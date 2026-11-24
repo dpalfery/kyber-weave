@@ -362,6 +362,13 @@ public sealed class AnalyticsOperationsDetailTests
             bool full = false) =>
             inner.TurnContentParts(sessionKey, turnIndex, spanId, part, budget, full);
 
+        public int TurnContentPartCount(
+            string sessionKey,
+            int? turnIndex = null,
+            string? spanId = null,
+            string? part = null) =>
+            inner.TurnContentPartCount(sessionKey, turnIndex, spanId, part);
+
         public IReadOnlyList<StoredToolDefinition> ToolDefinitions(string? spanId = null, string? sessionKey = null) => inner.ToolDefinitions(spanId, sessionKey);
 
         public IReadOnlyList<StoredAgentInvocation> AgentInvocations(string? spanId = null, string? sessionKey = null) => inner.AgentInvocations(spanId, sessionKey);

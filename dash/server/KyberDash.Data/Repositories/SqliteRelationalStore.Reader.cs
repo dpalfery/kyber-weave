@@ -409,6 +409,53 @@ public partial class SqliteRelationalStore : IRelationalStoreReader
     }
 
     /// <inheritdoc />
+    public int TurnContentPartCount(
+        string sessionKey,
+        int? turnIndex = null,
+        string? spanId = null,
+        string? part = null)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(sessionKey);
+
+        string? scopedSpan = spanId;
+        if (string.IsNullOrEmpty(scopedSpan) && turnIndex.HasValue)
+        {
+            scopedSpan = ResolveTurnContentSpan(sessionKey, turnIndex.Value);
+            if (scopedSpan is null)
+            {
+                return 0;
+            }
+        }
+
+        List<string> predicates =
+        [
+            $"EXISTS (SELECT 1 FROM record_session_link rsl WHERE rsl.span_id = cp.span_id AND rsl.session_key = {TextExpr(sessionKey)})",
+        ];
+        if (!string.IsNullOrEmpty(scopedSpan))
+        {
+            predicates.Add($"cp.span_id = {TextExpr(scopedSpan)}");
+        }
+
+        if (!string.IsNullOrEmpty(part))
+        {
+            predicates.Add($"cp.bucket = {TextExpr(part)}");
+        }
+
+        // COUNT over the scoped rows only: no content-text column is selected, so the count read
+        // transfers no part text however large the parts are.
+        string sql = TabReadScriptHeader +
+                     $"SELECT COUNT(*) FROM content_part cp WHERE {string.Join(" AND ", predicates)};\n";
+
+        string output = ExecuteSqlite(sql);
+        foreach (string line in TabLines(output))
+        {
+            return ParseInt32Required(SplitTabLine(line, 1, "content_part.count")[0], "content_part.count");
+        }
+
+        return 0;
+    }
+
+    /// <inheritdoc />
     public IReadOnlyList<StoredToolDefinition> ToolDefinitions(string? spanId = null, string? sessionKey = null)
     {
         string whereClause = BuildSpanFilterWhere("td", spanId, sessionKey);

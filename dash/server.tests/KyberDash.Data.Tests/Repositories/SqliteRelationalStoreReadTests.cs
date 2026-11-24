@@ -180,6 +180,47 @@ public class SqliteRelationalStoreReadTests : IDisposable
     }
 
     /// <summary>
+    /// The turn-content count matches <see cref="InMemoryRelationalStore"/> for every scope —
+    /// session, turn index, span, and part — and answers an unresolvable scope with zero the way
+    /// the parts read answers empty. The script counts rows only: no content-text column is
+    /// selected, so no part text crosses the <c>ExecuteSqliteCore</c> seam.
+    /// </summary>
+    [Fact]
+    public void TurnContentPartCountMatchesTheInMemoryStoreAndReadsNoText()
+    {
+        string dbPath = Path.Combine(directory.Path, "turn-content-count", "canon.db");
+        CapturingSqliteRelationalStore sqlite = new(dbPath, new SqliteCircuitBreaker());
+        InMemoryRelationalStore memory = new();
+        WriteBudgetedContentTurn(sqlite, memory);
+        sqlite.ClearCapturedScripts();
+
+        Assert.Equal(4, sqlite.TurnContentPartCount("sess-budget"));
+        Assert.Equal(memory.TurnContentPartCount("sess-budget"), sqlite.TurnContentPartCount("sess-budget"));
+        Assert.Equal(
+            memory.TurnContentPartCount("sess-budget", turnIndex: 0),
+            sqlite.TurnContentPartCount("sess-budget", turnIndex: 0));
+        Assert.Equal(
+            memory.TurnContentPartCount("sess-budget", spanId: "span-budget-1"),
+            sqlite.TurnContentPartCount("sess-budget", spanId: "span-budget-1"));
+        Assert.Equal(
+            memory.TurnContentPartCount("sess-budget", part: "user_prompt"),
+            sqlite.TurnContentPartCount("sess-budget", part: "user_prompt"));
+
+        // An unresolvable scope answers zero the way the parts read answers empty.
+        Assert.Equal(0, sqlite.TurnContentPartCount("sess-budget", turnIndex: 9));
+        Assert.Equal(0, sqlite.TurnContentPartCount("sess-missing"));
+
+        // One session-scoped count call, captured alone: the script selects COUNT(*) over the
+        // scoped rows only — no content-text column, so no part text crosses the seam.
+        sqlite.ClearCapturedScripts();
+        Assert.Equal(4, sqlite.TurnContentPartCount("sess-budget"));
+        (string Script, string Output) countRead = Assert.Single(sqlite.CapturedScripts);
+        Assert.Contains("COUNT(*)", countRead.Script, StringComparison.Ordinal);
+        Assert.DoesNotContain("part_text", countRead.Script, StringComparison.Ordinal);
+        Assert.DoesNotContain(ToHex("aaaaa"), countRead.Output, StringComparison.Ordinal);
+    }
+
+    /// <summary>
     /// A reported input total is the checksum of fresh, cache-read, and cache-write tokens.
     /// It is not billed at the fresh rate, and a side the harness did not report is not
     /// billed as zero. A reported output total is one rate and is billed. A class breakdown
