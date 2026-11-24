@@ -1,3 +1,5 @@
+import { buildTurnContentView, type TurnContentSourcePart } from './turnContentBlocks.js'
+
 export type KyberTimelineNode = import('@/components/analysis/TimelineView').TimelineNode
 export type KyberComparisonTable = {
   harnesses: string[]
@@ -184,6 +186,8 @@ export interface KyberSessionSummary {
   models?: string[]
   problems?: number
   subagents?: KyberSessionSummary[]
+  /** How many subagents the session has in total; the first page rides inline in `subagents`. */
+  subagent_total?: number
   rollup?: SessionRollup
 }
 
@@ -247,10 +251,8 @@ export type KyberSessionAncestry = KyberSessionSummaryDetail & {
 /**
  * One session's identity fields, from the bounded summary route.
  *
- * WHY this route and not the detail route: the detail route serves the entire
- * session payload, and this consumer needs the identity fields only. The
- * turns consumer (`fetchKyberSessionTurns`) reads the bounded per-turn route
- * for one turn, and the detail route for a session's whole list of them.
+ * WHY this route and not the detail route: the detail route served the entire
+ * session payload, and this consumer needs the identity fields only.
  */
 export async function fetchKyberSession(sessionId: string): Promise<KyberSessionAncestry> {
   return fetchJson<KyberSessionAncestry>(
@@ -261,10 +263,8 @@ export async function fetchKyberSession(sessionId: string): Promise<KyberSession
 /**
  * Measured per-turn token figures from the session turn row (issue #184, Q3).
  * Every field is a harness-measured counter or null; consumers render what is
- * measured and state absence plainly — never estimate from text. A single
- * turn's row comes from the bounded per-turn route, which the turn page
- * reads; the whole list of a session's rows still comes from the full session
- * payload (`GET /api/kyber/session/:id`).
+ * measured and state absence plainly — never estimate from text. The row comes
+ * from the bounded per-turn route.
  */
 export interface TurnTokenFigures {
   input?: number | null
@@ -274,47 +274,18 @@ export interface TurnTokenFigures {
 }
 
 /**
- * One turn's row, from the bounded per-turn route.
+ * One turn's row, from the bounded per-turn route
+ * `GET /api/kyber/session/:id/turn/:index`.
  *
- * <remarks>
- * The same row shape the detail route serves for one turn, so a consumer that
- * already reads the detail route's rows reads this one unchanged — but from
- * `GET /api/kyber/session/:id/turn/:index`, which answers one turn instead of
- * the session's whole payload.
+ * A turn index is required: the route answers one turn, so there is no
+ * whole-payload list read left to fall back to.
  */
-export type KyberSessionTurn = KyberSessionTurnRow & {
-  /** The session the turn belongs to. */
-  session_id: string
-  /** The turn's index in that session. */
-  turn_index: number
-}
-
-/**
- * A session's turn rows, or one turn's row.
- *
- * <remarks>
- * With a turn index, the read is the bounded per-turn route: one row, never
- * the session's whole payload — which is what a single turn's counters cost
- * before (up to 10,933 turn rows to read four numbers). Without one, the read
- * is still the detail route's turns array, the shape a list-style consumer
- * expects.
- */
-export async function fetchKyberSessionTurns(sessionId: string): Promise<KyberSessionTurnRow[]>
 export async function fetchKyberSessionTurns(
   sessionId: string,
   turnIndex: number,
-): Promise<KyberSessionTurn>
-export async function fetchKyberSessionTurns(
-  sessionId: string,
-  turnIndex?: number,
-): Promise<KyberSessionTurnRow[] | KyberSessionTurn> {
-  if (turnIndex !== undefined) {
-    return fetchJson<KyberSessionTurn>(
-      `/api/kyber/session/${encodeURIComponent(sessionId)}/turn/${turnIndex}`,
-    )
-  }
-  const body = await fetchJson<{ turns?: KyberSessionTurnRow[] }>(`/api/kyber/session/${encodeURIComponent(sessionId)}`)
-  return Array.isArray(body.turns) ? body.turns : []
+): Promise<KyberSessionTurnRow | undefined> {
+  const section = await fetchKyberSessionTurn(sessionId, turnIndex)
+  return section.turn
 }
 
 /** A turn row carrying either numbering shape: 0-based `index`, legacy 1-based `turn`, or neither. */
@@ -383,16 +354,117 @@ export function findContextTurn<T extends TurnIdentity>(
   return findByIdentity(rows, oneBasedTurn, contextTurnNumber, (i) => i + 1)
 }
 
-export async function fetchKyberSessions(harness?: string | null): Promise<KyberSessionSummary[]> {
-  const url = harness ? `/api/kyber/sessions?harness=${encodeURIComponent(harness)}` : '/api/kyber/sessions'
-  const res = await fetch(url)
-  if (!res.ok) throw new Error(`Request failed (${res.status}) for ${url}`)
-  const json = (await res.json()) as { sessions: KyberSessionSummary[] }
-  let list = json.sessions ?? []
-  if (harness) {
-    list = list.filter((s) => s.harness?.toLowerCase() === harness.toLowerCase())
+export const KYBER_SESSIONS_PAGE_LIMIT = 100
+
+/** The subagents a root previews inline and a subagent page holds. */
+export const KYBER_SUBAGENTS_PAGE_LIMIT = 25
+
+/**
+ * One paged envelope a `/api/kyber` paging route serves: the page's rows
+ * under the engine's `data` key (and the route's own items key beside it),
+ * plus the window it answered under.
+ *
+ * A 2xx body without these members is a broken server, not an empty list:
+ * the validator refuses it, and the consumer renders the error state.
+ */
+export type KyberPage<T> = {
+  /** The page's rows, the generic name consumers read. */
+  entries: T[]
+  /** The same rows under the engine's envelope key. */
+  data: T[]
+  /** How many rows the whole list holds, across every page. */
+  total: number
+  /** The one-based page this envelope answers. */
+  page: number
+  /** Rows per page, after the server clamped it. */
+  limit: number
+}
+
+function malformedPage(path: string, why: string): Error {
+  return new Error(`Malformed paged envelope for ${path}: ${why}`)
+}
+
+/**
+ * Validates one paged envelope. The rows are read from `data` — the one items
+ * key every paging route serves — and each row must be an object, so a route
+ * that answers a different document cannot pose as a page.
+ */
+function parseKyberPage<T>(
+  raw: unknown,
+  path: string,
+  readRow: (row: unknown) => T,
+  itemsKey = 'data',
+): KyberPage<T> {
+  if (!isRaw(raw) || !Array.isArray(raw[itemsKey])) throw malformedPage(path, `${itemsKey} is not an array`)
+  const total = raw.total
+  const page = raw.page
+  const limit = raw.limit
+  if (typeof total !== 'number' || !Number.isInteger(total) || total < 0) throw malformedPage(path, 'total is not a row count')
+  if (typeof page !== 'number' || !Number.isInteger(page) || page < 1) throw malformedPage(path, 'page is not a page number')
+  if (typeof limit !== 'number' || !Number.isInteger(limit) || limit < 1) throw malformedPage(path, 'limit is not a page size')
+  const entries = raw[itemsKey].map((row) => {
+    if (!isRaw(row)) throw malformedPage(path, 'a row is not an object')
+    return readRow(row)
+  })
+  return { entries, data: entries, total, page, limit }
+}
+
+/**
+ * Reads one sessions-list row: every row must name its session (non-empty), since
+ * the list keys, links and selects rows by that id, and its harness, which the
+ * list groups and labels rows by.
+ */
+function readSessionSummaryRow(path: string): (row: unknown) => KyberSessionSummary {
+  return (row) => {
+    if (!isRaw(row) || typeof row.session_id !== 'string' || row.session_id.trim() === '') throw malformedPage(path, 'a row has no session_id')
+    if (typeof row.harness !== 'string' || row.harness.trim() === '') throw malformedPage(path, 'a row has no harness')
+    return row as unknown as KyberSessionSummary
   }
-  return list
+}
+
+/**
+ * One page of the sessions list, from `GET /api/kyber/sessions`.
+ *
+ * The store chooses the page — root resolution, harness filter, search,
+ * order and window — so the shell's harness scope and the search text travel
+ * on the query string, and a page costs what it shows rather than what the
+ * store holds. Every root carries its first subagents inline under
+ * `subagents` and its full subagent count under `subagent_total`; the rest
+ * are paged by `fetchKyberSubagentPage`.
+ */
+export async function fetchKyberSessionPage(opts: {
+  page?: number
+  limit?: number
+  harness?: string | null
+  q?: string
+}): Promise<KyberPage<KyberSessionSummary>> {
+  const path = '/api/kyber/sessions'
+  const params = new URLSearchParams()
+  params.set('page', String(opts.page ?? 1))
+  params.set('limit', String(opts.limit ?? KYBER_SESSIONS_PAGE_LIMIT))
+  // `all` (and its older spelling) is the shell's word for every harness; the
+  // route has no such harness, so it is never sent.
+  const harness = opts.harness
+  if (harness !== undefined && harness !== null && harness !== '' && harness !== 'all' && harness !== 'agent-all') {
+    params.set('harness', harness)
+  }
+  if (opts.q) params.set('q', opts.q)
+  const query = params.toString()
+  const body = await fetchJson<unknown>(`${path}?${query}`)
+  return parseKyberPage<KyberSessionSummary>(body, `${path}?${query}`, readSessionSummaryRow(path))
+}
+
+/**
+ * One page of a session's subagents, from `GET /api/kyber/session/:id/subagents`.
+ * The same set a root's `subagent_total` counts and its inline preview begins.
+ */
+export async function fetchKyberSubagentPage(parentId: string, page = 1): Promise<KyberPage<KyberSessionSummary>> {
+  const params = new URLSearchParams()
+  params.set('page', String(page))
+  params.set('limit', String(KYBER_SUBAGENTS_PAGE_LIMIT))
+  const path = `/api/kyber/session/${encodeURIComponent(parentId)}/subagents?${params.toString()}`
+  const body = await fetchJson<unknown>(path)
+  return parseKyberPage<KyberSessionSummary>(body, path, readSessionSummaryRow(path))
 }
 
 // ── Session view payload (/api/kyber/session/:id) ───────────────────────────
@@ -600,6 +672,7 @@ export interface KyberTurnContentPart {
   id?: string
   spanId?: string
   part: string
+  /** Human label the web parser derives from the part key; the engine never sends it. */
   label: string
   text: string
   tokens?: number
@@ -608,14 +681,15 @@ export interface KyberTurnContentPart {
   totalLength?: number
   order?: number
   /**
-   * False when a `tool_definitions` part is an MCP catalogue entry the session
-   * offered without keeping it resident in the model's context. Absent or true
+   * False on a `tool_definitions` part is an MCP catalogue entry the session
+   * offered without keeping resident in the model's context. Absent or true
    * means the definition was resident.
    */
   resident?: boolean
   /**
    * Exact-match recurrence against earlier captured turns of this session
    * (same part kind, whole source text). Capture-only — never a cache claim.
+   * The restored C# route does not annotate it; consumers render without it.
    */
   recurrence?: { seenBefore: boolean }
 }
@@ -632,7 +706,8 @@ export interface KyberTurnContentBlock {
   /**
    * Block aggregate: `newThisTurn` when any member part is new,
    * `seenBefore` when any member part exactly matches an earlier same-kind
-   * part. Both may hold at once for mixed blocks.
+   * part. Both may hold at once for mixed blocks. The restored C# route
+   * carries no recurrence; consumers render without it.
    */
   recurrence?: { newThisTurn: boolean; seenBefore: boolean }
 }
@@ -640,28 +715,47 @@ export interface KyberTurnContentBlock {
 export interface KyberTurnContentResult {
   sessionId: string
   turnIndex: number
+  /** The turn's own span, served at the top level by the restored C# route. */
   spanId?: string
-  /** The turn record's parent span, when the record named one (B7). */
+  /**
+   * Legacy field of the retired TypeScript server. The restored C# route does not
+   * serve it; the raw-packet disclosure renders without it.
+   */
   parentSpanId?: string
+  /** The turn's model, omitted by the engine when the turn recorded none. */
   model?: string
+  /**
+   * The canonical blocks, built by the web parser from the served parts — never
+   * trusted off the wire.
+   */
   blocks: KyberTurnContentBlock[]
+  /** The labelled parts, built by the web parser from the served parts. */
   parts: KyberTurnContentPart[]
+  /** Whole-turn plain text with a heading per non-blank block, built web-side. */
   assembledText: string
+  /**
+   * True only when the budgeted parts read left at least one scoped part behind —
+   * the engine decides it with a content-free count read, and `?full=true` is never
+   * truncated. Absent means not truncated.
+   */
   truncated?: boolean
+  /** Not served by the restored route; the views render without it. */
   totalLength?: number
   measurability?: string | Record<string, unknown>
   notMeasurable?: { reason: string }
   /**
-   * Where this turn's raw packets can be fetched (B7): the request span's
-   * attributes always; the quarantined parent's packet only when that row
-   * kept a payload.
+   * Where this turn's raw packets can be fetched: the turn span's attributes,
+   * always, at `/api/kyber/span/{spanId}/attributes`. The restored C# route links
+   * no `interactionPath` — the quarantined-parent packet pointer of the retired
+   * TypeScript server is not served.
    */
   rawPacket?: { spanAttributesPath: string; interactionPath?: string }
   /**
    * Session-level shared context: every captured `system_prompt` part in
    * session scope, in capture order, with section-level earlier-turn
-   * recurrence. Null when none was captured. The view hides exact
-   * duplicates of the turn's own parts.
+   * recurrence. Null when none was captured. Not restored: the C# route serves
+   * the turn's own parts only, so this stays absent and the drawer renders
+   * without the section.
    */
   sharedContext?: {
     parts: Array<{
@@ -675,11 +769,77 @@ export interface KyberTurnContentResult {
     }>
     seenBefore: boolean
   } | null
-  /** The skills this turn listed and invoked; absent on a turn that predates the skills projection. */
+  /**
+   * The skills this turn listed and invoked. Not restored: the C# route serves
+   * the turn's own parts only, so the entry stays absent and consumers render
+   * without it.
+   */
   skills?: KyberTurnSkillsEntry
+  /**
+   * The sections' failure marker: present with no content fields when this turn's
+   * projection read faulted. `blocks`/`parts`/`assembledText` are then inert empty
+   * transport fields — the page renders the failure state, never an empty turn.
+   */
+  projection_status?: string
 }
 
-export function fetchTurnContent(
+/**
+ * Parses the content route's body. A faulted projection read answers the sections'
+ * failure shape (identity plus the marker, no content fields); the parser keeps the
+ * marker and fills the built transport fields with nothing, so consumers gate on
+ * the marker rather than reading the fault as an empty turn.
+ *
+ * The restored C# route serves the byte-budgeted parts alone — no blocks, no
+ * assembledText — so the normal path validates the parts and builds the view from
+ * them. A body that still carries a blocks array is parsed the same way: one
+ * contract, built from parts.
+ */
+function parseTurnContentResult(raw: unknown, path: string): KyberTurnContentResult {
+  if (!isRaw(raw)) throw malformedSection(path, 'body is not an object')
+  if (raw.projection_status === TURN_PROJECTION_FAILED) {
+    return {
+      sessionId: requireStringField(raw, 'sessionId', path),
+      turnIndex: requireIntegerField(raw, 'turnIndex', path, 0),
+      projection_status: raw.projection_status,
+      blocks: [],
+      parts: [],
+      assembledText: '',
+    }
+  }
+  const sessionId = requireStringField(raw, 'sessionId', path)
+  const turnIndex = requireIntegerField(raw, 'turnIndex', path, 0)
+  if (!Array.isArray(raw.parts)) throw malformedSection(path, 'parts is not an array')
+  const sourceParts: TurnContentSourcePart[] = raw.parts.map((entry: unknown) => {
+    if (!isRaw(entry)) throw malformedSection(path, 'parts entry is not an object')
+    return {
+      part: requireStringField(entry, 'part', path),
+      text: requireStringField(entry, 'text', path),
+      spanId: typeof entry.spanId === 'string' ? entry.spanId : undefined,
+      tokens: typeof entry.tokens === 'number' && Number.isInteger(entry.tokens) && entry.tokens >= 0 ? entry.tokens : undefined,
+      server: typeof entry.server === 'string' ? entry.server : undefined,
+      resident: entry.resident === false ? false : undefined,
+      truncated: entry.truncated === true ? true : undefined,
+    }
+  })
+  const { parts, blocks, assembledText } = buildTurnContentView(sourceParts)
+  const result: KyberTurnContentResult = { sessionId, turnIndex, parts, blocks, assembledText }
+  if (typeof raw.spanId === 'string') result.spanId = raw.spanId
+  if (typeof raw.model === 'string') result.model = raw.model
+  if (isRaw(raw.rawPacket)) {
+    const packet: NonNullable<KyberTurnContentResult['rawPacket']> = {
+      spanAttributesPath: requireStringField(raw.rawPacket, 'spanAttributesPath', path),
+    }
+    if (typeof raw.rawPacket.interactionPath === 'string') packet.interactionPath = raw.rawPacket.interactionPath
+    result.rawPacket = packet
+  }
+  if (raw.truncated === true) result.truncated = true
+  return result
+}
+
+/** The sections' fault marker, matched exactly by both turn-route parsers. */
+const TURN_PROJECTION_FAILED = 'PROJECTION_FAILED'
+
+export async function fetchTurnContent(
   sessionId: string,
   turnIndex: number,
   opts?: { budget?: number; full?: boolean },
@@ -695,7 +855,7 @@ export function fetchTurnContent(
   }
   const qs = params.toString()
   const path = `/api/kyber/session/${encodeURIComponent(sessionId)}/turn/${turnIndex}/content${qs ? `?${qs}` : ''}`
-  return fetchJson<KyberTurnContentResult>(path)
+  return parseTurnContentResult(await fetchJson<unknown>(path), path)
 }
 
 /**
@@ -2215,16 +2375,30 @@ export interface StoredFieldRow {
 }
 
 /**
- * One catalog table's inspection entry: the reachable `table.column` labels
- * live in `columnNames` plus every row cell's `columnName`; `rows` holds the
- * session's persisted rows; `missingParentKeys` names the parent keys with
- * no row in this optional child table.
+ * One catalog table's inspection entry in the stored-fields inventory: the
+ * reachable `table.column` labels live in `columnNames`, `rowCount` counts
+ * the session's persisted rows across every page, and `missingParentKeys`
+ * names the parent keys with no row in this optional child table. The rows
+ * themselves load through `fetchStoredTableRowsPage` only when the viewer
+ * opens the table (decision D15) — the inventory carries no row content.
  */
 export interface StoredTableFields {
   tableName: string
   columnNames: string[]
-  rows: StoredFieldRow[]
+  rowCount: number
   missingParentKeys: string[]
+}
+
+/** One page of one catalog table's stored rows, read when the viewer opens the table. */
+export interface StoredFieldRowsPage {
+  tableName: string
+  columnNames: string[]
+  /** Rows belonging to the session, across every page. */
+  totalRows: number
+  page: number
+  limit: number
+  offset: number
+  rows: StoredFieldRow[]
 }
 
 /**
@@ -2238,15 +2412,885 @@ export interface StoredFieldsResponse {
 }
 
 /**
- * Reads the catalog-driven stored-fields view for a session.
+ * Reads the catalog-driven stored-fields inventory for a session: the tables
+ * and columns the store can hold for it, with row counts — no row content.
  *
  * WHY this route and not the session payload: the payload serves the
  * session's measured counters, while this route serves what the relational
  * store actually persisted — every reachable catalog column labeled
- * `table.column` — for the session execution inspection.
+ * `table.column` — for the session execution inspection. A large table's
+ * rows never ride along here; they page through `fetchStoredTableRowsPage`
+ * when the viewer opens that table.
  */
-export async function fetchStoredFields(sessionKey: string): Promise<StoredFieldsResponse> {
-  return fetchJson<StoredFieldsResponse>(
-    `/api/kyber/session/${encodeURIComponent(sessionKey)}/stored-fields`,
+export async function fetchKyberSessionStoredFields(sessionKey: string): Promise<StoredFieldsResponse> {
+  const path = `/api/kyber/session/${encodeURIComponent(sessionKey)}/stored-fields`
+  return parseStoredFields(await fetchJson<unknown>(path), path)
+}
+
+/** The stored-fields section's fetcher under its original name. */
+export const fetchStoredFields = fetchKyberSessionStoredFields
+
+/**
+ * Reads one page of one catalog table's stored rows for a session, from
+ * `GET /api/kyber/session/:sessionKey/stored-fields/:table`. The table name
+ * is a catalog identifier from the inventory, and it is URL-encoded into the
+ * path like every other id.
+ */
+export async function fetchStoredTableRowsPage(sessionKey: string, table: string, page = 1): Promise<StoredFieldRowsPage> {
+  const params = new URLSearchParams()
+  params.set('page', String(page))
+  params.set('limit', String(KYBER_SECTION_PAGE_LIMIT))
+  const path = `/api/kyber/session/${encodeURIComponent(sessionKey)}/stored-fields/${encodeURIComponent(table)}?${params.toString()}`
+  return parseStoredFieldRowsPage(await fetchJson<unknown>(path), path)
+}
+
+// ── Session view sections (/api/kyber/session/:id/{section}) ────────────────
+//
+// Every section route answers one slice of the session view. The client
+// validates each answered document here, so a 2xx body that is not the
+// documented shape becomes an error state rather than a crash or a silent
+// default. The list routes build on T3's paged-envelope validator; summary,
+// charts, skills, timeline, turn and stored-fields carry their own members
+// beside the shared window.
+
+/** Rows per page every session section list route serves when the caller names none. */
+export const KYBER_SECTION_PAGE_LIMIT = 25
+
+/** The sections a session view can request; the query key's third member. */
+export type KyberSessionSection =
+  | 'summary'
+  | 'charts'
+  | 'tools'
+  | 'servers'
+  | 'skills'
+  | 'timeline'
+  | 'requests'
+  | 'reconciliation'
+  | 'problems'
+  | 'stored-fields'
+  | 'turn'
+
+/**
+ * The query key one session section is cached under: `['kyber-session', id, section, page]`.
+ * The whole-session key `['kyber-session', id]` is its prefix, so invalidating the
+ * session invalidates every section read with it.
+ */
+export function kyberSessionSectionQueryKey(
+  sessionId: string,
+  section: KyberSessionSection,
+  page = 1,
+): readonly ['kyber-session', string, KyberSessionSection, number] {
+  return ['kyber-session', sessionId, section, page]
+}
+
+/** The one-based page window every section list route answers. */
+export interface KyberSectionWindow {
+  /** How many rows the whole list holds, across every page. */
+  total: number
+  /** The one-based page this document answers. */
+  page: number
+  /** Rows per page, after the server clamped it. */
+  limit: number
+  /** Zero-based offset of this page's first row. */
+  offset: number
+  /**
+   * The session's projection fault, when the section's projection read faulted;
+   * absent when it did not. A payload carrying a fault is an error state, never data.
+   */
+  projection_status?: string
+}
+
+/** One page of a session section: the T3 page envelope plus its window offset. */
+export interface KyberSectionPage<T> extends KyberPage<T>, KyberSectionWindow {}
+
+function malformedSection(path: string, why: string): Error {
+  return new Error(`Malformed session section for ${path}: ${why}`)
+}
+
+function requireStringField(raw: Raw, key: string, path: string): string {
+  const value = raw[key]
+  if (typeof value !== 'string') throw malformedSection(path, `${key} is not a string`)
+  return value
+}
+
+function requireNumberField(raw: Raw, key: string, path: string): number {
+  const value = raw[key]
+  if (typeof value !== 'number' || !Number.isFinite(value)) throw malformedSection(path, `${key} is not a number`)
+  return value
+}
+
+function requireIntegerField(raw: Raw, key: string, path: string, minimum: number): number {
+  const value = requireNumberField(raw, key, path)
+  if (!Number.isInteger(value) || value < minimum) throw malformedSection(path, `${key} is not a whole number`)
+  return value
+}
+
+function requireBooleanField(raw: Raw, key: string, path: string): boolean {
+  const value = raw[key]
+  if (typeof value !== 'boolean') throw malformedSection(path, `${key} is not a boolean`)
+  return value
+}
+
+function readNullableString(value: unknown, path: string, key: string): string | null {
+  if (value === null) return null
+  if (typeof value === 'string') return value
+  throw malformedSection(path, `${key} is not a string or null`)
+}
+
+function readNullableNumber(value: unknown, path: string, key: string): number | null {
+  if (value === null) return null
+  if (typeof value === 'number' && Number.isFinite(value)) return value
+  throw malformedSection(path, `${key} is not a number or null`)
+}
+
+function readOptionalString(value: unknown, path: string, key: string): string | null | undefined {
+  if (value === undefined || value === null) return value
+  if (typeof value === 'string') return value
+  throw malformedSection(path, `${key} is not a string`)
+}
+
+function readOptionalNumber(value: unknown, path: string, key: string): number | null | undefined {
+  if (value === undefined || value === null) return value
+  if (typeof value === 'number' && Number.isFinite(value)) return value
+  throw malformedSection(path, `${key} is not a number`)
+}
+
+function readStringArray(value: unknown, path: string, key: string): string[] {
+  if (!Array.isArray(value)) throw malformedSection(path, `${key} is not an array`)
+  return value.map((entry) => {
+    if (typeof entry !== 'string') throw malformedSection(path, `${key} holds a non-string`)
+    return entry
+  })
+}
+
+function readNumberMap(value: unknown, path: string, key: string): Record<string, number> {
+  if (!isRaw(value)) throw malformedSection(path, `${key} is not an object`)
+  const out: Record<string, number> = {}
+  for (const [entryKey, entry] of Object.entries(value)) {
+    if (typeof entry !== 'number' || !Number.isFinite(entry)) {
+      throw malformedSection(path, `${key}.${entryKey} is not a number`)
+    }
+    out[entryKey] = entry
+  }
+  return out
+}
+
+function readNullableNumberMap(
+  value: unknown,
+  path: string,
+  key: string,
+): Record<string, number | null> {
+  if (!isRaw(value)) throw malformedSection(path, `${key} is not an object`)
+  const out: Record<string, number | null> = {}
+  for (const [entryKey, entry] of Object.entries(value)) {
+    out[entryKey] = readNullableNumber(entry, path, `${key}.${entryKey}`)
+  }
+  return out
+}
+
+function readSectionWindow(raw: Raw, path: string): KyberSectionWindow {
+  const window: KyberSectionWindow = {
+    total: requireIntegerField(raw, 'total', path, 0),
+    page: requireIntegerField(raw, 'page', path, 1),
+    limit: requireIntegerField(raw, 'limit', path, 1),
+    offset: requireIntegerField(raw, 'offset', path, 0),
+  }
+  if (typeof raw.projection_status === 'string') window.projection_status = raw.projection_status
+  return window
+}
+
+/** Reads one section page from the route's own items key, on top of T3's envelope. */
+function parseSectionPage<T>(
+  raw: unknown,
+  path: string,
+  itemsKey: string,
+  readRow: (row: Raw, path: string) => T,
+): KyberSectionPage<T> {
+  const page = parseKyberPage<T>(raw, path, (row) => readRow(row as Raw, path), itemsKey)
+  if (!isRaw(raw)) throw malformedSection(path, 'body is not an object')
+  const section: KyberSectionPage<T> = { ...page, offset: requireIntegerField(raw, 'offset', path, 0) }
+  if (typeof raw.projection_status === 'string') section.projection_status = raw.projection_status
+  return section
+}
+
+// ── Summary ─────────────────────────────────────────────────────────────────
+
+/** The bounded summary section: identity, counts and notes, no turn bodies. */
+export interface KyberSessionSummarySection {
+  session_id: string
+  harness: string
+  label?: string | null
+  is_subagent: boolean
+  parent_session?: string | null
+  agent_name?: string | null
+  repo?: string | null
+  branch?: string | null
+  started?: string | null
+  ended?: string | null
+  span_count: number
+  problems: number
+  problems_count: number
+  request_count: number
+  context_limit_source?: string | null
+  costBasisMismatch: KyberCostBasisMismatch | null
+  summary: Record<string, unknown> | null
+  notes: string[]
+  reconciliation: { total: number; mismatched: number }
+  tools_offered_count: number
+  tools_invoked_count: number
+  unused_tools_count: number
+  skills_count: number
+  projection_status?: string
+}
+
+function readCostBasisMismatch(value: unknown, path: string): KyberCostBasisMismatch | null {
+  if (value === null) return null
+  if (!isRaw(value)) throw malformedSection(path, 'costBasisMismatch is not an object or null')
+  return {
+    code: requireStringField(value, 'code', path),
+    message: requireStringField(value, 'message', path),
+    bases: readStringArray(value.bases, path, 'costBasisMismatch.bases'),
+    totalsByBasis: readNullableNumberMap(
+      value.totalsByBasis,
+      path,
+      'costBasisMismatch.totalsByBasis',
+    ),
+  }
+}
+
+function parseSessionSummarySection(raw: unknown, path: string): KyberSessionSummarySection {
+  if (!isRaw(raw)) throw malformedSection(path, 'body is not an object')
+  const reconciliation = raw.reconciliation
+  if (!isRaw(reconciliation)) throw malformedSection(path, 'reconciliation is not an object')
+  if (!Array.isArray(raw.notes) || raw.notes.some((note) => typeof note !== 'string')) {
+    throw malformedSection(path, 'notes is not a string array')
+  }
+  if (raw.summary !== null && !isRaw(raw.summary)) {
+    throw malformedSection(path, 'summary is not an object or null')
+  }
+
+  const section: KyberSessionSummarySection = {
+    session_id: requireStringField(raw, 'session_id', path),
+    harness: requireStringField(raw, 'harness', path),
+    is_subagent: requireBooleanField(raw, 'is_subagent', path),
+    span_count: requireNumberField(raw, 'span_count', path),
+    problems: requireNumberField(raw, 'problems', path),
+    problems_count: requireNumberField(raw, 'problems_count', path),
+    request_count: requireNumberField(raw, 'request_count', path),
+    costBasisMismatch: readCostBasisMismatch(raw.costBasisMismatch, path),
+    summary: raw.summary === null ? null : (raw.summary as Record<string, unknown>),
+    notes: raw.notes as string[],
+    reconciliation: {
+      total: requireNumberField(reconciliation, 'total', path),
+      mismatched: requireNumberField(reconciliation, 'mismatched', path),
+    },
+    tools_offered_count: requireNumberField(raw, 'tools_offered_count', path),
+    tools_invoked_count: requireNumberField(raw, 'tools_invoked_count', path),
+    unused_tools_count: requireNumberField(raw, 'unused_tools_count', path),
+    skills_count: requireNumberField(raw, 'skills_count', path),
+  }
+
+  for (const key of [
+    'label',
+    'parent_session',
+    'agent_name',
+    'repo',
+    'branch',
+    'started',
+    'ended',
+    'context_limit_source',
+  ] as const) {
+    const value = readOptionalString(raw[key], path, key)
+    if (value !== undefined) section[key] = value
+  }
+  if (typeof raw.projection_status === 'string') section.projection_status = raw.projection_status
+
+  return section
+}
+
+// ── Charts ──────────────────────────────────────────────────────────────────
+
+/** The charts section: the detail payload's turns and context, without its other reads. */
+export interface KyberSessionChartsSection {
+  sessionId: string
+  turns: KyberSessionTurnRow[]
+  context: KyberSessionContext
+  projection_status?: string
+}
+
+function readChartTurn(value: unknown, path: string): KyberSessionTurnRow {
+  if (!isRaw(value)) throw malformedSection(path, 'a turn is not an object')
+  requireNumberField(value, 'index', path)
+  return value as unknown as KyberSessionTurnRow
+}
+
+function parseSessionChartsSection(raw: unknown, path: string): KyberSessionChartsSection {
+  if (!isRaw(raw)) throw malformedSection(path, 'body is not an object')
+  if (!Array.isArray(raw.turns)) throw malformedSection(path, 'turns is not an array')
+  const context = raw.context
+  if (!isRaw(context) || typeof context.measurable !== 'boolean') {
+    throw malformedSection(path, 'context is not a context document')
+  }
+  if (context.measurable) {
+    if (!Array.isArray(context.turns)) throw malformedSection(path, 'context.turns is not an array')
+    requireNumberField(context, 'contextLimit', path)
+  } else if (typeof context.reason !== 'string') {
+    throw malformedSection(path, 'context.reason is not a string')
+  }
+
+  const section: KyberSessionChartsSection = {
+    sessionId: requireStringField(raw, 'sessionId', path),
+    turns: raw.turns.map((turn) => readChartTurn(turn, path)),
+    context: context as unknown as KyberSessionContext,
+  }
+  if (typeof raw.projection_status === 'string') section.projection_status = raw.projection_status
+  return section
+}
+
+// ── Tools ───────────────────────────────────────────────────────────────────
+
+/** One ranked tool row: never-invoked rows included. */
+export interface KyberSessionToolRow {
+  name: string
+  server: string | null
+  invocations: number
+  schema_tokens?: number | null
+  turns_resident?: number | null
+  total_schema_cost?: number | null
+  invoked: boolean
+  in_definitions: boolean
+  is_mcp: boolean
+}
+
+/** The unused-schema cost band, served once for every row rather than per page. */
+export interface KyberUnusedRange {
+  tokenResidencies: number
+  floor: number
+  ceiling: number
+  currency: string | null
+}
+
+/** The tools section's aggregate, priced over every row before paging. */
+export interface KyberSessionToolsAggregate {
+  maxCost: number | null
+  residentCostTotal: number
+  invocationCount: number
+  unusedCount: number
+  unusedRange: KyberUnusedRange | null
+  byServer: Record<string, number>
+  definitionsSpanId: string | null
+  /** The engine's measurability verdict: true only when the session stored a schema. */
+  measurable: boolean
+  /** Why the schema is not measurable; null when it is. */
+  reason: string | null
+}
+
+/** One page of the tools section with the aggregate over the whole ranking. */
+export interface KyberSessionToolsPage extends KyberSectionPage<KyberSessionToolRow> {
+  aggregate: KyberSessionToolsAggregate
+}
+
+function readUnusedRange(value: unknown, path: string): KyberUnusedRange | null {
+  if (value === null) return null
+  if (!isRaw(value)) throw malformedSection(path, 'aggregate.unusedRange is not an object or null')
+  const currency = value.currency === undefined ? null : readNullableString(value.currency, path, 'aggregate.unusedRange.currency')
+  return {
+    tokenResidencies: requireNumberField(value, 'tokenResidencies', path),
+    floor: requireNumberField(value, 'floor', path),
+    ceiling: requireNumberField(value, 'ceiling', path),
+    currency,
+  }
+}
+
+function readToolsAggregate(value: unknown, path: string): KyberSessionToolsAggregate {
+  if (!isRaw(value)) throw malformedSection(path, 'aggregate is not an object')
+  return {
+    maxCost: readNullableNumber(value.maxCost, path, 'aggregate.maxCost'),
+    residentCostTotal: requireNumberField(value, 'residentCostTotal', path),
+    invocationCount: requireNumberField(value, 'invocationCount', path),
+    unusedCount: requireNumberField(value, 'unusedCount', path),
+    unusedRange: readUnusedRange(value.unusedRange, path),
+    byServer: readNumberMap(value.byServer, path, 'aggregate.byServer'),
+    definitionsSpanId: readNullableString(value.definitionsSpanId, path, 'aggregate.definitionsSpanId'),
+    measurable: requireBooleanField(value, 'measurable', path),
+    reason: readNullableString(value.reason, path, 'aggregate.reason'),
+  }
+}
+
+function readToolRow(raw: Raw, path: string): KyberSessionToolRow {
+  const row: KyberSessionToolRow = {
+    name: requireStringField(raw, 'name', path),
+    server: readNullableString(raw.server, path, 'server'),
+    invocations: requireNumberField(raw, 'invocations', path),
+    invoked: requireBooleanField(raw, 'invoked', path),
+    in_definitions: requireBooleanField(raw, 'in_definitions', path),
+    is_mcp: requireBooleanField(raw, 'is_mcp', path),
+  }
+  const schemaTokens = readOptionalNumber(raw.schema_tokens, path, 'schema_tokens')
+  if (schemaTokens !== undefined) row.schema_tokens = schemaTokens
+  const turnsResident = readOptionalNumber(raw.turns_resident, path, 'turns_resident')
+  if (turnsResident !== undefined) row.turns_resident = turnsResident
+  const totalSchemaCost = readOptionalNumber(raw.total_schema_cost, path, 'total_schema_cost')
+  if (totalSchemaCost !== undefined) row.total_schema_cost = totalSchemaCost
+  return row
+}
+
+function parseSessionToolsPage(raw: unknown, path: string): KyberSessionToolsPage {
+  const page = parseSectionPage(raw, path, 'tools', readToolRow)
+  if (!isRaw(raw)) throw malformedSection(path, 'body is not an object')
+  return { ...page, aggregate: readToolsAggregate(raw.aggregate, path) }
+}
+
+// ── Servers ─────────────────────────────────────────────────────────────────
+
+/** One per-server schema and invocation rollup row. */
+export interface KyberSessionServerRow {
+  server: string
+  is_mcp: boolean
+  tools: number
+  schema_tokens: number
+  total_schema_cost: number
+  invocations: number
+  unused_tools: number
+  unused_cost: number
+}
+
+function readServerRow(raw: Raw, path: string): KyberSessionServerRow {
+  return {
+    server: requireStringField(raw, 'server', path),
+    is_mcp: requireBooleanField(raw, 'is_mcp', path),
+    tools: requireNumberField(raw, 'tools', path),
+    schema_tokens: requireNumberField(raw, 'schema_tokens', path),
+    total_schema_cost: requireNumberField(raw, 'total_schema_cost', path),
+    invocations: requireNumberField(raw, 'invocations', path),
+    unused_tools: requireNumberField(raw, 'unused_tools', path),
+    unused_cost: requireNumberField(raw, 'unused_cost', path),
+  }
+}
+
+// ── Skills ──────────────────────────────────────────────────────────────────
+
+/**
+ * The skills section: the detail payload's skill block with its rows paged.
+ * A session that recorded no skills answers the whole-block not-measurable
+ * verdict, with no rows.
+ */
+export type KyberSessionSkillsPage = (
+  | { measurable: true; rows: KyberSkillRow[] }
+  | (KyberSkillAvailability & { rows: KyberSkillRow[] })
+) &
+  KyberSectionWindow
+
+function readSkillAvailability(value: unknown, path: string, key: string): KyberSkillAvailability {
+  if (!isRaw(value) || value.availability !== 'not_measurable' || typeof value.reason !== 'string') {
+    throw malformedSection(path, `${key} is not a measured figure`)
+  }
+  return { availability: 'not_measurable', reason: value.reason }
+}
+
+function readSkillFlag(value: unknown, path: string, key: string): boolean | KyberSkillAvailability {
+  if (typeof value === 'boolean') return value
+  return readSkillAvailability(value, path, key)
+}
+
+function readSkillCount(value: unknown, path: string, key: string): number | KyberSkillAvailability {
+  if (typeof value === 'number' && Number.isInteger(value) && value >= 0) return value
+  return readSkillAvailability(value, path, key)
+}
+
+function readIntegerArray(value: unknown, path: string, key: string): number[] {
+  if (!Array.isArray(value)) throw malformedSection(path, `${key} is not an array`)
+  return value.map((entry) => {
+    if (typeof entry !== 'number' || !Number.isInteger(entry)) {
+      throw malformedSection(path, `${key} holds a non-integer`)
+    }
+    return entry
+  })
+}
+
+function readSkillRow(raw: Raw, path: string): KyberSkillRow {
+  const row: KyberSkillRow = {
+    name: requireStringField(raw, 'name', path),
+    listed: readSkillFlag(raw.listed, path, 'listed'),
+    invocations: readSkillCount(raw.invocations, path, 'invocations'),
+    turns_listed: readIntegerArray(raw.turns_listed, path, 'turns_listed'),
+  }
+  const derivedTokens = readOptionalNumber(raw.derived_tokens, path, 'derived_tokens')
+  if (derivedTokens !== undefined && derivedTokens !== null) row.derived_tokens = derivedTokens
+  const description = readOptionalString(raw.description, path, 'description')
+  if (description !== undefined && description !== null) row.description = description
+  return row
+}
+
+function parseSessionSkillsPage(raw: unknown, path: string): KyberSessionSkillsPage {
+  if (!isRaw(raw)) throw malformedSection(path, 'body is not an object')
+  if (!Array.isArray(raw.rows)) throw malformedSection(path, 'rows is not an array')
+  const rows = raw.rows.map((row) => {
+    if (!isRaw(row)) throw malformedSection(path, 'a skill row is not an object')
+    return readSkillRow(row, path)
+  })
+  const window = readSectionWindow(raw, path)
+  if (raw.availability === 'not_measurable') {
+    if (typeof raw.reason !== 'string') throw malformedSection(path, 'reason is not a string')
+    return { availability: 'not_measurable', reason: raw.reason, rows, ...window }
+  }
+  if (raw.measurable !== true) throw malformedSection(path, 'measurable is not true')
+  return { measurable: true, rows, ...window }
+}
+
+// ── Timeline ────────────────────────────────────────────────────────────────
+
+/** One timeline node: today's node fields minus `children`, plus its child count. */
+export interface KyberSessionTimelineNode {
+  spanId: string
+  parentId: string | null
+  startMs: number
+  durationMs: number
+  kind: string
+  name: string
+  status: string | null
+  attributes: Record<string, unknown>
+  isSubagent: boolean
+  isAuxiliary: boolean
+  cost: Record<string, unknown>
+  childCount: number
+}
+
+/** One page of one timeline level, with the whole tree's bounds. */
+export interface KyberSessionTimelinePage extends KyberSectionWindow {
+  sessionId: string
+  /** The parent whose children this page lists; null for the top level. */
+  parent: string | null
+  nodes: KyberSessionTimelineNode[]
+  bounds: { startMs: number; endMs: number }
+}
+
+function readTimelineNode(raw: Raw, path: string): KyberSessionTimelineNode {
+  const attributes = raw.attributes
+  if (!isRaw(attributes)) throw malformedSection(path, 'attributes is not an object')
+  const cost = raw.cost
+  if (!isRaw(cost)) throw malformedSection(path, 'cost is not an object')
+  return {
+    spanId: requireStringField(raw, 'spanId', path),
+    parentId: readNullableString(raw.parentId, path, 'parentId'),
+    startMs: requireNumberField(raw, 'startMs', path),
+    durationMs: requireNumberField(raw, 'durationMs', path),
+    kind: requireStringField(raw, 'kind', path),
+    name: requireStringField(raw, 'name', path),
+    status: readNullableString(raw.status, path, 'status'),
+    attributes,
+    isSubagent: requireBooleanField(raw, 'isSubagent', path),
+    isAuxiliary: requireBooleanField(raw, 'isAuxiliary', path),
+    cost,
+    childCount: requireNumberField(raw, 'childCount', path),
+  }
+}
+
+function parseSessionTimelinePage(raw: unknown, path: string): KyberSessionTimelinePage {
+  if (!isRaw(raw)) throw malformedSection(path, 'body is not an object')
+  if (!Array.isArray(raw.nodes)) throw malformedSection(path, 'nodes is not an array')
+  const bounds = raw.bounds
+  if (!isRaw(bounds)) throw malformedSection(path, 'bounds is not an object')
+  const page: KyberSessionTimelinePage = {
+    sessionId: requireStringField(raw, 'sessionId', path),
+    parent: readNullableString(raw.parent, path, 'parent'),
+    nodes: raw.nodes.map((node) => {
+      if (!isRaw(node)) throw malformedSection(path, 'a node is not an object')
+      return readTimelineNode(node, path)
+    }),
+    ...readSectionWindow(raw, path),
+    bounds: {
+      startMs: requireNumberField(bounds, 'startMs', path),
+      endMs: requireNumberField(bounds, 'endMs', path),
+    },
+  }
+  return page
+}
+
+// ── Requests, reconciliation and problems ───────────────────────────────────
+
+/** One request row: identity and position only; its prompt preview may be absent. */
+export interface KyberSessionRequestRow {
+  request: string
+  timestamp: string | null
+  turns: number | null
+  model: string | null
+  prompt: string | null
+}
+
+function readRequestRow(raw: Raw, path: string): KyberSessionRequestRow {
+  return {
+    request: requireStringField(raw, 'request', path),
+    timestamp: readNullableString(raw.timestamp, path, 'timestamp'),
+    turns: readNullableNumber(raw.turns, path, 'turns'),
+    model: readNullableString(raw.model, path, 'model'),
+    prompt: readNullableString(raw.prompt, path, 'prompt'),
+  }
+}
+
+/** One measurable input/output reconciliation row. */
+export interface KyberSessionReconciliationRow {
+  request: string
+  root_input: number | null
+  sum_chat_input: number | null
+  input_match: boolean
+  root_output: number | null
+  sum_chat_output: number | null
+  output_match: boolean
+}
+
+function readReconciliationRow(raw: Raw, path: string): KyberSessionReconciliationRow {
+  return {
+    request: requireStringField(raw, 'request', path),
+    root_input: readNullableNumber(raw.root_input, path, 'root_input'),
+    sum_chat_input: readNullableNumber(raw.sum_chat_input, path, 'sum_chat_input'),
+    input_match: requireBooleanField(raw, 'input_match', path),
+    root_output: readNullableNumber(raw.root_output, path, 'root_output'),
+    sum_chat_output: readNullableNumber(raw.sum_chat_output, path, 'sum_chat_output'),
+    output_match: requireBooleanField(raw, 'output_match', path),
+  }
+}
+
+/** One stored ingest problem row. */
+export interface KyberIngestProblemRow {
+  id: number
+  spanId: string
+  severity: string
+  code: string
+  message: string
+  location: string | null
+  sessionId: string | null
+  harness: string | null
+  timestamp: string | null
+}
+
+function readIngestProblemRow(raw: Raw, path: string): KyberIngestProblemRow {
+  return {
+    id: requireNumberField(raw, 'id', path),
+    spanId: requireStringField(raw, 'spanId', path),
+    severity: requireStringField(raw, 'severity', path),
+    code: requireStringField(raw, 'code', path),
+    message: requireStringField(raw, 'message', path),
+    location: readNullableString(raw.location, path, 'location'),
+    sessionId: readNullableString(raw.sessionId, path, 'sessionId'),
+    harness: readNullableString(raw.harness, path, 'harness'),
+    timestamp: readNullableString(raw.timestamp, path, 'timestamp'),
+  }
+}
+
+// ── Stored fields ───────────────────────────────────────────────────────────
+
+function readStoredCell(value: unknown, path: string): StoredFieldCell {
+  if (!isRaw(value)) throw malformedSection(path, 'a stored cell is not an object')
+  const cell: StoredFieldCell = { columnName: requireStringField(value, 'columnName', path) }
+  if (value.columnType !== undefined) cell.columnType = value.columnType
+  const text = readOptionalString(value.textValue, path, 'textValue')
+  if (text !== undefined) cell.textValue = text
+  const integer = readOptionalNumber(value.integerValue, path, 'integerValue')
+  if (integer !== undefined) cell.integerValue = integer
+  const real = readOptionalNumber(value.realValue, path, 'realValue')
+  if (real !== undefined) cell.realValue = real
+  return cell
+}
+
+function readStoredRow(value: unknown, path: string): StoredFieldRow {
+  if (!isRaw(value) || !Array.isArray(value.cells)) {
+    throw malformedSection(path, 'a stored row is not a cell array carrier')
+  }
+  return { cells: value.cells.map((cell) => readStoredCell(cell, path)) }
+}
+
+function readStoredTable(value: unknown, path: string): StoredTableFields {
+  if (!isRaw(value)) throw malformedSection(path, 'a stored table is not an object')
+  const rowCount = value.rowCount
+  if (typeof rowCount !== 'number' || !Number.isFinite(rowCount)) {
+    throw malformedSection(path, 'a stored table rowCount is not a number')
+  }
+  return {
+    tableName: requireStringField(value, 'tableName', path),
+    columnNames: readStringArray(value.columnNames, path, 'columnNames'),
+    rowCount,
+    missingParentKeys: readStringArray(value.missingParentKeys, path, 'missingParentKeys'),
+  }
+}
+
+function parseStoredFields(raw: unknown, path: string): StoredFieldsResponse {
+  if (!isRaw(raw)) throw malformedSection(path, 'body is not an object')
+  if (!Array.isArray(raw.tables)) throw malformedSection(path, 'tables is not an array')
+  return {
+    sessionKey: requireStringField(raw, 'sessionKey', path),
+    tables: raw.tables.map((table) => readStoredTable(table, path)),
+  }
+}
+
+function parseStoredFieldRowsPage(raw: unknown, path: string): StoredFieldRowsPage {
+  if (!isRaw(raw)) throw malformedSection(path, 'body is not an object')
+  if (!Array.isArray(raw.rows)) throw malformedSection(path, 'rows is not an array')
+  const totalRows = raw.totalRows
+  if (typeof totalRows !== 'number' || !Number.isFinite(totalRows)) {
+    throw malformedSection(path, 'totalRows is not a number')
+  }
+  const page = raw.page
+  const limit = raw.limit
+  const offset = raw.offset
+  if (typeof page !== 'number' || !Number.isInteger(page) || page < 1) throw malformedSection(path, 'page is not a page number')
+  if (typeof limit !== 'number' || !Number.isInteger(limit) || limit < 1) throw malformedSection(path, 'limit is not a page size')
+  if (typeof offset !== 'number' || !Number.isInteger(offset) || offset < 0) throw malformedSection(path, 'offset is not a row offset')
+  return {
+    tableName: requireStringField(raw, 'tableName', path),
+    columnNames: readStringArray(raw.columnNames, path, 'columnNames'),
+    totalRows,
+    page,
+    limit,
+    offset,
+    rows: raw.rows.map((row) => readStoredRow(row, path)),
+  }
+}
+
+// ── Turn ────────────────────────────────────────────────────────────────────
+
+/** The widened per-turn section: the turn's figures plus its stored context buckets. */
+export interface KyberSessionTurnSection {
+  sessionId: string
+  turnIndex: number
+  /** Absent when the payload names a faulted projection instead of a turn row. */
+  turn?: KyberSessionTurnRow
+  context: KyberContextTurn | null
+  projection_status?: string
+}
+
+function parseSessionTurnSection(raw: unknown, path: string): KyberSessionTurnSection {
+  if (!isRaw(raw)) throw malformedSection(path, 'body is not an object')
+  // A faulted projection read answers the sections' failure shape: identity plus the
+  // projection_status marker, no turn row. The section carries the marker; the page
+  // renders the failure state, never a neighbour's figures.
+  if (raw.projection_status === TURN_PROJECTION_FAILED && !isRaw(raw.turn)) {
+    return {
+      sessionId: requireStringField(raw, 'sessionId', path),
+      turnIndex: requireIntegerField(raw, 'turnIndex', path, 0),
+      context: null,
+      projection_status: raw.projection_status,
+    }
+  }
+  const turn = raw.turn
+  if (!isRaw(turn)) throw malformedSection(path, 'turn is not an object')
+  requireNumberField(turn, 'index', path)
+  if (raw.context !== null) {
+    if (!isRaw(raw.context)) throw malformedSection(path, 'context is not an object or null')
+    requireNumberField(raw.context, 'index', path)
+    if (!isRaw(raw.context.buckets)) throw malformedSection(path, 'context.buckets is not an object')
+  }
+  const section: KyberSessionTurnSection = {
+    sessionId: requireStringField(raw, 'sessionId', path),
+    turnIndex: requireIntegerField(raw, 'turnIndex', path, 0),
+    turn: turn as unknown as KyberSessionTurnRow,
+    context: raw.context === null ? null : (raw.context as unknown as KyberContextTurn),
+  }
+  if (typeof raw.projection_status === 'string') section.projection_status = raw.projection_status
+  return section
+}
+
+// ── Section fetchers ────────────────────────────────────────────────────────
+
+function sectionPath(sessionId: string, section: string, page: number): string {
+  const params = new URLSearchParams()
+  params.set('page', String(page))
+  params.set('limit', String(KYBER_SECTION_PAGE_LIMIT))
+  return `/api/kyber/session/${encodeURIComponent(sessionId)}/${section}?${params.toString()}`
+}
+
+/** Reads the bounded summary section. */
+export async function fetchKyberSessionSummary(sessionId: string): Promise<KyberSessionSummarySection> {
+  const path = `/api/kyber/session/${encodeURIComponent(sessionId)}/summary`
+  return parseSessionSummarySection(await fetchJson<unknown>(path), path)
+}
+
+/** Reads the charts section: the session's turns and context only. */
+export async function fetchKyberSessionCharts(sessionId: string): Promise<KyberSessionChartsSection> {
+  const path = `/api/kyber/session/${encodeURIComponent(sessionId)}/charts`
+  return parseSessionChartsSection(await fetchJson<unknown>(path), path)
+}
+
+/** Reads one page of the ranked tool rows with the aggregate over every row. */
+export async function fetchKyberSessionTools(
+  sessionId: string,
+  page = 1,
+): Promise<KyberSessionToolsPage> {
+  const path = sectionPath(sessionId, 'tools', page)
+  return parseSessionToolsPage(await fetchJson<unknown>(path), path)
+}
+
+/** Reads one page of the per-server schema and invocation rollup. */
+export async function fetchKyberSessionServers(
+  sessionId: string,
+  page = 1,
+): Promise<KyberSectionPage<KyberSessionServerRow>> {
+  const path = sectionPath(sessionId, 'servers', page)
+  return parseSectionPage(await fetchJson<unknown>(path), path, 'servers', readServerRow)
+}
+
+/** Reads one page of the session's skill rows. */
+export async function fetchKyberSessionSkills(
+  sessionId: string,
+  page = 1,
+): Promise<KyberSessionSkillsPage> {
+  const path = sectionPath(sessionId, 'skills', page)
+  return parseSessionSkillsPage(await fetchJson<unknown>(path), path)
+}
+
+/** Reads one level of the session's timeline tree, page by page. */
+export async function fetchKyberSessionTimeline(
+  sessionId: string,
+  opts?: { parent?: string | null; page?: number },
+): Promise<KyberSessionTimelinePage> {
+  const page = opts?.page ?? 1
+  const params = new URLSearchParams()
+  params.set('page', String(page))
+  params.set('limit', String(KYBER_SECTION_PAGE_LIMIT))
+  if (opts?.parent !== undefined && opts.parent !== null && opts.parent !== '') {
+    params.set('parent', opts.parent)
+  }
+  const path = `/api/kyber/session/${encodeURIComponent(sessionId)}/timeline?${params.toString()}`
+  return parseSessionTimelinePage(await fetchJson<unknown>(path), path)
+}
+
+/** Reads one page of the session's request rows, each with its prompt preview. */
+export async function fetchKyberSessionRequests(
+  sessionId: string,
+  page = 1,
+): Promise<KyberSectionPage<KyberSessionRequestRow>> {
+  const path = sectionPath(sessionId, 'requests', page)
+  return parseSectionPage(await fetchJson<unknown>(path), path, 'requests', readRequestRow)
+}
+
+/** Reads one page of the session's measurable reconciliation rows. */
+export async function fetchKyberSessionReconciliation(
+  sessionId: string,
+  page = 1,
+): Promise<KyberSectionPage<KyberSessionReconciliationRow>> {
+  const path = sectionPath(sessionId, 'reconciliation', page)
+  return parseSectionPage(
+    await fetchJson<unknown>(path),
+    path,
+    'reconciliation',
+    readReconciliationRow,
   )
+}
+
+/** Reads one page of the session's stored ingest problems. */
+export async function fetchKyberSessionProblems(
+  sessionId: string,
+  page = 1,
+): Promise<KyberSectionPage<KyberIngestProblemRow>> {
+  const path = sectionPath(sessionId, 'problems', page)
+  return parseSectionPage(await fetchJson<unknown>(path), path, 'problems', readIngestProblemRow)
+}
+
+/** Reads the widened per-turn section: the turn's figures and its context buckets. */
+export async function fetchKyberSessionTurn(
+  sessionId: string,
+  turnIndex: number,
+): Promise<KyberSessionTurnSection> {
+  const path = `/api/kyber/session/${encodeURIComponent(sessionId)}/turn/${turnIndex}`
+  return parseSessionTurnSection(await fetchJson<unknown>(path), path)
 }

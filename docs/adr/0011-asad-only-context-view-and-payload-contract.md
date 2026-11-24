@@ -4,14 +4,14 @@ title: ASAD as the Only Context View and as the Canonical Session Contract
 doc-type: adr
 status: current
 owner: dpalfery
-last-reviewed: 2026-09-04
+last-reviewed: 2026-11-23
 ---
 
 # ADR 0011: ASAD as the Only Context View and as the Canonical Session Contract
 
 ## Status
 
-Accepted, 2026-09-04. Amends [ADR 0007](0007-kyberdash-agent-session-analysis-integration.md) decisions D1 and D2: the Context tab no longer offers a second TreeTable / SessionDetails path. [ADR 0008](0008-kyberdash-single-canonical-store.md) (single store) and [ADR 0009](0009-multi-signal-ingestion-span-shaped-record.md) (logs enrichment, quarantine, source precedence) stand.
+Accepted, 2026-09-04. Amends [ADR 0007](0007-kyberdash-agent-session-analysis-integration.md) decisions D1 and D2: the Context tab no longer offers a second TreeTable / SessionDetails path. [ADR 0008](0008-kyberdash-single-canonical-store.md) (single store) and [ADR 0009](0009-multi-signal-ingestion-span-shaped-record.md) (logs enrichment, quarantine, source precedence) stand. The `GET /api/kyber/session/:id` clause of decision D3 is superseded by [ADR 0092](0092-dashboard-views-load-by-section-and-page.md): the ASAD payload is no longer served whole; the session view reads one route per section from the same stored projection, and the per-section shapes keep the field names the payload carried. The Context tab keeps its single session view, and everything else in ADR 0011 stands.
 
 ## Context
 

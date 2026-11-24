@@ -10,11 +10,12 @@ using Xunit;
 namespace KyberDash.Presentation.Tests;
 
 /// <summary>
-/// Drives the catalog-driven stored-fields endpoint through the real Minimal API map, substituting
-/// <c>IDashboardQueryService</c> with a mock. These assert the wire contract: the
-/// <c>/api/kyber/session/{sessionKey}/stored-fields</c> route (never <c>/api/sessions/...</c>),
-/// every reachable catalog column labeled <c>table.column</c>, absent optional rows marked not
-/// reported, and HTTP 404 for an unknown session.
+/// Drives the stored-fields routes through the real Minimal API map, substituting
+/// <c>IDashboardQueryService</c> with a mock. These assert the wire contract (decision D15): the
+/// content-free inventory at <c>/api/kyber/session/{sessionKey}/stored-fields</c> (never
+/// <c>/api/sessions/...</c>) carrying names, columns, counts and missing keys with no row values,
+/// and the per-table rows route <c>/api/kyber/session/{sessionKey}/stored-fields/{table}</c>
+/// answering one page of 25, with HTTP 404 for an unknown session or a table outside the catalog.
 /// </summary>
 public class StoredFieldsEndpointTests
 {
@@ -26,10 +27,10 @@ public class StoredFieldsEndpointTests
     };
 
     [Fact]
-    public async Task StoredFieldsReturnsEveryReachableCatalogColumnLabeledTableColumn()
+    public async Task StoredFieldsInventoryReturnsNamesColumnsCountsAndMissingKeysWithoutRowValues()
     {
-        StoredFieldsView view = CopilotView(SessionKey);
-        await using Host host = await Host.StartAsync(SessionKey, view);
+        StoredFieldsInventoryView view = CopilotInventory(SessionKey);
+        await using Host host = await Host.StartAsync(SessionKey, inventory: view);
 
         HttpResponseMessage response = await host.Client.GetAsync(
             new Uri($"/api/kyber/session/{SessionKey}/stored-fields", UriKind.Relative));
@@ -37,8 +38,8 @@ public class StoredFieldsEndpointTests
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
         using JsonDocument body = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
 
-        HashSet<string> labels = CollectLabels(body);
-        foreach (StoredTableFields table in view.Tables)
+        HashSet<string> labels = CollectColumnLabels(body);
+        foreach (StoredTableInventory table in view.Tables)
         {
             foreach (string column in table.ColumnNames)
             {
@@ -48,10 +49,27 @@ public class StoredFieldsEndpointTests
     }
 
     [Fact]
-    public async Task StoredFieldsMarksAbsentOptionalRowsAsNotReported()
+    public async Task StoredFieldsInventoryCarriesNoRowCells()
     {
-        StoredFieldsView view = CopilotView(SessionKey);
-        await using Host host = await Host.StartAsync(SessionKey, view);
+        await using Host host = await Host.StartAsync(SessionKey, inventory: CopilotInventory(SessionKey));
+
+        HttpResponseMessage response = await host.Client.GetAsync(
+            new Uri($"/api/kyber/session/{SessionKey}/stored-fields", UriKind.Relative));
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        using JsonDocument body = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
+
+        // Content-free: counts and column names only — never a row array or a typed cell.
+        string raw = body.RootElement.GetRawText();
+        Assert.DoesNotContain("\"rows\"", raw, StringComparison.Ordinal);
+        Assert.DoesNotContain("\"cells\"", raw, StringComparison.Ordinal);
+        Assert.DoesNotContain("\"textValue\"", raw, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task StoredFieldsInventoryMarksAbsentOptionalRowsAsNotReported()
+    {
+        await using Host host = await Host.StartAsync(SessionKey, inventory: CopilotInventory(SessionKey));
 
         HttpResponseMessage response = await host.Client.GetAsync(
             new Uri($"/api/kyber/session/{SessionKey}/stored-fields", UriKind.Relative));
@@ -64,16 +82,16 @@ public class StoredFieldsEndpointTests
             tables.EnumerateArray(),
             static entry => string.Equals(
                 entry.GetProperty("tableName").GetString(), "record_model", StringComparison.Ordinal));
-        Assert.Equal(0, recordModel.GetProperty("rows").GetArrayLength());
+        Assert.Equal(0, recordModel.GetProperty("rowCount").GetInt64());
         string[] missing = [.. recordModel.GetProperty("missingParentKeys").EnumerateArray()
             .Select(static key => key.GetString()!)];
         Assert.Contains("span-copilot-1", missing);
     }
 
     [Fact]
-    public async Task StoredFieldsReturnsNotFoundForUnknownSession()
+    public async Task StoredFieldsInventoryReturnsNotFoundForUnknownSession()
     {
-        await using Host host = await Host.StartAsync(SessionKey, CopilotView(SessionKey));
+        await using Host host = await Host.StartAsync(SessionKey, inventory: CopilotInventory(SessionKey));
 
         HttpResponseMessage response = await host.Client.GetAsync(
             new Uri("/api/kyber/session/unknown-session/stored-fields", UriKind.Relative));
@@ -82,9 +100,9 @@ public class StoredFieldsEndpointTests
     }
 
     [Fact]
-    public async Task StoredFieldsIsNeverServedUnderApiSessions()
+    public async Task StoredFieldsInventoryIsNeverServedUnderApiSessions()
     {
-        await using Host host = await Host.StartAsync(SessionKey, CopilotView(SessionKey));
+        await using Host host = await Host.StartAsync(SessionKey, inventory: CopilotInventory(SessionKey));
 
         HttpResponseMessage response = await host.Client.GetAsync(
             new Uri($"/api/sessions/{SessionKey}/stored-fields", UriKind.Relative));
@@ -92,60 +110,122 @@ public class StoredFieldsEndpointTests
         Assert.Equal(HttpStatusCode.NotFound, response.StatusCode);
     }
 
+    [Fact]
+    public async Task StoredFieldsRowsReturnTheNamedTablesPageOneOf25AtADefault()
+    {
+        StoredTableRows rows = CopilotRows("record_model");
+        await using Host host = await Host.StartAsync(SessionKey, rows: rows);
+
+        HttpResponseMessage response = await host.Client.GetAsync(
+            new Uri($"/api/kyber/session/{SessionKey}/stored-fields/record_model", UriKind.Relative));
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        using JsonDocument body = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
+        Assert.Equal("record_model", body.RootElement.GetProperty("tableName").GetString());
+        host.Builder.Query.Verify(
+            q => q.GetStoredFieldRows(SessionKey, "record_model", 1, 25),
+            Times.Once);
+    }
+
+    [Fact]
+    public async Task StoredFieldsRowsParseThePageWindow()
+    {
+        StoredTableRows rows = CopilotRows("record_model");
+        await using Host host = await Host.StartAsync(SessionKey, rows: rows);
+
+        HttpResponseMessage response = await host.Client.GetAsync(
+            new Uri($"/api/kyber/session/{SessionKey}/stored-fields/record_model?page=2&limit=5", UriKind.Relative));
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        host.Builder.Query.Verify(
+            q => q.GetStoredFieldRows(SessionKey, "record_model", 2, 5),
+            Times.Once);
+    }
+
+    [Fact]
+    public async Task StoredFieldsRowsReturnsNotFoundForUnknownSession()
+    {
+        await using Host host = await Host.StartAsync(SessionKey, rows: CopilotRows("record_model"));
+
+        HttpResponseMessage response = await host.Client.GetAsync(
+            new Uri("/api/kyber/session/unknown-session/stored-fields/record_model", UriKind.Relative));
+
+        Assert.Equal(HttpStatusCode.NotFound, response.StatusCode);
+    }
+
+    [Fact]
+    public async Task StoredFieldsRowsReturnsNotFoundForATableOutsideTheCatalog()
+    {
+        await using Host host = await Host.StartAsync(SessionKey, rows: CopilotRows("record_model"));
+
+        HttpResponseMessage response = await host.Client.GetAsync(
+            new Uri($"/api/kyber/session/{SessionKey}/stored-fields/sqlite_master", UriKind.Relative));
+
+        Assert.Equal(HttpStatusCode.NotFound, response.StatusCode);
+    }
+
+    [Fact]
+    public async Task StoredFieldsRowsAreNeverServedUnderApiSessions()
+    {
+        await using Host host = await Host.StartAsync(SessionKey, rows: CopilotRows("record_model"));
+
+        HttpResponseMessage response = await host.Client.GetAsync(
+            new Uri($"/api/sessions/{SessionKey}/stored-fields/record_model", UriKind.Relative));
+
+        Assert.Equal(HttpStatusCode.NotFound, response.StatusCode);
+    }
+
     /// <summary>
-    /// Builds a Copilot-session view from the real catalog: populated <c>session</c> and
-    /// <c>record</c> rows plus an empty optional <c>record_model</c> child whose absent row is
-    /// reported through missing parent keys.
+    /// Builds a Copilot-session inventory from the real catalog: populated <c>session</c> and
+    /// <c>record</c> counts plus an empty optional <c>record_model</c> child whose absent row is
+    /// reported through missing parent keys, and no row value anywhere.
     /// </summary>
-    private static StoredFieldsView CopilotView(string sessionKey)
+    private static StoredFieldsInventoryView CopilotInventory(string sessionKey)
     {
         TableDefinition sessionTable = RelationalSchemaCatalog.GetTable("session");
         TableDefinition recordTable = RelationalSchemaCatalog.GetTable("record");
         TableDefinition recordModelTable = RelationalSchemaCatalog.GetTable("record_model");
 
-        return new StoredFieldsView(
+        return new StoredFieldsInventoryView(
             sessionKey,
             [
-                new StoredTableFields(
+                new StoredTableInventory(
                     sessionTable.Name,
                     [.. sessionTable.Columns.Select(static column => column.Name)],
-                    [new StoredFieldRow([.. sessionTable.Columns.Select(column => SampleCell(column, sessionKey))])],
+                    1,
                     []),
-                new StoredTableFields(
+                new StoredTableInventory(
                     recordTable.Name,
                     [.. recordTable.Columns.Select(static column => column.Name)],
-                    [new StoredFieldRow([.. recordTable.Columns.Select(column => SampleCell(column, sessionKey))])],
+                    1,
                     []),
-                new StoredTableFields(
+                new StoredTableInventory(
                     recordModelTable.Name,
                     [.. recordModelTable.Columns.Select(static column => column.Name)],
-                    [],
+                    0,
                     ["span-copilot-1"]),
             ]);
     }
 
-    /// <summary>Builds one sample cell carrying the column's own affinity.</summary>
-    private static StoredFieldCell SampleCell(ColumnDefinition column, string sessionKey) =>
-        column.Type switch
-        {
-            SqliteColumnType.SqliteText => new StoredFieldCell(column.Name, column.Type, TextValue: SampleText(column.Name, sessionKey)),
-            SqliteColumnType.SqliteInteger => new StoredFieldCell(column.Name, column.Type, IntegerValue: 1),
-            SqliteColumnType.SqliteReal => new StoredFieldCell(column.Name, column.Type, RealValue: 0.5),
-            _ => throw new InvalidOperationException($"Unsupported catalog column type '{column.Type}'."),
-        };
+    /// <summary>Builds one canned rows page for a table, mirroring the route's wire shape.</summary>
+    private static StoredTableRows CopilotRows(string tableName)
+    {
+        TableDefinition table = RelationalSchemaCatalog.GetTable(tableName);
+        return new StoredTableRows(
+            tableName,
+            [.. table.Columns.Select(static column => column.Name)],
+            TotalRows: 1,
+            Page: 1,
+            Limit: 25,
+            Offset: 0,
+            Rows:
+            [
+                new StoredFieldRow([.. table.Columns.Select(static column => new StoredFieldCell(column.Name, column.Type))]),
+            ]);
+    }
 
-    /// <summary>Returns deterministic sample text honoring key-shaped columns.</summary>
-    private static string SampleText(string columnName, string sessionKey) =>
-        columnName switch
-        {
-            "session_id" => sessionKey,
-            "session_key" => sessionKey,
-            "span_id" => "span-copilot-1",
-            _ => $"sample-{columnName}",
-        };
-
-    /// <summary>Collects every <c>table.column</c> label carried by the response.</summary>
-    private static HashSet<string> CollectLabels(JsonDocument body)
+    /// <summary>Collects every <c>table.column</c> label the inventory's column names carry.</summary>
+    private static HashSet<string> CollectColumnLabels(JsonDocument body)
     {
         HashSet<string> labels = new(StringComparer.Ordinal);
         foreach (JsonElement table in body.RootElement.GetProperty("tables").EnumerateArray())
@@ -155,46 +235,63 @@ public class StoredFieldsEndpointTests
             {
                 labels.Add($"{tableName}.{column.GetString()}");
             }
-
-            foreach (JsonElement row in table.GetProperty("rows").EnumerateArray())
-            {
-                foreach (JsonElement cell in row.GetProperty("cells").EnumerateArray())
-                {
-                    labels.Add($"{tableName}.{cell.GetProperty("columnName").GetString()}");
-                }
-            }
         }
 
         return labels;
     }
 
-    /// <summary>Owns a started test application serving one canned stored-fields view.</summary>
+    /// <summary>Owns a started test application serving one canned inventory or rows payload.</summary>
     private class Host : IAsyncDisposable
     {
-        private Host(WebApplication app, HttpClient client)
+        private Host(WebApplication app, HttpClient client, PresentationBuilder builder)
         {
             App = app;
             Client = client;
+            Builder = builder;
         }
 
         public WebApplication App { get; }
 
         public HttpClient Client { get; }
 
-        public static async Task<Host> StartAsync(string sessionKey, StoredFieldsView view)
+        public PresentationBuilder Builder { get; }
+
+        public static async Task<Host> StartAsync(string sessionKey, StoredFieldsInventoryView? inventory = null, StoredTableRows? rows = null)
         {
             PresentationBuilder builder = new();
             builder.ApplyCannedResults();
-            JsonElement payload = JsonSerializer.SerializeToElement(view, CamelCaseOptions);
-            builder.Query
-                .Setup(q => q.GetStoredFields(sessionKey))
-                .Returns((JsonElement?)payload);
-            builder.Query
-                .Setup(q => q.GetStoredFields(It.Is<string>(key => !string.Equals(key, sessionKey, StringComparison.Ordinal))))
-                .Returns((JsonElement?)null);
+            if (inventory is not null)
+            {
+                JsonElement payload = JsonSerializer.SerializeToElement(inventory, CamelCaseOptions);
+                builder.Query
+                    .Setup(q => q.GetStoredFieldsInventory(sessionKey))
+                    .Returns((JsonElement?)payload);
+            }
+
+            if (rows is not null)
+            {
+                JsonElement payload = JsonSerializer.SerializeToElement(rows, CamelCaseOptions);
+                builder.Query
+                    .Setup(q => q.GetStoredFieldRows(
+                        It.IsAny<string>(),
+                        It.IsAny<string>(),
+                        It.IsAny<int>(),
+                        It.IsAny<int>()))
+                    .Returns((JsonElement?)null);
+                builder.Query
+                    .Setup(q => q.GetStoredFieldRows(sessionKey, rows.TableName, It.IsAny<int>(), It.IsAny<int>()))
+                    .Returns((JsonElement?)payload);
+            }
+
+            if (inventory is null)
+            {
+                builder.Query
+                    .Setup(q => q.GetStoredFieldsInventory(It.Is<string>(key => !string.Equals(key, sessionKey, StringComparison.Ordinal))))
+                    .Returns((JsonElement?)null);
+            }
 
             WebApplication app = await PresentationTestHost.StartAsync(builder.AllSubstitutes(), builder.SettingsRuntime);
-            return new Host(app, PresentationTestHost.CreateClient(app));
+            return new Host(app, PresentationTestHost.CreateClient(app), builder);
         }
 
         public async ValueTask DisposeAsync()

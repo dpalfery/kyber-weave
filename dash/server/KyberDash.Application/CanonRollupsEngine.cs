@@ -305,11 +305,14 @@ public class CanonRollupsEngine
 
     /// <summary>Typed per-session inputs for harness metric aggregation.</summary>
     /// <param name="Projection">Projected session summary, when the session projector ran.</param>
-    /// <param name="Aggregate">Read-time session aggregate, when the session has turns.</param>
-    private sealed record SessionDatum(StoredSessionProjection? Projection, SessionAggregateView? Aggregate);
+    /// <param name="Figures">
+    /// Content-free session figures. The run scorecard and the run comparison price totals, cache
+    /// reads, and tool names only, so the read answers them without materializing a conversation.
+    /// </param>
+    private sealed record SessionDatum(StoredSessionProjection? Projection, SessionSummaryFigure? Figures);
 
     private SessionDatum ReadSessionDatum(string sessionKey) =>
-        new(projections!.GetSessionProjection(sessionKey), reader!.GetSessionAggregate(sessionKey));
+        new(projections!.GetSessionProjection(sessionKey), reader!.SessionSummaryFigures(sessionKey));
 
     /// <summary>
     /// Aggregates measurable harness metrics from typed session projections and read-time
@@ -372,13 +375,13 @@ public class CanonRollupsEngine
                 unknownWindowSessions++;
             }
 
-            if (datum.Aggregate is not SessionAggregateView aggregate)
+            if (datum.Figures is not SessionSummaryFigure figures)
             {
                 continue;
             }
 
-            long input = aggregate.TotalInput ?? 0;
-            long cacheRead = aggregate.TotalCacheRead ?? 0;
+            long input = figures.TotalInput ?? 0;
+            long cacheRead = figures.TotalCacheRead ?? 0;
             totalInput += input;
             totalCacheRead += cacheRead;
 
@@ -387,9 +390,9 @@ public class CanonRollupsEngine
                 hasCacheRead = true;
             }
 
-            HashSet<string> offered = new(aggregate.ToolsOffered, StringComparer.Ordinal);
+            HashSet<string> offered = new(figures.ToolsOffered, StringComparer.Ordinal);
             totalDefinedTools += offered.Count;
-            foreach (string tool in aggregate.ToolsInvoked)
+            foreach (string tool in figures.ToolsInvoked)
             {
                 if (offered.Contains(tool))
                 {
@@ -672,28 +675,6 @@ public class CanonRollupsEngine
         }, CamelCaseJsonOptions);
     }
 
-    /// <summary>Compares two persisted runs (<paramref name="runAId"/> vs <paramref name="runBId"/>).</summary>
-    /// <param name="runAId">Baseline run identifier.</param>
-    /// <param name="runBId">Comparison run identifier.</param>
-    /// <returns>Comparison JSON element, or <see langword="null"/> when either run is absent.</returns>
-    public JsonElement? CompareRuns(string runAId, string runBId)
-    {
-        ArgumentException.ThrowIfNullOrWhiteSpace(runAId);
-        ArgumentException.ThrowIfNullOrWhiteSpace(runBId);
-
-        StoredRun? runA = projections!.GetRun(runAId);
-        StoredRun? runB = projections.GetRun(runBId);
-        if (runA is null || runB is null)
-        {
-            return null;
-        }
-
-        RunMetrics a = SummarizeRunMetrics(runA);
-        RunMetrics b = SummarizeRunMetrics(runB);
-
-        return CompareRunMetrics(a, b);
-    }
-
     private static (
         object ContextHygiene,
         object CacheEfficiency,
@@ -768,106 +749,6 @@ public class CanonRollupsEngine
         }
 
         return fallbackReason;
-    }
-
-    private static JsonElement CompareRunMetrics(RunMetrics a, RunMetrics b)
-    {
-        ArgumentNullException.ThrowIfNull(a);
-        ArgumentNullException.ThrowIfNull(b);
-
-        long? deltaInput = a.TotalInput.HasValue && b.TotalInput.HasValue ? b.TotalInput.Value - a.TotalInput.Value : null;
-        long? deltaOutput = a.TotalOutput.HasValue && b.TotalOutput.HasValue ? b.TotalOutput.Value - a.TotalOutput.Value : null;
-        double? deltaPressure = a.PeakPressure.HasValue && b.PeakPressure.HasValue
-            ? Math.Round(b.PeakPressure.Value - a.PeakPressure.Value, 4)
-            : null;
-
-        return JsonSerializer.SerializeToElement(new
-        {
-            runA = a,
-            runB = b,
-            delta = new
-            {
-                inputTokens = deltaInput,
-                outputTokens = deltaOutput,
-                peakPressure = deltaPressure,
-                turns = b.TurnCount - a.TurnCount,
-            },
-        }, CamelCaseJsonOptions);
-    }
-
-    private record RunMetrics(
-        string RunId,
-        string Harness,
-        string? Started,
-        string? Ended,
-        int SessionCount,
-        int TurnCount,
-        long? TotalInput,
-        long? TotalOutput,
-        double? PeakPressure);
-
-    private RunMetrics SummarizeRunMetrics(StoredRun run)
-    {
-        ArgumentNullException.ThrowIfNull(run);
-
-        IReadOnlyList<StoredExecution> execs = projections!.ListExecutionsForRun(run.RunId);
-        long totalInput = 0;
-        long totalOutput = 0;
-        bool hasInput = false;
-        bool hasOutput = false;
-        int turns = 0;
-        double maxPressure = 0;
-        bool hasPressure = false;
-
-        foreach (StoredExecution execution in execs)
-        {
-            if (string.IsNullOrEmpty(execution.SessionId))
-            {
-                continue;
-            }
-
-            SessionDatum datum = ReadSessionDatum(execution.SessionId);
-            if (datum.Aggregate is SessionAggregateView aggregate)
-            {
-                if (aggregate.TotalInput is long input)
-                {
-                    totalInput += input;
-                    hasInput = true;
-                }
-
-                if (aggregate.TotalOutput is long output)
-                {
-                    totalOutput += output;
-                    hasOutput = true;
-                }
-
-                turns += aggregate.TurnCount;
-            }
-
-            if (datum.Projection?.Context is StoredSessionContext context)
-            {
-                foreach (StoredSessionContextTurn turn in context.Turns)
-                {
-                    if (turn.Pressure is double pressure && double.IsFinite(pressure)
-                        && (!hasPressure || pressure > maxPressure))
-                    {
-                        maxPressure = pressure;
-                        hasPressure = true;
-                    }
-                }
-            }
-        }
-
-        return new RunMetrics(
-            run.RunId,
-            run.HarnessId,
-            run.StartedAtUtc,
-            run.EndedAtUtc,
-            execs.Count,
-            turns,
-            hasInput ? totalInput : null,
-            hasOutput ? totalOutput : null,
-            hasPressure ? Math.Round(maxPressure, 4) : null);
     }
 
     private static JsonElement NotMeasurableJson(string reason) =>

@@ -172,13 +172,13 @@ public sealed class AnalyticsOperationsReadTests
 
         Assert.Empty(store.ToolCalls(sessionKey: "sess-all-devin"));
 
-        SessionAggregateView? devin = store.GetSessionAggregate("sess-all-devin", pricing.LoadPricingTables());
+        SessionSummaryFigure? devin = store.SessionSummaryFigures("sess-all-devin", pricing.LoadPricingTables());
 
         Assert.NotNull(devin);
         Assert.Null(devin.ToolCalls);
         Assert.Empty(devin.ToolsInvoked);
 
-        SessionAggregateView? codex = store.GetSessionAggregate("sess-all-codex", pricing.LoadPricingTables());
+        SessionSummaryFigure? codex = store.SessionSummaryFigures("sess-all-codex", pricing.LoadPricingTables());
 
         Assert.NotNull(codex);
         Assert.Equal(2, codex.ToolCalls);

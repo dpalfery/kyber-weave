@@ -435,6 +435,38 @@ public class DroidPiSpanMapperTests
         Assert.Empty(batch.Problems);
     }
 
+    [Fact]
+    public void PiMapSpan_PiSessionId_TrimsNonWhitespaceAndRejectsWhitespace()
+    {
+        PiSpanMapper mapper = new();
+
+        OtlpSpan trimmedSpan = MakeSpan(
+            "1111222233334444",
+            "pi.response",
+            new Dictionary<string, JsonElement>(StringComparer.Ordinal)
+            {
+                ["pi.session.id"] = Element("  sess-pi  "),
+                ["gen_ai.usage.input_tokens"] = Element(12),
+                ["gen_ai.usage.output_tokens"] = Element(4),
+            });
+
+        CollectedRecord trimmedRecord = mapper.MapSpan(trimmedSpan);
+        Assert.Equal("sess-pi", trimmedRecord.SessionKey);
+
+        OtlpSpan whitespaceSpan = MakeSpan(
+            "1111222233334445",
+            "pi.response",
+            new Dictionary<string, JsonElement>(StringComparer.Ordinal)
+            {
+                ["pi.session.id"] = Element("   \t  "),
+                ["gen_ai.usage.input_tokens"] = Element(12),
+                ["gen_ai.usage.output_tokens"] = Element(4),
+            });
+
+        CollectedRecord whitespaceRecord = mapper.MapSpan(whitespaceSpan);
+        Assert.Null(whitespaceRecord.SessionKey);
+    }
+
     private static OtlpSpan MakeSpan(
         string spanId,
         string name,

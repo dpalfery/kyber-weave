@@ -9,6 +9,8 @@ import {
   HONEST_EMPTY_HARNESS,
   MEASURED_HARNESS,
   OPENCODE_REPLAY_SESSION_ID,
+  SECTION_PAGE_LIMIT,
+  SESSION_PAGE_LIMIT,
   USER_CANON,
   ZERO_RECORD_HARNESS,
 } from './harness-collection-world.js'
@@ -17,7 +19,6 @@ import {
   FACTORY_CONTENT_ON_SESSION_ID,
   FACTORY_REPLAY_MODEL,
   FACTORY_REPLAY_PROMPT,
-  FACTORY_REPLAY_TOOL,
 } from './factory-replay-world.js'
 
 /**
@@ -437,7 +438,15 @@ test.describe('the Factory (Droid) replay', () => {
 
     // The tool the recorded tool payload named: one invocation of it.
     await expect(page.getByTestId('metric-tool-calls')).toContainText('1')
-    await expect(page.getByTestId('schema-cost-ranking')).toContainText(FACTORY_REPLAY_TOOL)
+
+    // The recorded hook events name the invocation but export no tool definitions,
+    // so there is nothing to rank: the section says so instead of ranking one row.
+    // This is the same contract the Web dashboard specs pin (schemas-not-exported
+    // banner plus the not-measurable box), and ranking here would read as if the
+    // harness had offered definitions it never exported.
+    const toolSchemaSection = page.getByTestId('tool-schema-section')
+    await expect(toolSchemaSection.getByTestId('schemas-not-exported-banner')).toBeVisible()
+    await expect(toolSchemaSection.getByTestId('schema-cost-not-measurable')).toBeVisible()
 
     // The token state is honest: the input figure is the em dash, never a zero and
     // never a number borrowed from another session.
@@ -494,19 +503,44 @@ test.describe('the Factory (Droid) replay', () => {
     await expect(page.getByTestId('span-inspector')).toContainText(FACTORY_REPLAY_PROMPT)
 
     // And the prompt is the session's own content, not only an attribute on the
-    // raw span: the session payload's request carries what was asked.
-    const response = await page.request.get(`${factoryApp}/api/kyber/session/${FACTORY_CONTENT_ON_SESSION_ID}`)
-    expect(response.status(), await response.text()).toBe(200)
-    const payload = (await response.json()) as {
-      requests?: Array<{ prompt?: unknown }>
+    // raw span: the requests section carries what was asked in each row's prompt
+    // preview. The section is paged, so the read walks every page of it.
+    const prompts: unknown[] = []
+    for (let pageNumber = 1; ; pageNumber += 1) {
+      const response = await page.request.get(
+        `${factoryApp}/api/kyber/session/${FACTORY_CONTENT_ON_SESSION_ID}/requests?limit=${SECTION_PAGE_LIMIT}&page=${pageNumber}`,
+      )
+      expect(response.status(), await response.text()).toBe(200)
+      const payload = (await response.json()) as {
+        data?: Array<{ prompt?: unknown }>
+        requests?: Array<{ prompt?: unknown }>
+        total?: number
+      }
+      const rows = payload.data ?? payload.requests ?? []
+      prompts.push(...rows.map((request) => request.prompt))
+      if (rows.length === 0 || prompts.length >= (payload.total ?? 0)) break
     }
     // The request that carries the prompt is found, not assumed to be the
-    // first: the payload's order is the session's, and a request that declares
+    // first: the page's order is the session's, and a request that declares
     // the prompt absent says so in a shape of its own.
-    const prompts = (payload.requests ?? []).map((request) => request.prompt)
     const carried = prompts.find((prompt) => typeof prompt === 'string')
-    expect(carried, 'the session payload must carry the prompt the consent allowed').toBeDefined()
+    expect(carried, 'the requests section must carry the prompt the consent allowed').toBeDefined()
     expect(carried as string).toContain(FACTORY_REPLAY_PROMPT)
+
+    // The restored turn-content contract, end to end on the consent-on session:
+    // the turn page reads the parts the engine serves and the web builds the
+    // blocks it renders, so the recorded prompt is page content — not only a
+    // raw-span attribute or a request preview. The route is opened as a deep link
+    // and reloaded, the way a shared link or a browser refresh reaches it: the app
+    // shell served on a nested route must still load its bundle.
+    await page.goto(`${factoryApp}/session/${FACTORY_CONTENT_ON_SESSION_ID}/turn/0`)
+    await expect(page.getByTestId('page-turn')).toBeVisible()
+    await page.reload()
+    await expect(page.getByTestId('page-turn')).toBeVisible()
+    await expect(page.getByTestId('turn-not-found')).toHaveCount(0)
+    await expect(page.getByTestId('turn-load-error')).toHaveCount(0)
+    await expect(page.getByTestId('turn-projection-failed')).toHaveCount(0)
+    await expect(page.getByTestId('context-content-pane')).toContainText(FACTORY_REPLAY_PROMPT)
   })
 })
 
@@ -535,14 +569,8 @@ async function sessionTokenState(
   baseUrl: string,
   sessionId: string,
 ): Promise<{ availability: string; reason: string }> {
-  const response = await page.request.get(`${baseUrl}/api/kyber/sessions`)
-  expect(response.status(), 'the sessions answer must be the dashboard own').toBe(200)
-  const body = (await response.json()) as {
-    sessions?: Array<{ session_id?: string; total_input?: unknown }>
-  }
-  const session = body.sessions?.find((row) => row.session_id === sessionId)
-  expect(session, `the sessions answer must carry ${sessionId}`).toBeDefined()
-  const total = session?.total_input as { availability?: string; reason?: string } | undefined
+  const session = await sessionRow(page, baseUrl, sessionId)
+  const total = session.total_input as { availability?: string; reason?: string } | undefined
   expect(total, `${sessionId} must declare a token state`).toBeDefined()
   return {
     availability: total?.availability ?? 'measured',
@@ -555,13 +583,33 @@ async function sessionTokenState(
  * them. The model the plugin captured travels as the session's own attribute.
  */
 async function sessionModels(page: Page, baseUrl: string, sessionId: string): Promise<string[]> {
-  const response = await page.request.get(`${baseUrl}/api/kyber/sessions`)
+  const session = await sessionRow(page, baseUrl, sessionId)
+  const models = session.models
+  return Array.isArray(models) ? models.filter((model): model is string => typeof model === 'string') : []
+}
+
+/**
+ * One session's row, from the sessions page's own search.
+ *
+ * The list is paged, so the row is asked for by id instead of found in a page one read:
+ * a corpus past the first window would otherwise read as missing.
+ */
+async function sessionRow(
+  page: Page,
+  baseUrl: string,
+  sessionId: string,
+): Promise<{ session_id?: string; total_input?: unknown; models?: unknown }> {
+  const response = await page.request.get(
+    `${baseUrl}/api/kyber/sessions?q=${encodeURIComponent(sessionId)}&limit=${SESSION_PAGE_LIMIT}`,
+  )
   expect(response.status(), 'the sessions answer must be the dashboard own').toBe(200)
   const body = (await response.json()) as {
-    sessions?: Array<{ session_id?: string; models?: unknown }>
+    sessions?: Array<{ session_id?: string; total_input?: unknown; models?: unknown }>
+    total?: number
+    page?: number
+    limit?: number
   }
   const session = body.sessions?.find((row) => row.session_id === sessionId)
   expect(session, `the sessions answer must carry ${sessionId}`).toBeDefined()
-  const models = session?.models
-  return Array.isArray(models) ? models.filter((model): model is string => typeof model === 'string') : []
+  return session!
 }

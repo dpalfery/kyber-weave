@@ -268,13 +268,15 @@ public record RefreshReport(
 
 // Ported DTOs from CanonSessionProjector.cs
 /// <summary>Summary returned by an incremental projection pass.</summary>
+/// <param name="DeferredKeys">Session keys a read-path pass deferred under its record-count budget; they stay dirty and <see langword="null"/> on every other pass.</param>
 public record ProjectionPassReport(
     int Built,
     int Skipped,
     int Pruned,
     int Findings,
     IReadOnlyList<string> RebuiltKeys,
-    IReadOnlyList<string> SkippedKeys);
+    IReadOnlyList<string> SkippedKeys,
+    IReadOnlyList<string>? DeferredKeys = null);
 
 
 // Ported DTOs from CanonRollups.cs

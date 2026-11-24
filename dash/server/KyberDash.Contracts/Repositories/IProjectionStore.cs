@@ -151,6 +151,52 @@ public record StoredSessionProjection(
     IReadOnlyList<string>? TimelineSubagentSpanIds = null,
     IReadOnlyList<string>? TimelineAuxiliarySpanIds = null);
 
+/// <summary>
+/// Normalized session-projection header: every <c>session_projection</c> column and its single-row
+/// satellites, and none of the child collections (<c>session_request</c>, <c>session_turn</c>,
+/// <c>session_context*</c>, <c>session_schema*</c> and <c>session_timeline*</c>).
+/// </summary>
+/// <param name="SessionId">Session identifier.</param>
+/// <param name="Label">Human-readable session label.</param>
+/// <param name="IsSubagent">Whether this session is a delegated subagent session.</param>
+/// <param name="SpanCount">Number of spans in the session.</param>
+/// <param name="StartedAtUtc">Earliest span timestamp.</param>
+/// <param name="EndedAtUtc">Latest span timestamp.</param>
+/// <param name="ParentSessionId">Optional parent session identifier (<c>session_projection_parent</c>).</param>
+/// <param name="AgentName">Optional subagent name (<c>session_projection_agent</c>).</param>
+/// <param name="IncludedInParent">Whether this subagent is folded into its parent (<c>session_projection_included_in_parent</c>).</param>
+/// <param name="ContextUnmeasurableReason">Optional reason context could not be measured (<c>session_context_unmeasurable</c>).</param>
+/// <param name="SchemaUnmeasurableReason">Optional reason schema could not be measured (<c>session_schema_unmeasurable</c>).</param>
+/// <remarks>
+/// The header is what a sessions page needs to place and label a row. The page reads its figures
+/// separately, by key, so a list never materializes a projection whose title alone it shows.
+/// </remarks>
+public record StoredSessionHeader(
+    string SessionId,
+    string Label,
+    bool IsSubagent,
+    int SpanCount,
+    string StartedAtUtc,
+    string EndedAtUtc,
+    string? ParentSessionId,
+    string? AgentName,
+    bool IncludedInParent,
+    string? ContextUnmeasurableReason,
+    string? SchemaUnmeasurableReason);
+
+/// <summary>One page of session-projection headers with the number of rows the filters match before paging.</summary>
+/// <param name="Items">The headers on this page, in the page's order.</param>
+/// <param name="Total">Number of rows the filters match, before paging.</param>
+public record SessionHeaderPageResult(IReadOnlyList<StoredSessionHeader> Items, int Total);
+
+/// <summary>
+/// One parent's subagent preview: how many subagents attach to it, and the first of them.
+/// </summary>
+/// <param name="ParentSessionId">Session whose subagents are previewed.</param>
+/// <param name="TotalChildren">Number of subagents that attach to the parent.</param>
+/// <param name="ChildSessionIds">The first subagents, oldest start first and then by session id.</param>
+public record SessionChildPreviewEntry(string ParentSessionId, int TotalChildren, IReadOnlyList<string> ChildSessionIds);
+
 /// <summary>Normalized run grouping row (<c>run</c>, <c>run_label</c>, <c>run_working_directory</c>, <c>run_bounds</c>).</summary>
 /// <param name="RunId">Run identifier.</param>
 /// <param name="HarnessId">Attributed harness identifier.</param>
@@ -295,6 +341,91 @@ public interface IProjectionStore
     /// <summary>Lists projected session summaries optionally filtered by <paramref name="harnessId"/>.</summary>
     /// <param name="harnessId">Optional harness filter.</param>
     IReadOnlyList<StoredSessionProjection> ListSessionProjections(string? harnessId = null);
+
+    /// <summary>
+    /// Pages the root sessions: one page of session-projection headers, chosen in the store, with
+    /// the number of roots the filters match.
+    /// </summary>
+    /// <param name="harnessId">
+    /// Optional harness filter over the session rows. It also scopes the root rule, so a session
+    /// whose parent belongs to another harness is a root here.
+    /// </param>
+    /// <param name="search">
+    /// Optional text that a root's label or session id must contain. It is matched literally —
+    /// <c>%</c>, <c>_</c> and a backslash are ordinary characters — and ASCII letters match either
+    /// case. It narrows the roots and never changes which sessions are roots.
+    /// </param>
+    /// <param name="page">One-based page number.</param>
+    /// <param name="limit">Number of roots on a page.</param>
+    /// <returns>
+    /// The page's root headers, newest start first and then by session id, with the total number of
+    /// roots the filters match.
+    /// </returns>
+    /// <remarks>
+    /// <para>
+    /// A session is a root unless its parent is a projected session in the same harness scope and
+    /// attaching it would form no cycle. A session whose parent chain loops back to itself is
+    /// therefore a root, and so is one whose parent is not a projected session in the scope.
+    /// </para>
+    /// <para>
+    /// Only projection header columns are read: no child collection of a projection and no record.
+    /// </para>
+    /// </remarks>
+    /// <exception cref="ArgumentOutOfRangeException">
+    /// <paramref name="page"/> or <paramref name="limit"/> is less than 1.
+    /// </exception>
+    SessionHeaderPageResult SessionHeaderPage(string? harnessId, string? search, int page, int limit);
+
+    /// <summary>
+    /// Pages the subagents of one session: the sessions whose parent is
+    /// <paramref name="parentSessionId"/> and that attach to it.
+    /// </summary>
+    /// <param name="parentSessionId">Session whose subagents are paged.</param>
+    /// <param name="page">One-based page number.</param>
+    /// <param name="limit">Number of subagents on a page.</param>
+    /// <returns>
+    /// The page's subagent headers, oldest start first and then by session id, with the number of
+    /// subagents that attach to the parent.
+    /// </returns>
+    /// <remarks>
+    /// The parent must be a projected session, and a session on a parent chain that loops back to
+    /// itself never attaches — it is a root instead. Subagents are resolved over every projected
+    /// session, not one harness, which is the same set <see cref="SessionChildPreview"/> previews, so
+    /// a preview's total always matches this page.
+    /// </remarks>
+    /// <exception cref="ArgumentException"><paramref name="parentSessionId"/> is null, empty, or whitespace.</exception>
+    /// <exception cref="ArgumentOutOfRangeException">
+    /// <paramref name="page"/> or <paramref name="limit"/> is less than 1.
+    /// </exception>
+    SessionHeaderPageResult SessionChildHeaderPage(string parentSessionId, int page, int limit);
+
+    /// <summary>
+    /// Answers each named parent's subagent total and its first subagents, in one read however many
+    /// parents are named.
+    /// </summary>
+    /// <param name="parentSessionIds">Sessions to preview. Order and duplicates are ignored.</param>
+    /// <param name="perParent">Subagents listed under each parent, the oldest first.</param>
+    /// <returns>
+    /// One entry per named parent that has at least one subagent, newest parent start first and then
+    /// by parent session id. A parent with no subagents has no entry.
+    /// </returns>
+    /// <remarks>
+    /// Subagents attach by the rule <see cref="SessionChildHeaderPage"/> pages by, over every
+    /// projected session.
+    /// </remarks>
+    /// <exception cref="ArgumentOutOfRangeException"><paramref name="perParent"/> is less than 1.</exception>
+    IReadOnlyList<SessionChildPreviewEntry> SessionChildPreview(IReadOnlyCollection<string> parentSessionIds, int perParent);
+
+    /// <summary>
+    /// Gets the session-projection headers of exactly the named sessions, newest start first and
+    /// then by session id.
+    /// </summary>
+    /// <param name="sessionIds">
+    /// Sessions to read. Order and duplicates are ignored; a session with no projection row is
+    /// absent from the answer.
+    /// </param>
+    /// <returns>The headers of the named sessions that have a projection row.</returns>
+    IReadOnlyList<StoredSessionHeader> SessionHeadersByKeys(IReadOnlyCollection<string> sessionIds);
 
     /// <summary>Replaces one projected session summary and its child rows atomically.</summary>
     /// <param name="projection">Projected session summary to persist.</param>
