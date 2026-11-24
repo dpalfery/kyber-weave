@@ -1,14 +1,9 @@
 ---
-id: standards/csharp/skills
-title: "csharp skills"
-doc-type: skill
-status: current
-technology: csharp
-owner: dpalfery
-last-reviewed: 2026-11-22
+name: kw-dotnet-inner-loop
+description: "Run the Kyber-Weave C# inner loop: build once, run only the test classes that cover the change, check formatting on changed files, isolate parallel builds, and re-run the docs gates after editing docs. Load when changing C# in this repository or when a dotnet filter exits 8."
 ---
 
-# csharp skills
+# Kyber-Weave .NET inner loop
 
 ## Inner loop
 

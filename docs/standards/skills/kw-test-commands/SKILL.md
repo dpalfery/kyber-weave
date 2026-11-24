@@ -1,14 +1,9 @@
 ---
-id: standards/test/skills
-title: "test skills"
-doc-type: skill
-status: current
-technology: test
-owner: dpalfery
-last-reviewed: 2026-11-16
+name: kw-test-commands
+description: "Run Kyber-Weave tests by project: unit, repository-policy and content test commands, the fast-loop router, and the shared fixtures. Load when writing or running tests in this repository."
 ---
 
-# test skills
+# Kyber-Weave test commands
 
 ## Commands
 

@@ -1,14 +1,9 @@
 ---
-id: standards/sqlite/skills
-title: "sqlite skills"
-doc-type: skill
-status: current
-technology: sqlite
-owner: dpalfery
-last-reviewed: 2026-11-20
+name: kw-canon-schema-change
+description: "Change the KyberDash SQLite canon schema safely: where the schema, DDL writer and open behaviour live, and the two targeted test classes to run afterwards. Load when changing RelationalSchemaCatalog, SchemaDdlGenerator or SqliteRelationalStore."
 ---
 
-# sqlite skills
+# Canon schema change
 
 ## Read the standard first
 

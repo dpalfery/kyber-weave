@@ -1,14 +1,9 @@
 ---
-id: standards/typescript/skills
-title: "typescript skills"
-doc-type: skill
-status: current
-technology: typescript
-owner: dpalfery
-last-reviewed: 2026-11-22
+name: kw-dash-web-loop
+description: "Run the KyberDash web app inner loop: typecheck, lint, unit tests, the isolated Playwright config, setup, and the guidance files for the web app and tray. Load when changing TypeScript or React under dash in this repository."
 ---
 
-# typescript skills
+# KyberDash web loop
 
 ## Commands
 
