@@ -901,12 +901,12 @@ public partial class CursorMapper : IHarnessMapper
                     correctionRule = correction.Rule;
                 }
 
-                parts.Add(BuildContentPart(position++, ContentBucket.UserMessage, pairedUserText, "user"));
+                parts.Add(ToolContentMeasurer.BuildContentPart(position++, ContentBucket.UserMessage, pairedUserText, "user"));
             }
 
             if (row.BubbleType != 1 && !string.IsNullOrWhiteSpace(row.UserText))
             {
-                parts.Add(BuildContentPart(position++, ContentBucket.ConversationHistory, row.UserText, "assistant"));
+                parts.Add(ToolContentMeasurer.BuildContentPart(position++, ContentBucket.ConversationHistory, row.UserText, "assistant"));
             }
 
             records.Add(BuildRecord(
@@ -1017,17 +1017,17 @@ public partial class CursorMapper : IHarnessMapper
                     correctionRule = correction.Rule;
                 }
 
-                parts.Add(BuildContentPart(position++, ContentBucket.UserMessage, turn.UserMessage, "user"));
+                parts.Add(ToolContentMeasurer.BuildContentPart(position++, ContentBucket.UserMessage, turn.UserMessage, "user"));
             }
 
             if (!string.IsNullOrWhiteSpace(turn.Body))
             {
-                parts.Add(BuildContentPart(position++, ContentBucket.ConversationHistory, turn.Body, "assistant"));
+                parts.Add(ToolContentMeasurer.BuildContentPart(position++, ContentBucket.ConversationHistory, turn.Body, "assistant"));
             }
 
             if (!string.IsNullOrWhiteSpace(turn.Reasoning))
             {
-                parts.Add(BuildContentPart(position++, ContentBucket.Reasoning, turn.Reasoning, "assistant"));
+                parts.Add(ToolContentMeasurer.BuildContentPart(position++, ContentBucket.Reasoning, turn.Reasoning, "assistant"));
             }
 
             records.Add(BuildRecord(
@@ -1127,29 +1127,6 @@ public partial class CursorMapper : IHarnessMapper
                 DeclaredContextWindow: null),
             ReportedInputTokens: reportedInputTokens,
             ReportedOutputTokens: reportedOutputTokens);
-    }
-
-    private static CollectedContentPart BuildContentPart(
-        int position,
-        ContentBucket bucket,
-        string rawText,
-        string role)
-    {
-        ToolContentMeasurement measurement = ToolContentMeasurer.Measure(rawText);
-        string? plainText = measurement.IsDocument ? null : measurement.PlainText;
-        CollectedWithheldText? withheld = measurement.IsDocument ? measurement.ToWithheldText() : null;
-        long? originalBytes = measurement.IsDocument ? null : measurement.OriginalUtf8BytesWhenTruncated;
-
-        return new CollectedContentPart(
-            Position: position,
-            Bucket: bucket,
-            PlainText: plainText,
-            Withheld: withheld,
-            ReportedTokens: null,
-            Server: null,
-            Role: role,
-            Resident: null,
-            OriginalUtf8BytesWhenTruncated: originalBytes);
     }
 
     private static string EnsureUniqueRecordId(HashSet<string> seenRecordIds, string candidate) =>

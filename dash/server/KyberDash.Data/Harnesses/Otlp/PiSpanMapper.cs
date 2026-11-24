@@ -1,5 +1,4 @@
 using System.Text.Json;
-using System.Text.RegularExpressions;
 using KyberDash.Data.Collector;
 using KyberDash.Domain;
 
@@ -32,14 +31,11 @@ public partial class PiSpanMapper : OtlpSpanMapperBase
     /// <summary>Pi skill and context attribute keys mapped to <c>instruction_context</c> parts.</summary>
     public static readonly IReadOnlyList<string> PiInstructionKeys = ["pi.skills", "pi.context_files"];
 
-    [GeneratedRegex(@"^invoke_agent(?:[ :]|$)", RegexOptions.CultureInvariant, matchTimeoutMilliseconds: 1000)]
-    private static partial Regex InvokeAgentNameRegex();
-
     /// <inheritdoc />
     protected override string CanonicalHarnessId => PiHarnessId;
 
     private static readonly OtlpSpanMapperCore.OtlpMapperHooks MapperHooks = new(
-        ResolveOp,
+        OtlpSpanMapperCore.ResolveGenericOp,
         TryBuildTokenUsage,
         ShouldSkipSpan: IsGeminiAttributed);
 
@@ -109,28 +105,6 @@ public partial class PiSpanMapper : OtlpSpanMapperBase
     /// <returns><see langword="true"/> when the span is Gemini-attributed and must be excluded.</returns>
     public static bool IsGeminiAttributed(OtlpSpanNative native) =>
         OtlpSpanNative.IsGeminiAttributed(native);
-
-    private static RecordOp ResolveOp(OtlpSpanNative native)
-    {
-        if (OtlpSpanNative.HasAnyKey(native.Attributes, ["gen_ai.tool.name"]))
-        {
-            return RecordOp.ToolInvoke;
-        }
-
-        if (string.Equals(native.OperationName, "invoke_agent", StringComparison.Ordinal)
-            || InvokeAgentNameRegex().IsMatch(native.Name))
-        {
-            return RecordOp.AgentInvoke;
-        }
-
-        if (OtlpSpanNative.HasAnyKey(native.Attributes, OtlpSpanNative.InputTokenKeys)
-            || OtlpSpanNative.HasAnyKey(native.Attributes, OtlpSpanNative.OutputTokenKeys))
-        {
-            return RecordOp.LlmInvoke;
-        }
-
-        return RecordOp.Unspecified;
-    }
 
     private static bool TryBuildTokenUsage(OtlpSpanNative native, RecordOp op, out TokenUsage? usage)
     {

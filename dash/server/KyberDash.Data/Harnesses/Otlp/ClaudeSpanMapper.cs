@@ -1,4 +1,3 @@
-using System.Text.RegularExpressions;
 using KyberDash.Data.Repositories;
 using KyberDash.Data.Collector;
 using KyberDash.Domain;
@@ -13,9 +12,6 @@ namespace KyberDash.Data.Harnesses.Otlp;
 /// </summary>
 public partial class ClaudeSpanMapper : OtlpSpanMapperBase
 {
-    [GeneratedRegex(@"^invoke_agent(?:[ :]|$)", RegexOptions.CultureInvariant, matchTimeoutMilliseconds: 1000)]
-    private static partial Regex InvokeAgentNameRegex();
-
     /// <inheritdoc />
     protected override string CanonicalHarnessId => TranscriptReaderRepository.ClaudeHarnessId;
 
@@ -32,30 +28,13 @@ public partial class ClaudeSpanMapper : OtlpSpanMapperBase
 
     private static RecordOp ResolveOp(OtlpSpanNative native)
     {
-        if (OtlpSpanNative.HasAnyKey(native.Attributes, ["gen_ai.tool.name"]))
-        {
-            return RecordOp.ToolInvoke;
-        }
-
         if (string.Equals(native.SpanType, "tool", StringComparison.Ordinal)
             && !string.IsNullOrWhiteSpace(native.ToolName))
         {
             return RecordOp.ToolInvoke;
         }
 
-        if (string.Equals(native.OperationName, "invoke_agent", StringComparison.Ordinal)
-            || InvokeAgentNameRegex().IsMatch(native.Name))
-        {
-            return RecordOp.AgentInvoke;
-        }
-
-        if (OtlpSpanNative.HasAnyKey(native.Attributes, OtlpSpanNative.InputTokenKeys)
-            || OtlpSpanNative.HasAnyKey(native.Attributes, OtlpSpanNative.OutputTokenKeys))
-        {
-            return RecordOp.LlmInvoke;
-        }
-
-        return RecordOp.Unspecified;
+        return OtlpSpanMapperCore.ResolveGenericOp(native);
     }
 
     private static bool TryBuildTokenUsage(OtlpSpanNative native, RecordOp op, out TokenUsage? usage)

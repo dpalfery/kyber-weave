@@ -28,4 +28,32 @@ public class HarnessJsonTests
 
         Assert.Null(HarnessJson.ReadOptionalNonNegativeLong(document.RootElement, "n"));
     }
+
+    [Fact]
+    public void ReadCodexMessageText_StringContent_ReturnsTheText()
+    {
+        using JsonDocument document = JsonDocument.Parse("{\"content\":\"hello\"}");
+
+        Assert.Equal("hello", HarnessJson.ReadCodexMessageText(document.RootElement));
+    }
+
+    [Fact]
+    public void ReadCodexMessageText_BlockArray_JoinsTheTextBlocks()
+    {
+        using JsonDocument document = JsonDocument.Parse(
+            "{\"content\":[{\"type\":\"text\",\"text\":\"first\"},{\"type\":\"image\"},{\"type\":\"text\",\"text\":\"second\"}]}");
+
+        Assert.Equal("first\nsecond", HarnessJson.ReadCodexMessageText(document.RootElement));
+    }
+
+    [Theory]
+    [InlineData("{}")]
+    [InlineData("{\"content\":5}")]
+    [InlineData("{\"content\":\"\"}")]
+    public void ReadCodexMessageText_MissingNonTextOrEmptyContent_ReturnsNull(string payload)
+    {
+        using JsonDocument document = JsonDocument.Parse(payload);
+
+        Assert.Null(HarnessJson.ReadCodexMessageText(document.RootElement));
+    }
 }

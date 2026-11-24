@@ -143,12 +143,12 @@ public class CopilotVscodeMapper : IHarnessMapper
                 CopilotVscodeRequest previous = document.Requests[prevIndex];
                 if (!string.IsNullOrWhiteSpace(previous.UserMessage))
                 {
-                    parts.Add(BuildContentPart(position++, ContentBucket.ConversationHistory, previous.UserMessage, "user"));
+                    parts.Add(ToolContentMeasurer.BuildContentPart(position++, ContentBucket.ConversationHistory, previous.UserMessage, "user"));
                 }
 
                 if (!string.IsNullOrWhiteSpace(previous.ResponseText))
                 {
-                    parts.Add(BuildContentPart(position++, ContentBucket.ConversationHistory, previous.ResponseText, "assistant"));
+                    parts.Add(ToolContentMeasurer.BuildContentPart(position++, ContentBucket.ConversationHistory, previous.ResponseText, "assistant"));
                 }
             }
 
@@ -161,12 +161,12 @@ public class CopilotVscodeMapper : IHarnessMapper
                     correctionRule = correction.Rule;
                 }
 
-                parts.Add(BuildContentPart(position++, ContentBucket.ConversationHistory, current.UserMessage, "user"));
+                parts.Add(ToolContentMeasurer.BuildContentPart(position++, ContentBucket.ConversationHistory, current.UserMessage, "user"));
             }
 
             if (!string.IsNullOrWhiteSpace(current.ModeInstructions))
             {
-                parts.Add(BuildContentPart(position++, ContentBucket.InstructionContext, current.ModeInstructions, "system"));
+                parts.Add(ToolContentMeasurer.BuildContentPart(position++, ContentBucket.InstructionContext, current.ModeInstructions, "system"));
             }
 
             string model = ResolveModel(current);
@@ -936,29 +936,6 @@ public class CopilotVscodeMapper : IHarnessMapper
 
     private static string? ReadJsonString(JsonElement obj, string propertyName) =>
         HarnessJson.ReadStringOnly(obj, propertyName);
-
-    private static CollectedContentPart BuildContentPart(
-        int position,
-        ContentBucket bucket,
-        string rawText,
-        string role)
-    {
-        ToolContentMeasurement measurement = ToolContentMeasurer.Measure(rawText);
-        string? plainText = measurement.IsDocument ? null : measurement.PlainText;
-        CollectedWithheldText? withheld = measurement.IsDocument ? measurement.ToWithheldText() : null;
-        long? originalBytes = measurement.IsDocument ? null : measurement.OriginalUtf8BytesWhenTruncated;
-
-        return new CollectedContentPart(
-            Position: position,
-            Bucket: bucket,
-            PlainText: plainText,
-            Withheld: withheld,
-            ReportedTokens: null,
-            Server: null,
-            Role: role,
-            Resident: null,
-            OriginalUtf8BytesWhenTruncated: originalBytes);
-    }
 
     private static string ResolveModel(CopilotVscodeRequest request)
     {

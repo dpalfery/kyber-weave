@@ -411,8 +411,8 @@ public record OtlpSpanNative(
             ToolCallId: FirstSafeString(clonedAttributes, ToolCallIdKeys),
             ToolMcpServerName: FirstSafeString(clonedAttributes, ToolMcpServerKeys),
             ToolMcpToolName: FirstSafeString(clonedAttributes, ToolMcpToolKeys),
-            ToolRawInput: ReadRawTextOrJson(clonedAttributes, ToolInputKeys),
-            ToolRawResult: ReadRawTextOrJson(clonedAttributes, ToolResultAttributeKeys),
+            ToolRawInput: CanonAdapters.ReadText(clonedAttributes, ToolInputKeys),
+            ToolRawResult: CanonAdapters.ReadText(clonedAttributes, ToolResultAttributeKeys),
             ToolStatus: FirstSafeString(clonedAttributes, ToolStatusKeys),
             ToolIsError: ReadOptionalBool(clonedAttributes, ["is_error", "isError"]),
             ToolErrorCode: FirstSafeString(clonedAttributes, ToolErrorCodeKeys),
@@ -675,32 +675,6 @@ public record OtlpSpanNative(
         return values;
     }
 
-    private static string? ReadRawTextOrJson(IReadOnlyDictionary<string, JsonElement> attributes, IReadOnlyList<string> keys)
-    {
-        foreach (string key in keys)
-        {
-            if (!attributes.TryGetValue(key, out JsonElement element))
-            {
-                continue;
-            }
-
-            if (element.ValueKind == JsonValueKind.String)
-            {
-                string? value = element.GetString();
-                if (!string.IsNullOrEmpty(value))
-                {
-                    return value;
-                }
-            }
-            else if (element.ValueKind is JsonValueKind.Object or JsonValueKind.Array)
-            {
-                return element.GetRawText();
-            }
-        }
-
-        return null;
-    }
-
     private static DateTimeOffset ParseTimestamp(string? timestamp, string? startTimeUnixNano)
     {
         if (!string.IsNullOrWhiteSpace(timestamp)
@@ -751,7 +725,7 @@ public record OtlpSpanNative(
 
     private static string? SystemPromptText(IReadOnlyDictionary<string, JsonElement> attributes)
     {
-        string? raw = ReadRawTextOrJson(attributes, SystemInstructionKeys);
+        string? raw = CanonAdapters.ReadText(attributes, SystemInstructionKeys);
         if (raw is null)
         {
             return null;
@@ -807,14 +781,14 @@ public record OtlpSpanNative(
             parts.Add(new ContentPart("system_prompt", system, Tokens: reported, Order: order++));
         }
 
-        string? rules = ReadRawTextOrJson(attributes, InstructionRuleKeys);
+        string? rules = CanonAdapters.ReadText(attributes, InstructionRuleKeys);
         if (rules is not null)
         {
             long? reported = ReadOptionalCounter(attributes, RuleTokenKeys);
             parts.Add(new ContentPart("instruction_context", rules, Tokens: reported, Order: order++));
         }
 
-        string? skills = ReadRawTextOrJson(attributes, SkillKeys);
+        string? skills = CanonAdapters.ReadText(attributes, SkillKeys);
         if (skills is not null)
         {
             long? reported = ReadOptionalCounter(attributes, SkillTokenKeys);
@@ -824,7 +798,7 @@ public record OtlpSpanNative(
         AppendToolDefinitionParts(attributes, parts, ref order);
         AppendMessageParts(attributes, parts, system is not null, ref order);
 
-        string? toolResult = ReadRawTextOrJson(attributes, ToolResultKeys);
+        string? toolResult = CanonAdapters.ReadText(attributes, ToolResultKeys);
         if (toolResult is not null)
         {
             parts.Add(new ContentPart("tool_result_content", toolResult, Order: order++));
@@ -832,7 +806,7 @@ public record OtlpSpanNative(
 
         if (!HasAnyKey(attributes, InputMessageKeys))
         {
-            string? flat = ReadRawTextOrJson(attributes, FlatPromptKeys);
+            string? flat = CanonAdapters.ReadText(attributes, FlatPromptKeys);
             if (flat is not null)
             {
                 parts.Add(new ContentPart("conversation_history", flat, Order: order++));
@@ -847,7 +821,7 @@ public record OtlpSpanNative(
         List<ContentPart> parts,
         ref int order)
     {
-        string? raw = ReadRawTextOrJson(attributes, ToolDefinitionKeys);
+        string? raw = CanonAdapters.ReadText(attributes, ToolDefinitionKeys);
         if (raw is null)
         {
             return;
@@ -904,7 +878,7 @@ public record OtlpSpanNative(
         bool hasSystemInstructions,
         ref int order)
     {
-        string? raw = ReadRawTextOrJson(attributes, InputMessageKeys);
+        string? raw = CanonAdapters.ReadText(attributes, InputMessageKeys);
         if (raw is null)
         {
             return;
