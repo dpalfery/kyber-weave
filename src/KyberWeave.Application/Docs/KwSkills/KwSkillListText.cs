@@ -24,9 +24,22 @@ public static class KwSkillListText
         StringBuilder text = new(LoadInstruction);
         foreach (KwSkillEntry entry in entries)
         {
-            text.Append("\n- ").Append(entry.Name).Append(": ").Append(entry.Description);
+            text.Append("\n- ").Append(entry.Name).Append(": ").Append(Neutralise(entry.Description));
         }
 
         return text.ToString();
+    }
+
+    /// <summary>
+    /// A description is repository-authored free text that lands in a model prompt one line per skill inside
+    /// one <c>kw-skills</c> tag: a newline would forge a list entry and the tag's own markers would close or
+    /// reopen the block, so whitespace runs collapse to one space and the markers are defused.
+    /// </summary>
+    private static string Neutralise(string description)
+    {
+        string collapsed = string.Join(' ', description.Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries));
+        return collapsed
+            .Replace("<kw-skills>", "(kw-skills)", StringComparison.OrdinalIgnoreCase)
+            .Replace("</kw-skills>", "(/kw-skills)", StringComparison.OrdinalIgnoreCase);
     }
 }
