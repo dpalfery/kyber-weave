@@ -325,12 +325,15 @@ public sealed class DocsScaffolder : IDocsScaffoldingService
             return [];
         }
 
-        if (KwSkillFiles.TryParseList(text, out List<string> names))
+        if (KwSkillFiles.TryParseList(text, out List<string> names, out string? parseError))
         {
             return names;
         }
 
-        throw new InvalidDataException($"The shipped '{scope}' skills list is not a YAML sequence of skill names.");
+        throw new InvalidDataException(
+            parseError is null
+                ? $"The shipped '{scope}' skills list is not a YAML sequence of skill names."
+                : $"The shipped '{scope}' skills list is not a YAML sequence of skill names: {parseError}.");
     }
 
     /// <summary>The technology a shipped standard builds on, or null when it builds on none.</summary>

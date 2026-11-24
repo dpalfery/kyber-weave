@@ -16,9 +16,18 @@ internal static class KwSkillFiles
     /// <param name="text">The list file's text.</param>
     /// <param name="names">The trimmed names when the text is a sound list; empty otherwise.</param>
     /// <returns>True when the text is a sound list.</returns>
-    public static bool TryParseList(string text, out List<string> names)
+    public static bool TryParseList(string text, out List<string> names) =>
+        TryParseList(text, out names, out _);
+
+    /// <summary>Reads a list as one YAML sequence of non-empty scalars and nothing else.</summary>
+    /// <param name="text">The list file's text.</param>
+    /// <param name="names">The trimmed names when the text is a sound list; empty otherwise.</param>
+    /// <param name="parseError">Why the YAML could not be read; null when the text parsed but is not a sound list's shape.</param>
+    /// <returns>True when the text is a sound list.</returns>
+    public static bool TryParseList(string text, out List<string> names, out string? parseError)
     {
         names = [];
+        parseError = null;
         try
         {
             YamlStream stream = new();
@@ -31,9 +40,10 @@ internal static class KwSkillFiles
                 return true;
             }
         }
-        catch (YamlException)
+        catch (YamlException exception)
         {
-            // Not a YAML document at all: the caller reports the shape.
+            // Not a YAML document at all: the caller reports the shape, carrying this reason when there is one.
+            parseError = exception.Message.ReplaceLineEndings(" ");
         }
 
         return false;

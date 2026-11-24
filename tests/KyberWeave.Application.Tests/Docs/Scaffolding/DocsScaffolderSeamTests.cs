@@ -69,6 +69,26 @@ public sealed class DocsScaffolderSeamTests
         Assert.Contains("skills list", error.Message, StringComparison.Ordinal);
     }
 
+    /// <summary>
+    /// A list the YAML parser itself rejects is reported with the parser's reason, not only the
+    /// shape sentence, so the author of the shipped template can see what was wrong with the text.
+    /// The parser's own wording is not pinned here — only that a reason follows the sentence.
+    /// </summary>
+    [Fact]
+    public void AShippedSkillsListThatIsNotYamlNamesTheParserReason()
+    {
+        _resources.Add("Standards.csharp.skills.yml", "- go-gates\n  bad: [\n");
+
+        InvalidDataException error = Assert.Throws<InvalidDataException>(() =>
+            Scaffolder().Scaffold("repo", "docs", reviewGates: false, standards: ["csharp"]));
+
+        Assert.Contains("csharp", error.Message, StringComparison.Ordinal);
+        Assert.Contains("skills list", error.Message, StringComparison.Ordinal);
+        Assert.False(
+            error.Message.EndsWith("skill names.", StringComparison.Ordinal),
+            $"the parser's reason is carried, not swallowed: {error.Message}");
+    }
+
     [Fact]
     public void AShippedSkillsListNamingASkillTheBuildDoesNotShipStopsTheScaffold()
     {
