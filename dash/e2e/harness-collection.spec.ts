@@ -526,6 +526,23 @@ test.describe('the Factory (Droid) replay', () => {
     const carried = prompts.find((prompt) => typeof prompt === 'string')
     expect(carried, 'the requests section must carry the prompt the consent allowed').toBeDefined()
     expect(carried as string).toContain(FACTORY_REPLAY_PROMPT)
+
+    // The restored turn-content contract, end to end on the consent-on session:
+    // the turn page reads the parts the engine serves and the web builds the
+    // blocks it renders, so the recorded prompt is page content — not only a
+    // raw-span attribute or a request preview. The dashboard serves its bundle
+    // with relative asset URLs, so the route opens the way the app's own
+    // navigation does: the loaded SPA pushes the path and rebuilds the ancestry
+    // (the same transition `openHarness` drives for the harness route).
+    await page.evaluate((path) => {
+      window.history.pushState({}, '', path)
+      window.dispatchEvent(new PopStateEvent('popstate'))
+    }, `/session/${FACTORY_CONTENT_ON_SESSION_ID}/turn/0`)
+    await expect(page.getByTestId('page-turn')).toBeVisible()
+    await expect(page.getByTestId('turn-not-found')).toHaveCount(0)
+    await expect(page.getByTestId('turn-load-error')).toHaveCount(0)
+    await expect(page.getByTestId('turn-projection-failed')).toHaveCount(0)
+    await expect(page.getByTestId('context-content-pane')).toContainText(FACTORY_REPLAY_PROMPT)
   })
 })
 

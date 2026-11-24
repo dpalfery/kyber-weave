@@ -155,11 +155,97 @@ describe('fetchKyberSessionTurns per-turn route', () => {
   })
 
   it.each([
-    ['blocks is null', { sessionId: 'sess-1', turnIndex: 1, blocks: null, parts: [], assembledText: '' }],
     ['parts is missing', { sessionId: 'sess-1', turnIndex: 1, blocks: [], assembledText: '' }],
-    ['assembledText is missing', { sessionId: 'sess-1', turnIndex: 1, blocks: [], parts: [] }],
+    ['parts is null', { sessionId: 'sess-1', turnIndex: 1, blocks: [], parts: null, assembledText: '' }],
+    ['a parts entry is not an object', { sessionId: 'sess-1', turnIndex: 1, parts: ['nope'] }],
+    ['a parts entry part is not a string', { sessionId: 'sess-1', turnIndex: 1, parts: [{ part: 7, text: 'x' }] }],
+    ['a parts entry text is not a string', { sessionId: 'sess-1', turnIndex: 1, parts: [{ part: 'system_prompt', text: null }] }],
   ])('refuses a content body the page cannot render: %s', async (_why, body) => {
     stubFetch(200, body)
     await expect(fetchTurnContent('sess-1', 1)).rejects.toThrow(/malformed/i)
+  })
+
+  it.each([
+    ['blocks is null', { sessionId: 'sess-1', turnIndex: 1, blocks: null, parts: [], assembledText: '' }],
+    ['assembledText is missing', { sessionId: 'sess-1', turnIndex: 1, blocks: [], parts: [] }],
+  ])('builds the view from parts regardless of the body’s blocks: %s', async (_why, body) => {
+    // Blocks and assembled text are the web’s derivation of the served parts, not
+    // fields the engine owes. Whichever shape the body carries them in, the parser
+    // builds the same view from `parts` alone — one contract.
+    stubFetch(200, body)
+
+    const content = await fetchTurnContent('sess-1', 1)
+
+    // A turn whose parts were cut to nothing still answers the five canonical
+    // blocks, empty, so the rail keeps its shape.
+    expect(content.blocks.map((b) => [b.key, b.text, b.parts.length])).toEqual([
+      ['system_prompt', '', 0],
+      ['tool_definitions', '', 0],
+      ['instruction_context', '', 0],
+      ['conversation_history', '', 0],
+      ['tool_result_content', '', 0],
+    ])
+    expect(content.parts).toEqual([])
+    expect(content.assembledText).toBe('')
+  })
+
+  it('builds blocks, labels, and assembled text from the real engine shape', async () => {
+    // EXACTLY the served shape of the C# engine’s content route — no blocks, no
+    // assembledText on the wire. The budgeted parts it kept, the turn’s span and
+    // model, the raw-packet pointer, and the parts-count truncation flag are all
+    // the route sends; everything the turn page renders is built from them.
+    stubFetch(200, {
+      sessionId: 'sess-1',
+      turnIndex: 0,
+      spanId: 'turn-span-1',
+      model: 'claude-sonnet-4-6',
+      rawPacket: { spanAttributesPath: '/api/kyber/span/turn-span-1/attributes' },
+      content: null,
+      turn: { turnIndex: 0, index: 0, spanId: 'turn-span-1', timestamp: '2026-11-23T10:00:00.000Z' },
+      truncated: true,
+      budget: 32768,
+      totalBytes: 857,
+      parts: [
+        { spanId: 'turn-span-1', part: 'system_prompt', text: 'Be helpful.', tokens: 12 },
+        { spanId: 'turn-span-1', part: 'conversation_history', text: 'user: hello\nassistant: hi', tokens: 40 },
+        { spanId: 'turn-span-1', part: 'mystery_blob', text: 'blob bytes', server: 'x', truncated: true },
+      ],
+    })
+
+    const content = await fetchTurnContent('sess-1', 0)
+
+    // Identity, span, model, and the packet pointer pass through as served.
+    expect(content.sessionId).toBe('sess-1')
+    expect(content.turnIndex).toBe(0)
+    expect(content.spanId).toBe('turn-span-1')
+    expect(content.model).toBe('claude-sonnet-4-6')
+    expect(content.rawPacket).toEqual({ spanAttributesPath: '/api/kyber/span/turn-span-1/attributes' })
+    expect(content.truncated).toBe(true)
+
+    // The conversation history split into labelled parts with proportional tokens;
+    // the unknown kind keeps its own label, server, and flags.
+    expect(content.parts.map((p) => [p.id, p.part, p.label, p.text])).toEqual([
+      ['part-sys-0', 'system_prompt', 'System Prompt', 'Be helpful.'],
+      ['part-user-1', 'user_messages', 'User Messages', 'hello'],
+      ['part-asst-2', 'assistant_turns', 'Assistant Turns', 'hi'],
+      ['part-other-3', 'mystery_blob', 'mystery blob', 'blob bytes'],
+    ])
+    expect(content.parts[1]).toMatchObject({ tokens: 20 })
+    expect(content.parts[2]).toMatchObject({ tokens: 20 })
+    expect(content.parts[3]).toMatchObject({ server: 'x', truncated: true })
+
+    // The five canonical blocks, built from those parts.
+    expect(content.blocks.map((b) => [b.key, b.text, b.tokens])).toEqual([
+      ['system_prompt', 'Be helpful.', 12],
+      ['tool_definitions', '', undefined],
+      ['instruction_context', '', undefined],
+      ['conversation_history', 'hello\n\nhi', 40],
+      ['tool_result_content', '', undefined],
+    ])
+
+    // Assembled text heads each non-blank block; the unknown kind is a part, not a block.
+    expect(content.assembledText).toBe(
+      '=== SYSTEM PROMPT ===\nBe helpful.\n\n=== CONVERSATION HISTORY ===\nhello\n\nhi',
+    )
   })
 })

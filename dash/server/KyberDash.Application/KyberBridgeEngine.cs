@@ -1007,7 +1007,14 @@ public class KyberBridgeEngine
         }, CamelCaseJsonOptions);
     }
 
-    /// <summary>Returns bounded or full text/parts content for a single turn.</summary>
+    /// <summary>
+    /// Returns bounded or full text/parts content for a single turn. The payload names the turn's
+    /// span (<c>spanId</c>) and model (omitted when the turn recorded none), links the span's raw
+    /// packet through <c>rawPacket.spanAttributesPath</c>, and flags <c>truncated</c> by counting
+    /// scoped parts: true only when the budgeted parts read left at least one part behind, and
+    /// never when <paramref name="full"/> is true. Blocks, part labels, and assembled text are
+    /// built by the web parser from the served parts, so no text is duplicated on the wire.
+    /// </summary>
     /// <param name="sessionId">Canonical session identifier.</param>
     /// <param name="turnIndex">Zero-based turn index.</param>
     /// <param name="budget">Byte budget applied when <paramref name="full"/> is false.</param>
@@ -1033,20 +1040,32 @@ public class KyberBridgeEngine
         Dictionary<string, object?> turn = ToTurnDto(figures);
         string serialized = JsonSerializer.Serialize(turn, CamelCaseJsonOptions);
         int totalBytes = Encoding.UTF8.GetByteCount(serialized);
-        bool truncated = !full && totalBytes > effectiveBudget;
-        string slice = truncated ? TruncateUtf8(serialized, effectiveBudget) : serialized;
+        bool contentSliced = !full && totalBytes > effectiveBudget;
+        string slice = contentSliced ? TruncateUtf8(serialized, effectiveBudget) : serialized;
+        // The web's `truncated` counts scoped parts, not bytes: the budgeted read left content
+        // behind exactly when the scope holds more parts than it returned. The lossless full
+        // read answers every part, so it never needs the count.
+        bool truncated = !full && parts.Count < reader.TurnContentPartCount(sessionId, turnIndex: turnIndex);
 
-        return JsonSerializer.SerializeToElement(new
+        Dictionary<string, object?> payload = new(StringComparer.Ordinal)
         {
-            sessionId,
-            turnIndex,
-            content = truncated ? slice : null,
-            turn = truncated ? null : turn,
-            truncated,
-            budget = effectiveBudget,
-            totalBytes,
-            parts,
-        }, CamelCaseJsonOptions);
+            ["sessionId"] = sessionId,
+            ["turnIndex"] = turnIndex,
+            ["spanId"] = figures.SpanId,
+            ["rawPacket"] = new { spanAttributesPath = $"/api/kyber/span/{figures.SpanId}/attributes" },
+            ["content"] = contentSliced ? slice : null,
+            ["turn"] = contentSliced ? null : turn,
+            ["truncated"] = truncated,
+            ["budget"] = effectiveBudget,
+            ["totalBytes"] = totalBytes,
+            ["parts"] = parts,
+        };
+        if (figures.Model is string model)
+        {
+            payload["model"] = model;
+        }
+
+        return JsonSerializer.SerializeToElement(payload, CamelCaseJsonOptions);
     }
 
     /// <summary>Returns bounded or full session content optionally filtered by turn, span, or canonical part key.</summary>

@@ -633,6 +633,14 @@ public class ProjectionReadPathTests
             inner.TurnContentParts(sessionKey, turnIndex, spanId, part, budget, full);
 
         /// <inheritdoc />
+        public int TurnContentPartCount(
+            string sessionKey,
+            int? turnIndex = null,
+            string? spanId = null,
+            string? part = null) =>
+            inner.TurnContentPartCount(sessionKey, turnIndex, spanId, part);
+
+        /// <inheritdoc />
         public IReadOnlyList<StoredToolDefinition> ToolDefinitions(string? spanId = null, string? sessionKey = null) => inner.ToolDefinitions(spanId, sessionKey);
 
         /// <inheritdoc />

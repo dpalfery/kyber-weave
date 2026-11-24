@@ -737,6 +737,27 @@ public interface IRelationalStoreReader
         int budget = 0,
         bool full = false);
 
+    /// <summary>
+    /// Counts the scoped content parts without reading any part text — a content-free
+    /// <c>COUNT(*)</c> over the scope <see cref="TurnContentParts"/> would materialize.
+    /// </summary>
+    /// <param name="sessionKey">Canonical session key.</param>
+    /// <param name="turnIndex">Zero-based turn index scoping the read; it resolves through the turn figures the way the parts read's does.</param>
+    /// <param name="spanId">Span identifier to scope to; it wins over <paramref name="turnIndex"/> when both are given.</param>
+    /// <param name="part">Canonical part key to scope to — the stored bucket name — or <see langword="null"/> for every part.</param>
+    /// <returns>The number of parts in the scope, or zero when the scope resolves to nothing.</returns>
+    /// <remarks>
+    /// The turn content route reads this beside its budgeted <see cref="TurnContentParts"/> call
+    /// to decide its <c>truncated</c> flag: the budgeted read left content behind exactly when it
+    /// returned fewer parts than the scope holds. Counting in SQL keeps that verdict free of any
+    /// text transfer.
+    /// </remarks>
+    int TurnContentPartCount(
+        string sessionKey,
+        int? turnIndex = null,
+        string? spanId = null,
+        string? part = null);
+
     /// <summary>Queries advertised tool definitions (<c>tool_definition</c> and <c>tool_definition_server</c>).</summary>
     /// <param name="spanId">Optional record span identifier filter.</param>
     /// <param name="sessionKey">Optional session key filter.</param>

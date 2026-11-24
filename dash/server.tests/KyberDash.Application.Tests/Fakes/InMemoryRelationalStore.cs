@@ -800,6 +800,54 @@ public class InMemoryRelationalStore :
         }
     }
 
+    /// <inheritdoc />
+    public int TurnContentPartCount(
+        string sessionKey,
+        int? turnIndex = null,
+        string? spanId = null,
+        string? part = null)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(sessionKey);
+
+        lock (syncRoot)
+        {
+            NoteRead(nameof(TurnContentPartCount));
+
+            string? scopedSpan = spanId;
+            if (string.IsNullOrEmpty(scopedSpan) && turnIndex.HasValue)
+            {
+                scopedSpan = ResolveTurnContentSpan(state, sessionKey, turnIndex.Value);
+                if (scopedSpan is null)
+                {
+                    return 0;
+                }
+            }
+
+            // Same scope as TurnContentParts, counting rows only: no part is materialized and no
+            // content byte is counted, so the count read stays content-free.
+            HashSet<string>? allowedSpans = ResolveFilteredSpanIds(state, scopedSpan, sessionKey);
+            TableMetadata meta = GetTableMetadata("content_part");
+            int count = 0;
+            foreach (object?[] row in state.GetRows("content_part"))
+            {
+                string rowSpan = GetString(meta, row, "span_id");
+                if (allowedSpans is not null && !allowedSpans.Contains(rowSpan))
+                {
+                    continue;
+                }
+
+                if (!string.IsNullOrEmpty(part) && !string.Equals(GetString(meta, row, "bucket"), part, StringComparison.Ordinal))
+                {
+                    continue;
+                }
+
+                count++;
+            }
+
+            return count;
+        }
+    }
+
     /// <summary>
     /// Resolves a turn index to the span the turn figures answer for that index, so the content
     /// read is scoped to the same turn the summary already priced.
