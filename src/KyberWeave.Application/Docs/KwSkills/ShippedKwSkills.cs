@@ -80,7 +80,10 @@ internal sealed class ShippedKwSkills(
             targets.Add((target, bytes));
         }
 
-        if (targets.TrueForAll(t => files.FileExists(t.Path) && files.GetLength(t.Path) == t.Bytes.Length))
+        // Content, not just length: a file that was truncated and padded, or tampered with, must
+        // not be served as the skill this folder's digest names.
+        if (targets.TrueForAll(t => files.FileExists(t.Path)
+            && files.ReadAllBytes(t.Path).AsSpan().SequenceEqual(t.Bytes)))
         {
             return folder;
         }

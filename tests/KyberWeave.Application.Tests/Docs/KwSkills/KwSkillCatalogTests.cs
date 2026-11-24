@@ -287,6 +287,22 @@ public sealed class KwSkillCatalogTests
         Assert.Equal("SHIPPED BODY", second.Body.Trim());
     }
 
+    [Fact]
+    public void ACorruptedCacheFileIsRewrittenRatherThanReused()
+    {
+        Shipped("shipped-one", "From the product.", "SHIPPED BODY", reference: "REF TEXT");
+
+        string cached = _catalog.Load("shipped-one").References[0];
+
+        // Same length as the shipped bytes, so only a content check catches it.
+        _files.WriteAllBytes(cached, "WRONGTXT"u8.ToArray());
+
+        KwSkillLoadResult second = _catalog.Load("shipped-one");
+
+        Assert.Equal(KwSkillLoadOutcome.Found, second.Outcome);
+        Assert.Equal("REF TEXT", _files.ReadAllText(second.References[0]));
+    }
+
     [Theory]
     [InlineData("../SKILL.md")]
     [InlineData("/SKILL.md")]
