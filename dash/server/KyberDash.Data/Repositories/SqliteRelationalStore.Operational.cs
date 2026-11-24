@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Globalization;
+using System.Numerics;
 using System.Text;
 using KyberDash.Contracts.Repositories;
 using KyberDash.Core.Exceptions;
@@ -122,7 +123,7 @@ public partial class SqliteRelationalStore : IOperationalStore
     /// <inheritdoc />
     public void SetWriteMarker(long recordsWriteSeq)
     {
-        RequireNonNegativeLong(recordsWriteSeq, "store_write_marker", "records_write_seq");
+        RequireNonNegative(recordsWriteSeq, "store_write_marker", "records_write_seq");
         ExecuteTransaction(
             string.Create(
                 CultureInfo.InvariantCulture,
@@ -199,7 +200,7 @@ public partial class SqliteRelationalStore : IOperationalStore
     public void SetProjectionState(ProjectionStateView state)
     {
         ArgumentNullException.ThrowIfNull(state);
-        RequireNonNegativeLong(state.RecordsMarker, "projection_state", "records_marker");
+        RequireNonNegative(state.RecordsMarker, "projection_state", "records_marker");
 
         ExecuteTransaction(
             string.Create(
@@ -256,8 +257,8 @@ public partial class SqliteRelationalStore : IOperationalStore
     public void SetProjectionDirtyState(DirtyProjectionState state)
     {
         ArgumentNullException.ThrowIfNull(state);
-        RequireNonNegativeLong(state.FromSeq, "projection_dirty_range", "from_seq");
-        RequireNonNegativeLong(state.ToSeq, "projection_dirty_range", "to_seq");
+        RequireNonNegative(state.FromSeq, "projection_dirty_range", "from_seq");
+        RequireNonNegative(state.ToSeq, "projection_dirty_range", "to_seq");
 
         StringBuilder body = new();
         body.Append(
@@ -423,8 +424,8 @@ public partial class SqliteRelationalStore : IOperationalStore
         string lastAttemptExpr = GuardedNonEmptyTextExpr("source_checkpoint", "last_attempt_utc", checkpoint.LastAttemptUtc);
         string lastStatusExpr = GuardedNonEmptyTextExpr("source_checkpoint", "last_status", checkpoint.LastStatus);
 
-        RequireNonNegativeInt(checkpoint.UnitCount, "source_checkpoint", "unit_count");
-        RequireNonNegativeInt(checkpoint.RecordCount, "source_checkpoint", "record_count");
+        RequireNonNegative(checkpoint.UnitCount, "source_checkpoint", "unit_count");
+        RequireNonNegative(checkpoint.RecordCount, "source_checkpoint", "record_count");
 
         string? successExpr = checkpoint.LastSuccessUtc is null
             ? null
@@ -627,7 +628,7 @@ public partial class SqliteRelationalStore : IOperationalStore
         {
             ArgumentNullException.ThrowIfNull(entry);
             string hashExpr = GuardedNonEmptyTextExpr("token_cache", "hash", entry.Hash);
-            RequireNonNegativeLong(entry.TokenCount, "token_cache", "token_count");
+            RequireNonNegative(entry.TokenCount, "token_cache", "token_count");
             string? modelExpr = entry.ModelId is null
                 ? null
                 : GuardedNonEmptyTextExpr("token_cache_model", "model_id", entry.ModelId);
@@ -947,7 +948,7 @@ public partial class SqliteRelationalStore : IOperationalStore
     public void RecordIngest(string source, int count, string timestampUtc)
     {
         string sourceExpr = GuardedNonEmptyTextExpr("ingest_log", "source", source);
-        RequireNonNegativeInt(count, "ingest_log", "record_count");
+        RequireNonNegative(count, "ingest_log", "record_count");
         string timestampExpr = GuardedNonEmptyTextExpr("ingest_log", "timestamp_utc", timestampUtc);
 
         ExecuteTransaction(
@@ -1313,19 +1314,10 @@ public partial class SqliteRelationalStore : IOperationalStore
         }
     }
 
-    private static void RequireNonNegativeInt(int value, string tableName, string columnName)
+    private static void RequireNonNegative<T>(T value, string tableName, string columnName)
+        where T : INumberBase<T>
     {
-        if (value < 0)
-        {
-            throw new DashValidationException(
-                ConstraintViolatedCode,
-                $"INTEGER column '{tableName}.{columnName}' cannot be negative.");
-        }
-    }
-
-    private static void RequireNonNegativeLong(long value, string tableName, string columnName)
-    {
-        if (value < 0)
+        if (T.IsNegative(value))
         {
             throw new DashValidationException(
                 ConstraintViolatedCode,

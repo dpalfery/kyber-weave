@@ -389,7 +389,7 @@ public class CommandCodeMapper : IHarnessMapper
                     correctionRule = check.Rule;
                 }
 
-                parts.Add(BuildContentPart(position++, ContentBucket.UserMessage, pendingUserMessage, "user"));
+                parts.Add(ToolContentMeasurer.BuildContentPart(position++, ContentBucket.UserMessage, pendingUserMessage, "user"));
             }
 
             foreach (CommandCodeContentBlock block in msg.Blocks)
@@ -397,7 +397,7 @@ public class CommandCodeMapper : IHarnessMapper
                 if (string.Equals(block.BlockType, "text", StringComparison.Ordinal)
                     && !string.IsNullOrEmpty(block.Text))
                 {
-                    parts.Add(BuildContentPart(position++, ContentBucket.ConversationHistory, block.Text, "assistant"));
+                    parts.Add(ToolContentMeasurer.BuildContentPart(position++, ContentBucket.ConversationHistory, block.Text, "assistant"));
                 }
             }
 
@@ -671,29 +671,6 @@ public class CommandCodeMapper : IHarnessMapper
             AgentInstanceId: null,
             ToolDefinitions: [],
             Signals: new CollectedRecordSignals(null, null, null, null));
-    }
-
-    private static CollectedContentPart BuildContentPart(
-        int position,
-        ContentBucket bucket,
-        string rawText,
-        string role)
-    {
-        ToolContentMeasurement measurement = ToolContentMeasurer.Measure(rawText, CanonSynth.MaxToolResultBytes);
-        string? plainText = measurement.IsDocument ? null : measurement.PlainText;
-        CollectedWithheldText? withheld = measurement.IsDocument ? measurement.ToWithheldText() : null;
-        long? originalBytes = measurement.IsDocument ? null : measurement.OriginalUtf8BytesWhenTruncated;
-
-        return new CollectedContentPart(
-            Position: position,
-            Bucket: bucket,
-            PlainText: plainText,
-            Withheld: withheld,
-            ReportedTokens: null,
-            Server: null,
-            Role: role,
-            Resident: null,
-            OriginalUtf8BytesWhenTruncated: originalBytes);
     }
 
     private static string ResolveMessageModel(string? messageModel, string? entryModel, string? resolvedModel)

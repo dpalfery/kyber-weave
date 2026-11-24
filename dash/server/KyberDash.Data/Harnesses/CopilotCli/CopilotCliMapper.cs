@@ -309,7 +309,7 @@ public class CopilotCliMapper : IHarnessMapper
 
             if (latestSystemPrompts.TryGetValue(agentKey, out string? systemPrompt))
             {
-                parts.Add(BuildContentPart(position++, ContentBucket.SystemPrompt, systemPrompt, "system"));
+                parts.Add(ToolContentMeasurer.BuildContentPart(position++, ContentBucket.SystemPrompt, systemPrompt, "system"));
             }
 
             if (pendingUserMessages.TryGetValue(agentKey, out List<string>? userMessages))
@@ -325,7 +325,7 @@ public class CopilotCliMapper : IHarnessMapper
                         }
                     }
 
-                    parts.Add(BuildContentPart(position++, ContentBucket.UserMessage, userMessage, "user"));
+                    parts.Add(ToolContentMeasurer.BuildContentPart(position++, ContentBucket.UserMessage, userMessage, "user"));
                 }
 
                 userMessages.Clear();
@@ -335,7 +335,7 @@ public class CopilotCliMapper : IHarnessMapper
             {
                 foreach (string reasoning in reasonings)
                 {
-                    parts.Add(BuildContentPart(position++, ContentBucket.Reasoning, reasoning, "assistant"));
+                    parts.Add(ToolContentMeasurer.BuildContentPart(position++, ContentBucket.Reasoning, reasoning, "assistant"));
                 }
 
                 reasonings.Clear();
@@ -343,12 +343,12 @@ public class CopilotCliMapper : IHarnessMapper
 
             if (!string.IsNullOrEmpty(evt.ReasoningText))
             {
-                parts.Add(BuildContentPart(position++, ContentBucket.Reasoning, evt.ReasoningText, "assistant"));
+                parts.Add(ToolContentMeasurer.BuildContentPart(position++, ContentBucket.Reasoning, evt.ReasoningText, "assistant"));
             }
 
             if (!string.IsNullOrEmpty(evt.Content))
             {
-                parts.Add(BuildContentPart(position++, ContentBucket.ConversationHistory, evt.Content, "assistant"));
+                parts.Add(ToolContentMeasurer.BuildContentPart(position++, ContentBucket.ConversationHistory, evt.Content, "assistant"));
             }
 
             List<CollectedTokenCount> tokens = BuildTokens(evt);
@@ -598,29 +598,6 @@ public class CopilotCliMapper : IHarnessMapper
         }
 
         list.Add(text);
-    }
-
-    private static CollectedContentPart BuildContentPart(
-        int position,
-        ContentBucket bucket,
-        string rawText,
-        string role)
-    {
-        ToolContentMeasurement measurement = ToolContentMeasurer.Measure(rawText);
-        string? plainText = measurement.IsDocument ? null : measurement.PlainText;
-        CollectedWithheldText? withheld = measurement.IsDocument ? measurement.ToWithheldText() : null;
-        long? originalBytes = measurement.IsDocument ? null : measurement.OriginalUtf8BytesWhenTruncated;
-
-        return new CollectedContentPart(
-            Position: position,
-            Bucket: bucket,
-            PlainText: plainText,
-            Withheld: withheld,
-            ReportedTokens: null,
-            Server: null,
-            Role: role,
-            Resident: null,
-            OriginalUtf8BytesWhenTruncated: originalBytes);
     }
 
     private static List<CollectedTokenCount> BuildTokens(CopilotCliJournalEvent evt)

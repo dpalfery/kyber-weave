@@ -521,7 +521,7 @@ public class KiloMapper : IHarnessMapper
             List<CollectedContentPart> parts = [];
             if (request.Index == 0 && !string.IsNullOrWhiteSpace(document.UserMessage))
             {
-                parts.Add(BuildContentPart(0, ContentBucket.ConversationHistory, document.UserMessage, "user"));
+                parts.Add(ToolContentMeasurer.BuildContentPart(0, ContentBucket.ConversationHistory, document.UserMessage, "user"));
             }
 
             List<CollectedTokenCount> tokens = [];
@@ -616,7 +616,7 @@ public class KiloMapper : IHarnessMapper
         {
             foreach (string text in pending)
             {
-                parts.Add(BuildContentPart(position++, ContentBucket.ConversationHistory, text, "user"));
+                parts.Add(ToolContentMeasurer.BuildContentPart(position++, ContentBucket.ConversationHistory, text, "user"));
             }
 
             pending.Clear();
@@ -627,7 +627,7 @@ public class KiloMapper : IHarnessMapper
             string? text = PartText(row.Data);
             if (text is not null)
             {
-                parts.Add(BuildContentPart(position++, ContentBucket.ConversationHistory, text, "assistant"));
+                parts.Add(ToolContentMeasurer.BuildContentPart(position++, ContentBucket.ConversationHistory, text, "assistant"));
             }
         }
 
@@ -642,7 +642,7 @@ public class KiloMapper : IHarnessMapper
 
         foreach (string resultText in resultTexts)
         {
-            parts.Add(BuildContentPart(position++, ContentBucket.ToolResultContent, resultText, "assistant"));
+            parts.Add(ToolContentMeasurer.BuildContentPart(position++, ContentBucket.ToolResultContent, resultText, "assistant"));
         }
 
         List<CollectedTokenCount> tokens = [];
@@ -1550,29 +1550,6 @@ public class KiloMapper : IHarnessMapper
         }
 
         return importedAtUtc.ToUniversalTime();
-    }
-
-    private static CollectedContentPart BuildContentPart(
-        int position,
-        ContentBucket bucket,
-        string rawText,
-        string role)
-    {
-        ToolContentMeasurement measurement = ToolContentMeasurer.Measure(rawText);
-        string? plainText = measurement.IsDocument ? null : measurement.PlainText;
-        CollectedWithheldText? withheld = measurement.IsDocument ? measurement.ToWithheldText() : null;
-        long? originalBytes = measurement.IsDocument ? null : measurement.OriginalUtf8BytesWhenTruncated;
-
-        return new CollectedContentPart(
-            Position: position,
-            Bucket: bucket,
-            PlainText: plainText,
-            Withheld: withheld,
-            ReportedTokens: null,
-            Server: null,
-            Role: role,
-            Resident: null,
-            OriginalUtf8BytesWhenTruncated: originalBytes);
     }
 
     private static string EnsureUniqueRecordId(HashSet<string> seenRecordIds, string candidate) =>

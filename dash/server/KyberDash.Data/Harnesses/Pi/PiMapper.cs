@@ -419,7 +419,7 @@ public class PiMapper : IHarnessMapper
                     correctionRule = check.Rule;
                 }
 
-                parts.Add(BuildContentPart(position++, ContentBucket.UserMessage, pendingUserMessage, "user"));
+                parts.Add(ToolContentMeasurer.BuildContentPart(position++, ContentBucket.UserMessage, pendingUserMessage, "user"));
             }
 
             List<string> skillsInvoked = [];
@@ -431,7 +431,7 @@ public class PiMapper : IHarnessMapper
                 if (string.Equals(block.BlockType, "text", StringComparison.Ordinal)
                     && !string.IsNullOrEmpty(block.Text))
                 {
-                    parts.Add(BuildContentPart(position++, ContentBucket.ConversationHistory, block.Text, "assistant"));
+                    parts.Add(ToolContentMeasurer.BuildContentPart(position++, ContentBucket.ConversationHistory, block.Text, "assistant"));
                     continue;
                 }
 
@@ -783,29 +783,6 @@ public class PiMapper : IHarnessMapper
         }
 
         return (tokens, hasInput ? inputSum : null, usage.OutputTokens);
-    }
-
-    private static CollectedContentPart BuildContentPart(
-        int position,
-        ContentBucket bucket,
-        string rawText,
-        string role)
-    {
-        ToolContentMeasurement measurement = ToolContentMeasurer.Measure(rawText, CanonSynth.MaxToolResultBytes);
-        string? plainText = measurement.IsDocument ? null : measurement.PlainText;
-        CollectedWithheldText? withheld = measurement.IsDocument ? measurement.ToWithheldText() : null;
-        long? originalBytes = measurement.IsDocument ? null : measurement.OriginalUtf8BytesWhenTruncated;
-
-        return new CollectedContentPart(
-            Position: position,
-            Bucket: bucket,
-            PlainText: plainText,
-            Withheld: withheld,
-            ReportedTokens: null,
-            Server: null,
-            Role: role,
-            Resident: null,
-            OriginalUtf8BytesWhenTruncated: originalBytes);
     }
 
     private static string ResolveMessageModel(string? messageModel, string? resolvedModel)
