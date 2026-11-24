@@ -1,3 +1,4 @@
+using KyberDash.Core.Exceptions;
 using System.Text.Json;
 using KyberDash.Application;
 using KyberDash.Application.Tests.Fakes;
@@ -219,7 +220,7 @@ public sealed class SessionSectionEndpointsTests
     [Theory]
     [InlineData(typeof(IOException))]
     [InlineData(typeof(TimeoutException))]
-    [InlineData(typeof(InvalidOperationException))]
+    [InlineData(typeof(StoredDataException))]
     [InlineData(typeof(FormatException))]
     [InlineData(typeof(System.Text.Json.JsonException))]
     [InlineData(typeof(InvalidDataException))]
@@ -245,6 +246,7 @@ public sealed class SessionSectionEndpointsTests
     [InlineData(typeof(OperationCanceledException))]
     [InlineData(typeof(NullReferenceException))]
     [InlineData(typeof(ArgumentNullException))]
+    [InlineData(typeof(InvalidOperationException))]
     public void TheTurnRoutesLetFatalAndCancellationFaultsPropagate(Type faultType)
     {
         TurnFiguresFaultingStore store = new(() => (Exception)Activator.CreateInstance(faultType)!);
@@ -1622,7 +1624,7 @@ public sealed class SessionSectionEndpointsTests
         {
             if (string.Equals(sessionKey, "sess-timeline-broken", StringComparison.Ordinal))
             {
-                throw new InvalidOperationException("projection exploded");
+                throw new StoredDataException("projection exploded");
             }
 
             return base.SessionTimelineRecords(sessionKey);
@@ -1640,7 +1642,7 @@ public sealed class SessionSectionEndpointsTests
         {
             if (string.Equals(sessionKey, "sess-turn-broken", StringComparison.Ordinal))
             {
-                throw fault?.Invoke() ?? new InvalidOperationException("projection exploded");
+                throw fault?.Invoke() ?? new StoredDataException("projection exploded");
             }
 
             return base.TurnFigures(sessionKey, turnIndex, pricing);

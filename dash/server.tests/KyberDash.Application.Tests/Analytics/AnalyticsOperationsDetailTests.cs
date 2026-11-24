@@ -390,7 +390,7 @@ public sealed class AnalyticsOperationsDetailTests
             IReadOnlyList<SessionListFigure> figures = inner.SessionListFigures(harnessId, pricing);
             if (figures.Any(figure => string.Equals(figure.SessionKey, failingSessionKey, StringComparison.Ordinal)))
             {
-                throw new InvalidOperationException("projection exploded");
+                throw new StoredDataException("projection exploded");
             }
 
             return figures;
@@ -401,7 +401,7 @@ public sealed class AnalyticsOperationsDetailTests
             IReadOnlyList<SessionListFigure> figures = inner.SessionListFigures(sessionKeys, pricing);
             if (figures.Any(figure => string.Equals(figure.SessionKey, failingSessionKey, StringComparison.Ordinal)))
             {
-                throw new InvalidOperationException("projection exploded");
+                throw new StoredDataException("projection exploded");
             }
 
             return figures;
@@ -411,7 +411,7 @@ public sealed class AnalyticsOperationsDetailTests
         {
             if (string.Equals(sessionKey, failingSessionKey, StringComparison.Ordinal))
             {
-                throw new InvalidOperationException("projection exploded");
+                throw new StoredDataException("projection exploded");
             }
 
             return inner.SessionSummaryFigures(sessionKey, pricing);
@@ -422,7 +422,7 @@ public sealed class AnalyticsOperationsDetailTests
             IReadOnlyList<SessionReportFigure> figures = inner.SessionReportFigures(sessionKeys, pricing);
             if (figures.Any(figure => string.Equals(figure.SessionKey, failingSessionKey, StringComparison.Ordinal)))
             {
-                throw new InvalidOperationException("projection exploded");
+                throw new StoredDataException("projection exploded");
             }
 
             return figures;
@@ -432,7 +432,7 @@ public sealed class AnalyticsOperationsDetailTests
         {
             if (string.Equals(sessionKey, failingSessionKey, StringComparison.Ordinal))
             {
-                throw new InvalidOperationException("projection exploded");
+                throw new StoredDataException("projection exploded");
             }
 
             return inner.TurnFigures(sessionKey, turnIndex, pricing);
@@ -442,7 +442,7 @@ public sealed class AnalyticsOperationsDetailTests
         {
             if (string.Equals(sessionKey, failingSessionKey, StringComparison.Ordinal))
             {
-                throw new InvalidOperationException("projection exploded");
+                throw new StoredDataException("projection exploded");
             }
 
             return inner.SessionTurnFigures(sessionKey, pricing);
@@ -452,7 +452,7 @@ public sealed class AnalyticsOperationsDetailTests
         {
             if (string.Equals(sessionKey, failingSessionKey, StringComparison.Ordinal))
             {
-                throw new InvalidOperationException("projection exploded");
+                throw new StoredDataException("projection exploded");
             }
 
             return inner.SessionRequestFigures(sessionKey, page, limit);
@@ -462,7 +462,7 @@ public sealed class AnalyticsOperationsDetailTests
         {
             if (string.Equals(sessionKey, failingSessionKey, StringComparison.Ordinal))
             {
-                throw new InvalidOperationException("projection exploded");
+                throw new StoredDataException("projection exploded");
             }
 
             return inner.SessionReconciliationFigures(sessionKey, page, limit);
@@ -472,7 +472,7 @@ public sealed class AnalyticsOperationsDetailTests
         {
             if (string.Equals(sessionKey, failingSessionKey, StringComparison.Ordinal))
             {
-                throw new InvalidOperationException("projection exploded");
+                throw new StoredDataException("projection exploded");
             }
 
             return inner.SessionProblems(sessionKey, page, limit);
@@ -485,7 +485,7 @@ public sealed class AnalyticsOperationsDetailTests
         {
             if (string.Equals(sessionKey, failingSessionKey, StringComparison.Ordinal))
             {
-                throw new InvalidOperationException("projection exploded");
+                throw new StoredDataException("projection exploded");
             }
 
             return inner.SessionRecordsContentFree(sessionKey);
@@ -495,7 +495,7 @@ public sealed class AnalyticsOperationsDetailTests
         {
             if (string.Equals(sessionKey, failingSessionKey, StringComparison.Ordinal))
             {
-                throw new InvalidOperationException("projection exploded");
+                throw new StoredDataException("projection exploded");
             }
 
             return inner.SessionToolFigures(sessionKey, pricing);
@@ -505,7 +505,7 @@ public sealed class AnalyticsOperationsDetailTests
         {
             if (string.Equals(sessionKey, failingSessionKey, StringComparison.Ordinal))
             {
-                throw new InvalidOperationException("projection exploded");
+                throw new StoredDataException("projection exploded");
             }
 
             return inner.SessionSkillFigures(sessionKey);
@@ -515,7 +515,7 @@ public sealed class AnalyticsOperationsDetailTests
         {
             if (string.Equals(sessionKey, failingSessionKey, StringComparison.Ordinal))
             {
-                throw new InvalidOperationException("projection exploded");
+                throw new StoredDataException("projection exploded");
             }
 
             return inner.SessionTimelineRecords(sessionKey);

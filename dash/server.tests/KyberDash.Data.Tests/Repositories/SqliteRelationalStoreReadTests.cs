@@ -1,3 +1,4 @@
+using KyberDash.Core.Exceptions;
 using System;
 using System.Collections.Generic;
 using System.Globalization;
@@ -1167,7 +1168,7 @@ public class SqliteRelationalStoreReadTests : IDisposable
 
     /// <summary>
     /// Verifies <see cref="SqliteRelationalStore"/> reader parsing fails closed with
-    /// <see cref="InvalidOperationException"/> when SQLite returns invalid hex, wrong column
+    /// <see cref="StoredDataException"/> when SQLite returns invalid hex, wrong column
     /// counts, unrecognized enum wire tokens, or non-numeric scalar columns.
     /// </summary>
     [Fact]
@@ -1178,11 +1179,11 @@ public class SqliteRelationalStoreReadTests : IDisposable
 
         // Truncated column count in Harnesses() (single column query returning extra tab column).
         store.EnqueueResponse("636C617564652D636F6465\textra");
-        Assert.Throws<InvalidOperationException>(() => store.Harnesses());
+        Assert.Throws<StoredDataException>(() => store.Harnesses());
 
         // Invalid hex encoding in Harnesses().
         store.EnqueueResponse("ZZZZ");
-        Assert.Throws<InvalidOperationException>(() => store.Harnesses());
+        Assert.Throws<StoredDataException>(() => store.Harnesses());
 
         // Unknown SourceKind wire token in Sources().
         string hexSrcId = ToHex("src-1");
@@ -1190,17 +1191,17 @@ public class SqliteRelationalStoreReadTests : IDisposable
         string hexBadKind = ToHex("bogus_kind");
         string hexLocator = ToHex("/tmp/a.jsonl");
         store.EnqueueResponse($"{hexSrcId}\t{hexHarness}\t{hexBadKind}\t{hexLocator}");
-        Assert.Throws<InvalidOperationException>(() => store.Sources());
+        Assert.Throws<StoredDataException>(() => store.Sources());
 
         // Non-numeric CountRecords output.
         store.EnqueueResponse("not-an-integer");
-        Assert.Throws<InvalidOperationException>(() => store.CountRecords());
+        Assert.Throws<StoredDataException>(() => store.CountRecords());
 
         // Unknown TokenClass in TokenCounts().
         string hexSpan = ToHex("span-1");
         string hexBadToken = ToHex("unknown_bucket");
         store.EnqueueResponse($"{hexSpan}\t{hexBadToken}\t42");
-        Assert.Throws<InvalidOperationException>(() => store.TokenCounts());
+        Assert.Throws<StoredDataException>(() => store.TokenCounts());
     }
 
     private static void AssertAllReadScriptsUseTabbedHexWithoutJson(IReadOnlyList<string> scripts)

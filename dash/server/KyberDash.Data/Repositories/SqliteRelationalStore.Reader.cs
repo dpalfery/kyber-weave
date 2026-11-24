@@ -4,6 +4,7 @@ using System.Globalization;
 using System.Linq;
 using System.Text;
 using KyberDash.Contracts.Repositories;
+using KyberDash.Core.Exceptions;
 using KyberDash.Data.Collector;
 using KyberDash.Domain;
 using KyberDash.Domain.Schema;
@@ -104,7 +105,7 @@ public partial class SqliteRelationalStore : IRelationalStoreReader
         List<string> lines = [.. TabLines(output)];
         if (lines.Count != 1)
         {
-            throw new InvalidOperationException($"Expected single scalar row from record count query, got {lines.Count}.");
+            throw new StoredDataException($"Expected single scalar row from record count query, got {lines.Count}.");
         }
 
         string[] cols = SplitTabLine(lines[0], 1, "record count");
@@ -649,13 +650,13 @@ public partial class SqliteRelationalStore : IRelationalStoreReader
             string[] cols = line.Split('\t');
             if (cols.Length < 3)
             {
-                throw new InvalidOperationException("Empty row returned from the stored-fields inventory query.");
+                throw new StoredDataException("Empty row returned from the stored-fields inventory query.");
             }
 
             int tableIndex = ParseInt32Required(cols[0], "table_index");
             if (tableIndex < 0 || tableIndex >= tables.Count)
             {
-                throw new InvalidOperationException($"Out-of-range table index '{tableIndex.ToString(CultureInfo.InvariantCulture)}' returned from the stored-fields inventory query.");
+                throw new StoredDataException($"Out-of-range table index '{tableIndex.ToString(CultureInfo.InvariantCulture)}' returned from the stored-fields inventory query.");
             }
 
             TableDefinition table = tables[tableIndex];
@@ -664,7 +665,7 @@ public partial class SqliteRelationalStore : IRelationalStoreReader
                 case "c":
                     if (cols.Length != 3)
                     {
-                        throw new InvalidOperationException($"Expected 3 columns for the {table.Name} count, got {cols.Length.ToString(CultureInfo.InvariantCulture)}.");
+                        throw new StoredDataException($"Expected 3 columns for the {table.Name} count, got {cols.Length.ToString(CultureInfo.InvariantCulture)}.");
                     }
 
                     counts[tableIndex] = ParseInt64Required(cols[2], $"{table.Name}.row_count");
@@ -673,7 +674,7 @@ public partial class SqliteRelationalStore : IRelationalStoreReader
                     List<ColumnDefinition> keyColumns = keyColumnsByTable[table.Name];
                     if (cols.Length != 2 + (keyColumns.Count * 2))
                     {
-                        throw new InvalidOperationException($"Expected {2 + (keyColumns.Count * 2)} columns for the {table.Name} key rows, got {cols.Length.ToString(CultureInfo.InvariantCulture)}.");
+                        throw new StoredDataException($"Expected {2 + (keyColumns.Count * 2)} columns for the {table.Name} key rows, got {cols.Length.ToString(CultureInfo.InvariantCulture)}.");
                     }
 
                     StoredFieldCell[] cells = new StoredFieldCell[table.Columns.Count];
@@ -696,7 +697,7 @@ public partial class SqliteRelationalStore : IRelationalStoreReader
                     keyRowsByTable[table.Name].Add(new StoredFieldRow(cells));
                     break;
                 default:
-                    throw new InvalidOperationException($"Unexpected inventory row tag '{cols[1]}' for '{table.Name}'.");
+                    throw new StoredDataException($"Unexpected inventory row tag '{cols[1]}' for '{table.Name}'.");
             }
         }
 
@@ -755,7 +756,7 @@ public partial class SqliteRelationalStore : IRelationalStoreReader
             string[] cols = line.Split('\t');
             if (cols.Length < 3)
             {
-                throw new InvalidOperationException("Empty row returned from the stored-fields rows query.");
+                throw new StoredDataException("Empty row returned from the stored-fields rows query.");
             }
 
             switch (cols[1])
@@ -763,7 +764,7 @@ public partial class SqliteRelationalStore : IRelationalStoreReader
                 case "c":
                     if (cols.Length != 3)
                     {
-                        throw new InvalidOperationException($"Expected 3 columns for the {definition.Name} count, got {cols.Length.ToString(CultureInfo.InvariantCulture)}.");
+                        throw new StoredDataException($"Expected 3 columns for the {definition.Name} count, got {cols.Length.ToString(CultureInfo.InvariantCulture)}.");
                     }
 
                     totalRows = ParseInt64Required(cols[2], $"{definition.Name}.row_count");
@@ -772,7 +773,7 @@ public partial class SqliteRelationalStore : IRelationalStoreReader
                     rows.Add(ParseStoredFieldRow(definition, cols[2..]));
                     break;
                 default:
-                    throw new InvalidOperationException($"Unexpected row tag '{cols[1]}' for '{definition.Name}'.");
+                    throw new StoredDataException($"Unexpected row tag '{cols[1]}' for '{definition.Name}'.");
             }
         }
 
@@ -867,7 +868,7 @@ public partial class SqliteRelationalStore : IRelationalStoreReader
             string[] cols = SplitTabLine(line, 5, "session child preview");
             if (cols[0] != "PREVIEW")
             {
-                throw new InvalidOperationException($"Unexpected session child preview row tag '{cols[0]}'.");
+                throw new StoredDataException($"Unexpected session child preview row tag '{cols[0]}'.");
             }
 
             string parentSessionId = ParseHexRequired(cols[1], "session_projection_parent.parent_session_id");
@@ -883,7 +884,7 @@ public partial class SqliteRelationalStore : IRelationalStoreReader
             // preview promises was not the order the store answered.
             if (childRank != previews[^1].Children.Count + 1 || totalChildren != previews[^1].TotalChildren)
             {
-                throw new InvalidOperationException($"Session child preview rows arrived out of rank order for parent '{parentSessionId}'.");
+                throw new StoredDataException($"Session child preview rows arrived out of rank order for parent '{parentSessionId}'.");
             }
 
             previews[^1].Children.Add(childSessionId);
@@ -1000,7 +1001,7 @@ public partial class SqliteRelationalStore : IRelationalStoreReader
             string[] countLines = [.. TabLines(ExecuteSqlite(cte + "SELECT 'HEADER', COUNT(*) FROM page_set;\n"))];
             if (countLines.Length != 1)
             {
-                throw new InvalidOperationException($"Expected 1 count row for the session header page, got {countLines.Length.ToString(CultureInfo.InvariantCulture)}.");
+                throw new StoredDataException($"Expected 1 count row for the session header page, got {countLines.Length.ToString(CultureInfo.InvariantCulture)}.");
             }
 
             total = ParseInt32Required(SplitTabLine(countLines[0], 2, "session header page count")[1], "session header page total");
@@ -1019,7 +1020,7 @@ public partial class SqliteRelationalStore : IRelationalStoreReader
     {
         if (cols.Length != 17 || cols[0] != "HEADER")
         {
-            throw new InvalidOperationException($"Expected 17 columns for HEADER row, got {cols.Length.ToString(CultureInfo.InvariantCulture)}.");
+            throw new StoredDataException($"Expected 17 columns for HEADER row, got {cols.Length.ToString(CultureInfo.InvariantCulture)}.");
         }
 
         return (ParseSessionHeader(cols, 2), ParseInt32Required(cols[1], "session header page total"));
@@ -1306,7 +1307,7 @@ public partial class SqliteRelationalStore : IRelationalStoreReader
                     }
 
                 default:
-                    throw new InvalidOperationException($"Unexpected session projection shape row tag '{tag}'.");
+                    throw new StoredDataException($"Unexpected session projection shape row tag '{tag}'.");
             }
         }
 
@@ -1637,7 +1638,7 @@ public partial class SqliteRelationalStore : IRelationalStoreReader
             string[] countLines = [.. TabLines(ExecuteSqlite(countSql.ToString()))];
             if (countLines.Length != 1)
             {
-                throw new InvalidOperationException($"Expected 1 count row for the session problem page, got {countLines.Length.ToString(CultureInfo.InvariantCulture)}.");
+                throw new StoredDataException($"Expected 1 count row for the session problem page, got {countLines.Length.ToString(CultureInfo.InvariantCulture)}.");
             }
 
             total = ParseInt32Required(SplitTabLine(countLines[0], 2, "session problem page count")[1], "session problem page total");
@@ -1688,7 +1689,7 @@ public partial class SqliteRelationalStore : IRelationalStoreReader
             string[] cols = line.Split('\t');
             if (cols.Length < 2)
             {
-                throw new InvalidOperationException("Unexpected short row in the session tool figures read.");
+                throw new StoredDataException("Unexpected short row in the session tool figures read.");
             }
 
             switch (cols[0])
@@ -1696,7 +1697,7 @@ public partial class SqliteRelationalStore : IRelationalStoreReader
                 case "HARNESS":
                     if (cols.Length != 3)
                     {
-                        throw new InvalidOperationException($"Expected 3 columns for HARNESS row, got {cols.Length.ToString(CultureInfo.InvariantCulture)}.");
+                        throw new StoredDataException($"Expected 3 columns for HARNESS row, got {cols.Length.ToString(CultureInfo.InvariantCulture)}.");
                     }
 
                     harnessId = ParseNullableHex(cols[1], cols[2], "session.harness_id");
@@ -1705,7 +1706,7 @@ public partial class SqliteRelationalStore : IRelationalStoreReader
                 case "MODEL":
                     if (cols.Length != 3)
                     {
-                        throw new InvalidOperationException($"Expected 3 columns for MODEL row, got {cols.Length.ToString(CultureInfo.InvariantCulture)}.");
+                        throw new StoredDataException($"Expected 3 columns for MODEL row, got {cols.Length.ToString(CultureInfo.InvariantCulture)}.");
                     }
 
                     primaryModel = ParseNullableHex(cols[1], cols[2], "record_model.model_id");
@@ -1714,7 +1715,7 @@ public partial class SqliteRelationalStore : IRelationalStoreReader
                 case "CALL":
                     if (cols.Length != 7)
                     {
-                        throw new InvalidOperationException($"Expected 7 columns for CALL row, got {cols.Length.ToString(CultureInfo.InvariantCulture)}.");
+                        throw new StoredDataException($"Expected 7 columns for CALL row, got {cols.Length.ToString(CultureInfo.InvariantCulture)}.");
                     }
 
                     toolCallTotal++;
@@ -1737,7 +1738,7 @@ public partial class SqliteRelationalStore : IRelationalStoreReader
                 case "DEF":
                     if (cols.Length != 7)
                     {
-                        throw new InvalidOperationException($"Expected 7 columns for DEF row, got {cols.Length.ToString(CultureInfo.InvariantCulture)}.");
+                        throw new StoredDataException($"Expected 7 columns for DEF row, got {cols.Length.ToString(CultureInfo.InvariantCulture)}.");
                     }
 
                     string defSpan = ParseHexRequired(cols[1], "tool_definition.span_id");
@@ -1765,7 +1766,7 @@ public partial class SqliteRelationalStore : IRelationalStoreReader
                 case "SCH":
                     if (cols.Length != 5)
                     {
-                        throw new InvalidOperationException($"Expected 5 columns for SCH row, got {cols.Length.ToString(CultureInfo.InvariantCulture)}.");
+                        throw new StoredDataException($"Expected 5 columns for SCH row, got {cols.Length.ToString(CultureInfo.InvariantCulture)}.");
                     }
 
                     schema = new StoredSessionSchema(
@@ -1779,7 +1780,7 @@ public partial class SqliteRelationalStore : IRelationalStoreReader
                 case "SCH_REASON":
                     if (cols.Length != 3)
                     {
-                        throw new InvalidOperationException($"Expected 3 columns for SCH_REASON row, got {cols.Length.ToString(CultureInfo.InvariantCulture)}.");
+                        throw new StoredDataException($"Expected 3 columns for SCH_REASON row, got {cols.Length.ToString(CultureInfo.InvariantCulture)}.");
                     }
 
                     schemaUnmeasurableReason = ParseNullableHex(cols[1], cols[2], "session_schema_unmeasurable.reason");
@@ -1788,7 +1789,7 @@ public partial class SqliteRelationalStore : IRelationalStoreReader
                 case "SCH_TOOL":
                     if (cols.Length != 7)
                     {
-                        throw new InvalidOperationException($"Expected 7 columns for SCH_TOOL row, got {cols.Length.ToString(CultureInfo.InvariantCulture)}.");
+                        throw new StoredDataException($"Expected 7 columns for SCH_TOOL row, got {cols.Length.ToString(CultureInfo.InvariantCulture)}.");
                     }
 
                     rankedTools.Add(new StoredSchemaRankedTool(
@@ -1802,7 +1803,7 @@ public partial class SqliteRelationalStore : IRelationalStoreReader
                 case "SCH_SRV":
                     if (cols.Length != 3)
                     {
-                        throw new InvalidOperationException($"Expected 3 columns for SCH_SRV row, got {cols.Length.ToString(CultureInfo.InvariantCulture)}.");
+                        throw new StoredDataException($"Expected 3 columns for SCH_SRV row, got {cols.Length.ToString(CultureInfo.InvariantCulture)}.");
                     }
 
                     schemaServers.Add(new StoredSchemaServerTokens(
@@ -1811,7 +1812,7 @@ public partial class SqliteRelationalStore : IRelationalStoreReader
                     break;
 
                 default:
-                    throw new InvalidOperationException($"Unexpected row tag in the session tool figures read: '{cols[0]}'.");
+                    throw new StoredDataException($"Unexpected row tag in the session tool figures read: '{cols[0]}'.");
             }
         }
 
@@ -2095,7 +2096,7 @@ public partial class SqliteRelationalStore : IRelationalStoreReader
         string[] countLines = [.. TabLines(ExecuteSqlite(countSql.ToString()))];
         if (countLines.Length != 1)
         {
-            throw new InvalidOperationException($"Expected 1 count row for the {displayName} count, got {countLines.Length.ToString(CultureInfo.InvariantCulture)}.");
+            throw new StoredDataException($"Expected 1 count row for the {displayName} count, got {countLines.Length.ToString(CultureInfo.InvariantCulture)}.");
         }
 
         return ParseInt32Required(SplitTabLine(countLines[0], 2, displayName)[1], $"{displayName} total");
@@ -2159,7 +2160,7 @@ public partial class SqliteRelationalStore : IRelationalStoreReader
             string[] cols = line.Split('\t');
             if (cols.Length != 22)
             {
-                throw new InvalidOperationException($"Expected 22 columns for TREC row, got {cols.Length.ToString(CultureInfo.InvariantCulture)}.");
+                throw new StoredDataException($"Expected 22 columns for TREC row, got {cols.Length.ToString(CultureInfo.InvariantCulture)}.");
             }
 
             string spanId = ParseHexRequired(cols[1], "record.span_id");
@@ -2168,7 +2169,7 @@ public partial class SqliteRelationalStore : IRelationalStoreReader
             CollectedCost? reportedCost = costAmount.HasValue && costCurrency is not null
                 ? new CollectedCost(costAmount.Value, costCurrency)
                 : costAmount.HasValue || costCurrency is not null
-                    ? throw new InvalidOperationException("Partial record_reported_cost row returned.")
+                    ? throw new StoredDataException("Partial record_reported_cost row returned.")
                     : null;
 
             records.Add(new CollectedRecord(
@@ -2856,7 +2857,7 @@ public partial class SqliteRelationalStore : IRelationalStoreReader
     {
         if (cols.Length != 38)
         {
-            throw new InvalidOperationException($"Expected 38 columns for REC row, got {cols.Length.ToString(CultureInfo.InvariantCulture)}.");
+            throw new StoredDataException($"Expected 38 columns for REC row, got {cols.Length.ToString(CultureInfo.InvariantCulture)}.");
         }
 
         string spanId = ParseHexRequired(cols[1], "record.span_id");
@@ -2878,7 +2879,7 @@ public partial class SqliteRelationalStore : IRelationalStoreReader
         CollectedCost? reportedCost = costAmount.HasValue && costCurrency is not null
             ? new CollectedCost(costAmount.Value, costCurrency)
             : costAmount.HasValue || costCurrency is not null
-                ? throw new InvalidOperationException("Partial record_reported_cost row returned.")
+                ? throw new StoredDataException("Partial record_reported_cost row returned.")
                 : null;
         string? agentInstanceId = ParseNullableHex(cols[24], cols[25], "record_agent_instance.agent_instance_id");
         string? errMsg = ParseNullableHex(cols[26], cols[27], "record_error.message");
@@ -3026,7 +3027,7 @@ public partial class SqliteRelationalStore : IRelationalStoreReader
             string[] cols = line.Split('\t');
             if (cols.Length < 1)
             {
-                throw new InvalidOperationException("Unexpected empty row in QueryContentFreeRecordsBySession.");
+                throw new StoredDataException("Unexpected empty row in QueryContentFreeRecordsBySession.");
             }
 
             switch (cols[0])
@@ -3039,7 +3040,7 @@ public partial class SqliteRelationalStore : IRelationalStoreReader
                     {
                         if (cols.Length != 4)
                         {
-                            throw new InvalidOperationException($"Expected 4 columns for TOK row, got {cols.Length.ToString(CultureInfo.InvariantCulture)}.");
+                            throw new StoredDataException($"Expected 4 columns for TOK row, got {cols.Length.ToString(CultureInfo.InvariantCulture)}.");
                         }
 
                         string spanId = ParseHexRequired(cols[1], "record_token_count.span_id");
@@ -3053,7 +3054,7 @@ public partial class SqliteRelationalStore : IRelationalStoreReader
                     {
                         if (cols.Length != 7)
                         {
-                            throw new InvalidOperationException($"Expected 7 columns for TDEF row, got {cols.Length.ToString(CultureInfo.InvariantCulture)}.");
+                            throw new StoredDataException($"Expected 7 columns for TDEF row, got {cols.Length.ToString(CultureInfo.InvariantCulture)}.");
                         }
 
                         string spanId = ParseHexRequired(cols[1], "tool_definition.span_id");
@@ -3069,7 +3070,7 @@ public partial class SqliteRelationalStore : IRelationalStoreReader
                     {
                         if (cols.Length != 34)
                         {
-                            throw new InvalidOperationException($"Expected 34 columns for TC row, got {cols.Length.ToString(CultureInfo.InvariantCulture)}.");
+                            throw new StoredDataException($"Expected 34 columns for TC row, got {cols.Length.ToString(CultureInfo.InvariantCulture)}.");
                         }
 
                         string spanId = ParseHexRequired(cols[1], "tool_call.span_id");
@@ -3078,7 +3079,7 @@ public partial class SqliteRelationalStore : IRelationalStoreReader
                     }
 
                 default:
-                    throw new InvalidOperationException($"Unexpected content-free record query row tag '{cols[0]}'.");
+                    throw new StoredDataException($"Unexpected content-free record query row tag '{cols[0]}'.");
             }
         }
 
@@ -3246,7 +3247,7 @@ public partial class SqliteRelationalStore : IRelationalStoreReader
             string[] cols = line.Split('\t');
             if (cols.Length < 1)
             {
-                throw new InvalidOperationException("Unexpected empty row in QueryRecords.");
+                throw new StoredDataException("Unexpected empty row in QueryRecords.");
             }
 
             switch (cols[0])
@@ -3261,7 +3262,7 @@ public partial class SqliteRelationalStore : IRelationalStoreReader
                     {
                         if (cols.Length != 4)
                         {
-                            throw new InvalidOperationException($"Expected 4 columns for TOK row, got {cols.Length.ToString(CultureInfo.InvariantCulture)}.");
+                            throw new StoredDataException($"Expected 4 columns for TOK row, got {cols.Length.ToString(CultureInfo.InvariantCulture)}.");
                         }
 
                         string spanId = ParseHexRequired(cols[1], "record_token_count.span_id");
@@ -3275,7 +3276,7 @@ public partial class SqliteRelationalStore : IRelationalStoreReader
                     {
                         if (cols.Length != 3)
                         {
-                            throw new InvalidOperationException($"Expected 3 columns for SKL row, got {cols.Length.ToString(CultureInfo.InvariantCulture)}.");
+                            throw new StoredDataException($"Expected 3 columns for SKL row, got {cols.Length.ToString(CultureInfo.InvariantCulture)}.");
                         }
 
                         string spanId = ParseHexRequired(cols[1], "record_skill_invocation.span_id");
@@ -3288,7 +3289,7 @@ public partial class SqliteRelationalStore : IRelationalStoreReader
                     {
                         if (cols.Length != 22)
                         {
-                            throw new InvalidOperationException($"Expected 22 columns for PART row, got {cols.Length.ToString(CultureInfo.InvariantCulture)}.");
+                            throw new StoredDataException($"Expected 22 columns for PART row, got {cols.Length.ToString(CultureInfo.InvariantCulture)}.");
                         }
 
                         string spanId = ParseHexRequired(cols[1], "content_part.span_id");
@@ -3301,7 +3302,7 @@ public partial class SqliteRelationalStore : IRelationalStoreReader
                     {
                         if (cols.Length != 7)
                         {
-                            throw new InvalidOperationException($"Expected 7 columns for TDEF row, got {cols.Length.ToString(CultureInfo.InvariantCulture)}.");
+                            throw new StoredDataException($"Expected 7 columns for TDEF row, got {cols.Length.ToString(CultureInfo.InvariantCulture)}.");
                         }
 
                         string spanId = ParseHexRequired(cols[1], "tool_definition.span_id");
@@ -3317,7 +3318,7 @@ public partial class SqliteRelationalStore : IRelationalStoreReader
                     {
                         if (cols.Length != 34)
                         {
-                            throw new InvalidOperationException($"Expected 34 columns for TC row, got {cols.Length.ToString(CultureInfo.InvariantCulture)}.");
+                            throw new StoredDataException($"Expected 34 columns for TC row, got {cols.Length.ToString(CultureInfo.InvariantCulture)}.");
                         }
 
                         string spanId = ParseHexRequired(cols[1], "tool_call.span_id");
@@ -3329,7 +3330,7 @@ public partial class SqliteRelationalStore : IRelationalStoreReader
                     {
                         if (cols.Length != 9)
                         {
-                            throw new InvalidOperationException($"Expected 9 columns for AI row, got {cols.Length.ToString(CultureInfo.InvariantCulture)}.");
+                            throw new StoredDataException($"Expected 9 columns for AI row, got {cols.Length.ToString(CultureInfo.InvariantCulture)}.");
                         }
 
                         string spanId = ParseHexRequired(cols[1], "agent_invocation.span_id");
@@ -3338,7 +3339,7 @@ public partial class SqliteRelationalStore : IRelationalStoreReader
                     }
 
                 default:
-                    throw new InvalidOperationException($"Unexpected record query row tag '{cols[0]}'.");
+                    throw new StoredDataException($"Unexpected record query row tag '{cols[0]}'.");
             }
         }
 
@@ -3404,7 +3405,7 @@ public partial class SqliteRelationalStore : IRelationalStoreReader
             string[] cols = line.Split('\t');
             if (cols.Length < 1)
             {
-                throw new InvalidOperationException("Unexpected empty row in QuerySessions.");
+                throw new StoredDataException("Unexpected empty row in QuerySessions.");
             }
 
             switch (cols[0])
@@ -3413,7 +3414,7 @@ public partial class SqliteRelationalStore : IRelationalStoreReader
                     {
                         if (cols.Length != 12)
                         {
-                            throw new InvalidOperationException($"Expected 12 columns for SESS row, got {cols.Length.ToString(CultureInfo.InvariantCulture)}.");
+                            throw new StoredDataException($"Expected 12 columns for SESS row, got {cols.Length.ToString(CultureInfo.InvariantCulture)}.");
                         }
 
                         string sessionId = ParseHexRequired(cols[1], "session.session_id");
@@ -3434,7 +3435,7 @@ public partial class SqliteRelationalStore : IRelationalStoreReader
                     {
                         if (cols.Length != 6)
                         {
-                            throw new InvalidOperationException($"Expected 6 columns for USAGE row, got {cols.Length.ToString(CultureInfo.InvariantCulture)}.");
+                            throw new StoredDataException($"Expected 6 columns for USAGE row, got {cols.Length.ToString(CultureInfo.InvariantCulture)}.");
                         }
 
                         string sessionId = ParseHexRequired(cols[1], "session_model_usage.session_id");
@@ -3447,7 +3448,7 @@ public partial class SqliteRelationalStore : IRelationalStoreReader
                     }
 
                 default:
-                    throw new InvalidOperationException($"Unexpected session query row tag '{cols[0]}'.");
+                    throw new StoredDataException($"Unexpected session query row tag '{cols[0]}'.");
             }
         }
 
@@ -3578,7 +3579,7 @@ public partial class SqliteRelationalStore : IRelationalStoreReader
             string[] cols = line.Split('\t');
             if (cols.Length < 2)
             {
-                throw new InvalidOperationException("Unexpected short row in QuerySessionProjections.");
+                throw new StoredDataException("Unexpected short row in QuerySessionProjections.");
             }
 
             switch (cols[0])
@@ -3586,7 +3587,7 @@ public partial class SqliteRelationalStore : IRelationalStoreReader
                 case "PROJ":
                     if (cols.Length != 16)
                     {
-                        throw new InvalidOperationException($"Expected 16 columns for PROJ row, got {cols.Length.ToString(CultureInfo.InvariantCulture)}.");
+                        throw new StoredDataException($"Expected 16 columns for PROJ row, got {cols.Length.ToString(CultureInfo.InvariantCulture)}.");
                     }
 
                     projHeaders.Add(ParseSessionHeader(cols, 1));
@@ -3595,7 +3596,7 @@ public partial class SqliteRelationalStore : IRelationalStoreReader
                 case "REQ":
                     if (cols.Length != 3)
                     {
-                        throw new InvalidOperationException($"Expected 3 columns for REQ row, got {cols.Length.ToString(CultureInfo.InvariantCulture)}.");
+                        throw new StoredDataException($"Expected 3 columns for REQ row, got {cols.Length.ToString(CultureInfo.InvariantCulture)}.");
                     }
 
                     GetOrCreateList(requestsBySess, ParseHexRequired(cols[1], "session_request.session_id"))
@@ -3606,7 +3607,7 @@ public partial class SqliteRelationalStore : IRelationalStoreReader
                     {
                         if (cols.Length != 4)
                         {
-                            throw new InvalidOperationException($"Expected 4 columns for TURN row, got {cols.Length.ToString(CultureInfo.InvariantCulture)}.");
+                            throw new StoredDataException($"Expected 4 columns for TURN row, got {cols.Length.ToString(CultureInfo.InvariantCulture)}.");
                         }
 
                         string sid = ParseHexRequired(cols[1], "session_turn.session_id");
@@ -3620,7 +3621,7 @@ public partial class SqliteRelationalStore : IRelationalStoreReader
                     {
                         if (cols.Length != 7)
                         {
-                            throw new InvalidOperationException($"Expected 7 columns for CTX row, got {cols.Length.ToString(CultureInfo.InvariantCulture)}.");
+                            throw new StoredDataException($"Expected 7 columns for CTX row, got {cols.Length.ToString(CultureInfo.InvariantCulture)}.");
                         }
 
                         string sid = ParseHexRequired(cols[1], "session_context.session_id");
@@ -3636,7 +3637,7 @@ public partial class SqliteRelationalStore : IRelationalStoreReader
                 case "CTX_OBS":
                     if (cols.Length != 3)
                     {
-                        throw new InvalidOperationException($"Expected 3 columns for CTX_OBS row, got {cols.Length.ToString(CultureInfo.InvariantCulture)}.");
+                        throw new StoredDataException($"Expected 3 columns for CTX_OBS row, got {cols.Length.ToString(CultureInfo.InvariantCulture)}.");
                     }
 
                     GetOrCreateList(obsBucketsBySess, ParseHexRequired(cols[1], "session_context_observed_part.session_id"))
@@ -3646,7 +3647,7 @@ public partial class SqliteRelationalStore : IRelationalStoreReader
                 case "CTX_DER":
                     if (cols.Length != 4)
                     {
-                        throw new InvalidOperationException($"Expected 4 columns for CTX_DER row, got {cols.Length.ToString(CultureInfo.InvariantCulture)}.");
+                        throw new StoredDataException($"Expected 4 columns for CTX_DER row, got {cols.Length.ToString(CultureInfo.InvariantCulture)}.");
                     }
 
                     GetOrCreateList(derivedBySess, ParseHexRequired(cols[1], "session_context_derived_count.session_id"))
@@ -3658,7 +3659,7 @@ public partial class SqliteRelationalStore : IRelationalStoreReader
                 case "CTX_FLAG":
                     if (cols.Length != 3)
                     {
-                        throw new InvalidOperationException($"Expected 3 columns for CTX_FLAG row, got {cols.Length.ToString(CultureInfo.InvariantCulture)}.");
+                        throw new StoredDataException($"Expected 3 columns for CTX_FLAG row, got {cols.Length.ToString(CultureInfo.InvariantCulture)}.");
                     }
 
                     GetOrCreateList(flaggedBySess, ParseHexRequired(cols[1], "session_context_flagged_turn.session_id"))
@@ -3668,7 +3669,7 @@ public partial class SqliteRelationalStore : IRelationalStoreReader
                 case "CTX_TURN":
                     if (cols.Length != 25)
                     {
-                        throw new InvalidOperationException($"Expected 25 columns for CTX_TURN row, got {cols.Length.ToString(CultureInfo.InvariantCulture)}.");
+                        throw new StoredDataException($"Expected 25 columns for CTX_TURN row, got {cols.Length.ToString(CultureInfo.InvariantCulture)}.");
                     }
 
                     GetOrCreateList(ctxTurnsBySess, ParseHexRequired(cols[1], "session_context_turn.session_id"))
@@ -3694,7 +3695,7 @@ public partial class SqliteRelationalStore : IRelationalStoreReader
                     {
                         if (cols.Length != 5)
                         {
-                            throw new InvalidOperationException($"Expected 5 columns for CTX_T_BKT row, got {cols.Length.ToString(CultureInfo.InvariantCulture)}.");
+                            throw new StoredDataException($"Expected 5 columns for CTX_T_BKT row, got {cols.Length.ToString(CultureInfo.InvariantCulture)}.");
                         }
 
                         (string, int) key = (ParseHexRequired(cols[1], "session_context_turn_bucket.session_id"), ParseInt32Required(cols[2], "session_context_turn_bucket.position"));
@@ -3708,7 +3709,7 @@ public partial class SqliteRelationalStore : IRelationalStoreReader
                     {
                         if (cols.Length != 5)
                         {
-                            throw new InvalidOperationException($"Expected 5 columns for CTX_T_SRV row, got {cols.Length.ToString(CultureInfo.InvariantCulture)}.");
+                            throw new StoredDataException($"Expected 5 columns for CTX_T_SRV row, got {cols.Length.ToString(CultureInfo.InvariantCulture)}.");
                         }
 
                         (string, int) key = (ParseHexRequired(cols[1], "session_context_turn_server_definitions.session_id"), ParseInt32Required(cols[2], "session_context_turn_server_definitions.position"));
@@ -3721,7 +3722,7 @@ public partial class SqliteRelationalStore : IRelationalStoreReader
                 case "SCH":
                     if (cols.Length != 6)
                     {
-                        throw new InvalidOperationException($"Expected 6 columns for SCH row, got {cols.Length.ToString(CultureInfo.InvariantCulture)}.");
+                        throw new StoredDataException($"Expected 6 columns for SCH row, got {cols.Length.ToString(CultureInfo.InvariantCulture)}.");
                     }
 
                     schemaHeadersBySess[ParseHexRequired(cols[1], "session_schema.session_id")] = (
@@ -3733,7 +3734,7 @@ public partial class SqliteRelationalStore : IRelationalStoreReader
                 case "SCH_TOOL":
                     if (cols.Length != 8)
                     {
-                        throw new InvalidOperationException($"Expected 8 columns for SCH_TOOL row, got {cols.Length.ToString(CultureInfo.InvariantCulture)}.");
+                        throw new StoredDataException($"Expected 8 columns for SCH_TOOL row, got {cols.Length.ToString(CultureInfo.InvariantCulture)}.");
                     }
 
                     GetOrCreateList(rankedToolsBySess, ParseHexRequired(cols[1], "session_schema_ranked_tool.session_id"))
@@ -3748,7 +3749,7 @@ public partial class SqliteRelationalStore : IRelationalStoreReader
                 case "SCH_SRV":
                     if (cols.Length != 4)
                     {
-                        throw new InvalidOperationException($"Expected 4 columns for SCH_SRV row, got {cols.Length.ToString(CultureInfo.InvariantCulture)}.");
+                        throw new StoredDataException($"Expected 4 columns for SCH_SRV row, got {cols.Length.ToString(CultureInfo.InvariantCulture)}.");
                     }
 
                     GetOrCreateList(schemaServersBySess, ParseHexRequired(cols[1], "session_schema_server.session_id"))
@@ -3760,7 +3761,7 @@ public partial class SqliteRelationalStore : IRelationalStoreReader
                 case "TL_SUB":
                     if (cols.Length != 3)
                     {
-                        throw new InvalidOperationException($"Expected 3 columns for TL_SUB row, got {cols.Length.ToString(CultureInfo.InvariantCulture)}.");
+                        throw new StoredDataException($"Expected 3 columns for TL_SUB row, got {cols.Length.ToString(CultureInfo.InvariantCulture)}.");
                     }
 
                     GetOrCreateList(subagentsBySess, ParseHexRequired(cols[1], "session_timeline_subagent.session_id"))
@@ -3770,7 +3771,7 @@ public partial class SqliteRelationalStore : IRelationalStoreReader
                 case "TL_AUX":
                     if (cols.Length != 3)
                     {
-                        throw new InvalidOperationException($"Expected 3 columns for TL_AUX row, got {cols.Length.ToString(CultureInfo.InvariantCulture)}.");
+                        throw new StoredDataException($"Expected 3 columns for TL_AUX row, got {cols.Length.ToString(CultureInfo.InvariantCulture)}.");
                     }
 
                     GetOrCreateList(auxiliariesBySess, ParseHexRequired(cols[1], "session_timeline_auxiliary.session_id"))
@@ -3778,7 +3779,7 @@ public partial class SqliteRelationalStore : IRelationalStoreReader
                     break;
 
                 default:
-                    throw new InvalidOperationException($"Unexpected projection query row tag '{cols[0]}'.");
+                    throw new StoredDataException($"Unexpected projection query row tag '{cols[0]}'.");
             }
         }
 
@@ -3957,7 +3958,7 @@ public partial class SqliteRelationalStore : IRelationalStoreReader
             string[] cols = line.Split('\t');
             if (cols.Length < 1)
             {
-                throw new InvalidOperationException("Unexpected empty row in QueryHarnessRollups.");
+                throw new StoredDataException("Unexpected empty row in QueryHarnessRollups.");
             }
 
             switch (cols[0])
@@ -3965,7 +3966,7 @@ public partial class SqliteRelationalStore : IRelationalStoreReader
                 case "ROLLUP":
                     if (cols.Length != 7)
                     {
-                        throw new InvalidOperationException($"Expected 7 columns for ROLLUP row, got {cols.Length.ToString(CultureInfo.InvariantCulture)}.");
+                        throw new StoredDataException($"Expected 7 columns for ROLLUP row, got {cols.Length.ToString(CultureInfo.InvariantCulture)}.");
                     }
 
                     headers.Add((
@@ -3980,7 +3981,7 @@ public partial class SqliteRelationalStore : IRelationalStoreReader
                 case "METRIC":
                     if (cols.Length != 5)
                     {
-                        throw new InvalidOperationException($"Expected 5 columns for METRIC row, got {cols.Length.ToString(CultureInfo.InvariantCulture)}.");
+                        throw new StoredDataException($"Expected 5 columns for METRIC row, got {cols.Length.ToString(CultureInfo.InvariantCulture)}.");
                     }
 
                     GetOrCreateList(metricsByHarness, ParseHexRequired(cols[1], "harness_rollup_metric.harness_id"))
@@ -3991,7 +3992,7 @@ public partial class SqliteRelationalStore : IRelationalStoreReader
                     break;
 
                 default:
-                    throw new InvalidOperationException($"Unexpected harness rollup query row tag '{cols[0]}'.");
+                    throw new StoredDataException($"Unexpected harness rollup query row tag '{cols[0]}'.");
             }
         }
 
@@ -4053,7 +4054,7 @@ public partial class SqliteRelationalStore : IRelationalStoreReader
             string[] cols = line.Split('\t');
             if (cols.Length < 1)
             {
-                throw new InvalidOperationException("Unexpected empty row in QueryFindings.");
+                throw new StoredDataException("Unexpected empty row in QueryFindings.");
             }
 
             switch (cols[0])
@@ -4062,7 +4063,7 @@ public partial class SqliteRelationalStore : IRelationalStoreReader
                     {
                         if (cols.Length != 29)
                         {
-                            throw new InvalidOperationException($"Expected 29 columns for FIND row, got {cols.Length.ToString(CultureInfo.InvariantCulture)}.");
+                            throw new StoredDataException($"Expected 29 columns for FIND row, got {cols.Length.ToString(CultureInfo.InvariantCulture)}.");
                         }
 
                         double? lower = ParseNullableDouble(cols[11], cols[12], "finding_error_bar.lower");
@@ -4070,7 +4071,7 @@ public partial class SqliteRelationalStore : IRelationalStoreReader
                         FindingErrorBar? errorBar = lower.HasValue && upper.HasValue
                             ? new FindingErrorBar((long)lower.Value, (long)upper.Value)
                             : lower.HasValue || upper.HasValue
-                                ? throw new InvalidOperationException("Partial finding_error_bar row returned.")
+                                ? throw new StoredDataException("Partial finding_error_bar row returned.")
                                 : null;
 
                         long? hazardLimit = ParseNullableInt64(cols[25], cols[26], "finding_compaction_hazard.context_limit");
@@ -4078,7 +4079,7 @@ public partial class SqliteRelationalStore : IRelationalStoreReader
                         StoredCompactionHazard? hazard = hazardLimit.HasValue && hazardSource is not null
                             ? new StoredCompactionHazard(hazardLimit.Value, hazardSource)
                             : hazardLimit.HasValue || hazardSource is not null
-                                ? throw new InvalidOperationException("Partial finding_compaction_hazard row returned.")
+                                ? throw new StoredDataException("Partial finding_compaction_hazard row returned.")
                                 : null;
 
                         headers.Add(new RawFindingHeader(
@@ -4104,7 +4105,7 @@ public partial class SqliteRelationalStore : IRelationalStoreReader
                 case "LINK":
                     if (cols.Length != 5)
                     {
-                        throw new InvalidOperationException($"Expected 5 columns for LINK row, got {cols.Length.ToString(CultureInfo.InvariantCulture)}.");
+                        throw new StoredDataException($"Expected 5 columns for LINK row, got {cols.Length.ToString(CultureInfo.InvariantCulture)}.");
                     }
 
                     GetOrCreateList(linksByFinding, ParseHexRequired(cols[1], "finding_evidence_link.finding_id"))
@@ -4115,7 +4116,7 @@ public partial class SqliteRelationalStore : IRelationalStoreReader
                     break;
 
                 default:
-                    throw new InvalidOperationException($"Unexpected finding query row tag '{cols[0]}'.");
+                    throw new StoredDataException($"Unexpected finding query row tag '{cols[0]}'.");
             }
         }
 
@@ -4255,7 +4256,7 @@ public partial class SqliteRelationalStore : IRelationalStoreReader
         CollectedWithheldText? withheld = wBytes.HasValue && wChars.HasValue && wTokens.HasValue
             ? new CollectedWithheldText(wBytes.Value, wChars.Value, wTokens.Value)
             : wBytes.HasValue || wChars.HasValue || wTokens.HasValue
-                ? throw new InvalidOperationException("Partial content_part_withheld row returned.")
+                ? throw new StoredDataException("Partial content_part_withheld row returned.")
                 : null;
         long? reportedTokens = ParseNullableInt64(cols[startIndex + 10], cols[startIndex + 11], "content_part_reported_tokens.token_count");
         string? server = ParseNullableHex(cols[startIndex + 12], cols[startIndex + 13], "content_part_server.server_name");
@@ -4266,7 +4267,7 @@ public partial class SqliteRelationalStore : IRelationalStoreReader
             {
                 0L => false,
                 1L => true,
-                _ => throw new InvalidOperationException($"Invalid boolean flag '{residentRaw.Value.ToString(CultureInfo.InvariantCulture)}' in content_part_residency.is_resident."),
+                _ => throw new StoredDataException($"Invalid boolean flag '{residentRaw.Value.ToString(CultureInfo.InvariantCulture)}' in content_part_residency.is_resident."),
             }
             : null;
         long? originalBytes = ParseNullableInt64(cols[startIndex + 18], cols[startIndex + 19], "content_part_truncation.original_utf8_bytes");
@@ -4380,7 +4381,7 @@ public partial class SqliteRelationalStore : IRelationalStoreReader
             {
                 0L => false,
                 1L => true,
-                _ => throw new InvalidOperationException($"Invalid boolean flag '{succeededRaw.Value.ToString(CultureInfo.InvariantCulture)}' in tool_call_outcome.succeeded."),
+                _ => throw new StoredDataException($"Invalid boolean flag '{succeededRaw.Value.ToString(CultureInfo.InvariantCulture)}' in tool_call_outcome.succeeded."),
             }
             : null;
 
@@ -4417,7 +4418,7 @@ public partial class SqliteRelationalStore : IRelationalStoreReader
             {
                 0L => false,
                 1L => true,
-                _ => throw new InvalidOperationException($"Invalid boolean flag '{succeededRaw.Value.ToString(CultureInfo.InvariantCulture)}' in agent_invocation_outcome.succeeded."),
+                _ => throw new StoredDataException($"Invalid boolean flag '{succeededRaw.Value.ToString(CultureInfo.InvariantCulture)}' in agent_invocation_outcome.succeeded."),
             }
             : null;
         string? error = ParseNullableHex(cols[startIndex + 5], cols[startIndex + 6], "agent_invocation_error.message");
@@ -4497,7 +4498,7 @@ public partial class SqliteRelationalStore : IRelationalStoreReader
                 sql.Append(CultureInfo.InvariantCulture, $", typeof({column.Name}), COALESCE(CAST({column.Name} AS TEXT), '')");
                 break;
             default:
-                throw new InvalidOperationException($"Unsupported catalog column type '{column.Type}' on '{table.Name}.{column.Name}'.");
+                throw new StoredDataException($"Unsupported catalog column type '{column.Type}' on '{table.Name}.{column.Name}'.");
         }
     }
 
@@ -4551,7 +4552,7 @@ public partial class SqliteRelationalStore : IRelationalStoreReader
     {
         if (pairs.Length != table.Columns.Count * 2)
         {
-            throw new InvalidOperationException(
+            throw new StoredDataException(
                 $"Expected {(table.Columns.Count * 2).ToString(CultureInfo.InvariantCulture)} value columns for stored-fields table '{table.Name}', got {pairs.Length.ToString(CultureInfo.InvariantCulture)}.");
         }
 
@@ -4581,14 +4582,14 @@ public partial class SqliteRelationalStore : IRelationalStoreReader
         {
             SqliteColumnType.SqliteText => string.Equals(typeCell, "text", StringComparison.Ordinal)
                 ? new StoredFieldCell(column.Name, column.Type, TextValue: ParseHexRequired(valCell, site))
-                : throw new InvalidOperationException($"Unexpected SQLite storage type '{typeCell}' for text column '{site}'."),
+                : throw new StoredDataException($"Unexpected SQLite storage type '{typeCell}' for text column '{site}'."),
             SqliteColumnType.SqliteInteger => string.Equals(typeCell, "integer", StringComparison.Ordinal)
                 ? new StoredFieldCell(column.Name, column.Type, IntegerValue: ParseInt64Required(valCell, site))
-                : throw new InvalidOperationException($"Unexpected SQLite storage type '{typeCell}' for integer column '{site}'."),
+                : throw new StoredDataException($"Unexpected SQLite storage type '{typeCell}' for integer column '{site}'."),
             SqliteColumnType.SqliteReal => typeCell is "real" or "integer"
                 ? new StoredFieldCell(column.Name, column.Type, RealValue: ParseDoubleRequired(valCell, site))
-                : throw new InvalidOperationException($"Unexpected SQLite storage type '{typeCell}' for real column '{site}'."),
-            _ => throw new InvalidOperationException($"Unsupported column type '{column.Type}' on '{site}'."),
+                : throw new StoredDataException($"Unexpected SQLite storage type '{typeCell}' for real column '{site}'."),
+            _ => throw new StoredDataException($"Unsupported column type '{column.Type}' on '{site}'."),
         };
     }
 
@@ -4654,7 +4655,7 @@ public partial class SqliteRelationalStore : IRelationalStoreReader
 
             if (found < 0)
             {
-                throw new InvalidOperationException($"Column '{target}' not found on table '{table.Name}'.");
+                throw new StoredDataException($"Column '{target}' not found on table '{table.Name}'.");
             }
 
             indices[index] = found;
@@ -5389,7 +5390,7 @@ public partial class SqliteRelationalStore : IRelationalStoreReader
         string[] cols = line.Split('\t');
         if (cols.Length != expectedColumns)
         {
-            throw new InvalidOperationException(
+            throw new StoredDataException(
                 $"Expected {expectedColumns.ToString(CultureInfo.InvariantCulture)} columns for {context}, got {cols.Length.ToString(CultureInfo.InvariantCulture)}.");
         }
 
@@ -5404,7 +5405,7 @@ public partial class SqliteRelationalStore : IRelationalStoreReader
         }
         catch (FormatException ex)
         {
-            throw new InvalidOperationException($"Invalid hexadecimal UTF-8 payload in '{columnName}': '{hexCell}'.", ex);
+            throw new StoredDataException($"Invalid hexadecimal UTF-8 payload in '{columnName}': '{hexCell}'.", ex);
         }
     }
 
@@ -5420,7 +5421,7 @@ public partial class SqliteRelationalStore : IRelationalStoreReader
             return ParseHexRequired(hexCell, columnName);
         }
 
-        throw new InvalidOperationException($"Unexpected SQLite storage type '{typeCell}' for nullable text column '{columnName}'.");
+        throw new StoredDataException($"Unexpected SQLite storage type '{typeCell}' for nullable text column '{columnName}'.");
     }
 
     private static long ParseInt64Required(string cell, string columnName)
@@ -5430,7 +5431,7 @@ public partial class SqliteRelationalStore : IRelationalStoreReader
             return value;
         }
 
-        throw new InvalidOperationException($"Invalid integer value '{cell}' for '{columnName}'.");
+        throw new StoredDataException($"Invalid integer value '{cell}' for '{columnName}'.");
     }
 
     private static long? ParseNullableInt64(string typeCell, string valCell, string columnName)
@@ -5445,7 +5446,7 @@ public partial class SqliteRelationalStore : IRelationalStoreReader
             return ParseInt64Required(valCell, columnName);
         }
 
-        throw new InvalidOperationException($"Unexpected SQLite storage type '{typeCell}' for nullable integer column '{columnName}'.");
+        throw new StoredDataException($"Unexpected SQLite storage type '{typeCell}' for nullable integer column '{columnName}'.");
     }
 
     private static int ParseInt32Required(string cell, string columnName)
@@ -5455,14 +5456,14 @@ public partial class SqliteRelationalStore : IRelationalStoreReader
             return value;
         }
 
-        throw new InvalidOperationException($"Invalid 32-bit integer value '{cell}' for '{columnName}'.");
+        throw new StoredDataException($"Invalid 32-bit integer value '{cell}' for '{columnName}'.");
     }
 
     private static bool ParseBoolFlag(string cell, string columnName) => cell switch
     {
         "0" => false,
         "1" => true,
-        _ => throw new InvalidOperationException($"Invalid boolean flag '{cell}' for '{columnName}'."),
+        _ => throw new StoredDataException($"Invalid boolean flag '{cell}' for '{columnName}'."),
     };
 
     /// <summary>Parses a nullable boolean stored as an integer, absent when the column is null.</summary>
@@ -5473,9 +5474,9 @@ public partial class SqliteRelationalStore : IRelationalStoreReader
         {
             "0" => false,
             "1" => true,
-            _ => throw new InvalidOperationException($"Invalid boolean flag '{valCell}' for '{columnName}'."),
+            _ => throw new StoredDataException($"Invalid boolean flag '{valCell}' for '{columnName}'."),
         },
-        _ => throw new InvalidOperationException($"Unexpected SQLite storage type '{typeCell}' for nullable boolean column '{columnName}'."),
+        _ => throw new StoredDataException($"Unexpected SQLite storage type '{typeCell}' for nullable boolean column '{columnName}'."),
     };
 
     private static double ParseDoubleRequired(string cell, string columnName)
@@ -5486,7 +5487,7 @@ public partial class SqliteRelationalStore : IRelationalStoreReader
             return value;
         }
 
-        throw new InvalidOperationException($"Invalid finite floating-point value '{cell}' for '{columnName}'.");
+        throw new StoredDataException($"Invalid finite floating-point value '{cell}' for '{columnName}'.");
     }
 
     private static double? ParseNullableDouble(string typeCell, string valCell, string columnName)
@@ -5501,7 +5502,7 @@ public partial class SqliteRelationalStore : IRelationalStoreReader
             return ParseDoubleRequired(valCell, columnName);
         }
 
-        throw new InvalidOperationException($"Unexpected SQLite storage type '{typeCell}' for nullable real column '{columnName}'.");
+        throw new StoredDataException($"Unexpected SQLite storage type '{typeCell}' for nullable real column '{columnName}'.");
     }
 
     private static DateTimeOffset ParseTimestampRequired(string text, string columnName)
@@ -5511,14 +5512,14 @@ public partial class SqliteRelationalStore : IRelationalStoreReader
             return parsed.ToUniversalTime();
         }
 
-        throw new InvalidOperationException($"Invalid ISO-8601 timestamp '{text}' for '{columnName}'.");
+        throw new StoredDataException($"Invalid ISO-8601 timestamp '{text}' for '{columnName}'.");
     }
 
     private static SourceKind ParseSourceKind(string value) => value switch
     {
         "file" => SourceKind.File,
         "otlp" => SourceKind.Otlp,
-        _ => throw new InvalidOperationException($"Unrecognized source_kind '{value}'."),
+        _ => throw new StoredDataException($"Unrecognized source_kind '{value}'."),
     };
 
     private static RecordOp ParseRecordOp(string value) => value switch
@@ -5527,7 +5528,7 @@ public partial class SqliteRelationalStore : IRelationalStoreReader
         "tool.invoke" => RecordOp.ToolInvoke,
         "agent.invoke" => RecordOp.AgentInvoke,
         "unspecified" => RecordOp.Unspecified,
-        _ => throw new InvalidOperationException($"Unrecognized record.op '{value}'."),
+        _ => throw new StoredDataException($"Unrecognized record.op '{value}'."),
     };
 
     private static RecordKind ParseRecordKind(string value) => value switch
@@ -5538,7 +5539,7 @@ public partial class SqliteRelationalStore : IRelationalStoreReader
         "client" => RecordKind.Client,
         "producer" => RecordKind.Producer,
         "consumer" => RecordKind.Consumer,
-        _ => throw new InvalidOperationException($"Unrecognized record.kind '{value}'."),
+        _ => throw new StoredDataException($"Unrecognized record.kind '{value}'."),
     };
 
     private static RecordStatus ParseRecordStatus(string value) => value switch
@@ -5547,7 +5548,7 @@ public partial class SqliteRelationalStore : IRelationalStoreReader
         "ok" => RecordStatus.Ok,
         "error" => RecordStatus.Error,
         "unspecified" => RecordStatus.Unspecified,
-        _ => throw new InvalidOperationException($"Unrecognized record.status '{value}'."),
+        _ => throw new StoredDataException($"Unrecognized record.status '{value}'."),
     };
 
     private static TokenClass ParseTokenClass(string value) => value switch
@@ -5557,7 +5558,7 @@ public partial class SqliteRelationalStore : IRelationalStoreReader
         "cache_write" => TokenClass.CacheWrite,
         "output" => TokenClass.Output,
         "reasoning" => TokenClass.Reasoning,
-        _ => throw new InvalidOperationException($"Unrecognized token_class '{value}'."),
+        _ => throw new StoredDataException($"Unrecognized token_class '{value}'."),
     };
 
     private static ContentBucket ParseContentBucket(string value) => value switch
@@ -5571,14 +5572,14 @@ public partial class SqliteRelationalStore : IRelationalStoreReader
         "user_prompt" => ContentBucket.UserPrompt,
         "user_message" => ContentBucket.UserMessage,
         "reasoning" => ContentBucket.Reasoning,
-        _ => throw new InvalidOperationException($"Unrecognized content_part.bucket '{value}'."),
+        _ => throw new StoredDataException($"Unrecognized content_part.bucket '{value}'."),
     };
 
     private static ReportedTotalDirection ParseReportedDirection(string value) => value switch
     {
         "input" => ReportedTotalDirection.Input,
         "output" => ReportedTotalDirection.Output,
-        _ => throw new InvalidOperationException($"Unrecognized record_reported_total.direction '{value}'."),
+        _ => throw new StoredDataException($"Unrecognized record_reported_total.direction '{value}'."),
     };
 
     private static ProblemSeverity ParseProblemSeverityValue(string value)
@@ -5593,7 +5594,7 @@ public partial class SqliteRelationalStore : IRelationalStoreReader
             return ProblemSeverity.Warning;
         }
 
-        throw new InvalidOperationException($"Unrecognized ingest_problem.severity '{value}'.");
+        throw new StoredDataException($"Unrecognized ingest_problem.severity '{value}'.");
     }
 
     private static List<T> GetOrCreateList<TKey, T>(Dictionary<TKey, List<T>> map, TKey key)

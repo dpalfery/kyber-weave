@@ -712,12 +712,12 @@ public class ApplicationParityTests
     /// <summary>Projection service that always fails, for job-host failure reporting.</summary>
     private class FailingProjectionService : ICanonProjectionService
     {
-        public ProjectionPassReport ProjectIncremental() => throw new InvalidOperationException("projection exploded");
+        public ProjectionPassReport ProjectIncremental() => throw new StoredDataException("projection exploded");
 
-        public IReadOnlyList<HarnessRollupRow> ProjectRunsAndHarnesses() => throw new InvalidOperationException("projection exploded");
+        public IReadOnlyList<HarnessRollupRow> ProjectRunsAndHarnesses() => throw new StoredDataException("projection exploded");
 
         public (ProjectionPassReport Projection, IReadOnlyList<HarnessRollupRow> Rollups) ProjectAll() =>
-            throw new InvalidOperationException("projection exploded");
+            throw new StoredDataException("projection exploded");
     }
 
     /// <summary>Web asset repository recording the override directory each call carried.</summary>

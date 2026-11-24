@@ -2528,16 +2528,16 @@ public class KyberBridgeEngine
     /// Whether an exception from one session's section read is a read fault of that session's
     /// stored data, to isolate behind <see cref="ProjectionFailedStatus"/>: the store or the disk
     /// failed (the same store faults the analytics route answers 503 for), or a stored row has a
-    /// shape the read cannot parse. Anything else — a programming error such as a null reference
-    /// or a bad argument, out-of-memory, or a cancelled request — propagates, so a bug or an
-    /// unhealthy host is never reported as one broken projection.
+    /// shape the read cannot parse (<see cref="StoredDataException"/>, or a format or JSON fault
+    /// from hydrating it). Anything else — a programming error such as a null reference, a bad
+    /// argument or an invalid operation, out-of-memory, or a cancelled request — propagates, so a
+    /// bug or an unhealthy host is never reported as one broken projection.
     /// </summary>
     /// <param name="ex">The exception the read threw.</param>
     /// <returns><see langword="true"/> when the fault belongs to the session's stored data.</returns>
     private static bool IsSessionReadFault(Exception ex) =>
         ex is SqliteExecutionException or CircuitBreakerOpenException or IOException or TimeoutException
-            or InvalidOperationException or FormatException or JsonException or InvalidDataException
-        && ex is not OperationCanceledException;
+            or StoredDataException or FormatException or JsonException or InvalidDataException;
 
     private (ReadTimeTurnSummary? Figures, string? ProjectionStatus) TryTurnFigures(string sessionKey, int turnIndex)
     {
