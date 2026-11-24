@@ -1,14 +1,18 @@
 ---
-id: todo/kw-skills-load-on-demand
+id: archive/todo/kw-skills-load-on-demand
 title: Kyber-Weave skills that agents load on demand
 doc-type: todo
 component: KyberSquad
-status: draft
+status: superseded
 owner: dpalfery
-last-reviewed: 2026-11-22
+last-reviewed: 2026-11-24
 ---
 
 # Kyber-Weave skills that agents load on demand
+
+**Status:** Superseded and archived
+**Archive Date:** 2026-11-24
+Successor: implementation plan 2026-11-24-kw-skills-load-on-demand ("Kyber-Weave skills that agents load on demand").
 
 User story for the conductor. Settled with the owner on 2026-11-22.
 

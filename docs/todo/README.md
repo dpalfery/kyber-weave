@@ -43,7 +43,7 @@ last-reviewed: YYYY-MM-DD
 
 | Todo | Component | Status | Description |
 |---|---|---|---|
-| [kw-skills-load-on-demand.md](kw-skills-load-on-demand.md) | KyberSquad | draft | User story: technology and role agents get a list of Kyber-Weave skills at start and load one through kw-docs `load_skill`, separate from harness skills. |
+| [kw-skills-load-on-demand.md](../archive/todo/kw-skills-load-on-demand.md) | KyberSquad | archived | Promoted to an implementation plan on 2026-11-24: technology and role agents get a list of Kyber-Weave skills at start and load one through kw-docs `load_skill`, separate from harness skills. |
 | [interface-driven-test-follow-ups.md](../archive/todo/interface-driven-test-follow-ups.md) | CI Pipelines | archived | Delivered 2026-11-18: the fifteen logic classes moved to the unit projects of the code they test, every real-resource case stayed in `KyberWeave.Integration.Tests` with a name saying what it proves, and all eleven shared-test-library cleanups closed. |
 | [seam-conversion-leftovers.md](seam-conversion-leftovers.md) | CI Pipelines | draft | Eleven `Application` classes still resolve a path or a host name directly, and a short list of seam members the conversion deferred (process path, write-through-link, architecture, the CodeGraph index workspace). |
 | [unit-tests-on-windows-ci.md](unit-tests-on-windows-ci.md) | CI Pipelines | draft | No unit test project runs on Windows, and several test fixtures default to a POSIX literal root, so the suite has no Windows evidence. |
