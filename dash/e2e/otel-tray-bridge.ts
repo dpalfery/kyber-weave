@@ -598,10 +598,14 @@ export function verifyNoSymlinkSegments(
   return { ok: true }
 }
 
-export function resolveStaticAsset(distDir: string, pathname: string): StaticAssetResolution {
-  if (typeof distDir !== 'string') {
-    throw new TypeError('distDir must be a string')
+function assertValidDistDir(distDir: string): void {
+  if (typeof distDir !== 'string' || distDir.trim() === '') {
+    throw new TypeError('distDir must be a non-empty string')
   }
+}
+
+export function resolveStaticAsset(distDir: string, pathname: string): StaticAssetResolution {
+  assertValidDistDir(distDir)
   if (pathname.includes('\0')) {
     return { ok: false, statusCode: 400, message: 'Bad request path' }
   }
@@ -680,7 +684,7 @@ export function resolveStaticAsset(distDir: string, pathname: string): StaticAss
 
 export type StaticAssetReadResult =
   | { readonly ok: true; readonly contents: Buffer; readonly contentType: string }
-  | { readonly ok: false; readonly statusCode: 403 | 404 | 413 | 500; readonly message: string }
+  | { readonly ok: false; readonly statusCode: 403 | 404 | 413; readonly message: string }
 
 const STATIC_ASSET_FORBIDDEN_ERROR_CODES: ReadonlySet<string> = new Set([
   'ERR_PATH_TRAVERSAL',
@@ -700,13 +704,16 @@ const STATIC_ASSET_NOT_FOUND_ERROR_CODES: ReadonlySet<string> = new Set([
   'ENOTDIR',
 ])
 
+function extractErrorCode(error: unknown): unknown {
+  return error !== null && typeof error === 'object' && 'code' in error
+    ? (error as { readonly code?: unknown }).code
+    : undefined
+}
+
 export function mapStaticAssetOpenError(
   error: unknown,
 ): { readonly ok: false; readonly statusCode: 403 | 404 | 413 | 500; readonly message: string } {
-  const code =
-    error !== null && typeof error === 'object' && 'code' in error
-      ? (error as { readonly code?: unknown }).code
-      : undefined
+  const code = extractErrorCode(error)
   if (error instanceof StaticAssetTooLargeError || code === 'ERR_STATIC_ASSET_TOO_LARGE') {
     return { ok: false, statusCode: 413, message: 'Payload Too Large' }
   }
@@ -730,6 +737,16 @@ function rethrowUnexpectedStaticAssetError(
     return { ok: false, statusCode: mapped.statusCode, message: mapped.message }
   }
   throw error
+}
+
+function mapExpectedStaticAssetReadError(
+  error: unknown,
+): { readonly ok: false; readonly statusCode: 403 | 404 | 413; readonly message: string } {
+  const mapped = mapStaticAssetOpenError(error)
+  if (mapped.statusCode === 500) {
+    throw error
+  }
+  return { ok: false, statusCode: mapped.statusCode, message: mapped.message }
 }
 
 function readOpenedFileDescriptor(fd: number, maxBytes: number): Buffer {
@@ -756,15 +773,13 @@ export function readResolvedStaticAsset(
   resolved: Extract<StaticAssetResolution, { readonly ok: true }>,
   options?: { readonly maxBytes?: number },
 ): StaticAssetReadResult {
-  if (typeof distDir !== 'string') {
-    throw new TypeError('distDir must be a string')
-  }
+  assertValidDistDir(distDir)
   const maxBytes = resolveMaxResponseBytes(options?.maxBytes, 'maxBytes')
   let realDistDir: string
   try {
     realDistDir = realpathSync(distDir)
   } catch (error) {
-    return mapStaticAssetOpenError(error)
+    return mapExpectedStaticAssetReadError(error)
   }
 
   const realDistPrefix = realDistDir.endsWith(sep) ? realDistDir : `${realDistDir}${sep}`
@@ -817,12 +832,22 @@ export function readResolvedStaticAsset(
     const contents = readOpenedFileDescriptor(fd, maxBytes)
     return { ok: true, contents, contentType: resolved.contentType }
   } catch (error) {
-    return mapStaticAssetOpenError(error)
+    return mapExpectedStaticAssetReadError(error)
   } finally {
     if (fd !== undefined) {
       closeSync(fd)
     }
   }
+}
+
+function formatSafeStaticAssetErrorDiagnostic(error: unknown): string {
+  const rawName = error instanceof Error ? error.name : undefined
+  const errorName =
+    typeof rawName === 'string' && /^[A-Za-z0-9_]+$/.test(rawName) ? rawName : 'UnknownError'
+  const rawCode = extractErrorCode(error)
+  const errorCode =
+    typeof rawCode === 'string' && /^[A-Z0-9_]+$/.test(rawCode) ? rawCode : undefined
+  return errorCode ? `${errorName} (${errorCode})` : errorName
 }
 
 export function serveStaticAsset(
@@ -831,7 +856,10 @@ export function serveStaticAsset(
   pathname: string,
   resolveAsset: typeof resolveStaticAsset = resolveStaticAsset,
 ): void {
-  let asset: StaticAssetReadResult | Extract<StaticAssetResolution, { readonly ok: false }>
+  let asset:
+    | StaticAssetReadResult
+    | ReturnType<typeof mapStaticAssetOpenError>
+    | Extract<StaticAssetResolution, { readonly ok: false }>
   let unexpectedError: unknown
   try {
     const resolved = resolveAsset(distDir, pathname)
@@ -843,13 +871,7 @@ export function serveStaticAsset(
 
   if (!asset.ok) {
     if (asset.statusCode === 500) {
-      const detail =
-        unexpectedError === undefined
-          ? asset.message
-          : unexpectedError instanceof Error
-            ? unexpectedError.message
-            : String(unexpectedError)
-      console.error('tray static asset failed:', detail)
+      console.error('tray static asset internal error:', formatSafeStaticAssetErrorDiagnostic(unexpectedError))
     }
     res.writeHead(asset.statusCode, { 'content-type': 'text/plain; charset=utf-8' })
     res.end(asset.message)

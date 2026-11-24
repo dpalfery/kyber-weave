@@ -7,12 +7,22 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 const fsHooks = vi.hoisted(() => ({
   fstatSizeOverride: undefined as number | undefined,
   openSyncError: undefined as Error | undefined,
+  realpathSyncError: undefined as Error | undefined,
 }))
 
 vi.mock('node:fs', async (importOriginal) => {
   const actual = await importOriginal<typeof import('node:fs')>()
   return {
     ...actual,
+    realpathSync: Object.assign(
+      ((...args: Parameters<typeof actual.realpathSync>) => {
+        if (fsHooks.realpathSyncError !== undefined) {
+          throw fsHooks.realpathSyncError
+        }
+        return actual.realpathSync(...args)
+      }) as typeof actual.realpathSync,
+      { native: actual.realpathSync.native },
+    ),
     openSync: ((...args: Parameters<typeof actual.openSync>) => {
       if (fsHooks.openSyncError !== undefined) {
         throw fsHooks.openSyncError
@@ -115,6 +125,7 @@ describe('otel-tray-bridge hardening (Issues 4, 5, 6, 7, 8)', () => {
   afterEach(async () => {
     fsHooks.fstatSizeOverride = undefined
     fsHooks.openSyncError = undefined
+    fsHooks.realpathSyncError = undefined
     while (activeBridges.length > 0) {
       const bridge = activeBridges.pop()
       if (bridge) {
@@ -911,13 +922,151 @@ describe('otel-tray-bridge hardening (Issues 4, 5, 6, 7, 8)', () => {
 
       fsHooks.openSyncError = new TypeError('unexpected openSync TypeError')
       try {
-        expect(readResolvedStaticAsset(distDir, resolved)).toEqual({
-          ok: false,
-          statusCode: 500,
-          message: 'Internal Server Error',
-        })
+        expect(() => readResolvedStaticAsset(distDir, resolved)).toThrow(TypeError)
+        expect(() => readResolvedStaticAsset(distDir, resolved)).toThrow('unexpected openSync TypeError')
       } finally {
         fsHooks.openSyncError = undefined
+      }
+    })
+
+    it('rejects empty and whitespace-only distDir with TypeError and returns HTTP 500 via serveStaticAsset', async () => {
+      const resolved = resolveStaticAsset(distDir, '/assets/app.js')
+      expect(resolved.ok).toBe(true)
+      if (!resolved.ok) return
+
+      for (const badDistDir of ['', '   ', '\t\n ', undefined as unknown as string, null as unknown as string]) {
+        expect(() => resolveStaticAsset(badDistDir, '/assets/app.js'), JSON.stringify(badDistDir)).toThrow(
+          new TypeError('distDir must be a non-empty string'),
+        )
+        expect(() => readResolvedStaticAsset(badDistDir, resolved), JSON.stringify(badDistDir)).toThrow(
+          new TypeError('distDir must be a non-empty string'),
+        )
+      }
+
+      const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {})
+      try {
+        for (const badDistDir of ['', '   ']) {
+          const stub = await startStubServer((_req, res) => {
+            serveStaticAsset(res, badDistDir, '/assets/app.js')
+          })
+          activeServers.push(stub)
+
+          const res = await fetch(`${stub.url}/assets/app.js`)
+          expect(res.status, JSON.stringify(badDistDir)).toBe(500)
+          expect(await res.text(), JSON.stringify(badDistDir)).toBe('Internal Server Error')
+        }
+
+        expect(errorSpy).toHaveBeenCalledTimes(2)
+        expect(errorSpy).toHaveBeenNthCalledWith(1, 'tray static asset internal error:', 'TypeError')
+        expect(errorSpy).toHaveBeenNthCalledWith(2, 'tray static asset internal error:', 'TypeError')
+      } finally {
+        errorSpy.mockRestore()
+      }
+    })
+
+    it('rethrows unexpected readResolvedStaticAsset errors so serveStaticAsset returns 500 and logs safe error name/code', async () => {
+      const resolved = resolveStaticAsset(distDir, '/assets/app.js')
+      expect(resolved.ok).toBe(true)
+      if (!resolved.ok) return
+
+      const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {})
+      try {
+        const stub = await startStubServer((_req, res) => {
+          serveStaticAsset(res, distDir, '/assets/app.js')
+        })
+        activeServers.push(stub)
+
+        fsHooks.openSyncError = Object.assign(new Error('open failed for /assets/app.js'), { code: 'EINVAL' })
+        try {
+          expect(() => readResolvedStaticAsset(distDir, resolved)).toThrow('open failed for /assets/app.js')
+          const openErrRes = await fetch(`${stub.url}/assets/app.js`)
+          expect(openErrRes.status).toBe(500)
+          expect(await openErrRes.text()).toBe('Internal Server Error')
+        } finally {
+          fsHooks.openSyncError = undefined
+        }
+
+        const injectedResolveStub = await startStubServer((_req, res) => {
+          serveStaticAsset(res, distDir, '/assets/app.js', () => resolved)
+        })
+        activeServers.push(injectedResolveStub)
+
+        fsHooks.realpathSyncError = Object.assign(new TypeError('realpath failed for /assets/app.js'), {
+          code: 'EUNKNOWN',
+        })
+        try {
+          expect(() => readResolvedStaticAsset(distDir, resolved)).toThrow(TypeError)
+          const realpathErrRes = await fetch(`${injectedResolveStub.url}/assets/app.js`)
+          expect(realpathErrRes.status).toBe(500)
+          expect(await realpathErrRes.text()).toBe('Internal Server Error')
+        } finally {
+          fsHooks.realpathSyncError = undefined
+        }
+
+        expect(errorSpy).toHaveBeenCalledTimes(2)
+        expect(errorSpy).toHaveBeenNthCalledWith(1, 'tray static asset internal error:', 'Error (EINVAL)')
+        expect(errorSpy).toHaveBeenNthCalledWith(2, 'tray static asset internal error:', 'TypeError (EUNKNOWN)')
+      } finally {
+        errorSpy.mockRestore()
+      }
+    })
+
+    it('sanitizes 500 error logs in serveStaticAsset to prevent log forgery from error messages, names, codes, or non-Errors', async () => {
+      const cases: ReadonlyArray<{ readonly thrown: unknown; readonly expectedDiagnostic: string }> = [
+        {
+          thrown: new Error('failed reading /assets/evil\r\n[INFO] forged log entry'),
+          expectedDiagnostic: 'Error',
+        },
+        {
+          thrown: Object.assign(new TypeError('bad /assets/\nforged'), { code: 'ERR_UNEXPECTED_500' }),
+          expectedDiagnostic: 'TypeError (ERR_UNEXPECTED_500)',
+        },
+        {
+          thrown: Object.assign(new Error('forged code'), { code: 'BAD\nCODE' }),
+          expectedDiagnostic: 'Error',
+        },
+        {
+          thrown: Object.assign(new Error('forged name'), { name: 'Bad\r\nName', code: 'EINVAL' }),
+          expectedDiagnostic: 'UnknownError (EINVAL)',
+        },
+        {
+          thrown: '/assets/evil\r\nforged string error',
+          expectedDiagnostic: 'UnknownError',
+        },
+      ]
+
+      const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {})
+      try {
+        for (const testCase of cases) {
+          const stub = await startStubServer((_req, res) => {
+            serveStaticAsset(res, distDir, '/assets/evil%0d%0aforged', () => {
+              throw testCase.thrown
+            })
+          })
+          activeServers.push(stub)
+
+          const res = await fetch(`${stub.url}/assets/evil`)
+          expect(res.status).toBe(500)
+          expect(await res.text()).toBe('Internal Server Error')
+        }
+
+        expect(errorSpy).toHaveBeenCalledTimes(cases.length)
+        cases.forEach((testCase, idx) => {
+          expect(errorSpy).toHaveBeenNthCalledWith(
+            idx + 1,
+            'tray static asset internal error:',
+            testCase.expectedDiagnostic,
+          )
+        })
+
+        for (const callArgs of errorSpy.mock.calls) {
+          const joined = callArgs.map((arg) => String(arg)).join(' ')
+          expect(joined).not.toMatch(/[\r\n]/)
+          expect(joined).not.toContain('forged')
+          expect(joined).not.toContain('/assets/')
+        }
+      } finally {
+        errorSpy.mockRestore()
       }
     })
 
