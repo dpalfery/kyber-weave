@@ -6,7 +6,7 @@ component: KyberDash
 source-root: dash
 status: current
 owner: dpalfery
-last-reviewed: 2026-11-20
+last-reviewed: 2026-11-23
 decided-by:
   - adr/0084-kyberdash-csharp-engine
   - adr/0020-kyberdash-one-time-fork
@@ -30,6 +30,8 @@ decided-by:
   - adr/0041-kyberdash-retire-legacy-context-schema-routes
   - adr/0043-kyberdash-analysis-mcp-read-only-boundary
   - adr/0090-kyberdash-relational-store
+  - adr/0091-store-reads-are-shaped-by-their-consumer
+  - adr/0092-dashboard-views-load-by-section-and-page
 keywords:
   - dashboard
   - codeburn
@@ -52,6 +54,8 @@ sections:
 code-refs:
   - DashEndpointMappings
   - KyberBridgeEngine
+  - DashboardQueryService
+  - IDashboardQueryService
   - JobSchedulerService
   - JobsLease
   - OtlpCollector
@@ -100,6 +104,7 @@ code-refs:
   - LegacyTableReplacementMap
   - SqliteRelationalStore
   - OtlpLogMapper
+  - PiSpanMapper
   - TranscriptIngestionService
   - IRelationalStoreReader
   - IRelationalStoreWriter
@@ -109,7 +114,35 @@ code-refs:
   - HarnessSourceRegistry
   - IHarnessSourceReader
   - IHarnessMapper
-  - StoredFieldsView
+  - ProjectIncrementalForReads
+  - SessionAttributions
+  - SessionRecordsForRebuild
+  - AllSessionRecordsForMaintenance
+  - SessionListFigures
+  - SessionHeaderPage
+  - SessionChildHeaderPage
+  - SessionChildPreview
+  - SessionHeadersByKeys
+  - SessionSummaryFigures
+  - SessionTurnFigures
+  - TurnFigures
+  - SessionRequestFigures
+  - SessionReconciliationFigures
+  - SessionProblems
+  - SessionToolFigures
+  - SessionSkillFigures
+  - SessionTimelineRecords
+  - StoredFieldsInventory
+  - StoredFieldsInventoryView
+  - StoredFieldsRows
+  - StoredTableRows
+  - RequestPromptPreviews
+  - SpanPromptText
+  - SessionReportFigures
+  - SessionRecordsContentFree
+  - RecordContentFree
+  - TurnContentParts
+  - SourceRecordCounts
 ---
 
 # KyberDash architecture
@@ -1128,8 +1161,8 @@ Catalog rules, enforced by `RelationalSchemaCatalogTests`:
   `position` (`IsRepeatedItem`); non-repeated composite keys are allow-listed instead.
 - Projection tables store only non-derivable outputs. Turn counts, token totals, durations,
   models, costs, cache ratios, tool counts, coverage, problems, and reconciliation are computed
-  at read time (DD-13) via `IRelationalStoreReader.GetSessionAggregate`,
-  `ListSessionAggregates`, and `SessionTurnSummaries`, never stored.
+  at read time (DD-13) by the purpose-named figures reads — `IRelationalStoreReader.SessionListFigures`,
+  `SessionSummaryFigures`, `SessionTurnFigures`, `TurnFigures` — and never stored.
 - Mutually exclusive verdicts use exclusive pairs: `session_context` vs
   `session_context_unmeasurable`, `session_schema` vs `session_schema_unmeasurable`, and
   `content_part_text` vs `content_part_withheld`.
@@ -1195,15 +1228,168 @@ never raw DB payloads). Status follows the envelope error: 200 when `error` is n
 500 for `internal_error`. Operations are `status`, `catalog`, `query`, `search-sessions`,
 `inspect`, `findings`, `compare`, and `outcomes`.
 
-The stored-fields inspection surface is `GET /api/kyber/session/{sessionKey}/stored-fields`
-(never `/api/sessions/...`), mapped in `DashEndpointMappings.StoredFieldsAsync` and served via
-`IDashboardQueryService.GetStoredFields` from `KyberBridgeEngine.GetStoredFields`. The reader
-implementation (`SqliteRelationalStore.Reader.StoredFields`) walks `RelationalSchemaCatalog`
-in catalog order and returns a `StoredFieldsView(SessionKey, Tables)` of `StoredTableFields`
-entries (`tableName`, `columnNames`, `rows`, `missingParentKeys`). Every reachable catalog
+The stored-fields inspection surface is two routes under
+`GET /api/kyber/session/{sessionKey}/stored-fields` (never `/api/sessions/...`),
+mapped in `DashEndpointMappings.StoredFieldsInventoryAsync` and
+`DashEndpointMappings.StoredFieldRowsAsync` and served via
+`IDashboardQueryService` from `KyberBridgeEngine.GetStoredFieldsInventory` and
+`KyberBridgeEngine.GetStoredFieldsRows`. The inventory route answers the
+content-free inventory alone — a `StoredFieldsInventoryView(SessionKey, Tables)` of
+`StoredTableFields` entries (`tableName`, `columnNames`, `rows`, `missingParentKeys`)
+walked from `RelationalSchemaCatalog` in catalog order by
+`IRelationalStoreReader.StoredFieldsInventory`. A table's rows load only when the
+viewer opens that table, one page of 25 at a time, through
+`IRelationalStoreReader.StoredFieldsRows(sessionKey, table, page, limit)`, which
+reads that table's rows in SQL; `table` must be one the inventory lists (a
+catalog-table allowlist), else the route answers 404. Every reachable catalog
 column is labeled `table.column`; a parent key with no row in an optional child table is listed
 in `missingParentKeys` and rendered as "not reported" (never `0` or `""`). An unknown session
 answers HTTP 404.
+
+## Read-path invariants and the read-model register
+
+A read is shaped by its consumer. Every dashboard read answers from one purpose-named store
+method whose result **is** the page's shape, so a page cannot over-fetch by accident and a new
+page gets a new named read instead of borrowing a broad one. On a small store this is invisible;
+on a store where one session holds half a gigabyte of captured text it is the difference between
+a page that paints and a request that materializes the corpus before discarding most of it.
+
+The contract lives in `IRelationalStoreReader`
+(`dash/server/KyberDash.Contracts/Repositories/IRelationalStoreReader.cs`), whose XML docs state
+each read's scope and content policy. Three invariants hold over it:
+
+- **Selecting a session never materializes its content.** The list, summary, section and turn
+  reads carry figures computed from record scalars only.
+- **Selecting a turn never materializes the session.** `TurnFigures` is scoped to one turn index.
+- **Content text is read by coordinate, not by session.** `TurnContentParts` reads
+  `(session_key, span, position)`, so the content view pays for the parts it renders.
+
+The broad reads this replaced — `Records`, `GetRecord`, `ContentParts`, `GetSessionAggregate`,
+`ListSessionAggregates`, `SessionTurnSummaries` — are retired from the interface and from all four
+implementers. `StoreInterfaceShapeTests.TheReaderInterfaceCarriesNoBroadReads` fails if one comes
+back.
+
+### The read-model register
+
+| Endpoint(s) | Read model (scoping key) | Content text |
+|---|---|---|
+| `GET /api/kyber/sessions` (and the `/session` alias) | `SessionHeaderPage(harness?, search?, page, limit)` — projection header columns only, with root resolution, the harness filter, the `q` substring match and `LIMIT/OFFSET` in SQL plus a `COUNT(*)` total — then `SessionChildPreview(pageKeys, 25)` (one window-function statement for the page's first-25 subagent rows plus each root's child total) and the keyed `SessionListFigures(keys)` for the page's figures only. `limit` defaults to 100 roots (clamp 1..100); roots carry their first 25 subagents and a `subagentTotal` | No |
+| `GET /api/kyber/session/{id}` | **Retired** — answers 404. One route per section below replaced the monolithic payload; the report moved to `SessionReportFigures` and the run page to `SessionTurnFigures` ([ADR 0092](../adr/0092-dashboard-views-load-by-section-and-page.md)) | — |
+| `GET /api/kyber/session/{id}/summary` | `SessionSummaryFigures(sessionKey)` — the widened summary the header strip, banners and overview strip render: `span_count`, `request_count`, cost blocks by basis and model, reconciliation totals, `problems_count`, tool counts (`offered`, `invoked`, `unused`), `skills_count`, aux-call fields and schema waste fields | No |
+| `GET /api/kyber/session/{id}/charts` | `SessionTurnFigures(sessionKey)` plus the stored context projection — today's detail `turns` and `context` for the whole session. Not paged by design: charts need the session's shape | No |
+| `GET /api/kyber/session/{id}/tools` | `SessionToolFigures(sessionKey)` — ranked rows (never-invoked included) plus the `aggregate` priced over every row before paging (`measurable`/`reason`, `maxCost`, `residentCostTotal`, `invocationCount`, `unusedCount`, `unusedRange`, `byServer`, `definitionsSpanId`) | No |
+| `GET /api/kyber/session/{id}/servers` | `SessionToolFigures(sessionKey)` — the same read's server rollups, paged at 25 | No |
+| `GET /api/kyber/session/{id}/skills` | `SessionSkillFigures(sessionKey)` — skill rows paged at 25 with the session total; whole-session counts come from the summary's `skills_listed`/`skills_invoked` | No |
+| `GET /api/kyber/session/{id}/requests` | `SessionRequestFigures(sessionKey, page, limit)` plus `RequestPromptPreviews(sessionKey, requestSpanIds)` — the page's request rows, with prompt previews for the page's spans only | **Yes — the page's prompt previews only, fetched because the rows on screen show them** |
+| `GET /api/kyber/session/{id}/reconciliation` | `SessionReconciliationFigures(sessionKey, page, limit)` — reconciliation rows paged at 25 | No |
+| `GET /api/kyber/session/{id}/problems` | `SessionProblems(sessionKey, page, limit)` — problem rows paged at 25 | No |
+| `GET /api/kyber/session/{id}/subagents` | `SessionChildHeaderPage(parentId, page, limit)` plus the keyed `SessionListFigures(keys)` — one root's subagent rows, 25 per page | No |
+| `GET /api/kyber/session/{id}/turn/{index}` | `TurnFigures(sessionKey, turnIndex)` plus the stored context turn — one turn's spans, tool calls, token and cost facts with that turn's `context` buckets | No |
+| `GET /api/kyber/timeline` | `SessionRecordsContentFree(sessionKey)` — linked records with token counts, models, timestamps, signals, tool-call metadata and tool definitions, and no content part, tool input text or tool result text. The global timeline is unchanged; the session view reads its own paged level route above | No |
+| `GET /api/kyber/session/{id}/timeline` | `SessionTimelineRecords(sessionKey)` — the record-header columns the timeline tree's nodes read (span, parent, harness, timestamp, duration, kind, name, status, cost, model, declared window), hydrated into the `BuildTimeline` tree once per page; the per-request cost is the session's metadata tree, never its content | No |
+| `GET /api/kyber/span/{id}/attributes` | `RecordContentFree(spanId)` — one record's metadata — plus `SpanPromptText(spanId)`: the one span's consent-allowed captured prompt, so the inspector the viewer opened shows what the stall fix lost | **Yes — one span's prompt, only for the inspector the viewer opened** |
+| `GET /api/kyber/session/{id}/turn/{index}/content`, `GET /api/kyber/session/{id}/content` | `TurnContentParts(sessionKey, turnIndex?, spanId?, part?, budget, full)` — parts by `(session_key, span, position)`, honouring the response budget and the `full` flag; the turn route adds `TurnContentPartCount(sessionKey, turnIndex?, spanId?, part?)`, a content-free `COUNT(*)` that decides its `truncated` flag | **Yes — the one request-path content read, scoped to that turn or request** |
+| `GET /api/kyber/session/{sessionKey}/stored-fields` | `StoredFieldsInventory(sessionKey)` — catalog-driven inventory of the named session's stored columns, row counts and missing parent keys. No row values, no content read | No |
+| `GET /api/kyber/session/{sessionKey}/stored-fields/{table}` | `StoredFieldsRows(sessionKey, table, page, limit)` — that catalog table's rows, limited in SQL to one page of 25; `table` outside the inventory answers 404 | **Yes — one table's page, only when the viewer opens it** |
+| `GET /api/kyber/coverage` | `SourceRecordCounts()` and `Sources()` — every source count is answered in the store rather than by materializing records — plus the projection store's harness rollups and the operational store's refresh runs, ingest log, checkpoints, quarantine rows and settings | No |
+| `GET /api/kyber/harnesses`, `/harness/{id}` | `Sessions()` for the per-harness session counts, plus the projection store's harness rollups, runs and findings and the operational store's checkpoints | No |
+| `GET /api/kyber/report` | `Sessions(harnessId?)` for the session count, one keyed `SessionReportFigures(keys)` read for every session in the report's scope and window, and `SessionTurnFigures` once for the latest session's turns, plus the projection store's findings and harness rollups; no per-session read loop | No |
+| `GET /api/kyber/analytics/*` | `Sessions(harnessId?)` for the grouped, search and outcome answers, `CountRecords()` and `Harnesses()` for `status` and `catalog`, `SessionSummaryFigures` for `inspect`, and the projection store's findings and harness comparison; the list, section and turn figures are not read | No |
+| `/api/kyber/runs`, `/run/{id}` | `SessionListFigures` for the per-session figures those views price, `SessionTurnFigures` for a run's turn list, plus the projection store's runs, executions, findings and scorecard | No |
+| `/api/kyber/findings`, `/finding/{id}`, `/meta` | `Sessions()` for the `/findings` harness filter and the `/meta` session count, `CountRecords()` on `/meta`, and the projection store's findings | No |
+| `/api/kyber/compare*`, `/problems`, `/quarantine*`, `/jobs`, `/settings`, `/version`, `/capture`, `/model-catalog`, `/predictions`, `/calibration`, `/review*`, `/api/events` | The projection store, the operational store or the model pricing repository only — no relational-reader read. `/api/events` reads no store: it forwards the collector's store-changed event | No |
+
+**How the boundary is held.** `AnalyticsReadPathTests.EveryOtherPathLeavesContentUnread` sweeps
+29 request paths over an instrumented fake and fails on the first materialized content byte — a path
+test measured 1,048,607 bytes before the list, detail and summary reads were shaped, and zero
+after. The sweep also pins the two sanctioned scoped content reads to the paths that display
+them: `SpanPromptText` only on the span-attributes path and `RequestPromptPreviews` only on the
+requests path. `AnalyticsReadPathTests.TurnContentReadsOnlyTheRequestedTurnsParts` pins the scoped read's
+budget, `full` flag and coordinate scoping; the `StoredFieldsRows*` tests pin the rows route to one
+SQL-limited page of the named table scoped to the session, with 404 for a table outside the
+catalog. Every section route carries the same pin in `SessionSectionEndpointsTests`
+(`The<Section>Section...` — zero content bytes and a read log naming only its own reads).
+The checkable rules that keep a new read in this shape are
+`KW-STD-SQL-001..003` and `KW-STD-TEST-001..002` in the
+[SQLite standard](../standards/sqlite/sqlite.standards.md) and the
+[test standard](../standards/test/test.standards.md); the register above is their worked example.
+
+### The maintenance-read boundary
+
+Whole-store reads exist, are off the request path, and are named so they cannot be mistaken for a
+page read:
+
+- `AllSessionRecordsForMaintenance()` — every stored record and child row in one query. Reserved
+  for `kyber build` (`CanonProjectionService.ProjectAll`), a wildcard projection rebuild, and
+  doctor.
+- `SessionRecordsForRebuild(sessionKey)` — full records, content included, for the one session a
+  projection pass rebuilds (token counting, timeline, findings and previews need the part text).
+- `SessionAttributions()` — distinct `(session key, harness)` pairs with record counts from one
+  grouped query over `record` joined to `record_session_link`. It feeds the pass's identities,
+  skip decisions and per-session record budgets without materializing a record. Its ordering
+  (session key, then harness) is load-bearing: attribution-driven id claiming must assign the
+  same session ids as sorted-key record iteration, or every stored projection's id churns.
+
+`ArchitectureBoundaryTests.RequestPathsCannotReachMaintenanceReads` scans `dash/server` and fails,
+naming the file, when anything outside the contract, the SQLite adapter, `CanonSessionProjectorEngine.cs`,
+the CLI `Program.cs` and `DoctorService.cs` names the maintenance read. `Sessions`, `Sources`,
+`CountRecords` and `SessionModelUsages` stay because each is already
+purpose-named, cheap and scoped; the child-table query members (`TokenCounts`, `ReportedTotals`,
+`ReportedCosts`, `SkillsInvoked`, `ToolCalls`, `ToolDefinitions`, `AgentInvocations`,
+`RecordSignals`) stay where a named maintenance consumer remains.
+
+### Read-path deferral and single-flight
+
+`CanonSessionProjectorEngine` has two entries, and which one a caller uses is the whole contract:
+
+```mermaid
+flowchart LR
+    DASH["dashboard GET<br/>KyberBridgeEngine.EnsureProjected"] --> READS["ProjectIncrementalForReads()"]
+    READS --> ATTRIB["SessionAttributions()<br/>identities, skips, budgets"]
+    ATTRIB --> SMALL["dirty session under the record budget<br/>SessionRecordsForRebuild(key)"]
+    ATTRIB --> BIG["dirty session over the budget<br/>(default 2,000 records)"]
+    BIG --> DEFER["deferred: left dirty,<br/>reported in deferredSessions"]
+    JOBS["maintenance tick, kyber build,<br/>refresh, clean"] --> FULL["ProjectIncremental()<br/>never defers"]
+    FULL --> ALL["AllSessionRecordsForMaintenance()"]
+    DEFER --> JOBS
+```
+
+- `ProjectIncremental()` is the maintenance entry: the scheduler's tick, CLI `kyber build`, refresh
+  and clean. It never defers.
+- `ProjectIncrementalForReads()` is the request path. It defers a dirty session whose record count
+  exceeds the budget (default 2,000, constructor-injectable), writes the key back as still dirty so
+  the next pass retries it, and reports it. The bounded GET latency is a property of the deferral,
+  not of the store being small.
+- A single-flight guard inside the projector pass entry makes a concurrent caller return a skipped
+  report and serve the current projections instead of stacking a second pass; waiting would make
+  the second GET as slow as the first, and the polling UI already tolerates slightly stale
+  projections.
+- `KyberBridgeEngine.BuildProjectionHealth` reports `deferredSessions` from the dirty state while
+  `status` stays `"ok"`: deferral is expected behaviour, not a fault. The same object already
+  reports `failedSessions` and `lastError`, and it is the `projection` block of
+  `GET /api/kyber/coverage`.
+
+What an operator sees when a session is deferred — and what each section shows while its
+page loads — is in the [runbook](runbook.md#11-slow-dashboard-responses-on-a-large-store).
+
+### Sanctioned exceptions
+
+Three reads stay heavier than the page they serve, each named so a reader does not mistake it for
+a defect:
+
+- **The section-scoped content reads** answer only the screen that shows them: the request
+  prompt previews of the shown requests page (`RequestPromptPreviews`, through the `/requests`
+  route), the one consent-allowed prompt of the inspected span (`SpanPromptText`, through the
+  span-attributes route), and the rows of the one stored table the viewer opened
+  (`StoredFieldsRows`, through the per-table route, one SQL-limited page of 25). Scoping them to
+  the displayed page is the contract; pre-reading them would change what they cost.
+- **The maintenance reads above** are whole-store or whole-session by definition and are reachable
+  only from the paths `RequestPathsCannotReachMaintenanceReads` allows.
+- **The projection rebuild** reads content for the dirty sessions it rebuilds, because token
+  counting, timeline derivation and findings consume the part text.
+
+Nothing else on a request path may read a content-text column. A new page adds a read model to the
+register above; it does not widen an existing one.
 
 ## Normalization layer
 
@@ -1378,7 +1564,7 @@ only when the server sent no cost.
 **Measured session payload and scorecard contracts (issues #183, #185, #187).**
 - *Cache metric derivation:* `buildSessionRow` is the single writer for `cache_hit_ratio` and `cache_creation_coverage`. `cache_hit_ratio` is computed as `totals.cacheRead / summaryTotalInput`, where `summaryTotalInput` is the measured total (`fresh + cache_read + cache_creation`); payload `total_input` already includes the cache components, so no additional adding is performed. `cache_creation_coverage` is the count of turns with `cache_creation > 0`. When total input is unmeasurable, both fields are omitted or marked unavailable rather than emitted as misleading zeros.
 - *Measured residual and reported_input:* Context composition charts and heatmaps compute residual context as `reported_input - sum(bucketed_tokens)`. The engine emits `reported_input` on serialized context turns (`KyberContextTurn`) to convey the measured input basis. A fully bucketed turn has a measured residual of 0.0%; not-measurable treatment applies only when no measured input basis exists.
-- *Run turns and scorecard:* `KyberBridgeEngine.getRunTurns` serves per-turn rows (`RunTurnRow`) with measured model, tokens, pressure, `cacheHitRatio`, timestamp, and per-turn `costUsd` (priced via `createCostBlock`). `KyberBridgeEngine.getRunScorecard` derives a run-scoped scorecard by aggregating the run's sessions through the shared harness rollup and dimension calculation machinery.
+- *Run turns and scorecard:* `KyberBridgeEngine.ExtractRunTurns` serves per-turn rows (`RunTurnRow` with measured model, tokens, pressure, `cacheHitRatio`, timestamp, and per-turn `costUsd`) from `SessionTurnFigures` per execution, and `CanonRollupsEngine.BuildScorecard` derives the run-scoped scorecard by aggregating the run's sessions through the shared harness rollup and dimension calculation machinery.
 
 ### Skills view contract
 
@@ -1386,7 +1572,7 @@ The Sessions page shows which skills a session, and each of its turns, had acces
 and which were actually invoked. Listed and invoked are joined per skill, the way offered and
 invoked tools are. In C#, `CanonSynth` stamps `kyber.skills.listed` (`SkillsListedKey`) and
 `kyber.skills.invoked` (`SkillsInvokedKey`), `CanonFindings` detects inactive skill references
-(`DetectInactiveSkillReference`), and `CanonSessionProjectorEngine` (`dash/server/KyberDash.Application/CanonSessionProjectorEngine.cs`) projects the skills view into the session payload. All of this lives in
+(`DetectInactiveSkillReference`), and `CanonSessionProjectorEngine` (`dash/server/KyberDash.Application/CanonSessionProjectorEngine.cs`) projects the skills view into the stored session projection. All of this lives in
 `dash/server/`; the web renders the served values only ([ADR 0033](../adr/0033-kyberdash-surfaces-are-display-layers.md)),
 and no value is counted in the browser.
 
@@ -1396,30 +1582,22 @@ There is no `canon.db` schema change. The session payload is a JSON blob that is
 projection, so a session row stored before this change has no `skills` key and renders
 "not yet projected" until it is rebuilt ([runbook §2g](runbook.md#2g-skills-view-rebuild-and-capture-fixtures)).
 
+In the C# engine, `CanonIngestPipeline.ToCollectedRecord` (`dash/server/KyberDash.Application/CanonIngestPipeline.cs`) and `OtlpLogMapper.ToCollectedRecord` (`dash/server/KyberDash.Data/Harnesses/Otlp/OtlpLogMapper.cs`) populate `SkillsInvoked` from `gen_ai.skill.name`, `skill.name`, `skill_name`, `kyber.skills.invoked`, and `Skill`/`skill` tool call arguments. `KyberBridgeEngine.BuildSkillsPayload` projects `{ measurable: true, rows }` with `listed` marked `{ availability: 'not_measurable', reason }` when invocations exist without a listing export, or `{ availability: 'not_measurable', reason }` when neither side is recorded.
+
 **Measurability.** Listing and invocation are measured separately, and an unmeasured side is
-never reported as zero. It is declared in one of two ways: a key is absent (the `summary` and
-per-turn keys), or it carries `{availability: 'not_measurable', reason}` (the whole `skills`
-view, and each row's `invocations`). `[]` is a measured none. Per-harness sources are in the [telemetry inventory](telemetry-inventory.md#skill-availability-by-harness).
+never reported as zero. It is declared in one of two ways: a key is absent (the summary's
+`skills_invoked` array), or it carries `{availability: 'not_measurable', reason}` (the whole
+`skills` view, and each row's `invocations`). `[]` is a measured none. Per-harness sources are in the [telemetry inventory](telemetry-inventory.md#skill-availability-by-harness).
 
-**Session payload** (`GET /api/kyber/session/:id`, additive):
+**Skills section** (`GET /api/kyber/session/:id/skills`, additive). The route serves one page of
+the session's skill rows with the page envelope (`rows`, `total`, `page`, `limit`), or the
+whole-block `{availability: 'not_measurable', reason}` verdict when the harness measured neither
+side. The whole-session counts live on the summary: `skills_count`, always served. (The engine
+also emits the `skills_invoked` name array, which the summary validator does not carry; the
+panel tiles that read the arrays therefore render "not measurable" — see the known limit below.)
 
-- `summary.skills_listed` and `summary.skills_invoked` are name arrays. Each key is absent when
-  that side is not measured.
-- `skills` is either `{availability: 'not_measurable', reason}`, or
-  `{measurable: true, reported_skill_tokens?, listed_count, listed_uninvoked_count?, invocationsCoverage?, rows}`.
-  - `reported_skill_tokens` is a single per-turn resident size, taken from the latest turn that
-    carries it. It is never summed across turns and never split across skills. Antigravity
-    reports it as `gen_ai.usage.skill_tokens`.
-  - `listed_count` is always present when the view is measurable. `listed_uninvoked_count` is
-    absent when invocation is not measured, which is the same case in which every row's
-    `invocations` is the `not_measurable` object. A row is never counted while one of its
-    sides is unmeasured.
-  - `invocationsCoverage` is `{measuredTurns, totalTurns}`. It is set only for an Antigravity
-    session where some turns carry `kyber.skills.invoked` and some do not, so `0 < measuredTurns <
-    totalTurns`. The invocation figures and `listed_uninvoked_count` then cover the measured turns
-    only. It is absent when every turn is measured, and absent when no turn is.
-  - `rows` is sorted by name. Each row is `{name, listed, invocations, turns_listed,
-    description?, derived_tokens?}`.
+- `skills.rows` is sorted by name. Each row is `{name, listed, invocations, turns_listed,
+  description?, derived_tokens?}`.
     - `listed` is always a boolean. It is `true` when a measured listing named the skill on at
       least one turn, and `false` for a skill that was only invoked.
     - `invocations` is a number when invocation is measured, and `0` is a measured none. For
@@ -1432,22 +1610,15 @@ view, and each row's `invocations`). `[]` is a measured none. Per-harness source
     - `description` is the first listing text observed for that skill in the session, stored
       once. `derived_tokens` is estimated from the description and is labelled derived. Both are
       absent when no listing carried a description.
-- `turns[i].skills_listed` is present only for measured turns. `turns[i].skills_invoked` lists
-  names, with `[]` as a measured none, and is absent when invocation is not measured. For an
-  Antigravity turn it is absent unless that turn's record carries `kyber.skills.invoked` as an array,
-  so a turn the transcript did not cover is never shown as a measured none.
 - `measurability.skills` is set only when the whole `skills` view is `not_measurable`, and then
   carries that same reason. A partly measured view (Antigravity when no
   record of the session carries the invoked key, or Copilot CLI when a listing is measured but no
   record carries the invoked key) leaves `measurability.skills` unset. Its unmeasured side shows per row (the
-  `invocations` object) and by the absent `summary.skills_invoked`, turn `skills_invoked`, and
-  `listed_uninvoked_count` keys.
+  `invocations` object) and by the absent `summary.skills_invoked` key.
 
-**Turn content** (`GET /api/kyber/session/:id/turn/:index/content`, additive). The result carries
-a `skills` entry, `{listed: [{name, text?}], invoked: [names]}`. Either side, or the whole entry,
-may be `{availability: 'not_measurable', reason}`. The entry is built only from the stored
-session payload; the narrow turn-content route never walks session records. A payload without
-`skills` gives `not_measurable` with the reason `session not yet projected with skills`.
+**Turn content** (`GET /api/kyber/session/:id/turn/:index/content`). The restored C# route serves
+the byte-budgeted parts alone and carries no `skills` entry: `skills` stays optional in the web
+type and the views render without it. The narrow turn-content route never walks session records.
 
 **Known limits.**
 
@@ -1464,6 +1635,12 @@ session payload; the narrow turn-content route never walks session records. A pa
   edited description shows at the next payload build without a restart, and an absent file is never
   cached. A skill that no Antigravity root holds has no description
   ([telemetry inventory](telemetry-inventory.md#antigravity-skill-descriptions)).
+- The skills section route serves no whole-list aggregate yet. The section forwards the page's
+  rows alone, so the headline, the harness-reported aggregate and the coverage note stay hidden
+  and the token bars scale to the loaded page — even though `SkillsPanel` already accepts a
+  whole-list `aggregate.maxTokens` and the summary already serves `skills_count`. Serving the
+  aggregate from `SessionSkillFigures` (the way the tools section serves its own) and forwarding
+  it through `SessionSkillsSection` is the named follow-up.
 
 **Analysis inputs.** The `skillUtilisation` signal and the `inactive-skill-reference` finding take
 their listed and invoked sets from `CanonSynth` / `CanonSessionProjectorEngine` (see [Pure Signals and Findings Engine](#pure-signals-and-findings-engine-canonfindings)).
@@ -1476,15 +1653,22 @@ invocations", with no deletion or waste claim.
 an older generation (for example `3` or `4`) report their findings as outdated; `CanonSessionProjectorEngine`
 re-projects them to the current generation on maintenance/build.
 
-**Web.** The Sessions page section **4 · Skills** has two tiles (skills listed, skills invoked) and
-a headline, "X of Y listed skills had no observed invocation". The headline is rendered from the
-served `listed_uninvoked_count` and `listed_count`, and reads "not measurable" when either is
-absent. It is hidden when there are no rows. Each row shows listed and invoked badges and the
-turns listed (displayed 1-based), with derived tokens labelled as derived. The harness-reported
-aggregate appears where present, with no currency. A "Not measurable" card shows the reason. Clicking
-a row opens a skill drawer with the listed and invoked state, the turns listed, and the listing
-text for the first turn listed. The unit tests render these states in a simulated DOM and the
-bundle builds. The states have not yet been checked against a live dashboard session.
+**Web.** The Sessions page section **4 · Skills** renders one page of skill rows with the
+shared pager (`SessionSkillsSection`, one query per the
+[data-loading contract](#web-dashboard-data-loading-by-section-and-page)). Each row shows
+listed and invoked badges and the turns listed (displayed 1-based), with derived tokens labelled
+as derived. The tiles and headline read whole-list figures: the tiles read the summary's
+`skills_listed` / `skills_invoked` arrays and the headline reads the block's
+`listed_uninvoked_count` / `listed_count`. The section route serves neither — the summary
+carries `skills_count` only, and the section forwards the page's `rows` alone — so the tiles
+and the headline render "not measurable" and the harness-reported aggregate stays hidden until
+the route serves them (known limit below). Token bars scale to the loaded page for the same
+reason: `SkillsPanel` accepts the whole-list `aggregate.maxTokens`, but no caller passes one
+yet. Clicking a row opens a skill drawer with the listed and invoked state, the turns listed,
+and the listing text for the first turn listed, fetched through the turn route and then the
+turn-content route — never from a session-wide payload. The unit tests render these states in a
+simulated DOM and the bundle builds. The states have not yet been checked against a live
+dashboard session.
 
 ### Message role on content parts
 
@@ -1521,10 +1705,13 @@ measured independently from whether individual composition buckets are available
   each child the declared reason for every key it does not carry itself. `tool_result_content` is
   measured on a child only when the tool result it was handed carries a `content` value. Other
   harnesses copy the parent's map unchanged.
-- **Stored text can be gone.** Measurability is stamped at ingest and not re-derived. The 14-day
-  purge ([ADR 0018](../adr/0018-kyberdash-content-retention-purge.md)) empties `content_json` and
-  `parts_json` and leaves `measurability_json` as it was, so a record can read as measured while no
-  text is stored for it.
+- **Stored text can be gone.** Measurability is stamped at ingest and not re-derived, so a record
+  can read as measured while no text is stored for it: clearing a store
+  ([the runbook's clean section](runbook.md#2b-database-clean-dash-clean)) leaves `measurability_json` as it was.
+  The 14-day purge ([ADR 0018](../adr/0018-kyberdash-content-retention-purge.md)) does not yet
+  empty `content_json` and `parts_json` on the relational engine — it records the retention mark
+  and deletes nothing, which the [runbook's retention policy](runbook.md#4-content-retention-policy)
+  states.
 - **Non-resident parts.** `ContentPart.resident: false` marks a tool definition the turn was offered
   but did not keep resident. It adds no tokens to the context composition (`CanonContextAnalysis.AnalyzeContext`),
   is counted in `TurnPressure.nonResidentToolDefinitions`, and stays on the part for the turn-content
@@ -1539,7 +1726,11 @@ dependency (`GHSA-2m69-gcr7-jv3q`). The schema is the relational catalog at `Sql
 (`25`): `RelationalSchemaCatalog` (`dash/server/KyberDash.Domain/Schema/RelationalSchemaCatalog.cs`) is the
 single static source of every table, column, key, and index, and `SchemaDdlGenerator` emits the deterministic
 DDL. The store implements `IRelationalStoreWriter` (`WriteBatch`, `DeleteSource`, `WriteProblem`),
-`IRelationalStoreReader` (`GetSessionAggregate`, `ListSessionAggregates`, `SessionTurnSummaries`, `StoredFields`),
+`IRelationalStoreReader` (`SessionListFigures`, `SessionSummaryFigures`, `SessionTurnFigures`,
+`TurnFigures`, `SessionRequestFigures`, `SessionToolFigures`, `SessionSkillFigures`,
+`SessionRecordsContentFree`, `RecordContentFree`, `TurnContentParts`, `StoredFieldsInventory`,
+`StoredFieldsRows` — the
+[read-model register](#the-read-model-register) names each read's scope and content policy),
 `IProjectionStore` (sessions, runs, executions, findings, predictions), and `IOperationalStore` (settings,
 checkpoints, quarantine, problems, ingest log). `LegacyTableReplacementMap`
 (`dash/server/KyberDash.Domain/Schema/LegacyTableReplacementMap.cs`) records how the retired v24 document
@@ -1560,7 +1751,7 @@ a parallel document.
 Subagent executions dispatched by orchestrators are projected during session build (`CanonSessionProjectorEngine` in `dash/server/KyberDash.Application/CanonSessionProjectorEngine.cs`) into first-class derived session rows with stable, deterministic identities ([ADR 0038](../adr/0038-post-run-transcript-sync-subagent-hierarchy.md)):
 - **Identity format**: Claude Code subagents are assigned the deterministic session ID `<parentSessionId>#agent-<agentId>` (e.g. `claude-sess-001#agent-researcher-001`, not doubling an `agent-` prefix already on attributes such as `agent_id` or `subagent_id`), scoped by the parent so two parents reusing an agent id keep separate rows. Copilot subagent invocations receive `<parentSessionId>#<invoke_agent_span_id>` (e.g. `copilot-sess-001#invoke-agent-span-1`).
 - **Database representation**: Subagent rows in `session` record `is_subagent = 1`, `parent_session = <parentSessionId>` (pointing to the root session), and `agent_name = <agentName>`. Subagent records are reparented under the root invoke span (`parentSpanId = null` for the root invoke span, child spans reparented beneath it), ensuring a clean single-root execution tree in the ASAD payload.
-- **Dual spend accounting and read-time rollups**: Stored session rows persist only their own granular, unaggregated counters (`turn_count`, `request_count`, `total_input`, `total_output`, `cost_usd`) in `payload.summary`. On read (`KyberBridgeEngine.GetSessions` in `dash/server/KyberDash.Application/KyberBridgeEngine.cs`), child subagent sessions whose parent exists in the store are omitted from the top-level list and nested into their parent's `subagents` array. The parent session carries a read-time `rollup` object aggregating spend across the orchestrator and all nested children:
+- **Dual spend accounting and read-time rollups**: Stored session rows persist only their own granular, unaggregated counters (`turn_count`, `request_count`, `total_input`, `total_output`, `cost_usd`) in `payload.summary`. On read (`KyberBridgeEngine.GetSessionPage` in `dash/server/KyberDash.Application/KyberBridgeEngine.cs`), child subagent sessions whose parent exists in the store are omitted from the top-level list and nested into their parent's `subagents` array. The parent session carries a read-time `rollup` object aggregating spend across the orchestrator and all nested children:
   $$\text{rollup.metric} = \text{parent.metric} + \sum_{c \in \text{subagents}} c\text{.metric}$$
   The sum is recursive and leaf-first (a chain A ← B ← C nests two deep, and B's rollup is B + C). A projected subagent row is built from a subset of the records its parent row is built from, so the parent's own counters already include it; the projection marks such a row `payload.summary.included_in_parent`, and the rollup adds neither it nor anything beneath it. Only an independent child (one whose records are not in the parent) is summed. A parent cycle in stored ancestry is never attached, so no session drops out of the list.
   Both parent and child sessions preserve their own granular counters unaggregated at their respective levels. Orphan subagent sessions (whose parent session is absent from the store) remain visible at the top level with self-derived rollups.
@@ -1654,12 +1845,69 @@ with a reason, never as a fabricated `0`. A genuine measured zero is still `0`.
 3. **Run (`RunDetail.tsx`)**: Task-level view showing the hierarchical execution tree,
    delegation overhead, phase breakdown, run scorecard, and ranked run findings.
 4. **AgentExecution (`AgentSessionDashboard.tsx`)**: The full single-session ASAD view,
-   visualizing per-turn token spend, context composition, and tool schema cost.
+   visualizing per-turn token spend, context composition, and tool schema cost. The view loads
+   by section and by page ([web dashboard data loading by section and page](#web-dashboard-data-loading-by-section-and-page)):
+   header, banners and overview render from `/summary` while every other section fetches its
+   own endpoint and pages its own lists.
 5. **Turn (`SessionSpendCharts`, `ContextPressureStrip`)**: Granular turn breakdown exposing
    composition bands, fresh input spikes (cache invalidation), and schema residency.
 6. **ContextItem (`ContextInspector.tsx`)**: Full unclipped plain-text inspection per semantic
    bucket, subdivided by part, with whole-turn and per-block copy out ([ADR 0014](../adr/0014-unclipped-turn-inspection-and-copy-out-protocol.md)).
    The inspector is reachable from Turn on the spine.
+
+### Web dashboard data loading by section and page
+
+The sessions list and the session view load in small, independent pieces
+([ADR 0092](../adr/0092-dashboard-views-load-by-section-and-page.md)). No view waits on a
+monolithic payload: the retired `GET /api/kyber/session/:id` answers 404, and no component outside `lib/kyberApi.ts` calls `fetch`.
+
+```mermaid
+flowchart LR
+    MOUNT["view mounts"] --> S1["/summary"]
+    MOUNT --> S2["/charts"]
+    MOUNT --> S3["/tools, /servers, /skills"]
+    MOUNT --> S4["/timeline top level"]
+    MOUNT --> S5["/requests, /reconciliation, /problems"]
+    MOUNT --> S6["/stored-fields inventory"]
+    S1 --> HDR["header, banners, overview"]
+    S4 --> EXP["expand a node: that level's page"]
+    S6 --> TBL["open a table: that table's rows, 25 at a time"]
+    EXP --> INS["inspector: /turn/:index, then content"]
+```
+
+- **One section, one query.** Every paged section of the session view reads through the shared
+  `useSectionPage` hook (`dash/web/src/components/session/useSectionPage.ts`): the page the
+  viewer is on, and the one query that reads it, with the previous page held on screen while the
+  next loads. Each section component owns its query and renders its own loading, error, empty
+  and data states, so a slow section never blanks another. The header, subagent notice,
+  reconciliation badge, harness notes, requests banner, aux banner and overview strip render
+  from `/summary` alone.
+- **Issued in page order, served in parallel.** All section queries mount with the view and are
+  issued in the order the sections appear — summary, charts, tools, servers, skills, timeline
+  top level, cost (from the summary, no query), requests, reconciliation, problems,
+  stored-fields inventory — so the top of the page arrives first. The store serves the reads in
+  parallel (WAL journal mode, a fresh connection per read, no read lock); the browser's
+  per-origin connection limit queues the overflow in issue order, which is page order.
+- **Every list pages.** The sessions list pages at 100 roots (`page`, `limit`, `harness`, `q`
+  on the query string; roots carry their first 25 subagents and a `subagentTotal`, further
+  pages through `/session/:id/subagents`). Every list section pages at 25 rows through the one
+  shared `Pager` (`dash/web/src/components/ui/Pager.tsx`): tools, servers, skills, requests,
+  reconciliation, problems, timeline levels (by level, with `childCount` and `bounds`; node ids
+  URL-encoded, synthetic `(auxiliary)` and `(orphan:…)` ids included) and stored-fields rows
+  per table. Cost blocks are not lists and never page. Charts are not paged by design: the
+  spend and composition charts need the whole session to be correct.
+- **Content only on display.** Opening a session issues no content route and no stored-fields
+  rows request. Conversation text arrives when the viewer asks for it: the inspector drawer
+  resolves a turn through `/turn/:index` (widened with that turn's context) and only then its
+  content; a tool opens its definitions through the tools `aggregate.definitionsSpanId`; a
+  skill through its row's `turns_listed`; a span from the loaded timeline node or
+  `/span/:id/attributes` (with the consent-allowed prompt). Request rows carry the prompt
+  previews of the shown page only; a stored-fields table's rows load when the viewer opens it.
+- **Paging envelope.** Paged routes reuse the existing `{ entries, data, total, page, limit }`
+  envelope (`data` is the existing alias of `entries`); section routes default and clamp
+  `limit` to 25, and a page past the end answers empty `entries` with the true `total`. A 404
+  check reads the projection header row only, never turns or content. Under live capture a new
+  session can shift the sessions list by one row between pages; accepted for a monitoring view.
 
 ### Independent Dimension Vectors — No Composite Score (Decision D3)
 
@@ -1801,22 +2049,17 @@ already follow — not join a derived execution's persisted `sessionId` directly
 `records.session_id` when a split native key stores rows under their native id while the
 derived row carries a qualified id such as `cursor:<native-key>`.
 
-`KyberBridgeEngine` (`dash/server/KyberDash.Application/KyberBridgeEngine.cs`) resolves each execution's session
-key through the store's `SessionIdentities.shareOf`; when a share resolves it reads
-`recordsForShare`, otherwise it retains the legitimate unsplit-session lookup. Within each
-share it applies the existing `dedupeTwinTurns` rule, keeps only `op === 'llm.invoke'` model
-turns (auxiliary and tool records do not inflate turn counts), and deduplicates by span id
-when repeated execution keys appear in one run. Phase alignment and token totals operate on
-that deduped turn set only.
-
-The share-miss fallback goes through the same `recordsForShare` harness predicate as a share
-hit. When that predicate drops every record under a key (an excluded identity such as Gemini,
-or a sibling harness), the side's `metricsReason` names the drop and the bridge warns once per
-key and harness rather than on every Compare request. `SessionIdentities` is memoized on the
-bridge per database handle and store generation — `PRAGMA data_version` (commits from other
-connections, such as ingest or backfill) plus `total_changes()` (any write through the bridge's
-own connection, including in-place `UPDATE`s like `setSessionId`) — so the
-`SELECT DISTINCT … FROM records` scan reruns only after the store changes. Per-phase
+`KyberBridgeEngine` (`dash/server/KyberDash.Application/KyberBridgeEngine.cs`) resolves each
+execution's session once per run and reads its turns through the content-free read models:
+`SessionTurnFigures` for the per-turn token and cost figures, and `SessionRecordsContentFree`
+for the reported totals and the tool names each turn invoked. It hands the turns to
+`CanonRunComparison.Compare` (`dash/server/KyberDash.Application/CanonRunComparison.cs`), which
+infers each turn's phase from its tool names (verification, resolution, implementation,
+exploration, then turn position), aligns the two runs phase by phase, and answers every figure
+the page renders: each turn's canonical total `tokens.all` (measured input plus measured output,
+or withheld with a not-measurable reason, never a zero), per-pair deltas, signals and readings,
+per-phase summaries and run totals. The web page and `TurnAlignedDiff` render those values and
+compute none of them. Per-phase
 `phaseSummaries` token fields follow the totals rule: a phase with any unmeasurable turn omits
 `tokensA`/`tokensB`/`tokenDelta` and carries the first coverage gap as `tokensUnavailableReason`.
 
@@ -2063,7 +2306,7 @@ probed. The `statusLines` are fixed facts and never echo text the owner wrote in
 
 The turn inspection drawer and turn-content endpoints follow explicit numbering and resolution conventions:
 - **0-based transport and 1-based display:** URL routes, router state, and API payloads carry 0-based `turnIndex` (`/api/kyber/session/:id/turn/:index/content`), matching payload `turns[].index`. All user-facing interfaces render 1-based display labels (`Turn #N`), converted strictly at the presentation click boundary. Engine `TurnPressure.index` preserves its documented 1-based contract.
-- **Strict resolver:** `KyberBridgeEngine.assembleTurnContent` strictly resolves 0-based index or positional matches (and legacy `turn - 1` rows). Out-of-bounds indices return HTTP 404 rather than falling back to neighbouring turns.
+- **Strict resolver:** `KyberBridgeEngine.GetTurnContent` strictly resolves 0-based index or positional matches (and legacy `turn - 1` rows). Out-of-bounds indices return HTTP 404 rather than falling back to neighbouring turns.
 - **Diagnosable empty state:** The turn content pane distinguishes an existing turn with no recorded content (`200 OK` with empty content parts, disclosing `spanId` and 0-based `turnIndex`) from an invalid or nonexistent turn (`404 Not Found`).
 - **Measured inspector figures:** Turn inspector headers display measured per-turn token figures only, never text-length estimates. Unmeasured values render honest not-measured treatments per [honest unobservability](../rules/honest-unobservability.md).
 
@@ -2071,7 +2314,10 @@ The turn inspection drawer and turn-content endpoints follow explicit numbering 
 
 Selecting a turn opens the whole-turn view over `GET /api/kyber/session/:id/turn/:index/content`,
 whose explicit `?full=true` path is lossless: no default-budget truncation and no large-number
-sentinel. Blocks and parts render in API order, every part included — unknown kinds and zero-token
+sentinel. The restored C# route serves the byte-budgeted parts alone — the web parser builds the
+blocks, part labels, and assembled text from them, so the shared-context and recurrence handling
+below stays ready for those optional type fields while the route serves neither. Blocks and parts
+render in API order, every part included — unknown kinds and zero-token
 blocks among them — with exact truncation notices when a budget applied.
 
 - **Order is the API's, not the parser's.** `parseReadableXmlChunks` and the formatted view
@@ -2113,14 +2359,24 @@ The web dashboard server wires HTTP requests directly to `KyberBridgeEngine`:
 | `/api/kyber/harness/:id` | `GET` | `HarnessRollupRow` | Detail for a single harness including coverage metrics. |
 | `/api/kyber/runs` | `GET` | `{ runs: RunRow[] }` | List runs newest-first; supports `?harness=`. Each row carries `started`, `harness`, measured `turnCount` when derivable, and optional `label` for Compare inventory labels. |
 | `/api/kyber/run/:id` | `GET` | `{ run, executionTree, executions, findings, turns, scorecard }` | Complete run detail with parent/child execution tree, executions enriched with `turnCount` and `costUsd`, `turns` list (`RunTurnRow[]` with model, tokens, pressure, `cacheHitRatio`, timestamp, and per-turn `costUsd`), and run-scoped `scorecard` (`RunScorecard`). |
-| `/api/kyber/sessions` | `GET` | `{ sessions: SessionSummary[] }` | List sessions; supports `?limit=` and `?harness=`. |
-| `/api/kyber/session/:id` | `GET` | `SessionPayload` | Full session payload with turns, context, tools, and timeline. Summary emits `cache_hit_ratio` and `cache_creation_coverage` from single engine writer. Additively carries `summary.skills_listed`, `summary.skills_invoked`, `skills`, and per-turn `turns[i].skills_listed` / `turns[i].skills_invoked` ([skills view contract](#skills-view-contract)). The served document is assembled — the session aggregate plus one ordered `session_turn` scan via `IRelationalStoreReader.SessionTurnSummaries` — with identical content and unchanged `_clip` bounds. |
-| `/api/kyber/session/:id/summary` | `GET` | Bounded session summary (`session_id`, `harness`, `label`, `is_subagent`, `parent_session`, `agent_name`, `started`, `ended`, `summary`, `problems_count`) | Bounded ancestry lookup served from the read-time session aggregate without touching stored turns; 404 for an unknown id. No run or execution linkage is served, deliberately. |
-| `/api/kyber/session/:id/turn/:index` | `GET` | Bounded per-turn figures | One turn's figures served from a single `session_turn` row — 404 for an unknown turn under the strict 0-based identity lookup. The turn page's counters query reads kilobytes here instead of the whole payload (up to 10,933 turns) it once fetched for one row's counters. |
-| `/api/kyber/timeline` | `GET` | Session timeline | The stored session `timeline` served from the payload directly, without reassembling the whole session payload; the shape the client already parses is unchanged. |
+| `/api/kyber/sessions` | `GET` | `{ sessions: SessionSummary[], total, page, limit }` | Paged roots, 100 per page by default (`limit` clamp 1..100); supports `?page=`, `?limit=`, `?harness=` and `?q=` (case-insensitive substring over label and session id, with `%`, `_` and `\` matched literally). Each root carries its first 25 subagents and a `subagentTotal`. Root resolution, filtering, search, ordering (`started_at_utc` descending, then session id) and the `COUNT(*)` total run in SQL; only the page is priced. |
+| `/api/kyber/session/:id` | `GET` | 404 | **Retired.** The monolithic session payload is gone; the session view reads one route per section (below). The report prices its window with one keyed batched read and the run page reads turn figures. |
+| `/api/kyber/session/:id/summary` | `GET` | Widened bounded session summary | The header strip, banners and overview strip source: identity fields plus `span_count`, `request_count`, cost blocks by basis and model, `costBasisMismatch`, reconciliation totals, `problems_count`, tool counts (`tools_offered_count`, `tools_invoked_count`, `unused_tools_count`), `skills_count`, aux-call fields and schema waste fields. 404 for an unknown id; no run or execution linkage, deliberately. |
+| `/api/kyber/session/:id/charts` | `GET` | Whole-session `turns` and `context` | Exactly the retired payload's `turns` array shape and `context` object (flagged turns, accumulation rate, derived counts, fresh-jump factor, residual total, unmeasured turns, context limit, per-turn tool definitions, residual, headroom, first, last). Not paged by design. |
+| `/api/kyber/session/:id/tools` | `GET` | `{ entries, data, total, page, limit, aggregate }` | Ranked tool rows (never-invoked included and flagged), 25 per page, with the page-independent `aggregate` (`measurable` / `reason`, `maxCost`, `residualCostTotal`, `invocationCount`, `unusedCount`, `unusedRange`, `byServer`, `definitionsSpanId`) priced over every row before paging. |
+| `/api/kyber/session/:id/servers` | `GET` | `{ entries, data, total, page, limit }` | Server rollup rows, 25 per page. |
+| `/api/kyber/session/:id/skills` | `GET` | `{ rows, total, page, limit }` or the not-measurable verdict | Skill rows, 25 per page; the whole-block `{availability: 'not_measurable', reason}` verdict when neither side is measured. Whole-list aggregates are not served yet ([skills view contract](#skills-view-contract)). |
+| `/api/kyber/session/:id/requests` | `GET` | `{ entries, data, total, page, limit }` | Request rows (`request`, `timestamp`, `turns`, `model`, `prompt` preview), 25 per page. Prompt previews are read for the page's spans only. |
+| `/api/kyber/session/:id/reconciliation` | `GET` | `{ entries, data, total, page, limit }` | Reconciliation rows (today's snake-case fields, null-match rows omitted as before), 25 per page. |
+| `/api/kyber/session/:id/problems` | `GET` | `{ entries, data, total, page, limit }` | Problem rows, 25 per page. |
+| `/api/kyber/session/:id/subagents` | `GET` | `{ entries, data, total, page, limit }` | One root's subagent rows, 25 per page. |
+| `/api/kyber/session/:id/timeline` | `GET` | `{ entries, data, total, page, limit, bounds }` | One tree level's nodes (today's node fields without `children`, plus `childCount`), 25 per page, with the whole tree's `bounds`. `parent` omitted answers the top level; otherwise the URL-decoded node id — synthetic `(auxiliary)` and `(orphan:…)` ids included. |
+| `/api/kyber/session/:id/turn/:index` | `GET` | Bounded per-turn figures with context | One turn's figures served from a single `session_turn` row — 404 for an unknown turn under the strict 0-based identity lookup — plus that turn's `context` buckets. The turn page's counters and the drawer drill-down read kilobytes here instead of the whole payload (up to 10,933 turns) they once fetched for one row's counters. |
+| `/api/kyber/timeline` | `GET` | Session timeline | The global timeline, built from the session's content-free record metadata; unchanged by the section split. |
 | `/api/kyber/session/:id/content` | `GET` | `SessionContent` | Full canonical content for an inspected session part. |
-| `/api/kyber/session/{sessionKey}/stored-fields` | `GET` | `StoredFieldsView` (`sessionKey`, `tables[]` of `{ tableName, columnNames, rows, missingParentKeys }`) | Catalog-driven inspection of every applicable `RelationalSchemaCatalog` table for one session: every reachable column labeled `table.column`, absent optional rows listed in `missingParentKeys` as not reported (never `0` or `""`); 404 when the session is unknown; never `/api/sessions/...`. Served by `DashEndpointMappings.StoredFieldsAsync` via `IDashboardQueryService.GetStoredFields` from `KyberBridgeEngine.GetStoredFields` over `IRelationalStoreReader.StoredFields` ([analytics read path, error envelope, and stored-fields surface](#analytics-read-path-error-envelope-and-stored-fields-surface)). |
-| `/api/kyber/session/:id/turn/:index/content` | `GET` | `TurnContentResult` | Full unclipped assembled context for a specific turn ([ADR 0014](../adr/0014-unclipped-turn-inspection-and-copy-out-protocol.md)). Uses 0-based `:index`; strict resolution returns 404 for out-of-bounds turn indices, and 200 with empty parts when the turn exists but recorded no content. `?full=true` is the explicit lossless path — no default-budget truncation, no large-number sentinel — backing the whole-turn inspector; each part annotates recurrence against earlier captured turns by whole-text sha256 with no normalization, and `sharedContext` unions turn-span system prompts with non-turn session prompts, each tagged with its contributing `turnIndex` ([ordered, API-seen turn context](#ordered-api-seen-turn-context)). Additively carries `parentSpanId` and `rawPacket: { spanAttributesPath, interactionPath? }` — the packet pointers the turn view discloses; `interactionPath` is present only when the parent's quarantine row kept a payload ([ADR 0035](../adr/0035-kyberdash-quarantine-raw-packet-evidence.md)). Additively carries a `skills` entry, `{listed: [{name, text?}], invoked: [names]}`, where either side or the whole entry may be `{availability: 'not_measurable', reason}` ([skills view contract](#skills-view-contract)). |
+| `/api/kyber/session/{sessionKey}/stored-fields` | `GET` | `StoredFieldsInventoryView` (`sessionKey`, `tables[]` of `{ tableName, columnNames, rows, missingParentKeys }`) | Content-free inventory of every applicable `RelationalSchemaCatalog` table for one session: every reachable column labeled `table.column`, absent optional rows listed in `missingParentKeys` as not reported (never `0` or `""`); 404 when the session is unknown; never `/api/sessions/...`. No row values cross on this route ([analytics read path, error envelope, and stored-fields surface](#analytics-read-path-error-envelope-and-stored-fields-surface)). |
+| `/api/kyber/session/{sessionKey}/stored-fields/{table}` | `GET` | `{ entries, data, total, page, limit }` | That catalog table's rows, one SQL-limited page of 25; `table` must be one the inventory lists, else 404. Rows load only when the viewer opens the table. |
+| `/api/kyber/session/:id/turn/:index/content` | `GET` | `TurnContentResult` | Byte-budgeted turn content for a specific turn ([ADR 0014](../adr/0014-unclipped-turn-inspection-and-copy-out-protocol.md)). Uses 0-based `:index`; strict resolution returns 404 for out-of-bounds turn indices, and 200 with empty parts when the turn exists but recorded no content. `?full=true` is the explicit lossless path — no default-budget truncation, no large-number sentinel — backing the whole-turn inspector. The route serves the scoped parts alone — `{spanId, part, text, tokens?, server?, resident?, truncated?}` per part — plus `spanId`, `model?` (omitted when the turn recorded none), `rawPacket: { spanAttributesPath: /api/kyber/span/{spanId}/attributes }`, and the legacy `content`/`turn`/`budget`/`totalBytes` fields; `truncated` is true only when the budgeted parts read left at least one scoped part behind (decided by the content-free `TurnContentPartCount` read), never on `?full=true`. Blocks, part labels, and assembled text are built by the web parser from the served parts, so no text is duplicated on the wire ([ordered, API-seen turn context](#ordered-api-seen-turn-context)). The retired TypeScript server's recurrence annotations, `sharedContext`, `parentSpanId`, `interactionPath`, and `skills` entry are not restored: each stays optional in the web type and the views render without it ([skills view contract](#skills-view-contract)). |
 | `/api/kyber/findings` | `GET` | `{ findings: Finding[], total, limit, offset, detectorCounts, unknownWindowSessions }` | Ranked findings; supports `?runId=`, `?sessionId=`, `?harness=`, `?detector=`, `?limit=`, `?offset=`. `total` describes the narrowed set; `detectorCounts` cover the run/session/harness scope ignoring paging and the detector filter so filter chips never evaporate; `unknownWindowSessions` counts sessions with an unreported context window in scope. |
 | `/api/kyber/finding/:id` | `GET` | `Finding` | Single finding detail with evidence rows and risk caveats. |
 | `/api/kyber/predictions` | `GET`, `POST` | `{ predictions: Prediction[] }` | Query or record prediction calibration entries. |
@@ -2135,7 +2391,7 @@ The web dashboard server wires HTTP requests directly to `KyberBridgeEngine`:
 | `/api/kyber/meta` | `GET` | `MetaResult` | Tokenizer configuration, rates, span counts, and sources. |
 | `/api/kyber/version` | `GET` | `{ version, apiVersion }` | The engine's version (`KYBERDASH_VERSION`, read from `dash/package.json`, which a release stamps with the release version) and the report schema version (`apiVersion`). Store-free on purpose: it never reads `canon.db`, so it stays fast while a projection runs, where `/api/kyber/meta` measured 23 s. The web Settings drawer reads it once on open, with no polling. The tray core fetches it on its existing poll and carries it as `ViewState.kyberdashVersion`, passed through unchanged, or `null` when the fetch fails, so the tray shows `unknown`. Non-GET methods answer 405. |
 | `/api/kyber/coverage` | `GET` | `{ refresh, ingest, quarantineByReason, checkpoints }` | Ingest coverage: persisted refresh window (`history_weeks`, null = unknown), per-source ingest activity (`records` counts joined with `ingest_log` sums and `lastReceivedAt`; `{ status: 'unknown' }` when nothing is recorded), per-reason quarantine counts, and `source_checkpoint` statuses including `partial` and the persisted zero-record reason (`lastErrorCode`). |
-| `/api/kyber/report` | `GET` | `ContextReport` | The versioned context report for the query scope (`harness`, `session`, `run`, `days`); the same document `kyberdash report` prints. |
+| `/api/kyber/report` | `GET` | `ContextReport` | The versioned context report for the query scope (`harness`, `session`, `run`, `limit` 1..200 default `50`, `days` positive integer default `7`; HTTP 400 on invalid `days` or `limit`), excluding `gemini` and unprojected sessions and emitting `kyberdashVersion`, `scope`, `coverage` (`storePath`, `harnesses`, `refresh`, `quarantineCount`, `problemCount`, `hints`), `findings`, `harnesses[].dimensions`, `latestSession`, and non-blended `cost[]`; the same document `kyberdash report` prints. |
 | `/api/kyber/settings` | `GET`, `PUT` | `SettingsView` | The four shared switches as JSON booleans and a number: `folderImportScheduled`, `jobsPaused`, `refreshCadenceMinutes`, `receiverHosted` ([ADR 0033](../adr/0033-kyberdash-surfaces-are-display-layers.md)). A `PUT` is partial; an unknown key or a value of the wrong type is refused whole (400), leaving every switch as it was. |
 | `/api/kyber/jobs` | `GET` | `{ refresh, paused, storeGeneration, hostedElsewhere }` | What the job host is actually doing — state, last success, last failure, next due, whether it is paused, and whether another process holds `jobs.lock`. The flat host status is mapped here once, so both surfaces read the same shape. |
 | `/api/kyber/capture` | `GET`, `POST` | `GET`: `{ platform, receiver: { hosted, liveness, detail }, harnesses: CaptureHarnessStatus[] }` · `POST`: `{ action, harness, dryRun, outcome, events, harnessState, receiver: { hosted, willEnable, enabled, enableFailed, lastManagedHarnessDisabled } }` | Harness OpenTelemetry collection ([ADR 0031](../adr/0031-kyberdash-capture-command-owns-harness-telemetry-keys.md)). `GET` is read-only: per-harness `state` (`on` / `off` / `partial` / `unknown` / `not-applicable`), install detection, files with expected and present keys, drift, warnings, manual steps, and receiver liveness probed at `/healthz` (`unknown`, not probed, when this server does not host the receiver). `POST` body is exactly `{ action: 'enable' \| 'disable', harness, dryRun }` for a managed harness (Copilot, Claude Code, OpenCode); any other key or harness is 400. A dry run returns the exact per-file changes and writes nothing. A real `enable` that ends `wrote` or `noop`, or that wrote at least one file before a later file refused, turns `settings.receiver.hosted` on afterwards; `disable` never turns it off and only reports `lastManagedHarnessDisabled`. 200 result; 400 invalid payload; 404 when the server has no store; 405 other methods; 409 `{ error, outcome: 'refused', reason, events }` on drift, conflict, unparseable, unreadable or busy; a refusal before any write changes no files (a drift refusal on disable says so), but files are written one at a time, so a later file's refusal or host error can follow earlier files already written, and `events` keeps those `wrote` events; 413 body over 64KB; 415 non-JSON content type; 500 fixed `{ error: 'Capture failed' }` (no path or host error text crosses the wire). |
@@ -2329,6 +2585,19 @@ scheduled refresh and the receiver — is superseded by
 The one seam every surface depends on is the `ContextReport` itself. The tray, the web
 dashboard, and the CLI render the same document, so parity is structural; CLI and REST `/api/kyber/report`
 parity is pinned by `dash/server.tests/KyberDash.Presentation.Tests/MinimalApiEndpointTests.cs` (Requirement 11.14).
+
+### Collector attribution and read-side API projection
+
+The OTLP ingest seam and read-side query engine align raw harness telemetry with both Web Dashboard and Tray UI display contracts:
+
+- **Pi session correlation (`PiAdapter` and `PiSpanMapper`):** Both `PiAdapter.Normalize` (`dash/server/KyberDash.Domain/CanonAdapters.cs`) and `PiSpanMapper.Parse` (`dash/server/KyberDash.Data/Harnesses/Otlp/PiSpanMapper.cs`) fall back to a trimmed non-whitespace `pi.session.id` attribute when standard session keys (`CanonicalSessionId` / `OtlpSpanNative.SessionId`) are absent; whitespace-only values resolve to `null`.
+- **OTLP `SkillsInvoked` ingest (`CanonIngestPipeline` and `OtlpLogMapper`):** `CanonIngestPipeline.ToCollectedRecord` and `OtlpLogMapper.ToCollectedRecord` populate `CollectedRecord.SkillsInvoked` from `gen_ai.skill.name`, `skill.name`, `skill_name`, and `kyber.skills.invoked` (scalar string, JSON array string, or string array) plus `Skill`/`skill` tool call argument properties (`skill`, `skill_name`, `name` across `ToolArgumentKeys`) instead of leaving `SkillsInvoked` empty.
+- **Web Dashboard session section projections (one route per section):** the retired `GET /api/kyber/session/:id` payload is gone; each section endpoint serves the fields the payload used to carry, from its own purpose-named read ([the read-model register](#the-read-model-register), [ADR 0092](../adr/0092-dashboard-views-load-by-section-and-page.md)). `KyberBridgeEngine.GetSessionSummary` emits the header strip, banners and overview strip; `GetSessionCharts` the whole-session `turns` and `context`; `GetSessionTools` / `GetSessionServers` the ranked tool rows, server rollups and the page-independent aggregate; `GetSessionSkills` the paged skill rows; `GetSessionTimeline` one tree level with `childCount` and `bounds`; `GetSessionRequests` / `GetSessionReconciliation` / `GetSessionProblems` the paged rows (requests with the page's prompt previews); `GetSessionSubagents` the subagent pages; and `GetStoredFieldsInventory` / `GetStoredFieldsRows` the inventory and the opened table's page. Field names and shapes are unchanged from the retired payload; only the route that serves them moved.
+- **Tray `ContextReport` alignment and windowing (`GET /api/kyber/report`):**
+  - `IDashboardQueryService` (`dash/server/KyberDash.Contracts/Services/IDashServices.cs`) and `DashboardQueryService` preserve the 4-argument `GetReport(harness, sessionId, runId, limit)` signature (defaulting `days: 7`) for CLI `ReportService` and test mock compatibility while adding a 5-argument overload `GetReport(harness, sessionId, runId, limit, days)`.
+  - `DashEndpointMappings.ReportAsync` (`dash/server/KyberDash.Api/Endpoints/DashEndpointMappings.cs`) trims `harness`/`session`/`run` (normalizing `harness`), clamps `limit` to `1..200` (default `50` when omitted), defaults `?days=` to `7` when omitted entirely, and returns HTTP 400 Bad Request (`"days must be a positive whole number"` / `"limit must be a positive whole number"`) via `DashHttp.OptionalPositiveInt` when `?days=` (or `?limit=`) is provided as blank, whitespace, zero, negative, or non-numeric.
+  - `ServiceCollectionExtensions.RegisterEngines` passes `DashOptions.DatabasePath` as `storePath` into `KyberBridgeEngine` (defaulting to `CanonDbPath.Resolve()`), emitted at `coverage.storePath`.
+  - `KyberBridgeEngine.GetReport` excludes excluded harnesses (`CanonPricing.CanonicalHarnessId(...) is null`, including `gemini`) and unprojected sessions, scopes sessions/runs/findings to the `days` window, preserves compatibility scalars (`schemaVersion`, `generatedAt`, `storeGeneration`, `sessionCount`, `findingCount`, `harnessCount`), emits `kyberdashVersion`, `scope`, `coverage` (`storePath`, `refresh`, `harnesses`, `quarantineCount`, `problemCount`, `hints`), `findings` (`recoverableTokens`, `view`, `errorBar`, `evidenceIds`), `harnesses[].dimensions` via `CanonRollupsEngine.BuildHarnessScorecard` from `StoredHarnessRollup` or bounded window rollups without N+1 `ReadSessionFigures` scans, `latestSession` (hydrating `ReadSessionFigures` at most once for that single newest session with `latestTurn` buckets, pressure, and residual or honest absent reasons), and non-blended `cost[]`.
 
 ## Parity suite and C# engine verification (R15)
 

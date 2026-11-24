@@ -155,6 +155,38 @@ const SCOPE_SESSIONS = [
   { session_id: 'sess-cursor-1', harness: 'cursor', label: 'cursor run' },
 ]
 
+/**
+ * The page envelope the sessions paging route serves (Task T3): the store
+ * filters by harness and search server-side, and windows by page and limit,
+ * so a stub that skips either would let a scoped page answer with rows the
+ * page did not ask for.
+ */
+function sessionsPageEnvelope(
+  rows: Array<{ session_id: string; harness: string; label: string | null }>,
+  url?: URL,
+): Record<string, unknown> {
+  const page = url ? Number(url.searchParams.get('page') ?? 1) : 1
+  const limit = url ? Number(url.searchParams.get('limit') ?? 100) : 100
+  const windowed = url ? rows.slice((page - 1) * limit, page * limit) : rows
+  return { sessions: windowed, data: windowed, total: rows.length, page, limit, offset: (page - 1) * limit }
+}
+
+/** The store's harness-and-search narrowing, as the engine's route applies it. */
+function narrowedSessions(
+  store: Array<{ session_id: string; harness: string; label: string | null }>,
+  url: URL,
+): Array<{ session_id: string; harness: string; label: string | null }> {
+  let rows = store
+  const harness = url.searchParams.get('harness')
+  const q = url.searchParams.get('q')
+  if (harness) rows = rows.filter((s) => (s.harness ?? '').toLowerCase() === harness.toLowerCase())
+  if (q) {
+    const wanted = q.toLowerCase()
+    rows = rows.filter((s) => (s.label ?? '').toLowerCase().includes(wanted) || s.session_id.toLowerCase().includes(wanted))
+  }
+  return rows
+}
+
 function browserSection(): HTMLElement {
   return screen.getByTestId('all-workspace-findings')
 }
@@ -189,7 +221,7 @@ function stubPagedFetch(opts: {
     vi.fn(async (input: string) => {
       const url = new URL(input, 'http://localhost')
       const json = (payload: unknown) => ({ ok: true, json: async () => payload }) as unknown as Response
-      if (url.pathname === '/api/kyber/sessions') return json({ sessions: SCOPE_SESSIONS })
+      if (url.pathname === '/api/kyber/sessions') return json(sessionsPageEnvelope(SCOPE_SESSIONS))
       if (url.pathname === '/api/kyber/harnesses') return json({ harnesses: renderedHarnesses })
       if (url.pathname === '/api/kyber/runs') return json({ runs: [] })
       if (url.pathname === '/api/kyber/coverage') return json(emptyCoverage)
@@ -999,7 +1031,7 @@ describe('ContextDoctor filter change — rendered (must-fix-1)', () => {
         const url = new URL(input, 'http://localhost')
         const json = (payload: unknown) =>
           ({ ok: true, json: async () => payload }) as unknown as Response
-        if (url.pathname === '/api/kyber/sessions') return json({ sessions: SCOPE_SESSIONS })
+        if (url.pathname === '/api/kyber/sessions') return json(sessionsPageEnvelope(SCOPE_SESSIONS))
         if (url.pathname === '/api/kyber/harnesses') return json({ harnesses: renderedHarnesses })
         if (url.pathname === '/api/kyber/runs') return json({ runs: [] })
         if (url.pathname === '/api/kyber/coverage') return json(emptyCoverage)
@@ -1206,7 +1238,6 @@ describe('ContextDoctor paging — rendered (F2/F3)', () => {
     expect(requested).toEqual(['3', '6'])
   })
 })
-
 /**
  * Scope owned above the page (harness + session). The owner of the dashboard
  * header — `App` — holds the selected harness and the session opened in the
@@ -1217,12 +1248,12 @@ describe('ContextDoctor paging — rendered (F2/F3)', () => {
  * What these pin:
  *   - both findings queries (headline card and paged browser) carry the
  *     harness AND session parameters, so the scope is the server's;
- *   - the session selector defaults to All sessions and lists only the
- *     selected harness's canonical sessions;
- *   - a scope change refetches from page one and never paints the previous
- *     scope's rows under the new heading;
- *   - a session that leaves the selected harness is cleared rather than left
- *     filtering findings by a session outside the scope;
+ *   - the picker is a search combobox over the server's `q`, paged like the
+ *     explorer (Task T3), and lists only the scope the store answers;
+ *   - a selected or deep-linked id validates through the bounded summary
+ *     route — never through list membership — so a session past page one
+ *     still stands, a record for another harness is reported, and an
+ *     unknown id (404) ends the scope;
  *   - the standalone page (no `onSessionChange`) still works off internal
  *     state.
  */
@@ -1232,11 +1263,25 @@ describe('ContextDoctor scope: harness and session', () => {
     vi.unstubAllGlobals()
   })
 
+  /** The bounded body GET /api/kyber/session/:id/summary serves. */
+  function summaryBody(id: string, harness: string, label?: string): Record<string, unknown> {
+    return { session_id: id, harness, label: label ?? null, is_subagent: false, parent_session: null, summary: {} }
+  }
+
+  const KNOWN_SUMMARIES: Record<string, Record<string, unknown>> = {
+    'sess-pi-1': summaryBody('sess-pi-1', 'pi'),
+    'sess-pi-2': summaryBody('sess-pi-2', 'pi'),
+    'sess-cursor-1': summaryBody('sess-cursor-1', 'cursor'),
+  }
+
   /**
    * Stubs the endpoints the scoped page reads and records every findings URL
    * it asked for, so the scope parameters can be asserted per request rather
-   * than per component. Session-scoped requests are gated so a mid-flight
-   * assertion is deterministic.
+   * than per component. The sessions store narrows the way the engine's route
+   * does (harness, then search), and the summary route answers the ids in
+   * `summaries` with a 404 for everything else — a deep-linked id the store
+   * does not know is a 404, and a real one resolves however far down the
+   * store it sits.
    */
   function stubScoped(opts: {
     page?: FindingsPage
@@ -1244,27 +1289,48 @@ describe('ContextDoctor scope: harness and session', () => {
     isScoped?: (url: URL) => boolean
     release?: () => Promise<void>
     sessionsStatus?: number
-    /** Fail the first N session reads, then serve the list (the retry path). */
+    /** Fail the first N session reads, then serve the store (the retry path). */
     sessionsFailures?: number
+    /** Per-id summary bodies; ids without one answer 404. */
+    summaries?: Record<string, Record<string, unknown>>
+    /** Answer every summary read with this status instead of the body. */
+    summaryStatus?: number
+    /** Hold every summary answer until released. */
+    holdSummary?: Promise<void>
+    /** A store the sessions route serves instead of SCOPE_SESSIONS. */
+    store?: Array<{ session_id: string; harness: string; label: string | null }>
+    /** When present, every sessions request's query string is appended here. */
+    sessionRequests?: string[]
   } = {}): string[] {
     const requested: string[] = []
     let sessionFailures = opts.sessionsFailures ?? 0
+    const summaries = opts.summaries ?? KNOWN_SUMMARIES
     vi.stubGlobal(
       'fetch',
       vi.fn(async (input: string) => {
         const url = new URL(input, 'http://localhost')
         const json = (payload: unknown) => ({ ok: true, json: async () => payload }) as unknown as Response
+        const fail = (status: number) =>
+          ({ ok: false, status, json: async () => ({ error: 'failed' }) }) as unknown as Response
         if (url.pathname === '/api/kyber/sessions') {
+          opts.sessionRequests?.push(url.search)
           // A failure budget, so a retry is driven deterministically against
           // one stub: the endpoint fails, then recovers.
           if (sessionFailures > 0) {
             sessionFailures -= 1
-            return { ok: false, status: 500, json: async () => ({ error: 'sessions failed' }) } as unknown as Response
+            return fail(500)
           }
           const status = opts.sessionsStatus ?? 200
-          return status === 200
-            ? json({ sessions: SCOPE_SESSIONS })
-            : ({ ok: false, status, json: async () => ({ error: 'sessions failed' }) } as unknown as Response)
+          if (status !== 200) return fail(status)
+          return json(sessionsPageEnvelope(narrowedSessions(opts.store ?? SCOPE_SESSIONS, url), url))
+        }
+        const summary = /\/api\/kyber\/session\/([^/]+)\/summary$/.exec(url.pathname)
+        if (summary) {
+          if (opts.holdSummary) await opts.holdSummary
+          if (opts.summaryStatus !== undefined) return fail(opts.summaryStatus)
+          const body = summaries[decodeURIComponent(summary[1]!)]
+          if (body === undefined) return fail(404)
+          return json(body)
         }
         if (url.pathname === '/api/kyber/findings') {
           requested.push(url.search)
@@ -1280,11 +1346,16 @@ describe('ContextDoctor scope: harness and session', () => {
     return requested
   }
 
-  /** The select only once the canonical sessions for the scope are listed. */
-  async function sessionSelect(): Promise<HTMLSelectElement> {
-    const select = (await screen.findByTestId('context-doctor-session-select')) as HTMLSelectElement
-    await waitFor(() => expect(select.options.length).toBeGreaterThan(1))
-    return select
+  /** Opens the combobox so its listbox renders, and returns the input. */
+  async function openPicker(): Promise<HTMLInputElement> {
+    const box = (await screen.findByTestId('context-doctor-session-combobox')) as HTMLInputElement
+    fireEvent.focus(box)
+    await screen.findByTestId('context-doctor-session-listbox')
+    return box
+  }
+
+  function scopeNote(): HTMLElement {
+    return screen.getByTestId('context-doctor-session-scope-note')
   }
 
   /**
@@ -1347,7 +1418,7 @@ describe('ContextDoctor scope: harness and session', () => {
     // standalone and ignores `sessionId` entirely.
     renderScoped({ activeHarness: 'pi', sessionId: 'sess-pi-2', onSessionChange: () => {} })
 
-    await screen.findByTestId('context-doctor-session-select')
+    await screen.findByTestId('context-doctor-session-combobox')
     await waitFor(() => expect(requested.length).toBeGreaterThanOrEqual(2))
     // The headline card and the paged browser are separate queries; each must
     // carry the scope, or the page mixes scopes inside one screen.
@@ -1357,19 +1428,19 @@ describe('ContextDoctor scope: harness and session', () => {
     expect(requested.every((qs) => qs.includes('sessionId=sess-pi-2'))).toBe(true)
   })
 
-  it('defaults the session selector to All sessions and lists only the selected harness', async () => {
+  it('defaults the picker to All sessions and lists only the selected harness', async () => {
     stubScoped()
     renderScoped({ activeHarness: 'pi' })
 
-    const select = (await screen.findByTestId('context-doctor-session-select')) as HTMLSelectElement
+    const box = await openPicker()
     // Default: the whole harness, not an arbitrary first session.
-    expect(select.value).toBe('')
+    expect(box.value).toBe('')
     await waitFor(() =>
-      expect(Array.from((select as HTMLSelectElement).options).map((option) => option.value)).toEqual([
-        '',
-        'sess-pi-1',
-        'sess-pi-2',
-      ]),
+      expect(
+        within(screen.getByTestId('context-doctor-session-listbox')).getAllByTestId(/^session-option-/).map((option) =>
+          option.getAttribute('data-testid')!.replace('session-option-', ''),
+        ),
+      ).toEqual(['all', 'sess-pi-1', 'sess-pi-2']),
     )
   })
 
@@ -1377,40 +1448,39 @@ describe('ContextDoctor scope: harness and session', () => {
     stubScoped()
     renderScoped({})
 
-    const select = (await screen.findByTestId('context-doctor-session-select')) as HTMLSelectElement
+    await openPicker()
     await waitFor(() =>
-      expect(Array.from(select.options).map((option) => option.value)).toEqual([
-        '',
-        'sess-pi-1',
-        'sess-pi-2',
-        'sess-cursor-1',
-      ]),
+      expect(
+        within(screen.getByTestId('context-doctor-session-listbox')).getAllByTestId(/^session-option-/).map((option) =>
+          option.getAttribute('data-testid')!.replace('session-option-', ''),
+        ),
+      ).toEqual(['all', 'sess-pi-1', 'sess-pi-2', 'sess-cursor-1']),
     )
-    expect(screen.getByTestId('context-doctor-session-scope-note').textContent).toMatch(/all sessions/i)
+    expect(scopeNote().textContent).toMatch(/all sessions/i)
   })
 
   it('says the session list could not be read, and keeps All sessions', async () => {
     stubScoped({ sessionsStatus: 500 })
     renderScoped({ activeHarness: 'pi' })
 
-    const note = await screen.findByTestId('context-doctor-session-scope-note')
-    expect(note.textContent).not.toContain('sessions failed')
-    const select = screen.getByTestId('context-doctor-session-select') as HTMLSelectElement
+    await openPicker()
+    const note = scopeNote()
+    expect(note.textContent).not.toContain('failed')
     // An unreadable session list is not a session choice: the scope stays
     // where it was rather than silently narrowing to nothing.
-    expect(Array.from(select.options).map((option) => option.value)).toEqual([''])
+    expect(within(screen.getByTestId('context-doctor-session-listbox')).queryByTestId(/^session-option-sess-/)).toBeNull()
     // Nothing was selected, so nothing is claimed beyond it: the failure is
     // reported, and the scope it leaves behind really is all sessions.
     await waitFor(() => expect(note.textContent).toMatch(/could not be read/i))
     expect(note.textContent).toMatch(/all sessions/i)
   })
 
-  it('keeps a selected session queried when the session list cannot be read', async () => {
-    // A controlled owner holding a session, and an inventory that failed to
-    // load. The page believes the inventory only once it has landed, so the
-    // session stands: clearing it here would widen the findings queries to
-    // the whole harness on the strength of a metadata failure.
-    const requested = stubScoped({ sessionsStatus: 500 })
+  it('keeps a selected session queried when its summary cannot be read', async () => {
+    // A controlled owner holding a session, and the summary route failing.
+    // The page believes the summary only once it has landed, so the session
+    // stands: clearing it here would widen the findings queries to the whole
+    // harness on the strength of a metadata failure.
+    const requested = stubScoped({ summaryStatus: 500 })
     const changes: (string | undefined)[] = []
     renderScoped({ activeHarness: 'pi', sessionId: 'sess-pi-2', onSessionChange: (id) => changes.push(id) })
 
@@ -1422,11 +1492,11 @@ describe('ContextDoctor scope: harness and session', () => {
     expect(changes).toEqual([])
   })
 
-  it('never claims all sessions when a selected session survived a session-list failure', async () => {
-    stubScoped({ sessionsStatus: 500 })
+  it('never claims all sessions when a selected session survived a failed summary read', async () => {
+    stubScoped({ summaryStatus: 500 })
     renderScoped({ activeHarness: 'pi', sessionId: 'sess-pi-2', onSessionChange: () => {} })
 
-    const note = await screen.findByTestId('context-doctor-session-scope-note')
+    const note = scopeNote()
     // The failure is stated...
     await waitFor(() => expect(note.textContent).toMatch(/could not be read/i))
     // ...and the scope on screen matches the scope in the query. "All sessions"
@@ -1435,101 +1505,65 @@ describe('ContextDoctor scope: harness and session', () => {
     expect(note.textContent).toMatch(/selected session/i)
   })
 
-  it('shows the selected session in the selector while the session list cannot be read', async () => {
-    // The select's value is the effective session, so without a matching
-    // option the native control renders blank/none while the findings still
-    // query the session. The fallback carries the current value truthfully
-    // (id plus unavailable metadata, never invented session metadata) and is
-    // disabled because it is the current value, not a new choice — All
-    // sessions stays explicitly choosable.
-    const requested = stubScoped({ sessionsStatus: 500 })
+  it('shows the selected session in the combobox while the summary cannot be read', async () => {
+    stubScoped({ summaryStatus: 500 })
     renderScoped({ activeHarness: 'pi', sessionId: 'sess-pi-2', onSessionChange: () => {} })
 
-    const select = (await screen.findByTestId('context-doctor-session-select')) as HTMLSelectElement
-    const note = screen.getByTestId('context-doctor-session-scope-note')
+    const box = (await screen.findByTestId('context-doctor-session-combobox')) as HTMLInputElement
+    const note = scopeNote()
     await waitFor(() => expect(note.textContent).toMatch(/could not be read/i))
-    expect(select.value).toBe('sess-pi-2')
-    expect(Array.from(select.options).map((option) => option.value)).toEqual(['', 'sess-pi-2'])
-    const fallback = Array.from(select.options).find((option) => option.value === 'sess-pi-2')!
-    expect(fallback.disabled).toBe(true)
-    expect(fallback.textContent).toContain('sess-pi-2')
-    expect(fallback.textContent).toMatch(/unavailable/i)
-    expect(Array.from(select.options).find((option) => option.value === '')!.disabled).toBe(false)
+    // The selection stands even though no fetched option carries it: the
+    // input represents the current value truthfully (its id), and the note
+    // says the scope really is that session.
+    expect(box.value).toBe('sess-pi-2')
     expect(note.textContent).toMatch(/selected session/i)
     expect(note.textContent).not.toMatch(/all sessions/i)
-    await waitFor(() => expect(requested.length).toBeGreaterThanOrEqual(2))
-    expect(requested.every((qs) => qs.includes('sessionId=sess-pi-2'))).toBe(true)
   })
 
-  it('shows the selected session in the selector while the session list is loading', async () => {
-    // Same blank-control facet while the inventory is in flight: the
-    // selection stands and the findings query it, so the visible selection
-    // must match the effective query rather than reading as All sessions.
-    let releaseSessions!: () => void
+  it('shows the selected session in the combobox while the summary is loading', async () => {
+    // The selection stands while its record is in flight: the findings query
+    // it, so the visible selection must match the effective query rather than
+    // reading as All sessions.
+    let releaseSummary!: () => void
     const gate = new Promise<void>((resolve) => {
-      releaseSessions = resolve
+      releaseSummary = resolve
     })
-    const requested: string[] = []
-    vi.stubGlobal(
-      'fetch',
-      vi.fn(async (input: string) => {
-        const url = new URL(input, 'http://localhost')
-        const json = (payload: unknown) => ({ ok: true, json: async () => payload }) as unknown as Response
-        if (url.pathname === '/api/kyber/sessions') {
-          await gate
-          return json({ sessions: SCOPE_SESSIONS })
-        }
-        if (url.pathname === '/api/kyber/findings') {
-          requested.push(url.search)
-          return json(browserPage([], {}))
-        }
-        throw new Error(`unstubbed fetch: ${input}`)
-      }),
-    )
+    const requested = stubScoped({ holdSummary: gate })
     renderScoped({ activeHarness: 'pi', sessionId: 'sess-pi-2', onSessionChange: () => {} })
 
-    const select = (await screen.findByTestId('context-doctor-session-select')) as HTMLSelectElement
-    expect(select.value).toBe('sess-pi-2')
-    expect(Array.from(select.options).map((option) => option.value)).toEqual(['', 'sess-pi-2'])
-    const fallback = Array.from(select.options).find((option) => option.value === 'sess-pi-2')!
-    expect(fallback.disabled).toBe(true)
-    expect(fallback.textContent).toContain('sess-pi-2')
-    expect(fallback.textContent).toMatch(/loading|reading/i)
-    expect(screen.getByTestId('context-doctor-session-scope-note').textContent).toMatch(/reading sessions/i)
+    const box = (await screen.findByTestId('context-doctor-session-combobox')) as HTMLInputElement
+    expect(box.value).toBe('sess-pi-2')
+    // The list lands first; while the selected session's own record is still
+    // in flight, the note says the page is reading it.
+    await waitFor(() => expect(scopeNote().textContent).not.toBe('Reading sessions…'))
+    expect(scopeNote().textContent).toMatch(/reading the selected session/i)
     await waitFor(() => expect(requested.length).toBeGreaterThanOrEqual(2))
     expect(requested.every((qs) => qs.includes('sessionId=sess-pi-2'))).toBe(true)
 
-    // The inventory lands: the real option replaces the fallback, still selected.
-    releaseSessions()
-    await waitFor(() =>
-      expect(
-        Array.from((screen.getByTestId('context-doctor-session-select') as HTMLSelectElement).options).map(
-          (option) => option.value,
-        ),
-      ).toEqual(['', 'sess-pi-1', 'sess-pi-2']),
-    )
-    expect((screen.getByTestId('context-doctor-session-select') as HTMLSelectElement).value).toBe('sess-pi-2')
+    // The record lands: the selection stands, named by its label.
+    releaseSummary()
+    await waitFor(() => expect((screen.getByTestId('context-doctor-session-combobox') as HTMLInputElement).value).toBe('sess-pi-2'))
   })
 
-  it('recovers the session scope on retry after a failed session read', async () => {
-    const requested = stubScoped({ sessionsFailures: 1 })
+  it('recovers the session list on retry after a failed session read', async () => {
+    stubScoped({ sessionsFailures: 1 })
     renderScoped({ activeHarness: 'pi', sessionId: 'sess-pi-2', onSessionChange: () => {} })
 
     fireEvent.click(await screen.findByTestId('context-doctor-session-retry'))
 
     // The list lands, and the session the owner was holding is still the one
     // in force: a failed read never became a scope change.
+    const box = await openPicker()
     await waitFor(() =>
       expect(
-        Array.from((screen.getByTestId('context-doctor-session-select') as HTMLSelectElement).options).map(
-          (option) => option.value,
+        within(screen.getByTestId('context-doctor-session-listbox')).getAllByTestId(/^session-option-/).map((option) =>
+          option.getAttribute('data-testid')!.replace('session-option-', ''),
         ),
-      ).toEqual(['', 'sess-pi-1', 'sess-pi-2']),
+      ).toEqual(['all', 'sess-pi-1', 'sess-pi-2']),
     )
-    expect((screen.getByTestId('context-doctor-session-select') as HTMLSelectElement).value).toBe('sess-pi-2')
-    await waitFor(() => expect(screen.getByTestId('context-doctor-session-scope-note').textContent).toMatch(/one session/i))
+    expect(box.value).toBe('sess-pi-2')
+    await waitFor(() => expect(scopeNote().textContent).toMatch(/one session/i))
     expect(screen.queryByTestId('context-doctor-session-retry')).toBeNull()
-    expect(requested.every((qs) => qs.includes('sessionId=sess-pi-2'))).toBe(true)
   })
 
   it('refetches under the chosen session and tells the owner', async () => {
@@ -1537,7 +1571,8 @@ describe('ContextDoctor scope: harness and session', () => {
     const changes: (string | undefined)[] = []
     renderOwnerControlled({ activeHarness: 'pi', onSelect: (id) => changes.push(id) })
 
-    fireEvent.change(await sessionSelect(), { target: { value: 'sess-pi-1' } })
+    fireEvent.focus(await screen.findByTestId('context-doctor-session-combobox'))
+    fireEvent.mouseDown(await screen.findByTestId('session-option-sess-pi-1'))
     expect(changes).toEqual(['sess-pi-1'])
     await waitFor(() => expect(requested.some((qs) => qs.includes('sessionId=sess-pi-1'))).toBe(true))
   })
@@ -1546,46 +1581,78 @@ describe('ContextDoctor scope: harness and session', () => {
     const requested = stubScoped()
     renderScoped({})
 
-    fireEvent.change(await sessionSelect(), { target: { value: 'sess-cursor-1' } })
+    fireEvent.focus(await screen.findByTestId('context-doctor-session-combobox'))
+    fireEvent.mouseDown(await screen.findByTestId('session-option-sess-cursor-1'))
     await waitFor(() => expect(requested.some((qs) => qs.includes('sessionId=sess-cursor-1'))).toBe(true))
   })
 
-  it('restarts at page one and never paints the previous scope rows', async () => {
-    const first = browserPage(['a-1', 'a-2', 'a-3'], {}, 'pi', { total: 115 })
-    const scoped = browserPage(['b-1', 'b-2'], {}, 'pi')
-    let release!: () => void
-    const gate = new Promise<void>((resolve) => {
-      release = resolve
-    })
-    const requested = stubScoped({
-      page: first,
-      scopedPage: scoped,
-      isScoped: (url) => url.searchParams.get('sessionId') === 'sess-pi-1',
-      release: () => gate,
-    })
-    const utils = renderScoped({ initial: first, activeHarness: 'pi', onSessionChange: () => {} })
+  it('searches the picker server-side over q, narrowing the options', async () => {
+    stubScoped()
+    renderScoped({ activeHarness: 'pi' })
 
-    // Page one of the harness scope is served like any other page: the seeded
-    // workspace rows are only ever the page one of an UNSCOPED list.
-    await browser().findByTestId('finding-card-a-1')
-    expect(browser().getByText('All Workspace Findings (115)')).not.toBeNull()
+    const box = await openPicker()
+    fireEvent.change(box, { target: { value: 'pi run' } })
+    await waitFor(() =>
+      expect(
+        within(screen.getByTestId('context-doctor-session-listbox')).getAllByTestId(/^session-option-/).map((option) =>
+          option.getAttribute('data-testid')!.replace('session-option-', ''),
+        ),
+      ).toEqual(['all', 'sess-pi-1']),
+    )
+  })
 
-    utils.rerender({ activeHarness: 'pi', sessionId: 'sess-pi-1' })
+  it('pages the picker through the shared pager', async () => {
+    // 150 sessions under `pi`: two pages at the picker's limit, and the deep
+    // one only reachable by page. The stub narrows like the store does.
+    const store = Array.from({ length: 150 }, (_, i) => ({
+      session_id: `sess-bulk-${i}`,
+      harness: 'pi',
+      label: `bulk ${i}` as string | null,
+    }))
+    stubScoped({ store })
+    renderScoped({ activeHarness: 'pi' })
 
-    // Mid-flight the previous scope's rows are gone, not greyed out.
-    expect(browser().queryByTestId('finding-card-a-1')).toBeNull()
-    expect(browser().queryByTestId('finding-card-a-3')).toBeNull()
+    const box = await openPicker()
+    const listbox = () => screen.getByTestId('context-doctor-session-listbox')
+    await waitFor(() => expect(within(listbox()).queryByTestId('session-option-sess-bulk-99')).not.toBeNull())
+    expect(within(listbox()).queryByTestId('session-option-sess-bulk-100')).toBeNull()
 
-    release()
-    await browser().findByTestId('finding-card-b-1')
-    expect(browser().getAllByTestId(/finding-card-/)).toHaveLength(2)
-    expect(browser().queryByTestId('finding-card-a-1')).toBeNull()
-    // Paging restarted: the new scope's page one was requested with no offset,
-    // even though the previous scope had walked to page two.
-    expect(
-      requested.some((qs) => qs.includes('sessionId=sess-pi-1') && !qs.includes('offset=')),
-    ).toBe(true)
-    expect(requested.some((qs) => qs.includes('offset='))).toBe(false)
+    fireEvent.click(within(listbox()).getByRole('button', { name: 'Next page' }))
+    await waitFor(() => expect(within(listbox()).queryByTestId('session-option-sess-bulk-100')).not.toBeNull())
+    expect(within(listbox()).queryByTestId('session-option-sess-bulk-99')).toBeNull()
+    expect(box.value).toBe('')
+  })
+
+  it('resolves a deep-linked session past page one through the summary, never as unavailable', async () => {
+    // The store holds 150 sessions and the deep-linked one is not among them:
+    // list membership would end the scope; the summary route keeps it.
+    const store = Array.from({ length: 150 }, (_, i) => ({
+      session_id: `sess-bulk-${i}`,
+      harness: 'pi',
+      label: `bulk ${i}` as string | null,
+    }))
+    const requested = stubScoped({ store, summaries: { 'sess-deep-9': summaryBody('sess-deep-9', 'pi', 'Deep linked session') } })
+    renderScoped({ activeHarness: 'pi', sessionId: 'sess-deep-9', onSessionChange: () => {} })
+
+    await screen.findByTestId('context-doctor-session-scope-note')
+    await waitFor(() => expect(requested.length).toBeGreaterThanOrEqual(2))
+    // The findings query the deep session, and the page never calls it
+    // unavailable or falls back to all sessions.
+    expect(requested.every((qs) => qs.includes('sessionId=sess-deep-9'))).toBe(true)
+    expect(scopeNote().textContent).toMatch(/one session/i)
+    expect((screen.getByTestId('context-doctor-session-combobox') as HTMLInputElement).value).toBe('Deep linked session')
+  })
+
+  it('ends the scope when the summary says the id is unknown (404)', async () => {
+    const requested = stubScoped({ summaries: {} })
+    const changes: (string | undefined)[] = []
+    renderScoped({ activeHarness: 'pi', sessionId: 'sess-gone', onSessionChange: (id) => changes.push(id) })
+
+    // An unknown id cannot scope anything: the page reports the clearing to
+    // the owner and re-scopes to every session, not to an invented state.
+    await waitFor(() => expect(changes).toEqual([undefined]))
+    await waitFor(() => expect(requested.some((qs) => !qs.includes('sessionId='))).toBe(true))
+    expect((screen.getByTestId('context-doctor-session-combobox') as HTMLInputElement).value).toBe('')
   })
 
   it('asks the owner to clear a session the selected harness does not hold', async () => {
@@ -1598,8 +1665,9 @@ describe('ContextDoctor scope: harness and session', () => {
     })
 
     // A session from another harness would scope the findings to something the
-    // selector cannot even show. The scope belongs to the owner, so the page
-    // reports it rather than filtering by a session outside the scope.
+    // picker cannot even offer. The scope belongs to the owner, so the page
+    // reports it rather than filtering by a session outside the scope — and
+    // the record that says so is the session's summary, not list membership.
     await waitFor(() => expect(changes).toEqual([undefined]))
   })
 
@@ -1612,15 +1680,17 @@ describe('ContextDoctor scope: harness and session', () => {
     const changes: (string | undefined)[] = []
     renderOwnerControlled({ activeHarness: 'pi', onSelect: (id) => changes.push(id) })
 
-    fireEvent.change(await sessionSelect(), { target: { value: 'sess-pi-1' } })
+    fireEvent.focus(await screen.findByTestId('context-doctor-session-combobox'))
+    fireEvent.mouseDown(await screen.findByTestId('session-option-sess-pi-1'))
     await waitFor(() => expect(requested.some((qs) => qs.includes('sessionId=sess-pi-1'))).toBe(true))
 
     // The owner drops the selection: All sessions at the page, an absent
     // `sessionId` above it. The page must not fall back to what it chose.
-    fireEvent.change(screen.getByTestId('context-doctor-session-select'), { target: { value: '' } })
+    fireEvent.focus(screen.getByTestId('context-doctor-session-combobox'))
+    fireEvent.mouseDown(screen.getByTestId('session-option-all'))
     expect(changes).toEqual(['sess-pi-1', undefined])
 
-    expect((screen.getByTestId('context-doctor-session-select') as HTMLSelectElement).value).toBe('')
+    expect((screen.getByTestId('context-doctor-session-combobox') as HTMLInputElement).value).toBe('')
     expect(screen.getByTestId('findings-scope-note').textContent).toMatch(/all sessions/i)
     await waitFor(() => expect(requested[requested.length - 1]).not.toContain('sessionId='))
     // And it stays ended: nothing goes on querying the discarded session.
@@ -1652,18 +1722,27 @@ describe('ContextDoctor scope: harness and session', () => {
     const requested = stubScoped()
     const utils = renderScoped({})
 
-    fireEvent.change(await sessionSelect(), { target: { value: 'sess-cursor-1' } })
+    fireEvent.focus(await screen.findByTestId('context-doctor-session-combobox'))
+    fireEvent.mouseDown(await screen.findByTestId('session-option-sess-cursor-1'))
     await waitFor(() => expect(requested.some((qs) => qs.includes('sessionId=sess-cursor-1'))).toBe(true))
 
     // The owner narrows to a harness that does not hold that session.
     utils.rerender({ activeHarness: 'pi' })
 
-    expect((screen.getByTestId('context-doctor-session-select') as HTMLSelectElement).value).toBe('')
+    expect((screen.getByTestId('context-doctor-session-combobox') as HTMLInputElement).value).toBe('')
     await waitFor(() => expect(requested[requested.length - 1]).not.toContain('sessionId='))
   })
 
   it('shows the scope the browser is showing, and no duplicate harness selector', () => {
-    const html = renderWithQuery(<ContextDoctor initialFindings={[]} activeHarness="claude-code" />)
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false, gcTime: 0 } } })
+    // Static markup runs no effect, so the picker's page data is seeded — the
+    // scope note then names the harness rather than the reading state.
+    client.setQueryData(['kyber-sessions', 'all', '', 1], sessionsPageEnvelope([]))
+    const html = renderToStaticMarkup(
+      <QueryClientProvider client={client}>
+        <ContextDoctor initialFindings={[]} activeHarness="claude-code" />
+      </QueryClientProvider>,
+    )
     expect(html).toContain('findings-scope-note')
     expect(html).toContain('Claude Code')
     // The owner above the page picks the harness; a second selector here would
@@ -1672,10 +1751,137 @@ describe('ContextDoctor scope: harness and session', () => {
   })
 
   it('renders findings only: no maintenance, ingest coverage or scorecard matrix', () => {
-    const html = renderWithQuery(<ContextDoctor initialFindings={[]} />)
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false, gcTime: 0 } } })
+    client.setQueryData(['kyber-sessions', 'all', '', 1], sessionsPageEnvelope([]))
+    const html = renderToStaticMarkup(
+      <QueryClientProvider client={client}>
+        <ContextDoctor initialFindings={[]} />
+      </QueryClientProvider>,
+    )
     expect(html).not.toContain('maintenance-panel')
     expect(html).not.toContain('coverage-ingest-panel')
     expect(html).not.toContain('scorecard-matrix')
     expect(html).not.toContain('Wipe database')
+  })
+
+  it('is keyboard-operable: the combobox opens on ArrowDown and chooses on Enter', async () => {
+    stubScoped()
+    renderScoped({ activeHarness: 'pi' })
+
+    const box = (await screen.findByTestId('context-doctor-session-combobox')) as HTMLInputElement
+    fireEvent.keyDown(box, { key: 'ArrowDown' })
+    await screen.findByTestId('context-doctor-session-listbox')
+    // The listbox opens; the first option is the All-sessions scope.
+    expect(screen.getByTestId('session-option-all').getAttribute('aria-selected')).toBe('true')
+
+    fireEvent.keyDown(box, { key: 'ArrowDown' })
+    fireEvent.keyDown(box, { key: 'Enter' })
+    expect(screen.getByTestId('context-doctor-session-combobox').getAttribute('aria-expanded')).toBe('false')
+  })
+
+  it('restarts the picker at page one when the harness changes', async () => {
+    // 150 pi sessions and one cursor session: page two of pi is not page two of
+    // cursor, so a picker that kept the page would ask for an empty window.
+    const store = [
+      ...Array.from({ length: 150 }, (_, i) => ({
+        session_id: `sess-pi-${i}`,
+        harness: 'pi',
+        label: `pi ${i}` as string | null,
+      })),
+      { session_id: 'sess-cursor-only', harness: 'cursor', label: 'cursor only' as string | null },
+    ]
+    const sessionRequests: string[] = []
+    stubScoped({ store, sessionRequests })
+    const utils = renderScoped({ activeHarness: 'pi' })
+
+    const listbox = () => screen.getByTestId('context-doctor-session-listbox')
+    await openPicker()
+    await waitFor(() => expect(within(listbox()).queryByTestId('session-option-sess-pi-99')).not.toBeNull())
+    fireEvent.click(within(listbox()).getByRole('button', { name: 'Next page' }))
+    await waitFor(() => expect(within(listbox()).queryByTestId('session-option-sess-pi-100')).not.toBeNull())
+    expect(
+      sessionRequests.some((qs) => {
+        const params = new URLSearchParams(qs)
+        return params.get('harness') === 'pi' && params.get('page') === '2'
+      }),
+    ).toBe(true)
+
+    // The owner switches harness while the picker sits on page two.
+    utils.rerender({ activeHarness: 'cursor' })
+
+    await waitFor(() =>
+      expect(within(listbox()).queryByTestId('session-option-sess-cursor-only')).not.toBeNull(),
+    )
+    // The first page of the new harness was asked for; an out-of-range page
+    // never was.
+    expect(
+      sessionRequests.some((qs) => {
+        const params = new URLSearchParams(qs)
+        return params.get('harness') === 'cursor' && params.get('page') === '2'
+      }),
+    ).toBe(false)
+  })
+
+  it('never points aria-activedescendant at an option that no longer exists', async () => {
+    // Switching harness shrinks the listbox under an active index that was
+    // valid a moment ago: the pointer must drop rather than read "undefined".
+    stubScoped()
+    const utils = renderScoped({ activeHarness: 'pi' })
+    const box = await openPicker()
+    const listbox = () => screen.getByTestId('context-doctor-session-listbox')
+    await waitFor(() => expect(within(listbox()).queryByTestId('session-option-sess-pi-2')).not.toBeNull())
+
+    fireEvent.keyDown(box, { key: 'ArrowDown' })
+    fireEvent.keyDown(box, { key: 'ArrowDown' })
+    fireEvent.keyDown(box, { key: 'ArrowDown' })
+    expect(box.getAttribute('aria-activedescendant')).toBe('session-option-sess-pi-2')
+
+    utils.rerender({ activeHarness: 'cursor' })
+    await waitFor(() => expect(within(listbox()).queryByTestId('session-option-sess-cursor-1')).not.toBeNull())
+    expect(box.getAttribute('aria-activedescendant')).toBeNull()
+  })
+
+  it('drops the active option when the picker turns the page', async () => {
+    const store = Array.from({ length: 150 }, (_, i) => ({
+      session_id: `sess-bulk-${i}`,
+      harness: 'pi',
+      label: `bulk ${i}` as string | null,
+    }))
+    stubScoped({ store })
+    renderScoped({ activeHarness: 'pi' })
+
+    const box = await openPicker()
+    const listbox = () => screen.getByTestId('context-doctor-session-listbox')
+    await waitFor(() => expect(within(listbox()).queryByTestId('session-option-sess-bulk-99')).not.toBeNull())
+    fireEvent.keyDown(box, { key: 'ArrowDown' })
+    fireEvent.keyDown(box, { key: 'ArrowDown' })
+    expect(box.getAttribute('aria-activedescendant')).toBe('session-option-sess-bulk-0')
+
+    fireEvent.click(within(listbox()).getByRole('button', { name: 'Next page' }))
+    await waitFor(() => expect(within(listbox()).queryByTestId('session-option-sess-bulk-100')).not.toBeNull())
+    // The index belonged to the previous page's rows.
+    expect(box.getAttribute('aria-activedescendant')).toBeNull()
+  })
+
+  it('clears the pending search timer when the picker unmounts', async () => {
+    stubScoped()
+    const setTimeoutSpy = vi.spyOn(globalThis, 'setTimeout')
+    const clearTimeoutSpy = vi.spyOn(globalThis, 'clearTimeout')
+    try {
+      const { unmount } = renderScoped({ activeHarness: 'pi' })
+      const box = await openPicker()
+      setTimeoutSpy.mockClear()
+
+      fireEvent.change(box, { target: { value: 'sess' } })
+      expect(setTimeoutSpy).toHaveBeenCalledTimes(1)
+      const pending = setTimeoutSpy.mock.results[0]!.value as ReturnType<typeof setTimeout>
+
+      unmount()
+      // The debounce must not outlive the picker that armed it.
+      expect(clearTimeoutSpy).toHaveBeenCalledWith(pending)
+    } finally {
+      setTimeoutSpy.mockRestore()
+      clearTimeoutSpy.mockRestore()
+    }
   })
 })

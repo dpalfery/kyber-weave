@@ -8,8 +8,19 @@ import { render, screen, fireEvent, cleanup, within } from '@testing-library/rea
 
 import { SkillsPanel } from './SkillsPanel.js'
 import fixtures from './fixtures/skills-payload.json'
+import type { PagedWindow } from './session/types.js'
 
 type SkillsPanelProps = React.ComponentProps<typeof SkillsPanel>
+
+/**
+ * The panel's props as the skills section feeds them: the page's rows plus the
+ * whole-list token scale and the window the page came in under. Declared as an
+ * intersection so the fixtures stay structural against the component's own props.
+ */
+type SectionSkillsProps = SkillsPanelProps & {
+  aggregate?: { maxTokens: number | null }
+  pager?: PagedWindow
+}
 
 // The fixture is the transport shape; the panel's prop type is the one place the
 // JSON literal is narrowed, so every test reads the same contract.
@@ -311,5 +322,62 @@ describe('SkillsPanel: invocations measured on some turns (D30)', () => {
   it('renders the realistic payload without the coverage statement when the server sends none', () => {
     const { container } = mount('realistic')
     expect(container.textContent?.replace(/\s+/g, ' ')).not.toContain('Invocations measured on')
+  })
+})
+
+describe('SkillsPanel: on the section page and its aggregate', () => {
+  // The skills route answers one page of rows. Page two is held back in every
+  // test here: the bar scale must already be the whole list's with only page
+  // one loaded.
+  const pageRows = {
+    listed_count: 40,
+    listed_uninvoked_count: 5,
+    rows: [
+      { name: 'docs', listed: true, invocations: 2, turns_listed: [0], derived_tokens: 1900, description: 'Docs' },
+      { name: 'deploy', listed: true, invocations: 0, turns_listed: [1], derived_tokens: 950 },
+    ],
+  }
+
+  const barWidth = (name: string): string => {
+    const bar = within(rowOf(name)).getByTestId(`skill-token-bar-${name}`)
+    return (bar.firstElementChild as HTMLElement).style.width
+  }
+
+  it('scales the token bars from the aggregate maxTokens, not from the page rows', () => {
+    // The page's largest derived-token figure is 1900; the whole list's is
+    // 3800. A bar filled to 100% would claim `docs` is the most expensive
+    // skill the session listed — a claim page two can only contradict.
+    const props: SectionSkillsProps = { skills: asSkills(pageRows), summary: asSummary({}), aggregate: { maxTokens: 3800 } }
+    render(<SkillsPanel {...props} />)
+    expect(barWidth('docs')).toBe('50%')
+    expect(barWidth('deploy')).toBe('25%')
+  })
+
+  it('keeps the page-derived scale when no aggregate has been served', () => {
+    const props: SectionSkillsProps = { skills: asSkills(pageRows), summary: asSummary({}) }
+    render(<SkillsPanel {...props} />)
+    expect(barWidth('docs')).toBe('100%')
+  })
+
+  it('pages the skill list at 25 rows and reports the page the viewer turned to', () => {
+    const onPageChange = vi.fn()
+    const props: SectionSkillsProps = {
+      skills: asSkills(pageRows),
+      summary: asSummary({}),
+      pager: { page: 1, total: 30, limit: 25, onPageChange },
+    }
+    render(<SkillsPanel {...props} />)
+    fireEvent.click(screen.getByTestId('pager-next'))
+    expect(onPageChange).toHaveBeenCalledWith(2)
+  })
+
+  it('renders no pager while the whole list fits one page', () => {
+    const props: SectionSkillsProps = {
+      skills: asSkills(pageRows),
+      summary: asSummary({}),
+      pager: { page: 1, total: 2, limit: 25, onPageChange: () => {} },
+    }
+    render(<SkillsPanel {...props} />)
+    expect(screen.queryByTestId('list-pager')).toBeNull()
   })
 })

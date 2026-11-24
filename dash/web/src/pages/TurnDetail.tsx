@@ -10,13 +10,15 @@ import {
   type TurnTokenFigures,
 } from '../lib/kyberApi.js'
 import { cn } from '../lib/utils.js'
+import { PROJECTION_FAILED_STATUS, projectionFailureMessage } from '../components/session/useSectionPage.js'
 import { Card } from '../components/ui/card.js'
 import { Skeleton } from '../components/ui/skeleton.js'
 import { ContextInspector } from '../components/ContextInspector.js'
 import { ContextReviewPanel, HierarchyBreadcrumb } from '../components/analysis/index.js'
 
 export interface TurnDetailProps {
-  runId: string
+  /** The run the turn was reached through; absent on a session turn link. */
+  runId?: string
   executionId?: string
   turnIndex: number
   onSelectAll?: () => void
@@ -100,7 +102,9 @@ export function TurnDetail({
   const [selectedBlockKey, setSelectedBlockKey] = useState<string | undefined>()
   const { data: run } = useQuery({
     queryKey: ['kyber-turn-run', runId],
-    queryFn: () => fetchRun(runId),
+    queryFn: () => fetchRun(runId!),
+    // A session turn link names no run; the session comes from the execution id.
+    enabled: !!runId,
   })
   const sessionId = resolveTurnSessionId(run, executionId)
   const { data, isLoading, isError, error } = useQuery({
@@ -121,7 +125,7 @@ export function TurnDetail({
     enabled: !!sessionId,
     // An unknown session, or a turn index past the end, is an answer and not
     // a transient failure: the request is not retried and the counters stay
-    // absent, exactly as they did when the payload answered with no such row.
+    // absent rather than showing a neighbour's numbers.
     retry: false,
   })
   // The strict lookup still applies to the one row the route served: a row
@@ -136,6 +140,10 @@ export function TurnDetail({
     ) ?? [],
     [data],
   )
+
+  // A faulted projection read answers the sections' failure marker instead of turn
+  // data. It is the page's error state — never an empty turn, never "no bands".
+  const projectionFailed = data?.projection_status === PROJECTION_FAILED_STATUS
 
   return (
     <div className="flex flex-col gap-density-stack" data-testid="page-turn">
@@ -154,7 +162,11 @@ export function TurnDetail({
         <h2 className="font-display text-density-display font-bold tracking-density text-foreground">Turn {turnIndex + 1}</h2>
         <p className="mt-density-hair text-density-xs text-muted-foreground leading-density">Select a context band to inspect its recorded content.</p>
 
-        {isLoading ? (
+        {projectionFailed ? (
+          <p className="mt-density-stack text-density-xs text-tertiary-foreground" data-testid="turn-projection-failed">
+            {projectionFailureMessage(data)}
+          </p>
+        ) : isLoading ? (
           <Skeleton className="mt-density-stack h-20 w-full" />
         ) : isError && turnContentErrorKind(error) === 'not-found' ? (
           <p className="mt-density-stack text-density-xs text-tertiary-foreground" data-testid="turn-not-found">
@@ -188,28 +200,32 @@ export function TurnDetail({
         )}
       </Card>
 
-      <Card className="p-chrome" data-testid="context-content">
-        <ContextInspector
-          sessionId={sessionId}
-          turnIndex={turnIndex}
-          data={data}
-          turnTokens={turnTokens}
-          initialBlockKey={selectedBlockKey}
-        />
-      </Card>
+      {!projectionFailed && (
+        <Card className="p-chrome" data-testid="context-content">
+          <ContextInspector
+            sessionId={sessionId}
+            turnIndex={turnIndex}
+            data={data}
+            turnTokens={turnTokens}
+            initialBlockKey={selectedBlockKey}
+          />
+        </Card>
+      )}
 
-      <ContextReviewPanel
-        content={data?.assembledText ?? ''}
-        turnIndex={turnIndex}
-        sessionId={sessionId}
-        blocks={data?.blocks.map((block) => ({
-          key: block.key,
-          label: block.label,
-          text: block.text,
-        }))}
-        harness={run?.harness}
-        model={data?.model}
-      />
+      {!projectionFailed && (
+        <ContextReviewPanel
+          content={data?.assembledText ?? ''}
+          turnIndex={turnIndex}
+          sessionId={sessionId}
+          blocks={data?.blocks.map((block) => ({
+            key: block.key,
+            label: block.label,
+            text: block.text,
+          }))}
+          harness={run?.harness}
+          model={data?.model}
+        />
+      )}
     </div>
   )
 }

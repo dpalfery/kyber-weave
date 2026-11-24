@@ -158,7 +158,7 @@ public class OtlpCollectorServiceTests
         Assert.Equal(1, flushed);
         Assert.Equal(0, harness.Collector.PendingCount);
         Assert.Equal(0, harness.Collector.PendingBytes);
-        CollectedRecord? record = harness.Store.GetRecord("1111111111111111");
+        CollectedRecord? record = harness.Store.FindRecord("1111111111111111");
         Assert.NotNull(record);
         Assert.Equal("copilot", record.HarnessId);
         Assert.NotNull(harness.Collector.LastAcceptedAt);
@@ -193,7 +193,7 @@ public class OtlpCollectorServiceTests
             while (harness.Store.CountRecords() == 0 && DateTime.UtcNow < deadline)
                 await Task.Delay(20, TestContext.Current.CancellationToken);
 
-            Assert.NotNull(harness.Store.GetRecord("1111111111111111"));
+            Assert.NotNull(harness.Store.FindRecord("1111111111111111"));
             Assert.Equal(0, harness.Collector.PendingCount);
             Assert.True(Volatile.Read(ref storeUpdated) >= 1);
             Assert.NotNull(harness.Collector.LastAcceptedAt);

@@ -24,23 +24,19 @@ public class ReportService : IReportService
 
     private readonly IDashboardQueryService query;
     private readonly IProjectionStore projections;
-    private readonly IRelationalStoreReader reader;
 
     /// <summary>
     /// Initializes a new <see cref="ReportService"/>.
     /// </summary>
     /// <param name="query">Query service producing the report projection.</param>
     /// <param name="projections">Projection store supplying harness rollups and findings.</param>
-    /// <param name="reader">Relational reader backing report-scope reads.</param>
-    public ReportService(IDashboardQueryService query, IProjectionStore projections, IRelationalStoreReader reader)
+    public ReportService(IDashboardQueryService query, IProjectionStore projections)
     {
         ArgumentNullException.ThrowIfNull(query);
         ArgumentNullException.ThrowIfNull(projections);
-        ArgumentNullException.ThrowIfNull(reader);
 
         this.query = query;
         this.projections = projections;
-        this.reader = reader;
     }
 
     /// <inheritdoc />

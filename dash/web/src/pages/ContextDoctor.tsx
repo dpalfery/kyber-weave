@@ -1,13 +1,16 @@
-import { useState, useMemo, useEffect } from 'react'
+import { useState, useMemo, useEffect, useRef } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { Skeleton } from '../components/ui/skeleton.js'
 import {
   fetchFindings,
-  fetchKyberSessions,
+  fetchKyberSession,
+  fetchKyberSessionPage,
+  isNotFoundError,
   type FindingsPage,
   type KyberFinding,
   type KyberSessionSummary,
 } from '../lib/kyberApi.js'
+import { Pager } from '../components/ui/Pager.js'
 import { HierarchyBreadcrumb, FindingList, BaselineSelect } from '../components/analysis/index.js'
 
 export interface ContextDoctorProps {
@@ -39,7 +42,7 @@ export interface ContextDoctorProps {
 }
 
 /**
- * The harness scope a findings query runs under, or `undefined` for every
+ * The session scope a findings query runs under, or `undefined` for every
  * harness. `'all'` is the tab the header shows for the whole workspace, and
  * the API has no such harness — sending it would filter to nothing.
  */
@@ -47,6 +50,230 @@ export function harnessScopeOf(activeHarness: string | undefined): string | unde
   return activeHarness === undefined || activeHarness === '' || activeHarness === 'all'
     ? undefined
     : activeHarness
+}
+
+/**
+ * The session scope's one control: a search combobox over the store's `q`,
+ * paged like every list (Task T3).
+ *
+ * The options are the page the store answered — narrowed by harness above
+ * this page and by the search text here — so a store the size of a year of
+ * work answers a page, never its whole inventory. The input doubles as the
+ * display of the current scope while it is untouched: the validated
+ * session's label, or its id when the label is blank. Typing replaces that
+ * display, and the committed search trails the keystrokes by a debounce, so
+ * a burst of characters asks the store once.
+ *
+ * Keyboard: the listbox opens on focus or ArrowDown, ArrowDown/ArrowUp move
+ * the active option, Enter chooses it, Escape closes without choosing. Every
+ * option is a real element a click or an Enter reaches.
+ */
+export function SessionPicker({
+  effectiveSessionId,
+  selectedLabel,
+  options,
+  loading,
+  fetching = false,
+  error,
+  onSelect,
+  onSearch,
+  page,
+  limit,
+  total,
+  onPageChange,
+}: {
+  /** The session the scope stands on after validation, or undefined for all. */
+  effectiveSessionId?: string
+  /** The validated session's stored label, shown while the input is untouched. */
+  selectedLabel?: string | null
+  /** The page's session rows, already narrowed by the store. */
+  options: readonly KyberSessionSummary[]
+  /** True while the rows are in flight and nothing is on screen yet. */
+  loading: boolean
+  /** True while a page is in flight after rows are on screen. */
+  fetching?: boolean
+  /** The rows' read failure, when the list could not be read at all. */
+  error: string | null
+  /** Reports the session chosen here; undefined is the All-sessions scope. */
+  onSelect: (sessionId: string | undefined) => void
+  /** Reports the committed search text; '' is no filter. */
+  onSearch: (q: string) => void
+  /** The pager's window, as the sessions page answered it. */
+  page: number
+  limit: number
+  total: number | undefined
+  onPageChange: (page: number) => void
+}) {
+  const [open, setOpen] = useState(false)
+  // Null while the input is untouched: it then displays the current scope
+  // rather than a stale search the user cleared by choosing an option.
+  const [edited, setEdited] = useState<string | null>(null)
+  const [activeIndex, setActiveIndex] = useState(-1)
+  // A page turn replaces the rows the index pointed at, so the index must not
+  // survive it. Adjusted during render (the state-when-props-change pattern),
+  // before the pointer is read.
+  const [prevPage, setPrevPage] = useState(page)
+  if (prevPage !== page) {
+    setPrevPage(page)
+    setActiveIndex(-1)
+  }
+  const pendingSearch = useRef<ReturnType<typeof setTimeout> | undefined>(undefined)
+  // The debounce must not outlive the picker that armed it: unmounting the
+  // picker leaves no timer behind to call back into a gone component.
+  useEffect(
+    () => () => {
+      if (pendingSearch.current !== undefined) clearTimeout(pendingSearch.current)
+    },
+    [],
+  )
+
+  const displayValue = edited ?? (selectedLabel != null && selectedLabel.length > 0 ? selectedLabel : effectiveSessionId ?? '')
+  const optionIds = ['all', ...options.map((session) => sessionIdOf(session))]
+  // Only an index that still names an option may produce a pointer: options can
+  // shrink under a previously valid index, and `session-option-undefined` is
+  // not an element id.
+  const activeOptionId = activeIndex >= 0 ? optionIds[activeIndex] : undefined
+
+  const cancelPendingSearch = () => {
+    if (pendingSearch.current !== undefined) {
+      clearTimeout(pendingSearch.current)
+      pendingSearch.current = undefined
+    }
+  }
+
+  const commitSearch = (text: string) => {
+    cancelPendingSearch()
+    pendingSearch.current = setTimeout(() => onSearch(text), SESSION_PICKER_SEARCH_DEBOUNCE_MS)
+  }
+
+  const choose = (id: string | undefined) => {
+    cancelPendingSearch()
+    setEdited(null)
+    onSearch('')
+    setOpen(false)
+    setActiveIndex(-1)
+    onSelect(id)
+  }
+
+  const moveActive = (next: number) => {
+    setActiveIndex(Math.min(Math.max(next, 0), optionIds.length - 1))
+  }
+
+  return (
+    <div className="relative">
+      <input
+        type="text"
+        id="context-doctor-session"
+        role="combobox"
+        aria-expanded={open}
+        aria-controls="context-doctor-session-listbox"
+        aria-autocomplete="list"
+        aria-activedescendant={open && activeOptionId !== undefined ? `session-option-${activeOptionId}` : undefined}
+        data-testid="context-doctor-session-combobox"
+        className="text-density-xs text-foreground"
+        placeholder="All sessions — search to narrow"
+        value={displayValue}
+        onChange={(event) => {
+          setEdited(event.target.value)
+          setOpen(true)
+          setActiveIndex(-1)
+          commitSearch(event.target.value)
+        }}
+        onFocus={() => {
+          setOpen(true)
+          setActiveIndex(-1)
+        }}
+        onBlur={(event) => {
+          // Focus moving into the listbox is not a close: the click that
+          // chooses an option passes through blur first.
+          if (event.relatedTarget instanceof Element && event.relatedTarget.closest('[role="listbox"]')) return
+          setOpen(false)
+          setActiveIndex(-1)
+        }}
+        onKeyDown={(event) => {
+          if (event.key === 'ArrowDown') {
+            event.preventDefault()
+            if (!open) {
+              setOpen(true)
+              setActiveIndex(0)
+              return
+            }
+            moveActive(activeIndex + 1)
+          } else if (event.key === 'ArrowUp') {
+            event.preventDefault()
+            if (open) moveActive(activeIndex - 1)
+          } else if (event.key === 'Enter') {
+            if (open && activeIndex >= 0) {
+              event.preventDefault()
+              const chosen = optionIds[activeIndex]
+              choose(chosen === 'all' ? undefined : chosen)
+            }
+          } else if (event.key === 'Escape') {
+            setOpen(false)
+            setActiveIndex(-1)
+          }
+        }}
+      />
+      {open && (
+        <ul
+          id="context-doctor-session-listbox"
+          role="listbox"
+          aria-label="Sessions"
+          data-testid="context-doctor-session-listbox"
+          className="absolute z-10 mt-1 max-h-72 w-full overflow-y-auto rounded-md border border-border bg-card shadow-lg"
+        >
+          <li
+            role="option"
+            id="session-option-all"
+            data-testid="session-option-all"
+            aria-selected={effectiveSessionId === undefined}
+            onMouseDown={(event) => {
+              event.preventDefault()
+              choose(undefined)
+            }}
+            className="cursor-pointer px-3 py-1.5 text-density-xs text-foreground hover:bg-interactive-secondary"
+          >
+            All sessions
+          </li>
+          {loading && (
+            <li className="px-3 py-1.5 text-density-xs text-muted-foreground" data-testid="context-doctor-session-loading">
+              Reading sessions…
+            </li>
+          )}
+          {error !== null && !loading && (
+            <li className="px-3 py-1.5 text-density-xs text-muted-foreground" data-testid="context-doctor-session-list-error">
+              {error}
+            </li>
+          )}
+          {options.map((session) => {
+            const id = sessionIdOf(session)
+            return (
+              <li
+                key={id}
+                role="option"
+                id={`session-option-${id}`}
+                data-testid={`session-option-${id}`}
+                aria-selected={effectiveSessionId === id}
+                onMouseDown={(event) => {
+                  event.preventDefault()
+                  choose(id)
+                }}
+                className="cursor-pointer px-3 py-1.5 text-density-xs text-foreground hover:bg-interactive-secondary"
+                title={id}
+              >
+                {sessionOptionLabel(session)}
+              </li>
+            )
+          })}
+          {total !== undefined && total > limit && (
+            <li className="px-2 py-1">
+              <Pager page={page} limit={limit} total={total} onPageChange={onPageChange} loading={fetching} ariaLabel="Session picker pages" />
+            </li>
+          )}
+        </ul>
+      )}
+    </div>
+  )
 }
 
 export type HarnessCatalogEntry = {
@@ -97,37 +324,22 @@ export const HARNESS_CATALOG: readonly HarnessCatalogEntry[] = [
 /** Page size for the workspace findings browser (issue #191). */
 export const FINDINGS_PAGE_SIZE = 25
 
+/** Rows per page the session picker asks the store for (Task T3). */
+export const SESSION_PICKER_PAGE_SIZE = 100
+
+/** How long the picker's search box waits before it narrows the options. */
+export const SESSION_PICKER_SEARCH_DEBOUNCE_MS = 400
+
 /** The canonical session id, whichever spelling the payload used. */
 export function sessionIdOf(session: KyberSessionSummary): string {
   return session.sessionId ?? session.session_id
 }
 
-/** What the session selector lists for one option. */
+/** What the session picker lists for one option. */
 export function sessionOptionLabel(session: KyberSessionSummary): string {
   const id = sessionIdOf(session)
   const label = session.label ?? null
   return label !== null && label.length > 0 ? `${label} — ${id}` : id
-}
-
-/**
- * The canonical sessions a scope may select: every session, narrowed to the
- * selected harness when there is one.
- *
- * <remarks>
- * Session metadata is selection only. It says which ids exist under a harness
- * — nothing about findings, pressure or waste, all of which the server
- * computes. Filtering here also keeps a scope change from offering a session
- * that belongs to a harness the operator is no longer looking at.
- * </remarks>
- */
-export function sessionsInScope(
-  sessions: readonly KyberSessionSummary[] | undefined,
-  harness: string | undefined,
-): KyberSessionSummary[] {
-  const all = sessions ?? []
-  if (harness === undefined) return [...all]
-  const wanted = harness.toLowerCase()
-  return all.filter((session) => (session.harness ?? '').toLowerCase() === wanted)
 }
 
 export interface FindingsBrowserViewProps {
@@ -576,66 +788,82 @@ export function ContextDoctor({
       }
     : initialFindings
 
-  // Canonical sessions for the selector. The scope filter runs here, over the
-  // unfiltered list, so a harness change never fires a second request for a
-  // list this page already holds.
+  // The picker's one search-and-page scope. The store narrows the options —
+  // by the harness scope above this page, then by the search text here — so
+  // the picker never downloads the inventory whole.
+  const [pickerQuery, setPickerQuery] = useState<{ q: string; page: number }>({ q: '', page: 1 })
+  // A harness change restarts the picker at its first page: page N of the
+  // harness just left is not where a viewer narrowing to another harness is,
+  // and it may be past the end of the new list. Adjusted during render (the
+  // React state-when-props-change pattern, as `useSectionPage` does for a
+  // session change), so the out-of-range page request never leaves.
+  const [prevHarnessFilter, setPrevHarnessFilter] = useState(harnessFilter)
+  if (prevHarnessFilter !== harnessFilter) {
+    setPrevHarnessFilter(harnessFilter)
+    setPickerQuery((previous) => ({ ...previous, page: 1 }))
+  }
   const {
-    data: sessionData,
+    data: sessionPage,
     isLoading: loadingSessions,
+    isFetching: fetchingSessions,
     isError: sessionsError,
+    error: sessionsErrorValue,
     refetch: refetchSessions,
-  } = useQuery({ queryKey: ['kyber-sessions'], queryFn: () => fetchKyberSessions() })
+  } = useQuery({
+    queryKey: ['kyber-sessions', harnessFilter ?? 'all', pickerQuery.q, pickerQuery.page],
+    queryFn: () =>
+      fetchKyberSessionPage({
+        page: pickerQuery.page,
+        limit: SESSION_PICKER_PAGE_SIZE,
+        harness: harnessFilter,
+        q: pickerQuery.q === '' ? undefined : pickerQuery.q,
+      }),
+  })
+  const pickerRows = useMemo(() => sessionPage?.entries ?? [], [sessionPage])
 
-  const sessions = useMemo(
-    () => sessionsInScope(sessionData, harnessFilter),
-    [sessionData, harnessFilter],
-  )
-  const sessionLabels = useMemo(() => {
-    const labels = new Map<string, string>()
-    for (const session of sessions) labels.set(sessionIdOf(session), sessionOptionLabel(session))
-    return labels
-  }, [sessions])
+  // A selected or deep-linked session validates through the bounded summary
+  // route — one bounded read per id — never through list membership: a
+  // session past page one of the picker would otherwise read as unavailable.
+  // While the record is in flight the session stands, so a metadata read
+  // never widens the findings scope on its own.
+  const {
+    data: selectedSummary,
+    isLoading: selectedLoading,
+    isError: selectedError,
+    error: selectedErrorValue,
+    refetch: refetchSelected,
+  } = useQuery({
+    queryKey: ['kyber-session-summary', sessionId],
+    queryFn: () => fetchKyberSession(sessionId!),
+    enabled: sessionId !== undefined,
+    // A 404 is the answer, not a flake: nothing retries it. The one retry a
+    // transient failure gets runs immediately — a bounded identity read has
+    // no backoff to wait out.
+    retry: (failureCount, failure) => !isNotFoundError(failure) && failureCount < 1,
+    retryDelay: 0,
+  })
 
-  // A session the loaded inventory says the current harness does not hold
-  // would scope the findings to something the selector cannot show. This is
-  // resolved during render, not in the effect below: an effect would let one
-  // request go out under the stale pairing before it ran. The inventory is
-  // only believed once it has landed — until then the session stands, or
-  // every harness change would flash the unscoped list.
-  const sessionsKnown = sessionData !== undefined && !sessionsError
-  const sessionInScope =
-    sessionId === undefined ||
-    !sessionsKnown ||
-    sessions.some((session) => sessionIdOf(session) === sessionId)
-  const effectiveSessionId = sessionInScope ? sessionId : undefined
+  // Resolution is render-time where the record is already known: a session
+  // whose record answers for another harness, or answers nothing at all
+  // (404), cannot scope anything, and one request must not go out under the
+  // stale pairing before the clearing lands.
+  const selectedKnown = selectedSummary !== undefined
+  const harnessMismatch =
+    selectedKnown &&
+    harnessFilter !== undefined &&
+    (selectedSummary.harness ?? '').toLowerCase() !== harnessFilter.toLowerCase()
+  const selectedMissing = sessionId !== undefined && selectedError && isNotFoundError(selectedErrorValue)
+  const selectedUnreadable = sessionId !== undefined && selectedError && !selectedMissing
+  const sessionStands = sessionId !== undefined && !harnessMismatch && !selectedMissing
+  const effectiveSessionId = sessionStands ? sessionId : undefined
 
-  // The select's value is the effective session, so the effective id needs a
-  // matching option or the native control renders blank/none while the
-  // findings still query it. While the inventory cannot be read (loading or
-  // error) the selection still stands, but no fetched option carries it —
-  // the fallback below represents the current value truthfully (id plus
-  // loading/unavailable metadata, never invented session metadata) and is
-  // disabled because it is the current value, not a new choice. A loaded
-  // inventory that lacks the session is handled above by clearing the scope.
-  const sessionFallbackNeeded =
-    effectiveSessionId !== undefined &&
-    !sessions.some((session) => sessionIdOf(session) === effectiveSessionId)
-  const sessionFallbackLabel =
-    effectiveSessionId === undefined
-      ? ''
-      : loadingSessions
-        ? `${effectiveSessionId} — reading sessions…`
-        : sessionsError
-          ? `${effectiveSessionId} — sessions unavailable`
-          : effectiveSessionId
-
-  // Reported, not applied: the scope belongs to the owner, which has to be
-  // told its session left the harness rather than left querying it.
+  // A scope that lost its session is reported, not applied: the owner
+  // decides. The page clears its own standalone choice at the same moment.
   useEffect(() => {
-    if (effectiveSessionId === sessionId || !sessionsKnown) return
+    if (sessionId === undefined || sessionStands) return
     setLocalSession(undefined)
     onSessionChange?.(undefined)
-  }, [effectiveSessionId, sessionId, sessionsKnown, onSessionChange])
+  }, [sessionId, sessionStands, onSessionChange])
 
   // Every page is stored under the scope it was fetched for, including the
   // first, so advancing the offset extends the list instead of replacing it.
@@ -784,51 +1012,60 @@ export function ContextDoctor({
       </div>
 
       {/* Session scope. The harness is chosen above this page, so the one
-          selector here is the one dimension this page narrows itself: all
-          sessions in scope by default, one session on request. */}
+          control here is the one dimension this page narrows itself: a search
+          combobox over the store's paged answer (Task T3), all sessions in
+          scope by default, one session on request. A chosen or deep-linked id
+          validates through the bounded summary route, not through list
+          membership, so a session past page one still stands. */}
       <div className="flex flex-wrap items-center gap-density-cluster">
         <label className="text-density-xs text-muted-foreground" htmlFor="context-doctor-session">
           Session
         </label>
-        <select
-          id="context-doctor-session"
-          data-testid="context-doctor-session-select"
-          className="text-density-xs text-foreground"
-          value={effectiveSessionId ?? ''}
-          onChange={(event) => chooseSession(event.target.value === '' ? undefined : event.target.value)}
-        >
-          <option value="">All sessions</option>
-          {sessionFallbackNeeded && effectiveSessionId !== undefined && (
-            <option value={effectiveSessionId} disabled>
-              {sessionFallbackLabel}
-            </option>
-          )}
-          {sessions.map((session) => (
-            <option key={sessionIdOf(session)} value={sessionIdOf(session)}>
-              {sessionOptionLabel(session)}
-            </option>
-          ))}
-        </select>
+        <SessionPicker
+          effectiveSessionId={effectiveSessionId}
+          selectedLabel={selectedSummary?.label ?? null}
+          options={pickerRows}
+          loading={loadingSessions}
+          fetching={fetchingSessions}
+          error={sessionsError ? `Sessions could not be read: ${String((sessionsErrorValue as Error)?.message)}` : null}
+          onSelect={chooseSession}
+          onSearch={(q) => setPickerQuery({ q, page: 1 })}
+          page={pickerQuery.page}
+          limit={SESSION_PICKER_PAGE_SIZE}
+          total={sessionPage?.total}
+          onPageChange={(next) => setPickerQuery((previous) => ({ ...previous, page: next }))}
+        />
         <p
           data-testid="context-doctor-session-scope-note"
           className="text-density-xs text-muted-foreground"
         >
           {sessionsError
             ? // Two situations, and only one of them is unscoped. While the
-              // inventory is unreadable the selection still stands (see
-              // `sessionInScope`), so claiming "all sessions" here would
+              // list is unreadable the selection still stands (see
+              // `sessionStands`), so claiming "all sessions" here would
               // describe a list these queries never asked for.
               effectiveSessionId === undefined
               ? 'Sessions could not be read, so the scope stays at all sessions.'
               : 'Sessions could not be read, so findings stay scoped to the selected session.'
             : loadingSessions
               ? 'Reading sessions…'
-              : effectiveSessionId === undefined
-                ? `Findings cover all sessions in ${harnessFilter === undefined ? 'every harness' : harnessDisplayName(harnessFilter)}.`
-                : `Findings cover one session in ${harnessFilter === undefined ? 'every harness' : harnessDisplayName(harnessFilter)}.`}
+              : selectedLoading
+                ? 'Reading the selected session…'
+                : selectedUnreadable
+                  ? 'The selected session could not be read, so findings stay scoped to the selected session.'
+                  : effectiveSessionId === undefined
+                    ? `Findings cover all sessions in ${harnessFilter === undefined ? 'every harness' : harnessDisplayName(harnessFilter)}.`
+                    : `Findings cover one session in ${harnessFilter === undefined ? 'every harness' : harnessDisplayName(harnessFilter)}.`}
         </p>
-        {sessionsError && (
-          <button type="button" data-testid="context-doctor-session-retry" onClick={() => void refetchSessions()}>
+        {(sessionsError || selectedUnreadable) && (
+          <button
+            type="button"
+            data-testid="context-doctor-session-retry"
+            onClick={() => {
+              void refetchSessions()
+              if (sessionId !== undefined) void refetchSelected()
+            }}
+          >
             Retry
           </button>
         )}
@@ -859,7 +1096,7 @@ export function ContextDoctor({
         scopeNote={scopeNoteFor(
           harnessFilter,
           effectiveSessionId,
-          effectiveSessionId === undefined ? undefined : sessionLabels.get(effectiveSessionId),
+          effectiveSessionId === undefined ? undefined : (selectedSummary?.label ?? undefined),
         )}
         loading={loadingBrowser}
         error={browserError ? 'findings-load-failed' : null}

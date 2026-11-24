@@ -218,3 +218,31 @@ public class TrayInstallException : DashException
         Step = step;
     }
 }
+
+/// <summary>
+/// Thrown when the store read a stored row it cannot parse: a wrong column count, an
+/// unrecognized wire token or row tag, invalid hex, or a non-numeric scalar. It names one
+/// session's corrupt stored data, so a per-session read may isolate it, unlike a programming
+/// error. It derives from <see cref="InvalidOperationException"/>, which the store threw for
+/// these faults before, so every caller that catches that type still catches this one.
+/// </summary>
+public class StoredDataException : InvalidOperationException
+{
+    /// <summary>Initializes a new <see cref="StoredDataException"/>.</summary>
+    public StoredDataException()
+        : base("The store returned a row it cannot parse.")
+    {
+    }
+
+    /// <summary>Initializes a new <see cref="StoredDataException"/> with a diagnostic message.</summary>
+    public StoredDataException(string message)
+        : base(message)
+    {
+    }
+
+    /// <summary>Initializes a new <see cref="StoredDataException"/> with a message and inner cause.</summary>
+    public StoredDataException(string message, Exception innerException)
+        : base(message, innerException)
+    {
+    }
+}

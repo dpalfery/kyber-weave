@@ -160,10 +160,16 @@ public class ApplicationParityTests
         Assert.Single(rollups);
         Assert.Contains(rollups, static r => r.Harness == "copilot" && r.SampleCount == 1);
 
-        Assert.Contains("sess-copilot", query.GetSessions().GetRawText(), StringComparison.Ordinal);
+        Assert.Contains("sess-copilot", query.GetSessionPage().GetRawText(), StringComparison.Ordinal);
         Assert.NotNull(query.GetSessionSummary("sess-copilot"));
-        Assert.NotNull(query.GetSessionDetail("sess-copilot"));
-        Assert.Null(query.GetSessionDetail("missing"));
+        Assert.NotNull(query.GetSessionCharts("sess-copilot"));
+        Assert.Null(query.GetSessionCharts("missing"));
+        Assert.NotNull(store.SessionSummaryFigures("sess-copilot"));
+        Assert.NotNull(store.SessionTurnFigures("sess-copilot"));
+        Assert.NotNull(store.TurnFigures("sess-copilot", 0));
+        Assert.Null(store.TurnFigures("sess-copilot", 1));
+        Assert.Null(store.SessionSummaryFigures("missing"));
+        Assert.Null(store.SessionTurnFigures("missing"));
         string harnessPayload = query.GetHarnesses().GetRawText();
         Assert.Contains("\"copilot\"", harnessPayload, StringComparison.Ordinal);
         Assert.Contains("\"sampleCount\"", harnessPayload, StringComparison.Ordinal);
@@ -211,6 +217,16 @@ public class ApplicationParityTests
         JsonElement partFiltered = bridge.GetSessionContent("sess-content", spanId: "span-parts", part: "user_prompt", full: true)!.Value;
         JsonElement filteredEntry = Assert.Single(partFiltered.GetProperty("parts").EnumerateArray().ToList());
         Assert.Equal("hello", filteredEntry.GetProperty("text").GetString());
+
+        // The content view reads only the span it answers for: five bytes of text, through the
+        // scoped content read, with no broad record or part read on the way.
+        store.ClearReadLog();
+        JsonElement scoped = bridge.GetSessionContent("sess-content", spanId: "span-parts", full: true)!.Value;
+        Assert.Single(scoped.GetProperty("parts").EnumerateArray());
+        Assert.Equal(5, store.MaterializedContentBytes);
+        Assert.Contains(nameof(InMemoryRelationalStore.TurnContentParts), store.ReadLog);
+        Assert.DoesNotContain(nameof(InMemoryRelationalStore.SessionRecordsForRebuild), store.ReadLog);
+        Assert.DoesNotContain(nameof(InMemoryRelationalStore.AllSessionRecordsForMaintenance), store.ReadLog);
     }
 
     [Fact]
@@ -696,12 +712,12 @@ public class ApplicationParityTests
     /// <summary>Projection service that always fails, for job-host failure reporting.</summary>
     private class FailingProjectionService : ICanonProjectionService
     {
-        public ProjectionPassReport ProjectIncremental() => throw new InvalidOperationException("projection exploded");
+        public ProjectionPassReport ProjectIncremental() => throw new StoredDataException("projection exploded");
 
-        public IReadOnlyList<HarnessRollupRow> ProjectRunsAndHarnesses() => throw new InvalidOperationException("projection exploded");
+        public IReadOnlyList<HarnessRollupRow> ProjectRunsAndHarnesses() => throw new StoredDataException("projection exploded");
 
         public (ProjectionPassReport Projection, IReadOnlyList<HarnessRollupRow> Rollups) ProjectAll() =>
-            throw new InvalidOperationException("projection exploded");
+            throw new StoredDataException("projection exploded");
     }
 
     /// <summary>Web asset repository recording the override directory each call carried.</summary>

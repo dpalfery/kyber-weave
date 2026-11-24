@@ -38,6 +38,23 @@ public static class PresentationTestData
     /// <summary>An empty JSON array payload.</summary>
     public static JsonElement EmptyArray { get; } = JsonSerializer.SerializeToElement(Array.Empty<object>());
 
+    /// <summary>
+    /// An empty paging envelope keyed by <paramref name="itemsKey"/> — the shared shape the
+    /// sessions and subagents pages answer with.
+    /// </summary>
+    /// <param name="itemsKey">Name of the items member, mirrored into <c>data</c>.</param>
+    /// <returns>The encoded envelope.</returns>
+    public static JsonElement PageEnvelope(string itemsKey) =>
+        JsonSerializer.SerializeToElement(new Dictionary<string, object?>
+        {
+            [itemsKey] = Array.Empty<object>(),
+            ["data"] = Array.Empty<object>(),
+            ["total"] = 0,
+            ["limit"] = 25,
+            ["offset"] = 0,
+            ["page"] = 1,
+        });
+
     /// <summary>A version payload.</summary>
     public static JsonElement Version { get; } = JsonSerializer.SerializeToElement(new { version = "0.21.0", apiVersion = 1 });
 

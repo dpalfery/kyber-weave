@@ -159,7 +159,7 @@ public sealed class AnalyticsOperationsDetailTests
     public void StoreFaultReturnsUnavailableContractV1Envelope()
     {
         (Mock<IRelationalStoreReader> reader, Mock<IProjectionStore> projections, Mock<IOperationalStore> operational) = CreateBaseStoreMocks();
-        reader.Setup(store => store.ListSessionAggregates(It.IsAny<string?>(), It.IsAny<IModelPricingLookup?>()))
+        reader.Setup(store => store.Sessions(It.IsAny<string?>()))
             .Throws(new SqliteExecutionException("sqlite3 exited with code 1", 1, "database is locked"));
         KyberBridgeEngine engine = CreateEngine(reader.Object, projections.Object, operational.Object);
 
@@ -240,12 +240,8 @@ public sealed class AnalyticsOperationsDetailTests
     {
         Mock<IRelationalStoreReader> reader = new();
         reader.Setup(store => store.Sessions(It.IsAny<string?>())).Returns(Array.Empty<CollectedSession>());
-        reader.Setup(store => store.Records(It.IsAny<string?>(), It.IsAny<string?>(), It.IsAny<string?>()))
-            .Returns(Array.Empty<CollectedRecord>());
         reader.Setup(store => store.CountRecords(It.IsAny<string?>())).Returns(0);
         reader.Setup(store => store.Harnesses()).Returns(Array.Empty<string>());
-        reader.Setup(store => store.ListSessionAggregates(It.IsAny<string?>(), It.IsAny<IModelPricingLookup?>()))
-            .Returns(Array.Empty<SessionAggregateView>());
 
         Mock<IProjectionStore> projections = new();
         projections.Setup(store => store.ListSessionProjections(It.IsAny<string?>()))
@@ -334,10 +330,18 @@ public sealed class AnalyticsOperationsDetailTests
 
         public int CountRecords(string? harnessId = null) => inner.CountRecords(harnessId);
 
-        public CollectedRecord? GetRecord(string spanId) => inner.GetRecord(spanId);
+        /// <inheritdoc />
+        public IReadOnlyList<StoredSourceCount> SourceRecordCounts() => inner.SourceRecordCounts();
 
-        public IReadOnlyList<CollectedRecord> Records(string? sessionKey = null, string? harnessId = null, string? sourceId = null) =>
-            inner.Records(sessionKey, harnessId, sourceId);
+        public CollectedRecord? RecordContentFree(string spanId) => inner.RecordContentFree(spanId);
+
+        public string? SpanPromptText(string spanId) => inner.SpanPromptText(spanId);
+
+        public IReadOnlyList<StoredSessionAttribution> SessionAttributions() => inner.SessionAttributions();
+
+        public IReadOnlyList<CollectedRecord> SessionRecordsForRebuild(string sessionKey) => inner.SessionRecordsForRebuild(sessionKey);
+
+        public IReadOnlyList<CollectedRecord> AllSessionRecordsForMaintenance() => inner.AllSessionRecordsForMaintenance();
 
         public IReadOnlyList<StoredTokenCount> TokenCounts(string? spanId = null, string? sessionKey = null) => inner.TokenCounts(spanId, sessionKey);
 
@@ -349,7 +353,21 @@ public sealed class AnalyticsOperationsDetailTests
 
         public IReadOnlyList<StoredToolCall> ToolCalls(string? spanId = null, string? sessionKey = null) => inner.ToolCalls(spanId, sessionKey);
 
-        public IReadOnlyList<StoredContentPart> ContentParts(string? spanId = null, string? sessionKey = null) => inner.ContentParts(spanId, sessionKey);
+        public IReadOnlyList<StoredContentPart> TurnContentParts(
+            string sessionKey,
+            int? turnIndex = null,
+            string? spanId = null,
+            string? part = null,
+            int budget = 0,
+            bool full = false) =>
+            inner.TurnContentParts(sessionKey, turnIndex, spanId, part, budget, full);
+
+        public int TurnContentPartCount(
+            string sessionKey,
+            int? turnIndex = null,
+            string? spanId = null,
+            string? part = null) =>
+            inner.TurnContentPartCount(sessionKey, turnIndex, spanId, part);
 
         public IReadOnlyList<StoredToolDefinition> ToolDefinitions(string? spanId = null, string? sessionKey = null) => inner.ToolDefinitions(spanId, sessionKey);
 
@@ -363,29 +381,144 @@ public sealed class AnalyticsOperationsDetailTests
 
         public IReadOnlyList<StoredSessionModelUsage> SessionModelUsages(string? sessionKey = null) => inner.SessionModelUsages(sessionKey);
 
-        public StoredFieldsView StoredFields(string sessionKey) => inner.StoredFields(sessionKey);
+        public StoredFieldsInventoryView StoredFieldsInventory(string sessionKey) => inner.StoredFieldsInventory(sessionKey);
 
-        public SessionAggregateView? GetSessionAggregate(string sessionKey, IModelPricingLookup? pricing = null)
+        public StoredTableRows? StoredFieldsRows(string sessionKey, string table, int page, int limit) => inner.StoredFieldsRows(sessionKey, table, page, limit);
+
+        public IReadOnlyList<SessionListFigure> SessionListFigures(string? harnessId = null, IModelPricingLookup? pricing = null)
         {
-            if (string.Equals(sessionKey, failingSessionKey, StringComparison.Ordinal))
+            IReadOnlyList<SessionListFigure> figures = inner.SessionListFigures(harnessId, pricing);
+            if (figures.Any(figure => string.Equals(figure.SessionKey, failingSessionKey, StringComparison.Ordinal)))
             {
-                throw new InvalidOperationException("projection exploded");
+                throw new StoredDataException("projection exploded");
             }
 
-            return inner.GetSessionAggregate(sessionKey, pricing);
+            return figures;
         }
 
-        public IReadOnlyList<SessionAggregateView> ListSessionAggregates(string? harnessId = null, IModelPricingLookup? pricing = null) =>
-            inner.ListSessionAggregates(harnessId, pricing);
+        public IReadOnlyList<SessionListFigure> SessionListFigures(IReadOnlyCollection<string> sessionKeys, IModelPricingLookup? pricing = null)
+        {
+            IReadOnlyList<SessionListFigure> figures = inner.SessionListFigures(sessionKeys, pricing);
+            if (figures.Any(figure => string.Equals(figure.SessionKey, failingSessionKey, StringComparison.Ordinal)))
+            {
+                throw new StoredDataException("projection exploded");
+            }
 
-        public IReadOnlyList<ReadTimeTurnSummary> SessionTurnSummaries(string sessionKey, IModelPricingLookup? pricing = null)
+            return figures;
+        }
+
+        public SessionSummaryFigure? SessionSummaryFigures(string sessionKey, IModelPricingLookup? pricing = null)
         {
             if (string.Equals(sessionKey, failingSessionKey, StringComparison.Ordinal))
             {
-                throw new InvalidOperationException("projection exploded");
+                throw new StoredDataException("projection exploded");
             }
 
-            return inner.SessionTurnSummaries(sessionKey, pricing);
+            return inner.SessionSummaryFigures(sessionKey, pricing);
+        }
+
+        public IReadOnlyList<SessionReportFigure> SessionReportFigures(IReadOnlyCollection<string> sessionKeys, IModelPricingLookup? pricing = null)
+        {
+            IReadOnlyList<SessionReportFigure> figures = inner.SessionReportFigures(sessionKeys, pricing);
+            if (figures.Any(figure => string.Equals(figure.SessionKey, failingSessionKey, StringComparison.Ordinal)))
+            {
+                throw new StoredDataException("projection exploded");
+            }
+
+            return figures;
+        }
+
+        public ReadTimeTurnSummary? TurnFigures(string sessionKey, int turnIndex, IModelPricingLookup? pricing = null)
+        {
+            if (string.Equals(sessionKey, failingSessionKey, StringComparison.Ordinal))
+            {
+                throw new StoredDataException("projection exploded");
+            }
+
+            return inner.TurnFigures(sessionKey, turnIndex, pricing);
+        }
+
+        public SessionTurnFigureSet? SessionTurnFigures(string sessionKey, IModelPricingLookup? pricing = null)
+        {
+            if (string.Equals(sessionKey, failingSessionKey, StringComparison.Ordinal))
+            {
+                throw new StoredDataException("projection exploded");
+            }
+
+            return inner.SessionTurnFigures(sessionKey, pricing);
+        }
+
+        public SessionRequestFigurePageResult SessionRequestFigures(string sessionKey, int page, int limit)
+        {
+            if (string.Equals(sessionKey, failingSessionKey, StringComparison.Ordinal))
+            {
+                throw new StoredDataException("projection exploded");
+            }
+
+            return inner.SessionRequestFigures(sessionKey, page, limit);
+        }
+
+        public SessionReconciliationFigurePageResult SessionReconciliationFigures(string sessionKey, int page, int limit)
+        {
+            if (string.Equals(sessionKey, failingSessionKey, StringComparison.Ordinal))
+            {
+                throw new StoredDataException("projection exploded");
+            }
+
+            return inner.SessionReconciliationFigures(sessionKey, page, limit);
+        }
+
+        public SessionProblemPageResult SessionProblems(string sessionKey, int page, int limit)
+        {
+            if (string.Equals(sessionKey, failingSessionKey, StringComparison.Ordinal))
+            {
+                throw new StoredDataException("projection exploded");
+            }
+
+            return inner.SessionProblems(sessionKey, page, limit);
+        }
+
+        public IReadOnlyList<StoredRequestPromptPreview> RequestPromptPreviews(string sessionKey, IReadOnlyCollection<string> requestSpanIds) =>
+            inner.RequestPromptPreviews(sessionKey, requestSpanIds);
+
+        public IReadOnlyList<CollectedRecord> SessionRecordsContentFree(string sessionKey)
+        {
+            if (string.Equals(sessionKey, failingSessionKey, StringComparison.Ordinal))
+            {
+                throw new StoredDataException("projection exploded");
+            }
+
+            return inner.SessionRecordsContentFree(sessionKey);
+        }
+
+        public SessionToolFigureSet SessionToolFigures(string sessionKey, IModelPricingLookup? pricing = null)
+        {
+            if (string.Equals(sessionKey, failingSessionKey, StringComparison.Ordinal))
+            {
+                throw new StoredDataException("projection exploded");
+            }
+
+            return inner.SessionToolFigures(sessionKey, pricing);
+        }
+
+        public IReadOnlyList<StoredSkillInvocation> SessionSkillFigures(string sessionKey)
+        {
+            if (string.Equals(sessionKey, failingSessionKey, StringComparison.Ordinal))
+            {
+                throw new StoredDataException("projection exploded");
+            }
+
+            return inner.SessionSkillFigures(sessionKey);
+        }
+
+        public IReadOnlyList<CollectedRecord> SessionTimelineRecords(string sessionKey)
+        {
+            if (string.Equals(sessionKey, failingSessionKey, StringComparison.Ordinal))
+            {
+                throw new StoredDataException("projection exploded");
+            }
+
+            return inner.SessionTimelineRecords(sessionKey);
         }
     }
 }

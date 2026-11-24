@@ -11,7 +11,7 @@ findings Kilo and CodeRabbit raised across about 100 pull requests from 30 Sep t
   *Ground rules*.
 - Each review-lens seat returns `guidance: [<section ids>]` on every finding, for example
   `guidance: [R8, §1]`.
-- Rules tagged with an id (`R2`–`R16`) are cited by that id. Untagged bullets are cited by
+- Rules tagged with an id (`R2`–`R17`) are cited by that id. Untagged bullets are cited by
   section number (`§N`). Never invent an id for an untagged bullet.
 - A `NO FINDINGS` reply names the sections it checked.
 - A seat given guidance that returns no attestation is recorded as a council-coverage gap; its
@@ -127,6 +127,20 @@ Governing rule: [honest unobservability](docs/rules/honest-unobservability.md).
 - **R7** *(low evidence)* Cap the serialized size of host-supplied payloads and every parser
   token. Page through an external list until `hasNextPage` is false, or fail loudly at the page
   limit. (#435, #433, #439)
+- **R17** Two questions about a read path, answered by reading the diff rather than by measuring.
+  **Does each endpoint's store read return only what its page renders** — no `Where`, `Skip` or
+  `Take` in C# over a superset the read returned, and no content-text column
+  (`content_part_text`, tool-call input or result text) selected outside the content view, the
+  stored-fields inventory and the projection rebuild? **Is any expensive shared refresh reached
+  from a request single-flight or deferred to maintenance** — `ProjectIncrementalForReads` with
+  its deferral on a GET, not `ProjectIncremental`? The shapes and their sanctioned exceptions are
+  in [the read-model register](docs/dash/architecture.md#read-path-invariants-and-the-read-model-register);
+  the rules are `KW-STD-SQL-001` to `KW-STD-SQL-003` in
+  [the SQLite standard](docs/standards/sqlite/sqlite.standards.md#store-reads-are-shaped-to-their-consumer).
+  The unbounded-materialisation, per-row-loop and per-request-rebuild variants above are already
+  findings here; do not restate them. A shaped path whose test asserts no read shape is a §10
+  finding for `test-adequacy` — `KW-STD-TEST-001` in
+  [the test standard](docs/standards/test/test.standards.md#read-path-tests-assert-the-shape-of-the-reads).
 
 ### 5. Identity, dedup, and merge correctness
 

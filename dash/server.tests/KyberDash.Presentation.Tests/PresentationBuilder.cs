@@ -76,15 +76,21 @@ public class PresentationBuilder
 
         Query.Setup(q => q.GetMeta()).Returns(PresentationTestData.Meta);
         Query.Setup(q => q.GetVersion()).Returns(PresentationTestData.Version);
-        Query.Setup(q => q.GetSessions(It.IsAny<int?>(), It.IsAny<string?>())).Returns(empty);
-        Query.Setup(q => q.GetSessions()).Returns(empty);
-        Query.Setup(q => q.GetSessionDetail(It.IsAny<string>())).Returns((JsonElement?)null);
+        Query.Setup(q => q.GetSessionPage(It.IsAny<int>(), It.IsAny<int>(), It.IsAny<string?>(), It.IsAny<string?>()))
+            .Returns(PresentationTestData.PageEnvelope("sessions"));
+        Query.Setup(q => q.GetSubagentPage(It.IsAny<string>(), It.IsAny<int>(), It.IsAny<int>()))
+            .Returns(PresentationTestData.PageEnvelope("subagents"));
         Query.Setup(q => q.GetSessionSummary(It.IsAny<string>())).Returns((JsonElement?)null);
+        Query.Setup(q => q.GetSessionCharts(It.IsAny<string>())).Returns((JsonElement?)null);
+        Query.Setup(q => q.GetSessionRequests(It.IsAny<string>(), It.IsAny<int>(), It.IsAny<int>())).Returns((JsonElement?)null);
+        Query.Setup(q => q.GetSessionReconciliation(It.IsAny<string>(), It.IsAny<int>(), It.IsAny<int>())).Returns((JsonElement?)null);
+        Query.Setup(q => q.GetSessionProblems(It.IsAny<string>(), It.IsAny<int>(), It.IsAny<int>())).Returns((JsonElement?)null);
         Query.Setup(q => q.GetSessionContent(It.IsAny<string>(), It.IsAny<int?>(), It.IsAny<string?>(), It.IsAny<string?>(), It.IsAny<bool>())).Returns((JsonElement?)null);
         Query.Setup(q => q.GetTurnFigures(It.IsAny<string>(), It.IsAny<int>())).Returns((JsonElement?)null);
         Query.Setup(q => q.GetTurnContent(It.IsAny<string>(), It.IsAny<int>(), It.IsAny<int>(), It.IsAny<bool>())).Returns((JsonElement?)null);
         Query.Setup(q => q.GetSpanAttributes(It.IsAny<string>())).Returns((JsonElement?)null);
-        Query.Setup(q => q.GetStoredFields(It.IsAny<string>())).Returns((JsonElement?)null);
+        Query.Setup(q => q.GetStoredFieldsInventory(It.IsAny<string>())).Returns((JsonElement?)null);
+        Query.Setup(q => q.GetStoredFieldRows(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<int>(), It.IsAny<int>())).Returns((JsonElement?)null);
         Query.Setup(q => q.GetCompare()).Returns(empty);
         Query.Setup(q => q.GetCompareRuns(It.IsAny<string>(), It.IsAny<string>())).Returns((JsonElement?)null);
         Query.Setup(q => q.GetQuarantinePage(It.IsAny<string?>(), It.IsAny<int>(), It.IsAny<int>(), It.IsAny<int>())).Returns(empty);
