@@ -416,8 +416,8 @@ function parseKyberPage<T>(
  */
 function readSessionSummaryRow(path: string): (row: unknown) => KyberSessionSummary {
   return (row) => {
-    if (!isRaw(row) || typeof row.session_id !== 'string' || row.session_id === '') throw malformedPage(path, 'a row has no session_id')
-    if (typeof row.harness !== 'string' || row.harness === '') throw malformedPage(path, 'a row has no harness')
+    if (!isRaw(row) || typeof row.session_id !== 'string' || row.session_id.trim() === '') throw malformedPage(path, 'a row has no session_id')
+    if (typeof row.harness !== 'string' || row.harness.trim() === '') throw malformedPage(path, 'a row has no harness')
     return row as unknown as KyberSessionSummary
   }
 }
