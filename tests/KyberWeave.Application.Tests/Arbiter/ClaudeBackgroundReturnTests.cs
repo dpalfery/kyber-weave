@@ -218,8 +218,84 @@ public sealed class ClaudeBackgroundReturnTests : IDisposable
         Assert.Equal(string.Empty, stdout);
         ArbiterLedgerEvent post = Assert.Single(Posts());
         Assert.Null(post.PreId);
-        Assert.Contains(Session, log, StringComparison.Ordinal);
-        Assert.Contains("agent-nobody", log, StringComparison.Ordinal);
+        Assert.Contains(
+            $"Arbiter: no followed background dispatch for agent 'agent-nobody' in session '{Session}'",
+            log,
+            StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void HandbackWhoseAgentIdDiffersFromTheLaunch_IsRecordedUnpaired()
+    {
+        Start("T2", "toolu-1", "agent-1");
+
+        (string stdout, string log) = Handback("agent-other", Report("T2"));
+
+        Assert.Equal(string.Empty, stdout);
+        Assert.Null(Assert.Single(Posts()).PreId);
+        Assert.NotEmpty(_host.Ledger.InFlightPaths());
+        Assert.Contains(
+            $"Arbiter: no followed background dispatch for agent 'agent-other' in session '{Session}'",
+            log,
+            StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void AsyncLaunchWithoutAnAgentId_IsNotTrackedAndLogsWhy()
+    {
+        Dispatch("T2", "toolu-1");
+        Advance();
+
+        (_, string log) = Send(new
+        {
+            hook_event_name = "PostToolUse",
+            session_id = Session,
+            cwd = _host.RepoRoot,
+            agent_type = "conductor",
+            tool_name = "Agent",
+            tool_input = new { description = "T2", prompt = Prompt("T2"), subagent_type = "dev-easy", run_in_background = true },
+            tool_use_id = "toolu-1",
+            tool_response = new { status = "async_launched", content = Array.Empty<string>() },
+        });
+
+        Assert.Contains(
+            $"Arbiter: background launch of agent '(none)' in session '{Session}' is not recorded",
+            log,
+            StringComparison.Ordinal);
+
+        Handback("agent-1", Report("T2"));
+        Assert.Null(Assert.Single(Posts()).PreId);
+    }
+
+    [Fact]
+    public void ForegroundCompletedTwiceForABackgroundAgent_IsRecordedOnceAndPaired()
+    {
+        Start("T2", "toolu-1", "agent-1");
+        ArbiterLedgerEvent pre = PreOf("toolu-1");
+
+        Completed("T2", "toolu-1", "agent-1");
+        Advance();
+        Completed("T2", "toolu-1", "agent-1");
+
+        ArbiterLedgerEvent post = Assert.Single(Posts());
+        Assert.Equal(pre.Id, post.PreId);
+    }
+
+    [Fact]
+    public void StopForAFollowedAgentWhosePreIsAlreadyPaired_LogsThatNothingIsClosed()
+    {
+        Start("T2", "toolu-1", "agent-1");
+        Handback("agent-1", Report("T2"));
+        Advance();
+
+        (_, string log) = Stop("agent-1");
+
+        Assert.Contains(
+            "Arbiter: the SubagentStop of agent 'agent-1' follows a saved dispatch, " +
+            "but that dispatch is not an open pre of this session, so nothing is closed.",
+            log,
+            StringComparison.Ordinal);
+        Assert.Single(Posts());
     }
 
     [Fact]
@@ -259,7 +335,10 @@ public sealed class ClaudeBackgroundReturnTests : IDisposable
         Advance();
         Handback("agent-1", Report("T2"));
 
-        Assert.Contains("toolu-unknown", log, StringComparison.Ordinal);
+        string pairing = log.ReplaceLineEndings("\n").Split('\n', StringSplitOptions.RemoveEmptyEntries)
+            .Single(line => line.Contains("Pairing keys compared", StringComparison.Ordinal));
+        Assert.Contains("call-id 'toolu-unknown'", pairing, StringComparison.Ordinal);
+        Assert.Contains("unpaired pre", pairing, StringComparison.Ordinal);
         Assert.Null(Assert.Single(Posts()).PreId);
     }
 

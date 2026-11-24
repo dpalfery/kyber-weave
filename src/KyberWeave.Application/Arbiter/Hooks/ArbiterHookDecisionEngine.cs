@@ -408,6 +408,9 @@ public sealed class ArbiterHookDecisionEngine : IContextualHookDecisionEngine, I
             if (own is null
                 || LedgerFacts.NotDispatchedLedgerIds(_state.OpenDecisionLog(arbiterDirectory)).Contains(own.Id))
             {
+                context.Log.WriteLine(
+                    $"Arbiter: the {stopEvent} of agent '{agentId}' follows a saved dispatch, " +
+                    "but that dispatch is not an open pre of this session, so nothing is closed.");
                 return 0;
             }
 

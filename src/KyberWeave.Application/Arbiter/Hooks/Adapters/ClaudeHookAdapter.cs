@@ -359,22 +359,29 @@ public sealed class ClaudeHookAdapter : IHarnessHookAdapter
             string? toolUseId = GetString(payload, "tool_use_id");
             string? agentId = GetString(response, "agentId");
             string? sessionId = GetString(payload, "session_id");
-            if (_engine is IBackgroundDispatchEngine background
-                && !string.IsNullOrWhiteSpace(agentId)
-                && !string.IsNullOrWhiteSpace(sessionId))
+            if (_engine is IBackgroundDispatchEngine background)
             {
-                // The engine saves the dispatch in the Arbiter's own state: each hook event is a separate process,
-                // so nothing here may keep it in memory.
-                background.TrackBackgroundDispatch(
-                    new BackgroundDispatch(
-                        Token,
-                        sessionId,
-                        agentId,
-                        caller,
-                        SubagentTypeOf(payload),
-                        PromptOf(payload),
-                        toolUseId),
-                    context);
+                if (string.IsNullOrWhiteSpace(agentId) || string.IsNullOrWhiteSpace(sessionId))
+                {
+                    context.Log.WriteLine(
+                        $"Arbiter: background launch of agent '{agentId ?? "(none)"}' in session '{sessionId ?? "(none)"}' " +
+                        "is not recorded; a launch needs both an agent id and a session id.");
+                }
+                else
+                {
+                    // The engine saves the dispatch in the Arbiter's own state: each hook event is a separate process,
+                    // so nothing here may keep it in memory.
+                    background.TrackBackgroundDispatch(
+                        new BackgroundDispatch(
+                            Token,
+                            sessionId,
+                            agentId,
+                            caller,
+                            SubagentTypeOf(payload),
+                            PromptOf(payload),
+                            toolUseId),
+                        context);
+                }
             }
 
             return string.Empty;
@@ -386,30 +393,41 @@ public sealed class ClaudeHookAdapter : IHarnessHookAdapter
                 $"Malformed Claude hook event: unknown PostToolUse status '{status ?? "<missing>"}'.");
         }
 
-        string? target = null;
-        string prompt = string.Empty;
-        if (payload.TryGetProperty("tool_input", out JsonElement toolInput)
-            && toolInput.ValueKind == JsonValueKind.Object)
-        {
-            target = GetString(toolInput, "subagent_type");
-            // The return classifies to its dispatch's trigger family, so the
-            // original prompt rides along best effort; without it the engine
-            // classifies from caller and target alone.
-            prompt = GetString(toolInput, "prompt") ?? string.Empty;
-        }
-
-        // No double recording: a hand-back already delivered this return.
         string? completedAgentId = GetString(response, "agentId");
         string? completedSession = GetString(payload, "session_id");
+        HookOutcome outcome;
         if (!string.IsNullOrWhiteSpace(completedAgentId)
             && !string.IsNullOrWhiteSpace(completedSession)
             && _engine is IBackgroundDispatchEngine followed
-            && followed.FindBackgroundDispatch(completedSession, completedAgentId, context)?.LastResponseDigest is not null)
+            && followed.FindBackgroundDispatch(completedSession, completedAgentId, context) is { } saved)
         {
-            return string.Empty;
-        }
+            if (saved.LastResponseDigest is not null)
+            {
+                // A hand-back already stored this return. The completed post is the same turn seen again.
+                return string.Empty;
+            }
 
-        HookOutcome outcome = DecidePost(payload, caller, target, prompt, response.GetRawText(), config, context);
+            // The launch is saved and no return is stored yet. Record this turn against that pre,
+            // so a repeat of the same text is not a second row.
+            outcome = followed.DecideBackgroundReturn(
+                Token, completedSession, completedAgentId, response.GetRawText(), config, context);
+        }
+        else
+        {
+            string? target = null;
+            string prompt = string.Empty;
+            if (payload.TryGetProperty("tool_input", out JsonElement toolInput)
+                && toolInput.ValueKind == JsonValueKind.Object)
+            {
+                target = GetString(toolInput, "subagent_type");
+                // The return classifies to its dispatch's trigger family, so the
+                // original prompt rides along best effort; without it the engine
+                // classifies from caller and target alone.
+                prompt = GetString(toolInput, "prompt") ?? string.Empty;
+            }
+
+            outcome = DecidePost(payload, caller, target, prompt, response.GetRawText(), config, context);
+        }
         return outcome.Kind switch
         {
             HookOutcomeKind.PassThrough => string.Empty,

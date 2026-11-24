@@ -76,7 +76,7 @@ public sealed class ClaudeHandbackTests
             "agent-9", agentId, StringComparison.Ordinal);
 
     [Fact]
-    public void Handback_JoinedReturn_RecordsMessageAsPostDispatchOutput()
+    public void Handback_PlainEngine_RecordsMessageAsPostDispatchOutput()
     {
         string agentId = UniqueAgentId();
         ScriptedEngine engine = new();
@@ -151,6 +151,71 @@ public sealed class ClaudeHandbackTests
         Assert.Equal("allow", output.GetProperty("permissionDecision").GetString());
         JsonElement updated = output.GetProperty("updatedInput");
         Assert.Equal(message + "\n\n" + note, updated.GetProperty("message").GetString());
+    }
+
+    [Fact]
+    public void Handback_SavedDispatch_IsJudgedThroughDecideBackgroundReturn()
+    {
+        const string message = "Implemented the plan parser with tests passing.";
+        JoiningEngine engine = new();
+        HookCommand command = ArbiterTestServices.Command(
+            ArbiterTestServices.Registry(engine),
+            _ => EnabledConfig(),
+            () => "decision-test-1");
+        using StringWriter stdout = new();
+        using StringWriter log = new();
+
+        int exit = command.Run("claude", "dev-medium", HandbackFor("agent-joined"), stdout, log);
+
+        Assert.Equal(0, exit);
+        Assert.Equal(0, engine.PostCalls);
+        Assert.Equal("sess-handback-1", engine.ReturnSession);
+        Assert.Equal("agent-joined", engine.ReturnAgent);
+        Assert.Equal(message, engine.ReturnResponse);
+        Assert.Equal(string.Empty, stdout.ToString());
+    }
+
+    /// <summary>A background engine that joins one agent id and records the return it is asked to judge.</summary>
+    private sealed class JoiningEngine : IHookDecisionEngine, IBackgroundDispatchEngine
+    {
+        public int PostCalls;
+
+        public string? ReturnSession { get; private set; }
+
+        public string? ReturnAgent { get; private set; }
+
+        public string? ReturnResponse { get; private set; }
+
+        public HookOutcome DecidePreDispatch(string caller, string? target, string prompt, KyberWeaveConfig config) =>
+            new(HookOutcomeKind.Allow);
+
+        public HookOutcome DecidePostDispatch(string caller, string? target, string toolOutput, KyberWeaveConfig config)
+        {
+            PostCalls++;
+            return new HookOutcome(HookOutcomeKind.Allow);
+        }
+
+        public void TrackBackgroundDispatch(BackgroundDispatch dispatch, HookContext context)
+        {
+        }
+
+        public BackgroundDispatchRecord? FindBackgroundDispatch(string sessionId, string agentId, HookContext context) =>
+            string.Equals(agentId, "agent-joined", StringComparison.Ordinal)
+                ? new BackgroundDispatchRecord(
+                    new BackgroundDispatch("claude", sessionId, agentId, "conductor", "dev-easy", "prompt"),
+                    "pre-1")
+                : null;
+
+        public HookOutcome DecideBackgroundReturn(
+            string harness, string sessionId, string agentId, string response, KyberWeaveConfig config, HookContext context)
+        {
+            ReturnSession = sessionId;
+            ReturnAgent = agentId;
+            ReturnResponse = response;
+            return new HookOutcome(HookOutcomeKind.Allow);
+        }
+
+        public IReadOnlyList<string> TakePendingNotes(string sessionId, string caller, HookContext context) => [];
     }
 
     [Fact]

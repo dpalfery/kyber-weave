@@ -185,6 +185,35 @@ public sealed class ClaudeHookAdapterTests
             tracked);
     }
 
+    [Theory]
+    [InlineData(
+        """{"hook_event_name":"PostToolUse","tool_name":"Agent","session_id":"s","tool_use_id":"t"}""",
+        "carries no tool_response")]
+    [InlineData(
+        """{"hook_event_name":"PostToolUse","tool_name":"Agent","session_id":"s","tool_response":{"status":"weird"}}""",
+        "unknown PostToolUse status")]
+    [InlineData(
+        """{"hook_event_name":"PreToolUse","tool_name":"SubagentHandback","session_id":"s","tool_input":{"message":"hi"}}""",
+        "carries no agent_id")]
+    [InlineData(
+        """{"hook_event_name":"PreToolUse","tool_name":"SubagentHandback","session_id":"s","agent_id":"a","tool_input":{}}""",
+        "carries no message")]
+    public void MalformedDispatchInput_FailsOpenAndLogsTheGuard(string stdin, string expected)
+    {
+        HookCommand command = ArbiterTestServices.Command(
+            ArbiterTestServices.Registry(new ScriptedEngine()),
+            _ => EnabledConfig(),
+            () => "decision-test-1");
+        using StringWriter stdout = new();
+        using StringWriter log = new();
+
+        int exit = command.Run("claude", "conductor", stdin, stdout, log);
+
+        Assert.Equal(0, exit);
+        Assert.Contains(expected, log.ToString(), StringComparison.Ordinal);
+        Assert.Contains("The dispatch continues without an Arbiter decision.", log.ToString(), StringComparison.Ordinal);
+    }
+
     /// <summary>A plain engine that also follows background dispatches, recording what it is handed.</summary>
     private sealed class BackgroundScriptedEngine : IHookDecisionEngine, IBackgroundDispatchEngine
     {
