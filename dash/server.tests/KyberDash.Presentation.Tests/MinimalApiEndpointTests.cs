@@ -837,6 +837,28 @@ public class MinimalApiEndpointTests
     }
 
     /// <summary>
+    /// A client-side route such as <c>/session/s/turn/0</c> is answered with the app shell, and the
+    /// shell must never be cached: a year-long immutable cache would keep an old shell naming asset
+    /// hashes a later build no longer serves.
+    /// </summary>
+    [Theory]
+    [InlineData("/session/sess-1/turn/0")]
+    [InlineData("/harness/codex")]
+    [InlineData("/")]
+    public async Task TheAppShellOnAClientRouteIsNeverCached(string requestPath)
+    {
+        await using Host host = await Host.StartAsync(b =>
+            b.Assets
+                .Setup(a => a.TryResolveAsset(It.IsAny<string>(), It.IsAny<string?>()))
+                .Returns(new WebAssetDocument("text/html; charset=utf-8", Encoding.UTF8.GetBytes("<html>spa</html>"))));
+
+        HttpResponseMessage response = await host.Client.GetAsync(new Uri(requestPath, UriKind.Relative));
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        Assert.Equal("no-store", response.Headers.CacheControl?.ToString());
+    }
+
+    /// <summary>
     /// A file the bundle does not hold must be a 404. The asset service answers an unknown key with
     /// index.html, so without this check a missing <c>/assets/*.js</c> would be served as HTML.
     /// </summary>

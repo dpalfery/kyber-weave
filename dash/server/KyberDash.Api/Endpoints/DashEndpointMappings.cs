@@ -1077,8 +1077,12 @@ public static class DashEndpointMappings
         if (document is null)
             return NotBuiltResult();
 
+        // The app shell is a document wherever it is served: at "/", as index.html, and on every
+        // client-side route (/session/s/turn/0), where the asset service answers with index.html.
+        // It must never be cached, or an old shell keeps naming asset hashes a later build dropped.
         bool isDocument = string.Equals(path, "/", StringComparison.Ordinal)
-            || string.Equals(Path.GetExtension(path), ".html", StringComparison.OrdinalIgnoreCase);
+            || string.Equals(Path.GetExtension(path), ".html", StringComparison.OrdinalIgnoreCase)
+            || (!IsFileName(path) && document.ContentType.StartsWith("text/html", StringComparison.OrdinalIgnoreCase));
         context.Response.Headers.CacheControl = isDocument
             ? "no-store"
             : "public, max-age=31536000, immutable";

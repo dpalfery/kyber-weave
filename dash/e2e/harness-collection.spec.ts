@@ -530,14 +530,12 @@ test.describe('the Factory (Droid) replay', () => {
     // The restored turn-content contract, end to end on the consent-on session:
     // the turn page reads the parts the engine serves and the web builds the
     // blocks it renders, so the recorded prompt is page content — not only a
-    // raw-span attribute or a request preview. The dashboard serves its bundle
-    // with relative asset URLs, so the route opens the way the app's own
-    // navigation does: the loaded SPA pushes the path and rebuilds the ancestry
-    // (the same transition `openHarness` drives for the harness route).
-    await page.evaluate((path) => {
-      window.history.pushState({}, '', path)
-      window.dispatchEvent(new PopStateEvent('popstate'))
-    }, `/session/${FACTORY_CONTENT_ON_SESSION_ID}/turn/0`)
+    // raw-span attribute or a request preview. The route is opened as a deep link
+    // and reloaded, the way a shared link or a browser refresh reaches it: the app
+    // shell served on a nested route must still load its bundle.
+    await page.goto(`${factoryApp}/session/${FACTORY_CONTENT_ON_SESSION_ID}/turn/0`)
+    await expect(page.getByTestId('page-turn')).toBeVisible()
+    await page.reload()
     await expect(page.getByTestId('page-turn')).toBeVisible()
     await expect(page.getByTestId('turn-not-found')).toHaveCount(0)
     await expect(page.getByTestId('turn-load-error')).toHaveCount(0)
