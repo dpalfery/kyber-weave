@@ -17,7 +17,8 @@ import { ContextInspector } from '../components/ContextInspector.js'
 import { ContextReviewPanel, HierarchyBreadcrumb } from '../components/analysis/index.js'
 
 export interface TurnDetailProps {
-  runId: string
+  /** The run the turn was reached through; absent on a session turn link. */
+  runId?: string
   executionId?: string
   turnIndex: number
   onSelectAll?: () => void
@@ -101,7 +102,9 @@ export function TurnDetail({
   const [selectedBlockKey, setSelectedBlockKey] = useState<string | undefined>()
   const { data: run } = useQuery({
     queryKey: ['kyber-turn-run', runId],
-    queryFn: () => fetchRun(runId),
+    queryFn: () => fetchRun(runId!),
+    // A session turn link names no run; the session comes from the execution id.
+    enabled: !!runId,
   })
   const sessionId = resolveTurnSessionId(run, executionId)
   const { data, isLoading, isError, error } = useQuery({

@@ -659,7 +659,7 @@ export function App({ initialPage = 'context-doctor', initialPath, initialNotFou
             ) : location.level === 'turn' ? (
               <TurnDetail
                 key={`turn:${location.runId}:${location.executionId ?? ''}:${location.turnIndex}`}
-                runId={location.runId!}
+                runId={location.runId}
                 executionId={location.executionId}
                 turnIndex={location.turnIndex!}
                 onSelectAll={() => openSpine({ level: 'context-doctor' }, 'goTo')}

@@ -344,6 +344,20 @@ describe('TurnDetail raw packet disclosure (B7)', () => {
     expect(screen.getByTestId('raw-packet-disclosure').textContent).toContain('Raw packet')
   })
 
+  it('reads no run when the turn was opened without one, and loads the session it names', async () => {
+    // A session turn link (/session/:id/turn/:n) names the session, not a run:
+    // the page must not ask for /api/kyber/run/undefined.
+    rawPacketApi.fetchTurnContent.mockResolvedValue(turnContent())
+    renderDom(
+      <QueryClientProvider client={new QueryClient({ defaultOptions: { queries: { retry: false, gcTime: 0 } } })}>
+        <TurnDetail executionId="sess-raw-packet" turnIndex={0} />
+      </QueryClientProvider>,
+    )
+
+    await waitFor(() => expect(rawPacketApi.fetchTurnContent).toHaveBeenCalledWith('sess-raw-packet', 0))
+    expect(rawPacketApi.fetchRun).not.toHaveBeenCalled()
+  })
+
   it('shows the sections’ projection failure when the turn read names a faulted projection', async () => {
     // The engine's fault shape: identity plus the marker, no figures, no content.
     rawPacketApi.fetchTurnContent.mockResolvedValue({
