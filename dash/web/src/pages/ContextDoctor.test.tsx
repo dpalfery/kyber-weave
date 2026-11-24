@@ -1821,4 +1821,45 @@ describe('ContextDoctor scope: harness and session', () => {
       }),
     ).toBe(false)
   })
+
+  it('never points aria-activedescendant at an option that no longer exists', async () => {
+    // Switching harness shrinks the listbox under an active index that was
+    // valid a moment ago: the pointer must drop rather than read "undefined".
+    stubScoped()
+    const utils = renderScoped({ activeHarness: 'pi' })
+    const box = await openPicker()
+    const listbox = () => screen.getByTestId('context-doctor-session-listbox')
+    await waitFor(() => expect(within(listbox()).queryByTestId('session-option-sess-pi-2')).not.toBeNull())
+
+    fireEvent.keyDown(box, { key: 'ArrowDown' })
+    fireEvent.keyDown(box, { key: 'ArrowDown' })
+    fireEvent.keyDown(box, { key: 'ArrowDown' })
+    expect(box.getAttribute('aria-activedescendant')).toBe('session-option-sess-pi-2')
+
+    utils.rerender({ activeHarness: 'cursor' })
+    await waitFor(() => expect(within(listbox()).queryByTestId('session-option-sess-cursor-1')).not.toBeNull())
+    expect(box.getAttribute('aria-activedescendant')).toBeNull()
+  })
+
+  it('drops the active option when the picker turns the page', async () => {
+    const store = Array.from({ length: 150 }, (_, i) => ({
+      session_id: `sess-bulk-${i}`,
+      harness: 'pi',
+      label: `bulk ${i}` as string | null,
+    }))
+    stubScoped({ store })
+    renderScoped({ activeHarness: 'pi' })
+
+    const box = await openPicker()
+    const listbox = () => screen.getByTestId('context-doctor-session-listbox')
+    await waitFor(() => expect(within(listbox()).queryByTestId('session-option-sess-bulk-99')).not.toBeNull())
+    fireEvent.keyDown(box, { key: 'ArrowDown' })
+    fireEvent.keyDown(box, { key: 'ArrowDown' })
+    expect(box.getAttribute('aria-activedescendant')).toBe('session-option-sess-bulk-0')
+
+    fireEvent.click(within(listbox()).getByRole('button', { name: 'Next page' }))
+    await waitFor(() => expect(within(listbox()).queryByTestId('session-option-sess-bulk-100')).not.toBeNull())
+    // The index belonged to the previous page's rows.
+    expect(box.getAttribute('aria-activedescendant')).toBeNull()
+  })
 })

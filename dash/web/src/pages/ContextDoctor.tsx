@@ -109,10 +109,22 @@ export function SessionPicker({
   // rather than a stale search the user cleared by choosing an option.
   const [edited, setEdited] = useState<string | null>(null)
   const [activeIndex, setActiveIndex] = useState(-1)
+  // A page turn replaces the rows the index pointed at, so the index must not
+  // survive it. Adjusted during render (the state-when-props-change pattern),
+  // before the pointer is read.
+  const [prevPage, setPrevPage] = useState(page)
+  if (prevPage !== page) {
+    setPrevPage(page)
+    setActiveIndex(-1)
+  }
   const pendingSearch = useMemo(() => ({ timer: undefined as ReturnType<typeof setTimeout> | undefined }), [])
 
   const displayValue = edited ?? (selectedLabel != null && selectedLabel.length > 0 ? selectedLabel : effectiveSessionId ?? '')
   const optionIds = ['all', ...options.map((session) => sessionIdOf(session))]
+  // Only an index that still names an option may produce a pointer: options can
+  // shrink under a previously valid index, and `session-option-undefined` is
+  // not an element id.
+  const activeOptionId = activeIndex >= 0 ? optionIds[activeIndex] : undefined
 
   const cancelPendingSearch = () => {
     if (pendingSearch.timer !== undefined) {
@@ -148,7 +160,7 @@ export function SessionPicker({
         aria-expanded={open}
         aria-controls="context-doctor-session-listbox"
         aria-autocomplete="list"
-        aria-activedescendant={open && activeIndex >= 0 ? `session-option-${optionIds[activeIndex]}` : undefined}
+        aria-activedescendant={open && activeOptionId !== undefined ? `session-option-${activeOptionId}` : undefined}
         data-testid="context-doctor-session-combobox"
         className="text-density-xs text-foreground"
         placeholder="All sessions — search to narrow"
