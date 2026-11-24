@@ -155,7 +155,7 @@ public sealed class PluginHookAdapter : IHarnessHookAdapter
         }
 
         string prompt = ArgString(envelope.Args, _promptArgument) ?? string.Empty;
-        DispatchInsertion insertion = DispatchPromptInsertion.Expand(prompt, context);
+        DispatchInsertion insertion = DispatchPromptInsertion.Expand(prompt, context, TargetOf(envelope));
         return insertion.Kind switch
         {
             DispatchInsertionKind.Inserted => RenderAllowWithArgs(envelope.Args, _promptArgument, insertion.Text),
@@ -176,7 +176,7 @@ public sealed class PluginHookAdapter : IHarnessHookAdapter
         HookOutcome outcome = DecidePre(envelope, caller, target, prompt, config, context);
 
         // The rules judge the short dispatch first; the prompt is inserted only for a dispatch they allowed.
-        DispatchInsertion insertion = DispatchPromptInsertion.Expand(prompt, context);
+        DispatchInsertion insertion = DispatchPromptInsertion.Expand(prompt, context, target);
         if (outcome.Kind == HookOutcomeKind.Deny)
         {
             return RenderBlock(

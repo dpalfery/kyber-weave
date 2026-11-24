@@ -47,6 +47,25 @@ public record StoredSkillInvocation(string SpanId, string SkillName);
 /// <param name="Call">Static tool call details.</param>
 public record StoredToolCall(string SpanId, CollectedToolCall Call);
 
+/// <summary>
+/// A tool call that may be a KW skill load (<c>tool_call</c>, its MCP split, the first 1024
+/// characters of its reply and its record's start time). The reader only narrows to candidate
+/// names; the application decides which candidates are loads and what skill each names.
+/// </summary>
+/// <param name="SpanId">Owning record span identifier.</param>
+/// <param name="ToolName">Tool name as the harness recorded it (<c>tool_call.tool_name</c>).</param>
+/// <param name="McpServerName">MCP server name when the call was split (<c>tool_call_mcp.server_name</c>).</param>
+/// <param name="McpToolName">MCP tool name when the call was split (<c>tool_call_mcp.server_tool_name</c>).</param>
+/// <param name="ReplyHead">The reply's first 1024 characters (<c>tool_call_result_text.text</c>), or <see langword="null"/> when no reply was captured. The call's input is never read.</param>
+/// <param name="StartedAtUtc">The owning record's start time (<c>record.started_at_utc</c>).</param>
+public record StoredKwSkillLoad(
+    string SpanId,
+    string ToolName,
+    string? McpServerName,
+    string? McpToolName,
+    string? ReplyHead,
+    DateTimeOffset StartedAtUtc);
+
 /// <summary>Persisted content part attached to a record (<c>content_part</c> and child extension tables).</summary>
 /// <param name="SpanId">Owning record span identifier.</param>
 /// <param name="Part">Static content part details.</param>
@@ -545,6 +564,11 @@ public record SessionReconciliationFigurePageResult(IReadOnlyList<ReadTimeTurnRe
 /// <param name="Total">Number of stored ingest problems attached to the session, before paging.</param>
 public record SessionProblemPageResult(IReadOnlyList<Problem> Items, int Total);
 
+/// <summary>One page of a session's KW skill loads (D17), in call order.</summary>
+/// <param name="Items">The page's load rows, in call order.</param>
+/// <param name="Total">Number of KW skill loads the session holds, before paging.</param>
+public record SessionKwSkillLoadPageResult(IReadOnlyList<StoredKwSkillLoad> Items, int Total);
+
 /// <summary>
 /// One session's tool and server section figures with the aggregates the tools section carries
 /// page-independently (<c>DD-13</c>).
@@ -982,6 +1006,26 @@ public interface IRelationalStoreReader
     /// spans and touches the skill table alone.
     /// </remarks>
     IReadOnlyList<StoredSkillInvocation> SessionSkillFigures(string sessionKey);
+
+    /// <summary>
+    /// Reads one page of the session's KW skill loads (D17), in call order, with the total.
+    /// </summary>
+    /// <param name="sessionKey">Canonical session key.</param>
+    /// <param name="page">One-based page number.</param>
+    /// <param name="limit">Rows on the page.</param>
+    /// <returns>
+    /// The page's load rows — every tool call of the session whose MCP server, normalized (lower
+    /// case, <c>_</c> to <c>-</c>), is <c>kw-docs</c> and whose MCP tool is <c>load_skill</c>, or
+    /// whose tool name is one of the unsplit D17 spellings — with the owning record's start time,
+    /// and the load count before paging. An empty page with a zero total when the session has none.
+    /// </returns>
+    /// <remarks>
+    /// The statement scopes to the session's spans, carries the D17 load rule in SQL, and pages
+    /// with <c>LIMIT</c>/<c>OFFSET</c>, so one page never reads the reply head of a load outside
+    /// it. The recognizer in the application layer stays the final authority on the load and its
+    /// skill; this read stays a plain row shape.
+    /// </remarks>
+    SessionKwSkillLoadPageResult SessionKwSkillLoads(string sessionKey, int page, int limit);
 
     /// <summary>
     /// Reads the prompt previews of exactly the named request spans, and no other span's parts.

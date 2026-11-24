@@ -39,6 +39,10 @@ public sealed class DispatchPromptInsertionTests
     private const string TaskPrompt =
         "<task>\nImplement the parser.\n</task>\n\n<left-out>\nNothing was left out.\n</left-out>";
 
+    private const string RolePrompt = "<kw-skills>\nLoad a skill by name.\n- plan-authoring: write a plan\n</kw-skills>";
+
+    private const string RoleDispatch = "Review the plan for gaps.";
+
     private const string TaskDispatch =
         "KYBER-ARBITER: true\nPLAN_FILE: docs/plans/plan.md\nTASK: T3\n\nImplement the plan parser.";
 
@@ -173,7 +177,8 @@ public sealed class DispatchPromptInsertionTests
                         Agent: null,
                         query.PriorResultsPath,
                         Technology: query.Technology,
-                        query.FailedAttempts),
+                        query.FailedAttempts,
+                        RoleAgent: query.Target),
                     EnabledConfig());
                 return new DispatchPromptExpansion(result.Built, result.Prompt, result.Refusal);
             });
@@ -392,6 +397,115 @@ public sealed class DispatchPromptInsertionTests
         string stdout = adapter.Handle(json(payload), payload, "conductor", EnabledConfig(), Context(new ScriptedPrompts()));
 
         Assert.Equal(TaskPrompt + "\n\nImplement the plan parser.", InsertedPrompt(harness, stdout));
+    }
+
+    [Fact]
+    public void ARoleDispatchWithNoHeadersGetsItsRoleSkillsInserted()
+    {
+        ScriptedPrompts prompts = new() { Prompt = RolePrompt };
+        IHarnessHookAdapter adapter = Adapter(new RecordingEngine(), ClaudeHookAdapter.Token);
+        string payload = Payload("claude", RoleDispatch).Replace("csharp-dev", "architect", StringComparison.Ordinal);
+
+        string stdout = adapter.Handle(json(payload), payload, "conductor", EnabledConfig(), Context(prompts));
+
+        Assert.Equal(RolePrompt + "\n\n" + RoleDispatch, InsertedPrompt("claude", stdout));
+        TaskPromptRequest request = Assert.Single(prompts.Requests);
+        Assert.Equal("architect", request.RoleAgent);
+        Assert.Null(request.TaskId);
+        Assert.Null(request.Technology);
+    }
+
+    [Fact]
+    public void ARoleWithNoSkillsLeavesTheDispatchUnchanged()
+    {
+        ScriptedPrompts prompts = new() { Refusal = "no skills for this role" };
+        TextWriter log = new StringWriter();
+        HookContext context = Context(prompts) with { Log = log };
+
+        DispatchInsertion insertion = DispatchPromptInsertion.Expand(RoleDispatch, context, "architect");
+
+        Assert.Equal(DispatchInsertionKind.None, insertion.Kind);
+        Assert.Equal(string.Empty, log.ToString());
+    }
+
+    [Theory]
+    [InlineData(TaskPromptRefusalKind.MissingInput)]
+    [InlineData(TaskPromptRefusalKind.Finding)]
+    public void ARoleOnlyRefusalNeverStopsTheDispatch(TaskPromptRefusalKind kind)
+    {
+        ScriptedPrompts prompts = new() { Refusal = "refused", RefusalKind = kind };
+
+        Assert.Equal(
+            DispatchInsertionKind.None,
+            DispatchPromptInsertion.Expand(RoleDispatch, Context(prompts), "architect").Kind);
+
+        HookContext throwing = Context(prompts) with
+        {
+            BuildDispatchPrompt = _ => throw new InvalidOperationException("catalog unreadable"),
+        };
+        Assert.Equal(
+            DispatchInsertionKind.None,
+            DispatchPromptInsertion.Expand(RoleDispatch, throwing, "architect").Kind);
+        HookContext empty = Context(prompts) with
+        {
+            BuildDispatchPrompt = _ => new DispatchPromptExpansion(true, " ", null),
+        };
+        Assert.Equal(
+            DispatchInsertionKind.None,
+            DispatchPromptInsertion.Expand(RoleDispatch, empty, "architect").Kind);
+    }
+
+    [Fact]
+    public void ADispatchAlreadyOpeningWithKwSkillsIsNotExpandedAgain()
+    {
+        ScriptedPrompts prompts = new() { Prompt = RolePrompt };
+
+        Assert.True(DispatchPromptInsertion.IsExpanded(RolePrompt + "\n\n" + RoleDispatch));
+        Assert.Equal(
+            DispatchInsertionKind.None,
+            DispatchPromptInsertion.Expand(RolePrompt + "\n\n" + RoleDispatch, Context(prompts), "architect").Kind);
+        Assert.Empty(prompts.Requests);
+    }
+
+    [Fact]
+    public void ADispatchWithNoTargetAndNoHeadersStaysUnchanged()
+    {
+        ScriptedPrompts prompts = new() { Prompt = RolePrompt };
+
+        Assert.Equal(DispatchInsertionKind.None, DispatchPromptInsertion.Expand(RoleDispatch, Context(prompts)).Kind);
+        Assert.Empty(prompts.Requests);
+    }
+
+    [Theory]
+    [MemberData(nameof(RewriteHarnesses))]
+    public void TheTargetReachesThePromptQueryOnEveryRewritingHarness(string harness)
+    {
+        ScriptedPrompts prompts = new() { Prompt = RolePrompt };
+        IHarnessHookAdapter adapter = Adapter(new RecordingEngine(), harness);
+
+        // Antigravity's hook only reads a dispatch carrying the Arbiter marker, so its role dispatch carries it.
+        string dispatch = harness == "antigravity" ? "KYBER-ARBITER: true\n\n" + RoleDispatch : RoleDispatch;
+        string payload = Payload(harness, dispatch);
+
+        string stdout = adapter.Handle(json(payload), payload, "conductor", DisabledConfig(), Context(prompts));
+
+        Assert.Equal(RolePrompt + "\n\n" + dispatch, InsertedPrompt(harness, stdout));
+        Assert.Equal("csharp-dev", Assert.Single(prompts.Requests).RoleAgent);
+    }
+
+    [Fact]
+    public void ATaskDispatchStillExpandsAsBefore()
+    {
+        ScriptedPrompts prompts = new();
+        IHarnessHookAdapter adapter = Adapter(new RecordingEngine(), ClaudeHookAdapter.Token);
+        string payload = Payload("claude", TaskDispatch);
+
+        string stdout = adapter.Handle(json(payload), payload, "conductor", EnabledConfig(), Context(prompts));
+
+        Assert.Equal(TaskPrompt + "\n\nImplement the plan parser.", InsertedPrompt("claude", stdout));
+        TaskPromptRequest request = Assert.Single(prompts.Requests);
+        Assert.Equal("T3", request.TaskId);
+        Assert.Equal("csharp-dev", request.RoleAgent);
     }
 
     private static JsonElement json(string text) => JsonDocument.Parse(text).RootElement.Clone();
@@ -770,14 +884,18 @@ public sealed class DispatchPromptInsertionTests
     [InlineData("STATUS: blocked")]
     public void ADispatchThatIsNotATaskDispatchPassesThroughUntouched(string dispatch)
     {
-        ScriptedPrompts prompts = new();
+        // The target is a role with no skills, so the role-only query the hook now makes is answered "not built".
+        ScriptedPrompts prompts = new() { Refusal = "no skills for this role" };
 
         (int exit, string stdout) = Run(
             Host(new RecordingEngine(), DisabledConfig(), prompts), ClaudeHookAdapter.Token, Payload("claude", dispatch));
 
         Assert.Equal(0, exit);
         Assert.Equal(string.Empty, stdout);
-        Assert.Empty(prompts.Requests);
+        TaskPromptRequest request = Assert.Single(prompts.Requests);
+        Assert.Null(request.TaskId);
+        Assert.Null(request.Technology);
+        Assert.Equal("csharp-dev", request.RoleAgent);
     }
 
     [Fact]

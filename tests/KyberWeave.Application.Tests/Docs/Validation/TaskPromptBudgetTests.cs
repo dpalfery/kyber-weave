@@ -132,13 +132,29 @@ public sealed class TaskPromptBudgetTests
             """;
     }
 
-    private static TaskPromptResult Build(DocFixture fixture, KyberWeaveConfig config, string? retryText = null) =>
+    /// <summary>The csharp list the budget cuts: three skills whose descriptions are long enough to matter to the budget.</summary>
+    private static IKwSkillCatalog CSharpSkills() =>
+        new FixedKwSkillCatalog((technology, _) => technology == "csharp"
+            ? new KwSkillList(
+            [
+                new KwSkillEntry("csharp-format", "CSHARP-SKILLS-MARKER: run dotnet format. " + Filler(400), KwSkillSource.Shipped),
+                new KwSkillEntry("csharp-tests", "CSHARP-TESTS-MARKER: " + Filler(400), KwSkillSource.Shipped),
+                new KwSkillEntry("csharp-nulls", "CSHARP-NULLS-MARKER: " + Filler(400), KwSkillSource.Repository),
+            ], [])
+            : new KwSkillList([], []));
+
+    private static TaskPromptResult Build(
+        DocFixture fixture,
+        KyberWeaveConfig config,
+        string? retryText = null,
+        IKwSkillCatalog? skills = null) =>
         new TaskPromptService(
             DocsMemoryServicesD.Services(fixture).GetRequiredService<IPlanTaskService>(),
             DocsMemoryServicesD.Services(fixture).GetRequiredService<IPacketHostFacts>(),
             DocsMemoryServicesD.Services(fixture).GetRequiredService<IWritableFileSystem>(),
             Index(fixture, config).StandardsFor,
-            DocsMemoryServicesD.Services(fixture).GetRequiredService<IProcessEnvironment>())
+            DocsMemoryServicesD.Services(fixture).GetRequiredService<IProcessEnvironment>(),
+            skills ?? CSharpSkills())
         .Build(new TaskPromptRequest(fixture.Root, TaskId: "T1", RetryText: retryText), config);
 
     private static DocumentIndex Index(DocFixture fixture, KyberWeaveConfig config) =>
@@ -158,7 +174,7 @@ public sealed class TaskPromptBudgetTests
     }
 
     [Fact]
-    public void OverTheBudgetSkillsAreCutFirstAndTheCutIsListedInTheLastPart()
+    public void OverTheBudgetTheKwSkillsListIsCutFirstAndNamedInLeftOut()
     {
         using DocFixture fixture = Ready();
         int full = Build(fixture, Config()).Prompt.Length;
@@ -169,7 +185,8 @@ public sealed class TaskPromptBudgetTests
         Assert.True(cut.Built, cut.Refusal);
         Assert.True(cut.Prompt.Length <= tight.TaskPromptBudget, $"the cut prompt is {cut.Prompt.Length} characters");
         string leftOut = cut.Prompt[cut.Prompt.IndexOf("<left-out>", StringComparison.Ordinal)..];
-        Assert.Contains("skills", leftOut, StringComparison.Ordinal);
+        Assert.Contains("KW skills (3 listed)", leftOut, StringComparison.Ordinal);
+        Assert.Contains("The KW skills list was left out", cut.Prompt, StringComparison.Ordinal);
         Assert.DoesNotContain("standard section", leftOut, StringComparison.Ordinal);
         Assert.DoesNotContain("CSHARP-SKILLS-MARKER", cut.Prompt, StringComparison.Ordinal);
         Assert.Contains("STANDARD-TESTING-MARKER", cut.Prompt, StringComparison.Ordinal);
@@ -182,7 +199,8 @@ public sealed class TaskPromptBudgetTests
     {
         using DocFixture fixture = Ready();
         int full = Build(fixture, Config()).Prompt.Length;
-        KyberWeaveConfig tight = Config(full - 1350);
+        // The KW list alone is about 1,400 characters, so a budget of full - 1,600 cuts it and then the least relevant section.
+        KyberWeaveConfig tight = Config(full - 1600);
 
         TaskPromptResult cut = Build(fixture, tight);
 
@@ -261,7 +279,8 @@ public sealed class TaskPromptBudgetTests
             DocsMemoryServicesD.Services(fixture).GetRequiredService<IPacketHostFacts>(),
             DocsMemoryServicesD.Services(fixture).GetRequiredService<IWritableFileSystem>(),
             index.StandardsFor,
-            DocsMemoryServicesD.Services(fixture).GetRequiredService<IProcessEnvironment>());
+            DocsMemoryServicesD.Services(fixture).GetRequiredService<IProcessEnvironment>(),
+            FixedKwSkillCatalog.Empty);
 
         foreach (string technology in technologies)
         {

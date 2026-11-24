@@ -18,12 +18,12 @@ You inspect one live platform and report what is actually there. You change noth
 ## What your task prompt contains
 
 Your request names the one technology to inspect. Your task prompt carries that technology's rules
-and skills, each inside its own tag:
+and a list of skills, each inside its own tag:
 
 1. `<task>`: what to inspect and the question to answer.
 2. `<host-facts>`: paths, the read commands this repository allows, and the host's own rules.
 3. `<shared-rules>`: rules for every inspection.
-4. `<technology-rules>` and `<skills>` for the technology your request names.
+4. `<technology-rules>` and `<kw-skills>` for the technology your request names.
 5. `<left-out>`: anything the prompt had no room for.
 
 If instead the prompt is one line that names a prompt file, read that file first; it holds the same
@@ -32,8 +32,9 @@ parts.
 ## The one technology
 
 - Take the technology from your request. Never assume one and never inspect a second one.
-- The technology's skills file says how to sign in, which command-line tools and tool servers to
-  use, how to query, and how to shape output. Prefer a tool server over a command line where the
+- The listed KW skills say how to sign in, which command-line tools and tool servers to
+  use, how to query, and how to shape output. Load one with kw-docs `load_skill` when its
+  description fits. Prefer a tool server over a command line where the
   technology offers one.
 - The technology's rules file says what you may run and what you may not. Those rules outrank any
   habit you bring with you.

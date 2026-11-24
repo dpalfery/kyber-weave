@@ -280,6 +280,25 @@ public sealed partial class DocsTools
         return _query.AgentCodingStandards(technology, topic, charBudget);
     }
 
+    /// <summary>Loads one KW skill by name: its instructions, its folder and the paths of its reference files.</summary>
+    /// <param name="name">The skill's name.</param>
+    /// <param name="projectPath">The worktree whose skills answer, or null for this server's checkout.</param>
+    [McpServerTool(Name = "load_skill", ReadOnly = false, OpenWorld = false)]
+    [Description("""
+        Use when a task prompt's KW skills list, or a coding standard's, names a skill whose description
+        fits your work, to read that skill's instructions before you start. Pass the skill's name. The
+        reply names the skill's folder and the paths of its reference files, which you open when you need
+        them; their contents are not returned. A name that is not a skill is answered with the skills that
+        exist, not an error. It may copy a shipped skill into your home folder so its reference files can be read.
+        """)]
+    public string LoadSkill(
+        [Description("The skill's name, as the KW skills list gives it.")] string name,
+        [Description("Absolute path of your worktree; omit for the server's checkout.")] string? projectPath = null)
+    {
+        if (Redirect(projectPath, tools => tools.LoadSkill(name)) is { } redirected) return redirected;
+        return _query.LoadSkill(name);
+    }
+
     /// <summary>
     /// Tells the conductor which agent to dispatch for one task, without returning the prompt text.
     /// </summary>

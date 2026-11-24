@@ -5,7 +5,7 @@ doc-type: reference
 status: current
 component: DocGraph
 owner: dpalfery
-last-reviewed: 2026-11-18
+last-reviewed: 2026-11-24
 decided-by:
   - adr/0010-keywords-prefix-coverage-and-oov-idf
 lead: frontmatter
@@ -139,15 +139,15 @@ what it is and whose it is.
 |---|---|---|
 | `<name>.standards.md` | `coding-standard` | The standard: six headings, in this order — Naming and layout; Coding standards; Testing; Commands; Security and data handling; Done checklist. |
 | `<name>.rules.md` | `rule` | Prose rules a model reads. They outrank the standard and are not evaluated by the Arbiter. |
-| `<name>.skills.md` | `skill` | How to do the work in this technology or role: commands, tool servers, query patterns, output shape. |
+| `<name>.skills.yml` | not governed | The KW skills this technology or role gets: a YAML list of skill names, nothing else (`[]` for none). The skills themselves are in the pool at `<docs-root>/standards/skills/<name>/SKILL.md`, checked by `KW-DOC-SKILL-001` to `-007`, not by the corpus. |
 | `<name>.arbiter-rules.yml` | not governed | Machine rules the Arbiter evaluates. YAML, no frontmatter, and a file that declares no rule is valid. |
 
 `shared-rules.md` beside the folders holds the rules that apply to every technology. A standard may
 name one parent it `builds-on` (React on TypeScript, Tauri on Rust), and a task in the child then
-receives the parent's rules and skills too. A folder whose standard is still `README.md` keeps
+receives the parent's rules, and the parent's KW skills listed before its own. A folder whose standard is still `README.md` keeps
 working for at least two minor releases: every finding the rename would raise is a warning naming
 `kyber-weave docs standards migrate`, which clears them in one run, so an un-upgraded host still
-runs. A rules or skills file must also carry its `doc-type` and the folder's `technology` (or
+runs. A rules file must also carry its `doc-type` and the folder's `technology` (or
 `role`) line: the standards lookup matches on both, so a file without them is in no task prompt
 even though it is on disk. `KW-DOC-SPEC-015` reports that, and the same migration sets the two
 lines while keeping every other line and the body byte for byte. The file names, checks and

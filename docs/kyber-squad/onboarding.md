@@ -5,7 +5,7 @@ doc-type: onboarding
 component: KyberSquad
 source-root: src/KyberWeave.Domain/Squad
 owner: dpalfery
-last-reviewed: 2026-11-22
+last-reviewed: 2026-11-24
 status: current
 decided-by:
   - adr/0067-copilot-system-prompt-override-is-machine-wide
@@ -1035,6 +1035,32 @@ If you copied a Kyber-Weave skill by hand to a path that Squad now deploys to, f
 `~/.claude/skills/kyber-docs-authoring`, `kyber-weave squad update --global` refuses with
 `UnmanagedCollision` and writes nothing. Remove the copy and run the update again. If the copy's
 bytes match the release, `kyber-weave squad install --global --adopt` claims it instead.
+
+---
+
+## KW skills are never deployed
+
+Kyber-Squad also uses **KW skills**: guidance an agent loads on demand through the kw-docs `load_skill` tool. They
+are a different kind of skill from the harness skills above and `squad install` and `squad update` never write one
+into a harness skills folder, global or project. They live in the repository's `standards/skills/` folder (and a
+shipped pool inside the binary), so there is nothing to deploy and nothing for `squad status` to track.
+
+What you do see is a list. Every dispatched agent whose technology or role has skills assigned carries a
+`<kw-skills>` part in its prompt: an opening line, then one `- <name>: <description>` line per skill. A skill is
+assigned in `standards/<technology-or-role>/<name>.skills.yml`, a plain YAML list of skill names. The agent calls
+`load_skill` with a name to read the skill.
+
+- **Add a skill.** Create `<docs-root>/standards/skills/<name>/SKILL.md` with `name` (equal to the folder) and
+  `description`, then list the name in the `.skills.yml` of each technology or role that should see it. A repository
+  skill beats a shipped skill of the same name.
+- **Check it.** `kyber-weave docs validate .` reports a malformed list, a listed name with no folder, a `SKILL.md`
+  with no `name` or `description`, a `name` that differs from its folder and a legacy `.skills.md`
+  ([the rules](../ci-pipelines/rule-reference.md#kw-skills--docs-validate)).
+- **Upgrade a repository.** `kyber-weave docs standards migrate` writes `[]` for a missing `.skills.yml`. It does
+  not convert an old `<name>.skills.md`: move any real guidance into a skill, list it, then delete the file.
+
+How the pool, the lists and the dispatch fit together is in the
+[architecture](architecture.md#13-kw-skills-the-on-demand-pool).
 
 ---
 

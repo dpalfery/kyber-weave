@@ -414,6 +414,80 @@ public sealed class SquadKyberWeaveSkillsTests : IClassFixture<SquadKyberWeavePa
     }
 
     /// <summary>
+    /// A KW skill lives in <c>standards/skills</c>, which the pack never reads: neither archive carries an entry
+    /// under it, and no KW skill name appears as a skill folder in either.
+    /// </summary>
+    [Fact]
+    public void NoPackArchiveCarriesAStandardsSkillsEntryOrAKwSkillName()
+    {
+        string[] kwSkills = Corpus.EnumerateDirectories("products/kyber-squad/standards/skills")
+            .Select(Path.GetFileName)
+            .OfType<string>()
+            .ToArray();
+        Assert.NotEmpty(kwSkills);
+
+        foreach ((SquadPackRun run, string file) in new[]
+                 {
+                     (_pack.ApmPack, $"kyber-squad-{PackedVersion}.zip"),
+                     (_pack.PluginsPack, $"kyber-squad-plugin-{PackedVersion}.zip")
+                 })
+        {
+            using ZipArchive archive = ZipFile.OpenRead(ArchivePath(run, file));
+            foreach (ZipArchiveEntry entry in archive.Entries)
+            {
+                string name = NormalizePath(entry.FullName);
+                Assert.DoesNotContain("standards/skills", name, StringComparison.Ordinal);
+                foreach (string kw in kwSkills)
+                {
+                    Assert.DoesNotContain($"skills/{kw}/", name, StringComparison.Ordinal);
+                }
+            }
+        }
+    }
+
+    /// <summary>
+    /// A global install into a scratch home writes no KW skill: the harness folders hold the squad and companion
+    /// skills only (D16).
+    /// </summary>
+    [Fact]
+    public void GlobalInstallDeploysNoKwSkill()
+    {
+        AssertExit(_pack.ApmPack.ExitCode, _pack.ApmPack.Output, 0);
+        string archive = ArchivePath(_pack.ApmPack, $"kyber-squad-{PackedVersion}.zip");
+        using SquadHomeHarness harness = new(Path.Combine(_temp.Path, "home"));
+        ISquadRenderer renderer = SquadHostDefaults.ResolveRenderer();
+        using ISquadReleaseSource releaseSource = FakeSquadReleaseSource.FromArchive(archive);
+        string anchor = harness.MakeDirectory("anchor");
+        string claudeRoot = harness.GlobalRoot(SquadTarget.Claude);
+
+        CapturedConsoleExecution<int> install = ProcessConsoleCapture.Run(() => SquadTestCommands.Install(
+                harness.UserPaths,
+                harness.Store,
+                releaseSource,
+                renderer,
+                false,
+                globalRoots: harness.GlobalRoots)
+            .Execute(null!, new SquadInstallSettings
+            {
+                Path = anchor,
+                Global = true,
+                Targets = ["claude"],
+                Version = PackedVersion,
+                Yes = true,
+                NoCapturePlugin = true
+            }));
+        AssertExit(install.Result, install.Output, 0);
+
+        Assert.True(File.Exists(Path.Combine(claudeRoot, "skills", "task-gate", "SKILL.md")));
+        foreach (string kw in Corpus.EnumerateDirectories("products/kyber-squad/standards/skills").Select(Path.GetFileName).OfType<string>())
+        {
+            Assert.False(
+                Directory.Exists(Path.Combine(claudeRoot, "skills", kw)),
+                $"squad install --global deployed the KW skill '{kw}' into a harness folder.");
+        }
+    }
+
+    /// <summary>
     /// Fail closed, as the spec requires: an <c>.apm/skills</c> name equal to a Squad skill or to a Squad agent must stop
     /// pack before any archive is written, so neither side silently shadows the other. On the base, pack exits 0.
     /// </summary>

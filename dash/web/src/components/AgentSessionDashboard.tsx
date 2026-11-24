@@ -10,6 +10,7 @@ import { SessionChartsSection } from './session/SessionChartsSection.js'
 import { SessionToolsSection } from './session/SessionToolsSection.js'
 import { SessionServersSection } from './session/SessionServersSection.js'
 import { SessionSkillsSection } from './session/SessionSkillsSection.js'
+import { SessionKwSkillsSection } from './session/SessionKwSkillsSection.js'
 import { SessionTimelineSection } from './session/SessionTimelineSection.js'
 import { SessionRequestsSection } from './session/SessionRequestsSection.js'
 import { SessionReconciliationSection } from './session/SessionReconciliationSection.js'
@@ -164,6 +165,9 @@ export function AgentSessionContent({
         summaryRecord={summaryRecord}
         openInspector={openInspector}
       />
+
+      {/* KW skills: the skill loads the KW agent made on demand, paged. Unnumbered. */}
+      <SessionKwSkillsSection sessionId={sessionId} />
 
       {/* 5 · Execution timeline and call tree (top level; deeper levels page on expand). */}
       <SessionTimelineSection

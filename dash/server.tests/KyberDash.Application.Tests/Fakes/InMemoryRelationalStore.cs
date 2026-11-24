@@ -1526,6 +1526,71 @@ public class InMemoryRelationalStore :
         }
     }
 
+    /// <summary>The unsplit tool names a KW skill load is recorded under (D17); mirrors the SQLite reader's spellings.</summary>
+    private static readonly string[] KwSkillLoadToolNames =
+    [
+        "mcp__kw-docs__load_skill",
+        "mcp__kw_docs__load_skill",
+        "kw-docs_load_skill",
+        "kw-docs__load_skill",
+        "kw-docs/load_skill",
+    ];
+
+    /// <inheritdoc />
+    public SessionKwSkillLoadPageResult SessionKwSkillLoads(string sessionKey, int page, int limit)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(sessionKey);
+        ArgumentOutOfRangeException.ThrowIfLessThan(page, 1);
+        ArgumentOutOfRangeException.ThrowIfLessThan(limit, 1);
+
+        lock (syncRoot)
+        {
+            NoteRead(nameof(SessionKwSkillLoads));
+            HashSet<string> sessionSpans = ResolveSessionSpanIds(state, sessionKey);
+            TableMetadata callMeta = GetTableMetadata("tool_call");
+            TableMetadata mcpMeta = GetTableMetadata("tool_call_mcp");
+            TableMetadata recordMeta = GetTableMetadata("record");
+            List<StoredKwSkillLoad> rows = [];
+            foreach (object?[] row in state.GetRows("tool_call"))
+            {
+                string spanId = GetString(callMeta, row, "span_id");
+                if (!sessionSpans.Contains(spanId))
+                {
+                    continue;
+                }
+
+                string toolName = GetString(callMeta, row, "tool_name");
+                object?[]? mcpRow = FindRowByKey(state, "tool_call_mcp", [("span_id", spanId)]);
+                string? serverName = mcpRow is null ? null : GetString(mcpMeta, mcpRow, "server_name");
+                string? serverToolName = mcpRow is null ? null : GetString(mcpMeta, mcpRow, "server_tool_name");
+                // The D17 load rule, as the application recognizer decides it: with an MCP split,
+                // the server name normalized (lower case, '_' to '-') is kw-docs and the split tool
+                // is load_skill; without one, the tool name is one of the unsplit spellings. The
+                // rule is quoted here because this file also compiles without the Application
+                // assembly; the SQLite parity tests prove the two stores decide alike.
+                bool load = serverName is not null || serverToolName is not null
+                    ? string.Equals(serverName?.Replace('_', '-'), "kw-docs", StringComparison.OrdinalIgnoreCase)
+                        && string.Equals(serverToolName, "load_skill", StringComparison.Ordinal)
+                    : KwSkillLoadToolNames.Contains(toolName, StringComparer.Ordinal);
+                if (!load)
+                {
+                    continue;
+                }
+
+                // The reply is read and cut to its first 1024 characters, as the SQLite reader does; the
+                // call's input is never read, so a JSON input cannot reach a load row.
+                string? replyText = ReadOptionalSingleString(state, "tool_call_result_text", "span_id", spanId, "text");
+                string? replyHead = replyText is null ? null : string.Concat(replyText.EnumerateRunes().Take(1024));
+                object?[] recordRow = FindRowByKey(state, "record", [("span_id", spanId)])
+                    ?? throw new InvalidOperationException($"tool_call {spanId} has no record row.");
+                DateTimeOffset startedAt = ParseTimestamp(GetString(recordMeta, recordRow, "started_at_utc"));
+                rows.Add(new StoredKwSkillLoad(spanId, toolName, serverName, serverToolName, replyHead, startedAt));
+            }
+
+            return new SessionKwSkillLoadPageResult(PageOf(rows, page, limit), rows.Count);
+        }
+    }
+
     /// <inheritdoc />
     public virtual IReadOnlyList<StoredRequestPromptPreview> RequestPromptPreviews(string sessionKey, IReadOnlyCollection<string> requestSpanIds)
     {

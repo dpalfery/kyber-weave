@@ -1,3 +1,5 @@
+using KyberWeave.Core.Configuration;
+
 namespace KyberWeave.Core.Docs.Scaffolding;
 
 /// <summary>
@@ -22,7 +24,7 @@ public static class KyberStandardsTemplates
         /// <summary>Prose rules a model reads.</summary>
         Rules,
 
-        /// <summary>How to do the work.</summary>
+        /// <summary>The YAML list of KW skill names the scope gets; a list, never prose.</summary>
         Skills,
 
         /// <summary>Machine rules the Arbiter evaluates; may declare none.</summary>
@@ -79,7 +81,7 @@ public static class KyberStandardsTemplates
     {
         Part.Standard => $"{scope}.standards.md",
         Part.Rules => $"{scope}.rules.md",
-        Part.Skills => $"{scope}.skills.md",
+        Part.Skills => $"{scope}{DocsLayout.SkillsListSuffix}",
         Part.ArbiterRules => $"{scope}.arbiter-rules.yml",
         _ => throw new ArgumentOutOfRangeException(nameof(part))
     };
@@ -89,7 +91,7 @@ public static class KyberStandardsTemplates
     {
         Part.Standard => $"{ResourcePrefix}{technology}.standards.md",
         Part.Rules => $"{ResourcePrefix}{technology}.rules.md",
-        Part.Skills => $"{ResourcePrefix}{technology}.skills.md",
+        Part.Skills => $"{ResourcePrefix}{technology}{DocsLayout.SkillsListSuffix}",
         Part.ArbiterRules => $"{ResourcePrefix}{technology}.arbiter-rules.yml",
         _ => throw new ArgumentOutOfRangeException(nameof(part))
     };

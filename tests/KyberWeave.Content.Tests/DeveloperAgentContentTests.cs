@@ -145,6 +145,19 @@ public sealed class DeveloperAgentContentTests
     [InlineData("dev-easy")]
     [InlineData("dev-medium")]
     [InlineData("dev-hard")]
+    public void EveryDeveloperTierNamesTheKwSkillsPartAndLoadSkill(string name)
+    {
+        string body = Agent(name).InstructionBody;
+
+        Assert.Contains("<kw-skills>", body, StringComparison.Ordinal);
+        Assert.Contains("load_skill", body, StringComparison.Ordinal);
+        Assert.DoesNotContain("<skills>", body, StringComparison.Ordinal);
+    }
+
+    [Theory]
+    [InlineData("dev-easy")]
+    [InlineData("dev-medium")]
+    [InlineData("dev-hard")]
     public void TheBodyNamesNoTechnologyLibraryCommandOrSkill(string name)
     {
         string body = Agent(name).InstructionBody;

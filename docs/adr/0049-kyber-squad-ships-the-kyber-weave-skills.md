@@ -4,7 +4,7 @@ title: Kyber-Squad Ships the Kyber-Weave Skills Beside Its Own Skills
 doc-type: adr
 status: current
 owner: dpalfery
-last-reviewed: 2026-11-01
+last-reviewed: 2026-11-24
 component: KyberSquad
 code-refs:
   - SquadCompanionSkills
@@ -122,3 +122,6 @@ Four facts constrain the choice:
 - **Known gap, introduced here (case).** Two companion skill folders whose names differ only by
   case, such as `Foo` and `foo` on a case-sensitive checkout, are both packed and would collide on a
   case-insensitive install; the fix is deferred as a follow-up.
+- **KW skills are a different kind (ADR 0093).** The skills this record ships are harness skills. The on-demand
+  guidance a technology or role lists in a `.skills.yml` is a **KW skill**, loaded through the kw-docs `load_skill`
+  tool and never deployed by Squad; see [ADR 0093](0093-kw-skills-load-on-demand-through-kw-docs.md).

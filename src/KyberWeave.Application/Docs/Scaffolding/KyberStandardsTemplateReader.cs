@@ -1,6 +1,7 @@
 using System.Collections.Frozen;
 using System.Diagnostics.CodeAnalysis;
 using KyberWeave.Contracts.Host;
+using KyberWeave.Core.Docs.KwSkills;
 using KyberWeave.Core.Text;
 
 namespace KyberWeave.Core.Docs.Scaffolding;
@@ -22,6 +23,7 @@ namespace KyberWeave.Core.Docs.Scaffolding;
 public sealed class KyberStandardsTemplateReader : IKyberStandardsTemplates
 {
     private readonly IEmbeddedResources _resources;
+    private readonly ShippedKwSkillPool _skillPool;
     private readonly Lazy<FrozenDictionary<string, string>> _templates;
 
     /// <summary>Creates the reader over the resource seam it reads.</summary>
@@ -30,6 +32,7 @@ public sealed class KyberStandardsTemplateReader : IKyberStandardsTemplates
     {
         ArgumentNullException.ThrowIfNull(resources);
         _resources = resources;
+        _skillPool = new ShippedKwSkillPool(resources);
         _templates = new Lazy<FrozenDictionary<string, string>>(LoadTemplates);
     }
 
@@ -100,7 +103,8 @@ public sealed class KyberStandardsTemplateReader : IKyberStandardsTemplates
 
         if (technology is not null && TryGetPart(technology, part, out string? content))
         {
-            rendered = part == KyberStandardsTemplates.Part.ArbiterRules
+            // A machine file (the Arbiter rules, the skills list) carries no frontmatter to inject into.
+            rendered = part is KyberStandardsTemplates.Part.ArbiterRules or KyberStandardsTemplates.Part.Skills
                 ? content
                 : InjectFrontmatter(content, owner, lastReviewed);
             return true;
@@ -141,6 +145,30 @@ public sealed class KyberStandardsTemplateReader : IKyberStandardsTemplates
 
         rendered = null;
         return false;
+    }
+
+    /// <inheritdoc />
+    public bool TryReadShippedSkill(string name, out IReadOnlyList<ShippedSkillFile> files)
+    {
+        ArgumentNullException.ThrowIfNull(name);
+
+        if (!_skillPool.Contains(name))
+        {
+            files = [];
+            return false;
+        }
+
+        List<ShippedSkillFile> read = [];
+        foreach (string relative in _skillPool.FilesOf(name))
+        {
+            using Stream stream = _skillPool.Open(name, relative);
+            using MemoryStream copy = new();
+            stream.CopyTo(copy);
+            read.Add(new ShippedSkillFile(relative, copy.ToArray()));
+        }
+
+        files = read;
+        return true;
     }
 
     /// <summary>The unknown-folder message, with a nearest-match hint when one is computable.</summary>

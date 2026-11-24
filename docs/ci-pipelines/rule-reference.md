@@ -5,7 +5,7 @@ doc-type: reference
 status: current
 component: CI Pipelines
 owner: dpalfery
-last-reviewed: 2026-11-17
+last-reviewed: 2026-11-24
 ---
 
 # Rule reference
@@ -26,7 +26,26 @@ baselines — see [CI Pipelines architecture](architecture.md) for why they neve
 | `KW-DOC-SPEC-005` | Error | `source-root` path does not exist |
 | `KW-DOC-SPEC-006` | Error | Duplicate `id`, or reference to an unknown id |
 | `KW-DOC-SPEC-007` | Error | `technology` on a document that is not a coding standard, or naming a different technology than its folder |
-| `KW-DOC-SPEC-015` | Error | A folder's rules or skills file exists but its frontmatter does not declare it as that file: `doc-type` other than `rule` / `skill`, or no `technology` / `role` line naming the folder. The task prompt cannot carry it until `docs standards migrate` (or a hand edit) sets those lines |
+| `KW-DOC-SPEC-015` | Error | A folder's rules file exists but its frontmatter does not declare it as that file: `doc-type` other than `rule`, or no `technology` / `role` line naming the folder. The task prompt cannot carry it until `docs standards migrate` (or a hand edit) sets those lines |
+
+### KW skills — `docs validate`
+
+A KW skill is on-demand guidance an agent loads with the kw-docs `load_skill` tool: a folder
+`<docs-root>/standards/skills/<name>/SKILL.md`, listed in a technology's or role's `<scope>.skills.yml`. The corpus
+does not load the pool, so these rules are the only check on it. The ids are permanent; see
+[the Squad architecture](../kyber-squad/architecture.md#13-kw-skills-the-on-demand-pool) and
+[ADR 0093](../adr/0093-kw-skills-load-on-demand-through-kw-docs.md). `KW-DOC-SPEC-012` expects
+`<scope>.skills.yml` in every standards folder.
+
+| Id | Severity | Meaning |
+|---|---|---|
+| `KW-DOC-SKILL-001` | Error | `<scope>.skills.yml` is not a YAML list of skill-name strings (a map, a scalar, or a list holding a non-string). `[]` is valid. The catalog then treats the file as listing nothing |
+| `KW-DOC-SKILL-002` | Error | A listed name has no folder in the repository pool or in the shipped pool. A name only the shipped pool has is not reported |
+| `KW-DOC-SKILL-003` | Error | A pool `SKILL.md` has no `name`, or no `description` |
+| `KW-DOC-SKILL-004` | Error | A pool skill's `name` differs from its folder name |
+| `KW-DOC-SKILL-005` | Warning | A legacy `<scope>.skills.md` remains beside the list. Move any real guidance into a KW skill, list it, then delete the file. `docs standards migrate` leaves it for this warning |
+| `KW-DOC-SKILL-006` | Error | A technology or role is named `skills`, which is the pool folder's name |
+| `KW-DOC-SKILL-007` | Error | A pool skill folder holds no `SKILL.md`, or holds one behind a symbolic link, which is not followed |
 
 ### Configuration registry — `docs validate`
 

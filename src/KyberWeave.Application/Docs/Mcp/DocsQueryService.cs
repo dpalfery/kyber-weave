@@ -7,6 +7,7 @@ using KyberWeave.Core.Diagnostics;
 using KyberWeave.Core.Docs.Analysis.Claims;
 using KyberWeave.Core.Docs.Analysis.Glossary;
 using KyberWeave.Core.Docs.Analysis.Model;
+using KyberWeave.Core.Docs.KwSkills;
 using KyberWeave.Core.Docs.Model;
 using KyberWeave.Core.Docs.Search;
 
@@ -48,8 +49,26 @@ public sealed partial class DocsQueryService : IDocsQueryService
         as is '<csharp-coding-standard>'.
         """;
 
+    /// <summary>The reply to a load that named no skill: the usage, so a blank call is a caller error with an answer.</summary>
+    private const string LoadSkillUsage = """
+        Pass the name of a KW skill: the name a task prompt's KW skills list, or a coding standard's,
+        gives it, such as 'plan-craft'.
+        """;
+
     /// <summary>Code joins listed per document.</summary>
     private const int JoinCap = 20;
+
+    /// <summary>Skills named in the unknown-skill reply before the remainder is counted.</summary>
+    private const int SkillNameCap = 20;
+
+    /// <summary>Longest echoed unknown skill name, so a caller's text can neither forge nor blow the reply.</summary>
+    private const int UnknownNameEchoCap = 80;
+
+    /// <summary>Skills-list problems named in one answer before the remainder is counted.</summary>
+    private const int SkillProblemCap = 10;
+
+    /// <summary>Skills listed in one answer's KW skills section before the remainder is counted.</summary>
+    private const int SkillEntryCap = 20;
 
     /// <summary>Hard caps for the conversational analysis surface.</summary>
     private const int AnalysisCandidateCap = 20;
@@ -68,6 +87,7 @@ public sealed partial class DocsQueryService : IDocsQueryService
     private readonly ICodeGraphFreshnessGate _freshness;
     private readonly IDocsGateRunner _gates;
     private readonly ICorpusProvenance _provenance;
+    private readonly IKwSkillCatalog _skills;
 
     /// <summary>Answers over <paramref name="host"/>, with the analysis and gate collaborators the composition root chose.</summary>
     /// <param name="host">The corpus this service answers from.</param>
@@ -75,6 +95,7 @@ public sealed partial class DocsQueryService : IDocsQueryService
     /// <param name="freshness">The CodeGraph refresh schedule, or null to answer from the documents on disk with no CodeGraph check at all.</param>
     /// <param name="gates">Runs the schema and drift gates.</param>
     /// <param name="provenance">Formats the provenance header.</param>
+    /// <param name="skills">Lists and loads the KW skills of this checkout.</param>
     /// <remarks>
     /// The schedule is opt-in, and null means no schedule, because it is a gate as much as a refresh:
     /// where the repository declares CodeGraph and the index is unreadable, a scheduled tool returns
@@ -88,13 +109,15 @@ public sealed partial class DocsQueryService : IDocsQueryService
         IDocsAnalysisReader? analysisReader,
         ICodeGraphFreshnessGate? freshness,
         IDocsGateRunner gates,
-        ICorpusProvenance provenance)
+        ICorpusProvenance provenance,
+        IKwSkillCatalog skills)
     {
         _host = host ?? throw new ArgumentNullException(nameof(host));
         _analysisReader = analysisReader;
         _freshness = freshness ?? NoCodeGraphRefresh.Instance;
         _gates = gates ?? throw new ArgumentNullException(nameof(gates));
         _provenance = provenance ?? throw new ArgumentNullException(nameof(provenance));
+        _skills = skills ?? throw new ArgumentNullException(nameof(skills));
     }
 
     public string Explore(
@@ -485,7 +508,6 @@ public sealed partial class DocsQueryService : IDocsQueryService
         AppendRuleIdIndex(sb, ruleIds);
 
         int remaining = Math.Max(0, budget - sb.Length);
-        List<string> leftOut = [];
 
         remaining = AppendWholePart(sb, "Shared rules", bundle.SharedRules, remaining);
 
@@ -493,11 +515,10 @@ public sealed partial class DocsQueryService : IDocsQueryService
         if (!string.IsNullOrWhiteSpace(parent))
         {
             remaining = AppendWholePart(sb, $"Parent rules ({parent})", bundle.ParentRules, remaining);
-            remaining = AppendCutPart(sb, $"Parent skills ({parent})", bundle.ParentSkills, remaining, leftOut);
         }
 
         remaining = AppendWholePart(sb, $"{requested} rules", bundle.Rules, remaining);
-        remaining = AppendCutPart(sb, $"{requested} skills", bundle.Skills, remaining, leftOut);
+        remaining = AppendKwSkills(sb, bundle.Standard, requested, remaining);
 
         int standardBudget = Math.Max(MinCharBudget, remaining);
         IReadOnlyList<DocumentHit> hits = index.CodingStandards(requested, topic, standardBudget);
@@ -541,8 +562,6 @@ public sealed partial class DocsQueryService : IDocsQueryService
             AppendExcerpt(sb, withheld.Elide(hit.Excerpt), "topic");
         }
 
-        AppendLeftOut(sb, leftOut);
-
         return Lead(gate, provenance, sb.ToString());
     }
 
@@ -565,47 +584,119 @@ public sealed partial class DocsQueryService : IDocsQueryService
     }
 
     /// <summary>
-    /// Appends a skills part, cut to the remaining budget. Skills are cut before the standard
-    /// because the standard is what a caller asked for by naming a topic; a cut is named so
-    /// the caller knows to ask again.
+    /// Appends the KW skills a technology gets, listed the way the task prompt lists them (D25). The
+    /// entries and the problems are each capped with the remainder counted, so an oversized pool
+    /// cannot blow the section. A problem the catalog reported while reading the lists is named
+    /// under the list — also when no skill survived it, so a bad list answers with the reason
+    /// instead of silently dropping the section.
     /// </summary>
-    private static int AppendCutPart(
-        StringBuilder sb,
-        string heading,
-        DocumentModel? document,
-        int remaining,
-        List<string> leftOut)
+    /// <param name="sb">The answer being built.</param>
+    /// <param name="standard">The technology's standard; the technology it declares scopes the skills.</param>
+    /// <param name="requested">The technology the caller named, used when the standard declares none.</param>
+    /// <param name="remaining">The characters the answer has left.</param>
+    private int AppendKwSkills(StringBuilder sb, DocumentModel standard, string requested, int remaining)
     {
-        if (document is null) return remaining;
+        string scope = standard.Frontmatter.Technology?.Trim() ?? requested;
+        KwSkillList skills = _skills.SkillsFor(scope, null);
+        if (skills.Entries.Count == 0 && skills.Problems.Count == 0) return remaining;
 
-        string body = document.Body.Trim();
-        if (body.Length + heading.Length + 4 <= remaining)
+        StringBuilder section = new("## KW skills\n");
+        if (skills.Entries.Count > 0)
         {
-            sb.Append("## ").AppendLine(heading);
-            sb.AppendLine(body);
-            return Math.Max(0, remaining - body.Length - heading.Length - 4);
+            section.Append(KwSkillListText.Render([.. skills.Entries.Take(SkillEntryCap)])).Append('\n');
+            if (skills.Entries.Count > SkillEntryCap)
+            {
+                section.Append(CultureInfo.InvariantCulture,
+                    $"… {skills.Entries.Count - SkillEntryCap} more skills omitted by the hard cap.\n");
+            }
         }
 
-        int take = Math.Max(0, remaining - heading.Length - 4);
-        if (take < 200)
+        if (skills.Problems.Count > 0)
         {
-            leftOut.Add($"{heading} ({body.Length} characters)");
-            return remaining;
+            section.Append("Problems in the skills lists:\n");
+            foreach (KwSkillProblem problem in skills.Problems.Take(SkillProblemCap))
+            {
+                section.Append("- ").Append(problem.Path).Append(": ").AppendLine(problem.Message);
+            }
+
+            if (skills.Problems.Count > SkillProblemCap)
+            {
+                section.Append(CultureInfo.InvariantCulture,
+                    $"… {skills.Problems.Count - SkillProblemCap} more problems omitted by the hard cap.\n");
+            }
         }
 
-        sb.Append("## ").AppendLine(heading);
-        sb.AppendLine(body[..take]);
-        sb.Append("… ").Append(body.Length - take).AppendLine(" characters cut for space.");
-        leftOut.Add($"{heading} (part)");
-        return 0;
+        section.Append('\n');
+        sb.Append(section);
+        return Math.Max(0, remaining - section.Length);
     }
 
-    private static void AppendLeftOut(StringBuilder sb, IReadOnlyList<string> leftOut)
+    /// <inheritdoc />
+    public string LoadSkill(string name)
     {
-        if (leftOut.Count == 0) return;
+        string provenance = Provenance();
+        if (string.IsNullOrWhiteSpace(name)) return provenance + "\n" + LoadSkillUsage;
 
-        sb.Append("[left out for space: ").Append(string.Join(" · ", leftOut))
-          .AppendLine(". Ask again with a larger charBudget for the whole part.]");
+        KwSkillLoadResult result = _skills.Load(name);
+        string body = result.Outcome switch
+        {
+            KwSkillLoadOutcome.Found => FormatSkill(result),
+            KwSkillLoadOutcome.Unknown => UnknownSkillReply(result),
+            _ =>
+                result.Reason is not null
+                    ? $"The KW skill '{result.Name}' in {result.Folder} cannot be loaded: {result.Reason}."
+                    : $"The KW skill '{result.Name}' in {result.Folder} cannot be loaded: its SKILL.md has no "
+                        + string.Join("/", result.MissingFields) + ".",
+        };
+        return provenance + "\n" + body;
+    }
+
+    /// <summary>
+    /// The reply for a name no skill has: the names that do exist, capped with the remainder
+    /// counted so a large pool cannot blow the reply, and a pool with no names at all said so
+    /// rather than rendered as an empty list. The name itself is a caller's argument echoed
+    /// back, so it is flattened to one line and capped before it is quoted.
+    /// </summary>
+    private static string UnknownSkillReply(KwSkillLoadResult result)
+    {
+        string name = result.Name.ReplaceLineEndings(" ");
+        if (name.Length > UnknownNameEchoCap)
+        {
+            name = name[..UnknownNameEchoCap] + "…";
+        }
+
+        if (result.ExistingNames.Count == 0)
+        {
+            return $"No KW skill is named '{name}', and this checkout has no KW skills.";
+        }
+
+        string names = string.Join(", ", result.ExistingNames.Take(SkillNameCap));
+        return result.ExistingNames.Count > SkillNameCap
+            ? $"No KW skill is named '{name}'. Skills that exist: {names} (+{result.ExistingNames.Count - SkillNameCap} more)."
+            : $"No KW skill is named '{name}'. Skills that exist: {names}.";
+    }
+
+    /// <summary>
+    /// The reply for a loaded skill: the <c>skill:</c> header a worker reads, the pool and folder it came from, the paths
+    /// of its reference files (never their contents), then the body of its <c>SKILL.md</c> below the frontmatter. The
+    /// body is capped like every other section, and a skill whose file ends at its frontmatter says so rather than
+    /// answering with blank space.
+    /// </summary>
+    private static string FormatSkill(KwSkillLoadResult skill)
+    {
+        StringBuilder sb = new();
+        sb.Append("skill: ").Append(skill.Name).Append('\n');
+        sb.Append("source: ").Append(skill.Source == KwSkillSource.Shipped ? "shipped" : "repository").Append('\n');
+        sb.Append("folder: ").Append(skill.Folder).Append('\n');
+        sb.Append("references:\n");
+        if (skill.References.Count == 0) sb.Append("(none)\n");
+        foreach (string reference in skill.References) sb.Append("- ").Append(reference).Append('\n');
+        sb.Append('\n');
+        string body = skill.Body.Trim();
+        sb.AppendLine(body.Length == 0
+            ? "(this SKILL.md carries no text below its frontmatter)"
+            : Truncate(body, SectionCharCap));
+        return sb.ToString();
     }
 
     /// <summary>

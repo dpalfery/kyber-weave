@@ -248,12 +248,42 @@ public sealed class StandardsFolderMigrationTests
     }
 
     /// <summary>
-    /// A rules or skills file the folder already holds is not skipped when its frontmatter does
-    /// not declare the folder's doc-type and scope: the migration sets those two lines and leaves
-    /// every other frontmatter line and the whole body exactly as it was.
+    /// A rules file the folder already holds is not skipped when its frontmatter does not declare the
+    /// folder's doc-type and scope: the migration sets those two lines and leaves every other frontmatter
+    /// line and the whole body exactly as it was. A legacy skills file is no longer repaired.
     /// </summary>
     [Fact]
-    public void ItRepairsAnExistingRulesAndSkillsFilesFrontmatterAndKeepsTheirText()
+    public void ItRepairsAnExistingRulesFilesFrontmatterAndKeepsItsText()
+    {
+        _disk.CreateDirectory(Folder);
+        _disk.WriteAllText($"{Folder}/csharp.standards.md", LegacyStandard);
+        _disk.WriteAllText($"{Folder}/csharp.rules.md", RulesWithoutTechnology);
+        _disk.WriteAllText($"{Folder}/csharp.skills.yml", "[]\n");
+        _disk.WriteAllText($"{Folder}/csharp.arbiter-rules.yml", "rules: []\n");
+
+        StandardsFolderMigrationResult result = Migration().Run();
+
+        Assert.Contains(
+            result.Changes,
+            change => change.Kind == StandardsFolderChangeKind.Frontmatter
+                      && change.To == "6-Docs/standards/csharp/csharp.rules.md");
+
+        string expectedRules = RulesWithoutTechnology.Replace(
+            "last-reviewed: 2026-11-16\n---",
+            "last-reviewed: 2026-11-16\ntechnology: csharp\n---",
+            StringComparison.Ordinal);
+        Assert.Equal(expectedRules, _disk.ReadAllText($"{Folder}/csharp.rules.md"));
+        Assert.Equal("[]\n", _disk.ReadAllText($"{Folder}/csharp.skills.yml"));
+
+        Assert.Empty(Migration().Run().Changes);
+    }
+
+    /// <summary>
+    /// A legacy <c>.skills.md</c> stays exactly where it is, whatever its frontmatter says: the
+    /// KW-DOC-SKILL-005 warning is what tells the operator to retire it. The missing list is added.
+    /// </summary>
+    [Fact]
+    public void ALegacySkillsMdIsLeftInPlace()
     {
         _disk.CreateDirectory(Folder);
         _disk.WriteAllText($"{Folder}/csharp.standards.md", LegacyStandard);
@@ -263,26 +293,27 @@ public sealed class StandardsFolderMigrationTests
 
         StandardsFolderMigrationResult result = Migration().Run();
 
+        Assert.Equal(SkillsTypedReference, _disk.ReadAllText($"{Folder}/csharp.skills.md"));
+        Assert.DoesNotContain(
+            result.Changes,
+            change => change.To.EndsWith("csharp.skills.md", StringComparison.Ordinal));
         Assert.Contains(
             result.Changes,
-            change => change.Kind == StandardsFolderChangeKind.Frontmatter
-                      && change.To == "6-Docs/standards/csharp/csharp.rules.md");
-        Assert.Contains(
-            result.Changes,
-            change => change.Kind == StandardsFolderChangeKind.Frontmatter
-                      && change.To == "6-Docs/standards/csharp/csharp.skills.md");
+            change => change.Kind == StandardsFolderChangeKind.Add
+                      && change.To == "6-Docs/standards/csharp/csharp.skills.yml");
+    }
 
-        string expectedRules = RulesWithoutTechnology.Replace(
-            "last-reviewed: 2026-11-16\n---",
-            "last-reviewed: 2026-11-16\ntechnology: csharp\n---",
-            StringComparison.Ordinal);
-        Assert.Equal(expectedRules, _disk.ReadAllText($"{Folder}/csharp.rules.md"));
+    /// <summary>A scope with no skills list is given an empty YAML list, never a prose stub.</summary>
+    [Fact]
+    public void AMissingSkillsListIsWrittenAsAnEmptyYamlList()
+    {
+        _disk.CreateDirectory(Folder);
+        _disk.WriteAllText($"{Folder}/README.md", LegacyStandard);
 
-        string expectedSkills = SkillsTypedReference.Replace(
-            "doc-type: reference", "doc-type: skill", StringComparison.Ordinal);
-        Assert.Equal(expectedSkills, _disk.ReadAllText($"{Folder}/csharp.skills.md"));
+        Migration().Run();
 
-        Assert.Empty(Migration().Run().Changes);
+        Assert.Equal("[]\n", _disk.ReadAllText($"{Folder}/csharp.skills.yml"));
+        Assert.False(_disk.FileExists($"{Folder}/csharp.skills.md"));
     }
 
     [Fact]
@@ -291,7 +322,7 @@ public sealed class StandardsFolderMigrationTests
         _disk.CreateDirectory(Folder);
         _disk.WriteAllText($"{Folder}/csharp.standards.md", LegacyStandard);
         _disk.WriteAllText($"{Folder}/csharp.rules.md", RulesWithoutTechnology);
-        _disk.WriteAllText($"{Folder}/csharp.skills.md", SkillsTypedReference);
+        _disk.WriteAllText($"{Folder}/csharp.skills.yml", "[]\n");
         _disk.WriteAllText($"{Folder}/csharp.arbiter-rules.yml", "rules: []\n");
 
         StandardsFolderMigrationResult result = Migration().Run(dryRun: true);
@@ -301,6 +332,5 @@ public sealed class StandardsFolderMigrationTests
             change => change.Kind == StandardsFolderChangeKind.Frontmatter
                       && change.To.EndsWith("csharp.rules.md", StringComparison.Ordinal));
         Assert.Equal(RulesWithoutTechnology, _disk.ReadAllText($"{Folder}/csharp.rules.md"));
-        Assert.Equal(SkillsTypedReference, _disk.ReadAllText($"{Folder}/csharp.skills.md"));
     }
 }

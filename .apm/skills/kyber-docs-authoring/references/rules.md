@@ -94,16 +94,37 @@ because the task prompt is sized for one parent. Only a `coding-standard` takes 
 
 ### `KW-DOC-SPEC-015` — a folder file does not declare itself
 
-The folder holds `<name>.rules.md` or `<name>.skills.md`, but its frontmatter does not
-mark it as that file: `doc-type` is something other than `rule` / `skill`, or the
+The folder holds `<name>.rules.md`, but its frontmatter does not
+mark it as that file: `doc-type` is something other than `rule`, or the
 `technology` (or `role`, in a role folder) line is missing. The standards lookup matches
 on both, so the file exists but reaches no task prompt, and the prompt reports the folder
 as having no such file.
 
-Set `doc-type: rule` (or `doc-type: skill`) and `technology: <folder>` (or
+Set `doc-type: rule` and `technology: <folder>` (or
 `role: <folder>`), or run `kyber-weave docs standards migrate`, which sets exactly those
 two lines and keeps every other line and the body unchanged. Fix it before dispatch: a
 worker that never receives the rules is not told they exist.
+
+### `KW-DOC-SKILL-001` to `-007` — KW skills
+
+A **KW skill** is on-demand guidance, not a harness skill: a folder
+`<docs-root>/standards/skills/<name>/SKILL.md` (frontmatter `name` and `description` only)
+that a technology or role lists in `<scope>.skills.yml`. The corpus does not load the pool,
+so these rules are the only check on it. `<scope>.skills.yml` is a YAML list of skill-name
+strings and nothing else; `[]` is a valid empty list.
+
+| Id | Severity | Cause | Fix |
+|---|---|---|---|
+| `KW-DOC-SKILL-001` | Error | `<scope>.skills.yml` is not a list of names (a map, a scalar, or a list holding a non-string) | Rewrite it as a plain list, or `[]` |
+| `KW-DOC-SKILL-002` | Error | A listed name has no folder in the repository pool or the shipped pool | Create `standards/skills/<name>/SKILL.md` or correct the name |
+| `KW-DOC-SKILL-003` | Error | A pool `SKILL.md` has no `name` or no `description` | Add the missing key |
+| `KW-DOC-SKILL-004` | Error | A pool skill's `name` differs from its folder | Make them equal |
+| `KW-DOC-SKILL-005` | Warning | A legacy `<scope>.skills.md` remains | Move real guidance into a KW skill, list it, delete the file |
+| `KW-DOC-SKILL-006` | Error | A technology or role is named `skills` (the pool folder's name) | Rename the scope |
+| `KW-DOC-SKILL-007` | Error | A pool skill folder holds no `SKILL.md`, or holds one behind a symbolic link (never followed) | Add a real `SKILL.md`, or replace the link with the file |
+
+`kyber-weave docs standards migrate` writes `[]` for a missing `.skills.yml` and does not
+convert a `.skills.md`. Never put a KW skill in a harness skills folder.
 
 ## Drift — `docs drift`
 

@@ -69,6 +69,7 @@ internal static class DocsToolsComposition
         // tools receive it by injection so a test that asks them directly gets the default cadence.
         services.AddSingleton<ICodeGraphFreshnessGate>(provider => Freshness(provider, repositoryRoot, codeGraphRefreshEnabled));
         services.AddSingleton<IDocsGateRunner, DocsGateRunner>();
+        services.AddSingleton<IKwSkillCatalog>(provider => Skills(provider, repositoryRoot));
         services.AddSingleton<IDocsQueryService, DocsQueryService>();
         services.AddSingleton<IPlanLifecycleService>(provider => new PlanLifecycleService(
             repositoryRoot,
@@ -140,12 +141,24 @@ internal static class DocsToolsComposition
     {
         ArgumentNullException.ThrowIfNull(provider);
         ArgumentNullException.ThrowIfNull(host);
+        KyberWeaveConfig config = provider.GetRequiredService<IKyberWeaveConfigRepository>().Load(host.RepositoryRoot);
         return new TaskPromptService(
             provider.GetRequiredService<IPlanTaskService>(),
             provider.GetRequiredService<IPacketHostFacts>(),
             provider.GetRequiredService<IWritableFileSystem>(),
             technology => host.Current().StandardsFor(technology),
-            provider.GetRequiredService<IProcessEnvironment>());
+            provider.GetRequiredService<IProcessEnvironment>(),
+            provider.GetRequiredService<IKwSkillCatalogFactory>().ForRepository(host.RepositoryRoot, config));
+    }
+
+    /// <summary>The KW skill catalog over <paramref name="repositoryRoot"/>, built from its configuration and the factory of <paramref name="provider"/>.</summary>
+    /// <param name="provider">The container the configuration and the factory are resolved from.</param>
+    /// <param name="repositoryRoot">The checkout whose skills the catalog reads.</param>
+    public static IKwSkillCatalog Skills(IServiceProvider provider, string repositoryRoot)
+    {
+        ArgumentNullException.ThrowIfNull(provider);
+        KyberWeaveConfig config = provider.GetRequiredService<IKyberWeaveConfigRepository>().Load(repositoryRoot);
+        return provider.GetRequiredService<IKwSkillCatalogFactory>().ForRepository(repositoryRoot, config);
     }
 
     /// <summary>The analysis reader over <paramref name="repositoryRoot"/>, built from the ports of <paramref name="provider"/>.</summary>
@@ -198,7 +211,8 @@ internal static class DocsToolsComposition
                 hostConfiguration,
                 provider.GetRequiredService<IDocsSchemaGate>(),
                 provider.GetRequiredService<IDocumentSourceFactory>()),
-            provider.GetRequiredService<ICorpusProvenance>());
+            provider.GetRequiredService<ICorpusProvenance>(),
+            Skills(provider, host.RepositoryRoot));
         return new DocsTools(
             query,
             new PlanLifecycleService(

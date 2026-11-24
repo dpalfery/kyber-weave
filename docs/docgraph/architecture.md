@@ -6,7 +6,7 @@ status: current
 component: DocGraph
 source-root: src/KyberWeave.Application/Docs
 owner: dpalfery
-last-reviewed: 2026-11-07
+last-reviewed: 2026-11-24
 decided-by:
   - adr/0010-keywords-prefix-coverage-and-oov-idf
   - adr/0057-squad-and-docs-are-their-own-assemblies
@@ -201,6 +201,29 @@ never made. `run.base-branch` carries a branch name rather than a mode word, and
 applies — the value names nothing on disk, so `KW-CONFIG-REG-001` must not look for it there
 while `KW-CONFIG-REG-002` still checks the line. See
 [Run controls](../configuration.md#run-controls).
+
+## Standards folders and the KW skill pool
+
+A technology or role folder under `<docs-root>/standards/<scope>/` holds four files: `<scope>.standards.md`
+(technologies only), `<scope>.rules.md`, `<scope>.skills.yml` and `<scope>.arbiter-rules.yml`. The skills file is a
+**list of KW skill names**, not prose: a YAML sequence of strings and nothing else, where `[]` is a valid empty list
+and a missing file lists nothing. `KW-DOC-SPEC-012` expects `<scope>.skills.yml`, and `KW-DOC-SPEC-015` no longer
+checks a skills file.
+
+The skills the names point at live in a **pool**, `<docs-root>/standards/skills/<name>/SKILL.md`, beside a shipped
+pool embedded in the binary. The pool's `SKILL.md` files carry harness frontmatter (`name`, `description`) so a skill
+copies between a harness and the pool unchanged, which no corpus document does. So the corpus does not contain them:
+`DocumentLoader` skips every file beneath a docs root's `standards/skills/`, and the standards-folder walk skips the
+`skills` folder (`skills` is therefore a reserved scope name). Without that, every pool file would fail
+`KW-DOC-SPEC-001` and the pool folder `KW-DOC-SPEC-012`. The pool is checked by its own rule family,
+`KW-DOC-SKILL-001` to `-007`, which a repository's `.skills.yml` files and pool are held to by `docs validate`:
+a list that is not names, a listed name with no folder, a pool skill without `name` or `description`, a `name` that
+differs from its folder, a legacy `<scope>.skills.md`, a scope named `skills`, and a pool folder with no `SKILL.md` or one behind a link
+([the rows](../ci-pipelines/rule-reference.md#kw-skills--docs-validate)).
+
+How the lists resolve to a prompt, and how `load_skill` reads a skill, are in
+[the Squad architecture](../kyber-squad/architecture.md#13-kw-skills-the-on-demand-pool) and
+[the MCP runbook](mcp-runbook.md#load_skillname-projectpath--null).
 
 ## Provisioning the index
 

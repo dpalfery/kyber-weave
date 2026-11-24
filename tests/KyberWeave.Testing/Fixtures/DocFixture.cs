@@ -1,8 +1,10 @@
 using KyberWeave.Contracts.Paths;
 using KyberWeave.Contracts.Repositories;
+using KyberWeave.Core.Arbiter;
 using KyberWeave.Core.Configuration;
 using KyberWeave.Core.Diagnostics;
 using KyberWeave.Core.Docs.Model;
+using KyberWeave.Core.Docs.KwSkills;
 using KyberWeave.Core.Docs.Parsing;
 using KyberWeave.Core.Docs.Validation;
 using KyberWeave.Tests.Fakes;
@@ -141,7 +143,15 @@ internal sealed class DocFixture : IDisposable
 
     /// <summary>Validates against a host ontology — the technologies a repository declared.</summary>
     public DiagnosticReport Validate(OntologyConfig ontology) =>
-        new DocSpecValidator(Root, ontology, Store, Paths, Environment).Validate(Loader(ontology).Load());
+        new DocSpecValidator(Root, ontology, Store, Paths, Environment, SkillCatalog(ontology)).Validate(Loader(ontology).Load());
+
+    /// <summary>
+    /// The KW skill catalog over this corpus, with no shipped pool: the skills-list name check sees only the
+    /// repository's own <c>standards/skills</c> folders, as it does for a host with no shipped skills.
+    /// </summary>
+    private KwSkillCatalog SkillCatalog(OntologyConfig ontology) =>
+        new(Store, Paths, Environment, new FakeEmbeddedResources(), Root,
+            new KyberWeaveConfig { Ontology = ontology, Arbiter = ArbiterConfigDefaults.Product });
 
     /// <summary>The loader over this corpus; the file seam is the in-memory store or the physical one, per mode.</summary>
     /// <param name="ontology">The ontology naming the roots, exclusions and catalog.</param>

@@ -139,6 +139,7 @@ public class MinimalApiEndpointTests
     [InlineData("/api/kyber/session/%20/tools")]
     [InlineData("/api/kyber/session/%20/servers")]
     [InlineData("/api/kyber/session/%20/skills")]
+    [InlineData("/api/kyber/session/%20/kw-skills")]
     [InlineData("/api/kyber/session/%20/timeline")]
     [InlineData("/api/kyber/session/%20/stored-fields/spans")]
     public async Task SectionRoutesAnswerNotFoundForABlankSessionId(string requestPath)
@@ -464,6 +465,60 @@ public class MinimalApiEndpointTests
         await using Host host = await Host.StartAsync();
 
         HttpResponseMessage response = await host.Client.GetAsync(new Uri("/api/kyber/session/absent/skills", UriKind.Relative));
+
+        Assert.Equal(HttpStatusCode.NotFound, response.StatusCode);
+    }
+
+    [Fact]
+    public async Task KwSkillsRouteReturnsTheQueryServiceEnvelope()
+    {
+        await using Host host = await Host.StartAsync(builder =>
+        {
+            builder.Query
+                .Setup(q => q.GetSessionKwSkills("sess-1", 1, 25))
+                .Returns(JsonSerializer.SerializeToElement(new
+                {
+                    rows = new[]
+                    {
+                        new
+                        {
+                            skill = "csharp-dev",
+                            agent = "kw-dev",
+                            session_id = "sess-1",
+                            span_id = "span-load-1",
+                            loaded_at = "2026-11-19T10:03:00.000Z",
+                        },
+                    },
+                    total = 1,
+                    limit = 25,
+                    offset = 0,
+                    page = 1,
+                }));
+        });
+
+        HttpResponseMessage response = await host.Client.GetAsync(new Uri("/api/kyber/session/sess-1/kw-skills", UriKind.Relative));
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        Assert.Equal("no-store", response.Headers.CacheControl?.ToString());
+        using JsonDocument body = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
+        Assert.False(body.RootElement.TryGetProperty("measurable", out _));
+        JsonElement row = Assert.Single(body.RootElement.GetProperty("rows").EnumerateArray().ToList());
+        Assert.Equal("csharp-dev", row.GetProperty("skill").GetString());
+        Assert.Equal("kw-dev", row.GetProperty("agent").GetString());
+        Assert.Equal("sess-1", row.GetProperty("session_id").GetString());
+        Assert.Equal("span-load-1", row.GetProperty("span_id").GetString());
+        Assert.Equal("2026-11-19T10:03:00.000Z", row.GetProperty("loaded_at").GetString());
+        Assert.Equal(1, body.RootElement.GetProperty("total").GetInt32());
+        Assert.Equal(1, body.RootElement.GetProperty("page").GetInt32());
+        host.Builder.Query.Verify(q => q.GetSessionKwSkills("sess-1", 1, 25), Times.Once);
+    }
+
+    [Fact]
+    public async Task KwSkillsRouteReturnsNotFoundWhenUnknown()
+    {
+        await using Host host = await Host.StartAsync();
+
+        HttpResponseMessage response = await host.Client.GetAsync(new Uri("/api/kyber/session/absent/kw-skills", UriKind.Relative));
 
         Assert.Equal(HttpStatusCode.NotFound, response.StatusCode);
     }

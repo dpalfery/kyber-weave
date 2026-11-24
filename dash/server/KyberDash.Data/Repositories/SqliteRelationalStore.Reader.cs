@@ -1933,6 +1933,105 @@ public partial class SqliteRelationalStore : IRelationalStoreReader
         return results;
     }
 
+    /// <summary>
+    /// The unsplit tool names a KW skill load is recorded under (D17). Together with the MCP
+    /// split rule in <see cref="AppendSessionKwLoadPredicate"/>, this list is the statement's
+    /// whole load filter, so the page and the total answer from SQL.
+    /// </summary>
+    private static readonly string[] KwSkillLoadToolNames =
+    [
+        "mcp__kw-docs__load_skill",
+        "mcp__kw_docs__load_skill",
+        "kw-docs_load_skill",
+        "kw-docs__load_skill",
+        "kw-docs/load_skill",
+    ];
+
+    /// <inheritdoc />
+    public SessionKwSkillLoadPageResult SessionKwSkillLoads(string sessionKey, int page, int limit)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(sessionKey);
+        ArgumentOutOfRangeException.ThrowIfLessThan(page, 1);
+        ArgumentOutOfRangeException.ThrowIfLessThan(limit, 1);
+        // The statement reads the tool-call header, its MCP split, the first 1024 characters of
+        // its reply and its record's start time for the session's load rows on the page only: the
+        // D17 load rule is the statement's filter and the page answers from LIMIT/OFFSET, so a
+        // page never reads the reply head of a load outside it. The call's input is never joined:
+        // the skill is read from the reply header (D17).
+        StringBuilder sql = new(TabReadScriptHeader);
+        sql.Append("SELECT 'KWLOAD', (SELECT COUNT(*) FROM (SELECT tc.span_id FROM tool_call tc ");
+        sql.Append("JOIN record r ON r.span_id = tc.span_id ");
+        sql.Append("LEFT JOIN tool_call_mcp tcm ON tcm.span_id = tc.span_id ");
+        AppendSessionKwLoadPredicate(sql, sessionKey);
+        sql.Append(")), ");
+        sql.Append("hex(CAST(tc.span_id AS BLOB)), hex(CAST(tc.tool_name AS BLOB)), ");
+        sql.Append("typeof(tcm.server_name), COALESCE(hex(CAST(tcm.server_name AS BLOB)), ''), ");
+        sql.Append("typeof(tcm.server_tool_name), COALESCE(hex(CAST(tcm.server_tool_name AS BLOB)), ''), ");
+        sql.Append("typeof(tcrt.text), COALESCE(hex(CAST(substr(tcrt.text, 1, 1024) AS BLOB)), ''), ");
+        sql.Append("hex(CAST(r.started_at_utc AS BLOB)) ");
+        sql.Append("FROM tool_call tc ");
+        sql.Append("JOIN record r ON r.span_id = tc.span_id ");
+        sql.Append("LEFT JOIN tool_call_mcp tcm ON tcm.span_id = tc.span_id ");
+        sql.Append("LEFT JOIN tool_call_result_text tcrt ON tcrt.span_id = tc.span_id ");
+        AppendSessionKwLoadPredicate(sql, sessionKey);
+        sql.Append(CultureInfo.InvariantCulture, $" ORDER BY tc.rowid ASC LIMIT {IntSql(limit)} OFFSET {LongSql(((long)page - 1) * limit)};\n");
+
+        string output = ExecuteSqlite(sql.ToString());
+        List<StoredKwSkillLoad> results = [];
+        int total = 0;
+        foreach (string line in TabLines(output))
+        {
+            string[] cols = SplitTabLine(line, 11, "session KW skill load page");
+            total = ParseInt32Required(cols[1], "session KW skill load page total");
+            results.Add(new StoredKwSkillLoad(
+                SpanId: ParseHexRequired(cols[2], "tool_call.span_id"),
+                ToolName: ParseHexRequired(cols[3], "tool_call.tool_name"),
+                McpServerName: ParseNullableHex(cols[4], cols[5], "tool_call_mcp.server_name"),
+                McpToolName: ParseNullableHex(cols[6], cols[7], "tool_call_mcp.server_tool_name"),
+                ReplyHead: ParseNullableHex(cols[8], cols[9], "tool_call_result_text.text"),
+                StartedAtUtc: ParseTimestampRequired(ParseHexRequired(cols[10], "record.started_at_utc"), "record.started_at_utc")));
+        }
+
+        if (results.Count == 0)
+        {
+            StringBuilder countSql = new(TabReadScriptHeader);
+            countSql.Append("SELECT 'KWLOAD', COUNT(*) FROM (SELECT tc.span_id FROM tool_call tc ");
+            countSql.Append("JOIN record r ON r.span_id = tc.span_id ");
+            countSql.Append("LEFT JOIN tool_call_mcp tcm ON tcm.span_id = tc.span_id ");
+            AppendSessionKwLoadPredicate(countSql, sessionKey);
+            countSql.Append(");\n");
+            string[] countLines = [.. TabLines(ExecuteSqlite(countSql.ToString()))];
+            if (countLines.Length != 1)
+            {
+                throw new StoredDataException($"Expected 1 count row for the session KW skill load page, got {countLines.Length.ToString(CultureInfo.InvariantCulture)}.");
+            }
+
+            total = ParseInt32Required(SplitTabLine(countLines[0], 2, "session KW skill load count")[1], "session KW skill load page total");
+        }
+
+        return new SessionKwSkillLoadPageResult(results, total);
+    }
+
+    /// <summary>Appends the D17 load predicate selecting a session's KW skill load rows.</summary>
+    /// <remarks>
+    /// A load is a kw-docs <c>load_skill</c>: with an MCP split, the server name normalized (lower
+    /// case, <c>_</c> to <c>-</c>) names kw-docs and the split tool is <c>load_skill</c>; without
+    /// one, the tool name is one of the unsplit D17 spellings. Another server's <c>load_skill</c>
+    /// is not a load (D17), so the page and the total count loads only. The application
+    /// recognizer keeps the final word on each row the page returns.
+    /// </remarks>
+    private static void AppendSessionKwLoadPredicate(StringBuilder sql, string sessionKey)
+    {
+        string unsplitNames = string.Join(", ", KwSkillLoadToolNames.Select(static name => TextExpr(name)));
+        sql.Append(CultureInfo.InvariantCulture, $"WHERE EXISTS (SELECT 1 FROM record_session_link rsl WHERE rsl.span_id = tc.span_id AND rsl.session_key = {TextExpr(sessionKey)}) ");
+        sql.Append("AND (");
+        sql.Append("((tcm.server_name IS NOT NULL OR tcm.server_tool_name IS NOT NULL) ");
+        sql.Append("AND LOWER(REPLACE(COALESCE(tcm.server_name, ''), '_', '-')) = 'kw-docs' ");
+        sql.Append("AND tcm.server_tool_name = 'load_skill') ");
+        sql.Append(CultureInfo.InvariantCulture, $"OR (tcm.server_name IS NULL AND tcm.server_tool_name IS NULL AND tc.tool_name IN ({unsplitNames}))");
+        sql.Append(')');
+    }
+
     /// <inheritdoc />
     public IReadOnlyList<StoredRequestPromptPreview> RequestPromptPreviews(string sessionKey, IReadOnlyCollection<string> requestSpanIds)
     {

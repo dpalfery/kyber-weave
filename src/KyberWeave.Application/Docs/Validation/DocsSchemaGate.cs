@@ -22,13 +22,15 @@ namespace KyberWeave.Core.Docs.Validation;
 /// <param name="timeProvider">Dates new glossary rows.</param>
 /// <param name="paths">Resolves the repository root the caller names.</param>
 /// <param name="environment">Names the directory a relative repository root is resolved against.</param>
+/// <param name="skills">Builds the KW skill catalog the skills-list name check reads. Null skips that one check.</param>
 public sealed class DocsSchemaGate(
     IRepositoryFileStore files,
     IGitChangeReader changes,
     ISeverityOverrideSource severityOverrides,
     TimeProvider timeProvider,
     IPathResolver paths,
-    IProcessEnvironment environment) : IDocsSchemaGate
+    IProcessEnvironment environment,
+    IKwSkillCatalogFactory? skills = null) : IDocsSchemaGate
 {
     /// <summary>
     /// Runs every frontmatter and inventory validator, the review guidance's severity overrides, the managed glossary gate, and — only
@@ -53,7 +55,8 @@ public sealed class DocsSchemaGate(
         DiagnosticReport report = new();
         OntologyConfig ontology = config.Ontology;
 
-        report.AddRange(new DocSpecValidator(root, ontology, files, paths, environment).Validate(corpus).Items);
+        IKwSkillCatalog? catalog = skills?.ForRepository(root, config);
+        report.AddRange(new DocSpecValidator(root, ontology, files, paths, environment, catalog).Validate(corpus).Items);
         report.AddRange(new ConfigRegValidator(root, config, files, paths, environment).Validate().Items);
         report.AddRange(severityOverrides.Validate(root, config.ConfigReg).Items);
         report.AddRange(new PlanInventoryValidator(config).Validate(corpus).Items);

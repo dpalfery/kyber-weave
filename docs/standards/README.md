@@ -4,7 +4,7 @@ title: Coding standards
 doc-type: index
 status: current
 owner: dpalfery
-last-reviewed: 2026-11-20
+last-reviewed: 2026-11-24
 ---
 
 # Coding standards
@@ -18,13 +18,22 @@ standard rather than a rule is in
 
 Each folder holds four files named after it: `<name>.standards.md` (the standard, six
 headings), `<name>.rules.md` (this repository's hard rules for the technology),
-`<name>.skills.md` (its procedures and commands) and `<name>.arbiter-rules.yml` (machine
-rules; empty when there are none). `shared-rules.md` beside the folders holds the rules that
-apply to every technology. A rules or skills file is found by its frontmatter, not its name:
-it needs `doc-type: rule` or `doc-type: skill` and the folder's `technology` (or `role`) line.
-Without them `docs validate` reports `KW-DOC-SPEC-015`, and the tool and the task prompt cannot
-carry the file even though it is on disk; `kyber-weave docs standards migrate` sets exactly
-those two lines in place and leaves every other line and the body alone. Nothing ships for
+`<name>.skills.yml` (the KW skills it gets: a YAML list of skill names, `[]` for none) and
+`<name>.arbiter-rules.yml` (machine rules; empty when there are none). `shared-rules.md` beside
+the folders holds the rules that apply to every technology. A rules file is found by its
+frontmatter, not its name: it needs `doc-type: rule` and the folder's `technology` (or `role`)
+line. Without them `docs validate` reports `KW-DOC-SPEC-015`, and the tool and the task prompt
+cannot carry the file even though it is on disk; `kyber-weave docs standards migrate` sets exactly
+those two lines in place and leaves every other line and the body alone; for a missing
+`<name>.skills.yml` it writes `[]`, and it leaves a legacy `<name>.skills.md` for the
+`KW-DOC-SKILL-005` warning to retire.
+
+The skills a list names are **KW skills**, kept in one pool at `standards/skills/<name>/SKILL.md`
+(not a technology folder) and loaded on demand with the kw-docs `load_skill` tool; see
+[the Squad architecture](../kyber-squad/architecture.md#13-kw-skills-the-on-demand-pool). The
+folder name `skills` is therefore reserved. A child technology's agents get the parent's list, then
+their own. A procedure that used to sit in a `<name>.skills.md` now lives in a skill, and prose
+that only repeated the standard was deleted. Nothing ships for
 testing alone: cross-technology testing rules live
 in `shared-rules.md` and each standard's **Testing** heading, because `test` and `sql` went with
 the per-technology agents the roster removal deleted.

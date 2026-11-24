@@ -538,7 +538,8 @@ public sealed class HookCommand : IArbiterHookHost
                     query.PriorResultsPath,
                     Technology: query.Technology,
                     query.FailedAttempts,
-                    RetryText: query.RetryText),
+                    RetryText: query.RetryText,
+                    RoleAgent: query.Target),
                 repositoryConfig);
 
             bool missingInput = result.RefusalKind == TaskPromptRefusalKind.MissingInput;

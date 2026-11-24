@@ -17,6 +17,7 @@ namespace KyberWeave.Core.Docs.Validation;
 /// <param name="documents">Opens the documentation corpus the standards lookup indexes.</param>
 /// <param name="paths">Resolves the repository root to a full path.</param>
 /// <param name="environment">Names the directory a relative repository root is resolved against.</param>
+/// <param name="skills">Builds the KW skill catalog the prompt's <c>kw-skills</c> part lists from, for the same root.</param>
 public sealed class TaskPromptServiceFactory(
     IPlanTaskService tasks,
     IPacketHostFacts hostFacts,
@@ -24,7 +25,8 @@ public sealed class TaskPromptServiceFactory(
     ICodeGraphPortsFactory codeGraph,
     IDocumentSourceFactory documents,
     IPathResolver paths,
-    IProcessEnvironment environment) : ITaskPromptServiceFactory
+    IProcessEnvironment environment,
+    IKwSkillCatalogFactory skills) : ITaskPromptServiceFactory
 {
     /// <inheritdoc />
     public ITaskPromptService ForRepository(string repositoryRoot, KyberWeaveConfig config)
@@ -36,6 +38,12 @@ public sealed class TaskPromptServiceFactory(
         DocumentIndex index = DocumentIndex.Build(
             documents.Create(root, config.Ontology).Load(),
             codeGraph.ForRepository(root).Resolver);
-        return new TaskPromptService(tasks, hostFacts, files, index.StandardsFor, environment);
+        return new TaskPromptService(
+            tasks,
+            hostFacts,
+            files,
+            index.StandardsFor,
+            environment,
+            skills.ForRepository(root, config));
     }
 }

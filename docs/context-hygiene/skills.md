@@ -6,7 +6,7 @@ status: current
 component: ContextHygiene
 source-root: src/KyberWeave.Application/Skills
 owner: dpalfery
-last-reviewed: 2026-11-17
+last-reviewed: 2026-11-24
 code-refs:
   - SkillFileReader
   - RoutingLinter
@@ -140,6 +140,13 @@ harness layout for each runtime is APM's problem rather than a second copy of th
 also ships through [Kyber-Squad](../kyber-squad/architecture.md), beside the Squad skills, under
 [ADR 0049](../adr/0049-kyber-squad-ships-the-kyber-weave-skills.md). The other Kyber-Weave
 skills in `.apm/skills/` ship the same two ways.
+
+These are **harness skills**: a harness loads them itself. They are not **KW skills**, the on-demand guidance
+that a technology or role lists in a `<scope>.skills.yml` and an agent reads through the kw-docs `load_skill` tool.
+ADR 0049's phrase "Kyber-Weave skills" names the harness kind; the glossary entry
+[KW skill](../glossary.md#kw-skill) defines the other, and
+[ADR 0093](../adr/0093-kw-skills-load-on-demand-through-kw-docs.md) records why they stay apart. A KW skill uses the
+same `SKILL.md` frontmatter but is checked by the `KW-DOC-SKILL` rules, not by `skill validate`.
 
 ### `codegraph`
 

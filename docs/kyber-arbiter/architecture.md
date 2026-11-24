@@ -1397,6 +1397,30 @@ neither path.
 | CommandCode | file until the check passes | `hooks.beforeToolCall` returns `input`, which rewrites the tool input the call executes with; rewrites chain across mods | Not yet: project mods are trust-gated and no Kyber-Weave mod is rendered. The check must show the worker received the replaced prompt and the dispatcher's transcript did not | The mod is absent, disabled or the workspace untrusted: the worker runs `docs packet` | [CM-MOD], read 2026-11-16 |
 | Warp | file | No dispatch hook and no rewrite field in the repository's harness notes | Not applicable | Always the file path; the MCP fallback carries the dispatch | [WP-DOC], checked 2026-11-16 |
 
+### KW skills in the dispatch prompt
+
+The dispatch hook also lists KW skills (guidance an agent loads on demand; see
+[the Squad architecture](../kyber-squad/architecture.md#13-kw-skills-the-on-demand-pool)).
+
+- **The tag.** The skills are one `<kw-skills>` part, placed where the retired `<skills>` part was: after
+  `<technology-rules>` and before `<standard>`. It opens with one fixed line: `These are Kyber-Weave skills, not
+  harness skills. When a skill's description fits your work, load it by calling the kw-docs load_skill tool with its
+  name; never load one through your harness's own skill tool.` Then one `- <name>: <description>` line per skill.
+  `<kw-skills>` is in `DispatchPromptInsertion.ExpandedTags`, so a dispatch that already carries it is never
+  expanded again; the retired `<skills>` tag is no longer in that list. The
+  part is omitted when no skill is assigned.
+- **The target.** `DispatchPromptQuery.Target` is the dispatched agent (`subagent_type`, or the harness's
+  equivalent), and every adapter that rewrites a dispatch passes it to `DispatchPromptInsertion.Expand`. The prompt
+  service uses it (`TaskPromptRequest.RoleAgent`) for the role lookup only: the developer-tier refusal still reads
+  the request's `Agent` alone, so a named technology developer is not refused by a role lookup.
+- **Role-only insertion.** A dispatch with no `TASK` and no `TECHNOLOGY` header used to be left alone. When it
+  names a target whose role has skills, the hook now puts a prompt made of the `<kw-skills>` part alone in front of
+  the dispatch text, which stays unchanged below it. A role with no skills, a refusal or a build failure on a
+  role-only query leaves the dispatch unchanged and is never a stop.
+- **Budget.** The list is one cut unit, cut before any standard section. When it does not fit, the part reads
+  `The KW skills list was left out: the prompt budget did not fit it. The last part names what was cut.` and the
+  `<left-out>` part names `KW skills (<n> listed)`. The prompt stays inside the existing budget.
+
 ### The user-level Claude hook
 
 The user-level hook (`--scope global`) and a project hook can both receive one Claude dispatch. For a

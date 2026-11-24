@@ -2,6 +2,7 @@ using System.Globalization;
 using System.Text;
 using KyberWeave.Contracts.Paths;
 using KyberWeave.Contracts.Repositories;
+using KyberWeave.Contracts.Services;
 using KyberWeave.Core.Configuration;
 using KyberWeave.Core.Diagnostics;
 using KyberWeave.Core.Docs.Graph;
@@ -71,6 +72,27 @@ public sealed class DocSpecValidator
     /// </summary>
     public const string StandardsFileFrontmatter = "KW-DOC-SPEC-015";
 
+    /// <summary>A scope's <c>&lt;scope&gt;.skills.yml</c> is not a YAML list of skill names.</summary>
+    public const string SkillListMalformed = "KW-DOC-SKILL-001";
+
+    /// <summary>A name in a scope's skills list has no folder in the repository pool or the shipped pool.</summary>
+    public const string SkillListUnknownName = "KW-DOC-SKILL-002";
+
+    /// <summary>A repository pool <c>SKILL.md</c> declares no <c>name</c> or no <c>description</c>.</summary>
+    public const string SkillPoolFrontmatter = "KW-DOC-SKILL-003";
+
+    /// <summary>A repository pool skill's <c>name</c> differs from its folder name.</summary>
+    public const string SkillPoolNameMismatch = "KW-DOC-SKILL-004";
+
+    /// <summary>A legacy <c>&lt;scope&gt;.skills.md</c> remains beside the skills list. A warning.</summary>
+    public const string LegacySkillsFile = "KW-DOC-SKILL-005";
+
+    /// <summary>A technology or role is named <c>skills</c>, which is the pool folder's name.</summary>
+    public const string ReservedSkillsScope = "KW-DOC-SKILL-006";
+
+    /// <summary>A pool skill folder holds no <c>SKILL.md</c>, or holds one behind a symbolic link.</summary>
+    public const string SkillPoolMalformedFolder = "KW-DOC-SKILL-007";
+
     /// <summary>
     /// The scalar keys the required-key matrix can demand beyond the base set.
     /// </summary>
@@ -81,9 +103,13 @@ public sealed class DocSpecValidator
     /// </remarks>
     private static readonly string[] TypedKeys = ["component", "source-root", "technology", "role"];
 
+    /// <summary>The folder under the standards root that holds the repository's KW skill pool, not a scope.</summary>
+    private const string PoolFolderName = "skills";
+
     private readonly string _repoRoot;
     private readonly OntologyConfig _config;
     private readonly IFileSystem _files;
+    private readonly KwSkillRulesValidator _skillRules;
 
     /// <summary>Creates a validator over one checkout.</summary>
     /// <param name="repoRoot">The checkout root.</param>
@@ -91,12 +117,17 @@ public sealed class DocSpecValidator
     /// <param name="files">Answers which files, folders and links the checkout holds.</param>
     /// <param name="paths">Resolves a relative checkout root.</param>
     /// <param name="environment">Names the directory a relative checkout root is resolved against.</param>
+    /// <param name="skills">
+    /// Names the skills in the repository and shipped pools, for the skills-list name check. Null skips
+    /// that one check, because a name the pools hold cannot be told apart from one they lack without it.
+    /// </param>
     public DocSpecValidator(
         string repoRoot,
         OntologyConfig config,
         IFileSystem files,
         IPathResolver paths,
-        IProcessEnvironment environment)
+        IProcessEnvironment environment,
+        IKwSkillCatalog? skills = null)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(repoRoot);
         ArgumentNullException.ThrowIfNull(config);
@@ -106,6 +137,7 @@ public sealed class DocSpecValidator
         _repoRoot = paths.GetFullPath(repoRoot, environment.CurrentDirectory);
         _config = config;
         _files = files;
+        _skillRules = new KwSkillRulesValidator(_repoRoot, files, skills);
     }
 
     /// <summary>
@@ -147,6 +179,11 @@ public sealed class DocSpecValidator
         ValidateLinkFragments(byPath, headingSlugsByPath, report);
 
         ValidateStandardsFolders(byPath, report);
+        foreach (string docsRoot in _config.DocsRoots)
+        {
+            _skillRules.CheckPool(RepositoryRelative(DocsLayout.SkillsPool(docsRoot)), report);
+        }
+
         ValidateBuildsOn(set, report);
 
         return report;
@@ -547,6 +584,13 @@ public sealed class DocSpecValidator
                 string relativeFolder = RepositoryRelative($"{docsRoot}/{DocsLayout.Standards}/{scope}");
                 if (!checkedFolders.Add(relativeFolder)) continue;
 
+                // The pool folder is not a scope: it holds one folder per KW skill, so it has no four files.
+                if (string.Equals(scope, PoolFolderName, StringComparison.Ordinal))
+                {
+                    KwSkillRulesValidator.ReportReservedScope(scope, relativeFolder, report);
+                    continue;
+                }
+
                 string absoluteFolder = Combine(relativeFolder);
                 if (LinksIt(relativeFolder))
                 {
@@ -559,6 +603,12 @@ public sealed class DocSpecValidator
                 }
 
                 if (!_files.DirectoryExists(absoluteFolder)) continue;
+
+                string legacySkills = RepositoryRelative(DocsLayout.SkillsFile(docsRoot, scope));
+                if (ExistsWithoutLink(legacySkills))
+                {
+                    KwSkillRulesValidator.ReportLegacySkillsFile(legacySkills, scope, report);
+                }
 
                 string standard = RepositoryRelative(DocsLayout.StandardFile(docsRoot, scope));
                 string legacy = $"{relativeFolder}/README.md";
@@ -591,10 +641,11 @@ public sealed class DocSpecValidator
                     ValidateStandardHeadings(document, scope, report);
                 }
 
+                string skillsList = RepositoryRelative(DocsLayout.SkillsListFile(docsRoot, scope));
                 foreach ((string file, string? docType) in new (string File, string? DocType)[]
                          {
                              (DocsLayout.RulesFile(docsRoot, scope), "rule"),
-                             (DocsLayout.SkillsFile(docsRoot, scope), "skill"),
+                             (DocsLayout.SkillsListFile(docsRoot, scope), null),
                              (DocsLayout.ArbiterRulesFile(docsRoot, scope), null)
                          })
                 {
@@ -606,6 +657,12 @@ public sealed class DocSpecValidator
                             $"the '{scope}' folder is missing '{Path.GetFileName(file)}'.",
                             scope, relativeFolder,
                             "Run 'kyber-weave docs standards migrate' to add the missing folder files."));
+                        continue;
+                    }
+
+                    if (relativeFile == skillsList)
+                    {
+                        _skillRules.CheckList(relativeFile, scope, report);
                         continue;
                     }
 

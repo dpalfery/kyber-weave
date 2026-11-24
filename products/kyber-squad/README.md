@@ -113,10 +113,12 @@ canonical copy; the retired `create-pull-request-github` is folded into `create-
 tree also retains its supplemental resources; recursive APM and
 Agent Plugins packages preserve those resources and their local references.
 
-Squad ships no per-technology skill. How a technology is written — its rules, its procedure and
-its commands — lives in that technology's folder under [`standards/`](standards/README.md),
-which a worker receives through `docs_get_coding_standard_for_technology` once the host adopts
-it; [the dispositions reference](../../docs/kyber-squad/skill-resource-dispositions.md) records
+Squad ships no per-technology skill in `skills/`. How a technology is written — its rules and its
+standard — lives in that technology's folder under [`standards/`](standards/README.md), whose four
+files are the standard, the rules, a `.skills.yml` list of KW skills and the Arbiter rules. The
+listed skills come from the pool in `standards/skills/` and reach a worker as a `<kw-skills>` list
+that it loads on demand with kw-docs `load_skill`. A worker receives the folder
+through `docs_get_coding_standard_for_technology` once the host adopts it; [the dispositions reference](../../docs/kyber-squad/skill-resource-dispositions.md) records
 where each former technology skill's content went.
 
 `code-review-loop` completes an authorized code review feedback cycle: validated fixes,

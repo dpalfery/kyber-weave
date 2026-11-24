@@ -1001,9 +1001,7 @@ public sealed class CodingStandardsLookupTests : IDisposable
 
         Assert.Equal("6-Docs/standards/shared-rules.md", bundle.SharedRules!.RelativePath);
         Assert.Equal("6-Docs/standards/typescript/typescript.rules.md", bundle.ParentRules!.RelativePath);
-        Assert.Equal("6-Docs/standards/typescript/typescript.skills.md", bundle.ParentSkills!.RelativePath);
         Assert.Equal("6-Docs/standards/csharp/csharp.rules.md", bundle.Rules!.RelativePath);
-        Assert.Equal("6-Docs/standards/csharp/csharp.skills.md", bundle.Skills!.RelativePath);
         Assert.Equal("6-Docs/standards/csharp/csharp.standards.md", bundle.Standard!.RelativePath);
     }
 
@@ -1020,7 +1018,6 @@ public sealed class CodingStandardsLookupTests : IDisposable
         StandardsBundle bundle = index.StandardsFor("go")!;
 
         Assert.Null(bundle.ParentRules);
-        Assert.Null(bundle.ParentSkills);
         Assert.Null(bundle.Rules);
     }
 

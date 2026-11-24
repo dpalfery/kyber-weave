@@ -199,6 +199,26 @@ public sealed class MultipleDocsRootTests
         Assert.DoesNotContain(report.Items, i => i.FilePath == "automation/README.md");
     }
 
+    /// <summary>
+    /// A KW skill's SKILL.md carries Agent Skills frontmatter, not a governed document's, and the skill
+    /// catalog reads the pool itself: nothing beneath standards/skills belongs to the corpus, in any root.
+    /// </summary>
+    [Fact]
+    public void TheSkillsPoolIsNotPartOfTheCorpus()
+    {
+        WriteCatalog("docs/catalog.md");
+        Write("docs/standards/skills/go-gates/SKILL.md", "---\nname: go-gates\ndescription: Run the gates.\n---\n\n# Go gates\n");
+        Write("docs/standards/skills/go-gates/references/notes.md", Document("docs/skill-notes"));
+        Write("automation/standards/skills/lab-skill/SKILL.md", "---\nname: lab-skill\ndescription: A lab skill.\n---\n\n# Lab\n");
+        Write("docs/standards/other.md", Document("standards/other"));
+
+        IReadOnlyList<DocumentModel> documents = _fixture.Loader(MultiRootConfig).Load().Documents;
+
+        Assert.Contains(documents, d => d.RelativePath == "docs/standards/other.md");
+        Assert.DoesNotContain(documents, d => d.RelativePath.Contains("/standards/skills/", StringComparison.Ordinal));
+        Assert.False(Validate(MultiRootConfig).HasErrors);
+    }
+
     [Fact]
     public void RootsAreWalkedInConfiguredOrder()
     {

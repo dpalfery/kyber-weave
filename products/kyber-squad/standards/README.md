@@ -12,7 +12,7 @@ Each folder holds four files, every one named after the folder:
 |---|---|
 | `<name>.standards.md` | The standard: six headings — Naming and layout, Coding standards, Testing, Commands, Security and data handling, Done checklist. |
 | `<name>.rules.md` | Prose rules a model reads. They outrank the standard. |
-| `<name>.skills.md` | How to do the work: commands, tool servers, query patterns, output shape. |
+| `<name>.skills.yml` | The KW skills listed for this technology, by name. A skill is a folder with a `SKILL.md` (commands, tool servers, query patterns, output shape) that a worker loads on demand with kw-docs `load_skill`. The pool is the repository's `<standards-root>/skills/` first, then the folder shipped with Squad. |
 | `<name>.arbiter-rules.yml` | Machine rules the Arbiter evaluates. An empty list is valid, and most folders declare none. |
 
 Technology and platform folders are scoped by `technology:`; role folders (`conductor`,

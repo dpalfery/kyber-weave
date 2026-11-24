@@ -6,7 +6,7 @@ status: current
 component: DocGraph
 source-root: src/KyberWeave.Mcp
 owner: dpalfery
-last-reviewed: 2026-11-23
+last-reviewed: 2026-11-24
 decided-by:
   - adr/0051-dotnet-cli-spawns-stdio-children-through-one-bounded-session
   - adr/0052-docs-branch-writes-repository-scope-mcp-configuration
@@ -1387,9 +1387,17 @@ in order:
 3. the rule-id index: every `KW-*` id the standard states, in document order, capped with the
    remainder counted. It comes first so that no budget can clip it.
 4. `## Shared rules`: the `shared-rules.md` file beside the folders, if the corpus has one.
-5. `## Parent rules (<technology>)` and `## Parent skills (<technology>)`: present only when
-   the standard's frontmatter names a parent with `builds-on`.
-6. `## <technology> rules` and `## <technology> skills`.
+5. `## Parent rules (<technology>)`: present only when the standard's frontmatter names a parent
+   with `builds-on`.
+6. `## <technology> rules`, then `## KW skills`: the same list the task prompt's `<kw-skills>` part
+   carries (the opening instruction line, then `- <name>: <description>` per skill, the parent's
+   first), omitted when none is assigned and the lists have no problems. The list is capped at the
+   first 20 skills with the remainder counted as an omission line under it. A problem reading the
+   lists — an unreadable or malformed list, or a listed name that is no skill — is named under
+   `Problems in the skills lists:` (rule `KW-DOC-SKILL-001`, capped with the remainder counted),
+   and the section appears for that reason alone when no skill survived the lists. The section
+   comes from one shared renderer, so the answer and the prompt cannot disagree. Read a listed
+   skill with [`load_skill`](#load_skillname-projectpath--null).
 7. `## <technology> standard`: a `###` heading with the standard's title, then the identity
    block — `path:`, `id:`, `doc-type:`, `status:`, `component:` — and a `technology:` line
    echoing the corpus value verbatim, not the caller's spelling. The declared value is what a
@@ -1399,11 +1407,11 @@ in order:
    the enum member's name, so a coding standard reads `doc-type: CODING-STANDARD` — the value a
    reader can look up, not `CODINGSTANDARD`, which no document or rule id uses. Then the
    chosen sections, with the `[complete document]` marker when nothing was omitted.
-8. `[left out for space: …]` when a skills part was cut, and the omission markers below when a
-   standard section was.
+8. The omission markers below when a standard section was cut.
 
 Rules are never cut: an id or a hard rule the caller cannot see is worse than a section it
-can ask for again. Skills are cut before standard sections. A coding standard declares no
+can ask for again. The KW skills list is capped at 20 entries with the remainder counted, so
+an oversized pool cannot blow the section. A coding standard declares no
 `code-refs` by ontology design, so the response never carries code joins.
 
 **The rule-id index is emitted ahead of the prose.** It lists the `KW-*` ids the standard
@@ -1454,6 +1462,54 @@ Four replies are not a standard at all:
   omission marker above when the budget cut something. The body does carry sections, so this
   reply never claims otherwise, and the prose is the point: a caller that receives no prose
   opens the file, which is the cost this tool exists to prevent.
+
+### `load_skill(name, projectPath = null)`
+
+Reads one KW skill: guidance an agent loads when its description fits the work, listed by name and
+description in a task prompt's `<kw-skills>` part or the `## KW skills` part of the coding-standard answer.
+The tool is named `load_skill` exactly, although every other tool here has a long `docs_...` name; it fits the
+[name limits](#name-limits-and-why-the-names-are-long) and is in the `kw-docs` roster of
+`products/kyber-squad/toolchain.yml`, so every renderer grants it. It is not a harness skill: the opening line
+of the list tells the agent never to load a KW skill through its harness's own skill tool.
+
+`name` is the skill's name as the list gives it; `projectPath` routes to a worktree as for every tool. The name
+must match `^[a-z0-9]+(-[a-z0-9]+)*$` and be one the catalog listed before any path is built from it, files are
+read only through the contained, link-free enumeration, and materialization writes only beneath its own folder, so a
+caller cannot steer the tool to another path. A blank name is answered with usage.
+
+The reply is the provenance line, then:
+
+```text
+skill: <name>
+source: repository | shipped
+folder: <absolute path>
+references:
+- <absolute path of each file in the folder other than SKILL.md>   (or "(none)")
+
+<the body of SKILL.md below its frontmatter, capped at the section cap with the truncation
+ named, or "(this SKILL.md carries no text below its frontmatter)" when there is none>
+```
+
+References are every other file in the folder, recursive, links not followed, in ordinal order; their
+contents are never returned, so the agent opens only the ones it needs. A repository skill wins the whole name
+over a shipped skill.
+
+- **Shipped skills are materialized.** A shipped skill has no file on disk, so the first load writes it once to
+  `<home>/.kyber-weave/kw-skills/<name>-<first 12 hex of the SHA-256 over its manifest-ordered files>/` and reports
+  that folder with `source: shipped`; an identical existing folder is reused and a second load writes nothing. The
+  content hash, not a version, keys the folder. The prompt list reads only the embedded frontmatter and writes
+  nothing. If the write fails (a read-only home) the reply still carries the body, with `folder: (not
+  materialized: <reason>)` and no references. This is why the tool is not read-only.
+- **An unknown name is not a failure.** The reply is `No KW skill is named '<name>'. Skills that exist: <names>.`
+  The names are capped at the first 20 with the remainder counted as `(+N more)`, so a large pool cannot blow the
+  reply; a checkout with no skills at all answers
+  `No KW skill is named '<name>', and this checkout has no KW skills.`
+- **A malformed skill is not a failure.** When its frontmatter could not be parsed or its file could not be read,
+  the reply names the reason: `The KW skill '<name>' in <folder> cannot be loaded: <reason>.` When the frontmatter
+  parsed but lacks a required field, it names the fields:
+  `The KW skill '<name>' in <folder> cannot be loaded: its SKILL.md has no <name/description>.`
+- **KyberDash recognizes the load** from the `skill: <name>` header on the reply's first lines, so keep that header
+  as written; see [the KyberDash architecture](../dash/architecture.md#kw-skill-loads).
 
 ### `docs_find_documents_citing_code_symbol(symbol, projectPath = null)`
 
@@ -1808,7 +1864,6 @@ so a server that stops answering is killed rather than left behind. The rule and
 | `repository.root` | The path is not in a git repository, git cannot run, or the root is `$HOME` | `run kyber-weave doctor from inside a git repository`, or `cd into a repository and run kyber-weave doctor` |
 | `codegraph.binary` | `codegraph` is not on `PATH`, or `codegraph --version` does not finish | `install the codegraph CLI so that 'codegraph' is on PATH, then run: kyber-weave doctor --check` |
 | `codegraph.index` | No `.codegraph/` in `--check`, the directory is not writable, the index is damaged, `init`, `sync` or `index` fails, the index lock is busy, or the run exceeds `--index-timeout` | Depends on the cause; see [Provisioning rules](#provisioning-rules) |
-| `codegraph.nested-worktrees` | The CodeGraph index holds a file under `.agent_worktrees/`, the folder `run start` puts run worktrees in. Passes when the index is unavailable (`codegraph.index` reports that). Runs in `--check`, `--provision` and `--ensure`, not `--post-checkout`; with `stop-on-tool-failure: false` an `--ensure` run reports it as a warning | `add '.agent_worktrees/' to .gitignore, then rebuild the index with 'codegraph index .'` |
 | `codegraph.restore` | `--ensure` and `--post-checkout`, and only when it reports something: the index preparation modified a tracked file that was clean before it ran, and the run reverted that file. Absent when the preparation wrote nothing | The paths it restored. Nothing is wrong with the repository; a file the index itself rewrote is not the operator's work |
 | `codegraph.explore` | `--ensure` only: the one `codegraph explore` proof did not answer, even after a single repair with `codegraph index` | Run `codegraph explore README` from the root for the child's own error, then `kyber-weave doctor --ensure` again |
 | `mcp.start` | `kyber-weave-mcp` cannot be started | `kyber-weave update` |

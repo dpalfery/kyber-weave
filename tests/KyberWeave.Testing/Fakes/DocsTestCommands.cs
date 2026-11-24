@@ -137,7 +137,8 @@ internal static class DocsTestCommands
             console ?? AnsiConsole.Console,
             provider.GetRequiredService<IConsole>(),
             PlanArgumentsFor(provider, console),
-            RepoRootFor(provider));
+            RepoRootFor(provider),
+            provider.GetRequiredService<IKwSkillCatalogFactory>());
     }
 
     public static DocsTasksCommand Tasks(IServiceProvider? services = null, IAnsiConsole? console = null)

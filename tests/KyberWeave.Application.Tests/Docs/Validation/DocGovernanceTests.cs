@@ -83,6 +83,7 @@ public class SkillAndScopeTests
         return fixture
             .Write($"6-Docs/standards/{scope}/{scope}.standards.md", standard)
             .Write($"6-Docs/standards/{scope}/{scope}.rules.md", rules)
+            .Write($"6-Docs/standards/{scope}/{scope}.skills.yml", "[]\n")
             .Write($"6-Docs/standards/{scope}/{scope}.arbiter-rules.yml", "rules: []\n");
     }
 

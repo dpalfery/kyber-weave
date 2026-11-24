@@ -2,6 +2,7 @@ using KyberWeave.Contracts.Services;
 using KyberWeave.Core.Arbiter;
 using KyberWeave.Core.Configuration;
 using KyberWeave.Core.Docs.Validation;
+using KyberWeave.Tests;
 using KyberWeave.Tests.Fakes;
 using KyberWeave.Tests.FileSystem;
 using Xunit;
@@ -41,7 +42,8 @@ public sealed class TaskPromptRootOverSeamsTests
             new NoHostFacts(),
             new InMemoryFileSystem(),
             _ => null,
-            new FakeProcessEnvironment(currentDirectory: Current));
+            new FakeProcessEnvironment(currentDirectory: Current),
+            FixedKwSkillCatalog.Empty);
         return service.Build(new TaskPromptRequest(root, TaskId: "T1"), new KyberWeaveConfig { Arbiter = ArbiterConfigDefaults.Product });
     }
 

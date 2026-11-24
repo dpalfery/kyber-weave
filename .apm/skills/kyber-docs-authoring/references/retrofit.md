@@ -58,9 +58,9 @@ current guidance. Promote to `current` only when a human has confirmed that file
 | `spec`, `rfc` | `spec` |
 | `standards/<scope>/<scope>.standards.md` | `coding-standard`, where `<scope>` is the folder's own name |
 | `standards/<scope>/<scope>.rules.md` | `rule`, scoped by `technology` or `role` to the folder's name |
-| `standards/<scope>/<scope>.skills.md` | `skill`, scoped by `technology` or `role` to the folder's name |
+| `standards/<scope>/<scope>.skills.yml` | not a governed document: a YAML list of KW skill names (`[]` for none); the skills are `standards/skills/<name>/SKILL.md`, which the corpus skips |
 | `todo/` | `todo` |
-| `policy`, `standard`, `convention` | `rule` or `governance`, except a standards folder's four prefixed files |
+| `policy`, `standard`, `convention` | `rule` or `governance`, except a standards folder's four prefixed files, and never a `standards/skills/` file |
 | `README.md` at a directory root | `index` |
 | anything else that is reference material | `reference` |
 

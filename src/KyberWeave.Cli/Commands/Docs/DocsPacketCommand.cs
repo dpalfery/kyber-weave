@@ -38,7 +38,8 @@ public sealed class DocsPacketCommand(
     IAnsiConsole console,
     IConsole standardError,
     PlanArguments plans,
-    ArbiterRepoRoot roots) : Command<DocsPacketSettings>
+    ArbiterRepoRoot roots,
+    IKwSkillCatalogFactory skills) : Command<DocsPacketSettings>
 {
     /// <summary>The plan could not be chosen: none is Ready or In progress, or several are.</summary>
     public const string PlanNotChosen = "KW-DOC-TASKS-CLI-002";
@@ -145,7 +146,13 @@ public sealed class DocsPacketCommand(
         DocumentIndex index = DocumentIndex.Build(
             documents.Create(root, config.Ontology).Load(),
             codeGraph.ForRepository(root).Resolver);
-        TaskPromptService prompts = new(tasks, hostFacts, files, index.StandardsFor, environment);
+        TaskPromptService prompts = new(
+            tasks,
+            hostFacts,
+            files,
+            index.StandardsFor,
+            environment,
+            skills.ForRepository(root, config));
         TaskPromptResult prompt = prompts.Build(
             new TaskPromptRequest(root, settings.Task, plan, settings.Agent, settings.PriorResults),
             config);

@@ -5,6 +5,7 @@ using KyberWeave.Contracts.Repositories;
 using KyberWeave.Contracts.Services;
 using KyberWeave.Core.Arbiter;
 using KyberWeave.Core.Configuration;
+using KyberWeave.Core.Docs.KwSkills;
 using KyberWeave.Core.Docs.Model;
 using KyberWeave.Core.Docs.Search;
 using KyberWeave.Core.FileSystem;
@@ -26,12 +27,14 @@ namespace KyberWeave.Core.Docs.Validation;
 /// skills, rules, skills and standard, or null when the host has no folder for it.
 /// </param>
 /// <param name="environment">Names the working directory a relative repository root is resolved against.</param>
+/// <param name="skills">Lists the KW skills a technology and a role agent get, for the checkout the prompt is built for.</param>
 public sealed class TaskPromptService(
     IPlanTaskService tasks,
     IPacketHostFacts hostFacts,
     IWritableFileSystem files,
     Func<string, StandardsBundle?> standardsFor,
-    IProcessEnvironment environment) : ITaskPromptService
+    IProcessEnvironment environment,
+    IKwSkillCatalog skills) : ITaskPromptService
 {
     /// <summary>What the last part says when the budget cut nothing.</summary>
     public const string NothingLeftOut = "Nothing was left out.";
@@ -42,9 +45,12 @@ public sealed class TaskPromptService(
     /// <summary>The prompt file's name inside the task's scratch folder.</summary>
     public const string PromptFileName = "prompt.md";
 
-    private const string ParentSkillsUnit = "parent-skills";
-    private const string SkillsUnit = "skills";
+    private const string KwSkillsUnit = "kw-skills";
     private const string StandardUnitPrefix = "standard:";
+
+    /// <summary>What the <c>kw-skills</c> part says when the budget cut the list.</summary>
+    private const string KwSkillsLeftOut =
+        "The KW skills list was left out: the prompt budget did not fit it. The last part names what was cut.";
 
     /// <summary>
     /// The developer tier for a task: <c>min(hard, rated difficulty + failed attempts)</c>. A task with no rating
@@ -195,10 +201,18 @@ public sealed class TaskPromptService(
         }
 
         string? technology = Clean(entry?.Technology) ?? Clean(request.Technology);
+        // The retry's failure report is delivered in the same dispatch, after this prompt, so the budget reserves
+        // room for it: cutting the prompt to the budget alone would overshoot by the report's length.
+        string retryText = request.RetryText ?? string.Empty;
+        int reserve = retryText.Length == 0 ? 0 : retryText.Length + 2;
+        string? roleAgent = Clean(request.RoleAgent) ?? Clean(request.Agent);
         if (entry is null && technology is null)
         {
-            return TaskPromptResult.NotBuilt(
-                "No prompt: name a task id, or a technology for a dispatch that belongs to no task.");
+            // A dispatch that names a role agent and no task gets the role's skills alone; the role lookup reads
+            // RoleAgent first, so a dispatch that names only Agent is read the same way.
+            return roleAgent is null
+                ? TaskPromptResult.NotBuilt("No prompt: name a task id, or a technology for a dispatch that belongs to no task.")
+                : RoleOnlyPrompt(roleAgent, config, reserve);
         }
 
         string? priorResults = null;
@@ -250,12 +264,9 @@ public sealed class TaskPromptService(
             ? null
             : hostFacts.Render(root, config, agent, taskId, null, technology);
 
-        PromptContent content = ContentOf(taskText, hostText, technology, config.Ontology, root);
+        IReadOnlyList<KwSkillEntry> kwSkills = skills.SkillsFor(technology, roleAgent).Entries;
+        PromptContent content = ContentOf(taskText, hostText, technology, config.Ontology, root, kwSkills);
         int budget = config.TaskPromptBudget > 0 ? config.TaskPromptBudget : KyberWeaveConfig.DefaultTaskPromptBudget;
-        // The retry's failure report is delivered in the same dispatch, after this prompt, so the budget reserves
-        // room for it: cutting the prompt to the budget alone would overshoot by the report's length.
-        string retryText = request.RetryText ?? string.Empty;
-        int reserve = retryText.Length == 0 ? 0 : retryText.Length + 2;
         (string prompt, IReadOnlyList<string> leftOut) = Fit(content, budget, reserve);
 
         string? promptFile = null;
@@ -283,6 +294,36 @@ public sealed class TaskPromptService(
             null,
             promptFile,
             removed?.Report);
+    }
+
+    /// <summary>
+    /// The role-only prompt: just the <c>kw-skills</c> part, for a dispatch that names a role agent and no task or
+    /// technology. It is built and empty when the role lists no skill, and its list is cut to the budget like any part.
+    /// </summary>
+    private TaskPromptResult RoleOnlyPrompt(string roleAgent, KyberWeaveConfig config, int reserve)
+    {
+        IReadOnlyList<KwSkillEntry> entries = skills.SkillsFor(null, roleAgent).Entries;
+        if (entries.Count == 0)
+        {
+            return new TaskPromptResult(true, string.Empty, roleAgent, null, null, null, [], null);
+        }
+
+        int budget = config.TaskPromptBudget > 0 ? config.TaskPromptBudget : KyberWeaveConfig.DefaultTaskPromptBudget;
+        string prompt = Join([new Part("kw-skills", KwSkillsText(entries))]);
+        if (prompt.Length + reserve <= budget)
+        {
+            return new TaskPromptResult(true, prompt, roleAgent, null, null, null, [], null);
+        }
+
+        return new TaskPromptResult(
+            true,
+            Join([new Part("kw-skills", KwSkillsLeftOut)]),
+            roleAgent,
+            null,
+            null,
+            null,
+            [$"KW skills ({entries.Count} listed)"],
+            null);
     }
 
     /// <summary>
@@ -396,20 +437,20 @@ public sealed class TaskPromptService(
         string? hostText,
         string? technology,
         OntologyConfig ontology,
-        string root)
+        string root,
+        IReadOnlyList<KwSkillEntry> kwSkills)
     {
         if (technology is null)
         {
             return new PromptContent(
-                taskText, hostText, null, null, false, null, null, null, null, null, null, [], null, null, null);
+                taskText, hostText, null, null, false, null, null, null, kwSkills, null, [], null, null);
         }
 
         StandardsBundle? bundle = standardsFor(technology);
         if (bundle is null)
         {
             return new PromptContent(
-                taskText, hostText, technology, null, false, null, null, null, null, null, null, [],
-                null, null, null);
+                taskText, hostText, technology, null, false, null, null, null, kwSkills, null, [], null, null);
         }
 
         string? parent = Clean(bundle.Standard?.Frontmatter.BuildsOn);
@@ -421,13 +462,11 @@ public sealed class TaskPromptService(
             true,
             BodyOf(bundle.SharedRules),
             BodyOf(bundle.ParentRules),
-            BodyOf(bundle.ParentSkills),
             BodyOf(bundle.Rules),
-            BodyOf(bundle.Skills),
+            kwSkills,
             StandardLeadOf(bundle.Standard),
             bundle.Standard?.Sections ?? [],
             bundle.Rules is null ? UncarriedFileNote(root, ontology, technology, "rules", parent: false) : null,
-            bundle.Skills is null ? UncarriedFileNote(root, ontology, technology, "skills", parent: false) : null,
             parent is not null && bundle.ParentRules is null
                 ? UncarriedFileNote(root, ontology, parent, "rules", parent: true)
                 : null);
@@ -528,11 +567,14 @@ public sealed class TaskPromptService(
     {
         List<CutUnit> units = [];
 
-        // Kind 0 and 1 are the skills, so every skill goes before any standard section is touched.
-        if (content.ParentSkills is not null)
-            units.Add(new CutUnit(ParentSkillsUnit, $"parent skills ({content.Parent})", 0, 0, content.ParentSkills));
-        if (content.Skills is not null)
-            units.Add(new CutUnit(SkillsUnit, $"skills ({content.Technology})", 1, 0, content.Skills));
+        // Kind 0 is the KW skills list, so it goes before any standard section is touched.
+        if (content.KwSkills.Count > 0)
+            units.Add(new CutUnit(
+                KwSkillsUnit,
+                $"KW skills ({content.KwSkills.Count} listed)",
+                0,
+                0,
+                KwSkillsText(content.KwSkills)));
 
         for (int index = 0; index < content.StandardSections.Count; index++)
         {
@@ -576,47 +618,48 @@ public sealed class TaskPromptService(
             {
                 parts.Add(new Part("shared-rules", content.SharedRules ?? NoSharedRules));
                 if (content.Parent is not null)
-                    parts.Add(new Part("parent-rules", ParentPart(content, cut)));
+                    parts.Add(new Part("parent-rules", ParentPart(content)));
                 parts.Add(new Part(
                     "technology-rules",
                     content.TechnologyRules ?? content.RulesNote ?? NoRulesFile));
-                parts.Add(new Part("skills", SkillsPart(content, cut)));
+                AddKwSkills(parts, content, cut);
                 parts.Add(new Part("standard", StandardPart(content, cut)));
             }
             else
             {
                 string note = string.Create(
                     CultureInfo.InvariantCulture,
-                    $"No standards folder for technology '{content.Technology}' is installed in this repository, so this prompt carries no rules, skills or standard for it. Report this to the conductor rather than improvising a standard.");
+                    $"No standards folder for technology '{content.Technology}' is installed in this repository, so this prompt carries no rules or standard for it. Report this to the conductor rather than improvising a standard.");
                 parts.Add(new Part("technology-rules", note));
-                parts.Add(new Part("skills", note));
+                AddKwSkills(parts, content, cut);
                 parts.Add(new Part("standard", note));
             }
+        }
+        else
+        {
+            AddKwSkills(parts, content, cut);
         }
 
         parts.Add(new Part("left-out", LeftOutPart(budget, leftOut)));
         return Join(parts);
     }
 
-    private static string ParentPart(PromptContent content, IReadOnlySet<string> cut)
+    private static void AddKwSkills(List<Part> parts, PromptContent content, IReadOnlySet<string> cut)
     {
-        StringBuilder text = new();
-        text.Append(content.ParentRules ?? content.ParentRulesNote ?? string.Create(
-            CultureInfo.InvariantCulture, $"The parent technology '{content.Parent}' has no rules file."));
-
-        if (content.ParentSkills is not null && !cut.Contains(ParentSkillsUnit))
-        {
-            text.Append("\n\n## Parent skills (").Append(content.Parent).Append(")\n\n").Append(content.ParentSkills);
-        }
-
-        return text.ToString();
+        if (content.KwSkills.Count > 0)
+            parts.Add(new Part("kw-skills", KwSkillsPart(content.KwSkills, cut)));
     }
 
-    private static string SkillsPart(PromptContent content, IReadOnlySet<string> cut) => content.Skills is null
-        ? content.SkillsNote ?? NoSkillsFile
-        : cut.Contains(SkillsUnit)
-            ? "The skills for this technology were left out: the prompt budget did not fit them. The last part names what was cut."
-            : content.Skills;
+    private static string ParentPart(PromptContent content) =>
+        content.ParentRules ?? content.ParentRulesNote ?? string.Create(
+            CultureInfo.InvariantCulture, $"The parent technology '{content.Parent}' has no rules file.");
+
+    /// <summary>The <c>kw-skills</c> part's text: the cut notice when the budget cut the list, else the list.</summary>
+    private static string KwSkillsPart(IReadOnlyList<KwSkillEntry> entries, IReadOnlySet<string> cut) =>
+        cut.Contains(KwSkillsUnit) ? KwSkillsLeftOut : KwSkillsText(entries);
+
+    /// <summary>The instruction line, then one <c>- name: description</c> line per skill.</summary>
+    private static string KwSkillsText(IReadOnlyList<KwSkillEntry> entries) => KwSkillListText.Render(entries);
 
     private static string StandardPart(PromptContent content, IReadOnlySet<string> cut)
     {
@@ -697,9 +740,6 @@ public sealed class TaskPromptService(
     private const string NoRulesFile =
         "This technology's folder has no rules file, so this prompt carries none for it.";
 
-    private const string NoSkillsFile =
-        "This technology's folder has no skills file.";
-
     /// <summary>One part of the prompt, written between a tag that opens it and the same tag closing it.</summary>
     private sealed record Part(string Tag, string Body);
 
@@ -708,9 +748,9 @@ public sealed class TaskPromptService(
 
     /// <summary>Every part of one prompt before the budget is applied, and which of them may be cut.</summary>
     /// <remarks>
-    /// <c>RulesNote</c>, <c>SkillsNote</c> and <c>ParentRulesNote</c> explain a folder file that
-    /// exists on disk but whose frontmatter kept it out of the bundle; each is null when the file
-    /// is genuinely absent, so the part keeps its plain "no ... file" text.
+    /// <c>RulesNote</c> and <c>ParentRulesNote</c> explain a folder file that exists on disk but whose frontmatter
+    /// kept it out of the bundle; each is null when the file is genuinely absent, so the part keeps its plain
+    /// "no ... file" text.
     /// </remarks>
     private sealed record PromptContent(
         string? Task,
@@ -720,12 +760,10 @@ public sealed class TaskPromptService(
         bool HasFolder,
         string? SharedRules,
         string? ParentRules,
-        string? ParentSkills,
         string? TechnologyRules,
-        string? Skills,
+        IReadOnlyList<KwSkillEntry> KwSkills,
         string? StandardLead,
         IReadOnlyList<DocumentSection> StandardSections,
         string? RulesNote,
-        string? SkillsNote,
         string? ParentRulesNote);
 }

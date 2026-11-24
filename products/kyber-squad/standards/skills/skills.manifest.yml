@@ -1,0 +1,28 @@
+skills:
+  - name: dotnet-build-diagnostics
+    files:
+      - SKILL.md
+  - name: aws-cli-queries
+    files:
+      - SKILL.md
+  - name: azure-resource-inspection
+    files:
+      - SKILL.md
+  - name: go-gates
+    files:
+      - SKILL.md
+  - name: maui-environment-doctor
+    files:
+      - SKILL.md
+  - name: pylance-tooling
+    files:
+      - SKILL.md
+  - name: rust-cross-build
+    files:
+      - SKILL.md
+  - name: sql-server-reference
+    files:
+      - SKILL.md
+  - name: tauri-v2-reference
+    files:
+      - SKILL.md

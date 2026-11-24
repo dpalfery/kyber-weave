@@ -50,7 +50,7 @@ public sealed class ArbiterCommandAllowListPromptTests
     {
         using DocFixture fixture = DocFixture.CreateInMemory();
         fixture.Write("6-Docs/standards/shared-rules.md", ShippedStandardsFile("shared-rules.md"));
-        foreach (string name in new[] { $"{technology}.standards.md", $"{technology}.rules.md", $"{technology}.skills.md" })
+        foreach (string name in new[] { $"{technology}.standards.md", $"{technology}.rules.md" })
         {
             fixture.Write($"6-Docs/standards/{technology}/{name}", ShippedStandardsFile($"{technology}/{name}"));
         }
@@ -65,7 +65,8 @@ public sealed class ArbiterCommandAllowListPromptTests
             provider.GetRequiredService<IPacketHostFacts>(),
             provider.GetRequiredService<IWritableFileSystem>(),
             index.StandardsFor,
-            provider.GetRequiredService<IProcessEnvironment>());
+            provider.GetRequiredService<IProcessEnvironment>(),
+            FixedKwSkillCatalog.Empty);
 
         TaskPromptResult result = service.Build(new TaskPromptRequest(fixture.Root, TaskId: null, Technology: technology), config);
 

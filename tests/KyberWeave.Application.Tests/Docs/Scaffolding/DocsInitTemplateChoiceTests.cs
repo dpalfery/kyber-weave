@@ -38,7 +38,7 @@ public class DocsInitTemplateChoiceTests
 
         Assert.True(_host.Files.FileExists(PathOf("docs/standards/csharp/csharp.standards.md")));
         Assert.True(_host.Files.FileExists(PathOf("docs/standards/csharp/csharp.rules.md")));
-        Assert.True(_host.Files.FileExists(PathOf("docs/standards/csharp/csharp.skills.md")));
+        Assert.True(_host.Files.FileExists(PathOf("docs/standards/csharp/csharp.skills.yml")));
         Assert.True(_host.Files.FileExists(PathOf("docs/standards/csharp/csharp.arbiter-rules.yml")));
         Assert.True(_host.Files.FileExists(PathOf("docs/standards/python/python.standards.md")));
         Assert.False(_host.Files.DirectoryExists(PathOf("docs/standards/typescript")));
@@ -47,6 +47,44 @@ public class DocsInitTemplateChoiceTests
         KyberWeaveConfig config = LoadConfig();
         Assert.Equal(["csharp", "python"], config.Ontology.Technologies);
         Assert.Empty(config.Ontology.Roles);
+    }
+
+    [Fact]
+    public void DocsInitWritesSkillsYmlAndCopiesTheAssignedShippedSkills()
+    {
+        Scaffolding.Scaffold(_host.Repo, standards: ["tauri"]);
+
+        string list = _host.Files.ReadAllText(PathOf("docs/standards/tauri/tauri.skills.yml"));
+        Assert.Contains("tauri-v2-reference", list, StringComparison.Ordinal);
+
+        // tauri builds on rust, so the parent's skill comes with it.
+        Assert.True(_host.Files.FileExists(PathOf("docs/standards/skills/tauri-v2-reference/SKILL.md")));
+        Assert.True(_host.Files.FileExists(PathOf("docs/standards/skills/rust-cross-build/SKILL.md")));
+        Assert.False(_host.Files.DirectoryExists(PathOf("docs/standards/skills/go-gates")));
+    }
+
+    [Fact]
+    public void DocsInitDoesNotOverwriteAnExistingRepositorySkillFolder()
+    {
+        const string mine = "---\nname: tauri-v2-reference\ndescription: Mine.\n---\n\nMine.\n";
+        string skill = PathOf("docs/standards/skills/tauri-v2-reference/SKILL.md");
+        _host.Files.CreateDirectory(Path.GetDirectoryName(skill)!);
+        _host.Files.WriteAllText(skill, mine);
+
+        Scaffolding.Scaffold(_host.Repo, standards: ["tauri"], force: true);
+
+        Assert.Equal(mine, _host.Files.ReadAllText(skill));
+        Assert.True(_host.Files.FileExists(PathOf("docs/standards/skills/rust-cross-build/SKILL.md")));
+    }
+
+    [Fact]
+    public void DocsInitWritesNoSkillsMd()
+    {
+        Scaffolding.Scaffold(_host.Repo, kyberStandards: true, standards: ["architect"]);
+
+        Assert.Empty(_host.Files.EnumerateFiles(PathOf("docs/standards"), "*.skills.md", recursive: true));
+        Assert.True(_host.Files.FileExists(PathOf("docs/standards/csharp/csharp.skills.yml")));
+        Assert.Equal("[]\n", _host.Files.ReadAllText(PathOf("docs/standards/architect/architect.skills.yml")));
     }
 
     [Fact]
@@ -106,7 +144,7 @@ public class DocsInitTemplateChoiceTests
 
         Assert.True(_host.Files.FileExists(PathOf("docs/standards/elixir/elixir.standards.md")));
         Assert.True(_host.Files.FileExists(PathOf("docs/standards/elixir/elixir.rules.md")));
-        Assert.True(_host.Files.FileExists(PathOf("docs/standards/elixir/elixir.skills.md")));
+        Assert.True(_host.Files.FileExists(PathOf("docs/standards/elixir/elixir.skills.yml")));
         Assert.True(_host.Files.FileExists(PathOf("docs/standards/elixir/elixir.arbiter-rules.yml")));
         Assert.Contains(
             "technology: elixir",

@@ -6,6 +6,7 @@ using KyberWeave.Contracts.Docs;
 using KyberWeave.Contracts.Host;
 using KyberWeave.Contracts.Paths;
 using KyberWeave.Contracts.Repositories;
+using KyberWeave.Core.Docs.KwSkills;
 using KyberWeave.Core.Docs.Mcp;
 using KyberWeave.Core.Docs.Parsing;
 using KyberWeave.Mcp;
@@ -81,7 +82,8 @@ public static class ServiceCollectionExtensions
             sp.GetRequiredService<ISeverityOverrideSource>(),
             sp.GetRequiredService<TimeProvider>(),
             sp.GetRequiredService<IPathResolver>(),
-            sp.GetRequiredService<IProcessEnvironment>()));
+            sp.GetRequiredService<IProcessEnvironment>(),
+            sp.GetRequiredService<IKwSkillCatalogFactory>()));
         services.TryAddSingleton<IPacketHostFacts>(sp => new PacketHostFacts(sp.GetRequiredService<IFileSystem>()));
         services.TryAddSingleton<ITaskPromptServiceFactory>(sp => new TaskPromptServiceFactory(
             sp.GetRequiredService<IPlanTaskService>(),
@@ -90,7 +92,13 @@ public static class ServiceCollectionExtensions
             sp.GetRequiredService<ICodeGraphPortsFactory>(),
             sp.GetRequiredService<IDocumentSourceFactory>(),
             sp.GetRequiredService<IPathResolver>(),
-            sp.GetRequiredService<IProcessEnvironment>()));
+            sp.GetRequiredService<IProcessEnvironment>(),
+            sp.GetRequiredService<IKwSkillCatalogFactory>()));
+        services.TryAddSingleton<IKwSkillCatalogFactory>(sp => new KwSkillCatalogFactory(
+            sp.GetRequiredService<IWritableFileSystem>(),
+            sp.GetRequiredService<IPathResolver>(),
+            sp.GetRequiredService<IProcessEnvironment>(),
+            sp.GetRequiredService<IEmbeddedResources>()));
         services.TryAddSingleton<IPlanCloseoutService>(sp => new PlanCloseoutService(
             sp.GetRequiredService<IRepositoryFileStore>(),
             sp.GetRequiredService<IBoundedProcessExecutor>(),

@@ -1,6 +1,7 @@
 using KyberWeave.Contracts.Services;
 using KyberWeave.Core.Configuration;
 using KyberWeave.Core.Docs.Validation;
+using KyberWeave.Tests;
 using KyberWeave.Tests.Fakes;
 using KyberWeave.Tests.FileSystem;
 using Xunit;
@@ -58,7 +59,8 @@ public sealed class TaskPromptFileOverSeamTests
             new UnusedHostFacts(),
             _disk,
             _ => null,
-            new FakeProcessEnvironment(currentDirectory: Root))
+            new FakeProcessEnvironment(currentDirectory: Root),
+            FixedKwSkillCatalog.Empty)
         .Build(new TaskPromptRequest(Root, Technology: "csharp", Harness: harness), KyberWeaveConfigAssembler.FromYaml("ontology:\n  docs-root: docs\n"));
 
     private sealed class UnusedTasks : IPlanTaskService

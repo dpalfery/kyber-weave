@@ -38,6 +38,7 @@ required-mcp-tools:
     - docs_push_run_branch_and_open_draft_pull_request
     - docs_run_tooling_check_and_repair_code_index
     - docs_validate_governed_document_schema
+    - load_skill
   kw-arbiter:
     - arbiter_check_configuration_and_key_readiness
     - arbiter_classify_bot_review_comment

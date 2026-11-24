@@ -215,7 +215,7 @@ public sealed class ClaudeHookAdapter : IHarnessHookAdapter
 
         JsonElement toolInput = RequireToolInput(payload);
         string prompt = GetString(toolInput, "prompt") ?? string.Empty;
-        DispatchInsertion insertion = DispatchPromptInsertion.Expand(prompt, context);
+        DispatchInsertion insertion = DispatchPromptInsertion.Expand(prompt, context, GetString(toolInput, "subagent_type"));
         return insertion.Kind switch
         {
             DispatchInsertionKind.Inserted => RenderPreAllowPrompt(toolInput, insertion.Text),
@@ -255,7 +255,7 @@ public sealed class ClaudeHookAdapter : IHarnessHookAdapter
             HookOutcome outcome = DecidePre(payload, caller, target, prompt, config, decisionContext, dispatchModel);
 
             // The rules judge the short dispatch first; the prompt is inserted only for a dispatch they allowed.
-            DispatchInsertion insertion = DispatchPromptInsertion.Expand(prompt, context);
+            DispatchInsertion insertion = DispatchPromptInsertion.Expand(prompt, context, target);
             if (outcome.Kind == HookOutcomeKind.Deny)
             {
                 return RenderPreDeny(

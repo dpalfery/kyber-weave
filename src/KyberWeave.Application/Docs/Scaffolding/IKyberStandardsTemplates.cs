@@ -78,4 +78,15 @@ public interface IKyberStandardsTemplates
     /// <param name="rendered">The rendered file if the build ships one; otherwise, <see langword="null"/>.</param>
     /// <returns><see langword="true"/> if the file exists and was rendered; otherwise, <see langword="false"/>.</returns>
     bool TryRenderSharedRules(string owner, string lastReviewed, [NotNullWhen(true)] out string? rendered);
+
+    /// <summary>Attempts to read every file of one shipped KW skill, so <c>docs init</c> can copy it into a repository.</summary>
+    /// <param name="name">The skill's name, which is its folder name.</param>
+    /// <param name="files">The skill's files, <c>SKILL.md</c> among them; empty when the build ships no such skill.</param>
+    /// <returns><see langword="true"/> if the build ships a skill of that name; otherwise, <see langword="false"/>.</returns>
+    bool TryReadShippedSkill(string name, out IReadOnlyList<ShippedSkillFile> files);
 }
+
+/// <summary>One file of a shipped KW skill.</summary>
+/// <param name="RelativePath">The path inside the skill's folder, slash-separated.</param>
+/// <param name="Bytes">The file's content, exactly as shipped.</param>
+public sealed record ShippedSkillFile(string RelativePath, ReadOnlyMemory<byte> Bytes);
