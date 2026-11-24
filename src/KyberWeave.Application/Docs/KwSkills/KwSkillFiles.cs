@@ -25,7 +25,7 @@ internal static class KwSkillFiles
             stream.Load(new StringReader(text));
             if (stream.Documents.Count == 1
                 && stream.Documents[0].RootNode is YamlSequenceNode sequence
-                && sequence.Children.All(child => child is YamlScalarNode { Value: { Length: > 0 } }))
+                && sequence.Children.All(child => child is YamlScalarNode { Value: { } value } && value.Trim().Length > 0))
             {
                 names = [.. sequence.Children.Cast<YamlScalarNode>().Select(node => node.Value!.Trim())];
                 return true;

@@ -264,6 +264,14 @@ public sealed class KwSkillValidationTests
     }
 
     [Fact]
+    public void AWhitespaceOnlyScalarEntryIsKwDocSkill001()
+    {
+        using DocFixture fixture = Scope("- \"  \"\n");
+
+        Only(Validate(fixture, Dotnet), DocSpecValidator.SkillListMalformed, Severity.Error);
+    }
+
+    [Fact]
     public void AnUnreadableListFileIsKwDocSkill001NotACrash()
     {
         using DocFixture fixture = Scope("[]\n");

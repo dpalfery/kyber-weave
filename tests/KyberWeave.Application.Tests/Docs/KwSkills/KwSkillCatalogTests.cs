@@ -95,6 +95,7 @@ public sealed class KwSkillCatalogTests
     [InlineData("just a sentence\n")]
     [InlineData("")]
     [InlineData("- go-gates\n  bad: [\n")]
+    [InlineData("- \"  \"\n")]
     public void ASkillsYmlThatIsNotAListOfNamesListsNothingAndReportsWhy(string content)
     {
         Skill("go-gates", "Run the Go gates in order.");
