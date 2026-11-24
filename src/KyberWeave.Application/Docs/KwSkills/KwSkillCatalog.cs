@@ -234,6 +234,14 @@ public sealed class KwSkillCatalog : IKwSkillCatalog
             {
                 file = relative;
                 text = SafeRead(candidate);
+                if (text is null)
+                {
+                    problems.Add(new KwSkillProblem(
+                        relative,
+                        $"the '{technology}' standard could not be read, so the skills of the technology it builds on "
+                        + "may not be listed"));
+                }
+
                 break;
             }
         }
