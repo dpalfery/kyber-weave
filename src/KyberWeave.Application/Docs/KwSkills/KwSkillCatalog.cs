@@ -234,14 +234,6 @@ public sealed class KwSkillCatalog : IKwSkillCatalog
             {
                 file = relative;
                 text = SafeRead(candidate);
-                if (text is null)
-                {
-                    problems.Add(new KwSkillProblem(
-                        relative,
-                        $"the '{technology}' standard could not be read, so the skills of the technology it builds on "
-                        + "may not be listed"));
-                }
-
                 break;
             }
         }
@@ -254,6 +246,16 @@ public sealed class KwSkillCatalog : IKwSkillCatalog
             }
             catch (MissingEmbeddedResourceException)
             {
+                // The problem is named only when the embedded copy served neither: an answer that
+                // lists the parent skills must not carry one saying they may not be listed.
+                if (file is not null)
+                {
+                    problems.Add(new KwSkillProblem(
+                        file,
+                        $"the '{technology}' standard could not be read, so the skills of the technology it builds on "
+                        + "may not be listed"));
+                }
+
                 return null;
             }
         }

@@ -162,6 +162,23 @@ public sealed class KwSkillCatalogTests
     }
 
     [Fact]
+    public void AnUnreadableParentStandardServedByTheEmbeddedCopyListsTheParentsWithoutAProblem()
+    {
+        Skill("a", "A.");
+        Skill("b", "B.");
+        Put("docs/standards/react/react.standards.md", Standard("react", "builds-on: typescript"));
+        Put("docs/standards/typescript/typescript.skills.yml", "- a\n");
+        Put("docs/standards/react/react.skills.yml", "- b\n");
+        _resources.Add("Standards.react.standards.md", Standard("react", "builds-on: typescript"));
+        Unreadable("react.standards.md");
+
+        KwSkillList list = _catalog.SkillsFor("react", null);
+
+        Assert.Equal(["a", "b"], list.Entries.Select(e => e.Name));
+        Assert.Empty(list.Problems);
+    }
+
+    [Fact]
     public void ARoleAgentNameMapsToItsRoleFolder()
     {
         Skill("plan-craft", "Plan craft.");
