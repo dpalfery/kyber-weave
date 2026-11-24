@@ -307,7 +307,9 @@ public sealed class DocsScaffolder : IDocsScaffoldingService
                 string relative = $"{folder}/{file.RelativePath}";
                 string absolute = RequireContained(repoRoot, relative, nameof(docsRoot));
                 _files.CreateDirectory(Path.GetDirectoryName(absolute)!);
-                _files.WriteAllBytes(absolute, file.Bytes.ToArray());
+                // Atomic, as the home-folder cache writes the same bytes: a reader never sees a
+                // half-written file, and a link planted at the destination is replaced, not followed.
+                _files.WriteAllBytesAtomic(absolute, file.Bytes.ToArray());
                 written.Add(new ScaffoldedFile(relative, ScaffoldOutcome.Created));
             }
         }
