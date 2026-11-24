@@ -625,7 +625,7 @@ public sealed class ArbiterInstallServiceSeamsTests
 
     /// <summary>
     /// Long endpoints that match through the 200-character display cap but diverge afterwards
-    /// still fail closed in <c>Verify</c> while keeping the error message bounded.
+    /// fail closed in <c>Verify</c>, remain bounded, and disambiguate the colliding displays.
     /// </summary>
     [Fact]
     public void Apply_VerifyFailsClosed_LongEndpointsDifferingAfterTruncationLimit_StillFailClosedAndTruncate()
@@ -660,13 +660,170 @@ public sealed class ArbiterInstallServiceSeamsTests
 
         Assert.Equal(1, applied.ExitCode);
         ArbiterInstallError error = Assert.Single(applied.Events.OfType<ArbiterInstallError>());
-        string truncated = sharedPrefix[..200] + "...";
-        int first = error.Message.IndexOf(truncated, StringComparison.Ordinal);
-        int second = first < 0 ? -1 : error.Message.IndexOf(truncated, first + truncated.Length, StringComparison.Ordinal);
-        Assert.True(first >= 0 && second >= 0);
-        Assert.Equal(-1, error.Message.IndexOf(truncated, second + truncated.Length, StringComparison.Ordinal));
+        (string effectiveDisplay, string effectiveOriginDisplay, string plannedDisplay, string plannedOriginDisplay) =
+            ParseVerifyMismatchDisplays(error.Message);
+        Assert.NotEqual(effectiveDisplay, plannedDisplay);
+        Assert.StartsWith(sharedPrefix[..200] + "...", effectiveDisplay, StringComparison.Ordinal);
+        Assert.StartsWith(sharedPrefix[..200] + "...", plannedDisplay, StringComparison.Ordinal);
+        Assert.Contains($"differs at index {sharedPrefix.Length + 1}", effectiveDisplay, StringComparison.Ordinal);
+        Assert.Contains($"differs at index {sharedPrefix.Length + 1}", plannedDisplay, StringComparison.Ordinal);
+        Assert.Contains($"len {effectiveEndpoint.Length}", effectiveDisplay, StringComparison.Ordinal);
+        Assert.Contains($"len {plannedEndpoint.Length}", plannedDisplay, StringComparison.Ordinal);
+        Assert.Contains("sha256:", effectiveDisplay, StringComparison.Ordinal);
+        Assert.Contains("sha256:", plannedDisplay, StringComparison.Ordinal);
+        Assert.Equal(OverrideOrigin, effectiveOriginDisplay);
+        Assert.Equal(OverrideOrigin, plannedOriginDisplay);
         Assert.DoesNotContain("/planned", error.Message, StringComparison.Ordinal);
         Assert.DoesNotContain("/effective", error.Message, StringComparison.Ordinal);
+        Assert.DoesNotContain(new string('x', 175), error.Message, StringComparison.Ordinal);
+    }
+
+    /// <summary>
+    /// Long endpoints with identical length and divergence index past the 200-character cap are
+    /// still disambiguated by content hash so the error never shows identical strings.
+    /// </summary>
+    [Fact]
+    public void Apply_VerifyFailsClosed_LongEndpointsDifferingAtSameIndexAndLength_AreDisambiguated()
+    {
+        string sharedPrefix = "https://openrouter.ai/api/" + new string('x', 200);
+        string plannedEndpoint = sharedPrefix + "/v1";
+        string effectiveEndpoint = sharedPrefix + "/v2";
+        _store.Seed(OverrideOrigin, "override-key");
+        IArbiterConfigResolver configs = new RepositoryEndpointConfigs(ArbiterProviderConfig.DefaultNone.Endpoint);
+
+        ArbiterInstallService prepareService = Service(
+            new FakeArbiterUserSettings
+            {
+                Override = (repository, _) => repository with { Kind = ArbiterProviderKind.Systemone, Endpoint = plannedEndpoint },
+            },
+            configs: configs,
+            lifecycle: new SucceedingLifecycle());
+        ArbiterInstallPrepared prepared = prepareService.Prepare(
+            Request(pathOption: null, projectScope: false, providerOption: "systemone", dryRun: false));
+
+        Assert.Equal(0, prepared.ExitCode);
+        Assert.NotNull(prepared.Plan);
+
+        ArbiterInstallService applyService = Service(
+            new FakeArbiterUserSettings
+            {
+                Override = (repository, _) => repository with { Kind = ArbiterProviderKind.Systemone, Endpoint = effectiveEndpoint },
+            },
+            configs: configs,
+            lifecycle: new SucceedingLifecycle());
+        ArbiterInstallApplied applied = applyService.Apply(prepared.Plan, CancellationToken.None);
+
+        Assert.Equal(1, applied.ExitCode);
+        ArbiterInstallError error = Assert.Single(applied.Events.OfType<ArbiterInstallError>());
+        (string effectiveDisplay, _, string plannedDisplay, _) = ParseVerifyMismatchDisplays(error.Message);
+        Assert.NotEqual(effectiveDisplay, plannedDisplay);
+        Assert.StartsWith(sharedPrefix[..200] + "...", effectiveDisplay, StringComparison.Ordinal);
+        Assert.StartsWith(sharedPrefix[..200] + "...", plannedDisplay, StringComparison.Ordinal);
+        Assert.Contains($"differs at index {sharedPrefix.Length + 2}, len {effectiveEndpoint.Length}, sha256:", effectiveDisplay, StringComparison.Ordinal);
+        Assert.Contains($"differs at index {sharedPrefix.Length + 2}, len {plannedEndpoint.Length}, sha256:", plannedDisplay, StringComparison.Ordinal);
+        Assert.DoesNotContain("/v1", error.Message, StringComparison.Ordinal);
+        Assert.DoesNotContain("/v2", error.Message, StringComparison.Ordinal);
+    }
+
+    /// <summary>
+    /// Long origins that share the first 200 characters and diverge afterwards are also
+    /// disambiguated in the <c>Verify</c> mismatch error while keeping both origins bounded.
+    /// </summary>
+    [Fact]
+    public void Apply_VerifyFailsClosed_LongOriginsDifferingAfterTruncationLimit_AreDisambiguated()
+    {
+        string sharedHostPrefix = string.Join('.', Enumerable.Repeat(new string('a', 55), 4));
+        string plannedOrigin = "https://" + sharedHostPrefix + ".p.example.com";
+        string effectiveOrigin = "https://" + sharedHostPrefix + ".e.example.com";
+        string plannedEndpoint = plannedOrigin + "/v1";
+        string effectiveEndpoint = effectiveOrigin + "/v1";
+        _store.Seed(plannedOrigin, "key-planned");
+        _store.Seed(effectiveOrigin, "key-effective");
+        IArbiterConfigResolver configs = new RepositoryEndpointConfigs(plannedEndpoint);
+
+        ArbiterInstallService prepareService = Service(
+            configs: configs,
+            lifecycle: new SucceedingLifecycle());
+        ArbiterInstallPrepared prepared = prepareService.Prepare(
+            Request(pathOption: null, projectScope: false, providerOption: "systemone", dryRun: false));
+
+        Assert.Equal(0, prepared.ExitCode);
+        Assert.NotNull(prepared.Plan);
+
+        ArbiterInstallService applyService = Service(
+            new FakeArbiterUserSettings
+            {
+                Override = (repository, _) => repository with { Kind = ArbiterProviderKind.Systemone, Endpoint = effectiveEndpoint },
+            },
+            configs: configs,
+            lifecycle: new SucceedingLifecycle());
+        ArbiterInstallApplied applied = applyService.Apply(prepared.Plan, CancellationToken.None);
+
+        Assert.Equal(1, applied.ExitCode);
+        ArbiterInstallError error = Assert.Single(applied.Events.OfType<ArbiterInstallError>());
+        (string effectiveEndpointDisplay, string effectiveOriginDisplay, string plannedEndpointDisplay, string plannedOriginDisplay) =
+            ParseVerifyMismatchDisplays(error.Message);
+        int expectedDiffIndex = ("https://" + sharedHostPrefix + ".").Length;
+        Assert.NotEqual(effectiveEndpointDisplay, plannedEndpointDisplay);
+        Assert.NotEqual(effectiveOriginDisplay, plannedOriginDisplay);
+        Assert.StartsWith(plannedOrigin[..200] + "...", effectiveOriginDisplay, StringComparison.Ordinal);
+        Assert.StartsWith(plannedOrigin[..200] + "...", plannedOriginDisplay, StringComparison.Ordinal);
+        Assert.Contains($"differs at index {expectedDiffIndex}, len {effectiveOrigin.Length}, sha256:", effectiveOriginDisplay, StringComparison.Ordinal);
+        Assert.Contains($"differs at index {expectedDiffIndex}, len {plannedOrigin.Length}, sha256:", plannedOriginDisplay, StringComparison.Ordinal);
+        Assert.DoesNotContain(".p.example.com", error.Message, StringComparison.Ordinal);
+        Assert.DoesNotContain(".e.example.com", error.Message, StringComparison.Ordinal);
+        Assert.DoesNotContain(plannedOrigin, error.Message, StringComparison.Ordinal);
+        Assert.DoesNotContain(effectiveOrigin, error.Message, StringComparison.Ordinal);
+    }
+
+    /// <summary>
+    /// Values that differ only in line endings (and therefore collapse to the same single-line
+    /// representation) are still disambiguated in the <c>Verify</c> mismatch error.
+    /// </summary>
+    [Fact]
+    public void Apply_VerifyFailsClosed_EndpointsDifferingOnlyInLineEndings_AreDisambiguated()
+    {
+        const string spaceEndpoint = "https://openrouter.ai/api/a b";
+        const string multilineEndpoint = "https://openrouter.ai/api/a\r\nb";
+        _store.Seed(OverrideOrigin, "override-key");
+        IArbiterConfigResolver configs = new RepositoryEndpointConfigs(ArbiterProviderConfig.DefaultNone.Endpoint);
+
+        ArbiterInstallService prepareService = Service(
+            OverrideToSystemone(),
+            configs: configs,
+            lifecycle: new SucceedingLifecycle());
+        ArbiterInstallPrepared prepared = prepareService.Prepare(
+            Request(pathOption: null, projectScope: false, providerOption: "systemone", dryRun: false));
+
+        Assert.Equal(0, prepared.ExitCode);
+        Assert.NotNull(prepared.Plan);
+
+        ArbiterInstallPlan multilinePlan = prepared.Plan with
+        {
+            Endpoint = multilineEndpoint,
+        };
+        ArbiterInstallService applyService = Service(
+            new FakeArbiterUserSettings
+            {
+                Override = (repository, _) => repository with { Kind = ArbiterProviderKind.Systemone, Endpoint = spaceEndpoint },
+            },
+            configs: configs,
+            lifecycle: new SucceedingLifecycle());
+        ArbiterInstallApplied applied = applyService.Apply(multilinePlan, CancellationToken.None);
+
+        Assert.Equal(1, applied.ExitCode);
+        ArbiterInstallError error = Assert.Single(applied.Events.OfType<ArbiterInstallError>());
+        (string effectiveDisplay, string effectiveOriginDisplay, string plannedDisplay, string plannedOriginDisplay) =
+            ParseVerifyMismatchDisplays(error.Message);
+        Assert.DoesNotContain("\n", error.Message, StringComparison.Ordinal);
+        Assert.DoesNotContain("\r", error.Message, StringComparison.Ordinal);
+        Assert.NotEqual(effectiveDisplay, plannedDisplay);
+        Assert.StartsWith(spaceEndpoint, effectiveDisplay, StringComparison.Ordinal);
+        Assert.StartsWith(spaceEndpoint, plannedDisplay, StringComparison.Ordinal);
+        Assert.Contains($"differs at index {spaceEndpoint.IndexOf(' ', StringComparison.Ordinal)}, len {spaceEndpoint.Length}, sha256:", effectiveDisplay, StringComparison.Ordinal);
+        Assert.Contains($"differs at index {spaceEndpoint.IndexOf(' ', StringComparison.Ordinal)}, len {multilineEndpoint.Length}, sha256:", plannedDisplay, StringComparison.Ordinal);
+        Assert.Equal(OverrideOrigin, effectiveOriginDisplay);
+        Assert.Equal(OverrideOrigin, plannedOriginDisplay);
     }
 
     /// <summary>
@@ -849,6 +1006,38 @@ public sealed class ArbiterInstallServiceSeamsTests
         {
             Override = (repository, _) => repository with { Kind = ArbiterProviderKind.Systemone, Endpoint = OverrideEndpoint },
         };
+
+    private static (string EffectiveEndpoint, string EffectiveOrigin, string PlannedEndpoint, string PlannedOrigin) ParseVerifyMismatchDisplays(
+        string message)
+    {
+        const string effectiveEndpointPrefix = "Verification failed: the effective provider endpoint '";
+        const string originPrefix = "' (origin '";
+        const string plannedEndpointPrefix = "') does not match the planned endpoint '";
+        const string suffix = "').";
+
+        Assert.StartsWith(effectiveEndpointPrefix, message, StringComparison.Ordinal);
+        int effectiveEndpointEnd = message.IndexOf(originPrefix, effectiveEndpointPrefix.Length, StringComparison.Ordinal);
+        Assert.True(effectiveEndpointEnd >= 0, $"Unexpected Verify mismatch message format: {message}");
+
+        int effectiveOriginStart = effectiveEndpointEnd + originPrefix.Length;
+        int effectiveOriginEnd = message.IndexOf(plannedEndpointPrefix, effectiveOriginStart, StringComparison.Ordinal);
+        Assert.True(effectiveOriginEnd >= 0, $"Unexpected Verify mismatch message format: {message}");
+
+        int plannedEndpointStart = effectiveOriginEnd + plannedEndpointPrefix.Length;
+        int plannedEndpointEnd = message.IndexOf(originPrefix, plannedEndpointStart, StringComparison.Ordinal);
+        Assert.True(plannedEndpointEnd >= 0, $"Unexpected Verify mismatch message format: {message}");
+
+        int plannedOriginStart = plannedEndpointEnd + originPrefix.Length;
+        Assert.EndsWith(suffix, message, StringComparison.Ordinal);
+        int plannedOriginEnd = message.Length - suffix.Length;
+        Assert.True(plannedOriginEnd >= plannedOriginStart, $"Unexpected Verify mismatch message format: {message}");
+
+        return (
+            message[effectiveEndpointPrefix.Length..effectiveEndpointEnd],
+            message[effectiveOriginStart..effectiveOriginEnd],
+            message[plannedEndpointStart..plannedEndpointEnd],
+            message[plannedOriginStart..plannedOriginEnd]);
+    }
 
     private static ArbiterInstallRequest Request(
         string? pathOption,
