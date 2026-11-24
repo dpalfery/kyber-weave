@@ -2275,7 +2275,7 @@ public sealed class AnalyticsReadPathTests
             return inner.SessionSkillFigures(sessionKey);
         }
 
-        public IReadOnlyList<StoredKwSkillLoad> SessionKwSkillLoads(string sessionKey) => inner.SessionKwSkillLoads(sessionKey);
+        public SessionKwSkillLoadPageResult SessionKwSkillLoads(string sessionKey, int page, int limit) => inner.SessionKwSkillLoads(sessionKey, page, limit);
 
         public IReadOnlyList<CollectedRecord> SessionTimelineRecords(string sessionKey)
         {

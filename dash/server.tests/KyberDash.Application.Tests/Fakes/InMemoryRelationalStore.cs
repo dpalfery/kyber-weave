@@ -1526,7 +1526,7 @@ public class InMemoryRelationalStore :
         }
     }
 
-    /// <summary>The unsplit tool names a KW skill load is recorded under (D17); mirrors the SQLite reader's narrowing.</summary>
+    /// <summary>The unsplit tool names a KW skill load is recorded under (D17); mirrors the SQLite reader's spellings.</summary>
     private static readonly string[] KwSkillLoadToolNames =
     [
         "mcp__kw-docs__load_skill",
@@ -1537,9 +1537,11 @@ public class InMemoryRelationalStore :
     ];
 
     /// <inheritdoc />
-    public IReadOnlyList<StoredKwSkillLoad> SessionKwSkillLoads(string sessionKey)
+    public SessionKwSkillLoadPageResult SessionKwSkillLoads(string sessionKey, int page, int limit)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(sessionKey);
+        ArgumentOutOfRangeException.ThrowIfLessThan(page, 1);
+        ArgumentOutOfRangeException.ThrowIfLessThan(limit, 1);
 
         lock (syncRoot)
         {
@@ -1561,9 +1563,16 @@ public class InMemoryRelationalStore :
                 object?[]? mcpRow = FindRowByKey(state, "tool_call_mcp", [("span_id", spanId)]);
                 string? serverName = mcpRow is null ? null : GetString(mcpMeta, mcpRow, "server_name");
                 string? serverToolName = mcpRow is null ? null : GetString(mcpMeta, mcpRow, "server_tool_name");
-                bool candidate = KwSkillLoadToolNames.Contains(toolName, StringComparer.Ordinal)
-                    || string.Equals(serverToolName, "load_skill", StringComparison.Ordinal);
-                if (!candidate)
+                // The D17 load rule, as the application recognizer decides it: with an MCP split,
+                // the server name normalized (lower case, '_' to '-') is kw-docs and the split tool
+                // is load_skill; without one, the tool name is one of the unsplit spellings. The
+                // rule is quoted here because this file also compiles without the Application
+                // assembly; the SQLite parity tests prove the two stores decide alike.
+                bool load = serverName is not null || serverToolName is not null
+                    ? string.Equals(serverName?.Replace('_', '-'), "kw-docs", StringComparison.OrdinalIgnoreCase)
+                        && string.Equals(serverToolName, "load_skill", StringComparison.Ordinal)
+                    : KwSkillLoadToolNames.Contains(toolName, StringComparer.Ordinal);
+                if (!load)
                 {
                     continue;
                 }
@@ -1578,7 +1587,7 @@ public class InMemoryRelationalStore :
                 rows.Add(new StoredKwSkillLoad(spanId, toolName, serverName, serverToolName, replyHead, startedAt));
             }
 
-            return rows;
+            return new SessionKwSkillLoadPageResult(PageOf(rows, page, limit), rows.Count);
         }
     }
 

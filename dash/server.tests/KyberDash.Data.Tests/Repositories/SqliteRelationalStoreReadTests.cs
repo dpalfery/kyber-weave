@@ -727,13 +727,14 @@ public class SqliteRelationalStoreReadTests : IDisposable
     }
 
     /// <summary>
-    /// The KW skill loads read returns exactly one session's candidate tool calls, in call order,
-    /// with the MCP split, the reply's head and the record's start time; it touches only the
-    /// tool-call tables, the record header and its session link, and matches
-    /// <see cref="InMemoryRelationalStore"/> on two sessions and an unknown one.
+    /// The KW skill loads read returns exactly one session's KW skill loads, in call order, with
+    /// the MCP split, the reply's head and the record's start time; another server's
+    /// <c>load_skill</c> is not a load (D17) and is not returned. It touches only the tool-call
+    /// tables, the record header and its session link, and it matches
+    /// <see cref="InMemoryRelationalStore"/> on two sessions and an unknown one, page for page.
     /// </summary>
     [Fact]
-    public void SessionKwSkillLoadsReadsOnlyThatSessionsToolCalls()
+    public void SessionKwSkillLoadsReadsOnlyThatSessionsLoads()
     {
         string dbPath = Path.Combine(directory.Path, "kw-skill-loads", "canon.db");
         SeamSqliteRelationalStore sqlite = new(dbPath, new SqliteCircuitBreaker());
@@ -753,18 +754,25 @@ public class SqliteRelationalStoreReadTests : IDisposable
         foreach (string sessionKey in (string[])["sess-kw-a", "sess-kw-b", "sess-missing"])
         {
             sqlite.ClearRecordedSql();
-            IReadOnlyList<StoredKwSkillLoad> rows = sqlite.SessionKwSkillLoads(sessionKey);
+            SessionKwSkillLoadPageResult rows = sqlite.SessionKwSkillLoads(sessionKey, 1, 25);
             AssertScriptsTouchOnlyTables(sqlite.ExecutedSql, SessionKwSkillLoadTables);
-            Assert.Equivalent(memory.SessionKwSkillLoads(sessionKey), rows, strict: true);
+            Assert.Equivalent(memory.SessionKwSkillLoads(sessionKey, 1, 25), rows, strict: true);
         }
 
-        IReadOnlyList<StoredKwSkillLoad> sessionA = sqlite.SessionKwSkillLoads("sess-kw-a");
-        string[] expectedSpans = ["span-kw-a-1", "span-kw-a-2", "span-kw-a-4"];
-        Assert.Equal(expectedSpans, sessionA.Select(static row => row.SpanId).ToArray());
-        Assert.DoesNotContain(sessionA, static row => row.ToolName == "read_file");
-        Assert.Equal("skill: csharp-dev\n\nGuidance.", sessionA[0].ReplyHead);
-        Assert.Equal(new DateTimeOffset(2026, 11, 19, 12, 0, 0, TimeSpan.Zero), sessionA[0].StartedAtUtc);
-        Assert.Single(sqlite.SessionKwSkillLoads("sess-kw-b"));
+        SessionKwSkillLoadPageResult sessionA = sqlite.SessionKwSkillLoads("sess-kw-a", 1, 25);
+        string[] expectedSpans = ["span-kw-a-1", "span-kw-a-2"];
+        Assert.Equal(expectedSpans, sessionA.Items.Select(static row => row.SpanId).ToArray());
+        Assert.Equal(expectedSpans.Length, sessionA.Total);
+        Assert.DoesNotContain(sessionA.Items, static row => row.ToolName == "read_file");
+        Assert.Equal("skill: csharp-dev\n\nGuidance.", sessionA.Items[0].ReplyHead);
+        Assert.Equal(new DateTimeOffset(2026, 11, 19, 12, 0, 0, TimeSpan.Zero), sessionA.Items[0].StartedAtUtc);
+        Assert.Single(sqlite.SessionKwSkillLoads("sess-kw-b", 1, 25).Items);
+
+        // The second page continues the call order in both stores, so the offset answers from SQL.
+        SessionKwSkillLoadPageResult secondPage = sqlite.SessionKwSkillLoads("sess-kw-a", 2, 1);
+        Assert.Equivalent(memory.SessionKwSkillLoads("sess-kw-a", 2, 1), secondPage, strict: true);
+        Assert.Equal(["span-kw-a-2"], secondPage.Items.Select(static row => row.SpanId).ToArray());
+        Assert.Equal(expectedSpans.Length, secondPage.Total);
     }
 
     /// <summary>
@@ -784,12 +792,13 @@ public class SqliteRelationalStoreReadTests : IDisposable
             KwLoadRecord("span-kw-long-2", "sess-kw-long", 1, new CollectedToolCall("call-long-2", "load_skill", "kw-docs", "load_skill", null, KwLoadReply("skill: dal-dev"), true, null, null)),
         ]);
 
-        IReadOnlyList<StoredKwSkillLoad> rows = sqlite.SessionKwSkillLoads("sess-kw-long");
+        SessionKwSkillLoadPageResult rows = sqlite.SessionKwSkillLoads("sess-kw-long", 1, 25);
 
-        Assert.Equal(longReply[..1024], rows[0].ReplyHead);
-        Assert.Equal(1024, rows[0].ReplyHead!.Length);
-        Assert.Equal("skill: dal-dev", rows[1].ReplyHead);
-        Assert.Equivalent(memory.SessionKwSkillLoads("sess-kw-long"), rows, strict: true);
+        Assert.Equal(longReply[..1024], rows.Items[0].ReplyHead);
+        Assert.Equal(1024, rows.Items[0].ReplyHead!.Length);
+        Assert.Equal("skill: dal-dev", rows.Items[1].ReplyHead);
+        Assert.Equal(2, rows.Total);
+        Assert.Equivalent(memory.SessionKwSkillLoads("sess-kw-long", 1, 25), rows, strict: true);
     }
 
     private static readonly string[] SessionKwSkillLoadTables =

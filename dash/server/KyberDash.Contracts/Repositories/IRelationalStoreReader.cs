@@ -564,6 +564,11 @@ public record SessionReconciliationFigurePageResult(IReadOnlyList<ReadTimeTurnRe
 /// <param name="Total">Number of stored ingest problems attached to the session, before paging.</param>
 public record SessionProblemPageResult(IReadOnlyList<Problem> Items, int Total);
 
+/// <summary>One page of a session's KW skill loads (D17), in call order.</summary>
+/// <param name="Items">The page's load rows, in call order.</param>
+/// <param name="Total">Number of KW skill loads the session holds, before paging.</param>
+public record SessionKwSkillLoadPageResult(IReadOnlyList<StoredKwSkillLoad> Items, int Total);
+
 /// <summary>
 /// One session's tool and server section figures with the aggregates the tools section carries
 /// page-independently (<c>DD-13</c>).
@@ -1003,20 +1008,24 @@ public interface IRelationalStoreReader
     IReadOnlyList<StoredSkillInvocation> SessionSkillFigures(string sessionKey);
 
     /// <summary>
-    /// Reads the session's candidate KW skill load tool calls (D17), in call order.
+    /// Reads one page of the session's KW skill loads (D17), in call order, with the total.
     /// </summary>
     /// <param name="sessionKey">Canonical session key.</param>
+    /// <param name="page">One-based page number.</param>
+    /// <param name="limit">Rows on the page.</param>
     /// <returns>
-    /// Every tool call of the session whose MCP server tool is <c>load_skill</c> or whose tool
-    /// name is one of the unsplit D17 spellings, with the owning record's start time. Empty when
-    /// the session has none.
+    /// The page's load rows — every tool call of the session whose MCP server, normalized (lower
+    /// case, <c>_</c> to <c>-</c>), is <c>kw-docs</c> and whose MCP tool is <c>load_skill</c>, or
+    /// whose tool name is one of the unsplit D17 spellings — with the owning record's start time,
+    /// and the load count before paging. An empty page with a zero total when the session has none.
     /// </returns>
     /// <remarks>
-    /// The statement scopes to the session's spans and filters the D17 names in SQL, so a session
-    /// with no loads reads no input text beyond its candidates. The recognizer in the application
-    /// layer decides the final load and skill; this read stays a plain row shape.
+    /// The statement scopes to the session's spans, carries the D17 load rule in SQL, and pages
+    /// with <c>LIMIT</c>/<c>OFFSET</c>, so one page never reads the reply head of a load outside
+    /// it. The recognizer in the application layer stays the final authority on the load and its
+    /// skill; this read stays a plain row shape.
     /// </remarks>
-    IReadOnlyList<StoredKwSkillLoad> SessionKwSkillLoads(string sessionKey);
+    SessionKwSkillLoadPageResult SessionKwSkillLoads(string sessionKey, int page, int limit);
 
     /// <summary>
     /// Reads the prompt previews of exactly the named request spans, and no other span's parts.

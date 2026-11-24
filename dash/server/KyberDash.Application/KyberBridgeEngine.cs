@@ -890,24 +890,27 @@ public class KyberBridgeEngine
         }
 
         string? agent = headers[0].AgentName;
-        (IReadOnlyList<StoredKwSkillLoad> calls, string? projectionStatus) = TrySessionKwSkillLoads(sessionId);
-        List<Dictionary<string, object?>> allRows = [];
-        foreach (KwSkillLoad load in KwSkillLoads.Recognize(calls))
+        (SessionKwSkillLoadPageResult? pageResult, string? projectionStatus) = TrySessionKwSkillLoads(sessionId, page, limit);
+        List<Dictionary<string, object?>> rows = [];
+        if (pageResult is not null)
         {
-            allRows.Add(new Dictionary<string, object?>(StringComparer.Ordinal)
+            foreach (KwSkillLoad load in KwSkillLoads.Recognize(pageResult.Items))
             {
-                ["skill"] = load.Skill,
-                ["agent"] = agent,
-                ["session_id"] = sessionId,
-                ["span_id"] = load.SpanId,
-                ["loaded_at"] = load.StartedAtUtc.UtcDateTime.ToString(TimestampFormat, CultureInfo.InvariantCulture),
-            });
+                rows.Add(new Dictionary<string, object?>(StringComparer.Ordinal)
+                {
+                    ["skill"] = load.Skill,
+                    ["agent"] = agent,
+                    ["session_id"] = sessionId,
+                    ["span_id"] = load.SpanId,
+                    ["loaded_at"] = load.StartedAtUtc.UtcDateTime.ToString(TimestampFormat, CultureInfo.InvariantCulture),
+                });
+            }
         }
 
         Dictionary<string, object?> payload = new(StringComparer.Ordinal)
         {
-            ["rows"] = PageOf(allRows, page, limit),
-            ["total"] = allRows.Count,
+            ["rows"] = rows,
+            ["total"] = pageResult?.Total ?? 0,
             ["limit"] = limit,
             ["offset"] = PageOffset(page, limit),
             ["page"] = page,
@@ -2754,19 +2757,21 @@ public class KyberBridgeEngine
         }
     }
 
-    /// <summary>Reads a session's KW skill load candidates, isolating any fault to that session.</summary>
+    /// <summary>Reads one page of a session's KW skill loads, isolating any fault to that session.</summary>
     /// <param name="sessionKey">Canonical session key.</param>
-    /// <returns>The candidate rows when readable, empty with the isolation marker when the read failed.</returns>
-    private (IReadOnlyList<StoredKwSkillLoad> Rows, string? ProjectionStatus) TrySessionKwSkillLoads(string sessionKey)
+    /// <param name="page">One-based page number.</param>
+    /// <param name="limit">Rows on the page.</param>
+    /// <returns>The load page when readable, and the isolation marker when the read failed.</returns>
+    private (SessionKwSkillLoadPageResult? Page, string? ProjectionStatus) TrySessionKwSkillLoads(string sessionKey, int page, int limit)
     {
         try
         {
-            return (reader.SessionKwSkillLoads(sessionKey), null);
+            return (reader.SessionKwSkillLoads(sessionKey, page, limit), null);
         }
         catch (Exception ex) when (IsSessionReadFault(ex))
         {
             RecordProjectionFailure(sessionKey, ex.Message);
-            return ([], ProjectionFailedStatus);
+            return (null, ProjectionFailedStatus);
         }
     }
 
