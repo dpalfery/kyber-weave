@@ -53,7 +53,7 @@ jobs:
       # The catalogue run below uses the current pin; the Go 1.25 run after it repeats the whole class
       # to prove the Go format gate fails on an older gofmt too (`gofmt -d` exits 0 there).
       - name: Setup Go 1.27
-        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        uses: actions/setup-go@d8cbb8045d7f43706b9177cceb36c1f91a6644d5 # v7.1.0
         with:
           go-version: "1.27"
 
@@ -83,7 +83,7 @@ jobs:
           --filter-class KyberWeave.Integration.Tests.GateCatalogueToolchainTests
 
       - name: Setup Go 1.25
-        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        uses: actions/setup-go@d8cbb8045d7f43706b9177cceb36c1f91a6644d5 # v7.1.0
         with:
           go-version: "1.25"
 
