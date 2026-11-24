@@ -152,7 +152,7 @@ docs-dev harvests the two Design harvest rows into `docs/kyber-arbiter/architect
 
 | ID | Destination |
 |---|---|
-| D1, D2, D3, D4, D6, D7, D9 | [Kyber Arbiter architecture](../../kyber-arbiter/architecture.md) (Claude hand-back hook section) |
-| D5 | [Kyber Arbiter architecture](../../kyber-arbiter/architecture.md) (Recovered returns section) |
+| D1, D2, D3, D4, D6, D7, D9 | [Claude hand-back](../../kyber-arbiter/architecture.md#claude-hand-back) |
+| D5 | [Recovered returns](../../kyber-arbiter/architecture.md#recovered-returns) |
 | D8, AP1 | Documentation waiver — plan-shape and approval records with no behavior a reader must consult |
 | KyberArbiter | [Kyber Arbiter architecture](../../kyber-arbiter/architecture.md) |

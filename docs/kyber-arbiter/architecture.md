@@ -1556,6 +1556,8 @@ project trust so that `.pi/extensions/` loads. Cursor's hooks carry no trust gat
 today. See the [runbook](runbook.md) and
 [Squad onboarding](../kyber-squad/onboarding.md).
 
+### Claude hand-back
+
 Claude observes background dispatches through a hand-back hook. Every agent a governed
 dispatcher can target gets a frontmatter `PreToolUse` hook on `^SubagentHandback$`: it
 records the return under the payload's `agent_id`, joined to the dispatch through the
@@ -1565,8 +1567,9 @@ uses (on `status: async_launched`), because every hook event runs in a fresh pro
 can be kept in memory between them. The hand-back looks that record up by session and agent id: a
 record pairs the return with its own dispatch's pre event, evaluated like a foreground return of
 that dispatch; no record records the return unpaired, still allowed, with a log line naming the
-session id and agent id looked up. A later foreground `completed` post for an agent whose saved
-record already holds a return is not recorded a second time. A non-allow outcome never denies the hand-back — it returns
+session id and agent id looked up. A foreground `completed` post for an agent with a saved launch
+is recorded against that launch when no return is stored yet. Once the record holds a return, a
+later `completed` post is not a second row. A non-allow outcome never denies the hand-back — it returns
 `allow` with `updatedInput`, the complete input with the envelope or note appended to
 `message`, so the dispatcher receives the outcome inside the hand-back. Foreground calls
 keep the `PostToolUse` path, and a return observed by neither is reported by `audit` as an
