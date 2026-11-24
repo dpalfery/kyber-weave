@@ -1,3 +1,5 @@
+import { buildTurnContentView, type TurnContentSourcePart } from './turnContentBlocks.js'
+
 export type KyberTimelineNode = import('@/components/analysis/TimelineView').TimelineNode
 export type KyberComparisonTable = {
   harnesses: string[]
@@ -668,6 +670,7 @@ export interface KyberTurnContentPart {
   id?: string
   spanId?: string
   part: string
+  /** Human label the web parser derives from the part key; the engine never sends it. */
   label: string
   text: string
   tokens?: number
@@ -676,14 +679,15 @@ export interface KyberTurnContentPart {
   totalLength?: number
   order?: number
   /**
-   * False when a `tool_definitions` part is an MCP catalogue entry the session
-   * offered without keeping it resident in the model's context. Absent or true
+   * False on a `tool_definitions` part is an MCP catalogue entry the session
+   * offered without keeping resident in the model's context. Absent or true
    * means the definition was resident.
    */
   resident?: boolean
   /**
    * Exact-match recurrence against earlier captured turns of this session
    * (same part kind, whole source text). Capture-only — never a cache claim.
+   * The restored C# route does not annotate it; consumers render without it.
    */
   recurrence?: { seenBefore: boolean }
 }
@@ -700,7 +704,8 @@ export interface KyberTurnContentBlock {
   /**
    * Block aggregate: `newThisTurn` when any member part is new,
    * `seenBefore` when any member part exactly matches an earlier same-kind
-   * part. Both may hold at once for mixed blocks.
+   * part. Both may hold at once for mixed blocks. The restored C# route
+   * carries no recurrence; consumers render without it.
    */
   recurrence?: { newThisTurn: boolean; seenBefore: boolean }
 }
@@ -708,28 +713,47 @@ export interface KyberTurnContentBlock {
 export interface KyberTurnContentResult {
   sessionId: string
   turnIndex: number
+  /** The turn's own span, served at the top level by the restored C# route. */
   spanId?: string
-  /** The turn record's parent span, when the record named one (B7). */
+  /**
+   * Legacy field of the retired TypeScript server. The restored C# route does not
+   * serve it; the raw-packet disclosure renders without it.
+   */
   parentSpanId?: string
+  /** The turn's model, omitted by the engine when the turn recorded none. */
   model?: string
+  /**
+   * The canonical blocks, built by the web parser from the served parts — never
+   * trusted off the wire.
+   */
   blocks: KyberTurnContentBlock[]
+  /** The labelled parts, built by the web parser from the served parts. */
   parts: KyberTurnContentPart[]
+  /** Whole-turn plain text with a heading per non-blank block, built web-side. */
   assembledText: string
+  /**
+   * True only when the budgeted parts read left at least one scoped part behind —
+   * the engine decides it with a content-free count read, and `?full=true` is never
+   * truncated. Absent means not truncated.
+   */
   truncated?: boolean
+  /** Not served by the restored route; the views render without it. */
   totalLength?: number
   measurability?: string | Record<string, unknown>
   notMeasurable?: { reason: string }
   /**
-   * Where this turn's raw packets can be fetched (B7): the request span's
-   * attributes always; the quarantined parent's packet only when that row
-   * kept a payload.
+   * Where this turn's raw packets can be fetched: the turn span's attributes,
+   * always, at `/api/kyber/span/{spanId}/attributes`. The restored C# route links
+   * no `interactionPath` — the quarantined-parent packet pointer of the retired
+   * TypeScript server is not served.
    */
   rawPacket?: { spanAttributesPath: string; interactionPath?: string }
   /**
    * Session-level shared context: every captured `system_prompt` part in
    * session scope, in capture order, with section-level earlier-turn
-   * recurrence. Null when none was captured. The view hides exact
-   * duplicates of the turn's own parts.
+   * recurrence. Null when none was captured. Not restored: the C# route serves
+   * the turn's own parts only, so this stays absent and the drawer renders
+   * without the section.
    */
   sharedContext?: {
     parts: Array<{
@@ -743,7 +767,11 @@ export interface KyberTurnContentResult {
     }>
     seenBefore: boolean
   } | null
-  /** The skills this turn listed and invoked; absent on a turn that predates the skills projection. */
+  /**
+   * The skills this turn listed and invoked. Not restored: the C# route serves
+   * the turn's own parts only, so the entry stays absent and consumers render
+   * without it.
+   */
   skills?: KyberTurnSkillsEntry
   /**
    * The sections' failure marker: present with no content fields when this turn's
@@ -756,8 +784,13 @@ export interface KyberTurnContentResult {
 /**
  * Parses the content route's body. A faulted projection read answers the sections'
  * failure shape (identity plus the marker, no content fields); the parser keeps the
- * marker and fills the required transport fields with nothing, so consumers gate on
+ * marker and fills the built transport fields with nothing, so consumers gate on
  * the marker rather than reading the fault as an empty turn.
+ *
+ * The restored C# route serves the byte-budgeted parts alone — no blocks, no
+ * assembledText — so the normal path validates the parts and builds the view from
+ * them. A body that still carries a blocks array is parsed the same way: one
+ * contract, built from parts.
  */
 function parseTurnContentResult(raw: unknown, path: string): KyberTurnContentResult {
   if (!isRaw(raw)) throw malformedSection(path, 'body is not an object')
@@ -771,12 +804,34 @@ function parseTurnContentResult(raw: unknown, path: string): KyberTurnContentRes
       assembledText: '',
     }
   }
-  requireStringField(raw, 'sessionId', path)
-  requireNumberField(raw, 'turnIndex', path)
-  if (!Array.isArray(raw.blocks)) throw malformedSection(path, 'blocks is not an array')
+  const sessionId = requireStringField(raw, 'sessionId', path)
+  const turnIndex = requireNumberField(raw, 'turnIndex', path)
   if (!Array.isArray(raw.parts)) throw malformedSection(path, 'parts is not an array')
-  requireStringField(raw, 'assembledText', path)
-  return raw as unknown as KyberTurnContentResult
+  const sourceParts: TurnContentSourcePart[] = raw.parts.map((entry: unknown) => {
+    if (!isRaw(entry)) throw malformedSection(path, 'parts entry is not an object')
+    return {
+      part: requireStringField(entry, 'part', path),
+      text: requireStringField(entry, 'text', path),
+      spanId: typeof entry.spanId === 'string' ? entry.spanId : undefined,
+      tokens: typeof entry.tokens === 'number' && Number.isFinite(entry.tokens) ? entry.tokens : undefined,
+      server: typeof entry.server === 'string' ? entry.server : undefined,
+      resident: entry.resident === false ? false : undefined,
+      truncated: entry.truncated === true ? true : undefined,
+    }
+  })
+  const { parts, blocks, assembledText } = buildTurnContentView(sourceParts)
+  const result: KyberTurnContentResult = { sessionId, turnIndex, parts, blocks, assembledText }
+  if (typeof raw.spanId === 'string') result.spanId = raw.spanId
+  if (typeof raw.model === 'string') result.model = raw.model
+  if (isRaw(raw.rawPacket)) {
+    const packet: NonNullable<KyberTurnContentResult['rawPacket']> = {
+      spanAttributesPath: requireStringField(raw.rawPacket, 'spanAttributesPath', path),
+    }
+    if (typeof raw.rawPacket.interactionPath === 'string') packet.interactionPath = raw.rawPacket.interactionPath
+    result.rawPacket = packet
+  }
+  if (raw.truncated === true) result.truncated = true
+  return result
 }
 
 /** The sections' fault marker, matched exactly by both turn-route parsers. */
