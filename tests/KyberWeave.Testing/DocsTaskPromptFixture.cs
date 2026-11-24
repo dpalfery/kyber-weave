@@ -103,7 +103,7 @@ internal static class DocsTaskPromptFixture
     internal static DocsTools Tools(DocFixture fixture) =>
         DocsToolsComposition.Create(Host(fixture, Config(fixture)), services: Services(fixture));
 
-    internal static TaskPromptService Service(DocFixture fixture)
+    internal static TaskPromptService Service(DocFixture fixture, IKwSkillCatalog? skills = null)
     {
         IServiceProvider provider = Services(fixture);
         KyberWeaveConfig config = Config(fixture);
@@ -112,7 +112,8 @@ internal static class DocsTaskPromptFixture
             provider.GetRequiredService<IPacketHostFacts>(),
             provider.GetRequiredService<IWritableFileSystem>(),
             Host(fixture, config).Current().StandardsFor,
-            provider.GetRequiredService<IProcessEnvironment>());
+            provider.GetRequiredService<IProcessEnvironment>(),
+            skills ?? FixedKwSkillCatalog.Empty);
     }
 
     /// <summary>What <c>docs packet</c> prints for <paramref name="task"/>.</summary>
@@ -128,4 +129,24 @@ internal static class DocsTaskPromptFixture
         _ = DocsTestCommands.Packet(Services(fixture), console).Execute(null!, settings, CancellationToken.None);
         return console.Output;
     }
+}
+
+/// <summary>
+/// An in-memory KW skill catalog whose lists a test states directly, so a prompt test states which skills a
+/// technology and a role agent get without a checkout's skill pool.
+/// </summary>
+/// <param name="skillsFor">Answers the list for a technology and a role agent, as the real catalog does.</param>
+internal sealed class FixedKwSkillCatalog(Func<string?, string?, KwSkillList> skillsFor) : IKwSkillCatalog
+{
+    /// <summary>A catalog that lists no skill for any technology or role.</summary>
+    internal static FixedKwSkillCatalog Empty { get; } = new((_, _) => new KwSkillList([], []));
+
+    /// <inheritdoc />
+    public KwSkillList SkillsFor(string? technology, string? roleAgent) => skillsFor(technology, roleAgent);
+
+    /// <inheritdoc />
+    public KwSkillLoadResult Load(string name) => KwSkillLoadResult.Unknown(name, Names());
+
+    /// <inheritdoc />
+    public IReadOnlyList<string> Names() => [];
 }

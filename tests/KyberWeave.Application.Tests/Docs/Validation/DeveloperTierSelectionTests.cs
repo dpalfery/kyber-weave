@@ -150,7 +150,8 @@ public sealed class DeveloperTierSelectionTests
             provider.GetRequiredService<IPacketHostFacts>(),
             provider.GetRequiredService<IWritableFileSystem>(),
             _ => null,
-            provider.GetRequiredService<IProcessEnvironment>());
+            provider.GetRequiredService<IProcessEnvironment>(),
+            FixedKwSkillCatalog.Empty);
     }
 
     /// <summary>

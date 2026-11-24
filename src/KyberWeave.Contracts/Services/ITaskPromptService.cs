@@ -23,6 +23,10 @@ namespace KyberWeave.Contracts.Services;
 /// The retry's failure report, which the dispatch hook appends after the prompt. It is not part of the prompt, but
 /// the budget leaves room for it so the delivered text does not overshoot.
 /// </param>
+/// <param name="RoleAgent">
+/// The role agent whose role skills the prompt lists, or null to use <paramref name="Agent"/>. It is the only input a
+/// role-only dispatch carries, and it selects no task and no agent.
+/// </param>
 public sealed record TaskPromptRequest(
     string RepoRoot,
     string? TaskId = null,
@@ -32,7 +36,8 @@ public sealed record TaskPromptRequest(
     string? Technology = null,
     int FailedAttempts = 0,
     string? Harness = null,
-    string? RetryText = null);
+    string? RetryText = null,
+    string? RoleAgent = null);
 
 /// <summary>Why a task prompt was not built, which decides whether the dispatch may continue.</summary>
 public enum TaskPromptRefusalKind

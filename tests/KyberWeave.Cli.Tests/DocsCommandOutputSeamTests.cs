@@ -63,7 +63,8 @@ public sealed class DocsCommandOutputSeamTests
             new ArbiterRepoRoot(
                 provider.GetRequiredService<IFileSystem>(),
                 provider.GetRequiredService<IPathResolver>(),
-                provider.GetRequiredService<IProcessEnvironment>())).Execute(null!, settings, CancellationToken.None);
+                provider.GetRequiredService<IProcessEnvironment>()),
+            provider.GetRequiredService<IKwSkillCatalogFactory>()).Execute(null!, settings, CancellationToken.None);
 
         Assert.Equal(1, exit);
         Assert.Contains(Root, _configs.LoadedRoots, StringComparer.Ordinal);

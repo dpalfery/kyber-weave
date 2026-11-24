@@ -65,7 +65,8 @@ public sealed class ArbiterCommandAllowListPromptTests
             provider.GetRequiredService<IPacketHostFacts>(),
             provider.GetRequiredService<IWritableFileSystem>(),
             index.StandardsFor,
-            provider.GetRequiredService<IProcessEnvironment>());
+            provider.GetRequiredService<IProcessEnvironment>(),
+            FixedKwSkillCatalog.Empty);
 
         TaskPromptResult result = service.Build(new TaskPromptRequest(fixture.Root, TaskId: null, Technology: technology), config);
 

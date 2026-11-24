@@ -140,12 +140,14 @@ internal static class DocsToolsComposition
     {
         ArgumentNullException.ThrowIfNull(provider);
         ArgumentNullException.ThrowIfNull(host);
+        KyberWeaveConfig config = provider.GetRequiredService<IKyberWeaveConfigRepository>().Load(host.RepositoryRoot);
         return new TaskPromptService(
             provider.GetRequiredService<IPlanTaskService>(),
             provider.GetRequiredService<IPacketHostFacts>(),
             provider.GetRequiredService<IWritableFileSystem>(),
             technology => host.Current().StandardsFor(technology),
-            provider.GetRequiredService<IProcessEnvironment>());
+            provider.GetRequiredService<IProcessEnvironment>(),
+            provider.GetRequiredService<IKwSkillCatalogFactory>().ForRepository(host.RepositoryRoot, config));
     }
 
     /// <summary>The analysis reader over <paramref name="repositoryRoot"/>, built from the ports of <paramref name="provider"/>.</summary>

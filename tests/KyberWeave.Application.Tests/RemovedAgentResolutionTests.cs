@@ -227,7 +227,8 @@ public sealed class RemovedAgentResolutionTests
             provider.GetRequiredService<IPacketHostFacts>(),
             provider.GetRequiredService<IWritableFileSystem>(),
             _ => null,
-            provider.GetRequiredService<IProcessEnvironment>());
+            provider.GetRequiredService<IProcessEnvironment>(),
+            FixedKwSkillCatalog.Empty);
     }
 
     /// <summary>The prompt the service builds for the plan's one task, under the roster of <paramref name="config"/>.</summary>

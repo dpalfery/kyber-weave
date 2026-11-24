@@ -91,7 +91,8 @@ public static class ServiceCollectionExtensions
             sp.GetRequiredService<ICodeGraphPortsFactory>(),
             sp.GetRequiredService<IDocumentSourceFactory>(),
             sp.GetRequiredService<IPathResolver>(),
-            sp.GetRequiredService<IProcessEnvironment>()));
+            sp.GetRequiredService<IProcessEnvironment>(),
+            sp.GetRequiredService<IKwSkillCatalogFactory>()));
         services.TryAddSingleton<IKwSkillCatalogFactory>(sp => new KwSkillCatalogFactory(
             sp.GetRequiredService<IWritableFileSystem>(),
             sp.GetRequiredService<IPathResolver>(),

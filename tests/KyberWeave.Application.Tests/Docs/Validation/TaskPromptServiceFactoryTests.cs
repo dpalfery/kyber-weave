@@ -23,7 +23,8 @@ public sealed class TaskPromptServiceFactoryTests
             null!,
             documents,
             new FakePathResolver(new InMemoryFileSystem()),
-            new FakeProcessEnvironment(currentDirectory: workingDirectory));
+            new FakeProcessEnvironment(currentDirectory: workingDirectory),
+            null!);
 
         _ = Assert.Throws<InvalidOperationException>(() => factory.ForRepository("repo", KyberWeaveConfigDefaults.Product));
 
