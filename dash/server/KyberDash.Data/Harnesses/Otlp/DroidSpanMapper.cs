@@ -1,4 +1,3 @@
-using System.Text.RegularExpressions;
 using KyberDash.Data.Collector;
 using KyberDash.Domain;
 
@@ -35,9 +34,6 @@ public partial class DroidSpanMapper : OtlpSpanMapperBase
 
     /// <summary>Droid tool error type attribute keys.</summary>
     public static readonly IReadOnlyList<string> DroidToolErrorTypeKeys = ["factory.tool.error_type"];
-
-    [GeneratedRegex(@"^invoke_agent(?:[ :]|$)", RegexOptions.CultureInvariant, matchTimeoutMilliseconds: 1000)]
-    private static partial Regex InvokeAgentNameRegex();
 
     /// <inheritdoc />
     protected override string CanonicalHarnessId => DroidHarnessId;
@@ -107,24 +103,7 @@ public partial class DroidSpanMapper : OtlpSpanMapperBase
             return RecordOp.LlmInvoke;
         }
 
-        if (OtlpSpanNative.HasAnyKey(native.Attributes, ["gen_ai.tool.name"]))
-        {
-            return RecordOp.ToolInvoke;
-        }
-
-        if (string.Equals(native.OperationName, "invoke_agent", StringComparison.Ordinal)
-            || InvokeAgentNameRegex().IsMatch(native.Name))
-        {
-            return RecordOp.AgentInvoke;
-        }
-
-        if (OtlpSpanNative.HasAnyKey(native.Attributes, OtlpSpanNative.InputTokenKeys)
-            || OtlpSpanNative.HasAnyKey(native.Attributes, OtlpSpanNative.OutputTokenKeys))
-        {
-            return RecordOp.LlmInvoke;
-        }
-
-        return RecordOp.Unspecified;
+        return OtlpSpanMapperCore.ResolveGenericOp(native);
     }
 
     private static bool TryBuildTokenUsage(OtlpSpanNative native, RecordOp op, out TokenUsage? usage)

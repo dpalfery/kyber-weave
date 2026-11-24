@@ -611,15 +611,15 @@ public class DroidSessionMapper : IHarnessMapper
 
         List<CollectedContentPart> parts = [];
         int position = 0;
-        parts.Add(BuildContentPart(position++, ContentBucket.UserMessage, call.UserMessage, "user"));
+        parts.Add(ToolContentMeasurer.BuildContentPart(position++, ContentBucket.UserMessage, call.UserMessage, "user"));
         foreach (string thinking in call.ThinkingTexts)
         {
-            parts.Add(BuildContentPart(position++, ContentBucket.Reasoning, thinking, "assistant"));
+            parts.Add(ToolContentMeasurer.BuildContentPart(position++, ContentBucket.Reasoning, thinking, "assistant"));
         }
 
         foreach (string text in call.Texts)
         {
-            parts.Add(BuildContentPart(position++, ContentBucket.ConversationHistory, text, "assistant"));
+            parts.Add(ToolContentMeasurer.BuildContentPart(position++, ContentBucket.ConversationHistory, text, "assistant"));
         }
 
         List<string> skillsInvoked = [];
@@ -738,7 +738,7 @@ public class DroidSessionMapper : IHarnessMapper
         List<CollectedContentPart> parts = [];
         if (resultText is not null)
         {
-            parts.Add(BuildContentPart(0, ContentBucket.ToolResultContent, resultText, "user"));
+            parts.Add(ToolContentMeasurer.BuildContentPart(0, ContentBucket.ToolResultContent, resultText, "user"));
         }
 
         return new CollectedRecord(
@@ -1043,27 +1043,6 @@ public class DroidSessionMapper : IHarnessMapper
         }
 
         return (server, method);
-    }
-
-    private static CollectedContentPart BuildContentPart(
-        int position,
-        ContentBucket bucket,
-        string rawText,
-        string role)
-    {
-        ToolContentMeasurement measurement = ToolContentMeasurer.Measure(rawText, CanonSynth.MaxToolResultBytes);
-        return new CollectedContentPart(
-            Position: position,
-            Bucket: bucket,
-            PlainText: measurement.IsDocument ? null : measurement.PlainText,
-            Withheld: measurement.IsDocument ? measurement.ToWithheldText() : null,
-            ReportedTokens: null,
-            Server: null,
-            Role: role,
-            Resident: null,
-            OriginalUtf8BytesWhenTruncated: measurement.IsDocument
-                ? null
-                : measurement.OriginalUtf8BytesWhenTruncated);
     }
 
     private static List<CollectedProblem> BuildProblems(

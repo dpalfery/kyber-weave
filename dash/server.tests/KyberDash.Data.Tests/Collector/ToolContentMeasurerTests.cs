@@ -304,6 +304,45 @@ public class ToolContentMeasurerTests
         Assert.Throws<ArgumentOutOfRangeException>(() => DefinedFieldList.Get(invalid));
     }
 
+    [Fact]
+    public void BuildContentPart_PlainTextWithinCap_CarriesPositionBucketAndRole()
+    {
+        CollectedContentPart part = ToolContentMeasurer.BuildContentPart(3, ContentBucket.ToolResultContent, "plain result", "assistant");
+
+        Assert.Equal(3, part.Position);
+        Assert.Equal(ContentBucket.ToolResultContent, part.Bucket);
+        Assert.Equal("plain result", part.PlainText);
+        Assert.Null(part.Withheld);
+        Assert.Null(part.ReportedTokens);
+        Assert.Null(part.Server);
+        Assert.Equal("assistant", part.Role);
+        Assert.Null(part.Resident);
+        Assert.Null(part.OriginalUtf8BytesWhenTruncated);
+    }
+
+    [Fact]
+    public void BuildContentPart_Document_WithholdsTextAndOmitsOriginalBytes()
+    {
+        CollectedContentPart part = ToolContentMeasurer.BuildContentPart(0, ContentBucket.ToolResultContent, "{\"a\":1}", "user");
+
+        Assert.Null(part.PlainText);
+        Assert.NotNull(part.Withheld);
+        Assert.Equal(Encoding.UTF8.GetByteCount("{\"a\":1}"), part.Withheld!.Utf8Bytes);
+        Assert.Null(part.OriginalUtf8BytesWhenTruncated);
+    }
+
+    [Fact]
+    public void BuildContentPart_PlainTextOverCap_TruncatesAndReportsOriginalUtf8Bytes()
+    {
+        string raw = new string('x', CanonSynth.MaxToolResultBytes + 10);
+
+        CollectedContentPart part = ToolContentMeasurer.BuildContentPart(0, ContentBucket.ToolResultContent, raw, "user");
+
+        Assert.True(part.PlainText!.Length < raw.Length);
+        Assert.Null(part.Withheld);
+        Assert.Equal(Encoding.UTF8.GetByteCount(raw), part.OriginalUtf8BytesWhenTruncated);
+    }
+
     private static void AssertColumns(DefinedFieldId id, params (string TableName, string ColumnName)[] expected)
     {
         DefinedFieldEntry entry = DefinedFieldList.Get(id);
