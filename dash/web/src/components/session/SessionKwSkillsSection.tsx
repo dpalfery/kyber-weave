@@ -66,7 +66,7 @@ export function SessionKwSkillsSection({ sessionId, className }: SessionKwSkills
                   const position = data.offset + i + 1
                   return (
                     <tr
-                      key={`${row.span_id}-${position}`}
+                      key={row.span_id}
                       data-testid={`kw-skill-row-${position}`}
                       className="border-t border-border"
                     >
