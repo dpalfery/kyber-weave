@@ -1391,8 +1391,12 @@ in order:
    with `builds-on`.
 6. `## <technology> rules`, then `## KW skills`: the same list the task prompt's `<kw-skills>` part
    carries (the opening instruction line, then `- <name>: <description>` per skill, the parent's
-   first), omitted when none is assigned. It comes from one shared renderer, so the answer and the
-   prompt cannot disagree. Read a listed skill with [`load_skill`](#load_skillname-projectpath--null).
+   first), omitted when none is assigned and the lists have no problems. A problem reading the
+   lists — an unreadable or malformed list, or a listed name that is no skill — is named under
+   `Problems in the skills lists:` (rule `KW-DOC-SKILL-001`, capped with the remainder counted),
+   and the section appears for that reason alone when no skill survived the lists. The section
+   comes from one shared renderer, so the answer and the prompt cannot disagree. Read a listed
+   skill with [`load_skill`](#load_skillname-projectpath--null).
 7. `## <technology> standard`: a `###` heading with the standard's title, then the identity
    block — `path:`, `id:`, `doc-type:`, `status:`, `component:` — and a `technology:` line
    echoing the corpus value verbatim, not the caller's spelling. The declared value is what a
@@ -1480,7 +1484,8 @@ folder: <absolute path>
 references:
 - <absolute path of each file in the folder other than SKILL.md>   (or "(none)")
 
-<the body of SKILL.md below its frontmatter>
+<the body of SKILL.md below its frontmatter, capped at the section cap with the truncation
+ named, or "(this SKILL.md carries no text below its frontmatter)" when there is none>
 ```
 
 References are every other file in the folder, recursive, links not followed, in ordinal order; their
@@ -1494,8 +1499,13 @@ over a shipped skill.
   nothing. If the write fails (a read-only home) the reply still carries the body, with `folder: (not
   materialized: <reason>)` and no references. This is why the tool is not read-only.
 - **An unknown name is not a failure.** The reply is `No KW skill is named '<name>'. Skills that exist: <names>.`
-- **A malformed skill is not a failure.** The reply is `The KW skill '<name>' in <folder> cannot be loaded: its
-  SKILL.md has no <name/description>.`
+  The names are capped at the first 20 with the remainder counted as `(+N more)`, so a large pool cannot blow the
+  reply; a checkout with no skills at all answers
+  `No KW skill is named '<name>', and this checkout has no KW skills.`
+- **A malformed skill is not a failure.** When its frontmatter could not be parsed or its file could not be read,
+  the reply names the reason: `The KW skill '<name>' in <folder> cannot be loaded: <reason>.` When the frontmatter
+  parsed but lacks a required field, it names the fields:
+  `The KW skill '<name>' in <folder> cannot be loaded: its SKILL.md has no <name/description>.`
 - **KyberDash recognizes the load** from the `skill: <name>` header on the reply's first lines, so keep that header
   as written; see [the KyberDash architecture](../dash/architecture.md#kw-skill-loads).
 
