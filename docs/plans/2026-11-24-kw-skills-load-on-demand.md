@@ -188,7 +188,7 @@ Every row is run by its own task's owner: tests written first, `task-gate --red`
 - **Session:** `kw-skill-content`
 - **Depends on:** none
 - **Files:**
-  - New `products/kyber-squad/standards/skills/<name>/SKILL.md` for `dotnet-build-diagnostics`, `aws-cli-queries`, `azure-resource-inspection`, `go-gates`, `maui-environment-doctor`, `pylance-tooling`, `rust-cross-build`, `sql-server-reference`, `tauri-v2-reference`; sources per D19 (for example `csharp/csharp.skills.md` Commands plus `github-actions/github-actions.skills.md` "Diagnosing a failed .NET build in CI" and its table go into `dotnet-build-diagnostics`).
+  - New `products/kyber-squad/standards/skills/<name>/SKILL.md` for `dotnet-build-diagnostics`, `aws-cli-queries`, `azure-resource-inspection`, `go-gates`, `maui-environment-doctor`, `pylance-tooling`, `rust-cross-build`, `sql-server-reference`, `tauri-v2-reference`; sources per D19 (for example `products/kyber-squad/standards/csharp/csharp.skills.md` Commands plus `products/kyber-squad/standards/github-actions/github-actions.skills.md` "Diagnosing a failed .NET build in CI" and its table go into `dotnet-build-diagnostics`).
   - New `products/kyber-squad/standards/skills/skills.manifest.yml`: `skills:` sequence of `{ name, files }`, `files` relative to the skill folder, `SKILL.md` first.
   - The `.skills.md` files are read, not edited or deleted (T8 deletes them).
 - **Commands:**
@@ -218,7 +218,7 @@ Every row is run by its own task's owner: tests written first, `task-gate --red`
   - `src/KyberWeave.Application/Docs/Parsing/DocumentLoader.cs`: `IsExcluded` skips paths beneath `<docsRoot>/standards/skills/`.
   - `src/KyberWeave.Application/Areas/Docs.props`: embed `..\..\products\kyber-squad\standards\skills\**\*` with logical name `KwSkills/%(RecursiveDir)%(Filename)%(Extension)` (the reader normalizes `\` to `/`).
   - `src/KyberWeave.Application/ServiceCollectionExtensions.cs`: register the catalog factory per repository root (the catalog is built for a root and config, like `TaskPromptServiceFactory`).
-  - Tests per the Test contract.
+  - Tests per the Test contract: new `tests/KyberWeave.Application.Tests/Docs/KwSkills/KwSkillCatalogTests.cs`; extend `tests/KyberWeave.Application.Tests/Docs/Parsing/MultipleDocsRootTests.cs`.
 - **Commands:**
   - `kyber-weave review gates . --agent <worker> --task T3 --red`
   - `kyber-weave review gates . --agent <worker> --task T3`
@@ -239,7 +239,7 @@ Every row is run by its own task's owner: tests written first, `task-gate --red`
   - `src/KyberWeave.Application/Docs/Validation/TaskPromptService.cs`: constructor takes `IKwSkillCatalog`; `Build` accepts no task and no technology when `RoleAgent ?? Agent` is set and returns the role-only prompt (empty and Built when no skills); `PromptContent` carries the skill list instead of `Skills`/`ParentSkills`; `Compose`, `Units`, `SkillsPart`, `ParentPart` and `UncarriedFileNote` per D10–D11.
   - `src/KyberWeave.Application/Docs/Validation/TaskPromptServiceFactory.cs`: pass the catalog for the root.
   - `src/KyberWeave.Cli/Commands/Docs/DocsPacketCommand.cs`: nothing new beyond compiling (its `--agent` reaches the role lookup through `Agent`).
-  - `tests/KyberWeave.Testing/DocsTaskPromptFixture.cs`, `tests/KyberWeave.Content.Tests/ArbiterCommandAllowListPromptTests.cs` (constructor call only), and tests per the Test contract.
+  - `tests/KyberWeave.Testing/DocsTaskPromptFixture.cs`, `tests/KyberWeave.Content.Tests/ArbiterCommandAllowListPromptTests.cs` (constructor call only), and tests per the Test contract: extend `tests/KyberWeave.Application.Tests/Docs/Validation/TaskPromptServiceTests.cs` and `tests/KyberWeave.Application.Tests/Docs/Validation/TaskPromptBudgetTests.cs`.
 - **Commands:**
   - `kyber-weave review gates . --agent <worker> --task T4 --red`
   - `kyber-weave review gates . --agent <worker> --task T4`
@@ -259,8 +259,8 @@ Every row is run by its own task's owner: tests written first, `task-gate --red`
   - `src/KyberWeave.Domain/Arbiter/Hooks/DispatchInsertionTypes.cs`: `DispatchPromptQuery` gains `Target` (optional, last).
   - `src/KyberWeave.Application/Arbiter/Hooks/DispatchPromptInsertion.cs`: `Expand(prompt, context, target = null)`; `ExpandedTags` gains `<kw-skills>`; the no-header branch per D9.
   - `src/KyberWeave.Application/Arbiter/Hooks/HookCommand.cs`: `PromptExpander` sets `RoleAgent: query.Target`.
-  - Every caller of `Expand`: `Adapters/ClaudeHookAdapter.cs` (`RenderPromptInsertion`, `HandlePre`), `Adapters/PluginHookAdapter.cs` (`TargetOf(envelope)`), `Adapters/AntigravityHookAdapter.cs`, `Adapters/CodexHookAdapter.cs`, `Adapters/DevinHookAdapter.cs`, plus any other the build finds; a harness with no target passes null.
-  - Tests per the Test contract.
+  - Every caller of `Expand`: `src/KyberWeave.Application/Arbiter/Hooks/Adapters/ClaudeHookAdapter.cs` (`RenderPromptInsertion`, `HandlePre`), `src/KyberWeave.Application/Arbiter/Hooks/Adapters/PluginHookAdapter.cs` (`TargetOf(envelope)`), `src/KyberWeave.Application/Arbiter/Hooks/Adapters/AntigravityHookAdapter.cs`, `src/KyberWeave.Application/Arbiter/Hooks/Adapters/CodexHookAdapter.cs`, `src/KyberWeave.Application/Arbiter/Hooks/Adapters/DevinHookAdapter.cs`, plus any other the build finds; a harness with no target passes null.
+  - Tests per the Test contract: extend `tests/KyberWeave.Arbiter.Tests/DispatchPromptInsertionTests.cs`.
 - **Commands:**
   - `kyber-weave review gates . --agent <worker> --task T5 --red`
   - `kyber-weave review gates . --agent <worker> --task T5`
@@ -283,7 +283,7 @@ Every row is run by its own task's owner: tests written first, `task-gate --red`
   - `src/KyberWeave.Mcp/DocsServerInstructions.cs`: one sentence naming `load_skill`.
   - `src/KyberWeave.Application/Docs/Search/DocumentIndex.cs`: `StandardsBundle` loses `ParentSkills` and `Skills`; `StandardsFor` stops reading `DocType.Skill`.
   - `products/kyber-squad/toolchain.yml`: add `load_skill` to `required-mcp-tools.kw-docs`.
-  - `tests/KyberWeave.Application.Tests/Docs/Search/DocumentIndexTests.cs` (bundle assertions on removed members only) and tests per the Test contract.
+  - `tests/KyberWeave.Application.Tests/Docs/Search/DocumentIndexTests.cs` (bundle assertions on removed members only) and tests per the Test contract: new `tests/KyberWeave.Mcp.Tests/McpLoadSkillTests.cs`; extend `tests/KyberWeave.Mcp.Tests/McpToolNameContractTests.cs` and `tests/KyberWeave.Mcp.Tests/McpAgentCodingStandardsTests.cs`; `tests/KyberWeave.Content.Tests/SquadToolchainRosterGuardTests.cs` (runs unchanged).
 - **Commands:**
   - `kyber-weave review gates . --agent <worker> --task T6 --red`
   - `kyber-weave review gates . --agent <worker> --task T6`
@@ -301,7 +301,7 @@ Every row is run by its own task's owner: tests written first, `task-gate --red`
 - **Files:**
   - `src/KyberWeave.Application/Docs/Validation/DocSpecValidator.cs`: rule constants; the folder walk skips `skills`; the four-file check uses `SkillsListFile` and drops the skills frontmatter check; legacy warning.
   - New `src/KyberWeave.Application/Docs/Validation/KwSkillRulesValidator.cs` if the rules do not fit the existing class cleanly, called from `DocSpecValidator` as the other folder checks are.
-  - Tests per the Test contract.
+  - Tests per the Test contract: new `tests/KyberWeave.Application.Tests/Docs/Validation/KwSkillValidationTests.cs`; extend `tests/KyberWeave.Application.Tests/Docs/Validation/StandardsFolderShapeTests.cs`.
 - **Commands:**
   - `kyber-weave review gates . --agent <worker> --task T7 --red`
   - `kyber-weave review gates . --agent <worker> --task T7`
@@ -325,7 +325,7 @@ Every row is run by its own task's owner: tests written first, `task-gate --red`
   - `src/KyberWeave.Application/Docs/Scaffolding/StandardsFolderMigration.cs`: stub `[]` for a missing `.skills.yml`; the frontmatter repair no longer touches skills files.
   - `src/KyberWeave.Application/Docs/Scaffolding/StandardsTemplateDiff.cs`: compares `.skills.yml`.
   - Any other walk over `products/kyber-squad/standards/*` that the build or content tests show treating `skills` as a scope folder skips it.
-  - Tests per the Test contract.
+  - Tests per the Test contract: extend `tests/KyberWeave.Application.Tests/Docs/Scaffolding/DocsInitTemplateChoiceTests.cs`, `tests/KyberWeave.Application.Tests/Docs/Scaffolding/StandardsFolderMigrationTests.cs` and `tests/KyberWeave.Application.Tests/Docs/Scaffolding/StandardsFolderMigrationScenarioTests.cs`; new `tests/KyberWeave.Content.Tests/KwSkillPoolContentTests.cs`; update `tests/KyberWeave.Content.Tests/ArbiterCommandAllowListPromptTests.cs`; extend `tests/KyberWeave.Integration.Tests/Squad/SquadKyberWeaveSkillsTests.cs`.
 - **Commands:**
   - `kyber-weave review gates . --agent <worker> --task T8 --red`
   - `kyber-weave review gates . --agent <worker> --task T8`
@@ -368,7 +368,7 @@ Every row is run by its own task's owner: tests written first, `task-gate --red`
   - `products/kyber-squad/agents/dev-easy.md`, `dev-medium.md`, `dev-hard.md`: the numbered list of parts and the precedence sentence ("rules beat skills…") become `<kw-skills>` plus "load a listed skill with kw-docs `load_skill` when its description fits".
   - `products/kyber-squad/agents/platform-researcher.md`: the same, and the line saying the skills file explains sign-in now points at the listed KW skills.
   - `products/kyber-squad/README.md` and `products/kyber-squad/standards/README.md`: the folder's four files are standard, rules, `.skills.yml`, Arbiter rules; the pool is described.
-  - `tests/KyberWeave.Content.Tests/PlatformAgentContentTests.cs`, `DeveloperAgentContentTests.cs` per the Test contract.
+  - `tests/KyberWeave.Content.Tests/PlatformAgentContentTests.cs`, `tests/KyberWeave.Content.Tests/DeveloperAgentContentTests.cs` per the Test contract.
 - **Commands:**
   - `kyber-weave review gates . --agent <worker> --task T10 --red`
   - `kyber-weave review gates . --agent <worker> --task T10`
@@ -389,7 +389,7 @@ Every row is run by its own task's owner: tests written first, `task-gate --red`
   - New `dash/server/KyberDash.Application/Sessions/KwSkillLoads.cs` (recognizer and name parse, pure), used by `dash/server/KyberDash.Application/KyberBridgeEngine.cs` `GetSessionKwSkills` (copy `GetSessionSkills` paging and 404).
   - `dash/server/KyberDash.Contracts/Services/IDashServices.cs`, `dash/server/KyberDash.Application/Services/DashboardQueryService.cs`, `dash/server/KyberDash.Api/Endpoints/DashEndpointMappings.cs` (`/session/{id}/kw-skills`).
   - `dash/server.tests/KyberDash.Application.Tests/Fakes/InMemoryRelationalStore.cs` and any `FaultingSessionReader`/`DelegatingReader` copies: implement the new member.
-  - Tests per the Test contract.
+  - Tests per the Test contract: new `dash/server.tests/KyberDash.Application.Tests/Sessions/SessionKwSkillLoadsTests.cs`; extend `dash/server.tests/KyberDash.Data.Tests/Repositories/SqliteRelationalStoreReadTests.cs` and `dash/server.tests/KyberDash.Presentation.Tests/MinimalApiEndpointTests.cs`.
 - **Commands:**
   - `kyber-weave review gates . --agent <worker> --task T11 --red`
   - `kyber-weave review gates . --agent <worker> --task T11`
@@ -408,7 +408,7 @@ Every row is run by its own task's owner: tests written first, `task-gate --red`
   - `dash/web/src/lib/kyberApi.ts`: `KyberSessionKwSkillsPage` type, `parseSessionKwSkillsPage`, `fetchKyberSessionKwSkills(sessionId, page)` through `sectionPath(sessionId, 'kw-skills', page)`.
   - New `dash/web/src/components/session/SessionKwSkillsSection.tsx` (copy `SessionSkillsSection.tsx` and `useSectionPage`, with `SectionLoading`/`SectionError` and the shared pager).
   - `dash/web/src/components/AgentSessionDashboard.tsx`: mount it right after `SessionSkillsSection`.
-  - Tests per the Test contract.
+  - Tests per the Test contract: new `dash/web/src/components/session/SessionKwSkillsSection.test.tsx`; extend `dash/web/src/lib/kyberApi.sections.test.ts`.
 - **Commands:**
   - `kyber-weave review gates . --agent <worker> --task T12 --red`
   - `kyber-weave review gates . --agent <worker> --task T12`
@@ -427,7 +427,7 @@ Every row is run by its own task's owner: tests written first, `task-gate --red`
   - `docs/kyber-arbiter/architecture.md`: dispatch prompt insertion.
   - `docs/docgraph/mcp-runbook.md`, `docs/docgraph/architecture.md`, `docs/ci-pipelines/rule-reference.md`, `docs/documentation-ontology.md`, `docs/standards/README.md`, `docs/cli-command-surface.md` (`docs init`, `docs standards migrate`).
   - `docs/context-hygiene/skills.md` and the managed glossary: "KW skill" against ADR 0049's term.
-  - `.apm/skills/kyber-docs-authoring/references/rules.md`, `references/retrofit.md`: `.skills.yml` and the KW-DOC-SKILL rules.
+  - `.apm/skills/kyber-docs-authoring/references/rules.md`, `.apm/skills/kyber-docs-authoring/references/retrofit.md`: `.skills.yml` and the KW-DOC-SKILL rules.
   - `docs/dash/architecture.md`: read-model register and REST API table row.
   - New `docs/adr/0093-kw-skills-load-on-demand-through-kw-docs.md`, its row in `docs/adr/README.md`, and a cross-reference from ADR 0049.
   - This plan's Closeout mapping.
@@ -478,6 +478,7 @@ First wave: T1, T2, T3, T11 (cap 4), then T12. T4, T6 run in the `kw-catalog` se
 ## Verification gates
 
 - Each developer task ends with its own `task-gate` run (the Commands above), test-first: the `--red` run before implementation, then the passing run. No dev agent runs the full suite.
+- TypeScript tasks (T12) need both `npm --prefix dash ci` and `npm --prefix dash/web ci` in the worktree before their gates run.
 - `SquadKyberWeaveSkillsTests.GlobalInstallDeploysNoKwSkill` is an integration test: it runs in CI, not in a task gate.
 - Documentation tasks run `docs validate .` and `docs drift .` through the source CLI; closeout runs `--merge-ready`.
 - The end-of-run council runs the full gates on the integrated head.
