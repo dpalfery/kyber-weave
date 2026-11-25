@@ -142,6 +142,85 @@ public class CliDispatchTests
     }
 
     [Fact]
+    public async Task EngineStopDelegatesToTheLifecycleService()
+    {
+        CliRun run = await CliRun.ExecuteAsync(["engine", "stop"]);
+
+        Assert.Equal(0, run.ExitCode);
+        run.Builder.Lifecycle.Verify(
+            l => l.StopRunningEngineAsync(null, It.IsAny<CancellationToken>()),
+            Times.Once);
+        Assert.Contains("engine: not-running", run.Output, StringComparison.Ordinal);
+    }
+
+    [Theory]
+    [InlineData(EngineVerifyOutcome.Running, 0)]
+    [InlineData(EngineVerifyOutcome.NotRunning, 1)]
+    [InlineData(EngineVerifyOutcome.OtherVersion, 3)]
+    [InlineData(EngineVerifyOutcome.Unresponsive, 4)]
+    public async Task EngineVerifyMapsEachOutcomeToItsExitCode(EngineVerifyOutcome outcome, int exitCode)
+    {
+        CliRun run = await CliRun.ExecuteAsync(
+            ["engine", "verify", "--version", "2.0.0", "--wait", "0"],
+            configure: builder => builder.Lifecycle
+                .Setup(l => l.VerifyRunningEngineVersionAsync(It.IsAny<string>(), It.IsAny<int>(), It.IsAny<string?>(), It.IsAny<CancellationToken>()))
+                .ReturnsAsync(new EngineEnsureReport(outcome == EngineVerifyOutcome.Running, "engine: probe", Outcome: outcome)));
+
+        Assert.Equal(exitCode, run.ExitCode);
+        run.Builder.Lifecycle.Verify(
+            l => l.VerifyRunningEngineVersionAsync("2.0.0", 1, null, It.IsAny<CancellationToken>()),
+            Times.Once);
+    }
+
+    [Fact]
+    public async Task EngineVerifyWaitsTwentySecondsByDefault()
+    {
+        CliRun run = await CliRun.ExecuteAsync(["engine", "verify", "--version", "2.0.0"]);
+
+        Assert.Equal(0, run.ExitCode);
+        run.Builder.Lifecycle.Verify(
+            l => l.VerifyRunningEngineVersionAsync("2.0.0", 134, null, It.IsAny<CancellationToken>()),
+            Times.Once);
+    }
+
+    [Fact]
+    public async Task EngineVerifyWithoutAVersionExitsTwo()
+    {
+        CliRun run = await CliRun.ExecuteAsync(["engine", "verify"]);
+
+        Assert.Equal(2, run.ExitCode);
+        run.Builder.Lifecycle.Verify(
+            l => l.VerifyRunningEngineVersionAsync(It.IsAny<string>(), It.IsAny<int>(), It.IsAny<string?>(), It.IsAny<CancellationToken>()),
+            Times.Never);
+    }
+
+    [Theory]
+    [InlineData("-1")]
+    [InlineData("soon")]
+    public async Task EngineVerifyRejectsAWaitThatIsNotAWholeNumber(string wait)
+    {
+        CliRun run = await CliRun.ExecuteAsync(["engine", "verify", "--version", "2.0.0", "--wait", wait]);
+
+        Assert.Equal(2, run.ExitCode);
+        run.Builder.Lifecycle.Verify(
+            l => l.VerifyRunningEngineVersionAsync(It.IsAny<string>(), It.IsAny<int>(), It.IsAny<string?>(), It.IsAny<CancellationToken>()),
+            Times.Never);
+    }
+
+    [Fact]
+    public async Task UnknownEngineSubcommandPrintsTheCurrentUsage()
+    {
+        CliRun run = await CliRun.ExecuteAsync(["engine", "restart"]);
+
+        Assert.Equal(2, run.ExitCode);
+        Assert.Contains(
+            "Usage: kyberdash engine ensure --if-running / stop / verify --version <v> [--wait <seconds>] [--state-dir <dir>]",
+            run.Error,
+            StringComparison.Ordinal);
+        Assert.DoesNotContain("Usage: kyberdash engine ensure --if-running [--state-dir <dir>]", run.Error, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public async Task E2eSeedRequiresWorldAndDatabase()
     {
         CliRun run = await CliRun.ExecuteAsync(["e2e-seed", "--world", "harness-collection"]);

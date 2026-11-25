@@ -185,6 +185,12 @@ public class PresentationBuilder
                 It.IsAny<CancellationToken>()))
             .ReturnsAsync(PresentationTestData.EngineReport);
         Lifecycle
+            .Setup(l => l.StopRunningEngineAsync(It.IsAny<string?>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new EngineEnsureReport(true, "engine: not-running"));
+        Lifecycle
+            .Setup(l => l.VerifyRunningEngineVersionAsync(It.IsAny<string>(), It.IsAny<int>(), It.IsAny<string?>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new EngineEnsureReport(true, "engine: running 2.0.0 (pid 42)", Outcome: EngineVerifyOutcome.Running));
+        Lifecycle
             .Setup(l => l.ResolveLiveServerUriAsync(It.IsAny<string?>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync((Uri?)null);
 

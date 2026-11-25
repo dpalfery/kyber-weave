@@ -181,7 +181,7 @@ public static partial class Program
             + "  mcp                      Serve read-only analytics over MCP stdio (spawns kyberdash-mcp)\n"
             + "  otel                     Start the standalone OTLP/HTTP receiver\n"
             + "  menubar                  Install or update the desktop tray app (macOS / Windows)\n"
-            + "  engine ensure            Replace a running engine of another version (--if-running)\n"
+            + "  engine ensure|stop|verify  Replace, stop, or check the running engine\n"
             + "  e2e-seed                 Seed an isolated store for Playwright E2E worlds\n"
             + "  kyber <subcommand>       Store, capture, and statusline utilities\n\n"
             + "Options:\n"
@@ -307,6 +307,12 @@ public static partial class Program
         return outcome.ExitCode;
     }
 
+    /// <summary>Usage line for <c>kyberdash engine</c>. Its wording is part of the contract: T3 reads it.</summary>
+    private const string EngineUsage =
+        "Usage: kyberdash engine ensure --if-running / stop / verify --version <v> [--wait <seconds>] [--state-dir <dir>]";
+
+    private sealed record EngineOptions(string? StateDir, string? Version, int WaitSeconds);
+
     private static async Task<int> RunEngineAsync(
         IServiceProvider provider,
         TextWriter output,
@@ -314,12 +320,62 @@ public static partial class Program
         string[] args,
         CancellationToken cancellationToken)
     {
-        if (args.Length == 0 || args[0] != "ensure")
+        string verb = args.Length > 0 ? args[0] : string.Empty;
+        if (verb is not ("ensure" or "stop" or "verify"))
         {
-            await error.WriteLineAsync("Usage: kyberdash engine ensure --if-running [--state-dir <dir>]").ConfigureAwait(false);
+            await error.WriteLineAsync(EngineUsage).ConfigureAwait(false);
             return 2;
         }
 
+        IEngineLifecycleService lifecycle = provider.GetRequiredService<IEngineLifecycleService>();
+        if (verb == "ensure")
+        {
+            return await RunEngineEnsureAsync(lifecycle, output, error, args, cancellationToken).ConfigureAwait(false);
+        }
+
+        if (!TryReadEngineOptions(verb, args, out EngineOptions options, out string problem))
+        {
+            await error.WriteLineAsync(problem).ConfigureAwait(false);
+            return 2;
+        }
+
+        if (verb == "stop")
+        {
+            EngineEnsureReport stop = await lifecycle
+                .StopRunningEngineAsync(options.StateDir, cancellationToken)
+                .ConfigureAwait(false);
+            return await WriteEngineReportAsync(stop, output, error, stop.Succeeded ? 0 : 1).ConfigureAwait(false);
+        }
+
+        if (string.IsNullOrWhiteSpace(options.Version))
+        {
+            await error.WriteLineAsync("kyberdash engine verify: --version <v> is required.").ConfigureAwait(false);
+            return 2;
+        }
+
+        // Probes are PollInterval apart, so the wait in seconds becomes whole probes; at least one probe always runs.
+        double probes = Math.Ceiling(options.WaitSeconds / EngineLifecycleService.PollInterval.TotalSeconds);
+        int attempts = (int)Math.Clamp(probes, 1, int.MaxValue);
+        EngineEnsureReport verify = await lifecycle
+            .VerifyRunningEngineVersionAsync(options.Version, attempts, options.StateDir, cancellationToken)
+            .ConfigureAwait(false);
+        int exitCode = verify.Outcome switch
+        {
+            EngineVerifyOutcome.Running => 0,
+            EngineVerifyOutcome.OtherVersion => 3,
+            EngineVerifyOutcome.Unresponsive => 4,
+            _ => 1,
+        };
+        return await WriteEngineReportAsync(verify, output, error, exitCode).ConfigureAwait(false);
+    }
+
+    private static async Task<int> RunEngineEnsureAsync(
+        IEngineLifecycleService lifecycle,
+        TextWriter output,
+        TextWriter error,
+        string[] args,
+        CancellationToken cancellationToken)
+    {
         if (!args.Contains("--if-running", StringComparer.Ordinal))
         {
             await error.WriteLineAsync(
@@ -334,7 +390,6 @@ public static partial class Program
                 stateDir = Path.GetFullPath(args[++index]);
         }
 
-        IEngineLifecycleService lifecycle = provider.GetRequiredService<IEngineLifecycleService>();
         EngineEnsureReport report = await lifecycle
             .EnsureRunningEngineMatchesVersionAsync(
                 ResolveVersion(),
@@ -343,9 +398,55 @@ public static partial class Program
                 cancellationToken)
             .ConfigureAwait(false);
 
+        return await WriteEngineReportAsync(report, output, error, report.Succeeded ? 0 : 1).ConfigureAwait(false);
+    }
+
+    /// <summary>Reads the options of <c>engine stop</c> and <c>engine verify</c>; any other token is a usage error.</summary>
+    private static bool TryReadEngineOptions(string verb, string[] args, out EngineOptions options, out string problem)
+    {
+        string? stateDir = null;
+        string? version = null;
+        int waitSeconds = 20;
+        for (int index = 1; index < args.Length; index++)
+        {
+            bool hasValue = index + 1 < args.Length;
+            if (args[index] == "--state-dir" && hasValue)
+            {
+                stateDir = Path.GetFullPath(args[++index]);
+            }
+            else if (args[index] == "--version" && hasValue)
+            {
+                version = args[++index];
+            }
+            else if (args[index] == "--wait" && hasValue
+                && int.TryParse(args[index + 1], NumberStyles.None, CultureInfo.InvariantCulture, out int seconds)
+                && seconds >= 0)
+            {
+                waitSeconds = seconds;
+                index++;
+            }
+            else
+            {
+                options = new EngineOptions(null, null, 0);
+                problem = $"kyberdash engine {verb}: unknown or incomplete option '{args[index]}'.";
+                return false;
+            }
+        }
+
+        options = new EngineOptions(stateDir, version, waitSeconds);
+        problem = string.Empty;
+        return true;
+    }
+
+    private static async Task<int> WriteEngineReportAsync(
+        EngineEnsureReport report,
+        TextWriter output,
+        TextWriter error,
+        int exitCode)
+    {
         TextWriter destination = report.Succeeded ? output : error;
         await destination.WriteLineAsync(report.Message).ConfigureAwait(false);
-        return report.Succeeded ? 0 : 1;
+        return exitCode;
     }
 
     private static int RunE2eSeed(IServiceProvider provider, TextWriter output, TextWriter error, string[] args)
