@@ -58,8 +58,16 @@ public static class OtlpJoinIds
         }
 
         string? text = element.GetString();
-        return string.IsNullOrWhiteSpace(text) || text.Length > MaxIdCharacters || JsonDocumentText.IsDocument(text)
+        return string.IsNullOrWhiteSpace(text) || JsonDocumentText.IsDocument(text)
             ? null
-            : text;
+            : WithinBound(text);
     }
+
+    /// <summary>
+    /// Returns the id when it fits the join key bound, or null: an id longer than <see cref="MaxIdCharacters"/>
+    /// is no join key, and is never cut down to one.
+    /// </summary>
+    /// <param name="id">The id to bound.</param>
+    public static string? WithinBound(string? id) =>
+        id is null || id.Length > MaxIdCharacters ? null : id;
 }
