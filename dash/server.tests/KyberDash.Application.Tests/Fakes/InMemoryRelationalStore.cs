@@ -43,6 +43,13 @@ public class InMemoryRelationalStore :
     private long materializedContentBytes;
 
     /// <summary>
+    /// Optional fault hook run, with the method name, before each projection write-back write
+    /// (<see cref="SetProjectionState"/>, <see cref="SetProjectionDirtyState"/>,
+    /// <see cref="ClearProjectionDirtyState"/>), so a test can simulate a crash between two of them.
+    /// </summary>
+    public Action<string>? BeforeProjectionWriteBack { get; set; }
+
+    /// <summary>
     /// Names of the <see cref="IRelationalStoreReader"/> methods invoked since the read log was
     /// last cleared, in call order, so tests can assert which reads a code path issued.
     /// </summary>
@@ -2839,6 +2846,7 @@ public class InMemoryRelationalStore :
     /// <inheritdoc />
     public void SetProjectionState(ProjectionStateView state)
     {
+        BeforeProjectionWriteBack?.Invoke(nameof(SetProjectionState));
         ArgumentNullException.ThrowIfNull(state);
 
         lock (syncRoot)
@@ -2884,6 +2892,7 @@ public class InMemoryRelationalStore :
     /// <inheritdoc />
     public void SetProjectionDirtyState(DirtyProjectionState state)
     {
+        BeforeProjectionWriteBack?.Invoke(nameof(SetProjectionDirtyState));
         ArgumentNullException.ThrowIfNull(state);
 
         lock (syncRoot)
@@ -2911,6 +2920,7 @@ public class InMemoryRelationalStore :
     /// <inheritdoc />
     public void ClearProjectionDirtyState()
     {
+        BeforeProjectionWriteBack?.Invoke(nameof(ClearProjectionDirtyState));
         lock (syncRoot)
         {
             StoreState working = state.Clone();

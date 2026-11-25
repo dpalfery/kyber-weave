@@ -575,6 +575,45 @@ public class ProjectionReadPathTests
     }
 
     /// <summary>
+    /// A read pass that defers a session with no dirty range stored before it writes the deferred
+    /// keys before it moves the watermark: a crash between the two write-back writes leaves the
+    /// projection out of date for the maintenance pass, never current with the deferred session
+    /// skipped.
+    /// </summary>
+    [Fact]
+    public void ACrashBetweenTheDeferredWriteBackWritesNeverLeavesTheProjectionCurrent()
+    {
+        InMemoryRelationalStore store = new();
+        CanonSessionProjectorEngine engine = new(
+            store,
+            store,
+            store,
+            new FakePricingRepository(),
+            readPathPassRecordBudget: 1);
+
+        WriteSession(store, "sess-a", "claude-code", [Turn("span-a-1", "sess-a", 0)]);
+        WriteSession(store, "sess-b", "claude-code", [Turn("span-b-1", "sess-b", 0)]);
+        store.SetStoreState(new StoreStateView(SqliteRelationalStore.SchemaVersion, SqliteRelationalStore.DetectorVersion));
+        store.ClearProjectionDirtyState();
+
+        int writeBackCalls = 0;
+        store.BeforeProjectionWriteBack = name =>
+        {
+            if (++writeBackCalls == 2)
+            {
+                throw new InvalidOperationException($"simulated crash before {name}");
+            }
+        };
+
+        Assert.Throws<InvalidOperationException>(() => engine.ProjectIncrementalForReads());
+        store.BeforeProjectionWriteBack = null;
+
+        Assert.False(engine.IsProjectionCurrent());
+        ProjectionPassReport maintenancePass = NewService(store, engine).ProjectIncremental();
+        Assert.Contains("sess-b", maintenancePass.RebuiltKeys);
+    }
+
+    /// <summary>
     /// A dashboard read gates on the read-path check, not the maintenance check: with a stale
     /// detector stamp, a current write marker, and a current schema, <see cref="KyberBridgeEngine.EnsureProjected"/>
     /// starts no projection pass, while a write that moves the marker does start one.

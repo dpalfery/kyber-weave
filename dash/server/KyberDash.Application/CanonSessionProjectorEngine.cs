@@ -2801,21 +2801,25 @@ public partial class CanonSessionProjectorEngine
         }
         else if (deferredKeys.Count > 0)
         {
-            // Deferred keys stay dirty at the watermark this pass just wrote, so the next read
+            // Deferred keys stay dirty at the watermark this pass then writes, so the next read
             // pass continues with them and the maintenance pass sees the projection as not
             // current until it rebuilds them. Only a read pass defers, so this never stamps the
-            // detector version.
-            StampProjectionState(finalMarker, stampDetector);
+            // detector version. The dirty state is written before the watermark: a crash between
+            // the two leaves a range that does not start at the stored watermark, which forces a
+            // full pass, never a watermark that hides the deferred keys.
             operationalStore.SetProjectionDirtyState(new DirtyProjectionState(
                 FromSeq: finalMarker,
                 ToSeq: finalMarker,
                 Keys: [.. deferredKeys.Order(StringComparer.Ordinal)],
                 IsWildcard: false));
+            StampProjectionState(finalMarker, stampDetector);
         }
         else
         {
-            StampProjectionState(finalMarker, stampDetector);
+            // Dirty state before the watermark, as above: a crash between them leaves the old
+            // watermark with nothing dirty, which forces a full pass.
             operationalStore.ClearProjectionDirtyState();
+            StampProjectionState(finalMarker, stampDetector);
         }
 
         return new ProjectionPassReport(
@@ -2845,11 +2849,20 @@ public partial class CanonSessionProjectorEngine
     /// at <paramref name="currentMarker"/> with the deferred keys added, or kept wildcard. Any
     /// other stored state, including a write landing between these reads and the rewrite, leaves
     /// a range whose end differs from the marker, which forces a full pass: every race here
-    /// degrades to a full pass, never to a skipped session.
+    /// degrades to a full pass, never to a skipped session. The dirty state is written before the
+    /// watermark, so a crash between the two leaves the previous watermark under a range that
+    /// starts at <paramref name="currentMarker"/>, or under no range, and the next pass runs in
+    /// full rather than incrementally over a range that has lost the deferred keys.
     /// </remarks>
     private void StampMidPassWrites(long currentMarker, long finalMarker, IReadOnlyCollection<string> deferredKeys, bool stampDetector)
     {
+        WriteMidPassDirtyState(currentMarker, finalMarker, deferredKeys);
         StampProjectionState(currentMarker, stampDetector);
+    }
+
+    /// <summary>Rewrites the dirty state <see cref="StampMidPassWrites"/> leaves behind it.</summary>
+    private void WriteMidPassDirtyState(long currentMarker, long finalMarker, IReadOnlyCollection<string> deferredKeys)
+    {
         DirtyProjectionState? stored = operationalStore!.GetProjectionDirtyState();
         if (stored is null || stored.ToSeq != finalMarker)
         {
