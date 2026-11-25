@@ -2,7 +2,7 @@
 id: plans/2026-11-24-sessions-list-column-headers
 title: Sessions list column headers and a plain "out of scope" explanation
 doc-type: plan
-status: current
+status: archived
 component: KyberDash
 owner: dpalfery
 last-reviewed: 2026-11-24
@@ -14,7 +14,7 @@ impact-components:
 
 # Sessions list column headers and a plain "out of scope" explanation
 
-**Status: Ready, 2026-11-25.** Task T1 complete (commits d3c8a173b, dd5a4c06b, 0c56d9acb); closeout mapping below.
+**Status: Archived, 2026-11-25.** Task T1 complete (commits d3c8a173b, dd5a4c06b, 0c56d9acb); closeout mapping below.
 
 ## Request
 
@@ -24,7 +24,7 @@ impact-components:
 
 The KyberDash web dashboard's Sessions list (`ContextExplorer` in `dash/web/src/components/ContextExplorer.tsx`) renders each session as a flex strip of unlabeled cells: session id, title, harness badge, turn count, cost, and how long ago it started. Nothing names the columns, so a word such as "out of scope" in the cost cell has no visible meaning.
 
-**Answer to the question.** "out of scope" is a cost status, not an error. When a harness reports its own cost, KyberDash shows that figure. Otherwise the engine estimates cost only from a price table that covers the harness: the published LiteLLM rates cover the Claude and Codex harnesses, and the Copilot credits table covers the Copilot harnesses. A session from any other harness that did not report its own cost has no table to price it, so its status is `out_of_scope` and KyberDash shows those words instead of a made-up figure or `$0.00` (`CanonPricing.PricePublishedTurn` and `CanonPricing.IsPublishedTableHarness` in `dash/server/KyberDash.Domain/CanonPricing.cs`; [architecture: CostBlock](../dash/architecture.md#costblock-and-cost-basis); requirement KD-005).
+**Answer to the question.** "out of scope" is a cost status, not an error. When a harness reports its own cost, KyberDash shows that figure. Otherwise the engine estimates cost only from a price table that covers the harness: the published LiteLLM rates cover the Claude and Codex harnesses, and the Copilot credits table covers the Copilot harnesses. A session from any other harness that did not report its own cost has no table to price it, so its status is `out_of_scope` and KyberDash shows those words instead of a made-up figure or `$0.00` (`CanonPricing.PricePublishedTurn` and `CanonPricing.IsPublishedTableHarness` in `dash/server/KyberDash.Domain/CanonPricing.cs`; [architecture: CostBlock](../../dash/architecture.md#costblock-and-cost-basis); requirement KD-005).
 
 **Goal.** The list gets one header row that names each column and lines up with the cells beneath it, and the cost cell's hover text explains every word status in plain language, using the same explanation the session view's cost tile shows, so "out of scope" explains itself where it appears.
 
@@ -140,8 +140,8 @@ header over the rows in a rendered browser — needs a live dashboard session`.
 
 | ID | Destination | Documentation-impact |
 |---|---|---|
-| D1, D2, D3, D4 | [KyberDash architecture: Display](../dash/architecture.md#costblock-and-cost-basis) | extends-component; header row, labels, shared widths and the data-state-only rule are described under Display; last-reviewed 2026-11-25 |
-| D5, D6, D7 | [KyberDash architecture: Display](../dash/architecture.md#costblock-and-cost-basis) and [runbook: no published rate](../dash/runbook.md) | extends-component; hover text format, shared `STATUS_EXPLANATIONS` and the new "out of scope" wording; last-reviewed 2026-11-25 |
-| D8 | [KyberDash architecture: Display](../dash/architecture.md#costblock-and-cost-basis) — the Sessions list paragraph records the fixed trailing slot on the header and every row; the width cost is a PR note | extends-component; last-reviewed 2026-11-25 |
+| D1, D2, D3, D4 | [KyberDash architecture: Display](../../dash/architecture.md#costblock-and-cost-basis) | extends-component; header row, labels, shared widths and the data-state-only rule are described under Display; last-reviewed 2026-11-25 |
+| D5, D6, D7 | [KyberDash architecture: Display](../../dash/architecture.md#costblock-and-cost-basis) and [runbook: no published rate](../../dash/runbook.md) | extends-component; hover text format, shared `STATUS_EXPLANATIONS` and the new "out of scope" wording; last-reviewed 2026-11-25 |
+| D8 | [KyberDash architecture: Display](../../dash/architecture.md#costblock-and-cost-basis) — the Sessions list paragraph records the fixed trailing slot on the header and every row; the width cost is a PR note | extends-component; last-reviewed 2026-11-25 |
 | AP1 | Documentation waiver — approval record only, preserved in this plan's Decisions table | n/a |
-| KyberDash | [KyberDash architecture: Display](../dash/architecture.md#costblock-and-cost-basis) and [KyberDash runbook: no published rate](../dash/runbook.md) | extends-component; both Design harvest rows migrated (architecture Display paragraph, runbook "Other statuses"); last-reviewed 2026-11-25 |
+| KyberDash | [KyberDash architecture: Display](../../dash/architecture.md#costblock-and-cost-basis) and [KyberDash runbook: no published rate](../../dash/runbook.md) | extends-component; both Design harvest rows migrated (architecture Display paragraph, runbook "Other statuses"); last-reviewed 2026-11-25 |

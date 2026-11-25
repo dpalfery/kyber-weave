@@ -64,9 +64,7 @@ its `tasks.yml` is caught rather than carried as dead weight.
 
 ## Active Plans
 
-| Plan | Status | Component | Summary |
-|---|---|---|---|
-| [Sessions list column headers and a plain "out of scope" explanation](2026-11-24-sessions-list-column-headers.md) | Ready | KyberDash | Header row for the Sessions list and plain hover explanations of cost status words. |
+No plans are open.
 
 ## Archived Plans
 
