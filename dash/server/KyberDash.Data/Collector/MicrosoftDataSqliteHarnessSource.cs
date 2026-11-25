@@ -143,6 +143,10 @@ public class MicrosoftDataSqliteHarnessSource : IHarnessSqliteSource
             {
                 throw Unreadable(path, "permission denied", ex);
             }
+            catch (IOException ex)
+            {
+                throw Unreadable(path, "its size could not be read", ex);
+            }
 
             SqliteOpenAction action = SqliteSourceOpenPolicy.Decide(failure, walBytes, databaseBytes, limits.CopyCapBytes);
             switch (action.Kind)

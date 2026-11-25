@@ -355,6 +355,24 @@ public class MicrosoftDataSqliteHarnessSourceSqliteTests : IDisposable
     }
 
     [Fact]
+    public void Open_LengthProbeThatFailsWithAnIOError_IsReportedAsUnreadable()
+    {
+        string sourceDirectory = directory.Combine("harness");
+        Directory.CreateDirectory(sourceDirectory);
+        string path = CreateSource(sourceDirectory, 3, SqliteFixtureJournal.WalUncheckpointed);
+        SkipUnlessSealed(sourceDirectory);
+        AssertPlainOpenFails(path);
+        MicrosoftDataSqliteHarnessSource source = new(
+            new HarnessSqliteLimits(),
+            directory.Combine("cache"),
+            fileLength: static file => throw new FileNotFoundException("gone", file));
+
+        IOException exception = Assert.Throws<IOException>(() => source.Open(path));
+
+        Assert.StartsWith(SqliteSourceOpenPolicy.SourceUnreadableCode, exception.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void Open_SourceThatGrewPastTheCopyCapAfterTheSizeCheck_IsRefusedWithTheCopyCapCode()
     {
         string sourceDirectory = directory.Combine("harness");
