@@ -210,7 +210,7 @@ public class CodexSpanMapperTests
     /// A Codex span carrying <c>request_id</c>, <c>gen_ai.response.id</c>, and <c>message.id</c>
     /// maps to a record with both ids absent: Codex OTel has no per-model-call id — its
     /// <c>auth.request_id</c> names an auth request — so the projector never id-joins a Codex turn
-    /// to its rollout file and applies per-session source precedence instead.
+    /// to its rollout file and pairs it one to one on equal reported counters instead.
     /// </summary>
     [Fact]
     public void MapSpan_LeavesJoinIdsAbsent()

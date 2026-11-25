@@ -274,8 +274,8 @@ public class CodexSpanMapper : IHarnessMapper
             DeclaredContextWindow: null);
 
         // Codex OTel carries no per-model-call id (its auth.request_id names an auth request), so a
-        // Codex record joins to nothing: both ids stay absent and the projector's per-session
-        // source precedence decides what the rollout file's model calls contribute.
+        // Codex record joins to nothing by id: both ids stay absent and the projector pairs it
+        // one to one with a rollout model call on equal reported counters within the twin skew.
         return new CollectedRecord(
             RecordId: native.SpanId,
             HarnessId: harnessId,

@@ -1,6 +1,6 @@
 schema-version: 2
 plan: docs/plans/2026-11-24-droid-tokens-and-per-harness-e2e.md
-execution-digest: 1f79c454c49f4f19dbb1ff5268d8b5b9c078e0f6bdc22746fa391e6b99a7b583
+execution-digest: e7652b35cda9c2dfd39cd0410916a918d8c6c4ecb3bacdd5d7f2fcd3be970b5e
 tasks:
   - id: T4
     capabilities: C# domain records, SQLite reader queries and projection with xUnit in-memory and SQLite unit tests
@@ -208,7 +208,6 @@ tasks:
       - dash/web/src/components/SessionSpendCharts.tsx
       - dash/web/src/components/SessionSpendCharts.test.tsx
       - dash/web/src/components/session/SessionChartsSection.test.tsx
-      - dash/web/src/components/SessionInspectorDrawer.test.tsx
       - dash/web/src/components/AgentSessionDashboard.test.tsx
     session: web
     prompt: >
@@ -232,7 +231,7 @@ tasks:
       - **Files:**
         - `dash/web/src/components/SessionSpendCharts.tsx`: `TurnSpendChart`; a turn is measured when any of `input`, `fresh_input`, `fresh`, `cache_read`, `cache_creation`, `output`, `visible_output`, `reasoning` is a finite number; no measured turn renders `data-testid="turn-spend-not-measurable"` (heading "Token Spend per Turn", the turn count, text "This harness does not report token counts per turn. Session totals, where reported, are in the overview."); otherwise every turn keeps `turn-bar-<i>` with `data-measured`, unmeasured bars draw no segments, and the chips and cumulative line use measured turns only. Theme tokens only, no new dependency.
         - `dash/web/src/components/SessionSpendCharts.test.tsx`: extend with the T2 cases.
-        - `dash/web/src/components/session/SessionChartsSection.test.tsx`, `dash/web/src/components/SessionInspectorDrawer.test.tsx`, `dash/web/src/components/AgentSessionDashboard.test.tsx`: one case each, the embedding component renders `turn-spend-not-measurable` for a token-less charts-section response.- **Commands:**
+        - `dash/web/src/components/session/SessionChartsSection.test.tsx`, `dash/web/src/components/AgentSessionDashboard.test.tsx`: one case each, the embedding component renders `turn-spend-not-measurable` for a token-less charts-section response.- **Commands:**
         - `kyber-weave review gates . --agent <your agent name> --task T2 --red`
         - `kyber-weave review gates . --agent <your agent name> --task T2`
       - **Acceptance:**
@@ -248,7 +247,7 @@ tasks:
 
       |---|---|---|---|---|---|
 
-      | T2 | `dash/web/src/components/SessionSpendCharts.test.tsx` (extend the `TurnSpendChart` describe block), `dash/web/src/components/session/SessionChartsSection.test.tsx`, `dash/web/src/components/SessionInspectorDrawer.test.tsx`, `dash/web/src/components/AgentSessionDashboard.test.tsx` (one case each) | `npm --prefix dash run test -- web/src/components/SessionSpendCharts.test.tsx web/src/components/session/SessionChartsSection.test.tsx web/src/components/SessionInspectorDrawer.test.tsx web/src/components/AgentSessionDashboard.test.tsx` | Each embedding component (`SessionChartsSection`, `SessionInspectorDrawer`, `AgentSessionDashboard`), given a `/charts` response whose turns carry no token field, renders `turn-spend-not-measurable` and no `turn-bar-*`. In the chart itself: all turns with every token field null: renders `turn-spend-not-measurable` with the turn count and the reason text, no `turn-bar-*`, no Cache Hit/Fresh/Output chips, no `0` figure. Mixed turns: every turn renders `turn-bar-<i>`; measured turns carry `data-measured="true"`, unmeasured ones `data-measured="false"` with no segments and aria-label "Turn <i>, tokens not measured"; chips sum measured turns only. A measured zero (`output: 0`) stays measured. Empty `turns` still renders `turn-spend-empty`. Fully measured turns render exactly as today. No code path draws a bar or chip for a turn without a measured figure (D1) | New cases fail: the all-null case renders `turn-spend-chart` with "Fresh: 0" | New and existing cases pass; existing assertions unchanged |
+      | T2 | `dash/web/src/components/SessionSpendCharts.test.tsx` (extend the `TurnSpendChart` describe block), `dash/web/src/components/session/SessionChartsSection.test.tsx`, `dash/web/src/components/SessionInspectorDrawer.test.tsx`, `dash/web/src/components/AgentSessionDashboard.test.tsx` (one case each) | `npm --prefix dash run test -- web/src/components/SessionSpendCharts.test.tsx web/src/components/session/SessionChartsSection.test.tsx web/src/components/SessionInspectorDrawer.test.tsx web/src/components/AgentSessionDashboard.test.tsx` | Each embedding component that draws the spend chart (`SessionChartsSection`, `AgentSessionDashboard`), given a `/charts` response whose turns carry no token field, renders `turn-spend-not-measurable` and no `turn-bar-*`. In the chart itself: all turns with every token field null: renders `turn-spend-not-measurable` with the turn count and the reason text, no `turn-bar-*`, no Cache Hit/Fresh/Output chips, no `0` figure. Mixed turns: every turn renders `turn-bar-<i>`; measured turns carry `data-measured="true"`, unmeasured ones `data-measured="false"` with no segments and aria-label "Turn <i>, tokens not measured"; chips sum measured turns only. A measured zero (`output: 0`) stays measured. Empty `turns` still renders `turn-spend-empty`. Fully measured turns render exactly as today. No code path draws a bar or chip for a turn without a measured figure (D1) | New cases fail: the all-null case renders `turn-spend-chart` with "Fresh: 0" | New and existing cases pass; existing assertions unchanged |
 
 
       #### Decisions this task cites

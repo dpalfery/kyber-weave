@@ -199,8 +199,11 @@ A turn seen by both an OTLP source and a file source is one turn, and the source
 joins them on ids the vendor documents: a Claude Code OTLP `llm.invoke` row and its transcript row join on the provider
 `request_id` or on the Anthropic `message.id` (stored as `response_id`, schema 27; the mappers write them, and
 `OtlpJoinIds` reads them from a span). Codex carries no shared id (its `auth.request_id` names an auth request), so
-`CollapseCodexFileModelCalls` applies the source-precedence rule per session instead: a session with OTLP model calls counts only
-those, while its rollout-file records still supply what OTLP lacks, such as tool calls by `call_id`.
+`PairCodexFileModelCalls` pairs them one to one on the data both sides carry: a rollout model call joins an OTLP model
+call only on equal reported counters in the same session within `TwinTurnMaxSkewMs`, the earliest unpaired file call
+with the earliest unpaired OTLP call. The paired file call's parts and content move onto the OTLP turn. A file call
+nothing pairs with stays a turn, so calls whose counters differ are both counted until Codex exports a shared call id.
+The rollout file's records still supply what OTLP lacks, such as tool calls by `call_id`.
 
 ### Session totals come from reported session usage
 
@@ -1627,13 +1630,13 @@ A genuine harness-reported figure is never repriced (R5.2). For Copilot, only th
 reader's `cost_usd` (marked `costHarnessReported` in `synth/readers/copilot.ts`) is `harness`;
 figures the Copilot parser derives through LiteLLM are `published` and are repriced from the
 credits table. `costBlockFor` returns `{published, no_rate}` for a zero or non-finite figure from
-a published-rate source (`costIsEstimated === true`, which marks a cost calculated from published rates, not an estimate), and `unknown` only where no pricing was
+a published-rate source (`costIsCalculated === true`, which marks a cost calculated from published rates, not an estimate), and `unknown` only where no pricing was
 attempted.
 
 **Devin rate (issue #197).** `devin.acuUsdRate` in `~/.kyberdash/config.json` prices Devin ACU
 usage; it does not gate discovery or parsing. A missing, non-positive, or non-finite rate
 (including a JSON literal such as `1e400` that parses as `Infinity`) still emits sessions and
-token fields. `costUSD` is then `0` with `costIsEstimated: true` — unknown, never a measured
+token fields. `costUSD` is then `0` with `costIsCalculated: true` — unknown, never a measured
 zero — and doctor appends `costs unpriced — set devin.acuUsdRate in ~/.kyberdash/config.json`
 rather than reporting `sessions.db` as holding no sessions. Set a finite positive rate to
 price; do not invent one.

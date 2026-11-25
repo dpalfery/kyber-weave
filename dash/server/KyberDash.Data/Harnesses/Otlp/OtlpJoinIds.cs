@@ -11,8 +11,8 @@ namespace KyberDash.Data.Harnesses.Otlp;
 /// joins its OTLP turns to: Claude Code. Any other harness gets no ids, so the projector's id join
 /// never fires for a harness with no transcript twin. Codex deliberately gets none: its OTel
 /// telemetry carries no per-model-call id (<c>auth.request_id</c> names an auth request, and the
-/// rollout file has no per-response id), so the projector applies per-session source precedence
-/// there instead of an id join.
+/// rollout file has no per-response id), so the projector pairs a Codex rollout model call with an
+/// OTLP one one to one on equal reported counters within the twin skew instead of an id join.
 /// </summary>
 public static class OtlpJoinIds
 {
