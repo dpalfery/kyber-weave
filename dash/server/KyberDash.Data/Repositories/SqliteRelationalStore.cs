@@ -198,7 +198,12 @@ public partial class SqliteRelationalStore : BaseSqliteRepository, IRelationalSt
     }
 
     /// <inheritdoc />
-    public void WriteBatch(CollectedBatch batch)
+    public void WriteBatch(CollectedBatch batch) => WriteBatchCore(batch, replaceSource: false);
+
+    /// <inheritdoc />
+    public void ReplaceSource(CollectedBatch batch) => WriteBatchCore(batch, replaceSource: true);
+
+    private void WriteBatchCore(CollectedBatch batch, bool replaceSource)
     {
         ArgumentNullException.ThrowIfNull(batch);
         ArgumentNullException.ThrowIfNull(batch.Source);
@@ -220,6 +225,11 @@ public partial class SqliteRelationalStore : BaseSqliteRepository, IRelationalSt
         {
             ArgumentNullException.ThrowIfNull(record);
             AppendHarnessInsert(body, harnesses, record.HarnessId);
+        }
+
+        if (replaceSource)
+        {
+            AppendSourceDelete(body, TextExpr(SourceIdOf(batch.Source)));
         }
 
         string sourceIdExpr = AppendSourceInsert(body, batch.Source);
@@ -264,7 +274,12 @@ public partial class SqliteRelationalStore : BaseSqliteRepository, IRelationalSt
             AppendProblemUpsert(body, problem);
         }
 
-        if (batch.Sessions.Count > 0 || batch.Records.Count > 0)
+        if (replaceSource)
+        {
+            // As DeleteSource: the cascade removes records of sessions this batch may not name.
+            AppendWriteMarkerAdvance(body, dirtyKeys: null);
+        }
+        else if (batch.Sessions.Count > 0 || batch.Records.Count > 0)
         {
             AppendWriteMarkerAdvance(body, DirtySessionKeysOf(batch));
         }
@@ -278,7 +293,7 @@ public partial class SqliteRelationalStore : BaseSqliteRepository, IRelationalSt
         ArgumentException.ThrowIfNullOrWhiteSpace(sourceId);
         string sourceIdExpr = GuardedTextExpr("source", "source_id", sourceId);
         StringBuilder body = new();
-        body.Append(CultureInfo.InvariantCulture, $"DELETE FROM source WHERE source_id = {sourceIdExpr};\n");
+        AppendSourceDelete(body, sourceIdExpr);
 
         // The cascade removes records of sessions this call does not know, so a source delete
         // always marks the range wildcard.
@@ -329,6 +344,14 @@ public partial class SqliteRelationalStore : BaseSqliteRepository, IRelationalSt
         StringBuilder body = new();
         AppendProblemUpsert(body, problem);
         ExecuteTransaction(body.ToString());
+    }
+
+    /// <inheritdoc />
+    public void DeleteProblem(string problemKey)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(problemKey);
+        string problemKeyExpr = GuardedTextExpr("ingest_problem", "problem_key", problemKey);
+        ExecuteTransaction($"DELETE FROM ingest_problem WHERE problem_key = {problemKeyExpr};\n");
     }
 
     public void ReplaceSessionProjection(StoredSessionProjection projection)
@@ -815,6 +838,28 @@ public partial class SqliteRelationalStore : BaseSqliteRepository, IRelationalSt
         }
     }
 
+    /// <summary>
+    /// Deletes one source and the records it owns, after handing each record another source still claims
+    /// (<c>record_source_claim</c>) to that source, so a span shared with another transcript survives.
+    /// </summary>
+    private static void AppendSourceDelete(StringBuilder sql, string sourceIdExpr)
+    {
+        string otherClaim =
+            $"FROM record_source_claim c WHERE c.span_id = record.span_id AND c.source_id <> {sourceIdExpr}";
+        sql.Append(
+            CultureInfo.InvariantCulture,
+            $"UPDATE record SET source_id = (SELECT c.source_id {otherClaim} ORDER BY c.source_id LIMIT 1) " +
+            $"WHERE source_id = {sourceIdExpr} AND EXISTS (SELECT 1 {otherClaim});\n");
+        sql.Append(CultureInfo.InvariantCulture, $"DELETE FROM source WHERE source_id = {sourceIdExpr};\n");
+    }
+
+    private static string SourceIdOf(CollectedSource source)
+    {
+        string kindText = FormatSourceKind(source.Kind);
+        byte[] digest = SHA256.HashData(Encoding.UTF8.GetBytes($"{source.HarnessId}\0{kindText}\0{source.Locator}"));
+        return $"src-{Convert.ToHexStringLower(digest)[..16]}";
+    }
+
     private static string AppendSourceInsert(StringBuilder sql, CollectedSource source)
     {
         string kindText = FormatSourceKind(source.Kind);
@@ -822,9 +867,7 @@ public partial class SqliteRelationalStore : BaseSqliteRepository, IRelationalSt
         string kindExpr = GuardedTextExpr("source", "source_kind", kindText);
         string locatorExpr = GuardedTextExpr("source", "locator", source.Locator);
 
-        byte[] digest = SHA256.HashData(Encoding.UTF8.GetBytes($"{source.HarnessId}\0{kindText}\0{source.Locator}"));
-        string sourceId = $"src-{Convert.ToHexStringLower(digest)[..16]}";
-        string sourceIdExpr = TextExpr(sourceId);
+        string sourceIdExpr = TextExpr(SourceIdOf(source));
 
         sql.Append(
             CultureInfo.InvariantCulture,
@@ -887,6 +930,14 @@ public partial class SqliteRelationalStore : BaseSqliteRepository, IRelationalSt
         string startedExpr = TextExpr(FormatTimestamp(record.StartedAt));
         string statusExpr = TextExpr(FormatRecordStatus(record.Status));
 
+        // One span can arrive from more than one source: a forked or resumed Claude Code transcript
+        // copies its parent's lines, parent session id and message ids included, so both files map
+        // to the same span id. The latest write owns the span; the delete cascades its child rows.
+        // Each writer's claim is kept, so deleting the owner hands the span on (AppendSourceDelete).
+        sql.Append(CultureInfo.InvariantCulture, $"DELETE FROM record WHERE span_id = {spanIdExpr};\n");
+        sql.Append(
+            CultureInfo.InvariantCulture,
+            $"INSERT OR IGNORE INTO record_source_claim (span_id, source_id) VALUES ({spanIdExpr}, {sourceIdExpr});\n");
         sql.Append(
             CultureInfo.InvariantCulture,
             $"INSERT INTO record (span_id, source_id, harness_id, op, kind, name, started_at_utc, status) VALUES ({spanIdExpr}, {sourceIdExpr}, {harnessIdExpr}, {opExpr}, {kindExpr}, {nameExpr}, {startedExpr}, {statusExpr});\n");

@@ -16,6 +16,15 @@ public interface IRelationalStoreWriter
     void WriteBatch(CollectedBatch batch);
 
     /// <summary>
+    /// Re-imports one source: deletes the stored <c>source</c> matching <paramref name="batch"/>'s source
+    /// (harness, kind and locator), cascading to the records it owns, and writes <paramref name="batch"/>,
+    /// in one transaction. A refused write leaves the stored source and its records as they were, so a
+    /// span it shares with another source is never lost to a failed re-import.
+    /// </summary>
+    /// <param name="batch">The source's new batch.</param>
+    void ReplaceSource(CollectedBatch batch);
+
+    /// <summary>
     /// Deletes the <c>source</c> identified by <paramref name="sourceId"/>, cascading via
     /// <c>ON DELETE CASCADE</c> to its owned records and child tables.
     /// </summary>
@@ -38,4 +47,11 @@ public interface IRelationalStoreWriter
     /// </summary>
     /// <param name="problem">Diagnostic problem to persist.</param>
     void WriteProblem(CollectedProblem problem);
+
+    /// <summary>
+    /// Deletes the <c>ingest_problem</c> row keyed <paramref name="problemKey"/> and its child rows, if
+    /// any; a missing key changes nothing.
+    /// </summary>
+    /// <param name="problemKey">Key of the problem to remove.</param>
+    void DeleteProblem(string problemKey);
 }
