@@ -1038,6 +1038,9 @@ public class RelationalIngestTests
             inner.DeleteSource(sourceId);
         }
 
+        public void ClearEstimatedRecordTokens(string harnessId, string sourceLocator, EstimatedRecordTokens estimated) =>
+            inner.ClearEstimatedRecordTokens(harnessId, sourceLocator, estimated);
+
         public void WriteProblem(CollectedProblem problem)
         {
             WriteProblemCalls.Add(problem);

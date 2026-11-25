@@ -226,6 +226,9 @@ public class FullReingestTests
             inner.DeleteSource(sourceId);
         }
 
+        public void ClearEstimatedRecordTokens(string harnessId, string sourceLocator, EstimatedRecordTokens estimated) =>
+            inner.ClearEstimatedRecordTokens(harnessId, sourceLocator, estimated);
+
         public void WriteProblem(CollectedProblem problem) => inner.WriteProblem(problem);
     }
 

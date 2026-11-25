@@ -55,6 +55,8 @@ public class HarnessSourceRegistry
     /// A unit's version is part of its checkpoint, and <c>CanonRefreshEngine.CheckpointIsReusable</c>
     /// refuses a checkpoint stamped with another version, so the next refresh re-reads these units
     /// and replaces the estimated token rows stored under version <see cref="DefaultParserContractVersion"/>.
+    /// A unit whose file is gone cannot be re-read; <see cref="EstimatedRecordTokensStoredUnder"/>
+    /// names the values to clear for it instead.
     /// </remarks>
     public const string NoEstimatedTokensParserContractVersion = "2";
 
@@ -75,6 +77,37 @@ public class HarnessSourceRegistry
     /// stored checkpoint, so the next refresh re-reads those sessions under the fresh-input mapping.
     /// </remarks>
     public const string CopilotCliFreshInputParserContractVersion = "2";
+
+    /// <summary>
+    /// Names the record token values that the reader of <paramref name="harnessId"/> stored as
+    /// estimates under <paramref name="parserContractVersion"/>.
+    /// </summary>
+    /// <remarks>
+    /// Under <see cref="DefaultParserContractVersion"/>, before <see cref="NoEstimatedTokensParserContractVersion"/>:
+    /// <c>droid</c> split the session total evenly across its calls, and <c>warp</c> allocated the
+    /// conversation total across its exchanges, storing the share as both the count and the reported
+    /// input, so every record count and reported total of theirs is an estimate. <c>cursor</c>
+    /// estimated from text length only for a record it reported no counts for, and kept the reported
+    /// counts as reported totals, so a record without a reported total holds estimates. Their session
+    /// reported usage was what the harness reported and is not named. Every other version stored none.
+    /// </remarks>
+    /// <param name="harnessId">Canonical harness identifier of the stored source.</param>
+    /// <param name="parserContractVersion">Parser contract version the source's rows were stored under.</param>
+    /// <returns>The estimated values to clear, or <see cref="EstimatedRecordTokens.None"/>.</returns>
+    public static EstimatedRecordTokens EstimatedRecordTokensStoredUnder(string harnessId, string parserContractVersion)
+    {
+        if (!string.Equals(parserContractVersion, DefaultParserContractVersion, StringComparison.Ordinal))
+        {
+            return EstimatedRecordTokens.None;
+        }
+
+        return harnessId switch
+        {
+            "droid" or "warp" => EstimatedRecordTokens.AllRecordTokens,
+            "cursor" => EstimatedRecordTokens.RecordsWithoutReportedTotal,
+            _ => EstimatedRecordTokens.None,
+        };
+    }
 
     private static readonly HashSet<string> ExcludedHarnessIds = new(
         ["windsurf", "aider"],

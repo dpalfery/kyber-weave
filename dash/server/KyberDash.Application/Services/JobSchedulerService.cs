@@ -363,8 +363,9 @@ public class JobSchedulerService : IJobSchedulerService
             if (readSources)
             {
                 // Before anything reads or imports sources, replace once the rows the Droid, Cursor
-                // and Warp readers stored from estimated tokens. The marker makes it a one-time
-                // pass across host restarts; a failed read leaves it absent for the next tick.
+                // and Warp readers stored from estimated tokens, or clear those estimates to not
+                // measured for a unit whose file is gone. The marker makes it a one-time pass
+                // across host restarts; a failed read or clear leaves it absent for the next tick.
                 if (operationalStore.GetRefreshRun(NoEstimateRereadKey) is null)
                 {
                     RereadEstimatedTokenSources(failedUnits);

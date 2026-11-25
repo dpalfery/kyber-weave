@@ -179,6 +179,7 @@ public class TranscriptIngestionService : ITranscriptIngestionService
         List<RefreshSourceStatusRow> rows = [];
         HashSet<string> sessionKeysRead = new(StringComparer.Ordinal);
         HashSet<string> visitedHarnesses = new(StringComparer.Ordinal);
+        bool clearedAny = false;
         foreach (string harnessId in harnessIds)
         {
             if (string.IsNullOrWhiteSpace(harnessId) || !visitedHarnesses.Add(harnessId))
@@ -198,12 +199,15 @@ public class TranscriptIngestionService : ITranscriptIngestionService
                 writer!.WriteProblem(discoveryProblem);
             }
 
+            HashSet<string> discoveredKeys = new(StringComparer.Ordinal);
             foreach (SourceUnit unit in discovery.Sources)
             {
                 if (!string.Equals(unit.HarnessId, harnessId, StringComparison.Ordinal))
                 {
                     continue;
                 }
+
+                _ = discoveredKeys.Add(unit.SourceKey);
 
                 // Only a unit the store already knows is replaced; a never-imported file stays for
                 // the next folder import to pick up, so this pass cannot widen what was collected.
@@ -220,9 +224,82 @@ public class TranscriptIngestionService : ITranscriptIngestionService
                     coveredThroughUtc,
                     sessionKeysRead));
             }
+
+            clearedAny |= ClearEstimatesOfVanishedUnits(harnessId, discoveredKeys, rows);
+        }
+
+        // Deleting rows does not move the records write marker, so the projection pass would
+        // short-circuit on the cleared sessions: invalidate the watermarks as the clean path does.
+        if (clearedAny)
+        {
+            operationalStore!.SetWriteMarker(operationalStore.GetWriteMarker() + 1);
+            operationalStore.ClearProjectionDirtyState();
         }
 
         return UnloggedRefreshReport(rows, commandStarted, sessionKeysRead.Count);
+    }
+
+    /// <summary>
+    /// Clears to not measured the token values that an earlier parser contract version stored as
+    /// estimates for each checkpointed unit of <paramref name="harnessId"/> whose file discovery no
+    /// longer lists, since such a unit cannot be re-read to replace them.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// The values are named by <see cref="HarnessSourceRegistry.EstimatedRecordTokensStoredUnder"/>
+    /// for the checkpoint's version. A checkpoint whose last status is not <c>ok</c> may carry the
+    /// new version while its stored rows are still the old ones (a failed read stamps the version it
+    /// tried), so it is treated as holding rows of <see cref="HarnessSourceRegistry.DefaultParserContractVersion"/>;
+    /// the newer readers store none of the values cleared, so this never removes a measured value.
+    /// </para>
+    /// <para>
+    /// Sessions, records, text and harness-reported counts stay, and the checkpoint keeps its version,
+    /// so a file that comes back is still re-read in full. A clear that fails is a failed unit row,
+    /// which keeps the one-time marker absent.
+    /// </para>
+    /// </remarks>
+    /// <param name="harnessId">Harness whose checkpoints are checked.</param>
+    /// <param name="discoveredKeys">Source keys discovery listed for the harness in this pass.</param>
+    /// <param name="rows">Pass rows the cleared and failed units are added to.</param>
+    /// <returns><see langword="true"/> when estimated values were cleared for at least one unit.</returns>
+    private bool ClearEstimatesOfVanishedUnits(
+        string harnessId,
+        HashSet<string> discoveredKeys,
+        List<RefreshSourceStatusRow> rows)
+    {
+        bool clearedAny = false;
+        foreach (SourceCheckpoint checkpoint in operationalStore!.ListSourceCheckpoints(harnessId))
+        {
+            if (discoveredKeys.Contains(checkpoint.SourceKey))
+            {
+                continue;
+            }
+
+            string storedVersion = string.Equals(checkpoint.LastStatus, "ok", StringComparison.Ordinal)
+                ? checkpoint.ParserContractVersion
+                : HarnessSourceRegistry.DefaultParserContractVersion;
+            EstimatedRecordTokens estimated = HarnessSourceRegistry.EstimatedRecordTokensStoredUnder(harnessId, storedVersion);
+            if (estimated == EstimatedRecordTokens.None)
+            {
+                continue;
+            }
+
+            try
+            {
+                writer!.ClearEstimatedRecordTokens(harnessId, checkpoint.SourceKey, estimated);
+                rows.Add(new RefreshSourceStatusRow(harnessId, checkpoint.SourceKey, "cleared", 0));
+                clearedAny = true;
+            }
+            catch (Exception ex) when (CanonRefreshEngine.IsSourceUnitFailure(ex))
+            {
+                string safeMessage = SafeProblemMessage(
+                    ex.Message,
+                    string.Create(CultureInfo.InvariantCulture, $"Failed to clear the estimated tokens of source unit '{checkpoint.SourceKey}'."));
+                rows.Add(new RefreshSourceStatusRow(harnessId, checkpoint.SourceKey, "failed", 0, safeMessage));
+            }
+        }
+
+        return clearedAny;
     }
 
     /// <summary>

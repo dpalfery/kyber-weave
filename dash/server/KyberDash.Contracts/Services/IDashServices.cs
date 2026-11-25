@@ -162,7 +162,10 @@ public interface ITranscriptIngestionService
     /// files are touched, and is not limited to the history window, so a checkpointed unit last
     /// written before it is still replaced. A discovered unit is read only when the operational store already holds
     /// its checkpoint; the standard checkpoint check then decides whether that checkpoint is still
-    /// reusable, which is how the parser contract version change forces a re-read. No
+    /// reusable, which is how the parser contract version change forces a re-read. A checkpointed
+    /// unit discovery no longer lists cannot be re-read, so the token values its stored version wrote
+    /// as estimates are cleared to not measured instead, keeping its sessions, records and text; that
+    /// unit's row reads <c>cleared</c>, or <c>failed</c> when the clear fails. No
     /// <c>refresh_run</c> row is written and no history coverage is claimed.
     /// </remarks>
     /// <param name="harnessIds">Harnesses whose checkpointed source units are re-read.</param>
