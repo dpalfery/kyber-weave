@@ -8,6 +8,13 @@ updates:
     cooldown:
       default-days: 7
     open-pull-requests-limit: 10
+    # Ignore major updates of Microsoft.Extensions.*. Packages on 10.0.14 are
+    # not moved to 11.0.0. Microsoft.Extensions.TimeProvider.Testing is already
+    # 11.0.0 and is not downgraded. Patch and minor updates still open.
+    ignore:
+      - dependency-name: "Microsoft.Extensions.*"
+        update-types:
+          - "version-update:semver-major"
 
   - package-ecosystem: "github-actions"
     directory: "/"
