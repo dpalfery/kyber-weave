@@ -20,6 +20,7 @@ import { assertHarnessSessionDashboard, navigateToHarnessDetail } from './sessio
 // Each harness test stands alone: a harness whose section renders wrong fails its own test and
 // leaves the other harnesses' results readable (D6 keeps the failing assertion).
 let server: IsolatedServerHandle | undefined
+let unlistedSessions: ReadonlySet<string> = new Set()
 
 // The run clock, one hour back and floored to the minute, so retention never ages a fixture out.
 const BASE_TIME_MS = Math.floor(Date.now() / 60_000) * 60_000 - 3_600_000
@@ -78,7 +79,9 @@ test.beforeAll(async () => {
       await new Promise<void>((resolveWait) => setTimeout(resolveWait, 500))
     }
   }
-  expect([...missing], 'every imported session must be listed by api/kyber/sessions').toEqual([])
+  // Kept per harness (below), so a harness whose import yields nothing fails its own test and
+  // leaves the other harnesses' results readable (D6).
+  unlistedSessions = missing
 })
 
 test.afterAll(async () => {
@@ -90,6 +93,10 @@ for (const [harness, contracts] of CONTRACTS_BY_HARNESS) {
     test.setTimeout(120_000)
     expect(server).toBeDefined()
     const baseUrl = server!.url
+    expect(
+      contracts.filter((contract) => unlistedSessions.has(`${harness}/${contract.sessionId}`)).map((contract) => contract.sessionId),
+      `${harness}: every imported session must be listed by api/kyber/sessions`,
+    ).toEqual([])
 
     await navigateToHarnessDetail(page, baseUrl, harness)
     await expect(page.getByTestId('page-harness')).toContainText(String(contracts.length))
