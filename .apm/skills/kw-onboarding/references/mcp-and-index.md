@@ -110,12 +110,15 @@ Everything else is a manual entry the user places; show them the entry and the f
 | VS Code Copilot | `.vscode/mcp.json`, `servers` | `vscode` |
 | OpenCode | `opencode.json`, `mcp` (command and args in one array) | `opencode` |
 | Kilo | `kilo.jsonc`, `mcp` | manual |
-| Codex | `~/.codex/config.toml`, `[mcp_servers.<name>]` | manual (user file: ask) |
+| Codex | `~/.codex/config.toml`, `[mcp_servers.<name>]`; use `--any-repo` | manual (user file: ask) |
 | ZCode | `zcode.json` or `.zcode/config.json`, `mcp.servers` | manual; ZCode fails every agent until `kw-docs` is wired |
-| Antigravity | `.agents/mcp_config.json`, `mcpServers` | manual |
-| Pi | `.mcp.json` in the `pi-mcp-adapter` schema, or `~/.config/mcp/mcp.json` | manual |
-| Copilot CLI | `$COPILOT_HOME/mcp-config.json` (default `~/.copilot/`), `mcpServers` | manual (user file: ask) |
-| Warp | Warp's own MCP settings | manual |
+| Antigravity | `~/.gemini/config/mcp_config.json` (a global `squad install` inserts the entry) or `.agents/mcp_config.json`, `mcpServers`; entry `kyber-weave-mcp --any-repo`, because Antigravity starts servers from `/` | manual |
+| Pi | `.mcp.json` in the `pi-mcp-adapter` schema, or `~/.config/mcp/mcp.json` (use `--any-repo` there) | manual |
+| Copilot CLI | `$COPILOT_HOME/mcp-config.json` (default `~/.copilot/`), `mcpServers`; use `--any-repo` | manual (user file: ask) |
+| Warp | Warp's own MCP settings; use `--any-repo` | manual |
+
+A user-scope entry has no repository to bind: use `kyber-weave-mcp --any-repo` and the agent passes `projectPath`
+on every call. Project-scope entries keep `--repo-root .`.
 
 Clients started from a desktop icon may not see `~/.local/bin` on `PATH`; if a server will not
 start there, use the absolute path of the binary in the entry.

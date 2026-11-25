@@ -474,6 +474,19 @@ flowchart LR
   mcp-wire` — and Squad writes no harness MCP configuration for any harness ([ADR
   0052](../adr/0052-docs-branch-writes-repository-scope-mcp-configuration.md)).
 
+  **The one exception is Antigravity's user MCP config.** Antigravity starts every MCP server from `/`, so a
+  `--repo-root .` entry never finds a repository. A global `squad install` or `squad update` that includes
+  Antigravity therefore calls `AntigravityMcpConfiguration.Ensure`, which inserts one `kw-docs` entry
+  (`kyber-weave-mcp --any-repo`) into `<agy global root>/mcp_config.json` (`~/.gemini/config/` by default) and
+  nothing else ([ADR 0094](../adr/0094-squad-inserts-the-kw-docs-entry-into-antigravitys-user-mcp-config.md)).
+  It is a byte splice (`JsonServerSplice`) written through `ISquadFileAccess.WriteAllBytesAtomic`, which keeps the
+  file's Unix mode and symbolic link; it never replaces an existing `kw-docs` entry (it warns when that entry
+  lacks `--any-repo`), refuses a malformed, non-object or over-1-MiB file (size probed with
+  `ISquadFileAccess.GetLength` before any read), writes nothing on a dry run or at instance or project scope, and
+  never puts file contents in a warning. `squad uninstall` leaves the entry. The command is the absolute path
+  PATH names for `kyber-weave-mcp`, resolved by `SquadDocsServerCommand` for install, update and `squad doctor`
+  alike, so the rendered agent files and the config entry agree.
+
 ### Cross-Process Mutex Lease
 
 - **Named OS Mutex**: Every mutating operation acquires an exclusive OS-named mutex (`kyber-weave-squad-<root-key>`).
@@ -1152,12 +1165,13 @@ and validates.
   which is the withholding, because a `deny` would assert a decision the capability lattice cannot
   derive. `AntigravityRenderer` emits an `mcpServers` array entry `{name, command, args}` for every
   entitled agent, with `command` and `args` read from the squad's own `mcp.json`, so the rendered
-  line is the one the operator's MCP configuration launches; a missing or malformed declaration
-  yields no entry. MCP names never enter that target's `tools:` list — Antigravity resolves it
+  line is the one the operator's MCP configuration launches, except that the `kw-docs` args are
+  `[--any-repo]` (the command is the absolute `kyber-weave-mcp` path in a global render and the bare name in a
+  project render, which may be committed); a missing or malformed declaration yields no entry. MCP names never enter that target's `tools:` list — Antigravity resolves it
   against its executor registry and fails fast on an unmapped name — and no `enable_mcp_tools` key
   is emitted, because a frontmatter-declared server is not gated by it. On both Kilo and
   Antigravity the server half stays the operator's: Kilo's `mcp` key in `kilo.jsonc`, and
-  Antigravity's workspace `.agents/mcp_config.json`. Cursor,
+  Antigravity's workspace `.agents/mcp_config.json` (its user file is the exception above). Cursor,
   Codex, and Warp carry no per-agent key at all: Cursor subagents inherit every parent tool
   including MCP, Codex custom agents inherit the parent's MCP servers and cannot override them,
   and Squad's Warp surface is role skills, which carry no tool scoping. A per-agent key invented
@@ -1351,7 +1365,7 @@ The grant spelling is the harness's, not ours:
 | `opencode`, `kilo` | `kw-docs_*` |
 | `pi` | `ext:pi-mcp-adapter/mcp__kw_docs__<tool>` |
 | `factory` | enumerated `{server}___{tool}` names in `tools` — one per roster tool of `kw-docs` for every entitled droid (e.g. `kw-docs___docs_get_source_repository_and_revision`), plus `codegraph___codegraph_explore` for read-entitled specialists (`conductor` keeps the `kw-docs` family alone); `mcpServers` retains the granted names as declared intent |
-| `antigravity` | `mcpServers: [{name: kw-docs, command: kyber-weave-mcp, args: [--repo-root, .]}]` |
+| `antigravity` | `mcpServers: [{name: kw-docs, command: kyber-weave-mcp, args: [--any-repo]}]` (command is the absolute path in a global render) |
 | `cursor`, `codex`, `warp` | no per-agent key; the session's server is the grant |
 
 The `kw-arbiter` grants use the same per-target forms with `kw-arbiter` in place of `kw-docs` —

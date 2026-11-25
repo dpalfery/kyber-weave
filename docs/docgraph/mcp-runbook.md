@@ -6,7 +6,7 @@ status: current
 component: DocGraph
 source-root: src/KyberWeave.Mcp
 owner: dpalfery
-last-reviewed: 2026-11-24
+last-reviewed: 2026-11-25
 decided-by:
   - adr/0051-dotnet-cli-spawns-stdio-children-through-one-bounded-session
   - adr/0052-docs-branch-writes-repository-scope-mcp-configuration
@@ -84,7 +84,7 @@ keys differ, and they differ more than you would expect:
 | [ZCode](#zcode) | `zcode.json`, or `.zcode/config.json` | `mcp.servers` | A nested key path, and the files are found by walking up to the worktree root |
 | [Command Code](#command-code) | `.mcp.json` (repo root) | `mcpServers` | Same shape as Claude Code; a subagent reaches a tool only when its own `tools` list names it |
 | [Kilo](#kilo) | `kilo.jsonc` | `mcp` | Per-agent reach is the agent frontmatter `permission` map entry `kw-docs_*: allow` — an approval grant, not isolation |
-| [Antigravity](#antigravity) | `.agents/mcp_config.json` (workspace) | `mcpServers` | The agent file carries its own `mcpServers` entry; MCP tools default to Ask until a policy pattern allows them |
+| [Antigravity](#antigravity) | `~/.gemini/config/mcp_config.json` (user, written by `squad install --global`) or `.agents/mcp_config.json` (workspace) | `mcpServers` | Starts servers from `/`, so the entry is `--any-repo`; the agent file carries its own `mcpServers` entry; MCP tools default to Ask until a policy pattern allows them |
 | [Pi](#pi) | `.mcp.json` (repo root), or `~/.config/mcp/mcp.json` | — | Read by the `pi-mcp-adapter` extension (6.0.0 or later) in the adapter's own schema; a project-scoped entry needs a trust approval on first use |
 | [Warp](#warp) | Warp's own MCP settings | — | Squad's Warp surface is role skills, which carry no tool scoping |
 
@@ -94,6 +94,14 @@ inherits every parent tool including MCP tools, and a Codex custom agent inherit
 servers with no way to override them. Nothing Squad renders on those two targets changes what an
 agent can call, which is why neither has a per-agent grant — wire the server and every agent,
 `conductor` included, already sees it.
+
+**User-scope entries use `--any-repo`.** A server declared once for every project (Codex's `~/.codex/config.toml`,
+Pi's `~/.config/mcp/mcp.json`, Kilo's and ZCode's user config, Warp's settings, Copilot CLI's
+`~/.copilot/mcp-config.json`, Antigravity's user and workspace files) has no repository to point
+`--repo-root` at, and the directory the harness starts it in is not one this repository has probed for every
+client. `kyber-weave-mcp --any-repo` is correct whatever that directory is; the agent then passes `projectPath` on
+every call. Project-scope entries keep `--repo-root .`, resolved against the client's working directory, except
+Antigravity's workspace file, which Antigravity also starts from `/`.
 
 Use an **absolute path** to the binary in any client launched from a desktop icon rather
 than a shell — GUI processes inherit a minimal PATH that usually excludes `~/.local/bin`,
@@ -333,7 +341,7 @@ the rewrite above keeps its outcome — the hyphen is still in the server key, a
 still leaves it alone.
 
 **Your half:** the server entry in `kilo.jsonc`'s `mcp` key under the key `kw-docs`, launched as
-`kyber-weave-mcp --repo-root .`. An agent file cannot add a server and `squad install` writes no
+`kyber-weave-mcp --any-repo` in the user-level config (a project `kilo.jsonc` may keep `--repo-root .`). An agent file cannot add a server and `squad install` writes no
 harness settings file, so a rendered grant with no `mcp` entry reaches nothing. Then check the repository
 rather than assuming it — call `docs_get_source_repository_and_revision` (its only argument is the optional `projectPath`)
 and confirm its `repo=` equals `git rev-parse --git-common-dir` in the repository you meant.
@@ -342,19 +350,34 @@ Do not hand-add a permission key to a rendered agent file: install and update ow
 
 ### Antigravity
 
-Workspace-scoped, at `.agents/mcp_config.json` in the repository
-(antigravity.google/docs/mcp, read 2026-10-31):
+Antigravity reads MCP servers from a user file, `~/.gemini/config/mcp_config.json`, and a workspace file,
+`<workspace>/.agents/mcp_config.json` (antigravity.google/docs/mcp, read 2026-11-25); an entry may also carry a
+`cwd`. **It starts every server once, from its hub process, with the working directory `/`** (verified on macOS,
+2026-11-25). A `--repo-root .` entry therefore resolves to `/`, exits with `KW-MCP-ROOT-001`, and the session has
+no `kw-docs` tools. Use [any-repo mode](#any-repo-mode-no-bound-root), which does not depend on the working
+directory:
 
 ```json
 {
   "mcpServers": {
     "kw-docs": {
       "command": "kyber-weave-mcp",
-      "args": ["--repo-root", "."]
+      "args": ["--any-repo"]
     }
   }
 }
 ```
+
+**What Squad writes.** A global `squad install` or `squad update` that includes Antigravity inserts exactly this
+entry into `~/.gemini/config/mcp_config.json` ([ADR 0094](../adr/0094-squad-inserts-the-kw-docs-entry-into-antigravitys-user-mcp-config.md)),
+the one harness MCP file Squad writes. `command` is the absolute path PATH names for `kyber-weave-mcp` when it is
+found (the bare name, with a warning, when not). The insertion is a byte splice: every other server and every other
+byte of the file stay as they were, and the file's mode and symbolic link are kept. It is idempotent, never
+replaces an existing `kw-docs` entry, and refuses a file that is not valid JSON, not an object, or over 1 MiB. A
+dry run only reports. A warning names the file and a fixed reason, never any of the file's content, because it can
+hold other servers' keys. `squad uninstall` leaves the entry. An existing `kw-docs` entry whose `args` lack
+`--any-repo` (for example one pinned with `--repo-root <path>`) is left as it is, with one warning: switch it by
+hand to `kyber-weave-mcp --any-repo` to serve every repository.
 
 MCP tools default to **Ask** on Antigravity, so approval goes through that client's
 `mcp(server/*)` policy patterns rather than through an agent file.
@@ -367,11 +390,13 @@ renderer adds one array entry to the agent file under `.agents/agents/<name>/age
 mcpServers:
   - name: kw-docs
     command: kyber-weave-mcp
-    args: [--repo-root, .]
+    args: [--any-repo]
 ```
 
-`command` and `args` are read from the squad's own `mcp.json`, so the rendered line is the line
-your MCP configuration launches. A squad that declares no such server, or declares it malformed,
+A global render writes the absolute path PATH names for `kyber-weave-mcp` as `command` (Antigravity does not expand
+`~`), and a project render, whose files may be committed, writes the bare name; `squad doctor` resolves the command
+the same way install and update do, so its expected files match what was written. The server name comes from the
+squad's own `mcp.json`, whose `--repo-root .` line other clients still use. A squad that declares no such server, or declares it malformed,
 yields no entry rather than a guessed one. An agent whose profile is outside the entitlement also
 gets no entry, and its degradation record states that the server was withheld, for which profile,
 and which capability the entitlement rests on.
@@ -389,12 +414,14 @@ resolves that list against its executor registry and fails fast on an unmapped n
 process still exits 0, so a caller reading only the exit code sees success). `enable_mcp_tools:
 false` does not block a server declared in frontmatter, so no such key is emitted to switch one on.
 Unknown frontmatter keys are ignored, which is why the entry has to be the probed shape rather than
-merely a plausible one. `--repo-root .` is workspace-relative on purpose: a probe with an absolute
-path returned the global server's root, so a same-named global definition can take precedence over
-the per-agent entry — keep the workspace file pointing at the same root.
+merely a plausible one. A probe with an absolute `--repo-root` returned the global server's root, so a
+same-named global definition can take precedence over the per-agent entry; the agent entry and the
+user and workspace files all carry the same any-repo command, so whichever wins serves the right
+repository.
 
-**Your half, beyond the agents:** the workspace `.agents/mcp_config.json` above has to name the
-server, and that client's own policy patterns decide whether a call is approved. Then compare the
+**Your half, beyond the agents:** the user file Squad writes (or the workspace `.agents/mcp_config.json`
+above, written by hand) has to name the server, and that client's own policy patterns decide whether a
+call is approved. The agent passes `projectPath` on every call. Then compare the
 provenance rather than trusting the answer: call `docs_get_source_repository_and_revision` and
 check that its `repo=` equals `git rev-parse --git-common-dir`.
 
@@ -403,7 +430,7 @@ check that its `repo=` equals `git rev-parse --git-common-dir`.
 Pi reaches MCP through the `pi-mcp-adapter` extension, which reads its servers from a project
 `.mcp.json`, a user-global `~/.config/mcp/mcp.json` or `~/.agents/mcp.json`, or Pi's own
 agent-directory `mcp.json`. A project-scoped server needs a trust approval the first time the
-project uses it. Declare `kw-docs` there launched as `kyber-weave-mcp --repo-root .`; as on
+project uses it. Declare `kw-docs` there launched as `kyber-weave-mcp --any-repo` in a user-global file (a project `.mcp.json` may keep `--repo-root .`); as on
 every other client, `squad install` writes none of those files, and the schema of the entry is the
 adapter's own — read the package's documentation for the key rather than copying a rendered agent
 file, which carries no server definition at all.
@@ -462,7 +489,7 @@ rename and names the key as it then stood. Then compare provenance as everywhere
 ### Warp
 
 Warp supports MCP (docs.warp.dev/agents/capabilities/mcp, read 2026-10-31), and the server is
-configured in Warp itself. There is no per-agent grant to make here: Squad's Warp surface is role
+configured in Warp itself; launch it as `kyber-weave-mcp --any-repo`, which does not depend on the directory Warp starts it in. There is no per-agent grant to make here: Squad's Warp surface is role
 skills, and a skill carries no tool scoping, so every deployed role — `conductor`'s lowered skill
 included — runs in a session whose MCP you configure. The file and key are Warp's own; Squad
 writes neither, and no per-agent claim is made.
@@ -540,18 +567,20 @@ Note the underscore: the table is `mcp_servers`, not `mcpServers`.
 ```toml
 [mcp_servers.kw-docs]
 command = "kyber-weave-mcp"
-args = ["--repo-root", "/path/to/your/repo"]
+args = ["--any-repo"]
 startup_timeout_sec = 10
 ```
 
 Or from the CLI:
 
 ```bash
-codex mcp add kw-docs -- kyber-weave-mcp --repo-root /path/to/your/repo
+codex mcp add kw-docs -- kyber-weave-mcp --any-repo
 ```
 
-Codex has no workspace-variable substitution, so an absolute path is the only reliable
-option in the user-level config. Verify with `codex mcp list`.
+Codex has no workspace-variable substitution, so a pinned `--repo-root` would serve one repository only;
+`--any-repo` serves every initialized repository the agent names with `projectPath`. In a trusted
+project's `.codex/config.toml` an absolute `--repo-root /path/to/your/repo` still works. Verify with
+`codex mcp list`.
 
 ### opencode
 
@@ -595,7 +624,8 @@ an entry inside `mcp.servers` is not pinned anywhere in this repository**, so no
 printed here and none is written: an invented body produces a configuration ZCode cannot
 load, which is worse than a step that is visibly the operator's. Read the body's keys from
 ZCode's own `mcpSchema` — the source the 2026-09-21 verification used — and declare the
-server named `kw-docs` there, launched as `kyber-weave-mcp --repo-root .`.
+server named `kw-docs` there, launched as `kyber-weave-mcp --repo-root .` in a project file and as
+`kyber-weave-mcp --any-repo` in the user tier.
 
 The user tier (`<storage>/cli/config.json`) is **user scope**: the check never reads it and
 the repair never writes it. A server wired only there is reported as not wired for the
@@ -635,6 +665,26 @@ The server never walks up to a parent Git repository and never serves an unbound
 corpus. If the selected directory was not initialized, startup fails on stderr with an
 actionable `kyber-weave docs init "<path>"` command. This prevents two repositories under a
 shared parent directory from accidentally reading one another's documentation.
+
+#### Any-repo mode: no bound root
+
+A client that starts its MCP servers once, globally, from a directory that is not a repository (Antigravity
+starts them from `/`) cannot satisfy the order above. `kyber-weave-mcp --any-repo` starts with no bound root
+and serves whichever initialized repository each call names.
+
+- **Every tool requires `projectPath`**: the absolute path of a directory inside the repository being worked on.
+  A call without it returns the provenance line `provenance: root=(none) mode=any-repo` and `projectPath is
+  required: this server runs in any-repo mode. Pass the absolute path of a directory inside the repository you
+  are working in.` The server instructions tell the agent the same.
+- **What `projectPath` must be.** An existing directory whose git top level holds a Kyber-Weave host
+  configuration (`kyber-weave docs init`). Each failure is refused with `projectPath was refused: <reason>` after
+  the same provenance line. The server never walks up past the git top level and never falls back to another root.
+- **Conflicts refuse to start.** `--any-repo` with `--repo-root` or `--expect-root` writes `KW-MCP-ROOT-003: …`
+  to stderr and exits 1. In this mode `KYBER_WEAVE_REPO_ROOT` and `KYBER_WEAVE_EXPECT_ROOT` are ignored, so an
+  ambient variable cannot silently bind a server that was asked to be unbound.
+- **Per-root state** is built on first use and kept for the four most recently used roots (here the server has no
+  root of its own, so four is the total). A path already resolved is remembered (up to 64), so repeated calls
+  spawn no git; building one root's tools does not block calls for another.
 
 ### Asserting the root with `--expect-root`
 
@@ -1189,7 +1239,8 @@ came from, which is what decides whether a code answer is about your branch.
 
 The server binds one root at startup, but agent runs work in linked worktrees created after it
 started, so an answer from the bound root can describe a different branch than the one being
-edited. Every tool therefore takes a `projectPath` (optional, except on the two plan lifecycle tools, the deliver tool and the tooling-check tool), the same name CodeGraph's
+edited. (A server started with [`--any-repo`](#any-repo-mode-no-bound-root) has no bound root: `projectPath`
+is then required on every tool.) Every tool therefore takes a `projectPath` (optional, except on the two plan lifecycle tools, the deliver tool and the tooling-check tool), the same name CodeGraph's
 `codegraph_explore` uses: the absolute path of a worktree of this repository. Omit it and the
 call is answered from the server's root, as before.
 
@@ -2128,6 +2179,9 @@ index of the root it is bound to, and nothing else.
 | Symptom | Cause |
 |---|---|
 | The server never starts | `kyber-weave-mcp` is not on the PATH the client inherits — use an absolute path |
+| The server exits at start with `KW-MCP-ROOT-001`, or an Antigravity session has no `kw-docs` tools | The client started the server in a directory that is not an initialized repository (Antigravity uses `/`). Launch it as `kyber-weave-mcp --any-repo` and pass `projectPath` per call — see [Any-repo mode](#any-repo-mode-no-bound-root) |
+| The server exits at start with `KW-MCP-ROOT-003` | `--any-repo` was combined with `--repo-root` or `--expect-root`; use one mode |
+| Every tool answers `projectPath is required` | The server runs in any-repo mode; pass the absolute path of a directory inside the repository |
 | The client lists no tools at all | Wrong file or wrong key for that client — check the table in [Wiring it up](#wiring-it-up) |
 | A Factory Task-dispatched droid lists no MCP tools | `squad install` and `squad update` print `factory-mcp-not-configured` when no Factory config file defines a server the droids are allowed. Check the droid's own `{server}___{tool}` entries under `tools` in `.factory/droids/<name>.md` **and** the server entry in `.factory/mcp.json` or `~/.factory/mcp.json`. The app-level file alone is not enough, and the droid's `mcpServers` whitelist alone is not enough either: the harness grants only the tool ids the `tools` list names. Every droid the shipped squad renders is granted `kw-docs` — `conductor` included — so a `[]` no longer means "this is the orchestrator": it means the droid's capability profile grants no read entitlement, or the squad declares no servers ([ADR 0050](../adr/0050-universal-kyber-weave-mcp-grant.md)). Droid-level visibility is Squad's rendered grant, not your client config — see [Factory](#factory) |
 | A ZCode agent lists no MCP tools, and `squad doctor` fails the install | ZCode expands no wildcard and `toolchain.yml`'s `required-mcp-tools` are hard connected-server requirements for every agent, `conductor` included. Declare the `kw-docs` server in the ZCode MCP configuration, or the install does not pass |

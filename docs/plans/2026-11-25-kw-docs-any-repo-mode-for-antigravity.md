@@ -334,3 +334,30 @@ The end-of-run review council reviews the whole change under the `code-review` s
 ## docs-dev closeout
 
 docs-dev harvests every Design harvest row: the new ADR 0094 and the ADR 0052 amendment line (D18); `docs/kyber-squad/architecture.md` §3 exception; `docs/docgraph/mcp-runbook.md` (any-repo mode, Antigravity, every user-scope recipe per D19, `KW-MCP-ROOT-003`); `.apm/skills/kw-onboarding/references/mcp-and-index.md`; `src/KyberWeave.Mcp/AGENTS.md`; `docs/reference/seams.md`. It runs the content tests that read `mcp-and-index.md` (`KyberWeave.Content.Tests.WorkerRuleRefusedFolderTests`) and the docs gates, then fills the Closeout mapping.
+
+## Completion summary
+
+All five tasks are integrated on the run branch: T4 `12b869e31`, T1 `3064a64e6`, T5 `c3ed8c48d`, T2 `3b2b99079`, T3 `5d67a2c50`, and T3's rework `118a3597b`, which makes `squad doctor` render Antigravity with the same resolved command as install and update through the new shared `SquadDocsServerCommand`. Each task's gate evidence is recorded by its own gate run. Documentation was harvested into the ADR 0094 (new) and the ADR 0052 amendment, the MCP runbook, the Squad architecture, onboarding and requirements pages, the kw-onboarding table, `src/KyberWeave.Mcp/AGENTS.md` and the seam register.
+
+NOT VERIFIED: file-mode and symbolic-link preservation on a real disk (`AtomicFileUnixModeTests`, `PhysicalSquadFileAccessWriteTests`) — they run only in the CI integration job (D28).
+
+NOT VERIFIED: how each harness other than Antigravity starts a user-scope server (working directory) — not probed live (D19); the runbook recommends `--any-repo` for each.
+
+## Closeout mapping
+
+| ID | Destination |
+|---|---|
+| DocGraph, D1, D3, D4, D5, D6, D7, D8, D9 | [Any-repo mode: no bound root](../docgraph/mcp-runbook.md#any-repo-mode-no-bound-root), [Naming your worktree with `projectPath`](../docgraph/mcp-runbook.md#naming-your-worktree-with-projectpath) |
+| D2, D24 | [Any-repo mode: no bound root](../docgraph/mcp-runbook.md#any-repo-mode-no-bound-root); the composition detail is in `src/KyberWeave.Mcp/AGENTS.md` (an agent-guidance file, not a governed document) |
+| KyberSquad, D10, D11, D12, D25, D26 | [Antigravity](../docgraph/mcp-runbook.md#antigravity), [Squad architecture, Antigravity user MCP config](../kyber-squad/architecture.md#cross-process-mutex-lease) |
+| D13, D14, D15, D16, D17, D18, D20 | [ADR 0094](../adr/0094-squad-inserts-the-kw-docs-entry-into-antigravitys-user-mcp-config.md), [ADR 0052 amendment](../adr/0052-docs-branch-writes-repository-scope-mcp-configuration.md) |
+| D19 | [Wiring it up, user-scope entries](../docgraph/mcp-runbook.md#wiring-it-up), [kw-onboarding wiring table](../../.apm/skills/kw-onboarding/references/mcp-and-index.md) |
+| D21, D28, D29, D30 | [Seam register](../reference/seams.md) |
+| D22, D27 | Documentation waiver — a decision to leave `products/kyber-squad/mcp.json` and the `docs mcp-wire` catalog unchanged; the runbook states that other clients keep `--repo-root .`. |
+| D23, AP1 | Documentation waiver — task rating and approval record, no lasting design content. |
+| Design harvest: DocGraph runbook (root and `projectPath`) | [Any-repo mode: no bound root](../docgraph/mcp-runbook.md#any-repo-mode-no-bound-root) |
+| Design harvest: DocGraph runbook (Antigravity, Warp, Codex, Pi, ZCode, Kilo, Copilot CLI) | [Antigravity](../docgraph/mcp-runbook.md#antigravity), [Codex CLI](../docgraph/mcp-runbook.md#codex-cli) |
+| Design harvest: KyberSquad architecture | [Squad architecture](../kyber-squad/architecture.md) |
+| Design harvest: ADR 0094 and ADR 0052 amendment | [ADR 0094](../adr/0094-squad-inserts-the-kw-docs-entry-into-antigravitys-user-mcp-config.md) |
+| Design harvest: onboarding table | [kw-onboarding wiring table](../../.apm/skills/kw-onboarding/references/mcp-and-index.md) |
+| Design harvest: Mcp AGENTS.md and seams | [KyberWeave.Mcp AGENTS.md](../../src/KyberWeave.Mcp/AGENTS.md), [Seam register](../reference/seams.md) |

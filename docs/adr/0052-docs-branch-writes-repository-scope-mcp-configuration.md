@@ -5,7 +5,7 @@ doc-type: adr
 status: current
 component: DocGraph
 owner: dpalfery
-last-reviewed: 2026-11-05
+last-reviewed: 2026-11-25
 decided-by: []
 supersedes: []
 ---
@@ -25,6 +25,11 @@ requires. [ADR 0058](0058-mcp-servers-and-tools-are-named-by-purpose.md) retires
 and tool names, so a repository-scope configuration holds entries a rename has to reach;
 `docs mcp-migrate` renames the property-name token in place and nothing else. Decision 2 is
 untouched by this amendment: user-scope configuration is still never written and never read.
+
+Amended 2026-11-25, in place: decision 2 is narrowed for one write that is not the docs branch's.
+[ADR 0094](0094-squad-inserts-the-kw-docs-entry-into-antigravitys-user-mcp-config.md) has Squad insert one
+`kw-docs` entry into Antigravity's user MCP config on a global install or update. The docs branch's writers
+stay the closed list above and still never write or read user scope.
 
 ## Context
 

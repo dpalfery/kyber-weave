@@ -4,7 +4,7 @@ title: Seams, adapters and the exceptions they keep
 doc-type: reference
 status: current
 owner: dpalfery
-last-reviewed: 2026-11-18
+last-reviewed: 2026-11-25
 component: CI Pipelines
 ---
 
@@ -53,6 +53,12 @@ Notes.
 - The narrow file interfaces (`IRepositoryFileStore`, `IDoctorFileSystem`, `ISquadFileAccess`,
   `ISquadLinkFileSystem`, `IFileStatReader`, `IExclusiveFileWriter`, `IContainedFileReader`) are role
   views over the file-system seam, so a class can ask for the write it needs and nothing more.
+- `ISquadFileAccess` also carries `WriteAllBytesAtomic` (atomic replace, parent directory created, Unix mode kept,
+  a symbolic link written through: `PhysicalSquadFileAccess` calls `AtomicFile` with `preserveUnixFileMode`) and
+  `GetLength` (the length without a read, a link followed, `FileNotFoundException` when missing). The in-memory
+  fake writes through a file link as the seam documents. `SquadFileAccessWriteContract` runs over the fake in unit
+  tests; the mode and link proof on disk is `PhysicalSquadFileAccessWriteTests` and `AtomicFileUnixModeTests` in
+  `KyberWeave.Integration.Tests`, which run in CI only.
 - The corpus seam is test infrastructure, not a product seam. It lives in the shared testing library
   so a content test says what it reads instead of walking the tree for the repository root.
 - `FakeRunStateStore` is the shared fake for `IRunStateStore`, the run records `run start` writes. The
@@ -98,7 +104,7 @@ task's list.
 | `ArbiterLogFiles` | File system (`IArbiterLogStore`) | `KyberWeave.Data` | `Arbiter/Ledger/ArbiterLogFiles.cs` | The Arbiter's append-only log: one line per append under an exclusively opened lock file, plus the lock-free windowed read every ledger, decision log and run store shares |
 | `FileStatReader` | File system | `KyberWeave.Data` | `Arbiter/FileStatReader.cs` | Length and last-write time |
 | `FileLinkProbe` | File system | `KyberWeave.Data` | `Hooks/Arbiter/FileLinkProbe.cs` | Link target and link kind |
-| `AtomicFile` | File system | `KyberWeave.Kernel` | `FileSystem/AtomicFile.cs` | The kernel-side atomic write, rename and link resolution the file-system adapter builds on |
+| `AtomicFile` | File system | `KyberWeave.Kernel` | `FileSystem/AtomicFile.cs` | The kernel-side atomic write, rename and link resolution the file-system adapter builds on; an opt-in five-argument `WriteAllBytes` overload (`preserveUnixFileMode`) copies the target's Unix mode onto the temporary before the rename, and the existing overloads do not |
 | `BoundedFileReader` | File system | `KyberWeave.Kernel` | `FileSystem/BoundedFileReader.cs` | The kernel-side bounded stream read |
 | `PhysicalPathResolver` | Paths | `KyberWeave.Data` | `Paths/PhysicalPathResolver.cs` | The path adapter |
 | `FileSystemPathResolver` | Paths | `KyberWeave.Data` | `Paths/FileSystemPathResolver.cs` | The base implementation over the file-system seam |
