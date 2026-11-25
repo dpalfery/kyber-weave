@@ -601,3 +601,41 @@ run's base (the stacked branch, D1).
 - No ADR: ADR waiver — the reader refines the existing collector architecture and reuses the deleted
   TypeScript reader's design.
 - Run `kyber-weave docs standards migrate` for the standards warning period, committed with the closeout.
+
+## Completion summary
+
+All 15 tasks landed and the review council approved at cycle 3 (LOW risk, 0 findings, 25 of 25 gates passed). Landed commits:
+
+| Task | Commits |
+|---|---|
+| T1 | `2a0a7cd1e` |
+| T2 | `78cbaab0f`, `3005b104d`, `3f84f6646` |
+| T3 | `4e2868bdb`, `f938a15f4` |
+| T4 | `6738bcf72` |
+| T5 | `f0b9c5d28`, `946269123`, `86a14f43f` |
+| T6 | `62b97c559` |
+| T7 | `3f68701e8`, `89cc0d526` |
+| T8 | `886b7e954` |
+| T9 | `ec4b1f110`, `286e232e2`, `e95a7c846` |
+| T10 | `c9c352cc0` |
+| T11 | `47a3087d6`, `854c70172`, `e13ce77ca`, `e9f29cf7b` |
+| T12 | `2ee21bab5` |
+| T13 | `4bb3eed83`, `6b471f282` |
+| T14 | `2ecd7997f`, `f923e3c2c` |
+| T15 | `3ebe97b69` |
+| Review fixes | `f6f164ad0`, `364a2bb71`, `ef6d3a74d` |
+
+NOT VERIFIED: the Playwright end-to-end runs (T12-T15) were not re-run by docs-dev — they need a built server and browser; the task gates recorded them.
+
+## Closeout mapping
+
+| ID | Destination |
+|---|---|
+| KyberDash, D1, D2, D3, D4, D6, D7, D11, D12, D13, D16, D17 | [The SQLite source reader](../dash/architecture.md#the-sqlite-source-reader) |
+| D5 | Documentation waiver — a test-layout choice for this change; the shape (in-memory fake for logic, real SQLite files for adapter and SQL) is stated in the SQLite standard and the test standard. |
+| D8, D9, D10, D18 | [Devin field register rows](../dash/field-register.md#devin), [Kilo and Warp rows](../dash/field-register.md#kilo) |
+| D14 | [Cursor field register rows](../dash/field-register.md#cursor) |
+| D15 | [SQLite stores read by the C# import](../dash/telemetry-inventory.md#sqlite-stores-read-by-the-c-import) |
+| AP1 | Documentation waiver — approval record, no lasting design content. |
+| Problem codes and the macOS permission (F6) | [Runbook, SQLite harness problems](../dash/runbook.md#8a-a-sqlite-harness-import-records-sqlite_source_unreadable-or-sqlite_source_schema_missing) |
+| D2 stale rules file | [SQLite rules](../standards/sqlite/sqlite.rules.md) |

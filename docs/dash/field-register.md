@@ -1139,7 +1139,7 @@ Kilo ingests two native surfaces via `KiloMapper` into `CollectedBatch`: `kilo-s
 | `KiloMessageData` | `InputTokens` | mapped | `record_token_count.token_count`, `record_reported_total.token_count` | Exclusive input tokens (`token_class = input`, `direction = input`) across the `tokens`, `usage`, and flat spellings. |
 | `KiloMessageData` | `OutputTokens` | mapped | `record_token_count.token_count`, `record_reported_total.token_count` | Output tokens (`token_class = output`, `direction = output`) across the `tokens`, `usage`, and flat spellings. |
 | `KiloMessageData` | `ReasoningTokens` | mapped | `record_token_count.token_count` | Reasoning tokens (`token_class = reasoning`); reported totals carry input/output directions only. |
-| `KiloMessageData` | `CacheReadTokens` | mapped | `record_token_count.token_count` | Cache-read tokens (`token_class = cache_read`); reported totals carry input/output directions only. |
+| `KiloMessageData` | `CacheReadTokens` | mapped | `record_token_count.token_count` | Cache-read tokens (`token_class = cache_read`); reported totals carry input/output directions only. The record's reported input total is fresh input plus cache read plus cache write. |
 | `KiloMessageData` | `CacheWriteTokens` | mapped | `record_token_count.token_count` | Cache-write tokens (`token_class = cache_write`); reported totals carry input/output directions only. |
 | `KiloMessageData` | `ParentId` | dropped | — | Capture-store join key (`parentID`); with no offline capture store the `system_prompt` and `tool_definitions` buckets stay absent. |
 | `KiloPartData` | `PartType` | mapped | `content_part.bucket` | Selects `conversation_history` (`text`/`markdown`), `tool_result_content` (`tool`), or no bucket. |
