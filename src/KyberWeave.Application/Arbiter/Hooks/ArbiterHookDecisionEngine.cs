@@ -329,12 +329,32 @@ public sealed class ArbiterHookDecisionEngine : IContextualHookDecisionEngine, I
 
         BackgroundDispatch dispatch = record.Dispatch;
         HookOutcome outcome = Decide(
-            harness, dispatch.Caller, dispatch.Target, dispatch.Prompt, response, isPost: true, config, context,
+            harness, ReturnCaller(dispatch, record.PreId, arbiterDirectory), dispatch.Target, dispatch.Prompt, response,
+            isPost: true, config, context,
             toolCallId: null, sessionId: dispatch.SessionId, preId: record.PreId);
         _background.Save(
             arbiterDirectory,
             record with { LastResponseDigest = digest, PendingNote = string.IsNullOrWhiteSpace(outcome.Reason) ? null : outcome.Reason });
         return outcome;
+    }
+
+    /// <summary>
+    /// The caller a background return is judged as. The launch event comes from the dispatching agent's own turn, and
+    /// on the main thread that names no agent, while the dispatch's pre event already resolved the caller from its
+    /// header. Judged as unidentified, a worker's return would classify as an investigation and skip the delegate
+    /// return rules. The saved record keeps the launch's caller, which is what its pending notes are matched by.
+    /// </summary>
+    private string ReturnCaller(BackgroundDispatch dispatch, string preId, string arbiterDirectory)
+    {
+        if (!IsUnidentified(dispatch.Caller))
+        {
+            return dispatch.Caller;
+        }
+
+        string? preCaller = _state.OpenLedger(arbiterDirectory).ReadAll()
+            .FirstOrDefault(e => e.Phase == ArbiterLedgerPhases.Pre && string.Equals(e.Id, preId, StringComparison.Ordinal))
+            ?.Caller;
+        return string.IsNullOrWhiteSpace(preCaller) ? dispatch.Caller : preCaller;
     }
 
     /// <inheritdoc/>
@@ -386,7 +406,8 @@ public sealed class ArbiterHookDecisionEngine : IContextualHookDecisionEngine, I
         string? sessionId,
         IReadOnlyList<string> agentNames,
         HookContext context,
-        string? agentId = null)
+        string? agentId = null,
+        string? stopEvent = null)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(harness);
         ArgumentNullException.ThrowIfNull(agentNames);
@@ -395,7 +416,7 @@ public sealed class ArbiterHookDecisionEngine : IContextualHookDecisionEngine, I
         string arbiterDirectory = ResolveArbiterDirectory(context.RepoRoot, context.Scope, context.HomeDirectory);
         IArbiterLedger ledger = _state.OpenLedger(arbiterDirectory);
         IReadOnlyList<ArbiterLedgerEvent> events = ledger.ReadAll();
-        string stopEvent = StopEventOf(harness);
+        stopEvent ??= StopEventOf(harness);
         string agent = agentNames.Count > 0 ? agentNames[0] : "(unnamed)";
 
         // A pre row written before the hook recorded the session names none, and no stop event can be matched to
@@ -677,7 +698,7 @@ public sealed class ArbiterHookDecisionEngine : IContextualHookDecisionEngine, I
             HookOutcome mapped = MapResult(result, harness, resolved, prompt, effective, arbiterDirectory, context, toolOutput, isPost);
             return isPost
                 ? WithAutonomousPlanNote(mapped, result, target, toolOutput, toolCallId, preId is null, arbiterDirectory, context)
-                : mapped;
+                : StopUnbuildableDispatch(mapped, result, prompt, target, arbiterDirectory, context);
         }
         catch (Exception exception) when (exception is not OperationCanceledException)
         {
@@ -690,6 +711,49 @@ public sealed class ArbiterHookDecisionEngine : IContextualHookDecisionEngine, I
         {
             owned?.Dispose();
         }
+    }
+
+    /// <summary>The <c>recovered</c> value of the row that closes a dispatch whose task prompt could not be built.</summary>
+    internal const string PromptStoppedClose = "prompt-stopped";
+
+    /// <summary>
+    /// Stops a dispatch the rules let through when its task prompt cannot be built, and closes its pre event.
+    /// </summary>
+    /// <remarks>
+    /// The rules judge the short dispatch first, so a rule's denial still outranks a prompt that cannot be built.
+    /// When they let it run, the adapter would stop it anyway, before any worker starts. Its pre event would then
+    /// stay open with no return ever coming, and hold its task's files against every later dispatch for the whole
+    /// unreturned horizon. The prompt is built here instead, through the same insertion the adapters use, and a
+    /// stop closes the pre with a recovered row and denies with the stop's own text.
+    /// </remarks>
+    private HookOutcome StopUnbuildableDispatch(
+        HookOutcome outcome,
+        ArbiterEvaluationResult result,
+        string prompt,
+        string? target,
+        string arbiterDirectory,
+        HookContext context)
+    {
+        if (outcome.Kind == HookOutcomeKind.Deny || string.IsNullOrEmpty(result.LedgerId))
+        {
+            return outcome;
+        }
+
+        DispatchInsertion insertion = DispatchPromptInsertion.Expand(prompt, context, target);
+        if (insertion.Kind != DispatchInsertionKind.Stopped)
+        {
+            return outcome;
+        }
+
+        IArbiterLedger ledger = _state.OpenLedger(arbiterDirectory);
+        ArbiterLedgerEvent? pre = ledger.ReadAll().FirstOrDefault(e =>
+            e.Phase == ArbiterLedgerPhases.Pre && string.Equals(e.Id, result.LedgerId, StringComparison.Ordinal));
+        if (pre is not null)
+        {
+            _ = AppendRecovery(ledger, pre, PromptStoppedClose, target ?? "unknown", _clock.GetUtcNow(), context);
+        }
+
+        return new HookOutcome(HookOutcomeKind.Deny, insertion.Reason);
     }
 
     /// <summary>

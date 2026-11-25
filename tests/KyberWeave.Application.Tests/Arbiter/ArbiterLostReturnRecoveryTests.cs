@@ -232,6 +232,56 @@ public sealed class ArbiterLostReturnRecoveryTests : IDisposable
         Assert.Equal("ready", Answer("KW-ARB-READY-001"));
     }
 
+    /// <summary>A context whose prompt service cannot build the task prompt, as a stale or misplaced input makes it.</summary>
+    private HookContext UnbuildableContext(TextWriter log) => Context(log) with
+    {
+        BuildDispatchPrompt = _ => new DispatchPromptExpansion(false, string.Empty, "No prompt: the prior-results file is outside the scratch area."),
+    };
+
+    /// <summary>
+    /// The live failure: the rules let a retry through, the adapter then stopped it because its task prompt could not
+    /// be built, and its open pre held the task's files against every later dispatch for hours.
+    /// </summary>
+    [Fact]
+    public void AnAllowedDispatchWhosePromptCannotBeBuilt_IsDeniedAndHoldsNoFiles()
+    {
+        StringWriter log = new();
+
+        HookOutcome stopped = Engine().DecidePreDispatch(
+            "claude", "conductor", "dev-easy", Prompt("T2"), Config(), UnbuildableContext(log),
+            "call-1", sessionId: "session-1", dispatchModel: null);
+
+        Assert.Equal(HookOutcomeKind.Deny, stopped.Kind);
+        Assert.Contains("prior-results", stopped.Reason, StringComparison.Ordinal);
+        ArbiterLedgerEvent pre = Assert.Single(Events(), e => e.Phase == ArbiterLedgerPhases.Pre);
+        ArbiterLedgerEvent closed = Assert.Single(RecoveredPosts());
+        Assert.Equal(pre.Id, closed.PreId);
+        Assert.Equal("prompt-stopped", closed.Recovered);
+
+        Advance();
+        Engine().DecidePreDispatch(
+            "claude", "conductor", "dev-easy", Prompt("T2"), Config(), Context(log),
+            "call-2", sessionId: "session-1", dispatchModel: null);
+
+        Assert.Equal("ready", Answer("KW-ARB-READY-001"));
+    }
+
+    /// <summary>A rule's refusal still outranks a prompt that cannot be built, and writes no closing row.</summary>
+    [Fact]
+    public void ARefusedDispatchWhosePromptCannotBeBuilt_KeepsTheRulesDenial()
+    {
+        TextWriter log = TextWriter.Null;
+        Dispatch("dev-easy", "T2", "call-1", log);
+
+        HookOutcome refused = Engine().DecidePreDispatch(
+            "copilot-cli", "conductor", "dev-easy", Prompt("T2"), Config(), UnbuildableContext(log),
+            "call-2", sessionId: "session-1", dispatchModel: null);
+
+        Assert.Equal(HookOutcomeKind.Deny, refused.Kind);
+        Assert.Contains("KW-ARB-READY-001", refused.Reason, StringComparison.Ordinal);
+        Assert.Empty(RecoveredPosts());
+    }
+
     [Fact]
     public void AStopEventBeforeTheRealPost_DoesNotStealItsReturn()
     {

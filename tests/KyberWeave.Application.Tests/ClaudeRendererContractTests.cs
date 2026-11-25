@@ -1153,8 +1153,8 @@ public sealed class ClaudeRendererContractTests : IDisposable
     public async Task RenderAsync_GlobalSettingsArbiterBlock_IsByteIdenticalToItsPreShellGuardRender()
     {
         // The shell guard lives in the agent file alone. The user-level settings block keeps its entries byte for
-        // byte, plus the worker guard on the file-writing tools, plus the matcher-less SubagentStop that closes a
-        // dispatch whose return hook timed out.
+        // byte, plus the worker guard on the file-writing tools, the TaskStop return that closes a stopped background
+        // agent's dispatch, and the matcher-less SubagentStop that closes a dispatch whose return hook timed out.
         SquadRenderResult result = await RenderClaudeArbiterAsync(
             ProductRoot,
             SquadDeploymentScope.Global,
@@ -1174,6 +1174,7 @@ public sealed class ClaudeRendererContractTests : IDisposable
             "PreToolUse {\"matcher\":\"*\",\"hooks\":" +
             "[{\"type\":\"command\",\"command\":\"kyber-weave-arbiter worker-guard --harness claude\",\"timeout\":30}]}",
             "PostToolUse {\"matcher\":\"^(Agent|Task)$\",\"hooks\":" + hooks + "}",
+            "PostToolUse {\"matcher\":\"^TaskStop$\",\"hooks\":" + hooks + "}",
             "SubagentStop {\"hooks\":" + hooks + "}",
         ];
 

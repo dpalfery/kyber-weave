@@ -1249,7 +1249,7 @@ session, and marks it:
   finished dispatch's late signal and nothing is closed — the dispatches still open may be different
   workers still running. A post that claims no pre is not that evidence: it can be the unpaired return
   the stop handler itself just recorded, which is the case recovery exists for.
-- `recovered` names the stop event (`subagentStop` or `SubagentStop`), so nothing reads the row as a
+- `recovered` names the stop event (`subagentStop`, `SubagentStop`, `TaskStop`, or `prompt-stopped`), so nothing reads the row as a
   worker's report.
 - It carries the pre event's caller, target and headers, pairs by its `pre-id`, and has no
   `returns` markers and no changed paths. The dispatch stops holding its task's files; no task is
@@ -1269,6 +1269,16 @@ session, and marks it:
 - When several dispatches of the agent are still open and the stop event names no followed agent, it
   cannot say which one ended: none is closed, and one line names how many matched. Closing the wrong one would report work as finished
   that never ran.
+- A background agent stopped with Claude's `TaskStop` never ends its turn, so no hand-back and no `SubagentStop`
+  arrives for it. The user-level hook block also matches `PostToolUse` on `^TaskStop$`; the stopped task's id is
+  the agent's id, so the adapter closes exactly that followed agent's dispatch with `recovered: TaskStop`, through
+  the same exact-id rule. A task the Arbiter does not follow, such as a background shell, is left alone.
+- A dispatch the rules allowed but whose task prompt cannot be built is stopped before any worker starts. The
+  engine builds the prompt itself right after the rules decide, closes the pre row with
+  `recovered: prompt-stopped`, and denies with the prompt's refusal, so a dispatch that never ran holds no files.
+  A rule's denial still outranks the prompt refusal and writes no such row.
+- A background return from the main thread is judged as the caller its pre row resolved (the conductor, from
+  the dispatch header), not as `unidentified`, so it classifies as a `delegate` return.
 - Factory's `SubagentStop` names the dispatch only by `task_name`, which is a description rather than
   an agent. The target comes from the transcript's `Task` call, the same place the dispatch path reads
   it, so recovery matches the agent the dispatch actually named.

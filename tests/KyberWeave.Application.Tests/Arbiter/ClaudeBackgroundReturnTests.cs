@@ -397,6 +397,97 @@ public sealed class ClaudeBackgroundReturnTests : IDisposable
         Assert.Equal("delegate.returned", post.Trigger);
     }
 
+    private (string Stdout, string Log) TaskStop(string taskId) => Send(new
+    {
+        hook_event_name = "PostToolUse",
+        session_id = Session,
+        cwd = _host.RepoRoot,
+        tool_name = "TaskStop",
+        tool_input = new { task_id = taskId },
+        tool_response = new { message = "Successfully stopped task: " + taskId, task_id = taskId, task_type = "local_agent" },
+        tool_use_id = "toolu-stop-" + taskId,
+    });
+
+    /// <summary>
+    /// A stopped background agent's turn never ends, so neither a hand-back nor a stop event closes its dispatch. The
+    /// dispatching agent's <c>TaskStop</c> names it by its agent id, and that closes exactly its dispatch.
+    /// </summary>
+    [Fact]
+    public void TaskStopOfAFollowedAgent_ClosesExactlyThatAgentsDispatch()
+    {
+        Start("T2", "toolu-1", "agent-1");
+        Start("T5", "toolu-2", "agent-2");
+
+        (string stdout, _) = TaskStop("agent-2");
+
+        Assert.Equal(string.Empty, stdout);
+        ArbiterLedgerEvent closed = Assert.Single(Posts());
+        Assert.Equal(PreOf("toolu-2").Id, closed.PreId);
+        Assert.Equal("TaskStop", closed.Recovered);
+    }
+
+    [Fact]
+    public void TaskStopOfAnAgentThatAlreadyReturned_WritesNoRow()
+    {
+        Start("T2", "toolu-1", "agent-1");
+        Handback("agent-1", Report("T2"));
+        Advance();
+
+        TaskStop("agent-1");
+
+        Assert.Null(Assert.Single(Posts()).Recovered);
+    }
+
+    [Fact]
+    public void TaskStopOfATaskTheArbiterDoesNotFollow_WritesNothing()
+    {
+        Start("T2", "toolu-1", "agent-1");
+
+        TaskStop("shell-9");
+
+        Assert.Empty(Posts());
+    }
+
+    /// <summary>
+    /// On the main thread the dispatch and launch events name no agent, so the launch saves an unidentified caller,
+    /// while the pre event resolved the conductor from the dispatch's header. The return is judged as the
+    /// conductor's, so it classifies as a delegate return rather than an investigation.
+    /// </summary>
+    [Fact]
+    public void AMainThreadBackgroundReturn_IsJudgedAsTheCallerThePreResolved()
+    {
+        object input = new { description = "T2", prompt = Prompt("T2"), subagent_type = "dev-easy", run_in_background = true };
+        Send(new
+        {
+            hook_event_name = "PreToolUse",
+            session_id = Session,
+            cwd = _host.RepoRoot,
+            tool_name = "Agent",
+            tool_input = input,
+            tool_use_id = "toolu-1",
+        });
+        Advance();
+        Send(new
+        {
+            hook_event_name = "PostToolUse",
+            session_id = Session,
+            cwd = _host.RepoRoot,
+            tool_name = "Agent",
+            tool_input = input,
+            tool_use_id = "toolu-1",
+            tool_response = new { status = "async_launched", agentId = "agent-1", content = Array.Empty<string>() },
+        });
+        Advance();
+        Assert.Equal("conductor", PreOf("toolu-1").Caller);
+
+        Handback("agent-1", Report("T2"));
+
+        ArbiterLedgerEvent post = Assert.Single(Posts());
+        Assert.Equal(PreOf("toolu-1").Id, post.PreId);
+        Assert.Equal("conductor", post.Caller);
+        Assert.Equal("delegate.returned", post.Trigger);
+    }
+
     /// <summary>An engine that follows one agent and answers its return with a note.</summary>
     private sealed class NotingEngine : IHookDecisionEngine, IBackgroundDispatchEngine
     {

@@ -218,11 +218,11 @@ public sealed class TaskPromptService(
         string? priorResults = null;
         if (Clean(request.PriorResultsPath) is { } priorPath)
         {
-            if (!ScratchFile(files, root, priorPath, out string absolute))
+            if (!ScratchFile(files, root, priorPath, request.ScratchRoots, out string absolute))
             {
                 return TaskPromptResult.NotBuilt(
                     $"No prompt: the prior-results file '{priorPath}' is outside this run's scratch area. " +
-                    $"Write it under {ScratchFolder} in the checkout, name it relative to that folder, or leave it out.",
+                    ScratchAreaHint(root, request.ScratchRoots),
                     TaskPromptRefusalKind.Finding);
             }
 
@@ -333,27 +333,53 @@ public sealed class TaskPromptService(
     /// <param name="root">The repository root.</param>
     /// <param name="path">The path the dispatch named, relative to the root or absolute.</param>
     public static bool IsScratchFile(IFileSystem files, string root, string path) =>
-        ScratchFile(files, root, path, out _);
+        ScratchFile(files, root, path, null, out _);
+
+    /// <summary>
+    /// What a refused prior-results path should be instead: the absolute scratch folders that were checked, and how a
+    /// relative path is read.
+    /// </summary>
+    /// <param name="root">The repository root.</param>
+    /// <param name="otherRoots">The run's other worktrees whose scratch folders were checked too, or null.</param>
+    public static string ScratchAreaHint(string root, IReadOnlyList<string>? otherRoots = null)
+    {
+        IEnumerable<string> folders = new[] { root }
+            .Concat(otherRoots ?? [])
+            .Select(folder => Path.Combine(folder, ScratchFolder))
+            .Distinct(StringComparer.Ordinal);
+        return $"Write it under {string.Join(" or ", folders.Select(folder => $"'{folder}'"))}, and name it by that " +
+            $"absolute path or relative to the checkout (for example {ScratchFolder}/T1/prior-results.md), or leave it out.";
+    }
 
     /// <summary>
     /// Resolves a prior-results path and reports whether it stays inside the run's scratch area. Only that area is
     /// readable: the dispatch header names a file, and a header must not turn any readable file into prompt text.
     /// </summary>
+    /// <remarks>
+    /// The area is the checkout's own scratch folder and, for the dispatch hook, the scratch folder of each other
+    /// worktree of the same repository: a conductor writes its scratch files in the run worktree, while the plan a
+    /// retry names may be read from a task worktree. A relative path is always read from the checkout.
+    /// </remarks>
     /// <param name="files">The file system links are resolved through.</param>
     /// <param name="root">The repository root.</param>
     /// <param name="path">The path the dispatch named, relative to the root or absolute.</param>
+    /// <param name="otherRoots">The run's other worktrees, validated as this repository's, or null for none.</param>
     /// <param name="absolute">The resolved path, when it is inside the scratch area.</param>
-    private static bool ScratchFile(IFileSystem files, string root, string path, out string absolute)
+    private static bool ScratchFile(
+        IFileSystem files, string root, string path, IReadOnlyList<string>? otherRoots, out string absolute)
     {
         // The check is on the resolved path: a symlink lying inside the scratch area is a window onto its target,
         // and that target is what a read would return to the worker.
-        absolute = RealPath(files, Path.GetFullPath(path, root));
-        string scratch = Path.TrimEndingDirectorySeparator(
-            RealPath(files, Path.GetFullPath(ScratchFolder, root)));
-        return string.Equals(absolute, scratch, StringComparison.Ordinal)
-            ? false
-            : absolute.StartsWith(scratch + Path.DirectorySeparatorChar, StringComparison.Ordinal);
+        string resolved = RealPath(files, Path.GetFullPath(path, root));
+        absolute = resolved;
+        return new[] { root }.Concat(otherRoots ?? []).Any(folder => IsInside(
+            resolved,
+            Path.TrimEndingDirectorySeparator(RealPath(files, Path.GetFullPath(ScratchFolder, folder)))));
     }
+
+    private static bool IsInside(string absolute, string scratch) =>
+        !string.Equals(absolute, scratch, StringComparison.Ordinal)
+        && absolute.StartsWith(scratch + Path.DirectorySeparatorChar, StringComparison.Ordinal);
 
     /// <summary>
     /// The path with every symlinked component resolved, so a check made on it describes the file a read returns.

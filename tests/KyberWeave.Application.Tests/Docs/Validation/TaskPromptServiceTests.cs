@@ -543,6 +543,35 @@ public sealed class TaskPromptServiceTests
         Assert.Contains("T1 reported: built, four tests green.", Between(result.Prompt, "task"), StringComparison.Ordinal);
     }
 
+    /// <summary>
+    /// A retry's plan can be read from a task worktree while the conductor wrote the prior results in the run
+    /// worktree's scratch folder. The hook names the run's worktrees, so that file is read; without them it is refused,
+    /// and the refusal names the absolute scratch folder it checked.
+    /// </summary>
+    [Fact]
+    public void PriorResultsInAnotherWorktreesScratchFolderAreReadOnlyWhenTheHookNamesThatWorktree()
+    {
+        using DocFixture fixture = Ready();
+        string runWorktree = fixture.FullPath("run-worktree");
+        string results = Path.Combine(runWorktree, TaskPromptService.ScratchFolder, "conductor", "T1-prior-results.md");
+        fixture.Memory!.CreateDirectory(Path.GetDirectoryName(results)!);
+        fixture.Memory.WriteAllText(results, "T1 reported: half done.");
+        KyberWeaveConfig config = Config();
+        TaskPromptService service = Service(fixture, config);
+
+        TaskPromptResult named = service.Build(
+            new TaskPromptRequest(fixture.Root, TaskId: "T1", PriorResultsPath: results, ScratchRoots: [fixture.Root, runWorktree]),
+            config);
+        TaskPromptResult unnamed = service.Build(
+            new TaskPromptRequest(fixture.Root, TaskId: "T1", PriorResultsPath: results),
+            config);
+
+        Assert.True(named.Built, named.Refusal);
+        Assert.Contains("T1 reported: half done.", Between(named.Prompt, "task"), StringComparison.Ordinal);
+        Assert.False(unnamed.Built);
+        Assert.Contains(Path.Combine(fixture.Root, TaskPromptService.ScratchFolder), unnamed.Refusal, StringComparison.Ordinal);
+    }
+
     /// <summary>The dispatch's failed-attempt count reaches the worker inside the prompt, not only the request.</summary>
     [Fact]
     public void TheFailedAttemptCountReachesThePrompt()
