@@ -29,6 +29,11 @@ namespace KyberWeave.Arbiter.Hooks.Adapters;
 /// carries <c>tool_input.message</c> as the output; it is never denied, so a
 /// non-allow outcome returns <c>allow</c> with the envelope or note appended to
 /// <c>message</c> after one blank line.
+/// A foreground dispatch can deliver its report the same way: the hand-back arrives first with the report, and the
+/// completed <c>PostToolUse</c> then carries only a delivery notice (<see cref="ClaudeDeliveryWrapper"/>). The
+/// unpaired hand-back keeps its report in the Arbiter's store, and the completed post takes it and decides it with
+/// its own prompt and target; a notice is never recorded as a return. When the post comes first it follows the
+/// dispatch, so the later hand-back, or the stop event's <c>last_assistant_message</c>, pairs with its pre.
 /// </remarks>
 public sealed class ClaudeHookAdapter : IHarnessHookAdapter
 {
@@ -151,7 +156,7 @@ public sealed class ClaudeHookAdapter : IHarnessHookAdapter
 
         if (string.Equals(eventName, "SubagentStop", StringComparison.Ordinal))
         {
-            HandleSubagentStop(payload, context);
+            HandleSubagentStop(payload, config, context);
             return string.Empty;
         }
 
@@ -173,8 +178,15 @@ public sealed class ClaudeHookAdapter : IHarnessHookAdapter
     /// The end of a sub-agent's turn: the agent's work is over, so one dispatch it left open is closed when its
     /// return hook never reached the ledger. Writes nothing to the harness.
     /// </summary>
-    private void HandleSubagentStop(JsonElement payload, HookContext context)
+    /// <remarks>
+    /// Before that, the event's <c>last_assistant_message</c> stands in for a report that never came through a
+    /// hand-back (D8 (d)). A dispatch the Arbiter follows with no return recorded yet is decided with it. An agent it
+    /// does not follow keeps the message for the completed dispatch event, unless a hand-back already kept the report.
+    /// This runs first so the recovery below does not close a dispatch whose report is about to be recorded.
+    /// </remarks>
+    private void HandleSubagentStop(JsonElement payload, KyberWeaveConfig config, HookContext context)
     {
+        RecordLastAssistantMessage(payload, config, context);
         if (_engine is not ILostReturnRecovery recovery)
         {
             return;
@@ -187,6 +199,40 @@ public sealed class ClaudeHookAdapter : IHarnessHookAdapter
             string.IsNullOrWhiteSpace(agent) ? [] : [agent],
             context,
             GetString(payload, "agent_id"));
+    }
+
+    /// <summary>
+    /// Uses a stop event's <c>last_assistant_message</c> as the agent's report when no hand-back delivered one. A
+    /// delivery notice is never used: it holds no report.
+    /// </summary>
+    private void RecordLastAssistantMessage(JsonElement payload, KyberWeaveConfig config, HookContext context)
+    {
+        string? sessionId = GetString(payload, "session_id");
+        string? agentId = GetString(payload, "agent_id");
+        string? message = GetString(payload, "last_assistant_message");
+        if (_engine is not IBackgroundDispatchEngine background
+            || string.IsNullOrWhiteSpace(sessionId)
+            || string.IsNullOrWhiteSpace(agentId)
+            || string.IsNullOrWhiteSpace(message)
+            || ClaudeDeliveryWrapper.IsWrapper(message))
+        {
+            return;
+        }
+
+        if (background.FindBackgroundDispatch(sessionId, agentId, context) is { } saved)
+        {
+            // A recorded return came through the hand-back, which is the report itself; the stop message adds nothing.
+            if (saved.LastResponseDigest is null)
+            {
+                _ = background.DecideBackgroundReturn(Token, sessionId, agentId, message, config, context);
+            }
+
+            return;
+        }
+
+        // A hand-back's kept report outranks the stop message, so it is put back when there is one.
+        string? kept = background.TakeUnpairedReturn(sessionId, agentId, context);
+        background.KeepUnpairedReturn(sessionId, agentId, kept ?? message, context);
     }
 
     /// <summary>Resolves the caller: the payload's <c>agent_type</c> outranks <c>--caller</c>.</summary>
@@ -393,41 +439,50 @@ public sealed class ClaudeHookAdapter : IHarnessHookAdapter
                 $"Malformed Claude hook event: unknown PostToolUse status '{status ?? "<missing>"}'.");
         }
 
-        string? completedAgentId = GetString(response, "agentId");
-        string? completedSession = GetString(payload, "session_id");
-        HookOutcome outcome;
-        if (!string.IsNullOrWhiteSpace(completedAgentId)
+        ReturnKey? key = _engine is IBackgroundDispatchEngine engine
+            && GetString(payload, "session_id") is { } completedSession
             && !string.IsNullOrWhiteSpace(completedSession)
-            && _engine is IBackgroundDispatchEngine followed
-            && followed.FindBackgroundDispatch(completedSession, completedAgentId, context) is { } saved)
+            && GetString(response, "agentId") is { } completedAgentId
+            && !string.IsNullOrWhiteSpace(completedAgentId)
+                ? new ReturnKey(engine, completedSession, completedAgentId)
+                : null;
+        BackgroundDispatchRecord? saved = key?.Engine.FindBackgroundDispatch(key.SessionId, key.AgentId, context);
+        if (saved?.LastResponseDigest is not null)
         {
-            if (saved.LastResponseDigest is not null)
+            // A hand-back already stored this return. The completed post is the same turn seen again.
+            return string.Empty;
+        }
+
+        string? target = null;
+        string prompt = string.Empty;
+        if (payload.TryGetProperty("tool_input", out JsonElement toolInput)
+            && toolInput.ValueKind == JsonValueKind.Object)
+        {
+            target = GetString(toolInput, "subagent_type");
+            // The return classifies to its dispatch's trigger family, so the
+            // original prompt rides along best effort; without it the engine
+            // classifies from caller and target alone.
+            prompt = GetString(toolInput, "prompt") ?? string.Empty;
+        }
+
+        // Taking the kept report removes it either way: a post that carries its own report has no use for it.
+        string? kept = key?.Engine.TakeUnpairedReturn(key.SessionId, key.AgentId, context);
+        string output = response.GetRawText();
+        if (ClaudeDeliveryWrapper.IsWrapper(ReviewSeatRecorder.ReplyText(output)))
+        {
+            if (kept is null)
             {
-                // A hand-back already stored this return. The completed post is the same turn seen again.
-                return string.Empty;
+                return HandleWrapperWithoutReport(payload, caller, target, prompt, key, saved, context);
             }
 
-            // The launch is saved and no return is stored yet. Record this turn against that pre,
-            // so a repeat of the same text is not a second row.
-            outcome = followed.DecideBackgroundReturn(
-                Token, completedSession, completedAgentId, response.GetRawText(), config, context);
+            output = kept;
         }
-        else
-        {
-            string? target = null;
-            string prompt = string.Empty;
-            if (payload.TryGetProperty("tool_input", out JsonElement toolInput)
-                && toolInput.ValueKind == JsonValueKind.Object)
-            {
-                target = GetString(toolInput, "subagent_type");
-                // The return classifies to its dispatch's trigger family, so the
-                // original prompt rides along best effort; without it the engine
-                // classifies from caller and target alone.
-                prompt = GetString(toolInput, "prompt") ?? string.Empty;
-            }
 
-            outcome = DecidePost(payload, caller, target, prompt, response.GetRawText(), config, context);
-        }
+        // A saved launch with no return stored yet records this turn against that pre, so a repeat of the same text
+        // is not a second row.
+        HookOutcome outcome = saved is not null && key is not null
+            ? key.Engine.DecideBackgroundReturn(Token, key.SessionId, key.AgentId, output, config, context)
+            : DecidePost(payload, caller, target, prompt, output, config, context);
         return outcome.Kind switch
         {
             HookOutcomeKind.PassThrough => string.Empty,
@@ -448,6 +503,37 @@ public sealed class ClaudeHookAdapter : IHarnessHookAdapter
                 $"Hook engine returned pre-dispatch outcome '{outcome.Kind}' for a post-dispatch event."),
         };
     }
+
+    /// <summary>
+    /// A completed dispatch whose result is only Claude Code's delivery notice, with no report kept for its agent yet.
+    /// Nothing is recorded: the notice is not the report. The dispatch is followed instead, so the hand-back or stop
+    /// event that brings the report later is decided with this dispatch's prompt and target and pairs with its pre.
+    /// </summary>
+    private static string HandleWrapperWithoutReport(
+        JsonElement payload,
+        string caller,
+        string? target,
+        string prompt,
+        ReturnKey? key,
+        BackgroundDispatchRecord? saved,
+        HookContext context)
+    {
+        context.Log.WriteLine(
+            $"Arbiter: the completed return of agent '{OneLine(key?.AgentId ?? "(none)")}' in session " +
+            $"'{OneLine(key?.SessionId ?? "(none)")}' carries only the delivery notice and no report is kept for it; " +
+            "nothing is recorded until the report arrives.");
+        if (key is not null && saved is null)
+        {
+            key.Engine.TrackBackgroundDispatch(
+                new BackgroundDispatch(Token, key.SessionId, key.AgentId, caller, target, prompt, GetString(payload, "tool_use_id")),
+                context);
+        }
+
+        return string.Empty;
+    }
+
+    /// <summary>The engine that follows returns across hook processes, with the session and agent a return is keyed by.</summary>
+    private sealed record ReturnKey(IBackgroundDispatchEngine Engine, string SessionId, string AgentId);
 
     /// <summary>
     /// Handles a background-dispatch return through <c>PreToolUse</c> on
@@ -497,6 +583,16 @@ public sealed class ClaudeHookAdapter : IHarnessHookAdapter
             context.Log.WriteLine(
                 $"Arbiter: no followed background dispatch for agent '{agentId}' in session '{sessionId ?? "(none)"}'; " +
                 "its return is recorded unpaired.");
+
+            // A foreground dispatch's report arrives here, and its completed event later carries only the delivery
+            // notice. The report is kept so that event can record it with the dispatch's own prompt and target.
+            if (_engine is IBackgroundDispatchEngine keeper
+                && !string.IsNullOrWhiteSpace(sessionId)
+                && !ClaudeDeliveryWrapper.IsWrapper(message))
+            {
+                keeper.KeepUnpairedReturn(sessionId, agentId, message, context);
+            }
+
             outcome = DecidePost(payload, caller, caller, string.Empty, message, config, context);
         }
 

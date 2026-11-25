@@ -4,7 +4,7 @@ title: CLI command surface
 doc-type: reference
 status: current
 owner: dpalfery
-last-reviewed: 2026-11-24
+last-reviewed: 2026-11-25
 ---
 
 # CLI command surface
@@ -534,6 +534,16 @@ no conflict at all, yet still leaves `CHERRY_PICK_HEAD` or a `sequencer` directo
 next integration as "already in progress". If `--abort` itself fails, `git cherry-pick --quit` ends the
 sequence. The conductor then dispatches a conflict-reconciliation rework instead of losing the task's
 work.
+
+Once the commits are on the run branch, no later failure is reported as "could not be integrated". A cleanup
+step that fails after the landing (removing the task worktree, deleting the task branch, or reading the run
+head) exits `1` with a message that names the landed state: `the task is integrated at <sha>, but removing the
+task worktree … failed: …` (or deleting the task branch), or `the task commits are on the run branch, but reading
+its head failed: …` when the sha could not be read. That includes git itself failing to start because the process's
+working directory was the task worktree it just removed; the adapter resolves the `git` executable to a full path
+once, falling back to the bare name, so the launch no longer depends on the working directory. A worker that sees
+exit `1` with such a message checks the run branch head and reports that commit. A failure before the commits land
+keeps the message "the task could not be integrated: …".
 
 When the commits are applied but copying the scratchpad fails, the task's work is already on the run
 branch, so the command prints `INTEGRATED: <sha>`, then an error line naming the copy failure, and exits

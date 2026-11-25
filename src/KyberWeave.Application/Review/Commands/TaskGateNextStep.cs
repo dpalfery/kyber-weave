@@ -9,9 +9,9 @@ namespace KyberWeave.Cli.Commands.Review;
 ///     reading the task-gate skill to compose it.
 /// </summary>
 /// <remarks>
-///     Only the run's own facts are filled: the status, the files from <c>--paths</c>, the gate counts and the report
-///     path. The test counts, the commit, the remote head and the number of runs are not known to one invocation and
-///     stay as placeholders.
+///     Only the run's own facts are filled: the status, the files from <c>--paths</c>, the gate counts, the report
+///     path and the number of task-gate runs the caller counted. The test counts, the commit and the remote head are
+///     not known to one invocation and stay as placeholders.
 /// </remarks>
 public static class TaskGateNextStep
 {
@@ -55,13 +55,15 @@ public static class TaskGateNextStep
     /// <param name="agent">The agent the gates belong to.</param>
     /// <param name="paths">The files the task changed, as given with <c>--paths</c>.</param>
     /// <param name="reportPath">Where the report was written, or null.</param>
+    /// <param name="runCount">The ordinal of this task-gate run, counting from 1.</param>
     public static IReadOnlyList<string> AfterRun(
         GateReport report,
         IReadOnlyList<ReviewTaskGateView> declared,
         bool fixRun,
         string agent,
         IReadOnlyList<string> paths,
-        string? reportPath)
+        string? reportPath,
+        int runCount)
     {
         ArgumentNullException.ThrowIfNull(report);
         ArgumentNullException.ThrowIfNull(declared);
@@ -86,17 +88,19 @@ public static class TaskGateNextStep
         if (fixRun)
             return [NextPrefix + "run this command again without --fix; only that run counts."];
 
-        return Digest(report, agent, paths, reportPath);
+        return Digest(report, agent, paths, reportPath, runCount);
     }
 
     /// <summary>The completion digest for an agent with no declared gates.</summary>
     /// <param name="agent">The agent.</param>
     /// <param name="paths">The files the task changed.</param>
     /// <param name="reportPath">Where the empty report was written, or null.</param>
-    public static IReadOnlyList<string> NoneDeclared(string agent, IReadOnlyList<string> paths, string? reportPath) =>
-        Digest(new GateReport(GateReport.CurrentSchema, []), agent, paths, reportPath);
+    /// <param name="runCount">The ordinal of this task-gate run, counting from 1.</param>
+    public static IReadOnlyList<string> NoneDeclared(string agent, IReadOnlyList<string> paths, string? reportPath, int runCount) =>
+        Digest(new GateReport(GateReport.CurrentSchema, []), agent, paths, reportPath, runCount);
 
-    private static IReadOnlyList<string> Digest(GateReport report, string agent, IReadOnlyList<string> paths, string? reportPath)
+    private static IReadOnlyList<string> Digest(
+        GateReport report, string agent, IReadOnlyList<string> paths, string? reportPath, int runCount)
     {
         int skipped = report.Gates.Count(gate => gate.NotApplicable);
         string status = report.Gates.Count == 0
@@ -111,7 +115,7 @@ public static class TaskGateNextStep
             "COMMIT: <commit-sha>",
             "REMOTE_HEAD: <remote-head-sha | UNPUSHED>",
             $"TASK_GATE: {status} — agent={agent} gates={report.Gates.Count} failed=none skipped={skipped} " +
-            $"report={reportPath ?? "<none>"} runs=<k>",
+            $"report={reportPath ?? "<none>"} runs={runCount}",
         ];
     }
 

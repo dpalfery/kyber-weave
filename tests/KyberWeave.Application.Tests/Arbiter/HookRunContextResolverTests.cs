@@ -26,19 +26,21 @@ public sealed class HookRunContextResolverTests
     private readonly string _main;
     private readonly string _runWorktree;
     private readonly string _otherWorktree;
+    private readonly string _taskWorktree;
 
     public HookRunContextResolverTests()
     {
         _main = ArbiterTestRoots.Under("kw", "repo");
         _runWorktree = ArbiterTestRoots.Under("kw", "run-worktree");
         _otherWorktree = ArbiterTestRoots.Under("kw", "other-worktree");
-        foreach (string directory in new[] { _main, _runWorktree, _otherWorktree })
+        _taskWorktree = ArbiterTestRoots.Under("kw", "task-worktree");
+        _git.CommonDirectory = Path.Combine(_main, ".git");
+        foreach (string directory in new[] { _main, _runWorktree, _otherWorktree, _taskWorktree })
         {
             _files.CreateDirectory(directory);
+            _git.Worktrees[directory] = [_main, _runWorktree, _otherWorktree, _taskWorktree];
         }
 
-        _git.CommonDirectory = Path.Combine(_main, ".git");
-        _git.Worktrees[_main] = [_main, _runWorktree, _otherWorktree];
         _paths = new FakePathResolver(_files);
         _environment = new FakeProcessEnvironment(currentDirectory: _main, homeDirectory: ArbiterTestRoots.Under("home"));
         _planRoots = new PlanRootResolver(_git, new ContainedPlanFileResolver(), _files, _paths);
@@ -96,21 +98,197 @@ public sealed class HookRunContextResolverTests
         Assert.Contains(context.Notes, note => note.Contains("branch", StringComparison.Ordinal));
     }
 
+    /// <summary>
+    /// Defect 9: with two live runs and no signal naming either, the newer one used to win, so a worker of the older
+    /// run was judged by the newer run's plan and files. Now nothing is chosen, and the note names both runs.
+    /// </summary>
     [Fact]
-    public void OnlyTheNewestRunRecordWhoseBranchIsStillCheckedOutIsUsed()
+    public void TwoLiveRunsAndNoSignalAreAmbiguousAndTheNoteNamesBoth()
     {
-        _runs.Records =
-        [
-            new RunRecord(_git.CommonDirectory!, "opencode/old/run", _runWorktree, DateTimeOffset.UtcNow.AddHours(-2)),
-            new RunRecord(_git.CommonDirectory!, "opencode/new/run", _otherWorktree, DateTimeOffset.UtcNow),
-        ];
-        _branches.Branches[_runWorktree] = "opencode/old/run";
-        _branches.Branches[_otherWorktree] = "opencode/new/run";
+        TwoLiveRuns();
 
-        HookRunContext context = Resolve("TASK: T1");
+        HookRunContext context = _resolver.Resolve(Request("TASK: T1", cwd: null));
 
+        Assert.Equal(HookRunContextSource.Ambiguous, context.Source);
+        Assert.Null(context.ActiveRun);
+        Assert.Equal(_main, context.Worktree);
+        Assert.Contains(
+            context.Notes,
+            note => note.Contains(_runWorktree, StringComparison.Ordinal)
+                && note.Contains(_otherWorktree, StringComparison.Ordinal));
+    }
+
+    /// <summary>The Read guard's roots: an ambiguous context still lists every worktree of the repository.</summary>
+    [Fact]
+    public void AnAmbiguousContextStillListsEveryWorktree()
+    {
+        TwoLiveRuns();
+
+        HookRunContext context = _resolver.Resolve(Request("TASK: T1", cwd: null));
+
+        Assert.Equal(HookRunContextSource.Ambiguous, context.Source);
+        Assert.Equal(
+            new[] { _main, _runWorktree, _otherWorktree, _taskWorktree }.Order(StringComparer.Ordinal),
+            context.Worktrees.Order(StringComparer.Ordinal));
+    }
+
+    [Fact]
+    public void ACwdInsideTheOlderRunsWorktreeResolvesThatRun()
+    {
+        TwoLiveRuns();
+        string cwd = Path.Combine(_runWorktree, "src");
+        _files.CreateDirectory(cwd);
+        _git.Worktrees[cwd] = _git.Worktrees[_main];
+
+        HookRunContext context = _resolver.Resolve(Request("TASK: T1", cwd: cwd));
+
+        Assert.Equal(_runWorktree, context.Worktree);
+        Assert.Equal("run/a", context.ActiveRun?.Branch);
+        Assert.Equal(_runWorktree, context.ActiveRun?.Worktree);
+    }
+
+    [Fact]
+    public void ACwdInATaskWorktreeWhoseBranchDescendsFromOneRunResolvesThatTaskWorktreeAndRun()
+    {
+        TwoLiveRuns();
+        _branches.Branches[_taskWorktree] = "task/t1";
+        _branches.Ancestry[("run/a", "task/t1")] = true;
+        _branches.Ancestry[("run/b", "task/t1")] = false;
+
+        HookRunContext context = _resolver.Resolve(Request("TASK: T1", cwd: _taskWorktree));
+
+        Assert.Equal(_taskWorktree, context.Worktree);
+        Assert.Equal("run/a", context.ActiveRun?.Branch);
+        Assert.NotEqual(HookRunContextSource.Ambiguous, context.Source);
+    }
+
+    [Fact]
+    public void AnUnscriptedAncestryPairAnswersNullAndLeavesTheRunContextAmbiguous()
+    {
+        TwoLiveRuns();
+        _branches.Branches[_taskWorktree] = "task/t1";
+        _branches.Ancestry[("run/a", "task/t1")] = true;
+
+        Assert.Null(_branches.IsAncestor(_taskWorktree, "run/b", "task/t1"));
+
+        HookRunContext context = _resolver.Resolve(Request("TASK: T1", cwd: _taskWorktree));
+
+        Assert.Equal(HookRunContextSource.Ambiguous, context.Source);
+        Assert.Null(context.ActiveRun);
+        Assert.Equal(_main, context.Worktree);
+        Assert.Contains(
+            context.Notes,
+            note => note.Contains("git could not tell whether 'run/b' is an ancestor of 'task/t1'", StringComparison.Ordinal));
+    }
+
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public void ACwdInATaskWorktreeWhoseBranchDescendsFromBothRunsOrNeitherIsAmbiguous(bool descendsFromBoth)
+    {
+        TwoLiveRuns();
+        _branches.Branches[_taskWorktree] = "task/t1";
+        _branches.Ancestry[("run/a", "task/t1")] = descendsFromBoth;
+        _branches.Ancestry[("run/b", "task/t1")] = descendsFromBoth;
+
+        HookRunContext context = _resolver.Resolve(Request("TASK: T1", cwd: _taskWorktree));
+
+        Assert.Equal(HookRunContextSource.Ambiguous, context.Source);
+        Assert.Null(context.ActiveRun);
+        Assert.Equal(_main, context.Worktree);
+        Assert.Contains(_taskWorktree, context.Worktrees);
+    }
+
+    [Fact]
+    public void ALeadingCdIntoTheOlderRunFromTheCanonicalCheckoutResolvesThatRun()
+    {
+        TwoLiveRuns();
+
+        HookRunContext context = _resolver.Resolve(
+            Request("TASK: T1", cwd: _main, command: $"cd {_runWorktree} && dotnet test"));
+
+        Assert.Equal(_runWorktree, context.Worktree);
+        Assert.Equal("run/a", context.ActiveRun?.Branch);
+    }
+
+    [Fact]
+    public void ALeadingCdIntoAnotherRunIsIgnoredWithANoteWhenTheCwdIsInsideARun()
+    {
+        TwoLiveRuns();
+
+        HookRunContext context = _resolver.Resolve(
+            Request("TASK: T1", cwd: _runWorktree, command: $"cd {_otherWorktree} && git status"));
+
+        Assert.Equal(_runWorktree, context.Worktree);
+        Assert.Equal("run/a", context.ActiveRun?.Branch);
+        Assert.Contains(
+            context.Notes,
+            note => note.Contains(_otherWorktree, StringComparison.Ordinal)
+                && note.Contains("ignored", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public void AGitDirectoryOptionIsNoSignal()
+    {
+        TwoLiveRuns();
+
+        HookRunContext context = _resolver.Resolve(
+            Request("TASK: T1", cwd: _runWorktree, command: $"git -C {_otherWorktree} status"));
+
+        Assert.Equal(_runWorktree, context.Worktree);
+        Assert.Equal("run/a", context.ActiveRun?.Branch);
+    }
+
+    [Fact]
+    public void AGitDirectoryOptionFromTheCanonicalCheckoutChoosesNoRun()
+    {
+        TwoLiveRuns();
+
+        HookRunContext context = _resolver.Resolve(
+            Request("TASK: T1", cwd: _main, command: $"git -C {_runWorktree} status"));
+
+        Assert.Equal(HookRunContextSource.Ambiguous, context.Source);
+        Assert.Null(context.ActiveRun);
+    }
+
+    [Fact]
+    public void OneLiveRunAndNoSignalIsThatRunAsBefore()
+    {
+        _runs.Records = [new RunRecord(_git.CommonDirectory!, "run/a", _runWorktree, DateTimeOffset.UtcNow)];
+        _branches.Branches[_runWorktree] = "run/a";
+
+        HookRunContext context = _resolver.Resolve(Request("TASK: T1", cwd: null));
+
+        Assert.Equal(HookRunContextSource.ActiveRun, context.Source);
+        Assert.Equal(_runWorktree, context.Worktree);
+        Assert.Equal("run/a", context.ActiveRun?.Branch);
+    }
+
+    [Fact]
+    public void TheAgentWorktreeOutranksTheCwdAndALeadingCd()
+    {
+        TwoLiveRuns();
+
+        HookRunContext context = _resolver.Resolve(
+            Request("TASK: T1", agentWorktree: _otherWorktree, cwd: _main, command: $"cd {_runWorktree} && ls"));
+
+        Assert.Equal(HookRunContextSource.EventWorktree, context.Source);
         Assert.Equal(_otherWorktree, context.Worktree);
-        Assert.Equal("opencode/new/run", context.ActiveRun?.Branch);
+        Assert.Equal("run/b", context.ActiveRun?.Branch);
+    }
+
+    [Fact]
+    public void ThePlanWorktreeOutranksTheCwd()
+    {
+        TwoLiveRuns();
+        WritePlan(_otherWorktree, "docs/plans/2026-11-24-b.md");
+
+        HookRunContext context = _resolver.Resolve(
+            Request("PLAN_FILE: docs/plans/2026-11-24-b.md\nTASK: T1", cwd: _runWorktree));
+
+        Assert.Equal(HookRunContextSource.EventWorktree, context.Source);
+        Assert.Equal(_otherWorktree, context.Worktree);
+        Assert.Equal("run/b", context.ActiveRun?.Branch);
     }
 
     [Fact]
@@ -257,6 +435,30 @@ public sealed class HookRunContextResolverTests
 
     private HookRunContextRequest Request(string prompt, string? agentWorktree = null) =>
         new("copilot-cli", null, _main, _main, agentWorktree, prompt, ArbiterTestRoots.Under("home"));
+
+    /// <summary>A request whose leading cd target is read from <paramref name="command" /> by the guard's own parser.</summary>
+    private HookRunContextRequest Request(string prompt, string? cwd, string? agentWorktree = null, string? command = null) =>
+        new(
+            "copilot-cli",
+            null,
+            cwd,
+            _main,
+            agentWorktree,
+            prompt,
+            ArbiterTestRoots.Under("home"),
+            WorkerGuardRules.LeadingChangeDirectory(command, ArbiterTestRoots.Under("home")));
+
+    /// <summary>Run A is older and works in the run worktree; run B is newer and works in the other worktree.</summary>
+    private void TwoLiveRuns()
+    {
+        _runs.Records =
+        [
+            new RunRecord(_git.CommonDirectory!, "run/a", _runWorktree, DateTimeOffset.UtcNow.AddHours(-2)),
+            new RunRecord(_git.CommonDirectory!, "run/b", _otherWorktree, DateTimeOffset.UtcNow),
+        ];
+        _branches.Branches[_runWorktree] = "run/a";
+        _branches.Branches[_otherWorktree] = "run/b";
+    }
 
     private void WritePlan(string worktree, string relative, bool withTaskFile = true)
     {

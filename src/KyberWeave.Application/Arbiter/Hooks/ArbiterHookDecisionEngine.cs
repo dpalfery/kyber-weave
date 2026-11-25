@@ -338,6 +338,27 @@ public sealed class ArbiterHookDecisionEngine : IContextualHookDecisionEngine, I
     }
 
     /// <inheritdoc/>
+    public void KeepUnpairedReturn(string sessionId, string agentId, string message, HookContext context)
+    {
+        ArgumentNullException.ThrowIfNull(sessionId);
+        ArgumentNullException.ThrowIfNull(agentId);
+        ArgumentNullException.ThrowIfNull(message);
+        ArgumentNullException.ThrowIfNull(context);
+        string arbiterDirectory = ResolveArbiterDirectory(context.RepoRoot, context.Scope, context.HomeDirectory);
+        _background.Keep(arbiterDirectory, sessionId, agentId, message);
+    }
+
+    /// <inheritdoc/>
+    public string? TakeUnpairedReturn(string sessionId, string agentId, HookContext context)
+    {
+        ArgumentNullException.ThrowIfNull(sessionId);
+        ArgumentNullException.ThrowIfNull(agentId);
+        ArgumentNullException.ThrowIfNull(context);
+        string arbiterDirectory = ResolveArbiterDirectory(context.RepoRoot, context.Scope, context.HomeDirectory);
+        return _background.Take(arbiterDirectory, sessionId, agentId);
+    }
+
+    /// <inheritdoc/>
     public IReadOnlyList<string> TakePendingNotes(string sessionId, string caller, HookContext context)
     {
         ArgumentNullException.ThrowIfNull(sessionId);

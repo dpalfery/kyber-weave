@@ -1,4 +1,5 @@
 using System.ComponentModel;
+using System.Globalization;
 using KyberWeave.Cli.Commands.Review;
 using KyberWeave.Cli.Commands.Squad.Infrastructure;
 using KyberWeave.Contracts.Paths;
@@ -584,6 +585,19 @@ public sealed class ReviewGatesService(
 
     private string FullPath(string path) => pathResolver.GetFullPath(path, environment.CurrentDirectory);
 
+    private string? CanonicalRootOrNull(string root)
+    {
+        try
+        {
+            string canonical = pathResolver.Canonicalize(root);
+            return string.Equals(canonical, root, StringComparison.Ordinal) ? null : canonical;
+        }
+        catch (Exception ex) when (FileFailure.Is(ex))
+        {
+            return null;
+        }
+    }
+
     /// <summary>
     ///     Whether two report paths name the same file, so a run that writes both the file <c>--out</c> names and the
     ///     task's own report writes each one once. A path that cannot be resolved is compared as spelled.
@@ -734,7 +748,9 @@ public sealed class ReviewGatesService(
             return ReviewCommandResultFactory.Reported(
                 report.HasErrors ? 1 : 0,
                 report,
-                request.HumanOutput && !resolved.IsRefused ? TaskGateNextStep.NoneDeclared(request.Agent!, paths, outPath) : []);
+                request.HumanOutput && !resolved.IsRefused
+                    ? TaskGateNextStep.NoneDeclared(request.Agent!, paths, outPath, PeekRunCount(root, taskSlug))
+                    : []);
         }
 
         IReadOnlyList<string> changed;
@@ -771,7 +787,11 @@ public sealed class ReviewGatesService(
         if (plan.Refusals.Count > 0)
             return RefuseInput(report, plan.Refusals);
 
+        int runCount = NextRunCount(root, taskSlug);
         ReviewGateReporting.AddSkips(report, plan.Skipped);
+
+        string? canonicalRoot = CanonicalRootOrNull(root);
+        bool caseInsensitivePaths = environment.IsFileSystemCaseInsensitive;
 
         // The classifiers read what each verify command printed, so a build that fails on missing symbols is told
         // apart from one that fails on anything else.
@@ -785,7 +805,9 @@ public sealed class ReviewGatesService(
                 // A build accepted as RED on missing symbols leaves nothing for a later test gate to run against.
                 if (request.Red && !result.Passed && brokenBuildSymbols is null && outputs.TryGetValue(gate.Id, out string? gateOutput))
                     brokenBuildSymbols = RedClassifier.AcceptedMissingSymbols(
-                        new RedGateObservation(gate.Id, string.Join(' ', gate.Run), result.ExitCode, gateOutput), changed);
+                        new RedGateObservation(
+                            gate.Id, string.Join(' ', gate.Run), result.ExitCode, gateOutput, gate.WorkingDirectory, root, canonicalRoot, caseInsensitivePaths),
+                        changed);
             },
             SkipReason = gate => request.Red && brokenBuildSymbols is not null && RedClassifier.IsTestGate(gate.Id, string.Join(' ', gate.Run))
                 ? RedClassifier.BuildSkipReason(brokenBuildSymbols)
@@ -812,7 +834,7 @@ public sealed class ReviewGatesService(
         if (request.Red)
         {
             (finalReport, redOutcome) = ReviewGateReporting.ApplyRed(
-                run.Report, plan.Gates, outputs, changed, file => projectFiles.NearestProjectFile(repoRoot, file), report);
+                run.Report, plan.Gates, outputs, changed, file => projectFiles.NearestProjectFile(repoRoot, file), report, root, canonicalRoot, caseInsensitivePaths);
         }
 
         foreach (GateResult gate in finalReport.Gates)
@@ -820,7 +842,7 @@ public sealed class ReviewGatesService(
 
         if (!request.Red)
         {
-            ReviewGateReporting.AddSiblingNotes(report, plan.Gates, run.Report, outputs, changed);
+            ReviewGateReporting.AddSiblingNotes(report, plan.Gates, run.Report, outputs, changed, root, canonicalRoot, caseInsensitivePaths);
         }
 
         foreach (GateResult fix in run.FixFailures)
@@ -864,7 +886,7 @@ public sealed class ReviewGatesService(
             epilogue.AddRange(digest);
             if (redOutcome is not null)
             {
-                epilogue.AddRange(ReviewGateReporting.RedLines(redOutcome, request.Agent!, finalReport, outPath));
+                epilogue.AddRange(ReviewGateReporting.RedLines(redOutcome, request.Agent!, finalReport, outPath, runCount));
                 epilogue.AddRange(TaskGateNextStep.AfterFailingRun(redOutcome.Passed, request.Agent!, changed, taskSlug, fromPlan: target is not null));
             }
             else
@@ -874,7 +896,7 @@ public sealed class ReviewGatesService(
                     .. agentGates.Select(gate => new ReviewTaskGateView(
                         gate.Id, !gate.Run.Any(arg => arg.Contains("{changed}", StringComparison.Ordinal) || arg.Contains("{tests}", StringComparison.Ordinal)))),
                 ];
-                epilogue.AddRange(TaskGateNextStep.AfterRun(finalReport, views, fixChangedFiles, request.Agent!, changed, outPath));
+                epilogue.AddRange(TaskGateNextStep.AfterRun(finalReport, views, fixChangedFiles, request.Agent!, changed, outPath, runCount));
             }
         }
 
@@ -915,6 +937,64 @@ public sealed class ReviewGatesService(
         }
 
         return lines;
+    }
+
+    private static string RunCountPath(string root, string taskSlug) =>
+        Path.Combine(root, ".agent_scratchpad", taskSlug, "task-gate-runs");
+
+    /// <summary>
+    ///     The ordinal the next task-gate run gets without advancing or writing the counter, so a no-gate run neither
+    ///     consumes an ordinal nor rewinds past prior gated runs.
+    /// </summary>
+    private int PeekRunCount(string root, string? taskSlug)
+    {
+        if (taskSlug is null)
+            return 1;
+
+        string path = RunCountPath(root, taskSlug);
+        int previous = 0;
+        try
+        {
+            if (files.FileExists(path)
+                && int.TryParse(files.ReadAllText(path), NumberStyles.Integer, CultureInfo.InvariantCulture, out int read)
+                && read >= 0)
+                previous = read;
+        }
+        catch (Exception ex) when (FileFailure.Is(ex))
+        {
+            previous = 0;
+        }
+
+        return previous == int.MaxValue ? int.MaxValue : previous + 1;
+    }
+
+    /// <summary>
+    ///     The ordinal this task-gate run gets, and the counter it leaves for the next run.
+    /// </summary>
+    /// <remarks>
+    ///     A counter file in the task's scratch folder names how many task-gate runs the task has had. The scratch
+    ///     folder is already the per-task evidence home, and one invocation cannot know the count any other way. A run
+    ///     with no task id names no folder, so it is always run 1. A counter that cannot be read or written counts as
+    ///     0: the run still reports its own number rather than failing on its own bookkeeping.
+    /// </remarks>
+    private int NextRunCount(string root, string? taskSlug)
+    {
+        int count = PeekRunCount(root, taskSlug);
+        if (taskSlug is null)
+            return count;
+
+        string path = RunCountPath(root, taskSlug);
+        try
+        {
+            files.CreateDirectory(Path.GetDirectoryName(path)!);
+            files.WriteAllText(path, count.ToString(CultureInfo.InvariantCulture));
+        }
+        catch (Exception ex) when (FileFailure.Is(ex))
+        {
+            // The run still reports the number it counted; only the next run's starting point is lost.
+        }
+
+        return count;
     }
 
     /// <summary>Reports every refusal, then ends the run before any gate process has started.</summary>

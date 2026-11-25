@@ -6,7 +6,7 @@ status: current
 component: DocGraph
 source-root: src/KyberWeave.Application/Docs
 owner: dpalfery
-last-reviewed: 2026-11-24
+last-reviewed: 2026-11-25
 decided-by:
   - adr/0010-keywords-prefix-coverage-and-oov-idf
   - adr/0057-squad-and-docs-are-their-own-assemblies
@@ -317,6 +317,17 @@ every worktree of the repository shares, so a `root=` from another worktree with
 `repo=` is the same repository on another branch, and only a different `repo=` is a foreign
 checkout. A worktree does not share the canonical checkout's index: it indexes itself with
 `doctor --ensure`, and a worker with a shell asks its own index through the CLI.
+
+## Plan parsing reads a task's paths from its Files bullets
+
+`PlanDocumentParser` derives each task's file list for `docs tasks`, the packet and the Arbiter's plan facts. In a
+`Files` bullet only the lead names files: the backticked spans before the bullet's first colon are paths (a bare file
+name after a directory in that lead inherits the directory), and a span in the description after the colon counts only
+when it contains a slash and never inherits a directory. A description that names `process.env.VERSION` or
+`matrix.target` is therefore prose, not a file, while one that names `src/a/B.cs` still is. The delegation-prompt
+check uses its own shared rule, unchanged. The task file's digest covers the parsed files, so a change to this rule
+makes existing task files stale until `docs tasks --write` regenerates them
+([Kyber Squad architecture](../kyber-squad/architecture.md)).
 
 ## Related
 

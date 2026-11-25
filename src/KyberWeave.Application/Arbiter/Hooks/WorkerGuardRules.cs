@@ -245,12 +245,29 @@ internal static class WorkerGuardRules
     /// The refusal a shell command earns when it would run in a repository's canonical checkout while a live run of
     /// that repository works in a worktree of its own.
     /// </summary>
+    /// <remarks>
+    /// With one live run the refusal names its worktree as the retry prefix. With several, the guard cannot tell which
+    /// one the caller belongs to, so it names every live run's worktree and still refuses: naming only one would send
+    /// a worker of another run into somebody else's worktree.
+    /// </remarks>
     /// <param name="canonicalCheckout">The canonical checkout the command would run in.</param>
-    /// <param name="runWorktree">The worktree the live run works in.</param>
-    internal static string StrayCommandRefusal(string canonicalCheckout, string runWorktree) =>
-        $"{CheckoutRuleId}: this command would run in the repository's canonical checkout {canonicalCheckout} while " +
-        $"your run works in {runWorktree}. Start the command with `cd {runWorktree} && ` so every step runs in " +
-        "the run worktree; the canonical checkout stays untouched for the whole run.";
+    /// <param name="runWorktrees">The worktree of every live run of that repository; at least one.</param>
+    internal static string StrayCommandRefusal(string canonicalCheckout, IReadOnlyList<string> runWorktrees)
+    {
+        ArgumentNullException.ThrowIfNull(runWorktrees);
+        if (runWorktrees.Count == 1)
+        {
+            string runWorktree = runWorktrees[0];
+            return $"{CheckoutRuleId}: this command would run in the repository's canonical checkout {canonicalCheckout} while " +
+                $"your run works in {runWorktree}. Start the command with `cd {runWorktree} && ` so every step runs in " +
+                "the run worktree; the canonical checkout stays untouched for the whole run.";
+        }
+
+        return $"{CheckoutRuleId}: this command would run in the repository's canonical checkout {canonicalCheckout} while " +
+            $"{runWorktrees.Count} runs are live, in {string.Join(", ", runWorktrees)}. Start the command with " +
+            "`cd <your run's worktree> && `, naming whichever of those your run works in, so every step runs in the run " +
+            "worktree; the canonical checkout stays untouched for the whole run.";
+    }
 
     /// <summary>
     /// The refusal a command earns when a <c>cd</c> or <c>pushd</c> names a directory the guard cannot place, because
@@ -496,6 +513,38 @@ internal static class WorkerGuardRules
         }
 
         return new CommandWalk(runsInWorkingDirectory || !sawStep, hasUnplaceableDirectory, entered);
+    }
+
+    /// <summary>
+    /// The absolute directory a command's leading <c>cd &lt;path&gt;</c> names, when the command starts with one that
+    /// is followed by a separator or ends the command; null otherwise.
+    /// </summary>
+    /// <remarks>
+    /// Only the first step counts, and only a <c>cd</c>: a <c>git -C</c>, <c>--work-tree</c> or <c>--git-dir</c>
+    /// names the directory of one git step, not where the session works, so it never says which run a call is in.
+    /// A target the shell decides at run time, or one that is not fully qualified, is no signal either.
+    /// </remarks>
+    /// <param name="command">The command as the harness reported it.</param>
+    /// <param name="home">The operator's home, which a leading <c>~</c> expands to; null when the caller has none.</param>
+    /// <returns>The placed absolute target, or null.</returns>
+    internal static string? LeadingChangeDirectory(string? command, string? home)
+    {
+        if (string.IsNullOrWhiteSpace(command))
+        {
+            return null;
+        }
+
+        string[] tokens = ShellTokens(command);
+        if (tokens.Length < 2
+            || !string.Equals(tokens[0], "cd", StringComparison.Ordinal)
+            || (tokens.Length > 2 && !IsCommandSeparator(tokens[2]))
+            || IsCommandSeparator(tokens[1]))
+        {
+            return null;
+        }
+
+        string? placed = PlaceDirectory(tokens[1], home);
+        return placed is not null && Path.IsPathFullyQualified(placed) ? placed : null;
     }
 
     /// <summary>

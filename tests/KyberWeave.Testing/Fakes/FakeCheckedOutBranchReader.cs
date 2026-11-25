@@ -10,4 +10,11 @@ public sealed class FakeCheckedOutBranchReader : ICheckedOutBranchReader
 
     /// <inheritdoc />
     public string? Read(string workingDirectory) => Branches.GetValueOrDefault(workingDirectory);
+
+    /// <summary>Gets the ancestry answers a test scripts, keyed by ancestor and descendant branch; unscripted pairs answer null.</summary>
+    public Dictionary<(string Ancestor, string Descendant), bool?> Ancestry { get; } = [];
+
+    /// <inheritdoc />
+    public bool? IsAncestor(string workingDirectory, string ancestor, string descendant) =>
+        Ancestry.GetValueOrDefault((ancestor, descendant));
 }

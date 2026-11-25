@@ -1,6 +1,8 @@
+using System.ComponentModel;
 using KyberWeave.Application.RunIntegrate;
 using KyberWeave.Contracts.Repositories;
 using KyberWeave.Contracts.Services;
+using KyberWeave.Core.Processes;
 using KyberWeave.Core.RunStart;
 using KyberWeave.Tests.Fakes;
 using KyberWeave.Tests.FileSystem;
@@ -43,6 +45,11 @@ public sealed class RunIntegrateServiceTests
     private bool _cherryPickSucceeds = true;
     private bool _abortSucceeds = true;
     private bool _removeSucceeds = true;
+    private Exception? _gitLaunchFailure;
+    private bool _worktreeRemoveThrows;
+    private bool _branchDeleteThrows;
+    private bool _mergeThrows;
+    private bool _headReadThrows;
     private bool _evidencePresentAtRemoval;
     private int _commitsAhead = 1;
     private string _dirtyStatus = string.Empty;
@@ -548,6 +555,274 @@ public sealed class RunIntegrateServiceTests
         Assert.DoesNotContain(_git.Calls, call => call.Arguments.Contains("branch", StringComparer.Ordinal));
     }
 
+    [Fact]
+    public void ABranchDeleteThatThrowsStillReportsTheIntegrationItAlreadyMade()
+    {
+        _branchDeleteThrows = true;
+
+        RunIntegrateOutcome outcome = Integrate(Request());
+
+        Assert.Equal(RunIntegrateStatus.Failed, outcome.Status);
+        Assert.Contains("the task is integrated at " + AfterHead, outcome.Message!, StringComparison.Ordinal);
+        Assert.Contains("deleting the task branch", outcome.Message!, StringComparison.Ordinal);
+        Assert.Contains("Unable to find the specified file.", outcome.Message!, StringComparison.Ordinal);
+        Assert.DoesNotContain("could not be integrated", outcome.Message!, StringComparison.Ordinal);
+        Assert.True(_git.Called("-C", Run, "worktree", "remove", "--force", Task));
+        Assert.True(LockIsFree());
+    }
+
+    [Fact]
+    public void AWorktreeRemovalThatThrowsStillReportsTheIntegrationItAlreadyMade()
+    {
+        _worktreeRemoveThrows = true;
+
+        RunIntegrateOutcome outcome = Integrate(Request());
+
+        Assert.Equal(RunIntegrateStatus.Failed, outcome.Status);
+        Assert.Contains("the task is integrated at " + AfterHead, outcome.Message!, StringComparison.Ordinal);
+        Assert.Contains("removing the task worktree", outcome.Message!, StringComparison.Ordinal);
+        Assert.DoesNotContain("could not be integrated", outcome.Message!, StringComparison.Ordinal);
+        Assert.DoesNotContain(_git.Calls, call => call.Arguments.Contains("branch", StringComparer.Ordinal));
+    }
+
+    [Fact]
+    public void AHeadReadThatThrowsAfterTheApplyStillReportsTheLandedCommits()
+    {
+        _headReadThrows = true;
+
+        RunIntegrateOutcome outcome = Integrate(Request());
+
+        Assert.Equal(RunIntegrateStatus.Failed, outcome.Status);
+        Assert.Contains("the task commits are on the run branch, but reading its head failed", outcome.Message!, StringComparison.Ordinal);
+        Assert.Contains("Unable to find the specified file.", outcome.Message!, StringComparison.Ordinal);
+        Assert.DoesNotContain("could not be integrated", outcome.Message!, StringComparison.Ordinal);
+        Assert.DoesNotContain(_git.Calls, call => call.Arguments.Contains("worktree", StringComparer.Ordinal));
+        Assert.DoesNotContain(_git.Calls, call => call.Arguments.Contains("branch", StringComparer.Ordinal));
+    }
+
+    [Fact]
+    public void ARetryHeadReadThatThrowsStillReportsTheLandedCommits()
+    {
+        _commitsAhead = 0;
+        _headReadThrows = true;
+
+        RunIntegrateOutcome outcome = Integrate(Request());
+
+        Assert.Equal(RunIntegrateStatus.Failed, outcome.Status);
+        Assert.Contains("the task commits are on the run branch, but reading its head failed", outcome.Message!, StringComparison.Ordinal);
+        Assert.Contains("Unable to find the specified file.", outcome.Message!, StringComparison.Ordinal);
+        Assert.DoesNotContain("could not be integrated", outcome.Message!, StringComparison.Ordinal);
+        Assert.DoesNotContain(_git.Calls, call => call.Arguments.Contains("worktree", StringComparer.Ordinal));
+        Assert.DoesNotContain(_git.Calls, call => call.Arguments.Contains("branch", StringComparer.Ordinal));
+    }
+
+    [Fact]
+    public void AThrowBeforeAnyCommitLandsStillReportsTheTaskAsNotIntegrated()
+    {
+        _mergeThrows = true;
+
+        RunIntegrateOutcome outcome = Integrate(Request());
+
+        Assert.Equal(RunIntegrateStatus.Failed, outcome.Status);
+        Assert.Contains("the task could not be integrated", outcome.Message!, StringComparison.Ordinal);
+        Assert.DoesNotContain(_git.Calls, call => call.Arguments.Contains("worktree", StringComparer.Ordinal));
+    }
+
+    [Theory]
+    [InlineData("win32")]
+    [InlineData("invalid-operation")]
+    public void ALaunchFailureBeforeAnyCommitLandsStillReportsTheTaskAsNotIntegrated(string failureKind)
+    {
+        Exception failure = LaunchFailure(failureKind);
+        _gitLaunchFailure = failure;
+        _mergeThrows = true;
+
+        RunIntegrateOutcome outcome = Integrate(Request());
+
+        Assert.Equal(RunIntegrateStatus.Failed, outcome.Status);
+        Assert.Contains("the task could not be integrated", outcome.Message!, StringComparison.Ordinal);
+        Assert.Contains(failure.Message, outcome.Message!, StringComparison.Ordinal);
+        Assert.DoesNotContain(_git.Calls, call => call.Arguments.Contains("worktree", StringComparer.Ordinal));
+    }
+
+    [Theory]
+    [InlineData("win32")]
+    [InlineData("invalid-operation")]
+    public void ALaunchFailureAtThePostApplyHeadReadStillReportsTheLandedCommits(string failureKind)
+    {
+        Exception failure = LaunchFailure(failureKind);
+        _gitLaunchFailure = failure;
+        _headReadThrows = true;
+
+        RunIntegrateOutcome outcome = Integrate(Request());
+
+        Assert.Equal(RunIntegrateStatus.Failed, outcome.Status);
+        Assert.Contains(
+            "the task commits are on the run branch, but reading its head failed",
+            outcome.Message!,
+            StringComparison.Ordinal);
+        Assert.Contains(failure.Message, outcome.Message!, StringComparison.Ordinal);
+        Assert.DoesNotContain("could not be integrated", outcome.Message!, StringComparison.Ordinal);
+    }
+
+    [Theory]
+    [InlineData("win32")]
+    [InlineData("invalid-operation")]
+    public void ALaunchFailureRemovingTheWorktreeStillReportsTheIntegrationItAlreadyMade(string failureKind)
+    {
+        Exception failure = LaunchFailure(failureKind);
+        _gitLaunchFailure = failure;
+        _worktreeRemoveThrows = true;
+
+        RunIntegrateOutcome outcome = Integrate(Request());
+
+        Assert.Equal(RunIntegrateStatus.Failed, outcome.Status);
+        Assert.Contains("the task is integrated at " + AfterHead, outcome.Message!, StringComparison.Ordinal);
+        Assert.Contains("removing the task worktree", outcome.Message!, StringComparison.Ordinal);
+        Assert.Contains(failure.Message, outcome.Message!, StringComparison.Ordinal);
+        Assert.DoesNotContain("could not be integrated", outcome.Message!, StringComparison.Ordinal);
+    }
+
+    [Theory]
+    [InlineData("win32")]
+    [InlineData("invalid-operation")]
+    public void ALaunchFailureDeletingTheTaskBranchStillReportsTheIntegrationItAlreadyMade(string failureKind)
+    {
+        Exception failure = LaunchFailure(failureKind);
+        _gitLaunchFailure = failure;
+        _branchDeleteThrows = true;
+
+        RunIntegrateOutcome outcome = Integrate(Request());
+
+        Assert.Equal(RunIntegrateStatus.Failed, outcome.Status);
+        Assert.Contains("the task is integrated at " + AfterHead, outcome.Message!, StringComparison.Ordinal);
+        Assert.Contains("deleting the task branch", outcome.Message!, StringComparison.Ordinal);
+        Assert.Contains(failure.Message, outcome.Message!, StringComparison.Ordinal);
+        Assert.DoesNotContain("could not be integrated", outcome.Message!, StringComparison.Ordinal);
+    }
+
+    [Theory]
+    [InlineData("timeout")]
+    [InlineData("canceled")]
+    [InlineData("output-limit")]
+    public void AProcessFailureBeforeAnyCommitLandsStillReportsTheTaskAsNotIntegrated(string failureKind)
+    {
+        Exception failure = LaunchFailure(failureKind);
+        _gitLaunchFailure = failure;
+        _mergeThrows = true;
+
+        RunIntegrateOutcome outcome = Integrate(Request());
+
+        Assert.Equal(RunIntegrateStatus.Failed, outcome.Status);
+        if (failure is not TimeoutException)
+        {
+            Assert.Contains("the task could not be integrated", outcome.Message!, StringComparison.Ordinal);
+        }
+
+        Assert.Contains(failure.Message, outcome.Message!, StringComparison.Ordinal);
+        Assert.DoesNotContain(_git.Calls, call => call.Arguments.Contains("worktree", StringComparer.Ordinal));
+    }
+
+    [Theory]
+    [InlineData("timeout")]
+    [InlineData("canceled")]
+    [InlineData("output-limit")]
+    public void AProcessFailureAtThePostApplyHeadReadStillReportsTheLandedCommits(string failureKind)
+    {
+        Exception failure = LaunchFailure(failureKind);
+        _gitLaunchFailure = failure;
+        _headReadThrows = true;
+
+        RunIntegrateOutcome outcome = Integrate(Request());
+
+        Assert.Equal(RunIntegrateStatus.Failed, outcome.Status);
+        Assert.Contains(
+            "the task commits are on the run branch, but reading its head failed",
+            outcome.Message!,
+            StringComparison.Ordinal);
+        Assert.Contains(failure.Message, outcome.Message!, StringComparison.Ordinal);
+        Assert.DoesNotContain("could not be integrated", outcome.Message!, StringComparison.Ordinal);
+    }
+
+    [Theory]
+    [InlineData("timeout")]
+    [InlineData("canceled")]
+    [InlineData("output-limit")]
+    public void AProcessFailureRemovingTheWorktreeStillReportsTheIntegrationItAlreadyMade(string failureKind)
+    {
+        Exception failure = LaunchFailure(failureKind);
+        _gitLaunchFailure = failure;
+        _worktreeRemoveThrows = true;
+
+        RunIntegrateOutcome outcome = Integrate(Request());
+
+        Assert.Equal(RunIntegrateStatus.Failed, outcome.Status);
+        Assert.Contains("the task is integrated at " + AfterHead, outcome.Message!, StringComparison.Ordinal);
+        Assert.Contains("removing the task worktree", outcome.Message!, StringComparison.Ordinal);
+        Assert.Contains(failure.Message, outcome.Message!, StringComparison.Ordinal);
+        Assert.DoesNotContain("could not be integrated", outcome.Message!, StringComparison.Ordinal);
+    }
+
+    [Theory]
+    [InlineData("timeout")]
+    [InlineData("canceled")]
+    [InlineData("output-limit")]
+    public void AProcessFailureDeletingTheTaskBranchStillReportsTheIntegrationItAlreadyMade(string failureKind)
+    {
+        Exception failure = LaunchFailure(failureKind);
+        _gitLaunchFailure = failure;
+        _branchDeleteThrows = true;
+
+        RunIntegrateOutcome outcome = Integrate(Request());
+
+        Assert.Equal(RunIntegrateStatus.Failed, outcome.Status);
+        Assert.Contains("the task is integrated at " + AfterHead, outcome.Message!, StringComparison.Ordinal);
+        Assert.Contains("deleting the task branch", outcome.Message!, StringComparison.Ordinal);
+        Assert.Contains(failure.Message, outcome.Message!, StringComparison.Ordinal);
+        Assert.DoesNotContain("could not be integrated", outcome.Message!, StringComparison.Ordinal);
+    }
+
+    [Theory]
+    [InlineData("timeout")]
+    [InlineData("canceled")]
+    [InlineData("output-limit")]
+    public void ARetryHeadReadProcessFailureStillReportsTheLandedCommits(string failureKind)
+    {
+        Exception failure = LaunchFailure(failureKind);
+        _commitsAhead = 0;
+        _gitLaunchFailure = failure;
+        _headReadThrows = true;
+
+        RunIntegrateOutcome outcome = Integrate(Request());
+
+        Assert.Equal(RunIntegrateStatus.Failed, outcome.Status);
+        Assert.Contains(
+            "the task commits are on the run branch, but reading its head failed",
+            outcome.Message!,
+            StringComparison.Ordinal);
+        Assert.Contains(failure.Message, outcome.Message!, StringComparison.Ordinal);
+        Assert.DoesNotContain("could not be integrated", outcome.Message!, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void LaunchFailureExcludesOutputLimitWhileProcessFailureCoversEveryProcessRunnerException()
+    {
+        OutputLimitExceededException outputLimit = new("too much output");
+        TimeoutException timeout = new("timed out");
+        OperationCanceledException canceled = new("canceled");
+        InvalidOperationException launch = new("failed to start");
+
+        Assert.False(RunIntegrateService.IsGitLaunchFailure(outputLimit));
+        Assert.False(RunIntegrateService.IsGitLaunchFailure(timeout));
+        Assert.False(RunIntegrateService.IsGitLaunchFailure(canceled));
+        Assert.True(RunIntegrateService.IsGitLaunchFailure(launch));
+
+        Assert.True(RunIntegrateService.IsGitProcessFailure(outputLimit));
+        Assert.True(RunIntegrateService.IsGitProcessFailure(timeout));
+        Assert.True(RunIntegrateService.IsGitProcessFailure(canceled));
+        Assert.True(RunIntegrateService.IsGitProcessFailure(launch));
+    }
+
     private RunIntegrateOutcome Integrate(RunIntegrateRequest request)
     {
         return Service().Integrate(request);
@@ -653,6 +928,11 @@ public sealed class RunIntegrateServiceTests
 
         if (command == "merge --ff-only --end-of-options " + TaskBranch)
         {
+            if (_mergeThrows)
+            {
+                throw GitLaunchFailure();
+            }
+
             if (!_mergeSucceeds)
             {
                 return Exit(1, "merge stopped");
@@ -690,17 +970,32 @@ public sealed class RunIntegrateServiceTests
 
         if (command == "rev-parse HEAD")
         {
+            if (_headReadThrows)
+            {
+                throw GitLaunchFailure();
+            }
+
             return Ok(_head);
         }
 
         if (command.StartsWith("worktree remove ", StringComparison.Ordinal))
         {
             _evidencePresentAtRemoval = _files.FileExists(Run + "/.agent_scratchpad/T3/report.md");
+            if (_worktreeRemoveThrows)
+            {
+                throw GitLaunchFailure();
+            }
+
             return _removeSucceeds ? Ok() : Exit(1, "worktree is locked");
         }
 
         if (command.StartsWith("branch -D ", StringComparison.Ordinal))
         {
+            if (_branchDeleteThrows)
+            {
+                throw GitLaunchFailure();
+            }
+
             return Ok();
         }
 
@@ -710,4 +1005,19 @@ public sealed class RunIntegrateServiceTests
     private static GitOutcome Ok(string output = "") => new(0, output, string.Empty);
 
     private static GitOutcome Exit(int code, string error = "") => new(code, string.Empty, error);
+
+    /// <summary>The exception a git child throws when its executable cannot be launched.</summary>
+    private Exception GitLaunchFailure() =>
+        _gitLaunchFailure ?? new FileNotFoundException("Unable to find the specified file.");
+
+    /// <summary>A git child launch failure of the kind <paramref name="kind"/> names.</summary>
+    private static Exception LaunchFailure(string kind) => kind switch
+    {
+        "win32" => new Win32Exception(2, "The system cannot find the file specified."),
+        "invalid-operation" => new InvalidOperationException("The child process could not be started."),
+        "timeout" => new TimeoutException("The process did not exit within 120 seconds."),
+        "canceled" => new OperationCanceledException("The operation was canceled."),
+        "output-limit" => new OutputLimitExceededException("The process output exceeded the limit."),
+        _ => throw new ArgumentOutOfRangeException(nameof(kind), kind, "Unknown launch failure kind.")
+    };
 }

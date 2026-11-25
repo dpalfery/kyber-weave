@@ -6,7 +6,7 @@ status: current
 component: ReviewCouncil
 source-root: src/KyberWeave.Application/Review
 owner: dpalfery
-last-reviewed: 2026-11-23
+last-reviewed: 2026-11-25
 decided-by:
   - adr/0002-three-layer-review-council-verdict-engine
   - adr/0003-cross-file-duplication-and-prior-art-lenses
@@ -596,6 +596,11 @@ the plan is also read from another worktree of the repository when no plan here 
 a worker whose checkout does not hold the run's plan resolves the task the way `docs packet` does.
 See the [command surface](../cli-command-surface.md).
 
+The run's `TASK_GATE:` digest ends with `runs=<k>`, the number of task-gate runs for the task: each run with a
+task id increments a counter file in the task's scratch folder (`.agent_scratchpad/<task>/task-gate-runs`) and the
+digest and the RED line print it, so the third run prints `runs=3`. A run with no task id prints `runs=1`, and an
+unreadable counter counts as zero and never fails the run.
+
 ```yaml
 review:
   task-gates:
@@ -641,6 +646,8 @@ the shipped technology map keeps resolvable for two minor releases, and
 `kyber-weave review migrate-task-gates` rewrites it as `review.technology-gates`. Its gates are
 anchored for:
 
+- KyberDash C#: `dash-format-whitespace`, `dash-format-style`, `dash-build`, `dash-unit-application` and `dash-unit-domain`, anchored under the `csharp` entry after the KyberWeave gates and selected by the council's `dash-server-paths` include. A change under `dash/server` or `dash/server.tests` builds `dash/server/KyberDash.sln` and runs the Application and Domain test projects; the Data and Presentation test projects stay with the council's `dash-server-test` gate and CI, because they are the ones likely to need a database file or a test host. The KyberWeave gates' `include` is narrowed to `src/` and `tests/`, so a dash change selects no KyberWeave gate and a KyberWeave change selects no dash gate. The `csharp` entry also carries `test-policy` (`tests/KyberWeave.RepoPolicy.Tests`), so a C# task that edits configuration or a policy test runs the project that checks it.
+- Developer tiers: `dev-easy`, `dev-medium` and `dev-hard` each hold an entry that aliases every gate of `review.technology-gates` once. The agent's own entry is read before any technology, so a task that names no technology (a `--paths` run with no plan task) would otherwise run no gate and report `NONE_DECLARED` for a change nobody checked; `include` still selects the gates a change needs, so a tier runs the same gates its task's technology would. `TaskGatesRepositoryConfigTests` fails when a technology gains a gate that a tier's entry lacks, so the union cannot go stale.
 - .NET: `format-whitespace`, `format-style` and `dotnet-build`, anchored under the `csharp` entry (`csharp-dev` until the migration runs). `format-analyzers` was removed because `dotnet-build` immediately follows it and already runs all Roslyn analyzers under `AnalysisMode=all` with `TreatWarningsAsErrors=true` (D3), eliminating ~24s of redundant overhead per task completion with no loss of analyzer enforcement.
 - TypeScript: `dash-typecheck` and `dash-lint`, anchored under the `react` entry (`react-dev`); `tray-ui-typecheck` is anchored there too.
 - Tray Rust: `cargo-fmt` and `cargo-clippy`, anchored under the `tauri` entry (`tauri-dev`).
@@ -681,7 +688,9 @@ by anyone's prose: the run is RED when tests ran and at least one failed, or whe
 missing-symbol errors (C# `CS0103`, `CS0117`, `CS0234`, `CS0246`, `CS1061`; TypeScript `TS2304`, `TS2305`, `TS2307`,
 `TS2339`) in the files the task changed. A syntax or type error, a missing symbol in a file the task did not change, a
 restore error, or tests that all pass reject it (`KW-REVIEW-052`). The accepted gates are reported as passed with the
-reason, and `KW-REVIEW-051` carries the `RED_EVIDENCE:` summary; the report, not the line, is the proof. Without `--red`, the same classifier tells a
+reason, and `KW-REVIEW-051` carries the `RED_EVIDENCE:` summary; the report, not the line, is the proof.
+
+**RED is not applicable when no selected gate runs tests.** A gate set with no test gate (a workflow or shell task's `github-actions` gates, the lint-and-typecheck gates of a React or TypeScript task, a docs task) cannot observe a failing test, so refusing it would block every such task. When none of the task's selected gates is a test gate and every gate exited 0, the run is accepted as `RED_EVIDENCE: not applicable — no selected gate runs tests; gates passed: <ids>` (`KW-REVIEW-051`). A task with any test gate still needs a failing test or a missing-symbol build, and a failing gate in a test-less set is judged as before. A compiler path printed relative to the gate's own folder (`npm run --prefix dash typecheck` prints `tests/foo.test.ts` for `dash/tests/foo.test.ts`) matches a changed file when the repository path ends with it on a path-segment boundary, so `dash/xtests/foo.test.ts` does not match `tests/foo.test.ts`. Without `--red`, the same classifier tells a
 worker its build fails only on another task's tests' missing symbols (`KW-REVIEW-053`). Languages and test runners are records in
 `RedLanguages`, so a new one needs no change to the classifier.
 
