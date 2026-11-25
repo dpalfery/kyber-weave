@@ -574,6 +574,46 @@ public class ProjectionReadPathTests
         Assert.True(engine.IsProjectionCurrent());
     }
 
+    /// <summary>
+    /// A dashboard read gates on the read-path check, not the maintenance check: with a stale
+    /// detector stamp, a current write marker, and a current schema, <see cref="KyberBridgeEngine.EnsureProjected"/>
+    /// starts no projection pass, while a write that moves the marker does start one.
+    /// </summary>
+    [Fact]
+    public void ADashboardReadWithAStaleDetectorStampStartsNoProjectionPass()
+    {
+        InMemoryRelationalStore store = new();
+        FakePricingRepository pricing = new();
+        CanonSessionProjectorEngine engine = new(store, store, store, pricing);
+        KyberBridgeEngine bridge = new(
+            store,
+            store,
+            store,
+            pricing,
+            engine,
+            new CanonRollupsEngine(store, store, pricing));
+
+        WriteSession(store, "sess-a", "claude-code", [Turn("span-a-1", "sess-a", 0)]);
+        Assert.Equal(1, NewService(store, engine).ProjectIncremental().Built);
+
+        int staleDetector = SqliteRelationalStore.DetectorVersion - 1;
+        store.SetStoreState(new StoreStateView(SqliteRelationalStore.SchemaVersion, staleDetector));
+        Assert.True(engine.IsProjectionCurrentForReads());
+        Assert.False(engine.IsProjectionCurrent());
+
+        store.ClearReadLog();
+        bridge.EnsureProjected();
+        bridge.EnsureProjected();
+        Assert.DoesNotContain(nameof(InMemoryRelationalStore.SessionAttributions), store.ReadLog);
+
+        WriteSession(store, "sess-a", "claude-code", [Turn("span-a-2", "sess-a", 1)]);
+        Assert.False(engine.IsProjectionCurrentForReads());
+
+        store.ClearReadLog();
+        bridge.EnsureProjected();
+        Assert.Contains(nameof(InMemoryRelationalStore.SessionAttributions), store.ReadLog);
+    }
+
     private static CanonProjectionService NewService(InMemoryRelationalStore store, CanonSessionProjectorEngine engine) =>
         new(store, store, store, engine, new CanonRollupsEngine(store, store, new FakePricingRepository()));
 
