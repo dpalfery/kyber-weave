@@ -43,6 +43,41 @@ public class CursorSqliteConversationSourceTests
     }
 
     [Fact]
+    public void ListConversations_CorruptRow_RecordsAProblemAndListsTheOthers()
+    {
+        InMemoryHarnessSqliteSource sqlite = new();
+        FakeDatabase fake = sqlite.AddDatabase(DatabasePath);
+        fake.AddRow("cursor-composers", new Dictionary<string, object?>
+        {
+            ["composer_id"] = null,
+            ["bubble_count"] = 1L,
+            ["max_rowid"] = 2L,
+        });
+        fake.AddRow("cursor-composers", new Dictionary<string, object?>
+        {
+            ["composer_id"] = "composer-2",
+            ["bubble_count"] = "not-a-number",
+            ["max_rowid"] = 3L,
+        });
+        fake.AddRow("cursor-composers", new Dictionary<string, object?>
+        {
+            ["composer_id"] = "composer-3",
+            ["bubble_count"] = 4L,
+            ["max_rowid"] = 9L,
+        });
+        List<CollectedProblem> problems = [];
+
+        using IHarnessSqliteDatabase database = sqlite.Open(DatabasePath);
+        List<SqliteConversation> conversations = [.. new CursorSqliteConversationSource()
+            .ListConversations(Context(sqlite, database, since: null) with { Problems = problems })];
+
+        Assert.Equal("composer-3", Assert.Single(conversations).Id);
+        Assert.Equal(2, problems.Count);
+        Assert.All(problems, problem => Assert.Equal(DatabasePath, problem.Location));
+        Assert.Equal(2, problems.Select(problem => problem.ProblemKey).Distinct(StringComparer.Ordinal).Count());
+    }
+
+    [Fact]
     public void ListConversations_DoesNotFilterBySinceUtc()
     {
         InMemoryHarnessSqliteSource sqlite = new();

@@ -27,6 +27,7 @@ public class CursorSqliteConversationSource : ISqliteConversationSource
     private const string WorkspaceDatabaseName = "state.vscdb";
     private const string WorkspaceFileName = "workspace.json";
     private const string WorkspaceProblemCode = "CURSOR_WORKSPACE_UNREADABLE";
+    private const string ComposerProblemCode = "CURSOR_COMPOSER_UNREADABLE";
 
     /// <inheritdoc />
     public IReadOnlyDictionary<string, IReadOnlyList<string>> RequiredColumns { get; } =
@@ -59,16 +60,32 @@ public class CursorSqliteConversationSource : ISqliteConversationSource
 
         Dictionary<string, string> workspaceByComposer = BuildWorkspaceMap(context);
         List<SqliteConversation> conversations = [];
+        int rowNumber = 0;
         foreach (IReadOnlyDictionary<string, object?> row in context.Database.Query(query))
         {
-            string composerId = ReadText(row, "composer_id");
-            long bubbleCount = ReadInteger(row, "bubble_count");
-            long maxRowId = ReadInteger(row, "max_rowid");
-            conversations.Add(new SqliteConversation(
-                Id: composerId,
-                RevisionToken: string.Create(CultureInfo.InvariantCulture, $"{bubbleCount}-{maxRowId}"),
-                LastActivityUtc: null,
-                CompanionKey: workspaceByComposer.GetValueOrDefault(composerId)));
+            rowNumber++;
+            try
+            {
+                string composerId = ReadText(row, "composer_id");
+                long bubbleCount = ReadInteger(row, "bubble_count");
+                long maxRowId = ReadInteger(row, "max_rowid");
+                conversations.Add(new SqliteConversation(
+                    Id: composerId,
+                    RevisionToken: string.Create(CultureInfo.InvariantCulture, $"{bubbleCount}-{maxRowId}"),
+                    LastActivityUtc: null,
+                    CompanionKey: workspaceByComposer.GetValueOrDefault(composerId)));
+            }
+            catch (InvalidDataException ex)
+            {
+                // One unreadable composer row must not hide the others: record it and carry on.
+                context.Problems.Add(new CollectedProblem(
+                    ProblemKey: string.Create(CultureInfo.InvariantCulture, $"cursor-composer:{context.DatabasePath}:row-{rowNumber}"),
+                    Severity: "warning",
+                    Code: ComposerProblemCode,
+                    Message: string.Create(CultureInfo.InvariantCulture, $"Skipping Cursor composer row {rowNumber}: {ex.Message}"),
+                    Location: context.DatabasePath,
+                    HarnessId: context.HarnessId));
+            }
         }
 
         return conversations;
