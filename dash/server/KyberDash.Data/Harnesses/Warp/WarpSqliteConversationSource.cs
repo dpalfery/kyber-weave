@@ -18,9 +18,10 @@ namespace KyberDash.Data.Harnesses.Warp;
 /// <para>
 /// Block attribution is a JSON filter on <c>blocks.ai_metadata</c> that no index supports, and the
 /// database is harness-owned so none can be added. Running it once per conversation would parse every
-/// block once per conversation, so the attribution is read in one scan per database and kept by database
-/// path. <see cref="ListConversations"/> drops the path's entry, so each discovery pass reads the
-/// current blocks and the exports that follow it share that single scan.
+/// block once per conversation, so the attribution is read in one scan per database and kept by the file
+/// SQLite reports for it. <see cref="ListConversations"/> empties the whole cache, so each discovery pass
+/// reads the current blocks, the exports that follow it share that single scan, and the keys of earlier
+/// fingerprinted copies (a new file per change) cannot accumulate for the life of the singleton.
 /// </para>
 /// </remarks>
 public class WarpSqliteConversationSource : ISqliteConversationSource
@@ -51,6 +52,18 @@ public class WarpSqliteConversationSource : ISqliteConversationSource
     private readonly Dictionary<string, Dictionary<string, List<IReadOnlyDictionary<string, object?>>>> blocksByDatabase =
         new(StringComparer.Ordinal);
 
+    /// <summary>Number of databases whose block attribution is currently kept; read by tests to prove the cache is bounded.</summary>
+    internal int CachedDatabaseCount
+    {
+        get
+        {
+            lock (blocksLock)
+            {
+                return blocksByDatabase.Count;
+            }
+        }
+    }
+
     /// <inheritdoc />
     public IReadOnlyDictionary<string, IReadOnlyList<string>> RequiredColumns { get; } =
         new Dictionary<string, IReadOnlyList<string>>(StringComparer.Ordinal)
@@ -72,7 +85,7 @@ public class WarpSqliteConversationSource : ISqliteConversationSource
 
         lock (blocksLock)
         {
-            blocksByDatabase.Remove(DatabaseKey(context.Database));
+            blocksByDatabase.Clear();
         }
 
         HarnessSqliteQuery query = new(

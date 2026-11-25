@@ -81,6 +81,41 @@ public class WarpSqliteConversationSourceSqliteTests : IDisposable
         Assert.Equal(2, batch.Records.Count(static record => record.Op == RecordOp.LlmInvoke));
     }
 
+    [Fact]
+    public void WriteExport_TwoDatabasesWithTheSameConversationId_EachReturnsItsOwnBlocks()
+    {
+        string first = CreateWarpDatabase();
+        string second = CreateWarpDatabase("second.sqlite", "blk-other");
+        WarpSqliteConversationSource source = new();
+        using IHarnessSqliteDatabase firstDatabase = Source().Open(first);
+        using IHarnessSqliteDatabase secondDatabase = Source().Open(second);
+
+        _ = source.ListConversations(Context(firstDatabase, first, null)).ToList();
+        JsonElement fromFirst = Export(source, firstDatabase, "conv-1");
+        _ = source.ListConversations(Context(secondDatabase, second, null)).ToList();
+        JsonElement fromSecond = Export(source, secondDatabase, "conv-1");
+
+        Assert.Equal(["blk-1"], fromFirst.GetProperty("blocks").EnumerateArray().Select(block => block.GetProperty("block_id").GetString()));
+        Assert.Equal(["blk-other"], fromSecond.GetProperty("blocks").EnumerateArray().Select(block => block.GetProperty("block_id").GetString()));
+    }
+
+    [Fact]
+    public void ListConversations_PassesOverDifferentCopies_KeepAtMostOneCachedDatabase()
+    {
+        string first = CreateWarpDatabase();
+        string second = CreateWarpDatabase("second.sqlite", "blk-other");
+        WarpSqliteConversationSource source = new();
+        using IHarnessSqliteDatabase firstDatabase = Source().Open(first);
+        using IHarnessSqliteDatabase secondDatabase = Source().Open(second);
+
+        _ = source.ListConversations(Context(firstDatabase, first, null)).ToList();
+        _ = Export(source, firstDatabase, "conv-1");
+        _ = source.ListConversations(Context(secondDatabase, second, null)).ToList();
+        _ = Export(source, secondDatabase, "conv-1");
+
+        Assert.Equal(1, source.CachedDatabaseCount);
+    }
+
     private static JsonElement Export(WarpSqliteConversationSource source, IHarnessSqliteDatabase database, string conversationId) =>
         JsonDocument.Parse(ExportText(source, database, conversationId)).RootElement.Clone();
 
@@ -109,9 +144,9 @@ public class WarpSqliteConversationSourceSqliteTests : IDisposable
     private MicrosoftDataSqliteHarnessSource Source() =>
         new(new HarnessSqliteLimits(), directory.Combine("cache"));
 
-    private string CreateWarpDatabase()
+    private string CreateWarpDatabase(string fileName = "warp.sqlite", string blockId = "blk-1")
     {
-        string path = directory.Combine("warp.sqlite");
+        string path = directory.Combine(fileName);
         SqliteFixtureDatabase.Create(
             path,
             SchemaDdl,
@@ -128,7 +163,7 @@ public class WarpSqliteConversationSourceSqliteTests : IDisposable
                 // blk-1 is attributed to conv-1; the others are for conv-2, unattributed, or empty metadata.
                 new SqliteFixtureStatement(
                     "INSERT INTO blocks VALUES (?1, ?2, ?3, ?4)",
-                    ["blk-1", "2026-05-18 10:00:30", "ls", "{\"conversation_id\":\"conv-1\"}"]),
+                    [blockId, "2026-05-18 10:00:30", "ls", "{\"conversation_id\":\"conv-1\"}"]),
                 new SqliteFixtureStatement(
                     "INSERT INTO blocks VALUES (?1, ?2, ?3, ?4)",
                     ["blk-2", "2026-05-18 10:00:40", "pwd", "{\"conversation_id\":\"conv-2\"}"]),
