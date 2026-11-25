@@ -709,8 +709,12 @@ public partial class DevinMapper : IHarnessMapper
             FromMessageNodes: true);
     }
 
+    /// <remarks>
+    /// <c>(double)long.MaxValue</c> rounds up to 2^63, which no <see cref="long"/> holds, so the upper bound is
+    /// strict: a value at or beyond it is out of range and becomes no duration, never a clamped one.
+    /// </remarks>
     private static long? ToReportedDurationMs(double? totalTimeMs) =>
-        totalTimeMs is { } value && double.IsFinite(value) && value >= 0 && value <= long.MaxValue
+        totalTimeMs is { } value && double.IsFinite(value) && value >= 0 && value < (double)long.MaxValue
             ? (long)Math.Round(value, MidpointRounding.AwayFromZero)
             : null;
 

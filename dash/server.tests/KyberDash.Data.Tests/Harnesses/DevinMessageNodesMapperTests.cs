@@ -112,6 +112,20 @@ public class DevinMessageNodesMapperTests
         Assert.Null(llm[1].ReportedDurationMs);
     }
 
+    [Theory]
+    [InlineData("9223372036854775808")]
+    [InlineData("1e19")]
+    [InlineData("-1")]
+    public void Map_MessageNodesExport_OutOfRangeTotalTimeMsBecomesNoDuration(string totalTimeMs)
+    {
+        string export = Export.Replace("\"total_time_ms\": 900", $"\"total_time_ms\": {totalTimeMs}", StringComparison.Ordinal);
+
+        CollectedBatch batch = new DevinMapper().Map(MakeUnit(export), BaselineUtc);
+
+        List<CollectedRecord> llm = batch.Records.Where(static r => r.Op == RecordOp.LlmInvoke).ToList();
+        Assert.Null(llm[0].ReportedDurationMs);
+    }
+
     [Fact]
     public void Map_MessageNodesExport_ToolAndSystemNodesEmitNoRecords()
     {
