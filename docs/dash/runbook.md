@@ -1643,8 +1643,10 @@ npx --prefix dash playwright test --config dash/playwright.isolated.config.ts da
 import yields nothing. The reader fix lives on branch `claude/fix/sqlite-harness-readers`; when it lands the marker is
 removed and the tests must pass.
 
-**Import outcomes.** A folder import in which some source units fail reports `partial` with the number of `failedUnits`
-(the maintenance panel shows it) instead of `succeeded`; a store constraint failure on one unit fails only that unit.
+**Import outcomes.** A folder import, a refresh or a maintenance pass in which some source units fail (including the
+plugin-session pass and the one-time no-estimate re-read) reports `partial` with the number of `failedUnits` instead of
+`succeeded`; `failedUnits` is the count from the last pass that read sources, and the maintenance panel shows it. A store
+constraint failure on one unit fails only that unit.
 
 **Leftovers from an earlier run.** With no watchdog and no ledger, a process a killed run left behind
 is yours to find and stop:
