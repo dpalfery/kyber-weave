@@ -7,6 +7,7 @@ using KyberDash.Application.Tests.Fakes;
 using KyberDash.Data.Collector;
 using KyberDash.Data.Collector.Sources;
 using KyberDash.Data.Harnesses.CopilotVscode;
+using KyberDash.Data.Tokenization;
 using KyberDash.Domain;
 using KyberDash.Domain.Schema;
 using Xunit;
@@ -352,6 +353,31 @@ public class CopilotVscodeMapperTests
                 Assert.False(string.IsNullOrWhiteSpace(reason) || reason is "—" or "-");
             }
         }
+    }
+
+    /// <summary>
+    /// A request whose resolved model has its own published tokenizer counts the message part with
+    /// that tokenizer: the measured tokens equal the model's own figure, not the stand-in's.
+    /// </summary>
+    [Fact]
+    public void Map_CountsRequestPartsWithTheRequestModelOwnTokenizer()
+    {
+        string jsonl = string.Join('\n',
+        [
+            """{"kind":0,"v":{"sessionId":"chat-own","creationDate":"2026-11-19T10:00:00.000Z","requests":[]}}""",
+            """{"kind":2,"k":["requests"],"v":[{"requestId":"req-own","modelId":"gpt-3.5-turbo","message":{"text":"{\"こんにちは\":\"世界\"}"},"result":{"metadata":{"promptTokens":50,"outputTokens":10}}}]}""",
+        ]) + "\n";
+
+        NativeSourceUnit unit = MakeNativeUnit("/fake-home/ws1/chatSessions/model-own.jsonl", jsonl);
+        CollectedBatch batch = new CopilotVscodeMapper().Map(unit, BaselineUtc);
+
+        Assert.Empty(batch.Problems);
+        CollectedRecord record = Assert.Single(batch.Records);
+        Assert.Equal("gpt-3.5-turbo", record.Model);
+        CollectedContentPart part = Assert.Single(record.Parts);
+        Assert.NotNull(part.Withheld);
+        Assert.Equal(LocalTextTokenizer.Shared.Count("{\"こんにちは\":\"世界\"}", "gpt-3.5-turbo").Count, part.Withheld!.MeasuredTokens);
+        Assert.NotEqual(LocalTextTokenizer.Shared.Count("{\"こんにちは\":\"世界\"}", null).Count, part.Withheld.MeasuredTokens);
     }
 
     private static NativeSourceUnit MakeNativeUnit(string path, string rawText)

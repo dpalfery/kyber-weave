@@ -1,6 +1,7 @@
 import { useEffect, useMemo } from 'react'
 import { useQuery } from '@tanstack/react-query'
-import { cn, fmtTokens } from '../lib/utils.js'
+import { cn } from '../lib/utils.js'
+import { fmtMeasuredTokens } from '../lib/kyberApi.js'
 import { Card } from '../components/ui/card.js'
 import { Skeleton } from '../components/ui/skeleton.js'
 import {
@@ -189,23 +190,14 @@ export function FindingDetail({
           {/* Waste Summary Metric */}
           <div className="text-right shrink-0 rounded-lg border border-border bg-card/60 p-3">
             <div className="text-[10.5px] uppercase tracking-wider text-tertiary-foreground">
-              Estimated Waste
+              Recoverable Waste
             </div>
             <div
               className="font-display text-2xl font-bold text-amber-500 dark:text-amber-400 tabular-nums"
               data-testid="waste-summary"
             >
-              {fmtTokens(finding.estimatedWasteTokens)}
+              {fmtMeasuredTokens(finding.estimatedWasteTokens)}
             </div>
-            {finding.errorBar && (
-              <div
-                className="text-[10px] font-mono text-tertiary-foreground tabular-nums mt-0.5"
-                title="Confidence error bar bounds"
-                data-testid="waste-summary-error-bar"
-              >
-                [{fmtTokens(finding.errorBar.lower)} – {fmtTokens(finding.errorBar.upper)}]
-              </div>
-            )}
           </div>
         </div>
 
@@ -258,7 +250,6 @@ export function FindingDetail({
       <RecommendationPanel
         recommendation={finding.recommendation}
         estimatedWasteTokens={finding.estimatedWasteTokens}
-        errorBar={finding.errorBar}
       />
 
       <CalibrationSummary

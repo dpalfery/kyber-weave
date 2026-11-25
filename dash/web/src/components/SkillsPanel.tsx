@@ -1,4 +1,5 @@
 import { cn, fmtNum, fmtTokens } from '../lib/utils.js'
+import { tokenizerLabel } from '../lib/kyberApi.js'
 import { Pager } from './ui/Pager.js'
 import type {
   KyberSkillAvailability,
@@ -35,6 +36,8 @@ export type SkillsPanelProps = {
   pager?: PagedWindow
   /** Opens the skill drawer with the payload row. */
   onSelectSkill?: (skill: KyberSkillRow) => void
+  /** The session's model, so a stand-in tokenizer can say whose own it is not. */
+  model?: string | null
   className?: string
 }
 
@@ -77,13 +80,19 @@ function tile(testId: string, label: string, count: number | undefined, detail: 
   )
 }
 
-function renderRow(row: KyberSkillRow, maxTokens: number, onSelectSkill?: (skill: KyberSkillRow) => void) {
+function renderRow(
+  row: KyberSkillRow,
+  maxTokens: number,
+  onSelectSkill?: (skill: KyberSkillRow) => void,
+  model?: string | null,
+) {
   const listedUnmeasured = unmeasured(row.listed)
   const listed = row.listed === true
   const invocationsUnmeasured = unmeasured(row.invocations)
   const invocations = typeof row.invocations === 'number' ? row.invocations : undefined
   const listedButNeverInvoked = listed && invocations === 0
   const select = () => onSelectSkill?.(row)
+  const tokenizer = tokenizerLabel(row, model)
 
   return (
     <div
@@ -118,9 +127,11 @@ function renderRow(row: KyberSkillRow, maxTokens: number, onSelectSkill?: (skill
           {invocationsUnmeasured && <span className={BADGE_WARN}>invocations not measurable</span>}
         </div>
         {typeof row.derived_tokens === 'number' && (
-          <span className="shrink-0 font-semibold tabular-nums text-foreground">
+          <span className="shrink-0 text-right font-semibold tabular-nums text-foreground">
             {fmtTokens(row.derived_tokens)}{' '}
-            <span className="font-normal text-tertiary-foreground">derived tokens</span>
+            <span className="font-normal text-tertiary-foreground">
+              {tokenizer ? `tokens · ${tokenizer}` : 'derived tokens'}
+            </span>
           </span>
         )}
       </div>
@@ -151,7 +162,7 @@ function renderRow(row: KyberSkillRow, maxTokens: number, onSelectSkill?: (skill
   )
 }
 
-export function SkillsPanel({ skills, summary, aggregate, pager, onSelectSkill, className }: SkillsPanelProps) {
+export function SkillsPanel({ skills, summary, aggregate, pager, onSelectSkill, model, className }: SkillsPanelProps) {
   const rootClass = cn('rounded-lg border border-border bg-card p-4 text-card-foreground shadow-xs', className)
 
   if (skills === undefined || skills === null) {
@@ -238,7 +249,7 @@ export function SkillsPanel({ skills, summary, aggregate, pager, onSelectSkill, 
         {rows.length === 0 ? (
           <p className="py-4 text-center text-sm text-muted-foreground">No skill was recorded for this session.</p>
         ) : (
-          rows.map((row) => renderRow(row, maxTokens, onSelectSkill))
+          rows.map((row) => renderRow(row, maxTokens, onSelectSkill, model))
         )}
         {pager != null && (
           <Pager
@@ -253,7 +264,7 @@ export function SkillsPanel({ skills, summary, aggregate, pager, onSelectSkill, 
       </div>
 
       <p className="text-[11px] text-tertiary-foreground">
-        Derived tokens are estimated from each skill&apos;s listing; the reported total is the harness&apos;s own figure.
+        Derived tokens are counted by tokenizing each skill&apos;s listing; the reported total is the harness&apos;s own figure.
       </p>
     </div>
   )

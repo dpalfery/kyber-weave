@@ -1502,7 +1502,7 @@ public sealed class SessionSectionEndpointsTests
             store,
             store,
             pricing,
-            new CanonSessionProjectorEngine(store, store, store, pricing),
+            new CanonSessionProjectorEngine(store, store, store, pricing, new FakeTextTokenizer()),
             new CanonRollupsEngine(store, store, pricing),
             clock: () => TurnBase.AddHours(2),
             instanceId: "test-instance");
@@ -1512,7 +1512,7 @@ public sealed class SessionSectionEndpointsTests
             store,
             store,
             store,
-            new CanonSessionProjectorEngine(store, store, store, pricing),
+            new CanonSessionProjectorEngine(store, store, store, pricing, new FakeTextTokenizer()),
             new CanonRollupsEngine(store, store, pricing));
 
     private static void WriteSession(

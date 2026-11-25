@@ -135,6 +135,44 @@ public interface ITranscriptIngestionService
     /// <summary>Refreshes local harness transcript sources within <paramref name="historyWeeks"/> using checkpoints.</summary>
     RefreshReport RefreshHarnessSources(int historyWeeks = 2);
 
+    /// <summary>
+    /// Reads the transcript files of the sessions a plugin-captured OTLP source already recorded
+    /// for <paramref name="harnessId"/>, so those sessions gain their file rows, models, and
+    /// companion usage without a folder import.
+    /// </summary>
+    /// <remarks>
+    /// Discovery runs through the harness's registered reader only, keeping the units whose
+    /// transcript file stem is one of <paramref name="sessionKeys"/>; each kept unit then goes
+    /// through the standard checkpoint check, so an unchanged file writes nothing and a later
+    /// full refresh replaces the rows under the same source id. No <c>refresh_run</c> row is
+    /// written and no history coverage is claimed. A session id is data: files are matched by
+    /// comparing stems against discovery results, never by joining the id into a path.
+    /// </remarks>
+    /// <param name="harnessId">Harness whose registered reader discovers the files.</param>
+    /// <param name="sessionKeys">Candidate session keys, as recorded by the plugin-captured source.</param>
+    /// <returns>Per-unit status rows with no run id and no history claim.</returns>
+    RefreshReport RefreshPluginSessionFiles(string harnessId, IReadOnlyCollection<string> sessionKeys);
+
+    /// <summary>
+    /// Re-reads the source units of <paramref name="harnessIds"/> that already hold a checkpoint,
+    /// so a newer parser contract version replaces rows the harness stored with estimated tokens.
+    /// </summary>
+    /// <remarks>
+    /// Discovery runs through each named harness's registered reader only, so no other harness's
+    /// files are touched, and is not limited to the history window, so a checkpointed unit last
+    /// written before it is still replaced. A discovered unit is read only when the operational store already holds
+    /// its checkpoint; the standard checkpoint check then decides whether that checkpoint is still
+    /// reusable, which is how the parser contract version change forces a re-read. A checkpointed
+    /// unit whose source key discovery no longer returns (a deleted file, or a file now keyed
+    /// differently) cannot be re-read, so the token values its stored version wrote
+    /// as estimates are cleared to not measured instead, keeping its sessions, records and text; that
+    /// unit's row reads <c>cleared</c>, or <c>failed</c> when the clear fails. No
+    /// <c>refresh_run</c> row is written and no history coverage is claimed.
+    /// </remarks>
+    /// <param name="harnessIds">Harnesses whose checkpointed source units are re-read.</param>
+    /// <returns>Per-unit status rows with no run id and no history claim.</returns>
+    RefreshReport RereadCheckpointedSources(IReadOnlyCollection<string> harnessIds);
+
     /// <summary>Applies rolling 14-day content retention without dropping token or cost counters.</summary>
     PurgeExpiredContentResult PurgeExpiredContent(DateTimeOffset? now = null);
 }

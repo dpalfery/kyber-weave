@@ -250,6 +250,14 @@ public class CaptureHarnessProbeTests
                 ? text
                 : throw new UnauthorizedAccessException(filePath);
 
+        public string ReadAllText(string filePath, long maxBytes)
+        {
+            string text = ReadAllText(filePath);
+            return System.Text.Encoding.UTF8.GetByteCount(text) <= maxBytes
+                ? text
+                : throw new InvalidDataException($"'{filePath}' holds more than {maxBytes} bytes.");
+        }
+
         public string GetFullPath(string path) => path;
     }
 }

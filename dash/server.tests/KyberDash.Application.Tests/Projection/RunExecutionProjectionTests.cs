@@ -196,7 +196,7 @@ public class RunExecutionProjectionTests
     }
 
     private static CanonSessionProjectorEngine NewEngine(InMemoryRelationalStore store) =>
-        new(store, store, store, new FakePricingRepository());
+        new(store, store, store, new FakePricingRepository(), new FakeTextTokenizer());
 
     private static void WriteSession(
         InMemoryRelationalStore store,

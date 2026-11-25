@@ -67,6 +67,12 @@ public class KyberBridgeEngine
     /// <summary>Session marker answered when a single session's projection read fails.</summary>
     private const string ProjectionFailedStatus = "PROJECTION_FAILED";
 
+    /// <summary>Tokenizer name a figure carries when more than one tokenizer counted it.</summary>
+    private const string MixedTokenizer = "mixed";
+
+    /// <summary>The label shown beside a session total the harness reported with no input/output split.</summary>
+    private const string ReportedTotalOnlyNote = "total, split not reported";
+
     private const string TimestampFormat = "yyyy-MM-dd'T'HH:mm:ss.fff'Z'";
 
     private static readonly JsonSerializerOptions CamelCaseJsonOptions = new()
@@ -413,6 +419,7 @@ public class KyberBridgeEngine
             RequestCount: figure?.RequestCount,
             TotalInput: figure?.TotalInput,
             TotalOutput: figure?.TotalOutput,
+            ReportedTotalTokens: figure?.ReportedTotalTokens,
             CostUsd: ExtractUsdCost(figure?.PublishedCost),
             Cost: figure?.PublishedCost,
             CostReported: figure?.ReportedCost,
@@ -3178,7 +3185,7 @@ public class KyberBridgeEngine
         StoredSessionContextTurn? firstStored = ctx.Turns.Count > 0 ? ctx.Turns[0] : null;
         StoredSessionContextTurn? lastStored = ctx.Turns.Count > 0 ? ctx.Turns[^1] : null;
 
-        return new Dictionary<string, object?>(StringComparer.Ordinal)
+        Dictionary<string, object?> payload = new(StringComparer.Ordinal)
         {
             ["measurable"] = true,
             ["contextLimit"] = ctx.ContextLimit,
@@ -3194,11 +3201,40 @@ public class KyberBridgeEngine
             ["first"] = BuildContextEdge(firstBucket, firstStored),
             ["last"] = BuildContextEdge(lastBucket, lastStored),
         };
+        AddTokenizerLabels(payload, TokenizerLabel.Ordered(ctx.Turns.SelectMany(static turn => turn.Tokenizers)));
+        return payload;
+    }
+
+    /// <summary>
+    /// Adds the tokenizer label trio beside a figure measured from text: the tokenizer that
+    /// counted it — <see cref="MixedTokenizer"/> when more than one did — the full labelled list,
+    /// and whether that tokenizer is the model's own (<see langword="null"/> when mixed). A
+    /// figure with no labels came only from harness-reported counts, so nothing is added and it
+    /// stays shown as reported, never as not measured.
+    /// </summary>
+    /// <param name="target">Payload entry carrying the text-derived figures.</param>
+    /// <param name="labels">Tokenizers that counted those figures, in name order.</param>
+    private static void AddTokenizerLabels(Dictionary<string, object?> target, IReadOnlyList<TokenizerLabel> labels)
+    {
+        if (labels.Count == 0)
+        {
+            return;
+        }
+
+        target["tokenizer"] = labels.Count == 1 ? labels[0].Tokenizer : MixedTokenizer;
+        target["tokenizers"] = labels.Select(static label => new Dictionary<string, object?>(StringComparer.Ordinal)
+        {
+            ["name"] = label.Tokenizer,
+            ["isModelOwn"] = label.IsModelOwn,
+        }).ToList();
+        target["tokenizerIsModelOwn"] = labels.Count == 1 ? labels[0].IsModelOwn : null;
     }
 
     /// <summary>
     /// Projects one stored context turn onto the per-turn entry the charts context object and the
-    /// widened turn section both render, so the two routes answer the same buckets.
+    /// widened turn section both render, so the two routes answer the same buckets. The turn's
+    /// measured figures carry its tokenizer label trio; a turn whose figures are all
+    /// harness-reported adds no labels and stays shown as reported.
     /// </summary>
     private static Dictionary<string, object?> BuildStoredContextTurn(StoredSessionContextTurn turn)
     {
@@ -3214,7 +3250,7 @@ public class KyberBridgeEngine
             toolDefsByServer[serverDef.Server] = serverDef.Tokens;
         }
 
-        return new Dictionary<string, object?>(StringComparer.Ordinal)
+        Dictionary<string, object?> entry = new(StringComparer.Ordinal)
         {
             ["index"] = turn.Position + 1,
             ["inputTokens"] = turn.InputTokens,
@@ -3241,6 +3277,8 @@ public class KyberBridgeEngine
             ["freshJumpFactor"] = turn.FreshJumpFactor,
             ["nonResidentTokens"] = turn.NonResidentTokens,
         };
+        AddTokenizerLabels(entry, turn.Tokenizers);
+        return entry;
     }
 
     private static Dictionary<string, object?>? BuildContextEdge(
@@ -3321,7 +3359,7 @@ public class KyberBridgeEngine
 
             if (figures.ReportedCost is null && figures.TurnCount > 0)
             {
-                AddNote("Harness-reported cost was not exported; published pricing estimates are shown separately.");
+                AddNote("Harness-reported cost was not exported; cost calculated from published rates is shown separately.");
             }
 
             if (figures.CostBasisMismatch is not null)
@@ -3332,6 +3370,11 @@ public class KyberBridgeEngine
             if (!figures.TotalCacheCreation.HasValue && figures.TurnCount > 0)
             {
                 AddNote("Cache creation tokens were not reported for this session.");
+            }
+
+            if (figures.ReportedTotalTokens is not null)
+            {
+                AddNote(ReportedTotalOnlyNote);
             }
 
             if (figures.UnmeasuredInputTurns > 0)
@@ -3408,6 +3451,12 @@ public class KyberBridgeEngine
             ["problems"] = figures.Problems,
         };
 
+        if (figures.ReportedTotalTokens is not null)
+        {
+            summary["total_tokens"] = figures.ReportedTotalTokens;
+            summary["total_tokens_note"] = ReportedTotalOnlyNote;
+        }
+
         if (distinctSkills.Count > 0)
         {
             summary["skills_invoked"] = distinctSkills;
@@ -3452,7 +3501,10 @@ public class KyberBridgeEngine
     /// <param name="part">Content part the entry describes.</param>
     private static void AddPartDetail(Dictionary<string, object?> entry, CollectedContentPart part)
     {
-        if ((part.ReportedTokens ?? part.Withheld?.MeasuredTokens) is long tokens) entry["tokens"] = tokens;
+        PartTokenFigure figure = CanonRecordHydration.TokenFigureOf(part);
+        if (figure.Tokens is long tokens) entry["tokens"] = tokens;
+        if (figure.Tokenizer is string tokenizer) entry["tokenizer"] = tokenizer;
+        if (figure.TokenizerIsModelOwn is bool isModelOwn) entry["tokenizerIsModelOwn"] = isModelOwn;
         if (part.Server is string server) entry["server"] = server;
         if (part.Resident is bool resident) entry["resident"] = resident;
         if (part.OriginalUtf8BytesWhenTruncated.HasValue) entry["truncated"] = true;
@@ -4220,10 +4272,9 @@ public class KyberBridgeEngine
 
     private static (string Display, string Kind) FormatSourceDisplay(string source)
     {
-        const string fileSourcePrefix = "codeburn/";
-        if (source.StartsWith(fileSourcePrefix, StringComparison.Ordinal))
+        if (source.StartsWith(CanonSynth.FileSourcePrefix, StringComparison.Ordinal))
         {
-            return (source[fileSourcePrefix.Length..], "local-file");
+            return (source[CanonSynth.FileSourcePrefix.Length..], "local-file");
         }
 
         if (string.Equals(source.Trim(), "unattributed", StringComparison.OrdinalIgnoreCase))
@@ -4245,7 +4296,7 @@ public class KyberBridgeEngine
     /// counter publishes the not-measurable declaration the sessions list already promised:
     /// a missing number is not a measured zero, and the reason names the harness.
     /// </summary>
-    private static object? TokenFigure(long? total, int? turnCount, string harness)
+    private static object? TokenFigure(long? total, int? turnCount, string harness, long? reportedTotalTokens = null)
     {
         if (total is not null || turnCount is null or 0)
         {
@@ -4256,7 +4307,9 @@ public class KyberBridgeEngine
         return new Dictionary<string, string>(StringComparer.Ordinal)
         {
             ["availability"] = "not_measurable",
-            ["reason"] = $"{named} telemetry did not report token usage for this session.",
+            ["reason"] = reportedTotalTokens is null
+                ? $"{named} telemetry did not report token usage for this session."
+                : $"{named} reported a total only; the input and output split was not reported.",
         };
     }
 
@@ -4277,7 +4330,7 @@ public class KyberBridgeEngine
             ["ended"] = node.Ended,
             ["turn_count"] = node.TurnCount,
             ["request_count"] = node.RequestCount,
-            ["total_input"] = TokenFigure(node.TotalInput, node.TurnCount, node.Harness),
+            ["total_input"] = TokenFigure(node.TotalInput, node.TurnCount, node.Harness, node.ReportedTotalTokens),
             ["total_output"] = node.TotalOutput,
             ["cost_usd"] = node.CostUsd,
             ["cost"] = node.Cost is null ? new { basis = "unknown", status = "no_rate" } : node.Cost,
@@ -4287,6 +4340,12 @@ public class KyberBridgeEngine
             ["problems"] = node.Problems,
             ["subagents"] = node.Subagents.Select(ToSessionDto).ToList(),
         };
+        if (node.ReportedTotalTokens is not null)
+        {
+            dto["total_tokens"] = node.ReportedTotalTokens;
+            dto["total_tokens_note"] = ReportedTotalOnlyNote;
+        }
+
         if (node.ProjectionStatus is not null)
         {
             dto["projection_status"] = node.ProjectionStatus;
@@ -4957,6 +5016,7 @@ public class KyberBridgeEngine
         int? RequestCount,
         long? TotalInput,
         long? TotalOutput,
+        long? ReportedTotalTokens,
         double? CostUsd,
         ReadTimeCostSummary? Cost,
         ReadTimeCostSummary? CostReported,

@@ -28,7 +28,7 @@ public class E2eSeederWorldTests
         using TempDirectory directory = new();
         InMemoryRelationalStore store = new();
         FakePricingRepository pricing = new();
-        CanonSessionProjectorEngine projector = new(store, store, store, pricing);
+        CanonSessionProjectorEngine projector = new(store, store, store, pricing, new FakeTextTokenizer());
         CanonRollupsEngine rollups = new(store, store, pricing);
         CanonProjectionService projection = new(store, store, store, projector, rollups);
         TranscriptIngestionService ingestion = new(store, store, new HarnessSourceRegistry());
@@ -64,7 +64,7 @@ public class E2eSeederWorldTests
         using TempDirectory directory = new();
         InMemoryRelationalStore store = new();
         FakePricingRepository pricing = new();
-        CanonSessionProjectorEngine projector = new(store, store, store, pricing);
+        CanonSessionProjectorEngine projector = new(store, store, store, pricing, new FakeTextTokenizer());
         CanonRollupsEngine rollups = new(store, store, pricing);
         CanonProjectionService projection = new(store, store, store, projector, rollups);
         TranscriptIngestionService ingestion = new(store, store, new HarnessSourceRegistry());
@@ -97,7 +97,7 @@ public class E2eSeederWorldTests
         using TempDirectory directory = new();
         InMemoryRelationalStore store = new();
         FakePricingRepository pricing = new();
-        CanonSessionProjectorEngine projector = new(store, store, store, pricing);
+        CanonSessionProjectorEngine projector = new(store, store, store, pricing, new FakeTextTokenizer());
         CanonRollupsEngine rollups = new(store, store, pricing);
         CanonProjectionService projection = new(store, store, store, projector, rollups);
         // The seed's first projection pass heals a stale detector, so the detector is made stale

@@ -226,6 +226,18 @@ public class KiloMapper : IHarnessMapper
 
         string harnessId = ResolveHarnessId(unit.Unit.HarnessId);
         CollectedSource source = new(harnessId, unit.Unit.Kind, unit.Unit.SourceKey);
+        if (unit.RawText is null)
+        {
+            // A null payload is a source the reader could not give us content for, not an empty session: say so.
+            List<CollectedProblem> nullProblems = BuildProblems(
+                [Fail($"source '{unit.Unit.SourceKey}' carried no readable content")],
+                unit.Unit.SourceKey,
+                unit.Unit.SourceKey,
+                harnessId,
+                importedAtUtc);
+            return new CollectedBatch(source, [], [], nullProblems);
+        }
+
         if (string.IsNullOrWhiteSpace(unit.RawText))
         {
             return new CollectedBatch(source, [], [], []);
@@ -521,7 +533,7 @@ public class KiloMapper : IHarnessMapper
             List<CollectedContentPart> parts = [];
             if (request.Index == 0 && !string.IsNullOrWhiteSpace(document.UserMessage))
             {
-                parts.Add(ToolContentMeasurer.BuildContentPart(0, ContentBucket.ConversationHistory, document.UserMessage, "user"));
+                parts.Add(ToolContentMeasurer.BuildContentPart(0, ContentBucket.ConversationHistory, document.UserMessage, "user", document.Model));
             }
 
             List<CollectedTokenCount> tokens = [];
@@ -572,7 +584,7 @@ public class KiloMapper : IHarnessMapper
                 AgentInstanceId: null,
                 ToolDefinitions: [],
                 Signals: new CollectedRecordSignals(null, null, null, null),
-                ReportedInputTokens: request.TokensIn,
+                ReportedInputTokens: request.TokensIn + request.CacheReads + request.CacheWrites,
                 ReportedOutputTokens: request.TokensOut));
         }
 
@@ -616,7 +628,7 @@ public class KiloMapper : IHarnessMapper
         {
             foreach (string text in pending)
             {
-                parts.Add(ToolContentMeasurer.BuildContentPart(position++, ContentBucket.ConversationHistory, text, "user"));
+                parts.Add(ToolContentMeasurer.BuildContentPart(position++, ContentBucket.ConversationHistory, text, "user", message.Data.ModelText));
             }
 
             pending.Clear();
@@ -627,7 +639,7 @@ public class KiloMapper : IHarnessMapper
             string? text = PartText(row.Data);
             if (text is not null)
             {
-                parts.Add(ToolContentMeasurer.BuildContentPart(position++, ContentBucket.ConversationHistory, text, "assistant"));
+                parts.Add(ToolContentMeasurer.BuildContentPart(position++, ContentBucket.ConversationHistory, text, "assistant", message.Data.ModelText));
             }
         }
 
@@ -642,7 +654,7 @@ public class KiloMapper : IHarnessMapper
 
         foreach (string resultText in resultTexts)
         {
-            parts.Add(ToolContentMeasurer.BuildContentPart(position++, ContentBucket.ToolResultContent, resultText, "assistant"));
+            parts.Add(ToolContentMeasurer.BuildContentPart(position++, ContentBucket.ToolResultContent, resultText, "assistant", message.Data.ModelText));
         }
 
         List<CollectedTokenCount> tokens = [];
@@ -704,7 +716,7 @@ public class KiloMapper : IHarnessMapper
             AgentInstanceId: null,
             ToolDefinitions: [],
             Signals: new CollectedRecordSignals(null, null, null, null),
-            ReportedInputTokens: message.Data.InputTokens,
+            ReportedInputTokens: message.Data.InputTokens + message.Data.CacheReadTokens + message.Data.CacheWriteTokens,
             ReportedOutputTokens: message.Data.OutputTokens);
 
         List<CollectedRecord> records = [parent];
@@ -775,13 +787,13 @@ public class KiloMapper : IHarnessMapper
         }
 
         CollectedToolContent? input = part.InputJson is not null
-            ? ToolContentMeasurer.Measure(part.InputJson).ToToolContent(includeFingerprint: true)
+            ? ToolContentMeasurer.Measure(part.InputJson, model: message.Data.ModelText).ToToolContent(includeFingerprint: true)
             : null;
 
         bool isError = string.Equals(part.Status, "error", StringComparison.Ordinal);
         bool hasOutput = !string.IsNullOrEmpty(part.OutputText);
         CollectedToolContent? result = hasOutput || isError
-            ? ToolContentMeasurer.Measure(hasOutput ? part.OutputText : string.Empty).ToToolContent(includeFingerprint: false)
+            ? ToolContentMeasurer.Measure(hasOutput ? part.OutputText : string.Empty, model: message.Data.ModelText).ToToolContent(includeFingerprint: false)
             : null;
         bool? succeeded = isError ? false : hasOutput ? true : null;
         CollectedError? error = isError

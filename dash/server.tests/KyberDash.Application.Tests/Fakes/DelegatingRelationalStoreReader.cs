@@ -47,6 +47,10 @@ internal abstract class DelegatingRelationalStoreReader : IRelationalStoreReader
     public virtual IReadOnlyList<StoredSourceCount> SourceRecordCounts() => inner.SourceRecordCounts();
 
     /// <inheritdoc />
+    public virtual IReadOnlyList<string> SessionKeysWithRecordSource(string harnessId, string sourceName, int limit) =>
+        inner.SessionKeysWithRecordSource(harnessId, sourceName, limit);
+
+    /// <inheritdoc />
     public virtual CollectedRecord? RecordContentFree(string spanId) => inner.RecordContentFree(spanId);
 
     /// <inheritdoc />

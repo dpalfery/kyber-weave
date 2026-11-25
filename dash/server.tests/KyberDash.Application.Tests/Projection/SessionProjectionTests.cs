@@ -136,6 +136,29 @@ public class SessionProjectionTests
     }
 
     /// <summary>
+    /// A session with neither tool definitions nor tool invocations (a file harness whose journal
+    /// exports no tool records) is not a measured, empty ranking: it gets the schema-unmeasurable
+    /// row so the dashboard states that definitions were not exported rather than "No tools recorded".
+    /// </summary>
+    [Fact]
+    public void ProjectIncremental_WritesSchemaUnmeasurableRowWhenSessionHasNoDefinitionsAndNoInvocations()
+    {
+        InMemoryRelationalStore store = new();
+        CollectedRecord turn = Turn("turn-1", sessionKey: "sess-no-tools", minuteOffset: 0, inputTokens: 500, outputTokens: 40);
+        WriteSession(store, "sess-no-tools", [turn]);
+
+        CanonSessionProjectorEngine engine = NewEngine(store);
+        engine.ProjectIncremental();
+
+        StoredSessionProjection? projection = ((IProjectionStore)store).GetSessionProjection("sess-no-tools");
+        Assert.NotNull(projection);
+        Assert.Null(projection!.Schema);
+        Assert.NotNull(projection.SchemaUnmeasurableReason);
+        Assert.Equal(0, store.CountRows("session_schema"));
+        Assert.Equal(1, store.CountRows("session_schema_unmeasurable"));
+    }
+
+    /// <summary>
     /// Token counting during the pass persists its cache entries through
     /// <see cref="IOperationalStore"/> (<c>token_cache</c>).
     /// </summary>
@@ -156,8 +179,9 @@ public class SessionProjectionTests
         CanonSessionProjectorEngine engine = NewEngine(store);
         _ = engine.ProjectIncremental();
 
-        long expected = CanonTokenCache.ApproximateO200kBase(prompt);
-        Assert.Equal(expected, store.GetCachedTokenCount(CanonTokenCache.CacheKey(prompt, CanonTokenCache.ApproximateTokenizerName)));
+        // The pass counted the prompt through the engine's tokenizer for the model the records
+        // named, so the entry is stored under that tokenizer's label and that model.
+        Assert.Equal(1L, store.GetCachedTokenCount(CanonTokenCache.CacheKey(prompt, "claude-sonnet-4-6", "fake_tokenizer")));
         Assert.True(store.CountRows("token_cache") > 0, "the pass must persist token cache rows through IOperationalStore");
     }
 
@@ -299,7 +323,7 @@ public class SessionProjectionTests
     }
 
     private static CanonSessionProjectorEngine NewEngine(InMemoryRelationalStore store) =>
-        new(store, store, store, new FakePricingRepository());
+        new(store, store, store, new FakePricingRepository(), new FakeTextTokenizer());
 
     private static void WriteSession(
         InMemoryRelationalStore store,

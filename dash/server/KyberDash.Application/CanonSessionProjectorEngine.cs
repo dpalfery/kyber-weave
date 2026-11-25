@@ -16,7 +16,8 @@ namespace KyberDash.Application;
 /// <remarks>
 /// <para>
 /// The primary constructor projects sessions typed: it reads records only through
-/// <see cref="IRelationalStoreReader"/>, counts tokens through <see cref="IOperationalStore"/>
+/// <see cref="IRelationalStoreReader"/>, counts tokens through the local
+/// <see cref="ITextTokenizer"/> seam memoized via <see cref="IOperationalStore"/>
 /// (decision D16), and writes <see cref="StoredSessionProjection"/> rows, typed context and
 /// schema children (with exclusive <c>_unmeasurable</c> rows), and timeline marks through
 /// <see cref="IProjectionStore"/> — no JSON payload column anywhere.
@@ -45,7 +46,6 @@ public partial class CanonSessionProjectorEngine
     public const int DefaultReadPathPassRecordBudget = 20_000;
 
     private const int PromptPreviewLength = 200;
-    private const string FileSourcePrefix = "codeburn/";
     private const string DroidHarness = "droid";
     private const string DroidPluginSource = "kyberdash-factory-plugin";
     private const string SessionLabelKey = "kyber.session.label";
@@ -58,6 +58,17 @@ public partial class CanonSessionProjectorEngine
     private static readonly string[] BranchKeys = ["vcs.ref.head.name", "branch"];
     private static readonly string[] ModelKeys = ["gen_ai.response.model", "gen_ai.request.model", "model"];
     private static readonly string[] ParentSessionKeys = ["parent_session", "parent_session_id", "gen_ai.parent_session_id", "parentSession"];
+
+    /// <summary>
+    /// The harness ids a Codex record can carry: the OTLP log path names Codex <c>codex</c>
+    /// (CanonAdapters' CodexAdapter), the OTLP span and rollout-file paths <c>codex-cli</c>
+    /// (<c>TranscriptReaderRepository.CodexHarnessId</c>).
+    /// </summary>
+    private static readonly HashSet<string> CodexHarnessIds = new(StringComparer.Ordinal)
+    {
+        "codex",
+        "codex-cli",
+    };
 
     private static readonly HashSet<string> SideAgentNames = new(StringComparer.Ordinal)
     {
@@ -78,6 +89,7 @@ public partial class CanonSessionProjectorEngine
     private readonly IProjectionStore? projections;
     private readonly IOperationalStore? operationalStore;
     private readonly IPricingRepository pricing;
+    private readonly ITextTokenizer tokenizer;
     private readonly int readPathSessionRecordBudget;
     private readonly int readPathPassRecordBudget;
     private int projectionPassInFlight;
@@ -90,6 +102,7 @@ public partial class CanonSessionProjectorEngine
     /// <param name="projections">Typed projection store receiving session, context, schema, timeline, and finding rows.</param>
     /// <param name="operationalStore">Operational store backing the token counter and projection watermarks.</param>
     /// <param name="pricing">Model rate-table repository used when resolving context windows.</param>
+    /// <param name="tokenizer">Local tokenizer that counts each text under the model it was sent to (D17).</param>
     /// <param name="readPathSessionRecordBudget">Per-session record count a read-path pass may rebuild before deferring the session.</param>
     /// <param name="readPathPassRecordBudget">Total record count one read-path pass may rebuild before deferring every later session.</param>
     public CanonSessionProjectorEngine(
@@ -97,6 +110,7 @@ public partial class CanonSessionProjectorEngine
         IProjectionStore projections,
         IOperationalStore operationalStore,
         IPricingRepository pricing,
+        ITextTokenizer tokenizer,
         int readPathSessionRecordBudget = DefaultReadPathSessionRecordBudget,
         int readPathPassRecordBudget = DefaultReadPathPassRecordBudget)
     {
@@ -104,6 +118,7 @@ public partial class CanonSessionProjectorEngine
         ArgumentNullException.ThrowIfNull(projections);
         ArgumentNullException.ThrowIfNull(operationalStore);
         ArgumentNullException.ThrowIfNull(pricing);
+        ArgumentNullException.ThrowIfNull(tokenizer);
         ArgumentOutOfRangeException.ThrowIfLessThan(readPathSessionRecordBudget, 1);
         ArgumentOutOfRangeException.ThrowIfLessThan(readPathPassRecordBudget, 1);
 
@@ -111,6 +126,7 @@ public partial class CanonSessionProjectorEngine
         this.projections = projections;
         this.operationalStore = operationalStore;
         this.pricing = pricing;
+        this.tokenizer = tokenizer;
         this.readPathSessionRecordBudget = readPathSessionRecordBudget;
         this.readPathPassRecordBudget = readPathPassRecordBudget;
     }
@@ -119,8 +135,8 @@ public partial class CanonSessionProjectorEngine
     private static partial Regex InvokeAgentNameRegex();
 
     /// <summary>
-    /// Collapses same-turn twin observations across ID joins, exact-counter clusters, and
-    /// evidenced Cursor overlap shares without mutating input records.
+    /// Collapses same-turn twin observations across ID joins, one-to-one Codex counter pairs,
+    /// exact-counter clusters, and evidenced Cursor overlap shares without mutating input records.
     /// </summary>
     /// <param name="records">Candidate canonical records.</param>
     /// <param name="shareKey">Fallback session key used when a record has no <see cref="CanonicalRecord.SessionId"/>.</param>
@@ -138,6 +154,7 @@ public partial class CanonSessionProjectorEngine
         HashSet<CanonicalRecord> dropped = new(ReferenceEqualityComparer.Instance);
         Dictionary<CanonicalRecord, CanonicalRecord> transplant = new(ReferenceEqualityComparer.Instance);
         HashSet<CanonicalRecord> idJoined = CollapseIdJoins(records, shareKey, dropped, transplant);
+        HashSet<CanonicalRecord> codexPaired = PairCodexFileModelCalls(records, shareKey, dropped, transplant);
 
         Dictionary<string, List<CanonicalRecord>> byCounter = new(StringComparer.Ordinal);
         foreach (CanonicalRecord record in records)
@@ -147,7 +164,7 @@ public partial class CanonSessionProjectorEngine
                 continue;
             }
 
-            if (idJoined.Contains(record))
+            if (idJoined.Contains(record) || codexPaired.Contains(record))
             {
                 continue;
             }
@@ -255,6 +272,9 @@ public partial class CanonSessionProjectorEngine
     {
         _ = pricing.LoadPricingTables();
         CachedTokenCounter counter = CreateTokenCounter();
+
+        // Each text counts under the model its own record was sent to; a record that names no
+        // model counts under the tokenizer's labelled stand-in (D19).
         SessionSummaryRow row = BuildSessionSummary(sessionId, records, counter.Count);
         counter.Flush();
         return row;
@@ -262,12 +282,12 @@ public partial class CanonSessionProjectorEngine
 
     /// <summary>
     /// Builds the engine's cached token counter over <see cref="IOperationalStore"/> on the
-    /// relational path (decision D16). The legacy path, which has no operational store, counts
-    /// without persisting now that the transitional counter constructor is gone.
+    /// relational path (decision D16), counting through the constructor's tokenizer. The legacy
+    /// path, which has no operational store, counts without persisting now that the transitional
+    /// counter constructor is gone.
     /// </summary>
-    /// <returns>Cached token counter bound to the engine's operational store, or a counting-only counter.</returns>
-    private CachedTokenCounter CreateTokenCounter() =>
-        new(operationalStore, CanonTokenCache.ApproximateTokenizerName);
+    /// <returns>Cached token counter bound to the engine's tokenizer and operational store, or a counting-only counter.</returns>
+    private CachedTokenCounter CreateTokenCounter() => new(operationalStore, tokenizer);
 
     /// <summary>
     /// Derives a complete <see cref="SessionSummaryRow"/> (including the summary totals,
@@ -276,7 +296,7 @@ public partial class CanonSessionProjectorEngine
     /// </summary>
     /// <param name="sessionId">Canonical session identifier.</param>
     /// <param name="records">Session records.</param>
-    /// <param name="countTokens">Token counting callback.</param>
+    /// <param name="countTokens">Counts a text with the tokenizer of the model it was sent to.</param>
     /// <param name="isSubagent">Whether this session represents a delegated subagent execution.</param>
     /// <param name="parentSession">Parent session identifier when delegated.</param>
     /// <param name="agentName">Delegated agent name when available.</param>
@@ -286,7 +306,7 @@ public partial class CanonSessionProjectorEngine
     public static SessionSummaryRow BuildSessionSummary(
         string sessionId,
         IReadOnlyList<CanonicalRecord> records,
-        Func<string, long> countTokens,
+        TextTokenCounter countTokens,
         bool isSubagent = false,
         string? parentSession = null,
         string? agentName = null,
@@ -332,11 +352,11 @@ public partial class CanonSessionProjectorEngine
                 lastSystem = ownSystem;
             }
 
-            IReadOnlyList<ContextPart> effective = ownSystem.Count > 0 ? parts : [.. lastSystem, .. parts];
+            IReadOnlyList<ContextPart> effective = ownSystem.Count > 0 ? parts : [.. CarriedTo(lastSystem, record), .. parts];
             contextTurns.Add(new ContextTurn(
                 Parts: effective,
                 InputTokens: CanonPricing.MeasuredInput(record.Tokens),
-                FreshInput: record.Tokens.FreshInput));
+                FreshInput: MeasuredFreshInput(record.Tokens)));
         }
 
         IReadOnlyList<CanonicalRecord> windowRecords = contextRecords.Count > 0 ? contextRecords : records;
@@ -354,8 +374,8 @@ public partial class CanonSessionProjectorEngine
             new ContextCountOptions(
                 ContextLimit: analysisLimit,
                 ContextLimitSource: window.ContextLimitSource,
-                CountTokens: countTokens,
-                Measurability: compMeasurability));
+                Measurability: compMeasurability),
+            countTokens);
 
         List<ToolDefinition> definitions = ToolDefinitionsOf(records, countTokens);
         IReadOnlyList<CanonicalRecord> toolSourceRecords = paired && split.FileToolRecords.Count > 0
@@ -1094,7 +1114,7 @@ public partial class CanonSessionProjectorEngine
             }
 
             string session = SessionKeyOf(record, shareKey);
-            string? messageId = OtelResponseIdOf(record);
+            string? messageId = OtelMessageIdOf(record);
             if (messageId is not null)
             {
                 RememberEarliest(keeperByMessageId, $"{session}\u0000{messageId}", record);
@@ -1152,6 +1172,86 @@ public partial class CanonSessionProjectorEngine
         return joined;
     }
 
+    /// <summary>
+    /// Pairs Codex rollout-file model calls with the OTLP model calls that observed the same turn,
+    /// on data both sources carry (D21). Codex OTel carries no per-model-call id — its
+    /// <c>auth.request_id</c> names an auth request — so the pairing data is the reported counters:
+    /// same session, equal <see cref="CounterKey"/>, timestamps within
+    /// <see cref="TwinTurnMaxSkewMs"/>, and strictly one OTLP call per file call. Within each
+    /// counter group, each file call in timestamp order pairs with the earliest unpaired OTLP call
+    /// within the skew. A paired file call is dropped and, when it has parts, donates them to its
+    /// OTLP call (the OTel row is the turn; the file row supplies only what OTLP lacks). An unpaired
+    /// call of either source stays a turn; nothing pairs by timestamp or turn order alone.
+    /// </summary>
+    /// <param name="records">Candidate canonical records.</param>
+    /// <param name="shareKey">Fallback session key used when a record has no <see cref="CanonicalRecord.SessionId"/>.</param>
+    /// <param name="dropped">Receives each paired file model call.</param>
+    /// <param name="transplant">Receives each paired file model call with parts, keyed by its OTLP call.</param>
+    /// <returns>Every Codex model call with reported counters, paired or not, so the shared counter-cluster path skips it.</returns>
+    private static HashSet<CanonicalRecord> PairCodexFileModelCalls(
+        IReadOnlyList<CanonicalRecord> records,
+        string? shareKey,
+        HashSet<CanonicalRecord> dropped,
+        Dictionary<CanonicalRecord, CanonicalRecord> transplant)
+    {
+        HashSet<CanonicalRecord> handled = new(ReferenceEqualityComparer.Instance);
+        Dictionary<string, (List<CanonicalRecord> Otels, List<CanonicalRecord> Files)> groups = new(StringComparer.Ordinal);
+        foreach (CanonicalRecord record in records)
+        {
+            if (!IsCodexModelCall(record) || IsUnreportedCounters(record.Tokens))
+            {
+                continue;
+            }
+
+            handled.Add(record);
+            string key = CounterKey(record, shareKey);
+            if (!groups.TryGetValue(key, out (List<CanonicalRecord> Otels, List<CanonicalRecord> Files) group))
+            {
+                group = ([], []);
+                groups[key] = group;
+            }
+
+            (IsFileSource(record.Source) ? group.Files : group.Otels).Add(record);
+        }
+
+        foreach ((List<CanonicalRecord> otels, List<CanonicalRecord> files) in groups.Values)
+        {
+            if (otels.Count == 0 || files.Count == 0)
+            {
+                continue;
+            }
+
+            otels.Sort(CompareRecordTimestamps);
+            files.Sort(CompareRecordTimestamps);
+            HashSet<CanonicalRecord> pairedOtels = new(ReferenceEqualityComparer.Instance);
+            foreach (CanonicalRecord file in files)
+            {
+                double moment = RecordTimestampMs(file);
+                CanonicalRecord? otel = otels.Find(o =>
+                    !pairedOtels.Contains(o) && Math.Abs(RecordTimestampMs(o) - moment) <= TwinTurnMaxSkewMs);
+                if (otel is null)
+                {
+                    continue;
+                }
+
+                pairedOtels.Add(otel);
+                dropped.Add(file);
+                if (HasParts(file))
+                {
+                    transplant[otel] = transplant.TryGetValue(otel, out CanonicalRecord? existing)
+                        ? MergeDonors(existing, file)
+                        : file;
+                }
+            }
+        }
+
+        return handled;
+    }
+
+    private static bool IsCodexModelCall(CanonicalRecord record) =>
+        CodexHarnessIds.Contains(record.Harness)
+        && string.Equals(record.Op, "llm.invoke", StringComparison.Ordinal);
+
     private static void CollapseCluster(
         IReadOnlyList<CanonicalRecord> cluster,
         HashSet<CanonicalRecord> dropped,
@@ -1171,7 +1271,7 @@ public partial class CanonSessionProjectorEngine
                 return;
             }
 
-            if (!files.All(static f => string.Equals(f.Source, "codeburn/claude-desktop", StringComparison.Ordinal)
+            if (!files.All(static f => string.Equals(f.Source, CanonSynth.FileSourcePrefix + "claude-desktop", StringComparison.Ordinal)
                     || string.Equals(f.Harness, "claude-desktop", StringComparison.Ordinal)))
             {
                 return;
@@ -1500,7 +1600,7 @@ public partial class CanonSessionProjectorEngine
     }
 
     private static bool IsFileSource(string source) =>
-        source.StartsWith(FileSourcePrefix, StringComparison.Ordinal);
+        source.StartsWith(CanonSynth.FileSourcePrefix, StringComparison.Ordinal);
 
     private static string SessionKeyOf(CanonicalRecord record, string? shareKey) =>
         record.SessionId ?? shareKey ?? string.Empty;
@@ -1618,7 +1718,7 @@ public partial class CanonSessionProjectorEngine
     private static bool IsCursorCollector(CanonicalRecord record) =>
         !string.Equals(record.Harness, "cursor-agent", StringComparison.Ordinal)
         && (string.Equals(record.Harness, "cursor", StringComparison.Ordinal)
-            || string.Equals(record.Source, "codeburn/cursor", StringComparison.Ordinal));
+            || string.Equals(record.Source, CanonSynth.FileSourcePrefix + "cursor", StringComparison.Ordinal));
 
     private static bool IsCursorAgentCollector(CanonicalRecord record) =>
         string.Equals(record.Harness, "cursor-agent", StringComparison.Ordinal)
@@ -1658,19 +1758,9 @@ public partial class CanonSessionProjectorEngine
     private static bool IsCompleteCursorIdeObservation(CanonicalRecord record) =>
         IsCursorCollector(record) && HasCompleteCounters(record);
 
-    private static string? OtelResponseIdOf(CanonicalRecord record) => RawString(record, "gen_ai.response.id");
+    private static string? OtelMessageIdOf(CanonicalRecord record) => RawString(record, "message.id");
 
-    private static string? OtelRequestJoinId(CanonicalRecord record)
-    {
-        string? requestId = RawString(record, "request_id");
-        if (requestId is not null)
-        {
-            return requestId;
-        }
-
-        string? responseId = OtelResponseIdOf(record);
-        return responseId is not null && responseId.StartsWith("req_", StringComparison.Ordinal) ? responseId : null;
-    }
+    private static string? OtelRequestJoinId(CanonicalRecord record) => RawString(record, "request_id");
 
     private static string? FileRequestIdOf(CanonicalRecord record) => RawString(record, "requestId");
 
@@ -1815,15 +1905,34 @@ public partial class CanonSessionProjectorEngine
         return agentName is not null && SideAgentNames.Contains(agentName);
     }
 
+    /// <summary>
+    /// The analysis parts of <paramref name="record"/>, each stamped with the model the record was
+    /// sent to so its text counts under that model's tokenizer (decision D17).
+    /// </summary>
     private static List<ContextPart> PartsOf(CanonicalRecord record)
     {
+        string? model = ModelOf(record);
         if (record.Parts is { Count: > 0 })
         {
-            return record.Parts.Select(ContextPart.FromContentPart).ToList();
+            return record.Parts.Select(part => ContextPart.FromContentPart(part, model)).ToList();
         }
 
-        return record.Content.Select(static kv => new ContextPart(kv.Key, kv.Value)).ToList();
+        return record.Content.Select(kv => new ContextPart(kv.Key, kv.Value, Model: model)).ToList();
     }
+
+    /// <summary>
+    /// Re-stamps system-prompt parts carried forward from an earlier turn with the model of
+    /// <paramref name="record"/>: the carried prompt is sent again to this turn's model, so this
+    /// turn's tokenizer counts it.
+    /// </summary>
+    private static IEnumerable<ContextPart> CarriedTo(IReadOnlyList<ContextPart> carried, CanonicalRecord record)
+    {
+        string? model = ModelOf(record);
+        return carried.Select(part => part with { Model = model });
+    }
+
+    /// <summary>The model <paramref name="record"/> was sent to, or <see langword="null"/> when it names none.</summary>
+    private static string? ModelOf(CanonicalRecord record) => AttributeOf(record, ModelKeys);
 
     private static HashSet<string> CarriedBucketsOf(IReadOnlyList<CanonicalRecord> records)
     {
@@ -1928,11 +2037,12 @@ public partial class CanonSessionProjectorEngine
         return adjusted;
     }
 
-    private static List<ToolDefinition> ToolDefinitionsOf(IReadOnlyList<CanonicalRecord> records, Func<string, long> countTokens)
+    private static List<ToolDefinition> ToolDefinitionsOf(IReadOnlyList<CanonicalRecord> records, TextTokenCounter countTokens)
     {
-        Dictionary<string, (string? Server, long Tokens, int TurnsResident)> byName = new(StringComparer.Ordinal);
+        Dictionary<string, (string? Server, TokenCount Count, int TurnsResident)> byName = new(StringComparer.Ordinal);
         foreach (CanonicalRecord record in records)
         {
+            string? model = ModelOf(record);
             List<(string Text, string? Server, bool Catalogue)> rawDefs = [];
             if (record.Parts is { Count: > 0 })
             {
@@ -1976,9 +2086,9 @@ public partial class CanonSessionProjectorEngine
                     }
 
                     string trimmed = name.Trim();
-                    if (!byName.TryGetValue(trimmed, out (string? Server, long Tokens, int TurnsResident) existing))
+                    if (!byName.TryGetValue(trimmed, out (string? Server, TokenCount Count, int TurnsResident) existing))
                     {
-                        byName[trimmed] = (server, countTokens(itemText), 1);
+                        byName[trimmed] = (server, countTokens(itemText, model), 1);
                     }
                     else
                     {
@@ -1988,7 +2098,7 @@ public partial class CanonSessionProjectorEngine
             }
         }
 
-        return byName.Select(kv => new ToolDefinition(kv.Key, kv.Value.Server, kv.Value.Tokens, kv.Value.TurnsResident)).ToList();
+        return byName.Select(kv => new ToolDefinition(kv.Key, kv.Value.Server, kv.Value.Count.Count, kv.Value.TurnsResident, kv.Value.Count.Tokenizer, kv.Value.Count.IsModelOwn)).ToList();
     }
 
     private static List<(string Name, string Text)> SplitToolDefinitionsText(string text)
@@ -2732,7 +2842,7 @@ public partial class CanonSessionProjectorEngine
             }
         }
 
-        CachedTokenCounter counter = new(operationalStore, CanonTokenCache.ApproximateTokenizerName);
+        CachedTokenCounter counter = new(operationalStore, tokenizer);
 
         int builtCount = 0;
         int skippedCount = skippedKeys.Count;
@@ -2774,6 +2884,8 @@ public partial class CanonSessionProjectorEngine
                     continue;
                 }
 
+                // Same rule as the summary path: each text counts under its own record's model,
+                // and a record naming no model uses the stand-in.
                 StoredSessionProjection projection = BuildStoredSessionProjection(
                     sessionId,
                     merged,
@@ -3116,19 +3228,26 @@ public partial class CanonSessionProjectorEngine
     }
 
     /// <summary>
+    /// Fresh input tokens for the fresh-input jump check, or <see langword="null"/> when the turn reported
+    /// none. A zero fresh class carries no evidence the harness measured it (the canonical record holds
+    /// unreported classes as zero), so it is not-measured rather than a measured zero (D15).
+    /// </summary>
+    private static long? MeasuredFreshInput(TokenUsage tokens) => tokens.FreshInput > 0 ? tokens.FreshInput : null;
+
+    /// <summary>
     /// Rebuilds one typed <see cref="StoredSessionProjection"/> from a session's deduplicated
     /// records: context pressure analysis, schema ranking, timeline marks, requests, and turns,
     /// with exclusive unmeasurable reasons in place of non-measurable figures.
     /// </summary>
     /// <param name="sessionId">Canonical session identifier (a <c>session</c> table key).</param>
     /// <param name="records">Deduplicated session records in timestamp order.</param>
-    /// <param name="countTokens">Token counting callback.</param>
+    /// <param name="countTokens">Counts a text with the tokenizer of the model it was sent to.</param>
     /// <param name="title">Session title from the relational <c>session</c> row, when present.</param>
     /// <returns>Projected typed session row.</returns>
     private static StoredSessionProjection BuildStoredSessionProjection(
         string sessionId,
         IReadOnlyList<CanonicalRecord> records,
-        Func<string, long> countTokens,
+        TextTokenCounter countTokens,
         string? title = null)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(sessionId);
@@ -3162,11 +3281,11 @@ public partial class CanonSessionProjectorEngine
                 lastSystem = ownSystem;
             }
 
-            IReadOnlyList<ContextPart> effective = ownSystem.Count > 0 ? parts : [.. lastSystem, .. parts];
+            IReadOnlyList<ContextPart> effective = ownSystem.Count > 0 ? parts : [.. CarriedTo(lastSystem, record), .. parts];
             contextTurns.Add(new ContextTurn(
                 Parts: effective,
                 InputTokens: CanonPricing.MeasuredInput(record.Tokens),
-                FreshInput: record.Tokens.FreshInput));
+                FreshInput: MeasuredFreshInput(record.Tokens)));
         }
 
         IReadOnlyList<CanonicalRecord> windowRecords = contextRecords.Count > 0 ? contextRecords : records;
@@ -3177,8 +3296,8 @@ public partial class CanonSessionProjectorEngine
             contextTurns,
             new ContextCountOptions(
                 ContextLimit: analysisLimit,
-                ContextLimitSource: window.ContextLimitSource,
-                CountTokens: countTokens));
+                ContextLimitSource: window.ContextLimitSource),
+            countTokens);
 
         List<ToolDefinition> definitions = [.. TypedToolDefinitionsOf(records)];
         HashSet<string> knownDefinitions = [.. definitions.Select(static definition => definition.Name)];
@@ -3240,7 +3359,7 @@ public partial class CanonSessionProjectorEngine
                 ResidualTokens: turn.Residual.Tokens,
                 ResidualAttribution: turn.Residual.Attribution,
                 BuiltinToolDefinitionTokens: turn.BuiltinToolDefinitionTokens,
-                FreshInput: turn.FreshInput,
+                FreshInput: turn.FreshInput ?? 0,
                 Buckets: [.. turn.Buckets
                     .Where(static entry => entry.Value != 0)
                     .OrderBy(static entry => entry.Key, StringComparer.Ordinal)
@@ -3257,7 +3376,10 @@ public partial class CanonSessionProjectorEngine
                 FreshJumpFactor: turn.FreshInputJump is null
                     ? null
                     : double.IsFinite(turn.FreshInputJump.Factor) ? turn.FreshInputJump.Factor : null,
-                NonResidentTokens: turn.NonResidentToolDefinitions));
+                NonResidentTokens: turn.NonResidentToolDefinitions)
+            {
+                Tokenizers = turn.Tokenizers,
+            });
         }
 
         return new StoredSessionContext(

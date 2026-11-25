@@ -24,10 +24,20 @@ namespace KyberDash.Data.Repositories;
 public partial class SqliteRelationalStore : BaseSqliteRepository, IRelationalStoreWriter, IProjectionStore
 {
     /// <summary>Current normalized relational schema version stamped in <c>store_state</c>.</summary>
-    public const int SchemaVersion = 25;
+    /// <remarks>
+    /// Version 29 adds <c>session_context_turn_tokenizer</c> and <c>tool_definition_tokenizer</c>,
+    /// the label children of the figures they name. The rebuild-and-re-ingest pattern applies, so
+    /// no measured row can survive the bump without its label.
+    /// </remarks>
+    public const int SchemaVersion = 29;
 
     /// <summary>Current detector generation stamped in <c>store_state</c>.</summary>
-    public const int DetectorVersion = 5;
+    /// <remarks>
+    /// Generation 6: records read back carry their source name, so the projector's source rules
+    /// (the Droid plugin/file split and the file-source twin collapses) apply again, and every
+    /// projection built under generation 5's source-less hydration is rebuilt.
+    /// </remarks>
+    public const int DetectorVersion = 6;
 
     /// <summary>Maximum retained WAL journal size in bytes after checkpoint (32 MiB).</summary>
     public const int WalSizeLimitBytes = 32 * 1024 * 1024;
@@ -270,6 +280,41 @@ public partial class SqliteRelationalStore : BaseSqliteRepository, IRelationalSt
         // The cascade removes records of sessions this call does not know, so a source delete
         // always marks the range wildcard.
         AppendWriteMarkerAdvance(body, dirtyKeys: null);
+        ExecuteTransaction(body.ToString());
+    }
+
+    /// <inheritdoc />
+    public void ClearEstimatedRecordTokens(string harnessId, string sourceLocator, EstimatedRecordTokens estimated)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(harnessId);
+        ArgumentException.ThrowIfNullOrWhiteSpace(sourceLocator);
+        if (estimated == EstimatedRecordTokens.None)
+        {
+            return;
+        }
+
+        string harnessExpr = GuardedTextExpr("source", "harness_id", harnessId);
+        string locatorExpr = GuardedTextExpr("source", "locator", sourceLocator);
+        string sourceSpans =
+            "SELECT r.span_id FROM record r JOIN source s ON s.source_id = r.source_id " +
+            $"WHERE s.harness_id = {harnessExpr} AND s.source_kind = {TextExpr("file")} AND s.locator = {locatorExpr}";
+
+        StringBuilder body = new();
+        switch (estimated)
+        {
+            case EstimatedRecordTokens.AllRecordTokens:
+                body.Append(CultureInfo.InvariantCulture, $"DELETE FROM record_token_count WHERE span_id IN ({sourceSpans});\n");
+                body.Append(CultureInfo.InvariantCulture, $"DELETE FROM record_reported_total WHERE span_id IN ({sourceSpans});\n");
+                break;
+            case EstimatedRecordTokens.RecordsWithoutReportedTotal:
+                body.Append(
+                    CultureInfo.InvariantCulture,
+                    $"DELETE FROM record_token_count WHERE span_id IN ({sourceSpans}) AND span_id NOT IN (SELECT span_id FROM record_reported_total);\n");
+                break;
+            default:
+                throw new ArgumentOutOfRangeException(nameof(estimated), estimated, "Unsupported estimated token scope.");
+        }
+
         ExecuteTransaction(body.ToString());
     }
 
@@ -847,6 +892,8 @@ public partial class SqliteRelationalStore : BaseSqliteRepository, IRelationalSt
         AppendOptionalTextChild(sql, "record_parent", "span_id", spanIdExpr, "parent_span_id", record.ParentRecordId);
         AppendOptionalTextChild(sql, "record_trace", "span_id", spanIdExpr, "trace_id", record.TraceId);
         AppendOptionalTextChild(sql, "record_model", "span_id", spanIdExpr, "model_id", record.Model);
+        AppendOptionalTextChild(sql, "record_response_id", "span_id", spanIdExpr, "response_id", record.ResponseId);
+        AppendOptionalTextChild(sql, "record_request_id", "span_id", spanIdExpr, "request_id", record.RequestId);
 
         if (record.EndedAt.HasValue)
         {
@@ -972,6 +1019,13 @@ public partial class SqliteRelationalStore : BaseSqliteRepository, IRelationalSt
                 sql.Append(
                     CultureInfo.InvariantCulture,
                     $"INSERT INTO content_part_withheld (span_id, position, utf8_bytes, characters, measured_tokens) VALUES ({spanIdExpr}, {posSql}, {LongSql(part.Withheld.Utf8Bytes)}, {LongSql(part.Withheld.Characters)}, {LongSql(part.Withheld.MeasuredTokens)});\n");
+                if (part.Withheld.Tokenizer is string tokenizer)
+                {
+                    string tokenizerExpr = GuardedTextExpr("content_part_withheld_tokenizer", "tokenizer", tokenizer);
+                    sql.Append(
+                        CultureInfo.InvariantCulture,
+                        $"INSERT INTO content_part_withheld_tokenizer (span_id, position, tokenizer, is_model_own) VALUES ({spanIdExpr}, {posSql}, {tokenizerExpr}, {(part.Withheld.TokenizerIsModelOwn ? "1" : "0")});\n");
+                }
             }
 
             if (part.ReportedTokens.HasValue)
@@ -1032,6 +1086,14 @@ public partial class SqliteRelationalStore : BaseSqliteRepository, IRelationalSt
             sql.Append(
                 CultureInfo.InvariantCulture,
                 $"INSERT INTO tool_definition (span_id, position, tool_name, schema_tokens) VALUES ({spanIdExpr}, {posSql}, {toolNameExpr}, {LongSql(definition.SchemaTokens)});\n");
+
+            if (definition.Tokenizer is string tokenizer)
+            {
+                string tokenizerExpr = GuardedTextExpr("tool_definition_tokenizer", "tokenizer", tokenizer);
+                sql.Append(
+                    CultureInfo.InvariantCulture,
+                    $"INSERT INTO tool_definition_tokenizer (span_id, position, tokenizer, is_model_own) VALUES ({spanIdExpr}, {posSql}, {tokenizerExpr}, {BoolSql(definition.TokenizerIsModelOwn)});\n");
+            }
 
             if (definition.Server is not null)
             {
@@ -1380,6 +1442,15 @@ public partial class SqliteRelationalStore : BaseSqliteRepository, IRelationalSt
             }
         }
 
+        foreach (TokenizerLabel label in turn.Tokenizers)
+        {
+            ArgumentNullException.ThrowIfNull(label);
+            string tokenizerExpr = GuardedTextExpr("session_context_turn_tokenizer", "tokenizer", label.Tokenizer);
+            sql.Append(
+                CultureInfo.InvariantCulture,
+                $"INSERT INTO session_context_turn_tokenizer (session_id, position, tokenizer, is_model_own) VALUES ({sessionIdExpr}, {posSql}, {tokenizerExpr}, {BoolSql(label.IsModelOwn)});\n");
+        }
+
         RequireMatchedPair(
             turn.StrippedBlockCount.HasValue,
             turn.StrippedTokens.HasValue,
@@ -1637,6 +1708,7 @@ public partial class SqliteRelationalStore : BaseSqliteRepository, IRelationalSt
         TokenClass.CacheWrite => "cache_write",
         TokenClass.Output => "output",
         TokenClass.Reasoning => "reasoning",
+        TokenClass.Total => "total",
         _ => throw new DashValidationException(ConstraintViolatedCode, $"Unsupported TokenClass '{tokenClass}'."),
     };
 

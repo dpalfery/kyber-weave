@@ -6,6 +6,7 @@ using KyberDash.Application.Tests.Fakes;
 using KyberDash.Data.Collector;
 using KyberDash.Data.Collector.Sources;
 using KyberDash.Data.Harnesses.Cursor;
+using KyberDash.Data.Tokenization;
 using KyberDash.Domain.Schema;
 using Xunit;
 
@@ -14,7 +15,8 @@ namespace KyberDash.Data.Tests.Harnesses;
 /// <summary>
 /// Unit tests for <see cref="CursorMapper"/> covering <c>cursorDiskKV</c> bubble-row mapping,
 /// <c>cursor-agent</c> JSONL and legacy text transcript mapping, <c>cursor-agent -&gt; cursor</c>
-/// harness normalization, and field register completeness.
+/// harness normalization, native token counts only (text length never becomes tokens), and
+/// field register completeness.
 /// </summary>
 public class CursorMapperTests
 {
@@ -28,7 +30,7 @@ public class CursorMapperTests
     }
 
     [Fact]
-    public void Map_BubbleRowsWithReportedTokensYieldUsageBearingLlmInvokeRecords()
+    public void Map_UserBubbleAndItsAssistantBubbleYieldOneTurnWithBothParts()
     {
         string rawText = """
             [
@@ -54,41 +56,64 @@ public class CursorMapperTests
         Assert.Equal("composer-1", session.NativeSessionId);
         Assert.Equal("cursor", session.HarnessId);
 
-        Assert.Equal(2, batch.Records.Count);
-
-        CollectedRecord userRecord = batch.Records[0];
-        Assert.Equal(RecordOp.LlmInvoke, userRecord.Op);
-        Assert.Equal(RecordKind.Internal, userRecord.Kind);
-        Assert.Equal("cursor", userRecord.HarnessId);
-        Assert.Equal("composer-1", userRecord.SessionKey);
+        CollectedRecord record = Assert.Single(batch.Records);
+        Assert.Equal(RecordOp.LlmInvoke, record.Op);
+        Assert.Equal(RecordKind.Internal, record.Kind);
+        Assert.Equal("cursor", record.HarnessId);
+        Assert.Equal("composer-1", record.SessionKey);
         Assert.Equal(
             DateTimeOffset.Parse("2026-09-22T10:01:00.000Z", CultureInfo.InvariantCulture),
-            userRecord.StartedAt);
-        Assert.Equal(60, Assert.Single(userRecord.Tokens, static t => t.TokenClass == TokenClass.Input).Count);
-        Assert.Equal(60, userRecord.ReportedInputTokens);
-        Assert.Null(userRecord.ReportedOutputTokens);
-        Assert.StartsWith("synth:cursor:composer-1:", userRecord.RecordId, StringComparison.Ordinal);
-
-        CollectedRecord assistantRecord = batch.Records[1];
-        Assert.Equal(RecordOp.LlmInvoke, assistantRecord.Op);
-        Assert.Equal("claude-sonnet-4-5", assistantRecord.Model);
-        Assert.Equal("cursor:claude-sonnet-4-5", assistantRecord.Name);
-        Assert.Equal(
-            DateTimeOffset.Parse("2026-09-22T10:02:00.000Z", CultureInfo.InvariantCulture),
-            assistantRecord.StartedAt);
-        Assert.Equal(120, Assert.Single(assistantRecord.Tokens, static t => t.TokenClass == TokenClass.Input).Count);
-        Assert.Equal(45, Assert.Single(assistantRecord.Tokens, static t => t.TokenClass == TokenClass.Output).Count);
-        Assert.Equal(120, assistantRecord.ReportedInputTokens);
-        Assert.Equal(45, assistantRecord.ReportedOutputTokens);
-        Assert.Equal(2, assistantRecord.Parts.Count);
-        Assert.Equal(ContentBucket.UserMessage, assistantRecord.Parts[0].Bucket);
-        Assert.Equal("summarize this file", assistantRecord.Parts[0].PlainText);
-        Assert.Equal(ContentBucket.ConversationHistory, assistantRecord.Parts[1].Bucket);
-        Assert.Equal("Here is the summary.", assistantRecord.Parts[1].PlainText);
+            record.StartedAt);
+        Assert.StartsWith("synth:cursor:composer-1:", record.RecordId, StringComparison.Ordinal);
+        Assert.Equal("claude-sonnet-4-5", record.Model);
+        Assert.Equal("cursor:claude-sonnet-4-5", record.Name);
+        Assert.Equal(180, Assert.Single(record.Tokens, static t => t.TokenClass == TokenClass.Input).Count);
+        Assert.Equal(45, Assert.Single(record.Tokens, static t => t.TokenClass == TokenClass.Output).Count);
+        Assert.Equal(180, record.ReportedInputTokens);
+        Assert.Equal(45, record.ReportedOutputTokens);
+        Assert.Equal(2, record.Parts.Count);
+        Assert.Equal(ContentBucket.UserMessage, record.Parts[0].Bucket);
+        Assert.Equal("summarize this file", record.Parts[0].PlainText);
+        Assert.Equal(ContentBucket.ConversationHistory, record.Parts[1].Bucket);
+        Assert.Equal("Here is the summary.", record.Parts[1].PlainText);
 
         InMemoryRelationalStore store = new();
         store.WriteBatch(batch);
-        Assert.Equal(2, store.CountRecords("cursor"));
+        Assert.Equal(1, store.CountRecords("cursor"));
+    }
+
+    [Fact]
+    public void Map_UserBubbleFollowedByTwoAssistantBubblesYieldsOneTurnKeepingEveryReportedFigure()
+    {
+        string rawText = """
+            [
+              {"bubble_key":"bubbleId:composer-7:11111111-1111-1111-1111-111111111111","input_tokens":0,"output_tokens":0,"model":null,"created_at":"2026-09-22T10:01:00.000Z","request_id":"req-7","user_text":"first question","text_length":14,"bubble_type":1,"context_window":null,"code_blocks":null},
+              {"bubble_key":"bubbleId:composer-7:22222222-2222-2222-2222-222222222222","input_tokens":100,"output_tokens":10,"model":"claude-sonnet-4-5","created_at":"2026-09-22T10:02:00.000Z","request_id":"req-7","user_text":"step one","text_length":8,"bubble_type":2,"context_window":null,"code_blocks":null},
+              {"bubble_key":"bubbleId:composer-7:33333333-3333-3333-3333-333333333333","input_tokens":30,"output_tokens":20,"model":"claude-sonnet-4-5","created_at":"2026-09-22T10:03:00.000Z","request_id":"req-7","user_text":"step two","text_length":8,"bubble_type":2,"context_window":null,"code_blocks":null},
+              {"bubble_key":"bubbleId:composer-7:44444444-4444-4444-4444-444444444444","input_tokens":0,"output_tokens":0,"model":null,"created_at":"2026-09-22T10:04:00.000Z","request_id":"req-8","user_text":"second question","text_length":15,"bubble_type":1,"context_window":null,"code_blocks":null},
+              {"bubble_key":"bubbleId:composer-7:55555555-5555-5555-5555-555555555555","input_tokens":5,"output_tokens":6,"model":"claude-sonnet-4-5","created_at":"2026-09-22T10:05:00.000Z","request_id":"req-8","user_text":"answer","text_length":6,"bubble_type":2,"context_window":null,"code_blocks":null}
+            ]
+            """;
+        NativeSourceUnit unit = MakeNativeUnit("/fake/state.vscdb", rawText, "cursor", "cursor-vscdb");
+
+        CollectedBatch batch = new CursorMapper().Map(unit, BaselineUtc);
+
+        Assert.Empty(batch.Problems);
+        Assert.Equal(2, batch.Records.Count);
+        CollectedRecord first = batch.Records[0];
+        Assert.Equal(
+            DateTimeOffset.Parse("2026-09-22T10:01:00.000Z", CultureInfo.InvariantCulture),
+            first.StartedAt);
+        Assert.Equal("claude-sonnet-4-5", first.Model);
+        Assert.Equal(130, first.ReportedInputTokens);
+        Assert.Equal(30, first.ReportedOutputTokens);
+        Assert.Equal(
+            ["first question", "step one", "step two"],
+            first.Parts.Select(static p => p.PlainText).ToArray());
+        Assert.Equal(ContentBucket.UserMessage, first.Parts[0].Bucket);
+        Assert.All(first.Parts.Skip(1), static p => Assert.Equal(ContentBucket.ConversationHistory, p.Bucket));
+        Assert.Equal(5, batch.Records[1].ReportedInputTokens);
+        Assert.Equal("second question", batch.Records[1].Parts[0].PlainText);
     }
 
     [Fact]
@@ -110,7 +135,7 @@ public class CursorMapperTests
     }
 
     [Fact]
-    public void Map_BubbleRowsWithZeroTokensEstimateUsageFromTextAndSkipEmptyOnes()
+    public void Map_BubbleRowsWithZeroNativeTokensYieldNotMeasuredRecordsAndSkipEmptyOnes()
     {
         string rawText = """
             [
@@ -131,7 +156,8 @@ public class CursorMapperTests
         CollectedRecord record = Assert.Single(batch.Records);
         Assert.Equal(RecordOp.LlmInvoke, record.Op);
         Assert.Equal("cursor-auto", record.Model);
-        Assert.Equal(100, Assert.Single(record.Tokens, static t => t.TokenClass == TokenClass.Output).Count);
+        Assert.Equal("user_text excerpt", Assert.Single(record.Parts).PlainText);
+        Assert.Empty(record.Tokens);
         Assert.Null(record.ReportedInputTokens);
         Assert.Null(record.ReportedOutputTokens);
     }
@@ -190,12 +216,10 @@ public class CursorMapperTests
             Assert.Equal("cursor", record.HarnessId);
             Assert.Equal("cursor-agent-auto", record.Model);
             Assert.Equal(BaselineUtc, record.StartedAt);
-            Assert.DoesNotContain(record.Tokens, static t => t.Count <= 0);
+            Assert.Empty(record.Tokens);
         }
 
         CollectedRecord first = batch.Records[0];
-        Assert.Equal(4, Assert.Single(first.Tokens, static t => t.TokenClass == TokenClass.Input).Count);
-        Assert.Equal(8, Assert.Single(first.Tokens, static t => t.TokenClass == TokenClass.Output).Count);
         Assert.Null(first.ReportedInputTokens);
         Assert.Null(first.ReportedOutputTokens);
         Assert.Equal("explain closures", first.Parts[0].PlainText);
@@ -233,13 +257,17 @@ public class CursorMapperTests
         Assert.Empty(batch.Problems);
         CollectedRecord record = Assert.Single(batch.Records);
         Assert.Equal(RecordOp.LlmInvoke, record.Op);
-        Assert.Equal(4, Assert.Single(record.Tokens, static t => t.TokenClass == TokenClass.Input).Count);
+
+        // A transcript carries no token counts, so the turn is kept with none rather than with a
+        // figure guessed from its text length.
+        Assert.Empty(record.Tokens);
+        Assert.Null(record.ReportedInputTokens);
+        Assert.Null(record.ReportedOutputTokens);
 
         // The `[Tool result]` marker regex requires a word boundary after `]`, which never
         // occurs before the trailing text, so the line stays in the body exactly as in
-        // `cursor-agent.ts` (37 characters -> 10 estimated tokens).
-        Assert.Equal(10, Assert.Single(record.Tokens, static t => t.TokenClass == TokenClass.Output).Count);
-        Assert.Equal(5, Assert.Single(record.Tokens, static t => t.TokenClass == TokenClass.Reasoning).Count);
+        // `cursor-agent.ts`.
+        Assert.EndsWith("[Tool result] ok", record.Parts[1].PlainText, StringComparison.Ordinal);
         Assert.Equal(3, record.Parts.Count);
         Assert.Equal(ContentBucket.Reasoning, record.Parts[2].Bucket);
         Assert.Equal("consider edge cases", record.Parts[2].PlainText);
@@ -247,9 +275,85 @@ public class CursorMapperTests
     }
 
     [Fact]
+    public void Map_BubbleRowWithNativeCountsAndLongTextKeepsOnlyTheNativeCounts()
+    {
+        string rawText = """
+            [
+              {"bubble_key":"bubbleId:composer-5:11111111-1111-1111-1111-111111111111","input_tokens":0,"output_tokens":7,"model":null,"created_at":"2026-09-22T10:01:00.000Z","request_id":null,"user_text":"reply","text_length":4000,"bubble_type":2,"context_window":null,"code_blocks":null}
+            ]
+            """;
+        NativeSourceUnit unit = MakeNativeUnit("/fake/state.vscdb", rawText, "cursor", "cursor-vscdb");
+
+        CollectedBatch batch = new CursorMapper().Map(unit, BaselineUtc);
+
+        CollectedRecord record = Assert.Single(batch.Records);
+        CollectedTokenCount output = Assert.Single(record.Tokens);
+        Assert.Equal(TokenClass.Output, output.TokenClass);
+        Assert.Equal(7, output.Count);
+        Assert.Null(record.ReportedInputTokens);
+        Assert.Equal(7, record.ReportedOutputTokens);
+    }
+
+    [Fact]
+    public void Map_TranscriptTurnWithOnlyAToolCallIsKeptAsTurnWithNoCounts()
+    {
+        string rawText = string.Join('\n',
+        [
+            """{"role":"user","message":{"content":[{"type":"text","text":"go"}]}}""",
+            """{"role":"assistant","message":{"content":[{"type":"tool_use","name":"Read"}]}}""",
+        ]) + "\n";
+        NativeSourceUnit unit = MakeNativeUnit(
+            "/fake/.cursor/projects/p1/agent-transcripts/tool-only.jsonl",
+            rawText,
+            "cursor",
+            "cursor-agent-jsonl");
+
+        CollectedBatch batch = new CursorMapper().Map(unit, BaselineUtc);
+
+        CollectedRecord record = Assert.Single(batch.Records);
+        Assert.Empty(record.Tokens);
+        Assert.Null(record.ReportedInputTokens);
+        Assert.Null(record.ReportedOutputTokens);
+        Assert.Equal("go", Assert.Single(record.Parts).PlainText);
+        Assert.Single(batch.Sessions);
+    }
+
+    [Fact]
     public void Map_EmptyRawTextReturnsEmptyBatch()
     {
         NativeSourceUnit unit = MakeNativeUnit("/fake/state.vscdb", "   ", "cursor", "cursor-vscdb");
+        CursorMapper mapper = new();
+        CollectedBatch batch = mapper.Map(unit, BaselineUtc);
+
+        Assert.Empty(batch.Sessions);
+        Assert.Empty(batch.Records);
+        Assert.Empty(batch.Problems);
+    }
+
+    [Fact]
+    public void Map_NullRawTextEmitsOneWarningNamingTheSourceKey()
+    {
+        const string path = "/fake/Library/Application Support/Cursor/User/globalStorage/state.vscdb";
+        NativeSourceUnit unit = MakeNativeUnit(path, null, "cursor", "cursor-vscdb");
+        CursorMapper mapper = new();
+        CollectedBatch batch = mapper.Map(unit, BaselineUtc);
+
+        Assert.Empty(batch.Sessions);
+        Assert.Empty(batch.Records);
+        CollectedProblem problem = Assert.Single(batch.Problems);
+        Assert.Equal(CursorMapper.MalformedLineCode, problem.Code);
+        Assert.Equal("warning", problem.Severity);
+        Assert.Contains(path, problem.Message, StringComparison.Ordinal);
+        Assert.Equal(path, problem.Location);
+    }
+
+    [Theory]
+    [InlineData("")]
+    [InlineData("   ")]
+    [InlineData("\r\n\t")]
+    public void Map_WhitespaceRawTextKeepsTheEmptyBatchWithoutAProblem(string rawText)
+    {
+        NativeSourceUnit unit = MakeNativeUnit("/fake/state.vscdb", rawText, "cursor", "cursor-vscdb");
         CursorMapper mapper = new();
         CollectedBatch batch = mapper.Map(unit, BaselineUtc);
 
@@ -407,8 +511,101 @@ public class CursorMapperTests
         }
     }
 
-    private static NativeSourceUnit MakeNativeUnit(string path, string rawText, string harnessId, string format)
+    /// <summary>
+    /// The bubble row's resolved model with its own published tokenizer counts the paired user
+    /// part with that tokenizer: the measured tokens equal the model's own figure, not the
+    /// stand-in's.
+    /// </summary>
+    [Fact]
+    public void Map_CountsPairedUserPartsWithTheRowModelOwnTokenizer()
     {
+        string userDoc = "{\"こんにちは\":\"世界\"}";
+        string rawText = """
+            [
+              {"bubble_key":"bubbleId:composer-own:11111111-1111-1111-1111-111111111111","input_tokens":60,"output_tokens":0,"model":null,"created_at":"2026-09-22T10:01:00.000Z","request_id":"req-own","user_text":"{\"こんにちは\":\"世界\"}","text_length":18,"bubble_type":1,"context_window":200000,"code_blocks":null},
+              {"bubble_key":"bubbleId:composer-own:22222222-2222-2222-2222-222222222222","input_tokens":120,"output_tokens":45,"model":"gpt-3.5-turbo","created_at":"2026-09-22T10:02:00.000Z","request_id":"req-own","user_text":"Here is the answer.","text_length":19,"bubble_type":2,"context_window":200000,"code_blocks":null}
+            ]
+            """;
+
+        NativeSourceUnit unit = MakeNativeUnit(
+            "/fake/Library/Application Support/Cursor/User/globalStorage/state.vscdb",
+            rawText,
+            "cursor",
+            "cursor-vscdb");
+        CollectedBatch batch = new CursorMapper().Map(unit, BaselineUtc);
+
+        Assert.Empty(batch.Problems);
+        CollectedRecord assistantRecord = Assert.Single(batch.Records, static r => r.Model == "gpt-3.5-turbo");
+        CollectedContentPart userPart = Assert.Single(assistantRecord.Parts, static p => p.Bucket == ContentBucket.UserMessage);
+        Assert.NotNull(userPart.Withheld);
+        Assert.Equal(LocalTextTokenizer.Shared.Count(userDoc, "gpt-3.5-turbo").Count, userPart.Withheld!.MeasuredTokens);
+        Assert.NotEqual(LocalTextTokenizer.Shared.Count(userDoc, null).Count, userPart.Withheld.MeasuredTokens);
+    }
+
+    private const string OneBubble = """
+        [
+          {"bubble_key":"bubbleId:composer-9:33333333-3333-3333-3333-333333333333","input_tokens":60,"output_tokens":10,"model":null,"created_at":"2026-09-22T10:01:00.000Z","request_id":null,"user_text":"hello","text_length":5,"bubble_type":1,"context_window":null,"code_blocks":null}
+        ]
+        """;
+
+    [Fact]
+    public void Map_FileFolderCompanionSetsPercentDecodedWorkingDirectory()
+    {
+        NativeSourceUnit unit = MakeNativeUnit("/fake/state.vscdb", OneBubble, "cursor", "cursor-vscdb") with
+        {
+            CompanionText = "{\"folder\":\"file:///Users/x/my%20repo\"}",
+        };
+
+        CollectedBatch batch = new CursorMapper().Map(unit, BaselineUtc);
+
+        CollectedSession session = Assert.Single(batch.Sessions);
+        Assert.Equal("/Users/x/my repo", session.Workspace?.WorkingDirectory);
+        Assert.Empty(batch.Problems);
+    }
+
+    [Fact]
+    public void Map_NoCompanionLeavesNoWorkspace()
+    {
+        NativeSourceUnit unit = MakeNativeUnit("/fake/state.vscdb", OneBubble, "cursor", "cursor-vscdb");
+
+        CollectedBatch batch = new CursorMapper().Map(unit, BaselineUtc);
+
+        Assert.Null(Assert.Single(batch.Sessions).Workspace);
+        Assert.Empty(batch.Problems);
+    }
+
+    [Fact]
+    public void Map_NonFileFolderCompanionLeavesNoWorkspaceAndOneWarning()
+    {
+        NativeSourceUnit unit = MakeNativeUnit("/fake/state.vscdb", OneBubble, "cursor", "cursor-vscdb") with
+        {
+            CompanionText = "{\"folder\":\"vscode-remote://host/repo\"}",
+        };
+
+        CollectedBatch batch = new CursorMapper().Map(unit, BaselineUtc);
+
+        Assert.Null(Assert.Single(batch.Sessions).Workspace);
+        CollectedProblem problem = Assert.Single(batch.Problems);
+        Assert.Equal("warning", problem.Severity);
+    }
+
+    [Fact]
+    public void Map_MalformedCompanionLeavesNoWorkspaceAndOneWarning()
+    {
+        NativeSourceUnit unit = MakeNativeUnit("/fake/state.vscdb", OneBubble, "cursor", "cursor-vscdb") with
+        {
+            CompanionText = "{not json",
+        };
+
+        CollectedBatch batch = new CursorMapper().Map(unit, BaselineUtc);
+
+        Assert.Null(Assert.Single(batch.Sessions).Workspace);
+        Assert.Equal("warning", Assert.Single(batch.Problems).Severity);
+    }
+
+    private static NativeSourceUnit MakeNativeUnit(string path, string? rawText, string harnessId, string format)
+    {
+        long sizeBytes = rawText is null ? 0 : Encoding.UTF8.GetByteCount(rawText);
         SourceUnit sourceUnit = new(
             HarnessId: harnessId,
             SourceKey: path,
@@ -419,12 +616,12 @@ public class CursorMapperTests
             SourceRootLabel: "cursor",
             RevisionToken: "1-1",
             LastWriteUtc: BaselineUtc,
-            SizeBytes: Encoding.UTF8.GetByteCount(rawText));
+            SizeBytes: sizeBytes);
 
         return new NativeSourceUnit(
             Unit: sourceUnit,
             RawText: rawText,
-            SizeBytes: Encoding.UTF8.GetByteCount(rawText),
+            SizeBytes: sizeBytes,
             LastWriteUtc: BaselineUtc);
     }
 

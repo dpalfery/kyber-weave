@@ -146,6 +146,7 @@ public class ProjectionReadPathTests
             store,
             store,
             new FakePricingRepository(),
+            new FakeTextTokenizer(),
             readPathSessionRecordBudget: ReadPathBudget);
 
         WriteSession(store, "sess-small", "claude-code", [Turn("span-small-1", "sess-small", 0, harnessId: "claude-code", inputTokens: 100, outputTokens: 10)]);
@@ -199,6 +200,7 @@ public class ProjectionReadPathTests
             store,
             store,
             new FakePricingRepository(),
+            new FakeTextTokenizer(),
             readPathPassRecordBudget: 6);
 
         WriteSession(store, "sess-a", "claude-code", [Turn("span-a-1", "sess-a", 0), Turn("span-a-2", "sess-a", 1)]);
@@ -238,6 +240,7 @@ public class ProjectionReadPathTests
             store,
             store,
             new FakePricingRepository(),
+            new FakeTextTokenizer(),
             readPathPassRecordBudget: 1);
 
         WriteSession(store, "sess-a", "claude-code", [Turn("span-a-1", "sess-a", 0), Turn("span-a-2", "sess-a", 1)]);
@@ -279,7 +282,7 @@ public class ProjectionReadPathTests
         MarkSessionsDirty(store, "sess-b");
 
         using GateReader reader = new(store);
-        CanonSessionProjectorEngine projector = new(reader, store, store, pricing);
+        CanonSessionProjectorEngine projector = new(reader, store, store, pricing, new FakeTextTokenizer());
         CanonRollupsEngine rollups = new(reader, store, pricing);
         KyberBridgeEngine bridge = new(reader, store, store, pricing, projector, rollups);
 
@@ -320,6 +323,7 @@ public class ProjectionReadPathTests
             store,
             store,
             pricing,
+            new FakeTextTokenizer(),
             readPathSessionRecordBudget: ReadPathBudget);
         KyberBridgeEngine bridge = new(store, store, store, pricing, projector, new CanonRollupsEngine(store, store, pricing));
 
@@ -357,7 +361,7 @@ public class ProjectionReadPathTests
         WriteSession(store, "sess-a", "claude-code", [Turn("span-a-1", "sess-a", 0, harnessId: "claude-code", inputTokens: 100, outputTokens: 10)]);
 
         FaultingAttributionReader reader = new(store);
-        CanonSessionProjectorEngine engine = new(reader, store, store, new FakePricingRepository());
+        CanonSessionProjectorEngine engine = new(reader, store, store, new FakePricingRepository(), new FakeTextTokenizer());
 
         Assert.Throws<InvalidOperationException>(() => engine.ProjectIncrementalForReads());
 
@@ -382,6 +386,7 @@ public class ProjectionReadPathTests
             store,
             store,
             new FakePricingRepository(),
+            new FakeTextTokenizer(),
             readPathSessionRecordBudget: ReadPathBudget);
 
         WriteSession(store, "sess-small", "claude-code", [Turn("span-small-1", "sess-small", 0, harnessId: "claude-code", inputTokens: 100, outputTokens: 10)]);
@@ -402,7 +407,7 @@ public class ProjectionReadPathTests
 
         CollectedRecord midPassSpan = Turn("span-small-3", "sess-small", 2, harnessId: "claude-code", inputTokens: 100, outputTokens: 10);
         MidPassIngestReader reader = new(store, "sess-small", midPassSpan);
-        CanonSessionProjectorEngine midPassEngine = new(reader, store, store, new FakePricingRepository(), readPathSessionRecordBudget: ReadPathBudget);
+        CanonSessionProjectorEngine midPassEngine = new(reader, store, store, new FakePricingRepository(), new FakeTextTokenizer(), readPathSessionRecordBudget: ReadPathBudget);
 
         ProjectionPassReport readPass = midPassEngine.ProjectIncrementalForReads();
         Assert.Equal(["sess-small"], readPass.RebuiltKeys);
@@ -441,7 +446,7 @@ public class ProjectionReadPathTests
             store,
             store,
             pricing,
-            new CanonSessionProjectorEngine(reader, store, store, pricing),
+            new CanonSessionProjectorEngine(reader, store, store, pricing, new FakeTextTokenizer()),
             new CanonRollupsEngine(reader, store, pricing));
 
         JsonElement firstPage = bridge.GetSessionPage().GetProperty("sessions");
@@ -478,6 +483,7 @@ public class ProjectionReadPathTests
             store,
             store,
             new FakePricingRepository(),
+            new FakeTextTokenizer(),
             readPathPassRecordBudget: 1);
         CanonProjectionService maintenance = NewService(store, engine);
 
@@ -529,6 +535,7 @@ public class ProjectionReadPathTests
             store,
             store,
             new FakePricingRepository(),
+            new FakeTextTokenizer(),
             readPathPassRecordBudget: 1);
 
         WriteSession(store, "sess-a", "claude-code", [Turn("span-a-1", "sess-a", 0)]);
@@ -558,6 +565,7 @@ public class ProjectionReadPathTests
             store,
             store,
             new FakePricingRepository(),
+            new FakeTextTokenizer(),
             readPathPassRecordBudget: 1);
 
         WriteSession(store, "sess-a", "claude-code", [Turn("span-a-1", "sess-a", 0)]);
@@ -589,6 +597,7 @@ public class ProjectionReadPathTests
             store,
             store,
             new FakePricingRepository(),
+            new FakeTextTokenizer(),
             readPathPassRecordBudget: 1);
 
         WriteSession(store, "sess-a", "claude-code", [Turn("span-a-1", "sess-a", 0)]);
@@ -623,7 +632,7 @@ public class ProjectionReadPathTests
     {
         InMemoryRelationalStore store = new();
         FakePricingRepository pricing = new();
-        CanonSessionProjectorEngine engine = new(store, store, store, pricing);
+        CanonSessionProjectorEngine engine = new(store, store, store, pricing, new FakeTextTokenizer());
         KyberBridgeEngine bridge = new(
             store,
             store,
@@ -657,7 +666,7 @@ public class ProjectionReadPathTests
         new(store, store, store, engine, new CanonRollupsEngine(store, store, new FakePricingRepository()));
 
     private static CanonSessionProjectorEngine NewEngine(InMemoryRelationalStore store) =>
-        new(store, store, store, new FakePricingRepository());
+        new(store, store, store, new FakePricingRepository(), new FakeTextTokenizer());
 
     /// <summary>
     /// Arranges the dirty range the preceding writes already produced, against the store's real

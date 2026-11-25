@@ -184,12 +184,12 @@ public class ProjectionWriteMarkerContractTests : IDisposable
         StoreUnderTest store,
         IRelationalStoreReader reader,
         int readPathSessionRecordBudget = CanonSessionProjectorEngine.DefaultReadPathSessionRecordBudget) =>
-        new(reader, store.Projections, store.Operational, new FakePricingRepository(), readPathSessionRecordBudget);
+        new(reader, store.Projections, store.Operational, new FakePricingRepository(), new FakeTextTokenizer(), readPathSessionRecordBudget);
 
     private static CanonProjectionService NewService(StoreUnderTest store)
     {
         FakePricingRepository pricing = new();
-        CanonSessionProjectorEngine engine = new(store.Reader, store.Projections, store.Operational, pricing);
+        CanonSessionProjectorEngine engine = new(store.Reader, store.Projections, store.Operational, pricing, new FakeTextTokenizer());
         return new CanonProjectionService(
             store.Reader,
             store.Projections,

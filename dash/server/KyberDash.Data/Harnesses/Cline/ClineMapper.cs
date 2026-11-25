@@ -858,7 +858,7 @@ public class ClineMapper : IHarnessMapper
                     correctionRule = correction.Rule;
                 }
 
-                parts.Add(ToolContentMeasurer.BuildContentPart(0, ContentBucket.UserMessage, document.UserMessage, "user"));
+                parts.Add(ToolContentMeasurer.BuildContentPart(0, ContentBucket.UserMessage, document.UserMessage, "user", DefaultTaskModel));
             }
 
             records.Add(BuildLlmRecord(
@@ -936,7 +936,7 @@ public class ClineMapper : IHarnessMapper
                     correctionRule = correction.Rule;
                 }
 
-                parts.Add(ToolContentMeasurer.BuildContentPart(0, ContentBucket.UserMessage, document.UserMessage, "user"));
+                parts.Add(ToolContentMeasurer.BuildContentPart(0, ContentBucket.UserMessage, document.UserMessage, "user", message.Model));
             }
 
             CollectedRecord parent = BuildLlmRecord(
@@ -1057,7 +1057,7 @@ public class ClineMapper : IHarnessMapper
     {
         ToolContentMeasurement? measurement = tool.InputJson is null
             ? null
-            : ToolContentMeasurer.Measure(tool.InputJson);
+            : ToolContentMeasurer.Measure(tool.InputJson, model: parent.Model);
         CollectedToolContent? input = measurement?.ToToolContent(includeFingerprint: true);
 
         string childRecordId = EnsureUniqueRecordId(

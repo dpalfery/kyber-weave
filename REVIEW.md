@@ -371,6 +371,23 @@ Governing rule: [`AGENTS.md`](AGENTS.md#seams-only-an-adapter-touches-a-resource
 - Re-raising a finding the author already answered with a justified reason, unless the reason
   is demonstrably wrong.
 
+### 16. Estimated figures in KyberDash data
+
+Governing rule: [honest unobservability](docs/rules/honest-unobservability.md#hard-rule-kyberdash-never-estimates).
+Scope: changes under `dash/` and `docs/dash/` only. This is a rule about KyberDash's data, not a
+rule for other code in the repository.
+
+- KyberDash never estimates the data it collects and displays: a value the harness did not report
+  is shown as not measured; the fix is capturing the real value. The council rejects any estimated
+  figure in KyberDash data.
+- An estimate is any figure the harness did not report that is not exact arithmetic on reported
+  values: a session total split across calls or turns (even or weighted), a count from text length
+  (characters divided by four), a heuristic floor, or an invented band or error bar. A cost computed
+  from published rates is a calculation, not an estimate.
+- One exception: token counts of text may use the model's own published tokenizer or, when the model
+  publishes none, the closest standard local tokenizer, always labelled with the tokenizer used and
+  whether it is the model's own. Tokenization never calls an API. Every other estimate stays banned.
+
 ## Lens map
 
 Each seat gets its lens row, the technology rows that match the diff, and the *Ground rules*.
@@ -382,8 +399,8 @@ and *What not to flag* only.
 
 | Lens | Take these sections |
 |---|---|
-| intent-alignment | Scope discipline, 11 |
-| correctness | 1, 2, 3, 5, 6, 7, 13, 15 |
+| intent-alignment | Scope discipline, 11, 16 |
+| correctness | 1, 2, 3, 5, 6, 7, 13, 15, 16 |
 | security | 2, 4, 5, 6, 12 |
 | authz-tenancy | 6, 12 |
 | di-composition | 15 |
@@ -409,14 +426,14 @@ The sections named here are sections of this file. Only the technologies with a 
 | Technology | Files | Take these sections |
 |---|---|---|
 | azure | Azure resource definitions | 12 |
-| csharp | `*.cs`, `*.csproj` | 2, 3, 5, 6, 7, 9, 10, 12, 14, 15 |
+| csharp | `*.cs`, `*.csproj` | 2, 3, 5, 6, 7, 9, 10, 12, 14, 15, 16 |
 | github-actions | `.github/workflows/*.yml`, `templates/github-actions/*.yml` | 7, 12 |
 | pulumi | Pulumi programs | 12 |
 | python | `*.py` and embedded Python | 2, 3, 4, 5, 12 |
-| react | `*.tsx`, `*.jsx`, React UI `.ts` | 1, 2, 8 |
+| react | `*.tsx`, `*.jsx`, React UI `.ts` | 1, 2, 8, 16 |
 | sql | `*.sql`, migrations | 4, 6 |
 | sqlite | `**/Sqlite*.cs`, `**/BaseSqliteRepository.cs`, `dash/server/KyberDash.Domain/Schema/**` | 4, 6 |
-| typescript | Node `*.ts`, `*.mts`, `*.cts`, `*.mjs` outside a React UI | 1, 2, 3, 4, 5, 6, 10, 12, 13, 14 |
+| typescript | Node `*.ts`, `*.mts`, `*.cts`, `*.mjs` outside a React UI | 1, 2, 3, 4, 5, 6, 10, 12, 13, 14, 16 |
 | rust | `*.rs`, `Cargo.toml`, `build.rs` outside Tauri | 3, 6 (no Kilo evidence) |
 | tauri | `src-tauri/**`, IPC, capabilities | 6, 12 (no Kilo evidence; also load the rust and react rows) |
 | go | `*.go`, `go.mod` | 3, 6 (no Kilo evidence) |

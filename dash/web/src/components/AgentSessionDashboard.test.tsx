@@ -714,6 +714,26 @@ describe('AgentSessionDashboard: layout order', () => {
   })
 })
 
+describe('AgentSessionDashboard: a charts response with no per-turn counters', () => {
+  it('renders the turn not-measurable state and no turn bars', async () => {
+    const router = stubSectionRoutes()
+    mountDashboard()
+    respondAll(router, {
+      [CHARTS_ROUTE]: {
+        ...CHARTS_BODY,
+        turns: [
+          { index: 0, spanId: 'turn-span-1', model: 'droid', durationMs: 4200 },
+          { index: 1, spanId: 'turn-span-2', model: 'droid', durationMs: 5100 },
+        ],
+      },
+    })
+    const state = await screen.findByTestId('turn-spend-not-measurable')
+    expect(state.textContent).toContain('This harness does not report token counts per turn.')
+    expect(screen.queryByTestId('turn-bar-0')).toBeNull()
+    expect(screen.queryByTestId('turn-bar-1')).toBeNull()
+  })
+})
+
 describe('AgentSessionDashboard: prop-driven states', () => {
   it('renders the error state from the error prop', () => {
     const element = (

@@ -5,6 +5,7 @@ using KyberDash.Application.Tests.Fakes;
 using KyberDash.Data.Collector;
 using KyberDash.Data.Collector.Sources;
 using KyberDash.Data.Harnesses.Antigravity;
+using KyberDash.Data.Tokenization;
 using KyberDash.Domain;
 using Xunit;
 
@@ -19,6 +20,9 @@ public class AntigravityTranscriptMapperTests
 {
     private static readonly DateTimeOffset ImportedAtUtc = new(2026, 11, 19, 12, 0, 0, TimeSpan.Zero);
 
+    /// <summary>A JSON document whose token counts differ between cl100k_base and the o200k_base stand-in.</summary>
+    private const string DivergentJsonText = "{\"summary\":\"こんにちは世界、今日はいい天気ですね。\"}";
+
     [Fact]
     public void Map_ThrowsArgumentNullException_WhenUnitIsNull()
     {
@@ -28,12 +32,9 @@ public class AntigravityTranscriptMapperTests
     }
 
     [Theory]
-    [InlineData(null, "antigravity-jsonl")]
     [InlineData("", "antigravity-jsonl")]
     [InlineData("   \r\n\t ", "antigravity-jsonl")]
-    [InlineData(null, "antigravity-pb")]
-    [InlineData("binary-placeholder", "antigravity-pb")]
-    public void Map_ReturnsEmptyBatch_WhenRawTextIsEmptyOrFormatIsBinary(string? rawText, string format)
+    public void Map_ReturnsEmptyBatch_WhenRawTextIsWhitespace(string rawText, string format)
     {
         AntigravityTranscriptMapper mapper = new();
         NativeSourceUnit unit = CreateUnit(
@@ -616,6 +617,50 @@ public class AntigravityTranscriptMapperTests
 
         Assert.Equal(3, store.CountRecords());
         Assert.Equal(2, store.Sessions().Count);
+    }
+
+    [Fact]
+    public void Map_TranscriptPartsCountUnderTheLabelledStandInWhenRecordsCarryNoModel()
+    {
+        string jsonl = string.Join('\n',
+        [
+            JsonSerializer.Serialize(new
+            {
+                step_index = 0,
+                source = "USER_EXPLICIT",
+                type = "USER_INPUT",
+                status = "DONE",
+                created_at = "2026-06-21T13:32:10Z",
+                content = DivergentJsonText,
+            }),
+            JsonSerializer.Serialize(new
+            {
+                step_index = 1,
+                source = "MODEL",
+                type = "PLANNER_RESPONSE",
+                status = "DONE",
+                created_at = "2026-06-21T13:32:11Z",
+                content = "Checking status now.",
+            }),
+        ]) + "\n";
+
+        AntigravityTranscriptMapper mapper = new();
+        NativeSourceUnit unit = CreateUnit(
+            harnessId: "antigravity",
+            sourceKey: "/home/dev/.gemini/antigravity/brain/conv-tok/.system_generated/logs/transcript.jsonl",
+            format: "antigravity-jsonl",
+            rawText: jsonl);
+
+        CollectedBatch batch = mapper.Map(unit, ImportedAtUtc);
+
+        CollectedRecord parent = Assert.Single(batch.Records, static r => r.Op == RecordOp.LlmInvoke);
+        Assert.Null(parent.Model);
+        CollectedContentPart userPart = Assert.Single(parent.Parts, static p => p.Bucket == ContentBucket.UserMessage);
+        Assert.Null(userPart.PlainText);
+        Assert.NotNull(userPart.Withheld);
+        Assert.Equal(
+            LocalTextTokenizer.Shared.Count(DivergentJsonText, null).Count,
+            userPart.Withheld!.MeasuredTokens);
     }
 
     private static NativeSourceUnit CreateUnit(

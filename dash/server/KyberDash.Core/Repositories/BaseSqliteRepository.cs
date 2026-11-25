@@ -7,7 +7,6 @@ using KyberDash.Core.Exceptions;
 using KyberDash.Core.Processes;
 using KyberDash.Core.Resilience;
 using Microsoft.Data.Sqlite;
-using SQLitePCL;
 
 namespace KyberDash.Core.Repositories;
 
@@ -18,9 +17,6 @@ namespace KyberDash.Core.Repositories;
 /// </summary>
 public abstract partial class BaseSqliteRepository
 {
-    private static readonly Lock ProviderGate = new();
-    private static volatile bool ProviderInitialized;
-
     private const int SqliteBusyResultCode = 5;
     private const int SqliteLockedResultCode = 6;
 
@@ -35,23 +31,7 @@ public abstract partial class BaseSqliteRepository
     protected ICircuitBreaker CircuitBreaker { get; }
 
     /// <summary>Ensures the system sqlite3 dynamic library provider is registered once.</summary>
-    protected static void EnsureSqliteProviderInitialized()
-    {
-        if (ProviderInitialized) return;
-        lock (ProviderGate)
-        {
-            if (ProviderInitialized) return;
-            try
-            {
-                raw.SetProvider(new SQLite3Provider_sqlite3());
-                ProviderInitialized = true;
-            }
-            catch (Exception ex) when (ex is DllNotFoundException or TypeInitializationException or InvalidOperationException or BadImageFormatException)
-            {
-                throw new SqliteExecutionException("The native 'sqlite3' dynamic library is unavailable.", ex);
-            }
-        }
-    }
+    protected static void EnsureSqliteProviderInitialized() => SqliteProvider.EnsureInitialized();
 
     /// <summary>Initializes a new <see cref="BaseSqliteRepository"/>.</summary>
     protected BaseSqliteRepository(

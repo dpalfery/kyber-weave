@@ -9,7 +9,7 @@ namespace KyberDash.Data.Tests;
 
 /// <summary>
 /// Store-parity tests for <see cref="SqliteRelationalStore"/> over a real <c>sqlite3</c> database:
-/// nested directory creation, schema v25 stamping, idempotent initialization, newer-store refusal
+/// nested directory creation, current schema version stamping, idempotent initialization, newer-store refusal
 /// without mutating or deleting any database file, the unconsumed rebuild re-ingest flag, and the
 /// source-delete cascade the clean path relies on. Scripted <c>ExecuteSqliteCore</c> coverage lives
 /// in <c>SqliteRelationalStoreWriteTests</c> and <c>SchemaVersionTests</c>.
@@ -26,7 +26,7 @@ public class SqliteRelationalStoreParityTests : IDisposable
     }
 
     [Fact]
-    public void Constructor_CreatesNestedDirectoryAndStampsSchemaV25()
+    public void Constructor_CreatesNestedDirectoryAndStampsTheCurrentSchemaVersion()
     {
         string databasePath = Path.Combine(directory.Path, "nested", "deeper", "canon.db");
 
@@ -70,18 +70,18 @@ public class SqliteRelationalStoreParityTests : IDisposable
     {
         string databasePath = Path.Combine(directory.Path, "canon.db");
         SqliteRelationalStore store = new(databasePath, new SqliteCircuitBreaker());
-        store.SetStoreState(new StoreStateView(26, SqliteRelationalStore.DetectorVersion));
+        store.SetStoreState(new StoreStateView(SqliteRelationalStore.SchemaVersion + 1, SqliteRelationalStore.DetectorVersion));
 
         InvalidOperationException exception = Assert.Throws<InvalidOperationException>(
             () => _ = new SqliteRelationalStore(databasePath, new SqliteCircuitBreaker()));
 
         Assert.Equal(
-            SqliteRelationalStore.FormatSchemaVersionRefusal(Path.GetFullPath(databasePath), 26),
+            SqliteRelationalStore.FormatSchemaVersionRefusal(Path.GetFullPath(databasePath), SqliteRelationalStore.SchemaVersion + 1),
             exception.Message);
 
         // The refusal happens before any PRAGMA, DDL, or deletion: the newer store keeps every file.
         Assert.True(File.Exists(databasePath));
-        Assert.Equal(26, store.GetStoreState()?.SchemaVersion);
+        Assert.Equal(SqliteRelationalStore.SchemaVersion + 1, store.GetStoreState()?.SchemaVersion);
     }
 
     [Fact]
@@ -130,12 +130,51 @@ public class SqliteRelationalStoreParityTests : IDisposable
         Assert.Single(store.GetSessionTurns("sess-a"));
     }
 
+    [Fact]
+    public void ClearEstimatedRecordTokens_DeletesOnlyTheNamedEstimatesOfTheFileSource()
+    {
+        SqliteRelationalStore store = Create();
+        store.WriteBatch(new CollectedBatch(
+            Source: new CollectedSource("cursor", SourceKind.File, "/home/dev/.cursor/a.jsonl"),
+            Sessions: [new CollectedSession("sess-c", "cursor", "sess-c", Workspace: null, Title: null, ReportedUsage: [])],
+            Records:
+            [
+                Record("span-native", "sess-c", "cursor") with { ReportedInputTokens = 10 },
+                Record("span-estimated", "sess-c", "cursor"),
+            ],
+            Problems: []));
+        store.WriteBatch(new CollectedBatch(
+            Source: new CollectedSource("warp", SourceKind.File, "/home/dev/warp.sqlite"),
+            Sessions: [new CollectedSession("sess-w", "warp", "sess-w", Workspace: null, Title: null, ReportedUsage: [new CollectedModelUsage(0, "auto", TokenClass.Total, 40)])],
+            Records: [Record("span-warp", "sess-w", "warp") with { ReportedInputTokens = 10 }],
+            Problems: []));
+        store.WriteBatch(new CollectedBatch(
+            Source: new CollectedSource("warp", SourceKind.File, "/home/dev/other.sqlite"),
+            Sessions: [],
+            Records: [Record("span-warp-other", "sess-w", "warp") with { ReportedInputTokens = 10 }],
+            Problems: []));
+
+        store.ClearEstimatedRecordTokens("cursor", "/home/dev/.cursor/a.jsonl", EstimatedRecordTokens.RecordsWithoutReportedTotal);
+        store.ClearEstimatedRecordTokens("warp", "/home/dev/warp.sqlite", EstimatedRecordTokens.AllRecordTokens);
+
+        Assert.Single(store.TokenCounts("span-native"));
+        Assert.Single(store.ReportedTotals("span-native"));
+        Assert.Empty(store.TokenCounts("span-estimated"));
+        Assert.Empty(store.TokenCounts("span-warp"));
+        Assert.Empty(store.ReportedTotals("span-warp"));
+        Assert.Single(store.TokenCounts("span-warp-other"));
+        Assert.Single(store.ReportedTotals("span-warp-other"));
+        Assert.Single(store.SessionModelUsages("sess-w"));
+        Assert.Equal(4, store.CountRecords());
+        Assert.Equal(2, store.Sessions().Count);
+    }
+
     private SqliteRelationalStore Create() =>
         new(Path.Combine(directory.Path, $"parity-{Guid.NewGuid():N}.db"), new SqliteCircuitBreaker());
 
-    private static CollectedRecord Record(string spanId, string sessionKey) => new(
+    private static CollectedRecord Record(string spanId, string sessionKey, string harnessId = "claude-code") => new(
         RecordId: spanId,
-        HarnessId: "claude-code",
+        HarnessId: harnessId,
         Op: RecordOp.LlmInvoke,
         Kind: RecordKind.Client,
         Name: "llm.invoke",

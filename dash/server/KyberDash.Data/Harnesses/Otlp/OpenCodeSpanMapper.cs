@@ -196,7 +196,7 @@ public partial class OpenCodeSpanMapper : OtlpSpanMapperBase
 
             nextPosition = Math.Max(nextPosition, position + 1);
 
-            ToolContentMeasurement measurement = ToolContentMeasurer.Measure(text);
+            ToolContentMeasurement measurement = ToolContentMeasurer.Measure(text, model: ResolveModel(native));
             string? plainText = measurement.IsDocument ? null : measurement.PlainText;
             CollectedWithheldText? withheld = measurement.IsDocument ? measurement.ToWithheldText() : null;
             long? originalBytes = measurement.IsDocument ? null : measurement.OriginalUtf8BytesWhenTruncated;
