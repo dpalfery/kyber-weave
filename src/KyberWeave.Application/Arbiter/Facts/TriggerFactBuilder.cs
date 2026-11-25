@@ -96,6 +96,7 @@ public static class TriggerFactBuilder
     /// never the prompt's own text, exempts it from the plan-read rule: a conductor can type the tags itself.</param>
     /// <param name="repoRoot">The repository root the standards folders sit under, when the caller has one. It
     /// resolves the technology's parent template, so a parent-keyed gate is found exactly as the gate run finds it.</param>
+    /// <param name="files">The file system the standards are read through; the parent technology is resolved only when it and <paramref name="repoRoot"/> are both given.</param>
     public static ArbiterFactSet Build(
         TriggerClassification classification,
         string prompt,
@@ -105,12 +106,12 @@ public static class TriggerFactBuilder
         string? delegationModel = null,
         IReadOnlyList<string>? secondaryTriggers = null,
         bool promptInserted = false,
-        string? repoRoot = null)
+        string? repoRoot = null,
+        IFileSystem? files = null)
     {
         ArgumentNullException.ThrowIfNull(classification);
         ArgumentNullException.ThrowIfNull(prompt);
         ArgumentNullException.ThrowIfNull(config);
-        _ = repoRoot;
 
         if (classification.Trigger is null)
             return new ArbiterFactSet();
@@ -126,7 +127,9 @@ public static class TriggerFactBuilder
             modelOverrideField,
             delegationModel,
             secondaryTriggers,
-            promptInserted);
+            promptInserted,
+            files is null ? null : repoRoot,
+            files);
     }
 
     /// <summary>Builds the fact bag for <paramref name="trigger"/> from dispatch input.</summary>

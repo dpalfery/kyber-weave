@@ -341,6 +341,26 @@ public sealed class ReviewSeatRecorderTests : IDisposable
             line => line.Contains("relative packet path", StringComparison.Ordinal));
     }
 
+    /// <summary>
+    /// Several live runs with no signal choosing one leave no active run, so a relative packet path is refused rather
+    /// than guessed against the canonical checkout.
+    /// </summary>
+    [Fact]
+    public void ARelativePacketPathInAnAmbiguousRunContextIsNotSaved()
+    {
+        StringWriter log = new();
+        HookRunContext run = new(
+            _host.RepoRoot, null, null, _host.RepoRoot, [_host.RepoRoot], null, null, null, false, HookRunContextSource.Ambiguous, []);
+        HookContext context = new(_host.RepoRoot, () => "decision-seat", log, RunContext: run);
+
+        _ = Sync(Prompt(".agent_scratchpad/feat/review/cycle-1/packets/correctness.md"), CopilotResult(Reply), context);
+
+        Assert.False(_host.Files.FileExists(Seat()));
+        Assert.Single(
+            log.ToString().Split('\n'),
+            line => line.Contains("relative packet path", StringComparison.Ordinal));
+    }
+
     /// <summary>A relative packet path with an active run is saved under the run's worktree.</summary>
     [Fact]
     public void ARelativePacketPathWithAnActiveRunIsSavedUnderTheRunWorktree()

@@ -211,6 +211,41 @@ public sealed class ArbiterGateReportRuleTests
     }
 
     /// <summary>
+    /// The classified-dispatch overload is the one production calls. It must resolve the parent technology exactly as
+    /// the other overload does, or a host with gates only on the parent reads as having none.
+    /// </summary>
+    [Fact]
+    public void TheClassifiedBuildResolvesTheParentTechnologyToo()
+    {
+        InMemoryFileSystem files = _state.Files;
+        string standard = Path.Combine(ArbiterTestRoots.Under("repo"), "docs", "standards", "react", "react.standards.md");
+        files.CreateDirectory(Path.GetDirectoryName(standard)!);
+        files.WriteAllText(standard, "---\nbuilds-on: typescript\n---\n\n# React standard\n");
+        KyberWeaveConfig config = new()
+        {
+            Arbiter = ArbiterConfigDefaults.Product,
+            Ontology = KyberWeaveConfigAssembler.FromYaml("ontology:\n  docs-root: docs\n").Ontology,
+            Review = new ReviewConfig
+            {
+                TechnologyGates = new Dictionary<string, IReadOnlyList<ReviewTaskGate>>(StringComparer.Ordinal)
+                {
+                    ["typescript"] = [new ReviewTaskGate("unit", ["**"], null, ["dotnet", "test"], [])]
+                }
+            }
+        };
+        string prompt = "KYBER-ARBITER: true\nTECHNOLOGY: react\n\nDo the work.";
+        TriggerClassification classification = new(
+            "delegate.returned", "conductor", ArbiterCallerSources.Harness, "developer", "worker",
+            new Dictionary<string, string>(StringComparer.Ordinal), null, false);
+
+        ArbiterFactSet facts = TriggerFactBuilder.Build(
+            classification, prompt, config, repoRoot: ArbiterTestRoots.Under("repo"), files: files);
+
+        Assert.True(facts.TryGet("config.task-gates-declared", out ArbiterFact? fact));
+        Assert.Equal(true, fact.Value);
+    }
+
+    /// <summary>
     /// A dispatch naming a technology whose standard this process may not read must still produce the fact.
     /// The build is fail-open (ADR 0072: errors allow), so the fact reports the gates it could resolve and
     /// the hook keeps going, instead of the permission failure escaping and stopping the dispatch.
