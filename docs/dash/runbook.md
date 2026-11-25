@@ -1963,7 +1963,7 @@ here.
 - **Cause**: `~/.kyberdash/config.json` has no finite positive `devin.acuUsdRate` (absent,
   non-numeric, `<= 0`, or a JSON literal such as `1e400` that parses as `Infinity`).
 - **Behavior**: transcripts still ingest. Token fields parse. Cost is unknown (`costUSD: 0`
-  with `costIsEstimated: true`), never a measured zero. Doctor's Devin verdict names the
+  with `costIsEstimated: true`, the published-rate flag, meaning cost not measured), never a measured zero. Doctor's Devin verdict names the
   missing rate instead of "holds no sessions".
 - **Fix**: set `devin.acuUsdRate` to the USD-per-ACU rate. Do not invent a figure to make
   the tile look priced.

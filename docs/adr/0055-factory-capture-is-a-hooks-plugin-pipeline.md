@@ -4,7 +4,7 @@ title: Factory (Droid) Capture Is a Hooks-Plugin Pipeline
 doc-type: adr
 status: current
 owner: dpalfery
-last-reviewed: 2026-11-15
+last-reviewed: 2026-11-24
 code-refs:
   - CanonAdapters
   - IsSupportedDroidEnvelope
@@ -97,6 +97,16 @@ Factory collection source): **one source per session owns tool calls.** The file
 them when it has any tool record for the session; otherwise the plugin's tool records count. A
 paired session's duration is the sum of the file source's llm-call active durations, with its tool records excluded because their time already lies inside those durations. Turns, prompts and the prompt
 consent are unchanged.
+
+Amended 2026-11-24 (the no-estimate rule): the file source no longer splits the session's
+`tokenUsage` across assistant calls. The "known lossy approximation" that the Context and
+Consequences below accept is withdrawn, because KyberDash never estimates the data it collects
+and displays ([honest unobservability](../rules/honest-unobservability.md#hard-rule-kyberdash-never-estimates)).
+Droid per-call tokens are **not measured**: the session totals are a session fact, stored once as
+session usage, and no per-call or per-turn token figure is derived from them. Factory documents no
+per-request token source for built-in models, so the per-call data that the earlier text expected
+to remove the approximation does not exist for them. The exact-session-id join, the source
+precedence and the plugin's `not_measurable` counters are unchanged.
 
 ## Context
 

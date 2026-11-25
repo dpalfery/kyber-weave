@@ -168,6 +168,16 @@ failure. The foundational architecture decisions — the one-time fork, the embe
 the span-shaped canonical model, single-file distribution and the C# engine cutover — are recorded in
 [ADR 0020](../adr/0020-kyberdash-one-time-fork.md).
 
+## The no-estimate rule
+
+> KyberDash never estimates the data it collects and displays: a value the harness did not report is shown as not measured; the fix is capturing the real value. This rule applies to KyberDash (`dash/**` and `docs/dash/**`) only. One exception: token counts of text may use the model's own published tokenizer or, when the model publishes none, the closest standard local tokenizer, always labelled with the tokenizer used and whether it is the model's own; tokenization never calls an API. Every other estimate stays banned.
+
+An estimate is any figure the harness did not report that is not exact arithmetic on reported
+values: a split of a session total across calls or turns, a count from text length, a heuristic
+floor, or an invented band. A cost computed from published per-token rates is a calculation, and
+is described as "calculated from published rates". The rule is decided in
+[honest unobservability](../rules/honest-unobservability.md#hard-rule-kyberdash-never-estimates).
+
 ## High-level architecture
 
 ```mermaid
@@ -751,7 +761,7 @@ has to say which source owns which half of it. The rule is decided in one place 
 | turn count, timeline turns, request roots, per-turn model, context turns | the **plugin rows** | the plugin is the PRIMARY mechanism and alone observes the turn boundary |
 | tool invocations | the **file rows' tool records** when the transcript has any tool record for the session; otherwise the **plugin rows** | the plugin's tool spans cannot tell two calls of one session apart, because Factory's hook payload carries no call id ([ADR 0055](../adr/0055-factory-capture-is-a-hooks-plugin-pipeline.md), amended 2026-11-09), so the transcript is the tool source wherever it has one |
 | duration | the **file rows' durations**, summed | the transcript carries each call's timestamp and the boundary it is measured from; the plugin's spans start and end at the same instant, so they measure no duration |
-| token totals (input, output, cache read, cache creation) and the availability that gates them | the **file rows** | the file source is the only source of counters, and its counters are a session-level total split evenly across assistant calls — a session fact, never a turn fact |
+| token totals (input, output, cache read, cache creation) and the availability that gates them | the **file rows** | the file source is the only source of counters. Session totals are stored once as session usage; per-call and per-turn tokens are not measured |
 | cost | the turn records **and** the counter records | the file row carries the only priced cost — the plugin rows carry none — and the two record sets are disjoint, so pricing the union prices nothing twice |
 
 The split is **total over two buckets**: every Factory record lands in exactly one of them, the
@@ -1537,7 +1547,7 @@ A genuine harness-reported figure is never repriced (R5.2). For Copilot, only th
 reader's `cost_usd` (marked `costHarnessReported` in `synth/readers/copilot.ts`) is `harness`;
 figures the Copilot parser derives through LiteLLM are `published` and are repriced from the
 credits table. `costBlockFor` returns `{published, no_rate}` for a zero or non-finite figure from
-a published-rate source (`costIsEstimated === true`), and `unknown` only where no pricing was
+a published-rate source (`costIsEstimated === true`, which marks a cost calculated from published rates, not an estimate), and `unknown` only where no pricing was
 attempted.
 
 **Devin rate (issue #197).** `devin.acuUsdRate` in `~/.kyberdash/config.json` prices Devin ACU
@@ -1609,7 +1619,7 @@ panel tiles that read the arrays therefore render "not measurable" — see the k
     - `turns_listed` holds 0-based transport indices (the issue #184 numbering), and is `[]` when
       the skill was listed on no turn.
     - `description` is the first listing text observed for that skill in the session, stored
-      once. `derived_tokens` is estimated from the description and is labelled derived. Both are
+      once. `derived_tokens` is a local-tokenizer count of the description, labelled with the tokenizer used and whether it is the model's own (the `o200k_base` stand-in when the model publishes none). Both are
       absent when no listing carried a description.
 - `measurability.skills` is set only when the whole `skills` view is `not_measurable`, and then
   carries that same reason. A partly measured view (Antigravity when no
@@ -1793,8 +1803,8 @@ handing off tasks to subagents). KyberDash introduces two first-class derived en
 `canon.db` (`CanonRollupsEngine` in `dash/server/KyberDash.Application/CanonRollupsEngine.cs`):
 
 - **`Run` (`RunRow`)**: Represents a single user-initiated task or unit of work. It aggregates
-  all executions participating in that task, recording token totals, estimated waste,
-  duration, and outcome signals (`exit_code`, `test_status_delta`, `outcome_status`).
+  all executions participating in that task, recording token totals, duration,
+  and outcome signals (`exit_code`, `test_status_delta`, `outcome_status`).
 - **`AgentExecution` (`ExecutionRow`)**: Represents an individual agent invocation within a
   run, tracking `parent_execution_id` and execution role (`root`, `child`, `delegated`).
 
@@ -1814,8 +1824,9 @@ The session projection emits the ASAD payload directly ([ADR 0011](../adr/0011-a
 It preserves per-bucket measurability and reasons, so a source that cannot supply content, schemas,
 structure, or counters produces `not_measurable` rather than a misleading zero.
 
-Derived token counts (R4.6) come from `CachedTokenCounter` (`dash/server/KyberDash.Application/CachedTokenCounter.cs`),
-backed by `token_cache` in `canon.db`, and are tagged as derived so consumers present them as a lower bound.
+Token counts of text (R4.6) come from `CachedTokenCounter` (`dash/server/KyberDash.Application/CachedTokenCounter.cs`),
+backed by `token_cache` in `canon.db`. They are local tokenizer counts, never an API call, and each carries a label naming the
+tokenizer used and whether it is the model's own; the `o200k_base` stand-in is labelled as a stand-in when the model publishes no tokenizer.
 
 ### Part-text boundary rule (`ContentPart.Text` is a string at derivation)
 
@@ -1993,7 +2004,7 @@ The analysis layer contains pure C# analysis modules under `dash/server/KyberDas
 | Hierarchical timeline, subagent and auxiliary separation | `CanonContextAnalysis.BuildTimeline` | R9 |
 | Cross-harness metric table, run comparison & calibration | `KyberBridgeEngine` | R10, ADR 0012 |
 | Telemetry-grounded finding engine & waste ranking | `CanonFindings.DetectFindings` | ADR 0013 (D5, D6, D8) |
-| Context & token estimation helpers | `CachedTokenCounter`, `CanonPricing` | ADR 0012, R4.6 |
+| Context & token counting helpers (local tokenizer, labelled) | `CachedTokenCounter`, `CanonPricing` | ADR 0012, R4.6 |
 
 ### Pure Signals and Findings Engine (`CanonFindings`)
 
@@ -2023,13 +2034,13 @@ Every diagnostic finding satisfies the strict **Finding Contract (Decision D5)**
 3. **Measurement class**: Declared as `deterministic`, `inferred`, or `coverage-gap`.
 4. **Stated confidence basis**: Written justification for assigned confidence and what would raise it.
 5. **Recommendation**: Actionable guidance adhering to **Relocation Over Deletion (Decision D8)**.
-6. **Expected improvement & error bar**: Estimated token/latency savings with uncertainty bounds.
+6. **Expected improvement**: The measured token or latency quantity the recommendation acts on, stated from reported values. No error bar is shown: a band the harness did not report is an invented figure, so it is not measured.
 7. **Outcome-risk caveat**: Mandatory disclosure of potential execution risks.
 
 Findings are ordered by the **Waste Ranking Formula (Decision D6)**:
-$$\text{Rank Score} = \text{Estimated Recoverable Waste} \times \text{Outcome Risk} \times \text{Confidence}$$
+$$\text{Rank Score} = \text{Measured Recoverable Waste} \times \text{Outcome Risk} \times \text{Confidence}$$
 An inferred finding can never outrank a deterministic finding of comparable size. Recoverable
-waste is an estimate tied to a specific recommended action.
+waste is the measured quantity tied to a specific recommended action; a finding whose waste cannot be measured from reported values ranks as not measured and carries no heuristic floor.
 
 Two honest-measurement contracts govern what the engine will not claim. The compaction-hazard
 detector fires only against a reported context window: an unreported window suppresses the
@@ -2337,7 +2348,7 @@ The turn inspection drawer and turn-content endpoints follow explicit numbering 
 - **0-based transport and 1-based display:** URL routes, router state, and API payloads carry 0-based `turnIndex` (`/api/kyber/session/:id/turn/:index/content`), matching payload `turns[].index`. All user-facing interfaces render 1-based display labels (`Turn #N`), converted strictly at the presentation click boundary. Engine `TurnPressure.index` preserves its documented 1-based contract.
 - **Strict resolver:** `KyberBridgeEngine.GetTurnContent` strictly resolves 0-based index or positional matches (and legacy `turn - 1` rows). Out-of-bounds indices return HTTP 404 rather than falling back to neighbouring turns.
 - **Diagnosable empty state:** The turn content pane distinguishes an existing turn with no recorded content (`200 OK` with empty content parts, disclosing `spanId` and 0-based `turnIndex`) from an invalid or nonexistent turn (`404 Not Found`).
-- **Measured inspector figures:** Turn inspector headers display measured per-turn token figures only, never text-length estimates. Unmeasured values render honest not-measured treatments per [honest unobservability](../rules/honest-unobservability.md).
+- **Measured inspector figures:** Turn inspector headers display measured per-turn token figures only, never figures derived from text length. Unmeasured values render honest not-measured treatments per [honest unobservability](../rules/honest-unobservability.md).
 
 #### Ordered, API-seen turn context
 

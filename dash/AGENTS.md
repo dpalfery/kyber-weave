@@ -20,6 +20,15 @@ Decided by [ADR 0033](../../docs/adr/0033-kyberdash-surfaces-are-display-layers.
 [ADR 0084](../../docs/adr/0084-kyberdash-csharp-engine.md).
 Architecture: [`docs/dash/architecture.md`](../../docs/dash/architecture.md).
 
+## KyberDash never estimates
+
+> KyberDash never estimates the data it collects and displays: a value the harness did not report is shown as not measured; the fix is capturing the real value. This rule applies to KyberDash (`dash/**` and `docs/dash/**`) only. One exception: token counts of text may use the model's own published tokenizer or, when the model publishes none, the closest standard local tokenizer, always labelled with the tokenizer used and whether it is the model's own; tokenization never calls an API. Every other estimate stays banned.
+
+An estimate is any figure the harness did not report that is not exact arithmetic on reported
+values: a split of a session total across calls or turns, a count from text length, a heuristic
+floor, or an invented band. A cost computed from published rates is a calculation. Full text:
+[`docs/rules/honest-unobservability.md`](../docs/rules/honest-unobservability.md#hard-rule-kyberdash-never-estimates).
+
 ## What lives where
 
 | Directory | Role |
