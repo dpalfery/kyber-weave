@@ -625,11 +625,47 @@ public static class SettingsCleanDoctorReportTests
         public void RunVacuumLeavesTheRelationalStoreAnswering()
         {
             using TempDirectory directory = new();
-            SqliteRelationalStore store = new(directory.Combine("vacuum.db"), new SqliteCircuitBreaker());
+            string databasePath = directory.Combine("vacuum.db");
+            SqliteRelationalStore store = new(databasePath, new SqliteCircuitBreaker());
             Mock<ICircuitBreaker> breaker = new();
+            string filler = new('x', 2000);
+
+            for (int batchIndex = 0; batchIndex < 80; batchIndex++)
+            {
+                CollectedRecord[] records = new CollectedRecord[10];
+                for (int recordIndex = 0; recordIndex < records.Length; recordIndex++)
+                {
+                    records[recordIndex] = Record($"vacuum-span-{batchIndex}-{recordIndex}", "sess-vacuum") with
+                    {
+                        Parts =
+                        [
+                            new CollectedContentPart(0, ContentBucket.UserPrompt, filler, null, null, null, "user", null, null),
+                            new CollectedContentPart(1, ContentBucket.Reasoning, filler, null, null, null, "assistant", null, null),
+                        ],
+                    };
+                }
+
+                store.WriteBatch(new CollectedBatch(
+                    Source: new CollectedSource("claude-code", SourceKind.File, $"/tmp/vacuum-batch-{batchIndex}.jsonl"),
+                    Sessions: [],
+                    Records: records,
+                    Problems: []));
+            }
+
+            foreach (StoredSource source in store.Sources("claude-code"))
+            {
+                store.DeleteSource(source.SourceId);
+            }
+
+            long bytesBeforeVacuum = new FileInfo(databasePath).Length;
 
             new DoctorService(store, store, breaker.Object).RunVacuum();
 
+            long bytesAfterVacuum = new FileInfo(databasePath).Length;
+
+            Assert.True(
+                bytesAfterVacuum < bytesBeforeVacuum,
+                $"RunVacuum should compact '{databasePath}' from {bytesBeforeVacuum} bytes, but it is {bytesAfterVacuum} bytes");
             Assert.Equal(SqliteRelationalStore.SchemaVersion, store.GetStoreState()?.SchemaVersion);
         }
 
