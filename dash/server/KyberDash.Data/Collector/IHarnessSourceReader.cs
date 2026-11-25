@@ -27,8 +27,9 @@ public interface IHarnessFileSystem
     string ReadAllText(string filePath);
 
     /// <summary>
-    /// Reads the UTF-8 text contents of <paramref name="filePath"/>, reading no more than
-    /// <paramref name="maxBytes"/> bytes plus one, so a file that grew after its size was checked is still bounded.
+    /// Reads the UTF-8 text contents of <paramref name="filePath"/>, holding no more than
+    /// <paramref name="maxBytes"/> bytes and stopping at the first read past them, so a file that grew after its
+    /// size was checked is still bounded.
     /// </summary>
     /// <exception cref="InvalidDataException">The file holds more than <paramref name="maxBytes"/> bytes.</exception>
     string ReadAllText(string filePath, long maxBytes);
