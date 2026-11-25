@@ -2725,6 +2725,7 @@ public class InMemoryRelationalStore :
     public void SetStoreState(StoreStateView state)
     {
         ArgumentNullException.ThrowIfNull(state);
+        BeforeProjectionWriteBack?.Invoke(nameof(SetStoreState));
 
         lock (syncRoot)
         {

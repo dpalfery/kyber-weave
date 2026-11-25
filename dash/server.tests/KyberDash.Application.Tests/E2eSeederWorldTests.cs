@@ -1,5 +1,6 @@
 using System.Text.Json;
 using KyberDash.Application.Tests.Fakes;
+using KyberDash.Contracts.Repositories;
 using KyberDash.Data.Collector.Sources;
 using KyberDash.Data.Repositories;
 using Xunit;
@@ -99,6 +100,9 @@ public class E2eSeederWorldTests
         CanonProjectionService projection = new(store, store, store, projector, rollups);
         TranscriptIngestionService ingestion = new(store, store, new HarnessSourceRegistry());
         E2eSeederService seeder = new(store, store, store, ingestion, projection);
+        // A store stamped with the previous detector version is stale, so the seed's projection
+        // pass must stamp the current one rather than find it already current.
+        store.SetStoreState(new StoreStateView(SqliteRelationalStore.SchemaVersion, SqliteRelationalStore.DetectorVersion - 1));
         List<string> writeBacks = [];
         store.BeforeProjectionWriteBack = writeBacks.Add;
 
@@ -106,10 +110,10 @@ public class E2eSeederWorldTests
             0,
             seeder.SeedWorld(E2eSeederService.HarnessCollectionWorld, directory.Combine("world.db"), repoRoot));
 
+        Assert.Equal(SqliteRelationalStore.DetectorVersion, store.GetStoreState()?.DetectorVersion);
         Assert.Equal(
             [nameof(InMemoryRelationalStore.ClearProjectionDirtyState), nameof(InMemoryRelationalStore.SetProjectionState)],
             writeBacks.TakeLast(2));
-        Assert.Equal(SqliteRelationalStore.DetectorVersion, store.GetStoreState()?.DetectorVersion);
         Assert.True(projector.IsProjectionCurrent());
     }
 
