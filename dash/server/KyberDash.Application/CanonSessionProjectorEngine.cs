@@ -1084,7 +1084,7 @@ public partial class CanonSessionProjectorEngine
                 return;
             }
 
-            if (!files.All(static f => string.Equals(f.Source, "codeburn/claude-desktop", StringComparison.Ordinal)
+            if (!files.All(static f => string.Equals(f.Source, CanonSynth.FileSourcePrefix + "claude-desktop", StringComparison.Ordinal)
                     || string.Equals(f.Harness, "claude-desktop", StringComparison.Ordinal)))
             {
                 return;
@@ -1531,7 +1531,7 @@ public partial class CanonSessionProjectorEngine
     private static bool IsCursorCollector(CanonicalRecord record) =>
         !string.Equals(record.Harness, "cursor-agent", StringComparison.Ordinal)
         && (string.Equals(record.Harness, "cursor", StringComparison.Ordinal)
-            || string.Equals(record.Source, "codeburn/cursor", StringComparison.Ordinal));
+            || string.Equals(record.Source, CanonSynth.FileSourcePrefix + "cursor", StringComparison.Ordinal));
 
     private static bool IsCursorAgentCollector(CanonicalRecord record) =>
         string.Equals(record.Harness, "cursor-agent", StringComparison.Ordinal)

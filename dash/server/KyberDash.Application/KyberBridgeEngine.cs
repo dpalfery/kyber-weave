@@ -4235,10 +4235,9 @@ public class KyberBridgeEngine
 
     private static (string Display, string Kind) FormatSourceDisplay(string source)
     {
-        const string fileSourcePrefix = "codeburn/";
-        if (source.StartsWith(fileSourcePrefix, StringComparison.Ordinal))
+        if (source.StartsWith(CanonSynth.FileSourcePrefix, StringComparison.Ordinal))
         {
-            return (source[fileSourcePrefix.Length..], "local-file");
+            return (source[CanonSynth.FileSourcePrefix.Length..], "local-file");
         }
 
         if (string.Equals(source.Trim(), "unattributed", StringComparison.OrdinalIgnoreCase))

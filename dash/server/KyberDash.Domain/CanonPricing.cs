@@ -1427,8 +1427,8 @@ public static partial class CanonPricing
 
     private static string PrettyHarness(string raw)
     {
-        string cleaned = raw.StartsWith("codeburn/", StringComparison.Ordinal)
-            ? raw["codeburn/".Length..]
+        string cleaned = raw.StartsWith(CanonSynth.FileSourcePrefix, StringComparison.Ordinal)
+            ? raw[CanonSynth.FileSourcePrefix.Length..]
             : raw;
 
         if (string.Equals(ToAsciiLower(cleaned), "opencode", StringComparison.Ordinal))
