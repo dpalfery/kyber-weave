@@ -68,16 +68,44 @@ public partial class MenubarService : IMenubarService
     };
 
     private readonly IServerStateRepository serverState;
+    private readonly TrayToolRunner runTool;
+    private readonly TrayPlatform platform;
+    private readonly Func<TimeSpan, CancellationToken, Task> delay;
 
     /// <summary>
-    /// Initializes a new <see cref="MenubarService"/>.
+    /// Initializes a new <see cref="MenubarService"/> that runs the real system tools on the real platform.
     /// </summary>
     /// <param name="serverState">Server-state repository supplying the tray install directory.</param>
     public MenubarService(IServerStateRepository serverState)
+        : this(serverState, null, null, null)
+    {
+    }
+
+    /// <summary>
+    /// Initializes a new <see cref="MenubarService"/> with its outside resources supplied, so the quit, launch and
+    /// running decisions are testable without a tray, a platform or a clock.
+    /// </summary>
+    /// <param name="serverState">Server-state repository supplying the tray install directory.</param>
+    /// <param name="runTool">Runs an external tool; the system process runner when <see langword="null"/>.</param>
+    /// <param name="platform">The platform to decide for; the running one when <see langword="null"/>.</param>
+    /// <param name="delay">Waits between quit polls; <see cref="Task.Delay(TimeSpan, CancellationToken)"/> when <see langword="null"/>.</param>
+    public MenubarService(
+        IServerStateRepository serverState,
+        TrayToolRunner? runTool,
+        TrayPlatform? platform,
+        Func<TimeSpan, CancellationToken, Task>? delay)
     {
         ArgumentNullException.ThrowIfNull(serverState);
         this.serverState = serverState;
+        this.runTool = runTool ?? RunToolAsync;
+        this.platform = platform ?? CurrentPlatform();
+        this.delay = delay ?? Task.Delay;
     }
+
+    private static TrayPlatform CurrentPlatform() =>
+        OperatingSystem.IsMacOS() ? TrayPlatform.MacOS
+        : OperatingSystem.IsWindows() ? TrayPlatform.Windows
+        : TrayPlatform.Other;
 
     [GeneratedRegex(@"^([0-9a-fA-F]{64})\s+\*?(.+)$", RegexOptions.CultureInvariant, matchTimeoutMilliseconds: 1000)]
     private static partial Regex ChecksumLineRegex();
@@ -235,7 +263,7 @@ public partial class MenubarService : IMenubarService
 
         try
         {
-            _ = await RunToolAsync(binary, ["--quit"], QuitTimeout, cancellationToken).ConfigureAwait(false);
+            _ = await runTool(binary, ["--quit"], QuitTimeout, cancellationToken).ConfigureAwait(false);
         }
         catch (TimeoutException)
         {
@@ -244,7 +272,7 @@ public partial class MenubarService : IMenubarService
 
         bool exited = await TrayProcesses.WaitForTrayExitAsync(
             c => IsRecordedTrayRunningAsync(binary, c),
-            (span, c) => Task.Delay(span, c),
+            delay,
             TrayPollInterval,
             QuitTimeout,
             cancellationToken).ConfigureAwait(false);
@@ -253,13 +281,13 @@ public partial class MenubarService : IMenubarService
             return new MenubarInstallOutcome(0, QuitDoneMessage);
         }
 
-        if (OperatingSystem.IsWindows())
+        if (platform == TrayPlatform.Windows)
         {
             // Windows image names do not identify one install, so a force-kill could stop another tray.
             return new MenubarInstallOutcome(1, "kyberdash: the tray is still running after quit; quit it and run again");
         }
 
-        _ = await RunToolAsync("/usr/bin/pkill", ["-f", binary], QuitTimeout, cancellationToken).ConfigureAwait(false);
+        _ = await runTool("/usr/bin/pkill", ["-f", binary], QuitTimeout, cancellationToken).ConfigureAwait(false);
         if (await IsRecordedTrayRunningAsync(binary, cancellationToken).ConfigureAwait(false))
         {
             return new MenubarInstallOutcome(1, "kyberdash: the tray is still running after quit and kill; quit it and run again");
@@ -282,14 +310,14 @@ public partial class MenubarService : IMenubarService
             return new MenubarInstallOutcome(1, NoRecordMessage);
         }
 
-        if (OperatingSystem.IsMacOS())
+        if (platform == TrayPlatform.MacOS)
         {
             if (!Directory.Exists(record.Path))
             {
                 return new MenubarInstallOutcome(1, string.Create(CultureInfo.InvariantCulture, $"kyberdash: the tray bundle is missing at {record.Path}"));
             }
 
-            ProcessResult open = await RunToolAsync("/usr/bin/open", [record.Path], QuitTimeout, cancellationToken).ConfigureAwait(false);
+            ProcessResult open = await runTool("/usr/bin/open", [record.Path], QuitTimeout, cancellationToken).ConfigureAwait(false);
             return open.ExitCode == 0
                 ? new MenubarInstallOutcome(0, "kyberdash: the tray launched")
                 : new MenubarInstallOutcome(1, FirstNonEmpty(open.StandardError, string.Create(CultureInfo.InvariantCulture, $"kyberdash menubar: launch: open exited {open.ExitCode}")));
@@ -320,27 +348,27 @@ public partial class MenubarService : IMenubarService
             return new MenubarInstallOutcome(1, PlatformRefusal);
         }
 
-        bool windows = OperatingSystem.IsWindows();
+        bool windows = platform == TrayPlatform.Windows;
         ProcessResult listing = windows
-            ? await RunToolAsync("tasklist", ["/FI", "IMAGENAME eq " + WindowsTrayImage, "/FO", "CSV", "/NH"], QuitTimeout, cancellationToken).ConfigureAwait(false)
-            : await RunToolAsync("/usr/bin/pgrep", ["-f", TrayProcessPattern], QuitTimeout, cancellationToken).ConfigureAwait(false);
+            ? await runTool("tasklist", ["/FI", "IMAGENAME eq " + WindowsTrayImage, "/FO", "CSV", "/NH"], QuitTimeout, cancellationToken).ConfigureAwait(false)
+            : await runTool("/usr/bin/pgrep", ["-f", TrayProcessPattern], QuitTimeout, cancellationToken).ConfigureAwait(false);
         return TrayProcesses.RunningOutcome(TrayProcesses.CountTrayProcesses(listing.StandardOutput, windows));
     }
 
-    private static bool IsSupportedPlatform() => OperatingSystem.IsMacOS() || OperatingSystem.IsWindows();
+    private bool IsSupportedPlatform() => platform != TrayPlatform.Other;
 
     private TrayRecord? ReadRecordOrNull() =>
         ReadTrayRecord(Path.Combine(serverState.DefaultStateDirectory, TrayRecordFile));
 
-    private static string TrayBinaryPath(TrayRecord record) =>
-        OperatingSystem.IsMacOS() ? Path.Combine(record.Path, "Contents", "MacOS", "kyberdash-tray") : record.Path;
+    private string TrayBinaryPath(TrayRecord record) =>
+        platform == TrayPlatform.MacOS ? Path.Combine(record.Path, "Contents", "MacOS", "kyberdash-tray") : record.Path;
 
-    private static async Task<bool> IsRecordedTrayRunningAsync(string binary, CancellationToken cancellationToken)
+    private async Task<bool> IsRecordedTrayRunningAsync(string binary, CancellationToken cancellationToken)
     {
-        bool windows = OperatingSystem.IsWindows();
+        bool windows = platform == TrayPlatform.Windows;
         ProcessResult listing = windows
-            ? await RunToolAsync("tasklist", ["/FI", "IMAGENAME eq " + WindowsTrayImage, "/FO", "CSV", "/NH"], QuitTimeout, cancellationToken).ConfigureAwait(false)
-            : await RunToolAsync("/usr/bin/pgrep", ["-f", binary], QuitTimeout, cancellationToken).ConfigureAwait(false);
+            ? await runTool("tasklist", ["/FI", "IMAGENAME eq " + WindowsTrayImage, "/FO", "CSV", "/NH"], QuitTimeout, cancellationToken).ConfigureAwait(false)
+            : await runTool("/usr/bin/pgrep", ["-f", binary], QuitTimeout, cancellationToken).ConfigureAwait(false);
         return TrayProcesses.CountTrayProcesses(listing.StandardOutput, windows) > 0;
     }
 
