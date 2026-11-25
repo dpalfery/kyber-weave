@@ -16,7 +16,8 @@ public interface IFileStatReader
 
     /// <summary>Gets a file's last write time in UTC.</summary>
     /// <param name="path">The absolute path.</param>
-    /// <returns>The time; the file-time epoch when the file does not exist. An unreadable file throws.</returns>
-    /// <exception cref="IOException">The file cannot be read, or a symbolic link chain loops or is too deep.</exception>
+    /// <returns>The time; the file-time epoch when the file does not exist.</returns>
+    /// <exception cref="UnauthorizedAccessException">The process may not read the file's metadata.</exception>
+    /// <exception cref="IOException">A symbolic link chain loops or is too deep.</exception>
     DateTime GetLastWriteTimeUtc(string path);
 }
