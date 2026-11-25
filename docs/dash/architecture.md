@@ -1853,10 +1853,11 @@ enters the Skills view above, which is built from harness `Skill` tool calls and
 change and the JSON-withholding rule untouched ([ADR 0093](../adr/0093-kw-skills-load-on-demand-through-kw-docs.md)).
 
 - **What is a load.** A `tool_call` whose `tool_call_mcp.server_name`, normalized (lower case, `_` to `-`), is
-  `kw-docs` or `kyber-weave` (the name the same server is also registered under) and whose `server_tool_name` is
-  `load_skill`; or, where the harness does not split the name, whose `tool_name` is one of `mcp__kw-docs__load_skill`,
-  `mcp__kw_docs__load_skill`, `kw-docs_load_skill`, `kw-docs__load_skill`, `kw-docs/load_skill`,
-  `mcp__kyber-weave__load_skill` or `mcp__kyber_weave__load_skill`. Another server's `load_skill` is not a load. A harness that
+  `kw-docs` or `kyber-weave` (the server's retired key, which machines installed before the rename still register)
+  and whose `server_tool_name` is `load_skill`; or, where the harness does not split the name, whose `tool_name` is
+  one of `mcp__kw-docs__load_skill`, `mcp__kw_docs__load_skill`, `kw-docs_load_skill`, `kw-docs__load_skill`,
+  `kw-docs/load_skill`, or the `mcp__<server>__load_skill` form of the retired key in its hyphen or underscore
+  spelling. Another server's `load_skill` is not a load. A harness that
   records the call under a spelling not listed here is under-counted; nothing else is affected.
 - **Which skill.** The input is never read: a JSON tool input is stored as size and fingerprint only
   (`STORE_JSON_TEXT_REFUSED` guards the text column), but the reply is plain text and is kept. The skill is the first

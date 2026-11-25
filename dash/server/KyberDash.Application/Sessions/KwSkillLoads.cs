@@ -13,8 +13,8 @@ public record KwSkillLoad(string SpanId, string? Skill, DateTimeOffset StartedAt
 /// </summary>
 /// <remarks>
 /// <para>
-/// A load is a tool call the kw-docs server's <c>load_skill</c> tool made. The same server is also
-/// registered as <c>kyber-weave</c>, so both names count. When the harness split the MCP server and
+/// A load is a tool call the kw-docs server's <c>load_skill</c> tool made. Machines installed before
+/// the server was renamed still register it under its retired key <c>kyber-weave</c>, so both names count. When the harness split the MCP server and
 /// tool apart, the split decides: the server name, lower-cased with <c>_</c> read as <c>-</c>, must be
 /// <c>kw-docs</c> or <c>kyber-weave</c> and the tool must be <c>load_skill</c>. Without a split, the
 /// tool name must be one of the unsplit spellings. A split call is judged by its split alone, so
@@ -31,7 +31,7 @@ public static class KwSkillLoads
     /// <summary>The MCP server a KW skill load is made to.</summary>
     public const string ServerName = "kw-docs";
 
-    /// <summary>The other name the same MCP server is registered under.</summary>
+    /// <summary>The server's retired key, still registered on machines installed before the rename.</summary>
     public const string AlternateServerName = "kyber-weave";
 
     /// <summary>The MCP tool a KW skill load calls.</summary>

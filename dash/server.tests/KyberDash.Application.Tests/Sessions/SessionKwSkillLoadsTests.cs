@@ -25,7 +25,7 @@ public sealed class SessionKwSkillLoadsTests
 
     /// <summary>
     /// The unsplit tool-name spellings of a kw-docs load: the five D17 names, and the two a harness
-    /// writes when the same server is registered as <c>kyber-weave</c>.
+    /// writes when the same server is still registered under its retired key <c>kyber-weave</c>.
     /// </summary>
     public static readonly TheoryData<string> UnsplitLoadToolNames = new()
     {
@@ -81,8 +81,8 @@ public sealed class SessionKwSkillLoadsTests
     }
 
     /// <summary>
-    /// The kw-docs server is also registered under the name <c>kyber-weave</c>; a split
-    /// <c>load_skill</c> call to it under that name is a load.
+    /// Machines installed before the rename still register the kw-docs server under its retired key
+    /// <c>kyber-weave</c>; a split <c>load_skill</c> call to it under that key is a load.
     /// </summary>
     [Theory]
     [InlineData("kyber-weave")]
