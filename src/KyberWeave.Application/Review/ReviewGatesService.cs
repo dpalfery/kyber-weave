@@ -710,7 +710,6 @@ public sealed class ReviewGatesService(
             parentTechnology);
 
         IReadOnlyList<ReviewTaskGate> agentGates = resolved.Gates;
-        int runCount = NextRunCount(root, taskSlug);
         if (agentGates.Count == 0)
         {
             // No route names a gate: not the task's technology, not its parent, not the agent. A task that names a
@@ -736,7 +735,7 @@ public sealed class ReviewGatesService(
             return ReviewCommandResultFactory.Reported(
                 report.HasErrors ? 1 : 0,
                 report,
-                request.HumanOutput && !resolved.IsRefused ? TaskGateNextStep.NoneDeclared(request.Agent!, paths, outPath, runCount) : []);
+                request.HumanOutput && !resolved.IsRefused ? TaskGateNextStep.NoneDeclared(request.Agent!, paths, outPath, 1) : []);
         }
 
         IReadOnlyList<string> changed;
@@ -773,6 +772,7 @@ public sealed class ReviewGatesService(
         if (plan.Refusals.Count > 0)
             return RefuseInput(report, plan.Refusals);
 
+        int runCount = NextRunCount(root, taskSlug);
         ReviewGateReporting.AddSkips(report, plan.Skipped);
 
         // The classifiers read what each verify command printed, so a build that fails on missing symbols is told

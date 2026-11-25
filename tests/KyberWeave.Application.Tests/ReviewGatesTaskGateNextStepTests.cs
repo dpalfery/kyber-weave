@@ -234,6 +234,46 @@ public sealed class ReviewGatesTaskGateNextStepTests
         Assert.Contains("runs=1", run.Output, StringComparison.Ordinal);
     }
 
+    [Fact]
+    public void ANoGateRunDoesNotConsumeARunOrdinalForTheFirstGatedRun()
+    {
+        CapturedConsoleExecution<int> noGates = Gates(
+            PassingResult(), "--agent", "go-dev", "--task", "t1", "--paths", TaskFile);
+
+        Assert.Equal(0, noGates.Result);
+        Assert.Contains("TASK_GATE: NONE_DECLARED", noGates.Output, StringComparison.Ordinal);
+        Assert.Contains("runs=1", noGates.Output, StringComparison.Ordinal);
+
+        CapturedConsoleExecution<int> gated = Gates(
+            PassingResult(), "--agent", "csharp-dev", "--task", "t1", "--paths", TaskFile);
+
+        Assert.Equal(0, gated.Result);
+        Assert.Contains("STATUS: PASS", gated.Output, StringComparison.Ordinal);
+        Assert.Contains("runs=1", gated.Output, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void ARefusedRunAfterGateResolutionDoesNotConsumeARunOrdinal()
+    {
+        using (InMemoryReviewServices failing = new(_files))
+        {
+            failing.Processes.Script("git", new ProcessRunResult(128, string.Empty, TimedOut: false)
+            {
+                StandardError = "fatal: not a git repository",
+            });
+            CapturedConsoleExecution<int> refused = failing.Run(
+                failing.ReviewGatesApp(), ["review", "gates", _repo, "--agent", "csharp-dev", "--task", "t1"]);
+            Assert.Equal(1, refused.Result);
+        }
+
+        CapturedConsoleExecution<int> gated = Gates(
+            PassingResult(), "--agent", "csharp-dev", "--task", "t1", "--paths", TaskFile);
+
+        Assert.Equal(0, gated.Result);
+        Assert.Contains("STATUS: PASS", gated.Output, StringComparison.Ordinal);
+        Assert.Contains("runs=1", gated.Output, StringComparison.Ordinal);
+    }
+
     private static ProcessRunResult PassingResult() => new(0, string.Empty, TimedOut: false)
     {
         StandardOutput = "Passed!  - Failed:     0, Passed:    1, Skipped:     0, Total:    1, Duration: 1 s",
