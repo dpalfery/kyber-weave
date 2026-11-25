@@ -16,7 +16,7 @@ import { Card } from './ui/card.js'
 import { Pager } from './ui/Pager.js'
 import { Skeleton } from './ui/skeleton.js'
 import { AgentSessionDashboard } from './AgentSessionDashboard.js'
-import { formatCostFigure, normalizeCostBlock } from './SessionCostPanel.js'
+import { formatCostFigure, normalizeCostBlock, STATUS_EXPLANATIONS, type CostBlock } from './SessionCostPanel.js'
 
 // Canonical harness IDs are open — the store may report any ID — so this type
 // constrains nothing on purpose, and the All sentinel is the one fixed value.
@@ -84,6 +84,48 @@ export function formatSessionTime(started?: string | number | null): string {
   return ago(ms)
 }
 
+/** Width and alignment of each list column; the header labels and the row cells share them so they line up. */
+export const SESSION_LIST_COLUMNS = {
+  id: 'w-36 shrink-0 truncate',
+  title: 'min-w-0 flex-1',
+  harness: 'w-32 shrink-0',
+  turns: 'w-16 shrink-0 text-right',
+  cost: 'w-28 shrink-0 whitespace-nowrap text-right',
+  started: 'w-16 shrink-0 text-right',
+} as const
+
+/** The subagent toggle's box (its margin, padding and 10px chevron); a row without subagents reserves the same width. */
+const SUBAGENT_TOGGLE_BOX = 'ml-3 shrink-0 p-1'
+
+/** The cost cell's hover text: the basis, and for a word status the sentence that explains it. */
+function costTitle(block: CostBlock): string {
+  const basis = `Cost basis: ${block.basis}`
+  return block.status === 'priced' ? basis : `${basis} — ${STATUS_EXPLANATIONS[block.status]}`
+}
+
+/** Column labels above the session rows, aligned to the same cells. */
+export function SessionListHeader() {
+  return (
+    <div
+      data-testid="explorer-column-headers"
+      className="flex w-full items-center border-b border-border text-[11px] text-tertiary-foreground"
+    >
+      <span aria-hidden="true" className={SUBAGENT_TOGGLE_BOX}>
+        <span className="block h-2.5 w-2.5" />
+      </span>
+      <div className="flex min-w-0 flex-1 items-center gap-3 px-4 py-1.5">
+        <span aria-hidden="true" className="block h-2.5 w-2.5 shrink-0" />
+        <span className={SESSION_LIST_COLUMNS.id}>Session</span>
+        <span className={SESSION_LIST_COLUMNS.title}>Title</span>
+        <span className={SESSION_LIST_COLUMNS.harness}>Harness</span>
+        <span className={SESSION_LIST_COLUMNS.turns}>Turns</span>
+        <span className={SESSION_LIST_COLUMNS.cost}>Cost</span>
+        <span className={SESSION_LIST_COLUMNS.started}>Started</span>
+      </div>
+    </div>
+  )
+}
+
 export function AgentSessionRow({
   s,
   open,
@@ -110,6 +152,7 @@ export function AgentSessionRow({
   const rolledCostUsd = !isChild && s.rollup?.cost_usd != null ? s.rollup.cost_usd : null
   const ownCostUsd = s.cost_usd ?? s.costUsd ?? null
   const hasSubagents = Boolean(s.subagents && s.subagents.length > 0)
+  const costBlock = s.cost ? normalizeCostBlock(s.cost) : null
 
   return (
     <div className={cn('border-t border-border first:border-t-0', open && 'bg-interactive-secondary/30')}>
@@ -121,6 +164,11 @@ export function AgentSessionRow({
           isChild && 'pl-5'
         )}
       >
+        {!isChild && !hasSubagents && (
+          <span aria-hidden="true" data-testid="subagent-toggle-spacer" className={SUBAGENT_TOGGLE_BOX}>
+            <span className="block h-2.5 w-2.5" />
+          </span>
+        )}
         {hasSubagents && (
           <button
             type="button"
@@ -128,7 +176,7 @@ export function AgentSessionRow({
             aria-label={`Toggle subagents for ${sessionId}`}
             aria-expanded={subagentsExpanded}
             onClick={(e) => onToggleSubagents?.(e)}
-            className="ml-3 shrink-0 p-1 text-tertiary-foreground transition-colors hover:text-foreground"
+            className={cn(SUBAGENT_TOGGLE_BOX, 'text-tertiary-foreground transition-colors hover:text-foreground')}
           >
             <svg
               viewBox="0 0 16 16"
@@ -167,11 +215,11 @@ export function AgentSessionRow({
             <path d="M6 3l5 5-5 5" />
           </svg>
 
-          <span className="shrink-0 font-mono text-xs text-primary" title={sessionId}>
+          <span className={cn(SESSION_LIST_COLUMNS.id, 'font-mono text-xs text-primary')} title={sessionId}>
             {formatSessionId(sessionId)}
           </span>
 
-          <span className="min-w-0 flex-1 truncate text-[13px] text-foreground flex items-center gap-2">
+          <span className={cn(SESSION_LIST_COLUMNS.title, 'truncate text-[13px] text-foreground flex items-center gap-2')}>
             <span title={sessionId}>
               {formatSessionTitle({
                 label: s.label,
@@ -191,44 +239,52 @@ export function AgentSessionRow({
           </span>
 
           {/* Harness badge */}
-          <span
-            className={cn(
-              'shrink-0 rounded px-1.5 py-0.5 text-[11px] font-medium border capitalize',
-              s.harness === 'copilot'
-                ? 'bg-blue-500/10 text-blue-500 border-blue-500/20'
-                : s.harness === 'gemini'
-                  ? 'bg-purple-500/10 text-purple-500 border-purple-500/20'
-                  : s.harness === 'pi'
-                    ? 'bg-amber-500/10 text-amber-500 border-amber-500/20'
-                    : 'bg-interactive-secondary text-foreground border-border'
-            )}
-            data-testid="agent-harness-badge"
-          >
-            {s.harness}
+          <span className={SESSION_LIST_COLUMNS.harness}>
+            <span
+              className={cn(
+                'shrink-0 rounded px-1.5 py-0.5 text-[11px] font-medium border capitalize',
+                s.harness === 'copilot'
+                  ? 'bg-blue-500/10 text-blue-500 border-blue-500/20'
+                  : s.harness === 'gemini'
+                    ? 'bg-purple-500/10 text-purple-500 border-purple-500/20'
+                    : s.harness === 'pi'
+                      ? 'bg-amber-500/10 text-amber-500 border-amber-500/20'
+                      : 'bg-interactive-secondary text-foreground border-border'
+              )}
+              data-testid="agent-harness-badge"
+            >
+              {s.harness}
+            </span>
           </span>
 
           {/* Turn count */}
-          <span className="w-16 shrink-0 text-right text-xs tabular-nums text-tertiary-foreground">
+          <span className={cn(SESSION_LIST_COLUMNS.turns, 'text-xs tabular-nums text-tertiary-foreground')}>
             {turnCount != null ? `${turnCount} turns` : '—'}
           </span>
 
           {/* Cost: word statuses from formatCostFigure need ~97px at text-xs; w-20 (80px) wraps. */}
           <span
             data-testid="agent-session-cost"
-            title={rolledCostUsd != null ? 'Cost including subagents' : s.cost ? `Cost basis: ${s.cost.basis}` : undefined}
-            className="w-28 shrink-0 whitespace-nowrap text-right text-xs tabular-nums text-foreground font-medium"
+            title={
+              rolledCostUsd != null
+                ? 'Cost including subagents'
+                : costBlock
+                  ? costTitle(costBlock)
+                  : undefined
+            }
+            className={cn(SESSION_LIST_COLUMNS.cost, 'text-xs tabular-nums text-foreground font-medium')}
           >
             {rolledCostUsd != null
               ? usd(rolledCostUsd)
-              : s.cost
-                ? formatCostFigure(normalizeCostBlock(s.cost))
+              : costBlock
+                ? formatCostFigure(costBlock)
                 : ownCostUsd != null
                   ? usd(ownCostUsd)
                   : '—'}
           </span>
 
           {/* Timestamp */}
-          <span className="w-16 shrink-0 text-right text-xs tabular-nums text-tertiary-foreground">
+          <span className={cn(SESSION_LIST_COLUMNS.started, 'text-xs tabular-nums text-tertiary-foreground')}>
             {formatSessionTime(s.started)}
           </span>
         </button>
@@ -407,6 +463,7 @@ export function ContextExplorer({ activeHarness, onSelectSession, sessions: init
               {scope === ALL_HARNESS ? 'No sessions found.' : `No sessions for ${harnessLabel(scope)}.`}
             </p>
           )}
+          {sessions && sessions.length > 0 && <SessionListHeader />}
           {sessions?.map((s) => {
             const sid = s.session_id || s.sessionId || ''
             const hasSubagents = Boolean(s.subagents && s.subagents.length > 0)
