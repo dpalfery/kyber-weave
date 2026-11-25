@@ -70,7 +70,7 @@ public class WarpSqliteConversationSourceSqliteTests : IDisposable
         string rawText = ExportText(source, database, "conv-1");
         DateTimeOffset baseline = new(2026, 5, 18, 12, 0, 0, TimeSpan.Zero);
         NativeSourceUnit unit = new(
-            new SourceUnit("warp", path + ":conv-1", "warp", "warp-reader", "1", "warp-test", "warp", "1-1", baseline, 0),
+            new SourceUnit("warp", path + "#conv-1", "warp", "warp-reader", "1", "warp-test", "warp", "1-1", baseline, 0),
             rawText,
             rawText.Length,
             baseline);

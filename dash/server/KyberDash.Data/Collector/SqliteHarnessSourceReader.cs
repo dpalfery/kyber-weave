@@ -138,20 +138,24 @@ public sealed class SqliteHarnessSourceReader : IHarnessSourceReader
         return new SourceDiscoveryResult(units, problems);
     }
 
+    /// <summary>Splits a unit's source key (<c>&lt;database path&gt;#&lt;conversation id&gt;</c>) at its last separator.</summary>
+    /// <param name="sourceKey">The unit's source key.</param>
+    /// <returns>The database path and conversation id, or <see langword="null"/> when the key has no separator.</returns>
+    internal static (string DatabasePath, string ConversationId)? SplitSourceKey(string sourceKey)
+    {
+        ArgumentNullException.ThrowIfNull(sourceKey);
+        int separator = sourceKey.LastIndexOf(KeySeparator);
+        return separator < 0 ? null : (sourceKey[..separator], sourceKey[(separator + 1)..]);
+    }
+
     /// <inheritdoc />
     public NativeSourceUnit? Read(SourceUnit unit, IHarnessFileSystem fileSystem)
     {
         ArgumentNullException.ThrowIfNull(unit);
         ArgumentNullException.ThrowIfNull(fileSystem);
-        int separator = unit.SourceKey.LastIndexOf(KeySeparator);
-        if (separator < 0)
-        {
-            throw new InvalidDataException(
+        (string databasePath, string conversationId) = SplitSourceKey(unit.SourceKey)
+            ?? throw new InvalidDataException(
                 $"{SqliteSourceOpenPolicy.SourceUnreadableCode}: source key '{unit.SourceKey}' has no '{KeySeparator}' conversation separator.");
-        }
-
-        string databasePath = unit.SourceKey[..separator];
-        string conversationId = unit.SourceKey[(separator + 1)..];
 
         string exportText;
         long exportBytes;

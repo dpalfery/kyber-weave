@@ -296,6 +296,18 @@ public class WarpMapper : IHarnessMapper
         string conversationId = DecodeConversationId(unit.Unit.SourceKey);
         if (conversationId.Length == 0 || !string.Equals(conversationId, document.Conversation.ConversationId, StringComparison.Ordinal))
         {
+            // A key whose id is not in the export must be visible, never an empty batch.
+            problems.AddRange(BuildProblems(
+                [
+                    new WarpParseProblem(
+                        0,
+                        MalformedDocumentCode,
+                        string.Create(
+                            CultureInfo.InvariantCulture,
+                            $"Skipping Warp source {unit.Unit.SourceKey}: conversation id '{conversationId}' is not the export's conversation '{document.Conversation.ConversationId}'.")),
+                ],
+                unit.Unit.SourceKey,
+                importedAtUtc));
             return new CollectedBatch(source, [], [], problems);
         }
 
@@ -456,13 +468,7 @@ public class WarpMapper : IHarnessMapper
 
     private static string DecodeConversationId(string sourceKey)
     {
-        int splitIndex = sourceKey.LastIndexOf(':');
-        if (splitIndex <= 0)
-        {
-            return string.Empty;
-        }
-
-        return sourceKey.Substring(splitIndex + 1).Trim();
+        return SqliteHarnessSourceReader.SplitSourceKey(sourceKey)?.ConversationId.Trim() ?? string.Empty;
     }
 
     private static bool IsFinalStatus(string rawStatus)

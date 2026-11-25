@@ -205,7 +205,7 @@ public class DevinWarpMapperTests
             conversationId: "conv-tok");
 
         CollectedBatch batch = new WarpMapper().Map(
-            MakeNativeUnit("warp", "/home/u/Library/warp.sqlite:conv-tok", rawText),
+            MakeNativeUnit("warp", "/home/u/Library/warp.sqlite#conv-tok", rawText),
             BaselineUtc);
 
         CollectedRecord record = Assert.Single(batch.Records);
@@ -495,7 +495,7 @@ public class DevinWarpMapperTests
             blocks: [],
             conversationId: "conv-1");
 
-        NativeSourceUnit unit = MakeNativeUnit("warp", "/home/u/Library/warp.sqlite:conv-1", rawText);
+        NativeSourceUnit unit = MakeNativeUnit("warp", "/home/u/Library/warp.sqlite#conv-1", rawText);
         CollectedBatch batch = new WarpMapper().Map(unit, BaselineUtc);
 
         Assert.Equal("warp", new WarpMapper().HarnessId);
@@ -543,7 +543,7 @@ public class DevinWarpMapperTests
             conversationId: "conv-5");
 
         CollectedBatch batch = new WarpMapper().Map(
-            MakeNativeUnit("warp", "/home/u/Library/warp.sqlite:conv-5", rawText),
+            MakeNativeUnit("warp", "/home/u/Library/warp.sqlite#conv-5", rawText),
             BaselineUtc);
 
         CollectedSession session = Assert.Single(batch.Sessions);
@@ -569,7 +569,7 @@ public class DevinWarpMapperTests
             conversationId: "conv-2");
 
         CollectedBatch batch = new WarpMapper().Map(
-            MakeNativeUnit("warp", "/home/u/Library/warp.sqlite:conv-2", rawText),
+            MakeNativeUnit("warp", "/home/u/Library/warp.sqlite#conv-2", rawText),
             BaselineUtc);
 
         List<CollectedRecord> parents = batch.Records.Where(static r => r.Op == RecordOp.LlmInvoke).ToList();
@@ -597,7 +597,7 @@ public class DevinWarpMapperTests
             conversationId: "conv-3");
 
         CollectedBatch batch = new WarpMapper().Map(
-            MakeNativeUnit("warp", "/home/u/Library/warp.sqlite:conv-3", rawText),
+            MakeNativeUnit("warp", "/home/u/Library/warp.sqlite#conv-3", rawText),
             BaselineUtc);
 
         Assert.Empty(batch.Records);
@@ -617,7 +617,7 @@ public class DevinWarpMapperTests
             conversationId: "conv-4");
 
         CollectedBatch batch = new WarpMapper().Map(
-            MakeNativeUnit("warp", "/home/u/Library/warp.sqlite:conv-4", rawText),
+            MakeNativeUnit("warp", "/home/u/Library/warp.sqlite#conv-4", rawText),
             BaselineUtc);
 
         Assert.Equal(2, batch.Records.Count);
@@ -634,7 +634,7 @@ public class DevinWarpMapperTests
     public void Map_EmitsProblemForMalformedWarpExports(string rawText)
     {
         CollectedBatch batch = new WarpMapper().Map(
-            MakeNativeUnit("warp", "/home/u/Library/warp.sqlite:conv-9", rawText),
+            MakeNativeUnit("warp", "/home/u/Library/warp.sqlite#conv-9", rawText),
             BaselineUtc);
 
         Assert.Empty(batch.Records);
@@ -646,7 +646,7 @@ public class DevinWarpMapperTests
     [Fact]
     public void Map_NullWarpPayload_EmitsOneWarningProblemNamingTheSourceKey()
     {
-        const string sourceKey = "/home/u/Library/warp.sqlite:conv-7";
+        const string sourceKey = "/home/u/Library/warp.sqlite#conv-7";
         NativeSourceUnit unit = new(
             new SourceUnit("warp", sourceKey, "warp", "warp-reader", "1", "warp-test", "warp", "1-1", BaselineUtc, 0),
             RawText: null,
@@ -663,13 +663,36 @@ public class DevinWarpMapperTests
         Assert.Contains(sourceKey, problem.Location, StringComparison.Ordinal);
     }
 
+    [Fact]
+    public void Map_SourceKeyIdNotInExport_RecordsAProblemInsteadOfDroppingTheSession()
+    {
+        string rawText = BuildWarpExport(
+            conversationData: "{}",
+            queries:
+            [
+                ("ex-1", "2026-05-18 10:00:00.000000", """[{"Query":{"text":"hi"}}]""", "auto-efficient", "/Users/test/project-a", "\"Completed\""),
+            ],
+            blocks: [],
+            conversationId: "conv-1");
+
+        CollectedBatch batch = new WarpMapper().Map(
+            MakeNativeUnit("warp", "/home/u/Library/warp.sqlite#conv-other", rawText),
+            BaselineUtc);
+
+        Assert.Empty(batch.Records);
+        CollectedProblem problem = Assert.Single(batch.Problems);
+        Assert.Equal("warning", problem.Severity);
+        Assert.Equal(WarpMapper.MalformedDocumentCode, problem.Code);
+        Assert.Contains("conv-other", problem.Message, StringComparison.Ordinal);
+    }
+
     [Theory]
     [InlineData(" ")]
     [InlineData("\n\t")]
     public void Map_WhitespaceWarpPayload_ReturnsEmptyBatchWithoutProblems(string rawText)
     {
         CollectedBatch batch = new WarpMapper().Map(
-            MakeNativeUnit("warp", "/home/u/Library/warp.sqlite:conv-8", rawText),
+            MakeNativeUnit("warp", "/home/u/Library/warp.sqlite#conv-8", rawText),
             BaselineUtc);
 
         Assert.Empty(batch.Records);
