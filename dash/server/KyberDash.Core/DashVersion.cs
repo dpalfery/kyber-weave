@@ -12,15 +12,30 @@ namespace KyberDash.Core;
 /// </remarks>
 public static class DashVersion
 {
-    /// <summary>The plain semantic version this build reports, without <c>+metadata</c>.</summary>
-    public static string Current { get; } = Resolve();
+    private static readonly Lazy<string> Cached = new(() => FromAssembly(typeof(DashVersion).Assembly));
 
-    private static string Resolve()
+    /// <summary>The plain semantic version this build reports, without <c>+metadata</c>.</summary>
+    /// <exception cref="InvalidOperationException">The build carries no informational version.</exception>
+    /// <remarks>
+    /// Resolved on first use rather than in a static initializer: a throw from a static initializer
+    /// surfaces as a <see cref="TypeInitializationException"/> on every later access, which no caller
+    /// can map to a clear message. Here the throw is an ordinary <see cref="InvalidOperationException"/>.
+    /// </remarks>
+    public static string Current => Cached.Value;
+
+    /// <summary>Reads the plain version from one assembly's informational version.</summary>
+    /// <param name="assembly">The assembly stamped by the SDK.</param>
+    /// <returns>The version without <c>+metadata</c>.</returns>
+    /// <exception cref="InvalidOperationException">The assembly carries no informational version.</exception>
+    public static string FromAssembly(Assembly assembly)
     {
-        string informational = typeof(DashVersion).Assembly
+        ArgumentNullException.ThrowIfNull(assembly);
+
+        string informational = assembly
             .GetCustomAttribute<AssemblyInformationalVersionAttribute>()?
             .InformationalVersion
-            ?? throw new InvalidOperationException("KyberDash.Core carries no AssemblyInformationalVersion attribute.");
+            ?? throw new InvalidOperationException(
+                $"{assembly.GetName().Name} carries no AssemblyInformationalVersion attribute; this build is broken.");
 
         int plus = informational.IndexOf('+', StringComparison.Ordinal);
         return plus >= 0 ? informational[..plus] : informational;

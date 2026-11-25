@@ -116,7 +116,16 @@ public static partial class Program
         string first = args[0];
         if (first is "--version" or "-v" or "-V")
         {
-            await output.WriteLineAsync(ResolveVersion()).ConfigureAwait(false);
+            try
+            {
+                await output.WriteLineAsync(ResolveVersion()).ConfigureAwait(false);
+            }
+            catch (InvalidOperationException exception)
+            {
+                await error.WriteLineAsync($"kyberdash --version: {exception.Message}").ConfigureAwait(false);
+                return 1;
+            }
+
             return 0;
         }
 

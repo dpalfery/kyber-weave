@@ -1,4 +1,5 @@
 using System.Reflection;
+using System.Reflection.Emit;
 using KyberDash.Api;
 using KyberDash.Contracts.Services;
 using KyberDash.Core;
@@ -22,6 +23,29 @@ public class DashVersionTests
         string expected = plus >= 0 ? informational[..plus] : informational;
 
         Assert.Equal(expected, DashVersion.Current);
+    }
+
+    [Fact]
+    public void AnAssemblyWithoutAnInformationalVersionThrowsAnOrdinaryInvalidOperationException()
+    {
+        AssemblyBuilder bare = AssemblyBuilder.DefineDynamicAssembly(new AssemblyName("BareAssembly"), AssemblyBuilderAccess.Run);
+
+        InvalidOperationException thrown = Assert.Throws<InvalidOperationException>(() => DashVersion.FromAssembly(bare));
+
+        Assert.Contains("BareAssembly", thrown.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void FromAssemblyStripsTheMetadataSuffix()
+    {
+        AssemblyBuilder stamped = AssemblyBuilder.DefineDynamicAssembly(
+            new AssemblyName("StampedAssembly"),
+            AssemblyBuilderAccess.Run,
+            [new CustomAttributeBuilder(
+                typeof(AssemblyInformationalVersionAttribute).GetConstructor([typeof(string)])!,
+                ["1.2.3+abc123"])]);
+
+        Assert.Equal("1.2.3", DashVersion.FromAssembly(stamped));
     }
 
     [Fact]

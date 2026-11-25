@@ -30,7 +30,16 @@ public static partial class Program
 
         if (args.Contains("--version", StringComparer.Ordinal))
         {
-            await Console.Out.WriteLineAsync(ResolveVersion()).ConfigureAwait(false);
+            try
+            {
+                await Console.Out.WriteLineAsync(ResolveVersion()).ConfigureAwait(false);
+            }
+            catch (InvalidOperationException exception)
+            {
+                await Console.Error.WriteLineAsync($"--version: {exception.Message}").ConfigureAwait(false);
+                return 1;
+            }
+
             return 0;
         }
 
