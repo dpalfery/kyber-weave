@@ -159,7 +159,8 @@ public interface ITranscriptIngestionService
     /// </summary>
     /// <remarks>
     /// Discovery runs through each named harness's registered reader only, so no other harness's
-    /// files are touched. A discovered unit is read only when the operational store already holds
+    /// files are touched, and is not limited to the history window, so a checkpointed unit last
+    /// written before it is still replaced. A discovered unit is read only when the operational store already holds
     /// its checkpoint; the standard checkpoint check then decides whether that checkpoint is still
     /// reusable, which is how the parser contract version change forces a re-read. No
     /// <c>refresh_run</c> row is written and no history coverage is claimed.

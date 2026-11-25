@@ -136,6 +136,26 @@ public class NoEstimateRereadTests
         Assert.Equal("ok", harness.Checkpoint("droid", harness.DroidPath("sess-a")).LastStatus);
     }
 
+    /// <summary>
+    /// A checkpointed unit last written before the history window is still re-read: the one-time
+    /// marker is permanent, so a unit the pass skipped would keep its estimated rows forever.
+    /// </summary>
+    [Fact]
+    public void MaintenancePass_RereadsACheckpointedUnitOlderThanTheHistoryWindow_BeforeRecordingTheMarker()
+    {
+        Harness harness = new();
+        harness.SeedCheckpoint("droid", harness.DroidPath("sess-old"), "factory", "droid-reader", "droid-jsonl", ".factory/sessions");
+        harness.AddDroidTranscript("sess-old", BaselineUtc.AddDays(-60));
+        harness.Writer.Clear();
+
+        JobOutcome outcome = harness.Jobs.RunMaintenancePass();
+
+        Assert.Equal("succeeded", outcome.Outcome);
+        Assert.Single(harness.Writer.WriteBatchCalls);
+        Assert.Equal("2", harness.Checkpoint("droid", harness.DroidPath("sess-old")).ParserContractVersion);
+        Assert.NotNull(harness.Store.GetRefreshRun(JobSchedulerService.NoEstimateRereadKey));
+    }
+
     /// <summary>Builds a harness with one checkpointed unit for each of Droid, Cursor and Warp.</summary>
     private static Harness CheckpointedHarness()
     {
@@ -205,7 +225,10 @@ public class NoEstimateRereadTests
             Combine(HomeRoot, $".pi/agent/sessions/{sessionId}.jsonl");
 
         public void AddDroidTranscript(string sessionId) =>
-            FileSystem.AddFile(DroidPath(sessionId), DroidTranscript(sessionId), BaselineUtc.AddMinutes(-10));
+            AddDroidTranscript(sessionId, BaselineUtc.AddMinutes(-10));
+
+        public void AddDroidTranscript(string sessionId, DateTimeOffset lastWriteUtc) =>
+            FileSystem.AddFile(DroidPath(sessionId), DroidTranscript(sessionId), lastWriteUtc);
 
         public void AddCursorTranscript(string sessionId) =>
             FileSystem.AddFile(CursorPath(sessionId), "{\"role\":\"user\",\"message\":\"hi\"}\n", BaselineUtc.AddMinutes(-10));

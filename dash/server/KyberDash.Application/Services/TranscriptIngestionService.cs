@@ -164,11 +164,15 @@ public class TranscriptIngestionService : ITranscriptIngestionService
         DateTimeOffset windowStart = commandStarted.AddDays(-7.0 * CanonRefreshEngine.DefaultHistoryWeeks);
         string coveredFromUtc = FormatUtc(windowStart);
         string coveredThroughUtc = FormatUtc(commandStarted);
+
+        // Discovery is not limited to the history window: the caller records this pass as complete
+        // once, so a checkpointed unit last written before the window would otherwise never be
+        // replaced. The checkpoint check below keeps the pass to units the store already knows.
         SourceDiscoveryContext context = new(
             HomeDirectory: homeDirectory,
             StateDirectory: stateDirectory,
             FileSystem: fileSystem,
-            SinceUtc: windowStart);
+            SinceUtc: null);
 
         List<RefreshSourceStatusRow> rows = [];
         HashSet<string> sessionKeysRead = new(StringComparer.Ordinal);
