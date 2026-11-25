@@ -28,6 +28,8 @@ public class DevinSqliteConversationSource : ISqliteConversationSource
     /// <summary>Reads one session's nodes in <c>row_id</c> order for the export.</summary>
     internal const string NodesQuery = "devin.message_nodes";
 
+    private const string SessionProblemCode = "DEVIN_SESSION_UNREADABLE";
+
     private const string ConversationsSql =
         "SELECT s.id AS id, s.last_activity_at AS last_activity_at, COUNT(m.row_id) AS node_count " +
         "FROM sessions s JOIN message_nodes m ON m.session_id = s.id " +
@@ -54,9 +56,23 @@ public class DevinSqliteConversationSource : ISqliteConversationSource
         foreach (IReadOnlyDictionary<string, object?> row in context.Database.Query(
                      new HarnessSqliteQuery(ConversationsQuery, ConversationsSql, [])))
         {
-            string id = Text(row["id"]) ?? throw new InvalidDataException("Devin session with no id.");
+            string? id = Text(row["id"]);
+            if (string.IsNullOrEmpty(id))
+            {
+                RecordProblem(context, "no-id", "Skipping a Devin session with no id.");
+                continue;
+            }
+
             string activityText = Text(row["last_activity_at"]) ?? string.Empty;
-            DateTimeOffset? lastActivity = ParseActivity(id, activityText);
+            if (!TryParseActivity(activityText, out DateTimeOffset? lastActivity))
+            {
+                RecordProblem(
+                    context,
+                    id,
+                    $"Skipping Devin session '{id}': last_activity_at is not a date: '{activityText}'.");
+                continue;
+            }
+
             if (context.SinceUtc is { } since && lastActivity is { } activity && activity < since)
             {
                 continue;
@@ -104,25 +120,35 @@ public class DevinSqliteConversationSource : ISqliteConversationSource
         writer.WriteEndObject();
     }
 
-    private static DateTimeOffset? ParseActivity(string sessionId, string text)
+    private static bool TryParseActivity(string text, out DateTimeOffset? parsed)
     {
+        parsed = null;
         if (text.Length == 0)
         {
-            return null;
+            return true;
         }
 
         if (!DateTimeOffset.TryParse(
                 text,
                 CultureInfo.InvariantCulture,
                 DateTimeStyles.AssumeUniversal | DateTimeStyles.AdjustToUniversal,
-                out DateTimeOffset parsed))
+                out DateTimeOffset value))
         {
-            throw new InvalidDataException(
-                $"Devin session '{sessionId}' has a last_activity_at that is not a date: '{text}'.");
+            return false;
         }
 
-        return parsed;
+        parsed = value;
+        return true;
     }
+
+    private static void RecordProblem(SqliteConversationContext context, string session, string message) =>
+        context.Problems.Add(new CollectedProblem(
+            ProblemKey: $"devin-session:{context.DatabasePath}:{session}",
+            Severity: "warning",
+            Code: SessionProblemCode,
+            Message: message,
+            Location: context.DatabasePath,
+            HarnessId: context.HarnessId));
 
     /// <summary>Writes a text column as a JSON string, or null when the column is NULL. Never parses it as JSON.</summary>
     private static void WriteText(Utf8JsonWriter writer, string propertyName, object? value)

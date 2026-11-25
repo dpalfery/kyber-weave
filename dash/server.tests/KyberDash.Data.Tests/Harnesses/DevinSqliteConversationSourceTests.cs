@@ -66,17 +66,22 @@ public class DevinSqliteConversationSourceTests
     }
 
     [Fact]
-    public void ListConversations_UnparseableActivity_RefusesWithAMessageNamingTheSession()
+    public void ListConversations_UnparseableActivity_RecordsAProblemNamingTheSession_AndListsTheOthers()
     {
         InMemoryHarnessSqliteSource sqlite = new();
         sqlite.AddDatabase(DatabasePath)
-            .AddRow(DevinSqliteConversationSource.ConversationsQuery, Row("s1", "yesterday-ish", 1L));
+            .AddRow(DevinSqliteConversationSource.ConversationsQuery, Row("s1", "yesterday-ish", 1L))
+            .AddRow(DevinSqliteConversationSource.ConversationsQuery, Row("s2", "2026-11-20T10:00:00Z", 2L));
         using IHarnessSqliteDatabase database = sqlite.Open(DatabasePath);
+        List<CollectedProblem> problems = [];
 
-        InvalidDataException exception = Assert.Throws<InvalidDataException>(() =>
-            new DevinSqliteConversationSource().ListConversations(Context(database, since: null)).ToList());
+        List<SqliteConversation> listed = [.. new DevinSqliteConversationSource().ListConversations(
+            Context(database, since: null, problems))];
 
-        Assert.Contains("s1", exception.Message, StringComparison.Ordinal);
+        Assert.Equal("s2", Assert.Single(listed).Id);
+        CollectedProblem problem = Assert.Single(problems);
+        Assert.Contains("s1", problem.Message, StringComparison.Ordinal);
+        Assert.Equal(DatabasePath, problem.Location);
     }
 
     [Fact]
@@ -209,7 +214,13 @@ public class DevinSqliteConversationSourceTests
         return document.RootElement.Clone();
     }
 
-    private static SqliteConversationContext Context(IHarnessSqliteDatabase database, DateTimeOffset? since) => new(
+    private static SqliteConversationContext Context(IHarnessSqliteDatabase database, DateTimeOffset? since) =>
+        Context(database, since, []);
+
+    private static SqliteConversationContext Context(
+        IHarnessSqliteDatabase database,
+        DateTimeOffset? since,
+        ICollection<CollectedProblem> problems) => new(
         database,
         DatabasePath,
         "devin",
@@ -217,7 +228,7 @@ public class DevinSqliteConversationSourceTests
         "/home/u",
         new NoFiles(),
         new InMemoryHarnessSqliteSource(),
-        new List<CollectedProblem>());
+        problems);
 
     /// <summary>The source never reads sibling files, so every file call here is a test defect.</summary>
     private sealed class NoFiles : IHarnessFileSystem
