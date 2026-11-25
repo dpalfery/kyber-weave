@@ -5,7 +5,7 @@
 // CursorMapperTests). Timestamps derive from the run clock passed in (D10). A contract states
 // each section as measured or as its explicit not-measurable state, from the mapper tests and
 // docs/dash/telemetry-inventory.md, never from what the screen shows.
-import { mkdirSync } from 'node:fs'
+import { mkdirSync, writeFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import { DatabaseSync } from 'node:sqlite'
 
@@ -38,13 +38,13 @@ function platformPath(paths: { readonly darwin: string; readonly win32: string; 
 function sqliteFixtures(
   planHarness: string,
   contractFor: (plan: SessionPlan) => FileHarnessContract,
-  build: (db: DatabaseSync, plan: SessionPlan, baseTimeMs: number) => void,
+  build: (db: DatabaseSync, plan: SessionPlan, baseTimeMs: number, homeDir: string) => void,
   relativePath: string,
 ): FileHarnessFixture[] {
   return plansFor(planHarness).map((plan) => ({
     contract: contractFor(plan),
     build: (homeDir: string, baseTimeMs: number) => {
-      withDatabase(homeDir, relativePath, (db) => build(db, plan, baseTimeMs))
+      withDatabase(homeDir, relativePath, (db) => build(db, plan, baseTimeMs, homeDir))
     },
   }))
 }
@@ -263,18 +263,47 @@ const CURSOR_PATH = platformPath({
   other: '.config/Cursor/User/globalStorage/state.vscdb',
 })
 
+/** The one fixed hash-named workspace folder; its state.vscdb names the first composer and its workspace.json the project. */
+const CURSOR_WORKSPACE_HASH = '5b7c1f0e2a9d4c3b8e6f1a0d9c2b7e4f'
+const CURSOR_WORKSPACE_PATH = platformPath({
+  darwin: `Library/Application Support/Cursor/User/workspaceStorage/${CURSOR_WORKSPACE_HASH}/state.vscdb`,
+  win32: `AppData/Roaming/Cursor/User/workspaceStorage/${CURSOR_WORKSPACE_HASH}/state.vscdb`,
+  other: `.config/Cursor/User/workspaceStorage/${CURSOR_WORKSPACE_HASH}/state.vscdb`,
+})
+const CURSOR_PROJECT_FOLDER = '/workspace/repo'
+
 /** A deterministic UUID-shaped bubble id for one session, turn and role. */
 function bubbleUuid(sessionOrdinal: number, turn: number, role: 1 | 2): string {
   const hex = (value: number, width: number) => value.toString(16).padStart(width, '0')
   return `${hex(sessionOrdinal, 8)}-${hex(turn, 4)}-4000-8000-${hex(role, 12)}`
 }
 
-function buildCursor(db: DatabaseSync, plan: SessionPlan, baseTimeMs: number): void {
+/** Writes the workspace folder that names the first composer and the project folder (once, for the first session). */
+function buildCursorWorkspace(homeDir: string, firstComposerId: string): void {
+  withDatabase(homeDir, CURSOR_WORKSPACE_PATH, (db) => {
+    db.exec('CREATE TABLE IF NOT EXISTS ItemTable (key TEXT UNIQUE ON CONFLICT REPLACE, value BLOB)')
+    db.prepare('INSERT INTO ItemTable (key, value) VALUES (?, ?)').run(
+      'composer.composerData',
+      JSON.stringify({ allComposers: [{ composerId: firstComposerId }] }),
+    )
+  })
+  writeFileSync(
+    join(dirname(join(homeDir, CURSOR_WORKSPACE_PATH)), 'workspace.json'),
+    JSON.stringify({ folder: `file://${CURSOR_PROJECT_FOLDER}` }),
+  )
+}
+
+function buildCursor(db: DatabaseSync, plan: SessionPlan, baseTimeMs: number, homeDir: string): void {
   db.exec(`
     CREATE TABLE IF NOT EXISTS ItemTable (key TEXT UNIQUE ON CONFLICT REPLACE, value BLOB);
     CREATE TABLE IF NOT EXISTS cursorDiskKV (key TEXT UNIQUE ON CONFLICT REPLACE, value BLOB);
   `)
   const insert = db.prepare('INSERT INTO cursorDiskKV (key, value) VALUES (?, ?)')
+  const firstComposerId = plansFor('cursor')[0].id
+  insert.run(`composerData:${plan.id}`, JSON.stringify({ composerId: plan.id, createdAt: iso(baseTimeMs) }))
+  if (plan.id === firstComposerId) {
+    buildCursorWorkspace(homeDir, firstComposerId)
+  }
   const ordinal = plan.turns
   for (let turn = 1; turn <= plan.turns; turn += 1) {
     const at = baseTimeMs + turn * TURN_SPACING_MS
@@ -380,7 +409,9 @@ export const FILE_HARNESS_SQLITE_FIXTURES: readonly FileHarnessFixture[] = [
       // The bubbles store contextWindow, so context is measured.
       contextMeasurable: true,
       perTurnTokensMeasurable: true,
-      expectedCostStatus: 'published_priced',
+      // The published rate table prices only the claude and codex families (CanonPricing.IsPublishedTableHarness),
+      // and the dashboard row shows this session as out of scope for published pricing, as kilo does.
+      expectedCostStatus: 'out_of_scope',
       expectedModels: [CURSOR_MODEL],
     }),
     buildCursor,
