@@ -311,6 +311,42 @@ public class KiloMapperTests
         Assert.Equal(taskTool.RecordId, agent.ParentRecordId);
     }
 
+    /// <summary>
+    /// Kilo reports <c>tokens.input</c> apart from <c>tokens.cache.read</c> and <c>tokens.cache.write</c>, so the
+    /// reported input total is the sum of the three classes, as the Claude mapper reports it. A reported input
+    /// of the fresh count alone fails the pricing checksum and leaves a turn with cache tokens only partly priced.
+    /// </summary>
+    [Fact]
+    public void Map_SharedRuntimeReportedInputIsFreshPlusCacheReadPlusCacheWrite()
+    {
+        long t0 = T0.ToUnixTimeMilliseconds();
+        string export = """
+            {
+              "session_id": "sess-kilo-cache",
+              "title": "Kilo cache totals",
+              "messages": [
+                {"id": "msg-a1", "session_id": "sess-kilo-cache", "time_created": __KILO_TS__, "data": {"role": "assistant", "modelID": "claude-sonnet-4-5", "tokens": {"input": 101, "output": 41, "reasoning": 7, "cache": {"read": 203, "write": 10}}}}
+              ],
+              "parts": []
+            }
+            """.Replace("__KILO_TS__", t0.ToString(CultureInfo.InvariantCulture), StringComparison.Ordinal);
+        NativeSourceUnit unit = MakeNativeUnit(
+            "/fake-home/.local/share/kilo/kilo.db",
+            export,
+            KiloMapper.KiloSharedRuntimeHarnessId,
+            format: "kilo-sqlite",
+            parserId: "kilo-sqlite-reader");
+
+        CollectedBatch batch = new KiloMapper().Map(unit, BaselineUtc);
+
+        CollectedRecord record = Assert.Single(batch.Records);
+        Assert.Equal(101, Assert.Single(record.Tokens, static t => t.TokenClass == TokenClass.Input).Count);
+        Assert.Equal(203, Assert.Single(record.Tokens, static t => t.TokenClass == TokenClass.CacheRead).Count);
+        Assert.Equal(10, Assert.Single(record.Tokens, static t => t.TokenClass == TokenClass.CacheWrite).Count);
+        Assert.Equal(314, record.ReportedInputTokens);
+        Assert.Equal(41, record.ReportedOutputTokens);
+    }
+
     [Fact]
     public void Map_LegacyUiMessagesProducesRecordsUnderLegacyHarnessId()
     {

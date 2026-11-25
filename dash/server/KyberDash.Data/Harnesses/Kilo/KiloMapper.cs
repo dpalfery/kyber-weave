@@ -584,7 +584,7 @@ public class KiloMapper : IHarnessMapper
                 AgentInstanceId: null,
                 ToolDefinitions: [],
                 Signals: new CollectedRecordSignals(null, null, null, null),
-                ReportedInputTokens: request.TokensIn,
+                ReportedInputTokens: request.TokensIn + request.CacheReads + request.CacheWrites,
                 ReportedOutputTokens: request.TokensOut));
         }
 
@@ -716,7 +716,7 @@ public class KiloMapper : IHarnessMapper
             AgentInstanceId: null,
             ToolDefinitions: [],
             Signals: new CollectedRecordSignals(null, null, null, null),
-            ReportedInputTokens: message.Data.InputTokens,
+            ReportedInputTokens: message.Data.InputTokens + message.Data.CacheReadTokens + message.Data.CacheWriteTokens,
             ReportedOutputTokens: message.Data.OutputTokens);
 
         List<CollectedRecord> records = [parent];

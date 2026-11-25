@@ -89,7 +89,7 @@ test.afterAll(async () => {
 })
 
 /** The SQLite-format harnesses whose source reader the C# engine lacks (regression from #612). */
-const SQLITE_READER_EXPECTED_FAILURES: ReadonlySet<string> = new Set(['kilo-shared-runtime', 'warp', 'cursor', 'devin'])
+const SQLITE_READER_EXPECTED_FAILURES: ReadonlySet<string> = new Set(['warp', 'cursor', 'devin'])
 const SQLITE_READER_EXPECTED_FAILURE_REASON =
   'C# engine has no SQLite source reader (regression from #612); fixed on branch claude/fix/sqlite-harness-readers'
 

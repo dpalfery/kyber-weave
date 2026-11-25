@@ -58,50 +58,105 @@ const KILO_PATH = platformPath({
   other: '.local/share/kilo/kilo.db',
 })
 
-function buildKilo(db: DatabaseSync, plan: SessionPlan, baseTimeMs: number): void {
-  db.exec(`
-    CREATE TABLE IF NOT EXISTS session (id TEXT PRIMARY KEY, title TEXT, parent_id TEXT, time_created INTEGER);
-    CREATE TABLE IF NOT EXISTS message (id TEXT PRIMARY KEY, session_id TEXT NOT NULL, time_created INTEGER, data TEXT NOT NULL);
-    CREATE TABLE IF NOT EXISTS part (id TEXT PRIMARY KEY, message_id TEXT NOT NULL, session_id TEXT, time_created INTEGER, data TEXT NOT NULL);
-  `)
-  db.prepare('INSERT INTO session (id, title, parent_id, time_created) VALUES (?, ?, NULL, ?)').run(
-    plan.id,
-    `Kilo file import ${plan.id}`,
-    baseTimeMs,
+/** Literal per-turn values the Kilo fixture reports; the JSONL fixtures report the same numbers per turn. */
+const KILO_TURN_TOKENS = { input: 101, output: 41, reasoning: 7, cacheRead: 203, cacheWrite: 10 } as const
+const KILO_TOOL_COMMAND = 'ls'
+const KILO_TOOL_OUTPUT = 'file.txt\n'
+const KILO_DIRECTORY = '/workspace/repo'
+/** The child session hangs under the first root (the 12-turn plan). */
+const KILO_FIRST_ROOT_ID = plansFor('kilo-shared-runtime')[0].id
+const KILO_CHILD_SUFFIX = 'child'
+
+/** Writes one user prompt and one assistant reply, with the tool call when `withTool` is set. */
+function insertKiloExchange(
+  db: DatabaseSync,
+  sessionId: string,
+  turn: number,
+  at: number,
+  withTool: boolean,
+  tokens: { readonly input: number; readonly output: number; readonly reasoning: number; readonly cacheRead: number; readonly cacheWrite: number } | null,
+): void {
+  const insertMessage = db.prepare('INSERT INTO message (id, session_id, time_created, time_updated, data) VALUES (?, ?, ?, ?, ?)')
+  const insertPart = db.prepare(
+    'INSERT INTO part (id, message_id, session_id, time_created, time_updated, data) VALUES (?, ?, ?, ?, ?, ?)',
   )
-  const insertMessage = db.prepare('INSERT INTO message (id, session_id, time_created, data) VALUES (?, ?, ?, ?)')
-  const insertPart = db.prepare('INSERT INTO part (id, message_id, session_id, time_created, data) VALUES (?, ?, ?, ?, ?)')
-  for (let turn = 1; turn <= plan.turns; turn += 1) {
-    const at = baseTimeMs + turn * TURN_SPACING_MS
-    const userId = `${plan.id}-u-${turn}`
-    const assistantId = `${plan.id}-a-${turn}`
-    insertMessage.run(userId, plan.id, at, JSON.stringify({ role: 'user' }))
-    insertPart.run(`${userId}-text`, userId, plan.id, at, JSON.stringify({ type: 'text', text: `Step ${turn}: continue the work` }))
-    insertMessage.run(
-      assistantId,
-      plan.id,
-      at + 1_000,
-      JSON.stringify({
+  const userId = `${sessionId}-u-${turn}`
+  const assistantId = `${sessionId}-a-${turn}`
+  insertMessage.run(userId, sessionId, at, at, JSON.stringify({ role: 'user' }))
+  insertPart.run(
+    `${userId}-text`,
+    userId,
+    sessionId,
+    at,
+    at,
+    JSON.stringify({ type: 'text', text: `Step ${turn}: continue the work` }),
+  )
+  const assistantData = tokens === null
+    ? { role: 'assistant', modelID: KILO_MODEL }
+    : {
         role: 'assistant',
         modelID: KILO_MODEL,
-        tokens: { input: 100 + turn, output: 40 + turn, reasoning: 0, cache: { read: 500, write: 40 } },
+        tokens: {
+          input: tokens.input,
+          output: tokens.output,
+          reasoning: tokens.reasoning,
+          cache: { read: tokens.cacheRead, write: tokens.cacheWrite },
+        },
+      }
+  insertMessage.run(assistantId, sessionId, at + 1_000, at + 1_000, JSON.stringify(assistantData))
+  insertPart.run(
+    `${assistantId}-text`,
+    assistantId,
+    sessionId,
+    at + 1_000,
+    at + 1_000,
+    JSON.stringify({ type: 'text', text: `Finished step ${turn}.` }),
+  )
+  if (withTool) {
+    insertPart.run(
+      `${assistantId}-tool`,
+      assistantId,
+      sessionId,
+      at + 1_000,
+      at + 1_000,
+      JSON.stringify({
+        type: 'tool',
+        callID: `${sessionId}-call-${turn}`,
+        tool: 'bash',
+        state: { status: 'completed', input: { command: KILO_TOOL_COMMAND }, output: KILO_TOOL_OUTPUT },
       }),
     )
-    insertPart.run(`${assistantId}-text`, assistantId, plan.id, at + 1_000, JSON.stringify({ type: 'text', text: `Finished step ${turn}.` }))
-    if (hasTool(turn)) {
-      insertPart.run(
-        `${assistantId}-tool`,
-        assistantId,
-        plan.id,
-        at + 1_000,
-        JSON.stringify({
-          type: 'tool',
-          callID: `${plan.id}-call-${turn}`,
-          tool: 'bash',
-          state: { status: 'completed', input: { command: 'ls' }, output: `file-${turn}.txt\n` },
-        }),
-      )
-    }
+  }
+}
+
+function buildKilo(db: DatabaseSync, plan: SessionPlan, baseTimeMs: number): void {
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS session (
+      id TEXT PRIMARY KEY, parent_id TEXT, directory TEXT, title TEXT,
+      time_created INTEGER, time_updated INTEGER, time_archived INTEGER
+    );
+    CREATE TABLE IF NOT EXISTS message (
+      id TEXT PRIMARY KEY, session_id TEXT NOT NULL, time_created INTEGER, time_updated INTEGER, data TEXT NOT NULL
+    );
+    CREATE TABLE IF NOT EXISTS part (
+      id TEXT PRIMARY KEY, message_id TEXT NOT NULL, session_id TEXT, time_created INTEGER, time_updated INTEGER,
+      data TEXT NOT NULL
+    );
+  `)
+  const endMs = baseTimeMs + plan.turns * TURN_SPACING_MS
+  db.prepare(
+    'INSERT INTO session (id, parent_id, directory, title, time_created, time_updated, time_archived) VALUES (?, NULL, ?, ?, ?, ?, NULL)',
+  ).run(plan.id, KILO_DIRECTORY, `Kilo file import ${plan.id}`, baseTimeMs, endMs)
+  for (let turn = 1; turn <= plan.turns; turn += 1) {
+    insertKiloExchange(db, plan.id, turn, baseTimeMs + turn * TURN_SPACING_MS, hasTool(turn), KILO_TURN_TOKENS)
+  }
+  if (plan.id === KILO_FIRST_ROOT_ID) {
+    const childId = `${plan.id}-${KILO_CHILD_SUFFIX}`
+    const childAt = baseTimeMs + TURN_SPACING_MS
+    db.prepare(
+      'INSERT INTO session (id, parent_id, directory, title, time_created, time_updated, time_archived) VALUES (?, ?, ?, ?, ?, ?, NULL)',
+    ).run(childId, plan.id, KILO_DIRECTORY, `Kilo child session ${plan.id}`, childAt, childAt + 1_000)
+    insertKiloExchange(db, childId, 1, childAt, false, null)
   }
 }
 
@@ -257,10 +312,13 @@ export const FILE_HARNESS_SQLITE_FIXTURES: readonly FileHarnessFixture[] = [
       expectedToolCalls: toolCallCount(plan.turns),
       tokensMeasurable: true,
       cacheCreationMeasurable: true,
-      // kilo.db stores neither the runtime system prompt nor tool-definition schemas.
-      contextMeasurable: false,
+      // kilo.db stores the message and tool text parts, which the context chart measures; it stores neither
+      // the runtime system prompt nor tool-definition schemas, so schemaMeasurable stays off.
+      contextMeasurable: true,
       perTurnTokensMeasurable: true,
-      expectedCostStatus: 'published_priced',
+      // The published rate table prices only the claude and codex families (CanonPricing.IsPublishedTableHarness),
+      // so a Kilo session that reports tokens is out of scope for published pricing, as kimi-code is.
+      expectedCostStatus: 'out_of_scope',
       expectedModels: [KILO_MODEL],
     }),
     buildKilo,
