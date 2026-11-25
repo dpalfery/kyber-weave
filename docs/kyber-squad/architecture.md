@@ -485,7 +485,9 @@ flowchart LR
   `ISquadFileAccess.GetLength` before any read), writes nothing on a dry run or at instance or project scope, and
   never puts file contents in a warning. `squad uninstall` leaves the entry. The command is the absolute path
   PATH names for `kyber-weave-mcp`, resolved by `SquadDocsServerCommand` for install, update and `squad doctor`
-  alike, so the rendered agent files and the config entry agree.
+  alike, so the rendered agent files and the config entry agree. The executable name and the `--any-repo`
+  argument are the shared `SquadDocsServerCommand.Executable` and `AnyRepoArgument` constants, read by both
+  `AntigravityMcpConfiguration` and `AntigravityRenderer`.
 
 ### Cross-Process Mutex Lease
 

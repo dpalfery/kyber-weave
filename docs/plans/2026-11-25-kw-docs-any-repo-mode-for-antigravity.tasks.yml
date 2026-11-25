@@ -1,6 +1,6 @@
 schema-version: 2
 plan: docs/plans/2026-11-25-kw-docs-any-repo-mode-for-antigravity.md
-execution-digest: 470ca1fe912d3e7bd4c2e8981632f33cfbd6b23fe15b7dbd57874905e2dec75f
+execution-digest: 2c519b690cf703408d119166c1ec9603b906540e5b1d35c6ec7b7c126a0c3e95
 tasks:
   - id: T1
     capabilities: C# MCP server composition, concurrency-safe caching, xUnit unit tests over fakes
@@ -187,6 +187,7 @@ tasks:
       - src/KyberWeave.Application/Squad/Rendering/AntigravityRenderer.cs
       - src/KyberWeave.Application/Squad/Deployment/SquadLifecycleService.cs
       - src/KyberWeave.Application/Squad/SquadServiceCollectionExtensions.cs
+      - src/KyberWeave.Cli/Commands/Squad/SquadDoctorCommand.cs
       - tests/KyberWeave.Application.Tests/AntigravityRendererContractTests.cs
       - tests/KyberWeave.Application.Tests/Squad/ArbiterMcpGrantRenderingTests.cs
       - tests/KyberWeave.Application.Tests/Squad/AntigravityMcpConfigurationTests.cs
@@ -214,6 +215,7 @@ tasks:
         - `src/KyberWeave.Application/Squad/Rendering/AntigravityRenderer.cs`: where agent `mcpServers` entries are built (`McpServerDeclaration` for `CapabilityDegradations.UniversalMcpServer`), use args `[--any-repo]` and, when `Request.Scope` is Global and `DocsServerCommand` is set, that command (D11, D22); update the class XML remarks that explain `--repo-root .`.
         - `src/KyberWeave.Application/Squad/Deployment/SquadLifecycleService.cs`: optional trailing constructor parameter `Func<string, string?>? findExecutable = null`; in both render-request sites set `DocsServerCommand` for Global and Instance scope; pass the same value to `AntigravityMcpConfiguration.Ensure`; add one warning when Antigravity is targeted globally and the lookup returns null.
         - `src/KyberWeave.Application/Squad/SquadServiceCollectionExtensions.cs`: wire `findExecutable` to `IProcessRunner.FindOnPath`.
+        - `src/KyberWeave.Cli/Commands/Squad/SquadDoctorCommand.cs`: optional trailing `IProcessRunner` constructor parameter; resolve the command with `SquadDocsServerCommand.Resolve` and set `DocsServerCommand` on its global render, so doctor's byte comparison sees the same agent files as install (D25).
         - Tests: `tests/KyberWeave.Application.Tests/AntigravityRendererContractTests.cs`, `tests/KyberWeave.Application.Tests/Squad/ArbiterMcpGrantRenderingTests.cs`, `tests/KyberWeave.Application.Tests/Squad/AntigravityMcpConfigurationTests.cs` (lifecycle cases for the resolved path).
       - **Commands:**
         - `kyber-weave review gates . --agent <agent> --task T3 --red`
@@ -244,6 +246,8 @@ tasks:
       | D11 | Absolute path in project-scope agent files too? | No. Global (and Instance) renders use the absolute path; a project render, whose `.agents/agents/*` files may be committed, emits bare `kyber-weave-mcp`. Both emit `args: [--any-repo]`. When the global lookup finds nothing, the render falls back to bare `kyber-weave-mcp` and the lifecycle adds one warning naming the missing executable. | The request's instruction is about the agent files under `~/.gemini/config/agents`; a machine path in a committed file breaks every other clone (the delivery rule already forbids committing machine-specific paths). The verified agy PATH includes `~/.local/bin`, so the bare name works there. | autonomous: recommendation accepted (conflict with the literal instruction recorded here, user intent kept for the files named) |
 
       | D22 | `products/kyber-squad/mcp.json` | Unchanged. The Antigravity renderer replaces the `kw-docs` args with `[--any-repo]` (and the command per D11) because the spawn-from-`/` behaviour is a harness fact, like the entry shape it already pins. | Other consumers of `mcp.json` (Factory's server-name check, worktree MCP setup) read the declared entry; changing it would alter their behaviour, which the request does not ask for. | autonomous: recommendation accepted |
+
+      | D25 | Other render callers | Amended in review round 1: `SquadDoctorCommand` resolves the kw-docs command through `SquadDocsServerCommand.Resolve` (its constructor gains an optional trailing `IProcessRunner` parameter for the PATH lookup) and passes `DocsServerCommand` into its global render. Doctor's unmanaged-collision scan compares bytes, not only paths, so a render with different command text would flag a correct install as drift. The two `SquadLifecycleService` sites and doctor are the three render callers. | Read `SquadDoctorCommand.cs` around its `RenderAsync` call; `grep` of `RenderAsync(` outside the renderers lists three sites. | autonomous: recommendation accepted; review round 1 keeps the doctor change |
 
 
       Results of the tasks this one follows, as their workers reported them:

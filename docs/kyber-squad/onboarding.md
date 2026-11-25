@@ -600,7 +600,7 @@ server to launch resolves to nothing.
 server in `kilo.jsonc`'s `mcp` key — an agent file cannot add one. **Antigravity** takes the
 user `mcp_config.json`, which a global `squad install` or `squad update` writes for you (insertion only), or a workspace `.agents/mcp_config.json` you write as `--any-repo`, and additionally its own `mcp(server/*)` policy patterns
 decide whether a call is approved, since MCP tools default to Ask there; keep the same
-`--repo-root` in that entry as the rendered one, because a same-named global server definition can
+`--any-repo` command in that entry as the rendered one, because a same-named global server definition can
 take precedence over the per-agent declaration. **Pi** takes a project `.mcp.json` (or
 `~/.config/mcp/mcp.json`, `~/.agents/mcp.json`, or the adapter's own agent-directory `mcp.json`),
 and a project-scoped server needs a trust approval on first use. On Pi, the overlay also needs
