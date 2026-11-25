@@ -5,6 +5,7 @@ using KyberDash.Data.Collector.Sources;
 using KyberDash.Data.Harnesses.Antigravity;
 using KyberDash.Data.Harnesses.Cline;
 using KyberDash.Data.Harnesses.Kilo;
+using KyberDash.Data.Tokenization;
 using KyberDash.Domain;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
@@ -55,6 +56,7 @@ public static class ServiceCollectionExtensions
             _ = pricing.LoadPricingTables();
             return pricing;
         });
+        services.TryAddSingleton<ITextTokenizer>(_ => LocalTextTokenizer.Shared);
         services.TryAddSingleton(provider => new CanonSessionProjectorEngine(
             provider.GetRequiredService<IRelationalStoreReader>(),
             provider.GetRequiredService<IProjectionStore>(),

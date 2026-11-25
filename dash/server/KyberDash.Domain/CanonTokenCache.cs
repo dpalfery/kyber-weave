@@ -3,14 +3,17 @@ using System.Text;
 
 namespace KyberDash.Domain;
 
-/// <summary>Derived token count tagged with the tokenizer model identity.</summary>
-/// <param name="Count">Derived lower-bound token count.</param>
-/// <param name="Model">Model/tokenizer name against which the text was counted.</param>
-/// <param name="Derived">Always <see langword="true"/> so derived figures stay distinct from harness counters.</param>
+/// <summary>A token count derived from text, labelled with the tokenizer that produced it (decision D17).</summary>
+/// <param name="Count">Number of tokens the tokenizer gives the text.</param>
+/// <param name="Tokenizer">Name of the tokenizer that counted the text, such as <c>o200k_base</c>.</param>
+/// <param name="IsModelOwn">
+/// <see langword="true"/> when <paramref name="Tokenizer"/> is the model's own published tokenizer;
+/// <see langword="false"/> when it is the named standard stand-in (D19).
+/// </param>
 public record TokenCount(
     long Count,
-    string Model,
-    bool Derived = true);
+    string Tokenizer,
+    bool IsModelOwn);
 
 /// <summary>Cache hit/miss statistics reported by a cached token counter.</summary>
 /// <param name="Hits">Lookups served from the in-process memo or SQLite cache.</param>
