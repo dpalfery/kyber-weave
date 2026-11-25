@@ -71,19 +71,20 @@ public static partial class Program
         ArgumentNullException.ThrowIfNull(output);
         ArgumentNullException.ThrowIfNull(error);
 
-        ServiceProvider provider;
+        DashOptions options;
         try
         {
-            provider = BuildProvider(args);
+            options = ResolveOptions(args);
         }
         catch (Exception exception) when (exception is ArgumentException or NotSupportedException or PathTooLongException or SecurityException)
         {
             // --db and --state-dir come from the operator; a path the platform cannot resolve is a usage error.
-            await error.WriteLineAsync($"kyberdash: --db or --state-dir is not a usable path ({exception.Message})").ConfigureAwait(false);
+            // Only the path resolution is inside this handler, so a failure while building the container is not misreported.
+            await TryWriteErrorAsync(error, $"kyberdash: --db or --state-dir is not a usable path ({exception.Message})").ConfigureAwait(false);
             return 2;
         }
 
-        await using ServiceProvider owned = provider;
+        await using ServiceProvider owned = BuildProvider(options);
         return await RunAsync(args, output, error, owned, null, cancellationToken).ConfigureAwait(false);
     }
 
@@ -116,14 +117,24 @@ public static partial class Program
         string first = args[0];
         if (first is "--version" or "-v" or "-V")
         {
+            string version;
             try
             {
-                await output.WriteLineAsync(ResolveVersion()).ConfigureAwait(false);
+                version = ResolveVersion();
             }
             catch (InvalidOperationException exception)
             {
-                await error.WriteLineAsync($"kyberdash --version: {exception.Message}").ConfigureAwait(false);
+                await TryWriteErrorAsync(error, $"kyberdash --version: {exception.Message}").ConfigureAwait(false);
                 return 1;
+            }
+
+            try
+            {
+                await output.WriteLineAsync(version).ConfigureAwait(false);
+            }
+            catch (IOException)
+            {
+                // A closed pipe (for example `| head`) is the reader's choice, not a failure of the version lookup.
             }
 
             return 0;
@@ -156,7 +167,19 @@ public static partial class Program
     /// <returns>The service provider; the caller disposes it.</returns>
     public static ServiceProvider BuildProvider(string[]? args = null)
     {
+        return BuildProvider(ResolveOptions(args));
+    }
+
+    private static ServiceProvider BuildProvider(DashOptions options)
+    {
         ServiceCollection services = new();
+        services.AddDashApplication(options);
+        return services.BuildServiceProvider();
+    }
+
+    /// <summary>Resolves <c>--db</c> and <c>--state-dir</c> to full paths; throws the platform's path exceptions.</summary>
+    private static DashOptions ResolveOptions(string[]? args)
+    {
         DashOptions options = new();
 
         foreach (string[] pair in ReadGlobalOptions(args))
@@ -167,8 +190,20 @@ public static partial class Program
                 options.StateDirectory = Path.GetFullPath(pair[1]);
         }
 
-        services.AddDashApplication(options);
-        return services.BuildServiceProvider();
+        return options;
+    }
+
+    /// <summary>Writes a diagnostic; a broken error stream must not change the exit code the caller returns.</summary>
+    private static async Task TryWriteErrorAsync(TextWriter error, string message)
+    {
+        try
+        {
+            await error.WriteLineAsync(message).ConfigureAwait(false);
+        }
+        catch (IOException)
+        {
+            // The diagnostic has nowhere to go; the exit code still reports the failure.
+        }
     }
 
     /// <summary>Resolves the reported version from the assembly's informational version.</summary>
@@ -452,7 +487,7 @@ public static partial class Program
             {
                 if (!TryFullPath(args[++index], out stateDir, out string stateDirProblem))
                 {
-                    await error.WriteLineAsync($"kyberdash engine ensure: {stateDirProblem}").ConfigureAwait(false);
+                    await TryWriteErrorAsync(error, $"kyberdash engine ensure: {stateDirProblem}").ConfigureAwait(false);
                     return 2;
                 }
             }

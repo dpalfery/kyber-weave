@@ -345,6 +345,42 @@ public class CliDispatchTests
     }
 
     [Fact]
+    public async Task AClosedOutputPipeOnVersionIsNotReportedAsAVersionFailure()
+    {
+        using ThrowingWriter output = new();
+        using StringWriter error = new();
+
+        int exitCode = await Program.RunAsync(
+            ["--version"],
+            output,
+            error,
+            TestContext.Current.CancellationToken);
+
+        Assert.Equal(0, exitCode);
+        Assert.Equal(string.Empty, error.ToString());
+    }
+
+    [Fact]
+    public async Task ABrokenErrorStreamKeepsTheUsageExitCode()
+    {
+        using StringWriter output = new();
+        using ThrowingWriter error = new();
+
+        int exitCode = await Program.RunAsync(
+            ["engine", "stop", "--state-dir", "bad\0dir"],
+            output,
+            error,
+            TestContext.Current.CancellationToken);
+
+        Assert.Equal(2, exitCode);
+    }
+
+    private sealed class ThrowingWriter : StringWriter
+    {
+        public override Task WriteLineAsync(string? value) => throw new IOException("Broken pipe");
+    }
+
+    [Fact]
     public async Task UnknownEngineSubcommandPrintsTheCurrentUsage()
     {
         CliRun run = await CliRun.ExecuteAsync(["engine", "restart"]);
