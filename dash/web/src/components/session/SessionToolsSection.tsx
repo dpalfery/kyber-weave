@@ -222,13 +222,7 @@ export function SessionToolsSection({
             : null,
           byServer: aggregate.byServer,
         }}
-        pager={{
-          page: tools.page,
-          total: data.total,
-          limit: data.limit,
-          loading: tools.isFetching,
-          onPageChange: tools.setPage,
-        }}
+        pager={tools.pagerProps}
         onSelectTool={openToolInspector}
       />
     </div>

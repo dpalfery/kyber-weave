@@ -406,11 +406,63 @@ describe('SkillsPanel: on the section page and its aggregate', () => {
     expect(onPageChange).toHaveBeenCalledWith(2)
   })
 
-  it('renders no pager while the whole list fits one page', () => {
+  it('forwards page-size and sort-order controls even on a single non-empty page', () => {
+    const onLimitChange = vi.fn()
+    const onOrderChange = vi.fn()
     const props: SectionSkillsProps = {
       skills: asSkills(pageRows),
       summary: asSummary({}),
-      pager: { page: 1, total: 2, limit: 25, onPageChange: () => {} },
+      pager: {
+        page: 1,
+        total: 2,
+        limit: 25,
+        limitOptions: [25, 50, 100],
+        onLimitChange,
+        order: 'desc',
+        onOrderChange,
+        onPageChange: () => {},
+      },
+    }
+    const { rerender } = render(<SkillsPanel {...props} />)
+    expect(screen.getByTestId('list-pager')).toBeTruthy()
+    expect(screen.queryByTestId('pager-prev')).toBeNull()
+    expect(screen.queryByTestId('pager-next')).toBeNull()
+
+    const select = screen.getByTestId('pager-limit') as HTMLSelectElement
+    fireEvent.change(select, { target: { value: '50' } })
+    fireEvent.change(select, { target: { value: '100' } })
+    expect(onLimitChange.mock.calls).toEqual([[50], [100]])
+
+    const orderButton = screen.getByTestId('pager-order')
+    expect(orderButton.textContent).toBe('Newest first')
+    fireEvent.click(orderButton)
+    expect(onOrderChange).toHaveBeenCalledWith('asc')
+
+    rerender(
+      <SkillsPanel
+        {...props}
+        pager={{ ...props.pager!, order: 'asc' }}
+      />,
+    )
+    expect(screen.getByTestId('pager-order').textContent).toBe('Oldest first')
+    fireEvent.click(screen.getByTestId('pager-order'))
+    expect(onOrderChange).toHaveBeenCalledWith('desc')
+  })
+
+  it('hides the pager cleanly when total is 0', () => {
+    const props: SectionSkillsProps = {
+      skills: asSkills({ ...pageRows, rows: [] }),
+      summary: asSummary({}),
+      pager: {
+        page: 1,
+        total: 0,
+        limit: 25,
+        limitOptions: [25, 50, 100],
+        onLimitChange: () => {},
+        order: 'desc',
+        onOrderChange: () => {},
+        onPageChange: () => {},
+      },
     }
     render(<SkillsPanel {...props} />)
     expect(screen.queryByTestId('list-pager')).toBeNull()

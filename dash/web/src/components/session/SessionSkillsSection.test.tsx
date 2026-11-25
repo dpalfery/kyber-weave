@@ -21,8 +21,8 @@ function jsonResponse(body: unknown, status = 200): Response {
   return { ok: status >= 200 && status < 300, status, json: async () => body } as unknown as Response
 }
 
-function stubFetch(handler: () => Response): ReturnType<typeof vi.fn> {
-  const fetchMock = vi.fn(() => Promise.resolve(handler()))
+function stubFetch(handler: (url: string) => Response): ReturnType<typeof vi.fn> {
+  const fetchMock = vi.fn((url: string) => Promise.resolve(handler(url)))
   vi.stubGlobal('fetch', fetchMock)
   return fetchMock
 }
@@ -38,6 +38,7 @@ function mount(openInspector: (request: OpenInspectorRequest) => void): ReturnTy
 
 afterEach(() => {
   cleanup()
+  window.sessionStorage.clear()
   vi.unstubAllGlobals()
 })
 
@@ -149,8 +150,70 @@ describe('SessionSkillsSection inspector wiring', () => {
     fireEvent.click(within(pager).getByTestId('pager-next'))
     await waitFor(() =>
       expect(
-        fetchMock.mock.calls.some((call) => String(call[0]).includes('skills?page=2&limit=25')),
+        fetchMock.mock.calls.some((call) => String(call[0]).includes('skills?page=2&limit=25&order=desc')),
       ).toBe(true),
+    )
+  })
+
+  it('shows limit and order controls on a single non-empty page and hides the pager when total is 0', async () => {
+    stubFetch(() => jsonResponse(SKILLS_PAGE))
+    const { unmount } = mount(() => {})
+    const section = await screen.findByTestId('skills-section')
+    const pager = within(section).getByTestId('list-pager')
+    expect(within(pager).getByTestId('pager-limit')).toBeTruthy()
+    expect(within(pager).getByTestId('pager-order').textContent).toBe('Newest first')
+    expect(within(pager).queryByTestId('pager-prev')).toBeNull()
+    expect(within(pager).queryByTestId('pager-next')).toBeNull()
+    unmount()
+
+    stubFetch(() => jsonResponse({ measurable: true, rows: [], total: 0, limit: 25, offset: 0, page: 1 }))
+    mount(() => {})
+    const emptySection = await screen.findByTestId('skills-section')
+    expect(within(emptySection).queryByTestId('list-pager')).toBeNull()
+  })
+
+  it('changes page size (25 -> 50 -> 100), persists per section, toggles sort order, and resets to page 1', async () => {
+    const fetchMock = stubFetch((url) => {
+      const parsed = new URL(url, 'http://localhost')
+      const page = Number(parsed.searchParams.get('page') ?? '1')
+      const limit = Number(parsed.searchParams.get('limit') ?? '25')
+      const order = parsed.searchParams.get('order') ?? 'desc'
+      return jsonResponse({ ...SKILLS_PAGE, total: 120, page, limit, order })
+    })
+    mount(() => {})
+    const section = await screen.findByTestId('skills-section')
+
+    fireEvent.click(within(section).getByTestId('pager-next'))
+    await waitFor(() =>
+      expect(fetchMock.mock.calls.some(([url]) => String(url).includes('skills?page=2&limit=25&order=desc'))).toBe(true),
+    )
+
+    fireEvent.change(within(section).getByTestId('pager-limit'), { target: { value: '50' } })
+    await waitFor(() =>
+      expect(fetchMock.mock.calls.some(([url]) => String(url).includes('skills?page=1&limit=50&order=desc'))).toBe(true),
+    )
+    expect(window.sessionStorage.getItem('kyberdash:session-section:limit:skills')).toBe('50')
+
+    fireEvent.change(within(section).getByTestId('pager-limit'), { target: { value: '100' } })
+    await waitFor(() =>
+      expect(fetchMock.mock.calls.some(([url]) => String(url).includes('skills?page=1&limit=100&order=desc'))).toBe(true),
+    )
+    expect(window.sessionStorage.getItem('kyberdash:session-section:limit:skills')).toBe('100')
+
+    fireEvent.click(within(section).getByTestId('pager-next'))
+    await waitFor(() =>
+      expect(fetchMock.mock.calls.some(([url]) => String(url).includes('skills?page=2&limit=100&order=desc'))).toBe(true),
+    )
+
+    fireEvent.click(within(section).getByTestId('pager-order'))
+    await waitFor(() =>
+      expect(fetchMock.mock.calls.some(([url]) => String(url).includes('skills?page=1&limit=100&order=asc'))).toBe(true),
+    )
+    expect(within(section).getByTestId('pager-order').textContent).toBe('Oldest first')
+
+    fireEvent.click(within(section).getByTestId('pager-order'))
+    await waitFor(() =>
+      expect(fetchMock.mock.calls.filter(([url]) => String(url).includes('skills?page=1&limit=100&order=desc')).length).toBeGreaterThanOrEqual(2),
     )
   })
 })

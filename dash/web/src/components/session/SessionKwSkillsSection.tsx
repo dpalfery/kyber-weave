@@ -87,11 +87,7 @@ export function SessionKwSkillsSection({ sessionId, className }: SessionKwSkills
             </table>
           </div>
           <Pager
-            page={kwSkills.page}
-            limit={data.limit}
-            total={data.total}
-            onPageChange={kwSkills.setPage}
-            loading={kwSkills.isFetching}
+            {...kwSkills.pagerProps}
             ariaLabel="KW skill pages"
           />
         </>
