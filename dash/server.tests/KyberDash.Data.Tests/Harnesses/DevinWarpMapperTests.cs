@@ -483,7 +483,7 @@ public class DevinWarpMapperTests
     // ------------------------------------------------------------------
 
     [Fact]
-    public void Map_KeepsPrimaryAgentTotalsAsSessionUsageAndLeavesExchangesNotMeasured()
+    public void Map_CountsEveryModelsFullReportedTotalAsSessionUsageAndLeavesExchangesNotMeasured()
     {
         string rawText = BuildWarpExport(
             conversationData: """{"conversation_usage_metadata":{"token_usage":[{"model_id":"GPT-5.3 Codex (medium reasoning)","warp_tokens":300,"byok_tokens":0,"warp_token_usage_by_category":{"primary_agent":300},"byok_token_usage_by_category":{}},{"model_id":"Claude Haiku 4.5","warp_tokens":90,"byok_tokens":0,"warp_token_usage_by_category":{"full_terminal_use":90},"byok_token_usage_by_category":{}}]}}""",
@@ -519,19 +519,23 @@ public class DevinWarpMapperTests
         Assert.All(batch.Records, static r => Assert.Empty(r.Tokens));
         Assert.All(batch.Records, static r => Assert.Null(r.ReportedInputTokens));
         Assert.All(batch.Records, static r => Assert.Null(r.ReportedOutputTokens));
-        CollectedModelUsage usage = Assert.Single(session.ReportedUsage);
-        Assert.Equal(new CollectedModelUsage(0, "gpt-5.3-codex", TokenClass.Total, 300L), usage);
+        Assert.Equal(
+            [
+                new CollectedModelUsage(0, "gpt-5.3-codex", TokenClass.Total, 300L),
+                new CollectedModelUsage(0, "claude-haiku-4-5", TokenClass.Total, 90L),
+            ],
+            session.ReportedUsage);
         Assert.All(batch.Records, static r => Assert.Equal("conv-1", r.SessionKey));
 
         InMemoryRelationalStore store = new();
         store.WriteBatch(batch);
         Assert.Equal(2, store.CountRecords("warp"));
         Assert.Empty(store.TokenCounts(sessionKey: "conv-1"));
-        Assert.Equal(300L, Assert.Single(store.SessionModelUsages("conv-1")).Usage.Count);
+        Assert.Equal(390L, store.SessionModelUsages("conv-1").Sum(static u => u.Usage.Count));
     }
 
     [Fact]
-    public void Map_FallsBackToPerModelConversationTotalsWhenNoPrimaryAgentCategoryIsReported()
+    public void Map_SumsPerModelConversationTotalsWhenNoCategoryIsReported()
     {
         string rawText = BuildWarpExport(
             conversationData: """{"conversation_usage_metadata":{"token_usage":[{"model_id":"GPT-5.3 Codex (medium reasoning)","warp_tokens":70,"byok_tokens":5,"warp_token_usage_by_category":{},"byok_token_usage_by_category":{}},{"model_id":"Claude Sonnet 4.5","warp_tokens":40,"byok_tokens":0},{"model_id":"GPT-5.3 Codex (medium reasoning)","warp_tokens":25,"byok_tokens":0}]}}""",

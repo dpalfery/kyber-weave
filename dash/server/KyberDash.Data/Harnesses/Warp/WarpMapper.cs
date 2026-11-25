@@ -87,8 +87,8 @@ public record WarpExportDocument(
 /// The offline seam parses a per-conversation JSON export mirroring the <c>agent_conversations</c>,
 /// <c>ai_queries</c>, and <c>blocks</c> projections; opening SQLite files in unit tests is forbidden
 /// (OD-9), so the export rows arrive as text. Warp reports token usage per conversation and model,
-/// never per exchange, so the conversation totals (primary-agent category, falling back to each
-/// entry's Warp plus BYOK total) become the session's reported usage and each completed exchange
+/// never per exchange, so each model's full reported total (its Warp plus BYOK tokens, every
+/// category included) becomes the session's reported usage and each completed exchange
 /// maps to one <c>llm.invoke</c> record whose tokens are not measured: a split of the conversation
 /// total across exchanges would be an estimate, which KyberDash never produces (decision D15).
 /// Warp's figure is a single total with no input/output breakdown, so it is stored in the
@@ -111,7 +111,6 @@ public class WarpMapper : IHarnessMapper
     /// <summary>Tool name recorded for attributed command blocks.</summary>
     public const string BashToolName = "Bash";
 
-    private const string PrimaryAgentCategory = "primary_agent";
     private const string DefaultModelId = "warp-auto-efficient";
 
     private static readonly IReadOnlyDictionary<string, string> ModelAliases =
@@ -540,9 +539,9 @@ public class WarpMapper : IHarnessMapper
     /// model that carried the most of it.
     /// </summary>
     /// <remarks>
-    /// Each <c>token_usage</c> entry is one model's reported figures. When any entry reports the
-    /// <c>primary_agent</c> category, the usage is that category per model; otherwise it is each
-    /// entry's <c>warp_tokens</c> plus <c>byok_tokens</c>. Entries for the same model are summed,
+    /// Each <c>token_usage</c> entry is one model's reported figures, and its usage is the entry's
+    /// full <c>warp_tokens</c> plus <c>byok_tokens</c>, every category included (the owner's
+    /// decision: a conversation's cost covers its helper models, not only the primary agent). Entries for the same model are summed,
     /// which is arithmetic on reported values, not an estimate. An entry with no model id is
     /// attributed to the dominant model (or <c>warp-auto-efficient</c> when none is known). No
     /// reported usage yields no rows: the figure is then not measured. Warp reports one total per
@@ -574,10 +573,9 @@ public class WarpMapper : IHarnessMapper
                 return ([], string.Empty);
             }
 
-            long dominantPrimaryTokens = 0L;
-            long dominantFallbackTokens = 0L;
+            long dominantTokens = 0L;
             string dominantModel = string.Empty;
-            List<(string? Model, long PrimaryTokens, long EntryTotal)> entries = [];
+            List<(string? Model, long EntryTotal)> entries = [];
 
             foreach (JsonElement entry in tokenUsageEl.EnumerateArray())
             {
@@ -586,37 +584,26 @@ public class WarpMapper : IHarnessMapper
                     continue;
                 }
 
-                long primaryTokens = ExtractCategoryTokens(entry, "warp_token_usage_by_category")
-                    + ExtractCategoryTokens(entry, "byok_token_usage_by_category");
                 long entryTotal = ReadSafeLong(entry, "warp_tokens") + ReadSafeLong(entry, "byok_tokens");
 
                 string? reportedModel = entry.TryGetProperty("model_id", out JsonElement modelEl)
                     && modelEl.ValueKind == JsonValueKind.String
                     ? modelEl.GetString()
                     : null;
-                entries.Add((reportedModel, primaryTokens, entryTotal));
+                entries.Add((reportedModel, entryTotal));
 
-                string entryModel = reportedModel ?? dominantModel;
-                if (primaryTokens > dominantPrimaryTokens)
+                if (entryTotal > dominantTokens)
                 {
-                    dominantPrimaryTokens = primaryTokens;
-                    dominantModel = entryModel;
-                }
-
-                if (dominantPrimaryTokens == 0 && entryTotal > dominantFallbackTokens)
-                {
-                    dominantFallbackTokens = entryTotal;
-                    dominantModel = entryModel;
+                    dominantTokens = entryTotal;
+                    dominantModel = reportedModel ?? dominantModel;
                 }
             }
 
             string normalizedDominant = NormalizeModel(dominantModel);
-            bool usePrimary = entries.Any(static entry => entry.PrimaryTokens > 0);
             List<string> modelOrder = [];
             Dictionary<string, long> countsByModel = new(StringComparer.Ordinal);
-            foreach ((string? model, long primaryTokens, long entryTotal) in entries)
+            foreach ((string? model, long count) in entries)
             {
-                long count = usePrimary ? primaryTokens : entryTotal;
                 if (count <= 0)
                 {
                     continue;
@@ -645,18 +632,6 @@ public class WarpMapper : IHarnessMapper
             ];
             return (usage, normalizedDominant);
         }
-    }
-
-    private static long ExtractCategoryTokens(JsonElement entry, string key)
-    {
-        if (!entry.TryGetProperty(key, out JsonElement categoriesEl)
-            || categoriesEl.ValueKind != JsonValueKind.Object
-            || !categoriesEl.TryGetProperty(PrimaryAgentCategory, out JsonElement categoryEl))
-        {
-            return 0;
-        }
-
-        return ReadSafeLong(categoryEl);
     }
 
     private static string ExtractUserMessage(string rawInput)
