@@ -158,13 +158,9 @@ export function AgentSessionRow({
     <div className={cn('border-t border-border first:border-t-0', open && 'bg-interactive-secondary/30')}>
       {/* The row is a flex strip of sibling controls: the subagent toggle and the parent link
           are never inside the row button, so no button contains another. */}
-      <div
-        className={cn(
-          'flex w-full items-center transition-colors hover:bg-interactive-secondary/50',
-          isChild && 'pl-5'
-        )}
-      >
-        {!isChild && !hasSubagents && (
+      <div className="flex w-full items-center transition-colors hover:bg-interactive-secondary/50">
+        {/* A row without a toggle reserves its width, so child rows keep the root rows' columns. */}
+        {!hasSubagents && (
           <span aria-hidden="true" data-testid="subagent-toggle-spacer" className={SUBAGENT_TOGGLE_BOX}>
             <span className="block h-2.5 w-2.5" />
           </span>
@@ -219,7 +215,7 @@ export function AgentSessionRow({
             {formatSessionId(sessionId)}
           </span>
 
-          <span className={cn(SESSION_LIST_COLUMNS.title, 'truncate text-[13px] text-foreground flex items-center gap-2')}>
+          <span className={cn(SESSION_LIST_COLUMNS.title, 'truncate text-[13px] text-foreground flex items-center gap-2', isChild && 'pl-5')}>
             <span title={sessionId}>
               {formatSessionTitle({
                 label: s.label,

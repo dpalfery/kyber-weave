@@ -597,6 +597,30 @@ describe('ContextExplorer column headers', () => {
     expect(markup).not.toContain(`data-testid="subagent-toggle-${sampleSession.session_id}"`)
   })
 
+  it("gives a child row the root rows' column widths, so its right-hand cells line up under the header", () => {
+    const child = session('claude-code', '-child')
+    render(
+      <div>
+        <AgentSessionRow s={sampleSession} open={false} onToggle={() => {}} onSelectSession={() => {}} />
+        <AgentSessionRow s={child} open={false} onToggle={() => {}} onSelectSession={() => {}} isChild />
+      </div>,
+    )
+    const cellsOf = (id: string) =>
+      Array.from(screen.getByTestId(`agent-session-row-${id}`).children).filter(
+        (el) => el.tagName.toLowerCase() !== 'svg',
+      )
+    const rootCells = cellsOf(sampleSession.session_id)
+    const childCells = cellsOf(child.session_id)
+    // Harness, turns, cost and started sit at the same index in both rows.
+    for (const [key, index] of [['harness', 2], ['turns', 3], ['cost', 4], ['started', 5]] as const) {
+      const tokens = SESSION_LIST_COLUMNS[key].split(/\s+/)
+      expect(rootCells[index]!.className.split(/\s+/)).toEqual(expect.arrayContaining(tokens))
+      expect(childCells[index]!.className.split(/\s+/)).toEqual(expect.arrayContaining(tokens))
+    }
+    // The child reserves the same leading spacer width as a root row without subagents.
+    expect(screen.getAllByTestId('subagent-toggle-spacer')).toHaveLength(2)
+  })
+
   it('renders the toggle, and no spacer, on a root row with subagents', () => {
     const root = rootWithChildren('root-1', [session('claude-code', '-child')])
     const markup = renderToStaticMarkup(
