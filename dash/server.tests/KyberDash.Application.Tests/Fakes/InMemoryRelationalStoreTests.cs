@@ -244,6 +244,7 @@ public class InMemoryRelationalStoreTests
             "record_reported_total",
             "record_reported_cost",
             "record_skill_invocation",
+            "record_skill_listing",
             "record_agent_instance",
             "record_error",
             "record_edit_failure",

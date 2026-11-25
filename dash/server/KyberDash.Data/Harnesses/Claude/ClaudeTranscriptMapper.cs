@@ -79,6 +79,16 @@ public record ClaudeTranscriptMessage(
 /// <param name="AttributionMcpServer">Optional ground-truth MCP server attribution.</param>
 /// <param name="Message">Parsed <c>message</c> payload, when present.</param>
 /// <param name="RequestId">The provider request id the line carries (<c>requestId</c>), when present.</param>
+/// <param name="ListedSkills">
+/// Skill names a <c>skill_listing</c> attachment line announced to the agent (<c>attachment.names</c>, or the
+/// <c>- name: description</c> lines of <c>attachment.content</c> when no names array is present).
+/// </param>
+/// <param name="RequestShapeHash">
+/// The request shape an <c>api-request</c> or <c>api-request-shape</c> line names (<c>shapeHash</c>).
+/// </param>
+/// <param name="RequestShapeTools">
+/// The tool schemas an <c>api-request-shape</c> line carries (<c>shape.tools</c>), in request order.
+/// </param>
 public record ClaudeTranscriptLine(
     string? RecordType,
     string? SessionId,
@@ -88,7 +98,15 @@ public record ClaudeTranscriptLine(
     int? ExitCode,
     string? AttributionMcpServer,
     ClaudeTranscriptMessage? Message,
-    string? RequestId = null);
+    string? RequestId = null,
+    IReadOnlyList<string>? ListedSkills = null,
+    string? RequestShapeHash = null,
+    IReadOnlyList<ClaudeTranscriptToolSchema>? RequestShapeTools = null);
+
+/// <summary>One tool schema a Claude Code request shape advertised to the model.</summary>
+/// <param name="Name">The tool name (<c>shape.tools[].name</c>).</param>
+/// <param name="SchemaText">The tool's whole schema object as JSON text, measured for its token cost.</param>
+public record ClaudeTranscriptToolSchema(string Name, string SchemaText);
 
 /// <summary>
 /// Pure <see cref="IHarnessMapper"/> translating a loaded Claude Code JSONL
@@ -101,6 +119,7 @@ public class ClaudeTranscriptMapper : IHarnessMapper
     private const string FallbackTimestamp = "1970-01-01T00:00:00.000Z";
     private const string UnknownModelFallback = "unknown";
     private const string FallbackToolErrorMessage = "Tool execution failed";
+    private const string SkillToolName = "Skill";
 
     /// <inheritdoc />
     public string HarnessId => TranscriptReaderRepository.ClaudeHarnessId;
@@ -124,8 +143,10 @@ public class ClaudeTranscriptMapper : IHarnessMapper
             return new CollectedBatch(source, [], [], []);
         }
 
+        Dictionary<string, IReadOnlyList<ClaudeTranscriptToolSchema>> requestShapes = IndexRequestShapes(rawGroups);
         List<MergedLineGroup> mergedGroups = MergeClaudeGroups(rawGroups, fileStem);
-        List<ParsedTurnGroup> keptTurns = BuildKeptTurns(mergedGroups, fileStem);
+        HashSet<string> listedSkills = IndexListedSkills(rawGroups);
+        List<ParsedTurnGroup> keptTurns = BuildKeptTurns(mergedGroups, fileStem, listedSkills);
         if (keptTurns.Count == 0)
         {
             return new CollectedBatch(source, [], [], []);
@@ -135,7 +156,7 @@ public class ClaudeTranscriptMapper : IHarnessMapper
         int[] ordinals = ComputeWindowIndependentOrdinals(keptTurns);
 
         List<CollectedSession> sessions = BuildSessions(keptTurns);
-        List<CollectedRecord> records = BuildRecords(keptTurns, ordinals, sessionToolResults);
+        List<CollectedRecord> records = BuildRecords(keptTurns, ordinals, sessionToolResults, requestShapes);
 
         return new CollectedBatch(source, sessions, records, []);
     }
@@ -144,6 +165,28 @@ public class ClaudeTranscriptMapper : IHarnessMapper
     {
         string stem = Path.GetFileNameWithoutExtension(sourceKey);
         return SafeOptionalText(stem) ?? string.Empty;
+    }
+
+    /// <summary>
+    /// Indexes the tool schemas of every request shape the transcript carries by its hash. Claude Code writes
+    /// a shape once, on the first request that uses it, and later requests name it by hash alone.
+    /// </summary>
+    private static Dictionary<string, IReadOnlyList<ClaudeTranscriptToolSchema>> IndexRequestShapes(
+        List<List<ClaudeTranscriptLine>> rawGroups)
+    {
+        Dictionary<string, IReadOnlyList<ClaudeTranscriptToolSchema>> shapes = new(StringComparer.Ordinal);
+        foreach (List<ClaudeTranscriptLine> group in rawGroups)
+        {
+            foreach (ClaudeTranscriptLine line in group)
+            {
+                if (line.RequestShapeHash is not null && line.RequestShapeTools is { Count: > 0 } tools)
+                {
+                    shapes[line.RequestShapeHash] = tools;
+                }
+            }
+        }
+
+        return shapes;
     }
 
     private static List<List<ClaudeTranscriptLine>> GroupLinesByUsage(string rawText)
@@ -246,6 +289,14 @@ public class ClaudeTranscriptMapper : IHarnessMapper
                 message = ParseMessage(msgEl);
             }
 
+            IReadOnlyList<string>? listedSkills = recordType == "attachment" ? ReadListedSkills(root) : null;
+            string? shapeHash = recordType is "api-request" or "api-request-shape"
+                ? ReadSafeMetadataText(root, "shapeHash")
+                : null;
+            IReadOnlyList<ClaudeTranscriptToolSchema>? shapeTools = recordType == "api-request-shape"
+                ? ReadShapeTools(root)
+                : null;
+
             return new ClaudeTranscriptLine(
                 RecordType: recordType,
                 SessionId: sessionId,
@@ -255,7 +306,123 @@ public class ClaudeTranscriptMapper : IHarnessMapper
                 ExitCode: exitCode,
                 AttributionMcpServer: server,
                 Message: message,
-                RequestId: ReadSafeMetadataText(root, "requestId"));
+                RequestId: ReadSafeMetadataText(root, "requestId"),
+                ListedSkills: listedSkills,
+                RequestShapeHash: shapeHash,
+                RequestShapeTools: shapeTools);
+        }
+    }
+
+    /// <summary>
+    /// The skill names a <c>skill_listing</c> attachment announced: its <c>names</c> array, or, on a transcript
+    /// written before that array existed, the name of every <c>- name: description</c> line of its content. A
+    /// listing entry written as <c>name (alias): description</c> keeps the name alone. Null for any other line.
+    /// </summary>
+    private static IReadOnlyList<string>? ReadListedSkills(JsonElement root)
+    {
+        if (!root.TryGetProperty("attachment", out JsonElement attachment)
+            || attachment.ValueKind != JsonValueKind.Object
+            || !string.Equals(ReadSafeMetadataText(attachment, "type"), "skill_listing", StringComparison.Ordinal))
+        {
+            return null;
+        }
+
+        List<string> names = [];
+        HashSet<string> seen = new(StringComparer.Ordinal);
+        if (attachment.TryGetProperty("names", out JsonElement namesEl) && namesEl.ValueKind == JsonValueKind.Array)
+        {
+            foreach (JsonElement nameEl in namesEl.EnumerateArray())
+            {
+                AddListedSkillName(nameEl.ValueKind == JsonValueKind.String ? nameEl.GetString() : null, names, seen);
+            }
+
+            return names;
+        }
+
+        string? content = ReadStringOnly(attachment, "content");
+        if (content is null)
+        {
+            return names;
+        }
+
+        foreach (string contentLine in content.Split('\n'))
+        {
+            string rawLine = contentLine.TrimStart();
+            if (!rawLine.StartsWith("- ", StringComparison.Ordinal))
+            {
+                continue;
+            }
+
+            // Plugin skills carry a colon inside the name (plugin:skill), so the name ends at the first ": ".
+            string entry = rawLine[2..];
+            int separator = entry.IndexOf(": ", StringComparison.Ordinal);
+            string name = separator >= 0 ? entry[..separator] : entry.TrimEnd(':');
+            int alias = name.IndexOf(" (", StringComparison.Ordinal);
+            AddListedSkillName(alias > 0 ? name[..alias] : name, names, seen);
+        }
+
+        return names;
+    }
+
+    private static void AddListedSkillName(string? candidate, List<string> names, HashSet<string> seen)
+    {
+        string? name = SafeOptionalText(candidate?.Trim());
+        if (name is not null && !name.Contains(' ', StringComparison.Ordinal) && seen.Add(name))
+        {
+            names.Add(name);
+        }
+    }
+
+    /// <summary>The tool schemas of an <c>api-request-shape</c> line (<c>shape.tools</c>), each kept as its JSON text.</summary>
+    private static IReadOnlyList<ClaudeTranscriptToolSchema>? ReadShapeTools(JsonElement root)
+    {
+        if (!root.TryGetProperty("shape", out JsonElement shape)
+            || shape.ValueKind != JsonValueKind.Object
+            || !shape.TryGetProperty("tools", out JsonElement tools)
+            || tools.ValueKind != JsonValueKind.Array)
+        {
+            return null;
+        }
+
+        List<ClaudeTranscriptToolSchema> schemas = [];
+        HashSet<string> seen = new(StringComparer.Ordinal);
+        foreach (JsonElement tool in tools.EnumerateArray())
+        {
+            if (tool.ValueKind != JsonValueKind.Object)
+            {
+                continue;
+            }
+
+            string? name = SafeOptionalText(ReadSafeMetadataText(tool, "name")?.Trim());
+            if (name is not null && seen.Add(name))
+            {
+                schemas.Add(new ClaudeTranscriptToolSchema(name, tool.GetRawText()));
+            }
+        }
+
+        return schemas;
+    }
+
+    /// <summary>The skill a <c>Skill</c> tool call names in its input (<c>{"skill": "name"}</c>), or null.</summary>
+    /// <remarks>An input sent as a JSON string holding that object is read the same way.</remarks>
+    private static string? ReadInvokedSkill(string? rawInputText, bool inputIsString)
+    {
+        _ = inputIsString;
+        if (string.IsNullOrWhiteSpace(rawInputText))
+        {
+            return null;
+        }
+
+        try
+        {
+            using JsonDocument doc = JsonDocument.Parse(rawInputText);
+            return doc.RootElement.ValueKind == JsonValueKind.Object
+                ? SafeOptionalText(ReadSafeMetadataText(doc.RootElement, "skill")?.Trim())
+                : null;
+        }
+        catch (JsonException)
+        {
+            return null;
         }
     }
 
@@ -501,13 +668,63 @@ public class ClaudeTranscriptMapper : IHarnessMapper
         return true;
     }
 
-    private static List<ParsedTurnGroup> BuildKeptTurns(List<MergedLineGroup> mergedGroups, string fileStem)
+    /// <summary>Every skill name a listing anywhere in the transcript announced.</summary>
+    private static HashSet<string> IndexListedSkills(List<List<ClaudeTranscriptLine>> rawGroups)
+    {
+        HashSet<string> names = new(StringComparer.Ordinal);
+        foreach (List<ClaudeTranscriptLine> group in rawGroups)
+        {
+            foreach (ClaudeTranscriptLine line in group)
+            {
+                if (line.ListedSkills is { } listed)
+                {
+                    names.UnionWith(listed);
+                }
+            }
+        }
+
+        return names;
+    }
+
+    /// <summary>
+    /// The skill a user's slash command ran: the <c>&lt;command-name&gt;/name&lt;/command-name&gt;</c> tag Claude Code
+    /// writes into the user message, when the name is a skill the transcript listed. A built-in command such as
+    /// <c>/model</c> is not a listed skill, so it is not an invocation.
+    /// </summary>
+    private static void AddSlashCommandSkills(string text, IReadOnlySet<string> listedSkills, List<string> skillsInvoked)
+    {
+        const string Open = "<command-name>";
+        const string Close = "</command-name>";
+        int start = text.IndexOf(Open, StringComparison.Ordinal);
+        while (start >= 0)
+        {
+            int nameStart = start + Open.Length;
+            int end = text.IndexOf(Close, nameStart, StringComparison.Ordinal);
+            if (end < 0)
+            {
+                return;
+            }
+
+            string name = text[nameStart..end].Trim().TrimStart('/');
+            if (listedSkills.Contains(name))
+            {
+                AddDistinct(skillsInvoked, [name]);
+            }
+
+            start = text.IndexOf(Open, end + Close.Length, StringComparison.Ordinal);
+        }
+    }
+
+    private static List<ParsedTurnGroup> BuildKeptTurns(
+        List<MergedLineGroup> mergedGroups,
+        string fileStem,
+        IReadOnlySet<string> listedSkills)
     {
         List<ParsedTurnGroup> turns = [];
 
         foreach (MergedLineGroup mergedGroup in mergedGroups)
         {
-            ParsedTurnGroup? parsed = ParseTurnGroup(mergedGroup.Lines, mergedGroup.FirstUsage, fileStem);
+            ParsedTurnGroup? parsed = ParseTurnGroup(mergedGroup.Lines, mergedGroup.FirstUsage, fileStem, listedSkills);
             if (parsed is null)
             {
                 continue;
@@ -532,7 +749,8 @@ public class ClaudeTranscriptMapper : IHarnessMapper
     private static ParsedTurnGroup? ParseTurnGroup(
         List<ClaudeTranscriptLine> lines,
         UsageSnapshot? usageSnapshot,
-        string fileStem)
+        string fileStem,
+        IReadOnlySet<string> listedSkills)
     {
         string? discoveredSessionId = null;
         string? nativeRecordId = usageSnapshot?.MessageId;
@@ -544,10 +762,23 @@ public class ClaudeTranscriptMapper : IHarnessMapper
         List<ParsedPart> parts = [];
         List<ParsedToolCall> toolCalls = [];
         List<ParsedToolResult> toolResults = [];
+        List<string> skillsInvoked = [];
+        List<string> skillsListed = [];
+        string? requestShapeHash = null;
 
         foreach (ClaudeTranscriptLine line in lines)
         {
             discoveredSessionId ??= line.SessionId;
+            if (line.ListedSkills is { Count: > 0 } listed)
+            {
+                AddDistinct(skillsListed, listed);
+            }
+
+            if (line.RequestShapeHash is not null)
+            {
+                requestShapeHash = line.RequestShapeHash;
+            }
+
             sessionTitle ??= line.SessionTitle;
             if (string.Equals(line.Message?.Role, "assistant", StringComparison.Ordinal))
             {
@@ -589,6 +820,8 @@ public class ClaudeTranscriptMapper : IHarnessMapper
                         {
                             correctionRule = check.Rule;
                         }
+
+                        AddSlashCommandSkills(text, listedSkills, skillsInvoked);
                     }
 
                     parts.Add(new ParsedPart(ContentBucket.ConversationHistory, text, server, role));
@@ -614,6 +847,8 @@ public class ClaudeTranscriptMapper : IHarnessMapper
                         {
                             correctionRule = check.Rule;
                         }
+
+                        AddSlashCommandSkills(text, listedSkills, skillsInvoked);
                     }
 
                     parts.Add(new ParsedPart(ContentBucket.ConversationHistory, text, server, role));
@@ -652,6 +887,12 @@ public class ClaudeTranscriptMapper : IHarnessMapper
                         continue;
                     }
 
+                    if (string.Equals(name, SkillToolName, StringComparison.Ordinal)
+                        && ReadInvokedSkill(block.RawInputText, block.InputIsString) is { } invokedSkill)
+                    {
+                        AddDistinct(skillsInvoked, [invokedSkill]);
+                    }
+
                     toolCalls.Add(new ParsedToolCall(
                         Id: id,
                         Name: string.IsNullOrWhiteSpace(name) ? UnknownModelFallback : name,
@@ -666,6 +907,7 @@ public class ClaudeTranscriptMapper : IHarnessMapper
             && discoveredSessionId is null
             && toolCalls.Count == 0
             && toolResults.Count == 0
+            && skillsListed.Count == 0
             && usageSnapshot is null)
         {
             return null;
@@ -688,7 +930,21 @@ public class ClaudeTranscriptMapper : IHarnessMapper
             CorrectionRule: correctionRule,
             Parts: parts,
             ToolCalls: toolCalls,
-            ToolResults: toolResults);
+            ToolResults: toolResults,
+            SkillsInvoked: skillsInvoked,
+            SkillsListed: skillsListed,
+            RequestShapeHash: requestShapeHash);
+    }
+
+    private static void AddDistinct(List<string> target, IEnumerable<string> values)
+    {
+        foreach (string value in values)
+        {
+            if (!target.Contains(value, StringComparer.Ordinal))
+            {
+                target.Add(value);
+            }
+        }
     }
 
     private static bool HasNonZeroUsage(ClaudeTranscriptUsage? usage) =>
@@ -700,16 +956,25 @@ public class ClaudeTranscriptMapper : IHarnessMapper
             || (usage.ReasoningTokens ?? 0L) != 0);
 
     private static bool HasTurnContent(ParsedTurnGroup turn) =>
-        turn.Parts.Count > 0 || turn.ToolCalls.Count > 0 || turn.ToolResults.Count > 0;
+        turn.Parts.Count > 0 || turn.ToolCalls.Count > 0 || turn.ToolResults.Count > 0 || turn.SkillsListed.Count > 0;
 
-    private static ParsedTurnGroup MergeTailTurn(ParsedTurnGroup head, ParsedTurnGroup tail) =>
-        head with
+    private static ParsedTurnGroup MergeTailTurn(ParsedTurnGroup head, ParsedTurnGroup tail)
+    {
+        List<string> skillsInvoked = [.. head.SkillsInvoked];
+        AddDistinct(skillsInvoked, tail.SkillsInvoked);
+        List<string> skillsListed = [.. head.SkillsListed];
+        AddDistinct(skillsListed, tail.SkillsListed);
+        return head with
         {
             Parts = [.. head.Parts, .. tail.Parts],
             ToolCalls = [.. head.ToolCalls, .. tail.ToolCalls],
             ToolResults = [.. head.ToolResults, .. tail.ToolResults],
             SessionTitle = head.SessionTitle ?? tail.SessionTitle,
+            SkillsInvoked = skillsInvoked,
+            SkillsListed = skillsListed,
+            RequestShapeHash = head.RequestShapeHash ?? tail.RequestShapeHash,
         };
+    }
 
     private static Dictionary<string, ParsedToolResult> IndexToolResults(IReadOnlyList<ParsedTurnGroup> turns)
     {
@@ -786,15 +1051,18 @@ public class ClaudeTranscriptMapper : IHarnessMapper
     private List<CollectedRecord> BuildRecords(
         IReadOnlyList<ParsedTurnGroup> turns,
         int[] ordinals,
-        IReadOnlyDictionary<string, ParsedToolResult> sessionToolResults)
+        IReadOnlyDictionary<string, ParsedToolResult> sessionToolResults,
+        IReadOnlyDictionary<string, IReadOnlyList<ClaudeTranscriptToolSchema>> requestShapes)
     {
         List<CollectedRecord> records = [];
         HashSet<string> seenRecordIds = new(StringComparer.Ordinal);
+        Dictionary<(string ShapeHash, string? Model), IReadOnlyList<CollectedToolDefinition>> measuredShapes = [];
 
         for (int i = 0; i < turns.Count; i++)
         {
             ParsedTurnGroup turn = turns[i];
-            CollectedRecord parent = BuildParentRecord(turn, ordinals[i]);
+            IReadOnlyList<CollectedToolDefinition> toolDefinitions = ToolDefinitionsOf(turn, requestShapes, measuredShapes);
+            CollectedRecord parent = BuildParentRecord(turn, ordinals[i], toolDefinitions);
             if (!seenRecordIds.Add(parent.RecordId))
             {
                 continue;
@@ -829,7 +1097,50 @@ public class ClaudeTranscriptMapper : IHarnessMapper
         return records;
     }
 
-    private CollectedRecord BuildParentRecord(ParsedTurnGroup turn, int ordinal)
+    /// <summary>
+    /// The tool schemas the turn's request advertised, read from the request shape its <c>api-request</c> line
+    /// names. Every schema is measured from its own JSON text with the turn model's tokenizer, once per shape
+    /// and model. Empty when the turn names no shape or the transcript does not carry the shape's tools.
+    /// </summary>
+    private static IReadOnlyList<CollectedToolDefinition> ToolDefinitionsOf(
+        ParsedTurnGroup turn,
+        IReadOnlyDictionary<string, IReadOnlyList<ClaudeTranscriptToolSchema>> requestShapes,
+        Dictionary<(string ShapeHash, string? Model), IReadOnlyList<CollectedToolDefinition>> measuredShapes)
+    {
+        if (turn.RequestShapeHash is null
+            || !requestShapes.TryGetValue(turn.RequestShapeHash, out IReadOnlyList<ClaudeTranscriptToolSchema>? schemas))
+        {
+            return [];
+        }
+
+        (string, string?) key = (turn.RequestShapeHash, turn.Model);
+        if (measuredShapes.TryGetValue(key, out IReadOnlyList<CollectedToolDefinition>? cached))
+        {
+            return cached;
+        }
+
+        List<CollectedToolDefinition> definitions = new(schemas.Count);
+        foreach (ClaudeTranscriptToolSchema schema in schemas)
+        {
+            ToolContentMeasurement measurement = ToolContentMeasurer.Measure(schema.SchemaText, model: turn.Model);
+            (string? server, _) = ParseMcpToolNames(schema.Name);
+            definitions.Add(new CollectedToolDefinition(
+                Position: definitions.Count,
+                ToolName: schema.Name,
+                Server: server,
+                SchemaTokens: measurement.MeasuredTokens,
+                Tokenizer: measurement.MeasuredTokenizer,
+                TokenizerIsModelOwn: measurement.MeasuredTokenizerIsModelOwn));
+        }
+
+        measuredShapes[key] = definitions;
+        return definitions;
+    }
+
+    private CollectedRecord BuildParentRecord(
+        ParsedTurnGroup turn,
+        int ordinal,
+        IReadOnlyList<CollectedToolDefinition> toolDefinitions)
     {
         string nativeRecordId = ResolveNativeRecordId(turn, ordinal);
         string spanId = $"{CanonSynth.SynthSpanPrefix}{HarnessId}:{turn.SessionId}:{nativeRecordId}";
@@ -867,9 +1178,9 @@ public class ClaudeTranscriptMapper : IHarnessMapper
             Parts: parts,
             Tool: null,
             Agent: null,
-            SkillsInvoked: [],
+            SkillsInvoked: turn.SkillsInvoked,
             AgentInstanceId: null,
-            ToolDefinitions: [],
+            ToolDefinitions: toolDefinitions,
             Signals: new CollectedRecordSignals(
                 ErrorMessage: null,
                 EditFailures: null,
@@ -878,7 +1189,8 @@ public class ClaudeTranscriptMapper : IHarnessMapper
             ReportedInputTokens: reportedInput,
             ReportedOutputTokens: reportedOutput,
             ResponseId: OtlpJoinIds.WithinBound(string.IsNullOrEmpty(turn.NativeRecordId) ? null : turn.NativeRecordId),
-            RequestId: OtlpJoinIds.WithinBound(turn.RequestId));
+            RequestId: OtlpJoinIds.WithinBound(turn.RequestId),
+            SkillsListed: turn.SkillsListed);
     }
 
     private CollectedRecord BuildToolRecord(
@@ -1144,6 +1456,12 @@ public class ClaudeTranscriptMapper : IHarnessMapper
                 {
                     if (item.ValueKind == JsonValueKind.Object)
                     {
+                        // An image or document block is not text: it is dropped, never kept as its JSON.
+                        if (IsNonTextBlock(item))
+                        {
+                            continue;
+                        }
+
                         items.Add(ExtractPropertyAsContentText(item, "text") ?? item.GetRawText());
                     }
                     else
@@ -1152,12 +1470,14 @@ public class ClaudeTranscriptMapper : IHarnessMapper
                     }
                 }
 
-                return string.Join('\n', items);
+                return items.Count > 0 ? string.Join('\n', items) : null;
             }
 
             if (rawContent.ValueKind == JsonValueKind.Object)
             {
-                return ExtractPropertyAsContentText(rawContent, "text") ?? rawContent.GetRawText();
+                return IsNonTextBlock(rawContent)
+                    ? null
+                    : ExtractPropertyAsContentText(rawContent, "text") ?? rawContent.GetRawText();
             }
 
             return ExtractRawContentText(rawContent);
@@ -1171,6 +1491,10 @@ public class ClaudeTranscriptMapper : IHarnessMapper
 
         return null;
     }
+
+    /// <summary>Whether a tool-result content block carries an image or a document rather than text.</summary>
+    private static bool IsNonTextBlock(JsonElement item) =>
+        ReadSafeMetadataText(item, "type") is "image" or "document";
 
     private static string? ExtractPropertyAsContentText(JsonElement obj, string key)
     {
@@ -1293,5 +1617,8 @@ public class ClaudeTranscriptMapper : IHarnessMapper
         string? CorrectionRule,
         IReadOnlyList<ParsedPart> Parts,
         IReadOnlyList<ParsedToolCall> ToolCalls,
-        IReadOnlyList<ParsedToolResult> ToolResults);
+        IReadOnlyList<ParsedToolResult> ToolResults,
+        IReadOnlyList<string> SkillsInvoked,
+        IReadOnlyList<string> SkillsListed,
+        string? RequestShapeHash);
 }

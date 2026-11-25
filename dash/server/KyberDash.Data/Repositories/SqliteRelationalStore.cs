@@ -25,19 +25,22 @@ public partial class SqliteRelationalStore : BaseSqliteRepository, IRelationalSt
 {
     /// <summary>Current normalized relational schema version stamped in <c>store_state</c>.</summary>
     /// <remarks>
-    /// Version 29 adds <c>session_context_turn_tokenizer</c> and <c>tool_definition_tokenizer</c>,
-    /// the label children of the figures they name. The rebuild-and-re-ingest pattern applies, so
-    /// no measured row can survive the bump without its label.
+    /// Version 30 adds <c>record_skill_listing</c>, the skills a harness listed to the agent on a
+    /// record. The rebuild-and-re-ingest pattern applies, so every source is read again and its
+    /// listings, invoked skills and tool schemas are stored by the current mappers.
     /// </remarks>
-    public const int SchemaVersion = 29;
+    public const int SchemaVersion = 30;
 
     /// <summary>Current detector generation stamped in <c>store_state</c>.</summary>
     /// <remarks>
     /// Generation 6: records read back carry their source name, so the projector's source rules
     /// (the Droid plugin/file split and the file-source twin collapses) apply again, and every
     /// projection built under generation 5's source-less hydration is rebuilt.
+    /// Generation 7: records read back carry their stored skill listing, and hydration exposes the
+    /// listing and the stored skill invocations to the inactive-skill-reference detector, so every
+    /// Claude Code session's findings are rebuilt.
     /// </remarks>
-    public const int DetectorVersion = 6;
+    public const int DetectorVersion = 7;
 
     /// <summary>Maximum retained WAL journal size in bytes after checkpoint (32 MiB).</summary>
     public const int WalSizeLimitBytes = 32 * 1024 * 1024;
@@ -989,6 +992,15 @@ public partial class SqliteRelationalStore : BaseSqliteRepository, IRelationalSt
             {
                 string skillExpr = GuardedTextExpr("record_skill_invocation", "skill_name", skillName);
                 sql.Append(CultureInfo.InvariantCulture, $"INSERT INTO record_skill_invocation (span_id, skill_name) VALUES ({spanIdExpr}, {skillExpr});\n");
+            }
+        }
+
+        if (record.SkillsListed is not null)
+        {
+            for (int position = 0; position < record.SkillsListed.Count; position++)
+            {
+                string skillExpr = GuardedTextExpr("record_skill_listing", "skill_name", record.SkillsListed[position]);
+                sql.Append(CultureInfo.InvariantCulture, $"INSERT INTO record_skill_listing (span_id, position, skill_name) VALUES ({spanIdExpr}, {IntSql(position)}, {skillExpr});\n");
             }
         }
 

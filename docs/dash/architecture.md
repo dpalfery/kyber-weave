@@ -191,7 +191,7 @@ which is what the source rules in `CanonSessionProjectorEngine` key on: `SplitDr
 [Factory source-precedence rule](#the-factory-source-precedence-rule)), `IsFileSource`, the twin-turn collapse
 (`DedupeTwinTurns`, `CollapseCluster`) and `CollapseOverlapFileJoins` (Cursor). These rules are documented for every
 harness; they were silently inert for every session read back from the relational store until the source was restored.
-That change is why `SqliteRelationalStore.DetectorVersion` is `6`.
+That change is why `SqliteRelationalStore.DetectorVersion` became `6`; generation `7` is described under [Skills view contract](#skills-view-contract).
 
 ### Twin turns join on a vendor id, or on the session
 
@@ -1253,11 +1253,12 @@ view and catalog tests read it directly. `SqliteRelationalStore`
 (`dash/server/KyberDash.Data/Repositories/SqliteRelationalStore*.cs`) implements all four store
 seams — `IRelationalStoreWriter`, `IRelationalStoreReader`, `IProjectionStore`,
 `IOperationalStore` — against `canon.db` (`CanonDbPath.Resolve`) through bounded `ProcessRunner`
-calls to the system `sqlite3` CLI, stamped at `SchemaVersion = 29`. The versions since 25 added the `total` token
+calls to the system `sqlite3` CLI, stamped at `SchemaVersion = 30`. The versions since 25 added the `total` token
 class (26, a session figure a harness reports with no input/output split), the `record_response_id` and `record_request_id`
-children (27, the ids the twin join reads), `content_part_withheld_tokenizer` (28) and `session_context_turn_tokenizer` plus
-`tool_definition_tokenizer` (29, the tokenizer label beside each text-derived count). Each bump follows the rebuild-and-re-ingest
-pattern, so no stored figure survives without the label or id it now needs.
+children (27, the ids the twin join reads), `content_part_withheld_tokenizer` (28), `session_context_turn_tokenizer` plus
+`tool_definition_tokenizer` (29, the tokenizer label beside each text-derived count) and `record_skill_listing` (30, the
+skill names a harness listed to the agent on a record). Each bump follows the rebuild-and-re-ingest pattern, so no stored
+figure survives without the label or id it now needs, and every source is mapped again by the current mappers.
 
 ```mermaid
 flowchart LR
@@ -1497,11 +1498,14 @@ The checkable rules that keep a new read in this shape are
 Whole-store reads exist, are off the request path, and are named so they cannot be mistaken for a
 page read:
 
-- `AllSessionRecordsForMaintenance()` — every stored record and child row in one query. Reserved
-  for `kyber build` (`CanonProjectionService.ProjectAll`), a wildcard projection rebuild, and
-  doctor.
+- `AllSessionRecordsForMaintenance()` — every stored record and child row in one query. No production
+  code calls it any more; the store parity tests still use it. The projector stopped using it because,
+  on a real store with every Claude Code transcript imported, the query's output passed the 2^31
+  characters a .NET string can hold, and every maintenance pass failed.
 - `SessionRecordsForRebuild(sessionKey)` — full records, content included, for the one session a
   projection pass rebuilds (token counting, timeline, findings and previews need the part text).
+  Every pass, maintenance included, reads each session this way when it builds it, so only one
+  session's records are in memory at a time.
 - `SessionAttributions()` — distinct `(session key, harness)` pairs with record counts from one
   grouped query over `record` joined to `record_session_link`. It feeds the pass's identities,
   skip decisions and per-session record budgets without materializing a record. Its ordering
@@ -1528,7 +1532,7 @@ flowchart LR
     ATTRIB --> BIG["dirty session over the budget<br/>(default 2,000 records)"]
     BIG --> DEFER["deferred: left dirty,<br/>reported in deferredSessions"]
     JOBS["maintenance tick, kyber build,<br/>refresh, clean"] --> FULL["ProjectIncremental()<br/>never defers"]
-    FULL --> ALL["AllSessionRecordsForMaintenance()"]
+    FULL --> ALL["SessionRecordsForRebuild(key)<br/>one session at a time"]
     DEFER --> JOBS
 ```
 
@@ -1768,7 +1772,7 @@ There is no `canon.db` schema change. The session payload is a JSON blob that is
 projection, so a session row stored before this change has no `skills` key and renders
 "not yet projected" until it is rebuilt ([runbook §2g](runbook.md#2g-skills-view-rebuild-and-capture-fixtures)).
 
-In the C# engine, `CanonIngestPipeline.ToCollectedRecord` (`dash/server/KyberDash.Application/CanonIngestPipeline.cs`) and `OtlpLogMapper.ToCollectedRecord` (`dash/server/KyberDash.Data/Harnesses/Otlp/OtlpLogMapper.cs`) populate `SkillsInvoked` from `gen_ai.skill.name`, `skill.name`, `skill_name`, `kyber.skills.invoked`, and `Skill`/`skill` tool call arguments. `KyberBridgeEngine.BuildSkillsPayload` projects `{ measurable: true, rows }` with `listed` marked `{ availability: 'not_measurable', reason }` when invocations exist without a listing export, or `{ availability: 'not_measurable', reason }` when neither side is recorded.
+In the C# engine, `CanonIngestPipeline.ToCollectedRecord` (`dash/server/KyberDash.Application/CanonIngestPipeline.cs`) and `OtlpLogMapper.ToCollectedRecord` (`dash/server/KyberDash.Data/Harnesses/Otlp/OtlpLogMapper.cs`) populate `SkillsInvoked` from `gen_ai.skill.name`, `skill.name`, `skill_name`, `kyber.skills.invoked`, and `Skill`/`skill` tool call arguments. The Claude Code transcript mapper (`ClaudeTranscriptMapper`) fills `SkillsInvoked` on the turn record from each `Skill` tool call's `input.skill` and from each user slash command (`<command-name>/name</command-name>`) that names a skill the transcript listed, and `SkillsListed` from each `skill_listing` attachment (its `names` array, or the `- name: description` lines of its `content` on older transcripts), stored as names only in `record_skill_listing` (schema 30); the listing's descriptions are not stored. A turn carries the listing that arrived before its model call. `KyberBridgeEngine.BuildSkillsPayload` projects `{ measurable: true, rows }`: one row per invoked skill in invocation order, then one per listed skill never invoked, in listing order. When the session has a stored listing, each row's `listed` is a boolean and `turns_listed` names the projected turns that carried it; without one, `listed` is `{ availability: 'not_measurable', reason }`. When neither side is recorded, the whole block is `{ availability: 'not_measurable', reason }`. The listing's `description` and `derived_tokens` are not served by the C# route.
 
 **Measurability.** Listing and invocation are measured separately, and an unmeasured side is
 never reported as zero. It is declared in one of two ways: a key is absent (the summary's
@@ -1828,18 +1832,32 @@ type and the views render without it. The narrow turn-content route never walks 
   aggregate from `SessionSkillFigures` (the way the tools section serves its own) and forwarding
   it through `SessionSkillsSection` is the named follow-up.
 
-**Analysis inputs.** The `skillUtilisation` signal and the `inactive-skill-reference` finding take
-their listed and invoked sets from `CanonSynth` / `CanonSessionProjectorEngine` (see [Pure Signals and Findings Engine](#pure-signals-and-findings-engine-canonfindings)).
+**Analysis inputs.** The `inactive-skill-reference` finding takes its listed and invoked sets from
+the raw attributes `kyber.skills.listed` and `kyber.skills.invoked` on the records it is given (see [Pure Signals and Findings Engine](#pure-signals-and-findings-engine-canonfindings)).
+On the relational path the projector rebuilds a session from `SessionRecordsForRebuild`, whose records carry
+`SkillsInvoked` (`record_skill_invocation`) and `SkillsListed` (`record_skill_listing`, in listing position order;
+`null` when the record has no listing rows, since the store cannot tell an empty listing from none).
+`CanonRecordHydration.Hydrate` writes `kyber.skills.invoked` as the distinct invoked names and `kyber.skills.listed`
+as `{ skills: [{ name }] }`, each only when the record carries at least one name. The listing has no `isInitial`
+and no descriptions, because the store keeps neither; the detector reads `isInitial` only to reject a non-boolean
+value and unions every listing it sees. When `DedupeTwinTurns` keeps an OTLP turn over the transcript turn that
+carried the listing, the kept turn takes the absorbed turn's listing when it has none of its own and the union of
+both turns' invoked names. An absorbed turn that carries skill attributes hands them over even when it has no
+content left (after the content purge), so a Claude Code session with both sources still raises the finding. The content-free and timeline reads do not carry
+`SkillsListed`; nothing on those paths runs the detector.
+The `skillUtilisation` scorecard dimension is not fed by these inputs: `CanonRollupsEngine.BuildScorecardDimensions`
+reports it as not measurable for every harness, and making it measurable needs a rollup metric that does not exist yet.
 On a partly covered Antigravity session the invoked set is the names read on the covered turns,
 since an uncovered turn carries no key. The finding does not state that coverage.
 Finding detail follows ADR 0013 D15/D16: the wording is "listed with N recorded turns and 0
 invocations", with no deletion or waste claim.
 
-**Detector version.** `SqliteRelationalStore.DetectorVersion` is `6` (`dash/server/KyberDash.Data/Repositories/SqliteRelationalStore.cs`). Stores stamped with
-an older generation (for example `4` or `5`) report their findings as outdated; `CanonSessionProjectorEngine`
-re-projects them to the current generation on maintenance/build. Generation 6 is the one that restored record source identity
-(see [Records keep their source](#records-keep-their-source)): every projection built under generation 5's source-less
-reads is rebuilt on the first start or tick after the upgrade, so no stale projection survives.
+**Detector version.** `SqliteRelationalStore.DetectorVersion` is `7` (`dash/server/KyberDash.Data/Repositories/SqliteRelationalStore.cs`). Stores stamped with
+an older generation (for example `5` or `6`) report their findings as outdated; `CanonSessionProjectorEngine`
+re-projects them to the current generation on maintenance/build. Generation 6 restored record source identity
+(see [Records keep their source](#records-keep-their-source)); generation 7 hydrates the stored skill listing and
+invocations into the detector's inputs (see **Analysis inputs** above). Every projection built under an older
+generation is rebuilt on the first start or tick after the upgrade, so no stale projection survives.
 
 **Web.** The Sessions page section **4 · Skills** renders one page of skill rows with the
 shared pager (`SessionSkillsSection`, one query per the
@@ -1862,14 +1880,16 @@ dashboard session.
 
 A **KW skill** is on-demand Kyber-Weave guidance an agent reads by calling the kw-docs `load_skill` tool
 ([the tool](../docgraph/mcp-runbook.md#load_skillname-projectpath--null)). It is not a harness skill, so it never
-enters the Skills view above, which is built from harness `Skill` tool calls alone
+enters the Skills view above, which is built from harness `Skill` tool calls and listings alone
 (`SkillExtraction.ExtractInvoked`). KyberDash records a load from the tool calls it already stores, with no schema
 change and the JSON-withholding rule untouched ([ADR 0093](../adr/0093-kw-skills-load-on-demand-through-kw-docs.md)).
 
 - **What is a load.** A `tool_call` whose `tool_call_mcp.server_name`, normalized (lower case, `_` to `-`), is
-  `kw-docs` and whose `server_tool_name` is `load_skill`; or, where the harness does not split the name, whose
-  `tool_name` is one of `mcp__kw-docs__load_skill`, `mcp__kw_docs__load_skill`, `kw-docs_load_skill`,
-  `kw-docs__load_skill` or `kw-docs/load_skill`. Another server's `load_skill` is not a load. A harness that
+  `kw-docs` or `kyber-weave` (the server's retired key, which machines installed before the rename still register)
+  and whose `server_tool_name` is `load_skill`; or, where the harness does not split the name, whose `tool_name` is
+  one of `mcp__kw-docs__load_skill`, `mcp__kw_docs__load_skill`, `kw-docs_load_skill`, `kw-docs__load_skill`,
+  `kw-docs/load_skill`, or the `mcp__<server>__load_skill` form of the retired key in its hyphen or underscore
+  spelling. Another server's `load_skill` is not a load. A harness that
   records the call under a spelling not listed here is under-counted; nothing else is affected.
 - **Which skill.** The input is never read: a JSON tool input is stored as size and fingerprint only
   (`STORE_JSON_TEXT_REFUSED` guards the text column), but the reply is plain text and is kept. The skill is the first

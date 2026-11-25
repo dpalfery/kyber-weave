@@ -675,6 +675,14 @@ public static partial class RelationalSchemaCatalog
             ForeignKeys: [Fk("span_id", "record", "span_id")],
             Indexes: []));
 
+        tables.Add(new TableDefinition(
+            Name: "record_skill_listing",
+            Columns: [NonEmptyText("span_id"), PositionCol(), NonEmptyText("skill_name")],
+            PrimaryKeyColumns: ["span_id", "position"],
+            ForeignKeys: [Fk("span_id", "record", "span_id")],
+            Indexes: [],
+            IsRepeatedItem: true));
+
         tables.Add(RecordSingleText(
             "record_agent_instance",
             "agent_instance_id",
