@@ -134,13 +134,15 @@ describe('Scorecard Component (Decision D3 & D9 Compliance)', () => {
     expect(html).not.toContain('68%')
   })
 
-  it('Decision D9 compliance: Cost is displayed only as secondary derived metric', () => {
+  it('Decision D9 compliance: Cost is displayed only as secondary calculated metric', () => {
     const html = renderToStaticMarkup(<Scorecard data={mockScorecardData} />)
 
-    // Must contain secondary cost indicator with derived marker
+    // Must contain secondary cost indicator with its calculated basis
     expect(html).toContain('secondary-cost')
     expect(html).toContain('$0.42')
-    expect(html).toContain('(derived)')
+    expect(html).toContain('(calculated from published rates)')
+    expect(html).not.toContain('(derived)')
+    expect(html).not.toMatch(/derived estimate/i)
 
     // Cost must not be a primary header or primary value
     expect(html).not.toMatch(/<h[1-2][^>]*>\$0\.42<\/h[1-2]>/)

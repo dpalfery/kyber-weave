@@ -127,6 +127,15 @@ export function formatDimensionDisplay(dim?: ScorecardDimensionValue): {
 }
 
 /**
+ * The visible wording for a cost basis. A price computed from a published rate
+ * table is a calculation, so it is named as one (D15); a harness-reported cost
+ * says so. The dashboard never calls either an estimate.
+ */
+export function costBasisText(basis?: string): string {
+  return basis && /harness/i.test(basis) ? 'reported by the harness' : 'calculated from published rates'
+}
+
+/**
  * Scorecard Component:
  *
  * Implements Decision D3 & Decision D9:
@@ -183,12 +192,12 @@ export function Scorecard({
           </div>
         </div>
 
-        {/* Decision D9: Secondary derived cost (muted/subordinate indicator) */}
+        {/* Decision D9: Secondary cost, labelled with its calculated basis (D15) */}
         {secondaryCost?.costUsd !== undefined && secondaryCost.costUsd !== null && (
           <div
             className="flex items-center gap-density-inline rounded-chrome border border-border/60 bg-interactive-secondary/40 px-chrome-sm py-chrome-xs text-right text-density-xs text-muted-foreground"
             data-testid="secondary-cost"
-            title={`Cost: ${usd(secondaryCost.costUsd)} (${secondaryCost.basis || 'derived estimate'})`}
+            title={`Cost: ${usd(secondaryCost.costUsd)} (${costBasisText(secondaryCost.basis)})`}
           >
             <span className="text-density-2xs uppercase tracking-density text-tertiary-foreground">
               Secondary Cost:
@@ -197,7 +206,7 @@ export function Scorecard({
               {usd(secondaryCost.costUsd)}
             </span>
             <span className="text-density-2xs italic text-tertiary-foreground/80">
-              (derived)
+              ({costBasisText(secondaryCost.basis)})
             </span>
             {/* Review re-review #2 (Kilo 4): a partial total is marked in
                 visible text, not a hover-only title — and the gap may be

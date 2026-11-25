@@ -317,6 +317,79 @@ describe('session section fetchers', () => {
     await expect(fetchKyberSessionCharts('sess-1')).rejects.toThrow(/malformed/i)
   })
 
+  it('keeps the tokenizer label beside the session context and each labelled turn', async () => {
+    const labelled = {
+      ...CHARTS_BODY,
+      context: {
+        ...CHARTS_BODY.context,
+        tokenizer: 'o200k_base',
+        tokenizers: [{ name: 'o200k_base', isModelOwn: false }],
+        tokenizerIsModelOwn: false,
+        turns: [
+          {
+            index: 1,
+            buckets: { system_prompt: 10 },
+            tokenizer: 'o200k_base',
+            tokenizers: [{ name: 'o200k_base', isModelOwn: false }],
+            tokenizerIsModelOwn: false,
+          },
+        ],
+      },
+    }
+    stubFetch(200, labelled)
+
+    const charts = await fetchKyberSessionCharts('sess-1')
+
+    expect(charts.context).toMatchObject({
+      tokenizer: 'o200k_base',
+      tokenizers: [{ name: 'o200k_base', isModelOwn: false }],
+      tokenizerIsModelOwn: false,
+    })
+    if (charts.context.measurable) {
+      expect(charts.context.turns[0]).toMatchObject({ tokenizerIsModelOwn: false })
+    }
+  })
+
+  it('rejects a context figure whose tokenizer label is incomplete', async () => {
+    stubFetch(200, {
+      ...CHARTS_BODY,
+      context: { ...CHARTS_BODY.context, tokenizer: 'o200k_base' },
+    })
+    await expect(fetchKyberSessionCharts('sess-1')).rejects.toThrow(/incomplete tokenizer label/i)
+  })
+
+  it('rejects a context turn whose tokenizer list is empty', async () => {
+    stubFetch(200, {
+      ...CHARTS_BODY,
+      context: {
+        ...CHARTS_BODY.context,
+        turns: [
+          {
+            index: 1,
+            buckets: { system_prompt: 10 },
+            tokenizer: 'mixed',
+            tokenizers: [],
+            tokenizerIsModelOwn: null,
+          },
+        ],
+      },
+    })
+    await expect(fetchKyberSessionCharts('sess-1')).rejects.toThrow(/tokenizers is not a non-empty array/i)
+  })
+
+  it('rejects a context figure whose mixed label names one tokenizer', async () => {
+    stubFetch(200, {
+      ...CHARTS_BODY,
+      context: {
+        ...CHARTS_BODY.context,
+        tokenizer: 'mixed',
+        tokenizers: [{ name: 'o200k_base', isModelOwn: false }],
+        tokenizerIsModelOwn: null,
+      },
+    })
+    await expect(fetchKyberSessionCharts('sess-1')).rejects.toThrow(/disagrees with its list/i)
+  })
+
   it('GETs the tools route with the page and returns the page and its aggregate', async () => {
     const calls = stubFetch(200, TOOLS_BODY)
 

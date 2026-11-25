@@ -1,5 +1,6 @@
 import { useState, useMemo } from 'react'
-import { cn, fmtTokens } from '../../lib/utils.js'
+import { cn } from '../../lib/utils.js'
+import { fmtMeasuredTokens } from '../../lib/kyberApi.js'
 import { Card } from '../ui/card.js'
 import type { KyberFinding, KyberEvidenceLink } from '../../lib/kyberApi.js'
 
@@ -55,7 +56,7 @@ export function measurementClassOf(finding: KyberFinding): string {
 
 /**
  * Computes or retrieves rank score for ordering findings.
- * Ranking is estimated recoverable waste * confidence multiplier.
+ * Ranking is recoverable waste * confidence multiplier.
  * Deterministic findings beat larger inferred findings.
  */
 export function getFindingRankScore(finding: KyberFinding): number {
@@ -188,25 +189,17 @@ export function FindingCard({
           </p>
         </div>
 
-        {/* Estimated Waste with Error Bar */}
+        {/* Recoverable waste, with no invented error bar (D15). */}
         <div className="shrink-0 text-right">
           <div className="text-density-2xs uppercase tracking-density text-tertiary-foreground">
-            Estimated Waste
+            Recoverable Waste
           </div>
           <div
             className="font-display text-density-lg font-semibold text-amber-500 dark:text-amber-400 tabular-nums"
             data-testid="finding-waste-tokens"
           >
-            {fmtTokens(finding.estimatedWasteTokens)}
+            {fmtMeasuredTokens(finding.estimatedWasteTokens)}
           </div>
-          {finding.errorBar && (
-            <div
-              className="text-density-2xs font-mono text-tertiary-foreground tabular-nums"
-              title="Calibrated confidence error bar"
-            >
-              [{fmtTokens(finding.errorBar.lower)} – {fmtTokens(finding.errorBar.upper)}]
-            </div>
-          )}
         </div>
       </div>
 
@@ -329,7 +322,7 @@ export function FindingCard({
 export function FindingList({
   findings = [],
   title = 'Highest-Leverage Diagnostic Findings',
-  description = 'Ranked by estimated recoverable waste, outcome risk, and confidence. Deterministic evidence outranks inferred claims.',
+  description = 'Ranked by recoverable waste, outcome risk, and confidence. Deterministic evidence outranks inferred claims.',
   maxItems,
   onSelectFinding,
   onSelectTurn,

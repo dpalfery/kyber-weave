@@ -3,6 +3,7 @@ import { useEffect, useMemo, useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { formatDuration } from '../lib/labels.js'
 import { cn, usd, fmtNum, fmtTokens } from '../lib/utils.js'
+import { tokenizerLabel, type KyberTokenizerFigure } from '../lib/kyberApi.js'
 import { fetchKyberSessionContent, fetchKyberSessionTurn, fetchSpanAttributes, fetchTurnContentFull } from '../lib/kyberApi.js'
 import type {
   KyberMessageLike,
@@ -2214,7 +2215,7 @@ function SpanInspector({ node }: { node: SessionTimelineNode }) {
  * turn's own context by `TurnBucketPanel` (D9), or read off a legacy payload
  * record by `InspectorContent`'s shape dispatch.
  */
-interface ContextBucketItem {
+interface ContextBucketItem extends KyberTokenizerFigure {
   bucket?: string
   key?: string
   label?: string
@@ -2230,12 +2231,15 @@ interface ContextBucketItem {
  */
 function ContextBucketInspector({
   item,
+  model,
 }: {
   item: ContextBucketItem
+  model?: string | null
 }) {
-  const tokens = item.value ?? item.tokens ?? 0
+  const tokens = item.value ?? item.tokens
   const total = item.total ?? 0
-  const pct = total > 0 ? ((tokens / total) * 100).toFixed(1) + '%' : '—'
+  const pct = tokens != null && total > 0 ? ((tokens / total) * 100).toFixed(1) + '%' : 'not measured'
+  const tokenizer = tokenizerLabel(item, model)
 
   return (
     <div className="space-y-4" data-testid="context-bucket-inspector">
@@ -2244,9 +2248,19 @@ function ContextBucketInspector({
           {item.label ?? item.key ?? 'Context Bucket'}
         </h4>
         <div className="flex justify-between py-0.5">
-          <span className="text-muted-foreground">Tokens (approx.):</span>
-          <span className="font-mono font-semibold text-foreground">{fmtTokens(tokens)}</span>
+          <span className="text-muted-foreground">Tokens:</span>
+          <span className="font-mono font-semibold text-foreground">
+            {tokens == null ? 'not measured' : fmtTokens(tokens)}
+          </span>
         </div>
+        {tokenizer ? (
+          <div className="flex justify-between gap-3 py-0.5">
+            <span className="text-muted-foreground">Tokenized with:</span>
+            <span data-testid="context-bucket-tokenizer" className="text-right font-mono text-tertiary-foreground">
+              {tokenizer}
+            </span>
+          </div>
+        ) : null}
         <div className="flex justify-between py-0.5">
           <span className="text-muted-foreground">Share of reported input:</span>
           <span className="font-mono text-foreground">{pct}</span>
@@ -2719,11 +2733,14 @@ function isOfferedMcpDefinition(part: { part: string; resident?: boolean }): boo
 export function TurnContentBlockView({
   block,
   defaultView = 'formatted',
+  model,
 }: {
   block: KyberTurnContentBlock
   defaultView?: TurnContentViewMode
+  model?: string | null
 }) {
   const prefix = `turn-block-${block.key}`
+  const tokenizer = tokenizerLabel(block, model)
   return (
     <section data-testid={prefix}>
       <h4 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground mb-1.5">
@@ -2767,6 +2784,7 @@ export function TurnContentBlockView({
         {typeof block.tokens === 'number' ? (
           <p className="text-[11px] font-mono text-tertiary-foreground" data-testid={`${prefix}-tokens`}>
             {fmtTokens(block.tokens)} tokens
+            {tokenizer ? <span className="font-sans italic"> · {tokenizer}</span> : null}
           </p>
         ) : (
           <p className="text-[11px] font-mono text-tertiary-foreground italic" data-testid={`${prefix}-tokens-absent`}>
@@ -2824,12 +2842,15 @@ export function TurnContentPartView({
   part,
   index,
   defaultView = 'formatted',
+  model,
 }: {
   part: KyberTurnContentPart
   index: number
   defaultView?: TurnContentViewMode
+  model?: string | null
 }) {
   const prefix = `turn-part-${part.part}-${index}`
+  const tokenizer = tokenizerLabel(part, model)
   return (
     <div data-testid={prefix}>
       <div className="flex items-center gap-2 flex-wrap">
@@ -2851,7 +2872,10 @@ export function TurnContentPartView({
           </span>
         ) : null}
         {typeof part.tokens === 'number' ? (
-          <span className="font-mono text-[10px] text-tertiary-foreground">{fmtTokens(part.tokens)} tokens</span>
+          <span className="font-mono text-[10px] text-tertiary-foreground">
+            {fmtTokens(part.tokens)} tokens
+            {tokenizer ? <span className="font-sans italic"> · {tokenizer}</span> : null}
+          </span>
         ) : null}
       </div>
       {part.truncated === true ? (
@@ -3122,7 +3146,7 @@ export function TurnFullContentPanel({
           </div>
 
           {data.blocks.map((block) => (
-            <TurnContentBlockView key={block.key} block={block} defaultView={defaultView} />
+            <TurnContentBlockView key={block.key} block={block} defaultView={defaultView} model={data.model} />
           ))}
 
           {orphanParts.length > 0 ? (
@@ -3132,7 +3156,7 @@ export function TurnFullContentPanel({
               </h4>
               <div className="rounded border border-border bg-card p-3 overflow-hidden space-y-3">
                 {orphanParts.map((part, idx) => (
-                  <TurnContentPartView key={part.id ?? `${part.part}-${idx}`} part={part} index={idx} defaultView={defaultView} />
+                  <TurnContentPartView key={part.id ?? `${part.part}-${idx}`} part={part} index={idx} defaultView={defaultView} model={data.model} />
                 ))}
               </div>
             </section>
@@ -3237,7 +3261,19 @@ function TurnBucketPanel({ request }: { request: TurnBucketContentRequest }) {
   return (
     <div className="space-y-4">
       <ContextBucketInspector
-        item={{ bucket: request.bucket, key: request.bucket, label, tokens, value: tokens, total, content }}
+        item={{
+          bucket: request.bucket,
+          key: request.bucket,
+          label,
+          tokens,
+          value: tokens,
+          total,
+          content,
+          tokenizer: context?.tokenizer,
+          tokenizers: context?.tokenizers,
+          tokenizerIsModelOwn: context?.tokenizerIsModelOwn,
+        }}
+        model={turn.model}
       />
       {contentRequest !== null ? <FullContentPanel request={contentRequest} fallback={content} /> : null}
     </div>

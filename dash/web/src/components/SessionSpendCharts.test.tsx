@@ -760,6 +760,23 @@ describe('ContextCompositionChart', () => {
     expect(hasTestId(element, 'context-caveat-measured')).toBe(false)
   })
 
+  it('names the model a stand-in tokenizer is not the own of', () => {
+    const element = React.createElement(ContextCompositionChart, {
+      context: {
+        ...sampleContext,
+        derivedCounts: true,
+        tokenizer: 'o200k_base',
+        tokenizers: [{ name: 'o200k_base', isModelOwn: false }],
+        tokenizerIsModelOwn: false,
+      },
+      turns: [{ index: 1, model: 'claude-opus-4' }],
+    })
+
+    const text = normalizedRenderText(element)
+    expect(text).toContain('o200k_base, standard tokenizer — not Claude')
+    expect(text).not.toMatch(/estimated/i)
+  })
+
   it('does not warn about a proxy tokenizer when the harness reported the counts', () => {
     // The previous note fired on `derivedCounts` alone, so it appeared even
     // for harnesses reporting exact per-bucket totals, where it is false.
@@ -803,7 +820,7 @@ describe('ContextCompositionChart', () => {
 
     const atThresholdText = normalizedRenderText(atThreshold)
     expect(atThresholdText).toMatch(
-      /Bucket sizes are derived by tokenizing content with o200k_base\s*, a proxy for models that do not publish their tokenizer, so each is a lower bound\./,
+      /Bucket sizes are derived by tokenizing content with o200k_base\s*, standard tokenizer — not the model's own\s*,\s*so each is a lower bound\./,
     )
     expect(atThresholdText).toMatch(
       /The residual of 15\.0\s*% is the gap between the buckets and the model's own reported input\./,
@@ -833,7 +850,7 @@ describe('ContextCompositionChart', () => {
     })
 
     const text = normalizedRenderText(element)
-    expect(text).toMatch(/Bucket sizes are reported by the harness\s*, not estimated\./)
+    expect(text).toMatch(/Bucket sizes are reported by the harness\s*, measured directly\./)
     expect(text).toMatch(
       /The residual of 16\.0\s*% is input the harness did not attribute to any bucket — chat framing and role delimiters — rather than tokenizer drift\./,
     )

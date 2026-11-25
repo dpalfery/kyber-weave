@@ -1,6 +1,7 @@
 import { useMemo, useState } from 'react'
 
 import { cn, fmtNum, fmtTokens } from '../lib/utils.js'
+import { tokenizerLabel, type KyberTokenizerFigure } from '../lib/kyberApi.js'
 
 // ---------------------------------------------------------------------------
 // Types & Contracts
@@ -44,7 +45,7 @@ export interface TurnSpendItem {
   cost_status?: string
 }
 
-export interface ContextTurnItem {
+export interface ContextTurnItem extends KyberTokenizerFigure {
   index?: number
   turn?: number
   label?: string
@@ -57,7 +58,7 @@ export interface ContextTurnItem {
   accumulationRate?: number
 }
 
-export interface ContextCompositionData {
+export interface ContextCompositionData extends KyberTokenizerFigure {
   measurable?: boolean
   reason?: 'no_message_structure' | 'declared_not_measurable' | string
   contextLimit?: number
@@ -74,6 +75,7 @@ export interface ContextCompositionData {
   } | '__single__'
   residualTotal?: number
   derivedCounts?: boolean
+  /** Legacy single-tokenizer name; the engine now sends the label trio instead. */
   derivedModel?: string
   freshJumpFactor?: number
   flaggedTurns?: number[]
@@ -1115,7 +1117,7 @@ export function TurnSpendChart({
  */
 export function ContextCaveat({
   derivedCounts,
-  derivedModel,
+  derivedTokenizerLabel,
   residualPct,
   // Issue #187: false when no turn carried a measured input basis — the
   // caveat then states the gap instead of printing a 0.0% residual.
@@ -1124,7 +1126,7 @@ export function ContextCaveat({
   hasServerAttribution,
 }: {
   derivedCounts?: boolean
-  derivedModel?: string
+  derivedTokenizerLabel?: string
   residualPct: number
   residualMeasurable?: boolean
   unmeasuredTurns?: number
@@ -1150,15 +1152,15 @@ export function ContextCaveat({
         </span>
       ) : derivedCounts === false ? (
         <span data-testid="context-caveat-measured">
-          Bucket sizes are <strong>reported by the harness</strong>, not estimated. The residual of{' '}
+          Bucket sizes are <strong>reported by the harness</strong>, measured directly. The residual of{' '}
           <span className="tabular-nums">{residualPct.toFixed(1)}%</span> is input the harness did not
           attribute to any bucket — chat framing and role delimiters — rather than tokenizer drift.
         </span>
       ) : (
         <span data-testid="context-caveat-derived">
           Bucket sizes are <strong>derived</strong> by tokenizing content with{' '}
-          <span className="font-mono">{derivedModel ?? 'o200k_base'}</span>, a proxy for models that do
-          not publish their tokenizer, so each is a lower bound. The residual of{' '}
+          <span className="font-mono">{derivedTokenizerLabel ?? 'a tokenizer the server did not name'}</span>, so
+          each is a lower bound. The residual of{' '}
           <span className="tabular-nums">{residualPct.toFixed(1)}%</span> is the gap between the buckets
           and the model's own reported input.
           {heavyDrift && (
@@ -1202,6 +1204,18 @@ export function ContextCompositionChart({
 
   // Extract normalized rows
   const rows = useMemo(() => extractNormalizedContextTurns(context), [context])
+
+  // The engine names the tokenizer beside every text-derived figure. A legacy
+  // payload names only `derivedModel`; with neither, the label says so rather
+  // than naming a tokenizer the server did not.
+  const model = _turns?.find((turn) => typeof turn.model === 'string' && turn.model.length > 0)?.model
+  const derivedTokenizerLabel =
+    context == null
+      ? undefined
+      : tokenizerLabel(context, model) ??
+        (context.derivedModel
+          ? tokenizerLabel({ tokenizer: context.derivedModel, tokenizerIsModelOwn: false }, model)
+          : undefined)
 
   // Issue #184: the engine numbers composition turns 1-based (`TurnPressure.index`)
   // while transport (URL, router, session `turns[].index`, drawer state) is 0-based.
@@ -1378,7 +1392,7 @@ export function ContextCompositionChart({
 
       <ContextCaveat
         derivedCounts={context.derivedCounts}
-        derivedModel={context.derivedModel}
+        derivedTokenizerLabel={derivedTokenizerLabel}
         residualPct={avgResidualPct}
         residualMeasurable={residualMeasurable}
         unmeasuredTurns={(context as { unmeasuredTurns?: number }).unmeasuredTurns}
