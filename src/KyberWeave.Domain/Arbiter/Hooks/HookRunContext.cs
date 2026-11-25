@@ -8,7 +8,10 @@ public enum HookRunContextSource
     /// <summary>No candidate could be validated, so the process directory stands and the rules decide on the absence.</summary>
     None,
 
-    /// <summary>The worktree the event itself named: a dispatch plan, packet or agent working directory.</summary>
+    /// <summary>
+    /// The worktree the event itself named: a dispatch plan, packet or agent working directory, or the absolute target
+    /// of a shell command's leading <c>cd</c>.
+    /// </summary>
     EventWorktree,
 
     /// <summary>The live run record <c>kyber-weave run start</c> wrote for this repository.</summary>
@@ -19,6 +22,12 @@ public enum HookRunContextSource
 
     /// <summary>The process directory, which is the last resort for a payload that names no directory.</summary>
     ProcessDirectory,
+
+    /// <summary>
+    /// Several runs are live and no signal chose one of them: no run is active, paths are read from the canonical
+    /// checkout, and a note names every live run. No guard is relaxed by it.
+    /// </summary>
+    Ambiguous,
 }
 
 /// <summary>What one hook invocation asks the run-context resolver.</summary>
@@ -31,6 +40,10 @@ public enum HookRunContextSource
 /// </param>
 /// <param name="Prompt">The dispatch text, so the plan header and a named worktree can be read from it.</param>
 /// <param name="HomeDirectory">The operator's home, which holds the run records.</param>
+/// <param name="LeadingCdTarget">
+/// The absolute directory a shell command's leading <c>cd &lt;path&gt; &amp;&amp;</c> names, when the call is a shell
+/// command that starts with one. It counts only when the cwd is absent or is the canonical checkout.
+/// </param>
 public sealed record HookRunContextRequest(
     string Harness,
     string? WorkspaceRoot,
@@ -38,7 +51,8 @@ public sealed record HookRunContextRequest(
     string? ProcessDirectory,
     string? AgentWorktree,
     string? Prompt,
-    string HomeDirectory);
+    string HomeDirectory,
+    string? LeadingCdTarget = null);
 
 /// <summary>Everything one hook invocation reads paths from: the repository, the run, and the worktree holding the plan.</summary>
 /// <param name="RepositoryRoot">The directory configuration, the claim store and the ledger are read under.</param>

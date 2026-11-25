@@ -265,7 +265,7 @@ public sealed class WorkerGuard(
         }
 
         return checkouts.LiveSeparateRuns(home, checkout) is { Count: > 0 } runs
-            ? WorkerGuardRules.StrayCommandRefusal(checkout, runs[0].Worktree)
+            ? WorkerGuardRules.StrayCommandRefusal(checkout, [.. runs.Select(run => run.Worktree)])
             : null;
     }
 

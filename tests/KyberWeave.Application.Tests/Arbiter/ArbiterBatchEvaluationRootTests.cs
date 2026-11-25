@@ -83,6 +83,50 @@ public sealed class ArbiterBatchEvaluationRootTests
                 context, Repo, $"KYBER-ARBITER: true\nPLAN_FILE: {planC}\nTASK: T3\n\nTask T3.", roots));
     }
 
+    /// <summary>
+    /// Several live runs and no signal: the context is ambiguous, reads paths from the canonical checkout and names no
+    /// plan. A dispatch that names its plan is still judged in the worktree that holds it.
+    /// </summary>
+    [Fact]
+    public void AnAmbiguousContextJudgesADispatchThatNamesItsPlanWhereThePlanIs()
+    {
+        PlanRoots roots = new(new Dictionary<string, string>(StringComparer.Ordinal) { [PlanB] = WorktreeB });
+
+        Assert.Equal(
+            WorktreeB,
+            ArbiterHookDecisionEngine.EvaluationRootFor(
+                AmbiguousContext(), Repo, $"KYBER-ARBITER: true\nPLAN_FILE: {PlanB}\nTASK: T2\n\nTask T2.", roots));
+    }
+
+    /// <summary>Without a plan, an ambiguous context is judged in the canonical checkout, never in a guessed run.</summary>
+    [Fact]
+    public void AnAmbiguousContextJudgesADispatchWithoutAPlanInTheCanonicalCheckout()
+    {
+        PlanRoots roots = new(new Dictionary<string, string>(StringComparer.Ordinal) { [PlanB] = WorktreeB });
+
+        Assert.Equal(
+            Repo,
+            ArbiterHookDecisionEngine.EvaluationRootFor(AmbiguousContext(), Repo, "KYBER-ARBITER: true\nTASK: T2\n\nTask T2.", roots));
+    }
+
+    private static HookContext AmbiguousContext() =>
+        new(
+            Repo,
+            () => "decision-test",
+            TextWriter.Null,
+            RunContext: new HookRunContext(
+                RepositoryRoot: Repo,
+                CommonDirectory: "/kw/repo/.git",
+                ActiveRun: null,
+                Worktree: Repo,
+                PlanFile: null,
+                PlanPath: null,
+                TaskFile: null,
+                TaskFileExists: false,
+                Worktrees: [Repo, WorktreeA, WorktreeB],
+                Source: HookRunContextSource.Ambiguous,
+                Notes: ["several runs are live: '/kw/run-a', '/kw/run-b'."]));
+
     private static HookContext Context(string worktree, string planFile) =>
         new(
             Repo,
