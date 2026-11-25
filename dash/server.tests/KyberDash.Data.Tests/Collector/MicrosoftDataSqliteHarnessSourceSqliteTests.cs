@@ -264,6 +264,80 @@ public class MicrosoftDataSqliteHarnessSourceSqliteTests : IDisposable
     }
 
     [Fact]
+    public void Open_WalThatFillsAfterTheSizeCheck_IsReadThroughACopyRatherThanHiddenByImmutable()
+    {
+        string sourceDirectory = directory.Combine("harness");
+        Directory.CreateDirectory(sourceDirectory);
+        string path = CreateSource(sourceDirectory, 3, SqliteFixtureJournal.WalUncheckpointed);
+        SkipUnlessSealed(sourceDirectory);
+        AssertPlainOpenFails(path);
+        // The first WAL size check sees an empty WAL, as it would if a writer filled the WAL just after it.
+        bool walReportedEmpty = false;
+        long StaleWalLength(string file)
+        {
+            if (!walReportedEmpty && file.EndsWith("-wal", StringComparison.Ordinal))
+            {
+                walReportedEmpty = true;
+                return 0;
+            }
+
+            return File.Exists(file) ? new FileInfo(file).Length : 0;
+        }
+
+        using (IHarnessSqliteDatabase database = new MicrosoftDataSqliteHarnessSource(new HarnessSqliteLimits(), directory.Combine("cache"), StaleWalLength).Open(path))
+        {
+            Assert.Equal([1L, 2L, 3L], database.Query(new HarnessSqliteQuery("ids", "SELECT id FROM messages ORDER BY id", [])).Select(row => row["id"]));
+        }
+
+        Assert.True(walReportedEmpty);
+        Assert.Single(CacheCopies());
+    }
+
+    [Fact]
+    public void Open_SourceThatGrewPastTheCopyCapAfterTheSizeCheck_IsRefusedWithTheCopyCapCode()
+    {
+        string sourceDirectory = directory.Combine("harness");
+        Directory.CreateDirectory(sourceDirectory);
+        string path = CreateSource(sourceDirectory, 3, SqliteFixtureJournal.WalUncheckpointed);
+        SkipUnlessSealed(sourceDirectory);
+        // The size check sees one byte per file, as it would before a writer grew them; the real files exceed the cap.
+        MicrosoftDataSqliteHarnessSource source = new(new HarnessSqliteLimits(CopyCapBytes: 100), directory.Combine("cache"), _ => 1);
+
+        InvalidDataException exception = Assert.Throws<InvalidDataException>(() => source.Open(path));
+
+        Assert.StartsWith(SqliteSourceOpenPolicy.CopyCapExceededCode, exception.Message, StringComparison.Ordinal);
+        Assert.Contains(path, exception.Message, StringComparison.Ordinal);
+        Assert.Empty(CacheFiles());
+    }
+
+    [Fact]
+    public void CopyWithinCap_SourceLargerThanTheBudget_StopsWithTheCopyCapCode()
+    {
+        string sourceFile = directory.Combine("grown.bin");
+        File.WriteAllBytes(sourceFile, new byte[2_000]);
+
+        InvalidDataException exception = Assert.Throws<InvalidDataException>(
+            () => MicrosoftDataSqliteHarnessSource.CopyWithinCap(sourceFile, directory.Combine("copy.bin"), 1_000, 1_000));
+
+        Assert.StartsWith(SqliteSourceOpenPolicy.CopyCapExceededCode, exception.Message, StringComparison.Ordinal);
+        Assert.Contains(sourceFile, exception.Message, StringComparison.Ordinal);
+        Assert.True(new FileInfo(directory.Combine("copy.bin")).Length <= 1_000);
+    }
+
+    [Fact]
+    public void CopyWithinCap_SourceExactlyTheBudget_CopiesEveryByte()
+    {
+        string sourceFile = directory.Combine("exact.bin");
+        byte[] content = RandomNumberGenerator.GetBytes(1_000);
+        File.WriteAllBytes(sourceFile, content);
+
+        long copied = MicrosoftDataSqliteHarnessSource.CopyWithinCap(sourceFile, directory.Combine("copy.bin"), 1_000, 1_000);
+
+        Assert.Equal(1_000, copied);
+        Assert.Equal(content, File.ReadAllBytes(directory.Combine("copy.bin")));
+    }
+
+    [Fact]
     public void Open_MissingFile_IsRefusedAsUnreadable()
     {
         string path = directory.Combine("absent.db");

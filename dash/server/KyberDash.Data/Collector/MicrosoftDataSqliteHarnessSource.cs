@@ -44,16 +44,29 @@ public class MicrosoftDataSqliteHarnessSource : IHarnessSqliteSource
     private const int SqliteCantOpen = 14;
     private const int SqliteAuth = 23;
 
+    private const int MaxOpenAttempts = 3;
+
     private static long tempSequence;
 
     private readonly HarnessSqliteLimits limits;
     private readonly string cacheRoot;
+    private readonly Func<string, long> fileLength;
 
     /// <summary>Creates the adapter.</summary>
     /// <param name="limits">Size and time limits.</param>
     /// <param name="cacheRoot">Directory that holds the read-only copies; created on first use.</param>
     public MicrosoftDataSqliteHarnessSource(HarnessSqliteLimits limits, string cacheRoot)
+        : this(limits, cacheRoot, LengthOrZero)
     {
+    }
+
+    /// <summary>Creates the adapter with the probe that sizes the database and WAL for the open decision.</summary>
+    /// <param name="limits">Size and time limits.</param>
+    /// <param name="cacheRoot">Directory that holds the read-only copies; created on first use.</param>
+    /// <param name="fileLength">Length of a file, zero when it is absent; tests use it to report a stale size.</param>
+    internal MicrosoftDataSqliteHarnessSource(HarnessSqliteLimits limits, string cacheRoot, Func<string, long> fileLength)
+    {
+        ArgumentNullException.ThrowIfNull(fileLength);
         ArgumentNullException.ThrowIfNull(limits);
         ArgumentException.ThrowIfNullOrWhiteSpace(cacheRoot);
         ArgumentOutOfRangeException.ThrowIfLessThanOrEqual(limits.CommandTimeoutSeconds, 0);
@@ -61,6 +74,7 @@ public class MicrosoftDataSqliteHarnessSource : IHarnessSqliteSource
         ArgumentOutOfRangeException.ThrowIfNegative(limits.CopyCapBytes);
         this.limits = limits;
         this.cacheRoot = Path.GetFullPath(cacheRoot);
+        this.fileLength = fileLength;
     }
 
     /// <summary>Creates the adapter with default limits and the cache root <c>&lt;canon.db directory&gt;/sqlite-ro</c>.</summary>
@@ -101,54 +115,76 @@ public class MicrosoftDataSqliteHarnessSource : IHarnessSqliteSource
             }
         }
 
-        long walBytes;
-        long databaseBytes;
-        try
+        // An immutable open ignores the WAL, so a WAL that fills between the size check and the open would
+        // hide committed rows; the WAL is checked again once the immutable connection is open, and the
+        // decision is taken again on the new sizes.
+        for (int attempt = 1; ; attempt++)
         {
-            walBytes = LengthOrZero(path + "-wal");
-            databaseBytes = LengthOrZero(path);
-        }
-        catch (UnauthorizedAccessException ex)
-        {
-            throw Unreadable(path, "permission denied", ex);
-        }
+            long walBytes;
+            long databaseBytes;
+            try
+            {
+                walBytes = fileLength(path + "-wal");
+                databaseBytes = fileLength(path);
+            }
+            catch (UnauthorizedAccessException ex)
+            {
+                throw Unreadable(path, "permission denied", ex);
+            }
 
-        SqliteOpenAction action = SqliteSourceOpenPolicy.Decide(failure, walBytes, databaseBytes, limits.CopyCapBytes);
-        switch (action.Kind)
-        {
-            case SqliteOpenActionKind.Immutable:
-                try
-                {
-                    return Connect(ImmutableConnectionString(path), path);
-                }
-                catch (SqliteException ex)
-                {
-                    throw Unreadable(path, $"the immutable open failed with SQLite error {ex.SqliteErrorCode}: {ex.Message}", ex);
-                }
+            SqliteOpenAction action = SqliteSourceOpenPolicy.Decide(failure, walBytes, databaseBytes, limits.CopyCapBytes);
+            switch (action.Kind)
+            {
+                case SqliteOpenActionKind.Immutable:
+                    OpenDatabase immutable;
+                    try
+                    {
+                        immutable = Connect(ImmutableConnectionString(path), path);
+                    }
+                    catch (SqliteException ex)
+                    {
+                        throw Unreadable(path, $"the immutable open failed with SQLite error {ex.SqliteErrorCode}: {ex.Message}", ex);
+                    }
 
-            case SqliteOpenActionKind.CacheCopy:
-                string copy = CopyToCache(path);
-                try
-                {
-                    return Connect(PlainConnectionString(copy), path);
-                }
-                catch (SqliteException ex)
-                {
-                    throw Unreadable(path, $"its cache copy '{copy}' failed with SQLite error {ex.SqliteErrorCode}: {ex.Message}", ex);
-                }
+                    if (LengthOrZero(path + "-wal") <= 0)
+                    {
+                        return immutable;
+                    }
 
-            case SqliteOpenActionKind.Refuse when action.ProblemCode == SqliteSourceOpenPolicy.CopyCapExceededCode:
-                throw new InvalidDataException(
-                    $"{SqliteSourceOpenPolicy.CopyCapExceededCode}: '{path}' needs a cache copy of {databaseBytes + walBytes} bytes, " +
-                    $"more than the copy cap of {limits.CopyCapBytes} bytes.");
+                    immutable.Dispose();
+                    if (attempt >= MaxOpenAttempts)
+                    {
+                        throw Unreadable(path, $"its WAL was still being written after {MaxOpenAttempts} attempts to open it", null);
+                    }
 
-            case SqliteOpenActionKind.Refuse:
-                throw new IOException($"{action.ProblemCode}: cannot open '{path}': {cause}.");
+                    continue;
 
-            default:
-                throw Unreadable(path, $"the open policy chose {action.Kind} after a {failure} failure", null);
+                case SqliteOpenActionKind.CacheCopy:
+                    string copy = CopyToCache(path);
+                    try
+                    {
+                        return Connect(PlainConnectionString(copy), path);
+                    }
+                    catch (SqliteException ex)
+                    {
+                        throw Unreadable(path, $"its cache copy '{copy}' failed with SQLite error {ex.SqliteErrorCode}: {ex.Message}", ex);
+                    }
+
+                case SqliteOpenActionKind.Refuse when action.ProblemCode == SqliteSourceOpenPolicy.CopyCapExceededCode:
+                    throw CopyCapExceeded(path, databaseBytes, walBytes, limits.CopyCapBytes);
+
+                case SqliteOpenActionKind.Refuse:
+                    throw new IOException($"{action.ProblemCode}: cannot open '{path}': {cause}.");
+
+                default:
+                    throw Unreadable(path, $"the open policy chose {action.Kind} after a {failure} failure", null);
+            }
         }
     }
+
+    private static InvalidDataException CopyCapExceeded(string path, long databaseBytes, long walBytes, long copyCapBytes) =>
+        new($"{SqliteSourceOpenPolicy.CopyCapExceededCode}: '{path}' needs a cache copy of {databaseBytes} database bytes " +
+            $"and {walBytes} WAL bytes, more than the copy cap of {copyCapBytes} bytes.");
 
     private static string PlainConnectionString(string path) => new SqliteConnectionStringBuilder
     {
@@ -284,11 +320,18 @@ public class MicrosoftDataSqliteHarnessSource : IHarnessSqliteSource
             EnsureCacheRoot();
             string sourceKey = Hex(sourcePath)[..32];
             SourceFingerprint before = SourceFingerprint.Of(sourcePath);
+            long walBytes = Math.Max(before.WalBytes, 0);
+            if (before.DatabaseBytes > limits.CopyCapBytes || walBytes > limits.CopyCapBytes - before.DatabaseBytes)
+            {
+                // The open decision read the sizes earlier; the source may have grown since.
+                throw CopyCapExceeded(sourcePath, before.DatabaseBytes, walBytes, limits.CopyCapBytes);
+            }
+
             string name = $"{sourceKey}.{Hex(before.ToString())[..16]}.db";
             string cachePath = Path.Combine(cacheRoot, name);
             if (!File.Exists(cachePath))
             {
-                Publish(sourcePath, cachePath, before);
+                Publish(sourcePath, cachePath, before, limits.CopyCapBytes);
             }
 
             EvictSuperseded(sourceKey, name);
@@ -316,17 +359,18 @@ public class MicrosoftDataSqliteHarnessSource : IHarnessSqliteSource
         }
     }
 
-    private static void Publish(string sourcePath, string cachePath, SourceFingerprint before)
+    private static void Publish(string sourcePath, string cachePath, SourceFingerprint before, long copyCapBytes)
     {
         string tempDatabase = $"{cachePath}.tmp-{Environment.ProcessId}-{Interlocked.Increment(ref tempSequence)}";
         string tempWal = tempDatabase + "-wal";
         try
         {
-            File.Copy(sourcePath, tempDatabase);
+            // The cap is enforced on the bytes actually read, since the source can grow while it is copied.
+            long copied = CopyWithinCap(sourcePath, tempDatabase, copyCapBytes, copyCapBytes);
             bool hasWal = File.Exists(sourcePath + "-wal");
             if (hasWal)
             {
-                File.Copy(sourcePath + "-wal", tempWal);
+                CopyWithinCap(sourcePath + "-wal", tempWal, copyCapBytes - copied, copyCapBytes);
             }
 
             if (SourceFingerprint.Of(sourcePath) != before)
@@ -390,6 +434,33 @@ public class MicrosoftDataSqliteHarnessSource : IHarnessSqliteSource
                 Trace.TraceWarning("KyberDash: superseded SQLite cache copy '{0}' not deleted yet: {1}", file, ex.Message);
             }
         }
+    }
+
+    /// <summary>
+    /// Copies <paramref name="source"/> to a new <paramref name="destination"/>, reading at most
+    /// <paramref name="budget"/> bytes, and returns the bytes copied.
+    /// </summary>
+    /// <exception cref="InvalidDataException">The source holds more than <paramref name="budget"/> bytes.</exception>
+    internal static long CopyWithinCap(string source, string destination, long budget, long copyCapBytes)
+    {
+        using FileStream input = new(source, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete);
+        using FileStream output = new(destination, FileMode.CreateNew, FileAccess.Write, FileShare.None);
+        byte[] buffer = new byte[81_920];
+        long copied = 0;
+        int read;
+        while ((read = input.Read(buffer, 0, buffer.Length)) > 0)
+        {
+            if (read > budget - copied)
+            {
+                throw new InvalidDataException(
+                    $"{SqliteSourceOpenPolicy.CopyCapExceededCode}: '{source}' grew past the copy cap of {copyCapBytes} bytes while it was copied.");
+            }
+
+            output.Write(buffer, 0, read);
+            copied += read;
+        }
+
+        return copied;
     }
 
     private static string Hex(string value) =>
