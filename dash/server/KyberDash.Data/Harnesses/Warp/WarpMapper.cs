@@ -91,8 +91,8 @@ public record WarpExportDocument(
 /// entry's Warp plus BYOK total) become the session's reported usage and each completed exchange
 /// maps to one <c>llm.invoke</c> record whose tokens are not measured: a split of the conversation
 /// total across exchanges would be an estimate, which KyberDash never produces (decision D15).
-/// Warp's figure is a single total with no input/output breakdown; it is kept in the
-/// <see cref="TokenClass.Input"/> class, the class Warp's figures have always been stored in.
+/// Warp's figure is a single total with no input/output breakdown, so it is stored in the
+/// <see cref="TokenClass.Total"/> class, never as input or output.
 /// Each attributed command block maps to a child <c>tool.invoke</c>
 /// span named <c>Bash</c> carrying the full command text. Live-SQLite-only surfaces (schema
 /// validation, discovery, access-denial draining, workspace maps, <c>run_command</c> display-name
