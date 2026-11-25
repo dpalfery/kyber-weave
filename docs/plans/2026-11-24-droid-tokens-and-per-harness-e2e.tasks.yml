@@ -1,6 +1,6 @@
 schema-version: 2
 plan: docs/plans/2026-11-24-droid-tokens-and-per-harness-e2e.md
-execution-digest: e7652b35cda9c2dfd39cd0410916a918d8c6c4ecb3bacdd5d7f2fcd3be970b5e
+execution-digest: a2fca0a3d6840a0e0e6e34ed65045cd84513dca9841d7d62c30c751bab872e24
 tasks:
   - id: T4
     capabilities: C# domain records, SQLite reader queries and projection with xUnit in-memory and SQLite unit tests
@@ -64,7 +64,7 @@ tasks:
 
       |---|---|---|---|---|---|
 
-      | T4 | `dash/server.tests/KyberDash.Application.Tests/Projection/RelationalSourceIdentityTests.cs` (`KyberDash.Application.Tests.Projection.RelationalSourceIdentityTests`), `dash/server.tests/KyberDash.Data.Tests/Repositories/RecordSourceNameTests.cs` (`KyberDash.Data.Tests.Repositories.RecordSourceNameTests`) | `dotnet test dash/server.tests/KyberDash.Application.Tests/KyberDash.Application.Tests.csproj --filter "FullyQualifiedName~KyberDash.Application.Tests.Projection.RelationalSourceIdentityTests" && dotnet test dash/server.tests/KyberDash.Data.Tests/KyberDash.Data.Tests.csproj --filter "FullyQualifiedName~KyberDash.Data.Tests.Repositories.RecordSourceNameTests"` | Reader (real SQLite): a record from an OTLP batch reads back with `SourceName` equal to the batch locator; a record from a file batch reads back with `codeburn/<harness>`; a record whose source was deleted is gone (cascade unchanged). Hydration: `Hydrate` copies `SourceName` into `CanonicalRecord.Source`; a `null` `SourceName` keeps `relational`. Projection (in-memory store): a Droid session with 10 plugin turn records and the file rows and session usage `DroidSessionMapper` writes (after T8) for a companion (`inputTokens` 25829, `outputTokens` 6811, `cacheReadTokens` 283904, `cacheCreationTokens` 1200, model `gpt-5-codex`) projects 10 turns, session totals equal to the companion, model `gpt-5-codex`, cost basis `published_priced`, and per-turn token fields `null`; the same plugin records alone project 10 turns with totals `not_measurable`; a Claude session of OTLP records only projects exactly as before the change (turns, totals, cost). Mixed OTLP plus file sessions, each pinned to the documented outcome:<br>- `claude-code`: 4 OTLP `llm.invoke` rows carrying `gen_ai.response.id` and 4 transcript rows with matching message ids project 4 turns. Token totals equal the OTLP rows, never the sum of both, and the transcript's content parts land on the OTLP turns (`CollapseIdJoins`).<br>- `codex`: OTLP rows and rollout rows joined on the request id project one turn per request (`CollapseIdJoins`).<br>- Counter twins: an OTLP row and a file row with equal counters within `TwinTurnMaxSkewMs` collapse to one turn (`DedupeTwinTurns` and `CollapseCluster`).<br>- `cursor`: overlapping file rows that `HasEvidencedCursorTwinShare` accepts collapse as documented (`CollapseOverlapFileJoins`).<br>- Mixed rows with no join key keep both turns.<br>`SqliteRelationalStore.DetectorVersion` is 6. | Tests fail to compile on the missing `CollectedRecord.SourceName`; then the pairing case fails because counter rows count as turns | All cases pass with a non-zero count; existing projection test classes the worker runs (`KyberDash.Application.Tests.Projection`) keep their assertions |
+      | T4 | `dash/server.tests/KyberDash.Application.Tests/Projection/RelationalSourceIdentityTests.cs` (`KyberDash.Application.Tests.Projection.RelationalSourceIdentityTests`), `dash/server.tests/KyberDash.Data.Tests/Repositories/RecordSourceNameTests.cs` (`KyberDash.Data.Tests.Repositories.RecordSourceNameTests`) | `dotnet test dash/server.tests/KyberDash.Application.Tests/KyberDash.Application.Tests.csproj --filter "FullyQualifiedName~KyberDash.Application.Tests.Projection.RelationalSourceIdentityTests" && dotnet test dash/server.tests/KyberDash.Data.Tests/KyberDash.Data.Tests.csproj --filter "FullyQualifiedName~KyberDash.Data.Tests.Repositories.RecordSourceNameTests"` | Reader (real SQLite): a record from an OTLP batch reads back with `SourceName` equal to the batch locator; a record from a file batch reads back with `codeburn/<harness>`; a record whose source was deleted is gone (cascade unchanged). Hydration: `Hydrate` copies `SourceName` into `CanonicalRecord.Source`; a `null` `SourceName` keeps `relational`. Projection (in-memory store): a Droid session with 10 plugin turn records and the file rows and session usage `DroidSessionMapper` writes (after T8) for a companion (`inputTokens` 25829, `outputTokens` 6811, `cacheReadTokens` 283904, `cacheCreationTokens` 1200, model `gpt-5-codex`) projects 10 turns, session totals equal to the companion, model `gpt-5-codex`, cost basis `published_priced`, and per-turn token fields `null`; the same plugin records alone project 10 turns with totals `not_measurable`; a Claude session of OTLP records only projects exactly as before the change (turns, totals, cost). Mixed OTLP plus file sessions, each pinned to the documented outcome:<br>- `claude-code`: 4 OTLP `llm.invoke` rows carrying `gen_ai.response.id` and 4 transcript rows with matching message ids project 4 turns. Token totals equal the OTLP rows, never the sum of both, and the transcript's content parts land on the OTLP turns (`CollapseIdJoins`).<br>- `codex`: no id join; T14's row pins Codex pairing.<br>- Counter twins: an OTLP row and a file row with equal counters within `TwinTurnMaxSkewMs` collapse to one turn (`DedupeTwinTurns` and `CollapseCluster`).<br>- `cursor`: overlapping file rows that `HasEvidencedCursorTwinShare` accepts collapse as documented (`CollapseOverlapFileJoins`).<br>- Mixed rows with no join key keep both turns.<br>`SqliteRelationalStore.DetectorVersion` is 6. | Tests fail to compile on the missing `CollectedRecord.SourceName`; then the pairing case fails because counter rows count as turns | All cases pass with a non-zero count; existing projection test classes the worker runs (`KyberDash.Application.Tests.Projection`) keep their assertions |
 
 
       #### Decisions this task cites
@@ -73,7 +73,7 @@ tasks:
 
       |---|---|---|---|---|
 
-      | D11 | Restore record source identity on the relational read path, or special-case Droid? | Restore it for every record: `CollectedRecord` gains an optional `SourceName`, every reader method that returns records for projection fills it from the record's `source` row (OTLP: the locator, the service name; file: `codeburn/<harness_id>`), and `CanonRecordHydration.Hydrate` uses it instead of `relational`. | The source rules (`SplitDroidSessionRecords`, `IsFileSource`, twin-turn collapse) are documented for every harness and silently inert since the C# cutover; a Droid-only patch would leave the same defect for every other harness. This changes projections for any session holding both OTLP and file rows, which is the documented behaviour; rated `hard` (T4) for that reason. Rules that switch on, by harness:<br>- `CollapseIdJoins`: OTLP `llm.invoke` rows carrying `gen_ai.response.id` or a request join id, plus file rows (`claude-code`, `codex`).<br>- `DedupeTwinTurns` counter clusters (`CollapseCluster`): any harness whose OTLP and file rows report equal counters, and the file-only `claude-desktop` cluster.<br>- `CollapseOverlapFileJoins`: `cursor` (`HasEvidencedCursorTwinShare`).<br>- `SplitDroidSessionRecords`: `droid`.<br>T4 bumps `SqliteRelationalStore.DetectorVersion` from 5 to 6, so `IsProjectionCurrent` turns false and every stored projection is rebuilt on the first start or tick after deploy; no stale projection survives. | ANSWERED — autonomous: low-confidence, no authoritative source for the C#-specific fix; cost of wrong is a projection regression caught by T4's regression cases and review |
+      | D11 | Restore record source identity on the relational read path, or special-case Droid? | Restore it for every record: `CollectedRecord` gains an optional `SourceName`, every reader method that returns records for projection fills it from the record's `source` row (OTLP: the locator, the service name; file: `codeburn/<harness_id>`), and `CanonRecordHydration.Hydrate` uses it instead of `relational`. | The source rules (`SplitDroidSessionRecords`, `IsFileSource`, twin-turn collapse) are documented for every harness and silently inert since the C# cutover; a Droid-only patch would leave the same defect for every other harness. This changes projections for any session holding both OTLP and file rows, which is the documented behaviour; rated `hard` (T4) for that reason. Rules that switch on, by harness:<br>- `CollapseIdJoins`: OTLP `llm.invoke` rows carrying `gen_ai.response.id` or a request join id, plus file rows (`claude-code`; Codex has no shared id and pairs on counters, T14).<br>- `DedupeTwinTurns` counter clusters (`CollapseCluster`): any harness whose OTLP and file rows report equal counters, and the file-only `claude-desktop` cluster.<br>- `CollapseOverlapFileJoins`: `cursor` (`HasEvidencedCursorTwinShare`).<br>- `SplitDroidSessionRecords`: `droid`.<br>T4 bumps `SqliteRelationalStore.DetectorVersion` from 5 to 6, so `IsProjectionCurrent` turns false and every stored projection is rebuilt on the first start or tick after deploy; no stale projection survives. | ANSWERED — autonomous: low-confidence, no authoritative source for the C#-specific fix; cost of wrong is a projection regression caught by T4's regression cases and review |
 
 
       #### Plan section: Data model
@@ -247,7 +247,7 @@ tasks:
 
       |---|---|---|---|---|---|
 
-      | T2 | `dash/web/src/components/SessionSpendCharts.test.tsx` (extend the `TurnSpendChart` describe block), `dash/web/src/components/session/SessionChartsSection.test.tsx`, `dash/web/src/components/SessionInspectorDrawer.test.tsx`, `dash/web/src/components/AgentSessionDashboard.test.tsx` (one case each) | `npm --prefix dash run test -- web/src/components/SessionSpendCharts.test.tsx web/src/components/session/SessionChartsSection.test.tsx web/src/components/SessionInspectorDrawer.test.tsx web/src/components/AgentSessionDashboard.test.tsx` | Each embedding component that draws the spend chart (`SessionChartsSection`, `AgentSessionDashboard`), given a `/charts` response whose turns carry no token field, renders `turn-spend-not-measurable` and no `turn-bar-*`. In the chart itself: all turns with every token field null: renders `turn-spend-not-measurable` with the turn count and the reason text, no `turn-bar-*`, no Cache Hit/Fresh/Output chips, no `0` figure. Mixed turns: every turn renders `turn-bar-<i>`; measured turns carry `data-measured="true"`, unmeasured ones `data-measured="false"` with no segments and aria-label "Turn <i>, tokens not measured"; chips sum measured turns only. A measured zero (`output: 0`) stays measured. Empty `turns` still renders `turn-spend-empty`. Fully measured turns render exactly as today. No code path draws a bar or chip for a turn without a measured figure (D1) | New cases fail: the all-null case renders `turn-spend-chart` with "Fresh: 0" | New and existing cases pass; existing assertions unchanged |
+      | T2 | `dash/web/src/components/SessionSpendCharts.test.tsx` (extend the `TurnSpendChart` describe block), `dash/web/src/components/session/SessionChartsSection.test.tsx`, `dash/web/src/components/AgentSessionDashboard.test.tsx` (one case each; the drawer renders no chart, D24) | `npm --prefix dash run test -- web/src/components/SessionSpendCharts.test.tsx web/src/components/session/SessionChartsSection.test.tsx web/src/components/AgentSessionDashboard.test.tsx` | Each embedding component that draws the spend chart (`SessionChartsSection`, `AgentSessionDashboard`), given a `/charts` response whose turns carry no token field, renders `turn-spend-not-measurable` and no `turn-bar-*`. In the chart itself: all turns with every token field null: renders `turn-spend-not-measurable` with the turn count and the reason text, no `turn-bar-*`, no Cache Hit/Fresh/Output chips, no `0` figure. Mixed turns: every turn renders `turn-bar-<i>`; measured turns carry `data-measured="true"`, unmeasured ones `data-measured="false"` with no segments and aria-label "Turn <i>, tokens not measured"; chips sum measured turns only. A measured zero (`output: 0`) stays measured. Empty `turns` still renders `turn-spend-empty`. Fully measured turns render exactly as today. No code path draws a bar or chip for a turn without a measured figure (D1) | New cases fail: the all-null case renders `turn-spend-chart` with "Fresh: 0" | New and existing cases pass; existing assertions unchanged |
 
 
       #### Decisions this task cites
@@ -255,6 +255,8 @@ tasks:
       | ID | Question | Answer / decision | Mitigating and supporting information | Status / approval provenance |
 
       |---|---|---|---|---|
+
+      | D24 | Keep, move or drop the drawer test "draws no spend bars or not-measurable chart for a turn that carries no token counts" (cycle 1 asked for a drawer case; cycle 2 found it vacuous)? | Drop it. The drawer never renders the spend chart (`SessionInspectorDrawer.tsx` imports only `CONTEXT_BUCKET_LABELS` from `SessionSpendCharts`), so no drawer assertion can fail on that behaviour. The behaviour stays pinned where the chart mounts: `SessionSpendCharts.test.tsx` and `SessionChartsSection.test.tsx`. The T2 Test-contract row no longer names `SessionInspectorDrawer.test.tsx`. | Cycle-1 finding `intent-alignment/drawer-not-measurable-test-missing` read the T2 row literally; the row named a file whose component cannot show the state. | ANSWERED — autonomous: decided from code evidence |
 
       | D1 | Should a paired Droid session draw per-turn token bars? (the request asks for the bar graph; a documented rule calls Droid counters a session fact) | No bars. Turns with no measured per-turn tokens show the `turn-spend-not-measurable` state, and the overview tiles show the real session totals. No estimated bars. | Owner's answer, verbatim: "We don't estimate shit here in Kyberdash. The point of Kyberdash is to show absolute reality. We never, under any circumstances, are to estimate." Real per-turn Droid capture (hooks or plugins for per-turn tokens, tool descriptions, skills and system prompt) is researched separately and becomes its own issue and run (PR note). | ANSWERED — owner decision 2026-11-24, relayed by the conductor |
 
@@ -956,6 +958,212 @@ tasks:
     agent-confidence: 1
     difficulty: easy
     difficulty-source: architect
+  - id: T16
+    capabilities: React and TypeScript UI with Vitest component tests
+    depends-on: []
+    files:
+      - dash/web/src/components/SessionInspectorDrawer.tsx
+      - dash/web/src/components/turn.input
+      - dash/web/src/components/turn.fresh
+      - dash/web/src/components/analysis/Scorecard.tsx
+      - dash/web/src/components/session/SessionSkillsSection.tsx
+      - dash/web/src/components/session/summaryRecord?.models
+      - dash/web/src/components/SessionInspectorDrawer.test.tsx
+      - dash/web/src/components/SessionSpendCharts.test.tsx
+      - dash/web/src/components/SessionChartsSection.test.tsx
+      - dash/web/src/components/SessionInspectorDrawer.bucket.test.tsx
+      - dash/web/src/components/analysis/Scorecard.test.tsx
+      - dash/web/src/components/session/SessionSkillsSection.test.tsx
+      - dash/web/src/components/session/Scorecard.test.tsx
+      - dash/web/src/components/session/mockScorecardData.secondaryCost.basis
+    session: web
+    prompt: >
+      Task T16: Web review fixes: unmeasured bucket, cost basis text, skills model, vacuous drawer test
+
+      Worktree: {worktree}
+
+
+      - **Objective:** Fix the four cycle-2 web findings so no unmeasured figure renders as 0 or NaN, no basis is misnamed, and the skills panel names the session model.
+
+      - **Capabilities:** React and TypeScript UI with Vitest component tests
+
+      - **Difficulty:** easy
+
+      - **Technology:** react
+
+      - **Session:** `web`
+
+      - **Depends on:** none (T2 and T10, whose files this edits, are integrated on the run branch)
+
+      - **Files:**
+        - `dash/web/src/components/SessionInspectorDrawer.tsx`: `TurnBucketPanel`, the `tokens` constant: read the bucket value with no `Number(...)` and no `?? 0`; take it only when `typeof value === 'number'`, otherwise pass `undefined`, so `ContextBucketInspector`'s "not measured" branch runs for a not-measurable object or an absent key. The `reported` constant in the same function gets the same treatment: take the first of `context?.reported_input`, `turn.cumulative_input`, `turn.input`, `turn.fresh` that is a number, else `bucketSum`, with no `Number(...)` coercion. `ContextBucketInspector` is unchanged.
+        - `dash/web/src/components/analysis/Scorecard.tsx`: `costBasisText(basis)` maps: `/harness/i` → "reported by the harness"; `published` → "calculated from published rates"; `run_summary` → "run summary"; missing → "basis not reported"; any other value → the raw basis string. Update its doc comment to say so.
+        - `dash/web/src/components/session/SessionSkillsSection.tsx`: `SessionSkillsSection` passes `model` to `SkillsPanel`: `summaryRecord?.models` when it holds exactly one model, its single entry; otherwise `undefined`, so a multi-model session keeps the generic wording rather than naming one model wrongly.
+        - `dash/web/src/components/SessionInspectorDrawer.test.tsx`: delete the test "draws no spend bars or not-measurable chart for a turn that carries no token counts"; the drawer never renders the spend chart, and the state stays pinned in `SessionSpendCharts.test.tsx` and `SessionChartsSection.test.tsx`.
+        - `dash/web/src/components/SessionInspectorDrawer.bucket.test.tsx`, `dash/web/src/components/analysis/Scorecard.test.tsx`, `dash/web/src/components/session/SessionSkillsSection.test.tsx`: the T16 Test-contract cases; in `Scorecard.test.tsx`, `mockScorecardData.secondaryCost.basis` changes from `derived_estimate` to `published`, the engine's wire value.
+      - **Commands:**
+        - `kyber-weave review gates . --agent <your agent name> --task T16 --red`
+        - `kyber-weave review gates . --agent <your agent name> --task T16`
+      - **Acceptance:**
+        - The T16 Test-contract cases pass with a non-zero count; no rendered bucket share reads "NaN%"; `typecheck` and `lint` clean.
+
+      Reference content for this task, quoted exactly from its source document and complete as given:
+
+
+      #### Test contract row for T16
+
+      | Task | Test project or file | Runner command | Observable behavior | RED evidence required | GREEN acceptance |
+
+      |---|---|---|---|---|---|
+
+      | T16 | `dash/web/src/components/SessionInspectorDrawer.bucket.test.tsx` (extend), `dash/web/src/components/analysis/Scorecard.test.tsx` (extend), `dash/web/src/components/session/SessionSkillsSection.test.tsx` (extend), `dash/web/src/components/SessionInspectorDrawer.test.tsx` (one case deleted: the drawer renders no chart) | `npm --prefix dash run test -- web/src/components/SessionInspectorDrawer.bucket.test.tsx web/src/components/SessionInspectorDrawer.test.tsx web/src/components/analysis/Scorecard.test.tsx web/src/components/session/SessionSkillsSection.test.tsx` | Bucket drill-down (`TurnBucketPanel` into `ContextBucketInspector`): a turn whose bucket is `{availability:'not_measurable', reason}` shows Tokens "not measured" and Share "not measured", never "NaN%" or "0.0%"; a turn with the bucket key absent shows the same; a measured bucket of 0 shows "0" and "0.0%" (a measured zero stays measured); a measured bucket of 250 out of 1000 shows "25.0%". A turn whose `reported_input` and fallbacks are all non-numeric takes the bucket sum as its total, never NaN. Cost basis: `harness_rollup` reads "reported by the harness"; `published` reads "calculated from published rates"; `run_summary` reads "run summary"; `run_summary (partial: incomplete cost total)` shows that string in the visible text and the title; a missing basis reads "basis not reported". Skills: a session whose summary `models` is `['claude-sonnet-4-20250514']` and whose skill row is labelled with the `o200k_base` stand-in reads "not Claude's own"; a summary with two models or none reads "not the model's own". The drawer test "draws no spend bars or not-measurable chart for a turn that carries no token counts" no longer exists | Bucket: the not-measurable case renders "NaN%". Cost basis: `run_summary` and the missing basis render "calculated from published rates". Skills: the one-model case renders "not the model's own" | All pass with a non-zero count; existing assertions in the four files keep their meaning (the `Scorecard.test.tsx` fixture basis `derived_estimate` becomes `published`, the engine's wire value); `npm --prefix dash run typecheck` and `lint` clean |
+
+
+      Results of the tasks this one follows, as their workers reported them:
+
+      {prior_results}
+    agent: dev-easy
+    agent-confidence: 1
+    difficulty: easy
+    difficulty-source: architect
+    technology: react
+  - id: T17
+    capabilities: C# registry constant and xUnit in-memory unit tests
+    depends-on: []
+    files:
+      - dash/server/KyberDash.Data/Collector/HarnessSourceRegistry.cs
+      - dash/server.tests/KyberDash.Data.Tests/Collector/ParserContractVersionTests.cs
+      - dash/server.tests/KyberDash.Application.Tests/Ingest/PluginSessionFileRefreshTests.cs
+      - dash/server.tests/KyberDash.Application.Tests/Projection/OtlpFileIdJoinTests.cs
+    session: engine
+    prompt: >
+      Task T17: C# review fixes: copilot-cli parser contract version, traversal decoy, Codex unreported counters
+
+      Worktree: {worktree}
+
+
+      - **Objective:** Make already-imported Copilot CLI sessions re-read under the fresh-input mapping, and make two tests able to fail on the defects they name (D26).
+
+      - **Capabilities:** C# registry constant and xUnit in-memory unit tests
+
+      - **Difficulty:** easy
+
+      - **Technology:** csharp
+
+      - **Session:** `engine`
+
+      - **Depends on:** none (T1, T8 and T14, whose files this edits, are integrated on the run branch; D23)
+
+      - **Files:**
+        - `dash/server/KyberDash.Data/Collector/HarnessSourceRegistry.cs`: add `public const string CopilotCliFreshInputParserContractVersion = "2";` with a summary saying the copilot-cli mapper now stores fresh input as input minus cache read and cache write, so the version makes the next refresh re-read stored cache-inclusive rows; pass it as `ParserContractVersion:` on the `copilot-cli` `SourceRootSpec`, as `roo-code` passes `RooTaskDirectoryIdParserContractVersion`.
+        - `dash/server.tests/KyberDash.Data.Tests/Collector/ParserContractVersionTests.cs`: assert `copilot-cli` units carry the new constant (as the roo-code block does), exclude `copilot-cli` from `others`, and add a case that a "1" checkpoint for a `copilot-cli` unit is not reusable (as `CheckpointIsReusable_RefusesAVersionOneCheckpointForAChangedHarnessUnit`).
+        - `dash/server.tests/KyberDash.Application.Tests/Ingest/PluginSessionFileRefreshTests.cs`: `TraversalLikeCandidateIds_NeverReadOutsideTheSessionsRoot`: add `../../escape/sess-droid-1` to the candidate ids so a path join would reach the planted decoy; keep the existing ids and assertions.
+        - `dash/server.tests/KyberDash.Application.Tests/Projection/OtlpFileIdJoinTests.cs`: add the Codex unreported-counter case from the T17 Test-contract row for both harness ids, reusing the class's `Record`, `WriteOtlp` and `WriteFile` helpers.
+      - **Commands:**
+        - `kyber-weave review gates . --agent <your agent name> --task T17 --red`
+        - `kyber-weave review gates . --agent <your agent name> --task T17`
+      - **Acceptance:**
+        - The T17 Test-contract cases pass with a non-zero count; `CanonSessionProjectorEngine.cs` and `TranscriptIngestionService.cs` are not edited.
+
+      Reference content for this task, quoted exactly from its source document and complete as given:
+
+
+      #### Test contract row for T17
+
+      | Task | Test project or file | Runner command | Observable behavior | RED evidence required | GREEN acceptance |
+
+      |---|---|---|---|---|---|
+
+      | T17 | `dash/server.tests/KyberDash.Data.Tests/Collector/ParserContractVersionTests.cs` (`KyberDash.Data.Tests.Collector.ParserContractVersionTests`, extend), `dash/server.tests/KyberDash.Application.Tests/Ingest/PluginSessionFileRefreshTests.cs` (`KyberDash.Application.Tests.Ingest.PluginSessionFileRefreshTests`, change one test), `dash/server.tests/KyberDash.Application.Tests/Projection/OtlpFileIdJoinTests.cs` (`KyberDash.Application.Tests.Projection.OtlpFileIdJoinTests`, extend) | `dotnet test dash/server.tests/KyberDash.Data.Tests/KyberDash.Data.Tests.csproj --filter "FullyQualifiedName~KyberDash.Data.Tests.Collector.ParserContractVersionTests" && dotnet test dash/server.tests/KyberDash.Application.Tests/KyberDash.Application.Tests.csproj --filter "FullyQualifiedName~KyberDash.Application.Tests.Ingest.PluginSessionFileRefreshTests" && dotnet test dash/server.tests/KyberDash.Application.Tests/KyberDash.Application.Tests.csproj --filter "FullyQualifiedName~KyberDash.Application.Tests.Projection.OtlpFileIdJoinTests"` | Contract version: every discovered `copilot-cli` unit carries `HarnessSourceRegistry.CopilotCliFreshInputParserContractVersion` ("2"), and a checkpoint stamped "1" for a `copilot-cli` unit is not reusable; droid, cursor, warp ("2"), roo-code ("3") and every other registration ("1") are unchanged. Traversal: the candidate list of `TraversalLikeCandidateIds_NeverReadOutsideTheSessionsRoot` includes `../../escape/sess-droid-1`, which a `Path.Combine(sessionsRoot, id + ".jsonl")` join resolves to the planted decoy `HomeRoot/escape/sess-droid-1.jsonl`; the refresh reads nothing and writes no record, as before. Codex (D26), for both `codex` and `codex-cli`: 2 OTLP and 2 rollout model calls paired on equal counters, plus 1 rollout model call whose counters are all zero, project 3 turns (the unreported call stays its own turn); session token totals equal the OTLP sums. If the projection gives another turn count or totals, the worker stops and returns BLOCKED with the observed values; it does not edit the projector | Contract version: the new `copilot-cli` assertions fail (units carry "1"). Traversal and Codex: no RED is producible, because the shipped guard and projection already behave as asserted; the worker records that each new case passes on the first run and names the line that would fail without the guard (the stem compare in `TranscriptIngestionService.RefreshPluginSessionFiles`) | All pass with a non-zero count; existing cases keep their assertions except the `others` set in `DiscoverAll_StampsVersionTwoOnDroidCursorAndWarpUnitsAndVersionOneOnEveryOtherRegistration`, which excludes `copilot-cli` |
+
+
+      #### Decisions this task cites
+
+      | ID | Question | Answer / decision | Mitigating and supporting information | Status / approval provenance |
+
+      |---|---|---|---|---|
+
+      | D26 | Which model does the skills panel name for a stand-in tokenizer, and what happens to a Codex rollout model call with unreported counters beside OTLP calls? | Skills: `SessionSkillsSection` passes `summaryRecord.models[0]` when `models` holds exactly one model, otherwise nothing (a multi-model session keeps the generic "the model" wording rather than naming one model wrongly). Codex: a call with all counters zero is neither paired nor dropped (`PairCodexFileModelCalls` and the counter-cluster loop both skip `IsUnreportedCounters`), so it stays its own turn with counters not measured and adds nothing to the totals; T17 pins that, per D21 ("an unpaired file call stays a turn"). | Shipped code read through codegraph (`DedupeTwinTurns`, `PairCodexFileModelCalls`, `IsUnreportedCounters`); `SessionSummaryPayload.models` is `string[]`. | ANSWERED — autonomous: decided from code evidence and D21 |
+
+      | D23 | Which tasks own the cycle-2 review fixes, and what do they wait on? | Three new tasks, one per technology: T16 (react: `TurnBucketPanel`, `costBasisText`, `SessionSkillsSection`, the drawer test), T17 (csharp: copilot-cli parser contract version, traversal test, Codex unreported-counter test), T18 (typescript e2e: tray and harness-page count assertions). Each declares `Depends on: none`: everything it edits is already integrated on the run branch, so no plan task's output is still to come. The plan-text finding (`documentation-accuracy/plan-codex-id-join-stale`) is fixed in this amendment, because workers never open the plan. | The Arbiter refused T8 as added work (`KW-ARB-SCOPE-002`) and T3/T10 as waiting (`KW-ARB-READY-001`), as it did in cycle 1 (D22). The readiness rule reads completion only from the Arbiter ledger (a passing return or an `ATTESTED:` line), not from the plan or the task file, so declaring integrated work as a dependency would block on ledger state. | ANSWERED — autonomous: decided from the Arbiter's escalations and `ArbiterLedgerQueries.CompletedTasks` |
+
+
+      Results of the tasks this one follows, as their workers reported them:
+
+      {prior_results}
+    agent: dev-easy
+    agent-confidence: 1
+    difficulty: easy
+    difficulty-source: architect
+    technology: csharp
+  - id: T18
+    capabilities: TypeScript Playwright end-to-end tests against an isolated KyberDash server
+    depends-on: []
+    files:
+      - dash/e2e/otel-tray-dashboard.spec.ts
+      - dash/e2e/file-harness-dashboard.spec.ts
+    session: e2e-files
+    prompt: >
+      Task T18: E2e review fixes: exact tray and harness-page session counts
+
+      Worktree: {worktree}
+
+
+      - **Objective:** Make the two session-count assertions target one element by exact value, so a wrong count for one harness fails the suite.
+
+      - **Capabilities:** TypeScript Playwright end-to-end tests against an isolated KyberDash server
+
+      - **Difficulty:** easy
+
+      - **Technology:** typescript
+
+      - **Session:** `e2e-files`
+
+      - **Depends on:** none (T3 and T5, whose files this edits, are integrated on the run branch; D23)
+
+      - **Files:**
+        - `dash/e2e/otel-tray-dashboard.spec.ts`: the harness selector check: for each contract harness, locate the one option whose `value` attribute equals the harness (CSS selector `option[value="<harness>"]` on the selector) and assert its text contains `(<sessionCountForHarness(harness)>)`; remove the `optionsText.some(...)` substring match.
+        - `dash/e2e/file-harness-dashboard.spec.ts`: the Harness Detail count: replace `expect(page.getByTestId('page-harness')).toContainText(String(contracts.length))` with `expect(page.getByTestId('harness-session-count')).toHaveText(String(contracts.length))`.
+      - **Commands:**
+        - `kyber-weave review gates . --agent <your agent name> --task T18`
+        - `dotnet build dash/server/KyberDash.Cli -c Release`
+        - `npm --prefix dash run build:web`
+        - `npx --prefix dash playwright install --list` (browser precondition: the isolated config's Chromium must be listed; otherwise stop the evidence step and report `NOT VERIFIED: <reason>`)
+        - `npx --prefix dash playwright test --config dash/playwright.isolated.config.ts dash/e2e/file-harness-dashboard.spec.ts dash/e2e/otel-tray-dashboard.spec.ts` (evidence)
+      - **Acceptance:**
+        - The gate passes; the evidence run passes or is reported `NOT VERIFIED: <reason>`; neither count assertion matches by substring over a whole page or option list.
+
+      Reference content for this task, quoted exactly from its source document and complete as given:
+
+
+      #### Test contract row for T18
+
+      | Task | Test project or file | Runner command | Observable behavior | RED evidence required | GREEN acceptance |
+
+      |---|---|---|---|---|---|
+
+      | T18 | `dash/e2e/otel-tray-dashboard.spec.ts`, `dash/e2e/file-harness-dashboard.spec.ts` | Gate (D8): `npm --prefix dash run typecheck && npm --prefix dash run lint`. Evidence step: `npx --prefix dash playwright test --config dash/playwright.isolated.config.ts dash/e2e/file-harness-dashboard.spec.ts dash/e2e/otel-tray-dashboard.spec.ts` | Tray: for each harness, the selector option located by exact value (`option[value="<harness>"]`) has text containing `(<sessionCountForHarness(harness)>)`; no substring match over all options, so `pi` can no longer pass through `copilot (2)`. File-harness page: the session count is asserted with `getByTestId('harness-session-count')` and an exact `toHaveText(String(contracts.length))`, as `otel-web-dashboard.spec.ts` does; no `toContainText` on `page-harness` for the count | No RED is producible: the product shows the right counts today, so the tightened assertions pass; the reviewer checks that each assertion targets one element by exact value or test id | Gate passes; the evidence run passes, or the digest says `NOT VERIFIED: <reason>` per D8 (the tray spec needs the tray app build, issue #682) |
+
+
+      #### Decisions this task cites
+
+      | ID | Question | Answer / decision | Mitigating and supporting information | Status / approval provenance |
+
+      |---|---|---|---|---|
+
+      | D23 | Which tasks own the cycle-2 review fixes, and what do they wait on? | Three new tasks, one per technology: T16 (react: `TurnBucketPanel`, `costBasisText`, `SessionSkillsSection`, the drawer test), T17 (csharp: copilot-cli parser contract version, traversal test, Codex unreported-counter test), T18 (typescript e2e: tray and harness-page count assertions). Each declares `Depends on: none`: everything it edits is already integrated on the run branch, so no plan task's output is still to come. The plan-text finding (`documentation-accuracy/plan-codex-id-join-stale`) is fixed in this amendment, because workers never open the plan. | The Arbiter refused T8 as added work (`KW-ARB-SCOPE-002`) and T3/T10 as waiting (`KW-ARB-READY-001`), as it did in cycle 1 (D22). The readiness rule reads completion only from the Arbiter ledger (a passing return or an `ATTESTED:` line), not from the plan or the task file, so declaring integrated work as a dependency would block on ledger state. | ANSWERED — autonomous: decided from the Arbiter's escalations and `ArbiterLedgerQueries.CompletedTasks` |
+
+      | D8 | The test standard says Playwright never runs in a developer's task gate, but the request needs proof that the suite passes. | The e2e tasks' gates run `typecheck` and `lint` only. Each e2e task's worker first checks that the isolated config can launch its browser (`npx --prefix dash playwright install --list` lists Chromium), rebuilds the CLI and the web bundle, then runs its own spec once as a bounded evidence step and reports the result. RED is the new assertions failing at runtime; GREEN is the same assertions passing. When no browser is available, the digest and the pull request notes say `NOT VERIFIED: <reason>`, never a pass, and the conductor runs the evidence step where a browser exists. | This keeps the test standard intact and still gives the request its proof. CI does not yet run the isolated specs (issue #681). | ANSWERED — plan review finding 4 |
+
+
+      Results of the tasks this one follows, as their workers reported them:
+
+      {prior_results}
+    agent: dev-easy
+    agent-confidence: 0.98
+    difficulty: easy
+    difficulty-source: architect
+    technology: typescript
   - id: T5
     capabilities: TypeScript Playwright end-to-end tests against an isolated KyberDash server, writing native harness transcript files
     depends-on:
