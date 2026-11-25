@@ -148,6 +148,31 @@ public class SessionUsageTotalsTests : IDisposable
         Assert.Null(listFigure.TotalOutput);
     }
 
+    // Copilot CLI's shutdown input is stored as fresh input (the mapper subtracts the cache classes,
+    // CopilotCliMapper.cs BuildReportedUsage). The session input total is fresh input plus cache read,
+    // so 70 fresh input and 30 cache read is 100 input tokens, with cache counted once.
+    [Theory]
+    [MemberData(nameof(Stores))]
+    public void CopilotCli_FreshInputPlusCache_CountsCacheOnce(string storeKind)
+    {
+        IRelationalStoreReader reader = Seed(
+            storeKind,
+            [
+                new CollectedModelUsage(0, Model, TokenClass.Input, 70),
+                new CollectedModelUsage(0, Model, TokenClass.CacheRead, 30),
+                new CollectedModelUsage(0, Model, TokenClass.Output, 9),
+            ],
+            [Call("call-1", 0, [])],
+            CopilotCliJournalReader.CopilotCliHarnessId);
+
+        SessionSummaryFigure? summary = reader.SessionSummaryFigures(SessionKey);
+
+        Assert.NotNull(summary);
+        Assert.Equal(100L, summary.TotalInput);
+        Assert.Equal(30L, summary.TotalCacheRead);
+        Assert.Equal(9L, summary.TotalOutput);
+    }
+
     // Droid (DroidSessionMapper.cs:775-796) and Warp (WarpMapper.cs:623) only ever write snapshot
     // position 0, so a second snapshot is not something their data defines: not measured.
     [Theory]

@@ -36,7 +36,7 @@ public record CopilotCliToolRequest(
 /// Per-model token usage snapshot from a Copilot CLI <c>session.shutdown</c> event's <c>modelMetrics</c>.
 /// </summary>
 /// <param name="Model">Model identifier for this usage snapshot.</param>
-/// <param name="InputTokens">Fresh input token count when reported.</param>
+/// <param name="InputTokens">Input token count as the CLI reports it, cache-inclusive (cache read and write are part of it) when reported.</param>
 /// <param name="OutputTokens">Generated output token count when reported.</param>
 /// <param name="CacheReadTokens">Prompt-cache read token count when reported.</param>
 /// <param name="CacheWriteTokens">Prompt-cache creation/write token count when reported.</param>
@@ -500,7 +500,7 @@ public class CopilotCliMapper : IHarnessMapper
                     continue;
                 }
 
-                AddModelUsageRow(usage, position, model, TokenClass.Input, metric.InputTokens);
+                AddModelUsageRow(usage, position, model, TokenClass.Input, FreshInputTokens(metric));
                 AddModelUsageRow(usage, position, model, TokenClass.CacheRead, metric.CacheReadTokens);
                 AddModelUsageRow(usage, position, model, TokenClass.CacheWrite, metric.CacheWriteTokens);
                 AddModelUsageRow(usage, position, model, TokenClass.Output, metric.OutputTokens);
@@ -509,6 +509,30 @@ public class CopilotCliMapper : IHarnessMapper
         }
 
         return usage;
+    }
+
+    /// <summary>
+    /// The shutdown <c>inputTokens</c> is cache-inclusive (input + cache read + cache write), so the
+    /// fresh input stored is that count less both cache classes. The legacy provider did the same
+    /// (copilot.ts:959-986 at fc80ddf9^). A negative cache class, or a result below zero, means the
+    /// snapshot does not hold together: the fresh input is not measured and no input row is stored.
+    /// </summary>
+    private static long? FreshInputTokens(CopilotCliModelUsage metric)
+    {
+        if (metric.InputTokens is not { } input)
+        {
+            return null;
+        }
+
+        long cacheRead = metric.CacheReadTokens ?? 0;
+        long cacheWrite = metric.CacheWriteTokens ?? 0;
+        if (input < 0 || cacheRead < 0 || cacheWrite < 0)
+        {
+            return null;
+        }
+
+        long fresh = input - cacheRead - cacheWrite;
+        return fresh >= 0 ? fresh : null;
     }
 
     private static void AddModelUsageRow(
