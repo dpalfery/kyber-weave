@@ -696,7 +696,7 @@ Checked on 2026-11-25 against the code on the run branch. Links are relative to 
 | D24 | Documentation waiver: a test-file choice; the chart's not-measurable state is already documented in [Token figures, the per-turn chart and their labels](../dash/telemetry-inventory.md#token-figures-the-per-turn-chart-and-their-labels) |
 | D25, D26 | Documentation waiver: display wording of the cost basis, the skills panel's model argument, and a pinned case of the D21 rule already documented under [Twin turns join on a vendor id, or on the session](../dash/architecture.md#twin-turns-join-on-a-vendor-id-or-on-the-session); no new invariant |
 | D10 | Documentation waiver: a fixture clock choice with no surviving invariant beyond the run-relative timestamps the runbook states |
-| AP1 | Documentation waiver: the approve-and-execute gate is process provenance with no surviving architectural, operational or behavioural invariant |
+| AP1, AP2, AP3 | Documentation waiver: the approve-and-execute gate is process provenance with no surviving architectural, operational or behavioural invariant |
 | KyberDash | The Design harvest rows: [Where the Factory file rows come from](../dash/architecture.md#where-the-factory-file-rows-come-from) (counter pass, stale live-counter bullet replaced), [Jobs and shared settings](../dash/architecture.md#jobs-and-shared-settings-adr-0033) (scheduled import on and off), [Records keep their source](../dash/architecture.md#records-keep-their-source), [The Factory source-precedence rule](../dash/architecture.md#the-factory-source-precedence-rule) (paired Droid per-turn tokens not measurable), [Token figures, the per-turn chart and their labels](../dash/telemetry-inventory.md#token-figures-the-per-turn-chart-and-their-labels) (the spend chart state), [Per-harness dashboard suites](../dash/runbook.md#isolated-playwright-otlp-suites-web-dashboard-and-tray-ui) (the suites and gap matrix) and the detector-version paragraph in [Skills view contract](../dash/architecture.md#skills-view-contract) (`DetectorVersion` 6) |
 
 ADR waiver: no ADR. The change restores documented behaviour and follows the existing source-precedence rule; the no-estimate rule is recorded in the governed rules document.
@@ -710,6 +710,8 @@ ADR waiver: no ADR. The change restores documented behaviour and follows the exi
 NOT VERIFIED: the isolated Playwright suites were not run by this closeout; they need a browser and fresh builds, and the task evidence runs carry their results.
 
 NOT VERIFIED: the four SQLite-format harness tests (`kilo-shared-runtime`, `warp`, `cursor`, `devin`) are expected failures pending branch `claude/fix/sqlite-harness-readers`.
+
+**Review fix rounds.** T14 (`d6f5603f4`): Codex rollout model calls drop only when an OTLP call pairs with them on equal counters (D21). T15 (`47fc756d6`): field register, Codex pairing text and the closed even-split todo (D22). T16 (`0d0ef1773`): unmeasured bucket, cost basis text and skills model in the web (D24 to D26). T17 (`a4825ed8d`, `6ecc6b59b`): copilot-cli parser contract version, traversal decoy and Codex unreported-counter tests. T18 (`05e57ad5c`, `c40f8b49d`): exact tray and harness-page session counts and a polled day-count assertion in the e2e.
 
 **Open items (not fixed here).**
 
