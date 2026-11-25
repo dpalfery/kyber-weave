@@ -83,6 +83,19 @@ public class HarnessSourceRegistry
     public const string CopilotCliFreshInputParserContractVersion = "2";
 
     /// <summary>
+    /// Parser contract version of the <c>claude-code</c> reader, whose mapper now coalesces streamed
+    /// assistant messages across growing usage, emits <c>tool_use</c> conversation parts, splits
+    /// oversized plain text cleanly on <c>&lt;system-reminder&gt;</c> boundaries with tail-only withheld
+    /// continuation, folds compaction markers, and isolates subagent sessions.
+    /// </summary>
+    /// <remarks>
+    /// Bumping the version makes <c>CanonRefreshEngine.CheckpointIsReusable</c> refuse checkpoints
+    /// written under <see cref="DefaultParserContractVersion"/> so the next refresh re-ingests Claude
+    /// Code transcripts automatically.
+    /// </remarks>
+    public const string ClaudeTranscriptV2ParserContractVersion = "2";
+
+    /// <summary>
     /// Parser contract version of the <c>kilo-sqlite</c>, <c>warp-sqlite</c>, <c>cursor-vscdb</c> and
     /// <c>devin-sqlite</c> readers, which now read one conversation row export per unit (decision D7).
     /// </summary>
@@ -172,7 +185,8 @@ public class HarnessSourceRegistry
                     TranscriptReaderRepository.ClaudeParserId,
                     TranscriptReaderRepository.ClaudeFormat,
                     [".claude/projects"],
-                    ["*.jsonl"])),
+                    ["*.jsonl"],
+                    ParserContractVersion: ClaudeTranscriptV2ParserContractVersion)),
             new SpecHarnessSourceReader(
                 TranscriptReaderRepository.CodexHarnessId,
                 new SourceRootSpec(

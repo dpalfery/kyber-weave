@@ -79,6 +79,10 @@ public record ClaudeTranscriptMessage(
 /// <param name="AttributionMcpServer">Optional ground-truth MCP server attribution.</param>
 /// <param name="Message">Parsed <c>message</c> payload, when present.</param>
 /// <param name="RequestId">The provider request id the line carries (<c>requestId</c>), when present.</param>
+/// <param name="Subtype">Optional entry subtype (<c>subtype</c>), such as <c>compact_boundary</c>.</param>
+/// <param name="IsCompactSummary">Whether the line marks a post-compaction summary (<c>isCompactSummary</c>).</param>
+/// <param name="IsSidechain">Whether the line belongs to a sidechain/subagent execution (<c>isSidechain</c>).</param>
+/// <param name="AgentId">Optional subagent identifier (<c>agentId</c>).</param>
 public record ClaudeTranscriptLine(
     string? RecordType,
     string? SessionId,
@@ -88,7 +92,11 @@ public record ClaudeTranscriptLine(
     int? ExitCode,
     string? AttributionMcpServer,
     ClaudeTranscriptMessage? Message,
-    string? RequestId = null);
+    string? RequestId = null,
+    string? Subtype = null,
+    bool IsCompactSummary = false,
+    bool IsSidechain = false,
+    string? AgentId = null);
 
 /// <summary>
 /// Pure <see cref="IHarnessMapper"/> translating a loaded Claude Code JSONL
@@ -101,6 +109,12 @@ public class ClaudeTranscriptMapper : IHarnessMapper
     private const string FallbackTimestamp = "1970-01-01T00:00:00.000Z";
     private const string UnknownModelFallback = "unknown";
     private const string FallbackToolErrorMessage = "Tool execution failed";
+    private const string CompactBoundaryAgentInstanceId = "claude:compact_boundary";
+    private const string AgentStemPrefix = "agent-";
+    private const string SubagentsDirectoryName = "subagents";
+    private const string FallbackSidechainBareId = "sidechain";
+    private const string SystemReminderOpenTag = "<system-reminder>";
+    private const string SystemReminderCloseTag = "</system-reminder>";
 
     /// <inheritdoc />
     public string HarnessId => TranscriptReaderRepository.ClaudeHarnessId;
@@ -117,15 +131,15 @@ public class ClaudeTranscriptMapper : IHarnessMapper
             return new CollectedBatch(source, [], [], []);
         }
 
-        string fileStem = ExtractFileStem(unit.Unit.SourceKey);
+        SourcePathInfo pathInfo = ParseSourcePathInfo(unit.Unit.SourceKey);
         List<List<ClaudeTranscriptLine>> rawGroups = GroupLinesByUsage(unit.RawText);
         if (rawGroups.Count == 0)
         {
             return new CollectedBatch(source, [], [], []);
         }
 
-        List<MergedLineGroup> mergedGroups = MergeClaudeGroups(rawGroups, fileStem);
-        List<ParsedTurnGroup> keptTurns = BuildKeptTurns(mergedGroups, fileStem);
+        List<MergedLineGroup> mergedGroups = MergeClaudeGroups(rawGroups, pathInfo);
+        List<ParsedTurnGroup> keptTurns = BuildKeptTurns(mergedGroups, pathInfo);
         if (keptTurns.Count == 0)
         {
             return new CollectedBatch(source, [], [], []);
@@ -144,6 +158,28 @@ public class ClaudeTranscriptMapper : IHarnessMapper
     {
         string stem = Path.GetFileNameWithoutExtension(sourceKey);
         return SafeOptionalText(stem) ?? string.Empty;
+    }
+
+    private static SourcePathInfo ParseSourcePathInfo(string sourceKey)
+    {
+        string fileStem = ExtractFileStem(sourceKey);
+        string[] segments = sourceKey.Split(['/', '\\'], StringSplitOptions.RemoveEmptyEntries);
+        int subagentsIndex = -1;
+        for (int i = segments.Length - 2; i >= 0; i--)
+        {
+            if (string.Equals(segments[i], SubagentsDirectoryName, StringComparison.Ordinal))
+            {
+                subagentsIndex = i;
+                break;
+            }
+        }
+
+        bool isNestedSubagentFile = subagentsIndex >= 0;
+        string? subagentParentSessionId = subagentsIndex > 0
+            ? SafeOptionalText(segments[subagentsIndex - 1])
+            : null;
+
+        return new SourcePathInfo(fileStem, isNestedSubagentFile, subagentParentSessionId);
     }
 
     private static List<List<ClaudeTranscriptLine>> GroupLinesByUsage(string rawText)
@@ -246,6 +282,13 @@ public class ClaudeTranscriptMapper : IHarnessMapper
                 message = ParseMessage(msgEl);
             }
 
+            string? subtype = ReadSafeMetadataText(root, "subtype");
+            bool isCompactSummary = root.TryGetProperty("isCompactSummary", out JsonElement compactEl)
+                && compactEl.ValueKind == JsonValueKind.True;
+            bool isSidechain = root.TryGetProperty("isSidechain", out JsonElement sidechainEl)
+                && sidechainEl.ValueKind == JsonValueKind.True;
+            string? agentId = ReadSafeMetadataText(root, "agentId");
+
             return new ClaudeTranscriptLine(
                 RecordType: recordType,
                 SessionId: sessionId,
@@ -255,7 +298,11 @@ public class ClaudeTranscriptMapper : IHarnessMapper
                 ExitCode: exitCode,
                 AttributionMcpServer: server,
                 Message: message,
-                RequestId: ReadSafeMetadataText(root, "requestId"));
+                RequestId: ReadSafeMetadataText(root, "requestId"),
+                Subtype: subtype,
+                IsCompactSummary: isCompactSummary,
+                IsSidechain: isSidechain,
+                AgentId: agentId);
         }
     }
 
@@ -402,27 +449,32 @@ public class ClaudeTranscriptMapper : IHarnessMapper
 
     private static List<MergedLineGroup> MergeClaudeGroups(
         List<List<ClaudeTranscriptLine>> rawGroups,
-        string fileStem)
+        SourcePathInfo pathInfo)
     {
         List<MergedLineGroup> merged = [];
         foreach (List<ClaudeTranscriptLine> group in rawGroups)
         {
             ClaudeTranscriptLine lastLine = group[^1];
-            UsageSnapshot? usageInfo = ExtractUsageSnapshot(lastLine, fileStem);
+            UsageSnapshot? usageInfo = ExtractUsageSnapshot(lastLine, pathInfo);
 
             if (merged.Count > 0)
             {
                 MergedLineGroup prev = merged[^1];
-                UsageSnapshot? prevForMatch = prev.FirstUsage is null
+                UsageSnapshot? prevForMatch = prev.Usage is null
                     ? null
-                    : prev.FirstUsage with { MessageId = prev.MessageId ?? prev.FirstUsage.MessageId };
+                    : prev.Usage with { MessageId = prev.MessageId ?? prev.Usage.MessageId };
                 if (IsMatchingClaudeUsage(prevForMatch, usageInfo))
                 {
                     prev.Lines.AddRange(group);
-                    if (prev.MessageId is null && usageInfo?.MessageId is not null)
+                    string? mergedMessageId = prev.MessageId ?? usageInfo!.MessageId;
+                    UsageSnapshot mergedUsage = prev.Usage! with
                     {
-                        merged[^1] = prev with { MessageId = usageInfo.MessageId };
-                    }
+                        MessageId = mergedMessageId,
+                        Model = !string.IsNullOrWhiteSpace(usageInfo!.Model) ? usageInfo.Model : prev.Usage.Model,
+                        Usage = usageInfo.Usage,
+                        Timestamp = prev.Usage.Timestamp ?? usageInfo.Timestamp,
+                    };
+                    merged[^1] = prev with { MessageId = mergedMessageId, Usage = mergedUsage };
 
                     continue;
                 }
@@ -434,16 +486,19 @@ public class ClaudeTranscriptMapper : IHarnessMapper
         return merged;
     }
 
-    private static UsageSnapshot? ExtractUsageSnapshot(ClaudeTranscriptLine line, string fileStem)
+    private static UsageSnapshot? ExtractUsageSnapshot(ClaudeTranscriptLine line, SourcePathInfo pathInfo)
     {
         if (line.Message?.Usage is null)
         {
             return null;
         }
 
+        string resolvedSessionId = ResolveSessionId(line.SessionId, line.IsSidechain, line.AgentId, pathInfo)
+            ?? pathInfo.FileStem;
+
         return new UsageSnapshot(
             MessageId: line.Message.Id,
-            SessionId: line.SessionId ?? fileStem,
+            SessionId: resolvedSessionId,
             Model: line.Message.Model,
             Usage: line.Message.Usage,
             Timestamp: line.Timestamp);
@@ -456,16 +511,14 @@ public class ClaudeTranscriptMapper : IHarnessMapper
             return false;
         }
 
-        if (prev.MessageId is not null
-            && next.MessageId is not null
-            && !string.Equals(prev.MessageId, next.MessageId, StringComparison.Ordinal))
+        if (!string.Equals(prev.SessionId, next.SessionId, StringComparison.Ordinal))
         {
             return false;
         }
 
-        if (!string.Equals(prev.SessionId, next.SessionId, StringComparison.Ordinal))
+        if (!string.IsNullOrEmpty(prev.MessageId) && !string.IsNullOrEmpty(next.MessageId))
         {
-            return false;
+            return string.Equals(prev.MessageId, next.MessageId, StringComparison.Ordinal);
         }
 
         if (!string.Equals(prev.Model, next.Model, StringComparison.Ordinal))
@@ -501,20 +554,36 @@ public class ClaudeTranscriptMapper : IHarnessMapper
         return true;
     }
 
-    private static List<ParsedTurnGroup> BuildKeptTurns(List<MergedLineGroup> mergedGroups, string fileStem)
+    private static List<ParsedTurnGroup> BuildKeptTurns(List<MergedLineGroup> mergedGroups, SourcePathInfo pathInfo)
     {
         List<ParsedTurnGroup> turns = [];
+        HashSet<string> pendingCompactionSessions = new(StringComparer.Ordinal);
 
         foreach (MergedLineGroup mergedGroup in mergedGroups)
         {
-            ParsedTurnGroup? parsed = ParseTurnGroup(mergedGroup.Lines, mergedGroup.FirstUsage, fileStem);
+            bool groupHasCompaction = mergedGroup.Lines.Any(IsCompactionMarker);
+            ParsedTurnGroup? parsed = ParseTurnGroup(mergedGroup.Lines, mergedGroup.Usage, pathInfo);
+            string? sessionBucketKey = parsed?.SessionId
+                ?? mergedGroup.Usage?.SessionId
+                ?? ResolveGroupFallbackSessionKey(mergedGroup.Lines, pathInfo);
+
             if (parsed is null)
             {
+                if (groupHasCompaction && sessionBucketKey is not null)
+                {
+                    _ = pendingCompactionSessions.Add(sessionBucketKey);
+                }
+
                 continue;
             }
 
             if (!HasNonZeroUsage(parsed.Usage))
             {
+                if (groupHasCompaction && sessionBucketKey is not null)
+                {
+                    _ = pendingCompactionSessions.Add(sessionBucketKey);
+                }
+
                 if (turns.Count > 0 && HasTurnContent(parsed))
                 {
                     turns[^1] = MergeTailTurn(turns[^1], parsed);
@@ -523,18 +592,105 @@ public class ClaudeTranscriptMapper : IHarnessMapper
                 continue;
             }
 
+            bool hasPendingCompaction = sessionBucketKey is not null && pendingCompactionSessions.Remove(sessionBucketKey);
+            if (groupHasCompaction || hasPendingCompaction)
+            {
+                parsed = parsed with { AgentInstanceId = CompactBoundaryAgentInstanceId };
+            }
+
             turns.Add(parsed);
         }
 
         return turns;
     }
 
+    private static bool IsCompactionMarker(ClaudeTranscriptLine line) =>
+        (string.Equals(line.RecordType, "system", StringComparison.Ordinal)
+            && string.Equals(line.Subtype, "compact_boundary", StringComparison.Ordinal))
+        || line.IsCompactSummary;
+
+    private static string? ResolveGroupFallbackSessionKey(
+        List<ClaudeTranscriptLine> lines,
+        SourcePathInfo pathInfo)
+    {
+        string? sessionId = null;
+        bool isSidechain = false;
+        string? agentId = null;
+        foreach (ClaudeTranscriptLine line in lines)
+        {
+            sessionId ??= line.SessionId;
+            if (line.IsSidechain)
+            {
+                isSidechain = true;
+            }
+
+            agentId ??= line.AgentId;
+        }
+
+        return ResolveSessionId(sessionId, isSidechain, agentId, pathInfo);
+    }
+
+    private static string? ResolveSessionId(
+        string? lineSessionId,
+        bool isSidechain,
+        string? agentId,
+        SourcePathInfo pathInfo)
+    {
+        bool isolateAsSubagent = isSidechain
+            || !string.IsNullOrEmpty(agentId)
+            || pathInfo.IsNestedSubagentFile;
+
+        if (!isolateAsSubagent)
+        {
+            return !string.IsNullOrEmpty(lineSessionId)
+                ? lineSessionId
+                : (string.IsNullOrEmpty(pathInfo.FileStem) ? null : pathInfo.FileStem);
+        }
+
+        string? parentSessionId = !string.IsNullOrEmpty(lineSessionId)
+            ? lineSessionId
+            : (pathInfo.SubagentParentSessionId ?? (string.IsNullOrEmpty(pathInfo.FileStem) ? null : pathInfo.FileStem));
+        if (string.IsNullOrEmpty(parentSessionId))
+        {
+            return null;
+        }
+
+        string bareId = ResolveSubagentBareId(agentId, pathInfo);
+        return $"{parentSessionId}#agent-{bareId}";
+    }
+
+    private static string ResolveSubagentBareId(string? agentId, SourcePathInfo pathInfo)
+    {
+        if (!string.IsNullOrEmpty(agentId))
+        {
+            string trimmed = agentId.Trim();
+            return trimmed.StartsWith(AgentStemPrefix, StringComparison.Ordinal) && trimmed.Length > AgentStemPrefix.Length
+                ? trimmed[AgentStemPrefix.Length..]
+                : trimmed;
+        }
+
+        if (pathInfo.FileStem.StartsWith(AgentStemPrefix, StringComparison.Ordinal)
+            && pathInfo.FileStem.Length > AgentStemPrefix.Length)
+        {
+            return pathInfo.FileStem[AgentStemPrefix.Length..];
+        }
+
+        if (pathInfo.IsNestedSubagentFile && !string.IsNullOrEmpty(pathInfo.FileStem))
+        {
+            return pathInfo.FileStem;
+        }
+
+        return FallbackSidechainBareId;
+    }
+
     private static ParsedTurnGroup? ParseTurnGroup(
         List<ClaudeTranscriptLine> lines,
         UsageSnapshot? usageSnapshot,
-        string fileStem)
+        SourcePathInfo pathInfo)
     {
         string? discoveredSessionId = null;
+        bool isSidechain = false;
+        string? discoveredAgentId = null;
         string? nativeRecordId = usageSnapshot?.MessageId;
         string? requestId = null;
         string? sessionTitle = null;
@@ -548,6 +704,12 @@ public class ClaudeTranscriptMapper : IHarnessMapper
         foreach (ClaudeTranscriptLine line in lines)
         {
             discoveredSessionId ??= line.SessionId;
+            if (line.IsSidechain)
+            {
+                isSidechain = true;
+            }
+
+            discoveredAgentId ??= line.AgentId;
             sessionTitle ??= line.SessionTitle;
             if (string.Equals(line.Message?.Role, "assistant", StringComparison.Ordinal))
             {
@@ -652,9 +814,13 @@ public class ClaudeTranscriptMapper : IHarnessMapper
                         continue;
                     }
 
+                    string resolvedName = string.IsNullOrWhiteSpace(name) ? UnknownModelFallback : name;
+                    string toolPartText = FormatToolUsePartText(resolvedName, block.RawInputText);
+                    parts.Add(new ParsedPart(ContentBucket.ConversationHistory, toolPartText, server, role));
+
                     toolCalls.Add(new ParsedToolCall(
                         Id: id,
-                        Name: string.IsNullOrWhiteSpace(name) ? UnknownModelFallback : name,
+                        Name: resolvedName,
                         RawInputText: block.RawInputText,
                         InputIsString: block.InputIsString,
                         Timestamp: line.Timestamp));
@@ -671,9 +837,9 @@ public class ClaudeTranscriptMapper : IHarnessMapper
             return null;
         }
 
-        string? sessionId = !string.IsNullOrEmpty(discoveredSessionId)
-            ? discoveredSessionId
-            : (string.IsNullOrEmpty(fileStem) ? null : fileStem);
+        string? sessionId = usageSnapshot is not null && !string.IsNullOrEmpty(usageSnapshot.SessionId)
+            ? usageSnapshot.SessionId
+            : ResolveSessionId(discoveredSessionId, isSidechain, discoveredAgentId, pathInfo);
 
         return new ParsedTurnGroup(
             SessionId: sessionId,
@@ -686,10 +852,16 @@ public class ClaudeTranscriptMapper : IHarnessMapper
             TerminationReason: terminationReason,
             ExitCode: exitCode,
             CorrectionRule: correctionRule,
+            AgentInstanceId: null,
             Parts: parts,
             ToolCalls: toolCalls,
             ToolResults: toolResults);
     }
+
+    private static string FormatToolUsePartText(string toolName, string? rawInputText) =>
+        string.IsNullOrEmpty(rawInputText)
+            ? toolName
+            : $"{toolName} {rawInputText}";
 
     private static bool HasNonZeroUsage(ClaudeTranscriptUsage? usage) =>
         usage is not null
@@ -868,7 +1040,7 @@ public class ClaudeTranscriptMapper : IHarnessMapper
             Tool: null,
             Agent: null,
             SkillsInvoked: [],
-            AgentInstanceId: null,
+            AgentInstanceId: turn.AgentInstanceId,
             ToolDefinitions: [],
             Signals: new CollectedRecordSignals(
                 ErrorMessage: null,
@@ -924,23 +1096,16 @@ public class ClaudeTranscriptMapper : IHarnessMapper
         List<CollectedContentPart> parts = [];
         if (toolResult?.Content is not null)
         {
-            ToolContentMeasurement resultMeasurement = ToolContentMeasurer.Measure(
+            int partPosition = 0;
+            ToolContentMeasurement resultMeasurement = AppendMeasuredContentParts(
+                parts,
+                ref partPosition,
+                ContentBucket.ToolResultContent,
                 toolResult.Content,
-                CanonSynth.MaxToolResultBytes,
+                server: null,
+                role: null,
                 parent.Model);
             resultContent = resultMeasurement.ToToolContent(includeFingerprint: false);
-            parts.Add(new CollectedContentPart(
-                Position: 0,
-                Bucket: ContentBucket.ToolResultContent,
-                PlainText: resultMeasurement.IsDocument ? null : resultMeasurement.PlainText,
-                Withheld: resultMeasurement.IsDocument ? resultMeasurement.ToWithheldText() : null,
-                ReportedTokens: null,
-                Server: null,
-                Role: null,
-                Resident: null,
-                OriginalUtf8BytesWhenTruncated: resultMeasurement.IsDocument
-                    ? null
-                    : resultMeasurement.OriginalUtf8BytesWhenTruncated));
         }
 
         (string? mcpServerName, string? mcpToolName) = ParseMcpToolNames(toolCall.Name);
@@ -1052,25 +1217,141 @@ public class ClaudeTranscriptMapper : IHarnessMapper
     private static List<CollectedContentPart> BuildContentParts(IReadOnlyList<ParsedPart> parts, string? model)
     {
         List<CollectedContentPart> collected = new(parts.Count);
-        for (int i = 0; i < parts.Count; i++)
+        int position = 0;
+        foreach (ParsedPart part in parts)
         {
-            ParsedPart part = parts[i];
-            ToolContentMeasurement measurement = ToolContentMeasurer.Measure(part.Text, CanonSynth.MaxToolResultBytes, model);
-            collected.Add(new CollectedContentPart(
-                Position: i,
-                Bucket: part.Bucket,
-                PlainText: measurement.IsDocument ? null : measurement.PlainText,
-                Withheld: measurement.IsDocument ? measurement.ToWithheldText() : null,
-                ReportedTokens: null,
-                Server: part.Server,
-                Role: part.Role,
-                Resident: null,
-                OriginalUtf8BytesWhenTruncated: measurement.IsDocument
-                    ? null
-                    : measurement.OriginalUtf8BytesWhenTruncated));
+            _ = AppendMeasuredContentParts(
+                collected,
+                ref position,
+                part.Bucket,
+                part.Text,
+                part.Server,
+                part.Role,
+                model);
         }
 
         return collected;
+    }
+
+    private static ToolContentMeasurement AppendMeasuredContentParts(
+        List<CollectedContentPart> collected,
+        ref int position,
+        ContentBucket bucket,
+        string text,
+        string? server,
+        string? role,
+        string? model)
+    {
+        ToolContentMeasurement measurement = ToolContentMeasurer.Measure(text, CanonSynth.MaxToolResultBytes, model);
+        if (measurement.IsDocument)
+        {
+            collected.Add(new CollectedContentPart(
+                Position: position++,
+                Bucket: bucket,
+                PlainText: null,
+                Withheld: measurement.ToWithheldText(),
+                ReportedTokens: null,
+                Server: server,
+                Role: role,
+                Resident: null,
+                OriginalUtf8BytesWhenTruncated: null));
+            return measurement;
+        }
+
+        if (measurement.Utf8Bytes <= CanonSynth.MaxToolResultBytes)
+        {
+            collected.Add(new CollectedContentPart(
+                Position: position++,
+                Bucket: bucket,
+                PlainText: measurement.PlainText,
+                Withheld: null,
+                ReportedTokens: null,
+                Server: server,
+                Role: role,
+                Resident: null,
+                OriginalUtf8BytesWhenTruncated: null));
+            return measurement;
+        }
+
+        int safeCut = ComputeSystemReminderSafeCut(text, measurement.PlainText ?? string.Empty);
+        if (safeCut > 0)
+        {
+            string retainedPrefix = text[..safeCut];
+            collected.Add(new CollectedContentPart(
+                Position: position++,
+                Bucket: bucket,
+                PlainText: retainedPrefix,
+                Withheld: null,
+                ReportedTokens: null,
+                Server: server,
+                Role: role,
+                Resident: null,
+                OriginalUtf8BytesWhenTruncated: measurement.Utf8Bytes));
+        }
+
+        string unretainedTail = text[safeCut..];
+        if (unretainedTail.Length > 0)
+        {
+            ToolContentMeasurement tailMeasurement = ToolContentMeasurer.Measure(
+                unretainedTail,
+                CanonSynth.MaxToolResultBytes,
+                model);
+            collected.Add(new CollectedContentPart(
+                Position: position++,
+                Bucket: bucket,
+                PlainText: null,
+                Withheld: tailMeasurement.ToWithheldText(),
+                ReportedTokens: null,
+                Server: server,
+                Role: role,
+                Resident: null,
+                OriginalUtf8BytesWhenTruncated: null));
+        }
+
+        return measurement;
+    }
+
+    private static int ComputeSystemReminderSafeCut(string fullText, string truncatedPrefix)
+    {
+        int cut = truncatedPrefix.Length;
+        if (cut <= 0 || cut >= fullText.Length)
+        {
+            return cut;
+        }
+
+        // Avoid tearing an opening <system-reminder> tag across the 64 KiB byte boundary.
+        int lastLt = truncatedPrefix.LastIndexOf('<');
+        if (lastLt >= 0)
+        {
+            ReadOnlySpan<char> trailingSlice = truncatedPrefix.AsSpan(lastLt);
+            if (SystemReminderOpenTag.AsSpan().StartsWith(trailingSlice, StringComparison.Ordinal)
+                && fullText.AsSpan(lastLt).StartsWith(SystemReminderOpenTag, StringComparison.Ordinal))
+            {
+                cut = lastLt;
+            }
+        }
+
+        if (cut <= 0)
+        {
+            return 0;
+        }
+
+        // Back up before any unclosed <system-reminder> so StripInstructionBlocks never sees a broken block.
+        int lastOpen = fullText.LastIndexOf(SystemReminderOpenTag, cut - 1, cut, StringComparison.Ordinal);
+        if (lastOpen >= 0)
+        {
+            int searchStart = lastOpen + SystemReminderOpenTag.Length;
+            int closeCount = cut - searchStart;
+            int matchingClose = closeCount >= SystemReminderCloseTag.Length
+                ? fullText.IndexOf(SystemReminderCloseTag, searchStart, closeCount, StringComparison.Ordinal)
+                : -1;
+            if (matchingClose < 0)
+            {
+                cut = lastOpen;
+            }
+        }
+
+        return cut;
     }
 
     private static (string? ServerName, string? ToolName) ParseMcpToolNames(string toolName)
@@ -1247,6 +1528,11 @@ public class ClaudeTranscriptMapper : IHarnessMapper
     private static bool TryReadInt(JsonElement obj, string key, out int value) =>
         HarnessJson.TryReadInt(obj, key, out value);
 
+    private record SourcePathInfo(
+        string FileStem,
+        bool IsNestedSubagentFile,
+        string? SubagentParentSessionId);
+
     private record UsageSnapshot(
         string? MessageId,
         string SessionId,
@@ -1257,7 +1543,7 @@ public class ClaudeTranscriptMapper : IHarnessMapper
     private record MergedLineGroup(
         List<ClaudeTranscriptLine> Lines,
         string? MessageId,
-        UsageSnapshot? FirstUsage);
+        UsageSnapshot? Usage);
 
     private record ParsedPart(
         ContentBucket Bucket,
@@ -1291,6 +1577,7 @@ public class ClaudeTranscriptMapper : IHarnessMapper
         string? TerminationReason,
         int? ExitCode,
         string? CorrectionRule,
+        string? AgentInstanceId,
         IReadOnlyList<ParsedPart> Parts,
         IReadOnlyList<ParsedToolCall> ToolCalls,
         IReadOnlyList<ParsedToolResult> ToolResults);
