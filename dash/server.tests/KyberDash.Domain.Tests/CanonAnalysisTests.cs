@@ -142,7 +142,7 @@ public class CanonAnalysisTests
             new ContextPart("conversation_history", "hello <system-reminder>keep-this-rule</system-reminder> world"),
         ];
 
-        IReadOnlyList<ContextPart> reduced = CanonContextAnalysis.ReduceContextParts(rawParts);
+        IReadOnlyList<ContextPart> reduced = CanonContextAnalysis.ReduceContextParts(rawParts, CountWords);
         Assert.Equal(4, reduced.Count);
         Assert.All(reduced, static part => Assert.Equal(string.Empty, part.Text));
         Assert.False(reduced[2].Resident);
@@ -169,7 +169,8 @@ public class CanonAnalysisTests
 
         ContextAnalysis context = CanonContextAnalysis.AnalyzeContext(
             turns,
-            new ContextCountOptions(ContextLimit: 10_000, ContextLimitSource: "telemetry"));
+            new ContextCountOptions(ContextLimit: 10_000, ContextLimitSource: "telemetry"),
+            CountWords);
         Assert.True(context.Measurable);
         Assert.Equal(3, context.TurnCount);
         Assert.True(context.Turns[0].ToolDefinitionsByServer.ContainsKey("github"));
@@ -191,7 +192,8 @@ public class CanonAnalysisTests
             turns,
             new ContextCountOptions(
                 ContextLimit: 10_000,
-                Measurability: unmeasuredAllKeys));
+                Measurability: unmeasuredAllKeys),
+            CountWords);
         Assert.False(notMeasurable.Measurable);
         Assert.Equal("declared_not_measurable", notMeasurable.Reason);
 
@@ -836,4 +838,8 @@ public class CanonAnalysisTests
     }
 
     private static JsonElement Element(object value) => JsonSerializer.SerializeToElement(value);
+
+    /// <summary>Stand-in counter: one count per whitespace-separated word, never characters / 4.</summary>
+    private static long CountWords(string text, string? model) =>
+        text.Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries).LongLength;
 }

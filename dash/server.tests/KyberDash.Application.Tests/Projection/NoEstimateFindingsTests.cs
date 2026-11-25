@@ -146,7 +146,8 @@ public class NoEstimateFindingsTests
     {
         ContextAnalysis context = CanonContextAnalysis.AnalyzeContext(
             [ContextTurnOf(inputTokens: 500, freshInput: null), ContextTurnOf(inputTokens: 6_000, freshInput: 5_000)],
-            new ContextCountOptions(ContextLimit: 10_000, ContextLimitSource: "telemetry"));
+            new ContextCountOptions(ContextLimit: 10_000, ContextLimitSource: "telemetry"),
+            static (text, _) => text.Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries).LongLength);
 
         Assert.Null(context.Turns[0].FreshInput);
         Assert.Equal(5_000, context.Turns[1].FreshInput);
@@ -163,7 +164,8 @@ public class NoEstimateFindingsTests
                 ContextTurnOf(inputTokens: 1_200, freshInput: null),
                 ContextTurnOf(inputTokens: 6_000, freshInput: 5_000),
             ],
-            new ContextCountOptions(ContextLimit: 10_000, ContextLimitSource: "telemetry"));
+            new ContextCountOptions(ContextLimit: 10_000, ContextLimitSource: "telemetry"),
+            static (text, _) => text.Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries).LongLength);
 
         Assert.Null(context.Turns[1].FreshInputJump);
         FreshInputJump jump = Assert.IsType<FreshInputJump>(context.Turns[2].FreshInputJump);

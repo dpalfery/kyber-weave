@@ -16,6 +16,7 @@ namespace KyberDash.Application.Tests.Fakes;
 public class FakeTextTokenizer(string tokenizer = "fake_tokenizer", bool isModelOwn = false) : ITextTokenizer
 {
     private readonly List<string?> models = [];
+    private readonly List<(string Text, string? Model)> calls = [];
     private readonly Lock gate = new();
 
     /// <summary>Models passed to <see cref="Count"/>, in call order.</summary>
@@ -30,6 +31,18 @@ public class FakeTextTokenizer(string tokenizer = "fake_tokenizer", bool isModel
         }
     }
 
+    /// <summary>Every text passed to <see cref="Count"/> with the model it was counted for, in call order.</summary>
+    public IReadOnlyList<(string Text, string? Model)> Calls
+    {
+        get
+        {
+            lock (gate)
+            {
+                return [.. calls];
+            }
+        }
+    }
+
     /// <inheritdoc/>
     public TokenCount Count(string text, string? model)
     {
@@ -37,6 +50,7 @@ public class FakeTextTokenizer(string tokenizer = "fake_tokenizer", bool isModel
         lock (gate)
         {
             models.Add(model);
+            calls.Add((text, model));
         }
 
         long count = text.Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries).LongLength;
