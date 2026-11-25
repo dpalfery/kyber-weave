@@ -5,7 +5,7 @@ doc-type: architecture
 component: KyberArbiter
 source-root: src/KyberWeave.Domain/Arbiter
 owner: dpalfery
-last-reviewed: 2026-11-24
+last-reviewed: 2026-11-25
 status: current
 decided-by:
   - adr/0053-kyber-arbiter-three-step-decision-gates
@@ -269,23 +269,43 @@ One service now answers those questions once per hook invocation.
   - `RepositoryRoot`: the directory configuration, the claim store and the ledger are read under.
   - `CommonDirectory`: git's common directory for that repository, which identifies the repository
     across its worktrees.
-  - `ActiveRun`: the record `kyber-weave run start` wrote for this repository, when one is live.
+  - `ActiveRun`: the live run record that `kyber-weave run start` wrote for the run the chosen worktree belongs to; absent when the context is `Ambiguous`.
   - `Worktree`: the working tree the plan, its task file and the git facts are read from.
   - `PlanFile`, `PlanPath`, `TaskFile`: the dispatch's plan and the task file beside it, when both
     resolve inside the worktree.
   - `Worktrees`: every worktree of this repository, already checked to belong to it.
-  - `Source`: which candidate chose `Worktree`, and `Notes`: the precise reason for each candidate
+  - `Source`: which candidate chose `Worktree` (including `Ambiguous`, below), and `Notes`: the precise reason for each candidate
     that was refused and each path that was tried.
 
 - **Resolution order** is fixed and documented, and each candidate must belong to this repository or
   one of its own git worktrees. A candidate that does not is refused with its reason and the next is
   tried; it is never silently trusted.
-  1. **The worktree the event names** — a path in the dispatch prompt, packet or agent cwd that is a
-     worktree of this repository and holds the dispatch's plan.
-  2. **The active run** — the live record `run start` wrote for this repository, when its worktree is
-     still a worktree of this repository and still has the run's own branch checked out. A record
+  1. **The worktree the event names** — an agent worktree, or a path in the dispatch prompt or packet
+     that is a worktree of this repository and holds the dispatch's plan.
+  2. **The payload cwd**, when it is inside a worktree other than the canonical checkout. The cwd is
+     where the session works, so it outranks every run record: with several runs live, a worker in run A
+     is judged against run A's worktree, never against the newest run's.
+  3. **The command's leading `cd`**: the absolute target of a shell call's leading `cd <path> &&`,
+     used only when the cwd is absent or is the canonical checkout. A `cd` that names a different
+     worktree than the cwd's own is ignored with a note. `git -C <path>` is never a signal: it
+     directs one git step, not the session.
+  4. **The single live run**: the record `run start` wrote, when exactly one run is live and its
+     worktree is still a worktree of this repository with the run's own branch checked out. A record
      outlives its run, and a worktree can be reused for another branch, so both are checked.
-  3. **The payload cwd**, then the process directory when the payload carries none.
+  5. **Ambiguous**: several runs are live and no signal chose one. `Source` is `Ambiguous`, no run is
+     active, `Worktree` is the canonical checkout, `Worktrees` still lists every worktree, and a note
+     names every live run; the hook host logs it as a guard note. An ambiguous context never relaxes a
+     guard: planning-path guards still judge every worktree, the checkout guard still refuses (and now
+     names every live run's worktree rather than the first), and a rule fact read without a plan
+     file reads the canonical root, where no active plan lives. The review seat recorder refuses to
+     save a relative packet path when no run is active, with a log line, so the missing seat is visible.
+
+  A chosen worktree maps to its run in two ways: it is, or is inside, a live run record's worktree
+  (the longest wins), or it is a task worktree whose checked-out branch has exactly one live run's
+  branch as an ancestor. The ancestry check is the rule `run integrate` uses, asked through
+  `ICheckedOutBranchReader.IsAncestor` (`null` when git cannot answer). Run start records only run
+  worktrees; task worktrees are made beside them by the harness or the conductor, so containment alone
+  cannot find a task worktree's run. A worktree that maps to no run, or to more than one, is ambiguous.
 
   The repository anchor itself is the adapter's workspace root, else the payload cwd, else the
   process directory, accepted only when git names its common directory. `Worktree` is chosen among
@@ -378,7 +398,7 @@ each, what stays at step 0 and which answer only the model can give.
 | `KW-ARB-RUN-001` | `delegate`, `delegate.planner`, `investigate` | 0 | Has a run been started before an orchestrator hands a specialist that writes files any work? Machine facts: the catalog (the caller's `delegates-to` lists the target, whose profile is `worker`, `documentation`, `architect` or `product-planning`: a planner's plan belongs on the run branch), and `run.started`, a run record under `~/.kyber-weave/runs/` for this repository whose worktree still has its branch checked out. `not-started` escalates; unreadable evidence leaves the fact absent and allows. See the [runbook](runbook.md#reading-a-run-start-refusal). |
 | `KW-ARB-PLANREAD-001` | `delegate` | 0, then 1 (`choice`, ≥ 0.8) | Does the dispatch tell the worker to open a plan, specification or todo file? Step 0: `closeout`, `no-plan`. Model only: `names-plan` (escalates); `mentions-only` allows. |
 | `KW-ARB-DIFF-001` | `delegate.returned` | 0, then 1 (`choice`, ≥ 0.8) | Are all changed files part of the task's work? It reads `git.changed-paths.attributed`: the paths changed since dispatch, less the task files of writer dispatches in flight in the same working tree during this one (`ledger.concurrent.paths`), because parallel workers share a run worktree. Step 0: `unattributed` (allows: a sibling declared no files and a path outside this task remains, or the return is not in the ledger), `out-of-scope` (escalates), `no-task`, `no-task-files`, `inside-task`. Model only: `outside-task` (escalates). |
-| `KW-ARB-GATE-REPORT-001` | `delegate.returned` | 0, then 1 (`choice`, ≥ 0.8) | Does the report say the worker ran the task gate? Step 0: `verified`, `disagrees` (escalates, machine), `no-report`, `no-gates-declared` (the host's `review.task-gates` lists no gate for the returning agent; allows). Model only: `missing` (escalates). |
+| `KW-ARB-GATE-REPORT-001` | `delegate.returned` | 0, then 1 (`choice`, ≥ 0.8) | Does the report say the worker ran the task gate? Step 0: `verified`, `disagrees` (escalates, machine), `no-report`, `no-gates-declared` (no gate applies to the task: the host lists none for the returning agent, or every gate it resolves has an `include` that selects none of the task's files, as for a docs-only task; allows). Model only: `missing` (escalates). |
 | `KW-ARB-PLANNER-001` | `delegate.planner` | 0, then 1 (`choice`, ≥ 0.8) | Does the dispatch ask the planner for planning work? Step 0: `recognised` for an exact marker and an in-directory or absent `PLAN_FILE`. Model only: `malformed` (escalates). Where the planner writes is checked by PLANNER-DIFF-001. |
 | `KW-ARB-PLANNER-DIFF-001` | `delegate.planner.returned` | 0 | Did the planner write only plan, spec, and todo directories? Machine fact: git, read as `git.changed-paths.attributed`, the paths changed since dispatch less the task files of writer dispatches in flight in the same working tree during this one. When such a sibling declared no files and a remaining path lies outside the planning directories, the fact stays absent and the answer is `unattributed`, which allows. |
 | `KW-ARB-READONLY-001` | `investigate.returned` | 0 | Did the read-only dispatch leave the tree unchanged? It reads `git.changed-paths.attributed`, as `KW-ARB-DIFF-001` does: files that belong to writer dispatches in flight in the same working tree are set aside, and a remaining change that cannot be attributed (a sibling declared no files) answers `unattributed`, which allows. A target the catalog classes as `implementation` or `planner` answers `not-read-only` and is allowed, except the `RUN-START: true` dispatch. |
@@ -428,7 +448,7 @@ means the claim was `PASS` and the report corroborates it: at least one gate pas
 `disagrees` means the report contradicts the claim, and it includes a claim no report can back — any
 status other than `PASS`, and a `PASS` over a run whose every gate was not applicable, because a
 skipped gate is evidence neither way (`KW-REVIEW-026`). `missing` means the claim names no readable
-report, or the return carries no claim at all. `verified` allows and `disagrees` escalates: the report
+report, or the return carries no claim at all. A task owes no gate, and the rule answers `no-gates-declared`, when no resolved gate applies to it: it has no gate with no `include` and none whose `include` matches a file of the task. A task whose files are not known keeps the declared answer. `verified` allows and `disagrees` escalates: the report
 contradicting the claim is a machine fact. `missing` is the parser failing to read a line, so step 0
 leaves it undecidable and the model reads the report tail and the raw `TASK_GATE:` line; only a
 confident "the report never mentions the gate" escalates, and a return with no text allows
@@ -516,6 +536,20 @@ one append-only counter file per subagent under `~/.kyber-weave/arbiter/budgets/
 model, and allows anything it cannot read on the write, command and budget paths. A read through a grep tool carries
 no command, so the checkout rule never judges it; a read through a `view` or `Read` tool is judged only by the secret
 rule. A write a command makes to a file it does not name is left to the return rule below.
+
+The rule reads `grep` and `rg` options and script paths precisely, and only ever refuses the same or more: the first
+free word of a grep is its pattern, never a file. Short bundles (`-nA3`, `-nA`) are read letter by letter, and the
+last value-taking letter (`e f A B C m d D g t T M j`) takes the rest of the bundle or the next word; long options
+with a value (`--regexp`, `--file`, `--after-context`, `--context`, `--max-count`, `--glob`, `--include`, `--exclude`,
+`--type`, and each with `=`) take it too, so `grep -A 3 token f` and `rg -g '*.yml' token` read `token` as a pattern.
+`-e` or `--regexp` supplies the pattern, so the first free word is then a file. Every option value that names a file
+is judged as a file: `-f`, `--file`, `--exclude-from`, `--include-from`, `--ignore-file`. A quoted span is one
+pattern word, so a quoted multi-word pattern is a pattern. A heredoc body is judged as a script, not as shell steps,
+only when the program that opens it is a known script interpreter (`python`, `python3`, `pythonN.N`, `py`, `node`,
+`ruby`, `perl`); any other program (`bash`, `sh`, `ssh`, `cat`, an unknown one) keeps its body lines as shell steps. In
+a script, `open(...)` and `Path(...)` fail closed: every quoted literal in the argument is judged, and so is every
+quoted value assigned to an identifier in it anywhere in the command; only a lone identifier with no assignment,
+whose own name was what matched, is not a path. Nested `bash -c`, `sh -c` and `eval` text is matched as before.
 
 A command from a `platform-reader` dispatch (the `platform-researcher` agent) is seen. The guard raises
 `worker.command` with the command's text, its *form* — the program and leading words, with a leading
@@ -1275,6 +1309,17 @@ replies is slow and can alter them. So the hook saves them, and the reviewer nev
   `<lens>` in that file name; a mismatch is refused and logged. The dispatch hook strips the routing
   headers before the worker runs, so a return's prompt often has no `LENS:` line, and the file name then
   names the lens. Any other dispatch writes nothing.
+- **The delivery notice is never a seat.** On Claude Code a sub-agent's report reaches the Arbiter first, through
+  its `SubagentHandback` call, and the `Agent` tool's completed result then holds only a notice saying the
+  report "was delivered … as a message from <agent>" and "is not repeated here". `ClaudeDeliveryWrapper`
+  recognises that notice only as the whole trimmed reply, so a real report that quotes the phrase is kept.
+  The recorder refuses a notice-only reply, and replaces a seat file whose whole text is one. The report itself
+  is recovered in this order: the hand-back, when no dispatch was followed, keeps its message in the background
+  store under the session and agent id; the completed post whose result is the notice takes that kept message
+  (once) and records it with the post's own prompt and target; when none is kept yet, the `SubagentStop`
+  event's `last_assistant_message` is the fallback. A notice with no report found records nothing and logs one
+  line. A kept message no post takes is pruned by the store's seven-day sweep. Other harnesses deliver the
+  report in the tool result itself and are unchanged.
 - **Reply text.** The reply is the text the harness returned, taken out of its tool-result JSON: a
   string root, one of the `textResultForLlm`, `result`, `output`, `text` or `response` strings, a
   `content` string, or the `text` blocks of a `content` array. A wire value that is not a string or
@@ -1603,6 +1648,11 @@ The user-level settings block carries the same hand-back hook (`PreToolUse` on `
 background return is recorded in a project whose agents carry no hand-back hook of their own. It follows the
 same claim rule as a dispatch: when an agent's own hand-back hook claims the return, the user-level hook defers.
 A machine whose block predates this entry gets it on the next `kyber-weave arbiter install --target claude`.
+
+A hand-back with no followed dispatch is kept, not only recorded: `IBackgroundDispatchStore.Keep` writes the
+message in a sibling folder of the background store, keyed by session and agent id, and `Take` returns and removes
+it, so a later `completed` post for a foreground dispatch whose result is only the delivery notice (see
+[review seat files](#review-seat-files)) can record the real report, in a different hook process.
 
 ### Phase 3 notes
 

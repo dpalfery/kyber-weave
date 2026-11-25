@@ -440,3 +440,32 @@ One end-of-run council over the whole change, by code-reviewer under the `code-r
 ## docs-dev closeout
 
 docs-dev harvests the Design harvest rows into docs/kyber-arbiter/architecture.md (seat files, run context, KW-ARB-SECRET-001 and KW-ARB-GATE-REPORT-001 rows), docs/code-review/architecture.md (task gates, RED, runs=k), docs/configuration.md where it describes review.task-gates and technology-gates, the DocGraph plan-parsing page, and the run integrate runbook text; fills the Closeout mapping; and runs `kyber-weave docs standards migrate` for the standards warning period. ADR waiver expected: each decision refines an existing rule without a new boundary.
+
+## Closeout mapping
+
+Checked on 2026-11-25 by opening each destination and confirming the item landed and states the behavior the
+decision recorded. ADR waiver for every row: no ADR — ADR waiver: each decision refines an existing rule or
+applies an established pattern, and none adds a new boundary. The documentation-impact of every row is
+`extends-component`; impact-components are KyberArbiter, ReviewCouncil, DocGraph and KyberSquad; last-reviewed 2026-11-25; status archived.
+
+| ID | Destination | Verified |
+|---|---|---|
+| D8 | [Kyber Arbiter architecture](../kyber-arbiter/architecture.md): Review seat files ("The delivery notice is never a seat") and Claude hand-back | **Verified.** Whole-reply wrapper recognition, the kept hand-back, the SubagentStop fallback and the pruning sweep are described |
+| D9, D15 | [Kyber Arbiter architecture](../kyber-arbiter/architecture.md): The run context | **Verified.** Resolution order, the `Ambiguous` source, run mapping by containment or branch ancestry through `ICheckedOutBranchReader.IsAncestor`, and the checkout refusal naming every live run |
+| D12 | [Kyber Arbiter architecture](../kyber-arbiter/architecture.md): the `KW-ARB-SECRET-001` paragraph; [Kyber Arbiter runbook](../kyber-arbiter/runbook.md): Reading a secret refusal | **Verified.** Option parsing, file-naming option values, interpreter heredocs and fail-closed `open(...)` and `Path(...)` |
+| D10 | [Kyber Arbiter architecture](../kyber-arbiter/architecture.md): the `KW-ARB-GATE-REPORT-001` table row and paragraph | **Verified.** `no-gates-declared` covers a task whose files no gate selects |
+| D6, D7 | [Code review architecture](../code-review/architecture.md): Task gates and RED mode; [rule reference](../ci-pipelines/rule-reference.md): `KW-REVIEW-051`, `KW-REVIEW-052` | **Verified.** RED not applicable, relative compiler paths on a segment boundary, and the `runs=<k>` counter file |
+| D3, D4, D5, D13 | [Code review architecture](../code-review/architecture.md): Task gates; [Configuration](../configuration.md): `review.task-gates` | **Verified.** Developer tier union entries and their drift test, KyberDash C# gates under `csharp`, `test-policy`, and the narrowed KyberWeave include |
+| T7 | [Kyber Squad architecture](../kyber-squad/architecture.md): "A Files bullet's paths are its lead, not its prose" | **Verified.** Lead spans are paths; a description span counts only with a slash |
+| D11 | [Command surface](../cli-command-surface.md): `run integrate` | **Verified.** Cleanup failures after the landing name the landed commit; git is resolved by full path |
+| KyberArbiter, ReviewCouncil, KyberSquad | [Kyber Arbiter architecture](../kyber-arbiter/architecture.md), [Code review architecture](../code-review/architecture.md), [Kyber Squad architecture](../kyber-squad/architecture.md) | **Verified.** Each impact component's canonical document carries the harvest above and is reviewed 2026-11-25 |
+| DocGraph | [DocGraph architecture](../docgraph/architecture.md): Plan parsing reads a task's paths from its Files bullets | **Verified.** The Files-bullet rule is stated |
+| D1, D2, D14, D16, AP1 | Documentation waiver — plan-local delivery choices (one PR, task grouping, how this run proceeded before its fixes were installed, the Linux container layout, the approval record) with no surviving behavior or invariant for a future engineer to consult | **Waived.** Preserved in this plan's Decisions table |
+
+## Completion summary
+
+All ten tasks are integrated on the run branch (T1 046e61174; T2 87abaaac2; T3 a0719cfe1, 26696340f; T4 ee6e91d9e; T5 3d3486e58; T6 e50481956; T7 4b7f1da2a; T8 8f18c6f60, e7373f3bd; T9 263a7f129, 47f410ff5; spawn allow-list db2fd7c88). T10 ran the touched classes on Linux in a container: the touched classes pass, and 19 `KyberWeave.RepoPolicy.Tests` failures are container-environment only (missing python3, zip and node; the worktree's git link names a host path; a case-insensitive macOS bind mount).
+
+- NOT VERIFIED: `run integrate` after the task worktree's directory is deleted — reproducing needs the test process's own working directory deleted (D11); the adapter fix is reasoned and covered by an in-memory test of the reported exception.
+- NOT VERIFIED: a real Claude Code council run with the fixed seat-save — it needs this branch's build installed at user level, which the owner confirms (D14).
+- NOT VERIFIED: the RepoPolicy tests that need python3, zip, node and a case-sensitive mount, on a Linux image that has them.
