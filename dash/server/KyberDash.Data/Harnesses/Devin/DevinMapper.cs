@@ -276,12 +276,13 @@ internal static partial class DevinModelShortNames
 /// <see cref="CollectedBatch"/> records without touching the filesystem or ambient clock.
 /// </summary>
 /// <remarks>
-/// Only the transcript surface is ported: usage-bearing non-user steps map to <c>llm.invoke</c>
-/// records with harness-reported tokens, tool calls map to child <c>tool.invoke</c> spans, and the
-/// nearest preceding user message maps to the <c>user_message</c> content part. Live-only surfaces
-/// (<c>sessions.db</c> project/title/model/timestamp enrichment and hidden-session filtering,
-/// discovery, the once-per-process unpriced-rate stderr warning, and fiscal config reads) have no
-/// offline input and are not persisted. ACU pricing needs the caller-supplied
+/// Two surfaces are mapped: the transcript JSON and the <c>sessions.db</c> <c>message_nodes</c>
+/// export, which also carries the session title and working directory. Usage-bearing non-user steps
+/// map to <c>llm.invoke</c> records with harness-reported tokens, tool calls map to child
+/// <c>tool.invoke</c> spans, and the nearest preceding user message maps to the
+/// <c>user_message</c> content part. Project enrichment, hidden-session filtering (hidden sessions
+/// are ingested), the once-per-process unpriced-rate stderr warning, and fiscal config reads are
+/// not persisted. ACU pricing needs the caller-supplied
 /// <c>devin.acuUsdRate</c>; without it costs stay unreported (never <c>$0</c>) so rate-table
 /// estimation applies downstream. Assistant message text and observations carry no call-level
 /// fields in the deleted provider and are dropped.
