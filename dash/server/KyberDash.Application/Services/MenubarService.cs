@@ -269,6 +269,11 @@ public partial class MenubarService : IMenubarService
         {
             // The wait below decides whether the tray exited; a slow quit is not a failure by itself.
         }
+        catch (Exception exception) when (exception is Win32Exception or IOException or UnauthorizedAccessException)
+        {
+            // The tool never ran, so the tray was not asked to quit and a force-kill is not warranted.
+            return new MenubarInstallOutcome(1, string.Create(CultureInfo.InvariantCulture, $"kyberdash menubar: quit: {exception.Message}"));
+        }
 
         bool exited = await TrayProcesses.WaitForTrayExitAsync(
             c => IsRecordedTrayRunningAsync(binary, c),

@@ -16,6 +16,7 @@ public class MenubarServiceTrayTests : IDisposable
     private bool trayRunning;
     private bool killStopsTray = true;
     private bool quitThrowsTimeout;
+    private Exception? quitThrows;
     private bool quitStopsTray = true;
 
     /// <summary>Deletes the scratch state directory.</summary>
@@ -107,6 +108,37 @@ public class MenubarServiceTrayTests : IDisposable
 
         Assert.Equal(0, outcome.ExitCode);
         Assert.True(Called("/usr/bin/pkill", "-f", binary));
+    }
+
+    [Fact]
+    public async Task QuitReportsAFailureOutcomeWhenTheQuitToolCannotBeStarted()
+    {
+        _ = RecordInstall(TrayPlatform.MacOS);
+        trayRunning = true;
+        quitThrows = new System.ComponentModel.Win32Exception("exec format error");
+        MenubarService service = Create(TrayPlatform.MacOS);
+
+        MenubarInstallOutcome outcome = await service.QuitAsync();
+
+        Assert.Equal(1, outcome.ExitCode);
+        Assert.StartsWith("kyberdash menubar: quit:", outcome.Message, StringComparison.Ordinal);
+        Assert.DoesNotContain(calls, call => call.File == "/usr/bin/pkill");
+    }
+
+    [Theory]
+    [InlineData(typeof(IOException))]
+    [InlineData(typeof(UnauthorizedAccessException))]
+    public async Task QuitReportsAFailureOutcomeForAnIoOrAccessFailure(Type exceptionType)
+    {
+        _ = RecordInstall(TrayPlatform.MacOS);
+        trayRunning = true;
+        quitThrows = (Exception)Activator.CreateInstance(exceptionType, "denied")!;
+        MenubarService service = Create(TrayPlatform.MacOS);
+
+        MenubarInstallOutcome outcome = await service.QuitAsync();
+
+        Assert.Equal(1, outcome.ExitCode);
+        Assert.Contains("denied", outcome.Message, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -240,6 +272,11 @@ public class MenubarServiceTrayTests : IDisposable
         }
 
         // Anything else is the tray binary asked to quit.
+        if (quitThrows is not null)
+        {
+            throw quitThrows;
+        }
+
         if (quitThrowsTimeout)
         {
             throw new TimeoutException("the tray did not answer");
