@@ -18,6 +18,8 @@ public class MenubarServiceTrayTests : IDisposable
     private bool quitThrowsTimeout;
     private Exception? quitThrows;
     private int? probeExitCode;
+    private int killTakesPolls;
+    private int pendingPolls;
     private bool quitStopsTray = true;
 
     /// <summary>Deletes the scratch state directory.</summary>
@@ -93,7 +95,7 @@ public class MenubarServiceTrayTests : IDisposable
         // Every lookup names the recorded binary, never the generic tray pattern a developer's own tray also matches.
         Assert.All(
             calls.Where(call => call.File == "/usr/bin/pgrep"),
-            call => Assert.Equal(["-f", binary], call.Args));
+            call => Assert.Equal(["-f", AnchoredPattern(binary)], call.Args));
     }
 
     [Fact]
@@ -108,7 +110,7 @@ public class MenubarServiceTrayTests : IDisposable
         MenubarInstallOutcome outcome = await service.QuitAsync();
 
         Assert.Equal(0, outcome.ExitCode);
-        Assert.True(Called("/usr/bin/pkill", "-f", binary));
+        Assert.True(Called("/usr/bin/pkill", "-f", AnchoredPattern(binary)));
     }
 
     [Fact]
@@ -140,6 +142,53 @@ public class MenubarServiceTrayTests : IDisposable
 
         Assert.Equal(1, outcome.ExitCode);
         Assert.Contains("denied", outcome.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task QuitSignalsWithAPatternAnchoredToTheStartOfTheCommandLine()
+    {
+        string binary = RecordInstall(TrayPlatform.MacOS);
+        trayRunning = true;
+        quitStopsTray = false;
+        MenubarService service = Create(TrayPlatform.MacOS);
+
+        _ = await service.QuitAsync();
+
+        string pattern = calls.Single(call => call.File == "/usr/bin/pkill").Args[1];
+        System.Text.RegularExpressions.Regex matcher = new(pattern);
+        Assert.Matches(matcher, binary);
+        Assert.Matches(matcher, binary + " --flag");
+        Assert.DoesNotMatch(matcher, "/usr/bin/vim " + binary);
+        Assert.DoesNotMatch(matcher, binary + "-other");
+        Assert.DoesNotMatch(matcher, binary.Replace('.', 'x'));
+    }
+
+    [Fact]
+    public async Task QuitGivesAForceKilledTrayAFewPollsToDisappearBeforeReportingFailure()
+    {
+        _ = RecordInstall(TrayPlatform.MacOS);
+        trayRunning = true;
+        quitStopsTray = false;
+        killTakesPolls = 3;
+        MenubarService service = Create(TrayPlatform.MacOS);
+
+        MenubarInstallOutcome outcome = await service.QuitAsync();
+
+        Assert.Equal(0, outcome.ExitCode);
+    }
+
+    [Fact]
+    public async Task QuitStillReportsFailureWhenTheKilledTrayNeverDisappears()
+    {
+        _ = RecordInstall(TrayPlatform.MacOS);
+        trayRunning = true;
+        quitStopsTray = false;
+        killTakesPolls = 500;
+        MenubarService service = Create(TrayPlatform.MacOS);
+
+        MenubarInstallOutcome outcome = await service.QuitAsync();
+
+        Assert.Equal(1, outcome.ExitCode);
     }
 
     [Fact]
@@ -300,13 +349,26 @@ public class MenubarServiceTrayTests : IDisposable
         calls.Add((fileName, arguments));
         if (fileName == "/usr/bin/pkill")
         {
-            trayRunning = trayRunning && !killStopsTray;
+            if (killStopsTray && killTakesPolls > 0)
+            {
+                pendingPolls = killTakesPolls;
+            }
+            else
+            {
+                trayRunning = trayRunning && !killStopsTray;
+            }
+
             return Task.FromResult(new ProcessResult(0, string.Empty, string.Empty));
         }
 
         if (fileName == "/usr/bin/pgrep" || fileName == "tasklist")
         {
             string output = listingOutput ?? (trayRunning ? "4242\n" : string.Empty);
+            if (pendingPolls > 0 && --pendingPolls == 0)
+            {
+                trayRunning = false;
+            }
+
             if (fileName == "tasklist" && trayRunning && listingOutput is null)
             {
                 output = "\"kyberdash-tray.exe\",\"1\",\"Console\",\"1\",\"1 K\"\r\n";
@@ -329,6 +391,9 @@ public class MenubarServiceTrayTests : IDisposable
         trayRunning = trayRunning && !quitStopsTray;
         return Task.FromResult(new ProcessResult(0, string.Empty, string.Empty));
     }
+
+    private static string AnchoredPattern(string binary) =>
+        "^" + System.Text.RegularExpressions.Regex.Replace(binary, @"[\\.\[\]{}()*+?^$|]", "\\$0") + "( |$)";
 
     private bool Called(string file, params string[] args) =>
         calls.Any(call => call.File == file && call.Args.SequenceEqual(args));

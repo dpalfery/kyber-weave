@@ -50,6 +50,9 @@ public partial class MenubarService : IMenubarService
     private static readonly TimeSpan ToolTimeout = TimeSpan.FromMinutes(5);
     private static readonly TimeSpan QuitTimeout = TimeSpan.FromSeconds(10);
     private static readonly TimeSpan TrayPollInterval = TimeSpan.FromMilliseconds(150);
+
+    /// <summary>How long a force-killed tray may take to leave the process table before the kill counts as failed.</summary>
+    private static readonly TimeSpan KillGrace = TimeSpan.FromMilliseconds(750);
     private const string WindowsTrayImage = "kyberdash-tray.exe";
     private const string PlatformRefusal = "kyberdash menubar: platform: the KyberDash tray ships for macOS and Windows only; see docs/todo for the Linux tray";
     private const string NotRunningMessage = "kyberdash: the tray is not running";
@@ -256,12 +259,13 @@ public partial class MenubarService : IMenubarService
 
         // Only the binary recorded at install is ever signalled, so a developer's own tray is never touched.
         string binary = TrayBinaryPath(record);
+        string pattern = AnchoredCommandLinePattern(binary);
         if (!File.Exists(binary))
         {
             return new MenubarInstallOutcome(0, NotRunningMessage);
         }
 
-        TrayProbe first = await ProbeAsync(binary, cancellationToken).ConfigureAwait(false);
+        TrayProbe first = await ProbeAsync(pattern, cancellationToken).ConfigureAwait(false);
         if (first.Failure is not null)
         {
             return ProbeFailure(first.Failure);
@@ -289,7 +293,7 @@ public partial class MenubarService : IMenubarService
         string? probeFailure = null;
         async Task<bool> StillRunningAsync(CancellationToken c)
         {
-            TrayProbe probe = await ProbeAsync(binary, c).ConfigureAwait(false);
+            TrayProbe probe = await ProbeAsync(pattern, c).ConfigureAwait(false);
             probeFailure = probe.Failure;
             return probe.Failure is null && probe.Count > 0;
         }
@@ -316,12 +320,20 @@ public partial class MenubarService : IMenubarService
             return new MenubarInstallOutcome(1, "kyberdash: the tray is still running after quit; quit it and run again");
         }
 
-        _ = await runTool("/usr/bin/pkill", ["-f", binary], QuitTimeout, cancellationToken).ConfigureAwait(false);
+        try
+        {
+            _ = await runTool("/usr/bin/pkill", ["-f", pattern], QuitTimeout, cancellationToken).ConfigureAwait(false);
+        }
+        catch (Exception exception) when (exception is Win32Exception or IOException or UnauthorizedAccessException or TimeoutException)
+        {
+            return new MenubarInstallOutcome(1, string.Create(CultureInfo.InvariantCulture, $"kyberdash menubar: quit: kill: {exception.Message}"));
+        }
+
         bool gone = await TrayProcesses.WaitForTrayExitAsync(
             StillRunningAsync,
             delay,
             TrayPollInterval,
-            TimeSpan.Zero,
+            KillGrace,
             cancellationToken).ConfigureAwait(false);
         if (probeFailure is not null)
         {
@@ -399,6 +411,27 @@ public partial class MenubarService : IMenubarService
 
     private string TrayBinaryPath(TrayRecord record) =>
         platform == TrayPlatform.MacOS ? Path.Combine(record.Path, "Contents", "MacOS", "kyberdash-tray") : record.Path;
+
+    /// <summary>
+    /// Builds the <c>pgrep -f</c> / <c>pkill -f</c> pattern for exactly one binary: anchored to the start of the
+    /// command line and followed by a space or the end, so another process whose arguments merely contain the
+    /// path (an editor, a <c>tail</c> of a log) is neither counted nor signalled.
+    /// </summary>
+    private static string AnchoredCommandLinePattern(string binary)
+    {
+        StringBuilder escaped = new("^");
+        foreach (char character in binary)
+        {
+            if ("\\.[]{}()*+?^$|".Contains(character, StringComparison.Ordinal))
+            {
+                _ = escaped.Append('\\');
+            }
+
+            _ = escaped.Append(character);
+        }
+
+        return escaped.Append("( |$)").ToString();
+    }
 
     private sealed record TrayProbe(int Count, string? Failure);
 
