@@ -28,7 +28,7 @@ public static class SqliteProvider
                 raw.SetProvider(new SQLite3Provider_sqlite3());
                 initialized = true;
             }
-            catch (Exception ex) when (ex is DllNotFoundException or TypeInitializationException or InvalidOperationException or BadImageFormatException)
+            catch (Exception ex) when (ex is DllNotFoundException or EntryPointNotFoundException or TypeInitializationException or InvalidOperationException or BadImageFormatException)
             {
                 throw new SqliteExecutionException("The native 'sqlite3' dynamic library is unavailable.", ex);
             }
