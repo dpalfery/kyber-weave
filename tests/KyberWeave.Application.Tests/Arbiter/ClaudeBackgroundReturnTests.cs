@@ -1,5 +1,6 @@
 using System.Text.Json;
 using KyberWeave.Arbiter.Hooks;
+using KyberWeave.Arbiter.Hooks.Adapters;
 using KyberWeave.Contracts.Repositories;
 using KyberWeave.Core.Arbiter;
 using KyberWeave.Core.Arbiter.Facts;
@@ -512,6 +513,27 @@ public sealed class ClaudeBackgroundReturnTests : IDisposable
         (_, string log) = Handback("agent-1", "<task>done</task>");
 
         Assert.Contains("could not be read back", log, StringComparison.Ordinal);
+    }
+
+    /// <summary>
+    /// A pre event whose line is not a record is dropped from the read. A followed return whose pre event is missing
+    /// while the ledger holds a malformed line is judged from its saved prompt, and the log says why.
+    /// </summary>
+    [Fact]
+    public async Task ABackgroundReturnWhosePreLineIsMalformed_LogsThatItsHeadersWereNotRestored()
+    {
+        string directory = _host.Ledger.DirectoryPath;
+        _host.Get<IBackgroundDispatchStore>().Save(
+            directory,
+            new BackgroundDispatchRecord(
+                new BackgroundDispatch(ClaudeHookAdapter.Token, Session, "agent-1", "unidentified", "dev-easy", "<task>\nWork on T2.\n</task>", "toolu-1"),
+                "pre-lost-to-a-torn-line"));
+        await _host.State.Log.AppendLineAsync(directory, InFlightLedger.FileName, "{\"id\":\"pre-lost-to-a-torn", CancellationToken.None);
+
+        (_, string log) = Handback("agent-1", "<task>done</task>");
+
+        Assert.Contains("could not be read back", log, StringComparison.Ordinal);
+        Assert.Contains("not a record", log, StringComparison.Ordinal);
     }
 
     /// <summary>An engine that follows one agent and answers its return with a note.</summary>
