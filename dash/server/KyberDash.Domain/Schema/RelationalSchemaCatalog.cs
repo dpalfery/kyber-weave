@@ -627,6 +627,18 @@ public static partial class RelationalSchemaCatalog
             nonEmpty: true,
             Idx("record_model_by_model_id", "model_id")));
 
+        tables.Add(RecordSingleText(
+            "record_response_id",
+            "response_id",
+            nonEmpty: true,
+            Idx("record_response_id_by_response_id", "response_id")));
+
+        tables.Add(RecordSingleText(
+            "record_request_id",
+            "request_id",
+            nonEmpty: true,
+            Idx("record_request_id_by_request_id", "request_id")));
+
         tables.Add(RecordSingleText("record_end", "ended_at_utc", nonEmpty: true));
         tables.Add(RecordSingleNonNegInt("record_reported_duration", "duration_ms"));
 

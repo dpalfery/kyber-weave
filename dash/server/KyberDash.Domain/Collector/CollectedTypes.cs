@@ -374,6 +374,15 @@ public record CollectedRecordSignals(
 /// file source. <see langword="null"/> only for a record a mapper built in memory before it was
 /// stored; every store read that returns records for hydration fills it.
 /// </param>
+/// <param name="ResponseId">
+/// Optional provider response id (<c>record_response_id.response_id</c>): an OTLP record's
+/// <c>gen_ai.response.id</c>, or a transcript record's native message id. Never a synthesized
+/// counter or hash.
+/// </param>
+/// <param name="RequestId">
+/// Optional provider request id (<c>record_request_id.request_id</c>): an OTLP record's
+/// <c>request_id</c>, or a transcript record's <c>requestId</c>. Never a synthesized counter or hash.
+/// </param>
 public record CollectedRecord(
     string RecordId,
     string HarnessId,
@@ -399,4 +408,6 @@ public record CollectedRecord(
     CollectedRecordSignals Signals,
     long? ReportedInputTokens = null,
     long? ReportedOutputTokens = null,
-    string? SourceName = null);
+    string? SourceName = null,
+    string? ResponseId = null,
+    string? RequestId = null);

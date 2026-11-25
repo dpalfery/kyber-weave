@@ -57,6 +57,8 @@ public static class CanonRecordHydration
             raw["gen_ai.agent.name"] = JsonSerializer.SerializeToElement(record.Agent.AgentName);
         }
 
+        AddJoinIds(raw, record);
+
         long freshInput = 0;
         long cacheRead = 0;
         long cacheCreation = 0;
@@ -140,6 +142,35 @@ public static class CanonRecordHydration
             Measurability = null,
             Raw = raw,
         };
+    }
+
+    /// <summary>
+    /// Puts the record's stored response id and request id under the keys the projector's id join
+    /// reads for the record's side: <c>gen_ai.response.id</c> and <c>request_id</c> for an OTLP
+    /// record, <c>provenance.nativeRecordId</c> and <c>requestId</c> for a file record.
+    /// </summary>
+    private static void AddJoinIds(Dictionary<string, JsonElement> raw, CollectedRecord record)
+    {
+        bool fileSource = record.SourceName is not null
+            && record.SourceName.StartsWith(CanonSynth.FileSourcePrefix, StringComparison.Ordinal);
+
+        if (!string.IsNullOrWhiteSpace(record.ResponseId))
+        {
+            if (fileSource)
+            {
+                raw["provenance"] = JsonSerializer.SerializeToElement(
+                    new Dictionary<string, string>(StringComparer.Ordinal) { ["nativeRecordId"] = record.ResponseId });
+            }
+            else
+            {
+                raw["gen_ai.response.id"] = JsonSerializer.SerializeToElement(record.ResponseId);
+            }
+        }
+
+        if (!string.IsNullOrWhiteSpace(record.RequestId))
+        {
+            raw[fileSource ? "requestId" : "request_id"] = JsonSerializer.SerializeToElement(record.RequestId);
+        }
     }
 
     /// <summary>Maps a collected content-part bucket to the canonical part key the pipeline uses.</summary>

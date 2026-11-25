@@ -24,7 +24,7 @@ namespace KyberDash.Data.Repositories;
 public partial class SqliteRelationalStore : BaseSqliteRepository, IRelationalStoreWriter, IProjectionStore
 {
     /// <summary>Current normalized relational schema version stamped in <c>store_state</c>.</summary>
-    public const int SchemaVersion = 26;
+    public const int SchemaVersion = 27;
 
     /// <summary>Current detector generation stamped in <c>store_state</c>.</summary>
     /// <remarks>
@@ -759,6 +759,8 @@ public partial class SqliteRelationalStore : BaseSqliteRepository, IRelationalSt
         AppendOptionalTextChild(sql, "record_parent", "span_id", spanIdExpr, "parent_span_id", record.ParentRecordId);
         AppendOptionalTextChild(sql, "record_trace", "span_id", spanIdExpr, "trace_id", record.TraceId);
         AppendOptionalTextChild(sql, "record_model", "span_id", spanIdExpr, "model_id", record.Model);
+        AppendOptionalTextChild(sql, "record_response_id", "span_id", spanIdExpr, "response_id", record.ResponseId);
+        AppendOptionalTextChild(sql, "record_request_id", "span_id", spanIdExpr, "request_id", record.RequestId);
 
         if (record.EndedAt.HasValue)
         {

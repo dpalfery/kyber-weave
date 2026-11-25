@@ -3926,6 +3926,16 @@ public class InMemoryRelationalStore :
             InsertRowCore(working, "record_model", [("span_id", record.RecordId), ("model_id", record.Model)]);
         }
 
+        if (record.ResponseId is not null)
+        {
+            InsertRowCore(working, "record_response_id", [("span_id", record.RecordId), ("response_id", record.ResponseId)]);
+        }
+
+        if (record.RequestId is not null)
+        {
+            InsertRowCore(working, "record_request_id", [("span_id", record.RecordId), ("request_id", record.RequestId)]);
+        }
+
         if (record.EndedAt.HasValue)
         {
             InsertRowCore(working, "record_end", [("span_id", record.RecordId), ("ended_at_utc", FormatTimestamp(record.EndedAt.Value))]);
@@ -5341,6 +5351,8 @@ public class InMemoryRelationalStore :
         string? parentSpanId = ReadOptionalSingleString(currentState, "record_parent", "span_id", spanId, "parent_span_id");
         string? traceId = ReadOptionalSingleString(currentState, "record_trace", "span_id", spanId, "trace_id");
         string? model = ReadOptionalSingleString(currentState, "record_model", "span_id", spanId, "model_id");
+        string? responseId = ReadOptionalSingleString(currentState, "record_response_id", "span_id", spanId, "response_id");
+        string? requestId = ReadOptionalSingleString(currentState, "record_request_id", "span_id", spanId, "request_id");
         string? endedRaw = ReadOptionalSingleString(currentState, "record_end", "span_id", spanId, "ended_at_utc");
         DateTimeOffset? endedAt = endedRaw is null ? null : ParseTimestamp(endedRaw);
         long? reportedDurationMs = ReadOptionalSingleInt64(currentState, "record_reported_duration", "span_id", spanId, "duration_ms");
@@ -5421,7 +5433,9 @@ public class InMemoryRelationalStore :
             signals,
             reportedInput,
             reportedOutput,
-            ReadRecordSourceName(currentState, recordRow));
+            ReadRecordSourceName(currentState, recordRow),
+            responseId,
+            requestId);
     }
 
     private static long? ReadOptionalReportedTotal(StoreState currentState, string spanId, string direction)
@@ -6357,6 +6371,8 @@ public class InMemoryRelationalStore :
         string? sessionKey = ReadOptionalSingleString(currentState, "record_session_link", "span_id", spanId, "session_key");
         string? parentSpanId = ReadOptionalSingleString(currentState, "record_parent", "span_id", spanId, "parent_span_id");
         string? model = ReadOptionalSingleString(currentState, "record_model", "span_id", spanId, "model_id");
+        string? responseId = ReadOptionalSingleString(currentState, "record_response_id", "span_id", spanId, "response_id");
+        string? requestId = ReadOptionalSingleString(currentState, "record_request_id", "span_id", spanId, "request_id");
         long? reportedDurationMs = ReadOptionalSingleInt64(currentState, "record_reported_duration", "span_id", spanId, "duration_ms");
         long? declaredWindow = ReadOptionalSingleInt64(currentState, "record_declared_context_window", "span_id", spanId, "declared_context_window");
 
@@ -6392,7 +6408,9 @@ public class InMemoryRelationalStore :
             new CollectedRecordSignals(ErrorMessage: null, EditFailures: null, CorrectionRule: null, declaredWindow),
             ReportedInputTokens: null,
             ReportedOutputTokens: null,
-            SourceName: ReadRecordSourceName(currentState, recordRow));
+            SourceName: ReadRecordSourceName(currentState, recordRow),
+            ResponseId: responseId,
+            RequestId: requestId);
     }
 
     /// <summary>
@@ -6849,6 +6867,8 @@ public class InMemoryRelationalStore :
         string? parentSpanId = ReadOptionalSingleString(currentState, "record_parent", "span_id", spanId, "parent_span_id");
         string? traceId = ReadOptionalSingleString(currentState, "record_trace", "span_id", spanId, "trace_id");
         string? model = ReadOptionalSingleString(currentState, "record_model", "span_id", spanId, "model_id");
+        string? responseId = ReadOptionalSingleString(currentState, "record_response_id", "span_id", spanId, "response_id");
+        string? requestId = ReadOptionalSingleString(currentState, "record_request_id", "span_id", spanId, "request_id");
         string? endedRaw = ReadOptionalSingleString(currentState, "record_end", "span_id", spanId, "ended_at_utc");
         DateTimeOffset? endedAt = endedRaw is null ? null : ParseTimestamp(endedRaw);
         long? reportedDurationMs = ReadOptionalSingleInt64(currentState, "record_reported_duration", "span_id", spanId, "duration_ms");
@@ -6908,7 +6928,9 @@ public class InMemoryRelationalStore :
             MaterializeRecordSignals(currentState, spanId),
             reportedInput,
             reportedOutput,
-            ReadRecordSourceName(currentState, recordRow));
+            ReadRecordSourceName(currentState, recordRow),
+            responseId,
+            requestId);
     }
 
     /// <summary>

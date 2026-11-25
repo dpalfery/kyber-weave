@@ -22,6 +22,8 @@ public sealed partial class RelationalSchemaCatalogTests
         "record_parent",
         "record_trace",
         "record_model",
+        "record_response_id",
+        "record_request_id",
         "record_end",
         "record_reported_duration",
         "record_token_count",

@@ -30,6 +30,20 @@ public partial class SqliteRelationalStore : IRelationalStoreReader
     private const string RecordSourceJoin = "JOIN source src ON src.source_id = r.source_id ";
 
     /// <summary>
+    /// The record's response id and request id (<c>record_response_id</c>, <c>record_request_id</c>)
+    /// as four typed-hex columns placed just before <see cref="RecordSourceColumns"/>, which stays
+    /// last. They are the ids the projector joins an OTLP turn to its transcript twin on.
+    /// </summary>
+    private const string RecordJoinIdColumns =
+        "typeof(rrid.response_id), COALESCE(hex(CAST(rrid.response_id AS BLOB)), ''), " +
+        "typeof(rqid.request_id), COALESCE(hex(CAST(rqid.request_id AS BLOB)), ''), ";
+
+    /// <summary>Left-joins a record (alias <c>r</c>) to its optional response-id and request-id rows.</summary>
+    private const string RecordJoinIdJoin =
+        "LEFT JOIN record_response_id rrid ON rrid.span_id = r.span_id " +
+        "LEFT JOIN record_request_id rqid ON rqid.span_id = r.span_id ";
+
+    /// <summary>
     /// The projection header: every <c>session_projection</c> column and its five single-row
     /// satellites, with no child collection. The full projection read and the paged header reads
     /// select the same fifteen columns, so both parse one row shape.
@@ -2259,9 +2273,11 @@ public partial class SqliteRelationalStore : IRelationalStoreReader
             "typeof(rrc.amount), COALESCE(CAST(rrc.amount AS TEXT), ''), " +
             "typeof(rrc.currency), COALESCE(hex(CAST(rrc.currency AS BLOB)), ''), " +
             "typeof(rdcw.declared_context_window), COALESCE(CAST(rdcw.declared_context_window AS TEXT), ''), " +
+            RecordJoinIdColumns +
             RecordSourceColumns +
             "FROM record r " +
             RecordSourceJoin +
+            RecordJoinIdJoin +
             "LEFT JOIN record_session_link rsl ON rsl.span_id = r.span_id " +
             "LEFT JOIN record_parent rp ON rp.span_id = r.span_id " +
             "LEFT JOIN record_model rm ON rm.span_id = r.span_id " +
@@ -2274,9 +2290,9 @@ public partial class SqliteRelationalStore : IRelationalStoreReader
         foreach (string line in TabLines(ExecuteSqlite(sql.ToString())))
         {
             string[] cols = line.Split('\t');
-            if (cols.Length != 25)
+            if (cols.Length != 29)
             {
-                throw new StoredDataException($"Expected 25 columns for TREC row, got {cols.Length.ToString(CultureInfo.InvariantCulture)}.");
+                throw new StoredDataException($"Expected 29 columns for TREC row, got {cols.Length.ToString(CultureInfo.InvariantCulture)}.");
             }
 
             string spanId = ParseHexRequired(cols[1], "record.span_id");
@@ -2313,7 +2329,9 @@ public partial class SqliteRelationalStore : IRelationalStoreReader
                 new CollectedRecordSignals(ErrorMessage: null, EditFailures: null, CorrectionRule: null, ParseNullableInt64(cols[20], cols[21], "record_declared_context_window.declared_context_window")),
                 ReportedInputTokens: null,
                 ReportedOutputTokens: null,
-                SourceName: ParseRecordSourceName(cols, startIndex: 22)));
+                SourceName: ParseRecordSourceName(cols, startIndex: 26),
+                ResponseId: ParseNullableHex(cols[22], cols[23], "record_response_id.response_id"),
+                RequestId: ParseNullableHex(cols[24], cols[25], "record_request_id.request_id")));
         }
 
         return records;
@@ -3006,9 +3024,9 @@ public partial class SqliteRelationalStore : IRelationalStoreReader
     /// <param name="cols">Tab-split columns of the <c>REC</c> row.</param>
     private static RawRecordHeader ParseRawRecordHeader(string[] cols)
     {
-        if (cols.Length != 41)
+        if (cols.Length != 45)
         {
-            throw new StoredDataException($"Expected 41 columns for REC row, got {cols.Length.ToString(CultureInfo.InvariantCulture)}.");
+            throw new StoredDataException($"Expected 45 columns for REC row, got {cols.Length.ToString(CultureInfo.InvariantCulture)}.");
         }
 
         string spanId = ParseHexRequired(cols[1], "record.span_id");
@@ -3039,7 +3057,9 @@ public partial class SqliteRelationalStore : IRelationalStoreReader
         long? declaredWindow = ParseNullableInt64(cols[32], cols[33], "record_declared_context_window.declared_context_window");
         long? repIn = ParseNullableInt64(cols[34], cols[35], "record_reported_total.input");
         long? repOut = ParseNullableInt64(cols[36], cols[37], "record_reported_total.output");
-        string sourceName = ParseRecordSourceName(cols, startIndex: 38);
+        string? responseId = ParseNullableHex(cols[38], cols[39], "record_response_id.response_id");
+        string? requestId = ParseNullableHex(cols[40], cols[41], "record_request_id.request_id");
+        string sourceName = ParseRecordSourceName(cols, startIndex: 42);
 
         return new RawRecordHeader(
             spanId,
@@ -3060,7 +3080,9 @@ public partial class SqliteRelationalStore : IRelationalStoreReader
             new CollectedRecordSignals(errMsg, editFailures, correctionRule, declaredWindow),
             repIn,
             repOut,
-            sourceName);
+            sourceName,
+            responseId,
+            requestId);
     }
 
     /// <summary>
@@ -3141,9 +3163,11 @@ public partial class SqliteRelationalStore : IRelationalStoreReader
             "typeof(rdcw.declared_context_window), COALESCE(CAST(rdcw.declared_context_window AS TEXT), ''), " +
             "typeof(rrti.token_count), COALESCE(CAST(rrti.token_count AS TEXT), ''), " +
             "typeof(rrto.token_count), COALESCE(CAST(rrto.token_count AS TEXT), ''), " +
+            RecordJoinIdColumns +
             RecordSourceColumns +
             "FROM record r " +
             RecordSourceJoin +
+            RecordJoinIdJoin +
             "LEFT JOIN record_session_link rsl ON rsl.span_id = r.span_id " +
             "LEFT JOIN record_parent rp ON rp.span_id = r.span_id " +
             "LEFT JOIN record_trace rt ON rt.span_id = r.span_id " +
@@ -3286,7 +3310,9 @@ public partial class SqliteRelationalStore : IRelationalStoreReader
                 header.Signals,
                 header.ReportedInputTokens,
                 header.ReportedOutputTokens,
-                header.SourceName);
+                header.SourceName,
+                header.ResponseId,
+                header.RequestId);
             // A record with no session link is grouped under the empty key rather than dropped,
             // so a span-scoped read still answers it. A session key is never empty, so the
             // session-scoped callers are unaffected.
@@ -3341,9 +3367,11 @@ public partial class SqliteRelationalStore : IRelationalStoreReader
             "typeof(rdcw.declared_context_window), COALESCE(CAST(rdcw.declared_context_window AS TEXT), ''), " +
             "typeof(rrti.token_count), COALESCE(CAST(rrti.token_count AS TEXT), ''), " +
             "typeof(rrto.token_count), COALESCE(CAST(rrto.token_count AS TEXT), ''), " +
+            RecordJoinIdColumns +
             RecordSourceColumns +
             "FROM record r " +
             RecordSourceJoin +
+            RecordJoinIdJoin +
             "LEFT JOIN record_session_link rsl ON rsl.span_id = r.span_id " +
             "LEFT JOIN record_parent rp ON rp.span_id = r.span_id " +
             "LEFT JOIN record_trace rt ON rt.span_id = r.span_id " +
@@ -3550,7 +3578,9 @@ public partial class SqliteRelationalStore : IRelationalStoreReader
                 header.Signals,
                 header.ReportedInputTokens,
                 header.ReportedOutputTokens,
-                header.SourceName));
+                header.SourceName,
+                header.ResponseId,
+                header.RequestId));
         }
 
         return materialized;
@@ -5837,7 +5867,9 @@ public partial class SqliteRelationalStore : IRelationalStoreReader
         CollectedRecordSignals Signals,
         long? ReportedInputTokens,
         long? ReportedOutputTokens,
-        string SourceName);
+        string SourceName,
+        string? ResponseId,
+        string? RequestId);
 
     private record RawSessionHeader(
         string SessionId,

@@ -486,6 +486,8 @@ public class CollectedTypesTests
         map[(typeof(CollectedRecord), nameof(CollectedRecord.ReportedInputTokens))] = Col("record_reported_total", "token_count");
         map[(typeof(CollectedRecord), nameof(CollectedRecord.ReportedOutputTokens))] = Col("record_reported_total", "token_count");
         map[(typeof(CollectedRecord), nameof(CollectedRecord.SourceName))] = Col("source", "locator");
+        map[(typeof(CollectedRecord), nameof(CollectedRecord.ResponseId))] = Col("record_response_id", "response_id");
+        map[(typeof(CollectedRecord), nameof(CollectedRecord.RequestId))] = Col("record_request_id", "request_id");
 
         return map;
     }
