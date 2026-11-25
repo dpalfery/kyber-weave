@@ -30,6 +30,13 @@ public class CachedTokenCounter
     private readonly Dictionary<string, TokenCount> memo;
     private readonly Dictionary<string, PendingCount> pending;
     private readonly Lock gate = new();
+
+    /// <summary>
+    /// Serialises persistence. Taken before <see cref="gate"/> and never while holding it, so a store
+    /// write never blocks a concurrent count, and a flush returns only after every batch taken
+    /// before it is written.
+    /// </summary>
+    private readonly Lock flushGate = new();
     private int hits;
     private int misses;
     private int uncached;
@@ -110,6 +117,7 @@ public class CachedTokenCounter
             throw new InvalidOperationException($"Tokenizer {computed.Tokenizer} returned a negative count ({computed.Count}) for model {CanonTokenCache.ModelSlot(model)}.");
         }
 
+        bool flushDue;
         lock (gate)
         {
             misses++;
@@ -119,29 +127,38 @@ public class CachedTokenCounter
             }
 
             pending[key] = new PendingCount(computed.Count, ModelIdOf(model));
-            if (pending.Count >= CanonTokenCache.FlushThreshold)
-            {
-                Dictionary<string, PendingCount> batch = new(pending, StringComparer.Ordinal);
-                pending.Clear();
-                FlushPendingBatch(batch);
-            }
+            flushDue = pending.Count >= CanonTokenCache.FlushThreshold;
+        }
+
+        if (flushDue)
+        {
+            Flush();
         }
 
         return computed;
     }
 
     /// <summary>Flushes buffered cache misses into the backing store.</summary>
+    /// <remarks>
+    /// The buffer is taken under the counter's lock and written outside it, so concurrent counts
+    /// never wait on the store. A failed write drops its batch and the exception propagates.
+    /// </remarks>
     public void Flush()
     {
-        lock (gate)
+        lock (flushGate)
         {
-            if (pending.Count == 0)
+            Dictionary<string, PendingCount> batch;
+            lock (gate)
             {
-                return;
+                if (pending.Count == 0)
+                {
+                    return;
+                }
+
+                batch = new(pending, StringComparer.Ordinal);
+                pending.Clear();
             }
 
-            Dictionary<string, PendingCount> batch = new(pending, StringComparer.Ordinal);
-            pending.Clear();
             FlushPendingBatch(batch);
         }
     }
