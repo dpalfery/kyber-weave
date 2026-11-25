@@ -1376,7 +1376,7 @@ public sealed class SelfUpdateRunTests : IDisposable
 
     /// <summary>An engine of another version is replaced by restarting the tray.</summary>
     [Fact]
-    public void RunRestartsTheTrayWhenTheEngineRunsAnotherVersion()
+    public void RunRestartsACurrentTrayWhenTheEngineVersionDiffers()
     {
         List<string> log = [];
         List<ReconcileStep> steps = [];
@@ -1419,7 +1419,7 @@ public sealed class SelfUpdateRunTests : IDisposable
 
     /// <summary>With no tray recorded the engine alone is checked, the tray verbs never run and the skip is logged.</summary>
     [Fact]
-    public void RunWithNoTrayRecordEnsuresTheEngineAndRunsNoTrayVerb()
+    public void RunWithoutATrayKeepsTheDetachedEngineRestart()
     {
         List<string> log = [];
         List<ReconcileStep> steps = [];
@@ -1492,6 +1492,25 @@ public sealed class SelfUpdateRunTests : IDisposable
         Assert.Equal(stopped, message.Contains("tray and engine are stopped", StringComparison.Ordinal));
         if (stopped)
             Assert.Contains("kyberdash menubar --launch", message, StringComparison.Ordinal);
+    }
+
+    /// <summary>A restarted engine that reports another version fails the verify step by name, with the tray and engine stopped.</summary>
+    [Fact]
+    public void RunFailsNamingTheVerifyStepWhenTheEngineReportsAnotherVersion()
+    {
+        List<string> log = [];
+        List<ReconcileStep> steps = [];
+
+        (SelfUpdateOutcome outcome, string message) = RunChanged(
+            log,
+            steps,
+            Scripted(("engine verify --version 0.10.0 --wait 60", Exit(3, "engine runs 0.9.23"))));
+
+        Assert.Equal(1, outcome.ExitCode);
+        Assert.Contains("the KyberDash engine step failed:", message, StringComparison.Ordinal);
+        Assert.Contains("engine verify --version 0.10.0 --wait 60", message, StringComparison.Ordinal);
+        Assert.Contains("exited 3: engine runs 0.9.23", message, StringComparison.Ordinal);
+        Assert.Contains("tray and engine are stopped", message, StringComparison.Ordinal);
     }
 
     /// <summary>A failed tray update after the quit names the update command as the way back.</summary>

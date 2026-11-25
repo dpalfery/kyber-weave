@@ -1139,7 +1139,7 @@
       "file": "src/KyberWeave.Data/Update/ProcessConsoleLauncher.cs",
       "text": "using Process? started = Process.Start(child);",
       "count": 1,
-      "bound": "Process.Start in Run, which waits at most the timeout its caller passes (5 min tray, 15 min hand-off, 30 s rehearsal) and on expiry kills the whole process tree and raises TimeoutException."
+      "bound": "Process.Start in Run, which waits at most the timeout its caller passes (5 min tray, 25 min hand-off, 30 s rehearsal) and on expiry kills the whole process tree and raises TimeoutException."
     },
     {
       "file": "src/KyberWeave.Data/Update/SelfUpdateSystem.cs",
