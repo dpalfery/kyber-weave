@@ -698,8 +698,9 @@ public class RelationalIngestTests
     }
 
     /// <summary>
-    /// A store that is itself unusable (locked, broken file, or an open circuit breaker) is not a
-    /// per-unit problem: the exception escapes and the job fails.
+    /// A store that is itself unusable (locked, broken file, or an open circuit breaker), or a validation
+    /// failure that is not the store refusing a unit's rows, is not a per-unit problem: the exception
+    /// escapes and the job fails.
     /// </summary>
     [Fact]
     public async Task ImportHistory_WhenTheStoreIsUnusable_FailsTheJob()
@@ -709,6 +710,7 @@ public class RelationalIngestTests
             new SqliteExecutionException("sqlite3 error 5: database is locked", 5, "database is locked"),
             new SqliteExecutionException("sqlite3 error 11: database disk image is malformed", 11, "database disk image is malformed"),
             new CircuitBreakerOpenException("sqlite circuit open"),
+            new DashValidationException("VALIDATION_ERROR", "a defect, not one unit's rows"),
         ];
 
         foreach (Exception failure in unusable)
