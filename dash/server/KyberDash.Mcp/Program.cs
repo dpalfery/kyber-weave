@@ -30,14 +30,24 @@ public static partial class Program
 
         if (args.Contains("--version", StringComparer.Ordinal))
         {
+            string version;
             try
             {
-                await Console.Out.WriteLineAsync(ResolveVersion()).ConfigureAwait(false);
+                version = ResolveVersion();
             }
             catch (InvalidOperationException exception)
             {
                 await Console.Error.WriteLineAsync($"--version: {exception.Message}").ConfigureAwait(false);
                 return 1;
+            }
+
+            try
+            {
+                await Console.Out.WriteLineAsync(version).ConfigureAwait(false);
+            }
+            catch (IOException)
+            {
+                // A closed pipe (for example `| head`) is the reader's choice, not a failure.
             }
 
             return 0;
