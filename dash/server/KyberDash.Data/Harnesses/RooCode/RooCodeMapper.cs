@@ -462,7 +462,14 @@ public partial class RooCodeMapper : IHarnessMapper
     private static string ResolveTaskId(string sourceKey)
     {
         string trimmed = sourceKey.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
-        string? candidate = SafeOptionalText(Path.GetFileName(trimmed));
+
+        // Discovery hands the mapper the task's ui_messages.json file, so the task id is the
+        // parent directory's name (as ClineMapper.TaskIdFromSourceKey does); a bare task
+        // directory key is the id itself.
+        string? leaf = Path.GetFileName(trimmed);
+        string? candidate = string.Equals(Path.GetExtension(leaf), ".json", StringComparison.OrdinalIgnoreCase)
+            ? SafeOptionalText(Path.GetFileName(Path.GetDirectoryName(trimmed)))
+            : SafeOptionalText(leaf);
         if (candidate is not null)
         {
             return candidate;

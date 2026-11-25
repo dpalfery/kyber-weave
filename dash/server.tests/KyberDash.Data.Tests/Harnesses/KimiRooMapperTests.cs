@@ -480,6 +480,22 @@ public class KimiRooMapperTests
     }
 
     [Fact]
+    public void Map_DiscoveredUiMessagesFiles_YieldOneSessionPerTaskDirectory()
+    {
+        string uiMessages = RooUiMessages(tokensIn: 100, tokensOut: 50);
+        NativeSourceUnit unitA = MakeNativeUnit("roo-code", Path.Combine(RooTaskDir("task-a"), "ui_messages.json"), uiMessages);
+        NativeSourceUnit unitB = MakeNativeUnit("roo-code", Path.Combine(RooTaskDir("task-b"), "ui_messages.json"), uiMessages);
+        RooCodeMapper mapper = new();
+
+        CollectedRecord recordA = Assert.Single(mapper.Map(unitA, BaselineUtc).Records);
+        CollectedRecord recordB = Assert.Single(mapper.Map(unitB, BaselineUtc).Records);
+
+        Assert.NotEqual(recordA.TraceId, recordB.TraceId);
+        Assert.Equal("synth:roo-code:task-a:0", recordA.RecordId);
+        Assert.Equal("synth:roo-code:task-b:0", recordB.RecordId);
+    }
+
+    [Fact]
     public void Map_SkipsZeroTokenEntries()
     {
         string uiMessages = "[{\"type\":\"say\",\"say\":\"api_req_started\",\"text\":\"{\\\"tokensIn\\\":0,\\\"tokensOut\\\":0}\",\"ts\":1700000000000}]";

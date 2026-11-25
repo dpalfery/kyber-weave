@@ -58,6 +58,13 @@ public class HarnessSourceRegistry
     /// </remarks>
     public const string NoEstimatedTokensParserContractVersion = "2";
 
+    /// <summary>
+    /// Parser contract version of the <c>roo-code</c> reader, whose mapper now takes the task id from
+    /// the task directory rather than from the <c>ui_messages.json</c> file name.
+    /// </summary>
+    /// <remarks>Stored Roo rows were all keyed to one task id; the new version makes the next refresh re-read them.</remarks>
+    public const string RooTaskDirectoryIdParserContractVersion = "3";
+
     private static readonly HashSet<string> ExcludedHarnessIds = new(
         ["windsurf", "aider"],
         StringComparer.Ordinal);
@@ -123,7 +130,8 @@ public class HarnessSourceRegistry
                         ".config/Code/User/globalStorage/kilocode.kilo-code/tasks",
                         "AppData/Roaming/Code/User/globalStorage/kilocode.kilo-code/tasks",
                     ],
-                    ["ui_messages.json"])),
+                    ["ui_messages.json"],
+                    ParserContractVersion: RooTaskDirectoryIdParserContractVersion)),
             new SpecHarnessSourceReader(
                 "devin",
                 new SourceRootSpec("devin", "devin-reader", "devin-transcript-json", [".local/share/devin/cli/transcripts"], ["*.json", "*.jsonl"]),
