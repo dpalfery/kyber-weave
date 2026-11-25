@@ -2245,8 +2245,9 @@ public partial class SqliteRelationalStore : IRelationalStoreReader
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(sessionKey);
 
-        // Only the columns BuildTimeline's nodes read: no trace, end time, token count, reported
-        // total, error or correction signal, tool metadata, or content child row (decision D17).
+        // Only the columns BuildTimeline's nodes read, plus the record's source name (decision
+        // D11): no trace, end time, token count, reported total, error or correction signal, tool
+        // metadata, or content child row (decision D17).
         StringBuilder sql = new(TabReadScriptHeader);
         sql.Append(
             "SELECT 'TREC', hex(CAST(r.span_id AS BLOB)), hex(CAST(r.harness_id AS BLOB)), hex(CAST(r.op AS BLOB)), hex(CAST(r.kind AS BLOB)), " +
@@ -2506,9 +2507,19 @@ public partial class SqliteRelationalStore : IRelationalStoreReader
             ? AggregateReaderCostBlocks(reportedRecordBlocks, CostBasis.Harness, extraProblems)
             : null;
 
-        ReadTimeCostSummary sessionPublishedCost = turnPublishedBlocks.Count > 0
-            ? AggregateReaderCostBlocks(turnPublishedBlocks, CostBasis.Published, extraProblems)
-            : new ReadTimeCostSummary(CostBasis.Unknown, CostStatus.NoRate, null, null, []);
+        // A session whose records carry no tokens is priced from the usage the harness reported
+        // for the whole session, per model; records with tokens keep pricing per turn.
+        ReportedUsageCost? reportedUsageCost = ReportedSessionUsage.Price(session, records, pricing);
+        if (reportedUsageCost is not null)
+        {
+            extraProblems.AddRange(reportedUsageCost.Problems);
+        }
+
+        ReadTimeCostSummary sessionPublishedCost = reportedUsageCost is not null
+            ? ToReaderCostSummary(reportedUsageCost.Cost)
+            : turnPublishedBlocks.Count > 0
+                ? AggregateReaderCostBlocks(turnPublishedBlocks, CostBasis.Published, extraProblems)
+                : new ReadTimeCostSummary(CostBasis.Unknown, CostStatus.NoRate, null, null, []);
 
         ReadTimeCostBasisMismatch? basisMismatch = null;
         if (valuedTurnHarnessBlocks.Count > 0 && valuedTurnPublishedBlocks.Count > 0)
@@ -2834,9 +2845,19 @@ public partial class SqliteRelationalStore : IRelationalStoreReader
             ? AggregateReaderCostBlocks(reportedRecordBlocks, CostBasis.Harness, extraProblems)
             : null;
 
-        ReadTimeCostSummary sessionPublishedCost = turnPublishedBlocks.Count > 0
-            ? AggregateReaderCostBlocks(turnPublishedBlocks, CostBasis.Published, extraProblems)
-            : new ReadTimeCostSummary(CostBasis.Unknown, CostStatus.NoRate, null, null, []);
+        // A session whose records carry no tokens is priced from the usage the harness reported
+        // for the whole session, per model; records with tokens keep pricing per turn.
+        ReportedUsageCost? reportedUsageCost = ReportedSessionUsage.Price(session, records, pricing);
+        if (reportedUsageCost is not null)
+        {
+            extraProblems.AddRange(reportedUsageCost.Problems);
+        }
+
+        ReadTimeCostSummary sessionPublishedCost = reportedUsageCost is not null
+            ? ToReaderCostSummary(reportedUsageCost.Cost)
+            : turnPublishedBlocks.Count > 0
+                ? AggregateReaderCostBlocks(turnPublishedBlocks, CostBasis.Published, extraProblems)
+                : new ReadTimeCostSummary(CostBasis.Unknown, CostStatus.NoRate, null, null, []);
 
         ReadTimeCostBasisMismatch? basisMismatch = null;
         if (valuedTurnHarnessBlocks.Count > 0 && valuedTurnPublishedBlocks.Count > 0)

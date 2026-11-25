@@ -485,6 +485,7 @@ public class CollectedTypesTests
         map[(typeof(CollectedRecord), nameof(CollectedRecord.Signals))] = Nested(typeof(CollectedRecordSignals));
         map[(typeof(CollectedRecord), nameof(CollectedRecord.ReportedInputTokens))] = Col("record_reported_total", "token_count");
         map[(typeof(CollectedRecord), nameof(CollectedRecord.ReportedOutputTokens))] = Col("record_reported_total", "token_count");
+        map[(typeof(CollectedRecord), nameof(CollectedRecord.SourceName))] = Col("source", "locator");
 
         return map;
     }

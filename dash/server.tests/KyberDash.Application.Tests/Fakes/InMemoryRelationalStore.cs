@@ -6221,9 +6221,19 @@ public class InMemoryRelationalStore :
             ? AggregateCostBlocks(reportedRecordBlocks, CostBasis.Harness, extraProblems)
             : null;
 
-        ReadTimeCostSummary sessionPublishedCost = turnPublishedBlocks.Count > 0
-            ? AggregateCostBlocks(turnPublishedBlocks, CostBasis.Published, extraProblems)
-            : new ReadTimeCostSummary(CostBasis.Unknown, CostStatus.NoRate, null, null, []);
+        // A session whose records carry no tokens is priced from the usage the harness reported
+        // for the whole session, per model; records with tokens keep pricing per turn.
+        ReportedUsageCost? reportedUsageCost = ReportedSessionUsage.Price(session, records, pricing);
+        if (reportedUsageCost is not null)
+        {
+            extraProblems.AddRange(reportedUsageCost.Problems);
+        }
+
+        ReadTimeCostSummary sessionPublishedCost = reportedUsageCost is not null
+            ? ToReadTimeCostSummary(reportedUsageCost.Cost)
+            : turnPublishedBlocks.Count > 0
+                ? AggregateCostBlocks(turnPublishedBlocks, CostBasis.Published, extraProblems)
+                : new ReadTimeCostSummary(CostBasis.Unknown, CostStatus.NoRate, null, null, []);
 
         ReadTimeCostBasisMismatch? basisMismatch = null;
         if (valuedTurnHarnessBlocks.Count > 0 && valuedTurnPublishedBlocks.Count > 0)
@@ -6330,8 +6340,8 @@ public class InMemoryRelationalStore :
 
     /// <summary>
     /// Materializes the record-header columns the timeline tree's nodes read — the span, parent,
-    /// harness, timestamp, duration, kind, name, status, cost, model and declared window — with
-    /// every other child row absent, matching the SQLite timeline read row for row.
+    /// harness, timestamp, duration, kind, name, status, cost, model, declared window and source
+    /// — with every other child row absent, matching the SQLite timeline read row for row.
     /// </summary>
     private static CollectedRecord MaterializeRecordTimeline(StoreState currentState, object?[] recordRow)
     {
@@ -6585,9 +6595,19 @@ public class InMemoryRelationalStore :
             ? AggregateCostBlocks(reportedRecordBlocks, CostBasis.Harness, extraProblems)
             : null;
 
-        ReadTimeCostSummary sessionPublishedCost = turnPublishedBlocks.Count > 0
-            ? AggregateCostBlocks(turnPublishedBlocks, CostBasis.Published, extraProblems)
-            : new ReadTimeCostSummary(CostBasis.Unknown, CostStatus.NoRate, null, null, []);
+        // A session whose records carry no tokens is priced from the usage the harness reported
+        // for the whole session, per model; records with tokens keep pricing per turn.
+        ReportedUsageCost? reportedUsageCost = ReportedSessionUsage.Price(session, records, pricing);
+        if (reportedUsageCost is not null)
+        {
+            extraProblems.AddRange(reportedUsageCost.Problems);
+        }
+
+        ReadTimeCostSummary sessionPublishedCost = reportedUsageCost is not null
+            ? ToReadTimeCostSummary(reportedUsageCost.Cost)
+            : turnPublishedBlocks.Count > 0
+                ? AggregateCostBlocks(turnPublishedBlocks, CostBasis.Published, extraProblems)
+                : new ReadTimeCostSummary(CostBasis.Unknown, CostStatus.NoRate, null, null, []);
 
         ReadTimeCostBasisMismatch? basisMismatch = null;
         if (valuedTurnHarnessBlocks.Count > 0 && valuedTurnPublishedBlocks.Count > 0)

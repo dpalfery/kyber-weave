@@ -45,7 +45,6 @@ public partial class CanonSessionProjectorEngine
     public const int DefaultReadPathPassRecordBudget = 20_000;
 
     private const int PromptPreviewLength = 200;
-    private const string FileSourcePrefix = "codeburn/";
     private const string DroidHarness = "droid";
     private const string DroidPluginSource = "kyberdash-factory-plugin";
     private const string SessionLabelKey = "kyber.session.label";
@@ -1414,7 +1413,7 @@ public partial class CanonSessionProjectorEngine
     }
 
     private static bool IsFileSource(string source) =>
-        source.StartsWith(FileSourcePrefix, StringComparison.Ordinal);
+        source.StartsWith(CanonSynth.FileSourcePrefix, StringComparison.Ordinal);
 
     private static string SessionKeyOf(CanonicalRecord record, string? shareKey) =>
         record.SessionId ?? shareKey ?? string.Empty;

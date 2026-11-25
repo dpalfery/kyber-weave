@@ -85,7 +85,7 @@ For OTLP span mapping into static collector DTOs, `OtlpSpanNative` extracts cano
 | `ParsedProviderCall` | `CachedInputTokens` | mapped | `record_token_count.token_count` | Legacy cache-read fallback (`token_class = cache_read`) used only when `CacheReadInputTokens` is zero. |
 | `ParsedProviderCall` | `ReasoningTokens` | mapped | `record_token_count.token_count` | Reasoning token count (`token_class = reasoning`). |
 | `ParsedProviderCall` | `CostUsd` | mapped | `record_reported_cost.amount` | Persisted only when harness-reported (`USD` currency); table-calculated costs (from published rates) are computed at read/projection time. |
-| `ParsedProviderCall` | `CostIsEstimated` | dropped | — | Published-rate status is derived from rate-table lookup vs. presence of a `record_reported_cost` row rather than persisted on `record`. |
+| `ParsedProviderCall` | `CostIsCalculated` | dropped | — | Published-rate status is derived from rate-table lookup vs. presence of a `record_reported_cost` row rather than persisted on `record`. |
 | `ParsedProviderCall` | `CostHarnessReported` | dropped | — | Provenance flag gating `record_reported_cost` insertion; absence of a `record_reported_cost` row represents un-reported cost. |
 | `ParsedProviderCall` | `SessionId` | mapped | `session.native_session_id`, `record_session_link.session_key` | Session correlation key. |
 | `ParsedProviderCall` | `DeduplicationKey` | dropped | — | Transient upstream dedup string superseded by deterministic `record.span_id` and `record_provenance` keys. |
@@ -240,7 +240,7 @@ For OTLP tool-result log mapping, `CodexToolResultMapper` maps Codex `codex.tool
 | `ParsedProviderCall` | `CachedInputTokens` | mapped | `record_token_count.token_count` | Legacy cache-read fallback (`token_class = cache_read`). |
 | `ParsedProviderCall` | `ReasoningTokens` | mapped | `record_token_count.token_count` | Reasoning output tokens (`token_class = reasoning`). |
 | `ParsedProviderCall` | `CostUsd` | mapped | `record_reported_cost.amount` | Persisted only when harness-reported (`USD` currency); Codex file costs are calculated from published rates at read time. |
-| `ParsedProviderCall` | `CostIsEstimated` | dropped | — | Published-rate status is derived from rate-table lookup vs. presence of a `record_reported_cost` row rather than persisted on `record`. |
+| `ParsedProviderCall` | `CostIsCalculated` | dropped | — | Published-rate status is derived from rate-table lookup vs. presence of a `record_reported_cost` row rather than persisted on `record`. |
 | `ParsedProviderCall` | `CostHarnessReported` | dropped | — | Provenance flag gating `record_reported_cost` insertion; absence of a `record_reported_cost` row represents un-reported cost. |
 | `ParsedProviderCall` | `SessionId` | mapped | `session.native_session_id`, `record_session_link.session_key` | Session correlation key. |
 | `ParsedProviderCall` | `DeduplicationKey` | dropped | — | Transient upstream dedup string superseded by deterministic `record.span_id` and `record_provenance` keys. |
