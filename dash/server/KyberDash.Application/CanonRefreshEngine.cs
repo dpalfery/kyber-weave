@@ -46,8 +46,8 @@ public class CanonRefreshEngine
     /// <summary>
     /// Decides whether <paramref name="exception"/> belongs to one source unit, so the unit is recorded as a
     /// <c>SOURCE_UNREADABLE</c> problem and the pass continues. Read, parse, and argument failures qualify, as does a
-    /// store write rejected by a SQLite constraint (<see cref="SqliteExecutionException.ExitCode"/> 19), which
-    /// concerns only that unit's rows. Failures that mean the store itself is unusable (busy or locked database,
+    /// store write rejected by a SQLite constraint (<see cref="SqliteExecutionException.ExitCode"/> 19) or refused by
+    /// the store's own row validation (<see cref="DashValidationException"/>), which concern only that unit's rows. Failures that mean the store itself is unusable (busy or locked database,
     /// corrupt or unopenable file, missing native library, open circuit breaker) do not qualify and still fail the pass.
     /// </summary>
     /// <param name="exception">Exception raised while processing a single source unit.</param>
@@ -56,7 +56,8 @@ public class CanonRefreshEngine
     {
         ArgumentNullException.ThrowIfNull(exception);
         return exception is IOException or UnauthorizedAccessException or InvalidDataException or InvalidOperationException or JsonException or ArgumentException
-            || exception is SqliteExecutionException { ExitCode: SqliteConstraintResultCode };
+            || exception is SqliteExecutionException { ExitCode: SqliteConstraintResultCode }
+            || exception is DashValidationException;
     }
 
     /// <summary>Rolling content retention window in days (decision D18).</summary>

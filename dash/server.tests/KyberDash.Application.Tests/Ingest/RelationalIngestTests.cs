@@ -674,6 +674,30 @@ public class RelationalIngestTests
     }
 
     /// <summary>
+    /// A store write the store's own row validation refuses for one unit (here, JSON document text in a
+    /// text column) is recorded as that unit's source-unreadable problem and the rest still import,
+    /// rather than aborting the whole pass.
+    /// </summary>
+    [Fact]
+    public async Task ImportHistory_WhenOneUnitWriteFailsStoreValidation_RecordsAProblemAndImportsTheRest()
+    {
+        UnitWriteHarness harness = new();
+        harness.Writer.WriteBatchFailure = static batch => batch.Records.Any(static r => r.RecordId == "rec-bad")
+            ? new DashValidationException("STORE_JSON_TEXT_REFUSED", "Refused JSON object or array text in 'content_part_text.part_text'.")
+            : null;
+
+        JobOutcome outcome = await harness.Jobs.TriggerImportHistoryAsync(TestContext.Current.CancellationToken);
+
+        Assert.Equal("partial", outcome.Outcome);
+        Assert.Equal(1, outcome.FailedUnits);
+        Assert.NotNull(harness.Store.FindRecord("rec-good"));
+        Assert.Null(harness.Store.FindRecord("rec-bad"));
+        CollectedProblem problem = Assert.Single(harness.Writer.WriteProblemCalls);
+        Assert.Equal("SOURCE_UNREADABLE", problem.Code);
+        Assert.Equal("failed", harness.Store.GetSourceCheckpoint("commandcode", harness.BadPath)?.LastStatus);
+    }
+
+    /// <summary>
     /// A store that is itself unusable (locked, broken file, or an open circuit breaker) is not a
     /// per-unit problem: the exception escapes and the job fails.
     /// </summary>
