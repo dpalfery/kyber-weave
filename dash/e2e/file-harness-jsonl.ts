@@ -290,6 +290,157 @@ function kimiLines(plan: SessionPlan, baseTimeMs: number): unknown[] {
   return lines
 }
 
+
+// --- copilot-cli: ~/.copilot/session-state/<session>/events.jsonl -----------------------------
+const COPILOT_MODEL = 'claude-sonnet-4.5'
+
+function copilotLines(plan: SessionPlan, baseTimeMs: number): unknown[] {
+  const lines: unknown[] = [
+    {
+      type: 'session.start',
+      id: `${plan.id}-e0`,
+      timestamp: iso(baseTimeMs),
+      data: { sessionId: plan.id, selectedModel: COPILOT_MODEL },
+    },
+  ]
+  for (let turn = 1; turn <= plan.turns; turn += 1) {
+    const at = baseTimeMs + turn * TURN_SPACING_MS
+    lines.push({
+      type: 'user.message',
+      id: `${plan.id}-u${turn}`,
+      timestamp: iso(at),
+      data: { content: `Step ${turn}: continue the work` },
+    })
+    lines.push({
+      type: 'assistant.message',
+      id: `${plan.id}-a${turn}`,
+      timestamp: iso(at + 1_000),
+      data: {
+        messageId: `${plan.id}-msg-${turn}`,
+        content: `Finished step ${turn}.`,
+        inputTokens: 900 + turn,
+        outputTokens: 145 + turn,
+        ...(hasTool(turn)
+          ? { toolRequests: [{ toolCallId: `${plan.id}-tc-${turn}`, name: 'view', arguments: { path: `file-${turn}.ts` } }] }
+          : {}),
+      },
+    })
+  }
+  return lines
+}
+
+// --- droid (file-only): ~/.factory/sessions/<slug>/<session>.jsonl + .settings.json ----------
+const DROID_MODEL = 'GLM-5.1'
+
+function droidLines(plan: SessionPlan, baseTimeMs: number): unknown[] {
+  const lines: unknown[] = [
+    { type: 'session_start', id: plan.id, title: `Droid file import ${plan.id}`, cwd: '/home/dev/projects/kyber-weave' },
+  ]
+  for (let turn = 1; turn <= plan.turns; turn += 1) {
+    const at = baseTimeMs + turn * TURN_SPACING_MS
+    lines.push({
+      type: 'message',
+      timestamp: iso(at),
+      message: { role: 'user', content: [{ type: 'text', text: `Step ${turn}: continue the work` }] },
+    })
+    lines.push({
+      type: 'message',
+      id: `${plan.id}-a-${turn}`,
+      timestamp: iso(at + 2_500),
+      message: { role: 'assistant', content: [{ type: 'text', text: `Finished step ${turn}.` }] },
+    })
+  }
+  return lines
+}
+
+function droidSettings(plan: SessionPlan): string {
+  return JSON.stringify({
+    model: `custom:${DROID_MODEL}-[Proxy]-0`,
+    tokenUsage: {
+      inputTokens: 101 * plan.turns,
+      outputTokens: 41 * plan.turns,
+      cacheCreationTokens: 10 * plan.turns,
+      cacheReadTokens: 203 * plan.turns,
+      thinkingTokens: 7 * plan.turns,
+    },
+  })
+}
+
+// --- antigravity and antigravity-cli: <root>/brain/<conversation>/.system_generated/logs/transcript.jsonl
+function encodeTwice(value: unknown): string {
+  return JSON.stringify(JSON.stringify(value))
+}
+
+function antigravityLines(plan: SessionPlan, baseTimeMs: number): unknown[] {
+  const lines: unknown[] = []
+  let step = 0
+  for (let turn = 1; turn <= plan.turns; turn += 1) {
+    const at = baseTimeMs + turn * TURN_SPACING_MS
+    lines.push({
+      step_index: step++,
+      source: 'USER_EXPLICIT',
+      type: 'USER_INPUT',
+      status: 'DONE',
+      created_at: iso(at),
+      content: `Step ${turn}: continue the work`,
+    })
+    lines.push({
+      step_index: step++,
+      source: 'MODEL',
+      type: 'PLANNER_RESPONSE',
+      status: 'DONE',
+      created_at: iso(at + 1_000),
+      content: `Finished step ${turn}.`,
+      ...(hasTool(turn)
+        ? {
+            tool_calls: [
+              {
+                name: 'view_file',
+                args: { AbsolutePath: encodeTwice(`/synthetic/workspace/src/file-${turn}.ts`), StartLine: encodeTwice(12) },
+              },
+            ],
+          }
+        : {}),
+    })
+    if (hasTool(turn)) {
+      lines.push({
+        step_index: step++,
+        source: 'SYSTEM',
+        type: 'GENERIC',
+        status: 'DONE',
+        created_at: iso(at + 2_000),
+        content: `synthetic file contents ${turn}`,
+      })
+    }
+  }
+  return lines
+}
+
+
+function antigravityFixtures(harness: string, brainRoot: string): FileHarnessFixture[] {
+  return fixturesFor(
+    harness,
+    (plan) => ({
+      ...BASE_CONTRACT,
+      harness,
+      sessionId: plan.id,
+      turns: plan.turns,
+      expectedToolCalls: toolCallCount(plan.turns),
+      tokensMeasurable: false,
+      contextMeasurable: false,
+      perTurnTokensMeasurable: false,
+      expectedCostStatus: 'out_of_scope',
+      expectedModels: [],
+    }),
+    (plan, base) => [
+      {
+        relativePath: `${brainRoot}/${plan.id}/.system_generated/logs/transcript.jsonl`,
+        content: jsonl(antigravityLines(plan, base)),
+      },
+    ],
+  )
+}
+
 export const FILE_HARNESS_JSONL_FIXTURES: readonly FileHarnessFixture[] = [
   ...fixturesFor(
     'claude-code',
@@ -391,4 +542,44 @@ export const FILE_HARNESS_JSONL_FIXTURES: readonly FileHarnessFixture[] = [
       },
     ],
   ),
+  ...fixturesFor(
+    'copilot-cli',
+    (plan) => ({
+      ...BASE_CONTRACT,
+      harness: 'copilot-cli',
+      sessionId: plan.id,
+      turns: plan.turns,
+      expectedToolCalls: null,
+      tokensMeasurable: true,
+      contextMeasurable: true,
+      perTurnTokensMeasurable: true,
+      expectedCostStatus: 'no_rate',
+      expectedModels: [COPILOT_MODEL],
+    }),
+    (plan, base) => [
+      { relativePath: `.copilot/session-state/${plan.id}/events.jsonl`, content: jsonl(copilotLines(plan, base)) },
+    ],
+  ),
+  ...fixturesFor(
+    'droid',
+    (plan) => ({
+      ...BASE_CONTRACT,
+      harness: 'droid',
+      sessionId: plan.id,
+      turns: plan.turns,
+      expectedToolCalls: null,
+      tokensMeasurable: true,
+      cacheCreationMeasurable: true,
+      contextMeasurable: false,
+      perTurnTokensMeasurable: false,
+      expectedCostStatus: 'published_priced',
+      expectedModels: [DROID_MODEL],
+    }),
+    (plan, base) => [
+      { relativePath: `.factory/sessions/e2e-project/${plan.id}.jsonl`, content: jsonl(droidLines(plan, base)) },
+      { relativePath: `.factory/sessions/e2e-project/${plan.id}.settings.json`, content: droidSettings(plan) },
+    ],
+  ),
+  ...antigravityFixtures('antigravity', '.gemini/antigravity/brain'),
+  ...antigravityFixtures('antigravity-cli', '.gemini/antigravity-cli/brain'),
 ]

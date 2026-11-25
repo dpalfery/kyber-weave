@@ -17,8 +17,8 @@ import { assertHarnessSessionDashboard, navigateToHarnessDetail } from './sessio
  * real folder import (`api/kyber/import-history`), and every Agent Session Dashboard section is
  * checked per session against the harness contract.
  */
-test.describe.configure({ mode: 'serial' })
-
+// Each harness test stands alone: a harness whose section renders wrong fails its own test and
+// leaves the other harnesses' results readable (D6 keeps the failing assertion).
 let server: IsolatedServerHandle | undefined
 
 // The run clock, one hour back and floored to the minute, so retention never ages a fixture out.
