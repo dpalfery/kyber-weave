@@ -103,6 +103,16 @@ public class DevinMessageNodesMapperTests
     }
 
     [Fact]
+    public void Map_MessageNodesExport_TotalTimeMsBecomesReportedDurationAndAbsentStaysNull()
+    {
+        CollectedBatch batch = new DevinMapper().Map(MakeUnit(Export), BaselineUtc);
+
+        List<CollectedRecord> llm = batch.Records.Where(static r => r.Op == RecordOp.LlmInvoke).ToList();
+        Assert.Equal(900L, llm[0].ReportedDurationMs);
+        Assert.Null(llm[1].ReportedDurationMs);
+    }
+
+    [Fact]
     public void Map_MessageNodesExport_ToolAndSystemNodesEmitNoRecords()
     {
         CollectedBatch batch = new DevinMapper().Map(MakeUnit(Export), BaselineUtc);

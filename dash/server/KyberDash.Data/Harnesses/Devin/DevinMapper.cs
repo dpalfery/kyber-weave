@@ -49,6 +49,7 @@ public record DevinStepMetrics(
 /// <param name="OutputTokens">Legacy output tokens (<c>metrics.output_tokens</c>), when present.</param>
 /// <param name="CacheCreationTokens">Legacy cache-creation tokens (<c>metrics.cache_creation_tokens</c>), when present.</param>
 /// <param name="CacheReadTokens">Legacy cache-read tokens (<c>metrics.cache_read_tokens</c>), when present.</param>
+/// <param name="TotalTimeMs">Reported call duration (<c>metadata.metrics.total_time_ms</c> on a <c>message_nodes</c> assistant node), when present; never estimated.</param>
 public record DevinStepMetadata(
     string? CreatedAt,
     double? CommittedAcuCost,
@@ -57,7 +58,8 @@ public record DevinStepMetadata(
     double? InputTokens,
     double? OutputTokens,
     double? CacheCreationTokens,
-    double? CacheReadTokens);
+    double? CacheReadTokens,
+    double? TotalTimeMs = null);
 
 /// <summary>
 /// Native <c>extra</c> object on a Devin transcript step, carrying the ATIF v1.7
@@ -504,7 +506,7 @@ public partial class DevinMapper : IHarnessMapper
                 traceId,
                 model,
                 null,
-                null,
+                ToReportedDurationMs(step.Metadata?.TotalTimeMs),
                 tokens,
                 reportedCost,
                 parts,
@@ -706,6 +708,11 @@ public partial class DevinMapper : IHarnessMapper
             FromMessageNodes: true);
     }
 
+    private static long? ToReportedDurationMs(double? totalTimeMs) =>
+        totalTimeMs is { } value && double.IsFinite(value) && value >= 0 && value <= long.MaxValue
+            ? (long)Math.Round(value, MidpointRounding.AwayFromZero)
+            : null;
+
     private static DevinStep ParseAssistantNode(JsonElement chatEl, string stepId, string? content, string? exportModel)
     {
         List<DevinToolCall> toolCalls = [];
@@ -734,6 +741,7 @@ public partial class DevinMapper : IHarnessMapper
         double? output = null;
         double? cacheCreation = null;
         double? cacheRead = null;
+        double? totalTimeMs = null;
         if (chatEl.TryGetProperty("metadata", out JsonElement metadataEl)
             && metadataEl.ValueKind == JsonValueKind.Object)
         {
@@ -746,6 +754,7 @@ public partial class DevinMapper : IHarnessMapper
                 output = ReadOptionalDouble(metricsEl, "output_tokens");
                 cacheCreation = ReadOptionalDouble(metricsEl, "cache_creation_tokens");
                 cacheRead = ReadOptionalDouble(metricsEl, "cache_read_tokens");
+                totalTimeMs = ReadOptionalDouble(metricsEl, "total_time_ms");
             }
         }
 
@@ -757,7 +766,7 @@ public partial class DevinMapper : IHarnessMapper
             toolCalls,
             null,
             null,
-            new DevinStepMetadata(createdAt, null, generationModel, false, input, output, cacheCreation, cacheRead));
+            new DevinStepMetadata(createdAt, null, generationModel, false, input, output, cacheCreation, cacheRead, totalTimeMs));
     }
 
     private static DevinStep ParseStep(JsonElement stepEl, int index)
