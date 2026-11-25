@@ -395,9 +395,49 @@ public sealed class ReviewGatesRedModeTests : IDisposable
     }
 
     [Theory]
-    [InlineData("dash/xtests/foo.test.ts", false)]
-    [InlineData("dash/tests/foo.test.ts", true)]
-    [InlineData("tests/foo.test.ts", true)]
-    public void ARelativePathMatchesOnASegmentBoundaryOnly(string own, bool expected) =>
-        Assert.Equal(expected, RedClassifier.IsOwnFile("tests/foo.test.ts", [own]));
+    [InlineData("dash/xtests/foo.test.ts", null, false)]
+    [InlineData("dash/tests/foo.test.ts", null, false)]
+    [InlineData("tests/foo.test.ts", null, true)]
+    [InlineData("dash/xtests/foo.test.ts", "dash", false)]
+    [InlineData("dash/tests/foo.test.ts", "dash", true)]
+    [InlineData("tests/foo.test.ts", "dash", false)]
+    public void ARelativePathMatchesOnASegmentBoundaryOnly(string own, string? workingDirectory, bool expected) =>
+        Assert.Equal(expected, RedClassifier.IsOwnFile("tests/foo.test.ts", [own], workingDirectory));
+
+    [Theory]
+    [InlineData("npx tsc --noEmit", "tests/foo.test.ts", "dash/tests/foo.test.ts")]
+    [InlineData("npm run --prefix dash/tray/ui typecheck", "src/App.tsx", "dash/web/src/App.tsx")]
+    [InlineData("npm run --prefix dash typecheck", "tests/foo.test.ts", "tests/foo.test.ts")]
+    public void ASiblingRelativeCompilerPathWithoutAMatchingGateDirectoryIsRejected(
+        string command, string reportedFile, string ownFile)
+    {
+        (RedOutcome outcome, DiagnosticReport report) = Apply(
+            [("typecheck", command, 2, $"{reportedFile}(3,10): error TS2305: Module '\"../src/x\"' has no exported member 'Gadget'.")],
+            ownFile);
+
+        Assert.False(outcome.Passed);
+        Assert.Contains(report.Items, item => item.Code == ReviewGateReporting.RedRejected);
+    }
+
+    [Fact]
+    public void ACompilerPathRelativeToPlannedWorkingDirectoryIsCompileRed()
+    {
+        PlannedTaskGate planned = new("dash-typecheck", true, 60, [], ["npm", "run", "typecheck"], WorkingDirectory: "dash");
+        GateReport ran = new(GateReport.CurrentSchema, [new GateResult("dash-typecheck", true, 2, "ran")]);
+        DiagnosticReport report = new();
+
+        (_, RedOutcome outcome) = ReviewGateReporting.ApplyRed(
+            ran,
+            [planned],
+            new Dictionary<string, string>(StringComparer.Ordinal)
+            {
+                ["dash-typecheck"] = "tests/foo.test.ts(3,10): error TS2305: Module '\"../src/x\"' has no exported member 'Gadget'.",
+            },
+            ["dash/tests/foo.test.ts"],
+            _ => null,
+            report);
+
+        Assert.True(outcome.Passed, outcome.Reason);
+        Assert.Contains("Gadget", outcome.MissingSymbols);
+    }
 }

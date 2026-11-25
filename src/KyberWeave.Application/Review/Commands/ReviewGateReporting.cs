@@ -317,7 +317,8 @@ public static class ReviewGateReporting
             if (plannedGate is null || !outputs.TryGetValue(gate.Id, out string? output))
                 continue;
 
-            RedGateObservation observation = new(gate.Id, string.Join(' ', plannedGate.Run), gate.ExitCode, output);
+            RedGateObservation observation = new(
+                gate.Id, string.Join(' ', plannedGate.Run), gate.ExitCode, output, plannedGate.WorkingDirectory);
             if (RedClassifier.SiblingSymbols(observation, changed) is not { Count: > 0 } symbols)
                 continue;
 
@@ -354,7 +355,8 @@ public static class ReviewGateReporting
         {
             PlannedTaskGate? plannedGate = planned.FirstOrDefault(candidate => string.Equals(candidate.Id, gate.Id, StringComparison.Ordinal));
             if (plannedGate is not null && outputs.TryGetValue(gate.Id, out string? output))
-                observations.Add(new RedGateObservation(gate.Id, string.Join(' ', plannedGate.Run), gate.ExitCode, output));
+                observations.Add(new RedGateObservation(
+                    gate.Id, string.Join(' ', plannedGate.Run), gate.ExitCode, output, plannedGate.WorkingDirectory));
         }
 
         RedOutcome outcome = RedClassifier.Evaluate(

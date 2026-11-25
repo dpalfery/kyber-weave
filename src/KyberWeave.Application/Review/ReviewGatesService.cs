@@ -787,7 +787,9 @@ public sealed class ReviewGatesService(
                 // A build accepted as RED on missing symbols leaves nothing for a later test gate to run against.
                 if (request.Red && !result.Passed && brokenBuildSymbols is null && outputs.TryGetValue(gate.Id, out string? gateOutput))
                     brokenBuildSymbols = RedClassifier.AcceptedMissingSymbols(
-                        new RedGateObservation(gate.Id, string.Join(' ', gate.Run), result.ExitCode, gateOutput), changed);
+                        new RedGateObservation(
+                            gate.Id, string.Join(' ', gate.Run), result.ExitCode, gateOutput, gate.WorkingDirectory),
+                        changed);
             },
             SkipReason = gate => request.Red && brokenBuildSymbols is not null && RedClassifier.IsTestGate(gate.Id, string.Join(' ', gate.Run))
                 ? RedClassifier.BuildSkipReason(brokenBuildSymbols)

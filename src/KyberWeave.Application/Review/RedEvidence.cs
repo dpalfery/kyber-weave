@@ -8,7 +8,13 @@ namespace KyberWeave.Core.Review;
 /// <param name="Command">The command the gate ran, joined for display.</param>
 /// <param name="ExitCode">The process exit code.</param>
 /// <param name="Output">Standard output followed by standard error.</param>
-public sealed record RedGateObservation(string Id, string Command, int ExitCode, string Output);
+/// <param name="WorkingDirectory">Repository-relative directory the gate ran in, or null for the repository root.</param>
+public sealed record RedGateObservation(
+    string Id,
+    string Command,
+    int ExitCode,
+    string Output,
+    string? WorkingDirectory = null);
 
 /// <summary>One compiler error found in a gate's output.</summary>
 /// <param name="File">The file the compiler named, as it printed it; empty when the error names none.</param>
@@ -441,18 +447,36 @@ public static partial class RedClassifier
     }
 
     /// <summary>Whether a compiler-named <paramref name="file"/> is one of <paramref name="ownFiles"/> (repository-relative).</summary>
-    public static bool IsOwnFile(string file, IReadOnlyList<string> ownFiles)
+    /// <param name="file">The file path the compiler printed.</param>
+    /// <param name="ownFiles">The repository-relative files the task changed.</param>
+    /// <param name="workingDirectory">Repository-relative directory the gate ran in, or null for the repository root.</param>
+    public static bool IsOwnFile(string file, IReadOnlyList<string> ownFiles, string? workingDirectory = null)
     {
+        ArgumentNullException.ThrowIfNull(file);
+        ArgumentNullException.ThrowIfNull(ownFiles);
+
         string normalized = file.Replace('\\', '/');
-        string relative = normalized.StartsWith("./", StringComparison.Ordinal) ? normalized[2..] : normalized;
-        return ownFiles.Any(own =>
+        if (string.IsNullOrWhiteSpace(normalized))
         {
-            string path = own.Replace('\\', '/').TrimStart('/');
-            return normalized.Equals(path, StringComparison.OrdinalIgnoreCase)
-                   || normalized.EndsWith("/" + path, StringComparison.OrdinalIgnoreCase)
-                   // A path printed relative to the gate's own folder (npm --prefix dash) is the tail of the repository path.
-                   || (relative.Length > 0 && !Path.IsPathRooted(relative) && path.EndsWith("/" + relative, StringComparison.OrdinalIgnoreCase));
-        });
+            return false;
+        }
+
+        if (IsRootedPath(normalized, file))
+        {
+            return ownFiles.Any(own =>
+                NormalizeRepositoryRelative(own) is { } path
+                && (normalized.Equals(path, StringComparison.OrdinalIgnoreCase)
+                    || normalized.EndsWith("/" + path, StringComparison.OrdinalIgnoreCase)));
+        }
+
+        if (!TryResolveRelative(workingDirectory, normalized, allowEmpty: false, out string? resolved) || resolved is null)
+        {
+            return false;
+        }
+
+        return ownFiles.Any(own =>
+            NormalizeRepositoryRelative(own) is { } path
+            && resolved.Equals(path, StringComparison.OrdinalIgnoreCase));
     }
 
     /// <summary>
@@ -470,7 +494,8 @@ public static partial class RedClassifier
 
         IReadOnlyList<CompileError> errors = ParseErrors(gate.Output);
         if (errors.Count == 0 || HasUnparsedError(gate.Output, errors)
-            || errors.Any(error => error.Symbol is null || IsOwnFile(error.File, ownFiles)))
+            || !TryGateDirectory(gate, out string? gateDirectory)
+            || errors.Any(error => error.Symbol is null || IsOwnFile(error.File, ownFiles, gateDirectory)))
         {
             return null;
         }
@@ -544,9 +569,12 @@ public static partial class RedClassifier
             IReadOnlyList<CompileError> errors = ParseErrors(gate.Output);
             if (errors.Count > 0 || HasUnparsedError(gate.Output, errors))
             {
-                bool anyMissing = errors.Any(error => error.Symbol is not null && IsOwnFile(error.File, ownFiles));
-                errors = [.. errors.Where(error => !(anyMissing && ConsequenceCodes.Contains(error.Code) && IsOwnFile(error.File, ownFiles)))];
-                List<CompileError> other = [.. errors.Where(error => error.Symbol is null || !IsOwnFile(error.File, ownFiles))];
+                bool validDirectory = TryGateDirectory(gate, out string? gateDirectory);
+                bool Own(string file) => validDirectory && IsOwnFile(file, ownFiles, gateDirectory);
+
+                bool anyMissing = errors.Any(error => error.Symbol is not null && Own(error.File));
+                errors = [.. errors.Where(error => !(anyMissing && ConsequenceCodes.Contains(error.Code) && Own(error.File)))];
+                List<CompileError> other = [.. errors.Where(error => error.Symbol is null || !Own(error.File))];
                 if (other.Count > 0 || HasUnparsedError(gate.Output, errors))
                 {
                     rejected[gate.Id] = other.Count > 0
@@ -682,5 +710,188 @@ public static partial class RedClassifier
         }
 
         return command;
+    }
+
+    private static bool IsRootedPath(string normalized, string original) =>
+        normalized.StartsWith('/')
+        || (normalized.Length >= 2 && char.IsAsciiLetter(normalized[0]) && normalized[1] == ':')
+        || Path.IsPathRooted(original);
+
+    private static string? NormalizeRepositoryRelative(string path)
+    {
+        string trimmed = path.Replace('\\', '/').TrimStart('/');
+        if (string.IsNullOrWhiteSpace(trimmed))
+        {
+            return null;
+        }
+
+        return TryResolveRelative(null, trimmed, allowEmpty: false, out string? normalized) ? normalized : null;
+    }
+
+    private static bool TryGateDirectory(RedGateObservation gate, out string? gateDirectory)
+    {
+        gateDirectory = null;
+        if (!string.IsNullOrWhiteSpace(gate.WorkingDirectory))
+        {
+            string working = gate.WorkingDirectory.Replace('\\', '/');
+            if (IsRootedPath(working, gate.WorkingDirectory)
+                || !TryResolveRelative(null, working, allowEmpty: true, out gateDirectory))
+            {
+                gateDirectory = null;
+                return false;
+            }
+        }
+
+        IReadOnlyList<string> words = CommandWords(gate.Command);
+        for (int index = 0; index < words.Count; index++)
+        {
+            string word = words[index];
+            if (word == "--")
+            {
+                break;
+            }
+
+            string? directory = null;
+            if (word is "--prefix" or "--dir" or "--cwd" or "--directory" or "-C")
+            {
+                if (index + 1 < words.Count)
+                {
+                    directory = words[++index];
+                }
+            }
+            else if (TryOptionValue(word, "--prefix=", out string? prefixVal)
+                     || TryOptionValue(word, "--dir=", out prefixVal)
+                     || TryOptionValue(word, "--cwd=", out prefixVal)
+                     || TryOptionValue(word, "--directory=", out prefixVal)
+                     || TryOptionValue(word, "-C=", out prefixVal))
+            {
+                directory = prefixVal;
+            }
+
+            if (directory is null)
+            {
+                continue;
+            }
+
+            string normalizedDir = directory.Replace('\\', '/');
+            if (IsRootedPath(normalizedDir, directory)
+                || !TryResolveRelative(gateDirectory, normalizedDir, allowEmpty: true, out gateDirectory))
+            {
+                gateDirectory = null;
+                return false;
+            }
+        }
+
+        return true;
+    }
+
+    private static bool TryOptionValue(string word, string prefix, out string? value)
+    {
+        if (word.StartsWith(prefix, StringComparison.Ordinal))
+        {
+            value = word[prefix.Length..];
+            return true;
+        }
+
+        value = null;
+        return false;
+    }
+
+    private static List<string> CommandWords(string command)
+    {
+        List<string> words = [];
+        System.Text.StringBuilder current = new();
+        char? quote = null;
+        foreach (char c in command)
+        {
+            if (quote is not null)
+            {
+                if (c == quote)
+                {
+                    quote = null;
+                }
+                else
+                {
+                    current.Append(c);
+                }
+            }
+            else if (c is '\'' or '"')
+            {
+                quote = c;
+            }
+            else if (char.IsWhiteSpace(c))
+            {
+                if (current.Length > 0)
+                {
+                    words.Add(current.ToString());
+                    current.Clear();
+                }
+            }
+            else
+            {
+                current.Append(c);
+            }
+        }
+
+        if (current.Length > 0)
+        {
+            words.Add(current.ToString());
+        }
+
+        return words;
+    }
+
+    private static bool TryResolveRelative(string? baseDirectory, string relative, bool allowEmpty, out string? resolved)
+    {
+        List<string> segments = [];
+        if (!string.IsNullOrWhiteSpace(baseDirectory))
+        {
+            if (!AppendSegments(segments, baseDirectory))
+            {
+                resolved = null;
+                return false;
+            }
+        }
+
+        if (!AppendSegments(segments, relative))
+        {
+            resolved = null;
+            return false;
+        }
+
+        if (segments.Count == 0)
+        {
+            resolved = null;
+            return allowEmpty;
+        }
+
+        resolved = string.Join('/', segments);
+        return true;
+    }
+
+    private static bool AppendSegments(List<string> segments, string path)
+    {
+        foreach (string raw in path.Replace('\\', '/').Split('/', StringSplitOptions.RemoveEmptyEntries))
+        {
+            if (raw == ".")
+            {
+                continue;
+            }
+
+            if (raw == "..")
+            {
+                if (segments.Count == 0)
+                {
+                    return false;
+                }
+
+                segments.RemoveAt(segments.Count - 1);
+                continue;
+            }
+
+            segments.Add(raw);
+        }
+
+        return true;
     }
 }
