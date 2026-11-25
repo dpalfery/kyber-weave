@@ -125,8 +125,11 @@ public class HarnessSourceRegistry
         };
     }
 
-    /// <summary>Most bytes a local unit's companion file may hold: the default export cap.</summary>
-    private static readonly long CompanionCapBytes = new HarnessSqliteLimits().ExportCapBytes;
+    /// <summary>
+    /// The one set of limits the registry's SQLite readers and its local companion reads share, so a local
+    /// unit's companion is held to the same export cap as a SQLite export's.
+    /// </summary>
+    private static readonly HarnessSqliteLimits ReaderLimits = new();
 
     private static readonly HashSet<string> ExcludedHarnessIds = new(
         ["windsurf", "aider"],
@@ -617,7 +620,7 @@ public class HarnessSourceRegistry
         }
 
         // A companion is held to the same cap as a SQLite export's companion, checked before it is read.
-        string? companionText = SqliteHarnessSourceReader.ReadCompanion(unit.CompanionKey, fileSystem, CompanionCapBytes);
+        string? companionText = SqliteHarnessSourceReader.ReadCompanion(unit.CompanionKey, fileSystem, ReaderLimits.ExportCapBytes);
 
         DateTimeOffset effectiveWriteUtc = hasStats ? lastWriteUtc : (unit.LastWriteUtc ?? default);
         return new NativeSourceUnit(
@@ -648,7 +651,7 @@ public class HarnessSourceRegistry
             explicitRelativeDatabasePaths,
             conversations,
             sqlite,
-            new HarnessSqliteLimits());
+            ReaderLimits);
 
     private sealed record SourceRootSpec(
         string ProviderId,
