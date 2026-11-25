@@ -184,6 +184,25 @@ public class SharedSpanWriteParityTests : IDisposable
         Assert.Equal("ok", reopened.GetSourceCheckpoint("claude-code", ParentLocator)?.LastStatus);
     }
 
+    /// <summary>
+    /// A current-version store missing <c>source_checkpoint</c> as well as the claim table still opens: the
+    /// stale-marking step is skipped and the schema step recreates both tables.
+    /// </summary>
+    [Fact]
+    public void ReopeningAStoreMissingTheCheckpointTable_StillOpensAndRecreatesIt()
+    {
+        string dbPath = Path.Combine(directory.Path, $"self-heal-{Guid.NewGuid():N}.db");
+        RawSqliteStore first = new(dbPath);
+        first.WriteBatch(Batch(ParentLocator, inputTokens: 10));
+        _ = first.Raw("DROP TABLE record_source_claim; DROP TABLE source_checkpoint;");
+
+        SqliteRelationalStore reopened = new(dbPath, new SqliteCircuitBreaker());
+
+        Assert.Equal(1, reopened.CountRecords("claude-code"));
+        reopened.UpsertSourceCheckpoint(Checkpoint(ParentLocator));
+        Assert.Equal("ok", reopened.GetSourceCheckpoint("claude-code", ParentLocator)?.LastStatus);
+    }
+
     /// <summary><see cref="IRelationalStoreWriter.DeleteProblem"/> removes the keyed problem and ignores a missing key.</summary>
     /// <param name="kind">Store under test.</param>
     [Theory]

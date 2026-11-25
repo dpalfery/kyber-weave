@@ -76,6 +76,7 @@ public class SchemaVersionTests
             onRebuiltFromOlderSchema: () => rebuildCallbackInvoked = true);
         store.EnqueueResponse("store_state");
         store.EnqueueResponse($"{SqliteRelationalStore.SchemaVersion.ToString(CultureInfo.InvariantCulture)}\t1");
+        store.EnqueueResponse("source_checkpoint");
         store.EnqueueResponse(string.Empty);
         store.EnqueueResponse(string.Empty);
 
@@ -94,7 +95,7 @@ public class SchemaVersionTests
         Assert.False(store.HasPendingRebuildReingest);
         Assert.False(store.TryTakePendingRebuildReingest());
 
-        Assert.Equal(5, store.ExecutedSql.Count);
+        Assert.Equal(6, store.ExecutedSql.Count);
         string probeSql = NormalizeLineEndings(store.ExecutedSql[0]);
         Assert.StartsWith(".headers off\n.mode tabs\n", probeSql, StringComparison.Ordinal);
         Assert.Contains("sqlite_master", probeSql, StringComparison.Ordinal);
@@ -106,11 +107,12 @@ public class SchemaVersionTests
 
         // Before the schema adds record_source_claim, an existing store's folder checkpoints are marked stale
         // so the next folder import records every file's span claims; it is a no-op once the table exists.
-        string claimSql = NormalizeLineEndings(store.ExecutedSql[2]);
-        Assert.Contains("UPDATE source_checkpoint SET last_status = 'invalidated'", claimSql, StringComparison.Ordinal);
-        Assert.Contains("name = 'record_source_claim'", claimSql, StringComparison.Ordinal);
+        string claimProbeSql = NormalizeLineEndings(store.ExecutedSql[2]);
+        Assert.Contains("'source_checkpoint', 'record_source_claim'", claimProbeSql, StringComparison.Ordinal);
+        string claimSql = NormalizeLineEndings(store.ExecutedSql[3]);
+        Assert.Contains("UPDATE source_checkpoint SET last_status = 'invalidated';", claimSql, StringComparison.Ordinal);
 
-        string ddlSql = NormalizeLineEndings(store.ExecutedSql[4]);
+        string ddlSql = NormalizeLineEndings(store.ExecutedSql[5]);
         Assert.DoesNotContain("UPDATE store_state", ddlSql, StringComparison.Ordinal);
     }
 
