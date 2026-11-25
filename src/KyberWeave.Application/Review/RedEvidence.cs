@@ -450,9 +450,9 @@ public static partial class RedClassifier
         return errors;
     }
 
-    /// <summary>Whether a compiler-named <paramref name="file"/> is one of <paramref name="ownFiles"/> (repository-relative).</summary>
+    /// <summary>Whether a compiler-named <paramref name="file"/> is one of <paramref name="ownFiles"/>.</summary>
     /// <param name="file">The file path the compiler printed.</param>
-    /// <param name="ownFiles">The repository-relative files the task changed.</param>
+    /// <param name="ownFiles">The repository-relative or rooted files the task changed.</param>
     /// <param name="workingDirectory">Repository-relative directory the gate ran in, or null for the repository root.</param>
     /// <param name="repositoryRoot">Absolute repository root used to resolve rooted compiler paths, or null to require exact rooted equality.</param>
     /// <param name="canonicalRepositoryRoot">Canonical absolute repository root when different from <paramref name="repositoryRoot"/>, or null.</param>
@@ -472,22 +472,13 @@ public static partial class RedClassifier
             return false;
         }
 
+        RootedPath? parsedRoot = TryParseRoot(repositoryRoot);
+        RootedPath? parsedCanonicalRoot = TryParseRoot(canonicalRepositoryRoot);
+
         if (IsRootedPath(normalized, file))
         {
-            if (!TryNormalizeRooted(file, out RootedPath rootedFile))
-            {
-                return false;
-            }
-
-            if (!string.IsNullOrWhiteSpace(repositoryRoot) || !string.IsNullOrWhiteSpace(canonicalRepositoryRoot))
-            {
-                return MatchesRoot(rootedFile, repositoryRoot, ownFiles)
-                    || MatchesRoot(rootedFile, canonicalRepositoryRoot, ownFiles);
-            }
-
-            return ownFiles.Any(own =>
-                TryNormalizeRooted(own, out RootedPath rootedOwn)
-                && rootedFile.EqualsRooted(rootedOwn));
+            return TryNormalizeRooted(file, out RootedPath rootedFile)
+                && ownFiles.Any(own => MatchesRootedCompilerFile(rootedFile, own, parsedRoot, parsedCanonicalRoot));
         }
 
         if (!TryResolveRelative(workingDirectory, normalized, allowEmpty: false, out string? resolved) || resolved is null)
@@ -495,9 +486,7 @@ public static partial class RedClassifier
             return false;
         }
 
-        return ownFiles.Any(own =>
-            NormalizeRepositoryRelative(own) is { } path
-            && resolved.Equals(path, StringComparison.OrdinalIgnoreCase));
+        return ownFiles.Any(own => MatchesRelativeCompilerFile(resolved, own, parsedRoot, parsedCanonicalRoot));
     }
 
     /// <summary>
@@ -741,19 +730,83 @@ public static partial class RedClassifier
         || (normalized.Length >= 2 && char.IsAsciiLetter(normalized[0]) && normalized[1] == ':')
         || Path.IsPathRooted(original);
 
-    private static bool MatchesRoot(RootedPath rootedFile, string? candidateRoot, IReadOnlyList<string> ownFiles)
+    private static RootedPath? TryParseRoot(string? root) =>
+        !string.IsNullOrWhiteSpace(root) && TryNormalizeRooted(root, out RootedPath parsed) ? parsed : null;
+
+    private static bool MatchesRootedCompilerFile(
+        RootedPath rootedFile,
+        string own,
+        RootedPath? parsedRoot,
+        RootedPath? parsedCanonicalRoot)
     {
-        if (string.IsNullOrWhiteSpace(candidateRoot)
-            || !TryNormalizeRooted(candidateRoot, out RootedPath parsedRoot)
-            || !TryRelativeToRoot(parsedRoot, rootedFile, out string relative))
+        string ownNormalized = own.Replace('\\', '/');
+        if (string.IsNullOrWhiteSpace(ownNormalized))
         {
             return false;
         }
 
-        return ownFiles.Any(own =>
-            NormalizeRepositoryRelative(own) is { } path
-            && relative.Equals(path, StringComparison.OrdinalIgnoreCase));
+        if (IsRootedPath(ownNormalized, own))
+        {
+            return TryNormalizeRooted(own, out RootedPath rootedOwn)
+                && (rootedFile.EqualsRooted(rootedOwn)
+                    || MatchesAcrossRoots(rootedFile, rootedOwn, parsedRoot, parsedCanonicalRoot));
+        }
+
+        return NormalizeRepositoryRelative(own) is { } relativeOwn
+            && MatchesRelativeUnderAnyRoot(rootedFile, parsedRoot, parsedCanonicalRoot, relativeOwn);
     }
+
+    private static bool MatchesRelativeCompilerFile(
+        string resolvedFile,
+        string own,
+        RootedPath? parsedRoot,
+        RootedPath? parsedCanonicalRoot)
+    {
+        string ownNormalized = own.Replace('\\', '/');
+        if (string.IsNullOrWhiteSpace(ownNormalized))
+        {
+            return false;
+        }
+
+        if (IsRootedPath(ownNormalized, own))
+        {
+            return TryNormalizeRooted(own, out RootedPath rootedOwn)
+                && MatchesRelativeUnderAnyRoot(rootedOwn, parsedRoot, parsedCanonicalRoot, resolvedFile);
+        }
+
+        return NormalizeRepositoryRelative(own) is { } relativeOwn
+            && resolvedFile.Equals(relativeOwn, StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static bool MatchesAcrossRoots(
+        RootedPath rootedFile,
+        RootedPath rootedOwn,
+        RootedPath? parsedRoot,
+        RootedPath? parsedCanonicalRoot)
+    {
+        if (parsedRoot is { } root
+            && TryRelativeToRoot(root, rootedOwn, out string ownRelative)
+            && MatchesRelativeUnderAnyRoot(rootedFile, parsedRoot, parsedCanonicalRoot, ownRelative))
+        {
+            return true;
+        }
+
+        return parsedCanonicalRoot is { } canonical
+            && TryRelativeToRoot(canonical, rootedOwn, out string ownCanonicalRelative)
+            && MatchesRelativeUnderAnyRoot(rootedFile, parsedRoot, parsedCanonicalRoot, ownCanonicalRelative);
+    }
+
+    private static bool MatchesRelativeUnderAnyRoot(
+        RootedPath rootedPath,
+        RootedPath? parsedRoot,
+        RootedPath? parsedCanonicalRoot,
+        string expectedRelative) =>
+        (parsedRoot is { } root
+            && TryRelativeToRoot(root, rootedPath, out string relative)
+            && relative.Equals(expectedRelative, StringComparison.OrdinalIgnoreCase))
+        || (parsedCanonicalRoot is { } canonical
+            && TryRelativeToRoot(canonical, rootedPath, out string canonicalRelative)
+            && canonicalRelative.Equals(expectedRelative, StringComparison.OrdinalIgnoreCase));
 
     private static bool TryRelativeToRoot(RootedPath root, RootedPath candidate, out string relative)
     {
@@ -868,13 +921,13 @@ public static partial class RedClassifier
 
     private static string? NormalizeRepositoryRelative(string path)
     {
-        string trimmed = path.Replace('\\', '/').TrimStart('/');
-        if (string.IsNullOrWhiteSpace(trimmed))
+        string normalized = path.Replace('\\', '/');
+        if (string.IsNullOrWhiteSpace(normalized) || IsRootedPath(normalized, path))
         {
             return null;
         }
 
-        return TryResolveRelative(null, trimmed, allowEmpty: false, out string? normalized) ? normalized : null;
+        return TryResolveRelative(null, normalized, allowEmpty: false, out string? resolved) ? resolved : null;
     }
 
     private static bool TryGateDirectory(RedGateObservation gate, out string? gateDirectory)

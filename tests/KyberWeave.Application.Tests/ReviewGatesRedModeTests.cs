@@ -493,6 +493,30 @@ public sealed class ReviewGatesRedModeTests : IDisposable
                 canonicalRepositoryRoot: canonicalRepositoryRoot));
 
     [Theory]
+    [InlineData("/work/repo/dash/tests/foo.test.ts", "/work/repo/dash/tests/foo.test.ts", null, "/work/repo", null, true)]
+    [InlineData("/real/repo/dash/tests/foo.test.ts", "/alias/repo/dash/tests/foo.test.ts", null, "/alias/repo", "/real/repo", true)]
+    [InlineData("tests/foo.test.ts", "/work/repo/dash/tests/foo.test.ts", "dash", "/work/repo", null, true)]
+    [InlineData("/tmp/other/dash/tests/foo.test.ts", "/tmp/other/dash/tests/foo.test.ts", null, "/work/repo", null, true)]
+    [InlineData("/work/repo/work/repo/dash/tests/foo.test.ts", "/work/repo/dash/tests/foo.test.ts", null, "/work/repo", null, false)]
+    [InlineData("/tmp/other/dash/tests/foo.test.ts", "/work/repo/dash/tests/foo.test.ts", null, "/work/repo", null, false)]
+    [InlineData("/work/repo/dash/tests/foo.test.ts", "/dash/tests/foo.test.ts", null, "/work/repo", null, false)]
+    public void ARootedOwnPathMatchesAcrossBoundAndCanonicalRootsAndExactRootedPaths(
+        string reportedFile,
+        string ownFile,
+        string? workingDirectory,
+        string? repositoryRoot,
+        string? canonicalRepositoryRoot,
+        bool expected) =>
+        Assert.Equal(
+            expected,
+            RedClassifier.IsOwnFile(
+                reportedFile,
+                [ownFile],
+                workingDirectory,
+                repositoryRoot,
+                canonicalRepositoryRoot));
+
+    [Theory]
     [InlineData(null)]
     [InlineData("/work/repo")]
     public void EvaluateRejectsASiblingAbsoluteCompilerPathWithOrWithoutARepositoryRoot(string? repositoryRoot)
