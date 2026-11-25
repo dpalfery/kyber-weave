@@ -56,6 +56,8 @@ public class LocalTextTokenizerTests
     [Theory]
     [InlineData("claude-sonnet-4-20250514")]
     [InlineData("not-a-real-model-xyz")]
+    [InlineData("text-davinci-002")]
+    [InlineData("text-davinci-001")]
     [InlineData("")]
     [InlineData("   ")]
     [InlineData(null)]
