@@ -345,8 +345,9 @@ public class ClaudeTranscriptMapper : IHarnessMapper
             return names;
         }
 
-        foreach (string rawLine in content.Split('\n'))
+        foreach (string contentLine in content.Split('\n'))
         {
+            string rawLine = contentLine.TrimStart();
             if (!rawLine.StartsWith("- ", StringComparison.Ordinal))
             {
                 continue;
@@ -403,9 +404,11 @@ public class ClaudeTranscriptMapper : IHarnessMapper
     }
 
     /// <summary>The skill a <c>Skill</c> tool call names in its input (<c>{"skill": "name"}</c>), or null.</summary>
+    /// <remarks>An input sent as a JSON string holding that object is read the same way.</remarks>
     private static string? ReadInvokedSkill(string? rawInputText, bool inputIsString)
     {
-        if (inputIsString || string.IsNullOrWhiteSpace(rawInputText))
+        _ = inputIsString;
+        if (string.IsNullOrWhiteSpace(rawInputText))
         {
             return null;
         }
@@ -771,7 +774,7 @@ public class ClaudeTranscriptMapper : IHarnessMapper
                 AddDistinct(skillsListed, listed);
             }
 
-            if (string.Equals(line.RecordType, "api-request", StringComparison.Ordinal) && line.RequestShapeHash is not null)
+            if (line.RequestShapeHash is not null)
             {
                 requestShapeHash = line.RequestShapeHash;
             }
@@ -1125,7 +1128,7 @@ public class ClaudeTranscriptMapper : IHarnessMapper
                 Position: definitions.Count,
                 ToolName: schema.Name,
                 Server: server,
-                SchemaTokens: Math.Max(1L, measurement.MeasuredTokens),
+                SchemaTokens: measurement.MeasuredTokens,
                 Tokenizer: measurement.MeasuredTokenizer,
                 TokenizerIsModelOwn: measurement.MeasuredTokenizerIsModelOwn));
         }
@@ -1472,7 +1475,9 @@ public class ClaudeTranscriptMapper : IHarnessMapper
 
             if (rawContent.ValueKind == JsonValueKind.Object)
             {
-                return ExtractPropertyAsContentText(rawContent, "text") ?? rawContent.GetRawText();
+                return IsNonTextBlock(rawContent)
+                    ? null
+                    : ExtractPropertyAsContentText(rawContent, "text") ?? rawContent.GetRawText();
             }
 
             return ExtractRawContentText(rawContent);

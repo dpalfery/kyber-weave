@@ -651,6 +651,33 @@ public class ClaudeTranscriptMapperTests
         Assert.Equal(batch.Records.Count, store.CountRecords());
     }
 
+    /// <summary>
+    /// Edge shapes of the same three sources: an indented listing line still names a skill, a <c>Skill</c>
+    /// input sent as a JSON string still names the skill, a turn whose only shape line is the defining
+    /// <c>api-request-shape</c> still gets its tools, and an image sent as a single content object is dropped.
+    /// </summary>
+    [Fact]
+    public void Map_ReadsIndentedListingsStringSkillInputsShapeOnlyTurnsAndDropsAnImageObject()
+    {
+        string jsonl = string.Join('\n',
+        [
+            "{\"type\":\"attachment\",\"sessionId\":\"sess-edge\",\"timestamp\":\"2026-11-19T12:00:00.000Z\",\"attachment\":{\"type\":\"skill_listing\",\"content\":\"  - my-skill: Indented.\\n\\t- other: Tabbed.\"}}",
+            "{\"type\":\"api-request-shape\",\"sessionId\":\"sess-edge\",\"shapeHash\":\"shape-e\",\"timestamp\":\"2026-11-19T12:00:00.500Z\",\"shape\":{\"tools\":[{\"name\":\"Skill\",\"input_schema\":{\"type\":\"object\"}}]}}",
+            "{\"type\":\"assistant\",\"sessionId\":\"sess-edge\",\"timestamp\":\"2026-11-19T12:00:01.000Z\",\"message\":{\"id\":\"msg-e1\",\"role\":\"assistant\",\"model\":\"claude-sonnet-4-5\",\"content\":[{\"type\":\"tool_use\",\"id\":\"tc-s\",\"name\":\"Skill\",\"input\":\"{\\\"skill\\\":\\\"my-skill\\\"}\"},{\"type\":\"tool_use\",\"id\":\"tc-img\",\"name\":\"screenshot\",\"input\":{}}],\"usage\":{\"input_tokens\":50,\"output_tokens\":10}}}",
+            "{\"type\":\"user\",\"sessionId\":\"sess-edge\",\"timestamp\":\"2026-11-19T12:00:02.000Z\",\"message\":{\"role\":\"user\",\"content\":[{\"type\":\"tool_result\",\"tool_use_id\":\"tc-img\",\"content\":{\"type\":\"image\",\"source\":{\"type\":\"base64\",\"media_type\":\"image/png\",\"data\":\"AAAA\"}}}]}}",
+        ]);
+
+        CollectedBatch batch = new ClaudeTranscriptMapper().Map(CreateUnit("/tmp/.claude/projects/repo/sess-edge.jsonl", jsonl), ImportedAt);
+
+        CollectedRecord turn = Assert.Single(batch.Records, static r => r.Op == RecordOp.LlmInvoke);
+        Assert.Equal(["my-skill", "other"], turn.SkillsListed);
+        Assert.Equal(["my-skill"], turn.SkillsInvoked);
+        Assert.Equal(["Skill"], turn.ToolDefinitions.Select(static d => d.ToolName));
+        CollectedRecord shot = Assert.Single(batch.Records, static r => r.Tool?.CallId == "tc-img");
+        Assert.Null(shot.Tool!.Result);
+        Assert.Empty(shot.Parts);
+    }
+
     private static NativeSourceUnit CreateUnit(string sourceKey, string? rawText) =>
         new(
             Unit: new SourceUnit(
