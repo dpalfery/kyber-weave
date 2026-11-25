@@ -490,14 +490,12 @@ public class OperationalStoreTests : IDisposable
         }
 
         sqlite.SetWriteMarker(7);
-        long bytesBeforeVacuum = new FileInfo(dbPath).Length;
+        long freePagesBeforeVacuum = sqlite.FreelistPageCount();
+        Assert.True(freePagesBeforeVacuum > 0, "deleting every source should leave free pages for vacuum to reclaim");
 
         sqlite.Vacuum();
 
-        long bytesAfterVacuum = new FileInfo(dbPath).Length;
-        Assert.True(
-            bytesAfterVacuum < bytesBeforeVacuum,
-            $"vacuum should compact '{dbPath}' from {bytesBeforeVacuum} bytes, but it is {bytesAfterVacuum} bytes");
+        Assert.Equal(0, sqlite.FreelistPageCount());
         Assert.Equal(0, sqlite.CountRecords());
         Assert.Equal(7L, sqlite.GetWriteMarker());
     }
@@ -776,6 +774,10 @@ public class OperationalStoreTests : IDisposable
         public IReadOnlyList<string> ExecutedSql => executedSql;
 
         public void ClearRecordedSql() => executedSql.Clear();
+
+        /// <summary>Reads <c>PRAGMA freelist_count</c>, the pages a delete leaves that only a vacuum reclaims.</summary>
+        public long FreelistPageCount() =>
+            long.Parse(ExecuteSqliteCore("PRAGMA freelist_count;\n").Trim(), System.Globalization.CultureInfo.InvariantCulture);
 
         protected override string ExecuteSqliteCore(string sql)
         {

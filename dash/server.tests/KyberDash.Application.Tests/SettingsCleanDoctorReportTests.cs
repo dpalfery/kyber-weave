@@ -626,7 +626,7 @@ public static class SettingsCleanDoctorReportTests
         {
             using TempDirectory directory = new();
             string databasePath = directory.Combine("vacuum.db");
-            SqliteRelationalStore store = new(databasePath, new SqliteCircuitBreaker());
+            FreelistSqliteRelationalStore store = new(databasePath, new SqliteCircuitBreaker());
             Mock<ICircuitBreaker> breaker = new();
             string filler = new('x', 2000);
 
@@ -657,16 +657,20 @@ public static class SettingsCleanDoctorReportTests
                 store.DeleteSource(source.SourceId);
             }
 
-            long bytesBeforeVacuum = new FileInfo(databasePath).Length;
+            Assert.True(store.FreelistPageCount() > 0, "deleting every source should leave free pages for vacuum to reclaim");
 
             Assert.True(new DoctorService(store, store, breaker.Object).RunVacuum());
 
-            long bytesAfterVacuum = new FileInfo(databasePath).Length;
-
-            Assert.True(
-                bytesAfterVacuum < bytesBeforeVacuum,
-                $"RunVacuum should compact '{databasePath}' from {bytesBeforeVacuum} bytes, but it is {bytesAfterVacuum} bytes");
+            Assert.Equal(0, store.FreelistPageCount());
             Assert.Equal(SqliteRelationalStore.SchemaVersion, store.GetStoreState()?.SchemaVersion);
+        }
+
+        /// <summary>A SQLite store that can read <c>PRAGMA freelist_count</c>, the pages only a vacuum reclaims.</summary>
+        private sealed class FreelistSqliteRelationalStore(string databasePath, ICircuitBreaker circuitBreaker)
+            : SqliteRelationalStore(databasePath, circuitBreaker)
+        {
+            public long FreelistPageCount() =>
+                long.Parse(ExecuteSqliteCore("PRAGMA freelist_count;\n").Trim(), CultureInfo.InvariantCulture);
         }
 
         [Fact]
