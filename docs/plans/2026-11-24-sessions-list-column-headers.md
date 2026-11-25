@@ -144,3 +144,4 @@ header over the rows in a rendered browser — needs a live dashboard session`.
 | D5, D6, D7 | [KyberDash architecture: Display](../dash/architecture.md#costblock-and-cost-basis) and [runbook: no published rate](../dash/runbook.md) | extends-component; hover text format, shared `STATUS_EXPLANATIONS` and the new "out of scope" wording; last-reviewed 2026-11-25 |
 | D8 | Documentation waiver — a PR note about child rows' trailing parent link; the architecture Display paragraph records the reserved trailing slot, and no further invariant survives | n/a |
 | AP1 | Documentation waiver — approval record only, preserved in this plan's Decisions table | n/a |
+| KyberDash | [KyberDash architecture: Display](../dash/architecture.md#costblock-and-cost-basis) and [KyberDash runbook: no published rate](../dash/runbook.md) | extends-component; both Design harvest rows migrated (architecture Display paragraph, runbook "Other statuses"); last-reviewed 2026-11-25 |
