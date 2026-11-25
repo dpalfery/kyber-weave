@@ -6,6 +6,7 @@ using KyberWeave.Core.Arbiter.Facts;
 using KyberWeave.Core.Arbiter.Providers;
 using KyberWeave.Core.Arbiter.Rules;
 using KyberWeave.Core.Configuration;
+using KyberWeave.Core.RunStart;
 using KyberWeave.Tests.Fakes;
 using Xunit;
 
@@ -279,5 +280,100 @@ public sealed class ReviewSeatRecorderTests : IDisposable
 
         Assert.Equal(HookOutcomeKind.Allow, outcome.Kind);
         Assert.Contains("review seat was not saved", log.ToString(), StringComparison.Ordinal);
+    }
+
+    private const string Wrapper =
+        "This agent's report was delivered to you as a message from \"a52bf17cfe6305406\" (its SubagentHandback call). " +
+        "Read it there; it is not repeated here.";
+
+    /// <summary>A reply that is only Claude Code's delivery notice is not a report, so no seat file is written.</summary>
+    [Fact]
+    public void AWrapperOnlyReplyIsRefused()
+    {
+        (HookContext context, StringWriter log) = Context();
+
+        _ = Sync(Prompt(Packet()), CopilotResult(Wrapper), context);
+
+        Assert.False(_host.Files.FileExists(Seat()));
+        Assert.Contains("delivery notice", log.ToString(), StringComparison.Ordinal);
+    }
+
+    /// <summary>A seat file that holds only the notice is replaced by the real reply, not appended to.</summary>
+    [Fact]
+    public void ASeatFileHoldingOnlyAWrapperIsReplacedByTheRealReply()
+    {
+        (HookContext context, _) = Context();
+        _host.Files.CreateDirectory(Path.GetDirectoryName(Seat())!);
+        _host.Files.WriteAllText(Seat(), Wrapper + "\n");
+
+        _ = Sync(Prompt(Packet()), CopilotResult(Reply), context);
+
+        Assert.Equal(Reply, _host.Files.ReadAllText(Seat()));
+    }
+
+    /// <summary>A report that opens with the notice's words but carries findings is a report, and is saved.</summary>
+    [Fact]
+    public void AReplyThatOpensLikeTheNoticeButCarriesFindingsIsSaved()
+    {
+        (HookContext context, _) = Context();
+        string report = "This agent's report was delivered to you as a message from the lens; findings follow.\n"
+            + "F1 [major] src/A.cs:12 the seat holds the wrapper.";
+
+        _ = Sync(Prompt(Packet()), CopilotResult(report), context);
+
+        Assert.Equal(report, _host.Files.ReadAllText(Seat()));
+    }
+
+    /// <summary>
+    /// A relative packet path with no active run would resolve against whatever checkout the hook process started in,
+    /// so it is not saved, and the log says why.
+    /// </summary>
+    [Fact]
+    public void ARelativePacketPathWithNoActiveRunIsNotSaved()
+    {
+        (HookContext context, StringWriter log) = Context();
+
+        _ = Sync(Prompt(".agent_scratchpad/feat/review/cycle-1/packets/correctness.md"), CopilotResult(Reply), context);
+
+        Assert.False(_host.Files.FileExists(Seat()));
+        Assert.Single(
+            log.ToString().Split('\n'),
+            line => line.Contains("relative packet path", StringComparison.Ordinal));
+    }
+
+    /// <summary>
+    /// Several live runs with no signal choosing one leave no active run, so a relative packet path is refused rather
+    /// than guessed against the canonical checkout.
+    /// </summary>
+    [Fact]
+    public void ARelativePacketPathInAnAmbiguousRunContextIsNotSaved()
+    {
+        StringWriter log = new();
+        HookRunContext run = new(
+            _host.RepoRoot, null, null, _host.RepoRoot, [_host.RepoRoot], null, null, null, false, HookRunContextSource.Ambiguous, []);
+        HookContext context = new(_host.RepoRoot, () => "decision-seat", log, RunContext: run);
+
+        _ = Sync(Prompt(".agent_scratchpad/feat/review/cycle-1/packets/correctness.md"), CopilotResult(Reply), context);
+
+        Assert.False(_host.Files.FileExists(Seat()));
+        Assert.Single(
+            log.ToString().Split('\n'),
+            line => line.Contains("relative packet path", StringComparison.Ordinal));
+    }
+
+    /// <summary>A relative packet path with an active run is saved under the run's worktree.</summary>
+    [Fact]
+    public void ARelativePacketPathWithAnActiveRunIsSavedUnderTheRunWorktree()
+    {
+        string worktree = ArbiterTestRoots.Under("run-worktree");
+        StringWriter log = new();
+        HookRunContext run = new(
+            _host.RepoRoot, null, new RunRecord(_host.RepoRoot, "branch", worktree), worktree,
+            [_host.RepoRoot, worktree], null, null, null, false, HookRunContextSource.ActiveRun, []);
+        HookContext context = new(_host.RepoRoot, () => "decision-seat", log, RunContext: run);
+
+        _ = Sync(Prompt(".agent_scratchpad/feat/review/cycle-1/packets/correctness.md"), CopilotResult(Reply), context);
+
+        Assert.Equal(Reply, _host.Files.ReadAllText(Seat(root: worktree)));
     }
 }

@@ -322,14 +322,19 @@ public record JobHostStatus(
     [property: JsonPropertyName("paused")] bool Paused,
     [property: JsonPropertyName("hostedElsewhere")] bool HostedElsewhere,
     [property: JsonPropertyName("lastMaintenanceFailure")] string? LastMaintenanceFailure,
-    [property: JsonPropertyName("lastSyncFailure")] string? LastSyncFailure);
+    [property: JsonPropertyName("lastSyncFailure")] string? LastSyncFailure,
+    [property: JsonPropertyName("lastFailedUnits")] int LastFailedUnits = 0);
 
-/// <summary>Result returned by an in-process job trigger (<c>succeeded</c>, <c>busy</c>, <c>failed</c>, <c>declined</c>, <c>hosted-elsewhere</c>).</summary>
+/// <summary>
+/// Result returned by an in-process job trigger (<c>succeeded</c>, <c>partial</c>, <c>busy</c>, <c>failed</c>, <c>declined</c>, <c>hosted-elsewhere</c>).
+/// <c>partial</c> means the pass completed but <see cref="FailedUnits"/> source units failed and were skipped.
+/// </summary>
 public record JobOutcome(
     [property: JsonPropertyName("outcome")] string Outcome,
     [property: JsonPropertyName("reason")]
     [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
-    string? Reason = null);
+    string? Reason = null,
+    [property: JsonPropertyName("failedUnits")] int FailedUnits = 0);
 
 
 // Ported DTOs from CanonTranscriptReaders.cs

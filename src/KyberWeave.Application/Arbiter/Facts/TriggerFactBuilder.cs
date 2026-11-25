@@ -28,6 +28,8 @@ public static class TriggerFactBuilder
     /// </summary>
     public const string FilesAllTestsFact = "plan.task.files-all-tests";
 
+    private const string TaskGatesDeclaredFact = "config.task-gates-declared";
+
     /// <summary>How many lines either side of a refuted finding's line an earlier finding may sit and still be a candidate.</summary>
     private const int PriorFindingWindowLines = 20;
 
@@ -94,6 +96,7 @@ public static class TriggerFactBuilder
     /// never the prompt's own text, exempts it from the plan-read rule: a conductor can type the tags itself.</param>
     /// <param name="repoRoot">The repository root the standards folders sit under, when the caller has one. It
     /// resolves the technology's parent template, so a parent-keyed gate is found exactly as the gate run finds it.</param>
+    /// <param name="files">The file system the standards are read through; the parent technology is resolved only when it and <paramref name="repoRoot"/> are both given.</param>
     public static ArbiterFactSet Build(
         TriggerClassification classification,
         string prompt,
@@ -103,12 +106,12 @@ public static class TriggerFactBuilder
         string? delegationModel = null,
         IReadOnlyList<string>? secondaryTriggers = null,
         bool promptInserted = false,
-        string? repoRoot = null)
+        string? repoRoot = null,
+        IFileSystem? files = null)
     {
         ArgumentNullException.ThrowIfNull(classification);
         ArgumentNullException.ThrowIfNull(prompt);
         ArgumentNullException.ThrowIfNull(config);
-        _ = repoRoot;
 
         if (classification.Trigger is null)
             return new ArbiterFactSet();
@@ -124,7 +127,9 @@ public static class TriggerFactBuilder
             modelOverrideField,
             delegationModel,
             secondaryTriggers,
-            promptInserted);
+            promptInserted,
+            files is null ? null : repoRoot,
+            files);
     }
 
     /// <summary>Builds the fact bag for <paramref name="trigger"/> from dispatch input.</summary>
@@ -273,6 +278,48 @@ public static class TriggerFactBuilder
         }
 
         return facts;
+    }
+
+    /// <summary>
+    /// Narrows <c>config.task-gates-declared</c> to the gates that apply to the task's files (D10): the fact stays
+    /// true only when a resolved gate has no include, or an include that matches one of <c>plan.task.files</c>.
+    /// </summary>
+    /// <remarks>
+    /// The plan reader adds <c>plan.task.files</c> after the static build, so this runs after it. A task whose
+    /// files are not known keeps the fact as built: files nobody listed are not a claim that no gate applies. A
+    /// gate that selects none of the task's files (the docs developer's gate selects only the host configuration)
+    /// is a gate the task owes nothing to, so the rule's existing no-gates-declared answer allows the return.
+    /// </remarks>
+    /// <param name="facts">The bag from the static build and the plan reader.</param>
+    /// <param name="config">The host configuration whose gates resolve.</param>
+    /// <param name="target">The agent that returned.</param>
+    /// <param name="prompt">The dispatch prompt, whose header names the technology.</param>
+    /// <param name="parentTechnology">The technology the dispatched one builds on, when the caller resolved it.</param>
+    public static ArbiterFactSet WithTaskGatesApplyFact(
+        ArbiterFactSet facts, KyberWeaveConfig config, string? target, string prompt, string? parentTechnology = null)
+    {
+        ArgumentNullException.ThrowIfNull(facts);
+        ArgumentNullException.ThrowIfNull(config);
+        ArgumentNullException.ThrowIfNull(prompt);
+
+        if (target is null
+            || !facts.TryGet(TaskGatesDeclaredFact, out ArbiterFact? declared)
+            || declared.Value is not true
+            || !facts.TryGet("plan.task.files", out ArbiterFact? files)
+            || files.Value is not IEnumerable<string> paths)
+        {
+            return facts;
+        }
+
+        List<string> taskFiles = [.. paths];
+        if (taskFiles.Count == 0)
+            return facts;
+
+        HeaderBlock.Parse(prompt).Headers.TryGetValue("TECHNOLOGY", out string? technology);
+        IReadOnlyList<ReviewTaskGate> gates = TaskGateResolver.Resolve(config.Review, target, technology, parentTechnology).Gates;
+        bool applies = gates.Any(gate => gate.Include.Count == 0
+                                         || taskFiles.Any(path => gate.Include.Any(pattern => PathGlob.IsMatch(pattern, path))));
+        return applies ? facts : facts.With(TaskGatesDeclaredFact, false, ArbiterFactLabel.Derived);
     }
 
     /// <summary>

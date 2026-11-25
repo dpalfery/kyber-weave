@@ -132,61 +132,6 @@ public class CanonAnalysisTests
     }
 
     [Fact]
-    public void TokenCache_MemoizesAndPersistsAboveMinLengthThreshold()
-    {
-        Assert.Equal(512, CanonTokenCache.MinCachedTextLength);
-        InMemoryRelationalStore store = new();
-
-        int delegateCalls = 0;
-        long CountingApprox(string text)
-        {
-            delegateCalls++;
-            return CanonTokenCache.ApproximateO200kBase(text);
-        }
-
-        CachedTokenCounter counter = new(store, "test-tokenizer", CountingApprox);
-
-        string shortText = new('x', CanonTokenCache.MinCachedTextLength - 1);
-        long shortCount1 = counter.Count(shortText);
-        long shortCount2 = counter.Count(shortText);
-        Assert.Equal(shortCount1, shortCount2);
-        Assert.Equal(2, delegateCalls);
-        Assert.Equal(2, counter.Stats().Uncached);
-        Assert.Null(store.GetCachedTokenCount(CanonTokenCache.CacheKey(shortText, "test-tokenizer")));
-
-        string longText = new('a', CanonTokenCache.MinCachedTextLength);
-        string expectedKey = CanonTokenCache.CacheKey(longText, "test-tokenizer");
-        Assert.StartsWith("test-tokenizer:", expectedKey, StringComparison.Ordinal);
-
-        long computed = counter.Count(longText);
-        long memoHit = counter.Count(longText);
-        Assert.Equal(CanonTokenCache.ApproximateO200kBase(longText), computed);
-        Assert.Equal(computed, memoHit);
-        Assert.Equal(3, delegateCalls);
-        Assert.Equal(1, counter.Stats().Misses);
-        Assert.Equal(1, counter.Stats().Hits);
-
-        counter.Flush();
-        Assert.Equal(computed, store.GetCachedTokenCount(expectedKey));
-        Assert.Equal(1, store.CountRows("token_cache"));
-        Assert.Equal(1, store.CountRows("token_cache_model"));
-
-        int secondDelegateCalls = 0;
-        CachedTokenCounter persistedReader = new(
-            store,
-            "test-tokenizer",
-            text =>
-            {
-                secondDelegateCalls++;
-                return CanonTokenCache.ApproximateO200kBase(text);
-            });
-        long sqliteHit = persistedReader.Count(longText);
-        Assert.Equal(computed, sqliteHit);
-        Assert.Equal(0, secondDelegateCalls);
-        Assert.Equal(1, persistedReader.Stats().Hits);
-    }
-
-    [Fact]
     public void ContextSchemaAndTimeline_MatchTypeScriptAnalyses()
     {
         List<ContextPart> rawParts =
@@ -197,7 +142,7 @@ public class CanonAnalysisTests
             new ContextPart("conversation_history", "hello <system-reminder>keep-this-rule</system-reminder> world"),
         ];
 
-        IReadOnlyList<ContextPart> reduced = CanonContextAnalysis.ReduceContextParts(rawParts);
+        IReadOnlyList<ContextPart> reduced = CanonContextAnalysis.ReduceContextParts(rawParts, CountWords);
         Assert.Equal(4, reduced.Count);
         Assert.All(reduced, static part => Assert.Equal(string.Empty, part.Text));
         Assert.False(reduced[2].Resident);
@@ -224,7 +169,8 @@ public class CanonAnalysisTests
 
         ContextAnalysis context = CanonContextAnalysis.AnalyzeContext(
             turns,
-            new ContextCountOptions(ContextLimit: 10_000, ContextLimitSource: "telemetry"));
+            new ContextCountOptions(ContextLimit: 10_000, ContextLimitSource: "telemetry"),
+            CountWords);
         Assert.True(context.Measurable);
         Assert.Equal(3, context.TurnCount);
         Assert.True(context.Turns[0].ToolDefinitionsByServer.ContainsKey("github"));
@@ -246,7 +192,8 @@ public class CanonAnalysisTests
             turns,
             new ContextCountOptions(
                 ContextLimit: 10_000,
-                Measurability: unmeasuredAllKeys));
+                Measurability: unmeasuredAllKeys),
+            CountWords);
         Assert.False(notMeasurable.Measurable);
         Assert.Equal("declared_not_measurable", notMeasurable.Reason);
 
@@ -319,6 +266,20 @@ public class CanonAnalysisTests
         CostBlock auxiliarySpend = CanonContextAnalysis.AuxiliarySpend(root);
         Assert.Equal(CostStatus.Priced, auxiliarySpend.Status);
         Assert.Equal(0.02, auxiliarySpend.Value ?? 0, precision: 10);
+    }
+
+    /// <summary>
+    /// With no tool definitions the schema ranking has nothing to rank whether or not a tool ran:
+    /// a session with neither definitions nor invocations is not measurable, never an empty measured ranking.
+    /// </summary>
+    [Fact]
+    public void RankSchemas_NoDefinitionsAndNoInvocations_IsNotMeasurable()
+    {
+        SchemaCostAnalysis schema = CanonContextAnalysis.RankSchemas([], turns: 3, invocations: []);
+
+        Assert.False(schema.Measurable);
+        Assert.Equal(0, schema.InvocationCount);
+        Assert.Empty(schema.Ranked);
     }
 
     /// <summary>
@@ -573,10 +534,7 @@ public class CanonAnalysisTests
         foreach (Finding finding in findings)
         {
             Assert.NotEmpty(finding.EvidenceLinks);
-            if (!string.Equals(finding.MeasurementClass, "coverage-gap", StringComparison.Ordinal))
-            {
-                Assert.NotNull(finding.ErrorBar);
-            }
+            Assert.Null(finding.ErrorBar);
 
             Assert.False(string.IsNullOrWhiteSpace(finding.OutcomeRiskCaveat));
             D8LintResult lint = CanonFindings.LintRecommendationD8(finding.Recommendation);
@@ -594,7 +552,7 @@ public class CanonAnalysisTests
                     ["dormant-skill"] = 350,
                 }));
         Finding measuredSkill = Assert.Single(measuredSkillFindings);
-        Assert.NotNull(measuredSkill.ErrorBar);
+        Assert.Null(measuredSkill.ErrorBar);
         Assert.Equal("inferred", measuredSkill.MeasurementClass);
 
         Finding skillTied = findings.First(static finding => finding.DetectorId == "inactive-skill-reference") with
@@ -625,7 +583,7 @@ public class CanonAnalysisTests
     public void SessionProjection_RebuildsDirtySessionsPrunesStaleOnesAndPersistsFindings()
     {
         InMemoryRelationalStore store = new();
-        CanonSessionProjectorEngine projector = new(store, store, store, new FakePricingRepository());
+        CanonSessionProjectorEngine projector = new(store, store, store, new FakePricingRepository(), new FakeTextTokenizer());
 
         Assert.True(projector.IsProjectionCurrent());
 
@@ -742,7 +700,7 @@ public class CanonAnalysisTests
         WriteSession(store, "s2", "claude-code", [Turn("span-s2", "s2", "claude-code", minuteOffset: 120, inputTokens: 100, outputTokens: 10)]);
         WriteSession(store, "s3", "codex", [Turn("span-s3", "s3", "codex", minuteOffset: 1_500, inputTokens: 100, outputTokens: 10)]);
 
-        CanonSessionProjectorEngine projector = new(store, store, store, pricing);
+        CanonSessionProjectorEngine projector = new(store, store, store, pricing, new FakeTextTokenizer());
         ProjectionPassReport pass = projector.ProjectIncremental();
         Assert.Equal(3, pass.Built);
 
@@ -894,4 +852,8 @@ public class CanonAnalysisTests
     }
 
     private static JsonElement Element(object value) => JsonSerializer.SerializeToElement(value);
+
+    /// <summary>Stand-in counter: one count per whitespace-separated word, never characters / 4.</summary>
+    private static TokenCount CountWords(string text, string? model) =>
+        new(text.Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries).LongLength, "word-count", false);
 }

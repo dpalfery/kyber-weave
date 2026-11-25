@@ -177,7 +177,7 @@ public class RollupProjectionTests
     }
 
     private static CanonSessionProjectorEngine NewProjector(InMemoryRelationalStore store) =>
-        new(store, store, store, new FakePricingRepository());
+        new(store, store, store, new FakePricingRepository(), new FakeTextTokenizer());
 
     private static CanonRollupsEngine NewRollups(InMemoryRelationalStore store) =>
         new(store, store, new FakePricingRepository());

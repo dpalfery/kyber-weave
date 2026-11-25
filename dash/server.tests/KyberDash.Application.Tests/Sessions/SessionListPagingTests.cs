@@ -253,7 +253,7 @@ public sealed class SessionListPagingTests
             store,
             store,
             pricing,
-            new CanonSessionProjectorEngine(store, store, store, pricing),
+            new CanonSessionProjectorEngine(store, store, store, pricing, new FakeTextTokenizer()),
             new CanonRollupsEngine(store, store, pricing),
             clock: () => TurnBase.AddHours(2),
             instanceId: "test-instance");
@@ -263,7 +263,7 @@ public sealed class SessionListPagingTests
             store,
             store,
             store,
-            new CanonSessionProjectorEngine(store, store, store, pricing),
+            new CanonSessionProjectorEngine(store, store, store, pricing, new FakeTextTokenizer()),
             new CanonRollupsEngine(store, store, pricing));
 
     private static void SeedRoots(InMemoryRelationalStore store, int rootCount)

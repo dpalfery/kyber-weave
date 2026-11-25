@@ -291,7 +291,7 @@ public sealed class SessionKwSkillLoadsTests
             store,
             store,
             pricing,
-            new CanonSessionProjectorEngine(store, store, store, pricing),
+            new CanonSessionProjectorEngine(store, store, store, pricing, new FakeTextTokenizer()),
             new CanonRollupsEngine(store, store, pricing),
             clock: () => TurnBase.AddHours(2),
             instanceId: "test-instance");
@@ -301,7 +301,7 @@ public sealed class SessionKwSkillLoadsTests
             store,
             store,
             store,
-            new CanonSessionProjectorEngine(store, store, store, pricing),
+            new CanonSessionProjectorEngine(store, store, store, pricing, new FakeTextTokenizer()),
             new CanonRollupsEngine(store, store, pricing));
 
     private static void WriteSession(InMemoryRelationalStore store, string sessionKey, IReadOnlyList<CollectedRecord> records)

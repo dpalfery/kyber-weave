@@ -927,4 +927,100 @@ describe('ContextInspector Component', () => {
     expect(html).not.toContain('data-testid="turn-token-figures"')
     expect(html).toContain('data-testid="turn-token-figures-absent"')
   })
+
+  it('labels a text-derived block count with the stand-in tokenizer and the model it is not', () => {
+    const labelled: KyberTurnContentResult = {
+      ...sampleTurnContent,
+      model: 'claude-3-7-sonnet-20250219',
+      blocks: sampleTurnContent.blocks.map((block) =>
+        block.key === 'system_prompt'
+          ? {
+              ...block,
+              tokenizer: 'o200k_base',
+              tokenizers: [{ name: 'o200k_base', isModelOwn: false }],
+              tokenizerIsModelOwn: false,
+            }
+          : block,
+      ),
+    }
+
+    const html = renderHtml(React.createElement(ContextInspector, { data: labelled }))
+
+    expect(html).toContain('data-testid="block-tokenizer-system_prompt"')
+    expect(html).toContain('o200k_base, standard tokenizer — not Claude')
+    expect(html).not.toMatch(/estimated/i)
+  })
+
+  it('labels a tokenizer the model publishes as its own', () => {
+    const labelled: KyberTurnContentResult = {
+      ...sampleTurnContent,
+      model: 'claude-3-7-sonnet-20250219',
+      blocks: sampleTurnContent.blocks.map((block) =>
+        block.key === 'system_prompt'
+          ? {
+              ...block,
+              tokenizer: 'claude',
+              tokenizers: [{ name: 'claude', isModelOwn: true }],
+              tokenizerIsModelOwn: true,
+            }
+          : block,
+      ),
+    }
+
+    const html = renderHtml(React.createElement(ContextInspector, { data: labelled }))
+
+    expect(html).toContain('claude, the model')
+  })
+
+  it('lists every tokenizer when a block mixes more than one', () => {
+    const labelled: KyberTurnContentResult = {
+      ...sampleTurnContent,
+      model: 'claude-3-7-sonnet-20250219',
+      blocks: sampleTurnContent.blocks.map((block) =>
+        block.key === 'tool_definitions'
+          ? {
+              ...block,
+              tokenizer: 'mixed',
+              tokenizers: [
+                { name: 'o200k_base', isModelOwn: false },
+                { name: 'cl100k_base', isModelOwn: false },
+              ],
+              tokenizerIsModelOwn: null,
+            }
+          : block,
+      ),
+    }
+
+    const html = renderHtml(React.createElement(ContextInspector, { data: labelled }))
+
+    expect(html).toContain('mixed tokenizers')
+    expect(html).toContain('o200k_base')
+    expect(html).toContain('cl100k_base')
+  })
+
+  it('labels a part figure in the content pane with its tokenizer', () => {
+    const labelled: KyberTurnContentResult = {
+      ...sampleTurnContent,
+      model: 'claude-3-7-sonnet-20250219',
+      parts: sampleTurnContent.parts.map((part) =>
+        part.part === 'user_messages'
+          ? {
+              ...part,
+              tokenizer: 'o200k_base',
+              tokenizers: [{ name: 'o200k_base', isModelOwn: false }],
+              tokenizerIsModelOwn: false,
+            }
+          : part,
+      ),
+    }
+
+    // The user-messages part is selected by default only when the block is; select it
+    // through the initial part so the content pane renders that figure.
+    const html = renderHtml(
+      React.createElement(ContextInspector, { data: labelled, initialPart: 'user-turn-1' }),
+    )
+
+    expect(html).toContain('data-testid="content-pane-tokenizer"')
+    expect(html).toContain('o200k_base, standard tokenizer — not Claude')
+  })
 })

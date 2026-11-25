@@ -8,14 +8,27 @@ using KyberWeave.Core.RunStart;
 namespace KyberWeave.Arbiter.Hooks;
 
 /// <summary>
-/// Resolves one hook invocation's run context over the product's seams. The order is fixed: the worktree the event
-/// names, then the live run record <c>run start</c> wrote, then the payload's <c>cwd</c>, then the process directory.
-/// Every candidate must belong to this repository or one of its own git worktrees.
+/// Resolves one hook invocation's run context over the product's seams. The order is fixed: the agent's worktree, the
+/// worktree that holds the dispatch's plan, the payload's <c>cwd</c> when it is inside a worktree other than the
+/// canonical checkout, the absolute target of the command's leading <c>cd</c> when the cwd is absent or is the
+/// canonical checkout, the single live run, and else <see cref="HookRunContextSource.Ambiguous" /> when several runs
+/// are live. Every candidate must belong to this repository or one of its own git worktrees.
 /// </summary>
 /// <remarks>
+/// <para>
+/// A chosen worktree maps to its run in two ways: it is, or is inside, a live run record's worktree (the longest one
+/// wins), or it is a task worktree whose checked-out branch has exactly one live run's branch as an ancestor, the rule
+/// <c>run integrate</c> uses. Run start only records run worktrees; task worktrees are made beside them by the harness
+/// or the conductor, so containment alone cannot find a task worktree's run. A <c>git -C</c> names the directory of
+/// one git step, never where the session works, so it is no signal. With several live runs, a worktree that maps to
+/// none of them, or to more than one, is ambiguous: no run is active and paths are read from the canonical checkout,
+/// so a guard never judges a call by another run's plan and files.
+/// </para>
+/// <para>
 /// No member throws on a missing or unreadable input. A candidate that cannot be validated, and a plan or task file
 /// that cannot be read, adds a note naming the reason and the path tried, so a guard can escalate with the precise
 /// cause instead of denying on an absence.
+/// </para>
 /// </remarks>
 /// <param name="git">Names the repository's common directory and its worktrees.</param>
 /// <param name="planPaths">Resolves the dispatch's plan inside a candidate worktree.</param>
@@ -24,7 +37,10 @@ namespace KyberWeave.Arbiter.Hooks;
 /// <param name="paths">Compares path spellings and keeps a candidate inside the repository.</param>
 /// <param name="environment">The process directory a payload with no directory falls back to.</param>
 /// <param name="runStates">Reads the records <c>run start</c> wrote.</param>
-/// <param name="branches">Reads the branch a recorded worktree has checked out, which is what makes its run live.</param>
+/// <param name="branches">
+/// Reads the branch a recorded worktree has checked out, which is what makes its run live, and whether a run's branch
+/// is an ancestor of a task worktree's branch.
+/// </param>
 public sealed class HookRunContextResolver(
     IGitRepositoryFacts git,
     IPlanFileResolver planPaths,
@@ -43,9 +59,10 @@ public sealed class HookRunContextResolver(
 
         (string root, string? common) = Anchor(request, notes);
         IReadOnlyList<string> worktrees = Worktrees(root, common, notes);
-        RunRecord? activeRun = ActiveRun(request.HomeDirectory, common, worktrees, notes);
+        IReadOnlyList<RunRecord> liveRuns = LiveRuns(request.HomeDirectory, common, worktrees, notes);
 
-        (string worktree, HookRunContextSource source) = Candidate(request, root, common, worktrees, activeRun, notes);
+        (string worktree, HookRunContextSource source, RunRecord? activeRun) =
+            Candidate(request, root, common, worktrees, liveRuns, notes);
         return Hydrate(root, common, activeRun, worktree, worktrees, source, PlanFileOf(request.Prompt), notes);
     }
 
@@ -180,8 +197,8 @@ public sealed class HookRunContextResolver(
         return worktrees;
     }
 
-    /// <summary>The newest live run record for this repository whose worktree still exists.</summary>
-    private RunRecord? ActiveRun(
+    /// <summary>Every live run record for this repository whose worktree still exists, newest first.</summary>
+    private IReadOnlyList<RunRecord> LiveRuns(
         string home,
         string? common,
         IReadOnlyList<string> worktrees,
@@ -189,7 +206,7 @@ public sealed class HookRunContextResolver(
     {
         if (common is null || string.IsNullOrWhiteSpace(home))
         {
-            return null;
+            return [];
         }
 
         IReadOnlyList<RunRecord>? records;
@@ -200,16 +217,16 @@ public sealed class HookRunContextResolver(
         catch (Exception exception) when (FileFailure.Is(exception))
         {
             notes.Add($"the run records could not be read ({exception.Message}).");
-            return null;
+            return [];
         }
 
         if (records is null)
         {
             notes.Add($"the run records under '{home}' could not be read.");
-            return null;
+            return [];
         }
 
-        RunRecord? newest = null;
+        List<RunRecord> live = [];
         foreach (RunRecord record in records)
         {
             if (!IsSame(record.Repository, common))
@@ -239,31 +256,29 @@ public sealed class HookRunContextResolver(
                 continue;
             }
 
-            if (newest is null || Later(record, newest))
-            {
-                newest = record;
-            }
+            live.Add(record);
         }
 
-        return newest;
+        return [.. live.OrderByDescending(record => record.StartedAt ?? DateTimeOffset.MinValue)];
     }
 
-    /// <summary>The worktree the event names, else the active run's, else the payload's cwd.</summary>
-    private (string Worktree, HookRunContextSource Source) Candidate(
+    /// <summary>The worktree and run the signals choose, in the order the class summary gives.</summary>
+    private (string Worktree, HookRunContextSource Source, RunRecord? Run) Candidate(
         HookRunContextRequest request,
         string root,
         string? common,
         IReadOnlyList<string> worktrees,
-        RunRecord? activeRun,
+        IReadOnlyList<RunRecord> liveRuns,
         List<string> notes)
     {
         string? plan = PlanFileOf(request.Prompt);
+        string? canonical = CanonicalOf(common, worktrees);
 
         if (!string.IsNullOrWhiteSpace(request.AgentWorktree))
         {
             if (TryCandidate(request.AgentWorktree!, "the agent's working directory", root, common, worktrees, notes, out string agentWorktree))
             {
-                return (agentWorktree, HookRunContextSource.EventWorktree);
+                return (agentWorktree, HookRunContextSource.EventWorktree, EventRun(agentWorktree, liveRuns, notes));
             }
         }
 
@@ -275,27 +290,163 @@ public sealed class HookRunContextResolver(
             if (!IsSame(chosen, root) && IsValidated(chosen, root, worktrees))
             {
                 notes.Add($"the event names the plan's worktree '{chosen}'.");
-                return (chosen, HookRunContextSource.EventWorktree);
+                return (chosen, HookRunContextSource.EventWorktree, EventRun(chosen, liveRuns, notes));
             }
         }
 
-        if (activeRun is not null)
+        string? cwd = null;
+        if (!string.IsNullOrWhiteSpace(request.EventCwd)
+            && TryCandidate(request.EventCwd!, "the payload's cwd", root, common, worktrees, notes, out string cwdWorktree))
         {
-            notes.Add($"the live run for branch '{activeRun.Branch}' works in '{activeRun.Worktree}'.");
-            return (activeRun.Worktree, HookRunContextSource.ActiveRun);
+            cwd = cwdWorktree;
         }
 
-        if (!string.IsNullOrWhiteSpace(request.EventCwd)
-            && TryCandidate(request.EventCwd!, "the payload's cwd", root, common, worktrees, notes, out string cwd))
+        bool cwdIsCanonical = cwd is not null && canonical is not null && IsSame(cwd, canonical);
+        if (cwd is not null && !cwdIsCanonical)
         {
-            return (cwd, HookRunContextSource.PayloadCwd);
+            if (!string.IsNullOrWhiteSpace(request.LeadingCdTarget))
+            {
+                notes.Add($"the command's leading cd to '{request.LeadingCdTarget}' was ignored: the payload's cwd '{cwd}' already places the call.");
+            }
+
+            if (liveRuns.Count == 0)
+            {
+                return (cwd, HookRunContextSource.PayloadCwd, null);
+            }
+
+            if (RunOf(cwd, liveRuns, notes) is { } cwdRun)
+            {
+                notes.Add($"the payload's cwd '{cwd}' belongs to the live run for branch '{cwdRun.Branch}'.");
+                return (cwd, HookRunContextSource.PayloadCwd, cwdRun);
+            }
+
+            return Ambiguous(canonical ?? root, liveRuns, $"the payload's cwd '{cwd}' belongs to no single live run", notes);
+        }
+
+        // A leading cd counts only where the cwd says nothing about the run: absent, or the canonical checkout.
+        if (!string.IsNullOrWhiteSpace(request.LeadingCdTarget)
+            && TryCandidate(request.LeadingCdTarget!, "the command's leading cd", root, common, worktrees, notes, out string cdWorktree)
+            && (canonical is null || !IsSame(cdWorktree, canonical)))
+        {
+            if (RunOf(cdWorktree, liveRuns, notes) is { } cdRun)
+            {
+                notes.Add($"the command's leading cd enters '{cdWorktree}', where the live run for branch '{cdRun.Branch}' works.");
+                return (cdWorktree, HookRunContextSource.EventWorktree, cdRun);
+            }
+
+            notes.Add($"the command's leading cd enters '{cdWorktree}', which belongs to no single live run; it was not used.");
+        }
+
+        if (liveRuns.Count == 1)
+        {
+            RunRecord single = liveRuns[0];
+            notes.Add($"the live run for branch '{single.Branch}' works in '{single.Worktree}'.");
+            return (single.Worktree, HookRunContextSource.ActiveRun, single);
+        }
+
+        if (liveRuns.Count > 1)
+        {
+            return Ambiguous(canonical ?? root, liveRuns, "no signal chooses one of them", notes);
+        }
+
+        if (cwd is not null)
+        {
+            return (cwd, HookRunContextSource.PayloadCwd, null);
         }
 
         notes.Add($"the payload names no worktree of this repository; reading paths from '{root}'.");
         return (root, worktrees.Count > 0 && IsSame(root, worktrees[0])
             ? HookRunContextSource.PayloadCwd
-            : HookRunContextSource.None);
+            : HookRunContextSource.None, null);
     }
+
+    /// <summary>
+    /// The ambiguous outcome: several runs are live and the signals chose none of them. Paths are read from the
+    /// canonical checkout, no run is active, and the note names every live run so the operator can see why.
+    /// </summary>
+    private static (string Worktree, HookRunContextSource Source, RunRecord? Run) Ambiguous(
+        string canonical,
+        IReadOnlyList<RunRecord> liveRuns,
+        string reason,
+        List<string> notes)
+    {
+        string named = string.Join(", ", liveRuns.Select(run => $"'{run.Branch}' at '{run.Worktree}'"));
+        notes.Add($"the run is ambiguous: {liveRuns.Count} runs are live ({named}) and {reason}; no run is active and paths are read from '{canonical}'.");
+        return (canonical, HookRunContextSource.Ambiguous, null);
+    }
+
+    /// <summary>
+    /// The run of a worktree the event itself named. The worktree stands whatever its run; the run is the one it
+    /// maps to, else the single live run as before, else none when several are live and it maps to none of them.
+    /// </summary>
+    private RunRecord? EventRun(string worktree, IReadOnlyList<RunRecord> liveRuns, List<string> notes)
+    {
+        if (liveRuns.Count == 0)
+        {
+            return null;
+        }
+
+        if (RunOf(worktree, liveRuns, notes) is { } mapped)
+        {
+            return mapped;
+        }
+
+        if (liveRuns.Count == 1)
+        {
+            return liveRuns[0];
+        }
+
+        notes.Add($"worktree '{worktree}' belongs to no single one of the {liveRuns.Count} live runs; no run is active.");
+        return null;
+    }
+
+    /// <summary>
+    /// The live run a worktree belongs to: the longest run worktree that equals or contains it, else the one run whose
+    /// branch is an ancestor of the worktree's checked-out branch. Null when neither names exactly one run, or when git
+    /// cannot answer for one of them.
+    /// </summary>
+    private RunRecord? RunOf(string worktree, IReadOnlyList<RunRecord> liveRuns, List<string> notes)
+    {
+        RunRecord? containing = liveRuns
+            .Where(run => IsSame(run.Worktree, worktree) || IsWithin(run.Worktree, worktree))
+            .OrderByDescending(run => run.Worktree.Length)
+            .FirstOrDefault();
+        if (containing is not null)
+        {
+            return containing;
+        }
+
+        string? branch = BranchOf(worktree);
+        if (branch is null)
+        {
+            notes.Add($"worktree '{worktree}' has no branch git can read, so no run's branch can be its ancestor.");
+            return null;
+        }
+
+        List<RunRecord> ancestors = [];
+        foreach (RunRecord run in liveRuns)
+        {
+            bool? ancestor = AncestorOf(worktree, run.Branch, branch);
+            if (ancestor is null)
+            {
+                notes.Add($"git could not tell whether '{run.Branch}' is an ancestor of '{branch}' in '{worktree}'.");
+                return null;
+            }
+
+            if (ancestor.Value)
+            {
+                ancestors.Add(run);
+            }
+        }
+
+        return ancestors.Count == 1 ? ancestors[0] : null;
+    }
+
+    /// <summary>The canonical checkout: the listed worktree whose own <c>.git</c> is the repository's common directory.</summary>
+    private string? CanonicalOf(string? common, IReadOnlyList<string> worktrees) =>
+        common is null
+            ? null
+            : worktrees.FirstOrDefault(worktree => IsSame(Path.Combine(worktree, ".git"), common));
 
     /// <summary>Accepts a candidate only when it is this repository or one of its worktrees.</summary>
     private bool TryCandidate(
@@ -313,9 +464,9 @@ public sealed class HookRunContextResolver(
             return false;
         }
 
-        string? containing = worktrees
-            .OrderByDescending(worktree => worktree.Length)
-            .FirstOrDefault(worktree => IsSame(worktree, full) || IsWithin(worktree, full));
+        // The worktrees git listed come first: the anchor heads the list as the payload spelled it, which may be a
+        // directory inside a worktree, and a candidate is placed at the worktree's own root, not at that directory.
+        string? containing = Containing(worktrees.Skip(1), full) ?? Containing(worktrees.Take(1), full);
         if (containing is not null)
         {
             string? candidateCommon = CommonDirectoryOf(full);
@@ -340,6 +491,12 @@ public sealed class HookRunContextResolver(
         notes.Add($"{name} '{full}' is outside this repository and its worktrees; it was refused.");
         return false;
     }
+
+    /// <summary>The longest of <paramref name="worktrees" /> that equals or contains <paramref name="full" />.</summary>
+    private string? Containing(IEnumerable<string> worktrees, string full) =>
+        worktrees
+            .OrderByDescending(worktree => worktree.Length)
+            .FirstOrDefault(worktree => IsSame(worktree, full) || IsWithin(worktree, full));
 
     /// <summary>Reads the plan and its task file inside the chosen worktree, recording what was tried.</summary>
     private HookRunContext Hydrate(
@@ -441,6 +598,19 @@ public sealed class HookRunContextResolver(
         try
         {
             return branches.Read(worktree);
+        }
+        catch (Exception exception) when (FileFailure.Is(exception))
+        {
+            return null;
+        }
+    }
+
+    /// <summary>Whether one branch is an ancestor of another; null when git cannot answer.</summary>
+    private bool? AncestorOf(string worktree, string ancestor, string descendant)
+    {
+        try
+        {
+            return branches.IsAncestor(worktree, ancestor, descendant);
         }
         catch (Exception exception) when (FileFailure.Is(exception))
         {
@@ -562,7 +732,4 @@ public sealed class HookRunContextResolver(
 
     private static string Combine(string root, string relative) =>
         Path.Combine(root, relative.Replace('/', Path.DirectorySeparatorChar));
-
-    private static bool Later(RunRecord candidate, RunRecord current) =>
-        (candidate.StartedAt ?? DateTimeOffset.MinValue) > (current.StartedAt ?? DateTimeOffset.MinValue);
 }

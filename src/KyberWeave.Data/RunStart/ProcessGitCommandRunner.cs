@@ -15,6 +15,11 @@ public sealed class ProcessGitCommandRunner(TimeSpan timeout) : IGitCommandRunne
 {
     private const string GitExecutable = "git";
 
+    // Resolved once per runner, not per child: walking the PATH is file-system work no git call should repeat, and
+    // a full path keeps the child launch independent of the directory this process happens to sit in. The bare name
+    // stays as the fallback for a launcher that resolves git in a way FindOnPath cannot see.
+    private readonly string _gitExecutable = ProcessRunner.FindOnPath(GitExecutable) ?? GitExecutable;
+
     /// <summary>The bound one run-start git child gets by default: a fetch to a slow remote is the only one expected to take real time.</summary>
     public static readonly TimeSpan DefaultTimeout = TimeSpan.FromSeconds(120);
 
@@ -23,7 +28,7 @@ public sealed class ProcessGitCommandRunner(TimeSpan timeout) : IGitCommandRunne
     {
         ArgumentNullException.ThrowIfNull(arguments);
 
-        ProcessStartInfo startInfo = new(GitExecutable)
+        ProcessStartInfo startInfo = new(_gitExecutable)
         {
             UseShellExecute = false,
             RedirectStandardInput = true,

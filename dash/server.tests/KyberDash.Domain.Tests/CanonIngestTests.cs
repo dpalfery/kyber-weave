@@ -455,23 +455,6 @@ public class CanonIngestTests
     }
 
     [Fact]
-    public void CachedTokenCounterFlushesBufferedMissesIntoTheStore()
-    {
-        InMemoryRelationalStore store = new();
-        CachedTokenCounter counter = new(store, "model-x", static text => text.Length, maxMemoEntries: 0);
-
-        string text = new('b', CanonTokenCache.MinCachedTextLength);
-        long counted = counter.Count(text);
-        Assert.Equal(text.Length, counted);
-        Assert.Null(store.GetCachedTokenCount(CanonTokenCache.CacheKey(text, "model-x")));
-
-        counter.Flush();
-        Assert.Equal(counted, store.GetCachedTokenCount(CanonTokenCache.CacheKey(text, "model-x")));
-        counter.Flush();
-        Assert.Equal(counted, store.GetCachedTokenCount(CanonTokenCache.CacheKey(text, "model-x")));
-    }
-
-    [Fact]
     public void CanonIngestPipelineHelpersExposeNamespacesAndStructuralSpans()
     {
         IReadOnlyDictionary<string, JsonElement> attributes = new Dictionary<string, JsonElement>(StringComparer.Ordinal)

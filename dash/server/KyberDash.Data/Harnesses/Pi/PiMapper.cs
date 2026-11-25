@@ -419,7 +419,7 @@ public class PiMapper : IHarnessMapper
                     correctionRule = check.Rule;
                 }
 
-                parts.Add(ToolContentMeasurer.BuildContentPart(position++, ContentBucket.UserMessage, pendingUserMessage, "user"));
+                parts.Add(ToolContentMeasurer.BuildContentPart(position++, ContentBucket.UserMessage, pendingUserMessage, "user", model));
             }
 
             List<string> skillsInvoked = [];
@@ -431,7 +431,7 @@ public class PiMapper : IHarnessMapper
                 if (string.Equals(block.BlockType, "text", StringComparison.Ordinal)
                     && !string.IsNullOrEmpty(block.Text))
                 {
-                    parts.Add(ToolContentMeasurer.BuildContentPart(position++, ContentBucket.ConversationHistory, block.Text, "assistant"));
+                    parts.Add(ToolContentMeasurer.BuildContentPart(position++, ContentBucket.ConversationHistory, block.Text, "assistant", model));
                     continue;
                 }
 
@@ -710,7 +710,7 @@ public class PiMapper : IHarnessMapper
         string childRecordId = EnsureUniqueRecordId(seenRecordIds, $"{parentRecord.RecordId}-t{toolHash}", toolIndex);
 
         CollectedToolContent? inputContent = toolCall.RawInputText is not null
-            ? ToolContentMeasurer.Measure(toolCall.RawInputText, CanonSynth.MaxToolArgumentsBytes)
+            ? ToolContentMeasurer.Measure(toolCall.RawInputText, CanonSynth.MaxToolArgumentsBytes, parentRecord.Model)
                 .ToToolContent(includeFingerprint: true)
             : null;
 

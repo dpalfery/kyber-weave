@@ -198,7 +198,7 @@ public sealed class AnalyticsOperationsReadTests
             store,
             store,
             pricing,
-            new CanonSessionProjectorEngine(store, store, store, pricing),
+            new CanonSessionProjectorEngine(store, store, store, pricing, new FakeTextTokenizer()),
             new CanonRollupsEngine(store, store, pricing),
             clock: () => FixedTimestamp,
             instanceId: "test-instance");

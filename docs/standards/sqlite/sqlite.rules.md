@@ -12,8 +12,10 @@ last-reviewed: 2026-11-20
 
 ## The engine
 
-- SQL in this repository is SQLite, reached through the system `sqlite3` CLI.
-  `Microsoft.Data.Sqlite` and `SQLitePCLRaw` are not added.
+- SQL in this repository is SQLite. KyberDash's own store reaches it through
+  `Microsoft.Data.Sqlite.Core` over the system SQLite (`SQLitePCLRaw.provider.sqlite3`), and the
+  harness SQLite readers use the same client in read-only mode. Do not spawn the `sqlite3` CLI
+  per query, and do not add the bundled `SQLitePCLRaw.lib.e_sqlite3` native package.
 - `canon.db` is the KyberDash product database. The docs analysis cache is a local
   cache and is not a source of canon history.
 - `.codegraph/codegraph.db` belongs to the CodeGraph tool. Leave it alone.

@@ -6,6 +6,7 @@ import {
   fetchTurnContent,
   fetchSpanAttributes,
   fetchQuarantineEntry,
+  tokenizerLabel,
   type KyberTurnContentResult,
   type KyberTurnContentBlock,
   type KyberTurnContentPart,
@@ -135,6 +136,8 @@ export interface BlockRailProps {
   blocks: KyberTurnContentBlock[]
   activeBlockKey: string
   onSelectBlock: (key: string) => void
+  /** The turn's model, so a stand-in tokenizer can say whose own it is not. */
+  model?: string | null
   className?: string
 }
 
@@ -145,6 +148,7 @@ export function BlockRail({
   blocks,
   activeBlockKey,
   onSelectBlock,
+  model,
   className,
 }: BlockRailProps) {
   return (
@@ -176,6 +180,7 @@ export function BlockRail({
       {blocks.map((b) => {
         const isSelected = activeBlockKey === b.key
         const isNotMeasurable = Boolean(b.notMeasurable)
+        const tokenizer = tokenizerLabel(b, model)
         return (
           <button
             key={b.key}
@@ -183,13 +188,23 @@ export function BlockRail({
             onClick={() => onSelectBlock(b.key)}
             data-testid={`block-item-${b.key}`}
             className={cn(
-              'flex items-center justify-between rounded px-2.5 py-1.5 text-xs text-left font-medium transition-colors group',
+              'flex items-center justify-between gap-2 rounded px-2.5 py-1.5 text-xs text-left font-medium transition-colors group',
               isSelected
                 ? 'bg-primary/15 text-primary font-semibold border border-primary/30'
                 : 'text-muted-foreground hover:bg-interactive-secondary hover:text-foreground'
             )}
           >
-            <span className="truncate pr-1">{b.label}</span>
+            <span className="min-w-0">
+              <span className="block truncate pr-1">{b.label}</span>
+              {tokenizer ? (
+                <span
+                  data-testid={`block-tokenizer-${b.key}`}
+                  className="block truncate text-[9px] font-mono font-normal text-tertiary-foreground"
+                >
+                  {tokenizer}
+                </span>
+              ) : null}
+            </span>
             {isNotMeasurable ? (
               <span className="shrink-0 rounded bg-muted/80 px-1 py-0.5 text-[9px] text-muted-foreground font-mono">
                 n/a
@@ -298,6 +313,10 @@ export interface ContentPaneProps {
   label?: string
   truncated?: boolean
   totalLength?: number
+  /** The served token count for this pane, when one was measured. */
+  tokens?: number
+  /** The tokenizer that counted a text-derived figure, when there is one. */
+  tokenizer?: string
   notMeasurable?: { reason: string }
   context?: ContentPaneContext
   className?: string
@@ -312,6 +331,8 @@ export function ContentPane({
   label,
   truncated = false,
   totalLength,
+  tokens,
+  tokenizer,
   notMeasurable,
   context,
   className,
@@ -399,6 +420,10 @@ export function ContentPane({
         leading={
           <span className="text-[11px] font-mono text-tertiary-foreground">
             {label ? `${label} · ` : ''}{text.length.toLocaleString()} chars
+            {tokens != null ? ` · ${fmtTokens(tokens)} tokens` : ''}
+            {tokenizer ? (
+              <span data-testid="content-pane-tokenizer"> ({tokenizer})</span>
+            ) : null}
           </span>
         }
         copy={{ text, testId: 'context-content-pane-copy' }}
@@ -674,7 +699,7 @@ export function ContextInspector({
   // Displayed text, label, and budget status
   const displayedContent = useMemo(() => {
     if (!turnData) {
-      return { text: '', label: '', truncated: false, totalLength: undefined, notMeasurable: undefined, context: undefined }
+      return { text: '', label: '', truncated: false, totalLength: undefined, tokens: undefined, tokenizer: undefined, notMeasurable: undefined, context: undefined }
     }
 
     // Where this pane sits, so an empty block can name it (issue #184).
@@ -691,6 +716,8 @@ export function ContextInspector({
         label: activePart.label,
         truncated: activePart.truncated ?? false,
         totalLength: activePart.totalLength,
+        tokens: activePart.tokens,
+        tokenizer: tokenizerLabel(activePart, turnData.model),
         notMeasurable: undefined,
         context,
       }
@@ -703,6 +730,8 @@ export function ContextInspector({
         label: activeBlock.label,
         truncated: activeBlock.truncated ?? false,
         totalLength: activeBlock.totalLength,
+        tokens: activeBlock.tokens,
+        tokenizer: tokenizerLabel(activeBlock, turnData.model),
         notMeasurable: activeBlock.notMeasurable,
         context,
       }
@@ -714,6 +743,8 @@ export function ContextInspector({
       label: 'Whole Turn Assembled Context',
       truncated: turnData.truncated ?? false,
       totalLength: turnData.totalLength,
+      tokens: undefined,
+      tokenizer: undefined,
       notMeasurable: undefined,
       context,
     }
@@ -777,7 +808,7 @@ export function ContextInspector({
           ) : (
             <span
               data-testid="turn-token-figures-absent"
-              title="The harness recorded no per-turn token counters; nothing is estimated"
+              title="The harness recorded no per-turn token counters; nothing is derived from text"
               className="rounded bg-interactive-secondary px-2 py-0.5 text-[10px] font-mono text-tertiary-foreground italic"
             >
               token counts not recorded
@@ -825,6 +856,7 @@ export function ContextInspector({
         <BlockRail
           blocks={turnData.blocks}
           activeBlockKey={selectedBlockKey}
+          model={turnData.model}
           onSelectBlock={(k) => {
             setSelectedBlockKey(k)
             setSelectedPartId('all')
@@ -847,6 +879,8 @@ export function ContextInspector({
             label={displayedContent.label}
             truncated={displayedContent.truncated}
             totalLength={displayedContent.totalLength}
+            tokens={displayedContent.tokens}
+            tokenizer={displayedContent.tokenizer}
             notMeasurable={displayedContent.notMeasurable}
             context={displayedContent.context}
           />

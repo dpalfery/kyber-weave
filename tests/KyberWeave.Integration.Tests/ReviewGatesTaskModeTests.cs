@@ -132,7 +132,7 @@ public sealed class ReviewGatesTaskModeTests : IDisposable
         SkipOnWindows();
         // The test file the Test contract names is the task's own even though the task's file list leaves it out.
         string ownFile = PlanTaskFileProbe.SecondTaskFiles[0];
-        Gate($"/repo/{ownFile}(12,17): error CS0246: The type or namespace name 'PlanTaskFileShape' could not be found [/repo/x.csproj]\nBuild FAILED.", 1);
+        Gate($"{_fixture.Root}/{ownFile}(12,17): error CS0246: The type or namespace name 'PlanTaskFileShape' could not be found [{_fixture.Root}/x.csproj]\nBuild FAILED.", 1);
 
         (int exit, string output) = Run("--red");
 

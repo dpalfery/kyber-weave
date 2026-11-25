@@ -314,14 +314,26 @@ public sealed class HookCommand : IArbiterHookHost
 
         try
         {
-            return _runContexts.Resolve(new HookRunContextRequest(
+            HookRunContext context = _runContexts.Resolve(new HookRunContextRequest(
                 hookEvent.Harness,
                 hookEvent.WorkspaceRoot,
                 hookEvent.Cwd,
                 _environment.CurrentDirectory,
                 AgentWorktree: null,
                 hookEvent.Prompt,
-                home));
+                home,
+                WorkerGuardRules.LeadingChangeDirectory(CommandOf(hookEvent.Arguments), home)));
+            if (context.Source == HookRunContextSource.Ambiguous)
+            {
+                // Several runs are live and nothing chose one: say so, because every guard now reads the canonical
+                // checkout and no run's plan, and the operator needs to see why a call was judged without one.
+                foreach (string note in context.Notes.Where(note => note.StartsWith("the run is ambiguous", StringComparison.Ordinal)))
+                {
+                    log.WriteLine($"Arbiter guard: {OneLine(note)}");
+                }
+            }
+
+            return context;
         }
         catch (Exception ex) when (ex is not OutOfMemoryException && ex is not OperationCanceledException)
         {
@@ -331,6 +343,14 @@ public sealed class HookCommand : IArbiterHookHost
             return null;
         }
     }
+
+    /// <summary>The shell command a tool call carries in its arguments, or null when it carries none.</summary>
+    private static string? CommandOf(JsonElement arguments) =>
+        arguments.ValueKind == JsonValueKind.Object
+            && arguments.TryGetProperty("command", out JsonElement command)
+            && command.ValueKind == JsonValueKind.String
+            ? command.GetString()
+            : null;
 
     /// <summary>
     /// Decides whether the user-level hook evaluates a Claude dispatch for a project that enables the

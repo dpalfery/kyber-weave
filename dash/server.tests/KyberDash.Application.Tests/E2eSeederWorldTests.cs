@@ -24,7 +24,7 @@ public class E2eSeederWorldTests
         using TempDirectory directory = new();
         InMemoryRelationalStore store = new();
         FakePricingRepository pricing = new();
-        CanonSessionProjectorEngine projector = new(store, store, store, pricing);
+        CanonSessionProjectorEngine projector = new(store, store, store, pricing, new FakeTextTokenizer());
         CanonRollupsEngine rollups = new(store, store, pricing);
         CanonProjectionService projection = new(store, store, store, projector, rollups);
         TranscriptIngestionService ingestion = new(store, store, new HarnessSourceRegistry());

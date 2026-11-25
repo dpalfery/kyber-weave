@@ -45,7 +45,7 @@ public class CopilotCliSessionUsageTests
         Assert.Equal(7, first.Count);
         Assert.Equal(2, second.Count);
 
-        Assert.Contains(new CollectedModelUsage(0, "gpt-5", TokenClass.Input, 100L), first);
+        Assert.Contains(new CollectedModelUsage(0, "gpt-5", TokenClass.Input, 93L), first);
         Assert.Contains(new CollectedModelUsage(0, "gpt-5", TokenClass.Output, 20L), first);
         Assert.Contains(new CollectedModelUsage(0, "gpt-5", TokenClass.CacheRead, 5L), first);
         Assert.Contains(new CollectedModelUsage(0, "gpt-5", TokenClass.CacheWrite, 2L), first);
@@ -70,6 +70,75 @@ public class CopilotCliSessionUsageTests
         Assert.Equal(9, store.SessionModelUsages("sess-usage-1").Count);
         StoredSessionModelUsage storedFirst = store.SessionModelUsages("sess-usage-1")[0];
         Assert.Equal(0, storedFirst.Usage.SnapshotPosition);
+    }
+
+    // modelMetrics inputTokens is cache-inclusive (input + cache read + cache write): the legacy
+    // provider subtracted both cache classes before costing (copilot.ts:959-986 at fc80ddf9^, comment at
+    // copilot.ts:204-205), and CopilotCliModelUsage documents InputTokens as the fresh count. The
+    // stored Input row is therefore fresh input, so input plus cache is not counted twice.
+    [Fact]
+    public void Map_ShutdownInputIsCacheInclusive_StoresFreshInput()
+    {
+        string jsonl = string.Join('\n',
+        [
+            "{\"type\":\"session.start\",\"id\":\"e1\",\"timestamp\":\"2026-11-19T10:00:00.000Z\",\"data\":{\"sessionId\":\"sess-fresh-input\",\"selectedModel\":\"gpt-5\"}}",
+            "{\"type\":\"session.shutdown\",\"id\":\"e2\",\"timestamp\":\"2026-11-19T10:05:00.000Z\",\"data\":{\"sessionId\":\"sess-fresh-input\",\"modelMetrics\":[{\"model\":\"gpt-5\",\"inputTokens\":100,\"outputTokens\":5,\"cacheReadTokens\":30,\"cacheWriteTokens\":20},{\"model\":\"claude-sonnet-4.5\",\"inputTokens\":40,\"outputTokens\":2}]}}",
+        ]) + "\n";
+
+        NativeSourceUnit unit = MakeNativeUnit(
+            CombineHome(".copilot/session-state/sess-fresh-input/events.jsonl"),
+            jsonl);
+        CollectedBatch batch = new CopilotCliMapper().Map(unit, BaselineUtc);
+
+        CollectedSession session = Assert.Single(batch.Sessions);
+        Assert.Contains(new CollectedModelUsage(0, "gpt-5", TokenClass.Input, 50L), session.ReportedUsage);
+        Assert.Contains(new CollectedModelUsage(0, "gpt-5", TokenClass.CacheRead, 30L), session.ReportedUsage);
+        Assert.Contains(new CollectedModelUsage(0, "gpt-5", TokenClass.CacheWrite, 20L), session.ReportedUsage);
+        Assert.Contains(new CollectedModelUsage(0, "claude-sonnet-4.5", TokenClass.Input, 40L), session.ReportedUsage);
+    }
+
+    // Cache classes larger than the reported input cannot come from one cache-inclusive count, so the
+    // snapshot is inconsistent: the fresh input is not measured (no Input row for that model), while the
+    // cache counts the CLI did report are kept.
+    [Fact]
+    public void Map_ShutdownCacheExceedsInput_StoresNoFreshInputForThatModel()
+    {
+        string jsonl = string.Join('\n',
+        [
+            "{\"type\":\"session.start\",\"id\":\"e1\",\"timestamp\":\"2026-11-19T10:00:00.000Z\",\"data\":{\"sessionId\":\"sess-bad-snapshot\",\"selectedModel\":\"gpt-5\"}}",
+            "{\"type\":\"session.shutdown\",\"id\":\"e2\",\"timestamp\":\"2026-11-19T10:05:00.000Z\",\"data\":{\"sessionId\":\"sess-bad-snapshot\",\"modelMetrics\":[{\"model\":\"gpt-5\",\"inputTokens\":50,\"outputTokens\":5,\"cacheReadTokens\":60,\"cacheWriteTokens\":0}]}}",
+        ]) + "\n";
+
+        NativeSourceUnit unit = MakeNativeUnit(
+            CombineHome(".copilot/session-state/sess-bad-snapshot/events.jsonl"),
+            jsonl);
+        CollectedBatch batch = new CopilotCliMapper().Map(unit, BaselineUtc);
+
+        CollectedSession session = Assert.Single(batch.Sessions);
+        Assert.DoesNotContain(session.ReportedUsage, static u => u.TokenClass == TokenClass.Input);
+        Assert.Contains(new CollectedModelUsage(0, "gpt-5", TokenClass.CacheRead, 60L), session.ReportedUsage);
+        Assert.Contains(new CollectedModelUsage(0, "gpt-5", TokenClass.Output, 5L), session.ReportedUsage);
+    }
+
+    // Two cache classes each larger than half the long range make input minus both of them pass below
+    // long.MinValue; the subtraction must not wrap round to a large positive fresh input.
+    [Fact]
+    public void Map_ShutdownCachesFarAboveInput_StoresNoWrappedFreshInput()
+    {
+        string jsonl = string.Join('\n',
+        [
+            "{\"type\":\"session.start\",\"id\":\"e1\",\"timestamp\":\"2026-11-19T10:00:00.000Z\",\"data\":{\"sessionId\":\"sess-wrap\",\"selectedModel\":\"gpt-5\"}}",
+            "{\"type\":\"session.shutdown\",\"id\":\"e2\",\"timestamp\":\"2026-11-19T10:05:00.000Z\",\"data\":{\"sessionId\":\"sess-wrap\",\"modelMetrics\":[{\"model\":\"gpt-5\",\"inputTokens\":1,\"outputTokens\":5,\"cacheReadTokens\":6000000000000000000,\"cacheWriteTokens\":6000000000000000000}]}}",
+        ]) + "\n";
+
+        NativeSourceUnit unit = MakeNativeUnit(
+            CombineHome(".copilot/session-state/sess-wrap/events.jsonl"),
+            jsonl);
+        CollectedBatch batch = new CopilotCliMapper().Map(unit, BaselineUtc);
+
+        CollectedSession session = Assert.Single(batch.Sessions);
+        Assert.DoesNotContain(session.ReportedUsage, static u => u.TokenClass == TokenClass.Input);
+        Assert.Contains(new CollectedModelUsage(0, "gpt-5", TokenClass.Output, 5L), session.ReportedUsage);
     }
 
     [Fact]

@@ -16,6 +16,34 @@ public partial class SqliteRelationalStore : IRelationalStoreReader
     private const string TabReadScriptHeader = ".headers off\n.mode tabs\n";
 
     /// <summary>
+    /// The record's stored source (kind, harness, locator) as the last three columns of a record
+    /// row; <see cref="ParseRecordSourceName"/> turns them into <see cref="CollectedRecord.SourceName"/>.
+    /// </summary>
+    private const string RecordSourceColumns =
+        "hex(CAST(src.source_kind AS BLOB)), hex(CAST(src.harness_id AS BLOB)), hex(CAST(src.locator AS BLOB)) ";
+
+    /// <summary>
+    /// Joins a record (alias <c>r</c>) to its source row. An inner join, because
+    /// <c>record.source_id</c> is a required foreign key: a record always has a source, and one
+    /// whose source is deleted is cascaded away with it.
+    /// </summary>
+    private const string RecordSourceJoin = "JOIN source src ON src.source_id = r.source_id ";
+
+    /// <summary>
+    /// The record's response id and request id (<c>record_response_id</c>, <c>record_request_id</c>)
+    /// as four typed-hex columns placed just before <see cref="RecordSourceColumns"/>, which stays
+    /// last. They are the ids the projector joins an OTLP turn to its transcript twin on.
+    /// </summary>
+    private const string RecordJoinIdColumns =
+        "typeof(rrid.response_id), COALESCE(hex(CAST(rrid.response_id AS BLOB)), ''), " +
+        "typeof(rqid.request_id), COALESCE(hex(CAST(rqid.request_id AS BLOB)), ''), ";
+
+    /// <summary>Left-joins a record (alias <c>r</c>) to its optional response-id and request-id rows.</summary>
+    private const string RecordJoinIdJoin =
+        "LEFT JOIN record_response_id rrid ON rrid.span_id = r.span_id " +
+        "LEFT JOIN record_request_id rqid ON rqid.span_id = r.span_id ";
+
+    /// <summary>
     /// The projection header: every <c>session_projection</c> column and its five single-row
     /// satellites, with no child collection. The full projection read and the paged header reads
     /// select the same fifteen columns, so both parse one row shape.
@@ -126,6 +154,36 @@ public partial class SqliteRelationalStore : IRelationalStoreReader
             results.Add(new StoredSourceCount(
                 ParseHexRequired(cols[0], "record.source_id"),
                 ParseInt32Required(cols[1], "record source count")));
+        }
+
+        return results;
+    }
+
+    /// <inheritdoc />
+    public IReadOnlyList<string> SessionKeysWithRecordSource(string harnessId, string sourceName, int limit)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(harnessId);
+        ArgumentException.ThrowIfNullOrWhiteSpace(sourceName);
+        ArgumentOutOfRangeException.ThrowIfLessThan(limit, 1);
+
+        // Grouped by session key so each key appears once, with its newest record timestamp
+        // driving the order. Started-at values are written in one fixed ISO-8601 format, so the
+        // textual MAX orders chronologically.
+        string sql = TabReadScriptHeader +
+                     "SELECT hex(CAST(rsl.session_key AS BLOB)) FROM record r " +
+                     "JOIN record_session_link rsl ON rsl.span_id = r.span_id " +
+                     "JOIN source src ON src.source_id = r.source_id " +
+                     $"WHERE src.harness_id = {TextExpr(harnessId)} AND src.locator = {TextExpr(sourceName)} " +
+                     "GROUP BY rsl.session_key " +
+                     "ORDER BY MAX(r.started_at_utc) DESC, rsl.session_key ASC " +
+                     $"LIMIT {IntSql(limit)};\n";
+
+        string output = ExecuteSqlite(sql);
+        List<string> results = [];
+        foreach (string line in TabLines(output))
+        {
+            string[] cols = SplitTabLine(line, 1, "session keys with record source");
+            results.Add(ParseHexRequired(cols[0], "record_session_link.session_key"));
         }
 
         return results;
@@ -380,7 +438,7 @@ public partial class SqliteRelationalStore : IRelationalStoreReader
         List<StoredContentPart> results = [];
         foreach (string line in TabLines(output))
         {
-            string[] cols = SplitTabLine(line, cutInSql ? 22 : 21, "content_part");
+            string[] cols = SplitTabLine(line, ContentPartColumnCount + (cutInSql ? 2 : 1), "content_part");
             string rowSpan = ParseHexRequired(cols[0], "content_part.span_id");
             CollectedContentPart scopedPart = ParseContentPartColumns(cols, startIndex: 1);
             results.Add(new StoredContentPart(rowSpan, scopedPart));
@@ -462,22 +520,27 @@ public partial class SqliteRelationalStore : IRelationalStoreReader
         string whereClause = BuildSpanFilterWhere("td", spanId, sessionKey);
         string sql = TabReadScriptHeader +
                      "SELECT hex(CAST(td.span_id AS BLOB)), td.position, hex(CAST(td.tool_name AS BLOB)), " +
-                     "typeof(tds.server_name), COALESCE(hex(CAST(tds.server_name AS BLOB)), ''), td.schema_tokens " +
+                     "typeof(tds.server_name), COALESCE(hex(CAST(tds.server_name AS BLOB)), ''), td.schema_tokens, " +
+                     "typeof(tdt.tokenizer), COALESCE(hex(CAST(tdt.tokenizer AS BLOB)), ''), " +
+                     "typeof(tdt.is_model_own), COALESCE(CAST(tdt.is_model_own AS TEXT), '') " +
                      "FROM tool_definition td " +
-                     "LEFT JOIN tool_definition_server tds ON tds.span_id = td.span_id AND tds.position = td.position" +
+                     "LEFT JOIN tool_definition_server tds ON tds.span_id = td.span_id AND tds.position = td.position " +
+                     "LEFT JOIN tool_definition_tokenizer tdt ON tdt.span_id = td.span_id AND tdt.position = td.position" +
                      $"{whereClause} ORDER BY td.span_id ASC, td.position ASC;\n";
 
         string output = ExecuteSqlite(sql);
         List<StoredToolDefinition> results = [];
         foreach (string line in TabLines(output))
         {
-            string[] cols = SplitTabLine(line, 6, "tool_definition");
+            string[] cols = SplitTabLine(line, 10, "tool_definition");
             string rowSpan = ParseHexRequired(cols[0], "tool_definition.span_id");
             int position = ParseInt32Required(cols[1], "tool_definition.position");
             string toolName = ParseHexRequired(cols[2], "tool_definition.tool_name");
             string? server = ParseNullableHex(cols[3], cols[4], "tool_definition_server.server_name");
             long schemaTokens = ParseInt64Required(cols[5], "tool_definition.schema_tokens");
-            results.Add(new StoredToolDefinition(rowSpan, new CollectedToolDefinition(position, toolName, server, schemaTokens)));
+            string? tokenizer = ParseNullableHex(cols[6], cols[7], "tool_definition_tokenizer.tokenizer");
+            long? tokenizerIsModelOwn = ParseNullableInt64(cols[8], cols[9], "tool_definition_tokenizer.is_model_own");
+            results.Add(new StoredToolDefinition(rowSpan, new CollectedToolDefinition(position, toolName, server, schemaTokens, tokenizer, tokenizerIsModelOwn == 1L)));
         }
 
         return results;
@@ -2231,8 +2294,10 @@ public partial class SqliteRelationalStore : IRelationalStoreReader
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(sessionKey);
 
-        // Only the columns BuildTimeline's nodes read: no trace, end time, token count, reported
-        // total, error or correction signal, tool metadata, or content child row (decision D17).
+        // Only the columns BuildTimeline's nodes read, plus the record's source name (decision
+        // D11) and its response and request ids, so every record read hydrates the same join ids:
+        // no trace, end time, token count, reported total, error or correction signal, tool
+        // metadata, or content child row (decision D17).
         StringBuilder sql = new(TabReadScriptHeader);
         sql.Append(
             "SELECT 'TREC', hex(CAST(r.span_id AS BLOB)), hex(CAST(r.harness_id AS BLOB)), hex(CAST(r.op AS BLOB)), hex(CAST(r.kind AS BLOB)), " +
@@ -2243,8 +2308,12 @@ public partial class SqliteRelationalStore : IRelationalStoreReader
             "typeof(rrd.duration_ms), COALESCE(CAST(rrd.duration_ms AS TEXT), ''), " +
             "typeof(rrc.amount), COALESCE(CAST(rrc.amount AS TEXT), ''), " +
             "typeof(rrc.currency), COALESCE(hex(CAST(rrc.currency AS BLOB)), ''), " +
-            "typeof(rdcw.declared_context_window), COALESCE(CAST(rdcw.declared_context_window AS TEXT), '') " +
+            "typeof(rdcw.declared_context_window), COALESCE(CAST(rdcw.declared_context_window AS TEXT), ''), " +
+            RecordJoinIdColumns +
+            RecordSourceColumns +
             "FROM record r " +
+            RecordSourceJoin +
+            RecordJoinIdJoin +
             "LEFT JOIN record_session_link rsl ON rsl.span_id = r.span_id " +
             "LEFT JOIN record_parent rp ON rp.span_id = r.span_id " +
             "LEFT JOIN record_model rm ON rm.span_id = r.span_id " +
@@ -2257,9 +2326,9 @@ public partial class SqliteRelationalStore : IRelationalStoreReader
         foreach (string line in TabLines(ExecuteSqlite(sql.ToString())))
         {
             string[] cols = line.Split('\t');
-            if (cols.Length != 22)
+            if (cols.Length != 29)
             {
-                throw new StoredDataException($"Expected 22 columns for TREC row, got {cols.Length.ToString(CultureInfo.InvariantCulture)}.");
+                throw new StoredDataException($"Expected 29 columns for TREC row, got {cols.Length.ToString(CultureInfo.InvariantCulture)}.");
             }
 
             string spanId = ParseHexRequired(cols[1], "record.span_id");
@@ -2295,7 +2364,10 @@ public partial class SqliteRelationalStore : IRelationalStoreReader
                 ToolDefinitions: [],
                 new CollectedRecordSignals(ErrorMessage: null, EditFailures: null, CorrectionRule: null, ParseNullableInt64(cols[20], cols[21], "record_declared_context_window.declared_context_window")),
                 ReportedInputTokens: null,
-                ReportedOutputTokens: null));
+                ReportedOutputTokens: null,
+                SourceName: ParseRecordSourceName(cols, startIndex: 26),
+                ResponseId: ParseNullableHex(cols[22], cols[23], "record_response_id.response_id"),
+                RequestId: ParseNullableHex(cols[24], cols[25], "record_request_id.request_id")));
         }
 
         return records;
@@ -2489,9 +2561,19 @@ public partial class SqliteRelationalStore : IRelationalStoreReader
             ? AggregateReaderCostBlocks(reportedRecordBlocks, CostBasis.Harness, extraProblems)
             : null;
 
-        ReadTimeCostSummary sessionPublishedCost = turnPublishedBlocks.Count > 0
-            ? AggregateReaderCostBlocks(turnPublishedBlocks, CostBasis.Published, extraProblems)
-            : new ReadTimeCostSummary(CostBasis.Unknown, CostStatus.NoRate, null, null, []);
+        // A session whose records carry no tokens is priced from the usage the harness reported
+        // for the whole session, per model; records with tokens keep pricing per turn.
+        ReportedUsageCost? reportedUsageCost = ReportedSessionUsage.Price(session, records, pricing);
+        if (reportedUsageCost is not null)
+        {
+            extraProblems.AddRange(reportedUsageCost.Problems);
+        }
+
+        ReadTimeCostSummary sessionPublishedCost = reportedUsageCost is not null
+            ? ToReaderCostSummary(reportedUsageCost.Cost)
+            : turnPublishedBlocks.Count > 0
+                ? AggregateReaderCostBlocks(turnPublishedBlocks, CostBasis.Published, extraProblems)
+                : new ReadTimeCostSummary(CostBasis.Unknown, CostStatus.NoRate, null, null, []);
 
         ReadTimeCostBasisMismatch? basisMismatch = null;
         if (valuedTurnHarnessBlocks.Count > 0 && valuedTurnPublishedBlocks.Count > 0)
@@ -2525,10 +2607,21 @@ public partial class SqliteRelationalStore : IRelationalStoreReader
         long? nullableTotalCacheRead = hasCacheRead ? totalCacheRead : null;
         long? nullableTotalCacheCreation = hasCacheCreation ? totalCacheCreation : null;
 
+        ReportedSessionUsageTotals? reportedUsageTotals = ReportedSessionUsage.Resolve(session, records);
+        if (reportedUsageTotals is not null)
+        {
+            nullableTotalInput = reportedUsageTotals.CombinedInput;
+            nullableTotalOutput = reportedUsageTotals.Output;
+            nullableTotalCacheRead = reportedUsageTotals.CacheRead;
+            nullableTotalCacheCreation = reportedUsageTotals.CacheWrite;
+        }
+
         double? cacheHitRatio = nullableTotalInput is > 0 && nullableTotalCacheRead.HasValue
             ? (double)nullableTotalCacheRead.Value / nullableTotalInput.Value
             : null;
-        int? cacheCreationCoverage = nullableTotalInput is > 0 && nullableTotalCacheCreation.HasValue && turnEntries.Count > 0
+
+        // Cache-creation coverage counts turns; reported session usage has no per-turn figures.
+        int? cacheCreationCoverage = reportedUsageTotals is null && nullableTotalInput is > 0 && nullableTotalCacheCreation.HasValue && turnEntries.Count > 0
             ? cacheCreationTurns
             : null;
 
@@ -2675,7 +2768,8 @@ public partial class SqliteRelationalStore : IRelationalStoreReader
                 ToolRowsCount: tools.Count,
                 UnmeasuredInputTurns: unmeasuredInputTurns,
                 ReconciliationTotal: reconciliationTotal,
-                ReconciliationMismatched: reconciliationMismatched),
+                ReconciliationMismatched: reconciliationMismatched,
+                ReportedTotalTokens: reportedUsageTotals?.Total),
             tools,
             requests,
             servers,
@@ -2805,9 +2899,19 @@ public partial class SqliteRelationalStore : IRelationalStoreReader
             ? AggregateReaderCostBlocks(reportedRecordBlocks, CostBasis.Harness, extraProblems)
             : null;
 
-        ReadTimeCostSummary sessionPublishedCost = turnPublishedBlocks.Count > 0
-            ? AggregateReaderCostBlocks(turnPublishedBlocks, CostBasis.Published, extraProblems)
-            : new ReadTimeCostSummary(CostBasis.Unknown, CostStatus.NoRate, null, null, []);
+        // A session whose records carry no tokens is priced from the usage the harness reported
+        // for the whole session, per model; records with tokens keep pricing per turn.
+        ReportedUsageCost? reportedUsageCost = ReportedSessionUsage.Price(session, records, pricing);
+        if (reportedUsageCost is not null)
+        {
+            extraProblems.AddRange(reportedUsageCost.Problems);
+        }
+
+        ReadTimeCostSummary sessionPublishedCost = reportedUsageCost is not null
+            ? ToReaderCostSummary(reportedUsageCost.Cost)
+            : turnPublishedBlocks.Count > 0
+                ? AggregateReaderCostBlocks(turnPublishedBlocks, CostBasis.Published, extraProblems)
+                : new ReadTimeCostSummary(CostBasis.Unknown, CostStatus.NoRate, null, null, []);
 
         ReadTimeCostBasisMismatch? basisMismatch = null;
         if (valuedTurnHarnessBlocks.Count > 0 && valuedTurnPublishedBlocks.Count > 0)
@@ -2838,6 +2942,7 @@ public partial class SqliteRelationalStore : IRelationalStoreReader
 
         int requestCount = projectionRequestCount is > 0 ? projectionRequestCount.Value : rootRecords.Count;
 
+        ReportedSessionUsageTotals? listUsageTotals = ReportedSessionUsage.Resolve(session, records);
         return new SessionListFigure(
             SessionKey: sessionKey,
             HarnessId: harnessId,
@@ -2845,13 +2950,14 @@ public partial class SqliteRelationalStore : IRelationalStoreReader
             Branch: session.Workspace?.Branch,
             TurnCount: turnEntries.Count,
             RequestCount: requestCount,
-            TotalInput: hasInput ? totalInput : null,
-            TotalOutput: hasOutput ? totalOutput : null,
+            TotalInput: listUsageTotals is not null ? listUsageTotals.CombinedInput : hasInput ? totalInput : null,
+            TotalOutput: listUsageTotals is not null ? listUsageTotals.Output : hasOutput ? totalOutput : null,
             ReportedCost: sessionReportedCost,
             PublishedCost: sessionPublishedCost,
             CostBasisMismatch: basisMismatch,
             Models: models,
-            ProblemsCount: storedProblems.Count + extraProblems.Count);
+            ProblemsCount: storedProblems.Count + extraProblems.Count,
+            ReportedTotalTokens: listUsageTotals?.Total);
     }
 
     private List<Problem> QuerySessionIngestProblems(string sessionKey)
@@ -2954,9 +3060,9 @@ public partial class SqliteRelationalStore : IRelationalStoreReader
     /// <param name="cols">Tab-split columns of the <c>REC</c> row.</param>
     private static RawRecordHeader ParseRawRecordHeader(string[] cols)
     {
-        if (cols.Length != 38)
+        if (cols.Length != 45)
         {
-            throw new StoredDataException($"Expected 38 columns for REC row, got {cols.Length.ToString(CultureInfo.InvariantCulture)}.");
+            throw new StoredDataException($"Expected 45 columns for REC row, got {cols.Length.ToString(CultureInfo.InvariantCulture)}.");
         }
 
         string spanId = ParseHexRequired(cols[1], "record.span_id");
@@ -2987,6 +3093,9 @@ public partial class SqliteRelationalStore : IRelationalStoreReader
         long? declaredWindow = ParseNullableInt64(cols[32], cols[33], "record_declared_context_window.declared_context_window");
         long? repIn = ParseNullableInt64(cols[34], cols[35], "record_reported_total.input");
         long? repOut = ParseNullableInt64(cols[36], cols[37], "record_reported_total.output");
+        string? responseId = ParseNullableHex(cols[38], cols[39], "record_response_id.response_id");
+        string? requestId = ParseNullableHex(cols[40], cols[41], "record_request_id.request_id");
+        string sourceName = ParseRecordSourceName(cols, startIndex: 42);
 
         return new RawRecordHeader(
             spanId,
@@ -3006,7 +3115,31 @@ public partial class SqliteRelationalStore : IRelationalStoreReader
             agentInstanceId,
             new CollectedRecordSignals(errMsg, editFailures, correctionRule, declaredWindow),
             repIn,
-            repOut);
+            repOut,
+            sourceName,
+            responseId,
+            requestId);
+    }
+
+    /// <summary>
+    /// Parses the three <see cref="RecordSourceColumns"/> of a record row into the record's source
+    /// name as the projection rules read it: the locator for an OTLP source, or
+    /// <see cref="CanonSynth.FileSourcePrefix"/> followed by the source's harness for a file source.
+    /// </summary>
+    /// <remarks>
+    /// The name comes from the stored <c>source</c> row alone, never from record attributes, so a
+    /// record's source is exactly the batch source it was written under. The file form uses the
+    /// same prefix constant the file synthesizer stamps, which is what the projector's file-source
+    /// test reads.
+    /// </remarks>
+    /// <param name="cols">Tab-split columns of the record row.</param>
+    /// <param name="startIndex">Index of the first source column.</param>
+    private static string ParseRecordSourceName(string[] cols, int startIndex)
+    {
+        SourceKind kind = ParseSourceKind(ParseHexRequired(cols[startIndex], "source.source_kind"));
+        string harnessId = ParseHexRequired(cols[startIndex + 1], "source.harness_id");
+        string locator = ParseHexRequired(cols[startIndex + 2], "source.locator");
+        return kind == SourceKind.File ? CanonSynth.FileSourcePrefix + harnessId : locator;
     }
 
     /// <summary>
@@ -3065,8 +3198,12 @@ public partial class SqliteRelationalStore : IRelationalStoreReader
             "typeof(rcr.correction_rule), COALESCE(hex(CAST(rcr.correction_rule AS BLOB)), ''), " +
             "typeof(rdcw.declared_context_window), COALESCE(CAST(rdcw.declared_context_window AS TEXT), ''), " +
             "typeof(rrti.token_count), COALESCE(CAST(rrti.token_count AS TEXT), ''), " +
-            "typeof(rrto.token_count), COALESCE(CAST(rrto.token_count AS TEXT), '') " +
+            "typeof(rrto.token_count), COALESCE(CAST(rrto.token_count AS TEXT), ''), " +
+            RecordJoinIdColumns +
+            RecordSourceColumns +
             "FROM record r " +
+            RecordSourceJoin +
+            RecordJoinIdJoin +
             "LEFT JOIN record_session_link rsl ON rsl.span_id = r.span_id " +
             "LEFT JOIN record_parent rp ON rp.span_id = r.span_id " +
             "LEFT JOIN record_trace rt ON rt.span_id = r.span_id " +
@@ -3091,9 +3228,12 @@ public partial class SqliteRelationalStore : IRelationalStoreReader
         {
             sql.Append(
                 "SELECT 'TDEF', hex(CAST(td.span_id AS BLOB)), td.position, hex(CAST(td.tool_name AS BLOB)), " +
-                "typeof(tds.server_name), COALESCE(hex(CAST(tds.server_name AS BLOB)), ''), td.schema_tokens " +
+                "typeof(tds.server_name), COALESCE(hex(CAST(tds.server_name AS BLOB)), ''), td.schema_tokens, " +
+                "typeof(tdt.tokenizer), COALESCE(hex(CAST(tdt.tokenizer AS BLOB)), ''), " +
+                "typeof(tdt.is_model_own), COALESCE(CAST(tdt.is_model_own AS TEXT), '') " +
                 "FROM tool_definition td " +
-                "LEFT JOIN tool_definition_server tds ON tds.span_id = td.span_id AND tds.position = td.position" +
+                "LEFT JOIN tool_definition_server tds ON tds.span_id = td.span_id AND tds.position = td.position " +
+                "LEFT JOIN tool_definition_tokenizer tdt ON tdt.span_id = td.span_id AND tdt.position = td.position" +
                 $" WHERE td.span_id IN {linkedSpanIds} ORDER BY td.span_id ASC, td.position ASC;\n");
 
             // The tool-call metadata joins deliberately omit tool_call_input_text and
@@ -3151,9 +3291,9 @@ public partial class SqliteRelationalStore : IRelationalStoreReader
 
                 case "TDEF":
                     {
-                        if (cols.Length != 7)
+                        if (cols.Length != 11)
                         {
-                            throw new StoredDataException($"Expected 7 columns for TDEF row, got {cols.Length.ToString(CultureInfo.InvariantCulture)}.");
+                            throw new StoredDataException($"Expected 11 columns for TDEF row, got {cols.Length.ToString(CultureInfo.InvariantCulture)}.");
                         }
 
                         string spanId = ParseHexRequired(cols[1], "tool_definition.span_id");
@@ -3161,7 +3301,9 @@ public partial class SqliteRelationalStore : IRelationalStoreReader
                         string toolName = ParseHexRequired(cols[3], "tool_definition.tool_name");
                         string? server = ParseNullableHex(cols[4], cols[5], "tool_definition_server.server_name");
                         long schemaTokens = ParseInt64Required(cols[6], "tool_definition.schema_tokens");
-                        GetOrCreateList(defsBySpan, spanId).Add(new CollectedToolDefinition(position, toolName, server, schemaTokens));
+                        string? tokenizer = ParseNullableHex(cols[7], cols[8], "tool_definition_tokenizer.tokenizer");
+                        long? tokenizerIsModelOwn = ParseNullableInt64(cols[9], cols[10], "tool_definition_tokenizer.is_model_own");
+                        GetOrCreateList(defsBySpan, spanId).Add(new CollectedToolDefinition(position, toolName, server, schemaTokens, tokenizer, tokenizerIsModelOwn == 1L));
                         break;
                     }
 
@@ -3208,7 +3350,10 @@ public partial class SqliteRelationalStore : IRelationalStoreReader
                 defsBySpan.TryGetValue(header.SpanId, out List<CollectedToolDefinition>? defs) ? defs : [],
                 header.Signals,
                 header.ReportedInputTokens,
-                header.ReportedOutputTokens);
+                header.ReportedOutputTokens,
+                header.SourceName,
+                header.ResponseId,
+                header.RequestId);
             // A record with no session link is grouped under the empty key rather than dropped,
             // so a span-scoped read still answers it. A session key is never empty, so the
             // session-scoped callers are unaffected.
@@ -3262,8 +3407,12 @@ public partial class SqliteRelationalStore : IRelationalStoreReader
             "typeof(rcr.correction_rule), COALESCE(hex(CAST(rcr.correction_rule AS BLOB)), ''), " +
             "typeof(rdcw.declared_context_window), COALESCE(CAST(rdcw.declared_context_window AS TEXT), ''), " +
             "typeof(rrti.token_count), COALESCE(CAST(rrti.token_count AS TEXT), ''), " +
-            "typeof(rrto.token_count), COALESCE(CAST(rrto.token_count AS TEXT), '') " +
+            "typeof(rrto.token_count), COALESCE(CAST(rrto.token_count AS TEXT), ''), " +
+            RecordJoinIdColumns +
+            RecordSourceColumns +
             "FROM record r " +
+            RecordSourceJoin +
+            RecordJoinIdJoin +
             "LEFT JOIN record_session_link rsl ON rsl.span_id = r.span_id " +
             "LEFT JOIN record_parent rp ON rp.span_id = r.span_id " +
             "LEFT JOIN record_trace rt ON rt.span_id = r.span_id " +
@@ -3293,6 +3442,7 @@ public partial class SqliteRelationalStore : IRelationalStoreReader
         sql.Append(" FROM content_part cp " +
                    "LEFT JOIN content_part_text cpt ON cpt.span_id = cp.span_id AND cpt.position = cp.position " +
                    "LEFT JOIN content_part_withheld cpw ON cpw.span_id = cp.span_id AND cpw.position = cp.position " +
+                   "LEFT JOIN content_part_withheld_tokenizer cpwt ON cpwt.span_id = cp.span_id AND cpwt.position = cp.position " +
                    "LEFT JOIN content_part_reported_tokens cprt ON cprt.span_id = cp.span_id AND cprt.position = cp.position " +
                    "LEFT JOIN content_part_server cps ON cps.span_id = cp.span_id AND cps.position = cp.position " +
                    "LEFT JOIN content_part_role cpr ON cpr.span_id = cp.span_id AND cpr.position = cp.position " +
@@ -3302,9 +3452,12 @@ public partial class SqliteRelationalStore : IRelationalStoreReader
 
         sql.Append(
             "SELECT 'TDEF', hex(CAST(td.span_id AS BLOB)), td.position, hex(CAST(td.tool_name AS BLOB)), " +
-            "typeof(tds.server_name), COALESCE(hex(CAST(tds.server_name AS BLOB)), ''), td.schema_tokens " +
+            "typeof(tds.server_name), COALESCE(hex(CAST(tds.server_name AS BLOB)), ''), td.schema_tokens, " +
+            "typeof(tdt.tokenizer), COALESCE(hex(CAST(tdt.tokenizer AS BLOB)), ''), " +
+            "typeof(tdt.is_model_own), COALESCE(CAST(tdt.is_model_own AS TEXT), '') " +
             "FROM tool_definition td " +
-            "LEFT JOIN tool_definition_server tds ON tds.span_id = td.span_id AND tds.position = td.position" +
+            "LEFT JOIN tool_definition_server tds ON tds.span_id = td.span_id AND tds.position = td.position " +
+            "LEFT JOIN tool_definition_tokenizer tdt ON tdt.span_id = td.span_id AND tdt.position = td.position" +
             $"{defFilter} ORDER BY td.span_id ASC, td.position ASC;\n");
 
         sql.Append("SELECT 'TC', hex(CAST(tc.span_id AS BLOB)), ");
@@ -3386,9 +3539,9 @@ public partial class SqliteRelationalStore : IRelationalStoreReader
 
                 case "PART":
                     {
-                        if (cols.Length != 22)
+                        if (cols.Length != ContentPartColumnCount + 2)
                         {
-                            throw new StoredDataException($"Expected 22 columns for PART row, got {cols.Length.ToString(CultureInfo.InvariantCulture)}.");
+                            throw new StoredDataException($"Expected {(ContentPartColumnCount + 2).ToString(CultureInfo.InvariantCulture)} columns for PART row, got {cols.Length.ToString(CultureInfo.InvariantCulture)}.");
                         }
 
                         string spanId = ParseHexRequired(cols[1], "content_part.span_id");
@@ -3399,9 +3552,9 @@ public partial class SqliteRelationalStore : IRelationalStoreReader
 
                 case "TDEF":
                     {
-                        if (cols.Length != 7)
+                        if (cols.Length != 11)
                         {
-                            throw new StoredDataException($"Expected 7 columns for TDEF row, got {cols.Length.ToString(CultureInfo.InvariantCulture)}.");
+                            throw new StoredDataException($"Expected 11 columns for TDEF row, got {cols.Length.ToString(CultureInfo.InvariantCulture)}.");
                         }
 
                         string spanId = ParseHexRequired(cols[1], "tool_definition.span_id");
@@ -3409,7 +3562,9 @@ public partial class SqliteRelationalStore : IRelationalStoreReader
                         string toolName = ParseHexRequired(cols[3], "tool_definition.tool_name");
                         string? server = ParseNullableHex(cols[4], cols[5], "tool_definition_server.server_name");
                         long schemaTokens = ParseInt64Required(cols[6], "tool_definition.schema_tokens");
-                        GetOrCreateList(defsBySpan, spanId).Add(new CollectedToolDefinition(position, toolName, server, schemaTokens));
+                        string? tokenizer = ParseNullableHex(cols[7], cols[8], "tool_definition_tokenizer.tokenizer");
+                        long? tokenizerIsModelOwn = ParseNullableInt64(cols[9], cols[10], "tool_definition_tokenizer.is_model_own");
+                        GetOrCreateList(defsBySpan, spanId).Add(new CollectedToolDefinition(position, toolName, server, schemaTokens, tokenizer, tokenizerIsModelOwn == 1L));
                         break;
                     }
 
@@ -3469,7 +3624,10 @@ public partial class SqliteRelationalStore : IRelationalStoreReader
                 defsBySpan.TryGetValue(header.SpanId, out List<CollectedToolDefinition>? def) ? def : [],
                 header.Signals,
                 header.ReportedInputTokens,
-                header.ReportedOutputTokens));
+                header.ReportedOutputTokens,
+                header.SourceName,
+                header.ResponseId,
+                header.RequestId));
         }
 
         return materialized;
@@ -3633,6 +3791,10 @@ public partial class SqliteRelationalStore : IRelationalStoreReader
             $"SELECT 'CTX_T_SRV', hex(CAST(session_id AS BLOB)), position, hex(CAST(server AS BLOB)), tokens FROM session_context_turn_server_definitions{childWhere} ORDER BY session_id ASC, position ASC, rowid ASC;\n");
 
         sql.Append(
+            CultureInfo.InvariantCulture,
+            $"SELECT 'CTX_T_TOK', hex(CAST(session_id AS BLOB)), position, hex(CAST(tokenizer AS BLOB)), is_model_own FROM session_context_turn_tokenizer{childWhere} ORDER BY session_id ASC, position ASC, tokenizer ASC;\n");
+
+        sql.Append(
             "SELECT 'SCH', hex(CAST(t.session_id AS BLOB)), t.invocation_count, t.turn_count, " +
             "typeof(u.token_residencies), COALESCE(CAST(u.token_residencies AS TEXT), '') " +
             "FROM session_schema t " +
@@ -3667,6 +3829,7 @@ public partial class SqliteRelationalStore : IRelationalStoreReader
         Dictionary<string, List<RawContextTurnHeader>> ctxTurnsBySess = new(StringComparer.Ordinal);
         Dictionary<(string SessionId, int Position), List<StoredTurnBucketTokens>> ctxBucketsByTurn = [];
         Dictionary<(string SessionId, int Position), List<StoredTurnServerDefinitionTokens>> ctxServersByTurn = [];
+        Dictionary<(string SessionId, int Position), List<TokenizerLabel>> ctxTokenizersByTurn = [];
         Dictionary<string, (int InvocationCount, int TurnCount, long? Unused)> schemaHeadersBySess = new(StringComparer.Ordinal);
         Dictionary<string, List<StoredSchemaRankedTool>> rankedToolsBySess = new(StringComparer.Ordinal);
         Dictionary<string, List<StoredSchemaServerTokens>> schemaServersBySess = new(StringComparer.Ordinal);
@@ -3818,6 +3981,20 @@ public partial class SqliteRelationalStore : IRelationalStoreReader
                         break;
                     }
 
+                case "CTX_T_TOK":
+                    {
+                        if (cols.Length != 5)
+                        {
+                            throw new StoredDataException($"Expected 5 columns for CTX_T_TOK row, got {cols.Length.ToString(CultureInfo.InvariantCulture)}.");
+                        }
+
+                        (string, int) key = (ParseHexRequired(cols[1], "session_context_turn_tokenizer.session_id"), ParseInt32Required(cols[2], "session_context_turn_tokenizer.position"));
+                        GetOrCreateList(ctxTokenizersByTurn, key).Add(new TokenizerLabel(
+                            ParseHexRequired(cols[3], "session_context_turn_tokenizer.tokenizer"),
+                            ParseInt64Required(cols[4], "session_context_turn_tokenizer.is_model_own") == 1L));
+                        break;
+                    }
+
                 case "SCH":
                     if (cols.Length != 6)
                     {
@@ -3895,6 +4072,9 @@ public partial class SqliteRelationalStore : IRelationalStoreReader
                 foreach (RawContextTurnHeader rt in rawTurns)
                 {
                     (string, int) turnKey = (header.SessionId, rt.Position);
+                    // A turn with no label rows means its figures came only from harness-reported
+                    // counts — the schema-29 rebuild leaves no unlabelled measured row — so it is
+                    // shown as reported, never as not measured.
                     ctxTurns.Add(new StoredSessionContextTurn(
                         rt.Position,
                         rt.InputTokens,
@@ -3912,7 +4092,10 @@ public partial class SqliteRelationalStore : IRelationalStoreReader
                         rt.StrippedTokens,
                         rt.PreviousFreshInput,
                         rt.FreshJumpFactor,
-                        rt.NonResidentTokens));
+                        rt.NonResidentTokens)
+                    {
+                        Tokenizers = ctxTokenizersByTurn.TryGetValue(turnKey, out List<TokenizerLabel>? labels) ? labels : [],
+                    });
                 }
 
                 context = new StoredSessionContext(
@@ -4326,11 +4509,15 @@ public partial class SqliteRelationalStore : IRelationalStoreReader
         $"FROM content_part {alias} " +
         $"LEFT JOIN content_part_text cpt ON cpt.span_id = {alias}.span_id AND cpt.position = {alias}.position " +
         $"LEFT JOIN content_part_withheld cpw ON cpw.span_id = {alias}.span_id AND cpw.position = {alias}.position " +
+        $"LEFT JOIN content_part_withheld_tokenizer cpwt ON cpwt.span_id = {alias}.span_id AND cpwt.position = {alias}.position " +
         $"LEFT JOIN content_part_reported_tokens cprt ON cprt.span_id = {alias}.span_id AND cprt.position = {alias}.position " +
         $"LEFT JOIN content_part_server cps ON cps.span_id = {alias}.span_id AND cps.position = {alias}.position " +
         $"LEFT JOIN content_part_role cpr ON cpr.span_id = {alias}.span_id AND cpr.position = {alias}.position " +
         $"LEFT JOIN content_part_residency cpres ON cpres.span_id = {alias}.span_id AND cpres.position = {alias}.position " +
         $"LEFT JOIN content_part_truncation cptr ON cptr.span_id = {alias}.span_id AND cptr.position = {alias}.position";
+
+    /// <summary>Number of columns <see cref="BuildContentPartColumns"/> selects and <see cref="ParseContentPartColumns"/> reads.</summary>
+    private const int ContentPartColumnCount = 24;
 
     private static string BuildContentPartColumns(string alias) =>
         $"{alias}.position, hex(CAST({alias}.bucket AS BLOB)), " +
@@ -4342,7 +4529,9 @@ public partial class SqliteRelationalStore : IRelationalStoreReader
         "typeof(cps.server_name), COALESCE(hex(CAST(cps.server_name AS BLOB)), ''), " +
         "typeof(cpr.role_name), COALESCE(hex(CAST(cpr.role_name AS BLOB)), ''), " +
         "typeof(cpres.is_resident), COALESCE(CAST(cpres.is_resident AS TEXT), ''), " +
-        "typeof(cptr.original_utf8_bytes), COALESCE(CAST(cptr.original_utf8_bytes AS TEXT), '')";
+        "typeof(cptr.original_utf8_bytes), COALESCE(CAST(cptr.original_utf8_bytes AS TEXT), ''), " +
+        "typeof(cpwt.tokenizer), COALESCE(hex(CAST(cpwt.tokenizer AS BLOB)), ''), " +
+        "typeof(cpwt.is_model_own), COALESCE(CAST(cpwt.is_model_own AS TEXT), '')";
 
     private static CollectedContentPart ParseContentPartColumns(string[] cols, int startIndex)
     {
@@ -4352,8 +4541,22 @@ public partial class SqliteRelationalStore : IRelationalStoreReader
         long? wBytes = ParseNullableInt64(cols[startIndex + 4], cols[startIndex + 5], "content_part_withheld.utf8_bytes");
         long? wChars = ParseNullableInt64(cols[startIndex + 6], cols[startIndex + 7], "content_part_withheld.characters");
         long? wTokens = ParseNullableInt64(cols[startIndex + 8], cols[startIndex + 9], "content_part_withheld.measured_tokens");
+        string? wTokenizer = ParseNullableHex(cols[startIndex + 20], cols[startIndex + 21], "content_part_withheld_tokenizer.tokenizer");
+        long? wModelOwnRaw = ParseNullableInt64(cols[startIndex + 22], cols[startIndex + 23], "content_part_withheld_tokenizer.is_model_own");
+        bool wModelOwn = wModelOwnRaw switch
+        {
+            null => false,
+            0L => false,
+            1L => true,
+            _ => throw new StoredDataException($"Invalid boolean flag '{wModelOwnRaw.Value.ToString(CultureInfo.InvariantCulture)}' in content_part_withheld_tokenizer.is_model_own."),
+        };
+        if ((wTokenizer is null) != (wModelOwnRaw is null))
+        {
+            throw new StoredDataException("Partial content_part_withheld_tokenizer row returned.");
+        }
+
         CollectedWithheldText? withheld = wBytes.HasValue && wChars.HasValue && wTokens.HasValue
-            ? new CollectedWithheldText(wBytes.Value, wChars.Value, wTokens.Value)
+            ? new CollectedWithheldText(wBytes.Value, wChars.Value, wTokens.Value, wTokenizer, wModelOwn)
             : wBytes.HasValue || wChars.HasValue || wTokens.HasValue
                 ? throw new StoredDataException("Partial content_part_withheld row returned.")
                 : null;
@@ -5657,6 +5860,7 @@ public partial class SqliteRelationalStore : IRelationalStoreReader
         "cache_write" => TokenClass.CacheWrite,
         "output" => TokenClass.Output,
         "reasoning" => TokenClass.Reasoning,
+        "total" => TokenClass.Total,
         _ => throw new StoredDataException($"Unrecognized token_class '{value}'."),
     };
 
@@ -5754,7 +5958,10 @@ public partial class SqliteRelationalStore : IRelationalStoreReader
         string? AgentInstanceId,
         CollectedRecordSignals Signals,
         long? ReportedInputTokens,
-        long? ReportedOutputTokens);
+        long? ReportedOutputTokens,
+        string SourceName,
+        string? ResponseId,
+        string? RequestId);
 
     private record RawSessionHeader(
         string SessionId,

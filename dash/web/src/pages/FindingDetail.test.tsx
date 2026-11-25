@@ -264,8 +264,9 @@ describe('FindingDetail Screen (Task G3 Compliance)', () => {
     // Waste summary asserts
     expect(html).toContain('data-testid="waste-summary"')
     expect(html).toContain('3.7K')
-    expect(html).toContain('data-testid="waste-summary-error-bar"')
-    expect(html).toContain('[3.7K – 3.7K]')
+    // No error bar is drawn: the server no longer invents one (D15).
+    expect(html).not.toContain('data-testid="waste-summary-error-bar"')
+    expect(html).not.toMatch(/\[\s*3\.7K/)
   })
 
   it('Criterion 2: Evidence table displays all evidence links (>=2 links) with deep-link triggers', () => {
@@ -395,7 +396,7 @@ describe('FindingDetail Screen (Task G3 Compliance)', () => {
     expect(htmlHeuristic).toContain('This finding is inferred or heuristic')
   })
 
-  it('Criterion 4: Recommendation panel renders D8 relocation/progressive disclosure actions with recoverable waste and error bars', () => {
+  it('Criterion 4: Recommendation panel renders D8 relocation/progressive disclosure actions with measured waste and no error bar', () => {
     const html = renderHtml(<FindingDetail initialFinding={sampleStatisticalFinding} />)
 
     expect(html).toContain('data-testid="recommendation-panel"')
@@ -406,14 +407,14 @@ describe('FindingDetail Screen (Task G3 Compliance)', () => {
     expect(html).toContain('data-testid="recommendation-text"')
     expect(html).toContain('Apply progressive disclosure')
 
-    // Recoverable waste token estimate
+    // Recoverable waste token figure, as measured
     expect(html).toContain('data-testid="recoverable-waste-tokens"')
     expect(html).toContain('42.0K tokens')
 
-    // Calibrated error bar
-    expect(html).toContain('data-testid="recommendation-error-bar"')
-    expect(html).toContain('[32.0K – 51.0K]')
-    expect(html).toContain('data-testid="error-bar-visual"')
+    // No invented confidence band is drawn.
+    expect(html).not.toContain('data-testid="recommendation-error-bar"')
+    expect(html).not.toContain('data-testid="error-bar-visual"')
+    expect(html).not.toContain('[32.0K – 51.0K]')
 
     // D8 relocation strategy action card
     expect(html).toContain('data-testid="relocation-action-card"')
@@ -522,13 +523,24 @@ describe('RecommendationPanel Component Isolation', () => {
       <RecommendationPanel
         recommendation="Move dynamic session ID after static system prompt prefix to restore cache hit rate."
         estimatedWasteTokens={15000}
-        errorBar={{ lower: 12000, upper: 18000 }}
       />,
     )
 
     expect(html).toContain('Cache Breakpoint Repositioning')
     expect(html).toContain('Relocate, Do Not Delete')
     expect(html).toContain('15.0K tokens')
-    expect(html).toContain('[12.0K – 18.0K]')
+    expect(html).not.toContain('[12.0K – 18.0K]')
+  })
+
+  it('renders not measured for a finding with no waste figure, never zero', () => {
+    const html = renderToStaticMarkup(
+      <RecommendationPanel
+        recommendation="Move dynamic session ID after static system prompt prefix."
+        estimatedWasteTokens={null}
+      />,
+    )
+
+    expect(html).toContain('not measured')
+    expect(html).not.toMatch(/estimated/i)
   })
 })

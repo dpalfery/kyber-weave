@@ -2,6 +2,7 @@ using System.Globalization;
 using System.Text.Json;
 using KyberDash.Contracts.Repositories;
 using KyberDash.Contracts.Services;
+using KyberDash.Core.Exceptions;
 using KyberDash.Data.Collector;
 using KyberDash.Data.Collector.Sources;
 using KyberDash.Data.Repositories;
@@ -39,6 +40,25 @@ public record FullReingestReport(
 /// </summary>
 public class CanonRefreshEngine
 {
+    /// <summary>SQLite primary result code <c>SQLITE_CONSTRAINT</c> (UNIQUE, NOT NULL, FOREIGN KEY, CHECK).</summary>
+    private const int SqliteConstraintResultCode = 19;
+
+    /// <summary>
+    /// Decides whether <paramref name="exception"/> belongs to one source unit, so the unit is recorded as a
+    /// <c>SOURCE_UNREADABLE</c> problem and the pass continues. Read, parse, and argument failures qualify, as does a
+    /// store write rejected by a SQLite constraint (<see cref="SqliteExecutionException.ExitCode"/> 19), which
+    /// concerns only that unit's rows. Failures that mean the store itself is unusable (busy or locked database,
+    /// corrupt or unopenable file, missing native library, open circuit breaker) do not qualify and still fail the pass.
+    /// </summary>
+    /// <param name="exception">Exception raised while processing a single source unit.</param>
+    /// <returns><see langword="true"/> when the failure is confined to the unit.</returns>
+    public static bool IsSourceUnitFailure(Exception exception)
+    {
+        ArgumentNullException.ThrowIfNull(exception);
+        return exception is IOException or UnauthorizedAccessException or InvalidDataException or InvalidOperationException or JsonException or ArgumentException
+            || exception is SqliteExecutionException { ExitCode: SqliteConstraintResultCode };
+    }
+
     /// <summary>Rolling content retention window in days (decision D18).</summary>
     public const int ContentRetentionDays = 14;
 
@@ -408,7 +428,7 @@ public class CanonRefreshEngine
             activeStore.UpsertSourceCheckpoint(updatedCheckpoint);
             return new RefreshSourceStatusRow(unit.HarnessId, unit.SourceKey, "committed", batch.Records.Count);
         }
-        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or InvalidDataException or InvalidOperationException or JsonException or ArgumentException)
+        catch (Exception ex) when (CanonRefreshEngine.IsSourceUnitFailure(ex))
         {
             string safeMessage = SafeProblemMessage(
                 ex.Message,

@@ -6,6 +6,7 @@ using KyberDash.Application.Tests.Fakes;
 using KyberDash.Data.Collector;
 using KyberDash.Data.Collector.Sources;
 using KyberDash.Data.Harnesses.Kilo;
+using KyberDash.Data.Tokenization;
 using KyberDash.Domain;
 using KyberDash.Domain.Schema;
 using Xunit;
@@ -22,6 +23,9 @@ public class KiloMapperTests
     private static readonly DateTimeOffset BaselineUtc = new(2026, 11, 19, 12, 0, 0, TimeSpan.Zero);
 
     private static readonly DateTimeOffset T0 = new(2026, 9, 10, 10, 0, 0, TimeSpan.Zero);
+
+    /// <summary>A JSON document whose token counts differ between cl100k_base and the o200k_base stand-in.</summary>
+    private const string DivergentJsonText = "{\"summary\":\"こんにちは世界、今日はいい天気ですね。\"}";
 
     [Fact]
     public void HarnessId_IsKiloSharedRuntime()
@@ -236,6 +240,41 @@ public class KiloMapperTests
     }
 
     [Fact]
+    public void Map_SharedRuntimeCountsPartsUnderTheMessageModelOwnTokenizer()
+    {
+        long t0 = T0.ToUnixTimeMilliseconds();
+        string export = """
+            {
+              "session_id": "sess-kilo-tok",
+              "messages": [
+                {"id": "msg-a1", "session_id": "sess-kilo-tok", "time_created": __KILO_TS__, "data": {"role": "assistant", "modelID": "gpt-4", "tokens": {"input": 10, "output": 2}}}
+              ],
+              "parts": [
+                {"id": "part-a1", "message_id": "msg-a1", "time_created": __KILO_TS__, "data": {"type": "text", "text": "{\"summary\":\"こんにちは世界、今日はいい天気ですね。\"}"}}
+              ]
+            }
+            """
+            .Replace("__KILO_TS__", t0.ToString(CultureInfo.InvariantCulture), StringComparison.Ordinal);
+        NativeSourceUnit unit = MakeNativeUnit(
+            "/fake-home/.local/share/kilo/kilo.db",
+            export,
+            KiloMapper.KiloSharedRuntimeHarnessId,
+            format: "kilo-sqlite",
+            parserId: "kilo-sqlite-reader");
+
+        CollectedBatch batch = new KiloMapper().Map(unit, BaselineUtc);
+
+        CollectedRecord record = Assert.Single(batch.Records);
+        Assert.Equal("gpt-4", record.Model);
+        CollectedContentPart part = Assert.Single(record.Parts);
+        Assert.Null(part.PlainText);
+        Assert.NotNull(part.Withheld);
+        Assert.Equal(
+            LocalTextTokenizer.Shared.Count(DivergentJsonText, "gpt-4").Count,
+            part.Withheld!.MeasuredTokens);
+    }
+
+    [Fact]
     public void Map_SharedRuntimeExtractsSkillsAndSubagentInvocations()
     {
         long t0 = T0.ToUnixTimeMilliseconds();
@@ -270,6 +309,42 @@ public class KiloMapperTests
         CollectedRecord taskTool = batch.Records.Single(static r =>
             r.Op == RecordOp.ToolInvoke && r.Tool != null && string.Equals(r.Tool.CallId, "call-task", StringComparison.Ordinal));
         Assert.Equal(taskTool.RecordId, agent.ParentRecordId);
+    }
+
+    /// <summary>
+    /// Kilo reports <c>tokens.input</c> apart from <c>tokens.cache.read</c> and <c>tokens.cache.write</c>, so the
+    /// reported input total is the sum of the three classes, as the Claude mapper reports it. A reported input
+    /// of the fresh count alone fails the pricing checksum and leaves a turn with cache tokens only partly priced.
+    /// </summary>
+    [Fact]
+    public void Map_SharedRuntimeReportedInputIsFreshPlusCacheReadPlusCacheWrite()
+    {
+        long t0 = T0.ToUnixTimeMilliseconds();
+        string export = """
+            {
+              "session_id": "sess-kilo-cache",
+              "title": "Kilo cache totals",
+              "messages": [
+                {"id": "msg-a1", "session_id": "sess-kilo-cache", "time_created": __KILO_TS__, "data": {"role": "assistant", "modelID": "claude-sonnet-4-5", "tokens": {"input": 101, "output": 41, "reasoning": 7, "cache": {"read": 203, "write": 10}}}}
+              ],
+              "parts": []
+            }
+            """.Replace("__KILO_TS__", t0.ToString(CultureInfo.InvariantCulture), StringComparison.Ordinal);
+        NativeSourceUnit unit = MakeNativeUnit(
+            "/fake-home/.local/share/kilo/kilo.db",
+            export,
+            KiloMapper.KiloSharedRuntimeHarnessId,
+            format: "kilo-sqlite",
+            parserId: "kilo-sqlite-reader");
+
+        CollectedBatch batch = new KiloMapper().Map(unit, BaselineUtc);
+
+        CollectedRecord record = Assert.Single(batch.Records);
+        Assert.Equal(101, Assert.Single(record.Tokens, static t => t.TokenClass == TokenClass.Input).Count);
+        Assert.Equal(203, Assert.Single(record.Tokens, static t => t.TokenClass == TokenClass.CacheRead).Count);
+        Assert.Equal(10, Assert.Single(record.Tokens, static t => t.TokenClass == TokenClass.CacheWrite).Count);
+        Assert.Equal(314, record.ReportedInputTokens);
+        Assert.Equal(41, record.ReportedOutputTokens);
     }
 
     [Fact]
@@ -374,6 +449,55 @@ public class KiloMapperTests
         Assert.Empty(legacyBatch.Records);
         Assert.Empty(legacyBatch.Sessions);
         Assert.Equal(KiloMapper.MalformedLineCode, Assert.Single(legacyBatch.Problems).Code);
+    }
+
+    [Fact]
+    public void Map_NullPayloadRecordsOneWarningNamingTheSource()
+    {
+        const string sourceKey = "/fake-home/.local/share/kilo/kilo.db";
+        NativeSourceUnit unit = new(
+            Unit: new SourceUnit(
+                HarnessId: KiloMapper.KiloSharedRuntimeHarnessId,
+                SourceKey: sourceKey,
+                ProviderId: "kilo",
+                ParserId: "kilo-sqlite-reader",
+                ParserContractVersion: "1",
+                Format: "kilo-sqlite",
+                SourceRootLabel: "kilo",
+                RevisionToken: "1-1",
+                LastWriteUtc: BaselineUtc,
+                SizeBytes: 0),
+            RawText: null,
+            SizeBytes: 0,
+            LastWriteUtc: BaselineUtc,
+            CompanionText: null);
+
+        CollectedBatch batch = new KiloMapper().Map(unit, BaselineUtc);
+
+        Assert.Empty(batch.Records);
+        Assert.Empty(batch.Sessions);
+        CollectedProblem problem = Assert.Single(batch.Problems);
+        Assert.Equal(KiloMapper.MalformedLineCode, problem.Code);
+        Assert.Equal("warning", problem.Severity);
+        Assert.Contains(sourceKey, problem.Message, StringComparison.Ordinal);
+        Assert.Contains("carried no readable content", problem.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Map_WhitespacePayloadKeepsEmptyBatchWithoutProblem()
+    {
+        NativeSourceUnit unit = MakeNativeUnit(
+            "/fake-home/.local/share/kilo/kilo.db",
+            " \n\t ",
+            KiloMapper.KiloSharedRuntimeHarnessId,
+            format: "kilo-sqlite",
+            parserId: "kilo-sqlite-reader");
+
+        CollectedBatch batch = new KiloMapper().Map(unit, BaselineUtc);
+
+        Assert.Empty(batch.Records);
+        Assert.Empty(batch.Sessions);
+        Assert.Empty(batch.Problems);
     }
 
     [Fact]

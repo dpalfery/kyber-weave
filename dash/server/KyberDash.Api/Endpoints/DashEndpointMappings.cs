@@ -879,6 +879,7 @@ public static class DashEndpointMappings
                 lastSuccessAt = status.LastSuccessAt,
                 lastFailure = status.LastFailure,
                 nextDueAt = status.NextDueAt,
+                failedUnits = status.LastFailedUnits,
             },
             paused = status.Paused || settings.GetSettings().JobsPaused,
             hostedElsewhere = status.HostedElsewhere,
@@ -914,7 +915,7 @@ public static class DashEndpointMappings
         ArgumentNullException.ThrowIfNull(outcome);
         int statusCode = outcome.Outcome switch
         {
-            "succeeded" => StatusCodes.Status200OK,
+            "succeeded" or "partial" => StatusCodes.Status200OK,
             "busy" or "declined" or "hosted-elsewhere" => StatusCodes.Status409Conflict,
             _ => StatusCodes.Status500InternalServerError,
         };

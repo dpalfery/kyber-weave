@@ -126,6 +126,23 @@ export function formatDimensionDisplay(dim?: ScorecardDimensionValue): {
   }
 }
 
+/** The bases the engine and the rollups stamp on a figure the harness itself reported. */
+const HARNESS_REPORTED_BASES: ReadonlySet<string> = new Set(['harness', 'harness_reported', 'harness_rollup'])
+
+/**
+ * The visible wording for a cost basis. A harness-reported cost says so; a price
+ * computed from a published rate table is a calculation, named as one (D15); a
+ * run summary is named as one. A missing basis is stated as not reported, and any
+ * other basis is shown verbatim, so no basis is named as something it is not.
+ */
+export function costBasisText(basis?: string): string {
+  if (!basis) return 'basis not reported'
+  if (HARNESS_REPORTED_BASES.has(basis)) return 'reported by the harness'
+  if (basis === 'published') return 'calculated from published rates'
+  if (basis === 'run_summary') return 'run summary'
+  return basis
+}
+
 /**
  * Scorecard Component:
  *
@@ -183,12 +200,12 @@ export function Scorecard({
           </div>
         </div>
 
-        {/* Decision D9: Secondary derived cost (muted/subordinate indicator) */}
+        {/* Decision D9: Secondary cost, labelled with its calculated basis (D15) */}
         {secondaryCost?.costUsd !== undefined && secondaryCost.costUsd !== null && (
           <div
             className="flex items-center gap-density-inline rounded-chrome border border-border/60 bg-interactive-secondary/40 px-chrome-sm py-chrome-xs text-right text-density-xs text-muted-foreground"
             data-testid="secondary-cost"
-            title={`Cost: ${usd(secondaryCost.costUsd)} (${secondaryCost.basis || 'derived estimate'})`}
+            title={`Cost: ${usd(secondaryCost.costUsd)} (${costBasisText(secondaryCost.basis)})`}
           >
             <span className="text-density-2xs uppercase tracking-density text-tertiary-foreground">
               Secondary Cost:
@@ -197,7 +214,7 @@ export function Scorecard({
               {usd(secondaryCost.costUsd)}
             </span>
             <span className="text-density-2xs italic text-tertiary-foreground/80">
-              (derived)
+              ({costBasisText(secondaryCost.basis)})
             </span>
             {/* Review re-review #2 (Kilo 4): a partial total is marked in
                 visible text, not a hover-only title — and the gap may be

@@ -5,6 +5,8 @@ using KyberDash.Data.Collector.Sources;
 using KyberDash.Data.Harnesses.Antigravity;
 using KyberDash.Data.Harnesses.Cline;
 using KyberDash.Data.Harnesses.Kilo;
+using KyberDash.Data.Repositories;
+using KyberDash.Data.Tokenization;
 using KyberDash.Domain;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
@@ -55,11 +57,13 @@ public static class ServiceCollectionExtensions
             _ = pricing.LoadPricingTables();
             return pricing;
         });
+        services.TryAddSingleton<ITextTokenizer>(_ => LocalTextTokenizer.Shared);
         services.TryAddSingleton(provider => new CanonSessionProjectorEngine(
             provider.GetRequiredService<IRelationalStoreReader>(),
             provider.GetRequiredService<IProjectionStore>(),
             provider.GetRequiredService<IOperationalStore>(),
-            provider.GetRequiredService<IPricingRepository>()));
+            provider.GetRequiredService<IPricingRepository>(),
+            provider.GetRequiredService<ITextTokenizer>()));
 
         services.TryAddSingleton(provider => new CanonRollupsEngine(
             provider.GetRequiredService<IRelationalStoreReader>(),
@@ -128,7 +132,10 @@ public static class ServiceCollectionExtensions
         services.TryAddSingleton<ICanonProjectionService>(provider => provider.GetRequiredService<CanonProjectionService>());
 
         services.TryAddSingleton<IHarnessFileSystem>(_ => PhysicalHarnessFileSystem.Instance);
-        services.TryAddSingleton<HarnessSourceRegistry>(_ => new HarnessSourceRegistry());
+        services.TryAddSingleton<IHarnessSqliteSource>(provider => HarnessSourceRegistry.CreateSqliteSource(
+            ServerStateRepository.ResolveStateDirectory(provider.GetService<DashOptions>()?.StateDirectory)));
+        services.TryAddSingleton<HarnessSourceRegistry>(provider => new HarnessSourceRegistry(
+            provider.GetRequiredService<IHarnessSqliteSource>()));
 
         services.TryAddSingleton<TranscriptIngestionService>(provider => new TranscriptIngestionService(
             provider.GetRequiredService<IRelationalStoreWriter>(),

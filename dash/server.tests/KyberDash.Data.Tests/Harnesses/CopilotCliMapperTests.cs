@@ -4,6 +4,7 @@ using KyberDash.Contracts.Repositories;
 using KyberDash.Data.Collector;
 using KyberDash.Data.Collector.Sources;
 using KyberDash.Data.Harnesses.CopilotCli;
+using KyberDash.Data.Tokenization;
 using Xunit;
 
 namespace KyberDash.Data.Tests.Harnesses;
@@ -272,6 +273,32 @@ public class CopilotCliMapperTests
         Assert.Empty(nullOutput.Tokens);
     }
 
+    /// <summary>
+    /// The session's resolved model with its own published tokenizer counts the user-message part:
+    /// the measured tokens equal the model's own tokenizer figure, not the stand-in's.
+    /// </summary>
+    [Fact]
+    public void Map_CountsUserMessagePartsWithTheSessionModelOwnTokenizer()
+    {
+        string userDoc = "{\"こんにちは\":\"世界\"}";
+        string jsonl = string.Join('\n',
+        [
+            "{\"type\":\"session.start\",\"id\":\"e1\",\"timestamp\":\"2026-11-19T10:00:00.000Z\",\"data\":{\"sessionId\":\"sess-own\",\"selectedModel\":\"gpt-3.5-turbo\"}}",
+            $"{{\"type\":\"user.message\",\"id\":\"e2\",\"timestamp\":\"2026-11-19T10:00:01.000Z\",\"data\":{{\"content\":{System.Text.Json.JsonSerializer.Serialize(userDoc)}}}}}",
+            "{\"type\":\"assistant.message\",\"id\":\"e3\",\"timestamp\":\"2026-11-19T10:00:02.000Z\",\"data\":{\"messageId\":\"msg-own\",\"content\":\"Done.\"}}",
+        ]) + "\n";
+
+        NativeSourceUnit unit = MakeNativeUnit(Combine(HomeRoot, ".copilot/session-state/sess-own/events.jsonl"), jsonl);
+        CollectedBatch batch = new CopilotCliMapper().Map(unit, BaselineUtc);
+
+        CollectedRecord record = Assert.Single(batch.Records);
+        Assert.Equal("gpt-3.5-turbo", record.Model);
+        CollectedContentPart userPart = Assert.Single(record.Parts, static p => p.Bucket == ContentBucket.UserMessage);
+        Assert.NotNull(userPart.Withheld);
+        Assert.Equal(LocalTextTokenizer.Shared.Count(userDoc, "gpt-3.5-turbo").Count, userPart.Withheld!.MeasuredTokens);
+        Assert.NotEqual(LocalTextTokenizer.Shared.Count(userDoc, null).Count, userPart.Withheld.MeasuredTokens);
+    }
+
     private static NativeSourceUnit MakeNativeUnit(string path, string rawText)
     {
         SourceUnit sourceUnit = new(
@@ -383,6 +410,14 @@ public class CopilotCliMapperTests
             }
 
             return entry.Content;
+        }
+
+        public string ReadAllText(string filePath, long maxBytes)
+        {
+            string text = ReadAllText(filePath);
+            return System.Text.Encoding.UTF8.GetByteCount(text) <= maxBytes
+                ? text
+                : throw new InvalidDataException($"'{filePath}' holds more than {maxBytes} bytes.");
         }
 
         public string GetFullPath(string path) => NormalizePath(path);

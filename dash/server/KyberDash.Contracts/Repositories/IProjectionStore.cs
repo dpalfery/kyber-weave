@@ -58,7 +58,15 @@ public record StoredSessionContextTurn(
     long? StrippedTokens = null,
     long? PreviousFreshInput = null,
     double? FreshJumpFactor = null,
-    long? NonResidentTokens = null);
+    long? NonResidentTokens = null)
+{
+    /// <summary>
+    /// Tokenizers that counted this turn's text-derived figures (<c>session_context_turn_tokenizer</c>),
+    /// in tokenizer-name order. Empty when every figure came only from harness-reported counts,
+    /// which reads as reported — never as not measured.
+    /// </summary>
+    public IReadOnlyList<TokenizerLabel> Tokenizers { get; init; } = [];
+}
 
 /// <summary>Normalized session context projection (<c>session_context</c> and child tables).</summary>
 /// <param name="ContextLimit">Resolved context window limit.</param>

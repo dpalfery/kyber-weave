@@ -147,6 +147,7 @@ public class ProjectionReadPathTests
             store,
             store,
             new FakePricingRepository(),
+            new FakeTextTokenizer(),
             readPathSessionRecordBudget: ReadPathBudget);
 
         WriteSession(store, "sess-small", "claude-code", [Turn("span-small-1", "sess-small", 0, harnessId: "claude-code", inputTokens: 100, outputTokens: 10)]);
@@ -202,6 +203,7 @@ public class ProjectionReadPathTests
             store,
             store,
             new FakePricingRepository(),
+            new FakeTextTokenizer(),
             readPathPassRecordBudget: 6);
 
         WriteSession(store, "sess-a", "claude-code", [Turn("span-a-1", "sess-a", 0), Turn("span-a-2", "sess-a", 1)]);
@@ -242,6 +244,7 @@ public class ProjectionReadPathTests
             store,
             store,
             new FakePricingRepository(),
+            new FakeTextTokenizer(),
             readPathPassRecordBudget: 1);
 
         WriteSession(store, "sess-a", "claude-code", [Turn("span-a-1", "sess-a", 0), Turn("span-a-2", "sess-a", 1)]);
@@ -286,7 +289,7 @@ public class ProjectionReadPathTests
         store.SetProjectionDirtyState(new DirtyProjectionState(FromSeq: 1, ToSeq: 2, Keys: ["sess-b"], IsWildcard: false));
 
         using GateReader reader = new(store);
-        CanonSessionProjectorEngine projector = new(reader, store, store, pricing);
+        CanonSessionProjectorEngine projector = new(reader, store, store, pricing, new FakeTextTokenizer());
         CanonRollupsEngine rollups = new(reader, store, pricing);
         KyberBridgeEngine bridge = new(reader, store, store, pricing, projector, rollups);
 
@@ -328,6 +331,7 @@ public class ProjectionReadPathTests
             store,
             store,
             pricing,
+            new FakeTextTokenizer(),
             readPathSessionRecordBudget: ReadPathBudget);
         KyberBridgeEngine bridge = new(store, store, store, pricing, projector, new CanonRollupsEngine(store, store, pricing));
 
@@ -367,7 +371,7 @@ public class ProjectionReadPathTests
         store.SetWriteMarker(1);
 
         FaultingAttributionReader reader = new(store);
-        CanonSessionProjectorEngine engine = new(reader, store, store, new FakePricingRepository());
+        CanonSessionProjectorEngine engine = new(reader, store, store, new FakePricingRepository(), new FakeTextTokenizer());
 
         Assert.Throws<InvalidOperationException>(() => engine.ProjectIncrementalForReads());
 
@@ -392,6 +396,7 @@ public class ProjectionReadPathTests
             store,
             store,
             new FakePricingRepository(),
+            new FakeTextTokenizer(),
             readPathSessionRecordBudget: ReadPathBudget);
 
         WriteSession(store, "sess-small", "claude-code", [Turn("span-small-1", "sess-small", 0, harnessId: "claude-code", inputTokens: 100, outputTokens: 10)]);
@@ -414,7 +419,7 @@ public class ProjectionReadPathTests
 
         CollectedRecord midPassSpan = Turn("span-small-3", "sess-small", 2, harnessId: "claude-code", inputTokens: 100, outputTokens: 10);
         MidPassIngestReader reader = new(store, "sess-small", midPassSpan);
-        CanonSessionProjectorEngine midPassEngine = new(reader, store, store, new FakePricingRepository(), readPathSessionRecordBudget: ReadPathBudget);
+        CanonSessionProjectorEngine midPassEngine = new(reader, store, store, new FakePricingRepository(), new FakeTextTokenizer(), readPathSessionRecordBudget: ReadPathBudget);
 
         ProjectionPassReport readPass = midPassEngine.ProjectIncrementalForReads();
         Assert.Equal(["sess-small"], readPass.RebuiltKeys);
@@ -454,7 +459,7 @@ public class ProjectionReadPathTests
             store,
             store,
             pricing,
-            new CanonSessionProjectorEngine(reader, store, store, pricing),
+            new CanonSessionProjectorEngine(reader, store, store, pricing, new FakeTextTokenizer()),
             new CanonRollupsEngine(reader, store, pricing));
 
         JsonElement firstPage = bridge.GetSessionPage().GetProperty("sessions");
@@ -477,7 +482,7 @@ public class ProjectionReadPathTests
     }
 
     private static CanonSessionProjectorEngine NewEngine(InMemoryRelationalStore store) =>
-        new(store, store, store, new FakePricingRepository());
+        new(store, store, store, new FakePricingRepository(), new FakeTextTokenizer());
 
     /// <summary>
     /// Awaits <paramref name="task"/> through a deadlock guard rather than a blocking wait: the
@@ -600,6 +605,9 @@ public class ProjectionReadPathTests
 
         /// <inheritdoc />
         public IReadOnlyList<StoredSourceCount> SourceRecordCounts() => inner.SourceRecordCounts();
+
+        public IReadOnlyList<string> SessionKeysWithRecordSource(string harnessId, string sourceName, int limit) =>
+            inner.SessionKeysWithRecordSource(harnessId, sourceName, limit);
 
         /// <inheritdoc />
         public CollectedRecord? RecordContentFree(string spanId) => inner.RecordContentFree(spanId);

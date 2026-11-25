@@ -410,6 +410,129 @@ describe('TurnSpendChart', () => {
       expect(onSelect).toHaveBeenCalledWith(2)
     }
   })
+
+  // A turn with no measured counter: every token field is null, as the
+  // /charts section serves it for a harness that reports no per-turn tokens.
+  const unmeasuredTurn = (index: number): TurnSpendItem =>
+    ({
+      index,
+      input: null,
+      output: null,
+      cache_read: null,
+      cache_creation: null,
+      fresh: null,
+      fresh_input: null,
+      reasoning: null,
+      visible_output: null,
+    }) as unknown as TurnSpendItem
+
+  const turnBars = (element: React.ReactElement) =>
+    findAllElements(
+      element,
+      (el) => typeof el.props['data-testid'] === 'string' && el.props['data-testid'].startsWith('turn-bar-'),
+    )
+
+  it('renders the not-measurable state, with no bars, chips or zero figure, when no turn carries a counter', () => {
+    const turns = [unmeasuredTurn(1), unmeasuredTurn(2)]
+    const element = React.createElement(TurnSpendChart, { turns })
+    const text = normalizedRenderText(element)
+
+    expect(text).toContain('Token Spend per Turn')
+    expect(text).toContain('2 turns')
+    expect(text).toContain(
+      'This harness does not report token counts per turn. Session totals, where reported, are in the overview.',
+    )
+    expect(text).not.toContain('Fresh:')
+    expect(text).not.toContain('Cache Hit:')
+    expect(text).not.toContain('Output:')
+    expect(text).not.toMatch(/\b0\b/)
+    expect(findAllElements(element, (el) => el.props['data-testid'] === 'turn-spend-not-measurable')).toHaveLength(1)
+    expect(findAllElements(element, (el) => el.props['data-testid'] === 'turn-spend-chart')).toHaveLength(0)
+    expect(turnBars(element)).toHaveLength(0)
+  })
+
+  it('draws every turn, leaves an unmeasured turn bare, and sums chips over measured turns only', () => {
+    const element = React.createElement(TurnSpendChart, {
+      turns: [sampleTurns[0]!, unmeasuredTurn(2), sampleTurns[2]!],
+    })
+    const bars = turnBars(element)
+
+    expect(bars.map((b) => b.props['data-testid'])).toEqual(['turn-bar-1', 'turn-bar-2', 'turn-bar-3'])
+    expect(bars[0]!.props['data-measured']).toBe('true')
+    expect(bars[1]!.props['data-measured']).toBe('false')
+    expect(bars[1]!.props['aria-label']).toBe('Turn 2, tokens not measured')
+    expect(bars[2]!.props['data-measured']).toBe('true')
+
+    // Segments are the only <title> children of a bar: none for the unmeasured turn.
+    expect(findAllElements(bars[1]!, (el) => el.type === 'title')).toHaveLength(0)
+    expect(findAllElements(bars[0]!, (el) => el.type === 'title').length).toBeGreaterThan(0)
+
+    // Chips equal the figures for measured turns 1 and 3 alone:
+    // fresh 1000 + 800 = 1.8K; cache read 1500 of 3800 input = 39.5%; output 250 + 400 = 650.
+    const text = normalizedRenderText(element)
+    expect(text).toContain('Fresh: 1.8K')
+    expect(text).toMatch(/Cache Hit: 39\.5 ?%/)
+    expect(text).toContain('Output: 650')
+  })
+
+  it('keeps a turn whose only counter is a measured zero as measured', () => {
+    const element = React.createElement(TurnSpendChart, {
+      turns: [{ index: 1, output: 0 } as TurnSpendItem],
+    })
+    const bars = turnBars(element)
+
+    expect(bars).toHaveLength(1)
+    expect(bars[0]!.props['data-measured']).toBe('true')
+    expect(findAllElements(element, (el) => el.props['data-testid'] === 'turn-spend-not-measurable')).toHaveLength(0)
+  })
+
+  it('marks every fully measured turn as measured and keeps the chart shell', () => {
+    const element = React.createElement(TurnSpendChart, { turns: sampleTurns })
+    const bars = turnBars(element)
+
+    expect(bars).toHaveLength(3)
+    for (const bar of bars) expect(bar.props['data-measured']).toBe('true')
+    expect(findAllElements(element, (el) => el.props['data-testid'] === 'turn-spend-chart')).toHaveLength(1)
+  })
+
+  it('words a fresh-input jump against the immediately preceding turn as "vs previous turn"', () => {
+    // Turn 3 (fresh 800) follows turn 2 (fresh 200): +300%, adjacent.
+    const element = React.createElement(TurnSpendChart, { turns: sampleTurns })
+    const text = normalizedRenderText(element)
+
+    expect(text).toContain('#3 (+300% vs previous turn)')
+    expect(text).not.toContain('vs previous measured turn')
+  })
+
+  it('names the compared turn when an unmeasured turn sits between the jump and its baseline', () => {
+    // Turn 1 is measured (fresh 200); turn 2 has no counter; turn 3 (fresh 800)
+    // is compared against turn 1, the previous measured turn: +300%.
+    const turns: TurnSpendItem[] = [
+      { index: 1, fresh_input: 200, cache_read: 0, output: 50, input: 200 },
+      unmeasuredTurn(2),
+      { index: 3, fresh_input: 800, cache_read: 0, output: 50, input: 800 },
+    ]
+    const element = React.createElement(TurnSpendChart, { turns })
+    const text = normalizedRenderText(element)
+
+    expect(text).toContain('#3 (+300% vs previous measured turn (turn 1))')
+    expect(text).not.toContain('#3 (+300% vs previous turn)')
+  })
+
+  it('labels a server-provided jump "vs earlier turn", since the API does not name its baseline turn', () => {
+    // The server's fresh_jump_pct is not measured against a turn the API names,
+    // so the label must not claim "previous turn" or name one.
+    const turns: TurnSpendItem[] = [
+      { index: 1, fresh_input: 200, cache_read: 0, output: 50, input: 200 },
+      { index: 2, fresh_input: 800, cache_read: 0, output: 50, input: 800, fresh_jump_pct: 300 },
+    ]
+    const element = React.createElement(TurnSpendChart, { turns })
+    const text = normalizedRenderText(element)
+
+    expect(text).toContain('#2 (+300% vs earlier turn)')
+    expect(text).not.toContain('vs previous turn')
+    expect(text).not.toContain('vs previous measured turn')
+  })
 })
 
 describe('ContextCompositionChart', () => {
@@ -637,6 +760,23 @@ describe('ContextCompositionChart', () => {
     expect(hasTestId(element, 'context-caveat-measured')).toBe(false)
   })
 
+  it('names the model a stand-in tokenizer is not the own of', () => {
+    const element = React.createElement(ContextCompositionChart, {
+      context: {
+        ...sampleContext,
+        derivedCounts: true,
+        tokenizer: 'o200k_base',
+        tokenizers: [{ name: 'o200k_base', isModelOwn: false }],
+        tokenizerIsModelOwn: false,
+      },
+      turns: [{ index: 1, model: 'claude-opus-4' }],
+    })
+
+    const text = normalizedRenderText(element)
+    expect(text).toContain('o200k_base, standard tokenizer — not Claude')
+    expect(text).not.toMatch(/estimated/i)
+  })
+
   it('does not warn about a proxy tokenizer when the harness reported the counts', () => {
     // The previous note fired on `derivedCounts` alone, so it appeared even
     // for harnesses reporting exact per-bucket totals, where it is false.
@@ -680,7 +820,7 @@ describe('ContextCompositionChart', () => {
 
     const atThresholdText = normalizedRenderText(atThreshold)
     expect(atThresholdText).toMatch(
-      /Bucket sizes are derived by tokenizing content with o200k_base\s*, a proxy for models that do not publish their tokenizer, so each is a lower bound\./,
+      /Bucket sizes are derived by tokenizing content with o200k_base\s*, standard tokenizer — not the model's own\s*,\s*so each is a lower bound\./,
     )
     expect(atThresholdText).toMatch(
       /The residual of 15\.0\s*% is the gap between the buckets and the model's own reported input\./,
@@ -710,7 +850,7 @@ describe('ContextCompositionChart', () => {
     })
 
     const text = normalizedRenderText(element)
-    expect(text).toMatch(/Bucket sizes are reported by the harness\s*, not estimated\./)
+    expect(text).toMatch(/Bucket sizes are reported by the harness\s*, measured directly\./)
     expect(text).toMatch(
       /The residual of 16\.0\s*% is input the harness did not attribute to any bucket — chat framing and role delimiters — rather than tokenizer drift\./,
     )

@@ -226,6 +226,9 @@ public class FullReingestTests
             inner.DeleteSource(sourceId);
         }
 
+        public void ClearEstimatedRecordTokens(string harnessId, string sourceLocator, EstimatedRecordTokens estimated) =>
+            inner.ClearEstimatedRecordTokens(harnessId, sourceLocator, estimated);
+
         public void WriteProblem(CollectedProblem problem) => inner.WriteProblem(problem);
     }
 
@@ -385,6 +388,14 @@ public class FullReingestTests
             }
 
             return files[normalized].Content;
+        }
+
+        public string ReadAllText(string filePath, long maxBytes)
+        {
+            string text = ReadAllText(filePath);
+            return System.Text.Encoding.UTF8.GetByteCount(text) <= maxBytes
+                ? text
+                : throw new InvalidDataException($"'{filePath}' holds more than {maxBytes} bytes.");
         }
 
         public string GetFullPath(string path) => Path.GetFullPath(path);

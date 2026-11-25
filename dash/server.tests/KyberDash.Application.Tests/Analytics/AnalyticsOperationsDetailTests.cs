@@ -217,7 +217,7 @@ public sealed class AnalyticsOperationsDetailTests
             store,
             store,
             store,
-            new CanonSessionProjectorEngine(store, store, store, pricing),
+            new CanonSessionProjectorEngine(store, store, store, pricing, new FakeTextTokenizer()),
             new CanonRollupsEngine(store, store, pricing));
 
     private static KyberBridgeEngine CreateBridge(
@@ -230,7 +230,7 @@ public sealed class AnalyticsOperationsDetailTests
             store,
             store,
             pricing,
-            new CanonSessionProjectorEngine(reader, store, store, pricing),
+            new CanonSessionProjectorEngine(reader, store, store, pricing, new FakeTextTokenizer()),
             new CanonRollupsEngine(reader, store, pricing),
             clock: () => FixedTimestamp,
             instanceId: "test-instance");
@@ -274,7 +274,7 @@ public sealed class AnalyticsOperationsDetailTests
             projections,
             operational,
             pricing,
-            new CanonSessionProjectorEngine(reader, projections, operational, pricing),
+            new CanonSessionProjectorEngine(reader, projections, operational, pricing, new FakeTextTokenizer()),
             new CanonRollupsEngine(reader, projections, pricing),
             clock: () => FixedTimestamp,
             instanceId: "test-instance");
@@ -332,6 +332,9 @@ public sealed class AnalyticsOperationsDetailTests
 
         /// <inheritdoc />
         public IReadOnlyList<StoredSourceCount> SourceRecordCounts() => inner.SourceRecordCounts();
+
+        public IReadOnlyList<string> SessionKeysWithRecordSource(string harnessId, string sourceName, int limit) =>
+            inner.SessionKeysWithRecordSource(harnessId, sourceName, limit);
 
         public CollectedRecord? RecordContentFree(string spanId) => inner.RecordContentFree(spanId);
 

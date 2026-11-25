@@ -366,7 +366,7 @@ describe('Issue #319: refresh, import and the scheduled toggle', () => {
       otherwise: (call) =>
         call.url.includes('/refresh')
           ? { status: 409, json: { error: 'already running as pid 4242' } }
-          : { status: 202, json: {} },
+          : { status: 200, json: { outcome: 'succeeded', failedUnits: 0 } },
     })
     await openPanel()
 
@@ -375,6 +375,62 @@ describe('Issue #319: refresh, import and the scheduled toggle', () => {
     const status = await screen.findByTestId('maintenance-refresh-status')
     expect(status.textContent).toMatch(/already running|running/i)
     expect(status.textContent).not.toContain('4242')
+  })
+
+  it('says the refresh finished when the host reports success', async () => {
+    stubFetch({ otherwise: () => ({ status: 200, json: { outcome: 'succeeded', failedUnits: 0 } }) })
+    await openPanel()
+
+    fireEvent.click(screen.getByTestId('maintenance-refresh-button'))
+
+    const status = await screen.findByTestId('maintenance-refresh-status')
+    expect(status.textContent).toBe('Refresh finished.')
+  })
+
+  it('reports a partial refresh with its failed source count, never as requested', async () => {
+    stubFetch({
+      otherwise: (call) =>
+        call.url.includes('/refresh')
+          ? { status: 200, json: { outcome: 'partial', failedUnits: 2 } }
+          : { status: 200, json: { outcome: 'succeeded', failedUnits: 0 } },
+    })
+    await openPanel()
+
+    fireEvent.click(screen.getByTestId('maintenance-refresh-button'))
+
+    const status = await screen.findByTestId('maintenance-refresh-status')
+    expect(status.textContent).toBe(
+      'Refresh finished — 2 sources could not be read (see Problems).',
+    )
+    expect(status.textContent).not.toMatch(/requested/i)
+  })
+
+  it('says the folder-history import finished when the host reports success', async () => {
+    stubFetch({ otherwise: () => ({ status: 200, json: { outcome: 'succeeded', failedUnits: 0 } }) })
+    await openPanel()
+
+    fireEvent.click(screen.getByTestId('maintenance-import-button'))
+
+    const status = await screen.findByTestId('maintenance-import-status')
+    expect(status.textContent).toBe('Import finished.')
+  })
+
+  it('reports a partial import with its failed source count, never as requested', async () => {
+    stubFetch({
+      otherwise: (call) =>
+        call.url.includes('/import-history')
+          ? { status: 200, json: { outcome: 'partial', failedUnits: 1 } }
+          : { status: 200, json: { outcome: 'succeeded', failedUnits: 0 } },
+    })
+    await openPanel()
+
+    fireEvent.click(screen.getByTestId('maintenance-import-button'))
+
+    const status = await screen.findByTestId('maintenance-import-status')
+    expect(status.textContent).toBe(
+      'Import finished — 1 source could not be read (see Problems).',
+    )
+    expect(status.textContent).not.toMatch(/requested/i)
   })
 
   it('imports folder history for the default one week', async () => {
