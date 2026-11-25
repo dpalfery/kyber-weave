@@ -274,6 +274,54 @@ public sealed class ReviewGatesTaskGateNextStepTests
         Assert.Contains("runs=1", gated.Output, StringComparison.Ordinal);
     }
 
+    [Fact]
+    public void ANoGateRunAfterPriorGatedRunsPeeksNextOrdinalWithoutConsumingIt()
+    {
+        _ = Gates(PassingResult(), "--agent", "csharp-dev", "--task", "t1", "--paths", TaskFile);
+        _ = Gates(PassingResult(), "--agent", "csharp-dev", "--task", "t1", "--paths", TaskFile);
+
+        CapturedConsoleExecution<int> noGates = Gates(
+            PassingResult(), "--agent", "go-dev", "--task", "t1", "--paths", TaskFile);
+
+        Assert.Equal(0, noGates.Result);
+        Assert.Contains("TASK_GATE: NONE_DECLARED", noGates.Output, StringComparison.Ordinal);
+        Assert.Contains("runs=3", noGates.Output, StringComparison.Ordinal);
+
+        CapturedConsoleExecution<int> nextGated = Gates(
+            PassingResult(), "--agent", "csharp-dev", "--task", "t1", "--paths", TaskFile);
+
+        Assert.Equal(0, nextGated.Result);
+        Assert.Contains("STATUS: PASS", nextGated.Output, StringComparison.Ordinal);
+        Assert.Contains("runs=3", nextGated.Output, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void ANoGateRunWithoutATaskIdPrintsRunsEqualsOne()
+    {
+        CapturedConsoleExecution<int> noGates = Gates(
+            PassingResult(), "--agent", "go-dev", "--paths", TaskFile);
+
+        Assert.Equal(0, noGates.Result);
+        Assert.Contains("TASK_GATE: NONE_DECLARED", noGates.Output, StringComparison.Ordinal);
+        Assert.Contains("runs=1", noGates.Output, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void ANoGateRunWithAnUnreadableCounterPrintsRunsEqualsOneWithoutOverwriting()
+    {
+        string counter = Path.Combine(_repo, ".agent_scratchpad", "t1", "task-gate-runs");
+        _files.CreateDirectory(Path.GetDirectoryName(counter)!);
+        _files.WriteAllText(counter, "not a run count");
+
+        CapturedConsoleExecution<int> noGates = Gates(
+            PassingResult(), "--agent", "go-dev", "--task", "t1", "--paths", TaskFile);
+
+        Assert.Equal(0, noGates.Result);
+        Assert.Contains("TASK_GATE: NONE_DECLARED", noGates.Output, StringComparison.Ordinal);
+        Assert.Contains("runs=1", noGates.Output, StringComparison.Ordinal);
+        Assert.Equal("not a run count", _files.ReadAllText(counter));
+    }
+
     private static ProcessRunResult PassingResult() => new(0, string.Empty, TimedOut: false)
     {
         StandardOutput = "Passed!  - Failed:     0, Passed:    1, Skipped:     0, Total:    1, Duration: 1 s",

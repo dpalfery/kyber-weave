@@ -748,7 +748,9 @@ public sealed class ReviewGatesService(
             return ReviewCommandResultFactory.Reported(
                 report.HasErrors ? 1 : 0,
                 report,
-                request.HumanOutput && !resolved.IsRefused ? TaskGateNextStep.NoneDeclared(request.Agent!, paths, outPath, 1) : []);
+                request.HumanOutput && !resolved.IsRefused
+                    ? TaskGateNextStep.NoneDeclared(request.Agent!, paths, outPath, PeekRunCount(root, taskSlug))
+                    : []);
         }
 
         IReadOnlyList<string> changed;
@@ -936,21 +938,19 @@ public sealed class ReviewGatesService(
         return lines;
     }
 
+    private static string RunCountPath(string root, string taskSlug) =>
+        Path.Combine(root, ".agent_scratchpad", taskSlug, "task-gate-runs");
+
     /// <summary>
-    ///     The ordinal this task-gate run gets, and the counter it leaves for the next run.
+    ///     The ordinal the next task-gate run gets without advancing or writing the counter, so a no-gate run neither
+    ///     consumes an ordinal nor rewinds past prior gated runs.
     /// </summary>
-    /// <remarks>
-    ///     A counter file in the task's scratch folder names how many task-gate runs the task has had. The scratch
-    ///     folder is already the per-task evidence home, and one invocation cannot know the count any other way. A run
-    ///     with no task id names no folder, so it is always run 1. A counter that cannot be read or written counts as
-    ///     0: the run still reports its own number rather than failing on its own bookkeeping.
-    /// </remarks>
-    private int NextRunCount(string root, string? taskSlug)
+    private int PeekRunCount(string root, string? taskSlug)
     {
         if (taskSlug is null)
             return 1;
 
-        string path = Path.Combine(root, ".agent_scratchpad", taskSlug, "task-gate-runs");
+        string path = RunCountPath(root, taskSlug);
         int previous = 0;
         try
         {
@@ -964,7 +964,25 @@ public sealed class ReviewGatesService(
             previous = 0;
         }
 
-        int count = previous + 1;
+        return previous == int.MaxValue ? int.MaxValue : previous + 1;
+    }
+
+    /// <summary>
+    ///     The ordinal this task-gate run gets, and the counter it leaves for the next run.
+    /// </summary>
+    /// <remarks>
+    ///     A counter file in the task's scratch folder names how many task-gate runs the task has had. The scratch
+    ///     folder is already the per-task evidence home, and one invocation cannot know the count any other way. A run
+    ///     with no task id names no folder, so it is always run 1. A counter that cannot be read or written counts as
+    ///     0: the run still reports its own number rather than failing on its own bookkeeping.
+    /// </remarks>
+    private int NextRunCount(string root, string? taskSlug)
+    {
+        int count = PeekRunCount(root, taskSlug);
+        if (taskSlug is null)
+            return count;
+
+        string path = RunCountPath(root, taskSlug);
         try
         {
             files.CreateDirectory(Path.GetDirectoryName(path)!);
