@@ -38,7 +38,7 @@ function renderHtml(element: React.ReactElement): string {
 }
 
 describe('ContextReviewPanel (opt-in advisory review)', () => {
-  it('renders payload preview and token size calculation before confirmation (Criterion 2)', () => {
+  it('renders payload preview and the served token figures before confirmation (Criterion 2)', () => {
     const content = 'System prompt instructions: obey project conventions.\n'.repeat(20) // ~1,100 chars
     const blocks = [
       { key: 'system_prompt', label: 'System Instructions', text: content, tokens: 275 },
@@ -50,6 +50,7 @@ describe('ContextReviewPanel (opt-in advisory review)', () => {
         turnIndex: 3,
         sessionId: 'sess-preview-test',
         blocks,
+        initialShowPreview: true,
       }),
     )
 
@@ -58,11 +59,42 @@ describe('ContextReviewPanel (opt-in advisory review)', () => {
     expect(html).not.toContain('Decision D10')
     expect(html).toContain('Advisory Only')
 
-    // Asserts token calculation and character count preview
+    // The payload carries no served count of its own: it says so, never a guess.
     expect(html).toContain('Payload Size:')
+    expect(html).toContain('data-testid="review-payload-token-size"')
+    expect(html).toContain('not measured')
+    // The composition block's served count is shown as served.
+    expect(html).toContain('data-testid="review-block-token-system_prompt"')
+    expect(html).toContain('275 t')
     expect(html).toContain('Turn #3')
     expect(html).toContain('1 composition block')
     expect(html).toContain('Run Context Review')
+  })
+
+  it('never derives a token count from the payload text', () => {
+    // 4,000 characters was "~1,000 tokens" under the retired chars/4 estimate.
+    const html = renderHtml(
+      React.createElement(ContextReviewPanel, { content: 'x'.repeat(4000) }),
+    )
+
+    expect(html).not.toContain('~')
+    expect(html).not.toContain('1,000 tokens')
+    expect(html).not.toMatch(/estimated/i)
+    expect(html).not.toContain('≈')
+    expect(html).toContain('not measured')
+  })
+
+  it('states not measured for a composition block that carries no served count', () => {
+    const html = renderHtml(
+      React.createElement(ContextReviewPanel, {
+        content: 'Block text',
+        initialShowPreview: true,
+        blocks: [{ key: 'tool_definitions', label: 'Tools', text: 'Block text' }],
+      }),
+    )
+
+    expect(html).toContain('data-testid="review-block-token-tool_definitions"')
+    expect(html).toContain('not measured')
   })
 
   it('never triggers review automatically on render (Criterion 1)', () => {

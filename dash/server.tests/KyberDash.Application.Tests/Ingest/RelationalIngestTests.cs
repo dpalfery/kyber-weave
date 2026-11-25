@@ -7,10 +7,13 @@ using KyberDash.Application.Tests;
 using KyberDash.Application.Tests.Fakes;
 using KyberDash.Contracts.Repositories;
 using KyberDash.Contracts.Services;
+using KyberDash.Core.Exceptions;
 using KyberDash.Data.Collector;
 using KyberDash.Data.Collector.Sources;
+using KyberDash.Data.Tokenization;
 using KyberDash.Domain;
 using Microsoft.Extensions.DependencyInjection;
+using Moq;
 using Xunit;
 
 namespace KyberDash.Application.Tests.Ingest;
@@ -192,7 +195,7 @@ public class RelationalIngestTests
         Assert.Equal(0, outcome.Quarantined);
         Assert.Equal(0, outcome.Rejected);
 
-        ProjectionPassReport report = new CanonSessionProjectorEngine(store, store, store, pricing).ProjectIncremental();
+        ProjectionPassReport report = new CanonSessionProjectorEngine(store, store, store, pricing, new FakeTextTokenizer()).ProjectIncremental();
         Assert.Equal(1, report.Built);
 
         StoredSessionProjection? projection = store.GetSessionProjection(sessionId);
@@ -214,7 +217,7 @@ public class RelationalIngestTests
             store,
             store,
             pricing,
-            new CanonSessionProjectorEngine(store, store, store, pricing),
+            new CanonSessionProjectorEngine(store, store, store, pricing, new FakeTextTokenizer()),
             new CanonRollupsEngine(store, store, pricing));
         JsonElement tools = bridge.GetSessionTools(sessionId)!.Value;
         Assert.Contains(
@@ -256,7 +259,7 @@ public class RelationalIngestTests
         Assert.DoesNotContain(stored.Tokens, static token => token.TokenClass == TokenClass.Input);
         Assert.Null(stored.ReportedInputTokens);
 
-        _ = new CanonSessionProjectorEngine(store, store, store, pricing).ProjectIncremental();
+        _ = new CanonSessionProjectorEngine(store, store, store, pricing, new FakeTextTokenizer()).ProjectIncremental();
         SessionSummaryFigure? turnTotals = store.SessionSummaryFigures(sessionId, pricing.LoadPricingTables());
         Assert.NotNull(turnTotals);
         Assert.Null(turnTotals.TotalInput);
@@ -266,7 +269,7 @@ public class RelationalIngestTests
             store,
             store,
             pricing,
-            new CanonSessionProjectorEngine(store, store, store, pricing),
+            new CanonSessionProjectorEngine(store, store, store, pricing, new FakeTextTokenizer()),
             new CanonRollupsEngine(store, store, pricing));
         JsonElement summary = bridge.GetSessionSummary(sessionId)!.Value.GetProperty("summary");
         Assert.Equal(JsonValueKind.Null, summary.GetProperty("total_input").ValueKind);
@@ -314,14 +317,14 @@ public class RelationalIngestTests
 
         IngestOutcome outcome = CanonIngestPipeline.IngestBatch([turn], store, store);
         Assert.Equal(new IngestOutcome(1, 0, 0), outcome);
-        _ = new CanonSessionProjectorEngine(store, store, store, pricing).ProjectIncremental();
+        _ = new CanonSessionProjectorEngine(store, store, store, pricing, new FakeTextTokenizer()).ProjectIncremental();
 
         KyberBridgeEngine bridge = new(
             store,
             store,
             store,
             pricing,
-            new CanonSessionProjectorEngine(store, store, store, pricing),
+            new CanonSessionProjectorEngine(store, store, store, pricing, new FakeTextTokenizer()),
             new CanonRollupsEngine(store, store, pricing));
         store.ClearReadLog();
         JsonElement timeline = bridge.GetSessionTimeline(sessionId)!.Value.GetProperty("nodes");
@@ -642,6 +645,106 @@ public class RelationalIngestTests
     }
 
     /// <summary>
+    /// A store write that fails with a SQLite constraint violation for one unit is recorded as that
+    /// unit's source-unreadable problem, the other unit still imports, and the import-history job
+    /// succeeds instead of failing for every harness.
+    /// </summary>
+    [Fact]
+    public async Task ImportHistory_WhenOneUnitWriteViolatesAConstraint_RecordsAProblemAndImportsTheRest()
+    {
+        UnitWriteHarness harness = new();
+        harness.Writer.WriteBatchFailure = static batch => batch.Records.Any(static r => r.RecordId == "rec-bad")
+            ? new SqliteExecutionException("sqlite3 error 19: UNIQUE constraint failed: record.id", 19, "UNIQUE constraint failed: record.id")
+            : null;
+
+        JobOutcome outcome = await harness.Jobs.TriggerImportHistoryAsync(TestContext.Current.CancellationToken);
+
+        Assert.Equal("partial", outcome.Outcome);
+        Assert.Equal(1, outcome.FailedUnits);
+        Assert.NotNull(harness.Store.FindRecord("rec-good"));
+        Assert.Null(harness.Store.FindRecord("rec-bad"));
+        CollectedProblem problem = Assert.Single(harness.Writer.WriteProblemCalls);
+        Assert.Equal("SOURCE_UNREADABLE", problem.Code);
+        Assert.Contains("UNIQUE constraint failed", problem.Message, StringComparison.Ordinal);
+        Assert.Equal("failed", harness.Store.GetSourceCheckpoint("commandcode", harness.BadPath)?.LastStatus);
+        Assert.Equal("ok", harness.Store.GetSourceCheckpoint("commandcode", harness.GoodPath)?.LastStatus);
+
+        RefreshReport report = harness.Ingestion.RefreshHarnessSources(historyWeeks: 2);
+        Assert.Equal(1, report.Rows.Count(static r => r.Status == "failed"));
+    }
+
+    /// <summary>
+    /// A store that is itself unusable (locked, broken file, or an open circuit breaker) is not a
+    /// per-unit problem: the exception escapes and the job fails.
+    /// </summary>
+    [Fact]
+    public async Task ImportHistory_WhenTheStoreIsUnusable_FailsTheJob()
+    {
+        Exception[] unusable =
+        [
+            new SqliteExecutionException("sqlite3 error 5: database is locked", 5, "database is locked"),
+            new SqliteExecutionException("sqlite3 error 11: database disk image is malformed", 11, "database disk image is malformed"),
+            new CircuitBreakerOpenException("sqlite circuit open"),
+        ];
+
+        foreach (Exception failure in unusable)
+        {
+            UnitWriteHarness harness = new();
+            harness.Writer.WriteBatchFailure = _ => failure;
+
+            JobOutcome outcome = await harness.Jobs.TriggerImportHistoryAsync(TestContext.Current.CancellationToken);
+
+            Assert.Equal("failed", outcome.Outcome);
+            Assert.Empty(harness.Writer.WriteProblemCalls);
+        }
+    }
+
+    /// <summary>Two commandcode units, one that maps a record that the failing writer rejects and one good unit.</summary>
+    private sealed class UnitWriteHarness
+    {
+        public UnitWriteHarness()
+        {
+            FakeHarnessFileSystem fs = new();
+            BadPath = Combine(HomeRoot, ".commandcode/projects/repo/01-bad.jsonl");
+            GoodPath = Combine(HomeRoot, ".commandcode/projects/repo/02-good.jsonl");
+            fs.AddFile(BadPath, "{\"type\":\"turn\",\"id\":\"rec-bad\"}\n", BaselineUtc.AddMinutes(-10));
+            fs.AddFile(GoodPath, "{\"type\":\"turn\",\"id\":\"rec-good\"}\n", BaselineUtc.AddMinutes(-5));
+            Writer = new SpyRelationalStoreWriter(Store);
+            Ingestion = new TranscriptIngestionService(
+                Writer,
+                Store,
+                new HarnessSourceRegistry(),
+                [new CountingCommandCodeMapper()],
+                fs,
+                new DashOptions { StateDirectory = StateRoot },
+                homeDirectory: HomeRoot,
+                clock: () => BaselineUtc);
+            Mock<ICanonProjectionService> projection = new();
+            Jobs = new JobSchedulerService(
+                Store,
+                Store,
+                projection.Object,
+                Ingestion,
+                new FakeSettingsRepository(),
+                new FakeServerStateRepository(),
+                new DashOptions { StateDirectory = StateRoot },
+                clock: () => BaselineUtc);
+        }
+
+        public string BadPath { get; }
+
+        public string GoodPath { get; }
+
+        public InMemoryRelationalStore Store { get; } = new();
+
+        public SpyRelationalStoreWriter Writer { get; }
+
+        public TranscriptIngestionService Ingestion { get; }
+
+        public JobSchedulerService Jobs { get; }
+    }
+
+    /// <summary>
     /// Verifies unknown event types are counted in <c>ingest_problem</c> with zero payload rows
     /// or raw payloads persisted.
     /// </summary>
@@ -810,6 +913,46 @@ public class RelationalIngestTests
             kind: "internal",
             attributes);
 
+    /// <summary>
+    /// Ingest counts a record's content part with the record's own model tokenizer: a span whose
+    /// model has its own published tokenizer stores the part with that model's own measured token
+    /// figure, not the stand-in's.
+    /// </summary>
+    [Fact]
+    public void IngestBatch_CountsContentPartsWithTheRecordModelOwnTokenizer()
+    {
+        InMemoryRelationalStore store = new();
+        string promptDoc = "{\"こんにちは\":\"世界\"}";
+
+        OtlpSpan span = OpenCodeSpan(
+            spanId: "aaaaaaaaaaaaaaaa",
+            name: "opencode.step",
+            attributes: new Dictionary<string, JsonElement>(StringComparer.Ordinal)
+            {
+                ["opencode.contract_version"] = Element("3"),
+                ["opencode.span.kind"] = Element("step"),
+                ["opencode.session.id"] = Element("sess-pipeline-own"),
+                ["opencode.model.id"] = Element("gpt-3.5-turbo"),
+                ["opencode.usage.input"] = Element(10),
+                ["opencode.usage.output"] = Element(5),
+                ["gen_ai.request.model"] = Element("gpt-3.5-turbo"),
+                ["opencode.prompt.text"] = Element(promptDoc),
+            });
+
+        IngestOutcome outcome = CanonIngestPipeline.IngestBatch([span], store, store);
+        Assert.Equal(new IngestOutcome(1, 0, 0), outcome);
+
+        CollectedRecord? stored = store.FindRecord("aaaaaaaaaaaaaaaa");
+        Assert.NotNull(stored);
+        Assert.Equal("gpt-3.5-turbo", stored!.Model);
+
+        CollectedContentPart part = Assert.Single(store.FindRecordParts("aaaaaaaaaaaaaaaa"));
+        Assert.Null(part.PlainText);
+        Assert.NotNull(part.Withheld);
+        Assert.Equal(LocalTextTokenizer.Shared.Count(promptDoc, "gpt-3.5-turbo").Count, part.Withheld!.MeasuredTokens);
+        Assert.NotEqual(LocalTextTokenizer.Shared.Count(promptDoc, null).Count, part.Withheld.MeasuredTokens);
+    }
+
     private static OtlpSpan MakeOtlpSpan(
         string spanId,
         string traceId,
@@ -869,6 +1012,8 @@ public class RelationalIngestTests
 
     private sealed class SpyRelationalStoreWriter(IRelationalStoreWriter inner) : IRelationalStoreWriter
     {
+        public Func<CollectedBatch, Exception?>? WriteBatchFailure { get; set; }
+
         public List<CollectedBatch> WriteBatchCalls { get; } = [];
 
         public List<string> DeleteSourceCalls { get; } = [];
@@ -877,6 +1022,12 @@ public class RelationalIngestTests
 
         public void WriteBatch(CollectedBatch batch)
         {
+            Exception? failure = WriteBatchFailure?.Invoke(batch);
+            if (failure is not null)
+            {
+                throw failure;
+            }
+
             WriteBatchCalls.Add(batch);
             inner.WriteBatch(batch);
         }
@@ -886,6 +1037,9 @@ public class RelationalIngestTests
             DeleteSourceCalls.Add(sourceId);
             inner.DeleteSource(sourceId);
         }
+
+        public void ClearEstimatedRecordTokens(string harnessId, string sourceLocator, EstimatedRecordTokens estimated) =>
+            inner.ClearEstimatedRecordTokens(harnessId, sourceLocator, estimated);
 
         public void WriteProblem(CollectedProblem problem)
         {
@@ -1067,6 +1221,14 @@ public class RelationalIngestTests
             }
 
             return files[normalized].Content;
+        }
+
+        public string ReadAllText(string filePath, long maxBytes)
+        {
+            string text = ReadAllText(filePath);
+            return System.Text.Encoding.UTF8.GetByteCount(text) <= maxBytes
+                ? text
+                : throw new InvalidDataException($"'{filePath}' holds more than {maxBytes} bytes.");
         }
 
         public string GetFullPath(string path) => Path.GetFullPath(path);

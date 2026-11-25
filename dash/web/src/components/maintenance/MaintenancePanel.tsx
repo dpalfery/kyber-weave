@@ -27,6 +27,7 @@ import {
   requestKyberRefresh,
   updateKyberSettings,
   type KyberHarnessSummary,
+  type KyberJobOutcome,
 } from '../../lib/kyberApi.js'
 import {
   ACTION_BUTTON,
@@ -63,6 +64,18 @@ function parseWeeks(raw: string): number | null {
   if (!/^\d+$/.test(raw.trim())) return null
   const weeks = Number(raw.trim())
   return weeks >= MIN_WEEKS && weeks <= MAX_WEEKS ? weeks : null
+}
+
+/**
+ * The line a finished job pass shows. It states what the host reported: a partial
+ * pass names how many sources it could not read, and is never called a success.
+ */
+function outcomeLine(noun: 'Refresh' | 'Import', outcome: KyberJobOutcome): string {
+  if (outcome.outcome === 'partial') {
+    const failed = outcome.failedUnits
+    return `${noun} finished — ${failed} ${failed === 1 ? 'source' : 'sources'} could not be read (see Problems).`
+  }
+  return `${noun} finished.`
 }
 
 /**
@@ -136,9 +149,9 @@ export function MaintenancePanel({ harnesses }: MaintenancePanelProps) {
 
   const refresh = useMutation({
     mutationFn: () => requestKyberRefresh('web'),
-    onSuccess: () => {
-      setRefreshError(false)
-      setRefreshStatus('Refresh requested. The host runs it in the background.')
+    onSuccess: (outcome) => {
+      setRefreshError(outcome.outcome === 'partial')
+      setRefreshStatus(outcomeLine('Refresh', outcome))
     },
     onError: (error: unknown) => {
       setRefreshError(true)
@@ -155,9 +168,9 @@ export function MaintenancePanel({ harnesses }: MaintenancePanelProps) {
 
   const runImport = useMutation({
     mutationFn: (weeks: number) => importKyberHistory({ weeks, harnesses: importHarnesses }),
-    onSuccess: () => {
-      setImportError(false)
-      setImportStatus('Folder-history import requested.')
+    onSuccess: (outcome) => {
+      setImportError(outcome.outcome === 'partial')
+      setImportStatus(outcomeLine('Import', outcome))
     },
     onError: () => {
       setImportError(true)

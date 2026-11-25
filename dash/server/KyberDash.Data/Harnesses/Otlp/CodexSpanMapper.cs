@@ -273,6 +273,9 @@ public class CodexSpanMapper : IHarnessMapper
             CorrectionRule: null,
             DeclaredContextWindow: null);
 
+        // Codex OTel carries no per-model-call id (its auth.request_id names an auth request), so a
+        // Codex record joins to nothing by id: both ids stay absent and the projector pairs it
+        // one to one with a rollout model call on equal reported counters within the twin skew.
         return new CollectedRecord(
             RecordId: native.SpanId,
             HarnessId: harnessId,
@@ -297,7 +300,9 @@ public class CodexSpanMapper : IHarnessMapper
             ToolDefinitions: [],
             Signals: signals,
             ReportedInputTokens: reportedInputTokens,
-            ReportedOutputTokens: reportedOutputTokens);
+            ReportedOutputTokens: reportedOutputTokens,
+            ResponseId: null,
+            RequestId: null);
     }
 
     private static RecordOp ResolveOp(OtlpSpanNative native)

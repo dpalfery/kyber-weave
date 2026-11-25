@@ -71,6 +71,14 @@ public class HarnessMapperRegistrationTests
         Assert.IsType<PiMapper>(pi);
     }
 
+    [Fact]
+    public void AddDashApplication_RegistersTheSqliteSeamForTheRegistry()
+    {
+        using ServiceProvider provider = Composition();
+
+        Assert.IsType<MicrosoftDataSqliteHarnessSource>(provider.GetRequiredService<IHarnessSqliteSource>());
+    }
+
     private static ServiceProvider Composition() =>
         new ServiceCollection().AddDashApplication().BuildServiceProvider();
 }

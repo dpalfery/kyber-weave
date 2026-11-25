@@ -1,7 +1,9 @@
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
+using KyberDash.Contracts.Repositories;
 using KyberDash.Data.Collector;
+using KyberDash.Data.Tokenization;
 using KyberDash.Domain;
 using KyberDash.Domain.Schema;
 using Xunit;
@@ -14,6 +16,37 @@ namespace KyberDash.Data.Tests.Collector;
 /// </summary>
 public class ToolContentMeasurerTests
 {
+    private static readonly WordCountTokenizer Words = new();
+
+    /// <summary>
+    /// The default overload counts with the shared local tokenizer under the record's model and
+    /// names that tokenizer on the measurement, never a characters / 4 figure.
+    /// </summary>
+    [Fact]
+    public void Measure_DefaultCountsWithTheSharedLocalTokenizerAndLabelsIt()
+    {
+        const string text = "The quick brown fox jumps over the lazy dog, again and again.";
+
+        ToolContentMeasurement measurement = ToolContentMeasurer.Measure(text, model: "gpt-4o");
+
+        TokenCount expected = LocalTextTokenizer.Shared.Count(text, "gpt-4o");
+        Assert.Equal(expected.Count, measurement.MeasuredTokens);
+        Assert.Equal(expected.Tokenizer, measurement.MeasuredTokenizer);
+        Assert.NotEqual((text.Length + 3L) / 4L, measurement.MeasuredTokens);
+    }
+
+    /// <summary>The model reaches the tokenizer, so each record counts under its own model.</summary>
+    [Fact]
+    public void Measure_PassesTheRecordModelToTheTokenizer()
+    {
+        RecordingTokenizer recording = new();
+
+        _ = ToolContentMeasurer.Measure("alpha beta", recording, "model-alpha");
+        _ = ToolContentMeasurer.Measure("gamma", recording, "model-beta");
+
+        Assert.Equal(["model-alpha", "model-beta"], recording.Models);
+    }
+
     [Theory]
     [InlineData("{}")]
     [InlineData("[]")]
@@ -68,15 +101,16 @@ public class ToolContentMeasurerTests
             """;
         string equivalentReordered = "{\"a\":{\"b\":\"hello\",\"d\":[3,2,1]},\"z\":1}";
 
-        ToolContentMeasurement first = ToolContentMeasurer.Measure(unformatted);
-        ToolContentMeasurement second = ToolContentMeasurer.Measure(equivalentReordered);
+        ToolContentMeasurement first = ToolContentMeasurer.Measure(unformatted, Words, model: null);
+        ToolContentMeasurement second = ToolContentMeasurer.Measure(equivalentReordered, Words, model: null);
 
         Assert.True(first.IsDocument);
         Assert.Null(first.PlainText);
         Assert.Null(first.OriginalUtf8BytesWhenTruncated);
         Assert.Equal(Encoding.UTF8.GetByteCount(unformatted), first.Utf8Bytes);
         Assert.Equal(unformatted.Length, first.Characters);
-        Assert.Equal(CanonTokenCache.ApproximateO200kBase(unformatted), first.MeasuredTokens);
+        Assert.Equal(13, first.MeasuredTokens);
+        Assert.Equal(WordCountTokenizer.Name, first.MeasuredTokenizer);
 
         string expectedSha256 = Sha256Hex(equivalentReordered);
         Assert.Equal(expectedSha256, first.Sha256Fingerprint);
@@ -116,14 +150,14 @@ public class ToolContentMeasurerTests
     [InlineData("\"\\\"{\\\\\\\"b\\\\\\\":1,\\\\\\\"a\\\\\\\":2}\\\"\"", "{\"a\":2,\"b\":1}")]
     public void Measure_WithholdsNestedJsonStringThatParsesAsObjectOrArray(string nestedJsonString, string expectedCanonicalJson)
     {
-        ToolContentMeasurement measurement = ToolContentMeasurer.Measure(nestedJsonString);
+        ToolContentMeasurement measurement = ToolContentMeasurer.Measure(nestedJsonString, Words, model: null);
 
         Assert.True(measurement.IsDocument);
         Assert.Null(measurement.PlainText);
         Assert.Null(measurement.OriginalUtf8BytesWhenTruncated);
         Assert.Equal(Encoding.UTF8.GetByteCount(nestedJsonString), measurement.Utf8Bytes);
         Assert.Equal(nestedJsonString.Length, measurement.Characters);
-        Assert.Equal(CanonTokenCache.ApproximateO200kBase(nestedJsonString), measurement.MeasuredTokens);
+        Assert.Equal(WordCountTokenizer.WordsIn(nestedJsonString), measurement.MeasuredTokens);
         Assert.Equal(Sha256Hex(expectedCanonicalJson), measurement.Sha256Fingerprint);
     }
 
@@ -134,14 +168,14 @@ public class ToolContentMeasurerTests
     [InlineData("Here is a JSON snippet: {\"a\":1}")]
     public void Measure_PreservesJsonScalarsAndProseAsPlainText(string input)
     {
-        ToolContentMeasurement measurement = ToolContentMeasurer.Measure(input);
+        ToolContentMeasurement measurement = ToolContentMeasurer.Measure(input, Words, model: null);
 
         Assert.False(measurement.IsDocument);
         Assert.Equal(input, measurement.PlainText);
         Assert.Null(measurement.OriginalUtf8BytesWhenTruncated);
         Assert.Equal(Encoding.UTF8.GetByteCount(input), measurement.Utf8Bytes);
         Assert.Equal(input.Length, measurement.Characters);
-        Assert.Equal(CanonTokenCache.ApproximateO200kBase(input), measurement.MeasuredTokens);
+        Assert.Equal(WordCountTokenizer.WordsIn(input), measurement.MeasuredTokens);
         Assert.Equal(Sha256Hex(input), measurement.Sha256Fingerprint);
     }
 
@@ -150,14 +184,14 @@ public class ToolContentMeasurerTests
     [InlineData("   \t ")]
     public void Measure_PreservesEmptyAndBlankInput(string input)
     {
-        ToolContentMeasurement measurement = ToolContentMeasurer.Measure(input);
+        ToolContentMeasurement measurement = ToolContentMeasurer.Measure(input, Words, model: null);
 
         Assert.False(measurement.IsDocument);
         Assert.Equal(input, measurement.PlainText);
         Assert.Null(measurement.OriginalUtf8BytesWhenTruncated);
         Assert.Equal(Encoding.UTF8.GetByteCount(input), measurement.Utf8Bytes);
         Assert.Equal(input.Length, measurement.Characters);
-        Assert.Equal(CanonTokenCache.ApproximateO200kBase(input), measurement.MeasuredTokens);
+        Assert.Equal(0, measurement.MeasuredTokens);
         Assert.Equal(Sha256Hex(input), measurement.Sha256Fingerprint);
     }
 
@@ -169,7 +203,7 @@ public class ToolContentMeasurerTests
         int originalBytes = Encoding.UTF8.GetByteCount(oversized);
         Assert.True(originalBytes > CanonSynth.MaxToolResultBytes);
 
-        ToolContentMeasurement measurement = ToolContentMeasurer.Measure(oversized);
+        ToolContentMeasurement measurement = ToolContentMeasurer.Measure(oversized, Words, model: null);
 
         Assert.False(measurement.IsDocument);
         Assert.NotNull(measurement.PlainText);
@@ -178,7 +212,7 @@ public class ToolContentMeasurerTests
         Assert.Equal(originalBytes, measurement.OriginalUtf8BytesWhenTruncated);
         Assert.Equal(originalBytes, measurement.Utf8Bytes);
         Assert.Equal(oversized.Length, measurement.Characters);
-        Assert.Equal(CanonTokenCache.ApproximateO200kBase(oversized), measurement.MeasuredTokens);
+        Assert.Equal(1, measurement.MeasuredTokens);
         Assert.Equal(Sha256Hex(oversized), measurement.Sha256Fingerprint);
     }
 
@@ -351,6 +385,29 @@ public class ToolContentMeasurerTests
         {
             Assert.Equal(expected[i].TableName, entry.Columns[i].TableName);
             Assert.Equal(expected[i].ColumnName, entry.Columns[i].ColumnName);
+        }
+    }
+
+    /// <summary>Test tokenizer: one token per whitespace-separated word, labelled <see cref="Name"/>.</summary>
+    private sealed class WordCountTokenizer : ITextTokenizer
+    {
+        public const string Name = "word_fake";
+
+        public static long WordsIn(string text) =>
+            text.Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries).LongLength;
+
+        public TokenCount Count(string text, string? model) => new(WordsIn(text), Name, false);
+    }
+
+    /// <summary>Test tokenizer that records the model of every count.</summary>
+    private sealed class RecordingTokenizer : ITextTokenizer
+    {
+        public List<string?> Models { get; } = [];
+
+        public TokenCount Count(string text, string? model)
+        {
+            Models.Add(model);
+            return new TokenCount(WordCountTokenizer.WordsIn(text), WordCountTokenizer.Name, false);
         }
     }
 

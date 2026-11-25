@@ -465,9 +465,15 @@ public record CursorTranscriptDocument(
 /// Bubble rows arrive as a JSON export mirroring the <c>BUBBLE_QUERY_BASE</c> projection columns;
 /// opening SQLite files in unit tests is forbidden (OD-9), so the offline seam parses the exported
 /// rows directly. Only the offline-derivable semantics are ported: per-bubble usage (harness-reported
-/// counts, estimated from text length when both are zero), composer session attribution, and
-/// <c>cursor-agent -&gt; cursor</c> normalization. Live-SQLite-only surfaces (workspace map, composer
-/// meter, agent-stream tool attachment, results cache, paged scans) are intentionally absent.
+/// counts only), composer session attribution, and <c>cursor-agent -&gt; cursor</c> normalization.
+/// Live-SQLite-only surfaces (workspace map, composer meter, agent-stream tool attachment, results
+/// cache, paged scans) are intentionally absent.
+/// <para>
+/// Token counts are the ones Cursor reported, or none. A bubble whose reported counts are both zero,
+/// and every transcript turn (transcripts carry no counts), becomes a record whose tokens are not
+/// measured: a count derived from text length would be an estimate, which KyberDash never produces
+/// (decision D15). A bubble with neither counts nor text carries nothing to record and is skipped.
+/// </para>
 /// </remarks>
 public partial class CursorMapper : IHarnessMapper
 {
@@ -486,7 +492,6 @@ public partial class CursorMapper : IHarnessMapper
     /// <summary>Maximum user prompt characters retained per turn.</summary>
     internal const int MaxUserTextLength = 500;
 
-    private const int CharsPerToken = 4;
     private const string DefaultBubbleModel = "cursor-auto";
     private const string DefaultTranscriptModel = "cursor-agent-auto";
     private const string UserQueryOpen = "<user_query>";
@@ -503,6 +508,18 @@ public partial class CursorMapper : IHarnessMapper
 
         string harnessId = ResolveHarnessId(unit.Unit.HarnessId);
         CollectedSource source = new(harnessId, unit.Unit.Kind, unit.Unit.SourceKey);
+        if (unit.RawText is null)
+        {
+            // A null payload means the read produced nothing for this source; say so instead of mapping it as an empty file.
+            List<CollectedProblem> nullProblems = BuildProblems(
+                [new CursorParseProblem(0, MalformedLineCode, $"Skipping Cursor source {unit.Unit.SourceKey}: no payload was read.")],
+                unit.Unit.SourceKey,
+                harnessId,
+                null,
+                importedAtUtc);
+            return new CollectedBatch(source, [], [], nullProblems);
+        }
+
         if (string.IsNullOrWhiteSpace(unit.RawText))
         {
             return new CollectedBatch(source, [], [], []);
@@ -724,9 +741,6 @@ public partial class CursorMapper : IHarnessMapper
     private static bool IsBubbleExport(string rawText) =>
         rawText.TrimStart().StartsWith('[');
 
-    private static long EstimateTokens(long charCount) =>
-        charCount <= 0 ? 0 : (charCount + CharsPerToken - 1) / CharsPerToken;
-
     private static string TranscriptStem(string transcriptPath)
     {
         string fileName = Path.GetFileName(transcriptPath);
@@ -801,34 +815,14 @@ public partial class CursorMapper : IHarnessMapper
             harnessId,
             null,
             importedAtUtc);
+        CollectedWorkspace? workspace = ResolveWorkspace(unit, problems, harnessId, importedAtUtc);
 
-        Dictionary<string, Queue<string>> userMessages = new(StringComparer.Ordinal);
-        foreach (CursorBubbleRow row in document.Rows)
-        {
-            if (row.BubbleType != 1 || string.IsNullOrWhiteSpace(row.UserText))
-            {
-                continue;
-            }
-
-            string? composerId = ParseComposerIdFromKey(row.BubbleKey);
-            if (composerId is null)
-            {
-                continue;
-            }
-
-            if (!userMessages.TryGetValue(composerId, out Queue<string>? queue))
-            {
-                queue = new Queue<string>();
-                userMessages[composerId] = queue;
-            }
-
-            queue.Enqueue(row.UserText);
-        }
-
-        List<CollectedRecord> records = [];
-        Dictionary<string, string> lastUserMessage = new(StringComparer.Ordinal);
-        Dictionary<string, List<CollectedRecord>> recordsByComposer = new(StringComparer.Ordinal);
-        HashSet<string> seenRecordIds = new(StringComparer.Ordinal);
+        // One turn is one user bubble together with the assistant bubbles that answer it, as on the
+        // cursor-agent transcript path. Assistant bubbles before any user bubble form one leading turn.
+        List<BubbleTurn> turns = [];
+        Dictionary<string, BubbleTurn> openTurns = new(StringComparer.Ordinal);
+        HashSet<string> composerIds = new(StringComparer.Ordinal);
+        List<string> composerOrder = [];
 
         foreach (CursorBubbleRow row in document.Rows)
         {
@@ -846,106 +840,168 @@ public partial class CursorMapper : IHarnessMapper
 
             long nativeInput = Math.Max(0, row.InputTokens ?? 0);
             long nativeOutput = Math.Max(0, row.OutputTokens ?? 0);
-            long input = nativeInput;
-            long output = nativeOutput;
-            if (input == 0 && output == 0)
+            if (nativeInput == 0
+                && nativeOutput == 0
+                && (row.TextLength ?? 0) <= 0
+                && string.IsNullOrWhiteSpace(row.UserText))
             {
-                long textLength = Math.Max(0, row.TextLength ?? 0);
-                if (textLength > 0)
+                continue;
+            }
+
+            bool isUser = row.BubbleType == 1;
+            if (isUser || !openTurns.TryGetValue(composerId, out BubbleTurn? turn))
+            {
+                turn = new BubbleTurn(
+                    composerId,
+                    startedAt.Value,
+                    SafeOptionalText(row.RequestId) ?? TailSegment(row.BubbleKey),
+                    isUser ? row.UserText : null);
+                turns.Add(turn);
+                openTurns[composerId] = turn;
+                if (composerIds.Add(composerId))
                 {
-                    if (row.BubbleType == 1)
-                    {
-                        input = EstimateTokens(textLength);
-                    }
-                    else
-                    {
-                        output = EstimateTokens(textLength);
-                    }
-                }
-
-                if (input == 0 && output == 0)
-                {
-                    continue;
+                    composerOrder.Add(composerId);
                 }
             }
 
-            string pairedUserText;
-            if (row.BubbleType == 1)
+            if (!isUser && !string.IsNullOrWhiteSpace(row.UserText))
             {
-                pairedUserText = userMessages.TryGetValue(composerId, out Queue<string>? queue) && queue.Count > 0
-                    ? queue.Dequeue()
-                    : string.Empty;
-                lastUserMessage[composerId] = pairedUserText;
-            }
-            else
-            {
-                pairedUserText = lastUserMessage.GetValueOrDefault(composerId, string.Empty);
+                turn.AssistantTexts.Add(row.UserText);
             }
 
-            string displayModel = string.IsNullOrWhiteSpace(row.Model) || string.Equals(row.Model, "default", StringComparison.Ordinal)
-                ? DefaultBubbleModel
-                : row.Model;
-            string anchor = SafeOptionalText(row.RequestId) ?? TailSegment(row.BubbleKey);
+            turn.InputTokens += nativeInput;
+            turn.OutputTokens += nativeOutput;
+            if (!isUser
+                && turn.Model is null
+                && !string.IsNullOrWhiteSpace(row.Model)
+                && !string.Equals(row.Model, "default", StringComparison.Ordinal))
+            {
+                turn.Model = row.Model;
+            }
+        }
+
+        List<CollectedRecord> records = [];
+        HashSet<string> seenRecordIds = new(StringComparer.Ordinal);
+        foreach (BubbleTurn turn in turns)
+        {
+            string displayModel = turn.Model ?? DefaultBubbleModel;
             string recordId = EnsureUniqueRecordId(
                 seenRecordIds,
-                string.Create(CultureInfo.InvariantCulture, $"{CanonSynth.SynthSpanPrefix}{harnessId}:{composerId}:{anchor}"));
+                string.Create(CultureInfo.InvariantCulture, $"{CanonSynth.SynthSpanPrefix}{harnessId}:{turn.ComposerId}:{turn.Anchor}"));
 
             List<CollectedContentPart> parts = [];
             int position = 0;
             string? correctionRule = null;
-            if (!string.IsNullOrWhiteSpace(pairedUserText))
+            if (!string.IsNullOrWhiteSpace(turn.UserText))
             {
-                CorrectionDetectionResult correction = CanonFindings.DetectUserCorrection(pairedUserText);
+                CorrectionDetectionResult correction = CanonFindings.DetectUserCorrection(turn.UserText);
                 if (correction.Matched)
                 {
                     correctionRule = correction.Rule;
                 }
 
-                parts.Add(ToolContentMeasurer.BuildContentPart(position++, ContentBucket.UserMessage, pairedUserText, "user"));
+                parts.Add(ToolContentMeasurer.BuildContentPart(position++, ContentBucket.UserMessage, turn.UserText, "user", displayModel));
             }
 
-            if (row.BubbleType != 1 && !string.IsNullOrWhiteSpace(row.UserText))
+            foreach (string text in turn.AssistantTexts)
             {
-                parts.Add(ToolContentMeasurer.BuildContentPart(position++, ContentBucket.ConversationHistory, row.UserText, "assistant"));
+                parts.Add(ToolContentMeasurer.BuildContentPart(position++, ContentBucket.ConversationHistory, text, "assistant", displayModel));
             }
 
             records.Add(BuildRecord(
                 recordId,
                 harnessId,
-                composerId,
+                turn.ComposerId,
                 string.Create(CultureInfo.InvariantCulture, $"cursor:{displayModel}"),
-                startedAt.Value,
+                turn.StartedAt,
                 displayModel,
-                input,
-                output,
-                0,
-                nativeInput > 0 ? nativeInput : null,
-                nativeOutput > 0 ? nativeOutput : null,
+                turn.InputTokens,
+                turn.OutputTokens,
+                turn.InputTokens > 0 ? turn.InputTokens : null,
+                turn.OutputTokens > 0 ? turn.OutputTokens : null,
                 parts,
                 correctionRule));
-
-            if (!recordsByComposer.TryGetValue(composerId, out List<CollectedRecord>? composerRecords))
-            {
-                composerRecords = [];
-                recordsByComposer[composerId] = composerRecords;
-            }
-
-            composerRecords.Add(records[^1]);
         }
 
         List<CollectedSession> sessions = [];
-        foreach (string composerId in recordsByComposer.Keys)
+        foreach (string composerId in composerOrder)
         {
             sessions.Add(new CollectedSession(
                 SessionKey: composerId,
                 HarnessId: harnessId,
                 NativeSessionId: composerId,
-                Workspace: null,
+                Workspace: workspace,
                 Title: null,
                 ReportedUsage: []));
         }
 
         return new CollectedBatch(source, sessions, records, problems);
+    }
+
+    /// <summary>
+    /// Reads the workspace from the <c>workspace.json</c> companion text (D14). Cursor writes
+    /// <c>{"folder": "file:///…"}</c> for a single-folder workspace. A companion that is not JSON, or whose
+    /// <c>folder</c> is not a <c>file:</c> URI, yields no workspace and one warning; a companion without a
+    /// <c>folder</c> (a multi-root workspace names a <c>workspace</c> file instead) yields no workspace.
+    /// </summary>
+    private static CollectedWorkspace? ResolveWorkspace(
+        NativeSourceUnit unit,
+        List<CollectedProblem> problems,
+        string harnessId,
+        DateTimeOffset importedAtUtc)
+    {
+        if (string.IsNullOrWhiteSpace(unit.CompanionText))
+        {
+            return null;
+        }
+
+        string? folder;
+        try
+        {
+            using JsonDocument companion = JsonDocument.Parse(unit.CompanionText);
+            folder = companion.RootElement.ValueKind == JsonValueKind.Object
+                && companion.RootElement.TryGetProperty("folder", out JsonElement folderElement)
+                && folderElement.ValueKind == JsonValueKind.String
+                    ? folderElement.GetString()
+                    : null;
+        }
+        catch (JsonException ex)
+        {
+            problems.AddRange(BuildProblems(
+                [new CursorParseProblem(0, MalformedLineCode, $"Ignoring Cursor workspace file for {unit.Unit.SourceKey}: {ex.Message}")],
+                unit.Unit.SourceKey,
+                harnessId,
+                null,
+                importedAtUtc));
+            return null;
+        }
+
+        if (string.IsNullOrWhiteSpace(folder))
+        {
+            return null;
+        }
+
+        if (!Uri.TryCreate(folder, UriKind.Absolute, out Uri? uri) || !uri.IsFile)
+        {
+            problems.AddRange(BuildProblems(
+                [new CursorParseProblem(0, MalformedLineCode, $"Ignoring Cursor workspace folder for {unit.Unit.SourceKey}: it is not a file: URI.")],
+                unit.Unit.SourceKey,
+                harnessId,
+                null,
+                importedAtUtc));
+            return null;
+        }
+
+        // AbsolutePath keeps the URI's own separators on every OS; a Windows drive path arrives as /C:/x.
+        string path = Uri.UnescapeDataString(uri.AbsolutePath);
+        if (path.Length >= 3 && path[0] == '/' && char.IsAsciiLetter(path[1]) && path[2] == ':')
+        {
+            path = path[1..];
+        }
+
+        return SafeOptionalText(path) is string workingDirectory
+            ? new CollectedWorkspace(workingDirectory, null, null)
+            : null;
     }
 
     private CollectedBatch MapTranscript(
@@ -992,14 +1048,6 @@ public partial class CursorMapper : IHarnessMapper
         for (int index = 0; index < document.Turns.Count; index++)
         {
             CursorTranscriptTurn turn = document.Turns[index];
-            long input = EstimateTokens(turn.UserMessage.Length);
-            long output = EstimateTokens(turn.Body.Length);
-            long reasoning = EstimateTokens(turn.Reasoning.Length);
-            if (input == 0 && output == 0)
-            {
-                continue;
-            }
-
             string recordId = EnsureUniqueRecordId(
                 seenRecordIds,
                 string.Create(
@@ -1017,17 +1065,17 @@ public partial class CursorMapper : IHarnessMapper
                     correctionRule = correction.Rule;
                 }
 
-                parts.Add(ToolContentMeasurer.BuildContentPart(position++, ContentBucket.UserMessage, turn.UserMessage, "user"));
+                parts.Add(ToolContentMeasurer.BuildContentPart(position++, ContentBucket.UserMessage, turn.UserMessage, "user", DefaultTranscriptModel));
             }
 
             if (!string.IsNullOrWhiteSpace(turn.Body))
             {
-                parts.Add(ToolContentMeasurer.BuildContentPart(position++, ContentBucket.ConversationHistory, turn.Body, "assistant"));
+                parts.Add(ToolContentMeasurer.BuildContentPart(position++, ContentBucket.ConversationHistory, turn.Body, "assistant", DefaultTranscriptModel));
             }
 
             if (!string.IsNullOrWhiteSpace(turn.Reasoning))
             {
-                parts.Add(ToolContentMeasurer.BuildContentPart(position++, ContentBucket.Reasoning, turn.Reasoning, "assistant"));
+                parts.Add(ToolContentMeasurer.BuildContentPart(position++, ContentBucket.Reasoning, turn.Reasoning, "assistant", DefaultTranscriptModel));
             }
 
             records.Add(BuildRecord(
@@ -1037,11 +1085,10 @@ public partial class CursorMapper : IHarnessMapper
                 string.Create(CultureInfo.InvariantCulture, $"cursor:{DefaultTranscriptModel}"),
                 startedAt,
                 DefaultTranscriptModel,
-                input,
-                output,
-                reasoning,
-                null,
-                null,
+                inputTokens: 0,
+                outputTokens: 0,
+                reportedInputTokens: null,
+                reportedOutputTokens: null,
                 parts,
                 correctionRule));
         }
@@ -1065,6 +1112,25 @@ public partial class CursorMapper : IHarnessMapper
         return new CollectedBatch(source, sessions, records, problems);
     }
 
+    private sealed class BubbleTurn(string composerId, DateTimeOffset startedAt, string anchor, string? userText)
+    {
+        public string ComposerId { get; } = composerId;
+
+        public DateTimeOffset StartedAt { get; } = startedAt;
+
+        public string Anchor { get; } = anchor;
+
+        public string? UserText { get; } = userText;
+
+        public List<string> AssistantTexts { get; } = [];
+
+        public string? Model { get; set; }
+
+        public long InputTokens { get; set; }
+
+        public long OutputTokens { get; set; }
+    }
+
     private CollectedRecord BuildRecord(
         string recordId,
         string harnessId,
@@ -1074,7 +1140,6 @@ public partial class CursorMapper : IHarnessMapper
         string model,
         long inputTokens,
         long outputTokens,
-        long reasoningTokens,
         long? reportedInputTokens,
         long? reportedOutputTokens,
         List<CollectedContentPart> parts,
@@ -1089,11 +1154,6 @@ public partial class CursorMapper : IHarnessMapper
         if (outputTokens > 0)
         {
             tokens.Add(new CollectedTokenCount(TokenClass.Output, outputTokens));
-        }
-
-        if (reasoningTokens > 0)
-        {
-            tokens.Add(new CollectedTokenCount(TokenClass.Reasoning, reasoningTokens));
         }
 
         return new CollectedRecord(

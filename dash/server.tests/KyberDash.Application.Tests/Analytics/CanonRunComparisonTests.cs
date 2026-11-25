@@ -323,7 +323,7 @@ public sealed class CanonRunComparisonTests
             store,
             store,
             store,
-            new CanonSessionProjectorEngine(store, store, store, pricing),
+            new CanonSessionProjectorEngine(store, store, store, pricing, new FakeTextTokenizer()),
             new CanonRollupsEngine(store, store, pricing));
 
     private static KyberBridgeEngine CreateBridge(InMemoryRelationalStore store, FakePricingRepository pricing)
@@ -333,7 +333,7 @@ public sealed class CanonRunComparisonTests
             store,
             store,
             pricing,
-            new CanonSessionProjectorEngine(store, store, store, pricing),
+            new CanonSessionProjectorEngine(store, store, store, pricing, new FakeTextTokenizer()),
             new CanonRollupsEngine(store, store, pricing),
             clock: () => FixedTimestamp,
             instanceId: "test-instance");

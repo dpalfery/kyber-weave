@@ -70,6 +70,11 @@ export function SessionSkillsSection({
     })
   }
 
+  // The session's model names a stand-in tokenizer's family only when the session
+  // ran exactly one model; with several, or none, the panel keeps its generic wording.
+  const models = summaryRecord?.models
+  const model = models?.length === 1 ? models[0] : undefined
+
   return (
     <div className={cn('space-y-3', className)} data-testid="skills-section">
       <div>
@@ -83,6 +88,7 @@ export function SessionSkillsSection({
       <SkillsPanel
         skills={block}
         summary={summaryRecord ?? undefined}
+        model={model}
         onSelectSkill={openSkillInspector}
         pager={{
           page: skills.page,

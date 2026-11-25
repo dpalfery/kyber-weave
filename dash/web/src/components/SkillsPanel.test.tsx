@@ -184,6 +184,41 @@ describe('SkillsPanel: reported aggregate and derived labelling', () => {
     const { container } = mount('realistic')
     expect(container.textContent).toMatch(/derived/i)
   })
+
+  it('never calls a derived figure estimated', () => {
+    const { container } = mount('realistic')
+    expect(container.textContent).not.toMatch(/estimated/i)
+    expect(container.textContent).not.toContain('≈')
+  })
+
+  it('names the tokenizer beside a text-derived skill token figure', () => {
+    const skills = {
+      measurable: true,
+      rows: [
+        {
+          name: 'docs',
+          listed: true,
+          invocations: 1,
+          turns_listed: [0],
+          derived_tokens: 38,
+          tokenizer: 'o200k_base',
+          tokenizers: [{ name: 'o200k_base', isModelOwn: false }],
+          tokenizerIsModelOwn: false,
+        },
+      ],
+    }
+
+    render(
+      <SkillsPanel
+        skills={asSkills(skills)}
+        summary={asSummary({ skills_listed: ['docs'], skills_invoked: ['docs'] })}
+      />,
+    )
+
+    const docs = rowOf('docs')
+    expect(docs.textContent).toContain('38')
+    expect(docs.textContent).toContain('o200k_base, standard tokenizer')
+  })
 })
 
 describe('SkillsPanel: not-measurable states', () => {

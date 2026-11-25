@@ -4,6 +4,8 @@ using System.Security.Cryptography;
 using System.Text;
 using System.Text.Encodings.Web;
 using System.Text.Json;
+using KyberDash.Contracts.Repositories;
+using KyberDash.Data.Tokenization;
 using KyberDash.Domain;
 
 namespace KyberDash.Data.Collector;
@@ -15,10 +17,12 @@ namespace KyberDash.Data.Collector;
 /// <param name="PlainText">Preserved plain text (truncated if oversized), or <see langword="null"/> when withheld as JSON.</param>
 /// <param name="Utf8Bytes">Original UTF-8 byte count before any truncation or withholding.</param>
 /// <param name="Characters">Original UTF-16 character count before any truncation or withholding.</param>
-/// <param name="MeasuredTokens">Derived token count via <see cref="CanonTokenCache.ApproximateO200kBase"/>.</param>
+/// <param name="MeasuredTokens">Token count the local tokenizer gives the original text under the record's model (decision D17).</param>
 /// <param name="Sha256Fingerprint">64-character lowercase hex SHA-256 over canonical sorted-key minified JSON or plain text.</param>
 /// <param name="OriginalUtf8BytesWhenTruncated">Original UTF-8 byte length when <see cref="PlainText"/> was truncated; otherwise <see langword="null"/>.</param>
 /// <param name="IsDocument"><see langword="true"/> when the input was classified as a JSON object/array (including nested JSON strings).</param>
+/// <param name="MeasuredTokenizer">Name of the tokenizer that produced <paramref name="MeasuredTokens"/>, such as <c>o200k_base</c>.</param>
+/// <param name="MeasuredTokenizerIsModelOwn"><see langword="true"/> when <paramref name="MeasuredTokenizer"/> is the model's own tokenizer.</param>
 public record ToolContentMeasurement(
     string? PlainText,
     long Utf8Bytes,
@@ -26,7 +30,9 @@ public record ToolContentMeasurement(
     long MeasuredTokens,
     string Sha256Fingerprint,
     long? OriginalUtf8BytesWhenTruncated,
-    bool IsDocument)
+    bool IsDocument,
+    string MeasuredTokenizer,
+    bool MeasuredTokenizerIsModelOwn = false)
 {
     /// <summary>Projects this measurement into a <see cref="CollectedToolContent"/> DTO.</summary>
     /// <param name="includeFingerprint">Whether to retain <see cref="Sha256Fingerprint"/> (typically true for tool inputs).</param>
@@ -45,7 +51,9 @@ public record ToolContentMeasurement(
         new(
             Utf8Bytes: Utf8Bytes,
             Characters: Characters,
-            MeasuredTokens: MeasuredTokens);
+            MeasuredTokens: MeasuredTokens,
+            Tokenizer: MeasuredTokenizer,
+            TokenizerIsModelOwn: MeasuredTokenizerIsModelOwn);
 }
 
 /// <summary>
@@ -68,17 +76,43 @@ public static class ToolContentMeasurer
     /// when it parses as a JSON object or array (directly or via nested JSON string unwrapping)
     /// and truncating preserved plain text above <paramref name="maxPlainTextBytes"/>.
     /// </summary>
+    /// <remarks>
+    /// Counts with the shared local tokenizer (<see cref="LocalTextTokenizer.Shared"/>) under
+    /// <paramref name="model"/>; a blank model counts under the labelled stand-in (D19).
+    /// </remarks>
     /// <param name="text">Raw content string to classify and measure.</param>
     /// <param name="maxPlainTextBytes">Maximum UTF-8 bytes preserved when keeping plain text.</param>
+    /// <param name="model">Model the record carrying the text was sent to; <see langword="null"/> when unknown.</param>
     /// <returns>The <see cref="ToolContentMeasurement"/>.</returns>
-    public static ToolContentMeasurement Measure(string text, int maxPlainTextBytes = CanonSynth.MaxToolResultBytes)
+    public static ToolContentMeasurement Measure(
+        string text,
+        int maxPlainTextBytes = CanonSynth.MaxToolResultBytes,
+        string? model = null) =>
+        Measure(text, LocalTextTokenizer.Shared, model, maxPlainTextBytes);
+
+    /// <summary>
+    /// Measures <paramref name="text"/> as <see cref="Measure(string, int, string?)"/> does, counting
+    /// with <paramref name="tokenizer"/>.
+    /// </summary>
+    /// <param name="text">Raw content string to classify and measure.</param>
+    /// <param name="tokenizer">Tokenizer that counts the text and names itself on the result.</param>
+    /// <param name="model">Model the record carrying the text was sent to; <see langword="null"/> when unknown.</param>
+    /// <param name="maxPlainTextBytes">Maximum UTF-8 bytes preserved when keeping plain text.</param>
+    /// <returns>The <see cref="ToolContentMeasurement"/>.</returns>
+    public static ToolContentMeasurement Measure(
+        string text,
+        ITextTokenizer tokenizer,
+        string? model,
+        int maxPlainTextBytes = CanonSynth.MaxToolResultBytes)
     {
         ArgumentNullException.ThrowIfNull(text);
+        ArgumentNullException.ThrowIfNull(tokenizer);
         ArgumentOutOfRangeException.ThrowIfLessThanOrEqual(maxPlainTextBytes, 0);
 
         long utf8Bytes = Encoding.UTF8.GetByteCount(text);
         long characters = text.Length;
-        long measuredTokens = CanonTokenCache.ApproximateO200kBase(text);
+        TokenCount measured = tokenizer.Count(text, model);
+        long measuredTokens = measured.Count;
 
         if (TryParseDocumentOrNested(text, out JsonDocument? document))
         {
@@ -92,7 +126,9 @@ public static class ToolContentMeasurer
                     MeasuredTokens: measuredTokens,
                     Sha256Fingerprint: sha256,
                     OriginalUtf8BytesWhenTruncated: null,
-                    IsDocument: true);
+                    IsDocument: true,
+                    MeasuredTokenizer: measured.Tokenizer,
+                    MeasuredTokenizerIsModelOwn: measured.IsModelOwn);
             }
         }
 
@@ -108,17 +144,23 @@ public static class ToolContentMeasurer
             MeasuredTokens: measuredTokens,
             Sha256Fingerprint: plainSha256,
             OriginalUtf8BytesWhenTruncated: originalBytes,
-            IsDocument: false);
+            IsDocument: false,
+            MeasuredTokenizer: measured.Tokenizer,
+            MeasuredTokenizerIsModelOwn: measured.IsModelOwn);
     }
 
     /// <summary>
     /// Measures a <see cref="JsonElement"/> payload by unwrapping string elements or serializing
-    /// structured elements before applying <see cref="Measure(string, int)"/>.
+    /// structured elements before applying <see cref="Measure(string, int, string?)"/>.
     /// </summary>
     /// <param name="element">JSON element to classify and measure.</param>
     /// <param name="maxPlainTextBytes">Maximum UTF-8 bytes preserved when keeping plain text.</param>
+    /// <param name="model">Model the record carrying the element was sent to; <see langword="null"/> when unknown.</param>
     /// <returns>The <see cref="ToolContentMeasurement"/>.</returns>
-    public static ToolContentMeasurement Measure(JsonElement element, int maxPlainTextBytes = CanonSynth.MaxToolResultBytes)
+    public static ToolContentMeasurement Measure(
+        JsonElement element,
+        int maxPlainTextBytes = CanonSynth.MaxToolResultBytes,
+        string? model = null)
     {
         ArgumentOutOfRangeException.ThrowIfLessThanOrEqual(maxPlainTextBytes, 0);
 
@@ -129,7 +171,7 @@ public static class ToolContentMeasurer
             _ => element.GetRawText(),
         };
 
-        return Measure(raw, maxPlainTextBytes);
+        return Measure(raw, maxPlainTextBytes, model);
     }
 
     /// <summary>
@@ -143,10 +185,11 @@ public static class ToolContentMeasurer
     /// <param name="bucket">Content bucket the part belongs to.</param>
     /// <param name="rawText">Raw text to classify and measure.</param>
     /// <param name="role">Speaker role carried on the part.</param>
+    /// <param name="model">Model the part's record was sent to; <see langword="null"/> when unknown.</param>
     /// <returns>The projected <see cref="CollectedContentPart"/>.</returns>
-    public static CollectedContentPart BuildContentPart(int position, ContentBucket bucket, string rawText, string? role)
+    public static CollectedContentPart BuildContentPart(int position, ContentBucket bucket, string rawText, string? role, string? model = null)
     {
-        ToolContentMeasurement measurement = Measure(rawText, CanonSynth.MaxToolResultBytes);
+        ToolContentMeasurement measurement = Measure(rawText, CanonSynth.MaxToolResultBytes, model);
         return new CollectedContentPart(
             Position: position,
             Bucket: bucket,

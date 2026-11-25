@@ -26,6 +26,14 @@ public interface IHarnessFileSystem
     /// <summary>Reads the full UTF-8 text contents of <paramref name="filePath"/>.</summary>
     string ReadAllText(string filePath);
 
+    /// <summary>
+    /// Reads the UTF-8 text contents of <paramref name="filePath"/>, holding no more than
+    /// <paramref name="maxBytes"/> bytes and stopping at the first read past them, so a file that grew after its
+    /// size was checked is still bounded.
+    /// </summary>
+    /// <exception cref="InvalidDataException">The file holds more than <paramref name="maxBytes"/> bytes.</exception>
+    string ReadAllText(string filePath, long maxBytes);
+
     /// <summary>Resolves <paramref name="path"/> to its canonical full path string.</summary>
     string GetFullPath(string path);
 }
@@ -175,6 +183,31 @@ public class PhysicalHarnessFileSystem : IHarnessFileSystem
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(filePath);
         return File.ReadAllText(filePath, Encoding.UTF8);
+    }
+
+    /// <inheritdoc />
+    public string ReadAllText(string filePath, long maxBytes)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(filePath);
+        ArgumentOutOfRangeException.ThrowIfNegative(maxBytes);
+        using FileStream input = new(filePath, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete);
+        using MemoryStream content = new();
+        byte[] chunk = new byte[81_920];
+        int read;
+        while ((read = input.Read(chunk, 0, chunk.Length)) > 0)
+        {
+            if (read > maxBytes - content.Length)
+            {
+                throw new InvalidDataException($"'{filePath}' holds more than {maxBytes} bytes.");
+            }
+
+            content.Write(chunk, 0, read);
+        }
+
+        // Decoded as File.ReadAllText decodes: a byte order mark picks the encoding and is not part of the text.
+        content.Position = 0;
+        using StreamReader reader = new(content, Encoding.UTF8, detectEncodingFromByteOrderMarks: true);
+        return reader.ReadToEnd();
     }
 
     /// <inheritdoc />

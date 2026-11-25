@@ -99,6 +99,245 @@ public class TranscriptIngestionService : ITranscriptIngestionService
     }
 
     /// <inheritdoc />
+    public RefreshReport RefreshPluginSessionFiles(string harnessId, IReadOnlyCollection<string> sessionKeys)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(harnessId);
+        ArgumentNullException.ThrowIfNull(sessionKeys);
+
+        DateTimeOffset commandStarted = clock();
+        if (sessionKeys.Count == 0)
+        {
+            return UnloggedRefreshReport([], commandStarted);
+        }
+
+        IHarnessSourceReader? reader = sourceRegistry!.GetReader(harnessId);
+        if (reader is null || HarnessMapperLookup.Resolve(mappersByHarness, harnessId) is null)
+        {
+            return UnloggedRefreshReport([], commandStarted);
+        }
+
+        DateTimeOffset windowStart = commandStarted.AddDays(-7.0 * CanonRefreshEngine.DefaultHistoryWeeks);
+        string coveredFromUtc = FormatUtc(windowStart);
+        string coveredThroughUtc = FormatUtc(commandStarted);
+        SourceDiscoveryContext context = new(
+            HomeDirectory: homeDirectory,
+            StateDirectory: stateDirectory,
+            FileSystem: fileSystem,
+            SinceUtc: windowStart);
+        SourceDiscoveryResult discovery = reader.Discover(context);
+        foreach (CollectedProblem discoveryProblem in discovery.Problems)
+        {
+            writer!.WriteProblem(discoveryProblem);
+        }
+
+        HashSet<string> wantedStems = new(sessionKeys, StringComparer.Ordinal);
+        List<RefreshSourceStatusRow> rows = [];
+        HashSet<string> sessionKeysRead = new(StringComparer.Ordinal);
+        foreach (SourceUnit unit in discovery.Sources)
+        {
+            // A session id arrives as data, so the file is matched by comparing its stem against
+            // discovery results — never by joining the id into a path, which a crafted id could
+            // aim outside the sessions root.
+            if (!wantedStems.Contains(Path.GetFileNameWithoutExtension(unit.SourceKey)))
+            {
+                continue;
+            }
+
+            rows.Add(ProcessRelationalSourceUnit(
+                unit,
+                commandStarted,
+                coveredFromUtc,
+                coveredThroughUtc,
+                coveredThroughUtc,
+                sessionKeysRead));
+        }
+
+        return UnloggedRefreshReport(rows, commandStarted, sessionKeysRead.Count);
+    }
+
+    /// <inheritdoc />
+    public RefreshReport RereadCheckpointedSources(IReadOnlyCollection<string> harnessIds)
+    {
+        ArgumentNullException.ThrowIfNull(harnessIds);
+
+        DateTimeOffset commandStarted = clock();
+        DateTimeOffset windowStart = commandStarted.AddDays(-7.0 * CanonRefreshEngine.DefaultHistoryWeeks);
+        string coveredFromUtc = FormatUtc(windowStart);
+        string coveredThroughUtc = FormatUtc(commandStarted);
+
+        // Discovery is not limited to the history window: the caller records this pass as complete
+        // once, so a checkpointed unit last written before the window would otherwise never be
+        // replaced. The checkpoint check below keeps the pass to units the store already knows. The
+        // floor is the earliest instant rather than none, because a reader given a cutoff still lists
+        // a file it cannot stat, which then fails loudly instead of vanishing from the pass.
+        SourceDiscoveryContext context = new(
+            HomeDirectory: homeDirectory,
+            StateDirectory: stateDirectory,
+            FileSystem: fileSystem,
+            SinceUtc: DateTimeOffset.MinValue);
+
+        List<RefreshSourceStatusRow> rows = [];
+        HashSet<string> sessionKeysRead = new(StringComparer.Ordinal);
+        HashSet<string> visitedHarnesses = new(StringComparer.Ordinal);
+        bool clearedAny = false;
+        foreach (string harnessId in harnessIds)
+        {
+            if (string.IsNullOrWhiteSpace(harnessId) || !visitedHarnesses.Add(harnessId))
+            {
+                continue;
+            }
+
+            // A harness with no reader or mapper discovers nothing, so none of its checkpointed
+            // units is rediscovered and the clear below still removes their stored estimates.
+            HashSet<string> discoveredKeys = new(StringComparer.Ordinal);
+            IHarnessSourceReader? reader = sourceRegistry!.GetReader(harnessId);
+            if (reader is null || HarnessMapperLookup.Resolve(mappersByHarness, harnessId) is null)
+            {
+                clearedAny |= ClearEstimatesOfVanishedUnits(harnessId, discoveredKeys, rows);
+                continue;
+            }
+
+            SourceDiscoveryResult discovery = reader.Discover(context);
+            foreach (CollectedProblem discoveryProblem in discovery.Problems)
+            {
+                writer!.WriteProblem(discoveryProblem);
+            }
+
+            foreach (SourceUnit unit in discovery.Sources)
+            {
+                if (!string.Equals(unit.HarnessId, harnessId, StringComparison.Ordinal))
+                {
+                    continue;
+                }
+
+                _ = discoveredKeys.Add(unit.SourceKey);
+
+                // Only a unit the store already knows is replaced; a never-imported file stays for
+                // the next folder import to pick up, so this pass cannot widen what was collected.
+                if (operationalStore!.GetSourceCheckpoint(unit.HarnessId, unit.SourceKey) is null)
+                {
+                    continue;
+                }
+
+                RefreshSourceStatusRow row = ProcessRelationalSourceUnit(
+                    unit,
+                    commandStarted,
+                    coveredFromUtc,
+                    coveredThroughUtc,
+                    coveredThroughUtc,
+                    sessionKeysRead);
+                rows.Add(row);
+                clearedAny |= string.Equals(row.Status, "committed", StringComparison.Ordinal);
+            }
+
+            clearedAny |= ClearEstimatesOfVanishedUnits(harnessId, discoveredKeys, rows);
+        }
+
+        // Replacing or deleting rows does not move the records write marker, so the projection pass
+        // would short-circuit on the re-read or cleared sessions: invalidate the watermarks as the
+        // clean path does.
+        if (clearedAny)
+        {
+            operationalStore!.SetWriteMarker(operationalStore.GetWriteMarker() + 1);
+            operationalStore.ClearProjectionDirtyState();
+        }
+
+        return UnloggedRefreshReport(rows, commandStarted, sessionKeysRead.Count);
+    }
+
+    /// <summary>
+    /// Clears to not measured the token values that an earlier parser contract version stored as
+    /// estimates for each checkpointed unit of <paramref name="harnessId"/> whose source key is not
+    /// among the units discovery returned in this pass, since such a unit cannot be re-read to
+    /// replace them.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// "Not rediscovered" covers a deleted file, a root discovery could not list, and a unit whose
+    /// file still exists but is now keyed differently (a database re-keyed from one unit per file to
+    /// one unit per conversation): in each case the old checkpoint's rows are never replaced.
+    /// </para>
+    /// <para>
+    /// The values are named by <see cref="HarnessSourceRegistry.EstimatedRecordTokensStoredUnder"/>
+    /// for the checkpoint's version. A checkpoint whose last status is not <c>ok</c> may carry the
+    /// new version while its stored rows are still the old ones (a failed read stamps the version it
+    /// tried), so it is treated as holding rows of <see cref="HarnessSourceRegistry.DefaultParserContractVersion"/>;
+    /// the newer readers store none of the values cleared, so this never removes a measured value.
+    /// </para>
+    /// <para>
+    /// Sessions, records, text and harness-reported counts stay, and the checkpoint keeps its version,
+    /// so a file that comes back is still re-read in full. A clear that fails is a failed unit row,
+    /// which keeps the one-time marker absent.
+    /// </para>
+    /// </remarks>
+    /// <param name="harnessId">Harness whose checkpoints are checked.</param>
+    /// <param name="discoveredKeys">Source keys discovery listed for the harness in this pass.</param>
+    /// <param name="rows">Pass rows the cleared and failed units are added to.</param>
+    /// <returns><see langword="true"/> when estimated values were cleared for at least one unit.</returns>
+    private bool ClearEstimatesOfVanishedUnits(
+        string harnessId,
+        HashSet<string> discoveredKeys,
+        List<RefreshSourceStatusRow> rows)
+    {
+        bool clearedAny = false;
+        foreach (SourceCheckpoint checkpoint in operationalStore!.ListSourceCheckpoints(harnessId))
+        {
+            if (discoveredKeys.Contains(checkpoint.SourceKey))
+            {
+                continue;
+            }
+
+            string storedVersion = string.Equals(checkpoint.LastStatus, "ok", StringComparison.Ordinal)
+                ? checkpoint.ParserContractVersion
+                : HarnessSourceRegistry.DefaultParserContractVersion;
+            EstimatedRecordTokens estimated = HarnessSourceRegistry.EstimatedRecordTokensStoredUnder(harnessId, storedVersion);
+            if (estimated == EstimatedRecordTokens.None)
+            {
+                continue;
+            }
+
+            try
+            {
+                writer!.ClearEstimatedRecordTokens(harnessId, checkpoint.SourceKey, estimated);
+                rows.Add(new RefreshSourceStatusRow(harnessId, checkpoint.SourceKey, "cleared", 0));
+                clearedAny = true;
+            }
+            catch (Exception ex) when (CanonRefreshEngine.IsSourceUnitFailure(ex))
+            {
+                string safeMessage = SafeProblemMessage(
+                    ex.Message,
+                    string.Create(CultureInfo.InvariantCulture, $"Failed to clear the estimated tokens of source unit '{checkpoint.SourceKey}'."));
+                rows.Add(new RefreshSourceStatusRow(harnessId, checkpoint.SourceKey, "failed", 0, safeMessage));
+            }
+        }
+
+        return clearedAny;
+    }
+
+    /// <summary>
+    /// Builds a pass report that claims no run id and no history coverage, for a pass that writes
+    /// no <c>refresh_run</c> row.
+    /// </summary>
+    private static RefreshReport UnloggedRefreshReport(
+        List<RefreshSourceStatusRow> rows,
+        DateTimeOffset commandStarted,
+        int sessions = 0)
+    {
+        int failedCount = rows.Count(static r => string.Equals(r.Status, "failed", StringComparison.Ordinal));
+        return new RefreshReport(
+            RunId: string.Empty,
+            HistoryWeeks: 0,
+            CommandStartedAt: FormatUtc(commandStarted),
+            Rows: rows,
+            PurgedContentCount: 0,
+            Sessions: sessions,
+            Runs: 0,
+            Executions: 0,
+            Rollups: 0,
+            ExitCode: failedCount > 0 ? 1 : 0);
+    }
+
+    /// <inheritdoc />
     public PurgeExpiredContentResult PurgeExpiredContent(DateTimeOffset? now = null)
     {
         DateTimeOffset instant = now ?? clock();
@@ -299,7 +538,7 @@ public class TranscriptIngestionService : ITranscriptIngestionService
             operationalStore.UpsertSourceCheckpoint(updatedCheckpoint);
             return new RefreshSourceStatusRow(unit.HarnessId, unit.SourceKey, "committed", batch.Records.Count);
         }
-        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or InvalidDataException or InvalidOperationException or JsonException or ArgumentException)
+        catch (Exception ex) when (CanonRefreshEngine.IsSourceUnitFailure(ex))
         {
             string safeMessage = SafeProblemMessage(
                 ex.Message,

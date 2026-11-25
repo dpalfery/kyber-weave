@@ -21,6 +21,7 @@
   </ItemGroup>
 
   <ItemGroup>
+    <ProjectReference Include="..\..\server\KyberDash.Application\KyberDash.Application.csproj" />
     <ProjectReference Include="..\..\server\KyberDash.Contracts\KyberDash.Contracts.csproj" />
     <ProjectReference Include="..\..\server\KyberDash.Core\KyberDash.Core.csproj" />
     <ProjectReference Include="..\..\server\KyberDash.Data\KyberDash.Data.csproj" />
