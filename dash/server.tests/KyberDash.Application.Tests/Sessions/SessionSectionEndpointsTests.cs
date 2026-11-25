@@ -916,12 +916,49 @@ public sealed class SessionSectionEndpointsTests
         Assert.Equal("skill-25", secondRows[0].GetProperty("name").GetString());
         Assert.Equal(30, second.GetProperty("total").GetInt32());
 
+        // Without a recorded listing, whether a skill was listed is not measurable.
+        Assert.Equal("not_measurable", rows[0].GetProperty("listed").GetProperty("availability").GetString());
+
         // A session that invoked no skills answers the not-measurable block the summary section
         // carries, with no rows.
         JsonElement none = bridge.GetSessionSkills("sess-noskills")!.Value;
         Assert.Equal("not_measurable", none.GetProperty("availability").GetString());
         Assert.Empty(none.GetProperty("rows").EnumerateArray().ToList());
         Assert.Equal(0, none.GetProperty("total").GetInt32());
+    }
+
+    /// <summary>
+    /// When the harness recorded which skills it listed, the skills section has one row per invoked
+    /// skill and then one per listed skill never invoked, each saying whether it was listed and on
+    /// which turns (0-based); a listed skill never invoked has zero invocations.
+    /// </summary>
+    [Fact]
+    public void SkillsSection_ShowsListedSkillsBesideInvokedOnes()
+    {
+        InMemoryRelationalStore store = new();
+        FakePricingRepository pricing = new();
+        const string sessionKey = "sess-listed";
+        List<CollectedRecord> turns =
+        [
+            Turn("turn-listed-0", sessionKey, 0, inputTokens: 1_000) with { SkillsListed = ["alpha", "beta", "gamma"] },
+            Turn("turn-listed-1", sessionKey, 1, inputTokens: 1_000) with { SkillsInvoked = ["beta"] },
+            Turn("turn-listed-2", sessionKey, 2, inputTokens: 1_000) with { SkillsInvoked = ["delta"], SkillsListed = ["delta"] },
+        ];
+        WriteSession(store, sessionKey, turns, repo: "kyber-weave", branch: "main", title: "listed session");
+        _ = CreateProjection(store, pricing).ProjectAll();
+        KyberBridgeEngine bridge = CreateBridge(store, pricing);
+        bridge.EnsureProjected();
+
+        JsonElement page = bridge.GetSessionSkills(sessionKey)!.Value;
+
+        Assert.True(page.GetProperty("measurable").GetBoolean());
+        Assert.Equal(4, page.GetProperty("total").GetInt32());
+        JsonElement[] rows = [.. page.GetProperty("rows").EnumerateArray()];
+        Assert.Equal(["beta", "delta", "alpha", "gamma"], rows.Select(static r => r.GetProperty("name").GetString()));
+        Assert.All(rows, static r => Assert.True(r.GetProperty("listed").GetBoolean()));
+        Assert.Equal([1, 1, 0, 0], rows.Select(static r => r.GetProperty("invocations").GetInt32()));
+        Assert.Equal([0], rows[0].GetProperty("turns_listed").EnumerateArray().Select(static t => t.GetInt32()));
+        Assert.Equal([2], rows[1].GetProperty("turns_listed").EnumerateArray().Select(static t => t.GetInt32()));
     }
 
     /// <summary>

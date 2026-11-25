@@ -1996,6 +1996,33 @@ public partial class SqliteRelationalStore : IRelationalStoreReader
         return results;
     }
 
+    /// <inheritdoc />
+    public IReadOnlyList<StoredSkillListing> SessionSkillListings(string sessionKey)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(sessionKey);
+        string keyExpr = TextExpr(sessionKey);
+        string sql = TabReadScriptHeader +
+                     "SELECT hex(CAST(rsk.span_id AS BLOB)), hex(CAST(rsk.skill_name AS BLOB)), COALESCE(st.position, -1) " +
+                     "FROM record_skill_listing rsk " +
+                     "JOIN record_session_link rsl ON rsl.span_id = rsk.span_id " +
+                     $"LEFT JOIN session_turn st ON st.span_id = rsk.span_id AND st.session_id = {keyExpr} " +
+                     $"WHERE rsl.session_key = {keyExpr} ORDER BY rsk.rowid ASC;\n";
+
+        string output = ExecuteSqlite(sql);
+        List<StoredSkillListing> results = [];
+        foreach (string line in TabLines(output))
+        {
+            string[] cols = SplitTabLine(line, 3, "session record_skill_listing");
+            int turn = ParseInt32Required(cols[2], "session_turn.position");
+            results.Add(new StoredSkillListing(
+                SpanId: ParseHexRequired(cols[0], "record_skill_listing.span_id"),
+                SkillName: ParseHexRequired(cols[1], "record_skill_listing.skill_name"),
+                TurnIndex: turn >= 0 ? turn : null));
+        }
+
+        return results;
+    }
+
     /// <summary>
     /// The unsplit tool names a KW skill load is recorded under (D17). Together with the MCP
     /// split rule in <see cref="AppendSessionKwLoadPredicate"/>, this list is the statement's
@@ -2008,6 +2035,8 @@ public partial class SqliteRelationalStore : IRelationalStoreReader
         "kw-docs_load_skill",
         "kw-docs__load_skill",
         "kw-docs/load_skill",
+        "mcp__kyber-weave__load_skill",
+        "mcp__kyber_weave__load_skill",
     ];
 
     /// <inheritdoc />
@@ -2078,7 +2107,8 @@ public partial class SqliteRelationalStore : IRelationalStoreReader
     /// <summary>Appends the D17 load predicate selecting a session's KW skill load rows.</summary>
     /// <remarks>
     /// A load is a kw-docs <c>load_skill</c>: with an MCP split, the server name normalized (lower
-    /// case, <c>_</c> to <c>-</c>) names kw-docs and the split tool is <c>load_skill</c>; without
+    /// case, <c>_</c> to <c>-</c>) names kw-docs or kyber-weave (the same server's other registered
+    /// name) and the split tool is <c>load_skill</c>; without
     /// one, the tool name is one of the unsplit D17 spellings. Another server's <c>load_skill</c>
     /// is not a load (D17), so the page and the total count loads only. The application
     /// recognizer keeps the final word on each row the page returns.
@@ -2089,7 +2119,7 @@ public partial class SqliteRelationalStore : IRelationalStoreReader
         sql.Append(CultureInfo.InvariantCulture, $"WHERE EXISTS (SELECT 1 FROM record_session_link rsl WHERE rsl.span_id = tc.span_id AND rsl.session_key = {TextExpr(sessionKey)}) ");
         sql.Append("AND (");
         sql.Append("((tcm.server_name IS NOT NULL OR tcm.server_tool_name IS NOT NULL) ");
-        sql.Append("AND LOWER(REPLACE(COALESCE(tcm.server_name, ''), '_', '-')) = 'kw-docs' ");
+        sql.Append("AND LOWER(REPLACE(COALESCE(tcm.server_name, ''), '_', '-')) IN ('kw-docs', 'kyber-weave') ");
         sql.Append("AND tcm.server_tool_name = 'load_skill') ");
         sql.Append(CultureInfo.InvariantCulture, $"OR (tcm.server_name IS NULL AND tcm.server_tool_name IS NULL AND tc.tool_name IN ({unsplitNames}))");
         sql.Append(')');

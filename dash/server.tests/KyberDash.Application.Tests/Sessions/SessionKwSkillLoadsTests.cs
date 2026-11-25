@@ -23,7 +23,10 @@ public sealed class SessionKwSkillLoadsTests
     private const string SessionKey = "sess-kw";
     private const string AgentName = "kw-dev";
 
-    /// <summary>The five unsplit tool-name spellings D17 names for a kw-docs load.</summary>
+    /// <summary>
+    /// The unsplit tool-name spellings of a kw-docs load: the five D17 names, and the two a harness
+    /// writes when the same server is registered as <c>kyber-weave</c>.
+    /// </summary>
     public static readonly TheoryData<string> UnsplitLoadToolNames = new()
     {
         "mcp__kw-docs__load_skill",
@@ -31,6 +34,8 @@ public sealed class SessionKwSkillLoadsTests
         "kw-docs_load_skill",
         "kw-docs__load_skill",
         "kw-docs/load_skill",
+        "mcp__kyber-weave__load_skill",
+        "mcp__kyber_weave__load_skill",
     };
 
     /// <summary>
@@ -66,6 +71,27 @@ public sealed class SessionKwSkillLoadsTests
         InMemoryRelationalStore store = new();
         FakePricingRepository pricing = new();
         WriteSession(store, SessionKey, [LoadRecord("span-load-1", 0, Call("call-1", toolName, null, null, "skill: csharp-dev\n\nGuidance."))]);
+        ProjectWithAgent(store, pricing, SessionKey, AgentName);
+        KyberBridgeEngine bridge = CreateBridge(store, pricing);
+
+        JsonElement page = bridge.GetSessionKwSkills(SessionKey)!.Value;
+
+        Assert.Equal(1, page.GetProperty("total").GetInt32());
+        Assert.Equal("csharp-dev", page.GetProperty("rows")[0].GetProperty("skill").GetString());
+    }
+
+    /// <summary>
+    /// The kw-docs server is also registered under the name <c>kyber-weave</c>; a split
+    /// <c>load_skill</c> call to it under that name is a load.
+    /// </summary>
+    [Theory]
+    [InlineData("kyber-weave")]
+    [InlineData("Kyber_Weave")]
+    public void ALoadSkillCallToTheServerRegisteredAsKyberWeaveIsALoad(string serverName)
+    {
+        InMemoryRelationalStore store = new();
+        FakePricingRepository pricing = new();
+        WriteSession(store, SessionKey, [LoadRecord("span-load-1", 0, Call("call-1", $"mcp__{serverName}__load_skill", serverName, "load_skill", "skill: csharp-dev\n\nGuidance."))]);
         ProjectWithAgent(store, pricing, SessionKey, AgentName);
         KyberBridgeEngine bridge = CreateBridge(store, pricing);
 

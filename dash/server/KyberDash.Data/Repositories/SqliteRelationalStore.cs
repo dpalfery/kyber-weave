@@ -25,11 +25,11 @@ public partial class SqliteRelationalStore : BaseSqliteRepository, IRelationalSt
 {
     /// <summary>Current normalized relational schema version stamped in <c>store_state</c>.</summary>
     /// <remarks>
-    /// Version 29 adds <c>session_context_turn_tokenizer</c> and <c>tool_definition_tokenizer</c>,
-    /// the label children of the figures they name. The rebuild-and-re-ingest pattern applies, so
-    /// no measured row can survive the bump without its label.
+    /// Version 30 adds <c>record_skill_listing</c>, the skills a harness listed to the agent on a
+    /// record. The rebuild-and-re-ingest pattern applies, so every source is read again and its
+    /// listings, invoked skills and tool schemas are stored by the current mappers.
     /// </remarks>
-    public const int SchemaVersion = 29;
+    public const int SchemaVersion = 30;
 
     /// <summary>Current detector generation stamped in <c>store_state</c>.</summary>
     /// <remarks>
@@ -952,6 +952,15 @@ public partial class SqliteRelationalStore : BaseSqliteRepository, IRelationalSt
             {
                 string skillExpr = GuardedTextExpr("record_skill_invocation", "skill_name", skillName);
                 sql.Append(CultureInfo.InvariantCulture, $"INSERT INTO record_skill_invocation (span_id, skill_name) VALUES ({spanIdExpr}, {skillExpr});\n");
+            }
+        }
+
+        if (record.SkillsListed is not null)
+        {
+            for (int position = 0; position < record.SkillsListed.Count; position++)
+            {
+                string skillExpr = GuardedTextExpr("record_skill_listing", "skill_name", record.SkillsListed[position]);
+                sql.Append(CultureInfo.InvariantCulture, $"INSERT INTO record_skill_listing (span_id, position, skill_name) VALUES ({spanIdExpr}, {IntSql(position)}, {skillExpr});\n");
             }
         }
 

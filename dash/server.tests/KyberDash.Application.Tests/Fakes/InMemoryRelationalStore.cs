@@ -1655,6 +1655,43 @@ public class InMemoryRelationalStore :
         }
     }
 
+    /// <inheritdoc />
+    public virtual IReadOnlyList<StoredSkillListing> SessionSkillListings(string sessionKey)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(sessionKey);
+
+        lock (syncRoot)
+        {
+            NoteRead(nameof(SessionSkillListings));
+            HashSet<string> sessionSpans = ResolveSessionSpanIds(state, sessionKey);
+            TableMetadata turnMeta = GetTableMetadata("session_turn");
+            Dictionary<string, int> turnBySpan = new(StringComparer.Ordinal);
+            foreach (object?[] row in state.GetRows("session_turn"))
+            {
+                if (string.Equals(GetString(turnMeta, row, "session_id"), sessionKey, StringComparison.Ordinal))
+                {
+                    turnBySpan.TryAdd(GetString(turnMeta, row, "span_id"), (int)GetInt64(turnMeta, row, "position"));
+                }
+            }
+
+            TableMetadata meta = GetTableMetadata("record_skill_listing");
+            List<StoredSkillListing> rows = [];
+            foreach (object?[] row in state.GetRows("record_skill_listing"))
+            {
+                string spanId = GetString(meta, row, "span_id");
+                if (sessionSpans.Contains(spanId))
+                {
+                    rows.Add(new StoredSkillListing(
+                        spanId,
+                        GetString(meta, row, "skill_name"),
+                        turnBySpan.TryGetValue(spanId, out int turn) ? turn : null));
+                }
+            }
+
+            return rows;
+        }
+    }
+
     /// <summary>The unsplit tool names a KW skill load is recorded under (D17); mirrors the SQLite reader's spellings.</summary>
     private static readonly string[] KwSkillLoadToolNames =
     [
@@ -1663,6 +1700,8 @@ public class InMemoryRelationalStore :
         "kw-docs_load_skill",
         "kw-docs__load_skill",
         "kw-docs/load_skill",
+        "mcp__kyber-weave__load_skill",
+        "mcp__kyber_weave__load_skill",
     ];
 
     /// <inheritdoc />
@@ -1693,12 +1732,14 @@ public class InMemoryRelationalStore :
                 string? serverName = mcpRow is null ? null : GetString(mcpMeta, mcpRow, "server_name");
                 string? serverToolName = mcpRow is null ? null : GetString(mcpMeta, mcpRow, "server_tool_name");
                 // The D17 load rule, as the application recognizer decides it: with an MCP split,
-                // the server name normalized (lower case, '_' to '-') is kw-docs and the split tool
-                // is load_skill; without one, the tool name is one of the unsplit spellings. The
-                // rule is quoted here because this file also compiles without the Application
-                // assembly; the SQLite parity tests prove the two stores decide alike.
+                // the server name normalized (lower case, '_' to '-') is kw-docs or kyber-weave and
+                // the split tool is load_skill; without one, the tool name is one of the unsplit
+                // spellings. The rule is quoted here because this file also compiles without the
+                // Application assembly; the SQLite parity tests prove the two stores decide alike.
+                string? normalizedServer = serverName?.Replace('_', '-');
                 bool load = serverName is not null || serverToolName is not null
-                    ? string.Equals(serverName?.Replace('_', '-'), "kw-docs", StringComparison.OrdinalIgnoreCase)
+                    ? (string.Equals(normalizedServer, "kw-docs", StringComparison.OrdinalIgnoreCase)
+                        || string.Equals(normalizedServer, "kyber-weave", StringComparison.OrdinalIgnoreCase))
                         && string.Equals(serverToolName, "load_skill", StringComparison.Ordinal)
                     : KwSkillLoadToolNames.Contains(toolName, StringComparer.Ordinal);
                 if (!load)
@@ -4134,6 +4175,17 @@ public class InMemoryRelationalStore :
                     working,
                     "record_skill_invocation",
                     [("span_id", record.RecordId), ("skill_name", skillName)]);
+            }
+        }
+
+        if (record.SkillsListed is not null)
+        {
+            for (int position = 0; position < record.SkillsListed.Count; position++)
+            {
+                InsertRowCore(
+                    working,
+                    "record_skill_listing",
+                    [("span_id", record.RecordId), ("position", position), ("skill_name", record.SkillsListed[position])]);
             }
         }
 

@@ -42,6 +42,15 @@ public record StoredReportedCost(string SpanId, double Amount, string Currency);
 /// <param name="SkillName">Invoked skill name.</param>
 public record StoredSkillInvocation(string SpanId, string SkillName);
 
+/// <summary>Persisted skill listing row (<c>record_skill_listing</c>) with the session turn that carried it.</summary>
+/// <param name="SpanId">Owning record span identifier.</param>
+/// <param name="SkillName">Listed skill name.</param>
+/// <param name="TurnIndex">
+/// Zero-based turn position of the record in the session's projection (<c>session_turn.position</c>), or
+/// <see langword="null"/> when the record is not one of the session's projected turns.
+/// </param>
+public record StoredSkillListing(string SpanId, string SkillName, int? TurnIndex);
+
 /// <summary>Persisted tool call attached to a record (<c>tool_call</c> and child extension tables).</summary>
 /// <param name="SpanId">Owning record span identifier.</param>
 /// <param name="Call">Static tool call details.</param>
@@ -1028,6 +1037,15 @@ public interface IRelationalStoreReader
     /// spans and touches the skill table alone.
     /// </remarks>
     IReadOnlyList<StoredSkillInvocation> SessionSkillFigures(string sessionKey);
+
+    /// <summary>
+    /// Reads the skills the harness listed to the agent across one session (<c>record_skill_listing</c>),
+    /// in record and listing order, each with the projected turn that carried it — names only, never
+    /// listing text.
+    /// </summary>
+    /// <param name="sessionKey">Canonical session key.</param>
+    /// <returns>The listing rows; empty when the harness recorded no listing for the session.</returns>
+    IReadOnlyList<StoredSkillListing> SessionSkillListings(string sessionKey);
 
     /// <summary>
     /// Reads one page of the session's KW skill loads (D17), in call order, with the total.
