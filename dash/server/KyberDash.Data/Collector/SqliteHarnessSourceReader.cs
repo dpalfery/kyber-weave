@@ -186,11 +186,12 @@ public class SqliteHarnessSourceReader : IHarnessSourceReader
 
         string? companionText = ReadCompanion(unit.CompanionKey, fileSystem);
 
+        // default is the "not observed" value every mapper checks for; an invented date would be stamped on rows.
         return new NativeSourceUnit(
             unit,
             exportText,
             exportBytes,
-            unit.LastWriteUtc ?? DateTimeOffset.UnixEpoch,
+            unit.LastWriteUtc ?? default,
             companionText);
     }
 

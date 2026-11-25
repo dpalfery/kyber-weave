@@ -239,6 +239,30 @@ public class SqliteHarnessSourceReaderTests
     }
 
     [Fact]
+    public void Read_UnknownActivity_IsTheUnknownDefaultNotAFabricatedDate()
+    {
+        Rig rig = new();
+        rig.Sqlite.AddDatabase(DbPath);
+
+        NativeSourceUnit? native = rig.Reader.Read(rig.Unit(DbPath + "#a"), rig.Files);
+
+        Assert.NotNull(native);
+        Assert.Equal(default(DateTimeOffset), native.LastWriteUtc);
+    }
+
+    [Fact]
+    public void Read_KnownActivity_IsPassedThrough()
+    {
+        Rig rig = new();
+        rig.Sqlite.AddDatabase(DbPath);
+        DateTimeOffset active = new(2026, 11, 20, 10, 0, 0, TimeSpan.Zero);
+
+        NativeSourceUnit? native = rig.Reader.Read(rig.Unit(DbPath + "#a") with { LastWriteUtc = active }, rig.Files);
+
+        Assert.Equal(active, native?.LastWriteUtc);
+    }
+
+    [Fact]
     public void WriteJsonColumn_WritesRawJsonStringsNumbersAndNull()
     {
         using MemoryStream stream = new();
