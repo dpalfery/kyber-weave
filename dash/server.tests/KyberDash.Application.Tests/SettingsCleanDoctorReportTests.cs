@@ -530,12 +530,16 @@ public static class SettingsCleanDoctorReportTests
         {
             public void WriteBatch(CollectedBatch batch) => throw new IOException("disk full");
 
+            public void ReplaceSource(CollectedBatch batch) => throw new IOException("disk full");
+
             public void DeleteSource(string sourceId) => throw new IOException("disk full");
 
             public void ClearEstimatedRecordTokens(string harnessId, string sourceLocator, EstimatedRecordTokens estimated) =>
                 throw new IOException("disk full");
 
             public void WriteProblem(CollectedProblem problem) => throw new IOException("disk full");
+
+            public void DeleteProblem(string problemKey) => throw new IOException("disk full");
         }
     }
 
