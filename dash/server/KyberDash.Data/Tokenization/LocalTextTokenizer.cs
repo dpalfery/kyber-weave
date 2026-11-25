@@ -46,7 +46,16 @@ public class LocalTextTokenizer : ITextTokenizer
     private static readonly Lazy<Tokenizer> Cl100kBase =
         new(() => TiktokenTokenizer.CreateForEncoding(Cl100kBaseName), LazyThreadSafetyMode.ExecutionAndPublication);
 
+    /// <summary>
+    /// The most distinct model names whose selection is kept. Model names arrive from ingested data,
+    /// so the cache stops growing here; a model past the bound is resolved on each count instead.
+    /// </summary>
+    public const int MaxCachedModels = 1024;
+
     private readonly ConcurrentDictionary<string, Lazy<Selection>> selections = new(StringComparer.Ordinal);
+
+    /// <summary>Gets the number of model names whose selection is cached.</summary>
+    internal int CachedModelCount => selections.Count;
 
     /// <summary>Process-wide instance for callers that cannot take the seam through a constructor.</summary>
     public static LocalTextTokenizer Shared { get; } = new();
@@ -106,6 +115,18 @@ public class LocalTextTokenizer : ITextTokenizer
         }
 
         string key = model.Trim();
+        if (selections.TryGetValue(key, out Lazy<Selection>? cached))
+        {
+            return cached.Value;
+        }
+
+        // Concurrent first counts of new models can each pass this check, so the bound can be
+        // overshot by at most the number of threads counting at once; it never grows past that.
+        if (selections.Count >= MaxCachedModels)
+        {
+            return Resolve(key);
+        }
+
         return selections.GetOrAdd(
             key,
             static name => new Lazy<Selection>(() => Resolve(name), LazyThreadSafetyMode.ExecutionAndPublication)).Value;

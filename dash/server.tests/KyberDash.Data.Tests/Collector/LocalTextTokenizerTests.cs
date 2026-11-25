@@ -106,6 +106,24 @@ public class LocalTextTokenizerTests
         Assert.Equal(count.Count, store.GetCachedTokenCount(CanonTokenCache.CacheKey(text, model, LocalTextTokenizer.O200kBaseName)));
     }
 
+    /// <summary>
+    /// Model names arrive from ingested data, so the per-model selection cache stops growing at its
+    /// bound; a model past the bound is still resolved, and labelled, correctly.
+    /// </summary>
+    [Fact]
+    public void DistinctModelsPastTheCacheBound_StillResolveWithoutGrowingTheCache()
+    {
+        LocalTextTokenizer tokenizer = new();
+        TokenCount? last = null;
+        for (int index = 0; index < LocalTextTokenizer.MaxCachedModels + 10; index++)
+        {
+            last = tokenizer.Count(DivergentText, $"gpt-4o-bound-{index}");
+        }
+
+        Assert.Equal(LocalTextTokenizer.MaxCachedModels, tokenizer.CachedModelCount);
+        Assert.Equal(new TokenCount(O200kDivergentCount, "o200k_base", true), last);
+    }
+
     [Fact]
     public void CountIsNotCharactersOverFour()
     {
