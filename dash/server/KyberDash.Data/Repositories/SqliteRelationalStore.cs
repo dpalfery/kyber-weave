@@ -251,6 +251,11 @@ public partial class SqliteRelationalStore : BaseSqliteRepository, IRelationalSt
             AppendProblemUpsert(body, problem);
         }
 
+        if (batch.Sessions.Count > 0 || batch.Records.Count > 0)
+        {
+            AppendWriteMarkerAdvance(body, DirtySessionKeysOf(batch));
+        }
+
         ExecuteTransaction(body.ToString());
     }
 
@@ -259,7 +264,13 @@ public partial class SqliteRelationalStore : BaseSqliteRepository, IRelationalSt
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(sourceId);
         string sourceIdExpr = GuardedTextExpr("source", "source_id", sourceId);
-        ExecuteTransaction($"DELETE FROM source WHERE source_id = {sourceIdExpr};\n");
+        StringBuilder body = new();
+        body.Append(CultureInfo.InvariantCulture, $"DELETE FROM source WHERE source_id = {sourceIdExpr};\n");
+
+        // The cascade removes records of sessions this call does not know, so a source delete
+        // always marks the range wildcard.
+        AppendWriteMarkerAdvance(body, dirtyKeys: null);
+        ExecuteTransaction(body.ToString());
     }
 
     /// <inheritdoc />
@@ -556,6 +567,88 @@ public partial class SqliteRelationalStore : BaseSqliteRepository, IRelationalSt
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(databasePath);
         return databasePath;
+    }
+
+    /// <summary>
+    /// Returns the session keys a batch marks dirty: every session key and every record session
+    /// key, or <see langword="null"/> (wildcard) when any record carries no session key.
+    /// </summary>
+    private static SortedSet<string>? DirtySessionKeysOf(CollectedBatch batch)
+    {
+        SortedSet<string> keys = new(StringComparer.Ordinal);
+        foreach (CollectedSession session in batch.Sessions)
+        {
+            keys.Add(session.SessionKey);
+        }
+
+        foreach (CollectedRecord record in batch.Records)
+        {
+            if (string.IsNullOrEmpty(record.SessionKey))
+            {
+                return null;
+            }
+
+            keys.Add(record.SessionKey);
+        }
+
+        return keys;
+    }
+
+    /// <summary>
+    /// Appends the statements that advance <c>store_write_marker</c> by one and merge this write
+    /// into the dirty projection range, so they commit or roll back with the write itself.
+    /// </summary>
+    /// <param name="body">Transaction body the statements are appended to, after the write's own statements.</param>
+    /// <param name="dirtyKeys">Session keys the write changed; <see langword="null"/> marks the range wildcard.</param>
+    /// <remarks>
+    /// <para>
+    /// Every value is computed in SQL from the rows the transaction sees, never from a read made
+    /// in C# before it, so two writers cannot interleave a stale marker or range. With
+    /// <c>prev</c> the stored marker (0 when absent), the write is <em>continuing</em> when a range
+    /// row exists whose <c>to_seq</c> equals <c>prev</c>:
+    /// </para>
+    /// <list type="bullet">
+    /// <item>Continuing: <c>from_seq</c> is kept and <c>to_seq</c> becomes <c>prev + 1</c>; a stored
+    /// wildcard stays wildcard, otherwise the keys are merged.</item>
+    /// <item>Not continuing (no range, or a stale one): the range restarts at
+    /// (<c>prev</c>, <c>prev + 1</c>) with only this write's keys.</item>
+    /// <item>A wildcard write leaves no session rows under the range in either case.</item>
+    /// </list>
+    /// <para>
+    /// A wildcard is a range row with no <c>projection_dirty_session</c> rows, so the statements
+    /// read the old range and marker before replacing either, and the marker moves last.
+    /// </para>
+    /// </remarks>
+    private static void AppendWriteMarkerAdvance(StringBuilder body, SortedSet<string>? dirtyKeys)
+    {
+        const string PrevExpr =
+            "(SELECT COALESCE((SELECT records_write_seq FROM store_write_marker WHERE singleton_id = 1), 0))";
+        const string ContinuingExpr =
+            "EXISTS (SELECT 1 FROM projection_dirty_range WHERE singleton_id = 1 AND to_seq = " + PrevExpr + ")";
+
+        if (dirtyKeys is null)
+        {
+            body.Append("DELETE FROM projection_dirty_session;\n");
+        }
+        else
+        {
+            body.Append("DELETE FROM projection_dirty_session WHERE NOT " + ContinuingExpr + ";\n");
+            foreach (string key in dirtyKeys)
+            {
+                string keyExpr = GuardedNonEmptyTextExpr("projection_dirty_session", "session_id", key);
+                body.Append(
+                    CultureInfo.InvariantCulture,
+                    $"INSERT OR IGNORE INTO projection_dirty_session (session_id) SELECT {keyExpr} " +
+                    $"WHERE NOT {ContinuingExpr} OR EXISTS (SELECT 1 FROM projection_dirty_session);\n");
+            }
+        }
+
+        body.Append(
+            "INSERT OR REPLACE INTO projection_dirty_range (singleton_id, from_seq, to_seq) SELECT 1, " +
+            "CASE WHEN " + ContinuingExpr + " THEN (SELECT from_seq FROM projection_dirty_range WHERE singleton_id = 1) " +
+            "ELSE " + PrevExpr + " END, " + PrevExpr + " + 1;\n");
+        body.Append(
+            "INSERT OR REPLACE INTO store_write_marker (singleton_id, records_write_seq) SELECT 1, " + PrevExpr + " + 1;\n");
     }
 
     private void ExecuteTransaction(string bodySql)

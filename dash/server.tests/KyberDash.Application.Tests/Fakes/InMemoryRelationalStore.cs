@@ -286,6 +286,11 @@ public class InMemoryRelationalStore :
                 UpsertProblemCore(working, problem);
             }
 
+            if (batch.Sessions.Count > 0 || batch.Records.Count > 0)
+            {
+                AdvanceWriteMarker(working, DirtySessionKeysOf(batch));
+            }
+
             state = working;
         }
     }
@@ -299,6 +304,9 @@ public class InMemoryRelationalStore :
         {
             StoreState working = state.Clone();
             _ = DeleteRowsCore(working, "source", [("source_id", sourceId)]);
+
+            // The cascade removes records of sessions this call does not know: always wildcard.
+            AdvanceWriteMarker(working, dirtyKeys: null);
             state = working;
         }
     }
@@ -7904,6 +7912,67 @@ public class InMemoryRelationalStore :
         }
 
         return new StoredFieldRow(cells);
+    }
+
+    /// <summary>
+    /// Mirrors <c>SqliteRelationalStore.DirtySessionKeysOf</c>: every session key and record
+    /// session key, or <see langword="null"/> (wildcard) when any record carries no session key.
+    /// </summary>
+    private static SortedSet<string>? DirtySessionKeysOf(CollectedBatch batch)
+    {
+        SortedSet<string> keys = new(StringComparer.Ordinal);
+        foreach (CollectedSession session in batch.Sessions)
+        {
+            keys.Add(session.SessionKey);
+        }
+
+        foreach (CollectedRecord record in batch.Records)
+        {
+            if (string.IsNullOrEmpty(record.SessionKey))
+            {
+                return null;
+            }
+
+            keys.Add(record.SessionKey);
+        }
+
+        return keys;
+    }
+
+    /// <summary>
+    /// Mirrors <c>SqliteRelationalStore.AppendWriteMarkerAdvance</c> on the working copy: the
+    /// marker moves by one, and the write continues the dirty range when the range ends at the
+    /// previous marker (a stored wildcard stays wildcard, otherwise keys merge) or restarts it at
+    /// (previous, previous + 1) with only this write's keys. A <see langword="null"/>
+    /// <paramref name="dirtyKeys"/> leaves no session rows, which is the wildcard.
+    /// </summary>
+    private static void AdvanceWriteMarker(StoreState working, SortedSet<string>? dirtyKeys)
+    {
+        long prev = ReadSingletonInt64(working, "store_write_marker", "records_write_seq", 0L);
+        object?[]? rangeRow = FindSingletonRow(working, "projection_dirty_range");
+        TableMetadata rangeMeta = GetTableMetadata("projection_dirty_range");
+        bool continuing = rangeRow is not null && GetInt64(rangeMeta, rangeRow, "to_seq") == prev;
+        long fromSeq = continuing ? GetInt64(rangeMeta, rangeRow!, "from_seq") : prev;
+        bool storedWildcard = continuing && working.GetRows("projection_dirty_session").Count == 0;
+
+        if (dirtyKeys is null || !continuing)
+        {
+            _ = DeleteRowsCore(working, "projection_dirty_session", []);
+        }
+
+        if (dirtyKeys is not null && !storedWildcard)
+        {
+            foreach (string key in dirtyKeys)
+            {
+                if (FindRowByKey(working, "projection_dirty_session", [("session_id", key)]) is null)
+                {
+                    InsertRowCore(working, "projection_dirty_session", [("session_id", key)]);
+                }
+            }
+        }
+
+        ReplaceSingleton(working, "projection_dirty_range", ("from_seq", fromSeq), ("to_seq", prev + 1));
+        ReplaceSingleton(working, "store_write_marker", ("records_write_seq", prev + 1));
     }
 
     private static void ReplaceSingleton(
