@@ -5,8 +5,8 @@ namespace KyberWeave.Data.FileSystem;
 /// rather than for the link. On Linux and macOS a link's own length is the length of its target path.
 /// </summary>
 /// <remarks>
-/// The same rule as <c>AtomicFile.ResolveLinks</c> in KyberWeave.Kernel, which the write path uses. When that
-/// method is reachable from this assembly, delegate to it so the write path and the stat path cannot drift apart.
+/// Duplicates <c>AtomicFile.ResolveLinks</c> in KyberWeave.Kernel, which is private there; consolidating them is
+/// tracked in https://github.com/dpalfery/kyber-weave/issues/729.
 /// </remarks>
 internal static class SymbolicLinks
 {

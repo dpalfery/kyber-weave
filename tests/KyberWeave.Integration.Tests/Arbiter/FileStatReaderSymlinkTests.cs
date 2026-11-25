@@ -72,6 +72,22 @@ public sealed class FileStatReaderSymlinkTests : IDisposable
     }
 
     [Fact]
+    public void GetLengthOnALinkLoopThrowsIOException()
+    {
+        SkipOnWindows();
+
+        Assert.ThrowsAny<IOException>(() => _stats.GetLength(LinkLoop()));
+    }
+
+    [Fact]
+    public void GetLastWriteTimeUtcOnALinkLoopThrowsIOException()
+    {
+        SkipOnWindows();
+
+        Assert.ThrowsAny<IOException>(() => _stats.GetLastWriteTimeUtc(LinkLoop()));
+    }
+
+    [Fact]
     public void ArbiterLogByteLengthOnALinkReturnsTheTargetsLength()
     {
         SkipOnWindows();
@@ -96,6 +112,15 @@ public sealed class FileStatReaderSymlinkTests : IDisposable
         {
             Assert.Skip("Creating a symbolic link needs a privilege Windows does not grant by default.");
         }
+    }
+
+    private string LinkLoop()
+    {
+        string first = Path.Combine(_temp.Path, "loop-a.md");
+        string second = Path.Combine(_temp.Path, "loop-b.md");
+        File.CreateSymbolicLink(first, second);
+        File.CreateSymbolicLink(second, first);
+        return first;
     }
 
     /// <summary>Writes the target file under a long name, so the link's own length differs from the target's.</summary>
