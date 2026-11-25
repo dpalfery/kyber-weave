@@ -55,7 +55,9 @@ Notes.
   views over the file-system seam, so a class can ask for the write it needs and nothing more.
 - `ISquadFileAccess` also carries `WriteAllBytesAtomic` (atomic replace, parent directory created, Unix mode kept,
   a symbolic link written through: `PhysicalSquadFileAccess` calls `AtomicFile` with `preserveUnixFileMode`) and
-  `GetLength` (the length without a read, a link followed, `FileNotFoundException` when missing). The in-memory
+  `GetLength` (the length without a read, a link followed, `FileNotFoundException` when the file or its folder is
+  missing) and `ReadBytesUpTo` (reads at most the given number of bytes, so a file that grows after a length check
+  is never loaded whole; the same `FileNotFoundException` rule). The in-memory
   fake writes through a file link as the seam documents. `SquadFileAccessWriteContract` runs over the fake in unit
   tests; the mode and link proof on disk is `PhysicalSquadFileAccessWriteTests` and `AtomicFileUnixModeTests` in
   `KyberWeave.Integration.Tests`, which run in CI only.
