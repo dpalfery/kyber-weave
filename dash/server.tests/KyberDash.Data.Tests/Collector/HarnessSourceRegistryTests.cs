@@ -23,6 +23,21 @@ public class HarnessSourceRegistryTests
     private static readonly DateTimeOffset BaselineUtc = new(2026, 11, 15, 12, 0, 0, TimeSpan.Zero);
 
     [Fact]
+    public void SqliteCacheRoot_FollowsTheConfiguredStateDirectory()
+    {
+        string state = Path.Combine(HomeRoot, "configured-state");
+
+        Assert.Equal(Path.Combine(Path.GetFullPath(state), "sqlite-ro"), HarnessSourceRegistry.SqliteCacheRoot(state));
+        Assert.IsType<MicrosoftDataSqliteHarnessSource>(HarnessSourceRegistry.CreateSqliteSource(state));
+    }
+
+    [Fact]
+    public void SqliteCacheRoot_RejectsABlankStateDirectory()
+    {
+        _ = Assert.Throws<ArgumentException>(() => HarnessSourceRegistry.SqliteCacheRoot(" "));
+    }
+
+    [Fact]
     public void Registry_CoversAll17Bl2IdsAndAll8EvidencedLegacyIds()
     {
         HarnessSourceRegistry registry = new();

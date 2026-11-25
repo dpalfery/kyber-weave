@@ -132,7 +132,27 @@ public class HarnessSourceRegistry
     private readonly Dictionary<string, HarnessSourceRegistration> registrations;
     private readonly IReadOnlyList<IHarnessSourceReader> localReaders;
 
+    /// <summary>The directory under a state directory that holds the read-only copies of harness databases.</summary>
+    /// <param name="stateDirectory">The KyberDash state directory.</param>
+    /// <returns>The absolute cache root, <c>&lt;stateDirectory&gt;/sqlite-ro</c>.</returns>
+    public static string SqliteCacheRoot(string stateDirectory)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(stateDirectory);
+        return Path.Combine(Path.GetFullPath(stateDirectory), "sqlite-ro");
+    }
+
+    /// <summary>Creates the production SQLite seam whose cache copies live under <paramref name="stateDirectory"/>.</summary>
+    /// <param name="stateDirectory">The KyberDash state directory the host is configured with.</param>
+    /// <returns>The adapter with default limits.</returns>
+    public static IHarnessSqliteSource CreateSqliteSource(string stateDirectory) =>
+        new MicrosoftDataSqliteHarnessSource(new HarnessSqliteLimits(), SqliteCacheRoot(stateDirectory));
+
     /// <summary>Initializes the registry with all BL-2, evidenced legacy, and OTLP-only harness registrations.</summary>
+    /// <remarks>
+    /// Production composition always passes <paramref name="sqlite"/>, built from the configured state directory by
+    /// <see cref="CreateSqliteSource"/>. Omitting it is the test and tool path: the cache root then follows the
+    /// canonical database location instead of a configured state directory.
+    /// </remarks>
     /// <param name="sqlite">Read-only SQLite seam for the Kilo, Warp, Devin and Cursor databases; defaults to <see cref="MicrosoftDataSqliteHarnessSource.CreateDefault"/>.</param>
     public HarnessSourceRegistry(IHarnessSqliteSource? sqlite = null)
     {
