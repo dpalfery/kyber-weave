@@ -1064,8 +1064,10 @@ The incremental projection rests on three tables, with no other bookkeeping: `st
 (`records_write_seq`, a counter that rises by exactly 1 per record-changing write; an absent row reads 0),
 `projection_dirty_range` (`from_seq`, `to_seq`: the writes since `from_seq`, up to `to_seq`) and
 `projection_dirty_session` (the session keys those writes touched). A projection pass is skipped when
-`projection_state.records_marker` equals the write marker, the schema version and
-`SqliteRelationalStore.DetectorVersion`; unchanged session/run/execution rows also avoid redundant writes.
+`projection_state.records_marker` equals the write marker, `projection_state.projection_schema_version` equals
+`SqliteRelationalStore.SchemaVersion`, and `store_state.detector_version` equals `SqliteRelationalStore.DetectorVersion`.
+A new store stamps the current detector version and only a projection pass restamps it (opening a store never
+does), so bumping the constant makes the next pass run in full; unchanged session/run/execution rows also avoid redundant writes.
 
 - **Which writes move the marker.** Only `IRelationalStoreWriter.WriteBatch` (when it carries at least one
   session or record) and `IRelationalStoreWriter.DeleteSource`. Problems, quarantine, provenance, metrics,

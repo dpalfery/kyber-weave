@@ -268,9 +268,6 @@ public partial class SqliteRelationalStore
         script.Append(
             CultureInfo.InvariantCulture,
             $"INSERT OR IGNORE INTO store_state (singleton_id, schema_version, detector_version) VALUES (1, {schemaVersionSql}, {detectorVersionSql});\n");
-        script.Append(
-            CultureInfo.InvariantCulture,
-            $"UPDATE store_state SET detector_version = {detectorVersionSql} WHERE singleton_id = 1 AND detector_version <> {detectorVersionSql};\n");
         script.Append("COMMIT;\n");
         ExecuteSqlite(script.ToString());
     }

@@ -140,7 +140,7 @@ public class SqliteRelationalStoreWriteTests
     }
 
     [Fact]
-    public void EnsureInitialized_UpdatesDetectorVersionWhenSchemaVersionMatches()
+    public void EnsureInitialized_KeepsStoredDetectorVersionForTheProjectorToRestamp()
     {
         string rootDir = NewNonExistentRoot();
         string dbPath = Path.Combine(rootDir, "canon.db");
@@ -153,8 +153,9 @@ public class SqliteRelationalStoreWriteTests
 
         Assert.Equal(3, store.ExecutedSql.Count);
         string ddlSql = NormalizeLineEndings(store.ExecutedSql[2]);
+        Assert.DoesNotContain("UPDATE store_state", ddlSql, StringComparison.Ordinal);
         Assert.Contains(
-            $"UPDATE store_state SET detector_version = {SqliteRelationalStore.DetectorVersion.ToString(CultureInfo.InvariantCulture)} WHERE singleton_id = 1 AND detector_version <> {SqliteRelationalStore.DetectorVersion.ToString(CultureInfo.InvariantCulture)};",
+            $"INSERT OR IGNORE INTO store_state (singleton_id, schema_version, detector_version) VALUES (1, {SqliteRelationalStore.SchemaVersion.ToString(CultureInfo.InvariantCulture)}, {SqliteRelationalStore.DetectorVersion.ToString(CultureInfo.InvariantCulture)});",
             ddlSql,
             StringComparison.Ordinal);
         Assert.False(Directory.Exists(rootDir));

@@ -1828,8 +1828,8 @@ and the remedy `kyber-weave update`. It prints `engine: not-running (cli <cli>)`
 the endpoint, and `engine: unresponsive` when the holder never answers.
 
 **Re-projection after an upgrade.** The engine re-projects the store on its own start. The job host
-runs one maintenance tick at once, and when the store's detector stamp is older than this build's
-(`CanonSchema.DetectorVersion`), that tick projects the store to the new rules. You do not need `kyber build`.
+runs one maintenance tick at once, and when the store's detector stamp (`store_state.detector_version`) differs
+from this build's (`SqliteRelationalStore.DetectorVersion`), that tick projects the store to the new rules. You do not need `kyber build`.
 Rows from an older build, including OpenCode buckets that showed a measured zero, refresh on that tick.
 A current stamp means the tick does nothing.
 

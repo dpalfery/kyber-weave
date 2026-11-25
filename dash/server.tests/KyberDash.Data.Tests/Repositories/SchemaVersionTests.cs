@@ -105,10 +105,7 @@ public class SchemaVersionTests
         Assert.Contains("SELECT schema_version, detector_version FROM store_state WHERE singleton_id = 1 LIMIT 1;", versionSql, StringComparison.Ordinal);
 
         string ddlSql = NormalizeLineEndings(store.ExecutedSql[3]);
-        Assert.Contains(
-            $"UPDATE store_state SET detector_version = {SqliteRelationalStore.DetectorVersion.ToString(CultureInfo.InvariantCulture)} WHERE singleton_id = 1 AND detector_version <> {SqliteRelationalStore.DetectorVersion.ToString(CultureInfo.InvariantCulture)};",
-            ddlSql,
-            StringComparison.Ordinal);
+        Assert.DoesNotContain("UPDATE store_state", ddlSql, StringComparison.Ordinal);
     }
 
     [Theory]

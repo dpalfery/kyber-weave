@@ -828,10 +828,40 @@ public partial class CanonSessionProjectorEngine
         SkippedKeys: [],
         DeferredKeys: null);
 
+    /// <summary>
+    /// True when the stored projection was built under this build's schema version and with its
+    /// detector version (<see cref="SqliteRelationalStore.DetectorVersion"/>, stamped in
+    /// <c>store_state.detector_version</c>); a missing row on either side reads as not current.
+    /// </summary>
     private bool HasCurrentProjectionEnvironment()
     {
         ProjectionStateView? projectionState = operationalStore!.GetProjectionState();
-        return projectionState is not null && projectionState.ProjectionSchemaVersion == SqliteRelationalStore.SchemaVersion;
+        StoreStateView? storeState = operationalStore.GetStoreState();
+        return projectionState is not null
+            && projectionState.ProjectionSchemaVersion == SqliteRelationalStore.SchemaVersion
+            && storeState is not null
+            && storeState.DetectorVersion == SqliteRelationalStore.DetectorVersion;
+    }
+
+    /// <summary>
+    /// Writes the projection watermark at <paramref name="recordsMarker"/> under the current schema
+    /// version, then stamps the current detector version in <c>store_state</c>.
+    /// </summary>
+    /// <param name="recordsMarker">Write marker the stored projection now covers.</param>
+    /// <remarks>
+    /// The watermark is written first, so a failure between the two writes leaves the detector
+    /// stamp stale and the next pass runs in full rather than skipping a session.
+    /// </remarks>
+    private void StampProjectionState(long recordsMarker)
+    {
+        operationalStore!.SetProjectionState(new ProjectionStateView(SqliteRelationalStore.SchemaVersion, recordsMarker));
+        StoreStateView? storeState = operationalStore.GetStoreState();
+        if (storeState is null || storeState.DetectorVersion != SqliteRelationalStore.DetectorVersion)
+        {
+            operationalStore.SetStoreState(new StoreStateView(
+                storeState?.SchemaVersion ?? SqliteRelationalStore.SchemaVersion,
+                SqliteRelationalStore.DetectorVersion));
+        }
     }
 
     private static Dictionary<string, object?> SerializeContextPayload(
@@ -2712,7 +2742,7 @@ public partial class CanonSessionProjectorEngine
         {
             // Deferred keys stay dirty at the watermark this pass just wrote, so the next pass
             // (read or maintenance) retries them.
-            operationalStore.SetProjectionState(new ProjectionStateView(SqliteRelationalStore.SchemaVersion, finalMarker));
+            StampProjectionState(finalMarker);
             operationalStore.SetProjectionDirtyState(new DirtyProjectionState(
                 FromSeq: finalMarker,
                 ToSeq: finalMarker,
@@ -2721,7 +2751,7 @@ public partial class CanonSessionProjectorEngine
         }
         else
         {
-            operationalStore.SetProjectionState(new ProjectionStateView(SqliteRelationalStore.SchemaVersion, finalMarker));
+            StampProjectionState(finalMarker);
             operationalStore.ClearProjectionDirtyState();
         }
 
@@ -2755,8 +2785,8 @@ public partial class CanonSessionProjectorEngine
     /// </remarks>
     private void StampMidPassWrites(long currentMarker, long finalMarker, IReadOnlyCollection<string> deferredKeys)
     {
-        operationalStore!.SetProjectionState(new ProjectionStateView(SqliteRelationalStore.SchemaVersion, currentMarker));
-        DirtyProjectionState? stored = operationalStore.GetProjectionDirtyState();
+        StampProjectionState(currentMarker);
+        DirtyProjectionState? stored = operationalStore!.GetProjectionDirtyState();
         if (stored is null || stored.ToSeq != finalMarker)
         {
             operationalStore.ClearProjectionDirtyState();
