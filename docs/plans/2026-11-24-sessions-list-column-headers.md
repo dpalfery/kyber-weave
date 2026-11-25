@@ -14,7 +14,7 @@ impact-components:
 
 # Sessions list column headers and a plain "out of scope" explanation
 
-**Status: Ready, 2026-11-25.**
+**Status: Ready, 2026-11-25.** Task T1 complete (commits d3c8a173b, dd5a4c06b, 0c56d9acb); closeout mapping below.
 
 ## Request
 
@@ -131,3 +131,16 @@ The end-of-run review council under the `code-review` skill reviews the whole ch
 ## docs-dev closeout
 
 `docs-dev` harvests the two Design harvest rows into `docs/dash/architecture.md` (Costblock And Cost Basis, Display paragraph) and `docs/dash/runbook.md` (cost status explanation), fills the Closeout mapping, and archives the plan.
+
+## Closeout mapping
+
+Checked on 2026-11-25 against the delivered change (T1 commits d3c8a173b, dd5a4c06b, 0c56d9acb).
+Criteria needing a live browser are not performed here: `NOT VERIFIED: column alignment of the
+header over the rows in a rendered browser — needs a live dashboard session`.
+
+| ID | Destination | Documentation-impact |
+|---|---|---|
+| D1, D2, D3, D4 | [KyberDash architecture: Display](../dash/architecture.md#costblock-and-cost-basis) | extends-component; header row, labels, shared widths and the data-state-only rule are described under Display; last-reviewed 2026-11-25 |
+| D5, D6, D7 | [KyberDash architecture: Display](../dash/architecture.md#costblock-and-cost-basis) and [runbook: no published rate](../dash/runbook.md) | extends-component; hover text format, shared `STATUS_EXPLANATIONS` and the new "out of scope" wording; last-reviewed 2026-11-25 |
+| D8 | Documentation waiver — a PR note about child rows' trailing parent link; the architecture Display paragraph records the reserved trailing slot, and no further invariant survives | n/a |
+| AP1 | Documentation waiver — approval record only, preserved in this plan's Decisions table | n/a |

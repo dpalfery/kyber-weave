@@ -6,7 +6,7 @@ component: KyberDash
 source-root: dash
 status: current
 owner: dpalfery
-last-reviewed: 2026-11-24
+last-reviewed: 2026-11-25
 decided-by:
   - adr/0084-kyberdash-csharp-engine
   - adr/0020-kyberdash-one-time-fork
@@ -1557,7 +1557,13 @@ genuine mix of `harness` and `published` turns records `COST_BASIS_MISMATCH` in 
 currency) onto each row as `cost`; `cost_usd` is the block's value only when `status` is `priced`
 and the currency is USD. `AgentSessionRow` renders the cost tile's formatter text ("partially
 priced", "no published rate", "not billed", "out of scope", or the formatted figure); `—` appears
-only when the server sent no cost.
+only when the server sent no cost. The Sessions list has one column header row (Session, Title,
+Harness, Turns, Cost, Started) above the rows, shown only when at least one row is listed; its
+cells share the width classes of the row cells beneath them (`SESSION_LIST_COLUMNS`), and a
+trailing slot is reserved for a subagent row's parent link. A word-status cost cell's hover text
+reads `Cost basis: <basis> — <explanation>`, where the explanation is the plain-language sentence
+(`STATUS_EXPLANATIONS`) the cost tile shows for the same status; "out of scope" explains itself
+as "No KyberDash price table covers this harness, so its cost is not estimated."
 
 **Rate metadata.** `getMeta().rates` keeps its flat Copilot-credits fields and adds `tables`
 (`published` and `copilot_credits`), each with `source`, `retrieved` and `applies_to`.

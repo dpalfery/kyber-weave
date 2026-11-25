@@ -6,7 +6,7 @@ status: current
 component: KyberDash
 source-root: dash
 owner: dpalfery
-last-reviewed: 2026-11-23
+last-reviewed: 2026-11-25
 decided-by:
   - adr/0084-kyberdash-csharp-engine
   - adr/0031-kyberdash-capture-command-owns-harness-telemetry-keys
@@ -1994,7 +1994,10 @@ here.
   a cache-creation rate bills cache writes at its input rate (no 1.25x surcharge); set the
   cache-creation rate to state a surcharge.
 - **Other statuses**: "partially priced" means some turns are unpriced (no figure is shown),
-  "not billed" is a flat-rate model, and "out of scope" means the table does not name the harness.
+  "not billed" is a flat-rate model, and "out of scope" means no KyberDash price table covers the
+  harness (the published rates cover the Claude and Codex harnesses, the Copilot credits table the
+  Copilot harnesses) and the harness reported no cost of its own, so no cost is estimated. Hover
+  the cost cell in the Sessions list, or read the cost tile, for the same explanation.
 
 ### 10. Kilo shows no data
 
