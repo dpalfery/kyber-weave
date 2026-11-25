@@ -7,6 +7,9 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 const mkdtempHook = vi.hoisted(() => ({
   recordedDirs: [] as string[],
   onCreated: undefined as ((createdDir: string) => void) | undefined,
+  // When set, existsSync reports a path ending in this suffix as present. The spawn-failure
+  // test uses it to pass the built-engine guard without a real build in the worktree.
+  existsSuffixOverride: undefined as string | undefined,
 }))
 
 vi.mock('node:fs', async (importOriginal) => {
@@ -19,6 +22,11 @@ vi.mock('node:fs', async (importOriginal) => {
       mkdtempHook.onCreated?.(created)
       return created
     }) as typeof actual.mkdtempSync,
+    existsSync: ((path: Parameters<typeof actual.existsSync>[0]) => {
+      const override = mkdtempHook.existsSuffixOverride
+      if (override !== undefined && String(path).endsWith(override)) return true
+      return actual.existsSync(path)
+    }) as typeof actual.existsSync,
   }
 })
 
@@ -378,9 +386,13 @@ describe('startIsolatedServer temp root cleanup on failure (Finding 4)', () => {
     process.env['TEMP'] = validTmp
     process.env['TMP'] = validTmp
     process.env['KYBERDASH_BIN'] = join(sandboxRoot, 'missing-kyberdash-binary')
+    // The built-engine guard passes (the worktree's Release api is reported present), so the
+    // only failure left is the spawn of the missing KYBERDASH_BIN.
+    const exeName = process.platform === 'win32' ? 'kyberdash-api.exe' : 'kyberdash-api'
+    mkdtempHook.existsSuffixOverride = join('dash', 'server', 'KyberDash.Api', 'bin', 'Release', 'net10.0', exeName)
     try {
       mkdtempHook.recordedDirs.length = 0
-      await expect(startIsolatedServer({ startupTimeoutMs: 5_000 })).rejects.toThrow(/spawn failed|exited|kyberdash-api is not built/)
+      await expect(startIsolatedServer({ startupTimeoutMs: 5_000 })).rejects.toThrow(/spawn failed|exited/)
       expect(mkdtempHook.recordedDirs).toHaveLength(1)
       const tempDir = mkdtempHook.recordedDirs[0]
       expect(tempDir).toBeDefined()
@@ -398,6 +410,7 @@ describe('startIsolatedServer temp root cleanup on failure (Finding 4)', () => {
       else process.env['TMP'] = prevTmp
       if (prevBin === undefined) delete process.env['KYBERDASH_BIN']
       else process.env['KYBERDASH_BIN'] = prevBin
+      mkdtempHook.existsSuffixOverride = undefined
     }
   })
 })
