@@ -408,6 +408,7 @@ public record StoredSourceCount(string SourceId, int Count);
 /// <param name="CostBasisMismatch">Structured basis mismatch verdict when both valued harness and published costs occur.</param>
 /// <param name="Models">Distinct models observed across session turns in turn order.</param>
 /// <param name="ProblemsCount">Count of ingest and pricing diagnostics associated with the session.</param>
+/// <param name="ReportedTotalTokens">One session total the harness reported with no input/output split (for example Warp), or <see langword="null"/>. When set, <paramref name="TotalInput"/> and <paramref name="TotalOutput"/> stay <see langword="null"/>: they are not measured, never derived from this total.</param>
 /// <remarks>
 /// Carries no content: no <c>content_part</c>, tool-call text, tool-definition, or
 /// agent-invocation column is read to build it, so a sessions list never materializes
@@ -426,7 +427,8 @@ public record SessionListFigure(
     ReadTimeCostSummary PublishedCost,
     ReadTimeCostBasisMismatch? CostBasisMismatch,
     IReadOnlyList<string> Models,
-    int ProblemsCount);
+    int ProblemsCount,
+    long? ReportedTotalTokens = null);
 
 /// <summary>
 /// Read-time figures the bounded session summary page renders, derived from content-free record
@@ -458,6 +460,7 @@ public record SessionListFigure(
 /// <param name="UnmeasuredInputTurns">Count of turns that carry no combined input token count.</param>
 /// <param name="ReconciliationTotal">Count of turns whose reported and tokenized input and output totals are both measurable.</param>
 /// <param name="ReconciliationMismatched">Count of measurable reconciliation turns where either reported total disagrees with the tokenized one.</param>
+/// <param name="ReportedTotalTokens">One session total the harness reported with no input/output split (for example Warp), or <see langword="null"/>. When set, the input, output and cache totals stay <see langword="null"/>: they are not measured, never derived from this total.</param>
 /// <remarks>
 /// Carries no content: no <c>content_part</c>, tool-call text, tool-definition, or
 /// agent-invocation column is read to build it. The figures that would need those columns —
@@ -490,7 +493,8 @@ public record SessionSummaryFigure(
     int ToolRowsCount = 0,
     int UnmeasuredInputTurns = 0,
     int ReconciliationTotal = 0,
-    int ReconciliationMismatched = 0);
+    int ReconciliationMismatched = 0,
+    long? ReportedTotalTokens = null);
 
 /// <summary>
 /// Read-time figures the report prices one scoped session with: exactly the fields the report

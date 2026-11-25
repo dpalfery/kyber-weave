@@ -24,7 +24,7 @@ namespace KyberDash.Data.Repositories;
 public partial class SqliteRelationalStore : BaseSqliteRepository, IRelationalStoreWriter, IProjectionStore
 {
     /// <summary>Current normalized relational schema version stamped in <c>store_state</c>.</summary>
-    public const int SchemaVersion = 25;
+    public const int SchemaVersion = 26;
 
     /// <summary>Current detector generation stamped in <c>store_state</c>.</summary>
     public const int DetectorVersion = 5;
@@ -1544,6 +1544,7 @@ public partial class SqliteRelationalStore : BaseSqliteRepository, IRelationalSt
         TokenClass.CacheWrite => "cache_write",
         TokenClass.Output => "output",
         TokenClass.Reasoning => "reasoning",
+        TokenClass.Total => "total",
         _ => throw new DashValidationException(ConstraintViolatedCode, $"Unsupported TokenClass '{tokenClass}'."),
     };
 

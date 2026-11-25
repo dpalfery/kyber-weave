@@ -452,7 +452,7 @@ public class DevinWarpMapperTests
         Assert.All(batch.Records, static r => Assert.Null(r.ReportedInputTokens));
         Assert.All(batch.Records, static r => Assert.Null(r.ReportedOutputTokens));
         CollectedModelUsage usage = Assert.Single(session.ReportedUsage);
-        Assert.Equal(new CollectedModelUsage(0, "gpt-5.3-codex", TokenClass.Input, 300L), usage);
+        Assert.Equal(new CollectedModelUsage(0, "gpt-5.3-codex", TokenClass.Total, 300L), usage);
         Assert.All(batch.Records, static r => Assert.Equal("conv-1", r.SessionKey));
 
         InMemoryRelationalStore store = new();
@@ -480,8 +480,8 @@ public class DevinWarpMapperTests
 
         CollectedSession session = Assert.Single(batch.Sessions);
         Assert.Equal(2, session.ReportedUsage.Count);
-        Assert.Contains(new CollectedModelUsage(0, "gpt-5.3-codex", TokenClass.Input, 100L), session.ReportedUsage);
-        Assert.Contains(new CollectedModelUsage(0, "claude-sonnet-4-5", TokenClass.Input, 40L), session.ReportedUsage);
+        Assert.Contains(new CollectedModelUsage(0, "gpt-5.3-codex", TokenClass.Total, 100L), session.ReportedUsage);
+        Assert.Contains(new CollectedModelUsage(0, "claude-sonnet-4-5", TokenClass.Total, 40L), session.ReportedUsage);
         CollectedRecord record = Assert.Single(batch.Records);
         Assert.Empty(record.Tokens);
         Assert.Null(record.ReportedInputTokens);

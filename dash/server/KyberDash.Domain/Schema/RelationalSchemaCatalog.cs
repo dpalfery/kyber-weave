@@ -817,7 +817,7 @@ public static partial class RelationalSchemaCatalog
                 NonEmptyText("session_id"),
                 NonNegInt("snapshot_position"),
                 NonEmptyText("model_id"),
-                EnumText("token_class", "'input', 'cache_read', 'cache_write', 'output', 'reasoning'"),
+                EnumText("token_class", "'input', 'cache_read', 'cache_write', 'output', 'reasoning', 'total'"),
                 NonNegInt("token_count"),
             ],
             PrimaryKeyColumns: ["session_id", "snapshot_position", "model_id", "token_class"],

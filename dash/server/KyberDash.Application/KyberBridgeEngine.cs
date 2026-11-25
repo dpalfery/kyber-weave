@@ -67,6 +67,9 @@ public class KyberBridgeEngine
     /// <summary>Session marker answered when a single session's projection read fails.</summary>
     private const string ProjectionFailedStatus = "PROJECTION_FAILED";
 
+    /// <summary>The label shown beside a session total the harness reported with no input/output split.</summary>
+    private const string ReportedTotalOnlyNote = "total, split not reported";
+
     private const string TimestampFormat = "yyyy-MM-dd'T'HH:mm:ss.fff'Z'";
 
     private static readonly JsonSerializerOptions CamelCaseJsonOptions = new()
@@ -413,6 +416,7 @@ public class KyberBridgeEngine
             RequestCount: figure?.RequestCount,
             TotalInput: figure?.TotalInput,
             TotalOutput: figure?.TotalOutput,
+            ReportedTotalTokens: figure?.ReportedTotalTokens,
             CostUsd: ExtractUsdCost(figure?.PublishedCost),
             Cost: figure?.PublishedCost,
             CostReported: figure?.ReportedCost,
@@ -3334,6 +3338,11 @@ public class KyberBridgeEngine
                 AddNote("Cache creation tokens were not reported for this session.");
             }
 
+            if (figures.ReportedTotalTokens is not null)
+            {
+                AddNote(ReportedTotalOnlyNote);
+            }
+
             if (figures.UnmeasuredInputTurns > 0)
             {
                 AddNote("One or more turns lack input token counts.");
@@ -3407,6 +3416,12 @@ public class KyberBridgeEngine
             },
             ["problems"] = figures.Problems,
         };
+
+        if (figures.ReportedTotalTokens is not null)
+        {
+            summary["total_tokens"] = figures.ReportedTotalTokens;
+            summary["total_tokens_note"] = ReportedTotalOnlyNote;
+        }
 
         if (distinctSkills.Count > 0)
         {
@@ -4245,7 +4260,7 @@ public class KyberBridgeEngine
     /// counter publishes the not-measurable declaration the sessions list already promised:
     /// a missing number is not a measured zero, and the reason names the harness.
     /// </summary>
-    private static object? TokenFigure(long? total, int? turnCount, string harness)
+    private static object? TokenFigure(long? total, int? turnCount, string harness, long? reportedTotalTokens = null)
     {
         if (total is not null || turnCount is null or 0)
         {
@@ -4256,7 +4271,9 @@ public class KyberBridgeEngine
         return new Dictionary<string, string>(StringComparer.Ordinal)
         {
             ["availability"] = "not_measurable",
-            ["reason"] = $"{named} telemetry did not report token usage for this session.",
+            ["reason"] = reportedTotalTokens is null
+                ? $"{named} telemetry did not report token usage for this session."
+                : $"{named} reported a total only; the input and output split was not reported.",
         };
     }
 
@@ -4277,7 +4294,7 @@ public class KyberBridgeEngine
             ["ended"] = node.Ended,
             ["turn_count"] = node.TurnCount,
             ["request_count"] = node.RequestCount,
-            ["total_input"] = TokenFigure(node.TotalInput, node.TurnCount, node.Harness),
+            ["total_input"] = TokenFigure(node.TotalInput, node.TurnCount, node.Harness, node.ReportedTotalTokens),
             ["total_output"] = node.TotalOutput,
             ["cost_usd"] = node.CostUsd,
             ["cost"] = node.Cost is null ? new { basis = "unknown", status = "no_rate" } : node.Cost,
@@ -4287,6 +4304,12 @@ public class KyberBridgeEngine
             ["problems"] = node.Problems,
             ["subagents"] = node.Subagents.Select(ToSessionDto).ToList(),
         };
+        if (node.ReportedTotalTokens is not null)
+        {
+            dto["total_tokens"] = node.ReportedTotalTokens;
+            dto["total_tokens_note"] = ReportedTotalOnlyNote;
+        }
+
         if (node.ProjectionStatus is not null)
         {
             dto["projection_status"] = node.ProjectionStatus;
@@ -4957,6 +4980,7 @@ public class KyberBridgeEngine
         int? RequestCount,
         long? TotalInput,
         long? TotalOutput,
+        long? ReportedTotalTokens,
         double? CostUsd,
         ReadTimeCostSummary? Cost,
         ReadTimeCostSummary? CostReported,

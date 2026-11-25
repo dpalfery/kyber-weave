@@ -526,7 +526,9 @@ public class WarpMapper : IHarnessMapper
     /// entry's <c>warp_tokens</c> plus <c>byok_tokens</c>. Entries for the same model are summed,
     /// which is arithmetic on reported values, not an estimate. An entry with no model id is
     /// attributed to the dominant model (or <c>warp-auto-efficient</c> when none is known). No
-    /// reported usage yields no rows: the figure is then not measured.
+    /// reported usage yields no rows: the figure is then not measured. Warp reports one total per
+    /// model with no input/output split, so the rows are the <c>total</c> token class, never
+    /// <c>input</c> (decision D15).
     /// </remarks>
     /// <param name="conversationData">The conversation's <c>conversation_data</c> JSON.</param>
     /// <returns>Per-model usage rows at snapshot position 0, and the normalized dominant model.</returns>
@@ -620,7 +622,7 @@ public class WarpMapper : IHarnessMapper
 
             List<CollectedModelUsage> usage =
             [
-                .. modelOrder.Select(model => new CollectedModelUsage(0, model, TokenClass.Input, countsByModel[model])),
+                .. modelOrder.Select(model => new CollectedModelUsage(0, model, TokenClass.Total, countsByModel[model])),
             ];
             return (usage, normalizedDominant);
         }

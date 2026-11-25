@@ -83,7 +83,7 @@ public class CollectedTypesTests
         AssertEnumNames(typeof(RecordOp), ["LlmInvoke", "ToolInvoke", "AgentInvoke", "Unspecified"]);
         AssertEnumNames(typeof(RecordKind), ["Unspecified", "Internal", "Server", "Client", "Producer", "Consumer"]);
         AssertEnumNames(typeof(RecordStatus), ["Unset", "Ok", "Error", "Unspecified"]);
-        AssertEnumNames(typeof(TokenClass), ["Input", "CacheRead", "CacheWrite", "Output", "Reasoning"]);
+        AssertEnumNames(typeof(TokenClass), ["Input", "CacheRead", "CacheWrite", "Output", "Reasoning", "Total"]);
         AssertEnumNames(typeof(SourceKind), ["File", "Otlp"]);
         AssertEnumNames(
             typeof(ContentBucket),

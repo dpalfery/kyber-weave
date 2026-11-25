@@ -9,7 +9,7 @@ namespace KyberDash.Data.Tests;
 
 /// <summary>
 /// Store-parity tests for <see cref="SqliteRelationalStore"/> over a real <c>sqlite3</c> database:
-/// nested directory creation, schema v25 stamping, idempotent initialization, newer-store refusal
+/// nested directory creation, schema v26 stamping, idempotent initialization, newer-store refusal
 /// without mutating or deleting any database file, the unconsumed rebuild re-ingest flag, and the
 /// source-delete cascade the clean path relies on. Scripted <c>ExecuteSqliteCore</c> coverage lives
 /// in <c>SqliteRelationalStoreWriteTests</c> and <c>SchemaVersionTests</c>.
@@ -26,7 +26,7 @@ public class SqliteRelationalStoreParityTests : IDisposable
     }
 
     [Fact]
-    public void Constructor_CreatesNestedDirectoryAndStampsSchemaV25()
+    public void Constructor_CreatesNestedDirectoryAndStampsSchemaV26()
     {
         string databasePath = Path.Combine(directory.Path, "nested", "deeper", "canon.db");
 
@@ -70,18 +70,18 @@ public class SqliteRelationalStoreParityTests : IDisposable
     {
         string databasePath = Path.Combine(directory.Path, "canon.db");
         SqliteRelationalStore store = new(databasePath, new SqliteCircuitBreaker());
-        store.SetStoreState(new StoreStateView(26, SqliteRelationalStore.DetectorVersion));
+        store.SetStoreState(new StoreStateView(SqliteRelationalStore.SchemaVersion + 1, SqliteRelationalStore.DetectorVersion));
 
         InvalidOperationException exception = Assert.Throws<InvalidOperationException>(
             () => _ = new SqliteRelationalStore(databasePath, new SqliteCircuitBreaker()));
 
         Assert.Equal(
-            SqliteRelationalStore.FormatSchemaVersionRefusal(Path.GetFullPath(databasePath), 26),
+            SqliteRelationalStore.FormatSchemaVersionRefusal(Path.GetFullPath(databasePath), SqliteRelationalStore.SchemaVersion + 1),
             exception.Message);
 
         // The refusal happens before any PRAGMA, DDL, or deletion: the newer store keeps every file.
         Assert.True(File.Exists(databasePath));
-        Assert.Equal(26, store.GetStoreState()?.SchemaVersion);
+        Assert.Equal(SqliteRelationalStore.SchemaVersion + 1, store.GetStoreState()?.SchemaVersion);
     }
 
     [Fact]

@@ -71,6 +71,13 @@ public enum TokenClass
 
     /// <summary>Reasoning / thinking tokens (<c>reasoning</c>).</summary>
     Reasoning,
+
+    /// <summary>
+    /// One reported total with no input/output split (<c>total</c>), stored for a session's reported
+    /// usage only (<c>session_model_usage</c>): a harness that reports no split must never have its
+    /// total recorded as input or output.
+    /// </summary>
+    Total,
 }
 
 /// <summary>Origin mechanism of a collected telemetry source (<c>source.source_kind</c>).</summary>
