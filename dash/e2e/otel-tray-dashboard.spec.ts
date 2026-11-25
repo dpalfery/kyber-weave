@@ -330,7 +330,9 @@ test('updates SettingsView ?days= window and shared server settings over same-or
   await expect(page.getByTestId('session-panel')).toBeVisible()
   const widened = await bridge!.getState()
   expect(widened.viewState.settings.windowDays).toBe(30)
-  expect((widened.viewState.report as { scope?: { days?: number } } | null)?.scope?.days).toBe(30)
+  await expect
+    .poll(async () => ((await bridge!.getState()).viewState.report as { scope?: { days?: number } } | null)?.scope?.days)
+    .toBe(30)
   await expect(page.getByTestId('ipc-action-error')).toHaveCount(0)
 })
 
