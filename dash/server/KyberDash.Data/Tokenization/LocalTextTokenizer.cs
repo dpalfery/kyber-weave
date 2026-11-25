@@ -18,7 +18,8 @@ namespace KyberDash.Data.Tokenization;
 /// </para>
 /// <para>
 /// The library maps a model name to its encoding inside <c>TiktokenTokenizer.CreateForModel</c> but
-/// does not expose the encoding name it chose. Each distinct model is resolved once: the tokenizer
+/// does not expose the encoding name it chose. Each distinct model is resolved once (up to
+/// <see cref="MaxCachedModels"/> models; one past that is resolved on each count): the tokenizer
 /// <c>CreateForModel</c> builds is compared, on one probe text where the two vocabularies disagree,
 /// with the two encoders this class caches, and the matching encoder's name becomes the label. That
 /// keeps the library as the one authority for which model uses which encoding, rather than a
