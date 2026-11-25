@@ -172,6 +172,44 @@ public class SqliteHarnessSourceReaderTests
     }
 
     [Fact]
+    public void Read_ExportOverCap_StopsTheExportBeforeItIsFullyWritten()
+    {
+        const int Chunks = 200;
+        Rig rig = new(new HarnessSqliteLimits(ExportCapBytes: 16 * 1024));
+        rig.Sqlite.AddDatabase(DbPath);
+        string chunk = new('x', 1024);
+        int written = 0;
+        rig.Source.Export = writer =>
+        {
+            writer.WriteStartArray();
+            for (int i = 0; i < Chunks; i++)
+            {
+                writer.WriteStringValue(chunk);
+                written++;
+            }
+
+            writer.WriteEndArray();
+        };
+
+        InvalidDataException error = Assert.Throws<InvalidDataException>(() => rig.Reader.Read(rig.Unit(DbPath + "#a"), rig.Files));
+
+        Assert.StartsWith("SQLITE_EXPORT_CAP_EXCEEDED", error.Message, StringComparison.Ordinal);
+        Assert.InRange(written, 1, Chunks - 1);
+    }
+
+    [Fact]
+    public void Read_ExportExactlyAtCap_IsAccepted()
+    {
+        Rig rig = new(new HarnessSqliteLimits(ExportCapBytes: 10));
+        rig.Sqlite.AddDatabase(DbPath);
+
+        NativeSourceUnit? native = rig.Reader.Read(rig.Unit(DbPath + "#a"), rig.Files);
+
+        Assert.Equal("{\"id\":\"a\"}", native?.RawText);
+        Assert.Equal(10, native?.SizeBytes);
+    }
+
+    [Fact]
     public void WriteJsonColumn_WritesRawJsonStringsNumbersAndNull()
     {
         using MemoryStream stream = new();
@@ -257,6 +295,8 @@ public class SqliteHarnessSourceReaderTests
 
         public string? ExportedId { get; private set; }
 
+        public Action<Utf8JsonWriter>? Export { get; set; }
+
         public IReadOnlyDictionary<string, IReadOnlyList<string>> RequiredColumns { get; } =
             new Dictionary<string, IReadOnlyList<string>> { ["chats"] = ["id"] };
 
@@ -275,6 +315,12 @@ public class SqliteHarnessSourceReaderTests
         public void WriteExport(IHarnessSqliteDatabase database, string conversationId, Utf8JsonWriter writer)
         {
             ExportedId = conversationId;
+            if (Export is not null)
+            {
+                Export(writer);
+                return;
+            }
+
             writer.WriteStartObject();
             writer.WriteString("id", "a");
             writer.WriteEndObject();

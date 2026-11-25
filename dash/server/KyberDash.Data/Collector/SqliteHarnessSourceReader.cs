@@ -1,3 +1,4 @@
+using System.Buffers;
 using System.Globalization;
 using System.Text;
 using System.Text.Json;
@@ -160,16 +161,27 @@ public class SqliteHarnessSourceReader : IHarnessSourceReader
         string exportText;
         long exportBytes;
         using (IHarnessSqliteDatabase database = sqlite.Open(databasePath))
-        using (BoundedMemoryStream stream = new(limits.ExportCapBytes))
         {
-            using (Utf8JsonWriter writer = new(stream))
+            // The writer commits into the capped buffer as it grows, so an export over the cap stops while it is
+            // being written; a writer over a stream would hold the whole export in its own buffer until Flush.
+            BoundedBufferWriter buffer = new(limits.ExportCapBytes);
+            using (Utf8JsonWriter writer = new(buffer))
             {
-                conversations.WriteExport(database, conversationId, writer);
-                writer.Flush();
+                try
+                {
+                    conversations.WriteExport(database, conversationId, writer);
+                    writer.Flush();
+                }
+                catch
+                {
+                    // Drop the pending bytes so Dispose does not flush them into the refusing buffer a second time.
+                    writer.Reset();
+                    throw;
+                }
             }
 
-            exportBytes = stream.Length;
-            exportText = Encoding.UTF8.GetString(stream.GetBuffer(), 0, (int)stream.Length);
+            exportBytes = buffer.WrittenCount;
+            exportText = Encoding.UTF8.GetString(buffer.WrittenSpan);
         }
 
         string? companionText = unit.CompanionKey is not null && fileSystem.FileExists(unit.CompanionKey)
@@ -323,28 +335,67 @@ public class SqliteHarnessSourceReader : IHarnessSourceReader
         return missing.Count == 0 ? null : string.Join(", ", missing);
     }
 
-    /// <summary>A growable memory stream that refuses to hold more than its cap.</summary>
-    private sealed class BoundedMemoryStream(long capBytes) : MemoryStream
+    /// <summary>
+    /// A growable buffer that refuses to commit more than its cap. The cap is checked on <see cref="Advance"/>,
+    /// the only way bytes are committed; a size hint is a worst case (escaping can triple a string) and is not
+    /// held against the cap.
+    /// </summary>
+    private sealed class BoundedBufferWriter(long capBytes) : IBufferWriter<byte>
     {
-        public override void Write(byte[] buffer, int offset, int count)
-        {
-            EnsureWithinCap(count);
-            base.Write(buffer, offset, count);
-        }
+        private const int MinimumGrowth = 4096;
 
-        public override void Write(ReadOnlySpan<byte> buffer)
-        {
-            EnsureWithinCap(buffer.Length);
-            base.Write(buffer);
-        }
+        private byte[] buffer = [];
+        private int written;
 
-        private void EnsureWithinCap(int incoming)
+        public int WrittenCount => written;
+
+        public ReadOnlySpan<byte> WrittenSpan => buffer.AsSpan(0, written);
+
+        public void Advance(int count)
         {
-            if (Position + incoming > capBytes)
+            ArgumentOutOfRangeException.ThrowIfNegative(count);
+            if (written + (long)count > capBytes)
             {
                 throw new InvalidDataException(
                     $"{SqliteSourceOpenPolicy.ExportCapExceededCode}: export is larger than {capBytes} bytes.");
             }
+
+            ArgumentOutOfRangeException.ThrowIfGreaterThan(count, buffer.Length - written);
+            written += count;
+        }
+
+        public Memory<byte> GetMemory(int sizeHint = 0)
+        {
+            Reserve(sizeHint);
+            return buffer.AsMemory(written);
+        }
+
+        public Span<byte> GetSpan(int sizeHint = 0)
+        {
+            Reserve(sizeHint);
+            return buffer.AsSpan(written);
+        }
+
+        private void Reserve(int sizeHint)
+        {
+            ArgumentOutOfRangeException.ThrowIfNegative(sizeHint);
+            int wanted = Math.Max(sizeHint, 1);
+            if (buffer.Length - written >= wanted)
+            {
+                return;
+            }
+
+            // Doubling stops at the cap; only a hint larger than what is left goes past it, because a hint is a
+            // worst case and the bytes actually committed are checked in Advance.
+            long grown = Math.Min(Math.Max((long)written + Math.Max(wanted, MinimumGrowth), buffer.Length * 2L), capBytes);
+            long size = Math.Max(grown, (long)written + wanted);
+            if (size > Array.MaxLength)
+            {
+                throw new InvalidDataException(
+                    $"{SqliteSourceOpenPolicy.ExportCapExceededCode}: export is larger than {capBytes} bytes.");
+            }
+
+            Array.Resize(ref buffer, (int)size);
         }
     }
 }
