@@ -6,7 +6,7 @@ status: current
 component: KyberDash
 source-root: dash
 owner: dpalfery
-last-reviewed: 2026-11-23
+last-reviewed: 2026-11-24
 decided-by:
   - adr/0084-kyberdash-csharp-engine
   - adr/0031-kyberdash-capture-command-owns-harness-telemetry-keys
@@ -559,8 +559,10 @@ wipes the scope in one store transaction (records including `records.raw`, prove
 checkpoints, and harness-scoped derived caches), projects the derived tables, re-ingests
 the scope **only if a window was requested**, and resumes ingestion. `ingest_log`,
 `refresh_run`, `metadata` (stamped `last_clean_at`/scope), `token_cache`, and the
-model-window catalog are never wiped. Wipe-all clears `quarantine` and the
-log-enrichment tables. A per-harness wipe now deletes the `quarantine`, `pending_logs`,
+model-window catalog are never wiped. Neither is the diagnostic evidence: a clean, including
+`--all`, keeps the quarantined spans (`quarantined_span*`) and the ingest problems (`ingest_problem*`)
+and reports `QuarantineDeleted: 0` and `ProblemsDeleted: 0`, so the file keeps their pages. Wipe-all clears
+the log-enrichment tables. A per-harness wipe now deletes the `quarantine`, `pending_logs`,
 and `quarantined_logs` rows whose `harness` matches the wiped raw names — the nullable
 column schema v19 added for exactly this
 ([ADR 0035](../adr/0035-kyberdash-quarantine-raw-packet-evidence.md)). A row with no
@@ -576,6 +578,19 @@ Both surfaces reach the same operation at `POST /api/kyber/clean` (confirmed dia
 dashboard's Maintenance panel and in the tray's two-step confirm), passing the scope, the
 explicit confirmation, and a `reingestWeeks` window or its absence. Neither spawns a clean
 child, and neither holds clean logic.
+
+#### Vacuum and full reset
+
+`kyberdash kyber vacuum` compacts the SQLite store: it checkpoints the WAL with `TRUNCATE`, runs
+`VACUUM`, and checkpoints again. SQLite keeps pages freed by a clean inside the file, so the file only
+shrinks after a vacuum, and a vacuum frees nothing the clean kept (quarantine and problems stay). It runs
+under the store's bounded runner; a very large file can hit the store's batch timeout and surfaces as the
+store's normal error.
+
+To start from an empty database (a clean does not remove the quarantine and problem rows): stop the
+engine, delete `canon.db` and its `canon.db-wal` and `canon.db-shm` files (`KYBER_CANON_DB` overrides the
+path), then start it. The store recreates the schema on first open and the first write triggers a full
+projection. There is no backup and no undo, and OTLP-collected records do not come back.
 
 ### 2c. Import folder history (`dash import-history`)
 

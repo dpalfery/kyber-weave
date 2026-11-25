@@ -1058,10 +1058,36 @@ Inside the running `kyberdash web` server, `OtlpCollectorService` accepts span/l
 `BoundedIngestWriter` (which enforces 64 MiB request / 256 MiB pending bounds and 64 KiB
 UTF-8-safe content truncation via `CanonValidation`), notifies `JobSchedulerService` / `DashEndpointMappings` on
 updates, and relies on `JobSchedulerService` (coordinated via `JobsLease` on `jobs.lock`) and incremental
-dirty-key projection (`projection_dirty_sessions` / `projection_session_key_map`) rather than
-recomputing the whole corpus on every incoming OTLP request. Unchanged runs skip projection via the
-monotonic `records_write_seq` marker, schema version, and `SqliteRelationalStore.DetectorVersion`, while
-unchanged session/run/execution rows avoid redundant writes.
+dirty-key projection rather than recomputing the whole corpus on every incoming OTLP request.
+
+The incremental projection rests on three tables, with no other bookkeeping: `store_write_marker`
+(`records_write_seq`, a counter that rises by exactly 1 per record-changing write; an absent row reads 0),
+`projection_dirty_range` (`from_seq`, `to_seq`: the writes since `from_seq`, up to `to_seq`) and
+`projection_dirty_session` (the session keys those writes touched). A projection pass is skipped when
+`projection_state.records_marker` equals the write marker, the schema version and
+`SqliteRelationalStore.DetectorVersion`; unchanged session/run/execution rows also avoid redundant writes.
+
+- **Which writes move the marker.** Only `IRelationalStoreWriter.WriteBatch` (when it carries at least one
+  session or record) and `IRelationalStoreWriter.DeleteSource`. Problems, quarantine, provenance, metrics,
+  checkpoints, settings and every projector output write leave it alone, so a projection pass never
+  invalidates itself. The marker and the dirty range move in the same transaction as the record write
+  (`SqliteRelationalStore`, and `InMemoryRelationalStore` in its lock), so a rejected write moves nothing
+  and a caller cannot forget the bump.
+- **Which keys a write marks dirty.** `WriteBatch` marks the union of its session keys and its records'
+  session keys; a record with no session key, and every `DeleteSource` (the cascade removes records of
+  sessions the call does not name), make the write a wildcard: a range with no `projection_dirty_session`
+  rows, meaning every session.
+- **Merge rules.** A write continues the stored range when its `to_seq` equals the marker before the write:
+  `from_seq` stays, `to_seq` becomes the new marker, a keyed write adds its keys (duplicates ignored) and a
+  wildcard write drops the key rows. A keyed write never adds keys to a wildcard range. When the stored
+  range is absent or its `to_seq` differs from the marker, the range restarts at the marker before the write.
+  The projector rebuilds only the keys of a range that ends at the current marker and starts at the marker it
+  last projected; any other combination is a full pass.
+- **A write during a pass is never lost.** When the marker moved while a pass ran, the pass stamps
+  `records_marker` with the marker it read, not the newer one, and keeps the new writes dirty (range from the
+  marker it read to the newer marker, keys stored plus deferred; wildcard stays wildcard; anything else
+  clears), so the next pass rebuilds them. Every race in this path degrades to a full pass, never to a
+  skipped session.
 
 The C# canonical engine under `dash/server/` owns the schema-25 relational SQLite layout:
 - **Storage & transport (`CanonDbPath`, `RelationalSchemaCatalog`, `SchemaDdlGenerator`, `SqliteRelationalStore`)**:

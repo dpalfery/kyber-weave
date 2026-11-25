@@ -15,7 +15,7 @@ impact-components:
 
 # Record writes move the projection write marker again
 
-**Status: Ready, 2026-11-25.**
+**Status: Ready, 2026-11-25. Implementation complete T1-T4; closeout harvested.**
 
 ## Request
 
@@ -255,3 +255,22 @@ End-of-run council under the `code-review` skill over the whole branch; it deriv
 ## docs-dev closeout
 
 `docs-dev` harvests the Design harvest rows into `docs/dash/architecture.md` and `docs/dash/runbook.md`, fills the Closeout mapping (ADR waiver expected: restores the pre-#652 contract), runs `kyber-weave docs standards migrate` if the standards warning period still reports, and archives the plan.
+
+## Closeout mapping
+
+| ID | Destination | Documentation-impact |
+|---|---|---|
+| D1, D2, D3, D4, D5 | [dash/architecture.md](../dash/architecture.md#the-shared-canonical-projection) | extends-component; impact-components: KyberDash; last-reviewed 2026-11-24; status archived. Verified: the incremental projection text names `store_write_marker`, `projection_dirty_range` and `projection_dirty_session`, which writes move the marker, which keys they mark, the merge rules, the same-transaction rule and the mid-pass rule; the old `projection_dirty_sessions` / `projection_session_key_map` names are gone |
+| D9, D10 | [dash/runbook.md](../dash/runbook.md#vacuum-and-full-reset) | extends-component; impact-components: KyberDash; last-reviewed 2026-11-24; status archived. Verified: 2b states that clean keeps quarantine and problems (correcting a line that said wipe-all clears `quarantine`), that `kyber vacuum` checkpoints, vacuums and checkpoints again, and the full-reset procedure (stop the engine, delete `canon.db` plus `-wal`/`-shm`) |
+| D6, D7, D8, D11, AP1 | Documentation waiver: D6 (deferred keys on a quiet store), D7 (where the SQLite contract test lives), D8 (a comment kept) and D11 (test assertion changes) are implementation and test detail whose surviving invariants are in the PR notes; AP1 is the approval gate |
+| KyberDash | [dash/architecture.md](../dash/architecture.md), [dash/runbook.md](../dash/runbook.md) | The impact component's canonical documents, updated as above |
+
+no ADR - ADR waiver (D1 to D11): restores the pre-#652 write contract and applies the established store pattern; no new constraint on future work.
+
+## Completion summary
+
+- T1 (0b014ae55, bb335d994, 86e293bff): `WriteBatch` and `DeleteSource` move the marker and merge the dirty range in the write transaction on both stores; empty record session keys are refused.
+- T2 (235820ec5, 75cab68fc): a pass keeps mid-pass writes dirty and stamps the marker it read.
+- T3 (29366a9ee): tests use real writes, a shared `DelegatingRelationalStoreReader` fake, and the `CleanService` comment is corrected.
+- T4 (93deef3a2): `SqliteRelationalStore.Vacuum` (checkpoint `TRUNCATE`, `VACUUM`, checkpoint) and `DoctorService.RunVacuum` calls it.
+- NOT VERIFIED: sessions view refreshing against the owner's live store, and vacuum time on a 1.28 GB file — needs the live environment.
