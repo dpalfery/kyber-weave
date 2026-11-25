@@ -1889,6 +1889,9 @@ public sealed class AnalyticsReadPathTests
         Assert.Contains(
             summary.GetProperty("notes").EnumerateArray(),
             note => note.GetString() == stored.SchemaUnmeasurableReason);
+        Assert.Contains(
+            summary.GetProperty("notes").EnumerateArray(),
+            static note => note.GetString() == "Harness-reported cost was not exported; cost calculated from published rates is shown separately.");
 
         JsonElement skills = bridge.GetSessionSkills("sess-pi-gap")!.Value;
         Assert.Equal("not_measurable", skills.GetProperty("availability").GetString());

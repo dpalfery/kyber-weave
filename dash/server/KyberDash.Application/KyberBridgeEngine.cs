@@ -3321,7 +3321,7 @@ public class KyberBridgeEngine
 
             if (figures.ReportedCost is null && figures.TurnCount > 0)
             {
-                AddNote("Harness-reported cost was not exported; published pricing estimates are shown separately.");
+                AddNote("Harness-reported cost was not exported; cost calculated from published rates is shown separately.");
             }
 
             if (figures.CostBasisMismatch is not null)

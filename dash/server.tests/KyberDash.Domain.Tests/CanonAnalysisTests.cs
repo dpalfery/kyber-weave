@@ -573,10 +573,7 @@ public class CanonAnalysisTests
         foreach (Finding finding in findings)
         {
             Assert.NotEmpty(finding.EvidenceLinks);
-            if (!string.Equals(finding.MeasurementClass, "coverage-gap", StringComparison.Ordinal))
-            {
-                Assert.NotNull(finding.ErrorBar);
-            }
+            Assert.Null(finding.ErrorBar);
 
             Assert.False(string.IsNullOrWhiteSpace(finding.OutcomeRiskCaveat));
             D8LintResult lint = CanonFindings.LintRecommendationD8(finding.Recommendation);
@@ -594,7 +591,7 @@ public class CanonAnalysisTests
                     ["dormant-skill"] = 350,
                 }));
         Finding measuredSkill = Assert.Single(measuredSkillFindings);
-        Assert.NotNull(measuredSkill.ErrorBar);
+        Assert.Null(measuredSkill.ErrorBar);
         Assert.Equal("inferred", measuredSkill.MeasurementClass);
 
         Finding skillTied = findings.First(static finding => finding.DetectorId == "inactive-skill-reference") with

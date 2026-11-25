@@ -336,7 +336,7 @@ public partial class CanonSessionProjectorEngine
             contextTurns.Add(new ContextTurn(
                 Parts: effective,
                 InputTokens: CanonPricing.MeasuredInput(record.Tokens),
-                FreshInput: record.Tokens.FreshInput));
+                FreshInput: MeasuredFreshInput(record.Tokens)));
         }
 
         IReadOnlyList<CanonicalRecord> windowRecords = contextRecords.Count > 0 ? contextRecords : records;
@@ -2954,6 +2954,13 @@ public partial class CanonSessionProjectorEngine
     }
 
     /// <summary>
+    /// Fresh input tokens for the fresh-input jump check, or <see langword="null"/> when the turn reported
+    /// none. A zero fresh class carries no evidence the harness measured it (the canonical record holds
+    /// unreported classes as zero), so it is not-measured rather than a measured zero (D15).
+    /// </summary>
+    private static long? MeasuredFreshInput(TokenUsage tokens) => tokens.FreshInput > 0 ? tokens.FreshInput : null;
+
+    /// <summary>
     /// Rebuilds one typed <see cref="StoredSessionProjection"/> from a session's deduplicated
     /// records: context pressure analysis, schema ranking, timeline marks, requests, and turns,
     /// with exclusive unmeasurable reasons in place of non-measurable figures.
@@ -3004,7 +3011,7 @@ public partial class CanonSessionProjectorEngine
             contextTurns.Add(new ContextTurn(
                 Parts: effective,
                 InputTokens: CanonPricing.MeasuredInput(record.Tokens),
-                FreshInput: record.Tokens.FreshInput));
+                FreshInput: MeasuredFreshInput(record.Tokens)));
         }
 
         IReadOnlyList<CanonicalRecord> windowRecords = contextRecords.Count > 0 ? contextRecords : records;
@@ -3078,7 +3085,7 @@ public partial class CanonSessionProjectorEngine
                 ResidualTokens: turn.Residual.Tokens,
                 ResidualAttribution: turn.Residual.Attribution,
                 BuiltinToolDefinitionTokens: turn.BuiltinToolDefinitionTokens,
-                FreshInput: turn.FreshInput,
+                FreshInput: turn.FreshInput ?? 0,
                 Buckets: [.. turn.Buckets
                     .Where(static entry => entry.Value != 0)
                     .OrderBy(static entry => entry.Key, StringComparer.Ordinal)

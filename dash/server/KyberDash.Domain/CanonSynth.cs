@@ -51,11 +51,11 @@ public record ParsedProviderCall
     /// <summary>Reasoning/thinking token count reported by the provider, when non-zero.</summary>
     public long ReasoningTokens { get; init; }
 
-    /// <summary>Reported or estimated USD cost (<c>0</c> means unrated/no rate).</summary>
+    /// <summary>Harness-reported USD cost, or a cost calculated from published rates (<c>0</c> means unrated/no rate).</summary>
     public double CostUsd { get; init; }
 
-    /// <summary>True when <see cref="CostUsd"/> came from a bundled rate table rather than harness billing.</summary>
-    public bool CostIsEstimated { get; init; }
+    /// <summary>True when <see cref="CostUsd"/> was calculated from published rates (a bundled rate table) rather than harness billing.</summary>
+    public bool CostIsCalculated { get; init; }
 
     /// <summary>True when a Copilot reader observed a genuine harness-reported cost figure.</summary>
     public bool CostHarnessReported { get; init; }
@@ -531,7 +531,7 @@ public static class CanonSynth
         ArgumentNullException.ThrowIfNull(call);
         if (call.CostUsd != 0 && double.IsFinite(call.CostUsd))
         {
-            CostBasis basis = call.CostIsEstimated || (string.Equals(call.Provider, "copilot", StringComparison.Ordinal) && !call.CostHarnessReported)
+            CostBasis basis = call.CostIsCalculated || (string.Equals(call.Provider, "copilot", StringComparison.Ordinal) && !call.CostHarnessReported)
                 ? CostBasis.Published
                 : CostBasis.Harness;
             Dictionary<string, double> byModel = new(StringComparer.Ordinal)
@@ -541,7 +541,7 @@ public static class CanonSynth
             return new CostBlock(basis, CostStatus.Priced, call.CostUsd, "USD", byModel);
         }
 
-        return call.CostIsEstimated
+        return call.CostIsCalculated
             ? new CostBlock(CostBasis.Published, CostStatus.NoRate)
             : new CostBlock(CostBasis.Unknown, CostStatus.NoRate);
     }
@@ -1171,7 +1171,7 @@ public static class CanonSynth
             ["cachedInputTokens"] = JsonSerializer.SerializeToElement(call.CachedInputTokens),
             ["reasoningTokens"] = JsonSerializer.SerializeToElement(call.ReasoningTokens),
             ["costUSD"] = JsonSerializer.SerializeToElement(call.CostUsd),
-            ["costIsEstimated"] = JsonSerializer.SerializeToElement(call.CostIsEstimated),
+            ["costIsCalculated"] = JsonSerializer.SerializeToElement(call.CostIsCalculated),
             ["deduplicationKey"] = JsonSerializer.SerializeToElement(call.DeduplicationKey),
             ["provenance"] = JsonSerializer.SerializeToElement(provenance, RawSerializerOptions),
         };

@@ -33,7 +33,7 @@ public record ContextPart(
 public record ContextTurn(
     IReadOnlyList<ContextPart> Parts,
     long InputTokens,
-    long FreshInput);
+    long? FreshInput);
 
 /// <summary>Delimiters separating embedded instruction blocks from carrier content.</summary>
 public record InstructionBlockMarkers(string Open, string Close);
@@ -70,7 +70,7 @@ public record TurnPressure(
     long Headroom,
     double Pressure,
     long AccumulationRate,
-    long FreshInput,
+    long? FreshInput,
     FreshInputJump? FreshInputJump = null,
     int? NonResidentToolDefinitions = null);
 
@@ -407,18 +407,22 @@ public static class CanonContextAnalysis
             ContextTurn? previous = position > 0 ? turns[position - 1] : null;
             long accumulationRate = previous is null ? turn.InputTokens : turn.InputTokens - previous.InputTokens;
 
+            // The baseline is the nearest earlier turn whose fresh input was measured: an unmeasured
+            // turn is not a zero, so no jump is ever flagged against it.
             FreshInputJump? freshInputJump = null;
-            if (previous is not null)
+            long? previousFresh = null;
+            for (int back = position - 1; back >= 0 && !previousFresh.HasValue; back--)
+                previousFresh = turns[back].FreshInput;
+
+            if (turn.FreshInput is > 0 and long currentFresh && previousFresh.HasValue)
             {
-                long previousFresh = previous.FreshInput;
-                bool sharpRise = turn.FreshInput > 0 &&
-                                 ((previousFresh > 0 && turn.FreshInput >= options.FreshJumpFactor * previousFresh) ||
-                                  (previousFresh == 0 && turn.FreshInput >= options.ZeroPreviousFloor));
+                bool sharpRise = (previousFresh.Value > 0 && currentFresh >= options.FreshJumpFactor * previousFresh.Value) ||
+                                 (previousFresh.Value == 0 && currentFresh >= options.ZeroPreviousFloor);
                 if (sharpRise)
                 {
                     freshInputJump = new FreshInputJump(
-                        Previous: previousFresh,
-                        Factor: previousFresh > 0 ? (double)turn.FreshInput / previousFresh : double.PositiveInfinity);
+                        Previous: previousFresh.Value,
+                        Factor: previousFresh.Value > 0 ? (double)currentFresh / previousFresh.Value : double.PositiveInfinity);
                 }
             }
 

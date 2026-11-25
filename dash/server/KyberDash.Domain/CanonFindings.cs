@@ -876,7 +876,7 @@ public static partial class CanonFindings
 
         if (input.ToolDefinitions is { Count: > 0 })
         {
-            int totalTurns = input.TurnsCount ?? Math.Max(turnRecords.Count, 3);
+            int totalTurns = input.TurnsCount ?? turnRecords.Count;
             foreach (ToolDefinitionSupply def in input.ToolDefinitions)
             {
                 if (toolResidency.TryGetValue(def.Name, out ToolResidency? existing))
@@ -964,7 +964,7 @@ public static partial class CanonFindings
                 Confidence: "deterministic",
                 EstimatedWasteTokens: estimatedWasteTokens,
                 Recommendation: recommendation,
-                ErrorBar: measured ? new FindingErrorBar((long)Math.Floor(estimatedWasteTokens!.Value * 0.8), (long)Math.Ceiling(estimatedWasteTokens.Value * 1.2)) : null,
+                ErrorBar: null,
                 OutcomeRiskCaveat: outcomeRiskCaveat,
                 RunId: input.RunId,
                 SessionId: sessionId,
@@ -1005,27 +1005,9 @@ public static partial class CanonFindings
                 object? args = r.Raw is not null && r.Raw.TryGetValue("arguments", out JsonElement argsEl) ? argsEl : null;
                 string? argsHash = RawString(r, ["gen_ai.tool.arguments_hash"]);
 
+                // Only reported counters count: a token figure derived from result bytes or text length is an estimate (D15).
                 long sumTokens = r.Tokens.ReportedInput + r.Tokens.Output;
                 long? tokens = sumTokens > 0 ? sumTokens : null;
-                if (!tokens.HasValue)
-                {
-                    if (TryGetRawNumber(r, ["gen_ai.tool.result_bytes"], out double resultBytes) && resultBytes > 0)
-                    {
-                        tokens = (long)Math.Ceiling(resultBytes / 4.0);
-                    }
-                    else if (r.Parts is { Count: > 0 })
-                    {
-                        int textLen = r.Parts.Sum(static p => p.Text?.Length ?? 0);
-                        if (textLen > 0)
-                            tokens = (textLen + 3L) / 4L;
-                    }
-                    else if (TryGetRawElement(r, ["result", "output"], out JsonElement resEl) &&
-                             resEl.ValueKind == JsonValueKind.String &&
-                             !string.IsNullOrEmpty(resEl.GetString()))
-                    {
-                        tokens = (resEl.GetString()!.Length + 3L) / 4L;
-                    }
-                }
 
                 calls.Add(new NormalizedToolCall(
                     toolName.Trim(),
@@ -1093,7 +1075,7 @@ public static partial class CanonFindings
                     Confidence: "deterministic",
                     EstimatedWasteTokens: wasteTokens,
                     Recommendation: recommendation,
-                    ErrorBar: measured ? new FindingErrorBar((long)Math.Floor(wasteTokens!.Value * 0.8), (long)Math.Ceiling(wasteTokens.Value * 1.25)) : null,
+                    ErrorBar: null,
                     OutcomeRiskCaveat: outcomeRiskCaveat,
                     RunId: input.RunId,
                     SessionId: call.SessionId ?? sessionId,
@@ -1137,7 +1119,8 @@ public static partial class CanonFindings
             else if (string.Equals(r.Op, "tool.invoke", StringComparison.Ordinal))
             {
                 StringBuilder contentBuilder = new();
-                long tokens = 0;
+                long reportedTokens = 0;
+                bool allPartsMeasured = true;
                 if (r.Parts is not null)
                 {
                     foreach (ContentPart part in r.Parts)
@@ -1145,7 +1128,11 @@ public static partial class CanonFindings
                         if (string.Equals(part.Part, "tool_result_content", StringComparison.Ordinal) && !string.IsNullOrEmpty(part.Text))
                         {
                             contentBuilder.Append(part.Text);
-                            tokens += part.Tokens ?? ((part.Text.Length + 3L) / 4L);
+                            long? partTokens = CanonPricing.MeasuredCount(part.Tokens);
+                            if (partTokens.HasValue)
+                                reportedTokens += partTokens.Value;
+                            else
+                                allPartsMeasured = false;
                         }
                     }
                 }
@@ -1154,7 +1141,7 @@ public static partial class CanonFindings
                 if (content.Length == 0 && TryGetRawElement(r, ["result", "output"], out JsonElement rawRes))
                 {
                     content = rawRes.ValueKind == JsonValueKind.String ? (rawRes.GetString() ?? string.Empty) : rawRes.GetRawText();
-                    tokens = (content.Length + 3L) / 4L;
+                    allPartsMeasured = false;
                 }
 
                 string toolName = (!string.IsNullOrEmpty(r.Name) && r.Name != "tool.invoke" ? r.Name : null)
@@ -1164,13 +1151,15 @@ public static partial class CanonFindings
                 long? resultBytes = TryGetRawNumber(r, ["gen_ai.tool.result_bytes"], out double rb) ? (long)rb : null;
                 int chars = content.Length;
                 long bytes = resultBytes ?? Encoding.UTF8.GetByteCount(content);
-                long estTokens = tokens > 0 ? tokens : (bytes + 3L) / 4L;
+
+                // A token figure derived from bytes or text length is an estimate (D15): without reported tokens the item stays unmeasured.
+                long? measuredTokens = allPartsMeasured && reportedTokens > 0 ? reportedTokens : null;
 
                 if (chars > 0 || bytes > 0 || content.Length > 0)
                 {
                     items.Add(new ToolResultItem(
                         toolName,
-                        estTokens > 0 ? estTokens : ((chars + 3L) / 4L),
+                        measuredTokens,
                         chars,
                         bytes,
                         r.SpanId,
@@ -1196,10 +1185,9 @@ public static partial class CanonFindings
                 };
                 int chars = res.Characters ?? content.Length;
                 long bytes = res.Bytes ?? Encoding.UTF8.GetByteCount(content);
-                long tokens = res.Tokens ?? ((chars + 3L) / 4L);
                 items.Add(new ToolResultItem(
                     res.ToolName ?? "tool",
-                    tokens,
+                    res.Tokens,
                     chars,
                     bytes,
                     res.SpanId ?? $"result-span-{i}",
@@ -1218,32 +1206,38 @@ public static partial class CanonFindings
             if (!tokenExceeded && !charExceeded && !byteExceeded)
                 continue;
 
+            // The excess is exact arithmetic on a reported token count; a bytes- or characters-only
+            // overrun has no reported token figure, so it is not measured rather than derived at a ratio (D15).
             string titleExceeded;
             string thresholdDesc;
-            long excessTokens;
+            long? excessTokens;
             if (tokenExceeded)
             {
                 titleExceeded = $"{item.Tokens} tokens";
                 thresholdDesc = $"{input.TokenThreshold} tokens";
-                excessTokens = Math.Max(100L, item.Tokens - input.TokenThreshold);
+                excessTokens = item.Tokens!.Value - input.TokenThreshold;
             }
             else if (byteExceeded)
             {
                 titleExceeded = $"{item.Bytes} bytes";
                 thresholdDesc = $"{input.ByteThreshold} bytes";
-                excessTokens = Math.Max(100L, (long)Math.Ceiling((item.Bytes - input.ByteThreshold) / 4.0));
+                excessTokens = null;
             }
             else
             {
                 titleExceeded = $"{item.Chars} characters";
                 thresholdDesc = $"{input.CharThreshold} characters";
-                excessTokens = Math.Max(100L, (long)Math.Ceiling((item.Chars - input.CharThreshold) / 4.0));
+                excessTokens = null;
             }
+
+            bool excessMeasured = excessTokens.HasValue;
 
             FindingEvidenceLink[] evidenceLinks =
             [
                 new(item.SpanId, item.TurnIndex, $"Tool \"{item.ToolName}\" returned oversized output ({item.tokensDisplay}), exceeding threshold ({thresholdDesc})."),
-                new(item.ConsumingSpanId, item.TurnIndex + 1, $"Subsequent turn context re-read {item.Tokens} tokens into prompt history with low operational yield."),
+                new(item.ConsumingSpanId, item.TurnIndex + 1, item.Tokens.HasValue
+                    ? $"Subsequent turn context re-read {item.Tokens} tokens into prompt history with low operational yield."
+                    : "Subsequent turn context re-read the result into prompt history with low operational yield (token size not reported)."),
             ];
 
             string recommendation = "Relocate large tool outputs to persistent storage and use progressive disclosure or on-demand pagination to return concise excerpts.";
@@ -1256,16 +1250,18 @@ public static partial class CanonFindings
                 Id: $"finding-oversized-result-{item.ToolName}-{item.SpanId}",
                 DetectorId: "oversized-tool-result",
                 Title: $"Oversized Tool Result: \"{item.ToolName}\" returned {titleExceeded} exceeding budget",
-                Mechanism: $"Tool \"{item.ToolName}\" injected {item.Tokens} tokens ({item.Chars} characters, {item.Bytes} bytes) into context in a single output, exceeding the {thresholdDesc} limit and increasing per-turn re-read overhead by {excessTokens} tokens.",
+                Mechanism: excessMeasured
+                    ? $"Tool \"{item.ToolName}\" injected {item.Tokens} tokens ({item.Chars} characters, {item.Bytes} bytes) into context in a single output, exceeding the {thresholdDesc} limit and increasing per-turn re-read overhead by {excessTokens} tokens."
+                    : $"Tool \"{item.ToolName}\" injected {item.Chars} characters ({item.Bytes} bytes) into context in a single output, exceeding the {thresholdDesc} limit; no reported token count, so the added re-read overhead is not measured.",
                 EvidenceLinks: evidenceLinks,
                 Confidence: "deterministic",
                 EstimatedWasteTokens: excessTokens,
                 Recommendation: recommendation,
-                ErrorBar: new FindingErrorBar((long)Math.Floor(excessTokens * 0.8), (long)Math.Ceiling(excessTokens * 1.3)),
+                ErrorBar: null,
                 OutcomeRiskCaveat: outcomeRiskCaveat,
                 RunId: input.RunId,
                 SessionId: item.SessionId ?? sessionId,
-                RankScore: ComputeRankScore(excessTokens, "deterministic", discount),
+                RankScore: ComputeRankScore(excessTokens ?? 0, "deterministic", discount),
                 MeasurementClass: "deterministic",
                 ConfidenceBasis: "Deterministically measured by comparing tool result byte, character, and token lengths against configured thresholds.",
                 WhatWouldRaiseIt: "Deterministic measurement; confidence is at ceiling."));
@@ -1348,7 +1344,7 @@ public static partial class CanonFindings
                     Confidence: "deterministic",
                     EstimatedWasteTokens: wasteTokens,
                     Recommendation: recommendation,
-                    ErrorBar: measured ? new FindingErrorBar((long)Math.Floor(wasteTokens!.Value * 0.8), (long)Math.Ceiling(wasteTokens.Value * 1.25)) : null,
+                    ErrorBar: null,
                     OutcomeRiskCaveat: outcomeRiskCaveat,
                     RunId: input.RunId,
                     SessionId: sessionId,
@@ -1527,7 +1523,7 @@ public static partial class CanonFindings
                 Confidence: confidence,
                 EstimatedWasteTokens: estimatedWasteTokens,
                 Recommendation: recommendation,
-                ErrorBar: new FindingErrorBar((long)Math.Floor(estimatedWasteTokens * 0.9), (long)Math.Ceiling(estimatedWasteTokens * 1.3)),
+                ErrorBar: null,
                 OutcomeRiskCaveat: outcomeRiskCaveat,
                 RunId: input.RunId,
                 SessionId: group.SessionId,
@@ -1598,7 +1594,6 @@ public static partial class CanonFindings
         if (delegationShare <= 0.60)
             return [];
 
-        long estimatedWasteTokens = Math.Max(100L, subagentTokens - (long)Math.Floor(totalTokens * 0.50));
         FindingEvidenceLink[] evidenceLinks =
         [
             new(rootSpanId, 0, $"Root execution initiated workflow requiring {rootTokens} tokens ({Math.Round((double)rootTokens / totalTokens * 100.0)}% share)."),
@@ -1620,13 +1615,13 @@ public static partial class CanonFindings
                 Mechanism: $"Delegated executions consumed {subagentTokens} tokens ({Math.Round(delegationShare * 100.0)}% of total workflow), exceeding the 60% delegation ceiling without proportional outcome justification.",
                 EvidenceLinks: evidenceLinks,
                 Confidence: "calibrated_statistical",
-                EstimatedWasteTokens: estimatedWasteTokens,
+                EstimatedWasteTokens: null,
                 Recommendation: recommendation,
-                ErrorBar: new FindingErrorBar((long)Math.Floor(estimatedWasteTokens * 0.75), (long)Math.Ceiling(estimatedWasteTokens * 1.25)),
+                ErrorBar: null,
                 OutcomeRiskCaveat: outcomeRiskCaveat,
                 RunId: input.RunId,
                 SessionId: sessionId,
-                RankScore: ComputeRankScore(estimatedWasteTokens, "calibrated_statistical", discount),
+                RankScore: ComputeRankScore(0, "calibrated_statistical", discount),
                 MeasurementClass: "inferred",
                 ConfidenceBasis: "Calibrated from subagent token share relative to task outcome and delegation structure.",
                 WhatWouldRaiseIt: "Harness emission of explicit subagent task justification spans and task completion status."),
@@ -1695,7 +1690,7 @@ public static partial class CanonFindings
 
             long? tokensPerTurn = input.SkillTokens is not null && input.SkillTokens.TryGetValue(skill, out long tpt) ? tpt : null;
             bool measured = tokensPerTurn is > 0;
-            int turnsCount = measured ? Math.Max(recordedTurns, 3) : recordedTurns;
+            int turnsCount = recordedTurns;
             long? estimatedWasteTokens = measured ? tokensPerTurn!.Value * turnsCount : null;
 
             FindingEvidenceLink[] evidenceLinks = measured
@@ -1727,7 +1722,7 @@ public static partial class CanonFindings
                 Confidence: "heuristic",
                 EstimatedWasteTokens: estimatedWasteTokens,
                 Recommendation: recommendation,
-                ErrorBar: measured ? new FindingErrorBar((long)Math.Floor(estimatedWasteTokens!.Value * 0.5), (long)Math.Ceiling(estimatedWasteTokens.Value * 1.5)) : null,
+                ErrorBar: null,
                 OutcomeRiskCaveat: outcomeRiskCaveat,
                 RunId: input.RunId,
                 SessionId: sessionId,
@@ -2318,7 +2313,7 @@ public static partial class CanonFindings
 
     private record ToolResultItem(
         string ToolName,
-        long Tokens,
+        long? Tokens,
         int Chars,
         long Bytes,
         string SpanId,
@@ -2326,7 +2321,9 @@ public static partial class CanonFindings
         string ConsumingSpanId,
         string? SessionId)
     {
-        public string tokensDisplay => $"{Tokens} tokens, {Chars} characters, {Bytes} bytes";
+        public string tokensDisplay => Tokens.HasValue
+            ? $"{Tokens} tokens, {Chars} characters, {Bytes} bytes"
+            : $"{Chars} characters, {Bytes} bytes";
     }
 
     private class CompactionSessionGroup(string sessionId)
