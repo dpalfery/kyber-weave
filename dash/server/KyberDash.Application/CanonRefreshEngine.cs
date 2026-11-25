@@ -46,8 +46,10 @@ public class CanonRefreshEngine
     /// <summary>
     /// Decides whether <paramref name="exception"/> belongs to one source unit, so the unit is recorded as a
     /// <c>SOURCE_UNREADABLE</c> problem and the pass continues. Read, parse, and argument failures qualify, as does a
-    /// store write rejected by a SQLite constraint (<see cref="SqliteExecutionException.ExitCode"/> 19), which
-    /// concerns only that unit's rows. Failures that mean the store itself is unusable (busy or locked database,
+    /// store write rejected by a SQLite constraint (<see cref="SqliteExecutionException.ExitCode"/> 19) or refused by
+    /// the store's own row validation (<see cref="DashValidationException"/> with
+    /// <see cref="SqliteRelationalStore.ConstraintViolatedCode"/> or <see cref="SqliteRelationalStore.JsonTextRefusedCode"/>),
+    /// which concern only that unit's rows; any other validation code is a defect and still fails the pass. Failures that mean the store itself is unusable (busy or locked database,
     /// corrupt or unopenable file, missing native library, open circuit breaker) do not qualify and still fail the pass.
     /// </summary>
     /// <param name="exception">Exception raised while processing a single source unit.</param>
@@ -56,7 +58,11 @@ public class CanonRefreshEngine
     {
         ArgumentNullException.ThrowIfNull(exception);
         return exception is IOException or UnauthorizedAccessException or InvalidDataException or InvalidOperationException or JsonException or ArgumentException
-            || exception is SqliteExecutionException { ExitCode: SqliteConstraintResultCode };
+            || exception is SqliteExecutionException { ExitCode: SqliteConstraintResultCode }
+            || exception is DashValidationException
+            {
+                Code: SqliteRelationalStore.ConstraintViolatedCode or SqliteRelationalStore.JsonTextRefusedCode,
+            };
     }
 
     /// <summary>Rolling content retention window in days (decision D18).</summary>
@@ -86,6 +92,16 @@ public class CanonRefreshEngine
 
     /// <summary>Diagnostic code emitted when a local source unit cannot be read or parsed.</summary>
     public const string SourceUnreadableCode = "SOURCE_UNREADABLE";
+
+    /// <summary>
+    /// The key of the <see cref="SourceUnreadableCode"/> problem a failed source unit records, so the
+    /// unit's next successful import can remove it.
+    /// </summary>
+    /// <param name="harnessId">Harness owning the source unit.</param>
+    /// <param name="sourceKey">The source unit's key.</param>
+    /// <returns>The problem key.</returns>
+    public static string SourceUnreadableProblemKey(string harnessId, string sourceKey) =>
+        string.Create(CultureInfo.InvariantCulture, $"source-unreadable:{harnessId}:{sourceKey}");
 
     /// <summary>
     /// Initializes a relational <see cref="CanonRefreshEngine"/> persisting batches and
@@ -394,14 +410,21 @@ public class CanonRefreshEngine
 
             CollectedBatch batch = mapper.Map(nativeUnit, commandStarted);
 
+            // Clear the unit's earlier failure before writing: if anything below fails, the catch records it
+            // again, so no committed write is ever paired with a stale failure, nor a failure with no problem.
+            activeWriter.DeleteProblem(SourceUnreadableProblemKey(unit.HarnessId, unit.SourceKey));
+
             string? existingSourceId = activeReader.Sources(unit.HarnessId)
                 .FirstOrDefault(s => string.Equals(s.Source.Locator, unit.SourceKey, StringComparison.Ordinal))?.SourceId;
             if (existingSourceId is not null)
             {
-                activeWriter.DeleteSource(existingSourceId);
+                // One transaction: a refused write keeps the stored rows, including spans shared with another source.
+                activeWriter.ReplaceSource(batch);
             }
-
-            activeWriter.WriteBatch(batch);
+            else
+            {
+                activeWriter.WriteBatch(batch);
+            }
             foreach (CollectedProblem batchProblem in batch.Problems)
             {
                 activeWriter.WriteProblem(batchProblem);
@@ -435,7 +458,7 @@ public class CanonRefreshEngine
                 string.Create(CultureInfo.InvariantCulture, $"Failed to read or parse source unit '{unit.SourceKey}'."));
 
             activeWriter.WriteProblem(new CollectedProblem(
-                ProblemKey: string.Create(CultureInfo.InvariantCulture, $"source-unreadable:{unit.HarnessId}:{unit.SourceKey}"),
+                ProblemKey: SourceUnreadableProblemKey(unit.HarnessId, unit.SourceKey),
                 Severity: "error",
                 Code: SourceUnreadableCode,
                 Message: safeMessage,

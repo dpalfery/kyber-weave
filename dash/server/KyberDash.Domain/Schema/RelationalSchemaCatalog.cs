@@ -572,6 +572,16 @@ public static partial class RelationalSchemaCatalog
                 UniqueIdx("source_by_harness_kind_locator", "harness_id", "source_kind", "locator"),
                 Idx("source_by_harness", "harness_id"),
             ]));
+
+        // Every source that wrote a span, not just the record's owner (record.source_id): a forked transcript
+        // and its parent both carry the same spans. Deleting the owning source hands a span another source
+        // still claims to that source instead of losing it. No key to record: a claim outlives a rewrite.
+        tables.Add(new TableDefinition(
+            Name: "record_source_claim",
+            Columns: [NonEmptyText("span_id"), NonEmptyText("source_id")],
+            PrimaryKeyColumns: ["span_id", "source_id"],
+            ForeignKeys: [Fk("source_id", "source", "source_id")],
+            Indexes: [Idx("record_source_claim_by_source", "source_id")]));
     }
 
     private static void AddRecordTables(List<TableDefinition> tables)
@@ -674,6 +684,14 @@ public static partial class RelationalSchemaCatalog
             PrimaryKeyColumns: ["span_id", "skill_name"],
             ForeignKeys: [Fk("span_id", "record", "span_id")],
             Indexes: []));
+
+        tables.Add(new TableDefinition(
+            Name: "record_skill_listing",
+            Columns: [NonEmptyText("span_id"), PositionCol(), NonEmptyText("skill_name")],
+            PrimaryKeyColumns: ["span_id", "position"],
+            ForeignKeys: [Fk("span_id", "record", "span_id")],
+            Indexes: [],
+            IsRepeatedItem: true));
 
         tables.Add(RecordSingleText(
             "record_agent_instance",

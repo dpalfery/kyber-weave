@@ -2,6 +2,7 @@ using System.Globalization;
 using System.Runtime.InteropServices;
 using KyberDash.Application;
 using KyberDash.Contracts.Services;
+using KyberDash.Core;
 using KyberDash.Core.Exceptions;
 using KyberDash.Domain;
 using Microsoft.Extensions.DependencyInjection;
@@ -29,7 +30,26 @@ public static partial class Program
 
         if (args.Contains("--version", StringComparer.Ordinal))
         {
-            await Console.Out.WriteLineAsync(ResolveVersion()).ConfigureAwait(false);
+            string version;
+            try
+            {
+                version = ResolveVersion();
+            }
+            catch (InvalidOperationException exception)
+            {
+                await Console.Error.WriteLineAsync($"--version: {exception.Message}").ConfigureAwait(false);
+                return 1;
+            }
+
+            try
+            {
+                await Console.Out.WriteLineAsync(version).ConfigureAwait(false);
+            }
+            catch (IOException)
+            {
+                // A closed pipe (for example `| head`) is the reader's choice, not a failure.
+            }
+
             return 0;
         }
 
@@ -128,19 +148,7 @@ public static partial class Program
     /// <summary>Resolves the reported version from the assembly's informational version.</summary>
     public static string ResolveVersion()
     {
-        string? informational = typeof(Program).Assembly
-            .GetCustomAttributes(typeof(System.Reflection.AssemblyInformationalVersionAttribute), inherit: false)
-            .OfType<System.Reflection.AssemblyInformationalVersionAttribute>()
-            .FirstOrDefault()
-            ?.InformationalVersion;
-
-        if (!string.IsNullOrWhiteSpace(informational))
-        {
-            int plus = informational.IndexOf('+', StringComparison.Ordinal);
-            return plus >= 0 ? informational[..plus] : informational;
-        }
-
-        return "0.21.0";
+        return DashVersion.Current;
     }
 }
 

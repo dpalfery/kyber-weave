@@ -14,7 +14,6 @@
     <ToolCommandName>kyber-weave-mcp</ToolCommandName>
     <IsPackable>true</IsPackable>
     <PackageId>KyberWeave.Mcp</PackageId>
-    <Version>0.1.0</Version>
     <Authors>KyberWeave</Authors>
     <Description>Kyber-Weave documentation MCP server: retrieve governed repository documentation over stdio.</Description>
     <PackageLicenseExpression>MIT</PackageLicenseExpression>
@@ -22,7 +21,8 @@
 
   <ItemGroup>
     <PackageReference Include="ModelContextProtocol" Version="2.4.0" />
-    <PackageReference Include="Microsoft.Extensions.Hosting" Version="10.0.14" />
+    <PackageReference Include="Microsoft.Extensions.DependencyInjection" Version="10.0.15" />
+    <PackageReference Include="Microsoft.Extensions.Hosting" Version="10.0.15" />
   </ItemGroup>
 
   <ItemGroup>

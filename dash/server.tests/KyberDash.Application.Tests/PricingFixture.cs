@@ -60,6 +60,14 @@ public static class PricingFixture
                 return Path.Combine(current, "server", "KyberDash.Data", "Pricing");
             }
 
+            // A gate builds into .agent_scratchpad/<task>/artifacts, whose ancestors never include dash/.
+            // The repository root above it does, so accept the dash/ layout as well.
+            string dashCandidate = Path.Combine(current, "dash", "server", "KyberDash.Data", "Pricing", "litellm-snapshot.json");
+            if (File.Exists(dashCandidate))
+            {
+                return Path.Combine(current, "dash", "server", "KyberDash.Data", "Pricing");
+            }
+
             current = Path.GetDirectoryName(current);
         }
 

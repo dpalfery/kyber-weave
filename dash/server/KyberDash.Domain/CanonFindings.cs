@@ -1864,9 +1864,11 @@ public static partial class CanonFindings
 
         if (raw is not null && raw.TryGetValue(SkillsListedKey, out JsonElement claudeEl))
         {
+            // isInitial is optional: a listing hydrated from the relational store does not keep it,
+            // and the names are unioned either way. A present flag must still be a boolean.
             if (claudeEl.ValueKind != JsonValueKind.Object ||
-                !claudeEl.TryGetProperty("isInitial", out JsonElement initEl) ||
-                initEl.ValueKind is not (JsonValueKind.True or JsonValueKind.False) ||
+                (claudeEl.TryGetProperty("isInitial", out JsonElement initEl) &&
+                 initEl.ValueKind is not (JsonValueKind.True or JsonValueKind.False)) ||
                 !claudeEl.TryGetProperty("skills", out JsonElement arrEl) ||
                 arrEl.ValueKind != JsonValueKind.Array)
             {

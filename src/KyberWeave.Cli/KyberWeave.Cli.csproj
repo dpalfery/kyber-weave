@@ -13,7 +13,6 @@
     <PackAsTool>true</PackAsTool>
     <ToolCommandName>kyber-weave</ToolCommandName>
     <PackageId>KyberWeave.Tool</PackageId>
-    <Version>0.1.0</Version>
     <Authors>KyberWeave</Authors>
     <Description>Kyber-Weave governance CLI: validate, lint, security-scan and drift-check skills, agent definitions and documentation.</Description>
     <PackageLicenseExpression>MIT</PackageLicenseExpression>
@@ -21,7 +20,7 @@
 
   <ItemGroup>
     <PackageReference Include="JetBrains.Annotations" Version="2026.2.0" PrivateAssets="all" />
-    <PackageReference Include="Microsoft.Extensions.DependencyInjection" Version="10.0.14" />
+    <PackageReference Include="Microsoft.Extensions.DependencyInjection" Version="10.0.15" />
     <PackageReference Include="Spectre.Console" Version="0.57.2" />
     <PackageReference Include="Spectre.Console.Cli" Version="0.57.2" />
   </ItemGroup>

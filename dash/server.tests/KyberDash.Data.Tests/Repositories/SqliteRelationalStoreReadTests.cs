@@ -129,6 +129,35 @@ public class SqliteRelationalStoreReadTests : IDisposable
     }
 
     /// <summary>
+    /// The rebuild and maintenance record reads carry each record's <c>record_skill_listing</c> rows as
+    /// <see cref="CollectedRecord.SkillsListed"/> in listing position order, matching
+    /// <see cref="InMemoryRelationalStore"/>; a record with no listing rows reads back as
+    /// <see langword="null"/> in both stores.
+    /// </summary>
+    [Fact]
+    public void RecordReadsCarryTheSkillListingInPositionOrderMatchingInMemory()
+    {
+        string dbPath = Path.Combine(directory.Path, "skill-listing", "canon.db");
+        SeamSqliteRelationalStore sqlite = new(dbPath, new SqliteCircuitBreaker());
+        InMemoryRelationalStore memory = new();
+        string[] listed = ["zeta", "alpha", "plugin:skill", "quote\"d\tname"];
+        WriteAttributionTurn(sqlite, memory, "span-listed", "sess-skills", "claude-code", skillsListed: listed, skillsInvoked: ["alpha"]);
+        WriteAttributionTurn(sqlite, memory, "span-unlisted", "sess-skills", "claude-code");
+        WriteAttributionTurn(sqlite, memory, "span-other", "sess-other", "claude-code", skillsListed: ["solo"]);
+
+        IRelationalStoreReader sqliteReader = sqlite;
+        IRelationalStoreReader memoryReader = memory;
+        IReadOnlyList<CollectedRecord> rebuilt = sqliteReader.SessionRecordsForRebuild("sess-skills");
+
+        Assert.Equivalent(memoryReader.SessionRecordsForRebuild("sess-skills"), rebuilt, strict: true);
+        Assert.Equivalent(memoryReader.AllSessionRecordsForMaintenance(), sqliteReader.AllSessionRecordsForMaintenance(), strict: true);
+        Assert.Equal(listed, rebuilt.Single(static r => r.RecordId == "span-listed").SkillsListed);
+        Assert.Equal(["alpha"], rebuilt.Single(static r => r.RecordId == "span-listed").SkillsInvoked);
+        Assert.Null(rebuilt.Single(static r => r.RecordId == "span-unlisted").SkillsListed);
+        Assert.Null(memoryReader.SessionRecordsForRebuild("sess-skills").Single(static r => r.RecordId == "span-unlisted").SkillsListed);
+    }
+
+    /// <summary>
     /// The budgeted turn-content read keeps exactly the rows the in-memory cut kept — the parts
     /// up to and including the one that crosses the byte budget, and nothing after it — matched
     /// row for row against <see cref="InMemoryRelationalStore"/> and against the prefix of the
@@ -374,7 +403,9 @@ public class SqliteRelationalStoreReadTests : IDisposable
         InMemoryRelationalStore memory,
         string spanId,
         string sessionKey,
-        string harnessId)
+        string harnessId,
+        IReadOnlyList<string>? skillsListed = null,
+        IReadOnlyList<string>? skillsInvoked = null)
     {
         CollectedRecord record = new(
             RecordId: spanId,
@@ -395,12 +426,13 @@ public class SqliteRelationalStoreReadTests : IDisposable
             Parts: [],
             Tool: null,
             Agent: null,
-            SkillsInvoked: [],
+            SkillsInvoked: skillsInvoked ?? [],
             AgentInstanceId: null,
             ToolDefinitions: [],
             Signals: new CollectedRecordSignals(null, null, null, null),
             ReportedInputTokens: 100,
-            ReportedOutputTokens: 10);
+            ReportedOutputTokens: 10,
+            SkillsListed: skillsListed);
         CollectedBatch batch = new(
             Source: new CollectedSource(harnessId, SourceKind.Otlp, "otlp:" + harnessId),
             Sessions: [new CollectedSession(sessionKey, harnessId, sessionKey, null, null, [])],

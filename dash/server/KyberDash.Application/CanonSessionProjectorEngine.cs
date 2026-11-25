@@ -222,7 +222,7 @@ public partial class CanonSessionProjectorEngine
 
             if (!IsFileSource(record.Source))
             {
-                CanonicalRecord mergedOtel = MergeOtelFirst(record, donor);
+                CanonicalRecord mergedOtel = WithDonorSkills(MergeOtelFirst(record, donor), donor);
                 output.Add(ReferenceEquals(tokens, record.Tokens) ? mergedOtel : mergedOtel with { Tokens = tokens });
                 continue;
             }
@@ -251,7 +251,7 @@ public partial class CanonSessionProjectorEngine
             }
 
             bool keepParts = (donor.Parts is { Count: > 0 }) || extraParts.Count > 0 || (record.Parts is { Count: > 0 });
-            output.Add(record with
+            output.Add(WithDonorSkills(record, donor) with
             {
                 Tokens = tokens,
                 Parts = keepParts ? newParts : record.Parts,
@@ -1137,7 +1137,7 @@ public partial class CanonSessionProjectorEngine
             dropped.Add(file);
             joined.Add(file);
             joined.Add(keeper);
-            if (!HasParts(file))
+            if (!IsDonor(file))
             {
                 return;
             }
@@ -1236,7 +1236,7 @@ public partial class CanonSessionProjectorEngine
 
                 pairedOtels.Add(otel);
                 dropped.Add(file);
-                if (HasParts(file))
+                if (IsDonor(file))
                 {
                     transplant[otel] = transplant.TryGetValue(otel, out CanonicalRecord? existing)
                         ? MergeDonors(existing, file)
@@ -1284,7 +1284,7 @@ public partial class CanonSessionProjectorEngine
             {
                 CanonicalRecord file = files[i];
                 dropped.Add(file);
-                if (HasParts(file))
+                if (IsDonor(file))
                 {
                     donor = donor is null ? file : MergeDonors(donor, file);
                 }
@@ -1308,7 +1308,7 @@ public partial class CanonSessionProjectorEngine
             dropped.Add(file);
         }
 
-        List<CanonicalRecord> donors = files.Where(HasParts).OrderBy(RecordTimestampMs).ToList();
+        List<CanonicalRecord> donors = files.Where(IsDonor).OrderBy(RecordTimestampMs).ToList();
         HashSet<CanonicalRecord> free = new(donors, ReferenceEqualityComparer.Instance);
 
         List<CanonicalRecord> keepers =
@@ -1533,7 +1533,7 @@ public partial class CanonSessionProjectorEngine
 
                 mergedTokens = MaxTokens(mergedTokens, member.Tokens);
                 dropped.Add(member);
-                if (!HasParts(member))
+                if (!IsDonor(member))
                 {
                     continue;
                 }
@@ -1596,7 +1596,60 @@ public partial class CanonSessionProjectorEngine
             merged = MergeDictionaries(merged, CanonValidation.ContentFromParts(parts));
         }
 
-        return first with { Parts = parts, Content = merged };
+        return WithDonorSkills(first, second) with { Parts = parts, Content = merged };
+    }
+
+    /// <summary>Raw attributes a twin keeps from the observation it absorbed when it has none of its own.</summary>
+    private static readonly string[] DonorSkillKeys = [CanonSynth.SkillsListedKey, CanonSynth.SkillsInvokedKey];
+
+    /// <summary>
+    /// Carries the skill listing and skill invocations of an absorbed twin onto the kept record: a
+    /// Claude Code listing is stored only on the transcript turn, so an OTLP keeper would otherwise drop
+    /// it and the inactive-skill-reference detector would not see it. The keeper's own listing wins;
+    /// invoked names are unioned, keeper's first.
+    /// </summary>
+    private static CanonicalRecord WithDonorSkills(CanonicalRecord keeper, CanonicalRecord donor)
+    {
+        if (donor.Raw is null)
+        {
+            return keeper;
+        }
+
+        Dictionary<string, JsonElement>? raw = null;
+        Dictionary<string, JsonElement> Writable() =>
+            raw ??= keeper.Raw is null ? new(StringComparer.Ordinal) : new(keeper.Raw, StringComparer.Ordinal);
+
+        if (donor.Raw.TryGetValue(CanonSynth.SkillsListedKey, out JsonElement listed)
+            && (keeper.Raw is null || !keeper.Raw.ContainsKey(CanonSynth.SkillsListedKey)))
+        {
+            Writable()[CanonSynth.SkillsListedKey] = listed;
+        }
+
+        if (donor.Raw.TryGetValue(CanonSynth.SkillsInvokedKey, out JsonElement donorInvoked))
+        {
+            if (keeper.Raw is null || !keeper.Raw.TryGetValue(CanonSynth.SkillsInvokedKey, out JsonElement keeperInvoked))
+            {
+                Writable()[CanonSynth.SkillsInvokedKey] = donorInvoked;
+            }
+            else if (keeperInvoked.ValueKind == JsonValueKind.Array && donorInvoked.ValueKind == JsonValueKind.Array)
+            {
+                List<string> names = [];
+                foreach (JsonElement name in keeperInvoked.EnumerateArray().Concat(donorInvoked.EnumerateArray()))
+                {
+                    if (name.ValueKind == JsonValueKind.String && name.GetString() is { Length: > 0 } text && !names.Contains(text, StringComparer.Ordinal))
+                    {
+                        names.Add(text);
+                    }
+                }
+
+                if (names.Count != keeperInvoked.GetArrayLength())
+                {
+                    Writable()[CanonSynth.SkillsInvokedKey] = JsonSerializer.SerializeToElement(names);
+                }
+            }
+        }
+
+        return raw is null ? keeper : keeper with { Raw = raw };
     }
 
     private static bool IsFileSource(string source) =>
@@ -1797,6 +1850,13 @@ public partial class CanonSessionProjectorEngine
         string? val = el.GetString();
         return string.IsNullOrEmpty(val) ? null : val;
     }
+
+    /// <summary>
+    /// Whether an absorbed twin has anything to hand its keeper: content, or a skill listing or skill
+    /// invocations the keeper would otherwise lose (<see cref="WithDonorSkills"/>).
+    /// </summary>
+    private static bool IsDonor(CanonicalRecord record) =>
+        HasParts(record) || (record.Raw is not null && DonorSkillKeys.Any(record.Raw.ContainsKey));
 
     private static bool HasParts(CanonicalRecord record) =>
         (record.Parts is { Count: > 0 }) || record.Content.Count > 0;
@@ -2801,35 +2861,6 @@ public partial class CanonSessionProjectorEngine
             passRecordCount += recordCountByKey[key];
         }
 
-        Dictionary<string, List<CollectedRecord>> collectedByKey = new(StringComparer.Ordinal);
-        if (canIncremental || forReads)
-        {
-            foreach (string key in rebuildKeys)
-            {
-                collectedByKey[key] = [.. reader.SessionRecordsForRebuild(key)];
-            }
-        }
-        else
-        {
-            // Only the maintenance full/wildcard path reads the whole store in one query; the
-            // read path stays attribution-driven and per key so a request never pays for it.
-            foreach (CollectedRecord record in reader.AllSessionRecordsForMaintenance())
-            {
-                if (string.IsNullOrEmpty(record.SessionKey))
-                {
-                    continue;
-                }
-
-                if (!collectedByKey.TryGetValue(record.SessionKey!, out List<CollectedRecord>? list))
-                {
-                    list = [];
-                    collectedByKey[record.SessionKey!] = list;
-                }
-
-                list.Add(record);
-            }
-        }
-
         // A stored projection survives the pass when its session is still attributed records —
         // built, skipped-clean, or deferred — so only sessions whose records disappeared are
         // pruned, and a deferred session keeps its last stored projection for reads to answer.
@@ -2851,7 +2882,10 @@ public partial class CanonSessionProjectorEngine
 
         foreach (string key in rebuildKeys)
         {
-            List<CanonicalRecord> hydrated = [.. collectedByKey[key].Select(CanonRecordHydration.Hydrate)];
+            // Each session's records are read when its turn comes and released after it is built:
+            // reading the whole store at once outgrew the sqlite3 output a string can hold on a
+            // real store, and held every session's text in memory for the length of the pass.
+            List<CanonicalRecord> hydrated = [.. reader.SessionRecordsForRebuild(key).Select(CanonRecordHydration.Hydrate)];
             hydrated.Sort(CompareRecordTimestamps);
             Dictionary<string, List<CanonicalRecord>> grouped = GroupByCanonicalHarness(hydrated);
             if (grouped.Count == 0)

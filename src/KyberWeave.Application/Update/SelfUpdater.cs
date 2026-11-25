@@ -530,6 +530,212 @@ internal sealed class SelfUpdater : IDisposable
     }
 
     /// <summary>
+    /// Whether a tray owns the engine: not <c>--no-menubar</c>, a release that ships the tray, a recorded tray install
+    /// and an installed kyberdash. The checks mirror <see cref="ShouldUpdateTray"/> but are silent, because a false
+    /// answer hands over to the path that logs the reason.
+    /// </summary>
+    private bool IsTrayManaged(SelfUpdateOptions options, string version, bool windows)
+    {
+        return !options.NoMenubar
+               && ReleaseVersion.Compare(version, TrayMinVersion) >= 0
+               && _files.FileExists(Path.Combine(TrayConfigDirectory(), TrayRecordFile))
+               && _files.FileExists(InstalledKyberDash(windows));
+    }
+
+    /// <summary>
+    /// Whether the recorded tray is older than the kyberdash just reconciled. Only asked when the release did not
+    /// change: a changed release restarts the tray whatever the record says.
+    /// </summary>
+    private bool IsTrayOlder(string version, bool releaseChanged)
+    {
+        if (releaseChanged)
+            return false;
+
+        string record = Path.Combine(TrayConfigDirectory(), TrayRecordFile);
+        string? recorded = ReadRecordedTrayVersion(record);
+        if (recorded is null)
+        {
+            _log($"the tray record {record} has no readable version; treating the KyberDash tray as current");
+            return false;
+        }
+
+        if (ReleaseVersion.Compare(recorded, version) >= 0)
+        {
+            _log($"the KyberDash tray is already on {recorded}");
+            return false;
+        }
+
+        _log($"the KyberDash tray is on {recorded}, older than kyberdash {version}; relaunching it");
+        return true;
+    }
+
+    /// <summary>
+    /// Restarts the tray so it, and not a detached process, owns the engine, but only when the engine needs it: a
+    /// changed release, an older tray, an engine on another version, or a tray running without an engine.
+    /// A release change or a tray older than the installed kyberdash always restarts the tray, with an update.
+    /// Otherwise a stopped tray or engine is never started; a running tray restarts only when its engine is missing
+    /// or on another version.
+    /// </summary>
+    /// <remarks>
+    /// A kyberdash that predates these verbs falls back to today's path (engine ensure, then the tray update when due).
+    /// With no release change and an up-to-date tray, a probe that finds no engine and no tray ends the step. Every
+    /// failure is named and says the binaries are already updated; one after the tray was quit also says the tray and
+    /// engine are stopped and names the command that starts them.
+    /// </remarks>
+    private void RestartTrayWithOwnedEngine(bool windows, string version, bool releaseChanged, bool trayOlder)
+    {
+        string kyberdash = InstalledKyberDash(windows);
+        bool restartForRelease = releaseChanged || trayOlder;
+        string[] verify = ["engine", "verify", "--version", version, "--wait", "0"];
+
+        _log("checking the KyberDash engine…");
+        ProcessResult probe = CaptureVerb(kyberdash, verify, version, false);
+        if (PredatesTheVerbs(probe))
+        {
+            _log("this KyberDash predates the tray restart; checking the engine the earlier way");
+            EnsureEngine(windows);
+            if (restartForRelease)
+                UpdateTray(windows, version);
+            return;
+        }
+
+        if (!restartForRelease)
+        {
+            switch (probe.ExitCode)
+            {
+                case 0:
+                    _log($"{FirstLine(probe.StandardOutput, "the KyberDash engine is running")}; nothing to restart");
+                    return;
+                case 1:
+                    ProcessResult running = CaptureVerb(kyberdash, ["menubar", "--running"], version, false);
+                    if (running.ExitCode == 0)
+                    {
+                        _log("the KyberDash tray is running without an engine; restarting it");
+                    }
+                    else if (running.ExitCode == 1)
+                    {
+                        _log("the KyberDash engine and tray are not running; leaving them stopped");
+                        return;
+                    }
+                    else
+                    {
+                        throw StepFailed(kyberdash, ["menubar", "--running"], version, false,
+                            $"exited {running.ExitCode}{Reason(running)}");
+                    }
+
+                    break;
+                case 3:
+                    _log($"{FirstLine(probe.StandardOutput, "the KyberDash engine runs another version")}; restarting the tray");
+                    break;
+                default:
+                    throw StepFailed(kyberdash, verify, version, false, $"exited {probe.ExitCode}{Reason(probe)}");
+            }
+        }
+
+        RunVerb(kyberdash, ["menubar", "--quit"], version, false, "quitting the KyberDash tray");
+        RunVerb(kyberdash, ["engine", "stop"], version, true, "stopping the KyberDash engine");
+        if (restartForRelease)
+            RunTrayUpdate(kyberdash, version);
+        else
+            RunVerb(kyberdash, ["menubar", "--launch"], version, true, "launching the KyberDash tray");
+        RunVerb(
+            kyberdash,
+            ["engine", "verify", "--version", version, "--wait", "60"],
+            version,
+            true,
+            "verifying the KyberDash engine");
+        RunVerb(kyberdash, ["menubar", "--running"], version, true, "checking the KyberDash tray");
+    }
+
+    /// <summary>The line an older kyberdash prints for <c>engine verify</c>, which it does not have.</summary>
+    private const string PreVerbUsageLine = "Usage: kyberdash engine ensure --if-running [--state-dir <dir>]";
+
+    /// <summary>
+    /// True when a verb's answer shows a kyberdash that predates the restart verbs: its usage line with exit 2, or the
+    /// words "unknown command" at any exit code, which is how <c>EnsureEngine</c> recognises an old binary too.
+    /// </summary>
+    private static bool PredatesTheVerbs(ProcessResult result)
+    {
+        if (MentionsUnknownCommand(result))
+            return true;
+
+        return result.ExitCode == 2 && (result.StandardOutput + "\n" + result.StandardError).Contains(
+            PreVerbUsageLine, StringComparison.Ordinal);
+    }
+
+    /// <summary>Runs one KyberDash verb through the capture seam, and turns a start failure or a timeout into a named failure.</summary>
+    private ProcessResult CaptureVerb(string kyberdash, IReadOnlyList<string> args, string version, bool quitDone)
+    {
+        try
+        {
+            return _captureProcess(kyberdash, args);
+        }
+        catch (TimeoutException ex)
+        {
+            throw StepFailed(kyberdash, args, version, quitDone, $"did not finish and was stopped. {ex.Message}");
+        }
+        catch (Exception ex) when (ex is Win32Exception or IOException or InvalidOperationException
+                                       or UnauthorizedAccessException)
+        {
+            throw StepFailed(kyberdash, args, version, quitDone, $"could not start: {ex.Message}");
+        }
+    }
+
+    /// <summary>Runs one restart verb, requires exit 0 and logs the step with the verb's first output line.</summary>
+    private void RunVerb(string kyberdash, IReadOnlyList<string> args, string version, bool quitDone, string step)
+    {
+        _log($"{step}…");
+        ProcessResult result = CaptureVerb(kyberdash, args, version, quitDone);
+        if (result.ExitCode != 0)
+            throw StepFailed(kyberdash, args, version, quitDone, $"exited {result.ExitCode}{Reason(result)}");
+
+        string line = FirstLine(result.StandardOutput, string.Empty);
+        _log(line.Length == 0 ? $"{step}: done" : $"{step}: {line}");
+    }
+
+    /// <summary>
+    /// Runs <c>menubar --update</c> after the tray was quit, through the capture seam so a failure names the verb's
+    /// first output line like every other restart step.
+    /// </summary>
+    private void RunTrayUpdate(string kyberdash, string version)
+    {
+        string[] args = ["menubar", "--update", "--version", version];
+        _log("updating the KyberDash tray…");
+        ProcessResult result = CaptureVerb(kyberdash, args, version, true);
+        if (result.ExitCode != 0)
+            throw StepFailed(kyberdash, args, version, true, $"exited {result.ExitCode}{Reason(result)}");
+
+        _log("updated the KyberDash tray");
+    }
+
+    /// <summary>
+    /// The named failure of one restart step. Nothing is rolled back, so it says the binaries are already updated; after
+    /// the tray was quit it also says what is stopped and which command starts it again.
+    /// </summary>
+    private static SelfUpdateException StepFailed(
+        string kyberdash,
+        IReadOnlyList<string> args,
+        string version,
+        bool quitDone,
+        string detail)
+    {
+        string prefix = args.Count > 0 && args[0] == "engine"
+            ? "the KyberDash engine step failed:"
+            : "the KyberDash tray step failed:";
+        string message = $"{prefix} `{kyberdash} {string.Join(' ', args)}` {EndSentence(detail)} The binaries are already updated.";
+        if (quitDone)
+        {
+            bool updateFailed = args.Count > 1 && args[0] == "menubar" && args[1] == "--update";
+            string recovery = updateFailed
+                ? $"kyberdash menubar --update --version {version}"
+                : "kyberdash menubar --launch";
+            message += $" The KyberDash tray and engine are stopped; run `{recovery}` to start them.";
+        }
+
+        return new SelfUpdateException(message);
+    }
+
+    /// <summary>
     /// Brings the running KyberDash processes in line with the installed kyberdash: the engine (D12, C2, C3), the
     /// tray (D12), then the capture plugins (D13). Runs after the binaries commit on both the release-changed
     /// path and the "already on" path, so one command clears a stale engine.
@@ -554,9 +760,17 @@ internal sealed class SelfUpdater : IDisposable
         }
         else
         {
-            EnsureEngine(windows);
-            if (ShouldUpdateTray(options, version, windows, releaseChanged))
-                UpdateTray(windows, version);
+            if (IsTrayManaged(options, version, windows))
+            {
+                RestartTrayWithOwnedEngine(windows, version, releaseChanged, IsTrayOlder(version, releaseChanged));
+            }
+            else
+            {
+                // No tray to own the engine: the engine alone is checked, and ShouldUpdateTray logs why the tray is left.
+                EnsureEngine(windows);
+                if (ShouldUpdateTray(options, version, windows, releaseChanged))
+                    UpdateTray(windows, version);
+            }
         }
 
         UpdateCapturePlugin(windows);
