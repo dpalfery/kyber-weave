@@ -261,6 +261,73 @@ public sealed class ArbiterGateReportRuleTests
         Assert.Equal(false, fact.Value);
     }
 
+    /// <summary>
+    /// D10: a declared gate is owed only when it applies to the task. The docs developer's one gate selects only the
+    /// host configuration, so a docs-only task owes none and the rule answers no-gates-declared at step 0.
+    /// </summary>
+    [Fact]
+    public void ADocsOnlyTaskOwesNoGateAndIsAllowedAtStepZero()
+    {
+        ArbiterFactSet facts = WithReturnedTask("docs-dev", ["docs/guide.md"], [".kyber-weave/kyber-weave.yml"]);
+
+        Assert.False(Declared(facts));
+        Assert.Equal("no-gates-declared", RuleEngine.Decide(Rule(), facts));
+        Assert.Equal(RuleEffects.Allow, EffectFor(facts));
+    }
+
+    [Fact]
+    public void ATaskThatEditsTheHostConfigurationStillOwesItsGate()
+    {
+        ArbiterFactSet facts = WithReturnedTask("docs-dev", ["docs/guide.md", ".kyber-weave/kyber-weave.yml"], [".kyber-weave/kyber-weave.yml"]);
+
+        Assert.True(Declared(facts));
+        Assert.Equal(RuleEngine.Undecidable, RuleEngine.Decide(Rule(), facts));
+    }
+
+    private static bool Declared(ArbiterFactSet facts)
+    {
+        Assert.True(facts.TryGet("config.task-gates-declared", out ArbiterFact? fact));
+        return Assert.IsType<bool>(fact.Value);
+    }
+
+    [Fact]
+    public void ATaskWithNoKnownFilesKeepsTheDeclaredGateAnswer()
+    {
+        ArbiterFactSet facts = WithReturnedTask("docs-dev", null, [".kyber-weave/kyber-weave.yml"]);
+
+        Assert.True(Declared(facts));
+    }
+
+    [Fact]
+    public void AGateWithNoIncludeAppliesToAnyTask()
+    {
+        ArbiterFactSet facts = WithReturnedTask("docs-dev", ["docs/guide.md"], []);
+
+        Assert.True(Declared(facts));
+    }
+
+    /// <summary>Builds the return's facts for one agent whose one task gate has <paramref name="include"/>, then adds the task's files.</summary>
+    private static ArbiterFactSet WithReturnedTask(string agent, string[]? taskFiles, string[] include)
+    {
+        ReviewTaskGate gate = new("review-config", include, null, ["kyber-weave", "review"], []);
+        KyberWeaveConfig config = new()
+        {
+            Arbiter = ArbiterConfigDefaults.Product,
+            Review = new ReviewConfig
+            {
+                TaskGates = new Dictionary<string, IReadOnlyList<ReviewTaskGate>>(StringComparer.Ordinal) { [agent] = [gate] }
+            }
+        };
+        const string Prompt = "KYBER-ARBITER: true\n\nDo the work.";
+        ArbiterFactSet facts = TriggerFactBuilder.Build(
+            "delegate.returned", agent, Prompt, "conductor", ArbiterCallerSources.Harness, config)
+            .With(GateReportFacts.ReturnedTailFact, "Closeout done. No gate run.", ArbiterFactLabel.Asserted);
+        if (taskFiles is not null)
+            facts = facts.With("plan.task.files", taskFiles.ToList(), ArbiterFactLabel.Derived);
+
+        return TriggerFactBuilder.WithTaskGatesApplyFact(facts, config, agent, Prompt);
+    }
+
     [Fact]
     public void AnAgreeingReportAllowsTheDispatch()
     {
