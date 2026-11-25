@@ -1383,14 +1383,15 @@ public class SqliteRelationalStoreReadTests : IDisposable
     ];
 
     /// <summary>
-    /// The tables the timeline records read may touch: the record header, its session and parent
-    /// links, and the model, reported duration, reported cost and declared-window columns the
-    /// hydrated tree node carries. The list is closed: a content-text, token, tool, skill, or
-    /// trace table would fail it.
+    /// The tables the timeline records read may touch: the record header, its source row (the
+    /// record's source name), its session and parent links, and the model, reported duration,
+    /// reported cost and declared-window columns the hydrated tree node carries. The list is
+    /// closed: a content-text, token, tool, skill, or trace table would fail it.
     /// </summary>
     private static readonly string[] SessionTimelineRecordTables =
     [
         "record",
+        "source",
         "record_session_link",
         "record_parent",
         "record_model",

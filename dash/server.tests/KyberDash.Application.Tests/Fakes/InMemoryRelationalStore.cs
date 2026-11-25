@@ -5420,7 +5420,8 @@ public class InMemoryRelationalStore :
             toolDefs,
             signals,
             reportedInput,
-            reportedOutput);
+            reportedOutput,
+            ReadRecordSourceName(currentState, recordRow));
     }
 
     private static long? ReadOptionalReportedTotal(StoreState currentState, string spanId, string direction)
@@ -6380,7 +6381,25 @@ public class InMemoryRelationalStore :
             ToolDefinitions: [],
             new CollectedRecordSignals(ErrorMessage: null, EditFailures: null, CorrectionRule: null, declaredWindow),
             ReportedInputTokens: null,
-            ReportedOutputTokens: null);
+            ReportedOutputTokens: null,
+            SourceName: ReadRecordSourceName(currentState, recordRow));
+    }
+
+    /// <summary>
+    /// Reads a record's source name from its stored <c>source</c> row, matching the SQLite reader:
+    /// the locator for an OTLP source, or <see cref="CanonSynth.FileSourcePrefix"/> followed by the
+    /// source's harness for a file source. Never inferred from record attributes.
+    /// </summary>
+    private static string ReadRecordSourceName(StoreState currentState, object?[] recordRow)
+    {
+        string sourceId = GetString(GetTableMetadata("record"), recordRow, "source_id");
+        object?[] sourceRow = FindRowByKey(currentState, "source", [("source_id", sourceId)])
+            ?? throw new InvalidOperationException($"Record source '{sourceId}' has no source row.");
+        TableMetadata sourceMeta = GetTableMetadata("source");
+        SourceKind kind = ParseSourceKind(GetString(sourceMeta, sourceRow, "source_kind"));
+        return kind == SourceKind.File
+            ? CanonSynth.FileSourcePrefix + GetString(sourceMeta, sourceRow, "harness_id")
+            : GetString(sourceMeta, sourceRow, "locator");
     }
 
     /// <summary>
@@ -6868,7 +6887,8 @@ public class InMemoryRelationalStore :
             toolDefs,
             MaterializeRecordSignals(currentState, spanId),
             reportedInput,
-            reportedOutput);
+            reportedOutput,
+            ReadRecordSourceName(currentState, recordRow));
     }
 
     /// <summary>

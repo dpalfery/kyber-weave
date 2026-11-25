@@ -27,7 +27,12 @@ public partial class SqliteRelationalStore : BaseSqliteRepository, IRelationalSt
     public const int SchemaVersion = 26;
 
     /// <summary>Current detector generation stamped in <c>store_state</c>.</summary>
-    public const int DetectorVersion = 5;
+    /// <remarks>
+    /// Generation 6: records read back carry their source name, so the projector's source rules
+    /// (the Droid plugin/file split and the file-source twin collapses) apply again, and every
+    /// projection built under generation 5's source-less hydration is rebuilt.
+    /// </remarks>
+    public const int DetectorVersion = 6;
 
     /// <summary>Maximum retained WAL journal size in bytes after checkpoint (32 MiB).</summary>
     public const int WalSizeLimitBytes = 32 * 1024 * 1024;

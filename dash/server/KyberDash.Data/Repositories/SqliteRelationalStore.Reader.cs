@@ -16,6 +16,20 @@ public partial class SqliteRelationalStore : IRelationalStoreReader
     private const string TabReadScriptHeader = ".headers off\n.mode tabs\n";
 
     /// <summary>
+    /// The record's stored source (kind, harness, locator) as the last three columns of a record
+    /// row; <see cref="ParseRecordSourceName"/> turns them into <see cref="CollectedRecord.SourceName"/>.
+    /// </summary>
+    private const string RecordSourceColumns =
+        "hex(CAST(src.source_kind AS BLOB)), hex(CAST(src.harness_id AS BLOB)), hex(CAST(src.locator AS BLOB)) ";
+
+    /// <summary>
+    /// Joins a record (alias <c>r</c>) to its source row. An inner join, because
+    /// <c>record.source_id</c> is a required foreign key: a record always has a source, and one
+    /// whose source is deleted is cascaded away with it.
+    /// </summary>
+    private const string RecordSourceJoin = "JOIN source src ON src.source_id = r.source_id ";
+
+    /// <summary>
     /// The projection header: every <c>session_projection</c> column and its five single-row
     /// satellites, with no child collection. The full projection read and the paged header reads
     /// select the same fifteen columns, so both parse one row shape.
@@ -2243,8 +2257,10 @@ public partial class SqliteRelationalStore : IRelationalStoreReader
             "typeof(rrd.duration_ms), COALESCE(CAST(rrd.duration_ms AS TEXT), ''), " +
             "typeof(rrc.amount), COALESCE(CAST(rrc.amount AS TEXT), ''), " +
             "typeof(rrc.currency), COALESCE(hex(CAST(rrc.currency AS BLOB)), ''), " +
-            "typeof(rdcw.declared_context_window), COALESCE(CAST(rdcw.declared_context_window AS TEXT), '') " +
+            "typeof(rdcw.declared_context_window), COALESCE(CAST(rdcw.declared_context_window AS TEXT), ''), " +
+            RecordSourceColumns +
             "FROM record r " +
+            RecordSourceJoin +
             "LEFT JOIN record_session_link rsl ON rsl.span_id = r.span_id " +
             "LEFT JOIN record_parent rp ON rp.span_id = r.span_id " +
             "LEFT JOIN record_model rm ON rm.span_id = r.span_id " +
@@ -2257,9 +2273,9 @@ public partial class SqliteRelationalStore : IRelationalStoreReader
         foreach (string line in TabLines(ExecuteSqlite(sql.ToString())))
         {
             string[] cols = line.Split('\t');
-            if (cols.Length != 22)
+            if (cols.Length != 25)
             {
-                throw new StoredDataException($"Expected 22 columns for TREC row, got {cols.Length.ToString(CultureInfo.InvariantCulture)}.");
+                throw new StoredDataException($"Expected 25 columns for TREC row, got {cols.Length.ToString(CultureInfo.InvariantCulture)}.");
             }
 
             string spanId = ParseHexRequired(cols[1], "record.span_id");
@@ -2295,7 +2311,8 @@ public partial class SqliteRelationalStore : IRelationalStoreReader
                 ToolDefinitions: [],
                 new CollectedRecordSignals(ErrorMessage: null, EditFailures: null, CorrectionRule: null, ParseNullableInt64(cols[20], cols[21], "record_declared_context_window.declared_context_window")),
                 ReportedInputTokens: null,
-                ReportedOutputTokens: null));
+                ReportedOutputTokens: null,
+                SourceName: ParseRecordSourceName(cols, startIndex: 22)));
         }
 
         return records;
@@ -2968,9 +2985,9 @@ public partial class SqliteRelationalStore : IRelationalStoreReader
     /// <param name="cols">Tab-split columns of the <c>REC</c> row.</param>
     private static RawRecordHeader ParseRawRecordHeader(string[] cols)
     {
-        if (cols.Length != 38)
+        if (cols.Length != 41)
         {
-            throw new StoredDataException($"Expected 38 columns for REC row, got {cols.Length.ToString(CultureInfo.InvariantCulture)}.");
+            throw new StoredDataException($"Expected 41 columns for REC row, got {cols.Length.ToString(CultureInfo.InvariantCulture)}.");
         }
 
         string spanId = ParseHexRequired(cols[1], "record.span_id");
@@ -3001,6 +3018,7 @@ public partial class SqliteRelationalStore : IRelationalStoreReader
         long? declaredWindow = ParseNullableInt64(cols[32], cols[33], "record_declared_context_window.declared_context_window");
         long? repIn = ParseNullableInt64(cols[34], cols[35], "record_reported_total.input");
         long? repOut = ParseNullableInt64(cols[36], cols[37], "record_reported_total.output");
+        string sourceName = ParseRecordSourceName(cols, startIndex: 38);
 
         return new RawRecordHeader(
             spanId,
@@ -3020,7 +3038,29 @@ public partial class SqliteRelationalStore : IRelationalStoreReader
             agentInstanceId,
             new CollectedRecordSignals(errMsg, editFailures, correctionRule, declaredWindow),
             repIn,
-            repOut);
+            repOut,
+            sourceName);
+    }
+
+    /// <summary>
+    /// Parses the three <see cref="RecordSourceColumns"/> of a record row into the record's source
+    /// name as the projection rules read it: the locator for an OTLP source, or
+    /// <see cref="CanonSynth.FileSourcePrefix"/> followed by the source's harness for a file source.
+    /// </summary>
+    /// <remarks>
+    /// The name comes from the stored <c>source</c> row alone, never from record attributes, so a
+    /// record's source is exactly the batch source it was written under. The file form uses the
+    /// same prefix constant the file synthesizer stamps, which is what the projector's file-source
+    /// test reads.
+    /// </remarks>
+    /// <param name="cols">Tab-split columns of the record row.</param>
+    /// <param name="startIndex">Index of the first source column.</param>
+    private static string ParseRecordSourceName(string[] cols, int startIndex)
+    {
+        SourceKind kind = ParseSourceKind(ParseHexRequired(cols[startIndex], "source.source_kind"));
+        string harnessId = ParseHexRequired(cols[startIndex + 1], "source.harness_id");
+        string locator = ParseHexRequired(cols[startIndex + 2], "source.locator");
+        return kind == SourceKind.File ? CanonSynth.FileSourcePrefix + harnessId : locator;
     }
 
     /// <summary>
@@ -3079,8 +3119,10 @@ public partial class SqliteRelationalStore : IRelationalStoreReader
             "typeof(rcr.correction_rule), COALESCE(hex(CAST(rcr.correction_rule AS BLOB)), ''), " +
             "typeof(rdcw.declared_context_window), COALESCE(CAST(rdcw.declared_context_window AS TEXT), ''), " +
             "typeof(rrti.token_count), COALESCE(CAST(rrti.token_count AS TEXT), ''), " +
-            "typeof(rrto.token_count), COALESCE(CAST(rrto.token_count AS TEXT), '') " +
+            "typeof(rrto.token_count), COALESCE(CAST(rrto.token_count AS TEXT), ''), " +
+            RecordSourceColumns +
             "FROM record r " +
+            RecordSourceJoin +
             "LEFT JOIN record_session_link rsl ON rsl.span_id = r.span_id " +
             "LEFT JOIN record_parent rp ON rp.span_id = r.span_id " +
             "LEFT JOIN record_trace rt ON rt.span_id = r.span_id " +
@@ -3222,7 +3264,8 @@ public partial class SqliteRelationalStore : IRelationalStoreReader
                 defsBySpan.TryGetValue(header.SpanId, out List<CollectedToolDefinition>? defs) ? defs : [],
                 header.Signals,
                 header.ReportedInputTokens,
-                header.ReportedOutputTokens);
+                header.ReportedOutputTokens,
+                header.SourceName);
             // A record with no session link is grouped under the empty key rather than dropped,
             // so a span-scoped read still answers it. A session key is never empty, so the
             // session-scoped callers are unaffected.
@@ -3276,8 +3319,10 @@ public partial class SqliteRelationalStore : IRelationalStoreReader
             "typeof(rcr.correction_rule), COALESCE(hex(CAST(rcr.correction_rule AS BLOB)), ''), " +
             "typeof(rdcw.declared_context_window), COALESCE(CAST(rdcw.declared_context_window AS TEXT), ''), " +
             "typeof(rrti.token_count), COALESCE(CAST(rrti.token_count AS TEXT), ''), " +
-            "typeof(rrto.token_count), COALESCE(CAST(rrto.token_count AS TEXT), '') " +
+            "typeof(rrto.token_count), COALESCE(CAST(rrto.token_count AS TEXT), ''), " +
+            RecordSourceColumns +
             "FROM record r " +
+            RecordSourceJoin +
             "LEFT JOIN record_session_link rsl ON rsl.span_id = r.span_id " +
             "LEFT JOIN record_parent rp ON rp.span_id = r.span_id " +
             "LEFT JOIN record_trace rt ON rt.span_id = r.span_id " +
@@ -3483,7 +3528,8 @@ public partial class SqliteRelationalStore : IRelationalStoreReader
                 defsBySpan.TryGetValue(header.SpanId, out List<CollectedToolDefinition>? def) ? def : [],
                 header.Signals,
                 header.ReportedInputTokens,
-                header.ReportedOutputTokens));
+                header.ReportedOutputTokens,
+                header.SourceName));
         }
 
         return materialized;
@@ -5769,7 +5815,8 @@ public partial class SqliteRelationalStore : IRelationalStoreReader
         string? AgentInstanceId,
         CollectedRecordSignals Signals,
         long? ReportedInputTokens,
-        long? ReportedOutputTokens);
+        long? ReportedOutputTokens,
+        string SourceName);
 
     private record RawSessionHeader(
         string SessionId,

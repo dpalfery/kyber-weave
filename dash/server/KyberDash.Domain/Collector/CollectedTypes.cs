@@ -367,6 +367,13 @@ public record CollectedRecordSignals(
 /// <param name="Signals">Diagnostic signals attached to the record.</param>
 /// <param name="ReportedInputTokens">Optional reported input total (<c>record_reported_total.token_count</c> with direction <c>input</c>).</param>
 /// <param name="ReportedOutputTokens">Optional reported output total (<c>record_reported_total.token_count</c> with direction <c>output</c>).</param>
+/// <param name="SourceName">
+/// The record's source as the projection rules read it, taken from the stored <c>source</c> row
+/// (<c>record.source_id</c>): the locator (the OTLP service name, such as
+/// <c>kyberdash-factory-plugin</c>) for an OTLP source, or <c>codeburn/&lt;harness_id&gt;</c> for a
+/// file source. <see langword="null"/> only for a record a mapper built in memory before it was
+/// stored; every store read that returns records for hydration fills it.
+/// </param>
 public record CollectedRecord(
     string RecordId,
     string HarnessId,
@@ -391,4 +398,5 @@ public record CollectedRecord(
     IReadOnlyList<CollectedToolDefinition> ToolDefinitions,
     CollectedRecordSignals Signals,
     long? ReportedInputTokens = null,
-    long? ReportedOutputTokens = null);
+    long? ReportedOutputTokens = null,
+    string? SourceName = null);

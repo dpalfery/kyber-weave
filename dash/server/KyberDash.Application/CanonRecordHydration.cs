@@ -19,7 +19,10 @@ namespace KyberDash.Application;
 /// </remarks>
 public static class CanonRecordHydration
 {
-    /// <summary>Source label recorded on hydrated records; the relational store keeps no raw source string.</summary>
+    /// <summary>
+    /// Source label for a record that carries no <see cref="CollectedRecord.SourceName"/>: one a
+    /// mapper built in memory and that never went through a store read.
+    /// </summary>
     private const string RelationalSourceName = "relational";
 
     private const string TimestampFormat = "yyyy-MM-dd'T'HH:mm:ss.fff'Z'";
@@ -112,7 +115,7 @@ public static class CanonRecordHydration
             SpanId = record.RecordId,
             TraceId = record.TraceId,
             ParentSpanId = record.ParentRecordId,
-            Source = RelationalSourceName,
+            Source = record.SourceName ?? RelationalSourceName,
             Harness = record.HarnessId,
             SessionId = record.SessionKey,
             Name = record.Name,
