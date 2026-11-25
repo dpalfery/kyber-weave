@@ -17,6 +17,7 @@ public class MenubarServiceTrayTests : IDisposable
     private bool killStopsTray = true;
     private bool quitThrowsTimeout;
     private Exception? quitThrows;
+    private int? probeExitCode;
     private bool quitStopsTray = true;
 
     /// <summary>Deletes the scratch state directory.</summary>
@@ -210,6 +211,49 @@ public class MenubarServiceTrayTests : IDisposable
     }
 
     [Fact]
+    public async Task CountRunningReportsAFailureWhenPgrepFailsInsteadOfCountingItsOutput()
+    {
+        listingOutput = "4242\n";
+        probeExitCode = 2;
+        MenubarService service = Create(TrayPlatform.MacOS);
+
+        MenubarInstallOutcome outcome = await service.CountRunningAsync();
+
+        Assert.Equal(1, outcome.ExitCode);
+        Assert.Contains("probe", outcome.Message, StringComparison.Ordinal);
+        Assert.DoesNotContain("is running", outcome.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task CountRunningTreatsPgrepExitOneAsNoTrayEvenWithStrayOutput()
+    {
+        listingOutput = "4242\n";
+        probeExitCode = 1;
+        MenubarService service = Create(TrayPlatform.MacOS);
+
+        MenubarInstallOutcome outcome = await service.CountRunningAsync();
+
+        Assert.Equal(1, outcome.ExitCode);
+        Assert.Equal("kyberdash: no tray process running", outcome.Message);
+    }
+
+    [Fact]
+    public async Task QuitReportsAFailureWhenTheRunningProbeFailsAndSignalsNothing()
+    {
+        string binary = RecordInstall(TrayPlatform.MacOS);
+        trayRunning = true;
+        probeExitCode = 2;
+        MenubarService service = Create(TrayPlatform.MacOS);
+
+        MenubarInstallOutcome outcome = await service.QuitAsync();
+
+        Assert.Equal(1, outcome.ExitCode);
+        Assert.Contains("probe", outcome.Message, StringComparison.Ordinal);
+        Assert.DoesNotContain(calls, call => call.File == binary);
+        Assert.DoesNotContain(calls, call => call.File == "/usr/bin/pkill");
+    }
+
+    [Fact]
     public async Task CountRunningRefusesAPlatformTheTrayDoesNotShipFor()
     {
         MenubarService service = Create(TrayPlatform.Other);
@@ -268,7 +312,7 @@ public class MenubarServiceTrayTests : IDisposable
                 output = "\"kyberdash-tray.exe\",\"1\",\"Console\",\"1\",\"1 K\"\r\n";
             }
 
-            return Task.FromResult(new ProcessResult(output.Length > 0 ? 0 : 1, output, string.Empty));
+            return Task.FromResult(new ProcessResult(probeExitCode ?? (output.Length > 0 ? 0 : 1), output, probeExitCode is null ? string.Empty : "probe broke"));
         }
 
         // Anything else is the tray binary asked to quit.

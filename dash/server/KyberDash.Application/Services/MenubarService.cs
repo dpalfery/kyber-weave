@@ -256,7 +256,18 @@ public partial class MenubarService : IMenubarService
 
         // Only the binary recorded at install is ever signalled, so a developer's own tray is never touched.
         string binary = TrayBinaryPath(record);
-        if (!File.Exists(binary) || !await IsRecordedTrayRunningAsync(binary, cancellationToken).ConfigureAwait(false))
+        if (!File.Exists(binary))
+        {
+            return new MenubarInstallOutcome(0, NotRunningMessage);
+        }
+
+        TrayProbe first = await ProbeAsync(binary, cancellationToken).ConfigureAwait(false);
+        if (first.Failure is not null)
+        {
+            return ProbeFailure(first.Failure);
+        }
+
+        if (first.Count == 0)
         {
             return new MenubarInstallOutcome(0, NotRunningMessage);
         }
@@ -275,12 +286,25 @@ public partial class MenubarService : IMenubarService
             return new MenubarInstallOutcome(1, string.Create(CultureInfo.InvariantCulture, $"kyberdash menubar: quit: {exception.Message}"));
         }
 
+        string? probeFailure = null;
+        async Task<bool> StillRunningAsync(CancellationToken c)
+        {
+            TrayProbe probe = await ProbeAsync(binary, c).ConfigureAwait(false);
+            probeFailure = probe.Failure;
+            return probe.Failure is null && probe.Count > 0;
+        }
+
         bool exited = await TrayProcesses.WaitForTrayExitAsync(
-            c => IsRecordedTrayRunningAsync(binary, c),
+            StillRunningAsync,
             delay,
             TrayPollInterval,
             QuitTimeout,
             cancellationToken).ConfigureAwait(false);
+        if (probeFailure is not null)
+        {
+            return ProbeFailure(probeFailure);
+        }
+
         if (exited)
         {
             return new MenubarInstallOutcome(0, QuitDoneMessage);
@@ -293,7 +317,18 @@ public partial class MenubarService : IMenubarService
         }
 
         _ = await runTool("/usr/bin/pkill", ["-f", binary], QuitTimeout, cancellationToken).ConfigureAwait(false);
-        if (await IsRecordedTrayRunningAsync(binary, cancellationToken).ConfigureAwait(false))
+        bool gone = await TrayProcesses.WaitForTrayExitAsync(
+            StillRunningAsync,
+            delay,
+            TrayPollInterval,
+            TimeSpan.Zero,
+            cancellationToken).ConfigureAwait(false);
+        if (probeFailure is not null)
+        {
+            return ProbeFailure(probeFailure);
+        }
+
+        if (!gone)
         {
             return new MenubarInstallOutcome(1, "kyberdash: the tray is still running after quit and kill; quit it and run again");
         }
@@ -353,11 +388,8 @@ public partial class MenubarService : IMenubarService
             return new MenubarInstallOutcome(1, PlatformRefusal);
         }
 
-        bool windows = platform == TrayPlatform.Windows;
-        ProcessResult listing = windows
-            ? await runTool("tasklist", ["/FI", "IMAGENAME eq " + WindowsTrayImage, "/FO", "CSV", "/NH"], QuitTimeout, cancellationToken).ConfigureAwait(false)
-            : await runTool("/usr/bin/pgrep", ["-f", TrayProcessPattern], QuitTimeout, cancellationToken).ConfigureAwait(false);
-        return TrayProcesses.RunningOutcome(TrayProcesses.CountTrayProcesses(listing.StandardOutput, windows));
+        TrayProbe probe = await ProbeAsync(TrayProcessPattern, cancellationToken).ConfigureAwait(false);
+        return probe.Failure is null ? TrayProcesses.RunningOutcome(probe.Count) : ProbeFailure(probe.Failure);
     }
 
     private bool IsSupportedPlatform() => platform != TrayPlatform.Other;
@@ -368,13 +400,46 @@ public partial class MenubarService : IMenubarService
     private string TrayBinaryPath(TrayRecord record) =>
         platform == TrayPlatform.MacOS ? Path.Combine(record.Path, "Contents", "MacOS", "kyberdash-tray") : record.Path;
 
-    private async Task<bool> IsRecordedTrayRunningAsync(string binary, CancellationToken cancellationToken)
+    private sealed record TrayProbe(int Count, string? Failure);
+
+    private static MenubarInstallOutcome ProbeFailure(string failure) =>
+        new(1, string.Create(CultureInfo.InvariantCulture, $"kyberdash menubar: could not probe for the tray: {failure}"));
+
+    /// <summary>Counts the tray processes whose command line matches <paramref name="pgrepPattern"/> (macOS) or by image name (Windows).</summary>
+    /// <remarks>
+    /// <c>pgrep</c> exits 0 for a match, 1 for none and anything else for a failure of the probe itself;
+    /// <c>tasklist</c> exits 0 either way. Gating on the exit code keeps a broken probe from reading as
+    /// "no tray" (which would skip a needed quit) or as a running tray.
+    /// </remarks>
+    private async Task<TrayProbe> ProbeAsync(string pgrepPattern, CancellationToken cancellationToken)
     {
         bool windows = platform == TrayPlatform.Windows;
-        ProcessResult listing = windows
-            ? await runTool("tasklist", ["/FI", "IMAGENAME eq " + WindowsTrayImage, "/FO", "CSV", "/NH"], QuitTimeout, cancellationToken).ConfigureAwait(false)
-            : await runTool("/usr/bin/pgrep", ["-f", binary], QuitTimeout, cancellationToken).ConfigureAwait(false);
-        return TrayProcesses.CountTrayProcesses(listing.StandardOutput, windows) > 0;
+        string tool = windows ? "tasklist" : "/usr/bin/pgrep";
+        string[] arguments = windows
+            ? ["/FI", "IMAGENAME eq " + WindowsTrayImage, "/FO", "CSV", "/NH"]
+            : ["-f", pgrepPattern];
+        ProcessResult listing;
+        try
+        {
+            listing = await runTool(tool, arguments, QuitTimeout, cancellationToken).ConfigureAwait(false);
+        }
+        catch (Exception exception) when (exception is Win32Exception or IOException or UnauthorizedAccessException or TimeoutException)
+        {
+            return new TrayProbe(0, string.Create(CultureInfo.InvariantCulture, $"{tool}: {exception.Message}"));
+        }
+
+        if (!windows && listing.ExitCode == 1)
+        {
+            return new TrayProbe(0, null);
+        }
+
+        if (listing.ExitCode != 0)
+        {
+            string detail = FirstNonEmpty(listing.StandardError, string.Create(CultureInfo.InvariantCulture, $"exited {listing.ExitCode}"));
+            return new TrayProbe(0, string.Create(CultureInfo.InvariantCulture, $"{tool}: {detail}"));
+        }
+
+        return new TrayProbe(TrayProcesses.CountTrayProcesses(listing.StandardOutput, windows), null);
     }
 
     private static async Task<bool> PatternRunningAsync(string pattern, CancellationToken cancellationToken)
