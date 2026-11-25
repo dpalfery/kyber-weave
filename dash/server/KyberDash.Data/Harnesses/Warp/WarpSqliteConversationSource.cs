@@ -31,6 +31,7 @@ public class WarpSqliteConversationSource : ISqliteConversationSource
     private const string QueriesQueryName = "warp.queries";
     private const string BlocksQueryName = "warp.blocks";
     private const string DatabaseFileQueryName = "warp.database-file";
+    private const string UnattributedBlocksQueryName = "warp.unattributed-blocks";
 
     private static readonly string[] QueryColumns =
     [
@@ -87,6 +88,8 @@ public class WarpSqliteConversationSource : ISqliteConversationSource
         {
             blocksByDatabase.Clear();
         }
+
+        RecordUnattributableBlocks(context);
 
         HarnessSqliteQuery query = new(
             ConversationsQueryName,
@@ -184,6 +187,38 @@ public class WarpSqliteConversationSource : ISqliteConversationSource
 
         writer.WriteEndArray();
         writer.WriteEndObject();
+    }
+
+    /// <summary>
+    /// The export attributes a block by a text <c>conversation_id</c>; a block carrying any other JSON type
+    /// there cannot be attributed and is left out, so the count of them is recorded rather than dropped silently.
+    /// </summary>
+    private static void RecordUnattributableBlocks(SqliteConversationContext context)
+    {
+        IReadOnlyDictionary<string, object?>? row = context.Database
+            .Query(new HarnessSqliteQuery(
+                UnattributedBlocksQueryName,
+                "SELECT COUNT(*) AS skipped FROM blocks WHERE ai_metadata IS NOT NULL AND ai_metadata <> '' "
+                    + "AND json_type(ai_metadata, '$.conversation_id') NOT IN ('text', 'null')",
+                []))
+            .FirstOrDefault();
+        long skipped = row?.GetValueOrDefault("skipped") is { } value ? Convert.ToInt64(value, CultureInfo.InvariantCulture) : 0L;
+        if (skipped <= 0)
+        {
+            return;
+        }
+
+        context.Problems.Add(new CollectedProblem(
+            ProblemKey: string.Create(CultureInfo.InvariantCulture, $"warp-malformed:{context.DatabasePath}:blocks-non-text-conversation-id"),
+            Severity: "warning",
+            Code: WarpMapper.MalformedDocumentCode,
+            Message: string.Create(CultureInfo.InvariantCulture, $"Skipping {skipped} Warp block(s) whose conversation_id is not text."),
+            SpanId: null,
+            Location: context.DatabasePath,
+            SessionKey: null,
+            HarnessId: context.HarnessId,
+            TimestampUtc: null,
+            Stack: null));
     }
 
     private IReadOnlyList<IReadOnlyDictionary<string, object?>> BlocksFor(IHarnessSqliteDatabase database, string conversationId)

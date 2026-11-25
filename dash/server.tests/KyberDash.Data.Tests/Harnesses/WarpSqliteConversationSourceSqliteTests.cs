@@ -116,6 +116,44 @@ public class WarpSqliteConversationSourceSqliteTests : IDisposable
         Assert.Equal(1, source.CachedDatabaseCount);
     }
 
+    [Fact]
+    public void ListConversations_BlockWithNonTextConversationId_RecordsAProblemWithTheCount()
+    {
+        string path = directory.Combine("numeric.sqlite");
+        SqliteFixtureDatabase.Create(
+            path,
+            SchemaDdl,
+            [
+                new SqliteFixtureStatement(
+                    "INSERT INTO agent_conversations VALUES (?1, ?2, ?3)",
+                    ["conv-1", ConversationData, "2026-05-18 10:10:00"]),
+                Query("ex-a", "conv-1", "2026-05-18 10:00:00"),
+                new SqliteFixtureStatement(
+                    "INSERT INTO blocks VALUES (?1, ?2, ?3, ?4)",
+                    ["blk-1", "2026-05-18 10:00:30", "ls", "{\"conversation_id\":\"conv-1\"}"]),
+                new SqliteFixtureStatement(
+                    "INSERT INTO blocks VALUES (?1, ?2, ?3, ?4)",
+                    ["blk-n1", "2026-05-18 10:00:31", "pwd", "{\"conversation_id\":42}"]),
+                new SqliteFixtureStatement(
+                    "INSERT INTO blocks VALUES (?1, ?2, ?3, ?4)",
+                    ["blk-n2", "2026-05-18 10:00:32", "date", "{\"conversation_id\":[1]}"]),
+                new SqliteFixtureStatement(
+                    "INSERT INTO blocks VALUES (?1, ?2, ?3, ?4)",
+                    ["blk-none", "2026-05-18 10:00:33", "id", "{\"other\":1}"]),
+            ]);
+        List<CollectedProblem> problems = [];
+        using IHarnessSqliteDatabase database = Source().Open(path);
+        SqliteConversationContext context = new(
+            database, path, "warp", null, "/home/u", new PhysicalHarnessFileSystem(), Source(), problems);
+
+        List<SqliteConversation> listed = [.. new WarpSqliteConversationSource().ListConversations(context)];
+
+        Assert.Single(listed);
+        CollectedProblem problem = Assert.Single(problems);
+        Assert.Equal(WarpMapper.MalformedDocumentCode, problem.Code);
+        Assert.Contains("2 Warp block", problem.Message, StringComparison.Ordinal);
+    }
+
     private static JsonElement Export(WarpSqliteConversationSource source, IHarnessSqliteDatabase database, string conversationId) =>
         JsonDocument.Parse(ExportText(source, database, conversationId)).RootElement.Clone();
 
