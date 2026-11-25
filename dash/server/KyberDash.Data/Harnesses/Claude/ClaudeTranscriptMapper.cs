@@ -1397,6 +1397,12 @@ public class ClaudeTranscriptMapper : IHarnessMapper
                 {
                     if (item.ValueKind == JsonValueKind.Object)
                     {
+                        // An image or document block is not text: it is dropped, never kept as its JSON.
+                        if (IsNonTextBlock(item))
+                        {
+                            continue;
+                        }
+
                         items.Add(ExtractPropertyAsContentText(item, "text") ?? item.GetRawText());
                     }
                     else
@@ -1405,7 +1411,7 @@ public class ClaudeTranscriptMapper : IHarnessMapper
                     }
                 }
 
-                return string.Join('\n', items);
+                return items.Count > 0 ? string.Join('\n', items) : null;
             }
 
             if (rawContent.ValueKind == JsonValueKind.Object)
@@ -1424,6 +1430,10 @@ public class ClaudeTranscriptMapper : IHarnessMapper
 
         return null;
     }
+
+    /// <summary>Whether a tool-result content block carries an image or a document rather than text.</summary>
+    private static bool IsNonTextBlock(JsonElement item) =>
+        ReadSafeMetadataText(item, "type") is "image" or "document";
 
     private static string? ExtractPropertyAsContentText(JsonElement obj, string key)
     {

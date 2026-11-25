@@ -569,6 +569,36 @@ public class ClaudeTranscriptMapperTests
         Assert.Empty(turn.ToolDefinitions);
     }
 
+    /// <summary>
+    /// A tool result whose content holds image blocks keeps its text and drops the images: an image is
+    /// not text, and keeping its JSON made the store refuse the whole import. A result of images alone
+    /// carries no result text.
+    /// </summary>
+    [Fact]
+    public void Map_DropsImageBlocksFromToolResultContent()
+    {
+        string image = "{\"type\":\"image\",\"source\":{\"type\":\"base64\",\"media_type\":\"image/jpeg\",\"data\":\"AAAA\"}}";
+        string jsonl = string.Join('\n',
+        [
+            "{\"type\":\"assistant\",\"sessionId\":\"sess-img\",\"timestamp\":\"2026-11-19T12:00:01.000Z\",\"message\":{\"id\":\"msg-i1\",\"role\":\"assistant\",\"model\":\"claude-sonnet-4-5\",\"content\":[{\"type\":\"tool_use\",\"id\":\"tc-shot\",\"name\":\"screenshot\",\"input\":{}},{\"type\":\"tool_use\",\"id\":\"tc-read\",\"name\":\"Read\",\"input\":{}}],\"usage\":{\"input_tokens\":50,\"output_tokens\":10}}}",
+            "{\"type\":\"user\",\"sessionId\":\"sess-img\",\"timestamp\":\"2026-11-19T12:00:02.000Z\",\"message\":{\"role\":\"user\",\"content\":[{\"type\":\"tool_result\",\"tool_use_id\":\"tc-shot\",\"content\":[" + image + "," + image + "]},{\"type\":\"tool_result\",\"tool_use_id\":\"tc-read\",\"content\":[{\"type\":\"text\",\"text\":\"Page one\"}," + image + "]}]}}",
+            "{\"type\":\"assistant\",\"sessionId\":\"sess-img\",\"timestamp\":\"2026-11-19T12:00:03.000Z\",\"message\":{\"id\":\"msg-i2\",\"role\":\"assistant\",\"model\":\"claude-sonnet-4-5\",\"content\":[{\"type\":\"text\",\"text\":\"Seen.\"}],\"usage\":{\"input_tokens\":60,\"output_tokens\":5}}}",
+        ]);
+
+        CollectedBatch batch = new ClaudeTranscriptMapper().Map(CreateUnit("/tmp/.claude/projects/repo/sess-img.jsonl", jsonl), ImportedAt);
+
+        CollectedRecord shot = Assert.Single(batch.Records, static r => r.Tool?.CallId == "tc-shot");
+        Assert.Null(shot.Tool!.Result);
+        Assert.Empty(shot.Parts);
+        CollectedRecord read = Assert.Single(batch.Records, static r => r.Tool?.CallId == "tc-read");
+        Assert.Equal("Page one", Assert.Single(read.Parts).PlainText);
+        Assert.All(batch.Records.SelectMany(static r => r.Parts), static p => Assert.DoesNotContain("\"image\"", p.PlainText ?? string.Empty, StringComparison.Ordinal));
+
+        InMemoryRelationalStore store = new();
+        store.WriteBatch(batch);
+        Assert.Equal(batch.Records.Count, store.CountRecords());
+    }
+
     private static NativeSourceUnit CreateUnit(string sourceKey, string? rawText) =>
         new(
             Unit: new SourceUnit(
