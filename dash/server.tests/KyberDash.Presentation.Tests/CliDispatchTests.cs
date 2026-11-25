@@ -118,6 +118,82 @@ public class CliDispatchTests
         Assert.Contains("menubar: unchanged", run.Output, StringComparison.Ordinal);
     }
 
+    [Theory]
+    [InlineData("--quit")]
+    [InlineData("--launch")]
+    [InlineData("--running")]
+    public async Task MenubarTrayVerbCallsItsServiceMethodAndReturnsItsExitCode(string verb)
+    {
+        CliRun run = await CliRun.ExecuteAsync(["menubar", verb]);
+
+        Assert.Equal(0, run.ExitCode);
+        switch (verb)
+        {
+            case "--quit":
+                run.Builder.Menubar.Verify(m => m.QuitAsync(It.IsAny<CancellationToken>()), Times.Once);
+                break;
+            case "--launch":
+                run.Builder.Menubar.Verify(m => m.LaunchAsync(It.IsAny<CancellationToken>()), Times.Once);
+                break;
+            default:
+                run.Builder.Menubar.Verify(m => m.CountRunningAsync(It.IsAny<CancellationToken>()), Times.Once);
+                break;
+        }
+
+        run.Builder.Menubar.Verify(
+            m => m.InstallOrUpdateAsync(It.IsAny<bool>(), It.IsAny<bool>(), It.IsAny<string?>(), It.IsAny<string>(), It.IsAny<CancellationToken>()),
+            Times.Never);
+    }
+
+    [Fact]
+    public async Task MenubarRunningFailureIsWrittenToStderrWithItsExitCode()
+    {
+        CliRun run = await CliRun.ExecuteAsync(
+            ["menubar", "--running"],
+            configure: builder => builder.Menubar
+                .Setup(m => m.CountRunningAsync(It.IsAny<CancellationToken>()))
+                .ReturnsAsync(new MenubarInstallOutcome(1, "kyberdash: no tray process running")));
+
+        Assert.Equal(1, run.ExitCode);
+        Assert.Contains("kyberdash: no tray process running", run.Error, StringComparison.Ordinal);
+        Assert.DoesNotContain("kyberdash: no tray process running", run.Output, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task MenubarQuitFailureIsWrittenToStderrWithItsExitCode()
+    {
+        CliRun run = await CliRun.ExecuteAsync(
+            ["menubar", "--quit"],
+            configure: builder => builder.Menubar
+                .Setup(m => m.QuitAsync(It.IsAny<CancellationToken>()))
+                .ReturnsAsync(new MenubarInstallOutcome(1, "kyberdash: the tray is still running after quit; quit it and run again")));
+
+        Assert.Equal(1, run.ExitCode);
+        Assert.Contains("still running after quit", run.Error, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task MenubarRejectsAnUnknownOptionWithUsageAndInstallsNothing()
+    {
+        CliRun run = await CliRun.ExecuteAsync(["menubar", "--bogus"]);
+
+        Assert.Equal(2, run.ExitCode);
+        Assert.Contains("Usage: kyberdash menubar", run.Error, StringComparison.Ordinal);
+        run.Builder.Menubar.Verify(
+            m => m.InstallOrUpdateAsync(It.IsAny<bool>(), It.IsAny<bool>(), It.IsAny<string?>(), It.IsAny<string>(), It.IsAny<CancellationToken>()),
+            Times.Never);
+    }
+
+    [Fact]
+    public async Task HelpListsTheTrayVerbs()
+    {
+        CliRun run = await CliRun.ExecuteAsync(["--help"]);
+
+        Assert.Contains("--quit", run.Output, StringComparison.Ordinal);
+        Assert.Contains("--launch", run.Output, StringComparison.Ordinal);
+        Assert.Contains("--running", run.Output, StringComparison.Ordinal);
+    }
+
     [Fact]
     public async Task EngineEnsureRequiresTheIfRunningFlag()
     {
@@ -139,6 +215,182 @@ public class CliDispatchTests
             l => l.EnsureRunningEngineMatchesVersionAsync(Program.ResolveVersion(), null, It.IsAny<string?>(), It.IsAny<CancellationToken>()),
             Times.Once);
         Assert.Contains("engine: not-running", run.Output, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task EngineStopDelegatesToTheLifecycleService()
+    {
+        CliRun run = await CliRun.ExecuteAsync(["engine", "stop"]);
+
+        Assert.Equal(0, run.ExitCode);
+        run.Builder.Lifecycle.Verify(
+            l => l.StopRunningEngineAsync(null, It.IsAny<CancellationToken>()),
+            Times.Once);
+        Assert.Contains("engine: not-running", run.Output, StringComparison.Ordinal);
+    }
+
+    [Theory]
+    [InlineData(EngineVerifyOutcome.Running, 0)]
+    [InlineData(EngineVerifyOutcome.NotRunning, 1)]
+    [InlineData(EngineVerifyOutcome.OtherVersion, 3)]
+    [InlineData(EngineVerifyOutcome.Unresponsive, 4)]
+    public async Task EngineVerifyMapsEachOutcomeToItsExitCode(EngineVerifyOutcome outcome, int exitCode)
+    {
+        CliRun run = await CliRun.ExecuteAsync(
+            ["engine", "verify", "--version", "2.0.0", "--wait", "0"],
+            configure: builder => builder.Lifecycle
+                .Setup(l => l.VerifyRunningEngineVersionAsync(It.IsAny<string>(), It.IsAny<int>(), It.IsAny<string?>(), It.IsAny<CancellationToken>()))
+                .ReturnsAsync(new EngineEnsureReport(outcome == EngineVerifyOutcome.Running, "engine: probe", Outcome: outcome)));
+
+        Assert.Equal(exitCode, run.ExitCode);
+        run.Builder.Lifecycle.Verify(
+            l => l.VerifyRunningEngineVersionAsync("2.0.0", 1, null, It.IsAny<CancellationToken>()),
+            Times.Once);
+    }
+
+    [Fact]
+    public async Task EngineVerifyWaitsTwentySecondsByDefault()
+    {
+        CliRun run = await CliRun.ExecuteAsync(["engine", "verify", "--version", "2.0.0"]);
+
+        Assert.Equal(0, run.ExitCode);
+        run.Builder.Lifecycle.Verify(
+            l => l.VerifyRunningEngineVersionAsync("2.0.0", 134, null, It.IsAny<CancellationToken>()),
+            Times.Once);
+    }
+
+    [Fact]
+    public async Task EngineVerifyWithoutAVersionExitsTwo()
+    {
+        CliRun run = await CliRun.ExecuteAsync(["engine", "verify"]);
+
+        Assert.Equal(2, run.ExitCode);
+        run.Builder.Lifecycle.Verify(
+            l => l.VerifyRunningEngineVersionAsync(It.IsAny<string>(), It.IsAny<int>(), It.IsAny<string?>(), It.IsAny<CancellationToken>()),
+            Times.Never);
+    }
+
+    [Theory]
+    [InlineData("-1")]
+    [InlineData("soon")]
+    public async Task EngineVerifyRejectsAWaitThatIsNotAWholeNumber(string wait)
+    {
+        CliRun run = await CliRun.ExecuteAsync(["engine", "verify", "--version", "2.0.0", "--wait", wait]);
+
+        Assert.Equal(2, run.ExitCode);
+        run.Builder.Lifecycle.Verify(
+            l => l.VerifyRunningEngineVersionAsync(It.IsAny<string>(), It.IsAny<int>(), It.IsAny<string?>(), It.IsAny<CancellationToken>()),
+            Times.Never);
+    }
+
+    [Theory]
+    [InlineData("601")]
+    [InlineData("2147483647")]
+    public async Task EngineVerifyRejectsAWaitAboveTheCapWithUsage(string wait)
+    {
+        CliRun run = await CliRun.ExecuteAsync(["engine", "verify", "--version", "2.0.0", "--wait", wait]);
+
+        Assert.Equal(2, run.ExitCode);
+        Assert.Contains("Usage: kyberdash engine", run.Error, StringComparison.Ordinal);
+        run.Builder.Lifecycle.Verify(
+            l => l.VerifyRunningEngineVersionAsync(It.IsAny<string>(), It.IsAny<int>(), It.IsAny<string?>(), It.IsAny<CancellationToken>()),
+            Times.Never);
+    }
+
+    [Fact]
+    public async Task EngineVerifyAcceptsAWaitAtTheCap()
+    {
+        CliRun run = await CliRun.ExecuteAsync(
+            ["engine", "verify", "--version", "2.0.0", "--wait", "600"],
+            configure: builder => builder.Lifecycle
+                .Setup(l => l.VerifyRunningEngineVersionAsync(It.IsAny<string>(), It.IsAny<int>(), It.IsAny<string?>(), It.IsAny<CancellationToken>()))
+                .ReturnsAsync(new EngineEnsureReport(true, "engine: probe", Outcome: EngineVerifyOutcome.Running)));
+
+        Assert.Equal(0, run.ExitCode);
+    }
+
+    [Theory]
+    [InlineData("stop")]
+    [InlineData("verify")]
+    [InlineData("ensure")]
+    public async Task EngineRejectsAnUnusableStateDirWithExitTwoInsteadOfCrashing(string verb)
+    {
+        string[] args = verb switch
+        {
+            "verify" => ["engine", "verify", "--version", "2.0.0", "--state-dir", "bad\0dir"],
+            "ensure" => ["engine", "ensure", "--if-running", "--state-dir", "bad\0dir"],
+            _ => ["engine", verb, "--state-dir", "bad\0dir"],
+        };
+
+        CliRun run = await CliRun.ExecuteAsync(args, containerArgs: []);
+
+        Assert.Equal(2, run.ExitCode);
+        Assert.Contains("--state-dir", run.Error, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task AGlobalStateDirTheContainerCannotResolveExitsTwoInsteadOfCrashing()
+    {
+        using StringWriter output = new();
+        using StringWriter error = new();
+
+        int exitCode = await Program.RunAsync(
+            ["engine", "stop", "--state-dir", "bad\0dir"],
+            output,
+            error,
+            TestContext.Current.CancellationToken);
+
+        Assert.Equal(2, exitCode);
+        Assert.Contains("not a usable path", error.ToString(), StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task AClosedOutputPipeOnVersionIsNotReportedAsAVersionFailure()
+    {
+        using ThrowingWriter output = new();
+        using StringWriter error = new();
+
+        int exitCode = await Program.RunAsync(
+            ["--version"],
+            output,
+            error,
+            TestContext.Current.CancellationToken);
+
+        Assert.Equal(0, exitCode);
+        Assert.Equal(string.Empty, error.ToString());
+    }
+
+    [Fact]
+    public async Task ABrokenErrorStreamKeepsTheUsageExitCode()
+    {
+        using StringWriter output = new();
+        using ThrowingWriter error = new();
+
+        int exitCode = await Program.RunAsync(
+            ["engine", "stop", "--state-dir", "bad\0dir"],
+            output,
+            error,
+            TestContext.Current.CancellationToken);
+
+        Assert.Equal(2, exitCode);
+    }
+
+    private sealed class ThrowingWriter : StringWriter
+    {
+        public override Task WriteLineAsync(string? value) => throw new IOException("Broken pipe");
+    }
+
+    [Fact]
+    public async Task UnknownEngineSubcommandPrintsTheCurrentUsage()
+    {
+        CliRun run = await CliRun.ExecuteAsync(["engine", "restart"]);
+
+        Assert.Equal(2, run.ExitCode);
+        Assert.Contains(
+            "Usage: kyberdash engine ensure --if-running / stop / verify --version <v> [--wait <seconds>] [--state-dir <dir>]",
+            run.Error,
+            StringComparison.Ordinal);
+        Assert.DoesNotContain("Usage: kyberdash engine ensure --if-running [--state-dir <dir>]", run.Error, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -320,13 +572,14 @@ public class CliDispatchTests
         public static async Task<CliRun> ExecuteAsync(
             string[] args,
             Action<PresentationBuilder>? configure = null,
-            int processExitCode = 0)
+            int processExitCode = 0,
+            string[]? containerArgs = null)
         {
             PresentationBuilder builder = new();
             builder.ApplyCannedResults();
             configure?.Invoke(builder);
 
-            using ServiceProvider container = Program.BuildProvider(args);
+            using ServiceProvider container = Program.BuildProvider(containerArgs ?? args);
             IServiceProvider services = PresentationBuilder.Overlay(container, builder);
 
             RecordingProcessMode processMode = new(processExitCode);

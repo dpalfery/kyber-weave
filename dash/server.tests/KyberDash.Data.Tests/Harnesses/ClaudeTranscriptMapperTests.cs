@@ -489,6 +489,195 @@ public class ClaudeTranscriptMapperTests
         Assert.Equal(atBoundRequestId, turn.RequestId);
     }
 
+    /// <summary>
+    /// A transcript records skill use three ways: the <c>skill_listing</c> attachment names the skills the
+    /// harness listed, a <c>Skill</c> tool call names the skill it invoked, and the <c>api-request-shape</c>
+    /// line carries the tool schemas every request naming its hash advertised. The turn record carries
+    /// all three, and the store keeps the listing with the turn it arrived on.
+    /// </summary>
+    [Fact]
+    public void Map_CarriesListedSkillsInvokedSkillsAndRequestToolSchemasOnTheTurnRecords()
+    {
+        string jsonl = string.Join('\n',
+        [
+            "{\"type\":\"attachment\",\"sessionId\":\"sess-skills\",\"timestamp\":\"2026-11-19T12:00:00.000Z\",\"attachment\":{\"type\":\"skill_listing\",\"content\":\"- conductor: Orchestrates.\\n- code-review:code-review: Reviews.\",\"skillCount\":2,\"isInitial\":true,\"names\":[\"conductor\",\"code-review:code-review\"]}}",
+            "{\"type\":\"api-request-shape\",\"sessionId\":\"sess-skills\",\"shapeHash\":\"shape-1\",\"timestamp\":\"2026-11-19T12:00:00.500Z\",\"shape\":{\"system\":[],\"tools\":[{\"name\":\"Skill\",\"description\":\"Invoke a skill.\",\"input_schema\":{\"type\":\"object\",\"properties\":{\"skill\":{\"type\":\"string\"}}}},{\"name\":\"mcp__kw-docs__load_skill\",\"description\":\"Load a KW skill.\",\"input_schema\":{\"type\":\"object\"}}]}}",
+            "{\"type\":\"api-request\",\"sessionId\":\"sess-skills\",\"shapeHash\":\"shape-1\",\"timestamp\":\"2026-11-19T12:00:00.600Z\"}",
+            "{\"type\":\"user\",\"sessionId\":\"sess-skills\",\"timestamp\":\"2026-11-19T12:00:01.000Z\",\"message\":{\"role\":\"user\",\"content\":\"Run the conductor.\"}}",
+            "{\"type\":\"assistant\",\"sessionId\":\"sess-skills\",\"timestamp\":\"2026-11-19T12:00:02.000Z\",\"message\":{\"id\":\"msg-s1\",\"role\":\"assistant\",\"model\":\"claude-sonnet-4-5\",\"content\":[{\"type\":\"tool_use\",\"id\":\"tc-skill\",\"name\":\"Skill\",\"input\":{\"skill\":\"conductor\",\"args\":\"go\"}}],\"usage\":{\"input_tokens\":50,\"output_tokens\":10}}}",
+            "{\"type\":\"user\",\"sessionId\":\"sess-skills\",\"timestamp\":\"2026-11-19T12:00:03.000Z\",\"message\":{\"role\":\"user\",\"content\":[{\"type\":\"tool_result\",\"tool_use_id\":\"tc-skill\",\"content\":\"Launching skill: conductor\"}]}}",
+            "{\"type\":\"api-request\",\"sessionId\":\"sess-skills\",\"shapeHash\":\"shape-1\",\"timestamp\":\"2026-11-19T12:00:03.500Z\"}",
+            "{\"type\":\"assistant\",\"sessionId\":\"sess-skills\",\"timestamp\":\"2026-11-19T12:00:04.000Z\",\"message\":{\"id\":\"msg-s2\",\"role\":\"assistant\",\"model\":\"claude-sonnet-4-5\",\"content\":[{\"type\":\"text\",\"text\":\"Done.\"}],\"usage\":{\"input_tokens\":60,\"output_tokens\":5}}}",
+        ]);
+
+        ClaudeTranscriptMapper mapper = new();
+        CollectedBatch batch = mapper.Map(CreateUnit("/tmp/.claude/projects/repo/sess-skills.jsonl", jsonl), ImportedAt);
+
+        CollectedRecord[] turns = [.. batch.Records.Where(static r => r.Op == RecordOp.LlmInvoke)];
+        Assert.Equal(2, turns.Length);
+
+        Assert.Equal(["conductor", "code-review:code-review"], turns[0].SkillsListed);
+        Assert.Equal(["conductor"], turns[0].SkillsInvoked);
+        Assert.Empty(turns[1].SkillsListed!);
+        Assert.Empty(turns[1].SkillsInvoked);
+
+        foreach (CollectedRecord turn in turns)
+        {
+            Assert.Equal(["Skill", "mcp__kw-docs__load_skill"], turn.ToolDefinitions.Select(static d => d.ToolName));
+            Assert.Equal([0, 1], turn.ToolDefinitions.Select(static d => d.Position));
+            Assert.Equal([null, "kw-docs"], turn.ToolDefinitions.Select(static d => d.Server));
+            Assert.All(turn.ToolDefinitions, static d =>
+            {
+                Assert.True(d.SchemaTokens > 0);
+                Assert.False(string.IsNullOrEmpty(d.Tokenizer));
+            });
+        }
+
+        CollectedRecord skillCall = Assert.Single(batch.Records, static r => r.Op == RecordOp.ToolInvoke);
+        Assert.Equal("Skill", skillCall.Tool!.ToolName);
+        Assert.Empty(skillCall.SkillsInvoked);
+
+        InMemoryRelationalStore store = new();
+        store.WriteBatch(batch);
+        IReadOnlyList<StoredSkillListing> listings = store.SessionSkillListings("sess-skills");
+        Assert.Equal(["conductor", "code-review:code-review"], listings.Select(static l => l.SkillName));
+        Assert.All(listings, l => Assert.Equal(turns[0].RecordId, l.SpanId));
+        Assert.Equal(["conductor"], store.SessionSkillFigures("sess-skills").Select(static s => s.SkillName));
+    }
+
+    /// <summary>
+    /// A listing written before Claude Code added the <c>names</c> array is read from its
+    /// <c>- name: description</c> lines: a plugin skill keeps the colon inside its name, an alias in
+    /// parentheses is dropped, and a description's continuation lines are not skills. A transcript with
+    /// no request shape advertises no tool schemas.
+    /// </summary>
+    [Fact]
+    public void Map_ReadsListedSkillNamesFromTheListingTextWhenTheNamesArrayIsAbsent()
+    {
+        string listing = "- code-review:code-review: Code review a pull request\\n- ship-local (ship): Commit and push.\\n- anthropic-skills:docx\\n- dataviz: Charts.\\nTRIGGER — read this first: always.";
+        string jsonl = string.Join('\n',
+        [
+            "{\"type\":\"attachment\",\"sessionId\":\"sess-old\",\"timestamp\":\"2026-11-19T12:00:00.000Z\",\"attachment\":{\"type\":\"skill_listing\",\"content\":\"" + listing + "\"}}",
+            "{\"type\":\"assistant\",\"sessionId\":\"sess-old\",\"timestamp\":\"2026-11-19T12:00:02.000Z\",\"message\":{\"id\":\"msg-o1\",\"role\":\"assistant\",\"model\":\"claude-sonnet-4-5\",\"content\":[{\"type\":\"text\",\"text\":\"Hi.\"}],\"usage\":{\"input_tokens\":50,\"output_tokens\":10}}}",
+        ]);
+
+        ClaudeTranscriptMapper mapper = new();
+        CollectedBatch batch = mapper.Map(CreateUnit("/tmp/.claude/projects/repo/sess-old.jsonl", jsonl), ImportedAt);
+
+        CollectedRecord turn = Assert.Single(batch.Records);
+        Assert.Equal(["code-review:code-review", "ship-local", "anthropic-skills:docx", "dataviz"], turn.SkillsListed);
+        Assert.Empty(turn.ToolDefinitions);
+    }
+
+    /// <summary>
+    /// A skill the user ran as a slash command is an invocation on the turn that answered it, when the
+    /// command names a skill the transcript listed; a built-in command such as <c>/model</c> is not.
+    /// </summary>
+    [Fact]
+    public void Map_CountsASlashCommandThatNamesAListedSkillAsAnInvocation()
+    {
+        string jsonl = string.Join('\n',
+        [
+            "{\"type\":\"attachment\",\"sessionId\":\"sess-slash\",\"timestamp\":\"2026-11-19T12:00:00.000Z\",\"attachment\":{\"type\":\"skill_listing\",\"content\":\"- conductor: Orchestrates.\",\"names\":[\"conductor\"]}}",
+            "{\"type\":\"user\",\"sessionId\":\"sess-slash\",\"timestamp\":\"2026-11-19T12:00:01.000Z\",\"message\":{\"role\":\"user\",\"content\":\"<command-message>conductor</command-message>\\n<command-name>/conductor</command-name>\\n<command-args>fix it</command-args>\"}}",
+            "{\"type\":\"assistant\",\"sessionId\":\"sess-slash\",\"timestamp\":\"2026-11-19T12:00:02.000Z\",\"message\":{\"id\":\"msg-sl1\",\"role\":\"assistant\",\"model\":\"claude-sonnet-4-5\",\"content\":[{\"type\":\"text\",\"text\":\"On it.\"}],\"usage\":{\"input_tokens\":50,\"output_tokens\":10}}}",
+            "{\"type\":\"user\",\"sessionId\":\"sess-slash\",\"timestamp\":\"2026-11-19T12:00:03.000Z\",\"message\":{\"role\":\"user\",\"content\":[{\"type\":\"text\",\"text\":\"<command-name>/model</command-name>\"}]}}",
+            "{\"type\":\"assistant\",\"sessionId\":\"sess-slash\",\"timestamp\":\"2026-11-19T12:00:04.000Z\",\"message\":{\"id\":\"msg-sl2\",\"role\":\"assistant\",\"model\":\"claude-sonnet-4-5\",\"content\":[{\"type\":\"text\",\"text\":\"Model set.\"}],\"usage\":{\"input_tokens\":60,\"output_tokens\":5}}}",
+        ]);
+
+        CollectedBatch batch = new ClaudeTranscriptMapper().Map(CreateUnit("/tmp/.claude/projects/repo/sess-slash.jsonl", jsonl), ImportedAt);
+
+        CollectedRecord[] turns = [.. batch.Records.Where(static r => r.Op == RecordOp.LlmInvoke)];
+        Assert.Equal(2, turns.Length);
+        Assert.Equal(["conductor"], turns[0].SkillsInvoked);
+        Assert.Empty(turns[1].SkillsInvoked);
+    }
+
+    /// <summary>
+    /// A tool result whose content holds image blocks keeps its text and drops the images: an image is
+    /// not text, and keeping its JSON made the store refuse the whole import. A result of images alone
+    /// carries no result text.
+    /// </summary>
+    [Fact]
+    public void Map_DropsImageBlocksFromToolResultContent()
+    {
+        string image = "{\"type\":\"image\",\"source\":{\"type\":\"base64\",\"media_type\":\"image/jpeg\",\"data\":\"AAAA\"}}";
+        string jsonl = string.Join('\n',
+        [
+            "{\"type\":\"assistant\",\"sessionId\":\"sess-img\",\"timestamp\":\"2026-11-19T12:00:01.000Z\",\"message\":{\"id\":\"msg-i1\",\"role\":\"assistant\",\"model\":\"claude-sonnet-4-5\",\"content\":[{\"type\":\"tool_use\",\"id\":\"tc-shot\",\"name\":\"screenshot\",\"input\":{}},{\"type\":\"tool_use\",\"id\":\"tc-read\",\"name\":\"Read\",\"input\":{}}],\"usage\":{\"input_tokens\":50,\"output_tokens\":10}}}",
+            "{\"type\":\"user\",\"sessionId\":\"sess-img\",\"timestamp\":\"2026-11-19T12:00:02.000Z\",\"message\":{\"role\":\"user\",\"content\":[{\"type\":\"tool_result\",\"tool_use_id\":\"tc-shot\",\"content\":[" + image + "," + image + "]},{\"type\":\"tool_result\",\"tool_use_id\":\"tc-read\",\"content\":[{\"type\":\"text\",\"text\":\"Page one\"}," + image + "]}]}}",
+            "{\"type\":\"assistant\",\"sessionId\":\"sess-img\",\"timestamp\":\"2026-11-19T12:00:03.000Z\",\"message\":{\"id\":\"msg-i2\",\"role\":\"assistant\",\"model\":\"claude-sonnet-4-5\",\"content\":[{\"type\":\"text\",\"text\":\"Seen.\"}],\"usage\":{\"input_tokens\":60,\"output_tokens\":5}}}",
+        ]);
+
+        CollectedBatch batch = new ClaudeTranscriptMapper().Map(CreateUnit("/tmp/.claude/projects/repo/sess-img.jsonl", jsonl), ImportedAt);
+
+        CollectedRecord shot = Assert.Single(batch.Records, static r => r.Tool?.CallId == "tc-shot");
+        Assert.Null(shot.Tool!.Result);
+        Assert.Empty(shot.Parts);
+        CollectedRecord read = Assert.Single(batch.Records, static r => r.Tool?.CallId == "tc-read");
+        Assert.Equal("Page one", Assert.Single(read.Parts).PlainText);
+        Assert.All(batch.Records.SelectMany(static r => r.Parts), static p => Assert.DoesNotContain("\"image\"", p.PlainText ?? string.Empty, StringComparison.Ordinal));
+
+        InMemoryRelationalStore store = new();
+        store.WriteBatch(batch);
+        Assert.Equal(batch.Records.Count, store.CountRecords());
+    }
+
+    /// <summary>
+    /// The case that failed a real import: an image block whose JSON is one byte under the 64 KiB text cap,
+    /// followed by text. Kept as text, truncation left exactly the image's JSON object, which the store refuses.
+    /// The image is dropped, so the stored result is the text and the store accepts the batch.
+    /// </summary>
+    [Fact]
+    public void Map_AnImageBlockAtTheTextCapDoesNotLeaveAJsonDocumentAfterTruncation()
+    {
+        const string Wrapper = "{\"type\":\"image\",\"source\":{\"type\":\"base64\",\"media_type\":\"image/jpeg\",\"data\":\"\"}}";
+        string image = Wrapper.Insert(Wrapper.Length - 3, new string('A', CanonSynth.MaxToolResultBytes - 1 - Wrapper.Length));
+        Assert.Equal(CanonSynth.MaxToolResultBytes - 1, image.Length);
+        string jsonl = string.Join('\n',
+        [
+            "{\"type\":\"assistant\",\"sessionId\":\"sess-cap\",\"timestamp\":\"2026-11-19T12:00:01.000Z\",\"message\":{\"id\":\"msg-c1\",\"role\":\"assistant\",\"model\":\"claude-sonnet-4-5\",\"content\":[{\"type\":\"tool_use\",\"id\":\"tc-shot\",\"name\":\"screenshot\",\"input\":{}}],\"usage\":{\"input_tokens\":50,\"output_tokens\":10}}}",
+            "{\"type\":\"user\",\"sessionId\":\"sess-cap\",\"timestamp\":\"2026-11-19T12:00:02.000Z\",\"message\":{\"role\":\"user\",\"content\":[{\"type\":\"tool_result\",\"tool_use_id\":\"tc-shot\",\"content\":[" + image + ",{\"type\":\"text\",\"text\":\"Captured the page.\"}]}]}}",
+            "{\"type\":\"assistant\",\"sessionId\":\"sess-cap\",\"timestamp\":\"2026-11-19T12:00:03.000Z\",\"message\":{\"id\":\"msg-c2\",\"role\":\"assistant\",\"model\":\"claude-sonnet-4-5\",\"content\":[{\"type\":\"text\",\"text\":\"Seen.\"}],\"usage\":{\"input_tokens\":60,\"output_tokens\":5}}}",
+        ]);
+
+        CollectedBatch batch = new ClaudeTranscriptMapper().Map(CreateUnit("/tmp/.claude/projects/repo/sess-cap.jsonl", jsonl), ImportedAt);
+
+        Assert.All(batch.Records.SelectMany(static r => r.Parts), static p => Assert.False(JsonDocumentText.IsDocument(p.PlainText)));
+        CollectedRecord shot = Assert.Single(batch.Records, static r => r.Tool?.CallId == "tc-shot");
+        Assert.Equal("Captured the page.", Assert.Single(shot.Parts).PlainText);
+        InMemoryRelationalStore store = new();
+        store.WriteBatch(batch);
+        Assert.Equal(batch.Records.Count, store.CountRecords());
+    }
+
+    /// <summary>
+    /// Edge shapes of the same three sources: an indented listing line still names a skill, a <c>Skill</c>
+    /// input sent as a JSON string still names the skill, a turn whose only shape line is the defining
+    /// <c>api-request-shape</c> still gets its tools, and an image sent as a single content object is dropped.
+    /// </summary>
+    [Fact]
+    public void Map_ReadsIndentedListingsStringSkillInputsShapeOnlyTurnsAndDropsAnImageObject()
+    {
+        string jsonl = string.Join('\n',
+        [
+            "{\"type\":\"attachment\",\"sessionId\":\"sess-edge\",\"timestamp\":\"2026-11-19T12:00:00.000Z\",\"attachment\":{\"type\":\"skill_listing\",\"content\":\"  - my-skill: Indented.\\n\\t- other: Tabbed.\"}}",
+            "{\"type\":\"api-request-shape\",\"sessionId\":\"sess-edge\",\"shapeHash\":\"shape-e\",\"timestamp\":\"2026-11-19T12:00:00.500Z\",\"shape\":{\"tools\":[{\"name\":\"Skill\",\"input_schema\":{\"type\":\"object\"}}]}}",
+            "{\"type\":\"assistant\",\"sessionId\":\"sess-edge\",\"timestamp\":\"2026-11-19T12:00:01.000Z\",\"message\":{\"id\":\"msg-e1\",\"role\":\"assistant\",\"model\":\"claude-sonnet-4-5\",\"content\":[{\"type\":\"tool_use\",\"id\":\"tc-s\",\"name\":\"Skill\",\"input\":\"{\\\"skill\\\":\\\"my-skill\\\"}\"},{\"type\":\"tool_use\",\"id\":\"tc-img\",\"name\":\"screenshot\",\"input\":{}}],\"usage\":{\"input_tokens\":50,\"output_tokens\":10}}}",
+            "{\"type\":\"user\",\"sessionId\":\"sess-edge\",\"timestamp\":\"2026-11-19T12:00:02.000Z\",\"message\":{\"role\":\"user\",\"content\":[{\"type\":\"tool_result\",\"tool_use_id\":\"tc-img\",\"content\":{\"type\":\"image\",\"source\":{\"type\":\"base64\",\"media_type\":\"image/png\",\"data\":\"AAAA\"}}}]}}",
+        ]);
+
+        CollectedBatch batch = new ClaudeTranscriptMapper().Map(CreateUnit("/tmp/.claude/projects/repo/sess-edge.jsonl", jsonl), ImportedAt);
+
+        CollectedRecord turn = Assert.Single(batch.Records, static r => r.Op == RecordOp.LlmInvoke);
+        Assert.Equal(["my-skill", "other"], turn.SkillsListed);
+        Assert.Equal(["my-skill"], turn.SkillsInvoked);
+        Assert.Equal(["Skill"], turn.ToolDefinitions.Select(static d => d.ToolName));
+        CollectedRecord shot = Assert.Single(batch.Records, static r => r.Tool?.CallId == "tc-img");
+        Assert.Null(shot.Tool!.Result);
+        Assert.Empty(shot.Parts);
+    }
+
     private static NativeSourceUnit CreateUnit(string sourceKey, string? rawText) =>
         new(
             Unit: new SourceUnit(

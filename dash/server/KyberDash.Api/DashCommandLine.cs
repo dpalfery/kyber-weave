@@ -1,4 +1,5 @@
 using System.Globalization;
+using KyberDash.Core;
 using KyberDash.Core.Exceptions;
 
 namespace KyberDash.Api;
@@ -50,9 +51,7 @@ internal static class DashCommandLine
 
         DashRuntimeSettings settings = new()
         {
-            Version = Environment.GetEnvironmentVariable("KYBERDASH_VERSION") is { Length: > 0 } version
-                ? version
-                : "0.21.0",
+            Version = DashVersion.Current,
         };
 
         int index = 0;

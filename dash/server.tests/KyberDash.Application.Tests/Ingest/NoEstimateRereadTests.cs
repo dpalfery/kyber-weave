@@ -636,6 +636,18 @@ public class NoEstimateRereadTests
             inner.WriteBatch(batch);
         }
 
+        public void ReplaceSource(CollectedBatch batch)
+        {
+            if (failNextWriteBatch)
+            {
+                failNextWriteBatch = false;
+                throw new IOException("simulated source write failure");
+            }
+
+            WriteBatchCalls.Add(batch);
+            inner.ReplaceSource(batch);
+        }
+
         public void DeleteSource(string sourceId) => inner.DeleteSource(sourceId);
 
         public void ClearEstimatedRecordTokens(string harnessId, string sourceLocator, EstimatedRecordTokens estimated)
@@ -654,6 +666,8 @@ public class NoEstimateRereadTests
             WriteProblemCalls.Add(problem);
             inner.WriteProblem(problem);
         }
+
+        public void DeleteProblem(string problemKey) => inner.DeleteProblem(problemKey);
     }
 
     /// <summary>

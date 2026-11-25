@@ -90,7 +90,7 @@ kyber-weave as `kyber-weave update <version> --finish-update` and relays that pr
 The finishing process runs everything after the swap, so the steps below run in the new release.
 When the version is already installed ("already on"), nothing is swapped, and the updating process runs the
 same steps itself.
-Its wait is 15 minutes, and the process tree is killed on expiry. See
+Its wait is 25 minutes, and the process tree is killed on expiry. See
 [distribution](distribution.md#the-self-update-sequence) for the full sequence.
 
 `--finish-update` is a hidden option. Only the updater passes it, with the owner's `--no-kyberdash`,
@@ -104,8 +104,11 @@ any work, in three cases:
 It downloads nothing and commits nothing. On success it prints no outcome line; the updating process
 prints the single line `updated kyber-weave <version> → <path>`.
 
-The finishing process runs the KyberDash steps as a changed release. It runs
-`kyberdash engine ensure --if-running`, relaunches the tray when needed, then runs `kyberdash kyber
+The finishing process runs the KyberDash steps as a changed release. With a tray
+installed it quits the tray, runs `kyberdash engine stop`, updates or relaunches the tray so it owns a fresh
+engine (`kyberdash menubar --update --version <v>` or `--launch`), then verifies the engine version and a
+single tray with `kyberdash engine verify --version <v> --wait 60` and `kyberdash menubar --running`. With no
+tray it runs `kyberdash engine ensure --if-running`. It then runs `kyberdash kyber
 capture plugin install --harness opencode --preserve --if-installed` and `kyberdash kyber capture
 plugin install --harness factory --preserve --if-installed`. These steps also run when the release is
 unchanged ("already on"). It then re-renders the arbiter hooks/scripts for global targets registered
@@ -755,8 +758,10 @@ Owned by the [KyberDash overview](dash/README.md) and the
 | [`report`](dash/README.md) (default) | `--format text\|markdown\|json` (default `text`), `--harness <id>`, `--session <id>`, `--run <id>`, `--days <n>` (default `7`), `--limit <n>` (default `5`), `--db <path>` | Print a non-interactive context diagnosis of the store. |
 | [`web`](dash/onboarding.md#first-run) | `--port <number>` (default: the persisted `dashboard.port`, `4747`), `--no-open`, `--view <path>` | Open the local web dashboard. |
 | [`mcp`](dash/runbook.md#2j-conversational-analytics-over-mcp-kyberdash-mcp) | `--server-url <url>` (literal loopback, wins), `--state-dir <dir>` (existing receipt) | Serve the eight read-only analytics tools over MCP stdio; attaches to the running engine, never starts or stops it. |
-| [`menubar`](dash/onboarding.md#install-the-tray) | `--force`, `--update`, `--version <version>` | Install and launch the macOS/Windows tray; `--update` updates an existing install. |
-| [`engine ensure`](dash/runbook.md) | `--if-running` (required) | Replace a live engine of another version with this binary's version. Starts nothing when no engine runs. Prints one line: `engine: not-running`, `engine: attached <version>`, `engine: replaced <old> -> <new>`, or `engine: started <version>`. |
+| [`menubar`](dash/onboarding.md#install-the-tray) | `--force`, `--update`, `--version <version>`, `--quit`, `--launch`, `--running` | Install and launch the macOS/Windows tray; `--update` updates an existing install. `--quit` quits only the tray named in `tray.json` and waits for it to exit; `--launch` starts it; `--running` exits 0 only when exactly one tray process runs. Each prints one line. An unknown option exits 2. |
+| [`engine ensure`](dash/runbook.md) | `--if-running` (required) | Replace a live engine of another version with this binary's version. Starts nothing when no engine runs. Prints one line: `engine: not-running`, `engine: attached <version>`, `engine: replaced <old> -> <new>`, or `engine: started <version>`; a replacement that reports another version fails with `engine: failed replacement reports <actual>, expected <expected>`. |
+| [`engine stop`](dash/runbook.md) | `--state-dir <dir>` | Stop the running engine. Prints `engine: stopped <version>` or `engine: not-running`. |
+| [`engine verify`](dash/runbook.md) | `--version <version>` (required), `--wait <seconds>` (default 20), `--state-dir <dir>` | Check that the engine reports the version, waiting up to the wait. Prints `engine: running <version> (pid <n>)`, `engine: not-running`, `engine: running <actual>, expected <version>`, or `engine: unresponsive`. |
 | [`doctor`](dash/runbook.md) | `--provider <provider>` (default `all`), `--json`, `--no-color` | Per-provider detection status: paths probed, sessions found, parse health. |
 
 ### Canonical telemetry commands (`kyber`)
@@ -861,7 +866,10 @@ for `fast-loop.sh`. The full-run definition (launchers, `dotnet test` targets, `
 | `mcp` | `0` on clean EOF/SIGTERM shutdown (the engine keeps running); tool-domain errors are in-band (`isError: true`) with stable codes, not exit codes |
 | `kyber otel` | `2` when a custom `--port` or `--host` is supplied while the engine attaches |
 | `capture` leaves | `2` for a usage error; otherwise the capture action's own code |
-| `engine ensure` | `0` for `not-running`, `attached`, `replaced`, or `started`; `1` for `engine: unresponsive` (the endpoint holder never answers, nothing started) or `engine: failed`; `2` without `--if-running` |
+| `engine ensure` | `0` for `not-running`, `attached`, `replaced`, or `started`; `1` for `engine: unresponsive` (the endpoint holder never answers, nothing started) or `engine: failed` (including a replacement on the wrong version); `2` without `--if-running` |
+| `engine stop` | `0` for `stopped` or `not-running`; `1` for `engine: failed` or `unresponsive` |
+| `engine verify` | `0` on the version; `1` not running; `3` running another version; `4` unresponsive; `2` for a missing `--version` or a negative or non-numeric `--wait` |
+| `menubar --quit`, `--launch`, `--running` | `0` or `1` with one line; `2` for an unknown option |
 | `kyber capture plugin install` | `0` on success, including every `--preserve` keep and every `--if-installed` skip; `1` on a strict refusal (foreign, edited, or unreadable file or tree) or a failed write; `2` for a missing or unsupported `--harness` |
 | `kyber capture plugin consent` | `0` when the consent file was written; `1` when it could not be written; `2` for a usage error — a missing or unsupported `--harness`, or both or neither of `--on` and `--off` |
 

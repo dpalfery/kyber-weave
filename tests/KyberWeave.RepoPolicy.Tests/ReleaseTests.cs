@@ -586,6 +586,34 @@ public sealed class ReleaseTests
     }
 
     /// <summary>
+    /// Both tray builds stamp the release version into the bundle. The repository
+    /// manifests keep the dev value, so without <c>--config</c> the shipped app
+    /// reports the dev version. The value arrives through <c>env:</c>, never
+    /// interpolated into the shell, and the Windows leg runs under bash so one
+    /// quoting form serves both legs.
+    /// </summary>
+    [Fact]
+    public void BuildTrayStampsTheReleaseVersionIntoTheTrayBundle()
+    {
+        string job = ReadReleaseJob("build-tray");
+        string[] steps = Regex.Split(job, @"\n      - name: ").Skip(1).ToArray();
+
+        foreach (string stepName in new[] { "Build and sign the tray (macOS)", "Build the tray (Windows)" })
+        {
+            string step = steps.Single(s => s.StartsWith(stepName, StringComparison.Ordinal));
+            Assert.Contains(
+                "TRAY_VERSION: ${{ needs.version.outputs.version }}", step, StringComparison.Ordinal);
+            Assert.Matches(
+                @"tauri\.js build [^\n]*--config ""\{\\""version\\"":\\""\$\{TRAY_VERSION\}\\""\}""", step);
+            string runLine = step.Split('\n').Single(l => l.TrimStart().StartsWith("run:", StringComparison.Ordinal));
+            Assert.DoesNotContain("${{ needs.", runLine, StringComparison.Ordinal);
+        }
+
+        string windows = steps.Single(s => s.StartsWith("Build the tray (Windows)", StringComparison.Ordinal));
+        Assert.Contains("shell: bash", windows, StringComparison.Ordinal);
+    }
+
+    /// <summary>
     /// The local release loop builds kyberdash from a copy of the <c>build-kyberdash</c>
     /// job's steps, because the job cannot run off a runner. The job stays the authority,
     /// so the values a copy could drift on are read from it here. A drifted copy would pass

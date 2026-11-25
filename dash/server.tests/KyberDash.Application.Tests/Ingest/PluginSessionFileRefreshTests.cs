@@ -287,12 +287,21 @@ public class PluginSessionFileRefreshTests
 
         public List<string> DeleteSourceCalls { get; } = [];
 
+        public List<CollectedBatch> ReplaceSourceCalls { get; } = [];
+
         public List<CollectedProblem> WriteProblemCalls { get; } = [];
 
         public void WriteBatch(CollectedBatch batch)
         {
             WriteBatchCalls.Add(batch);
             inner.WriteBatch(batch);
+        }
+
+        public void ReplaceSource(CollectedBatch batch)
+        {
+            WriteBatchCalls.Add(batch);
+            ReplaceSourceCalls.Add(batch);
+            inner.ReplaceSource(batch);
         }
 
         public void DeleteSource(string sourceId)
@@ -309,6 +318,8 @@ public class PluginSessionFileRefreshTests
             WriteProblemCalls.Add(problem);
             inner.WriteProblem(problem);
         }
+
+        public void DeleteProblem(string problemKey) => inner.DeleteProblem(problemKey);
     }
 
     private sealed class FakeHarnessFileSystem : IHarnessFileSystem

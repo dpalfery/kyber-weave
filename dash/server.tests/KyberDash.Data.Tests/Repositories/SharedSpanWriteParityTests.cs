@@ -1,0 +1,322 @@
+using KyberDash.Application.Tests.Fakes;
+using KyberDash.Contracts.Repositories;
+using KyberDash.Core.Exceptions;
+using KyberDash.Core.Resilience;
+using KyberDash.Data.Collector;
+using KyberDash.Data.Repositories;
+using KyberDash.Domain;
+using Xunit;
+
+namespace KyberDash.Data.Tests.Repositories;
+
+/// <summary>
+/// Parity tests for a span written by more than one source, as a forked Claude Code transcript and its
+/// parent are, and for <see cref="IRelationalStoreWriter.DeleteProblem"/>: every case runs against
+/// <see cref="SqliteRelationalStore"/> over a real database and against <see cref="InMemoryRelationalStore"/>.
+/// </summary>
+public class SharedSpanWriteParityTests : IDisposable
+{
+    private const string SpanId = "synth:claude-code:parent-session:msg_1";
+    private const string SessionKey = "parent-session";
+    private const string ForkLocator = "/home/dev/.claude/projects/repo/fork-session.jsonl";
+    private const string ParentLocator = "/home/dev/.claude/projects/repo/parent-session.jsonl";
+
+    private readonly TempDirectory directory = new();
+
+    /// <inheritdoc />
+    public void Dispose()
+    {
+        directory.Dispose();
+        GC.SuppressFinalize(this);
+    }
+
+    /// <summary>
+    /// A second source writing a stored span replaces it, child rows included, and the first source
+    /// writing it again takes it back: one record and one copy of its children throughout.
+    /// </summary>
+    /// <param name="kind">Store under test.</param>
+    [Theory]
+    [InlineData("sqlite")]
+    [InlineData("memory")]
+    public void SpanWrittenByTwoSources_KeepsOneRecordWithTheLatestChildren(string kind)
+    {
+        StoreUnderTest store = Create(kind);
+
+        store.Writer.WriteBatch(Batch("/home/dev/.claude/projects/repo/parent-session.jsonl", inputTokens: 10));
+        store.Writer.WriteBatch(Batch("/home/dev/.claude/projects/repo/fork-session.jsonl", inputTokens: 20));
+
+        AssertSingleRecordWithInputTokens(store, 20);
+
+        store.Writer.WriteBatch(Batch("/home/dev/.claude/projects/repo/parent-session.jsonl", inputTokens: 10));
+
+        AssertSingleRecordWithInputTokens(store, 10);
+    }
+
+    /// <summary>A span repeated inside one batch is still refused, and the store keeps what it had.</summary>
+    /// <param name="kind">Store under test.</param>
+    [Theory]
+    [InlineData("sqlite")]
+    [InlineData("memory")]
+    public void SpanRepeatedInsideOneBatch_IsRefused_AndTheStoreIsUnchanged(string kind)
+    {
+        StoreUnderTest store = Create(kind);
+        store.Writer.WriteBatch(Batch("/home/dev/.claude/projects/repo/parent-session.jsonl", inputTokens: 10));
+
+        CollectedBatch duplicated = new(
+            Source: new CollectedSource("claude-code", SourceKind.File, "/home/dev/.claude/projects/repo/fork-session.jsonl"),
+            Sessions: [],
+            Records: [Record(20), Record(30)],
+            Problems: []);
+
+        DashValidationException refused = Assert.Throws<DashValidationException>(() => store.Writer.WriteBatch(duplicated));
+
+        Assert.Equal(SqliteRelationalStore.ConstraintViolatedCode, refused.Code);
+        AssertSingleRecordWithInputTokens(store, 10);
+    }
+
+    /// <summary>
+    /// <see cref="IRelationalStoreWriter.ReplaceSource"/> whose write is refused leaves the source's stored
+    /// records as they were, so a span it shares with another source is not lost to a failed re-import.
+    /// </summary>
+    /// <param name="kind">Store under test.</param>
+    [Theory]
+    [InlineData("sqlite")]
+    [InlineData("memory")]
+    public void ReplaceSource_WhoseWriteIsRefused_KeepsTheStoredRecords(string kind)
+    {
+        StoreUnderTest store = Create(kind);
+        store.Writer.WriteBatch(Batch(ForkLocator, inputTokens: 20));
+        long markerBefore = store.Operational.GetWriteMarker();
+
+        CollectedBatch refused = new(
+            Source: new CollectedSource("claude-code", SourceKind.File, ForkLocator),
+            Sessions: [],
+            Records: [Record(30), Record(40)],
+            Problems: []);
+
+        Assert.Throws<DashValidationException>(() => store.Writer.ReplaceSource(refused));
+
+        AssertSingleRecordWithInputTokens(store, 20);
+        Assert.Equal(markerBefore, store.Operational.GetWriteMarker());
+    }
+
+    /// <summary>
+    /// <see cref="IRelationalStoreWriter.ReplaceSource"/> drops the records the source no longer has, keeps one
+    /// source row, and marks every session dirty, as <see cref="IRelationalStoreWriter.DeleteSource"/> does.
+    /// </summary>
+    /// <param name="kind">Store under test.</param>
+    [Theory]
+    [InlineData("sqlite")]
+    [InlineData("memory")]
+    public void ReplaceSource_DropsRecordsTheSourceNoLongerHas_AndMarksEverySessionDirty(string kind)
+    {
+        StoreUnderTest store = Create(kind);
+        CollectedRecord extra = Record(5) with { RecordId = SpanId + "-extra" };
+        store.Writer.WriteBatch(Batch(ForkLocator, inputTokens: 20) with { Records = [Record(20), extra] });
+        Assert.Equal(2, store.Reader.CountRecords("claude-code"));
+
+        store.Writer.ReplaceSource(Batch(ForkLocator, inputTokens: 25));
+
+        AssertSingleRecordWithInputTokens(store, 25);
+        Assert.Single(store.Reader.Sources("claude-code"));
+        DirtyProjectionState? dirty = store.Operational.GetProjectionDirtyState();
+        Assert.NotNull(dirty);
+        Assert.True(dirty.IsWildcard);
+    }
+
+    /// <summary>
+    /// The source that owns a shared span re-imports without it, or is deleted: the span stays, handed to the
+    /// other source that still claims it, and goes only when no source claims it.
+    /// </summary>
+    /// <param name="kind">Store under test.</param>
+    /// <param name="deleteOwner">Delete the owning source instead of re-importing it without the span.</param>
+    [Theory]
+    [InlineData("sqlite", false)]
+    [InlineData("sqlite", true)]
+    [InlineData("memory", false)]
+    [InlineData("memory", true)]
+    public void OwnerDropsASharedSpan_TheOtherClaimantKeepsIt(string kind, bool deleteOwner)
+    {
+        StoreUnderTest store = Create(kind);
+        store.Writer.WriteBatch(Batch(ParentLocator, inputTokens: 10));
+        store.Writer.WriteBatch(Batch(ForkLocator, inputTokens: 20));
+
+        string forkSourceId = Assert.Single(store.Reader.Sources("claude-code"), static s => s.Source.Locator == ForkLocator).SourceId;
+        if (deleteOwner)
+        {
+            store.Writer.DeleteSource(forkSourceId);
+        }
+        else
+        {
+            store.Writer.ReplaceSource(Batch(ForkLocator, inputTokens: 0) with { Records = [] });
+        }
+
+        AssertSingleRecordWithInputTokens(store, 20);
+
+        string parentSourceId = Assert.Single(store.Reader.Sources("claude-code"), static s => s.Source.Locator == ParentLocator).SourceId;
+        store.Writer.DeleteSource(parentSourceId);
+
+        Assert.Equal(0, store.Reader.CountRecords("claude-code"));
+    }
+
+    /// <summary>
+    /// A store written before <c>record_source_claim</c> existed, reopened by this build, marks its folder
+    /// checkpoints stale, so the next folder import re-reads every file and records each file's claims; a
+    /// store that already has the table keeps its checkpoints.
+    /// </summary>
+    [Fact]
+    public void ReopeningAStoreWithoutTheClaimTable_MarksFolderCheckpointsStale_Once()
+    {
+        string dbPath = Path.Combine(directory.Path, $"upgrade-{Guid.NewGuid():N}.db");
+        RawSqliteStore first = new(dbPath);
+        first.WriteBatch(Batch(ParentLocator, inputTokens: 10));
+        first.UpsertSourceCheckpoint(Checkpoint(ParentLocator));
+        _ = first.Raw("DROP TABLE record_source_claim;");
+
+        SqliteRelationalStore upgraded = new(dbPath, new SqliteCircuitBreaker());
+
+        Assert.Equal("invalidated", upgraded.GetSourceCheckpoint("claude-code", ParentLocator)?.LastStatus);
+        Assert.Equal(1, upgraded.CountRecords("claude-code"));
+
+        upgraded.UpsertSourceCheckpoint(Checkpoint(ParentLocator));
+        SqliteRelationalStore reopened = new(dbPath, new SqliteCircuitBreaker());
+
+        Assert.Equal("ok", reopened.GetSourceCheckpoint("claude-code", ParentLocator)?.LastStatus);
+    }
+
+    /// <summary>
+    /// A current-version store missing <c>source_checkpoint</c> as well as the claim table still opens: the
+    /// stale-marking step is skipped and the schema step recreates both tables.
+    /// </summary>
+    [Fact]
+    public void ReopeningAStoreMissingTheCheckpointTable_StillOpensAndRecreatesIt()
+    {
+        string dbPath = Path.Combine(directory.Path, $"self-heal-{Guid.NewGuid():N}.db");
+        RawSqliteStore first = new(dbPath);
+        first.WriteBatch(Batch(ParentLocator, inputTokens: 10));
+        _ = first.Raw("DROP TABLE record_source_claim; DROP TABLE source_checkpoint;");
+
+        SqliteRelationalStore reopened = new(dbPath, new SqliteCircuitBreaker());
+
+        Assert.Equal(1, reopened.CountRecords("claude-code"));
+        reopened.UpsertSourceCheckpoint(Checkpoint(ParentLocator));
+        Assert.Equal("ok", reopened.GetSourceCheckpoint("claude-code", ParentLocator)?.LastStatus);
+    }
+
+    /// <summary><see cref="IRelationalStoreWriter.DeleteProblem"/> removes the keyed problem and ignores a missing key.</summary>
+    /// <param name="kind">Store under test.</param>
+    [Theory]
+    [InlineData("sqlite")]
+    [InlineData("memory")]
+    public void DeleteProblem_RemovesTheKeyedProblem_AndIgnoresAMissingKey(string kind)
+    {
+        StoreUnderTest store = Create(kind);
+        store.Writer.WriteProblem(Problem("source-unreadable:claude-code:/a.jsonl"));
+        store.Writer.WriteProblem(Problem("source-unreadable:claude-code:/b.jsonl"));
+
+        store.Writer.DeleteProblem("source-unreadable:claude-code:/a.jsonl");
+        store.Writer.DeleteProblem("source-unreadable:claude-code:/missing.jsonl");
+
+        StoredIngestProblem left = Assert.Single(store.Operational.ListIngestProblems("claude-code"));
+        Assert.Equal("source-unreadable:claude-code:/b.jsonl", left.Problem.ProblemKey);
+    }
+
+    private static void AssertSingleRecordWithInputTokens(StoreUnderTest store, long inputTokens)
+    {
+        Assert.Equal(1, store.Reader.CountRecords("claude-code"));
+        CollectedRecord record = Assert.Single(store.Reader.SessionRecordsContentFree(SessionKey));
+        Assert.Equal(SpanId, record.RecordId);
+        CollectedTokenCount tokens = Assert.Single(record.Tokens);
+        Assert.Equal(inputTokens, tokens.Count);
+    }
+
+    private StoreUnderTest Create(string kind)
+    {
+        if (string.Equals(kind, "sqlite", StringComparison.Ordinal))
+        {
+            SqliteRelationalStore sqlite = new(
+                Path.Combine(directory.Path, $"shared-span-{Guid.NewGuid():N}.db"),
+                new SqliteCircuitBreaker());
+            return new StoreUnderTest(sqlite, sqlite, sqlite);
+        }
+
+        if (string.Equals(kind, "memory", StringComparison.Ordinal))
+        {
+            InMemoryRelationalStore memory = new();
+            return new StoreUnderTest(memory, memory, memory);
+        }
+
+        throw new ArgumentOutOfRangeException(nameof(kind), kind, "Unknown store kind.");
+    }
+
+    private static CollectedBatch Batch(string locator, long inputTokens) => new(
+        Source: new CollectedSource("claude-code", SourceKind.File, locator),
+        Sessions: [new CollectedSession(SessionKey, "claude-code", SessionKey, Workspace: null, Title: null, ReportedUsage: [])],
+        Records: [Record(inputTokens)],
+        Problems: []);
+
+    private static CollectedRecord Record(long inputTokens) => new(
+        RecordId: SpanId,
+        HarnessId: "claude-code",
+        Op: RecordOp.LlmInvoke,
+        Kind: RecordKind.Internal,
+        Name: "claude:claude-sonnet-4-5",
+        StartedAt: new DateTimeOffset(2026, 11, 25, 10, 0, 0, TimeSpan.Zero),
+        Status: RecordStatus.Ok,
+        SessionKey: SessionKey,
+        ParentRecordId: null,
+        TraceId: null,
+        Model: null,
+        EndedAt: null,
+        ReportedDurationMs: null,
+        Tokens: [new CollectedTokenCount(TokenClass.Input, inputTokens)],
+        ReportedCost: null,
+        Parts: [],
+        Tool: null,
+        Agent: null,
+        SkillsInvoked: [],
+        AgentInstanceId: null,
+        ToolDefinitions: [],
+        Signals: new CollectedRecordSignals(ErrorMessage: null, EditFailures: null, CorrectionRule: null, DeclaredContextWindow: null));
+
+    private static CollectedProblem Problem(string key) => new(
+        ProblemKey: key,
+        Severity: "error",
+        Code: "SOURCE_UNREADABLE",
+        Message: "unreadable",
+        SpanId: null,
+        Location: null,
+        SessionKey: null,
+        HarnessId: "claude-code",
+        TimestampUtc: "2026-11-25T11:00:00Z",
+        Stack: null);
+
+    private static SourceCheckpoint Checkpoint(string sourceKey) => new(
+        HarnessId: "claude-code",
+        SourceKey: sourceKey,
+        ProviderId: "anthropic",
+        ParserId: "claude-jsonl",
+        ParserContractVersion: "1",
+        Format: "jsonl",
+        SourceRootLabel: "~/.claude/projects",
+        RevisionToken: "1:100",
+        CoveredFromUtc: "2026-11-11T00:00:00.000Z",
+        CoveredThroughUtc: "2026-11-25T00:00:00.000Z",
+        LastAttemptUtc: "2026-11-25T00:00:00.000Z",
+        LastSuccessUtc: "2026-11-25T00:00:00.000Z",
+        LastStatus: "ok",
+        LastErrorCode: null,
+        UnitCount: 1,
+        RecordCount: 1);
+
+    /// <summary>The SQLite store with raw SQL, to build a store as an older build left it.</summary>
+    private sealed class RawSqliteStore(string databasePath) : SqliteRelationalStore(databasePath, new SqliteCircuitBreaker())
+    {
+        public string Raw(string sql) => ExecuteSqlite(sql);
+    }
+
+    private sealed record StoreUnderTest(
+        IRelationalStoreWriter Writer,
+        IRelationalStoreReader Reader,
+        IOperationalStore Operational);
+}

@@ -4,7 +4,7 @@ title: The self-updater hands everything after the swap to the new binary
 doc-type: adr
 status: current
 owner: dpalfery
-last-reviewed: 2026-11-09
+last-reviewed: 2026-11-25
 component: Distribution
 decided-by: []
 supersedes: []
@@ -54,7 +54,7 @@ updating process prints the one outcome line on success.
 - On the swap path, any new post-update step belongs in the finishing process, never in the
   updating process. The "already on" path swaps nothing, so it runs those steps in the updating
   process itself.
-- The hand-off adds one process start and a 15-minute bound that stops the whole process tree
+- The hand-off adds one process start and a 25-minute bound (raised from 15 for the tray restart steps) that stops the whole process tree
   on expiry. Before the first commit, the old process rehearses the start path once with
   `--version` under a 30-second bound, so the code that starts the hand-off is loaded while the
   old image is still whole.

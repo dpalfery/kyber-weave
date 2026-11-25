@@ -214,10 +214,12 @@ jobs:
             CREATE_RELEASE=true
           fi
 
-          echo "tag=${TAG}" >> "${GITHUB_OUTPUT}"
-          echo "version=${VERSION}" >> "${GITHUB_OUTPUT}"
-          echo "create_release=${CREATE_RELEASE}" >> "${GITHUB_OUTPUT}"
-          echo "notes_start_tag=${NOTES_START_TAG}" >> "${GITHUB_OUTPUT}"
+          {
+            echo "tag=${TAG}"
+            echo "version=${VERSION}"
+            echo "create_release=${CREATE_RELEASE}"
+            echo "notes_start_tag=${NOTES_START_TAG}"
+          } >> "${GITHUB_OUTPUT}"
           echo "Release version=${VERSION} tag=${TAG} create_release=${CREATE_RELEASE} notes_start_tag=${NOTES_START_TAG:-none}"
 
   # The one human approval for the whole run. It lives on its own environment,
@@ -390,7 +392,6 @@ jobs:
           RELEASE_VERSION: ${{ needs.version.outputs.version }}
         run: |
           set -euo pipefail
-          RID="${RID}"
           case "${RID}" in
               darwin-arm64) DOTNET_RID=osx-arm64;  NODE_PLATFORM=darwin; NODE_ARCH=arm64 ;;
               darwin-x64)   DOTNET_RID=osx-x64;    NODE_PLATFORM=darwin; NODE_ARCH=x64   ;;
@@ -664,14 +665,22 @@ jobs:
           APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
           APPLE_API_KEY: ${{ secrets.APPLE_API_KEY }}
           APPLE_API_ISSUER: ${{ secrets.APPLE_API_ISSUER }}
-        run: node ui/node_modules/@tauri-apps/cli/tauri.js build --target ${{ matrix.target }} --bundles app
+          # The repository manifests keep the dev version; the bundle is stamped
+          # with the release version here. Passed through env, never inline.
+          TRAY_VERSION: ${{ needs.version.outputs.version }}
+        run: node ui/node_modules/@tauri-apps/cli/tauri.js build --target ${{ matrix.target }} --bundles app --config "{\"version\":\"${TRAY_VERSION}\"}"
 
       - name: Build the tray (Windows)
         if: runner.os == 'Windows'
         # cwd is dash/tray and the CLI is invoked through node for the reason
         # given on the macOS step above.
         working-directory: dash/tray
-        run: node ui/node_modules/@tauri-apps/cli/tauri.js build --target ${{ matrix.target }} --bundles nsis
+        # bash (Git Bash on the runner) so the --config quoting is identical on
+        # both legs.
+        shell: bash
+        env:
+          TRAY_VERSION: ${{ needs.version.outputs.version }}
+        run: node ui/node_modules/@tauri-apps/cli/tauri.js build --target ${{ matrix.target }} --bundles nsis --config "{\"version\":\"${TRAY_VERSION}\"}"
 
       # Requirement 12.3: the bundler's own success is not evidence of
       # notarization, so each property is asserted against the built app.
@@ -1385,7 +1394,7 @@ jobs:
         run: >
           dotnet pack KyberWeave.sln
           -c ${{ env.CONFIGURATION }}
-          -p:Version=${VERSION}
+          -p:Version="${VERSION}"
           -o ./artifacts/nupkg
 
       - name: Push to GitHub Packages (secondary channel)

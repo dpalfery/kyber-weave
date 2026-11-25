@@ -486,6 +486,7 @@ public class CollectedTypesTests
         map[(typeof(CollectedRecord), nameof(CollectedRecord.Tool))] = Nested(typeof(CollectedToolCall));
         map[(typeof(CollectedRecord), nameof(CollectedRecord.Agent))] = Nested(typeof(CollectedAgentInvocation));
         map[(typeof(CollectedRecord), nameof(CollectedRecord.SkillsInvoked))] = Col("record_skill_invocation", "skill_name");
+        map[(typeof(CollectedRecord), nameof(CollectedRecord.SkillsListed))] = Col("record_skill_listing", "skill_name");
         map[(typeof(CollectedRecord), nameof(CollectedRecord.AgentInstanceId))] = Col("record_agent_instance", "agent_instance_id");
         map[(typeof(CollectedRecord), nameof(CollectedRecord.ToolDefinitions))] = NestedList(typeof(CollectedToolDefinition));
         map[(typeof(CollectedRecord), nameof(CollectedRecord.Signals))] = Nested(typeof(CollectedRecordSignals));

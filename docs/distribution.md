@@ -5,7 +5,7 @@ doc-type: reference
 status: current
 component: Distribution
 owner: dpalfery
-last-reviewed: 2026-11-17
+last-reviewed: 2026-11-25
 ---
 
 # Distribution and release flow
@@ -516,7 +516,7 @@ steps run in the updating process itself.
    --finish-update`, passing on `--no-kyberdash`, `--no-menubar`, `--no-arbiter` and `--no-restart`
    when they were given. The updating process prints `finishing the
    update in the new kyber-weave…` before it starts the child, so that line comes from the old
-   process. The child's output is inherited. The wait is 15 minutes. On expiry the whole process tree is
+   process. The child's output is inherited. The wait is 25 minutes, which covers the worst case of the tray restart steps (six captures at 120 s, the tray update at 300 s, two plugin steps at 120 s). On expiry the whole process tree is
    killed. The updating process exits with the child's exit code.
 5. **Finish.** The new process runs the KyberDash steps as a changed release, then the arbiter hook
    refresh, in its own image. It downloads nothing and never starts another hand-off. On success it
@@ -643,7 +643,7 @@ record the updater reads is a fixture and never this machine's:
 | `kyberdash-replaced` | An installed `kyberdash` is replaced, and the new one answers `--version`. |
 | `kyberdash-opt-out` | `--no-kyberdash` updates the CLI and leaves `kyberdash` and the tray alone. |
 | `tray-opt-out` | `--no-menubar` replaces `kyberdash` and leaves the tray alone. |
-| `tray-delegated` | With a `tray.json`, the update runs the new `kyberdash menubar --update`, and that step's failure fails the update by name. |
+| `tray-delegated` | With a `tray.json`, the update runs the new `kyberdash`'s tray restart verbs (`menubar --quit` first), and that step's failure fails the update by name. |
 | `kyberdash-floor` | A release below the KyberDash floor, which carries no `kyberdash` archive, still updates the CLI and MCP. It needs no build, so it runs under `--no-kyberdash` too. |
 
 The main self-update also asserts that an absent `kyberdash` stays absent.

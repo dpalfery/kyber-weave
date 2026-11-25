@@ -24,7 +24,8 @@
 #
 # The KyberDash cases then run against the same release: an installed kyberdash is
 # replaced, `--no-kyberdash` and `--no-menubar` are honoured, a recorded tray makes the
-# update run the new `kyberdash menubar --update`, and a release below the KyberDash
+# update restart the tray so it owns the engine (probe `engine verify`, `menubar --quit`,
+# `engine stop`, `menubar --update` or `--launch`, then verify), and a release below the KyberDash
 # floor, which carries no kyberdash archive, still updates the CLI and MCP.
 #
 # The arbiter-hooks-after-swap case covers the step the other cases never reach. After a real
@@ -543,11 +544,12 @@ else
     expect_logged "--no-menubar given; leaving the KyberDash tray unchanged" "--no-menubar leaves the tray alone"
 
     # The tray step cannot succeed here: there is no tray to install on Linux, and on
-    # macOS the release has no tray archive. What it must do is run the new kyberdash's
-    # `menubar --update` and report a failure by name. The kyberdash's own error is the
-    # evidence the subcommand ran: when the root `--version` swallowed the updater's
-    # `--version <v>`, kyberdash printed its version, exited 0, and the update reported
-    # a tray update that never happened.
+    # macOS the release has no tray archive. What it must do is run the release's real
+    # kyberdash through the restart and report a failure by name: on Linux `menubar --quit`
+    # fails with `kyberdash menubar: platform: ...`, on macOS `menubar --update` fails. The
+    # kyberdash's own error is the evidence a menubar verb ran: when the root `--version`
+    # swallowed the updater's `--version <v>`, kyberdash printed its version, exited 0, and
+    # the update reported a tray update that never happened.
     begin_case tray-delegated "$FROM_BIN"
     install_stub_kyberdash
     record_tray
@@ -558,7 +560,7 @@ else
         fail "${CASE_NAME}: update exited 0 although the tray could not be updated"
     fi
     expect_logged "the KyberDash tray step failed" "the failure names the tray step"
-    expect_logged "kyberdash menubar:" "the release's kyberdash ran menubar --update"
+    expect_logged "kyberdash menubar:" "the release's kyberdash ran a menubar verb"
     expect_reports kyberdash "$TO_VERSION" "binaries stay committed when the tray step fails"
 fi
 

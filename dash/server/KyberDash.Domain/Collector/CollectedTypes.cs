@@ -410,6 +410,10 @@ public record CollectedRecordSignals(
 /// Optional provider request id (<c>record_request_id.request_id</c>): an OTLP record's
 /// <c>request_id</c>, or a transcript record's <c>requestId</c>. Never a synthesized counter or hash.
 /// </param>
+/// <param name="SkillsListed">
+/// Skills the harness listed to the agent on this record, in listing order (<c>record_skill_listing.skill_name</c>).
+/// Null or empty when the record carried no listing.
+/// </param>
 public record CollectedRecord(
     string RecordId,
     string HarnessId,
@@ -437,4 +441,5 @@ public record CollectedRecord(
     long? ReportedOutputTokens = null,
     string? SourceName = null,
     string? ResponseId = null,
-    string? RequestId = null);
+    string? RequestId = null,
+    IReadOnlyList<string>? SkillsListed = null);

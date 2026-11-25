@@ -12,7 +12,6 @@
     <ToolCommandName>kyberdash</ToolCommandName>
     <IsPackable>true</IsPackable>
     <PackageId>KyberDash.Cli</PackageId>
-    <Version>0.21.0</Version>
     <Authors>KyberWeave</Authors>
     <Description>KyberDash standalone CLI and process coordinator.</Description>
     <PackageLicenseExpression>MIT</PackageLicenseExpression>

@@ -298,8 +298,13 @@ public class SqliteRelationalStoreWriteTests
         // The source delete moves the write marker and marks the dirty range wildcard in the same
         // transaction as the delete, so a failed delete moves nothing.
         string deleteSql = NormalizeLineEndings(store.ExecutedSql[1]);
+        // Records another source still claims are handed to it before the delete cascades.
         Assert.StartsWith(
-            $"PRAGMA foreign_keys = ON;\nBEGIN IMMEDIATE;\nDELETE FROM source WHERE source_id = {HexExpr("src-deadbeef")};\n",
+            $"PRAGMA foreign_keys = ON;\nBEGIN IMMEDIATE;\nUPDATE record SET source_id = (SELECT c.source_id FROM record_source_claim c ",
+            deleteSql,
+            StringComparison.Ordinal);
+        Assert.Contains(
+            $";\nDELETE FROM source WHERE source_id = {HexExpr("src-deadbeef")};\n",
             deleteSql,
             StringComparison.Ordinal);
         Assert.Contains("DELETE FROM projection_dirty_session;\n", deleteSql, StringComparison.Ordinal);

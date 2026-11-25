@@ -156,5 +156,8 @@ internal abstract class DelegatingRelationalStoreReader : IRelationalStoreReader
     public virtual IReadOnlyList<StoredSkillInvocation> SessionSkillFigures(string sessionKey) => inner.SessionSkillFigures(sessionKey);
 
     /// <inheritdoc />
+    public virtual IReadOnlyList<StoredSkillListing> SessionSkillListings(string sessionKey) => inner.SessionSkillListings(sessionKey);
+
+    /// <inheritdoc />
     public virtual SessionKwSkillLoadPageResult SessionKwSkillLoads(string sessionKey, int page, int limit) => inner.SessionKwSkillLoads(sessionKey, page, limit);
 }

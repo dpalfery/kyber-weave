@@ -4,6 +4,7 @@ using System.Text.Json;
 using KyberDash.Application.Tests.Fakes;
 using KyberDash.Contracts.Repositories;
 using KyberDash.Contracts.Services;
+using KyberDash.Core;
 using KyberDash.Core.Exceptions;
 using KyberDash.Core.Resilience;
 using KyberDash.Data.Collector;
@@ -530,12 +531,16 @@ public static class SettingsCleanDoctorReportTests
         {
             public void WriteBatch(CollectedBatch batch) => throw new IOException("disk full");
 
+            public void ReplaceSource(CollectedBatch batch) => throw new IOException("disk full");
+
             public void DeleteSource(string sourceId) => throw new IOException("disk full");
 
             public void ClearEstimatedRecordTokens(string harnessId, string sourceLocator, EstimatedRecordTokens estimated) =>
                 throw new IOException("disk full");
 
             public void WriteProblem(CollectedProblem problem) => throw new IOException("disk full");
+
+            public void DeleteProblem(string problemKey) => throw new IOException("disk full");
         }
     }
 
@@ -1830,7 +1835,7 @@ public static class SettingsCleanDoctorReportTests
         private static KyberBridgeEngine CreateBridge(
             InMemoryRelationalStore store,
             FakePricingRepository? pricing = null,
-            string version = KyberBridgeEngine.DefaultVersion,
+            string? version = null,
             string? storePath = null)
         {
             FakePricingRepository resolvedPricing = pricing ?? new FakePricingRepository();
