@@ -64,9 +64,7 @@ its `tasks.yml` is caught rather than carried as dead weight.
 
 ## Active Plans
 
-| Plan | Status | Scope |
-|---|---|---|
-| [Droid token counters, honest per-turn chart, and a per-harness dashboard e2e](2026-11-24-droid-tokens-and-per-harness-e2e.md) | Ready | KyberDash engine Droid counter pass, spend chart not-measurable state, per-harness Playwright suite |
+No plans are open.
 
 ## Archived Plans
 

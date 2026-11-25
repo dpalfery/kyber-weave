@@ -2,7 +2,7 @@
 id: plans/2026-11-24-droid-tokens-and-per-harness-e2e
 title: Droid token counters, honest per-turn chart, and a per-harness dashboard e2e
 doc-type: plan
-status: current
+status: archived
 component: KyberDash
 owner: dpalfery
 last-reviewed: 2026-11-24
@@ -14,7 +14,7 @@ impact-components:
 
 # Droid token counters, honest per-turn chart, and a per-harness dashboard e2e
 
-**Status: Ready, 2026-11-25.** Amended 2026-11-25 for the final review's cycle-1 findings (T14, T15, D21, D22) and cycle-2 findings (T16, T17, T18, D23–D26); T1–T15 are integrated and unchanged.
+**Status: Archived, 2026-11-25.** Amended 2026-11-25 for the final review's cycle-1 findings (T14, T15, D21, D22) and cycle-2 findings (T16, T17, T18, D23–D26); T1–T15 are integrated and unchanged.
 
 Autonomy: autonomous. Development mode: test-first. Base: `main` at `2f661f462`, branch
 `claude/fix/droid-chart-and-per-harness-e2e`.
@@ -683,21 +683,21 @@ Checked on 2026-11-25 against the code on the run branch. Links are relative to 
 
 | ID | Destination |
 |---|---|
-| D1, D15 | [The no-estimate rule](../dash/architecture.md#the-no-estimate-rule) and [honest unobservability](../rules/honest-unobservability.md#hard-rule-kyberdash-never-estimates); the rule is also stated in `dash/AGENTS.md` and `REVIEW.md` section 16 |
-| D2, D3, D12 | [Where the Factory file rows come from](../dash/architecture.md#where-the-factory-file-rows-come-from) (the plugin-captured counter pass, its scope, its limit of 80, its checkpoint-only writes, and paused installs reading nothing) and [the Factory file source](../dash/telemetry-inventory.md#where-the-file-rows-come-from) |
-| D9 | [Jobs and shared settings](../dash/architecture.md#jobs-and-shared-settings-adr-0033): the scheduled setting on runs the full refresh on the tick, off reads only the counter pass |
-| D11 | [Records keep their source](../dash/architecture.md#records-keep-their-source) and [the Factory source-precedence rule](../dash/architecture.md#the-factory-source-precedence-rule); `DetectorVersion` 6 in the detector-version paragraph |
-| D16 | [Session totals come from reported session usage](../dash/architecture.md#session-totals-come-from-reported-session-usage), [Token figures, the per-turn chart and their labels](../dash/telemetry-inventory.md#token-figures-the-per-turn-chart-and-their-labels), and the Warp, Copilot CLI and Claude Code rows of [the field register](../dash/field-register.md) |
-| D17, D18, D19, D20 | [Text-derived counts carry a tokenizer label](../dash/architecture.md#text-derived-counts-carry-a-tokenizer-label) (the seam, the packages, the stand-in, the stored labels and the not-measured reading of an unlabelled figure), and the tokenizer rows of [the field register](../dash/field-register.md) |
-| D4, D5, D6, D7, D8, D13, D14 | [Per-harness dashboard suites](../dash/runbook.md#isolated-playwright-otlp-suites-web-dashboard-and-tray-ui): the two suites, the 7 OTLP and 15 file-import harnesses, how each loads its database, the prerequisites, the commands, the not-measurable assertions and the SQLite-reader known gap |
-| D21 | [Twin turns join on a vendor id, or on the session](../dash/architecture.md#twin-turns-join-on-a-vendor-id-or-on-the-session): Codex rollout and OTLP model calls join only on equal reported counters, parts move to the kept turn, unpaired file calls stay (T15) |
+| D1, D15 | [The no-estimate rule](../../dash/architecture.md#the-no-estimate-rule) and [honest unobservability](../../rules/honest-unobservability.md#hard-rule-kyberdash-never-estimates); the rule is also stated in `dash/AGENTS.md` and `REVIEW.md` section 16 |
+| D2, D3, D12 | [Where the Factory file rows come from](../../dash/architecture.md#where-the-factory-file-rows-come-from) (the plugin-captured counter pass, its scope, its limit of 80, its checkpoint-only writes, and paused installs reading nothing) and [the Factory file source](../../dash/telemetry-inventory.md#where-the-file-rows-come-from) |
+| D9 | [Jobs and shared settings](../../dash/architecture.md#jobs-and-shared-settings-adr-0033): the scheduled setting on runs the full refresh on the tick, off reads only the counter pass |
+| D11 | [Records keep their source](../../dash/architecture.md#records-keep-their-source) and [the Factory source-precedence rule](../../dash/architecture.md#the-factory-source-precedence-rule); `DetectorVersion` 6 in the detector-version paragraph |
+| D16 | [Session totals come from reported session usage](../../dash/architecture.md#session-totals-come-from-reported-session-usage), [Token figures, the per-turn chart and their labels](../../dash/telemetry-inventory.md#token-figures-the-per-turn-chart-and-their-labels), and the Warp, Copilot CLI and Claude Code rows of [the field register](../../dash/field-register.md) |
+| D17, D18, D19, D20 | [Text-derived counts carry a tokenizer label](../../dash/architecture.md#text-derived-counts-carry-a-tokenizer-label) (the seam, the packages, the stand-in, the stored labels and the not-measured reading of an unlabelled figure), and the tokenizer rows of [the field register](../../dash/field-register.md) |
+| D4, D5, D6, D7, D8, D13, D14 | [Per-harness dashboard suites](../../dash/runbook.md#isolated-playwright-otlp-suites-web-dashboard-and-tray-ui): the two suites, the 7 OTLP and 15 file-import harnesses, how each loads its database, the prerequisites, the commands, the not-measurable assertions and the SQLite-reader known gap |
+| D21 | [Twin turns join on a vendor id, or on the session](../../dash/architecture.md#twin-turns-join-on-a-vendor-id-or-on-the-session): Codex rollout and OTLP model calls join only on equal reported counters, parts move to the kept turn, unpaired file calls stay (T15) |
 | D22 | Documentation waiver: which task owned the cycle-1 review fixes is process provenance with no surviving invariant |
 | D23 | Documentation waiver: which tasks own the cycle-2 review fixes is process provenance with no surviving invariant |
-| D24 | Documentation waiver: a test-file choice; the chart's not-measurable state is already documented in [Token figures, the per-turn chart and their labels](../dash/telemetry-inventory.md#token-figures-the-per-turn-chart-and-their-labels) |
-| D25, D26 | Documentation waiver: display wording of the cost basis, the skills panel's model argument, and a pinned case of the D21 rule already documented under [Twin turns join on a vendor id, or on the session](../dash/architecture.md#twin-turns-join-on-a-vendor-id-or-on-the-session); no new invariant |
+| D24 | Documentation waiver: a test-file choice; the chart's not-measurable state is already documented in [Token figures, the per-turn chart and their labels](../../dash/telemetry-inventory.md#token-figures-the-per-turn-chart-and-their-labels) |
+| D25, D26 | Documentation waiver: display wording of the cost basis, the skills panel's model argument, and a pinned case of the D21 rule already documented under [Twin turns join on a vendor id, or on the session](../../dash/architecture.md#twin-turns-join-on-a-vendor-id-or-on-the-session); no new invariant |
 | D10 | Documentation waiver: a fixture clock choice with no surviving invariant beyond the run-relative timestamps the runbook states |
 | AP1, AP2, AP3 | Documentation waiver: the approve-and-execute gate is process provenance with no surviving architectural, operational or behavioural invariant |
-| KyberDash | The Design harvest rows: [Where the Factory file rows come from](../dash/architecture.md#where-the-factory-file-rows-come-from) (counter pass, stale live-counter bullet replaced), [Jobs and shared settings](../dash/architecture.md#jobs-and-shared-settings-adr-0033) (scheduled import on and off), [Records keep their source](../dash/architecture.md#records-keep-their-source), [The Factory source-precedence rule](../dash/architecture.md#the-factory-source-precedence-rule) (paired Droid per-turn tokens not measurable), [Token figures, the per-turn chart and their labels](../dash/telemetry-inventory.md#token-figures-the-per-turn-chart-and-their-labels) (the spend chart state), [Per-harness dashboard suites](../dash/runbook.md#isolated-playwright-otlp-suites-web-dashboard-and-tray-ui) (the suites and gap matrix) and the detector-version paragraph in [Skills view contract](../dash/architecture.md#skills-view-contract) (`DetectorVersion` 6) |
+| KyberDash | The Design harvest rows: [Where the Factory file rows come from](../../dash/architecture.md#where-the-factory-file-rows-come-from) (counter pass, stale live-counter bullet replaced), [Jobs and shared settings](../../dash/architecture.md#jobs-and-shared-settings-adr-0033) (scheduled import on and off), [Records keep their source](../../dash/architecture.md#records-keep-their-source), [The Factory source-precedence rule](../../dash/architecture.md#the-factory-source-precedence-rule) (paired Droid per-turn tokens not measurable), [Token figures, the per-turn chart and their labels](../../dash/telemetry-inventory.md#token-figures-the-per-turn-chart-and-their-labels) (the spend chart state), [Per-harness dashboard suites](../../dash/runbook.md#isolated-playwright-otlp-suites-web-dashboard-and-tray-ui) (the suites and gap matrix) and the detector-version paragraph in [Skills view contract](../../dash/architecture.md#skills-view-contract) (`DetectorVersion` 6) |
 
 ADR waiver: no ADR. The change restores documented behaviour and follows the existing source-precedence rule; the no-estimate rule is recorded in the governed rules document.
 
