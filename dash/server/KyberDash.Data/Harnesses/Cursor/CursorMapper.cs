@@ -508,6 +508,18 @@ public partial class CursorMapper : IHarnessMapper
 
         string harnessId = ResolveHarnessId(unit.Unit.HarnessId);
         CollectedSource source = new(harnessId, unit.Unit.Kind, unit.Unit.SourceKey);
+        if (unit.RawText is null)
+        {
+            // A null payload means the read produced nothing for this source; say so instead of mapping it as an empty file.
+            List<CollectedProblem> nullProblems = BuildProblems(
+                [new CursorParseProblem(0, MalformedLineCode, $"Skipping Cursor source {unit.Unit.SourceKey}: no payload was read.")],
+                unit.Unit.SourceKey,
+                harnessId,
+                null,
+                importedAtUtc);
+            return new CollectedBatch(source, [], [], nullProblems);
+        }
+
         if (string.IsNullOrWhiteSpace(unit.RawText))
         {
             return new CollectedBatch(source, [], [], []);

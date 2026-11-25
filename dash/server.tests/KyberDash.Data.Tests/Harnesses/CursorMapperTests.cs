@@ -308,6 +308,38 @@ public class CursorMapperTests
     }
 
     [Fact]
+    public void Map_NullRawTextEmitsOneWarningNamingTheSourceKey()
+    {
+        const string path = "/fake/Library/Application Support/Cursor/User/globalStorage/state.vscdb";
+        NativeSourceUnit unit = MakeNativeUnit(path, null, "cursor", "cursor-vscdb");
+        CursorMapper mapper = new();
+        CollectedBatch batch = mapper.Map(unit, BaselineUtc);
+
+        Assert.Empty(batch.Sessions);
+        Assert.Empty(batch.Records);
+        CollectedProblem problem = Assert.Single(batch.Problems);
+        Assert.Equal(CursorMapper.MalformedLineCode, problem.Code);
+        Assert.Equal("warning", problem.Severity);
+        Assert.Contains(path, problem.Message, StringComparison.Ordinal);
+        Assert.Equal(path, problem.Location);
+    }
+
+    [Theory]
+    [InlineData("")]
+    [InlineData("   ")]
+    [InlineData("\r\n\t")]
+    public void Map_WhitespaceRawTextKeepsTheEmptyBatchWithoutAProblem(string rawText)
+    {
+        NativeSourceUnit unit = MakeNativeUnit("/fake/state.vscdb", rawText, "cursor", "cursor-vscdb");
+        CursorMapper mapper = new();
+        CollectedBatch batch = mapper.Map(unit, BaselineUtc);
+
+        Assert.Empty(batch.Sessions);
+        Assert.Empty(batch.Records);
+        Assert.Empty(batch.Problems);
+    }
+
+    [Fact]
     public void Map_MalformedBubbleJsonEmitsProblem()
     {
         NativeSourceUnit unit = MakeNativeUnit("/fake/state.vscdb", "[{not json}]", "cursor", "cursor-vscdb");
@@ -487,8 +519,9 @@ public class CursorMapperTests
         Assert.NotEqual(LocalTextTokenizer.Shared.Count(userDoc, null).Count, userPart.Withheld.MeasuredTokens);
     }
 
-    private static NativeSourceUnit MakeNativeUnit(string path, string rawText, string harnessId, string format)
+    private static NativeSourceUnit MakeNativeUnit(string path, string? rawText, string harnessId, string format)
     {
+        long sizeBytes = rawText is null ? 0 : Encoding.UTF8.GetByteCount(rawText);
         SourceUnit sourceUnit = new(
             HarnessId: harnessId,
             SourceKey: path,
@@ -499,12 +532,12 @@ public class CursorMapperTests
             SourceRootLabel: "cursor",
             RevisionToken: "1-1",
             LastWriteUtc: BaselineUtc,
-            SizeBytes: Encoding.UTF8.GetByteCount(rawText));
+            SizeBytes: sizeBytes);
 
         return new NativeSourceUnit(
             Unit: sourceUnit,
             RawText: rawText,
-            SizeBytes: Encoding.UTF8.GetByteCount(rawText),
+            SizeBytes: sizeBytes,
             LastWriteUtc: BaselineUtc);
     }
 
