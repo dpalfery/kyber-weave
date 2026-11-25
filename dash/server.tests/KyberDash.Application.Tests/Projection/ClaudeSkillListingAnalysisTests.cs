@@ -130,6 +130,41 @@ public class ClaudeSkillListingAnalysisTests
     }
 
     /// <summary>
+    /// A transcript turn with no content left (after the content purge) still hands its listing and
+    /// invocations to the OTLP twin that absorbs it, and invoked names from both twins are unioned.
+    /// </summary>
+    [Fact]
+    public void DedupeTwinTurns_PartlessTranscriptTwin_StillHandsItsSkillsToTheOtlpKeeper()
+    {
+        CanonicalRecord otlp = CanonRecordHydration.Hydrate(Turn() with
+        {
+            RecordId = "otlp-1",
+            RequestId = "req_partless",
+            SourceName = "claude-code",
+            SkillsInvoked = ["review"],
+        });
+        CanonicalRecord file = CanonRecordHydration.Hydrate(Turn() with
+        {
+            RecordId = "file-1",
+            RequestId = "req_partless",
+            SourceName = CanonSynth.FileSourcePrefix + "claude-code",
+            SkillsListed = ["conductor", "review", "idle"],
+            SkillsInvoked = ["conductor", "review"],
+        });
+        Assert.Empty(file.Parts!);
+
+        CanonicalRecord kept = Assert.Single(CanonSessionProjectorEngine.DedupeTwinTurns([otlp, file], "sess-1"));
+
+        Assert.Equal("otlp-1", kept.SpanId);
+        Assert.Equal(
+            ["conductor", "review", "idle"],
+            kept.Raw![CanonSynth.SkillsListedKey].GetProperty("skills").EnumerateArray().Select(static s => s.GetProperty("name").GetString()));
+        Assert.Equal(
+            ["review", "conductor"],
+            kept.Raw![CanonSynth.SkillsInvokedKey].EnumerateArray().Select(static s => s.GetString()));
+    }
+
+    /// <summary>
     /// One transcript turn: a <c>skill_listing</c> naming <c>conductor</c> and
     /// <c>code-review:code-review</c>, then an assistant turn that invokes <c>conductor</c>.
     /// </summary>

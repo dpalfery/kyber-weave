@@ -1137,7 +1137,7 @@ public partial class CanonSessionProjectorEngine
             dropped.Add(file);
             joined.Add(file);
             joined.Add(keeper);
-            if (!HasParts(file))
+            if (!IsDonor(file))
             {
                 return;
             }
@@ -1236,7 +1236,7 @@ public partial class CanonSessionProjectorEngine
 
                 pairedOtels.Add(otel);
                 dropped.Add(file);
-                if (HasParts(file))
+                if (IsDonor(file))
                 {
                     transplant[otel] = transplant.TryGetValue(otel, out CanonicalRecord? existing)
                         ? MergeDonors(existing, file)
@@ -1284,7 +1284,7 @@ public partial class CanonSessionProjectorEngine
             {
                 CanonicalRecord file = files[i];
                 dropped.Add(file);
-                if (HasParts(file))
+                if (IsDonor(file))
                 {
                     donor = donor is null ? file : MergeDonors(donor, file);
                 }
@@ -1308,7 +1308,7 @@ public partial class CanonSessionProjectorEngine
             dropped.Add(file);
         }
 
-        List<CanonicalRecord> donors = files.Where(HasParts).OrderBy(RecordTimestampMs).ToList();
+        List<CanonicalRecord> donors = files.Where(IsDonor).OrderBy(RecordTimestampMs).ToList();
         HashSet<CanonicalRecord> free = new(donors, ReferenceEqualityComparer.Instance);
 
         List<CanonicalRecord> keepers =
@@ -1533,7 +1533,7 @@ public partial class CanonSessionProjectorEngine
 
                 mergedTokens = MaxTokens(mergedTokens, member.Tokens);
                 dropped.Add(member);
-                if (!HasParts(member))
+                if (!IsDonor(member))
                 {
                     continue;
                 }
@@ -1603,9 +1603,10 @@ public partial class CanonSessionProjectorEngine
     private static readonly string[] DonorSkillKeys = [CanonSynth.SkillsListedKey, CanonSynth.SkillsInvokedKey];
 
     /// <summary>
-    /// Carries the skill listing and skill invocations of an absorbed twin onto the kept record when
-    /// the kept record has none: a Claude Code listing is stored only on the transcript turn, so an
-    /// OTLP keeper would otherwise drop it and the inactive-skill-reference detector would not see it.
+    /// Carries the skill listing and skill invocations of an absorbed twin onto the kept record: a
+    /// Claude Code listing is stored only on the transcript turn, so an OTLP keeper would otherwise drop
+    /// it and the inactive-skill-reference detector would not see it. The keeper's own listing wins;
+    /// invoked names are unioned, keeper's first.
     /// </summary>
     private static CanonicalRecord WithDonorSkills(CanonicalRecord keeper, CanonicalRecord donor)
     {
@@ -1615,12 +1616,36 @@ public partial class CanonSessionProjectorEngine
         }
 
         Dictionary<string, JsonElement>? raw = null;
-        foreach (string key in DonorSkillKeys)
+        Dictionary<string, JsonElement> Writable() =>
+            raw ??= keeper.Raw is null ? new(StringComparer.Ordinal) : new(keeper.Raw, StringComparer.Ordinal);
+
+        if (donor.Raw.TryGetValue(CanonSynth.SkillsListedKey, out JsonElement listed)
+            && (keeper.Raw is null || !keeper.Raw.ContainsKey(CanonSynth.SkillsListedKey)))
         {
-            if (donor.Raw.TryGetValue(key, out JsonElement value) && (keeper.Raw is null || !keeper.Raw.ContainsKey(key)))
+            Writable()[CanonSynth.SkillsListedKey] = listed;
+        }
+
+        if (donor.Raw.TryGetValue(CanonSynth.SkillsInvokedKey, out JsonElement donorInvoked))
+        {
+            if (keeper.Raw is null || !keeper.Raw.TryGetValue(CanonSynth.SkillsInvokedKey, out JsonElement keeperInvoked))
             {
-                raw ??= keeper.Raw is null ? new(StringComparer.Ordinal) : new(keeper.Raw, StringComparer.Ordinal);
-                raw[key] = value;
+                Writable()[CanonSynth.SkillsInvokedKey] = donorInvoked;
+            }
+            else if (keeperInvoked.ValueKind == JsonValueKind.Array && donorInvoked.ValueKind == JsonValueKind.Array)
+            {
+                List<string> names = [];
+                foreach (JsonElement name in keeperInvoked.EnumerateArray().Concat(donorInvoked.EnumerateArray()))
+                {
+                    if (name.ValueKind == JsonValueKind.String && name.GetString() is { Length: > 0 } text && !names.Contains(text, StringComparer.Ordinal))
+                    {
+                        names.Add(text);
+                    }
+                }
+
+                if (names.Count != keeperInvoked.GetArrayLength())
+                {
+                    Writable()[CanonSynth.SkillsInvokedKey] = JsonSerializer.SerializeToElement(names);
+                }
             }
         }
 
@@ -1825,6 +1850,13 @@ public partial class CanonSessionProjectorEngine
         string? val = el.GetString();
         return string.IsNullOrEmpty(val) ? null : val;
     }
+
+    /// <summary>
+    /// Whether an absorbed twin has anything to hand its keeper: content, or a skill listing or skill
+    /// invocations the keeper would otherwise lose (<see cref="WithDonorSkills"/>).
+    /// </summary>
+    private static bool IsDonor(CanonicalRecord record) =>
+        HasParts(record) || (record.Raw is not null && DonorSkillKeys.Any(record.Raw.ContainsKey));
 
     private static bool HasParts(CanonicalRecord record) =>
         (record.Parts is { Count: > 0 }) || record.Content.Count > 0;

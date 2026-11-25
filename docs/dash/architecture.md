@@ -1826,8 +1826,9 @@ On the relational path the projector rebuilds a session from `SessionRecordsForR
 as `{ skills: [{ name }] }`, each only when the record carries at least one name. The listing has no `isInitial`
 and no descriptions, because the store keeps neither; the detector reads `isInitial` only to reject a non-boolean
 value and unions every listing it sees. When `DedupeTwinTurns` keeps an OTLP turn over the transcript turn that
-carried the listing, the kept turn takes the absorbed turn's two skill attributes if it has none of its own, so a
-Claude Code session with both sources still raises the finding. The content-free and timeline reads do not carry
+carried the listing, the kept turn takes the absorbed turn's listing when it has none of its own and the union of
+both turns' invoked names. An absorbed turn that carries skill attributes hands them over even when it has no
+content left (after the content purge), so a Claude Code session with both sources still raises the finding. The content-free and timeline reads do not carry
 `SkillsListed`; nothing on those paths runs the detector.
 The `skillUtilisation` scorecard dimension is not fed by these inputs: `CanonRollupsEngine.BuildScorecardDimensions`
 reports it as not measurable for every harness, and making it measurable needs a rollup metric that does not exist yet.
