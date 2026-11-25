@@ -35,7 +35,7 @@ namespace KyberDash.Data.Collector.Sources;
 /// progress handler that interrupts a statement once it has spent the limit inside SQLite.
 /// </para>
 /// </remarks>
-public sealed class MicrosoftDataSqliteHarnessSource : IHarnessSqliteSource
+public class MicrosoftDataSqliteHarnessSource : IHarnessSqliteSource
 {
     private const int SqliteBusy = 5;
     private const int SqliteLocked = 6;

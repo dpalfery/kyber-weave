@@ -16,7 +16,7 @@ namespace KyberDash.Data.Harnesses.Cursor;
 /// after the first pass. The export is the D10 array that <see cref="CursorMapper"/> reads; a bubble
 /// without a value is written as JSON <c>null</c>, never a default (D9).
 /// </remarks>
-public sealed class CursorSqliteConversationSource : ISqliteConversationSource
+public class CursorSqliteConversationSource : ISqliteConversationSource
 {
     private const string BubblePrefix = "bubbleId:";
     private const string BubbleUpperBound = "bubbleId;";

@@ -28,14 +28,14 @@ public interface IHarnessSqliteDatabase : IDisposable
 /// <param name="Name">Stable query name; the in-memory fake keys canned rows by it.</param>
 /// <param name="Sql">The SELECT text, with positional <c>?</c> parameters.</param>
 /// <param name="Parameters">Values bound positionally; never concatenated into <paramref name="Sql"/>.</param>
-public sealed record HarnessSqliteQuery(string Name, string Sql, IReadOnlyList<object?> Parameters);
+public record HarnessSqliteQuery(string Name, string Sql, IReadOnlyList<object?> Parameters);
 
 /// <summary>Size and time limits for reading a harness database.</summary>
 /// <param name="ExportCapBytes">Most bytes one export may read (64 MiB) before a recorded problem.</param>
 /// <param name="CopyCapBytes">Most database-plus-WAL bytes the cache-copy fallback may copy (4 GiB).</param>
 /// <param name="CommandTimeoutSeconds">Per-command timeout.</param>
 /// <param name="BusyTimeoutMilliseconds">SQLite <c>busy_timeout</c>.</param>
-public sealed record HarnessSqliteLimits(
+public record HarnessSqliteLimits(
     long ExportCapBytes = 67_108_864,
     long CopyCapBytes = 4_294_967_296,
     int CommandTimeoutSeconds = 30,

@@ -16,7 +16,7 @@ namespace KyberDash.Data.Harnesses.Warp;
 /// <c>conversation_data</c>: the mapper reads it with <c>GetString</c>, and writing it as an object
 /// would make the usage data vanish without an error.
 /// </remarks>
-public sealed class WarpSqliteConversationSource : ISqliteConversationSource
+public class WarpSqliteConversationSource : ISqliteConversationSource
 {
     private const string ConversationsQueryName = "warp.conversations";
     private const string ConversationQueryName = "warp.conversation";

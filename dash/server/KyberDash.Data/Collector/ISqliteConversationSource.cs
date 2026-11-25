@@ -29,7 +29,7 @@ public interface ISqliteConversationSource
 /// <param name="FileSystem">Filesystem seam for sibling files.</param>
 /// <param name="Sqlite">Opener for a further database (for example a workspace database).</param>
 /// <param name="Problems">Sink for recorded discovery problems.</param>
-public sealed record SqliteConversationContext(
+public record SqliteConversationContext(
     IHarnessSqliteDatabase Database,
     string DatabasePath,
     string HarnessId,
@@ -44,7 +44,7 @@ public sealed record SqliteConversationContext(
 /// <param name="RevisionToken">Fingerprint that changes when the conversation changes.</param>
 /// <param name="LastActivityUtc">Optional UTC time of the latest activity.</param>
 /// <param name="CompanionKey">Optional companion file locator.</param>
-public sealed record SqliteConversation(
+public record SqliteConversation(
     string Id,
     string RevisionToken,
     DateTimeOffset? LastActivityUtc,

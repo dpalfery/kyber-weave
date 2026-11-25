@@ -17,7 +17,7 @@ namespace KyberDash.Data.Harnesses.Devin;
 /// ISO-8601 text and is read as UTC; text that does not parse refuses the database naming the session, because
 /// a silent default would move the session's time window.
 /// </remarks>
-public sealed class DevinSqliteConversationSource : ISqliteConversationSource
+public class DevinSqliteConversationSource : ISqliteConversationSource
 {
     /// <summary>Lists each session with its node count; the revision token and the time window come from these.</summary>
     internal const string ConversationsQuery = "devin.conversations";

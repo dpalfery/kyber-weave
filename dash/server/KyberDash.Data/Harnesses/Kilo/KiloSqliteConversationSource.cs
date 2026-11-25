@@ -15,7 +15,7 @@ namespace KyberDash.Data.Harnesses.Kilo;
 /// <c>session_id</c> so the mapper can attribute it. The tree walk mirrors the deleted
 /// <c>sqlite-session-parser.ts</c> <c>session_tree</c> query.
 /// </remarks>
-public sealed class KiloSqliteConversationSource : ISqliteConversationSource
+public class KiloSqliteConversationSource : ISqliteConversationSource
 {
     private const string RootsQuery = "kilo-roots";
     private const string RevisionQuery = "kilo-revision";

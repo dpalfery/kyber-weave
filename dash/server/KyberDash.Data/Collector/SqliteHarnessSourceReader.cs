@@ -17,7 +17,7 @@ namespace KyberDash.Data.Collector.Sources;
 /// records against the unit. A missing table or column refuses the whole database (fail closed) instead of
 /// reading half of it.
 /// </remarks>
-public sealed class SqliteHarnessSourceReader : IHarnessSourceReader
+public class SqliteHarnessSourceReader : IHarnessSourceReader
 {
     private const char KeySeparator = '#';
 
