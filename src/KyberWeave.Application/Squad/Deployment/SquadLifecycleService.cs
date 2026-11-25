@@ -344,6 +344,12 @@ public sealed class SquadLifecycleService : ISquadLifecycleService
                 source,
                 targetRoot,
                 _stateStore.UserPaths.HomeDirectory));
+            warnings.AddRange(AntigravityMcpConfiguration.Ensure(_files,
+                request.Targets,
+                request.Scope,
+                _globalRoots,
+                docsServerCommand: null,
+                request.DryRun));
 
             if (request.DryRun)
                 return new SquadLifecycleResult(
@@ -734,6 +740,12 @@ public sealed class SquadLifecycleService : ISquadLifecycleService
                 source,
                 targetRoot,
                 _stateStore.UserPaths.HomeDirectory));
+            warnings.AddRange(AntigravityMcpConfiguration.Ensure(_files,
+                targets,
+                request.Scope,
+                _globalRoots,
+                docsServerCommand: null,
+                request.DryRun));
 
             if (request.DryRun)
                 return new SquadLifecycleResult(
