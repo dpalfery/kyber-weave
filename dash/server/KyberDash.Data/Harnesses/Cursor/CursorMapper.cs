@@ -815,6 +815,7 @@ public partial class CursorMapper : IHarnessMapper
             harnessId,
             null,
             importedAtUtc);
+        CollectedWorkspace? workspace = ResolveWorkspace(unit, problems, harnessId, importedAtUtc);
 
         Dictionary<string, Queue<string>> userMessages = new(StringComparer.Ordinal);
         foreach (CursorBubbleRow row in document.Rows)
@@ -938,12 +939,78 @@ public partial class CursorMapper : IHarnessMapper
                 SessionKey: composerId,
                 HarnessId: harnessId,
                 NativeSessionId: composerId,
-                Workspace: null,
+                Workspace: workspace,
                 Title: null,
                 ReportedUsage: []));
         }
 
         return new CollectedBatch(source, sessions, records, problems);
+    }
+
+    /// <summary>
+    /// Reads the workspace from the <c>workspace.json</c> companion text (D14). Cursor writes
+    /// <c>{"folder": "file:///…"}</c> for a single-folder workspace. A companion that is not JSON, or whose
+    /// <c>folder</c> is not a <c>file:</c> URI, yields no workspace and one warning; a companion without a
+    /// <c>folder</c> (a multi-root workspace names a <c>workspace</c> file instead) yields no workspace.
+    /// </summary>
+    private static CollectedWorkspace? ResolveWorkspace(
+        NativeSourceUnit unit,
+        List<CollectedProblem> problems,
+        string harnessId,
+        DateTimeOffset importedAtUtc)
+    {
+        if (string.IsNullOrWhiteSpace(unit.CompanionText))
+        {
+            return null;
+        }
+
+        string? folder;
+        try
+        {
+            using JsonDocument companion = JsonDocument.Parse(unit.CompanionText);
+            folder = companion.RootElement.ValueKind == JsonValueKind.Object
+                && companion.RootElement.TryGetProperty("folder", out JsonElement folderElement)
+                && folderElement.ValueKind == JsonValueKind.String
+                    ? folderElement.GetString()
+                    : null;
+        }
+        catch (JsonException ex)
+        {
+            problems.AddRange(BuildProblems(
+                [new CursorParseProblem(0, MalformedLineCode, $"Ignoring Cursor workspace file for {unit.Unit.SourceKey}: {ex.Message}")],
+                unit.Unit.SourceKey,
+                harnessId,
+                null,
+                importedAtUtc));
+            return null;
+        }
+
+        if (string.IsNullOrWhiteSpace(folder))
+        {
+            return null;
+        }
+
+        if (!Uri.TryCreate(folder, UriKind.Absolute, out Uri? uri) || !uri.IsFile)
+        {
+            problems.AddRange(BuildProblems(
+                [new CursorParseProblem(0, MalformedLineCode, $"Ignoring Cursor workspace folder for {unit.Unit.SourceKey}: it is not a file: URI.")],
+                unit.Unit.SourceKey,
+                harnessId,
+                null,
+                importedAtUtc));
+            return null;
+        }
+
+        // AbsolutePath keeps the URI's own separators on every OS; a Windows drive path arrives as /C:/x.
+        string path = Uri.UnescapeDataString(uri.AbsolutePath);
+        if (path.Length >= 3 && path[0] == '/' && char.IsAsciiLetter(path[1]) && path[2] == ':')
+        {
+            path = path[1..];
+        }
+
+        return SafeOptionalText(path) is string workingDirectory
+            ? new CollectedWorkspace(workingDirectory, null, null)
+            : null;
     }
 
     private CollectedBatch MapTranscript(

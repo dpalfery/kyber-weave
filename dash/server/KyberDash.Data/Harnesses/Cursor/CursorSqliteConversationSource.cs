@@ -1,5 +1,6 @@
 using System.Globalization;
 using System.Text.Json;
+using KyberDash.Data.Collector;
 using KyberDash.Data.Collector.Sources;
 
 namespace KyberDash.Data.Harnesses.Cursor;
@@ -21,6 +22,11 @@ public sealed class CursorSqliteConversationSource : ISqliteConversationSource
     private const string BubbleUpperBound = "bubbleId;";
     private const string ComposersQueryName = "cursor-composers";
     private const string BubblesQueryName = "cursor-bubbles";
+    private const string WorkspaceComposersQueryName = "cursor-workspace-composers";
+    private const string WorkspaceStorageFolder = "workspaceStorage";
+    private const string WorkspaceDatabaseName = "state.vscdb";
+    private const string WorkspaceFileName = "workspace.json";
+    private const string WorkspaceProblemCode = "CURSOR_WORKSPACE_UNREADABLE";
 
     /// <inheritdoc />
     public IReadOnlyDictionary<string, IReadOnlyList<string>> RequiredColumns { get; } =
@@ -51,6 +57,7 @@ public sealed class CursorSqliteConversationSource : ISqliteConversationSource
             """,
             [BubblePrefix, BubbleUpperBound]);
 
+        Dictionary<string, string> workspaceByComposer = BuildWorkspaceMap(context);
         List<SqliteConversation> conversations = [];
         foreach (IReadOnlyDictionary<string, object?> row in context.Database.Query(query))
         {
@@ -61,10 +68,113 @@ public sealed class CursorSqliteConversationSource : ISqliteConversationSource
                 Id: composerId,
                 RevisionToken: string.Create(CultureInfo.InvariantCulture, $"{bubbleCount}-{maxRowId}"),
                 LastActivityUtc: null,
-                CompanionKey: null));
+                CompanionKey: workspaceByComposer.GetValueOrDefault(composerId)));
         }
 
         return conversations;
+    }
+
+    /// <summary>
+    /// Maps each composer id to the <c>workspace.json</c> of the workspace that claims it (D14). The map is
+    /// built once per listing from every <c>Cursor/User/workspaceStorage/&lt;hash&gt;/state.vscdb</c>, whose
+    /// <c>ItemTable</c> row <c>composer.composerData</c> lists <c>allComposers[].composerId</c>. A workspace
+    /// database that cannot be opened, has no such row, or holds malformed JSON adds one warning and is skipped.
+    /// </summary>
+    private static Dictionary<string, string> BuildWorkspaceMap(SqliteConversationContext context)
+    {
+        Dictionary<string, string> map = new(StringComparer.Ordinal);
+        string? userDirectory = Path.GetDirectoryName(Path.GetDirectoryName(context.DatabasePath));
+        if (string.IsNullOrEmpty(userDirectory))
+        {
+            return map;
+        }
+
+        string storageRoot = Path.Combine(userDirectory, WorkspaceStorageFolder);
+        if (!context.FileSystem.DirectoryExists(storageRoot))
+        {
+            return map;
+        }
+
+        HarnessSqliteQuery query = new(
+            WorkspaceComposersQueryName,
+            "SELECT value FROM ItemTable WHERE key = 'composer.composerData'",
+            []);
+
+        foreach (string hashDirectory in context.FileSystem.EnumerateDirectories(storageRoot).Order(StringComparer.Ordinal))
+        {
+            string databasePath = Path.Combine(hashDirectory, WorkspaceDatabaseName);
+            if (!context.FileSystem.FileExists(databasePath))
+            {
+                continue;
+            }
+
+            string workspaceFile = Path.Combine(hashDirectory, WorkspaceFileName);
+            string? companionKey = context.FileSystem.FileExists(workspaceFile) ? workspaceFile : null;
+            try
+            {
+                IReadOnlyList<string> composerIds = ReadWorkspaceComposerIds(context.Sqlite, databasePath, query);
+                if (companionKey is null)
+                {
+                    continue;
+                }
+
+                foreach (string composerId in composerIds)
+                {
+                    // The first workspace to claim a composer keeps it, so a map is stable across runs.
+                    map.TryAdd(composerId, companionKey);
+                }
+            }
+            catch (Exception ex) when (ex is IOException or InvalidDataException or JsonException or InvalidOperationException)
+            {
+                context.Problems.Add(new CollectedProblem(
+                    ProblemKey: $"cursor-workspace:{databasePath}",
+                    Severity: "warning",
+                    Code: WorkspaceProblemCode,
+                    Message: $"Skipping Cursor workspace database {databasePath}: {ex.Message}",
+                    Location: databasePath,
+                    HarnessId: context.HarnessId));
+            }
+        }
+
+        return map;
+    }
+
+    private static List<string> ReadWorkspaceComposerIds(IHarnessSqliteSource sqlite, string databasePath, HarnessSqliteQuery query)
+    {
+        using IHarnessSqliteDatabase database = sqlite.Open(databasePath);
+        string? value = null;
+        foreach (IReadOnlyDictionary<string, object?> row in database.Query(query))
+        {
+            value = row["value"] as string;
+            break;
+        }
+
+        if (value is null)
+        {
+            throw new InvalidDataException("the ItemTable has no composer.composerData text.");
+        }
+
+        using JsonDocument document = JsonDocument.Parse(value);
+        if (document.RootElement.ValueKind != JsonValueKind.Object
+            || !document.RootElement.TryGetProperty("allComposers", out JsonElement composers)
+            || composers.ValueKind != JsonValueKind.Array)
+        {
+            throw new InvalidDataException("composer.composerData has no allComposers array.");
+        }
+
+        List<string> ids = [];
+        foreach (JsonElement composer in composers.EnumerateArray())
+        {
+            if (composer.ValueKind == JsonValueKind.Object
+                && composer.TryGetProperty("composerId", out JsonElement id)
+                && id.ValueKind == JsonValueKind.String
+                && id.GetString() is { Length: > 0 } composerId)
+            {
+                ids.Add(composerId);
+            }
+        }
+
+        return ids;
     }
 
     /// <inheritdoc />

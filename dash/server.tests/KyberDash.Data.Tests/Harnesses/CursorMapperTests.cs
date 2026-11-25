@@ -519,6 +519,67 @@ public class CursorMapperTests
         Assert.NotEqual(LocalTextTokenizer.Shared.Count(userDoc, null).Count, userPart.Withheld.MeasuredTokens);
     }
 
+    private const string OneBubble = """
+        [
+          {"bubble_key":"bubbleId:composer-9:33333333-3333-3333-3333-333333333333","input_tokens":60,"output_tokens":10,"model":null,"created_at":"2026-09-22T10:01:00.000Z","request_id":null,"user_text":"hello","text_length":5,"bubble_type":1,"context_window":null,"code_blocks":null}
+        ]
+        """;
+
+    [Fact]
+    public void Map_FileFolderCompanionSetsPercentDecodedWorkingDirectory()
+    {
+        NativeSourceUnit unit = MakeNativeUnit("/fake/state.vscdb", OneBubble, "cursor", "cursor-vscdb") with
+        {
+            CompanionText = "{\"folder\":\"file:///Users/x/my%20repo\"}",
+        };
+
+        CollectedBatch batch = new CursorMapper().Map(unit, BaselineUtc);
+
+        CollectedSession session = Assert.Single(batch.Sessions);
+        Assert.Equal("/Users/x/my repo", session.Workspace?.WorkingDirectory);
+        Assert.Empty(batch.Problems);
+    }
+
+    [Fact]
+    public void Map_NoCompanionLeavesNoWorkspace()
+    {
+        NativeSourceUnit unit = MakeNativeUnit("/fake/state.vscdb", OneBubble, "cursor", "cursor-vscdb");
+
+        CollectedBatch batch = new CursorMapper().Map(unit, BaselineUtc);
+
+        Assert.Null(Assert.Single(batch.Sessions).Workspace);
+        Assert.Empty(batch.Problems);
+    }
+
+    [Fact]
+    public void Map_NonFileFolderCompanionLeavesNoWorkspaceAndOneWarning()
+    {
+        NativeSourceUnit unit = MakeNativeUnit("/fake/state.vscdb", OneBubble, "cursor", "cursor-vscdb") with
+        {
+            CompanionText = "{\"folder\":\"vscode-remote://host/repo\"}",
+        };
+
+        CollectedBatch batch = new CursorMapper().Map(unit, BaselineUtc);
+
+        Assert.Null(Assert.Single(batch.Sessions).Workspace);
+        CollectedProblem problem = Assert.Single(batch.Problems);
+        Assert.Equal("warning", problem.Severity);
+    }
+
+    [Fact]
+    public void Map_MalformedCompanionLeavesNoWorkspaceAndOneWarning()
+    {
+        NativeSourceUnit unit = MakeNativeUnit("/fake/state.vscdb", OneBubble, "cursor", "cursor-vscdb") with
+        {
+            CompanionText = "{not json",
+        };
+
+        CollectedBatch batch = new CursorMapper().Map(unit, BaselineUtc);
+
+        Assert.Null(Assert.Single(batch.Sessions).Workspace);
+        Assert.Equal("warning", Assert.Single(batch.Problems).Severity);
+    }
+
     private static NativeSourceUnit MakeNativeUnit(string path, string? rawText, string harnessId, string format)
     {
         long sizeBytes = rawText is null ? 0 : Encoding.UTF8.GetByteCount(rawText);
