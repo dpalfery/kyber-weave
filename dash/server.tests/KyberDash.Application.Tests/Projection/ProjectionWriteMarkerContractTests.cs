@@ -129,7 +129,7 @@ public class ProjectionWriteMarkerContractTests : IDisposable
         Assert.Equal(passStartMarker, store.Operational.GetProjectionState()?.RecordsMarker);
         Assert.False(engine.IsProjectionCurrent());
 
-        ProjectionPassReport next = engine.ProjectIncremental();
+        ProjectionPassReport next = NewService(store).ProjectIncremental();
 
         Assert.Contains("sess-a", next.RebuiltKeys);
         Assert.Equal(3, store.Projections.GetSessionProjection("sess-a")?.SpanCount);
@@ -174,7 +174,7 @@ public class ProjectionWriteMarkerContractTests : IDisposable
         Assert.Equal(store.Operational.GetWriteMarker(), dirty.ToSeq);
         Assert.Equal(["sess-big", "sess-small"], dirty.Keys!.Order(StringComparer.Ordinal));
 
-        ProjectionPassReport next = engine.ProjectIncremental();
+        ProjectionPassReport next = NewService(store).ProjectIncremental();
 
         Assert.Contains("sess-small", next.RebuiltKeys);
         Assert.Contains("sess-big", next.RebuiltKeys);
