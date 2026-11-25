@@ -487,6 +487,33 @@ public sealed class ClaudeBackgroundReturnTests : IDisposable
         Assert.Equal("delegate.returned", post.Trigger);
     }
 
+    /// <summary>
+    /// The log store reports an unreadable ledger as data, not as an exception. A return whose headers cannot be read
+    /// back for that reason is judged from its saved prompt, and the log says why.
+    /// </summary>
+    [Fact]
+    public void ABackgroundReturnWhoseLedgerCannotBeRead_LogsThatItsHeadersWereNotRestored()
+    {
+        Dispatch("T2", "toolu-1");
+        Advance();
+        Send(new
+        {
+            hook_event_name = "PostToolUse",
+            session_id = Session,
+            cwd = _host.RepoRoot,
+            tool_name = "Agent",
+            tool_input = new { description = "T2", prompt = "<task>\nWork on T2.\n</task>", subagent_type = "dev-easy", run_in_background = true },
+            tool_use_id = "toolu-1",
+            tool_response = new { status = "async_launched", agentId = "agent-1", content = Array.Empty<string>() },
+        });
+        Advance();
+        _host.State.Log.UnreadablePaths.Add(_host.Ledger.FilePath);
+
+        (_, string log) = Handback("agent-1", "<task>done</task>");
+
+        Assert.Contains("could not be read back", log, StringComparison.Ordinal);
+    }
+
     /// <summary>An engine that follows one agent and answers its return with a note.</summary>
     private sealed class NotingEngine : IHookDecisionEngine, IBackgroundDispatchEngine
     {

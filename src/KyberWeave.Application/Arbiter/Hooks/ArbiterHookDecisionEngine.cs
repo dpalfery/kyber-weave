@@ -354,20 +354,30 @@ public sealed class ArbiterHookDecisionEngine : IContextualHookDecisionEngine, I
         }
 
         // The headers only sharpen the classification: a ledger that cannot be read, or whose read window no longer
-        // holds the pre event, leaves the return judged from its prompt as it was saved.
+        // holds the pre event, leaves the return judged from its prompt as it was saved, and says so once. The log
+        // store reports an unreadable file as data rather than throwing, so the read's own diagnostics are checked.
         ArbiterLedgerHeaders? headers;
+        string? missing;
         try
         {
-            headers = _state.OpenLedger(arbiterDirectory).ReadAll()
-                .FirstOrDefault(e => e.Phase == ArbiterLedgerPhases.Pre && string.Equals(e.Id, preId, StringComparison.Ordinal))
-                ?.Headers;
+            ArbiterLogRead<ArbiterLedgerEvent> read = _state.OpenLedger(arbiterDirectory).ReadAllWithDiagnostics();
+            ArbiterLedgerEvent? pre = read.Records.FirstOrDefault(e =>
+                e.Phase == ArbiterLedgerPhases.Pre && string.Equals(e.Id, preId, StringComparison.Ordinal));
+            headers = pre?.Headers;
+            missing = read.Unreadable is { } unreadable ? OneLine(unreadable)
+                : pre is null && read.Truncated ? "its pre event is older than the ledger window that was read"
+                : null;
         }
         catch (Exception exception) when (FileFailure.Is(exception))
         {
+            headers = null;
+            missing = OneLine(exception.Message);
+        }
+
+        if (missing is not null)
+        {
             context.Log.WriteLine($"Arbiter: the routing headers of dispatch {preId} could not be read back for its " +
-                $"return ({OneLine(exception.Message)}); the return is judged from its saved prompt and may be recorded " +
-                "with no caller.");
-            return prompt;
+                $"return ({missing}); the return is judged from its saved prompt and may be recorded with no caller.");
         }
 
         if (headers is null)
