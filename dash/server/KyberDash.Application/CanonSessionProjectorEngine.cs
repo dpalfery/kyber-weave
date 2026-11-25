@@ -135,8 +135,8 @@ public partial class CanonSessionProjectorEngine
     private static partial Regex InvokeAgentNameRegex();
 
     /// <summary>
-    /// Collapses same-turn twin observations across ID joins, exact-counter clusters, and
-    /// evidenced Cursor overlap shares without mutating input records.
+    /// Collapses same-turn twin observations across ID joins, one-to-one Codex counter pairs,
+    /// exact-counter clusters, and evidenced Cursor overlap shares without mutating input records.
     /// </summary>
     /// <param name="records">Candidate canonical records.</param>
     /// <param name="shareKey">Fallback session key used when a record has no <see cref="CanonicalRecord.SessionId"/>.</param>
@@ -154,7 +154,7 @@ public partial class CanonSessionProjectorEngine
         HashSet<CanonicalRecord> dropped = new(ReferenceEqualityComparer.Instance);
         Dictionary<CanonicalRecord, CanonicalRecord> transplant = new(ReferenceEqualityComparer.Instance);
         HashSet<CanonicalRecord> idJoined = CollapseIdJoins(records, shareKey, dropped, transplant);
-        CollapseCodexFileModelCalls(records, shareKey, dropped);
+        HashSet<CanonicalRecord> codexPaired = PairCodexFileModelCalls(records, shareKey, dropped, transplant);
 
         Dictionary<string, List<CanonicalRecord>> byCounter = new(StringComparer.Ordinal);
         foreach (CanonicalRecord record in records)
@@ -164,7 +164,7 @@ public partial class CanonSessionProjectorEngine
                 continue;
             }
 
-            if (idJoined.Contains(record))
+            if (idJoined.Contains(record) || codexPaired.Contains(record))
             {
                 continue;
             }
@@ -1087,46 +1087,79 @@ public partial class CanonSessionProjectorEngine
     }
 
     /// <summary>
-    /// Collapses a Codex session's rollout-file model calls when OTLP observed that session's model
-    /// calls, per the ADR 0009 source-precedence rule (the OTel row is the turn; values are never
-    /// summed across sources for the same turn; the file row supplies only what OTLP lacks). Codex
-    /// OTel carries no per-model-call id — its <c>auth.request_id</c> names an auth request — so
-    /// the two sources cannot be id-joined per turn and the precedence is per session instead: a
-    /// session with OTLP model calls counts only those, while its file records still supply what
-    /// OTLP lacks (tool calls by <c>call_id</c>), and a session only the file observed keeps the
-    /// file's model calls.
+    /// Pairs Codex rollout-file model calls with the OTLP model calls that observed the same turn,
+    /// on data both sources carry (D21). Codex OTel carries no per-model-call id — its
+    /// <c>auth.request_id</c> names an auth request — so the pairing data is the reported counters:
+    /// same session, equal <see cref="CounterKey"/>, timestamps within
+    /// <see cref="TwinTurnMaxSkewMs"/>, and strictly one OTLP call per file call. Within each
+    /// counter group, each file call in timestamp order pairs with the earliest unpaired OTLP call
+    /// within the skew. A paired file call is dropped and, when it has parts, donates them to its
+    /// OTLP call (the OTel row is the turn; the file row supplies only what OTLP lacks). An unpaired
+    /// call of either source stays a turn; nothing pairs by timestamp or turn order alone.
     /// </summary>
     /// <param name="records">Candidate canonical records.</param>
     /// <param name="shareKey">Fallback session key used when a record has no <see cref="CanonicalRecord.SessionId"/>.</param>
-    /// <param name="dropped">Records whose file-source model calls the precedence removes.</param>
-    private static void CollapseCodexFileModelCalls(
+    /// <param name="dropped">Receives each paired file model call.</param>
+    /// <param name="transplant">Receives each paired file model call with parts, keyed by its OTLP call.</param>
+    /// <returns>Every Codex model call with reported counters, paired or not, so the shared counter-cluster path skips it.</returns>
+    private static HashSet<CanonicalRecord> PairCodexFileModelCalls(
         IReadOnlyList<CanonicalRecord> records,
         string? shareKey,
-        HashSet<CanonicalRecord> dropped)
+        HashSet<CanonicalRecord> dropped,
+        Dictionary<CanonicalRecord, CanonicalRecord> transplant)
     {
-        HashSet<string> sessionsWithOtelModelCalls = new(StringComparer.Ordinal);
+        HashSet<CanonicalRecord> handled = new(ReferenceEqualityComparer.Instance);
+        Dictionary<string, (List<CanonicalRecord> Otels, List<CanonicalRecord> Files)> groups = new(StringComparer.Ordinal);
         foreach (CanonicalRecord record in records)
         {
-            if (IsCodexModelCall(record) && !IsFileSource(record.Source))
+            if (!IsCodexModelCall(record) || IsUnreportedCounters(record.Tokens))
             {
-                sessionsWithOtelModelCalls.Add(SessionKeyOf(record, shareKey));
+                continue;
+            }
+
+            handled.Add(record);
+            string key = CounterKey(record, shareKey);
+            if (!groups.TryGetValue(key, out (List<CanonicalRecord> Otels, List<CanonicalRecord> Files) group))
+            {
+                group = ([], []);
+                groups[key] = group;
+            }
+
+            (IsFileSource(record.Source) ? group.Files : group.Otels).Add(record);
+        }
+
+        foreach ((List<CanonicalRecord> otels, List<CanonicalRecord> files) in groups.Values)
+        {
+            if (otels.Count == 0 || files.Count == 0)
+            {
+                continue;
+            }
+
+            otels.Sort(CompareRecordTimestamps);
+            files.Sort(CompareRecordTimestamps);
+            HashSet<CanonicalRecord> pairedOtels = new(ReferenceEqualityComparer.Instance);
+            foreach (CanonicalRecord file in files)
+            {
+                double moment = RecordTimestampMs(file);
+                CanonicalRecord? otel = otels.Find(o =>
+                    !pairedOtels.Contains(o) && Math.Abs(RecordTimestampMs(o) - moment) <= TwinTurnMaxSkewMs);
+                if (otel is null)
+                {
+                    continue;
+                }
+
+                pairedOtels.Add(otel);
+                dropped.Add(file);
+                if (HasParts(file))
+                {
+                    transplant[otel] = transplant.TryGetValue(otel, out CanonicalRecord? existing)
+                        ? MergeDonors(existing, file)
+                        : file;
+                }
             }
         }
 
-        if (sessionsWithOtelModelCalls.Count == 0)
-        {
-            return;
-        }
-
-        foreach (CanonicalRecord record in records)
-        {
-            if (IsCodexModelCall(record)
-                && IsFileSource(record.Source)
-                && sessionsWithOtelModelCalls.Contains(SessionKeyOf(record, shareKey)))
-            {
-                dropped.Add(record);
-            }
-        }
+        return handled;
     }
 
     private static bool IsCodexModelCall(CanonicalRecord record) =>
