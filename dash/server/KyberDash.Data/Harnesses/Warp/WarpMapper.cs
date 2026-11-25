@@ -329,8 +329,23 @@ public class WarpMapper : IHarnessMapper
 
         exchanges.Sort(static (a, b) => a.StartedAt.CompareTo(b.StartedAt));
 
-        (IReadOnlyList<CollectedModelUsage> reportedUsage, string dominantModel) =
+        (IReadOnlyList<CollectedModelUsage> reportedUsage, string dominantModel, bool usageOverflowed) =
             ExtractConversationUsage(document.Conversation.ConversationData);
+        if (usageOverflowed)
+        {
+            problems.Add(new CollectedProblem(
+                string.Create(CultureInfo.InvariantCulture, $"warp-malformed:{unit.Unit.SourceKey}:token-usage-overflow"),
+                "warning",
+                MalformedDocumentCode,
+                "Warp reported token usage larger than a 64-bit count; the conversation's token usage is left not measured.",
+                null,
+                unit.Unit.SourceKey,
+                null,
+                WarpHarnessId,
+                importedAtUtc.ToUniversalTime().ToString("yyyy-MM-dd'T'HH:mm:ss.fff'Z'", CultureInfo.InvariantCulture),
+                null));
+        }
+
         IReadOnlyDictionary<string, IReadOnlyList<WarpBlockRow>> blocksByExchange =
             AssignCommandBlocksToExchanges(document.Blocks, exchanges);
 
@@ -543,14 +558,16 @@ public class WarpMapper : IHarnessMapper
     /// full <c>warp_tokens</c> plus <c>byok_tokens</c>, every category included (the owner's
     /// decision: a conversation's cost covers its helper models, not only the primary agent). Entries for the same model are summed,
     /// which is arithmetic on reported values, not an estimate. An entry with no model id is
-    /// attributed to the dominant model (or <c>warp-auto-efficient</c> when none is known). No
+    /// attributed to the dominant model, the named model with the largest single entry (or
+    /// <c>warp-auto-efficient</c> when no entry names one). A total past <see cref="long.MaxValue"/> cannot be
+    /// stored, so the conversation then reports no rows and the overflow flag is set for a problem. No
     /// reported usage yields no rows: the figure is then not measured. Warp reports one total per
     /// model with no input/output split, so the rows are the <c>total</c> token class, never
     /// <c>input</c> (decision D15).
     /// </remarks>
     /// <param name="conversationData">The conversation's <c>conversation_data</c> JSON.</param>
-    /// <returns>Per-model usage rows at snapshot position 0, and the normalized dominant model.</returns>
-    private static (IReadOnlyList<CollectedModelUsage> Usage, string DominantModel) ExtractConversationUsage(string conversationData)
+    /// <returns>Per-model usage rows at snapshot position 0, the normalized dominant model, and whether a total overflowed.</returns>
+    private static (IReadOnlyList<CollectedModelUsage> Usage, string DominantModel, bool Overflowed) ExtractConversationUsage(string conversationData)
     {
         JsonDocument document;
         try
@@ -559,7 +576,7 @@ public class WarpMapper : IHarnessMapper
         }
         catch (JsonException)
         {
-            return ([], string.Empty);
+            return ([], string.Empty, false);
         }
 
         using (document)
@@ -570,7 +587,7 @@ public class WarpMapper : IHarnessMapper
                 || !usageMetadataEl.TryGetProperty("token_usage", out JsonElement tokenUsageEl)
                 || tokenUsageEl.ValueKind != JsonValueKind.Array)
             {
-                return ([], string.Empty);
+                return ([], string.Empty, false);
             }
 
             long dominantTokens = 0L;
@@ -584,7 +601,14 @@ public class WarpMapper : IHarnessMapper
                     continue;
                 }
 
-                long entryTotal = ReadSafeLong(entry, "warp_tokens") + ReadSafeLong(entry, "byok_tokens");
+                long warpTokens = ReadSafeLong(entry, "warp_tokens");
+                long byokTokens = ReadSafeLong(entry, "byok_tokens");
+                if (warpTokens > long.MaxValue - byokTokens)
+                {
+                    return ([], string.Empty, true);
+                }
+
+                long entryTotal = warpTokens + byokTokens;
 
                 string? reportedModel = entry.TryGetProperty("model_id", out JsonElement modelEl)
                     && modelEl.ValueKind == JsonValueKind.String
@@ -592,10 +616,10 @@ public class WarpMapper : IHarnessMapper
                     : null;
                 entries.Add((reportedModel, entryTotal));
 
-                if (entryTotal > dominantTokens)
+                if (reportedModel is not null && entryTotal > dominantTokens)
                 {
                     dominantTokens = entryTotal;
-                    dominantModel = reportedModel ?? dominantModel;
+                    dominantModel = reportedModel;
                 }
             }
 
@@ -617,6 +641,11 @@ public class WarpMapper : IHarnessMapper
 
                 if (countsByModel.TryGetValue(normalized, out long existing))
                 {
+                    if (existing > long.MaxValue - count)
+                    {
+                        return ([], string.Empty, true);
+                    }
+
                     countsByModel[normalized] = existing + count;
                 }
                 else
@@ -630,7 +659,7 @@ public class WarpMapper : IHarnessMapper
             [
                 .. modelOrder.Select(model => new CollectedModelUsage(0, model, TokenClass.Total, countsByModel[model])),
             ];
-            return (usage, normalizedDominant);
+            return (usage, normalizedDominant, false);
         }
     }
 
@@ -883,25 +912,6 @@ public class WarpMapper : IHarnessMapper
         return 0;
     }
 
-    private static long ReadSafeLong(JsonElement element)
-    {
-        if (element.ValueKind != JsonValueKind.Number)
-        {
-            return 0;
-        }
-
-        if (element.TryGetInt64(out long value) && value > 0)
-        {
-            return value;
-        }
-
-        if (element.TryGetDouble(out double doubleVal) && double.IsFinite(doubleVal) && doubleVal > 0)
-        {
-            return (long)doubleVal;
-        }
-
-        return 0;
-    }
 
     private static string? ReadOptionalString(JsonElement obj, string key) =>
         HarnessJson.ReadOptionalString(obj, key);

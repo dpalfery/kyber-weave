@@ -560,6 +560,49 @@ public class DevinWarpMapperTests
     }
 
     [Fact]
+    public void Map_EntryWithNoModelAndTheLargestTotal_GoesToTheLargestNamedModel()
+    {
+        string rawText = BuildWarpExport(
+            conversationData: """{"conversation_usage_metadata":{"token_usage":[{"warp_tokens":300,"byok_tokens":0},{"model_id":"Claude Haiku 4.5","warp_tokens":90,"byok_tokens":0}]}}""",
+            queries:
+            [
+                ("ex-1", "2026-05-18 10:00:00.000000", """[{"Query":{"text":"prompt"}}]""", "auto-efficient", null, "\"Completed\""),
+            ],
+            blocks: [],
+            conversationId: "conv-6");
+
+        CollectedBatch batch = new WarpMapper().Map(
+            MakeNativeUnit("warp", "/home/u/Library/warp.sqlite#conv-6", rawText),
+            BaselineUtc);
+
+        CollectedSession session = Assert.Single(batch.Sessions);
+        Assert.Equal([new CollectedModelUsage(0, "claude-haiku-4-5", TokenClass.Total, 390L)], session.ReportedUsage);
+        Assert.Equal("claude-haiku-4-5", Assert.Single(batch.Records).Model);
+    }
+
+    [Fact]
+    public void Map_TokenTotalPastLongMax_RecordsAProblemAndReportsNoUsage()
+    {
+        string rawText = BuildWarpExport(
+            conversationData: """{"conversation_usage_metadata":{"token_usage":[{"model_id":"Claude Haiku 4.5","warp_tokens":9223372036854775807,"byok_tokens":1}]}}""",
+            queries:
+            [
+                ("ex-1", "2026-05-18 10:00:00.000000", """[{"Query":{"text":"prompt"}}]""", "auto-efficient", null, "\"Completed\""),
+            ],
+            blocks: [],
+            conversationId: "conv-7");
+
+        CollectedBatch batch = new WarpMapper().Map(
+            MakeNativeUnit("warp", "/home/u/Library/warp.sqlite#conv-7", rawText),
+            BaselineUtc);
+
+        Assert.Empty(Assert.Single(batch.Sessions).ReportedUsage);
+        CollectedProblem problem = Assert.Single(batch.Problems);
+        Assert.Equal(WarpMapper.MalformedDocumentCode, problem.Code);
+        Assert.Contains("token", problem.Message, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
     public void Map_AttributesCommandBlocksToNearestPrecedingExchange()
     {
         string rawText = BuildWarpExport(
