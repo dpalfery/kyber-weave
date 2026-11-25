@@ -643,6 +643,40 @@ public class DevinWarpMapperTests
         Assert.Equal(WarpMapper.MalformedDocumentCode, problem.Code);
     }
 
+    [Fact]
+    public void Map_NullWarpPayload_EmitsOneWarningProblemNamingTheSourceKey()
+    {
+        const string sourceKey = "/home/u/Library/warp.sqlite:conv-7";
+        NativeSourceUnit unit = new(
+            new SourceUnit("warp", sourceKey, "warp", "warp-reader", "1", "warp-test", "warp", "1-1", BaselineUtc, 0),
+            RawText: null,
+            SizeBytes: 0,
+            LastWriteUtc: BaselineUtc);
+
+        CollectedBatch batch = new WarpMapper().Map(unit, BaselineUtc);
+
+        Assert.Empty(batch.Records);
+        Assert.Empty(batch.Sessions);
+        CollectedProblem problem = Assert.Single(batch.Problems);
+        Assert.Equal("warning", problem.Severity);
+        Assert.Equal(WarpMapper.MalformedDocumentCode, problem.Code);
+        Assert.Contains(sourceKey, problem.Location, StringComparison.Ordinal);
+    }
+
+    [Theory]
+    [InlineData(" ")]
+    [InlineData("\n\t")]
+    public void Map_WhitespaceWarpPayload_ReturnsEmptyBatchWithoutProblems(string rawText)
+    {
+        CollectedBatch batch = new WarpMapper().Map(
+            MakeNativeUnit("warp", "/home/u/Library/warp.sqlite:conv-8", rawText),
+            BaselineUtc);
+
+        Assert.Empty(batch.Records);
+        Assert.Empty(batch.Sessions);
+        Assert.Empty(batch.Problems);
+    }
+
     [Theory]
     [InlineData("Claude Sonnet 4.6", "claude-sonnet-4-6")]
     [InlineData("Claude Haiku 4.5", "claude-haiku-4-5")]

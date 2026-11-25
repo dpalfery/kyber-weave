@@ -267,6 +267,19 @@ public class WarpMapper : IHarnessMapper
         ArgumentNullException.ThrowIfNull(unit.Unit);
 
         CollectedSource source = new(WarpHarnessId, unit.Unit.Kind, unit.Unit.SourceKey);
+        if (unit.RawText is null)
+        {
+            // A missing payload is not an empty conversation: the source key is named so the gap can be traced.
+            List<WarpParseProblem> missing =
+            [
+                new WarpParseProblem(
+                    0,
+                    MalformedDocumentCode,
+                    string.Create(CultureInfo.InvariantCulture, $"Skipping Warp source {unit.Unit.SourceKey}: no payload text was read.")),
+            ];
+            return new CollectedBatch(source, [], [], BuildProblems(missing, unit.Unit.SourceKey, importedAtUtc));
+        }
+
         if (string.IsNullOrWhiteSpace(unit.RawText))
         {
             return new CollectedBatch(source, [], [], []);
