@@ -18,6 +18,11 @@ function renderPager(props: Partial<Parameters<typeof Pager>[0]> = {}) {
       page={props.page ?? 1}
       limit={props.limit ?? 25}
       total={props.total ?? 100}
+      limitOptions={props.limitOptions}
+      onLimitChange={props.onLimitChange}
+      order={props.order}
+      onOrderChange={props.onOrderChange}
+      orderLabels={props.orderLabels}
       loading={props.loading}
       ariaLabel={props.ariaLabel ?? 'Sessions pages'}
       onPageChange={onPageChange}
@@ -107,5 +112,79 @@ describe('Pager', () => {
       expect(button.getAttribute('type')).toBe('button')
       expect(button).not.toHaveProperty('tabIndex', -1)
     }
+  })
+
+  it('renders reachable limit selector and sort toggle when total > 0 and callbacks are supplied on a single page', () => {
+    const onLimitChange = vi.fn()
+    const onOrderChange = vi.fn()
+    renderPager({
+      page: 1,
+      limit: 25,
+      total: 10,
+      limitOptions: [25, 50, 100],
+      onLimitChange,
+      order: 'desc',
+      onOrderChange,
+    })
+
+    const nav = screen.getByTestId('list-pager')
+    expect(nav).not.toBeNull()
+    expect(screen.queryByTestId('pager-prev')).toBeNull()
+    expect(screen.queryByTestId('pager-next')).toBeNull()
+
+    const select = screen.getByTestId('pager-limit') as HTMLSelectElement
+    expect(select.value).toBe('25')
+    fireEvent.change(select, { target: { value: '50' } })
+    expect(onLimitChange).toHaveBeenCalledExactlyOnceWith(50)
+
+    const orderButton = screen.getByTestId('pager-order')
+    expect(orderButton.textContent).toBe('Newest first')
+    fireEvent.click(orderButton)
+    expect(onOrderChange).toHaveBeenCalledExactlyOnceWith('asc')
+  })
+
+  it('still hides when total is 0 even when limit and order callbacks are supplied', () => {
+    const { container } = renderPager({
+      page: 1,
+      limit: 25,
+      total: 0,
+      limitOptions: [25, 50, 100],
+      onLimitChange: vi.fn(),
+      order: 'desc',
+      onOrderChange: vi.fn(),
+    })
+    expect(container.children).toHaveLength(0)
+  })
+
+  it('toggles from asc back to desc and supports custom orderLabels', () => {
+    const onOrderChange = vi.fn()
+    renderPager({
+      page: 1,
+      limit: 25,
+      total: 12,
+      order: 'asc',
+      onOrderChange,
+      orderLabels: { desc: 'Highest cost', asc: 'Lowest cost' },
+    })
+
+    const orderButton = screen.getByTestId('pager-order')
+    expect(orderButton.textContent).toBe('Lowest cost')
+    fireEvent.click(orderButton)
+    expect(onOrderChange).toHaveBeenCalledExactlyOnceWith('desc')
+  })
+
+  it('disables limit selector and sort toggle while loading', () => {
+    renderPager({
+      page: 1,
+      limit: 25,
+      total: 10,
+      limitOptions: [25, 50, 100],
+      onLimitChange: vi.fn(),
+      order: 'desc',
+      onOrderChange: vi.fn(),
+      loading: true,
+    })
+    expect(screen.getByTestId('pager-limit')).toHaveProperty('disabled', true)
+    expect(screen.getByTestId('pager-order')).toHaveProperty('disabled', true)
   })
 })

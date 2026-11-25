@@ -1,11 +1,19 @@
+import {
+  KYBER_SECTION_PAGE_LIMITS,
+  type KyberSectionPageLimit,
+  type KyberSectionPageOrder,
+} from '../../lib/kyberApi.js'
+
 /**
- * The one pager every paged list shares: previous, next and page numbers,
- * computed from the window the server answered under.
+ * The one pager every paged list shares: previous, next, page numbers, and
+ * optional page-size and sort-order controls, computed from the window the
+ * server answered under.
  *
- * Nothing renders while every row fits one page — a list the server served
- * whole has nothing to page — and every control disables while the page it
- * points at is loading, so one press cannot answer twice. The controls are
- * real buttons, so they are reachable and operable by keyboard.
+ * Nothing renders when the list is empty (`total <= 0`), or when every row fits
+ * one page and neither page-size nor sort controls are provided. Every control
+ * disables while the page it points at is loading, so one press cannot answer
+ * twice. The controls are real buttons and selects, so they are reachable and
+ * operable by keyboard.
  */
 export interface PagerProps {
   /** The one-based page the list is showing. */
@@ -16,6 +24,16 @@ export interface PagerProps {
   total: number
   /** Reports the page the user navigated to. */
   onPageChange: (page: number) => void
+  /** Available page-size options when the pager renders a size selector. */
+  limitOptions?: readonly number[]
+  /** Reports a newly selected page size. */
+  onLimitChange?: (limit: KyberSectionPageLimit) => void
+  /** Current sort order when the pager renders a sort toggle. */
+  order?: KyberSectionPageOrder
+  /** Reports a toggled sort order. */
+  onOrderChange?: (order: KyberSectionPageOrder) => void
+  /** Custom labels for the sort toggle button (`desc` and `asc`). */
+  orderLabels?: { desc: string; asc: string }
   /** True while the page this pager points at is loading. */
   loading?: boolean
   /** What this pager pages; names the nav for screen readers. */
@@ -50,63 +68,113 @@ export function Pager({
   limit,
   total,
   onPageChange,
+  limitOptions,
+  onLimitChange,
+  order = 'desc',
+  onOrderChange,
+  orderLabels = { desc: 'Newest first', asc: 'Oldest first' },
   loading = false,
   ariaLabel = 'Pagination',
 }: PagerProps) {
-  if (limit <= 0 || total <= limit) return null
+  const showPageButtons = limit > 0 && total > limit
+  const resolvedLimitOptions = limitOptions ?? KYBER_SECTION_PAGE_LIMITS
+  const showLimitSelect = onLimitChange !== undefined && resolvedLimitOptions.length > 0
+  const showOrderToggle = onOrderChange !== undefined
+  const hasControls = showLimitSelect || showOrderToggle
+
+  if (limit <= 0 || total <= 0) return null
+  if (!showPageButtons && !hasControls) return null
+
   const pageCount = Math.max(1, Math.ceil(total / limit))
   const current = Math.min(Math.max(page, 1), pageCount)
+  const nextOrder: KyberSectionPageOrder = order === 'desc' ? 'asc' : 'desc'
 
   return (
     <nav
       aria-label={ariaLabel}
       data-testid="list-pager"
-      className="flex items-center justify-center gap-1.5 border-t border-border px-4 py-2"
+      className="flex flex-wrap items-center justify-center gap-1.5 border-t border-border px-4 py-2"
     >
-      <button
-        type="button"
-        data-testid="pager-prev"
-        aria-label="Previous page"
-        disabled={current <= 1 || loading}
-        onClick={() => onPageChange(current - 1)}
-        className="rounded px-2 py-1 text-xs text-tertiary-foreground transition-colors hover:bg-interactive-secondary hover:text-foreground disabled:cursor-not-allowed disabled:opacity-40"
-      >
-        Previous
-      </button>
-      {pagerSlots(current, pageCount).map((slot, index) =>
-        slot.kind === 'gap' ? (
-          <span key={`gap-${index}`} aria-hidden="true" className="px-1 text-xs text-tertiary-foreground">
-            …
-          </span>
-        ) : (
+      {showPageButtons && (
+        <>
           <button
-            key={`page-${slot.page}`}
             type="button"
-            data-testid={`pager-page-${slot.page}`}
-            aria-label={`Page ${slot.page}`}
-            aria-current={slot.page === current ? 'page' : undefined}
-            disabled={loading && slot.page !== current}
-            onClick={() => onPageChange(slot.page)}
-            className={
-              slot.page === current
-                ? 'rounded bg-interactive-secondary px-2 py-1 text-xs font-semibold text-foreground'
-                : 'rounded px-2 py-1 text-xs text-tertiary-foreground transition-colors hover:bg-interactive-secondary hover:text-foreground disabled:cursor-not-allowed disabled:opacity-40'
-            }
+            data-testid="pager-prev"
+            aria-label="Previous page"
+            disabled={current <= 1 || loading}
+            onClick={() => onPageChange(current - 1)}
+            className="rounded px-2 py-1 text-xs text-tertiary-foreground transition-colors hover:bg-interactive-secondary hover:text-foreground disabled:cursor-not-allowed disabled:opacity-40"
           >
-            {slot.page}
+            Previous
           </button>
-        ),
+          {pagerSlots(current, pageCount).map((slot, index) =>
+            slot.kind === 'gap' ? (
+              <span key={`gap-${index}`} aria-hidden="true" className="px-1 text-xs text-tertiary-foreground">
+                …
+              </span>
+            ) : (
+              <button
+                key={`page-${slot.page}`}
+                type="button"
+                data-testid={`pager-page-${slot.page}`}
+                aria-label={`Page ${slot.page}`}
+                aria-current={slot.page === current ? 'page' : undefined}
+                disabled={loading && slot.page !== current}
+                onClick={() => onPageChange(slot.page)}
+                className={
+                  slot.page === current
+                    ? 'rounded bg-interactive-secondary px-2 py-1 text-xs font-semibold text-foreground'
+                    : 'rounded px-2 py-1 text-xs text-tertiary-foreground transition-colors hover:bg-interactive-secondary hover:text-foreground disabled:cursor-not-allowed disabled:opacity-40'
+                }
+              >
+                {slot.page}
+              </button>
+            ),
+          )}
+          <button
+            type="button"
+            data-testid="pager-next"
+            aria-label="Next page"
+            disabled={current >= pageCount || loading}
+            onClick={() => onPageChange(current + 1)}
+            className="rounded px-2 py-1 text-xs text-tertiary-foreground transition-colors hover:bg-interactive-secondary hover:text-foreground disabled:cursor-not-allowed disabled:opacity-40"
+          >
+            Next
+          </button>
+        </>
       )}
-      <button
-        type="button"
-        data-testid="pager-next"
-        aria-label="Next page"
-        disabled={current >= pageCount || loading}
-        onClick={() => onPageChange(current + 1)}
-        className="rounded px-2 py-1 text-xs text-tertiary-foreground transition-colors hover:bg-interactive-secondary hover:text-foreground disabled:cursor-not-allowed disabled:opacity-40"
-      >
-        Next
-      </button>
+      {showLimitSelect && (
+        <select
+          aria-label="Rows per page"
+          data-testid="pager-limit"
+          value={String(limit)}
+          disabled={loading}
+          onChange={(event) => {
+            const parsed = Number(event.target.value)
+            if (parsed === 25 || parsed === 50 || parsed === 100) {
+              onLimitChange(parsed)
+            }
+          }}
+          className="rounded border border-border bg-card px-2 py-1 text-xs text-foreground transition-colors hover:bg-interactive-secondary disabled:cursor-not-allowed disabled:opacity-40"
+        >
+          {resolvedLimitOptions.map((option) => (
+            <option key={option} value={String(option)}>
+              {option} / page
+            </option>
+          ))}
+        </select>
+      )}
+      {showOrderToggle && (
+        <button
+          type="button"
+          data-testid="pager-order"
+          disabled={loading}
+          onClick={() => onOrderChange(nextOrder)}
+          className="rounded border border-border bg-card px-2 py-1 text-xs text-tertiary-foreground transition-colors hover:bg-interactive-secondary hover:text-foreground disabled:cursor-not-allowed disabled:opacity-40"
+        >
+          {orderLabels[order]}
+        </button>
+      )}
     </nav>
   )
 }

@@ -20,15 +20,15 @@ import { formatDuration } from '../lib/labels.js'
 const SESSION_ID = 'sess-abc-123'
 
 const SUMMARY_ROUTE = `/api/kyber/session/${SESSION_ID}/summary`
-const CHARTS_ROUTE = `/api/kyber/session/${SESSION_ID}/charts`
-const TOOLS_ROUTE = `/api/kyber/session/${SESSION_ID}/tools?page=1&limit=25`
-const SERVERS_ROUTE = `/api/kyber/session/${SESSION_ID}/servers?page=1&limit=25`
-const SKILLS_ROUTE = `/api/kyber/session/${SESSION_ID}/skills?page=1&limit=25`
-const KW_SKILLS_ROUTE = `/api/kyber/session/${SESSION_ID}/kw-skills?page=1&limit=25`
-const TIMELINE_ROUTE = `/api/kyber/session/${SESSION_ID}/timeline?page=1&limit=25`
-const REQUESTS_ROUTE = `/api/kyber/session/${SESSION_ID}/requests?page=1&limit=25`
-const RECONCILIATION_ROUTE = `/api/kyber/session/${SESSION_ID}/reconciliation?page=1&limit=25`
-const PROBLEMS_ROUTE = `/api/kyber/session/${SESSION_ID}/problems?page=1&limit=25`
+const CHARTS_ROUTE = `/api/kyber/session/${SESSION_ID}/charts?page=1&limit=25&order=desc`
+const TOOLS_ROUTE = `/api/kyber/session/${SESSION_ID}/tools?page=1&limit=25&order=desc`
+const SERVERS_ROUTE = `/api/kyber/session/${SESSION_ID}/servers?page=1&limit=25&order=desc`
+const SKILLS_ROUTE = `/api/kyber/session/${SESSION_ID}/skills?page=1&limit=25&order=desc`
+const KW_SKILLS_ROUTE = `/api/kyber/session/${SESSION_ID}/kw-skills?page=1&limit=25&order=desc`
+const TIMELINE_ROUTE = `/api/kyber/session/${SESSION_ID}/timeline?page=1&limit=25&order=desc`
+const REQUESTS_ROUTE = `/api/kyber/session/${SESSION_ID}/requests?page=1&limit=25&order=desc`
+const RECONCILIATION_ROUTE = `/api/kyber/session/${SESSION_ID}/reconciliation?page=1&limit=25&order=desc`
+const PROBLEMS_ROUTE = `/api/kyber/session/${SESSION_ID}/problems?page=1&limit=25&order=desc`
 const STORED_FIELDS_ROUTE = `/api/kyber/session/${SESSION_ID}/stored-fields`
 
 const PAGE_ORDER = [
@@ -159,6 +159,10 @@ const SUMMARY_BODY = {
 
 const CHARTS_BODY = {
   sessionId: SESSION_ID,
+  total: 2,
+  page: 1,
+  limit: 25,
+  offset: 0,
   turns: [
     {
       index: 0,
@@ -463,9 +467,9 @@ describe('AgentSessionDashboard: paged lists', () => {
 
     fireEvent.click(within(pager).getByTestId('pager-next'))
     await waitFor(() =>
-      expect(router.calls).toContain(`/api/kyber/session/${SESSION_ID}/requests?page=2&limit=25`),
+      expect(router.calls).toContain(`/api/kyber/session/${SESSION_ID}/requests?page=2&limit=25&order=desc`),
     )
-    router.respond(`/api/kyber/session/${SESSION_ID}/requests?page=2&limit=25`, REQUESTS_PAGE_2)
+    router.respond(`/api/kyber/session/${SESSION_ID}/requests?page=2&limit=25&order=desc`, REQUESTS_PAGE_2)
     expect(await screen.findByTestId('request-row-26')).toBeTruthy()
   })
 
