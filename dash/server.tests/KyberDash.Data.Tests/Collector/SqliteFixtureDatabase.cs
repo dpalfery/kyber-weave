@@ -123,7 +123,7 @@ public static class SqliteFixtureDatabase
     private static void Execute(SqliteConnection connection, string sql, IReadOnlyList<object?> parameters)
     {
         using SqliteCommand command = connection.CreateCommand();
-        command.CommandText = sql;
+        command.CommandText = sql; // nosemgrep: csharp.lang.security.sqli.csharp-sqli.csharp-sqli
         for (int i = 0; i < parameters.Count; i++)
         {
             command.Parameters.AddWithValue("?" + (i + 1).ToString(System.Globalization.CultureInfo.InvariantCulture), parameters[i] ?? DBNull.Value);

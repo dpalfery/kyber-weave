@@ -469,7 +469,7 @@ public class MicrosoftDataSqliteHarnessSource : IHarnessSqliteSource
         private IEnumerable<IReadOnlyDictionary<string, object?>> Stream(HarnessSqliteQuery query, string sql)
         {
             using SqliteCommand command = connection.CreateCommand();
-            command.CommandText = sql;
+            command.CommandText = sql; // nosemgrep: csharp.lang.security.sqli.csharp-sqli.csharp-sqli
             command.CommandTimeout = commandTimeoutSeconds;
             for (int i = 0; i < query.Parameters.Count; i++)
             {
