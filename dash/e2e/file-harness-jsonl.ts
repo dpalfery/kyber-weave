@@ -6,12 +6,12 @@
 import type { FileHarnessContract, FileHarnessFixture } from './file-harness-contracts.js'
 import type { HarnessFile } from './file-harness-world.js'
 
-const TURN_SPACING_MS = 30_000
+export const TURN_SPACING_MS = 30_000
 const TOOL_EVERY = 3
 
-type SessionPlan = { readonly id: string; readonly turns: number }
+export type SessionPlan = { readonly id: string; readonly turns: number }
 
-function plansFor(harness: string): readonly [SessionPlan, SessionPlan] {
+export function plansFor(harness: string): readonly [SessionPlan, SessionPlan] {
   return [
     { id: `file-e2e-${harness}-a-12t`, turns: 12 },
     { id: `file-e2e-${harness}-b-10t`, turns: 10 },
@@ -19,15 +19,15 @@ function plansFor(harness: string): readonly [SessionPlan, SessionPlan] {
 }
 
 /** Tool calls the builders emit: one on every third turn. */
-function toolCallCount(turns: number): number {
+export function toolCallCount(turns: number): number {
   return Math.floor(turns / TOOL_EVERY)
 }
 
-function hasTool(turn: number): boolean {
+export function hasTool(turn: number): boolean {
   return turn % TOOL_EVERY === 0
 }
 
-function iso(ms: number): string {
+export function iso(ms: number): string {
   return new Date(ms).toISOString()
 }
 
@@ -36,7 +36,7 @@ function jsonl(lines: readonly unknown[]): string {
 }
 
 /** Contract fields every JSONL harness shares unless it says otherwise. */
-const BASE_CONTRACT = {
+export const BASE_CONTRACT = {
   cacheCreationMeasurable: false,
   contextMeasurable: false,
   schemaMeasurable: false,
@@ -47,7 +47,7 @@ const BASE_CONTRACT = {
   sendsLogs: false,
 } as const
 
-function fixturesFor(
+export function fixturesFor(
   harness: string,
   contractFor: (plan: SessionPlan) => FileHarnessContract,
   filesFor: (plan: SessionPlan, baseTimeMs: number) => readonly HarnessFile[],
