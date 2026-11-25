@@ -118,6 +118,82 @@ public class CliDispatchTests
         Assert.Contains("menubar: unchanged", run.Output, StringComparison.Ordinal);
     }
 
+    [Theory]
+    [InlineData("--quit")]
+    [InlineData("--launch")]
+    [InlineData("--running")]
+    public async Task MenubarTrayVerbCallsItsServiceMethodAndReturnsItsExitCode(string verb)
+    {
+        CliRun run = await CliRun.ExecuteAsync(["menubar", verb]);
+
+        Assert.Equal(0, run.ExitCode);
+        switch (verb)
+        {
+            case "--quit":
+                run.Builder.Menubar.Verify(m => m.QuitAsync(It.IsAny<CancellationToken>()), Times.Once);
+                break;
+            case "--launch":
+                run.Builder.Menubar.Verify(m => m.LaunchAsync(It.IsAny<CancellationToken>()), Times.Once);
+                break;
+            default:
+                run.Builder.Menubar.Verify(m => m.CountRunningAsync(It.IsAny<CancellationToken>()), Times.Once);
+                break;
+        }
+
+        run.Builder.Menubar.Verify(
+            m => m.InstallOrUpdateAsync(It.IsAny<bool>(), It.IsAny<bool>(), It.IsAny<string?>(), It.IsAny<string>(), It.IsAny<CancellationToken>()),
+            Times.Never);
+    }
+
+    [Fact]
+    public async Task MenubarRunningFailureIsWrittenToStderrWithItsExitCode()
+    {
+        CliRun run = await CliRun.ExecuteAsync(
+            ["menubar", "--running"],
+            configure: builder => builder.Menubar
+                .Setup(m => m.CountRunningAsync(It.IsAny<CancellationToken>()))
+                .ReturnsAsync(new MenubarInstallOutcome(1, "kyberdash: no tray process running")));
+
+        Assert.Equal(1, run.ExitCode);
+        Assert.Contains("kyberdash: no tray process running", run.Error, StringComparison.Ordinal);
+        Assert.DoesNotContain("kyberdash: no tray process running", run.Output, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task MenubarQuitFailureIsWrittenToStderrWithItsExitCode()
+    {
+        CliRun run = await CliRun.ExecuteAsync(
+            ["menubar", "--quit"],
+            configure: builder => builder.Menubar
+                .Setup(m => m.QuitAsync(It.IsAny<CancellationToken>()))
+                .ReturnsAsync(new MenubarInstallOutcome(1, "kyberdash: the tray is still running after quit; quit it and run again")));
+
+        Assert.Equal(1, run.ExitCode);
+        Assert.Contains("still running after quit", run.Error, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task MenubarRejectsAnUnknownOptionWithUsageAndInstallsNothing()
+    {
+        CliRun run = await CliRun.ExecuteAsync(["menubar", "--bogus"]);
+
+        Assert.Equal(2, run.ExitCode);
+        Assert.Contains("Usage: kyberdash menubar", run.Error, StringComparison.Ordinal);
+        run.Builder.Menubar.Verify(
+            m => m.InstallOrUpdateAsync(It.IsAny<bool>(), It.IsAny<bool>(), It.IsAny<string?>(), It.IsAny<string>(), It.IsAny<CancellationToken>()),
+            Times.Never);
+    }
+
+    [Fact]
+    public async Task HelpListsTheTrayVerbs()
+    {
+        CliRun run = await CliRun.ExecuteAsync(["--help"]);
+
+        Assert.Contains("--quit", run.Output, StringComparison.Ordinal);
+        Assert.Contains("--launch", run.Output, StringComparison.Ordinal);
+        Assert.Contains("--running", run.Output, StringComparison.Ordinal);
+    }
+
     [Fact]
     public async Task EngineEnsureRequiresTheIfRunningFlag()
     {

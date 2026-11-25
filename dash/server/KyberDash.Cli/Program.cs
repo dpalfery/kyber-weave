@@ -180,7 +180,7 @@ public static partial class Program
             + "  web                      Start the local dashboard and engine (spawns kyberdash-api)\n"
             + "  mcp                      Serve read-only analytics over MCP stdio (spawns kyberdash-mcp)\n"
             + "  otel                     Start the standalone OTLP/HTTP receiver\n"
-            + "  menubar                  Install or update the desktop tray app (macOS / Windows)\n"
+            + "  menubar                  Install, update, quit, launch, or count the desktop tray app (--quit, --launch, --running)\n"
             + "  engine ensure|stop|verify  Replace, stop, or check the running engine\n"
             + "  e2e-seed                 Seed an isolated store for Playwright E2E worlds\n"
             + "  kyber <subcommand>       Store, capture, and statusline utilities\n\n"
@@ -281,6 +281,10 @@ public static partial class Program
         return 0;
     }
 
+    /// <summary>Usage line for <c>kyberdash menubar</c>; the tray verbs the update orchestrates are part of it.</summary>
+    private const string MenubarUsage =
+        "Usage: kyberdash menubar [--force] [--update] [--version <v>] | --quit | --launch | --running";
+
     private static async Task<int> RunMenubarAsync(
         IServiceProvider provider,
         TextWriter output,
@@ -290,17 +294,47 @@ public static partial class Program
     {
         bool force = args.Contains("--force", StringComparer.Ordinal);
         bool update = args.Contains("--update", StringComparer.Ordinal);
+        bool quit = args.Contains("--quit", StringComparer.Ordinal);
+        bool launch = args.Contains("--launch", StringComparer.Ordinal);
+        bool running = args.Contains("--running", StringComparer.Ordinal);
         string? requestedVersion = null;
+        bool unknown = false;
         for (int index = 0; index < args.Length; index++)
         {
-            if (args[index] == "--version" && index + 1 < args.Length)
+            string arg = args[index];
+            if (arg == "--version" && index + 1 < args.Length)
+            {
                 requestedVersion = args[++index];
+            }
+            else if (arg is "--db" or "--state-dir" && index + 1 < args.Length)
+            {
+                // Global options are read by the container builder; they are skipped here with their value.
+                index++;
+            }
+            else if (arg is not ("--force" or "--update" or "--quit" or "--launch" or "--running"))
+            {
+                unknown = true;
+            }
+        }
+
+        int verbs = (quit ? 1 : 0) + (launch ? 1 : 0) + (running ? 1 : 0);
+        bool mixed = verbs > 1 || (verbs == 1 && (force || update || requestedVersion is not null));
+        if (unknown || mixed)
+        {
+            await error.WriteLineAsync(MenubarUsage).ConfigureAwait(false);
+            return 2;
         }
 
         IMenubarService menubar = provider.GetRequiredService<IMenubarService>();
-        MenubarInstallOutcome outcome = await menubar
-            .InstallOrUpdateAsync(force, update, requestedVersion, ResolveVersion(), cancellationToken)
-            .ConfigureAwait(false);
+        MenubarInstallOutcome outcome = quit
+            ? await menubar.QuitAsync(cancellationToken).ConfigureAwait(false)
+            : launch
+                ? await menubar.LaunchAsync(cancellationToken).ConfigureAwait(false)
+                : running
+                    ? await menubar.CountRunningAsync(cancellationToken).ConfigureAwait(false)
+                    : await menubar
+                        .InstallOrUpdateAsync(force, update, requestedVersion, ResolveVersion(), cancellationToken)
+                        .ConfigureAwait(false);
 
         TextWriter destination = outcome.ExitCode == 0 ? output : error;
         await destination.WriteLineAsync(outcome.Message).ConfigureAwait(false);
