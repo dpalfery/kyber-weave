@@ -229,10 +229,27 @@ public record CollectedError(
 /// <param name="Utf8Bytes">Original UTF-8 byte length (<c>content_part_withheld.utf8_bytes</c>).</param>
 /// <param name="Characters">Original character count (<c>content_part_withheld.characters</c>).</param>
 /// <param name="MeasuredTokens">Measured token count (<c>content_part_withheld.measured_tokens</c>).</param>
+/// <param name="Tokenizer">
+/// Tokenizer that counted <paramref name="MeasuredTokens"/> (<c>content_part_withheld_tokenizer.tokenizer</c>),
+/// or <see langword="null"/> when the stored count carries no label and so reads as not measured (D17).
+/// </param>
+/// <param name="TokenizerIsModelOwn">
+/// <see langword="true"/> when <paramref name="Tokenizer"/> is the model's own published tokenizer
+/// (<c>content_part_withheld_tokenizer.is_model_own</c>); <see langword="false"/> for the named standard stand-in.
+/// </param>
 public record CollectedWithheldText(
     long Utf8Bytes,
     long Characters,
-    long MeasuredTokens);
+    long MeasuredTokens,
+    string? Tokenizer = null,
+    bool TokenizerIsModelOwn = false)
+{
+    /// <summary>
+    /// The measured count when a tokenizer label names how it was counted; otherwise
+    /// <see langword="null"/>, because an unlabelled text-derived figure is never shown as a count.
+    /// </summary>
+    public long? LabeledTokens => Tokenizer is null ? null : MeasuredTokens;
+}
 
 /// <summary>
 /// Ordered content part of a record (<c>content_part</c> and child extension tables).

@@ -4153,6 +4153,18 @@ public class InMemoryRelationalStore :
                         ("characters", part.Withheld.Characters),
                         ("measured_tokens", part.Withheld.MeasuredTokens),
                     ]);
+                if (part.Withheld.Tokenizer is string tokenizer)
+                {
+                    InsertRowCore(
+                        working,
+                        "content_part_withheld_tokenizer",
+                        [
+                            ("span_id", record.RecordId),
+                            ("position", (long)part.Position),
+                            ("tokenizer", tokenizer),
+                            ("is_model_own", part.Withheld.TokenizerIsModelOwn ? 1L : 0L),
+                        ]);
+                }
             }
 
             if (part.ReportedTokens.HasValue)
@@ -5523,10 +5535,14 @@ public class InMemoryRelationalStore :
         if (withheldRow is not null)
         {
             TableMetadata withheldMeta = GetTableMetadata("content_part_withheld");
+            object?[]? labelRow = FindRowByKey(currentState, "content_part_withheld_tokenizer", [("span_id", spanId), ("position", pos)]);
+            TableMetadata labelMeta = GetTableMetadata("content_part_withheld_tokenizer");
             withheld = new CollectedWithheldText(
                 GetInt64(withheldMeta, withheldRow, "utf8_bytes"),
                 GetInt64(withheldMeta, withheldRow, "characters"),
-                GetInt64(withheldMeta, withheldRow, "measured_tokens"));
+                GetInt64(withheldMeta, withheldRow, "measured_tokens"),
+                labelRow is null ? null : GetString(labelMeta, labelRow, "tokenizer"),
+                labelRow is not null && GetInt64(labelMeta, labelRow, "is_model_own") == 1L);
         }
 
         object?[]? repTokensRow = FindRowByKey(currentState, "content_part_reported_tokens", [("span_id", spanId), ("position", pos)]);

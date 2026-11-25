@@ -22,6 +22,7 @@ namespace KyberDash.Data.Collector;
 /// <param name="OriginalUtf8BytesWhenTruncated">Original UTF-8 byte length when <see cref="PlainText"/> was truncated; otherwise <see langword="null"/>.</param>
 /// <param name="IsDocument"><see langword="true"/> when the input was classified as a JSON object/array (including nested JSON strings).</param>
 /// <param name="MeasuredTokenizer">Name of the tokenizer that produced <paramref name="MeasuredTokens"/>, such as <c>o200k_base</c>.</param>
+/// <param name="MeasuredTokenizerIsModelOwn"><see langword="true"/> when <paramref name="MeasuredTokenizer"/> is the model's own tokenizer.</param>
 public record ToolContentMeasurement(
     string? PlainText,
     long Utf8Bytes,
@@ -30,7 +31,8 @@ public record ToolContentMeasurement(
     string Sha256Fingerprint,
     long? OriginalUtf8BytesWhenTruncated,
     bool IsDocument,
-    string MeasuredTokenizer)
+    string MeasuredTokenizer,
+    bool MeasuredTokenizerIsModelOwn = false)
 {
     /// <summary>Projects this measurement into a <see cref="CollectedToolContent"/> DTO.</summary>
     /// <param name="includeFingerprint">Whether to retain <see cref="Sha256Fingerprint"/> (typically true for tool inputs).</param>
@@ -49,7 +51,9 @@ public record ToolContentMeasurement(
         new(
             Utf8Bytes: Utf8Bytes,
             Characters: Characters,
-            MeasuredTokens: MeasuredTokens);
+            MeasuredTokens: MeasuredTokens,
+            Tokenizer: MeasuredTokenizer,
+            TokenizerIsModelOwn: MeasuredTokenizerIsModelOwn);
 }
 
 /// <summary>
@@ -123,7 +127,8 @@ public static class ToolContentMeasurer
                     Sha256Fingerprint: sha256,
                     OriginalUtf8BytesWhenTruncated: null,
                     IsDocument: true,
-                    MeasuredTokenizer: measured.Tokenizer);
+                    MeasuredTokenizer: measured.Tokenizer,
+                    MeasuredTokenizerIsModelOwn: measured.IsModelOwn);
             }
         }
 
@@ -140,7 +145,8 @@ public static class ToolContentMeasurer
             Sha256Fingerprint: plainSha256,
             OriginalUtf8BytesWhenTruncated: originalBytes,
             IsDocument: false,
-            MeasuredTokenizer: measured.Tokenizer);
+            MeasuredTokenizer: measured.Tokenizer,
+            MeasuredTokenizerIsModelOwn: measured.IsModelOwn);
     }
 
     /// <summary>

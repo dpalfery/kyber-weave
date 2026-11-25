@@ -3467,7 +3467,10 @@ public class KyberBridgeEngine
     /// <param name="part">Content part the entry describes.</param>
     private static void AddPartDetail(Dictionary<string, object?> entry, CollectedContentPart part)
     {
-        if ((part.ReportedTokens ?? part.Withheld?.MeasuredTokens) is long tokens) entry["tokens"] = tokens;
+        PartTokenFigure figure = CanonRecordHydration.TokenFigureOf(part);
+        if (figure.Tokens is long tokens) entry["tokens"] = tokens;
+        if (figure.Tokenizer is string tokenizer) entry["tokenizer"] = tokenizer;
+        if (figure.TokenizerIsModelOwn is bool isModelOwn) entry["tokenizerIsModelOwn"] = isModelOwn;
         if (part.Server is string server) entry["server"] = server;
         if (part.Resident is bool resident) entry["resident"] = resident;
         if (part.OriginalUtf8BytesWhenTruncated.HasValue) entry["truncated"] = true;

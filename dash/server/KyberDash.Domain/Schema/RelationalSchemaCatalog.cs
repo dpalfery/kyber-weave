@@ -712,6 +712,13 @@ public static partial class RelationalSchemaCatalog
             NonNegInt("utf8_bytes"),
             NonNegInt("characters"),
             NonNegInt("measured_tokens")));
+        tables.Add(new TableDefinition(
+            Name: "content_part_withheld_tokenizer",
+            Columns: [NonEmptyText("span_id"), PositionCol(), NonEmptyText("tokenizer"), BoolInt("is_model_own")],
+            PrimaryKeyColumns: ["span_id", "position"],
+            ForeignKeys: [CompositeFk(["span_id", "position"], "content_part_withheld", ["span_id", "position"])],
+            Indexes: [],
+            IsRepeatedItem: true));
         tables.Add(ContentPartExtension("content_part_reported_tokens", NonNegInt("token_count")));
         tables.Add(ContentPartExtension("content_part_server", NonEmptyText("server_name")));
         tables.Add(ContentPartExtension("content_part_role", NonEmptyText("role_name")));

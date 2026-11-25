@@ -24,7 +24,7 @@ namespace KyberDash.Data.Repositories;
 public partial class SqliteRelationalStore : BaseSqliteRepository, IRelationalStoreWriter, IProjectionStore
 {
     /// <summary>Current normalized relational schema version stamped in <c>store_state</c>.</summary>
-    public const int SchemaVersion = 27;
+    public const int SchemaVersion = 28;
 
     /// <summary>Current detector generation stamped in <c>store_state</c>.</summary>
     /// <remarks>
@@ -886,6 +886,13 @@ public partial class SqliteRelationalStore : BaseSqliteRepository, IRelationalSt
                 sql.Append(
                     CultureInfo.InvariantCulture,
                     $"INSERT INTO content_part_withheld (span_id, position, utf8_bytes, characters, measured_tokens) VALUES ({spanIdExpr}, {posSql}, {LongSql(part.Withheld.Utf8Bytes)}, {LongSql(part.Withheld.Characters)}, {LongSql(part.Withheld.MeasuredTokens)});\n");
+                if (part.Withheld.Tokenizer is string tokenizer)
+                {
+                    string tokenizerExpr = GuardedTextExpr("content_part_withheld_tokenizer", "tokenizer", tokenizer);
+                    sql.Append(
+                        CultureInfo.InvariantCulture,
+                        $"INSERT INTO content_part_withheld_tokenizer (span_id, position, tokenizer, is_model_own) VALUES ({spanIdExpr}, {posSql}, {tokenizerExpr}, {(part.Withheld.TokenizerIsModelOwn ? "1" : "0")});\n");
+                }
             }
 
             if (part.ReportedTokens.HasValue)

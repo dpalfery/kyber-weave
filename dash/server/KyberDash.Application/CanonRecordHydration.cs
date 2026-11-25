@@ -89,15 +89,18 @@ public static class CanonRecordHydration
         List<ContentPart> parts = new(record.Parts.Count + record.ToolDefinitions.Count);
         foreach (CollectedContentPart part in record.Parts)
         {
+            PartTokenFigure figure = TokenFigureOf(part);
             parts.Add(new ContentPart(
                 Part: PartKeyOf(part.Bucket),
                 Text: part.PlainText ?? string.Empty,
-                Tokens: part.ReportedTokens ?? part.Withheld?.MeasuredTokens,
+                Tokens: figure.Tokens,
                 Server: part.Server,
                 Role: part.Role,
                 Order: part.Position,
                 Resident: part.Resident,
-                Truncated: part.OriginalUtf8BytesWhenTruncated.HasValue));
+                Truncated: part.OriginalUtf8BytesWhenTruncated.HasValue,
+                Tokenizer: figure.Tokenizer,
+                TokenizerIsModelOwn: figure.TokenizerIsModelOwn));
         }
 
         foreach (CollectedToolDefinition definition in record.ToolDefinitions)
@@ -173,6 +176,26 @@ public static class CanonRecordHydration
         }
     }
 
+    /// <summary>
+    /// The token figure a content part shows: a harness-reported count passes through unlabelled; a
+    /// count measured from withheld text shows only with the tokenizer that produced it, and a
+    /// stored measured count with no label reads as not measured (decision D17).
+    /// </summary>
+    /// <param name="part">Content part to read the figure from.</param>
+    /// <returns>The count and, for a text-derived count, its tokenizer label.</returns>
+    public static PartTokenFigure TokenFigureOf(CollectedContentPart part)
+    {
+        ArgumentNullException.ThrowIfNull(part);
+        if (part.ReportedTokens is long reported)
+        {
+            return new PartTokenFigure(reported, null, null);
+        }
+
+        return part.Withheld is { Tokenizer: string tokenizer } withheld
+            ? new PartTokenFigure(withheld.MeasuredTokens, tokenizer, withheld.TokenizerIsModelOwn)
+            : new PartTokenFigure(null, null, null);
+    }
+
     /// <summary>Maps a collected content-part bucket to the canonical part key the pipeline uses.</summary>
     /// <param name="bucket">Bucket recorded on the content part.</param>
     /// <returns>The canonical part key, which is also the stored bucket name.</returns>
@@ -189,3 +212,9 @@ public static class CanonRecordHydration
         _ => "reasoning",
     };
 }
+
+/// <summary>The token figure a content part shows, with the tokenizer label a text-derived count carries.</summary>
+/// <param name="Tokens">Token count, or <see langword="null"/> when the part has no shown count.</param>
+/// <param name="Tokenizer">Tokenizer that counted a text-derived figure; <see langword="null"/> for a reported count.</param>
+/// <param name="TokenizerIsModelOwn">Whether <paramref name="Tokenizer"/> is the model's own tokenizer; <see langword="null"/> when <paramref name="Tokenizer"/> is.</param>
+public readonly record struct PartTokenFigure(long? Tokens, string? Tokenizer, bool? TokenizerIsModelOwn);

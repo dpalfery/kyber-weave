@@ -438,7 +438,7 @@ public partial class SqliteRelationalStore : IRelationalStoreReader
         List<StoredContentPart> results = [];
         foreach (string line in TabLines(output))
         {
-            string[] cols = SplitTabLine(line, cutInSql ? 22 : 21, "content_part");
+            string[] cols = SplitTabLine(line, ContentPartColumnCount + (cutInSql ? 2 : 1), "content_part");
             string rowSpan = ParseHexRequired(cols[0], "content_part.span_id");
             CollectedContentPart scopedPart = ParseContentPartColumns(cols, startIndex: 1);
             results.Add(new StoredContentPart(rowSpan, scopedPart));
@@ -3432,6 +3432,7 @@ public partial class SqliteRelationalStore : IRelationalStoreReader
         sql.Append(" FROM content_part cp " +
                    "LEFT JOIN content_part_text cpt ON cpt.span_id = cp.span_id AND cpt.position = cp.position " +
                    "LEFT JOIN content_part_withheld cpw ON cpw.span_id = cp.span_id AND cpw.position = cp.position " +
+                   "LEFT JOIN content_part_withheld_tokenizer cpwt ON cpwt.span_id = cp.span_id AND cpwt.position = cp.position " +
                    "LEFT JOIN content_part_reported_tokens cprt ON cprt.span_id = cp.span_id AND cprt.position = cp.position " +
                    "LEFT JOIN content_part_server cps ON cps.span_id = cp.span_id AND cps.position = cp.position " +
                    "LEFT JOIN content_part_role cpr ON cpr.span_id = cp.span_id AND cpr.position = cp.position " +
@@ -3525,9 +3526,9 @@ public partial class SqliteRelationalStore : IRelationalStoreReader
 
                 case "PART":
                     {
-                        if (cols.Length != 22)
+                        if (cols.Length != ContentPartColumnCount + 2)
                         {
-                            throw new StoredDataException($"Expected 22 columns for PART row, got {cols.Length.ToString(CultureInfo.InvariantCulture)}.");
+                            throw new StoredDataException($"Expected {(ContentPartColumnCount + 2).ToString(CultureInfo.InvariantCulture)} columns for PART row, got {cols.Length.ToString(CultureInfo.InvariantCulture)}.");
                         }
 
                         string spanId = ParseHexRequired(cols[1], "content_part.span_id");
@@ -4468,11 +4469,15 @@ public partial class SqliteRelationalStore : IRelationalStoreReader
         $"FROM content_part {alias} " +
         $"LEFT JOIN content_part_text cpt ON cpt.span_id = {alias}.span_id AND cpt.position = {alias}.position " +
         $"LEFT JOIN content_part_withheld cpw ON cpw.span_id = {alias}.span_id AND cpw.position = {alias}.position " +
+        $"LEFT JOIN content_part_withheld_tokenizer cpwt ON cpwt.span_id = {alias}.span_id AND cpwt.position = {alias}.position " +
         $"LEFT JOIN content_part_reported_tokens cprt ON cprt.span_id = {alias}.span_id AND cprt.position = {alias}.position " +
         $"LEFT JOIN content_part_server cps ON cps.span_id = {alias}.span_id AND cps.position = {alias}.position " +
         $"LEFT JOIN content_part_role cpr ON cpr.span_id = {alias}.span_id AND cpr.position = {alias}.position " +
         $"LEFT JOIN content_part_residency cpres ON cpres.span_id = {alias}.span_id AND cpres.position = {alias}.position " +
         $"LEFT JOIN content_part_truncation cptr ON cptr.span_id = {alias}.span_id AND cptr.position = {alias}.position";
+
+    /// <summary>Number of columns <see cref="BuildContentPartColumns"/> selects and <see cref="ParseContentPartColumns"/> reads.</summary>
+    private const int ContentPartColumnCount = 24;
 
     private static string BuildContentPartColumns(string alias) =>
         $"{alias}.position, hex(CAST({alias}.bucket AS BLOB)), " +
@@ -4484,7 +4489,9 @@ public partial class SqliteRelationalStore : IRelationalStoreReader
         "typeof(cps.server_name), COALESCE(hex(CAST(cps.server_name AS BLOB)), ''), " +
         "typeof(cpr.role_name), COALESCE(hex(CAST(cpr.role_name AS BLOB)), ''), " +
         "typeof(cpres.is_resident), COALESCE(CAST(cpres.is_resident AS TEXT), ''), " +
-        "typeof(cptr.original_utf8_bytes), COALESCE(CAST(cptr.original_utf8_bytes AS TEXT), '')";
+        "typeof(cptr.original_utf8_bytes), COALESCE(CAST(cptr.original_utf8_bytes AS TEXT), ''), " +
+        "typeof(cpwt.tokenizer), COALESCE(hex(CAST(cpwt.tokenizer AS BLOB)), ''), " +
+        "typeof(cpwt.is_model_own), COALESCE(CAST(cpwt.is_model_own AS TEXT), '')";
 
     private static CollectedContentPart ParseContentPartColumns(string[] cols, int startIndex)
     {
@@ -4494,8 +4501,22 @@ public partial class SqliteRelationalStore : IRelationalStoreReader
         long? wBytes = ParseNullableInt64(cols[startIndex + 4], cols[startIndex + 5], "content_part_withheld.utf8_bytes");
         long? wChars = ParseNullableInt64(cols[startIndex + 6], cols[startIndex + 7], "content_part_withheld.characters");
         long? wTokens = ParseNullableInt64(cols[startIndex + 8], cols[startIndex + 9], "content_part_withheld.measured_tokens");
+        string? wTokenizer = ParseNullableHex(cols[startIndex + 20], cols[startIndex + 21], "content_part_withheld_tokenizer.tokenizer");
+        long? wModelOwnRaw = ParseNullableInt64(cols[startIndex + 22], cols[startIndex + 23], "content_part_withheld_tokenizer.is_model_own");
+        bool wModelOwn = wModelOwnRaw switch
+        {
+            null => false,
+            0L => false,
+            1L => true,
+            _ => throw new StoredDataException($"Invalid boolean flag '{wModelOwnRaw.Value.ToString(CultureInfo.InvariantCulture)}' in content_part_withheld_tokenizer.is_model_own."),
+        };
+        if ((wTokenizer is null) != (wModelOwnRaw is null))
+        {
+            throw new StoredDataException("Partial content_part_withheld_tokenizer row returned.");
+        }
+
         CollectedWithheldText? withheld = wBytes.HasValue && wChars.HasValue && wTokens.HasValue
-            ? new CollectedWithheldText(wBytes.Value, wChars.Value, wTokens.Value)
+            ? new CollectedWithheldText(wBytes.Value, wChars.Value, wTokens.Value, wTokenizer, wModelOwn)
             : wBytes.HasValue || wChars.HasValue || wTokens.HasValue
                 ? throw new StoredDataException("Partial content_part_withheld row returned.")
                 : null;
