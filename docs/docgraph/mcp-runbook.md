@@ -371,10 +371,13 @@ directory:
 **What Squad writes.** A global `squad install` or `squad update` that includes Antigravity inserts exactly this
 entry into `~/.gemini/config/mcp_config.json` ([ADR 0094](../adr/0094-squad-inserts-the-kw-docs-entry-into-antigravitys-user-mcp-config.md)),
 the one harness MCP file Squad writes. `command` is the absolute path PATH names for `kyber-weave-mcp` when it is
-found (the bare name, with a warning, when not). The insertion is a byte splice: every other server and every other
+found (the bare name, with a warning, when not); a PATH answer counts only when it is fully qualified and names an
+existing file. The insertion is a byte splice: every other server and every other
 byte of the file stay as they were, and the file's mode and symbolic link are kept. It is idempotent, never
-replaces an existing `kw-docs` entry, and refuses a file that is not valid JSON, not an object, or over 1 MiB. A
-dry run only reports. A warning names the file and a fixed reason, never any of the file's content, because it can
+replaces an existing `kw-docs` entry, and refuses a file that is not valid JSON, not an object, or over 1 MiB. The file is
+read again just before the write: if it changed in between, the insert is planned again from the new bytes, and if it
+changed a second time nothing is written and the update warns (this narrows the race with another writer but cannot
+close it, because the final rename can still race). A dry run only reports. A warning names the file and a fixed reason, never any of the file's content, because it can
 hold other servers' keys. `squad uninstall` leaves the entry. An existing `kw-docs` entry whose `args` lack
 `--any-repo` (for example one pinned with `--repo-root <path>`) is left as it is, with one warning: switch it by
 hand to `kyber-weave-mcp --any-repo` to serve every repository.

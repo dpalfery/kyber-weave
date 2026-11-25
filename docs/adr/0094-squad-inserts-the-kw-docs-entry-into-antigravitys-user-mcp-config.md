@@ -48,8 +48,13 @@ a working entry.
    This is the single exception to "Squad writes no harness MCP configuration". The write is a byte splice
    (`JsonServerSplice`, the splice `docs mcp-wire` uses) that inserts one member and keeps every other byte, is
    atomic and keeps the file's Unix mode and symbolic link, never replaces an existing `kw-docs` entry (it warns when
-   that entry lacks `--any-repo`), refuses a file that is malformed, not an object, or over 1 MiB, writes nothing on
-   a dry run, is idempotent, and never puts file contents in a warning, because that file can hold other servers' keys.
+   that entry lacks `--any-repo`), refuses a file that is malformed, not an object, or over 1 MiB (checked again on
+   the bytes actually read), writes nothing on a dry run, is idempotent, and never puts file contents in a warning,
+   because that file can hold other servers' keys. The PATH answer for `kyber-weave-mcp` is used only when it is
+   fully qualified and names an existing file; otherwise it counts as not found. The file is read again just before
+   the write: if it changed since the first read the insert is planned once more from the new bytes, and if it
+   changed again nothing is written and the update warns. This narrows the race with another writer but does not
+   close it, because the final rename can still race.
 4. **ADR 0052's list of writers is unchanged.** The docs branch still never writes user scope; this write is Squad's
    and is limited to Antigravity's global file. Instance and project scope write nothing.
 5. **`squad uninstall` leaves the entry.** The entry points at a machine-level executable Squad does not own.

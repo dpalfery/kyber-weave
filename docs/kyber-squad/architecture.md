@@ -482,9 +482,11 @@ flowchart LR
   It is a byte splice (`JsonServerSplice`) written through `ISquadFileAccess.WriteAllBytesAtomic`, which keeps the
   file's Unix mode and symbolic link; it never replaces an existing `kw-docs` entry (it warns when that entry
   lacks `--any-repo`), refuses a malformed, non-object or over-1-MiB file (size probed with
-  `ISquadFileAccess.GetLength` before any read), writes nothing on a dry run or at instance or project scope, and
-  never puts file contents in a warning. `squad uninstall` leaves the entry. The command is the absolute path
-  PATH names for `kyber-weave-mcp`, resolved by `SquadDocsServerCommand` for install, update and `squad doctor`
+  `ISquadFileAccess.GetLength` before any read, and checked again on the bytes read), writes nothing on a dry run or at instance or project scope, and
+  never puts file contents in a warning. The file is read again just before the write: a change in between
+  re-plans the insert from the new bytes, a second change writes nothing and warns, and the final rename can still
+  race. `squad uninstall` leaves the entry. The command is the absolute path
+  PATH names for `kyber-weave-mcp` (used only when fully qualified and naming an existing file), resolved by `SquadDocsServerCommand` for install, update and `squad doctor`
   alike, so the rendered agent files and the config entry agree. The executable name and the `--any-repo`
   argument are the shared `SquadDocsServerCommand.Executable` and `AnyRepoArgument` constants, read by both
   `AntigravityMcpConfiguration` and `AntigravityRenderer`.
