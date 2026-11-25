@@ -521,7 +521,8 @@ public static class CanonIngestPipeline
 
         CollectedToolCall? tool = BuildToolCall(record);
         IReadOnlyList<string> skillsInvoked = SkillExtraction.ExtractInvoked(record.Raw, tool?.ToolName);
-        IReadOnlyList<CollectedToolDefinition> toolDefinitions = BuildToolDefinitions(record, out HashSet<int> definitionPartIndexes);
+        IReadOnlyList<CollectedToolDefinition> toolDefinitions = BuildToolDefinitions(record, model, out HashSet<int> definitionPartIndexes);
+        (string? ResponseId, string? RequestId) joinIds = OtlpJoinIds.Read(record.Harness, record.Raw);
 
         return new CollectedRecord(
             RecordId: record.SpanId,
@@ -539,7 +540,7 @@ public static class CanonIngestPipeline
             ReportedDurationMs: reportedDurationMs,
             Tokens: tokens,
             ReportedCost: cost,
-            Parts: BuildCollectedParts(record, skipToolDefinitions: toolDefinitions.Count > 0, definitionPartIndexes),
+            Parts: BuildCollectedParts(record, skipToolDefinitions: toolDefinitions.Count > 0, definitionPartIndexes, model),
             Tool: tool,
             Agent: null,
             SkillsInvoked: skillsInvoked,
@@ -547,7 +548,9 @@ public static class CanonIngestPipeline
             ToolDefinitions: toolDefinitions,
             Signals: new CollectedRecordSignals(errorMessage, null, null, null),
             ReportedInputTokens: inputUnmeasured || record.Tokens.ReportedInput < 0 ? null : record.Tokens.ReportedInput,
-            ReportedOutputTokens: outputUnmeasured || record.Tokens.ReportedOutput < 0 ? null : record.Tokens.ReportedOutput);
+            ReportedOutputTokens: outputUnmeasured || record.Tokens.ReportedOutput < 0 ? null : record.Tokens.ReportedOutput,
+            ResponseId: joinIds.ResponseId,
+            RequestId: joinIds.RequestId);
     }
 
     /// <summary>
@@ -813,6 +816,7 @@ public static class CanonIngestPipeline
 
     private static IReadOnlyList<CollectedToolDefinition> BuildToolDefinitions(
         CanonicalRecord record,
+        string? model,
         out HashSet<int> contributingPartIndexes)
     {
         List<CollectedToolDefinition> definitions = [];
@@ -831,7 +835,7 @@ public static class CanonIngestPipeline
                     continue;
                 }
 
-                if (AddToolDefinitionsFromText(part.Text, part.Server, part.Tokens, definitions, seenNames, ref position))
+                if (AddToolDefinitionsFromText(part.Text, part.Server, part.Tokens, model, definitions, seenNames, ref position))
                 {
                     contributing.Add(partIndex);
                 }
@@ -839,7 +843,7 @@ public static class CanonIngestPipeline
         }
         else if (record.Content.TryGetValue("tool_definitions", out string? text) && !string.IsNullOrWhiteSpace(text))
         {
-            _ = AddToolDefinitionsFromText(text, null, null, definitions, seenNames, ref position);
+            _ = AddToolDefinitionsFromText(text, null, null, model, definitions, seenNames, ref position);
         }
 
         contributingPartIndexes = contributing;
@@ -855,6 +859,7 @@ public static class CanonIngestPipeline
         string text,
         string? defaultServer,
         long? partTokens,
+        string? model,
         List<CollectedToolDefinition> definitions,
         HashSet<string> seenNames,
         ref int position)
@@ -888,10 +893,25 @@ public static class CanonIngestPipeline
                             string name = s.Trim();
                             if (seenNames.Add(name))
                             {
-                                long tokens = isSingleItem && partTokens is > 0
-                                    ? partTokens.Value
-                                    : Math.Max(1L, ToolContentMeasurer.Measure(name).MeasuredTokens);
-                                definitions.Add(new CollectedToolDefinition(position++, name, SafeOptionalText(defaultServer), tokens));
+                                // A single-item part with its own reported count keeps that count
+                                // unlabelled; every other schema is measured from its text, so the
+                                // count carries the measuring tokenizer.
+                                long tokens;
+                                string? tokenizer = null;
+                                bool isModelOwn = false;
+                                if (isSingleItem && partTokens is > 0)
+                                {
+                                    tokens = partTokens.Value;
+                                }
+                                else
+                                {
+                                    ToolContentMeasurement measurement = ToolContentMeasurer.Measure(name, model: model);
+                                    tokens = Math.Max(1L, measurement.MeasuredTokens);
+                                    tokenizer = measurement.MeasuredTokenizer;
+                                    isModelOwn = measurement.MeasuredTokenizerIsModelOwn;
+                                }
+
+                                definitions.Add(new CollectedToolDefinition(position++, name, SafeOptionalText(defaultServer), tokens, tokenizer, isModelOwn));
                             }
                         }
                     }
@@ -901,10 +921,22 @@ public static class CanonIngestPipeline
                         if (name is not null && seenNames.Add(name))
                         {
                             string? server = ExtractToolServerFromObject(item) ?? defaultServer;
-                            long tokens = isSingleItem && partTokens is > 0
-                                ? partTokens.Value
-                                : Math.Max(1L, ToolContentMeasurer.Measure(item.GetRawText()).MeasuredTokens);
-                            definitions.Add(new CollectedToolDefinition(position++, name, SafeOptionalText(server), tokens));
+                            long tokens;
+                            string? tokenizer = null;
+                            bool isModelOwn = false;
+                            if (isSingleItem && partTokens is > 0)
+                            {
+                                tokens = partTokens.Value;
+                            }
+                            else
+                            {
+                                ToolContentMeasurement measurement = ToolContentMeasurer.Measure(item.GetRawText(), model: model);
+                                tokens = Math.Max(1L, measurement.MeasuredTokens);
+                                tokenizer = measurement.MeasuredTokenizer;
+                                isModelOwn = measurement.MeasuredTokenizerIsModelOwn;
+                            }
+
+                            definitions.Add(new CollectedToolDefinition(position++, name, SafeOptionalText(server), tokens, tokenizer, isModelOwn));
                         }
                     }
                 }
@@ -919,10 +951,24 @@ public static class CanonIngestPipeline
 
         if (!JsonDocumentText.IsDocument(trimmed) && seenNames.Add(trimmed))
         {
-            long tokens = partTokens is > 0
-                ? partTokens.Value
-                : Math.Max(1L, ToolContentMeasurer.Measure(trimmed).MeasuredTokens);
-            definitions.Add(new CollectedToolDefinition(position++, trimmed, SafeOptionalText(defaultServer), tokens));
+            // A part-reported count stays unlabelled; a count measured from the definition's own
+            // text carries the measuring tokenizer.
+            long tokens;
+            string? tokenizer = null;
+            bool isModelOwn = false;
+            if (partTokens is > 0)
+            {
+                tokens = partTokens.Value;
+            }
+            else
+            {
+                ToolContentMeasurement measurement = ToolContentMeasurer.Measure(trimmed, model: model);
+                tokens = Math.Max(1L, measurement.MeasuredTokens);
+                tokenizer = measurement.MeasuredTokenizer;
+                isModelOwn = measurement.MeasuredTokenizerIsModelOwn;
+            }
+
+            definitions.Add(new CollectedToolDefinition(position++, trimmed, SafeOptionalText(defaultServer), tokens, tokenizer, isModelOwn));
         }
 
         return definitions.Count > addedBefore;
@@ -974,7 +1020,8 @@ public static class CanonIngestPipeline
     private static List<CollectedContentPart> BuildCollectedParts(
         CanonicalRecord record,
         bool skipToolDefinitions,
-        HashSet<int> definitionPartIndexes)
+        HashSet<int> definitionPartIndexes,
+        string? model)
     {
         List<CollectedContentPart> parts = [];
         HashSet<int> usedPositions = [];
@@ -1006,7 +1053,7 @@ public static class CanonIngestPipeline
 
                 nextPosition = Math.Max(nextPosition, position + 1);
 
-                ToolContentMeasurement measurement = ToolContentMeasurer.Measure(part.Text ?? string.Empty);
+                ToolContentMeasurement measurement = ToolContentMeasurer.Measure(part.Text ?? string.Empty, model: model);
                 string? plainText = measurement.IsDocument ? null : measurement.PlainText;
                 CollectedWithheldText? withheld = measurement.IsDocument ? measurement.ToWithheldText() : null;
                 long? originalBytes = measurement.IsDocument ? null : measurement.OriginalUtf8BytesWhenTruncated;
@@ -1043,7 +1090,7 @@ public static class CanonIngestPipeline
                 int position = nextPosition++;
                 _ = usedPositions.Add(position);
 
-                ToolContentMeasurement measurement = ToolContentMeasurer.Measure(entry.Value ?? string.Empty);
+                ToolContentMeasurement measurement = ToolContentMeasurer.Measure(entry.Value ?? string.Empty, model: model);
                 string? plainText = measurement.IsDocument ? null : measurement.PlainText;
                 CollectedWithheldText? withheld = measurement.IsDocument ? measurement.ToWithheldText() : null;
                 long? originalBytes = measurement.IsDocument ? null : measurement.OriginalUtf8BytesWhenTruncated;

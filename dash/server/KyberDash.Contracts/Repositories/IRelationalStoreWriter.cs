@@ -23,6 +23,16 @@ public interface IRelationalStoreWriter
     void DeleteSource(string sourceId);
 
     /// <summary>
+    /// Deletes the record token values that <paramref name="estimated"/> names as estimates from the
+    /// records of the file source <paramref name="sourceLocator"/> of <paramref name="harnessId"/>, so
+    /// they read as not measured. Sessions, records, content and every other row stay.
+    /// </summary>
+    /// <param name="harnessId">Harness owning the source.</param>
+    /// <param name="sourceLocator">File source locator, the source unit's key.</param>
+    /// <param name="estimated">Which token values of the source were stored as estimates.</param>
+    void ClearEstimatedRecordTokens(string harnessId, string sourceLocator, EstimatedRecordTokens estimated);
+
+    /// <summary>
     /// Persists a single collector diagnostic problem into <c>ingest_problem</c> and its
     /// optional child tables.
     /// </summary>

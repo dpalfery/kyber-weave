@@ -261,9 +261,11 @@ describe('ContextDoctor findings browser (issue #191)', () => {
     expect(html).toContain('25 of 115')
   })
 
-  it('keeps the ranked top-5 headline card', () => {
+  it('keeps the ranked top-5 headline card, described without an estimate', () => {
     const html = render()
     expect(html).toContain('Highest-Leverage Workspace Findings')
+    expect(html).toContain('Ranked by measured waste; unmeasured findings rank last')
+    expect(html).not.toMatch(/estimated/i)
   })
 })
 

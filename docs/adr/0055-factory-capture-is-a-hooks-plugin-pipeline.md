@@ -4,7 +4,7 @@ title: Factory (Droid) Capture Is a Hooks-Plugin Pipeline
 doc-type: adr
 status: current
 owner: dpalfery
-last-reviewed: 2026-11-15
+last-reviewed: 2026-11-24
 code-refs:
   - CanonAdapters
   - IsSupportedDroidEnvelope
@@ -98,12 +98,22 @@ them when it has any tool record for the session; otherwise the plugin's tool re
 paired session's duration is the sum of the file source's llm-call active durations, with its tool records excluded because their time already lies inside those durations. Turns, prompts and the prompt
 consent are unchanged.
 
+Amended 2026-11-24 (the no-estimate rule): the file source no longer splits the session's
+`tokenUsage` across assistant calls. The "known lossy approximation" that the Context and
+Consequences below accept is withdrawn, because KyberDash never estimates the data it collects
+and displays ([honest unobservability](../rules/honest-unobservability.md#hard-rule-kyberdash-never-estimates)).
+Droid per-call tokens are **not measured**: the session totals are a session fact, stored once as
+session usage, and no per-call or per-turn token figure is derived from them. Factory documents no
+per-request token source for built-in models, so the per-call data that the earlier text expected
+to remove the approximation does not exist for them. The exact-session-id join, the source
+precedence and the plugin's `not_measurable` counters are unchanged.
+
 ## Context
 
 Factory (`droid`) was already a Kyber-Squad target and KyberDash already ingested it — but only
 as a **file** source, with no Settings row and no capture plugin. The file source loses the turn
-and tool timing (it splits one session-level token total evenly across the session's assistant
-calls), and the model it attributes is the session's model rather than the per-turn one.
+and tool timing (it originally split one session-level token total evenly across the session's assistant
+calls; the 2026-11-24 amendment above withdrew that split), and the model it attributes is the session's model rather than the per-turn one.
 
 Four collection paths were available, and the choice is expensive to revisit:
 
@@ -275,9 +285,9 @@ projection, then `/api/kyber/*`.
   `conversation_history` part, so a reader of the session view sees what was asked. A turn
   without it declares the prompt `not_measurable` with a reason that names the consent, so the
   absence is stated rather than shown as a blank.
-- The Factory file source's own even split of the session's token total across its assistant
-  calls stays as it is. It is a known lossy approximation, and the per-call data that would
-  remove it is tracked separately.
+- The Factory file source's even split of the session's token total across its assistant calls
+  was withdrawn by the 2026-11-24 amendment above: the total is stored once as session usage
+  and no per-call figure is derived from it.
 - Where an organisation pins a telemetry endpoint, the native path is silently absent. KyberDash
   reports what it observes, and the plugin path is unaffected.
 - The live proof of capture is an owner-run check, like the OpenCode live gate: a live Droid

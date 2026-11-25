@@ -5,6 +5,7 @@ using KyberDash.Application.Tests.Fakes;
 using KyberDash.Data.Collector;
 using KyberDash.Data.Collector.Sources;
 using KyberDash.Data.Harnesses.Codex;
+using KyberDash.Data.Tokenization;
 using KyberDash.Domain;
 using Xunit;
 
@@ -310,6 +311,35 @@ public class CodexRolloutMapperTests
 
         Assert.Equal(3, store.CountRecords("codex-cli"));
         Assert.NotNull(store.GetSession("codex-sess-store"));
+    }
+
+    /// <summary>
+    /// A turn whose session resolves a model with its own published tokenizer counts the tool
+    /// result part with that model's own tokenizer, not the labelled stand-in.
+    /// </summary>
+    [Fact]
+    public void Map_CountsToolResultPartsWithTheTurnModelOwnTokenizer()
+    {
+        string outputDoc = "{\"こんにちは\":\"世界\"}";
+        string rawJsonl = string.Join(
+            '\n',
+            [
+                """{"timestamp":"2026-11-19T10:00:00.000Z","type":"session_meta","payload":{"session_id":"codex-sess-own","model":"gpt-3.5-turbo","cwd":"/workspace/repo"}}""",
+                """{"timestamp":"2026-11-19T10:00:01.000Z","type":"response_item","payload":{"type":"function_call","call_id":"call_own_1","name":"shell","arguments":"{\"timeout\":5000}"}}""",
+                """{"timestamp":"2026-11-19T10:00:02.000Z","type":"response_item","payload":{"type":"function_call_output","call_id":"call_own_1","output":"{\"こんにちは\":\"世界\"}"}}""",
+                """{"timestamp":"2026-11-19T10:00:03.000Z","type":"event_msg","payload":{"type":"task_complete"}}""",
+            ]);
+
+        NativeSourceUnit unit = CreateUnit("rollout-model-own.jsonl", rawJsonl);
+        CollectedBatch batch = new CodexRolloutMapper().Map(unit, ImportedAtUtc);
+
+        CollectedRecord toolRecord = Assert.Single(batch.Records, static r => r.Op == RecordOp.ToolInvoke);
+        Assert.Equal("gpt-3.5-turbo", Assert.Single(batch.Records, static r => r.Op == RecordOp.LlmInvoke).Model);
+        CollectedContentPart part = Assert.Single(toolRecord.Parts);
+        Assert.Equal(ContentBucket.ToolResultContent, part.Bucket);
+        Assert.NotNull(part.Withheld);
+        Assert.Equal(LocalTextTokenizer.Shared.Count(outputDoc, "gpt-3.5-turbo").Count, part.Withheld!.MeasuredTokens);
+        Assert.NotEqual(LocalTextTokenizer.Shared.Count(outputDoc, null).Count, part.Withheld.MeasuredTokens);
     }
 
     private static NativeSourceUnit CreateUnit(string fileName, string rawText)

@@ -154,3 +154,41 @@ describe('SessionSkillsSection inspector wiring', () => {
     )
   })
 })
+
+describe('SessionSkillsSection names the session model', () => {
+  const STAND_IN_ROW = { ...SKILL_ROW, tokenizer: 'o200k_base', tokenizerIsModelOwn: false }
+
+  function mountWithModels(models: string[] | undefined): ReturnType<typeof render> {
+    stubFetch(() => jsonResponse({ ...SKILLS_PAGE, rows: [STAND_IN_ROW] }))
+    const element = (
+      <QueryClientProvider client={queryClient()}>
+        <SessionSkillsSection
+          sessionId={SESSION_ID}
+          summaryRecord={models === undefined ? null : { models }}
+          openInspector={() => {}}
+        />
+      </QueryClientProvider>
+    ) as ReactElement
+    return render(element)
+  }
+
+  it('names the one model the session ran, so a stand-in tokenizer reads not Claude\'s own', async () => {
+    mountWithModels(['claude-sonnet-4-20250514'])
+    const row = await screen.findByTestId('skill-row-docs')
+    expect(row.textContent).toContain("not Claude's own")
+    expect(row.textContent).not.toContain("not the model's own")
+  })
+
+  it('keeps the generic wording when the session ran two models', async () => {
+    mountWithModels(['claude-sonnet-4-20250514', 'gpt-4o'])
+    const row = await screen.findByTestId('skill-row-docs')
+    expect(row.textContent).toContain("not the model's own")
+    expect(row.textContent).not.toContain("not Claude's own")
+  })
+
+  it('keeps the generic wording when the summary names no model', async () => {
+    mountWithModels([])
+    const row = await screen.findByTestId('skill-row-docs')
+    expect(row.textContent).toContain("not the model's own")
+  })
+})

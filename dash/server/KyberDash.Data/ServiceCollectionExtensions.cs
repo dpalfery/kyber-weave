@@ -71,7 +71,10 @@ public static class ServiceCollectionExtensions
         services.TryAddSingleton<IOperationalStore>(provider =>
             provider.GetRequiredService<SqliteRelationalStore>());
 
-        services.TryAddSingleton<ITranscriptReaderRepository>(_ => new TranscriptReaderRepository());
+        services.TryAddSingleton<ITranscriptReaderRepository>(provider => new TranscriptReaderRepository(
+            null,
+            null,
+            ServerStateRepository.ResolveStateDirectory(provider.GetService<DashOptions>()?.StateDirectory)));
 
         services.TryAddSingleton<IPricingRepository>(provider =>
             new PricingRepository(provider.GetRequiredService<IOperationalStore>()));

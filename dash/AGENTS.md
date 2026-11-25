@@ -20,6 +20,15 @@ Decided by [ADR 0033](../../docs/adr/0033-kyberdash-surfaces-are-display-layers.
 [ADR 0084](../../docs/adr/0084-kyberdash-csharp-engine.md).
 Architecture: [`docs/dash/architecture.md`](../../docs/dash/architecture.md).
 
+## KyberDash never estimates
+
+> KyberDash never estimates the data it collects and displays: a value the harness did not report is shown as not measured; the fix is capturing the real value. This rule applies to KyberDash (`dash/**` and `docs/dash/**`) only. One exception: token counts of text may use the model's own published tokenizer or, when the model publishes none, the closest standard local tokenizer, always labelled with the tokenizer used and whether it is the model's own; tokenization never calls an API. Every other estimate stays banned.
+
+An estimate is any figure the harness did not report that is not exact arithmetic on reported
+values: a split of a session total across calls or turns, a count from text length, a heuristic
+floor, or an invented band. A cost computed from published rates is a calculation. Full text:
+[`docs/rules/honest-unobservability.md`](../docs/rules/honest-unobservability.md#hard-rule-kyberdash-never-estimates).
+
 ## What lives where
 
 | Directory | Role |
@@ -69,6 +78,10 @@ These rules hold for every test under `dash/`
 - **Playwright runs only with the isolated config**, from the repository root:
   `npx --prefix dash playwright test --config dash/playwright.isolated.config.ts <spec>`.
   Never run `dash/playwright.config.ts` by hand, and never omit `--config`.
+- **Build the engine before any e2e spec.** The isolated boots use only the worktree's own Release
+  build and fail loudly when it is missing (never a `kyberdash-api` from `PATH`, which would test an
+  old engine). From the repository root run `dotnet build dash/server/KyberDash.Api -c Release`,
+  `dotnet build dash/server/KyberDash.Cli -c Release`, and `npm --prefix dash run build:web`.
 - **Never start the dashboard manually to run a test** (`kyberdash web`, `npm run dev`). The isolated
   e2e boots seed an isolated state directory via `E2eSeederService` in `dash/server/KyberDash.Application/Services/` and launch
   a loopback-bound `kyberdash-api` server over ephemeral ports, torn down in `finally`.

@@ -135,6 +135,7 @@ public class CopilotVscodeMapper : IHarnessMapper
         for (int index = 0; index < document.Requests.Count; index++)
         {
             CopilotVscodeRequest current = document.Requests[index];
+            string model = ResolveModel(current);
             List<CollectedContentPart> parts = [];
             int position = 0;
 
@@ -143,12 +144,12 @@ public class CopilotVscodeMapper : IHarnessMapper
                 CopilotVscodeRequest previous = document.Requests[prevIndex];
                 if (!string.IsNullOrWhiteSpace(previous.UserMessage))
                 {
-                    parts.Add(ToolContentMeasurer.BuildContentPart(position++, ContentBucket.ConversationHistory, previous.UserMessage, "user"));
+                    parts.Add(ToolContentMeasurer.BuildContentPart(position++, ContentBucket.ConversationHistory, previous.UserMessage, "user", model));
                 }
 
                 if (!string.IsNullOrWhiteSpace(previous.ResponseText))
                 {
-                    parts.Add(ToolContentMeasurer.BuildContentPart(position++, ContentBucket.ConversationHistory, previous.ResponseText, "assistant"));
+                    parts.Add(ToolContentMeasurer.BuildContentPart(position++, ContentBucket.ConversationHistory, previous.ResponseText, "assistant", model));
                 }
             }
 
@@ -161,15 +162,14 @@ public class CopilotVscodeMapper : IHarnessMapper
                     correctionRule = correction.Rule;
                 }
 
-                parts.Add(ToolContentMeasurer.BuildContentPart(position++, ContentBucket.ConversationHistory, current.UserMessage, "user"));
+                parts.Add(ToolContentMeasurer.BuildContentPart(position++, ContentBucket.ConversationHistory, current.UserMessage, "user", model));
             }
 
             if (!string.IsNullOrWhiteSpace(current.ModeInstructions))
             {
-                parts.Add(ToolContentMeasurer.BuildContentPart(position++, ContentBucket.InstructionContext, current.ModeInstructions, "system"));
+                parts.Add(ToolContentMeasurer.BuildContentPart(position++, ContentBucket.InstructionContext, current.ModeInstructions, "system", model));
             }
 
-            string model = ResolveModel(current);
             string recordId = BuildUniqueRecordId(sessionId, current, seenRecordIds);
             string recordName = !string.Equals(model, "unknown", StringComparison.Ordinal)
                 ? $"copilot:{model}"
@@ -230,7 +230,7 @@ public class CopilotVscodeMapper : IHarnessMapper
                 string callId = SafeOptionalText(toolCall.CallId)
                     ?? string.Create(CultureInfo.InvariantCulture, $"tool-{toolIndex}");
                 CollectedToolContent? toolInput = !string.IsNullOrEmpty(toolCall.RawArgumentsText)
-                    ? ToolContentMeasurer.Measure(toolCall.RawArgumentsText).ToToolContent(includeFingerprint: true)
+                    ? ToolContentMeasurer.Measure(toolCall.RawArgumentsText, model: model).ToToolContent(includeFingerprint: true)
                     : null;
 
                 records.Add(new CollectedRecord(

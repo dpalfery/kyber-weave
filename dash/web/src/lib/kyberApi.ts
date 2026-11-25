@@ -1,3 +1,4 @@
+import { fmtTokens } from './utils.js'
 import { buildTurnContentView, type TurnContentSourcePart } from './turnContentBlocks.js'
 
 export type KyberTimelineNode = import('@/components/analysis/TimelineView').TimelineNode
@@ -482,6 +483,76 @@ export type KyberUnmeasurable = { availability: 'not_measurable'; reason: string
 /** A bucket or input total: a token count, or the explicit refusal with its reason. */
 export type KyberMeasuredFigure = number | KyberUnmeasurable
 
+/** One tokenizer that counted a text-derived figure, and whether it is the model's own. */
+export interface KyberTokenizerLabel {
+  name: string
+  isModelOwn: boolean
+}
+
+/**
+ * The label trio the engine adds beside a figure it counted from text. Absent
+ * as a whole when the harness reported the figure: a harness-reported count
+ * carries no tokenizer and is not a stand-in for one.
+ */
+export interface KyberTokenizerFigure {
+  tokenizer?: string
+  tokenizers?: KyberTokenizerLabel[]
+  tokenizerIsModelOwn?: boolean | null
+}
+
+/**
+ * The model family a stand-in tokenizer is being compared against, for the
+ * "not Claude's own" half of its label. A model the dashboard does not know
+ * is named as served, so the sentence never invents a family.
+ */
+function modelFamilyName(model?: string | null): string {
+  if (!model) return 'the model'
+  const lower = model.toLowerCase()
+  if (lower.includes('claude')) return 'Claude'
+  if (lower.includes('gemini')) return 'Gemini'
+  if (lower.includes('gpt') || lower.includes('openai')) return 'GPT'
+  return model
+}
+
+/**
+ * The visible label for a text-derived token figure: the tokenizer that
+ * counted it and whether it is the model's own. Undefined when the figure
+ * came from harness-reported counters and therefore carries no label.
+ */
+export function tokenizerLabel(
+  figure: KyberTokenizerFigure,
+  model?: string | null,
+): string | undefined {
+  const labels =
+    figure.tokenizers && figure.tokenizers.length > 0
+      ? figure.tokenizers
+      : figure.tokenizer && figure.tokenizer !== 'mixed'
+        ? [{ name: figure.tokenizer, isModelOwn: figure.tokenizerIsModelOwn === true }]
+        : []
+
+  if (labels.length === 0) {
+    return figure.tokenizer === 'mixed' ? 'mixed tokenizers' : undefined
+  }
+
+  if (labels.length > 1 || figure.tokenizer === 'mixed') {
+    const named = labels.map((label) =>
+      label.isModelOwn
+        ? `${label.name} (the model's own)`
+        : `${label.name} (standard, not ${modelFamilyName(model)}'s own)`,
+    )
+    return `mixed tokenizers: ${named.join(', ')}`
+  }
+
+  const only = labels[0]!
+  if (only.isModelOwn) return `${only.name}, the model's own tokenizer`
+  return `${only.name}, standard tokenizer — not ${modelFamilyName(model)}'s own`
+}
+
+/** A token figure with its label, or 'not measured' when it is absent. */
+export function fmtMeasuredTokens(n: number | null | undefined): string {
+  return n == null ? 'not measured' : fmtTokens(n)
+}
+
 /** Context composition of one turn, or of the session payload's `first`/`last` edge. */
 export interface KyberContextBucket {
   buckets: Record<string, KyberMeasuredFigure>
@@ -492,7 +563,7 @@ export interface KyberContextBucket {
  * One turn of the serialized context analysis — the engine's `TurnPressure`
  * with its per-server map turned into an object for JSON.
  */
-export interface KyberContextTurn {
+export interface KyberContextTurn extends KyberTokenizerFigure {
   index: number
   buckets: Record<string, KyberMeasuredFigure>
   toolDefinitionsByServer: Record<string, number>
@@ -515,7 +586,7 @@ export interface KyberContextTurn {
   turn?: number
 }
 
-export type KyberSessionContext = {
+export type KyberSessionContext = ({
   measurable: true
   contextLimit: number
   turns: KyberContextTurn[]
@@ -527,7 +598,7 @@ export type KyberSessionContext = {
   first: KyberContextBucket
   last: KyberContextBucket
   unmeasuredTurns: number
-} | {
+} & KyberTokenizerFigure) | {
   measurable: false
   reason: string
   turns?: number
@@ -634,7 +705,7 @@ export interface KyberMessageLike {
   [key: string]: unknown
 }
 
-export interface KyberSessionContentPart {
+export interface KyberSessionContentPart extends KyberTokenizerFigure {
   spanId: string
   part: string
   text: string
@@ -668,7 +739,7 @@ export function fetchKyberSessionContent(
   return fetchJson<KyberSessionContentResult>(path)
 }
 
-export interface KyberTurnContentPart {
+export interface KyberTurnContentPart extends KyberTokenizerFigure {
   id?: string
   spanId?: string
   part: string
@@ -694,7 +765,7 @@ export interface KyberTurnContentPart {
   recurrence?: { seenBefore: boolean }
 }
 
-export interface KyberTurnContentBlock {
+export interface KyberTurnContentBlock extends KyberTokenizerFigure {
   key: string
   label: string
   tokens?: number
@@ -811,6 +882,7 @@ function parseTurnContentResult(raw: unknown, path: string): KyberTurnContentRes
   if (!Array.isArray(raw.parts)) throw malformedSection(path, 'parts is not an array')
   const sourceParts: TurnContentSourcePart[] = raw.parts.map((entry: unknown) => {
     if (!isRaw(entry)) throw malformedSection(path, 'parts entry is not an object')
+    const label = readPartTokenizerFigure(entry, path, 'a content part')
     return {
       part: requireStringField(entry, 'part', path),
       text: requireStringField(entry, 'text', path),
@@ -819,6 +891,7 @@ function parseTurnContentResult(raw: unknown, path: string): KyberTurnContentRes
       server: typeof entry.server === 'string' ? entry.server : undefined,
       resident: entry.resident === false ? false : undefined,
       truncated: entry.truncated === true ? true : undefined,
+      ...label,
     }
   })
   const { parts, blocks, assembledText } = buildTurnContentView(sourceParts)
@@ -979,15 +1052,15 @@ export interface KyberFinding {
   mechanism: string
   evidenceLinks: KyberEvidenceLink[]
   confidence: FindingConfidenceLevel
-  // Absent for unmeasured (coverage-gap) findings: render '—', never zero.
-  estimatedWasteTokens?: number
+  // Absent or null for unmeasured (coverage-gap) findings: render 'not measured', never zero.
+  estimatedWasteTokens?: number | null
   recommendation: string
-  // Absent for unmeasured (coverage-gap) findings alongside the waste
-  // estimate; every consumer already guards with `finding.errorBar &&`.
+  // Absent or null for unmeasured (coverage-gap) findings; the dashboard shows no
+  // error bar at all, because an invented band is an estimate (D15).
   errorBar?: {
     lower: number
     upper: number
-  }
+  } | null
   outcomeRiskCaveat: string
   runId?: string
   sessionId?: string
@@ -1262,7 +1335,7 @@ export async function recordFindingPrediction(finding: {
   runId?: string
   estimatedWasteTokens?: number | null
   confidence?: string | number
-  errorBar?: { lower?: number; upper?: number }
+  errorBar?: { lower?: number; upper?: number } | null
 }): Promise<void> {
   if (!finding.id || !finding.runId) return
   if (finding.estimatedWasteTokens == null) return
@@ -1695,6 +1768,8 @@ export interface KyberJobStatus {
     lastSuccessAt: string | null
     lastFailure: string | null
     nextDueAt: string | null
+    /** Source units the last pass could not read and skipped; zero when it read them all. */
+    failedUnits: number
   }
   /** Whether SCHEDULED jobs are paused. The pause button and label read this. */
   paused: boolean
@@ -1790,35 +1865,61 @@ export async function updateKyberSettings(update: KyberSettingsUpdate): Promise<
   return res.json() as Promise<KyberSettings>
 }
 
+/**
+ * How a finished job pass ended, as the host reports it. `partial` means the
+ * pass completed but `failedUnits` source units could not be read and were
+ * skipped, so it is never a clean success.
+ */
+export interface KyberJobOutcome {
+  outcome: 'succeeded' | 'partial'
+  failedUnits: number
+}
+
+/**
+ * Reads the outcome of a job route. The host answers only after the pass has
+ * finished, so the reply IS the result. A non-2xx reply, or a 2xx body without a
+ * known outcome, is an error: a missing answer is never shown as success.
+ */
+async function readJobOutcome(res: Response, path: string): Promise<KyberJobOutcome> {
+  if (!res.ok) throw new KyberApiError(res.status, path)
+  const body = (await res.json()) as Partial<KyberJobOutcome> | null
+  const known = body?.outcome === 'succeeded' || body?.outcome === 'partial'
+  if (!known || typeof body?.failedUnits !== 'number') throw new KyberApiError(res.status, path)
+  return { outcome: body.outcome as KyberJobOutcome['outcome'], failedUnits: body.failedUnits }
+}
+
 /** Which surface asked for a refresh; `scheduled` is reserved for the host. */
 export type KyberRefreshSurface = 'web' | 'tray'
 
 /**
- * Requests a manual refresh. WHY `surface`: the host records which surface
- * triggered the run, and the dashboard must never ask for the scheduled one —
- * that decision belongs to the host's own cadence. A 409 arrives as a
- * `KyberApiError` for the caller to render as "already running".
+ * Requests a manual refresh and resolves to the outcome the host reports. WHY
+ * `surface`: the host records which surface triggered the run, and the dashboard
+ * must never ask for the scheduled one — that decision belongs to the host's own
+ * cadence. A 409 arrives as a `KyberApiError` for the caller to render as
+ * "already running".
  */
-export async function requestKyberRefresh(surface: KyberRefreshSurface = 'web'): Promise<void> {
+export async function requestKyberRefresh(
+  surface: KyberRefreshSurface = 'web',
+): Promise<KyberJobOutcome> {
   const path = '/api/kyber/refresh'
   const res = await fetch(path, {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
     body: JSON.stringify({ surface }),
   })
-  if (!res.ok) throw new KyberApiError(res.status, path)
+  return readJobOutcome(res, path)
 }
 
 /**
  * One-off folder-history import (issue #319). It NEVER touches the scheduled
  * folder-import setting: "import this once" and "keep importing" are different
  * decisions, and conflating them made a single import look like a standing
- * preference.
+ * preference. Resolves to the outcome the host reports.
  */
 export async function importKyberHistory(request: {
   weeks: number
   harnesses?: readonly string[]
-}): Promise<void> {
+}): Promise<KyberJobOutcome> {
   const path = '/api/kyber/import-history'
   const res = await fetch(path, {
     method: 'POST',
@@ -1832,7 +1933,7 @@ export async function importKyberHistory(request: {
         : {}),
     }),
   })
-  if (!res.ok) throw new KyberApiError(res.status, path)
+  return readJobOutcome(res, path)
 }
 
 // ===========================================================================
@@ -2297,12 +2398,12 @@ export type KyberSkillAvailability = {
 }
 
 /** One skill from the session's `skills.rows`. `turns_listed` is 0-based transport indices. */
-export type KyberSkillRow = {
+export type KyberSkillRow = KyberTokenizerFigure & {
   name: string
   listed: boolean | KyberSkillAvailability
   invocations: number | KyberSkillAvailability
   turns_listed: number[]
-  /** Engine-derived token estimate; labelled as derived wherever it is shown. */
+  /** Engine-derived token count; labelled with its tokenizer wherever it is shown. */
   derived_tokens?: number
   /** The skill description: from the listing, or the skill file for names-only harnesses. */
   description?: string
@@ -2556,6 +2657,75 @@ function readOptionalNumber(value: unknown, path: string, key: string): number |
   throw malformedSection(path, `${key} is not a number`)
 }
 
+/**
+ * Reads the tokenizer label trio the engine adds beside a text-derived figure.
+ * The trio is all-or-none: a figure with no label came from harness-reported
+ * counters, and a response carrying only part of one cannot be shown honestly.
+ */
+function readTokenizerFigure(raw: Raw, path: string, what: string): KyberTokenizerFigure {
+  const hasTokenizer = raw.tokenizer !== undefined
+  const hasList = raw.tokenizers !== undefined
+  const hasOwn = raw.tokenizerIsModelOwn !== undefined
+  if (!hasTokenizer && !hasList && !hasOwn) return {}
+  if (!hasTokenizer || !hasList || !hasOwn) {
+    throw malformedSection(path, `${what} carries an incomplete tokenizer label`)
+  }
+  if (typeof raw.tokenizer !== 'string' || raw.tokenizer.length === 0) {
+    throw malformedSection(path, `${what}.tokenizer is not a non-empty string`)
+  }
+  if (!Array.isArray(raw.tokenizers) || raw.tokenizers.length === 0) {
+    throw malformedSection(path, `${what}.tokenizers is not a non-empty array`)
+  }
+  const tokenizers: KyberTokenizerLabel[] = raw.tokenizers.map((entry) => {
+    if (!isRaw(entry)) throw malformedSection(path, `${what}.tokenizers holds a non-object`)
+    return {
+      name: requireStringField(entry, 'name', `${path} ${what}.tokenizers`),
+      isModelOwn: requireBooleanField(entry, 'isModelOwn', `${path} ${what}.tokenizers`),
+    }
+  })
+  const isModelOwn = raw.tokenizerIsModelOwn
+  if (isModelOwn !== null && typeof isModelOwn !== 'boolean') {
+    throw malformedSection(path, `${what}.tokenizerIsModelOwn is not a boolean or null`)
+  }
+  if (tokenizers.length > 1) {
+    if (raw.tokenizer !== 'mixed' || isModelOwn !== null) {
+      throw malformedSection(path, `${what} names several tokenizers without the mixed label`)
+    }
+  } else {
+    const only = tokenizers[0]!
+    if (raw.tokenizer !== only.name || isModelOwn !== only.isModelOwn) {
+      throw malformedSection(path, `${what} tokenizer label disagrees with its list`)
+    }
+  }
+  return { tokenizer: raw.tokenizer, tokenizers, tokenizerIsModelOwn: isModelOwn }
+}
+
+/**
+ * Reads a content part's single-tokenizer label. A part may carry tokens with
+ * no label (a harness-reported count), but it may not carry half a label.
+ */
+function readPartTokenizerFigure(raw: Raw, path: string, what: string): KyberTokenizerFigure {
+  const hasTokenizer = raw.tokenizer !== undefined
+  const hasOwn = raw.tokenizerIsModelOwn !== undefined
+  if (!hasTokenizer && !hasOwn) return {}
+  if (!hasTokenizer || !hasOwn) {
+    throw malformedSection(path, `${what} carries an incomplete tokenizer label`)
+  }
+  if (typeof raw.tokenizer !== 'string' || raw.tokenizer.length === 0) {
+    throw malformedSection(path, `${what}.tokenizer is not a non-empty string`)
+  }
+  const isModelOwn = raw.tokenizerIsModelOwn
+  if (isModelOwn !== null && typeof isModelOwn !== 'boolean') {
+    throw malformedSection(path, `${what}.tokenizerIsModelOwn is not a boolean or null`)
+  }
+  return {
+    tokenizer: raw.tokenizer,
+    tokenizers: [{ name: raw.tokenizer, isModelOwn: isModelOwn === true }],
+    tokenizerIsModelOwn: isModelOwn,
+  }
+}
+
+
 function readStringArray(value: unknown, path: string, key: string): string[] {
   if (!Array.isArray(value)) throw malformedSection(path, `${key} is not an array`)
   return value.map((entry) => {
@@ -2735,7 +2905,20 @@ function parseSessionChartsSection(raw: unknown, path: string): KyberSessionChar
   if (context.measurable) {
     if (!Array.isArray(context.turns)) throw malformedSection(path, 'context.turns is not an array')
     requireNumberField(context, 'contextLimit', path)
-  } else if (typeof context.reason !== 'string') {
+    const labels = readTokenizerFigure(context, path, 'context')
+    for (const turn of context.turns) {
+      if (!isRaw(turn)) throw malformedSection(path, 'context.turns holds a non-object')
+      readTokenizerFigure(turn, path, 'a context turn')
+    }
+    const section: KyberSessionChartsSection = {
+      sessionId: requireStringField(raw, 'sessionId', path),
+      turns: raw.turns.map((turn) => readChartTurn(turn, path)),
+      context: { ...(context as unknown as KyberSessionContext), ...labels },
+    }
+    if (typeof raw.projection_status === 'string') section.projection_status = raw.projection_status
+    return section
+  }
+  if (typeof context.reason !== 'string') {
     throw malformedSection(path, 'context.reason is not a string')
   }
 
@@ -2918,6 +3101,7 @@ function readSkillRow(raw: Raw, path: string): KyberSkillRow {
   }
   const derivedTokens = readOptionalNumber(raw.derived_tokens, path, 'derived_tokens')
   if (derivedTokens !== undefined && derivedTokens !== null) row.derived_tokens = derivedTokens
+  Object.assign(row, readPartTokenizerFigure(raw, path, 'a skill row'))
   const description = readOptionalString(raw.description, path, 'description')
   if (description !== undefined && description !== null) row.description = description
   return row
@@ -3223,6 +3407,7 @@ function parseSessionTurnSection(raw: unknown, path: string): KyberSessionTurnSe
     if (!isRaw(raw.context)) throw malformedSection(path, 'context is not an object or null')
     requireNumberField(raw.context, 'index', path)
     if (!isRaw(raw.context.buckets)) throw malformedSection(path, 'context.buckets is not an object')
+    readTokenizerFigure(raw.context, path, 'context')
   }
   const section: KyberSessionTurnSection = {
     sessionId: requireStringField(raw, 'sessionId', path),

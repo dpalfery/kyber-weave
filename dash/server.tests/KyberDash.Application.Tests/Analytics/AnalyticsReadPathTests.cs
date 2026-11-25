@@ -1889,6 +1889,9 @@ public sealed class AnalyticsReadPathTests
         Assert.Contains(
             summary.GetProperty("notes").EnumerateArray(),
             note => note.GetString() == stored.SchemaUnmeasurableReason);
+        Assert.Contains(
+            summary.GetProperty("notes").EnumerateArray(),
+            static note => note.GetString() == "Harness-reported cost was not exported; cost calculated from published rates is shown separately.");
 
         JsonElement skills = bridge.GetSessionSkills("sess-pi-gap")!.Value;
         Assert.Equal("not_measurable", skills.GetProperty("availability").GetString());
@@ -1910,7 +1913,7 @@ public sealed class AnalyticsReadPathTests
             store,
             store,
             store,
-            new CanonSessionProjectorEngine(store, store, store, pricing),
+            new CanonSessionProjectorEngine(store, store, store, pricing, new FakeTextTokenizer()),
             new CanonRollupsEngine(store, store, pricing));
 
     private static KyberBridgeEngine CreateBridge(
@@ -1924,7 +1927,7 @@ public sealed class AnalyticsReadPathTests
             store,
             store,
             resolvedPricing,
-            new CanonSessionProjectorEngine(readerOverride ?? store, store, store, resolvedPricing),
+            new CanonSessionProjectorEngine(readerOverride ?? store, store, store, resolvedPricing, new FakeTextTokenizer()),
             new CanonRollupsEngine(readerOverride ?? store, store, resolvedPricing),
             clock: () => FixedTimestamp,
             instanceId: "test-instance");
@@ -2096,6 +2099,9 @@ public sealed class AnalyticsReadPathTests
 
         /// <inheritdoc />
         public IReadOnlyList<StoredSourceCount> SourceRecordCounts() => inner.SourceRecordCounts();
+
+        public IReadOnlyList<string> SessionKeysWithRecordSource(string harnessId, string sourceName, int limit) =>
+            inner.SessionKeysWithRecordSource(harnessId, sourceName, limit);
 
         public CollectedRecord? RecordContentFree(string spanId) => inner.RecordContentFree(spanId);
 

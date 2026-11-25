@@ -143,7 +143,7 @@ public sealed class AnalyticsErrorEnvelopeTests
             resolvedProjections,
             resolvedOperational,
             pricing,
-            new CanonSessionProjectorEngine(reader, resolvedProjections, resolvedOperational, pricing),
+            new CanonSessionProjectorEngine(reader, resolvedProjections, resolvedOperational, pricing, new FakeTextTokenizer()),
             new CanonRollupsEngine(reader, resolvedProjections, pricing),
             clock: () => FixedTimestamp,
             instanceId: "test-instance");

@@ -26,7 +26,7 @@ public class ApplicationParityTests
             store,
             store,
             store,
-            new CanonSessionProjectorEngine(store, store, store, pricing),
+            new CanonSessionProjectorEngine(store, store, store, pricing, new FakeTextTokenizer()),
             new CanonRollupsEngine(store, store, pricing));
 
         WriteSession(
@@ -98,7 +98,7 @@ public class ApplicationParityTests
             store,
             store,
             store,
-            new CanonSessionProjectorEngine(store, store, store, pricing),
+            new CanonSessionProjectorEngine(store, store, store, pricing, new FakeTextTokenizer()),
             new CanonRollupsEngine(store, store, pricing));
 
         WriteSession(store, "sess-a", "droid", [Turn("span-a-1", "sess-a", 0)]);
@@ -121,14 +121,14 @@ public class ApplicationParityTests
             store,
             store,
             store,
-            new CanonSessionProjectorEngine(store, store, store, pricing),
+            new CanonSessionProjectorEngine(store, store, store, pricing, new FakeTextTokenizer()),
             new CanonRollupsEngine(store, store, pricing));
         KyberBridgeEngine bridge = new(
             store,
             store,
             store,
             pricing,
-            new CanonSessionProjectorEngine(store, store, store, pricing),
+            new CanonSessionProjectorEngine(store, store, store, pricing, new FakeTextTokenizer()),
             new CanonRollupsEngine(store, store, pricing));
         DashboardQueryService query = new(bridge);
 
@@ -272,7 +272,7 @@ public class ApplicationParityTests
         FakeSettingsRepository settings = new();
         FakeServerStateRepository serverState = new();
         FakePricingRepository pricing = new();
-        CanonProjectionService projection = new(store, store, store, new CanonSessionProjectorEngine(store, store, store, pricing), new CanonRollupsEngine(store, store, pricing));
+        CanonProjectionService projection = new(store, store, store, new CanonSessionProjectorEngine(store, store, store, pricing, new FakeTextTokenizer()), new CanonRollupsEngine(store, store, pricing));
         TranscriptIngestionService ingestion = new(store, store, new HarnessSourceRegistry());
         DashOptions options = new() { StateDirectory = serverState.DefaultStateDirectory };
 
@@ -300,7 +300,7 @@ public class ApplicationParityTests
         FakeSettingsRepository settings = new();
         FakeServerStateRepository serverState = new() { JobsLeaseAvailable = false };
         FakePricingRepository pricing = new();
-        CanonProjectionService projection = new(store, store, store, new CanonSessionProjectorEngine(store, store, store, pricing), new CanonRollupsEngine(store, store, pricing));
+        CanonProjectionService projection = new(store, store, store, new CanonSessionProjectorEngine(store, store, store, pricing, new FakeTextTokenizer()), new CanonRollupsEngine(store, store, pricing));
         TranscriptIngestionService ingestion = new(store, store, new HarnessSourceRegistry());
 
         using JobSchedulerService jobs = new(store, store, projection, ingestion, settings, serverState, new DashOptions { StateDirectory = serverState.DefaultStateDirectory });
@@ -337,7 +337,7 @@ public class ApplicationParityTests
         InMemoryRelationalStore store = new();
         FakeServerStateRepository serverState = new();
         FakePricingRepository pricing = new();
-        CanonProjectionService projection = new(store, store, store, new CanonSessionProjectorEngine(store, store, store, pricing), new CanonRollupsEngine(store, store, pricing));
+        CanonProjectionService projection = new(store, store, store, new CanonSessionProjectorEngine(store, store, store, pricing, new FakeTextTokenizer()), new CanonRollupsEngine(store, store, pricing));
         TranscriptIngestionService ingestion = new(store, store, new HarnessSourceRegistry());
 
         JobSchedulerService jobs = new(store, store, projection, ingestion, new FakeSettingsRepository(), serverState, new DashOptions { StateDirectory = serverState.DefaultStateDirectory });
@@ -553,7 +553,7 @@ public class ApplicationParityTests
         using TempDirectory directory = new();
         InMemoryRelationalStore store = new();
         FakePricingRepository pricing = new();
-        CanonProjectionService projection = new(store, store, store, new CanonSessionProjectorEngine(store, store, store, pricing), new CanonRollupsEngine(store, store, pricing));
+        CanonProjectionService projection = new(store, store, store, new CanonSessionProjectorEngine(store, store, store, pricing, new FakeTextTokenizer()), new CanonRollupsEngine(store, store, pricing));
         TranscriptIngestionService ingestion = new(store, store, new HarnessSourceRegistry());
         E2eSeederService seeder = new(store, store, store, ingestion, projection);
 
@@ -624,7 +624,7 @@ public class ApplicationParityTests
             store,
             store,
             pricing,
-            new CanonSessionProjectorEngine(store, store, store, pricing),
+            new CanonSessionProjectorEngine(store, store, store, pricing, new FakeTextTokenizer()),
             new CanonRollupsEngine(store, store, pricing));
     }
 

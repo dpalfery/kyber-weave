@@ -407,6 +407,8 @@ public static class OtlpLogMapper
             ? normalized.Name
             : CanonRecordVocabulary.FormatRecordOp(op);
 
+        (string? ResponseId, string? RequestId) joinIds = OtlpJoinIds.Read(normalized.Harness, log.Attributes);
+
         string? spanId = SafeOptionalText(log.SpanId);
         string? parentRecordId = spanId is not null && !string.Equals(spanId, log.LogId, StringComparison.Ordinal)
             ? spanId
@@ -441,7 +443,7 @@ public static class OtlpLogMapper
             ReportedDurationMs: ExtractOptionalNonNegLong(log.Attributes, DurationKeys),
             Tokens: tokens,
             ReportedCost: ExtractReportedCost(normalized.Cost, log.Attributes),
-            Parts: BuildCollectedParts(normalized, log.Body, item.EventName),
+            Parts: BuildCollectedParts(normalized, log.Body, item.EventName, model),
             Tool: null,
             Agent: null,
             SkillsInvoked: SkillExtraction.ExtractInvoked(log.Attributes),
@@ -449,7 +451,9 @@ public static class OtlpLogMapper
             ToolDefinitions: [],
             Signals: new CollectedRecordSignals(errorMessage, null, null, null),
             ReportedInputTokens: normalized.Tokens.ReportedInput >= 0 ? normalized.Tokens.ReportedInput : null,
-            ReportedOutputTokens: normalized.Tokens.ReportedOutput >= 0 ? normalized.Tokens.ReportedOutput : null);
+            ReportedOutputTokens: normalized.Tokens.ReportedOutput >= 0 ? normalized.Tokens.ReportedOutput : null,
+            ResponseId: joinIds.ResponseId,
+            RequestId: joinIds.RequestId);
     }
 
     private static RecordOp ResolveLogOp(
@@ -488,7 +492,8 @@ public static class OtlpLogMapper
     private static List<CollectedContentPart> BuildCollectedParts(
         CanonicalRecord normalized,
         string? logBody,
-        string? eventName)
+        string? eventName,
+        string? model)
     {
         List<CollectedContentPart> parts = [];
         HashSet<int> usedPositions = [];
@@ -517,7 +522,8 @@ public static class OtlpLogMapper
                     part.Tokens is >= 0 ? part.Tokens : null,
                     SafeOptionalText(part.Server),
                     SafeOptionalText(part.Role),
-                    part.Resident));
+                    part.Resident,
+                    model));
             }
         }
         else if (normalized.Content is { Count: > 0 })
@@ -531,7 +537,7 @@ public static class OtlpLogMapper
 
                 int position = nextPosition++;
                 _ = usedPositions.Add(position);
-                parts.Add(MeasureToCollectedPart(position, bucket, entry.Value ?? string.Empty, null, null, null, null));
+                parts.Add(MeasureToCollectedPart(position, bucket, entry.Value ?? string.Empty, null, null, null, null, model));
             }
         }
 
@@ -544,7 +550,7 @@ public static class OtlpLogMapper
             }
 
             ContentBucket bodyBucket = ResolveBodyBucket(eventName);
-            parts.Add(MeasureToCollectedPart(position, bodyBucket, logBody, null, null, null, null));
+            parts.Add(MeasureToCollectedPart(position, bodyBucket, logBody, null, null, null, null, model));
         }
 
         return parts;
@@ -557,9 +563,10 @@ public static class OtlpLogMapper
         long? reportedTokens,
         string? server,
         string? role,
-        bool? resident)
+        bool? resident,
+        string? model)
     {
-        ToolContentMeasurement measurement = ToolContentMeasurer.Measure(rawText, CanonValidation.MaxContentPartBytes);
+        ToolContentMeasurement measurement = ToolContentMeasurer.Measure(rawText, CanonValidation.MaxContentPartBytes, model);
         string? plainText = measurement.IsDocument ? null : measurement.PlainText;
         CollectedWithheldText? withheld = measurement.IsDocument ? measurement.ToWithheldText() : null;
         long? originalBytes = measurement.IsDocument ? null : measurement.OriginalUtf8BytesWhenTruncated;

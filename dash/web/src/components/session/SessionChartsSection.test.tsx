@@ -139,6 +139,23 @@ describe('SessionChartsSection states', () => {
     const banner = within(section).getByTestId('context-composition-not-measurable')
     expect(banner.textContent).toContain(reason)
   })
+
+  it('renders the not-measurable turn state, with no turn bars, for a charts response with no token fields', async () => {
+    stubFetch(() =>
+      jsonResponse({
+        ...CHARTS_BODY,
+        turns: [
+          { index: 0, spanId: 'turn-span-1', model: 'droid', durationMs: 4200 },
+          { index: 1, spanId: 'turn-span-2', model: 'droid', durationMs: 5100 },
+        ],
+      }),
+    )
+    mount(() => {})
+    const section = await screen.findByTestId('spend-composition-section')
+    expect(within(section).getByTestId('turn-spend-not-measurable')).toBeTruthy()
+    expect(within(section).queryByTestId('turn-bar-0')).toBeNull()
+    expect(within(section).queryByTestId('turn-bar-1')).toBeNull()
+  })
 })
 
 describe('SessionChartsSection inspector wiring', () => {

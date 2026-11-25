@@ -306,7 +306,7 @@ public static class SettingsCleanDoctorReportTests
             Mock<ITranscriptIngestionService> ingestion = new();
             projection.Setup(service => service.ProjectIncremental()).Returns(EmptyProjection);
             projection.Setup(service => service.ProjectRunsAndHarnesses()).Returns([]);
-            ingestion.Setup(service => service.RefreshHarnessSources(2)).Returns(EmptyRefreshReport);
+            ingestion.Setup(service => service.RefreshHarnessSources(2)).Returns(new RefreshReport(string.Empty, 0, string.Empty, [], 0, 0, 0, 0, 0, 0));
 
             CleanReport report = new CleanService(store, store, store, store, projection.Object, ingestion.Object).CleanDatabase(
                 new CleanScope(All: true, ReingestWeeks: 2));
@@ -530,6 +530,9 @@ public static class SettingsCleanDoctorReportTests
             public void WriteBatch(CollectedBatch batch) => throw new IOException("disk full");
 
             public void DeleteSource(string sourceId) => throw new IOException("disk full");
+
+            public void ClearEstimatedRecordTokens(string harnessId, string sourceLocator, EstimatedRecordTokens estimated) =>
+                throw new IOException("disk full");
 
             public void WriteProblem(CollectedProblem problem) => throw new IOException("disk full");
         }
@@ -881,6 +884,7 @@ public static class SettingsCleanDoctorReportTests
 
             Mock<ICanonProjectionService> projection = new();
             Mock<ITranscriptIngestionService> ingestion = new();
+            ingestion.Setup(service => service.RefreshHarnessSources(It.IsAny<int>())).Returns(new RefreshReport(string.Empty, 0, string.Empty, [], 0, 0, 0, 0, 0, 0));
             FakeSettingsRepository settings = new();
             FakeServerStateRepository serverState = new();
 
@@ -900,6 +904,7 @@ public static class SettingsCleanDoctorReportTests
 
             Mock<ICanonProjectionService> projection = new();
             Mock<ITranscriptIngestionService> ingestion = new();
+            ingestion.Setup(service => service.RefreshHarnessSources(It.IsAny<int>())).Returns(new RefreshReport(string.Empty, 0, string.Empty, [], 0, 0, 0, 0, 0, 0));
             FakeSettingsRepository settings = new();
             FakeServerStateRepository serverState = new();
             List<string> logs = [];
@@ -930,6 +935,7 @@ public static class SettingsCleanDoctorReportTests
 
             Mock<ICanonProjectionService> projection = new();
             Mock<ITranscriptIngestionService> ingestion = new();
+            ingestion.Setup(service => service.RefreshHarnessSources(It.IsAny<int>())).Returns(new RefreshReport(string.Empty, 0, string.Empty, [], 0, 0, 0, 0, 0, 0));
             FakeSettingsRepository settings = new();
             FakeServerStateRepository serverState = new();
 
@@ -948,6 +954,7 @@ public static class SettingsCleanDoctorReportTests
             FakeServerStateRepository serverState = new();
             Mock<ICanonProjectionService> projection = new();
             Mock<ITranscriptIngestionService> ingestion = new();
+            ingestion.Setup(service => service.RefreshHarnessSources(It.IsAny<int>())).Returns(new RefreshReport(string.Empty, 0, string.Empty, [], 0, 0, 0, 0, 0, 0));
 
             using JobSchedulerService jobs = new(store, store, projection.Object, ingestion.Object, settings, serverState, Options(serverState));
 
@@ -972,6 +979,7 @@ public static class SettingsCleanDoctorReportTests
             FakeServerStateRepository serverState = new();
             Mock<ICanonProjectionService> projection = new();
             Mock<ITranscriptIngestionService> ingestion = new();
+            ingestion.Setup(service => service.RefreshHarnessSources(It.IsAny<int>())).Returns(new RefreshReport(string.Empty, 0, string.Empty, [], 0, 0, 0, 0, 0, 0));
 
             JobSchedulerService jobs = new(store, store, projection.Object, ingestion.Object, settings, serverState, Options(serverState));
             try
@@ -1147,7 +1155,7 @@ public static class SettingsCleanDoctorReportTests
                     Store,
                     Store,
                     Pricing,
-                    new CanonSessionProjectorEngine(Store, Store, Store, Pricing),
+                    new CanonSessionProjectorEngine(Store, Store, Store, Pricing, new FakeTextTokenizer()),
                     new CanonRollupsEngine(Store, Store, Pricing));
                 Analytics = new AnalyticsService(bridge);
             }
@@ -1178,7 +1186,7 @@ public static class SettingsCleanDoctorReportTests
                 store,
                 store,
                 pricing,
-                new CanonSessionProjectorEngine(store, store, store, pricing),
+                new CanonSessionProjectorEngine(store, store, store, pricing, new FakeTextTokenizer()),
                 new CanonRollupsEngine(store, store, pricing),
                 clock: () => FixedNow);
 
@@ -1192,7 +1200,7 @@ public static class SettingsCleanDoctorReportTests
                 store,
                 store,
                 pricing,
-                new CanonSessionProjectorEngine(store, store, store, pricing),
+                new CanonSessionProjectorEngine(store, store, store, pricing, new FakeTextTokenizer()),
                 new CanonRollupsEngine(store, store, pricing),
                 version: "1.9.0",
                 clock: () => FixedNow,
@@ -1292,7 +1300,7 @@ public static class SettingsCleanDoctorReportTests
                 store,
                 store,
                 store,
-                new CanonSessionProjectorEngine(store, store, store, pricing),
+                new CanonSessionProjectorEngine(store, store, store, pricing, new FakeTextTokenizer()),
                 new CanonRollupsEngine(store, store, pricing)).ProjectAll();
 
             KyberBridgeEngine bridge = CreateBridge(store, pricing: pricing);
@@ -1391,7 +1399,7 @@ public static class SettingsCleanDoctorReportTests
                 store,
                 store,
                 store,
-                new CanonSessionProjectorEngine(store, store, store, pricing),
+                new CanonSessionProjectorEngine(store, store, store, pricing, new FakeTextTokenizer()),
                 new CanonRollupsEngine(store, store, pricing)).ProjectAll();
 
             KyberBridgeEngine bridge = CreateBridge(store, pricing: pricing);
@@ -1461,7 +1469,7 @@ public static class SettingsCleanDoctorReportTests
                 store,
                 store,
                 store,
-                new CanonSessionProjectorEngine(store, store, store, pricing),
+                new CanonSessionProjectorEngine(store, store, store, pricing, new FakeTextTokenizer()),
                 new CanonRollupsEngine(store, store, pricing)).ProjectAll();
 
             KyberBridgeEngine bridge = new(
@@ -1469,7 +1477,7 @@ public static class SettingsCleanDoctorReportTests
                 store,
                 store,
                 pricing,
-                new CanonSessionProjectorEngine(store, store, store, pricing),
+                new CanonSessionProjectorEngine(store, store, store, pricing, new FakeTextTokenizer()),
                 new CanonRollupsEngine(store, store, pricing),
                 clock: () => FixedNow,
                 storePath: "/tmp/multi.db");
@@ -1556,7 +1564,7 @@ public static class SettingsCleanDoctorReportTests
                 store,
                 store,
                 store,
-                new CanonSessionProjectorEngine(store, store, store, pricing),
+                new CanonSessionProjectorEngine(store, store, store, pricing, new FakeTextTokenizer()),
                 new CanonRollupsEngine(store, store, pricing)).ProjectAll();
 
             // Inject a stale excluded rollup and run to verify GetReport rejects excluded projections directly too.
@@ -1638,7 +1646,7 @@ public static class SettingsCleanDoctorReportTests
                 store,
                 store,
                 store,
-                new CanonSessionProjectorEngine(store, store, store, pricing),
+                new CanonSessionProjectorEngine(store, store, store, pricing, new FakeTextTokenizer()),
                 new CanonRollupsEngine(store, store, pricing));
             _ = projection.ProjectAll();
 
@@ -1729,7 +1737,7 @@ public static class SettingsCleanDoctorReportTests
                 store,
                 store,
                 store,
-                new CanonSessionProjectorEngine(store, store, store, pricing),
+                new CanonSessionProjectorEngine(store, store, store, pricing, new FakeTextTokenizer()),
                 new CanonRollupsEngine(store, store, pricing)).ProjectAll();
 
             // Force a projected session row with unparseable timestamps to verify window checks fail closed.
@@ -1781,7 +1789,7 @@ public static class SettingsCleanDoctorReportTests
                 store,
                 store,
                 resolvedPricing,
-                new CanonSessionProjectorEngine(store, store, store, resolvedPricing),
+                new CanonSessionProjectorEngine(store, store, store, resolvedPricing, new FakeTextTokenizer()),
                 new CanonRollupsEngine(store, store, resolvedPricing),
                 version: version,
                 clock: () => FixedNow,

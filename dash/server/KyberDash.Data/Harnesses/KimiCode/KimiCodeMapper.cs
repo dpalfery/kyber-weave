@@ -458,7 +458,7 @@ public class KimiCodeMapper : IHarnessMapper
                     correctionRule = check.Rule;
                 }
 
-                parts.Add(ToolContentMeasurer.BuildContentPart(0, ContentBucket.UserMessage, call.UserMessage, "user"));
+                parts.Add(ToolContentMeasurer.BuildContentPart(0, ContentBucket.UserMessage, call.UserMessage, "user", call.Model));
             }
 
             List<CollectedTokenCount> tokens =
@@ -541,7 +541,7 @@ public class KimiCodeMapper : IHarnessMapper
             toolIndex);
 
         CollectedToolContent? inputContent = toolCall.RawArgsText is not null
-            ? ToolContentMeasurer.Measure(toolCall.RawArgsText, CanonSynth.MaxToolArgumentsBytes)
+            ? ToolContentMeasurer.Measure(toolCall.RawArgsText, CanonSynth.MaxToolArgumentsBytes, parentRecord.Model)
                 .ToToolContent(includeFingerprint: true)
             : null;
 

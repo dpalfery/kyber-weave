@@ -42,6 +42,7 @@ public class CollectedTypesTests
         typeof(CollectedCost),
         typeof(CollectedError),
         typeof(CollectedTokenCount),
+        typeof(EstimatedRecordTokens),
     ];
 
     [Fact]
@@ -83,7 +84,7 @@ public class CollectedTypesTests
         AssertEnumNames(typeof(RecordOp), ["LlmInvoke", "ToolInvoke", "AgentInvoke", "Unspecified"]);
         AssertEnumNames(typeof(RecordKind), ["Unspecified", "Internal", "Server", "Client", "Producer", "Consumer"]);
         AssertEnumNames(typeof(RecordStatus), ["Unset", "Ok", "Error", "Unspecified"]);
-        AssertEnumNames(typeof(TokenClass), ["Input", "CacheRead", "CacheWrite", "Output", "Reasoning"]);
+        AssertEnumNames(typeof(TokenClass), ["Input", "CacheRead", "CacheWrite", "Output", "Reasoning", "Total"]);
         AssertEnumNames(typeof(SourceKind), ["File", "Otlp"]);
         AssertEnumNames(
             typeof(ContentBucket),
@@ -411,6 +412,9 @@ public class CollectedTypesTests
         map[(typeof(CollectedWithheldText), nameof(CollectedWithheldText.Utf8Bytes))] = Col("content_part_withheld", "utf8_bytes");
         map[(typeof(CollectedWithheldText), nameof(CollectedWithheldText.Characters))] = Col("content_part_withheld", "characters");
         map[(typeof(CollectedWithheldText), nameof(CollectedWithheldText.MeasuredTokens))] = Col("content_part_withheld", "measured_tokens");
+        map[(typeof(CollectedWithheldText), nameof(CollectedWithheldText.Tokenizer))] = Col("content_part_withheld_tokenizer", "tokenizer");
+        map[(typeof(CollectedWithheldText), nameof(CollectedWithheldText.TokenizerIsModelOwn))] = Col("content_part_withheld_tokenizer", "is_model_own");
+        map[(typeof(CollectedWithheldText), nameof(CollectedWithheldText.LabeledTokens))] = Cols(("content_part_withheld", "measured_tokens"), ("content_part_withheld_tokenizer", "tokenizer"));
 
         map[(typeof(CollectedContentPart), nameof(CollectedContentPart.Position))] = Col("content_part", "position");
         map[(typeof(CollectedContentPart), nameof(CollectedContentPart.Bucket))] = Col("content_part", "bucket");
@@ -426,6 +430,8 @@ public class CollectedTypesTests
         map[(typeof(CollectedToolDefinition), nameof(CollectedToolDefinition.ToolName))] = Col("tool_definition", "tool_name");
         map[(typeof(CollectedToolDefinition), nameof(CollectedToolDefinition.Server))] = Col("tool_definition_server", "server_name");
         map[(typeof(CollectedToolDefinition), nameof(CollectedToolDefinition.SchemaTokens))] = Col("tool_definition", "schema_tokens");
+        map[(typeof(CollectedToolDefinition), nameof(CollectedToolDefinition.Tokenizer))] = Col("tool_definition_tokenizer", "tokenizer");
+        map[(typeof(CollectedToolDefinition), nameof(CollectedToolDefinition.TokenizerIsModelOwn))] = Col("tool_definition_tokenizer", "is_model_own");
 
         map[(typeof(CollectedToolContent), nameof(CollectedToolContent.PlainText))] = Cols(
             ("tool_call_input_text", "text"),
@@ -485,6 +491,9 @@ public class CollectedTypesTests
         map[(typeof(CollectedRecord), nameof(CollectedRecord.Signals))] = Nested(typeof(CollectedRecordSignals));
         map[(typeof(CollectedRecord), nameof(CollectedRecord.ReportedInputTokens))] = Col("record_reported_total", "token_count");
         map[(typeof(CollectedRecord), nameof(CollectedRecord.ReportedOutputTokens))] = Col("record_reported_total", "token_count");
+        map[(typeof(CollectedRecord), nameof(CollectedRecord.SourceName))] = Col("source", "locator");
+        map[(typeof(CollectedRecord), nameof(CollectedRecord.ResponseId))] = Col("record_response_id", "response_id");
+        map[(typeof(CollectedRecord), nameof(CollectedRecord.RequestId))] = Col("record_request_id", "request_id");
 
         return map;
     }

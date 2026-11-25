@@ -1077,7 +1077,7 @@ export function ContextDoctor({
         <FindingList
           findings={headline}
           title="Highest-Leverage Workspace Findings"
-          description="Ranked by estimated waste, outcome risk, and confidence. Deterministic evidence beats inferred claims."
+          description="Ranked by measured waste; unmeasured findings rank last, then outcome risk and confidence. Deterministic evidence beats inferred claims."
           onSelectFinding={onSelectFinding}
           onSelectTurn={(turnIdx, execId) => onSelectTurn?.(turnIdx, execId)}
           onSelectExecution={(execId) => onSelectRun?.(execId)}

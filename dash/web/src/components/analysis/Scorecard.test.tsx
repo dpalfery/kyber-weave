@@ -4,6 +4,7 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 
 import {
   Scorecard,
+  costBasisText,
   formatDimensionDisplay,
   ORDERED_DIMENSION_KEYS,
   DIMENSION_METADATA,
@@ -90,7 +91,7 @@ describe('Scorecard Component (Decision D3 & D9 Compliance)', () => {
     },
     secondaryCost: {
       costUsd: 0.42,
-      basis: 'derived_estimate',
+      basis: 'published',
       status: 'derived',
     },
   }
@@ -134,13 +135,15 @@ describe('Scorecard Component (Decision D3 & D9 Compliance)', () => {
     expect(html).not.toContain('68%')
   })
 
-  it('Decision D9 compliance: Cost is displayed only as secondary derived metric', () => {
+  it('Decision D9 compliance: Cost is displayed only as secondary calculated metric', () => {
     const html = renderToStaticMarkup(<Scorecard data={mockScorecardData} />)
 
-    // Must contain secondary cost indicator with derived marker
+    // Must contain secondary cost indicator with its calculated basis
     expect(html).toContain('secondary-cost')
     expect(html).toContain('$0.42')
-    expect(html).toContain('(derived)')
+    expect(html).toContain('(calculated from published rates)')
+    expect(html).not.toContain('(derived)')
+    expect(html).not.toMatch(/derived estimate/i)
 
     // Cost must not be a primary header or primary value
     expect(html).not.toMatch(/<h[1-2][^>]*>\$0\.42<\/h[1-2]>/)
@@ -769,5 +772,46 @@ describe('ScorecardMatrix honesty (issues #189/#199, T10)', () => {
     expect(html).not.toContain('aria-label="codeburn/')
     // The canonical id still rides along for drill-down filtering and auditability.
     expect(html).toContain('drill-harness-codeburn/claude-desktop')
+  })
+})
+
+describe('costBasisText: the cost basis wording', () => {
+  it('names a harness rollup as reported by the harness', () => {
+    expect(costBasisText('harness_rollup')).toBe('reported by the harness')
+  })
+
+  it.each(['harness', 'harness_reported'])('names the %s basis as reported by the harness', (basis) => {
+    expect(costBasisText(basis)).toBe('reported by the harness')
+  })
+
+  it('does not infer provenance from a basis that merely contains the word harness', () => {
+    expect(costBasisText('not_from_harness')).toBe('not_from_harness')
+  })
+
+  it('names the published rate table as a calculation', () => {
+    expect(costBasisText('published')).toBe('calculated from published rates')
+  })
+
+  it('names the run summary as the run summary', () => {
+    expect(costBasisText('run_summary')).toBe('run summary')
+  })
+
+  it('states a missing basis as not reported, never as a calculation', () => {
+    expect(costBasisText(undefined)).toBe('basis not reported')
+  })
+
+  it('shows an unrecognised basis verbatim, in the visible text and the title', () => {
+    const basis = 'run_summary (partial: incomplete cost total)'
+    const html = renderToStaticMarkup(
+      <Scorecard
+        data={{
+          dimensions: {},
+          secondaryCost: { costUsd: 0.42, basis, status: 'derived' },
+        } as unknown as ScorecardData}
+      />,
+    )
+    expect(html).toContain(`(${basis})</span>`)
+    expect(html).toMatch(new RegExp(`title="Cost: [^"]*\\(${basis.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\)"`))
+    expect(html).not.toContain('calculated from published rates')
   })
 })
