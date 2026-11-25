@@ -591,7 +591,7 @@ public static class CanonContextAnalysis
 
         AvailabilityResult availability = CanonPricing.SchemaRankingAvailability(measurability);
         bool declaredNotMeasurable = !availability.IsMeasured;
-        if (declaredNotMeasurable || (definitions.Count == 0 && invocations.Count > 0))
+        if (declaredNotMeasurable || definitions.Count == 0)
         {
             return new SchemaCostAnalysis(
                 Measurable: false,

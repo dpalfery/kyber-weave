@@ -269,6 +269,20 @@ public class CanonAnalysisTests
     }
 
     /// <summary>
+    /// With no tool definitions the schema ranking has nothing to rank whether or not a tool ran:
+    /// a session with neither definitions nor invocations is not measurable, never an empty measured ranking.
+    /// </summary>
+    [Fact]
+    public void RankSchemas_NoDefinitionsAndNoInvocations_IsNotMeasurable()
+    {
+        SchemaCostAnalysis schema = CanonContextAnalysis.RankSchemas([], turns: 3, invocations: []);
+
+        Assert.False(schema.Measurable);
+        Assert.Equal(0, schema.InvocationCount);
+        Assert.Empty(schema.Ranked);
+    }
+
+    /// <summary>
     /// A level wider than a page keeps the total sibling order the timeline section pages by:
     /// start offset, then span id, with no duplicate and none dropped, and the synthetic
     /// containers — <c>(auxiliary)</c> and the <c>(orphan:...)</c> groups — are addressable by
