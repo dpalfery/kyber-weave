@@ -23,6 +23,8 @@ public class MenubarServiceTrayTests : IDisposable
     private Action<string> startDetached = _ => { };
     private readonly List<string> started = [];
     private int pendingPolls;
+    private int delayCalls;
+    private int pkillExitCode;
     private bool quitStopsTray = true;
 
     /// <summary>Deletes the scratch state directory.</summary>
@@ -98,13 +100,13 @@ public class MenubarServiceTrayTests : IDisposable
         // Every lookup names the recorded binary, never the generic tray pattern a developer's own tray also matches.
         Assert.All(
             calls.Where(call => call.File == "/usr/bin/pgrep"),
-            call => Assert.Equal(["-f", AnchoredPattern(binary)], call.Args));
+            call => Assert.Equal(["-f", ExpectedPattern(@"KyberDash\.app")], call.Args));
     }
 
     [Fact]
     public async Task QuitForceKillsOnlyTheRecordedBinaryOnMacosWhenItIgnoresTheQuit()
     {
-        string binary = RecordInstall(TrayPlatform.MacOS);
+        _ = RecordInstall(TrayPlatform.MacOS);
         trayRunning = true;
         quitThrowsTimeout = true;
         quitStopsTray = false;
@@ -113,7 +115,7 @@ public class MenubarServiceTrayTests : IDisposable
         MenubarInstallOutcome outcome = await service.QuitAsync();
 
         Assert.Equal(0, outcome.ExitCode);
-        Assert.True(Called("/usr/bin/pkill", "-f", AnchoredPattern(binary)));
+        Assert.True(Called("/usr/bin/pkill", "-f", ExpectedPattern(@"KyberDash\.app")));
     }
 
     [Fact]
@@ -144,7 +146,7 @@ public class MenubarServiceTrayTests : IDisposable
         MenubarInstallOutcome outcome = await service.QuitAsync();
 
         Assert.Equal(1, outcome.ExitCode);
-        Assert.Contains("denied", outcome.Message, StringComparison.Ordinal);
+        Assert.StartsWith("kyberdash menubar: quit: denied", outcome.Message, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -178,6 +180,9 @@ public class MenubarServiceTrayTests : IDisposable
         MenubarInstallOutcome outcome = await service.QuitAsync();
 
         Assert.Equal(0, outcome.ExitCode);
+        // The tray only disappears on the third poll after the kill, so a grace wait must have polled again.
+        Assert.True(PgrepCallsAfterKill() >= 3, "the kill must be followed by a grace wait that polls until the tray is gone");
+        Assert.True(delayCalls > 0);
     }
 
     [Fact]
@@ -192,6 +197,8 @@ public class MenubarServiceTrayTests : IDisposable
         MenubarInstallOutcome outcome = await service.QuitAsync();
 
         Assert.Equal(1, outcome.ExitCode);
+        Assert.True(PgrepCallsAfterKill() > 1, "the grace wait must poll more than once before giving up");
+        Assert.True(delayCalls > 0);
     }
 
     [Fact]
@@ -283,6 +290,7 @@ public class MenubarServiceTrayTests : IDisposable
     [InlineData(typeof(System.ComponentModel.Win32Exception))]
     [InlineData(typeof(IOException))]
     [InlineData(typeof(UnauthorizedAccessException))]
+    [InlineData(typeof(InvalidOperationException))]
     public async Task LaunchReportsAFailureOutcomeWhenWindowsCannotStartTheTray(Type exceptionType)
     {
         _ = RecordInstall(TrayPlatform.Windows);
@@ -318,7 +326,7 @@ public class MenubarServiceTrayTests : IDisposable
         MenubarInstallOutcome outcome = await service.CountRunningAsync();
 
         Assert.Equal(1, outcome.ExitCode);
-        Assert.Contains("probe", outcome.Message, StringComparison.Ordinal);
+        Assert.StartsWith("kyberdash menubar: could not probe for the tray:", outcome.Message, StringComparison.Ordinal);
         Assert.DoesNotContain("is running", outcome.Message, StringComparison.Ordinal);
     }
 
@@ -346,9 +354,73 @@ public class MenubarServiceTrayTests : IDisposable
         MenubarInstallOutcome outcome = await service.QuitAsync();
 
         Assert.Equal(1, outcome.ExitCode);
-        Assert.Contains("probe", outcome.Message, StringComparison.Ordinal);
+        Assert.StartsWith("kyberdash menubar: could not probe for the tray:", outcome.Message, StringComparison.Ordinal);
         Assert.DoesNotContain(calls, call => call.File == binary);
         Assert.DoesNotContain(calls, call => call.File == "/usr/bin/pkill");
+    }
+
+    [Fact]
+    public async Task QuitEscapesRegexMetacharactersInTheRecordedPath()
+    {
+        if (OperatingSystem.IsWindows())
+        {
+            return;
+        }
+
+        _ = RecordInstall(TrayPlatform.MacOS, appName: "Kyber.Dash (1).app");
+        trayRunning = true;
+        quitStopsTray = false;
+        MenubarService service = Create(TrayPlatform.MacOS);
+
+        _ = await service.QuitAsync();
+
+        Assert.True(Called("/usr/bin/pkill", "-f", ExpectedPattern(@"Kyber\.Dash \(1\)\.app")));
+    }
+
+    [Fact]
+    public async Task QuitReportsAFailureWhenPkillItselfFails()
+    {
+        _ = RecordInstall(TrayPlatform.MacOS);
+        trayRunning = true;
+        quitStopsTray = false;
+        pkillExitCode = 2;
+        MenubarService service = Create(TrayPlatform.MacOS);
+
+        MenubarInstallOutcome outcome = await service.QuitAsync();
+
+        Assert.Equal(1, outcome.ExitCode);
+        Assert.Equal("pkill broke", outcome.Message);
+    }
+
+    [Fact]
+    public async Task QuitTreatsPkillExitOneAsNothingLeftToSignal()
+    {
+        _ = RecordInstall(TrayPlatform.MacOS);
+        trayRunning = true;
+        quitStopsTray = false;
+        pkillExitCode = 1;
+        MenubarService service = Create(TrayPlatform.MacOS);
+
+        MenubarInstallOutcome outcome = await service.QuitAsync();
+
+        Assert.Equal(0, outcome.ExitCode);
+    }
+
+    [Fact]
+    public async Task CountRunningCountsOnlyTheRecordedBinaryWhenOneIsRecorded()
+    {
+        if (OperatingSystem.IsWindows())
+        {
+            return;
+        }
+
+        _ = RecordInstall(TrayPlatform.MacOS);
+        trayRunning = true;
+        MenubarService service = Create(TrayPlatform.MacOS);
+
+        _ = await service.CountRunningAsync();
+
+        Assert.Equal(["-f", ExpectedPattern(@"KyberDash\.app")], calls.Single(call => call.File == "/usr/bin/pgrep").Args);
     }
 
     [Fact]
@@ -368,7 +440,11 @@ public class MenubarServiceTrayTests : IDisposable
         new FakeServerStateRepository(state.Path),
         RunToolAsync,
         platform,
-        (_, _) => Task.CompletedTask,
+        (_, _) =>
+        {
+            delayCalls++;
+            return Task.CompletedTask;
+        },
         path =>
         {
             started.Add(path);
@@ -376,10 +452,10 @@ public class MenubarServiceTrayTests : IDisposable
         });
 
     /// <summary>Writes the tray record and, unless told not to, the binary it names; returns the binary's path.</summary>
-    private string RecordInstall(TrayPlatform platform, bool createBinary = true)
+    private string RecordInstall(TrayPlatform platform, bool createBinary = true, string appName = "KyberDash.app")
     {
         bool mac = platform == TrayPlatform.MacOS;
-        string recorded = mac ? Path.Combine(state.Path, "KyberDash.app") : Path.Combine(state.Path, "kyberdash-tray.exe");
+        string recorded = mac ? Path.Combine(state.Path, appName) : Path.Combine(state.Path, "kyberdash-tray.exe");
         string binary = mac ? Path.Combine(recorded, "Contents", "MacOS", "kyberdash-tray") : recorded;
         if (createBinary)
         {
@@ -417,7 +493,7 @@ public class MenubarServiceTrayTests : IDisposable
                 trayRunning = trayRunning && !killStopsTray;
             }
 
-            return Task.FromResult(new ProcessResult(0, string.Empty, string.Empty));
+            return Task.FromResult(new ProcessResult(pkillExitCode, string.Empty, pkillExitCode > 1 ? "pkill broke" : string.Empty));
         }
 
         if (fileName == "/usr/bin/pgrep" || fileName == "tasklist")
@@ -451,8 +527,19 @@ public class MenubarServiceTrayTests : IDisposable
         return Task.FromResult(new ProcessResult(0, string.Empty, string.Empty));
     }
 
-    private static string AnchoredPattern(string binary) =>
-        "^" + System.Text.RegularExpressions.Regex.Replace(binary, @"[\\.\[\]{}()*+?^$|]", "\\$0") + "( |$)";
+    /// <summary>
+    /// The pattern quit and running must use for the recorded tray, written out literally so a regression in the
+    /// production escaping cannot also change the expectation. Only the scratch directory prefix is escaped here.
+    /// </summary>
+    /// <param name="escapedAppName">The bundle name under the state directory, already regex-escaped.</param>
+    private string ExpectedPattern(string escapedAppName) =>
+        "^" + System.Text.RegularExpressions.Regex.Escape(state.Path) + "/" + escapedAppName + "/Contents/MacOS/kyberdash-tray( |$)";
+
+    private int PgrepCallsAfterKill()
+    {
+        int kill = calls.FindIndex(call => call.File == "/usr/bin/pkill");
+        return calls.Skip(kill + 1).Count(call => call.File == "/usr/bin/pgrep");
+    }
 
     private bool Called(string file, params string[] args) =>
         calls.Any(call => call.File == file && call.Args.SequenceEqual(args));

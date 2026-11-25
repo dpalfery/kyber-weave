@@ -329,13 +329,23 @@ public partial class MenubarService : IMenubarService
             return new MenubarInstallOutcome(1, "kyberdash: the tray is still running after quit; quit it and run again");
         }
 
+        ProcessResult kill;
         try
         {
-            _ = await runTool("/usr/bin/pkill", ["-f", pattern], QuitTimeout, cancellationToken).ConfigureAwait(false);
+            kill = await runTool("/usr/bin/pkill", ["-f", pattern], QuitTimeout, cancellationToken).ConfigureAwait(false);
         }
         catch (Exception exception) when (exception is Win32Exception or IOException or UnauthorizedAccessException or TimeoutException)
         {
             return new MenubarInstallOutcome(1, string.Create(CultureInfo.InvariantCulture, $"kyberdash menubar: quit: kill: {exception.Message}"));
+        }
+
+        // pkill exits 0 when it signalled something and 1 when nothing matched (the tray left on its own, which
+        // the grace wait below confirms); any other code means pkill itself failed.
+        if (kill.ExitCode is not (0 or 1))
+        {
+            return new MenubarInstallOutcome(
+                1,
+                FirstNonEmpty(kill.StandardError, string.Create(CultureInfo.InvariantCulture, $"kyberdash menubar: quit: kill: pkill exited {kill.ExitCode}")));
         }
 
         bool gone = await TrayProcesses.WaitForTrayExitAsync(
@@ -402,7 +412,7 @@ public partial class MenubarService : IMenubarService
         {
             startDetached(record.Path);
         }
-        catch (Exception ex) when (ex is Win32Exception or IOException or UnauthorizedAccessException)
+        catch (Exception ex) when (ex is Win32Exception or IOException or UnauthorizedAccessException or InvalidOperationException)
         {
             return new MenubarInstallOutcome(1, string.Create(CultureInfo.InvariantCulture, $"kyberdash menubar: launch: {ex.Message}"));
         }
@@ -418,7 +428,11 @@ public partial class MenubarService : IMenubarService
             return new MenubarInstallOutcome(1, PlatformRefusal);
         }
 
-        TrayProbe probe = await ProbeAsync(TrayProcessPattern, cancellationToken).ConfigureAwait(false);
+        // With a record, count only the recorded binary, as quit does; a lookalike path is not "the tray".
+        // Without one nothing was installed here, so the generic bundle path is the best available match.
+        TrayRecord? record = ReadRecordOrNull();
+        string pattern = record is null ? TrayProcessPattern : AnchoredCommandLinePattern(TrayBinaryPath(record));
+        TrayProbe probe = await ProbeAsync(pattern, cancellationToken).ConfigureAwait(false);
         return probe.Failure is null ? TrayProcesses.RunningOutcome(probe.Count) : ProbeFailure(probe.Failure);
     }
 
