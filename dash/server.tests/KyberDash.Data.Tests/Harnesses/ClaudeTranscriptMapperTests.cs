@@ -623,6 +623,34 @@ public class ClaudeTranscriptMapperTests
         Assert.Equal(batch.Records.Count, store.CountRecords());
     }
 
+    /// <summary>
+    /// The case that failed a real import: an image block whose JSON is one byte under the 64 KiB text cap,
+    /// followed by text. Kept as text, truncation left exactly the image's JSON object, which the store refuses.
+    /// The image is dropped, so the stored result is the text and the store accepts the batch.
+    /// </summary>
+    [Fact]
+    public void Map_AnImageBlockAtTheTextCapDoesNotLeaveAJsonDocumentAfterTruncation()
+    {
+        const string Wrapper = "{\"type\":\"image\",\"source\":{\"type\":\"base64\",\"media_type\":\"image/jpeg\",\"data\":\"\"}}";
+        string image = Wrapper.Insert(Wrapper.Length - 3, new string('A', CanonSynth.MaxToolResultBytes - 1 - Wrapper.Length));
+        Assert.Equal(CanonSynth.MaxToolResultBytes - 1, image.Length);
+        string jsonl = string.Join('\n',
+        [
+            "{\"type\":\"assistant\",\"sessionId\":\"sess-cap\",\"timestamp\":\"2026-11-19T12:00:01.000Z\",\"message\":{\"id\":\"msg-c1\",\"role\":\"assistant\",\"model\":\"claude-sonnet-4-5\",\"content\":[{\"type\":\"tool_use\",\"id\":\"tc-shot\",\"name\":\"screenshot\",\"input\":{}}],\"usage\":{\"input_tokens\":50,\"output_tokens\":10}}}",
+            "{\"type\":\"user\",\"sessionId\":\"sess-cap\",\"timestamp\":\"2026-11-19T12:00:02.000Z\",\"message\":{\"role\":\"user\",\"content\":[{\"type\":\"tool_result\",\"tool_use_id\":\"tc-shot\",\"content\":[" + image + ",{\"type\":\"text\",\"text\":\"Captured the page.\"}]}]}}",
+            "{\"type\":\"assistant\",\"sessionId\":\"sess-cap\",\"timestamp\":\"2026-11-19T12:00:03.000Z\",\"message\":{\"id\":\"msg-c2\",\"role\":\"assistant\",\"model\":\"claude-sonnet-4-5\",\"content\":[{\"type\":\"text\",\"text\":\"Seen.\"}],\"usage\":{\"input_tokens\":60,\"output_tokens\":5}}}",
+        ]);
+
+        CollectedBatch batch = new ClaudeTranscriptMapper().Map(CreateUnit("/tmp/.claude/projects/repo/sess-cap.jsonl", jsonl), ImportedAt);
+
+        Assert.All(batch.Records.SelectMany(static r => r.Parts), static p => Assert.False(JsonDocumentText.IsDocument(p.PlainText)));
+        CollectedRecord shot = Assert.Single(batch.Records, static r => r.Tool?.CallId == "tc-shot");
+        Assert.Equal("Captured the page.", Assert.Single(shot.Parts).PlainText);
+        InMemoryRelationalStore store = new();
+        store.WriteBatch(batch);
+        Assert.Equal(batch.Records.Count, store.CountRecords());
+    }
+
     private static NativeSourceUnit CreateUnit(string sourceKey, string? rawText) =>
         new(
             Unit: new SourceUnit(
