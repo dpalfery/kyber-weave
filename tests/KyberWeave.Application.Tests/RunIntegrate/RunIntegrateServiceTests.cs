@@ -43,6 +43,9 @@ public sealed class RunIntegrateServiceTests
     private bool _cherryPickSucceeds = true;
     private bool _abortSucceeds = true;
     private bool _removeSucceeds = true;
+    private bool _worktreeRemoveThrows;
+    private bool _branchDeleteThrows;
+    private bool _mergeThrows;
     private bool _evidencePresentAtRemoval;
     private int _commitsAhead = 1;
     private string _dirtyStatus = string.Empty;
@@ -548,6 +551,48 @@ public sealed class RunIntegrateServiceTests
         Assert.DoesNotContain(_git.Calls, call => call.Arguments.Contains("branch", StringComparer.Ordinal));
     }
 
+    [Fact]
+    public void ABranchDeleteThatThrowsStillReportsTheIntegrationItAlreadyMade()
+    {
+        _branchDeleteThrows = true;
+
+        RunIntegrateOutcome outcome = Integrate(Request());
+
+        Assert.Equal(RunIntegrateStatus.Failed, outcome.Status);
+        Assert.Contains("the task is integrated at " + AfterHead, outcome.Message!, StringComparison.Ordinal);
+        Assert.Contains("deleting the task branch", outcome.Message!, StringComparison.Ordinal);
+        Assert.Contains("Unable to find the specified file.", outcome.Message!, StringComparison.Ordinal);
+        Assert.DoesNotContain("could not be integrated", outcome.Message!, StringComparison.Ordinal);
+        Assert.True(_git.Called("-C", Run, "worktree", "remove", "--force", Task));
+        Assert.True(LockIsFree());
+    }
+
+    [Fact]
+    public void AWorktreeRemovalThatThrowsStillReportsTheIntegrationItAlreadyMade()
+    {
+        _worktreeRemoveThrows = true;
+
+        RunIntegrateOutcome outcome = Integrate(Request());
+
+        Assert.Equal(RunIntegrateStatus.Failed, outcome.Status);
+        Assert.Contains("the task is integrated at " + AfterHead, outcome.Message!, StringComparison.Ordinal);
+        Assert.Contains("removing the task worktree", outcome.Message!, StringComparison.Ordinal);
+        Assert.DoesNotContain("could not be integrated", outcome.Message!, StringComparison.Ordinal);
+        Assert.DoesNotContain(_git.Calls, call => call.Arguments.Contains("branch", StringComparer.Ordinal));
+    }
+
+    [Fact]
+    public void AThrowBeforeAnyCommitLandsStillReportsTheTaskAsNotIntegrated()
+    {
+        _mergeThrows = true;
+
+        RunIntegrateOutcome outcome = Integrate(Request());
+
+        Assert.Equal(RunIntegrateStatus.Failed, outcome.Status);
+        Assert.Contains("the task could not be integrated", outcome.Message!, StringComparison.Ordinal);
+        Assert.DoesNotContain(_git.Calls, call => call.Arguments.Contains("worktree", StringComparer.Ordinal));
+    }
+
     private RunIntegrateOutcome Integrate(RunIntegrateRequest request)
     {
         return Service().Integrate(request);
@@ -653,6 +698,11 @@ public sealed class RunIntegrateServiceTests
 
         if (command == "merge --ff-only --end-of-options " + TaskBranch)
         {
+            if (_mergeThrows)
+            {
+                throw GitLaunchFailure();
+            }
+
             if (!_mergeSucceeds)
             {
                 return Exit(1, "merge stopped");
@@ -696,11 +746,21 @@ public sealed class RunIntegrateServiceTests
         if (command.StartsWith("worktree remove ", StringComparison.Ordinal))
         {
             _evidencePresentAtRemoval = _files.FileExists(Run + "/.agent_scratchpad/T3/report.md");
+            if (_worktreeRemoveThrows)
+            {
+                throw GitLaunchFailure();
+            }
+
             return _removeSucceeds ? Ok() : Exit(1, "worktree is locked");
         }
 
         if (command.StartsWith("branch -D ", StringComparison.Ordinal))
         {
+            if (_branchDeleteThrows)
+            {
+                throw GitLaunchFailure();
+            }
+
             return Ok();
         }
 
@@ -710,4 +770,8 @@ public sealed class RunIntegrateServiceTests
     private static GitOutcome Ok(string output = "") => new(0, output, string.Empty);
 
     private static GitOutcome Exit(int code, string error = "") => new(code, string.Empty, error);
+
+    /// <summary>The exception <c>Process.Start</c> throws when a child's executable cannot be launched.</summary>
+    private static FileNotFoundException GitLaunchFailure() =>
+        new("Unable to find the specified file.");
 }

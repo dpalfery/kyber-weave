@@ -229,6 +229,8 @@ public sealed class RunIntegrateService : IRunIntegrateService
         {
             return Failed(timeout.Message);
         }
+        // This catch answers for the work before the commits land. Once IntegrateUnderLock has applied them, its
+        // cleanup failures are reported there as "integrated at (sha), but …" and never reach this message.
         catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
         {
             return Failed($"the task could not be integrated: {exception.Message}");
@@ -286,8 +288,22 @@ public sealed class RunIntegrateService : IRunIntegrateService
                 Notes: notes);
         }
 
-        GitOutcome removed = _git.Run(
-            runWorktree, ["-C", runWorktree, "worktree", "remove", "--force", taskWorktree]);
+        // The commits are on the run branch before cleanup starts, so a git child that cannot even start — the
+        // executable or its working directory gone from under us — is a cleanup failure: catching it here keeps it
+        // from reaching Integrate's catch, which would report work that landed as "could not be integrated".
+        GitOutcome removed;
+        try
+        {
+            removed = _git.Run(
+                runWorktree, ["-C", runWorktree, "worktree", "remove", "--force", taskWorktree]);
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+        {
+            return Failed(
+                $"the task is integrated at {head}, but removing the task worktree '{taskWorktree}' failed: " +
+                exception.Message);
+        }
+
         if (!removed.Succeeded)
         {
             return Failed(
@@ -295,7 +311,18 @@ public sealed class RunIntegrateService : IRunIntegrateService
                 removed.FirstErrorLine);
         }
 
-        GitOutcome deleted = _git.Run(runWorktree, ["-C", runWorktree, "branch", "-D", "--end-of-options", taskBranch]);
+        GitOutcome deleted;
+        try
+        {
+            deleted = _git.Run(runWorktree, ["-C", runWorktree, "branch", "-D", "--end-of-options", taskBranch]);
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+        {
+            return Failed(
+                $"the task is integrated at {head}, but deleting the task branch '{taskBranch}' failed: " +
+                exception.Message);
+        }
+
         if (!deleted.Succeeded)
         {
             return Failed(
