@@ -168,6 +168,10 @@ public sealed class SquadUpdateCommandTests
 
         public byte[] ReadAllBytes(string path) => throw new NotSupportedException();
 
+        public byte[] ReadBytesUpTo(string path, int maxBytes) => throw new NotSupportedException();
+
+        public long GetLength(string path) => throw new NotSupportedException();
+
         public void CreateDirectory(string path) => throw new NotSupportedException();
 
         public void DeleteDirectory(string path) => throw new NotSupportedException();
@@ -177,5 +181,7 @@ public sealed class SquadUpdateCommandTests
         public IEnumerable<SquadDirectoryEntry> EnumerateRealDirectories(string directory) => throw new NotSupportedException();
 
         public string? FindCheckoutSquadSourceRoot() => throw new NotSupportedException();
+
+        public void WriteAllBytesAtomic(string path, byte[] contents) => throw new NotSupportedException();
     }
 }

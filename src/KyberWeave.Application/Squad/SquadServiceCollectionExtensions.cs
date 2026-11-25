@@ -192,7 +192,8 @@ public static class SquadServiceCollectionExtensions
             sp.GetRequiredService<TimeProvider>(),
             sp.GetService<ISquadTransactionObserver>(),
             sp.GetRequiredService<ISquadGlobalRootResolver>(),
-            sp.GetRequiredService<IProcessEnvironment>().GetVariable);
+            sp.GetRequiredService<IProcessEnvironment>().GetVariable,
+            sp.GetRequiredService<IProcessRunner>().FindOnPath);
 }
 
 /// <summary>Resolves each target's global root from the process environment.</summary>

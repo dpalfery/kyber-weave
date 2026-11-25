@@ -208,7 +208,8 @@ internal static class SquadTestCommands
         ISquadRenderer renderer,
         ISquadGlobalRootResolver? globalRoots = null,
         Func<string, string?>? environmentReader = null,
-        ISquadTransactionObserver? observer = null)
+        ISquadTransactionObserver? observer = null,
+        Func<string, string?>? findExecutable = null)
     {
         ArgumentNullException.ThrowIfNull(state);
         InMemorySquadServices services = new(state.Files);
@@ -230,7 +231,8 @@ internal static class SquadTestCommands
             state.Time,
             observer: observer,
             globalRoots: globalRoots,
-            environmentReader: environmentReader);
+            environmentReader: environmentReader,
+            findExecutable: findExecutable);
     }
 
     /// <summary><c>squad install</c> over the in-memory lifecycle of <paramref name="state"/>.</summary>
@@ -453,7 +455,8 @@ internal static class SquadTestCommands
         ISquadRenderer? renderer = null,
         IKyberWeaveConfigRepository? configs = null,
         SquadConsole? output = null,
-        IMcpWiringService? wiring = null)
+        IMcpWiringService? wiring = null,
+        IProcessRunner? processRunner = null)
     {
         ArgumentNullException.ThrowIfNull(state);
         InMemorySquadServices services = new(state.Files);
@@ -478,7 +481,8 @@ internal static class SquadTestCommands
             console,
             state.Files,
             new SquadCommandRoots(state.Files, state.Paths, state.Environment, console),
-            wiring ?? new FakeMcpWiringService());
+            wiring ?? new FakeMcpWiringService(),
+            processRunner);
     }
 
     public static SquadPresetUseCommand PresetUse(
