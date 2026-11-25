@@ -28,11 +28,12 @@ public class ClaudeSpanMapperTests
     }
 
     /// <summary>
-    /// A Claude Code span carrying <c>gen_ai.response.id</c> and <c>request_id</c> maps to a record
-    /// with both ids, the ids the projector joins it to its transcript twin on.
+    /// A Claude Code span carrying the vendor-documented ids — <c>message.id</c> and
+    /// <c>request_id</c> — maps to a record with both ids, the ids the projector joins it to its
+    /// transcript twin on.
     /// </summary>
     [Fact]
-    public void MapSpan_WritesResponseIdAndRequestId()
+    public void MapSpan_WritesMessageIdAndRequestId()
     {
         OtlpSpan span = new(
             TraceId: "0102030405060708090a0b0c0d0e0f11",
@@ -51,7 +52,7 @@ public class ClaudeSpanMapperTests
                 ["gen_ai.request.model"] = Element("claude-sonnet-4-5"),
                 ["gen_ai.usage.input_tokens"] = Element(10),
                 ["gen_ai.usage.output_tokens"] = Element(5),
-                ["gen_ai.response.id"] = Element("msg_01ABC"),
+                ["message.id"] = Element("msg_01ABC"),
                 ["request_id"] = Element("req_01XYZ"),
             },
             Resource: new Dictionary<string, JsonElement>(StringComparer.Ordinal)
@@ -64,6 +65,44 @@ public class ClaudeSpanMapperTests
 
         Assert.Equal("msg_01ABC", record.ResponseId);
         Assert.Equal("req_01XYZ", record.RequestId);
+    }
+
+    /// <summary>
+    /// A Claude Code span carrying only <c>gen_ai.response.id</c> — an attribute the vendor does
+    /// not document — maps to a record with both ids absent: the join reads only the documented ids.
+    /// </summary>
+    [Fact]
+    public void MapSpan_GenAiResponseIdOnly_LeavesIdsAbsent()
+    {
+        OtlpSpan span = new(
+            TraceId: "0102030405060708090a0b0c0d0e0f11",
+            SpanId: "aabbccddeeff0022",
+            ParentSpanId: null,
+            Name: "claude_code.llm.request",
+            Kind: "client",
+            StartTimeUnixNano: "1763550000000000000",
+            EndTimeUnixNano: "1763550001000000000",
+            Timestamp: "2026-11-19T11:00:00.000Z",
+            DurationMs: 1000.0,
+            Status: new OtlpStatus("ok"),
+            Attributes: new Dictionary<string, JsonElement>(StringComparer.Ordinal)
+            {
+                ["gen_ai.session.id"] = Element("sess-claude-ids"),
+                ["gen_ai.request.model"] = Element("claude-sonnet-4-5"),
+                ["gen_ai.usage.input_tokens"] = Element(10),
+                ["gen_ai.usage.output_tokens"] = Element(5),
+                ["gen_ai.response.id"] = Element("resp_01ABC"),
+            },
+            Resource: new Dictionary<string, JsonElement>(StringComparer.Ordinal)
+            {
+                ["service.name"] = Element("claude-code"),
+            },
+            Scope: new OtlpScope("com.anthropic.claude_code", null));
+
+        CollectedRecord record = new ClaudeSpanMapper().MapSpan(span);
+
+        Assert.Null(record.ResponseId);
+        Assert.Null(record.RequestId);
     }
 
     [Fact]

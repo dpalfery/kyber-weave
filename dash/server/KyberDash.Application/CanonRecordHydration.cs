@@ -146,8 +146,8 @@ public static class CanonRecordHydration
 
     /// <summary>
     /// Puts the record's stored response id and request id under the keys the projector's id join
-    /// reads for the record's side: <c>gen_ai.response.id</c> and <c>request_id</c> for an OTLP
-    /// record, <c>provenance.nativeRecordId</c> and <c>requestId</c> for a file record.
+    /// reads for the record's side: <c>message.id</c> and <c>request_id</c> for an OTLP record,
+    /// <c>provenance.nativeRecordId</c> and <c>requestId</c> for a file record.
     /// </summary>
     private static void AddJoinIds(Dictionary<string, JsonElement> raw, CollectedRecord record)
     {
@@ -163,7 +163,7 @@ public static class CanonRecordHydration
             }
             else
             {
-                raw["gen_ai.response.id"] = JsonSerializer.SerializeToElement(record.ResponseId);
+                raw["message.id"] = JsonSerializer.SerializeToElement(record.ResponseId);
             }
         }
 

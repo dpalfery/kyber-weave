@@ -376,8 +376,8 @@ public record CollectedRecordSignals(
 /// </param>
 /// <param name="ResponseId">
 /// Optional provider response id (<c>record_response_id.response_id</c>): an OTLP record's
-/// <c>gen_ai.response.id</c>, or a transcript record's native message id. Never a synthesized
-/// counter or hash.
+/// <c>message.id</c> (the transcript message id Claude Code reports on <c>api_response_body</c>),
+/// or a transcript record's native message id. Never a synthesized counter or hash.
 /// </param>
 /// <param name="RequestId">
 /// Optional provider request id (<c>record_request_id.request_id</c>): an OTLP record's

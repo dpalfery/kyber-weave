@@ -391,52 +391,114 @@ public class OtlpLogMapperTests
     }
 
     /// <summary>
-    /// A Claude Code or Codex log carrying <c>gen_ai.response.id</c> and <c>request_id</c> maps to a
-    /// record with both ids, the ids the projector joins it to its transcript twin on.
+    /// A Claude Code <c>api_response_body</c> log carrying the vendor-documented ids —
+    /// <c>message.id</c> and <c>request_id</c> — maps to a record with both ids, the ids the
+    /// projector joins it to its transcript twin on.
     /// </summary>
-    [Theory]
-    [InlineData("claude-code")]
-    [InlineData("codex")]
-    public void Map_TwinHarnessLog_WritesResponseIdAndRequestId(string harness)
+    [Fact]
+    public void Map_ClaudeCodeResponseBodyLog_WritesMessageIdAndRequestId()
     {
-        OtlpLogMapResult result = OtlpLogMapper.Map([JoinIdLog(harness, responseId: "msg_01ABC", requestId: "req_01XYZ")]);
+        OtlpLogMapResult result = OtlpLogMapper.Map(
+            [ClaudeJoinIdLog(eventKind: "api_response_body", messageId: "msg_01ABC", requestId: "req_01XYZ")]);
 
         CollectedBatch batch = Assert.Single(result.Batches);
-        Assert.Equal(harness, batch.Source.HarnessId);
+        Assert.Equal("claude-code", batch.Source.HarnessId);
         CollectedRecord record = Assert.Single(batch.Records);
         Assert.Equal("msg_01ABC", record.ResponseId);
         Assert.Equal("req_01XYZ", record.RequestId);
     }
 
-    /// <summary>A Claude Code log with neither id maps to a record with both ids absent.</summary>
+    /// <summary>
+    /// A Claude Code log carrying only <c>gen_ai.response.id</c> — an attribute the vendor does not
+    /// document — maps to a record with both ids absent: the join reads only the documented ids.
+    /// </summary>
     [Fact]
-    public void Map_TwinHarnessLogWithoutIds_LeavesIdsAbsent()
+    public void Map_ClaudeCodeLogWithGenAiResponseIdOnly_LeavesIdsAbsent()
     {
-        OtlpLogMapResult result = OtlpLogMapper.Map([JoinIdLog("claude-code", responseId: null, requestId: null)]);
+        OtlpLogMapResult result = OtlpLogMapper.Map(
+            [ClaudeJoinIdLog(eventKind: "api_request", messageId: null, requestId: null, genAiResponseId: "resp_01ABC")]);
 
         CollectedRecord record = Assert.Single(Assert.Single(result.Batches).Records);
         Assert.Null(record.ResponseId);
         Assert.Null(record.RequestId);
     }
 
-    private static OtlpLog JoinIdLog(string harness, string? responseId, string? requestId)
+    /// <summary>
+    /// A Codex log carrying <c>request_id</c> and <c>gen_ai.response.id</c> maps to a record with
+    /// both ids absent: Codex OTel has no per-model-call id — <c>auth.request_id</c> names an auth
+    /// request — so the projector never id-joins a Codex turn to its rollout file.
+    /// </summary>
+    [Fact]
+    public void Map_CodexLog_LeavesJoinIdsAbsent()
     {
-        bool claude = harness == "claude-code";
         Dictionary<string, JsonElement> attributes = new(StringComparer.Ordinal)
         {
-            ["event.name"] = JsonSerializer.SerializeToElement(claude ? "claude_code.api_request" : "codex.api_request"),
-            ["gen_ai.request.model"] = JsonSerializer.SerializeToElement(claude ? "claude-sonnet-4-5" : "gpt-5-codex"),
+            ["event.name"] = JsonSerializer.SerializeToElement("codex.api_request"),
+            ["gen_ai.request.model"] = JsonSerializer.SerializeToElement("gpt-5-codex"),
+            ["gen_ai.usage.input_tokens"] = JsonSerializer.SerializeToElement(100),
+            ["gen_ai.usage.output_tokens"] = JsonSerializer.SerializeToElement(25),
+            ["request_id"] = JsonSerializer.SerializeToElement("req_01XYZ"),
+            ["gen_ai.response.id"] = JsonSerializer.SerializeToElement("resp_01ABC"),
+        };
+
+        OtlpLogMapResult result = OtlpLogMapper.Map(
+            [new OtlpLog(
+                LogId: "log-ids-codex",
+                TraceId: "dddddddddddddddddddddddddddddddd",
+                SpanId: null,
+                SessionId: "sess-ids-codex",
+                Timestamp: "2026-11-19T12:40:00.000Z",
+                Body: "api request",
+                Attributes: attributes,
+                Resource: new Dictionary<string, JsonElement>(StringComparer.Ordinal),
+                Scope: new OtlpScope("codex", "0.1.0"))]);
+
+        CollectedBatch batch = Assert.Single(result.Batches);
+        Assert.Equal("codex", batch.Source.HarnessId);
+        CollectedRecord record = Assert.Single(batch.Records);
+        Assert.Null(record.ResponseId);
+        Assert.Null(record.RequestId);
+    }
+
+    /// <summary>A Claude Code log with neither id maps to a record with both ids absent.</summary>
+    [Fact]
+    public void Map_ClaudeCodeLogWithoutIds_LeavesIdsAbsent()
+    {
+        OtlpLogMapResult result = OtlpLogMapper.Map(
+            [ClaudeJoinIdLog(eventKind: "api_request", messageId: null, requestId: null)]);
+
+        CollectedRecord record = Assert.Single(Assert.Single(result.Batches).Records);
+        Assert.Null(record.ResponseId);
+        Assert.Null(record.RequestId);
+    }
+
+    /// <summary>
+    /// Builds a Claude Code OTLP log shaped like the vendor's monitoring-usage documentation:
+    /// <c>api_request</c> carries <c>request_id</c>; <c>api_response_body</c> carries
+    /// <c>message.id</c> (the transcript message id) and <c>request_id</c>.
+    /// </summary>
+    private static OtlpLog ClaudeJoinIdLog(
+        string eventKind,
+        string? messageId,
+        string? requestId,
+        string? genAiResponseId = null)
+    {
+        Dictionary<string, JsonElement> attributes = new(StringComparer.Ordinal)
+        {
+            ["event.name"] = JsonSerializer.SerializeToElement($"claude_code.{eventKind}"),
+            ["claude_code.event"] = JsonSerializer.SerializeToElement(eventKind),
+            ["gen_ai.request.model"] = JsonSerializer.SerializeToElement("claude-sonnet-4-5"),
             ["gen_ai.usage.input_tokens"] = JsonSerializer.SerializeToElement(100),
             ["gen_ai.usage.output_tokens"] = JsonSerializer.SerializeToElement(25),
         };
-        if (claude)
+        if (messageId is not null)
         {
-            attributes["claude_code.event"] = JsonSerializer.SerializeToElement("api_request");
+            attributes["message.id"] = JsonSerializer.SerializeToElement(messageId);
         }
 
-        if (responseId is not null)
+        if (genAiResponseId is not null)
         {
-            attributes["gen_ai.response.id"] = JsonSerializer.SerializeToElement(responseId);
+            attributes["gen_ai.response.id"] = JsonSerializer.SerializeToElement(genAiResponseId);
         }
 
         if (requestId is not null)
@@ -445,16 +507,17 @@ public class OtlpLogMapperTests
         }
 
         return new OtlpLog(
-            LogId: $"log-ids-{harness}",
+            LogId: "log-ids-claude-code",
             TraceId: "dddddddddddddddddddddddddddddddd",
             SpanId: null,
-            SessionId: $"sess-ids-{harness}",
+            SessionId: "sess-ids-claude-code",
             Timestamp: "2026-11-19T12:40:00.000Z",
             Body: "api request",
             Attributes: attributes,
-            Resource: claude
-                ? new Dictionary<string, JsonElement>(StringComparer.Ordinal) { ["service.name"] = JsonSerializer.SerializeToElement("claude-code") }
-                : new Dictionary<string, JsonElement>(StringComparer.Ordinal),
-            Scope: claude ? new OtlpScope("claude_code", "1.0.0") : new OtlpScope("codex", "0.1.0"));
+            Resource: new Dictionary<string, JsonElement>(StringComparer.Ordinal)
+            {
+                ["service.name"] = JsonSerializer.SerializeToElement("claude-code"),
+            },
+            Scope: new OtlpScope("claude_code", "1.0.0"));
     }
 }

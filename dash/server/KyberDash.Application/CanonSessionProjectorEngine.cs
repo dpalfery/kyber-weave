@@ -58,6 +58,17 @@ public partial class CanonSessionProjectorEngine
     private static readonly string[] ModelKeys = ["gen_ai.response.model", "gen_ai.request.model", "model"];
     private static readonly string[] ParentSessionKeys = ["parent_session", "parent_session_id", "gen_ai.parent_session_id", "parentSession"];
 
+    /// <summary>
+    /// The harness ids a Codex record can carry: the OTLP log path names Codex <c>codex</c>
+    /// (CanonAdapters' CodexAdapter), the OTLP span and rollout-file paths <c>codex-cli</c>
+    /// (<c>TranscriptReaderRepository.CodexHarnessId</c>).
+    /// </summary>
+    private static readonly HashSet<string> CodexHarnessIds = new(StringComparer.Ordinal)
+    {
+        "codex",
+        "codex-cli",
+    };
+
     private static readonly HashSet<string> SideAgentNames = new(StringComparer.Ordinal)
     {
         "backgroundTodoAgent",
@@ -137,6 +148,7 @@ public partial class CanonSessionProjectorEngine
         HashSet<CanonicalRecord> dropped = new(ReferenceEqualityComparer.Instance);
         Dictionary<CanonicalRecord, CanonicalRecord> transplant = new(ReferenceEqualityComparer.Instance);
         HashSet<CanonicalRecord> idJoined = CollapseIdJoins(records, shareKey, dropped, transplant);
+        CollapseCodexFileModelCalls(records, shareKey, dropped);
 
         Dictionary<string, List<CanonicalRecord>> byCounter = new(StringComparer.Ordinal);
         foreach (CanonicalRecord record in records)
@@ -1007,7 +1019,7 @@ public partial class CanonSessionProjectorEngine
             }
 
             string session = SessionKeyOf(record, shareKey);
-            string? messageId = OtelResponseIdOf(record);
+            string? messageId = OtelMessageIdOf(record);
             if (messageId is not null)
             {
                 RememberEarliest(keeperByMessageId, $"{session}\u0000{messageId}", record);
@@ -1064,6 +1076,53 @@ public partial class CanonSessionProjectorEngine
 
         return joined;
     }
+
+    /// <summary>
+    /// Collapses a Codex session's rollout-file model calls when OTLP observed that session's model
+    /// calls, per the ADR 0009 source-precedence rule (the OTel row is the turn; values are never
+    /// summed across sources for the same turn; the file row supplies only what OTLP lacks). Codex
+    /// OTel carries no per-model-call id — its <c>auth.request_id</c> names an auth request — so
+    /// the two sources cannot be id-joined per turn and the precedence is per session instead: a
+    /// session with OTLP model calls counts only those, while its file records still supply what
+    /// OTLP lacks (tool calls by <c>call_id</c>), and a session only the file observed keeps the
+    /// file's model calls.
+    /// </summary>
+    /// <param name="records">Candidate canonical records.</param>
+    /// <param name="shareKey">Fallback session key used when a record has no <see cref="CanonicalRecord.SessionId"/>.</param>
+    /// <param name="dropped">Records whose file-source model calls the precedence removes.</param>
+    private static void CollapseCodexFileModelCalls(
+        IReadOnlyList<CanonicalRecord> records,
+        string? shareKey,
+        HashSet<CanonicalRecord> dropped)
+    {
+        HashSet<string> sessionsWithOtelModelCalls = new(StringComparer.Ordinal);
+        foreach (CanonicalRecord record in records)
+        {
+            if (IsCodexModelCall(record) && !IsFileSource(record.Source))
+            {
+                sessionsWithOtelModelCalls.Add(SessionKeyOf(record, shareKey));
+            }
+        }
+
+        if (sessionsWithOtelModelCalls.Count == 0)
+        {
+            return;
+        }
+
+        foreach (CanonicalRecord record in records)
+        {
+            if (IsCodexModelCall(record)
+                && IsFileSource(record.Source)
+                && sessionsWithOtelModelCalls.Contains(SessionKeyOf(record, shareKey)))
+            {
+                dropped.Add(record);
+            }
+        }
+    }
+
+    private static bool IsCodexModelCall(CanonicalRecord record) =>
+        CodexHarnessIds.Contains(record.Harness)
+        && string.Equals(record.Op, "llm.invoke", StringComparison.Ordinal);
 
     private static void CollapseCluster(
         IReadOnlyList<CanonicalRecord> cluster,
@@ -1571,19 +1630,9 @@ public partial class CanonSessionProjectorEngine
     private static bool IsCompleteCursorIdeObservation(CanonicalRecord record) =>
         IsCursorCollector(record) && HasCompleteCounters(record);
 
-    private static string? OtelResponseIdOf(CanonicalRecord record) => RawString(record, "gen_ai.response.id");
+    private static string? OtelMessageIdOf(CanonicalRecord record) => RawString(record, "message.id");
 
-    private static string? OtelRequestJoinId(CanonicalRecord record)
-    {
-        string? requestId = RawString(record, "request_id");
-        if (requestId is not null)
-        {
-            return requestId;
-        }
-
-        string? responseId = OtelResponseIdOf(record);
-        return responseId is not null && responseId.StartsWith("req_", StringComparison.Ordinal) ? responseId : null;
-    }
+    private static string? OtelRequestJoinId(CanonicalRecord record) => RawString(record, "request_id");
 
     private static string? FileRequestIdOf(CanonicalRecord record) => RawString(record, "requestId");
 

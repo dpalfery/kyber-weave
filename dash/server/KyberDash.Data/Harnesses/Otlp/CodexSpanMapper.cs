@@ -35,8 +35,6 @@ public class CodexSpanMapper : IHarnessMapper
         "gen_ai.session.id",
         "session.id",
         "event.timestamp",
-        OtlpJoinIds.ResponseIdKey,
-        OtlpJoinIds.RequestIdKey,
     ];
 
     /// <summary>Codex OTLP allowlisted attribute key prefixes from <c>CodexAdapter</c>.</summary>
@@ -269,14 +267,15 @@ public class CodexSpanMapper : IHarnessMapper
         string? sessionId = ResolveSession(native);
         string? errorMessage = status == RecordStatus.Error ? SafeOptionalText(native.StatusMessage) : null;
 
-        (string? ResponseId, string? RequestId) joinIds = OtlpJoinIds.Read(harnessId, native.Attributes);
-
         CollectedRecordSignals signals = new(
             ErrorMessage: errorMessage,
             EditFailures: null,
             CorrectionRule: null,
             DeclaredContextWindow: null);
 
+        // Codex OTel carries no per-model-call id (its auth.request_id names an auth request), so a
+        // Codex record joins to nothing: both ids stay absent and the projector's per-session
+        // source precedence decides what the rollout file's model calls contribute.
         return new CollectedRecord(
             RecordId: native.SpanId,
             HarnessId: harnessId,
@@ -302,8 +301,8 @@ public class CodexSpanMapper : IHarnessMapper
             Signals: signals,
             ReportedInputTokens: reportedInputTokens,
             ReportedOutputTokens: reportedOutputTokens,
-            ResponseId: joinIds.ResponseId,
-            RequestId: joinIds.RequestId);
+            ResponseId: null,
+            RequestId: null);
     }
 
     private static RecordOp ResolveOp(OtlpSpanNative native)

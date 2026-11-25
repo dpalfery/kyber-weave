@@ -5,31 +5,30 @@ using KyberDash.Data.Repositories;
 namespace KyberDash.Data.Harnesses.Otlp;
 
 /// <summary>
-/// Reads the provider response id (<c>gen_ai.response.id</c>) and request id (<c>request_id</c>)
-/// from an OTLP span's or log's attributes, for the harnesses that also write a transcript file
-/// the projector joins their OTLP turns to: Claude Code and Codex. Any other harness gets no ids,
-/// so the projector's id join never fires for a harness with no transcript twin.
+/// Reads the join ids Claude Code's OTel events carry — <c>request_id</c> and, on
+/// <c>api_response_body</c>, <c>message.id</c> (the transcript message id) — from an OTLP span's
+/// or log's attributes, for the one harness that also writes a transcript file the projector
+/// joins its OTLP turns to: Claude Code. Any other harness gets no ids, so the projector's id join
+/// never fires for a harness with no transcript twin. Codex deliberately gets none: its OTel
+/// telemetry carries no per-model-call id (<c>auth.request_id</c> names an auth request, and the
+/// rollout file has no per-response id), so the projector applies per-session source precedence
+/// there instead of an id join.
 /// </summary>
 public static class OtlpJoinIds
 {
-    /// <summary>The OTLP attribute holding the provider response id.</summary>
-    public const string ResponseIdKey = "gen_ai.response.id";
+    /// <summary>The OTLP attribute holding the transcript message id Claude Code reports on <c>api_response_body</c>.</summary>
+    public const string MessageIdKey = "message.id";
 
     /// <summary>The OTLP attribute holding the provider request id.</summary>
     public const string RequestIdKey = "request_id";
 
-    /// <summary>
-    /// The harness ids Claude Code and Codex records carry: the log mapper names Codex
-    /// <c>codex</c>, the span mapper <c>codex-cli</c>.
-    /// </summary>
+    /// <summary>The harness id whose OTLP turns the projector joins to a transcript file twin: Claude Code.</summary>
     private static readonly HashSet<string> TwinHarnesses = new(StringComparer.Ordinal)
     {
         TranscriptReaderRepository.ClaudeHarnessId,
-        TranscriptReaderRepository.CodexHarnessId,
-        "codex",
     };
 
-    /// <summary>Returns the response id and request id the attributes carry, or none for a harness with no transcript twin.</summary>
+    /// <summary>Returns the message id and request id the attributes carry, or none for a harness with no transcript twin.</summary>
     /// <param name="harnessId">The record's harness id.</param>
     /// <param name="attributes">The span's or log's attributes.</param>
     public static (string? ResponseId, string? RequestId) Read(
@@ -41,7 +40,7 @@ public static class OtlpJoinIds
             return (null, null);
         }
 
-        return (ReadText(attributes, ResponseIdKey), ReadText(attributes, RequestIdKey));
+        return (ReadText(attributes, MessageIdKey), ReadText(attributes, RequestIdKey));
     }
 
     private static string? ReadText(IReadOnlyDictionary<string, JsonElement> attributes, string key)
