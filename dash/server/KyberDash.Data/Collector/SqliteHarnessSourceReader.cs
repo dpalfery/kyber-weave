@@ -195,7 +195,7 @@ public class SqliteHarnessSourceReader : IHarnessSourceReader
             exportText = Encoding.UTF8.GetString(buffer.WrittenSpan);
         }
 
-        string? companionText = ReadCompanion(unit.CompanionKey, fileSystem);
+        string? companionText = ReadCompanion(unit.CompanionKey, fileSystem, limits.ExportCapBytes);
 
         // default is the "not observed" value every mapper checks for; an invented date would be stamped on rows.
         return new NativeSourceUnit(
@@ -256,9 +256,19 @@ public class SqliteHarnessSourceReader : IHarnessSourceReader
         }
     }
 
-    private string? ReadCompanion(string? companionKey, IHarnessFileSystem fileSystem)
+    /// <summary>
+    /// Reads a unit's companion file, refusing one whose size is unknown or larger than
+    /// <paramref name="capBytes"/> before any of it is read.
+    /// </summary>
+    /// <param name="companionKey">The companion's path, or <see langword="null"/> when the unit has none.</param>
+    /// <param name="fileSystem">The file system the companion is read through.</param>
+    /// <param name="capBytes">Most bytes the companion may hold.</param>
+    /// <returns>The companion's text, or <see langword="null"/> when there is no companion file.</returns>
+    /// <exception cref="InvalidDataException">The companion's size is unknown or larger than the cap; the message carries the problem code.</exception>
+    internal static string? ReadCompanion(string? companionKey, IHarnessFileSystem fileSystem, long capBytes)
     {
-        if (companionKey is null || !fileSystem.FileExists(companionKey))
+        ArgumentNullException.ThrowIfNull(fileSystem);
+        if (string.IsNullOrWhiteSpace(companionKey) || !fileSystem.FileExists(companionKey))
         {
             return null;
         }
@@ -269,10 +279,10 @@ public class SqliteHarnessSourceReader : IHarnessSourceReader
                 $"{SqliteSourceOpenPolicy.SourceUnreadableCode}: companion file '{companionKey}' has no readable size, so it is not read.");
         }
 
-        if (lengthBytes > limits.ExportCapBytes)
+        if (lengthBytes > capBytes)
         {
             throw new InvalidDataException(
-                $"{SqliteSourceOpenPolicy.ExportCapExceededCode}: companion file '{companionKey}' is {lengthBytes} bytes, larger than {limits.ExportCapBytes} bytes.");
+                $"{SqliteSourceOpenPolicy.ExportCapExceededCode}: companion file '{companionKey}' is {lengthBytes} bytes, larger than {capBytes} bytes.");
         }
 
         return fileSystem.ReadAllText(companionKey);

@@ -112,6 +112,25 @@ public class HarnessSourceRegistryTests
     }
 
     [Fact]
+    public void Read_LocalCompanionLargerThanTheExportCap_IsRefusedWithoutReadingIt()
+    {
+        FakeHarnessFileSystem fs = new();
+        string transcript = Combine(HomeRoot, ".factory/sessions/proj/droid-1.jsonl");
+        string companion = Combine(HomeRoot, ".factory/sessions/proj/droid-1.settings.json");
+        fs.AddFile(transcript, "{}", BaselineUtc);
+        fs.AddFile(companion, "{}", BaselineUtc);
+        fs.ReportLength(companion, new HarnessSqliteLimits().ExportCapBytes + 1);
+        HarnessSourceRegistry registry = new();
+        SourceUnit unit = Assert.Single(
+            registry.DiscoverForHarness("droid", new SourceDiscoveryContext(HomeRoot, StateRoot, fs)).Sources);
+
+        InvalidDataException error = Assert.Throws<InvalidDataException>(() => registry.GetReader("droid")!.Read(unit, fs));
+
+        Assert.StartsWith("SQLITE_EXPORT_CAP_EXCEEDED", error.Message, StringComparison.Ordinal);
+        Assert.DoesNotContain(fs.GetFullPath(companion), fs.ReadPaths);
+    }
+
+    [Fact]
     public void DiscoverAll_FindsAllEvidencedTypeScriptPortRootsViaFakeFs()
     {
         FakeHarnessFileSystem fs = new();
@@ -526,6 +545,15 @@ public class HarnessSourceRegistryTests
             }
         }
 
+        public List<string> ReadPaths { get; } = [];
+
+        /// <summary>Makes the file report <paramref name="lengthBytes"/> as its size while its content stays the same.</summary>
+        public void ReportLength(string path, long lengthBytes)
+        {
+            string normalized = NormalizePath(path);
+            files[normalized] = files[normalized] with { LengthBytes = lengthBytes };
+        }
+
         public bool DirectoryExists(string path) =>
             directories.Contains(NormalizePath(path));
 
@@ -594,6 +622,7 @@ public class HarnessSourceRegistryTests
         public string ReadAllText(string filePath)
         {
             string normalized = NormalizePath(filePath);
+            ReadPaths.Add(normalized);
             if (!files.TryGetValue(normalized, out FakeFileEntry? entry))
             {
                 throw new FileNotFoundException("Fake file not found.", normalized);

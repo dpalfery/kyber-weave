@@ -125,6 +125,9 @@ public class HarnessSourceRegistry
         };
     }
 
+    /// <summary>Most bytes a local unit's companion file may hold: the default export cap.</summary>
+    private static readonly long CompanionCapBytes = new HarnessSqliteLimits().ExportCapBytes;
+
     private static readonly HashSet<string> ExcludedHarnessIds = new(
         ["windsurf", "aider"],
         StringComparer.Ordinal);
@@ -613,11 +616,8 @@ public class HarnessSourceRegistry
             }
         }
 
-        string? companionText = null;
-        if (!string.IsNullOrWhiteSpace(unit.CompanionKey) && fileSystem.FileExists(unit.CompanionKey))
-        {
-            companionText = fileSystem.ReadAllText(unit.CompanionKey);
-        }
+        // A companion is held to the same cap as a SQLite export's companion, checked before it is read.
+        string? companionText = SqliteHarnessSourceReader.ReadCompanion(unit.CompanionKey, fileSystem, CompanionCapBytes);
 
         DateTimeOffset effectiveWriteUtc = hasStats ? lastWriteUtc : (unit.LastWriteUtc ?? default);
         return new NativeSourceUnit(
