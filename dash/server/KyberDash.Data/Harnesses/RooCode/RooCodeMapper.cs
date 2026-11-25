@@ -91,6 +91,8 @@ public partial class RooCodeMapper : IHarnessMapper
     /// <summary>Model fallback when no model indicator is present.</summary>
     public const string FallbackModel = "cline-auto";
 
+    private const string UiMessagesFileName = "ui_messages.json";
+
     private const int MaxUserTextLength = 500;
 
     /// <inheritdoc />
@@ -464,10 +466,10 @@ public partial class RooCodeMapper : IHarnessMapper
         string trimmed = sourceKey.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
 
         // Discovery hands the mapper the task's ui_messages.json file, so the task id is the
-        // parent directory's name (as ClineMapper.TaskIdFromSourceKey does); a bare task
-        // directory key is the id itself.
+        // parent directory's name (as KiloMapper.ExtractTaskId does for the same file); any other
+        // key, such as a bare task directory, is the id itself, whatever its name ends in.
         string? leaf = Path.GetFileName(trimmed);
-        string? candidate = string.Equals(Path.GetExtension(leaf), ".json", StringComparison.OrdinalIgnoreCase)
+        string? candidate = string.Equals(leaf, UiMessagesFileName, StringComparison.OrdinalIgnoreCase)
             ? SafeOptionalText(Path.GetFileName(Path.GetDirectoryName(trimmed)))
             : SafeOptionalText(leaf);
         if (candidate is not null)
