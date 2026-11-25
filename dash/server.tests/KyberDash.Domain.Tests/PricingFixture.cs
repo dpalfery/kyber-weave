@@ -54,10 +54,18 @@ public static class PricingFixture
         string? current = AppContext.BaseDirectory;
         while (current is not null)
         {
-            string candidate = Path.Combine(current, "server", "KyberDash.Data", "Pricing", "litellm-snapshot.json");
-            if (File.Exists(candidate))
+            string[] candidates =
+            [
+                Path.Combine(current, "server", "KyberDash.Data", "Pricing"),
+                Path.Combine(current, "dash", "server", "KyberDash.Data", "Pricing")
+            ];
+
+            foreach (string candidate in candidates)
             {
-                return Path.Combine(current, "server", "KyberDash.Data", "Pricing");
+                if (File.Exists(Path.Combine(candidate, "litellm-snapshot.json")))
+                {
+                    return candidate;
+                }
             }
 
             current = Path.GetDirectoryName(current);
