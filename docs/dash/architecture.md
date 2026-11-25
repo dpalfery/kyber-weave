@@ -1068,8 +1068,9 @@ The incremental projection rests on three tables, with no other bookkeeping: `st
 `projection_dirty_session` (the session keys those writes touched). A maintenance pass is skipped when
 `projection_state.records_marker` equals the write marker, `projection_state.projection_schema_version` equals
 `SqliteRelationalStore.SchemaVersion`, `store_state.detector_version` equals `SqliteRelationalStore.DetectorVersion`,
-and no session a read pass deferred is still dirty. A read-path pass is skipped on the marker and schema version
-alone. A new store stamps the current detector version and only a full maintenance pass restamps it (opening a
+no dirty state names work (a stored dirty range that is wildcard or lists any session key, such as a session a read
+pass deferred, keeps the pass running), and the store either has no records or holds at least one session projection.
+A read-path pass is skipped on the marker and schema version alone. A new store stamps the current detector version and only a full maintenance pass restamps it (opening a
 store or a budget-bounded read pass never does), so bumping the constant makes the next maintenance pass run in
 full; unchanged session/run/execution rows also avoid redundant writes.
 
