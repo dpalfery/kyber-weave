@@ -2236,9 +2236,14 @@ function ContextBucketInspector({
   item: ContextBucketItem
   model?: string | null
 }) {
-  const tokens = item.value ?? item.tokens
+  const rawTokens = item.value ?? item.tokens
+  // A figure is measured only when it is a finite number; NaN and Infinity read "not measured".
+  const tokens = typeof rawTokens === 'number' && Number.isFinite(rawTokens) ? rawTokens : undefined
   const total = item.total ?? 0
-  const pct = tokens != null && total > 0 ? ((tokens / total) * 100).toFixed(1) + '%' : 'not measured'
+  const pct =
+    tokens !== undefined && Number.isFinite(total) && total > 0
+      ? ((tokens / total) * 100).toFixed(1) + '%'
+      : 'not measured'
   const tokenizer = tokenizerLabel(item, model)
 
   return (
@@ -2250,7 +2255,7 @@ function ContextBucketInspector({
         <div className="flex justify-between py-0.5">
           <span className="text-muted-foreground">Tokens:</span>
           <span className="font-mono font-semibold text-foreground">
-            {tokens == null ? 'not measured' : fmtTokens(tokens)}
+            {tokens === undefined ? 'not measured' : fmtTokens(tokens)}
           </span>
         </div>
         {tokenizer ? (
@@ -3233,14 +3238,14 @@ function TurnBucketPanel({ request }: { request: TurnBucketContentRequest }) {
   // A bucket figure is taken only when it is a number; a not-measurable verdict
   // or an absent key stays undefined, so the inspector shows "not measured".
   const bucketValue = rawBuckets[request.bucket] ?? turn[request.bucket]
-  const tokens = typeof bucketValue === 'number' ? bucketValue : undefined
+  const tokens = typeof bucketValue === 'number' && Number.isFinite(bucketValue) ? bucketValue : undefined
   const bucketSum = Object.values(rawBuckets).reduce(
-    (sum: number, v) => sum + (typeof v === 'number' ? v : 0),
+    (sum: number, v) => sum + (typeof v === 'number' && Number.isFinite(v) ? v : 0),
     0,
   )
   // The first reported total that is a number; the bucket sum when none is.
   const reportedInput = [context?.reported_input, turn.cumulative_input, turn.input, turn.fresh].find(
-    (v): v is number => typeof v === 'number',
+    (v): v is number => typeof v === 'number' && Number.isFinite(v),
   )
   const reported = reportedInput ?? bucketSum
   const total = Math.max(reported, bucketSum)
