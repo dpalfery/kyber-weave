@@ -112,6 +112,7 @@ public static class LegacyTableReplacementMap
                     "content_part",
                     "content_part_text",
                     "content_part_withheld",
+                    "content_part_withheld_tokenizer",
                     "content_part_reported_tokens",
                     "content_part_server",
                     "content_part_role",

@@ -136,6 +136,8 @@ For OTLP span mapping into static collector DTOs, `OtlpSpanNative` extracts cano
 | `ContentPart` | `Order` | mapped | `content_part.position` | Zero-based part ordinal within the turn. |
 | `ContentPart` | `Resident` | mapped | `content_part_residency.is_resident` | Context residency indicator (`0` or `1`). |
 | `ContentPart` | `Truncated` | dropped | — | Boolean truncation flag is replaced by the exact original length in `content_part_truncation.original_utf8_bytes`. |
+| `ContentPart` | `Tokenizer` | mapped | `content_part_withheld_tokenizer.tokenizer` | Tokenizer that measured a withheld part's count; absent for a harness-reported count, and a measured count with no label reads as not measured. |
+| `ContentPart` | `TokenizerIsModelOwn` | mapped | `content_part_withheld_tokenizer.is_model_own` | Whether the measuring tokenizer is the model's own (`1`) or the named standard stand-in (`0`). |
 | `RefreshSourceInput` | `HarnessId` | mapped | `source_checkpoint.harness_id`, `source.harness_id` | Harness owning the discovered source unit. |
 | `RefreshSourceInput` | `SourceKey` | mapped | `source_checkpoint.source_key`, `source.locator` | Stable unit path or locator. |
 | `RefreshSourceInput` | `ProviderId` | mapped | `source_checkpoint.provider_id` | Upstream provider identifier (`claude`). |
@@ -291,6 +293,8 @@ For OTLP tool-result log mapping, `CodexToolResultMapper` maps Codex `codex.tool
 | `ContentPart` | `Order` | mapped | `content_part.position` | Zero-based part ordinal within turn snapshot. |
 | `ContentPart` | `Resident` | mapped | `content_part_residency.is_resident` | Context residency indicator (`0` or `1`). |
 | `ContentPart` | `Truncated` | dropped | — | Boolean truncation flag is replaced by the measured original byte length in `content_part_truncation.original_utf8_bytes`. |
+| `ContentPart` | `Tokenizer` | mapped | `content_part_withheld_tokenizer.tokenizer` | Tokenizer that measured a withheld part's count; absent for a harness-reported count, and a measured count with no label reads as not measured. |
+| `ContentPart` | `TokenizerIsModelOwn` | mapped | `content_part_withheld_tokenizer.is_model_own` | Whether the measuring tokenizer is the model's own (`1`) or the named standard stand-in (`0`). |
 | `RefreshSourceInput` | `HarnessId` | mapped | `source_checkpoint.harness_id`, `source.harness_id` | Harness owning the discovered rollout (`codex-cli`). |
 | `RefreshSourceInput` | `SourceKey` | mapped | `source_checkpoint.source_key`, `source.locator` | Rollout JSONL path. |
 | `RefreshSourceInput` | `ProviderId` | mapped | `source_checkpoint.provider_id` | Upstream provider identifier (`codex`). |

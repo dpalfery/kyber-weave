@@ -411,6 +411,9 @@ public class CollectedTypesTests
         map[(typeof(CollectedWithheldText), nameof(CollectedWithheldText.Utf8Bytes))] = Col("content_part_withheld", "utf8_bytes");
         map[(typeof(CollectedWithheldText), nameof(CollectedWithheldText.Characters))] = Col("content_part_withheld", "characters");
         map[(typeof(CollectedWithheldText), nameof(CollectedWithheldText.MeasuredTokens))] = Col("content_part_withheld", "measured_tokens");
+        map[(typeof(CollectedWithheldText), nameof(CollectedWithheldText.Tokenizer))] = Col("content_part_withheld_tokenizer", "tokenizer");
+        map[(typeof(CollectedWithheldText), nameof(CollectedWithheldText.TokenizerIsModelOwn))] = Col("content_part_withheld_tokenizer", "is_model_own");
+        map[(typeof(CollectedWithheldText), nameof(CollectedWithheldText.LabeledTokens))] = Cols(("content_part_withheld", "measured_tokens"), ("content_part_withheld_tokenizer", "tokenizer"));
 
         map[(typeof(CollectedContentPart), nameof(CollectedContentPart.Position))] = Col("content_part", "position");
         map[(typeof(CollectedContentPart), nameof(CollectedContentPart.Bucket))] = Col("content_part", "bucket");
