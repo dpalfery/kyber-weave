@@ -1,8 +1,10 @@
 using System.Text.Json;
 using KyberDash.Application.Tests.Fakes;
 using KyberDash.Contracts.Repositories;
+using KyberDash.Contracts.Services;
 using KyberDash.Data.Collector.Sources;
 using KyberDash.Data.Repositories;
+using KyberDash.Domain;
 using Xunit;
 
 namespace KyberDash.Application.Tests;
@@ -98,10 +100,11 @@ public class E2eSeederWorldTests
         CanonSessionProjectorEngine projector = new(store, store, store, pricing);
         CanonRollupsEngine rollups = new(store, store, pricing);
         CanonProjectionService projection = new(store, store, store, projector, rollups);
+        // The seed's first projection pass heals a stale detector, so the detector is made stale
+        // again right after that pass. Only the seeder's own final stamp can make it current.
+        DetectorStaleAfterFirstPass projectionAfterFirstPass = new(projection, store);
         TranscriptIngestionService ingestion = new(store, store, new HarnessSourceRegistry());
-        E2eSeederService seeder = new(store, store, store, ingestion, projection);
-        // A store stamped with the previous detector version is stale, so the seed's projection
-        // pass must stamp the current one rather than find it already current.
+        E2eSeederService seeder = new(store, store, store, ingestion, projectionAfterFirstPass);
         store.SetStoreState(new StoreStateView(SqliteRelationalStore.SchemaVersion, SqliteRelationalStore.DetectorVersion - 1));
         List<string> writeBacks = [];
         store.BeforeProjectionWriteBack = writeBacks.Add;
@@ -112,9 +115,51 @@ public class E2eSeederWorldTests
 
         Assert.Equal(SqliteRelationalStore.DetectorVersion, store.GetStoreState()?.DetectorVersion);
         Assert.Equal(
-            [nameof(InMemoryRelationalStore.ClearProjectionDirtyState), nameof(InMemoryRelationalStore.SetProjectionState)],
-            writeBacks.TakeLast(2));
+            [
+                nameof(InMemoryRelationalStore.ClearProjectionDirtyState),
+                nameof(InMemoryRelationalStore.SetProjectionState),
+                nameof(InMemoryRelationalStore.SetStoreState),
+            ],
+            writeBacks.TakeLast(3));
         Assert.True(projector.IsProjectionCurrent());
+    }
+
+    /// <summary>
+    /// Projection service that makes the store's detector version stale again right after the first
+    /// incremental pass returns, so the seeder's final stamp is the only step left that can heal it.
+    /// </summary>
+    private sealed class DetectorStaleAfterFirstPass : ICanonProjectionService
+    {
+        private readonly ICanonProjectionService inner;
+        private readonly InMemoryRelationalStore store;
+        private bool staled;
+
+        /// <param name="inner">Real projection service the seeder calls through.</param>
+        /// <param name="store">Store whose detector version is made stale.</param>
+        public DetectorStaleAfterFirstPass(ICanonProjectionService inner, InMemoryRelationalStore store)
+        {
+            this.inner = inner;
+            this.store = store;
+        }
+
+        /// <inheritdoc />
+        public ProjectionPassReport ProjectIncremental()
+        {
+            ProjectionPassReport report = inner.ProjectIncremental();
+            if (!staled)
+            {
+                staled = true;
+                store.SetStoreState(new StoreStateView(SqliteRelationalStore.SchemaVersion, SqliteRelationalStore.DetectorVersion - 1));
+            }
+
+            return report;
+        }
+
+        /// <inheritdoc />
+        public IReadOnlyList<HarnessRollupRow> ProjectRunsAndHarnesses() => inner.ProjectRunsAndHarnesses();
+
+        /// <inheritdoc />
+        public (ProjectionPassReport Projection, IReadOnlyList<HarnessRollupRow> Rollups) ProjectAll() => inner.ProjectAll();
     }
 
     /// <summary>Walks up from the test assembly until the fixture the seeder replays is found.</summary>
