@@ -126,6 +126,21 @@ public class MicrosoftDataSqliteHarnessSourceSqliteTests : IDisposable
     }
 
     [Fact]
+    public void Open_CacheRootIsAFile_ThrowsSourceUnreadableNamingTheSource()
+    {
+        string sourceDirectory = directory.Combine("harness");
+        Directory.CreateDirectory(sourceDirectory);
+        string path = CreateSource(sourceDirectory, 3, SqliteFixtureJournal.WalUncheckpointed);
+        SkipUnlessSealed(sourceDirectory);
+        File.WriteAllText(directory.Combine("cache"), "not a directory");
+
+        IOException exception = Assert.Throws<IOException>(() => Source().Open(path));
+
+        Assert.StartsWith(SqliteSourceOpenPolicy.SourceUnreadableCode, exception.Message, StringComparison.Ordinal);
+        Assert.Contains(path, exception.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void Open_UnchangedSourceReusesItsCopyAndAChangedSourceReplacesIt()
     {
         string sourceDirectory = directory.Combine("harness");

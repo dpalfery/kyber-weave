@@ -297,6 +297,10 @@ public sealed class MicrosoftDataSqliteHarnessSource : IHarnessSqliteSource
         {
             throw Unreadable(sourcePath, "permission denied while copying it to the cache", ex);
         }
+        catch (IOException ex) when (!ex.Message.StartsWith(SqliteSourceOpenPolicy.SourceUnreadableCode, StringComparison.Ordinal))
+        {
+            throw Unreadable(sourcePath, $"its cache copy could not be written: {ex.Message}", ex);
+        }
     }
 
     private void EnsureCacheRoot()
