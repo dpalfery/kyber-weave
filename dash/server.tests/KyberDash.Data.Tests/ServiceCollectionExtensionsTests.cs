@@ -1,3 +1,4 @@
+using System.Reflection;
 using KyberDash.Application.Tests.Fakes;
 using KyberDash.Contracts.Repositories;
 using KyberDash.Contracts.Services;
@@ -117,6 +118,20 @@ public class ServiceCollectionExtensionsTests : IDisposable
         using ServiceProvider provider = BuildProvider(options);
 
         Assert.Equal(Path.GetFullPath(directory.Combine("state")), provider.GetRequiredService<IServerStateRepository>().DefaultStateDirectory);
+    }
+
+    [Fact]
+    public void AddDashDataServices_TranscriptReaderCachesUnderTheConfiguredStateDirectory()
+    {
+        string state = directory.Combine("transcript-state");
+        DashOptions options = new() { DatabasePath = Path.Combine(directory.Path, "transcripts.db"), StateDirectory = state };
+        using ServiceProvider provider = BuildProvider(options);
+
+        TranscriptReaderRepository reader = Assert.IsType<TranscriptReaderRepository>(provider.GetRequiredService<ITranscriptReaderRepository>());
+        FieldInfo? stateField = typeof(TranscriptReaderRepository).GetField("stateDirectory", BindingFlags.NonPublic | BindingFlags.Instance);
+
+        Assert.NotNull(stateField);
+        Assert.Equal(Path.GetFullPath(state), stateField!.GetValue(reader));
     }
 
     [Fact]
