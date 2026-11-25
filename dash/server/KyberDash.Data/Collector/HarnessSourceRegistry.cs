@@ -130,8 +130,7 @@ public class HarnessSourceRegistry
                         ".config/Code/User/globalStorage/kilocode.kilo-code/tasks",
                         "AppData/Roaming/Code/User/globalStorage/kilocode.kilo-code/tasks",
                     ],
-                    ["ui_messages.json"],
-                    ParserContractVersion: RooTaskDirectoryIdParserContractVersion)),
+                    ["ui_messages.json"])),
             new SpecHarnessSourceReader(
                 "devin",
                 new SourceRootSpec("devin", "devin-reader", "devin-transcript-json", [".local/share/devin/cli/transcripts"], ["*.json", "*.jsonl"]),
@@ -189,7 +188,8 @@ public class HarnessSourceRegistry
                         ".config/Code/User/globalStorage/rooveterinaryinc.roo-cline/tasks",
                         "AppData/Roaming/Code/User/globalStorage/rooveterinaryinc.roo-cline/tasks",
                     ],
-                    ["ui_messages.json"])),
+                    ["ui_messages.json"],
+                    ParserContractVersion: RooTaskDirectoryIdParserContractVersion)),
             new CopilotVsCodeHarnessSourceReader(),
             new SpecHarnessSourceReader(
                 "pi",

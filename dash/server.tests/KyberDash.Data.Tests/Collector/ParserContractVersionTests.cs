@@ -24,6 +24,7 @@ public class ParserContractVersionTests
     private static readonly string StateRoot = Path.Combine(HomeRoot, ".kyberdash");
     private static readonly DateTimeOffset BaselineUtc = new(2026, 11, 24, 12, 0, 0, TimeSpan.Zero);
     private static readonly string[] ChangedHarnesses = ["droid", "cursor", "warp"];
+    private const string RooHarnessId = "roo-code";
 
     [Fact]
     public void DiscoverAll_StampsVersionTwoOnDroidCursorAndWarpUnitsAndVersionOneOnEveryOtherRegistration()
@@ -38,9 +39,13 @@ public class ParserContractVersionTests
             Assert.All(units, static unit => Assert.Equal("2", unit.ParserContractVersion));
         }
 
-        List<SourceUnit> others = [.. result.Sources.Where(static unit => !ChangedHarnesses.Contains(unit.HarnessId))];
+        List<SourceUnit> rooUnits = [.. result.Sources.Where(static unit => unit.HarnessId == RooHarnessId)];
+        Assert.NotEmpty(rooUnits);
+        Assert.All(rooUnits, static unit => Assert.Equal(HarnessSourceRegistry.RooTaskDirectoryIdParserContractVersion, unit.ParserContractVersion));
+
+        List<SourceUnit> others = [.. result.Sources.Where(static unit => !ChangedHarnesses.Contains(unit.HarnessId) && unit.HarnessId != RooHarnessId)];
         Assert.True(
-            others.Select(static unit => unit.HarnessId).Distinct(StringComparer.Ordinal).Count() >= 15,
+            others.Select(static unit => unit.HarnessId).Distinct(StringComparer.Ordinal).Count() >= 14,
             "The fixture should discover units for most other registrations.");
         Assert.All(others, static unit => Assert.Equal(HarnessSourceRegistry.DefaultParserContractVersion, unit.ParserContractVersion));
         Assert.Equal("1", HarnessSourceRegistry.DefaultParserContractVersion);
