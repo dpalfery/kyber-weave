@@ -85,6 +85,25 @@ public class SqliteSourceOpenPolicyTests
             () => SqliteSourceOpenPolicy.Decide((SqliteOpenFailure)99, 0, 0, CopyCap));
     }
 
+    [Theory]
+    [InlineData(-1L, 100L, CopyCap)]
+    [InlineData(10L, -1L, CopyCap)]
+    [InlineData(10L, 100L, -1L)]
+    public void Decide_NegativeSize_ThrowsRatherThanTreatingItAsAnEmptyWal(long walBytes, long databaseBytes, long copyCapBytes)
+    {
+        Assert.Throws<ArgumentOutOfRangeException>(
+            () => SqliteSourceOpenPolicy.Decide(SqliteOpenFailure.Busy, walBytes, databaseBytes, copyCapBytes));
+    }
+
+    [Fact]
+    public void Decide_DatabasePlusWalOverflowingLong_RefusesWithCopyCapCode()
+    {
+        SqliteOpenAction action = SqliteSourceOpenPolicy.Decide(SqliteOpenFailure.Busy, long.MaxValue, long.MaxValue, CopyCap);
+
+        Assert.Equal(SqliteOpenActionKind.Refuse, action.Kind);
+        Assert.Equal(SqliteSourceOpenPolicy.CopyCapExceededCode, action.ProblemCode);
+    }
+
     [Fact]
     public void ProblemCodes_AreTheStableValues()
     {

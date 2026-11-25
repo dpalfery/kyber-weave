@@ -58,6 +58,7 @@ public class MicrosoftDataSqliteHarnessSource : IHarnessSqliteSource
         ArgumentException.ThrowIfNullOrWhiteSpace(cacheRoot);
         ArgumentOutOfRangeException.ThrowIfLessThanOrEqual(limits.CommandTimeoutSeconds, 0);
         ArgumentOutOfRangeException.ThrowIfNegative(limits.BusyTimeoutMilliseconds);
+        ArgumentOutOfRangeException.ThrowIfNegative(limits.CopyCapBytes);
         this.limits = limits;
         this.cacheRoot = Path.GetFullPath(cacheRoot);
     }

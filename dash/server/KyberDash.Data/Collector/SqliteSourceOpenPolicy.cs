@@ -82,9 +82,15 @@ public static class SqliteSourceOpenPolicy
     /// <param name="walBytes">Size of the <c>-wal</c> file; zero when absent or empty.</param>
     /// <param name="databaseBytes">Size of the database file.</param>
     /// <param name="copyCapBytes">Most database-plus-WAL bytes that may be copied.</param>
-    /// <exception cref="ArgumentOutOfRangeException"><paramref name="failure"/> is not a defined value.</exception>
+    /// <exception cref="ArgumentOutOfRangeException">
+    /// <paramref name="failure"/> is not a defined value, or a size or the cap is negative.
+    /// </exception>
     public static SqliteOpenAction Decide(SqliteOpenFailure failure, long walBytes, long databaseBytes, long copyCapBytes)
     {
+        // A negative size is never a real file length; reading it as an empty WAL would open immutable and hide rows.
+        ArgumentOutOfRangeException.ThrowIfNegative(walBytes);
+        ArgumentOutOfRangeException.ThrowIfNegative(databaseBytes);
+        ArgumentOutOfRangeException.ThrowIfNegative(copyCapBytes);
         switch (failure)
         {
             case SqliteOpenFailure.None:
@@ -97,7 +103,8 @@ public static class SqliteSourceOpenPolicy
                     return SqliteOpenAction.Immutable;
                 }
 
-                return databaseBytes + walBytes <= copyCapBytes
+                // Compared by subtraction so two large sizes cannot overflow their sum past the cap.
+                return databaseBytes <= copyCapBytes && walBytes <= copyCapBytes - databaseBytes
                     ? SqliteOpenAction.CacheCopy
                     : SqliteOpenAction.Refuse(CopyCapExceededCode);
             case SqliteOpenFailure.Missing:
