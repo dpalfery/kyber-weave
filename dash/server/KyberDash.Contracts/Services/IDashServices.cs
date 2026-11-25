@@ -163,7 +163,8 @@ public interface ITranscriptIngestionService
     /// written before it is still replaced. A discovered unit is read only when the operational store already holds
     /// its checkpoint; the standard checkpoint check then decides whether that checkpoint is still
     /// reusable, which is how the parser contract version change forces a re-read. A checkpointed
-    /// unit discovery no longer lists cannot be re-read, so the token values its stored version wrote
+    /// unit whose source key discovery no longer returns (a deleted file, or a file now keyed
+    /// differently) cannot be re-read, so the token values its stored version wrote
     /// as estimates are cleared to not measured instead, keeping its sessions, records and text; that
     /// unit's row reads <c>cleared</c>, or <c>failed</c> when the clear fails. No
     /// <c>refresh_run</c> row is written and no history coverage is claimed.

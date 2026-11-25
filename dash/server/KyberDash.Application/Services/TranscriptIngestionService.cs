@@ -187,9 +187,13 @@ public class TranscriptIngestionService : ITranscriptIngestionService
                 continue;
             }
 
+            // A harness with no reader or mapper discovers nothing, so none of its checkpointed
+            // units is rediscovered and the clear below still removes their stored estimates.
+            HashSet<string> discoveredKeys = new(StringComparer.Ordinal);
             IHarnessSourceReader? reader = sourceRegistry!.GetReader(harnessId);
             if (reader is null || HarnessMapperLookup.Resolve(mappersByHarness, harnessId) is null)
             {
+                clearedAny |= ClearEstimatesOfVanishedUnits(harnessId, discoveredKeys, rows);
                 continue;
             }
 
@@ -199,7 +203,6 @@ public class TranscriptIngestionService : ITranscriptIngestionService
                 writer!.WriteProblem(discoveryProblem);
             }
 
-            HashSet<string> discoveredKeys = new(StringComparer.Ordinal);
             foreach (SourceUnit unit in discovery.Sources)
             {
                 if (!string.Equals(unit.HarnessId, harnessId, StringComparison.Ordinal))
@@ -241,10 +244,16 @@ public class TranscriptIngestionService : ITranscriptIngestionService
 
     /// <summary>
     /// Clears to not measured the token values that an earlier parser contract version stored as
-    /// estimates for each checkpointed unit of <paramref name="harnessId"/> whose file discovery no
-    /// longer lists, since such a unit cannot be re-read to replace them.
+    /// estimates for each checkpointed unit of <paramref name="harnessId"/> whose source key is not
+    /// among the units discovery returned in this pass, since such a unit cannot be re-read to
+    /// replace them.
     /// </summary>
     /// <remarks>
+    /// <para>
+    /// "Not rediscovered" covers a deleted file, a root discovery could not list, and a unit whose
+    /// file still exists but is now keyed differently (a database re-keyed from one unit per file to
+    /// one unit per conversation): in each case the old checkpoint's rows are never replaced.
+    /// </para>
     /// <para>
     /// The values are named by <see cref="HarnessSourceRegistry.EstimatedRecordTokensStoredUnder"/>
     /// for the checkpoint's version. A checkpoint whose last status is not <c>ok</c> may carry the

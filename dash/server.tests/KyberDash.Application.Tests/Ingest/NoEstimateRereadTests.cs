@@ -270,6 +270,59 @@ public class NoEstimateRereadTests
         Assert.Empty(harness.Store.TokenCounts("droid-gone-call"));
     }
 
+    /// <summary>
+    /// A unit whose database file still exists but is now discovered under another source key (one
+    /// unit per conversation instead of one per file) is never rediscovered under its old key, so its
+    /// old estimates are cleared while the file's current unit is still re-read.
+    /// </summary>
+    [Fact]
+    public void Reread_ClearsTheEstimatedTokens_OfAUnitWhoseFileExistsButIsKeyedDifferently()
+    {
+        Harness harness = new();
+        harness.AddWarpFile();
+
+        // The legacy key names a file that exists on disk, so only "not rediscovered", never "file
+        // missing", can tell this unit apart; discovery now returns the database under another key.
+        string legacyKey = Combine(HomeRoot, "legacy-warp/warp.sqlite");
+        harness.FileSystem.AddFile(legacyKey, "SQLite format 3\0", BaselineUtc.AddMinutes(-10));
+        harness.SeedCheckpoint("warp", harness.WarpPath(), "warp", "warp-sqlite-reader", "warp-sqlite", "warp.sqlite");
+        harness.SeedStoredUnit("warp", legacyKey, "warp-legacy", StoredRecord("warp-legacy-exchange", "warp", "warp-legacy", [new(TokenClass.Input, 12)], reportedInput: 12));
+        harness.Writer.Clear();
+
+        RefreshReport report = harness.Ingestion.RereadCheckpointedSources(["warp"]);
+
+        Assert.Equal(0, report.ExitCode);
+        Assert.Equal(
+            [(harness.WarpPath(), "committed"), (legacyKey, "cleared")],
+            report.Rows.Select(static row => (row.SourceKey, row.Status)));
+        Assert.Empty(harness.Store.TokenCounts("warp-legacy-exchange"));
+        Assert.Empty(harness.Store.ReportedTotals("warp-legacy-exchange"));
+        Assert.Single(harness.Store.FindRecordParts("warp-legacy-exchange"));
+    }
+
+    /// <summary>A named harness with no registered mapper still has the estimates of its checkpointed units cleared.</summary>
+    [Fact]
+    public void Reread_ClearsTheEstimatedTokens_OfANamedHarnessWithNoMapper()
+    {
+        Harness harness = new();
+        harness.SeedGoneDroidUnit(parserContractVersion: "1", lastStatus: "ok");
+        TranscriptIngestionService withoutDroidMapper = new(
+            harness.Writer,
+            harness.Store,
+            new HarnessSourceRegistry(),
+            [new CursorMapper(), new WarpMapper()],
+            harness.FileSystem,
+            new DashOptions { StateDirectory = StateRoot },
+            homeDirectory: HomeRoot,
+            clock: () => BaselineUtc);
+
+        RefreshReport report = withoutDroidMapper.RereadCheckpointedSources(["droid"]);
+
+        Assert.Equal(0, report.ExitCode);
+        Assert.Equal("cleared", Assert.Single(report.Rows).Status);
+        Assert.Empty(harness.Store.TokenCounts("droid-gone-call"));
+    }
+
     /// <summary>Builds a harness with one checkpointed unit for each of Droid, Cursor and Warp.</summary>
     private static Harness CheckpointedHarness()
     {
@@ -441,6 +494,13 @@ public class NoEstimateRereadTests
                 [new CollectedSession("pi-other", "pi", "pi-other", Workspace: null, Title: null, ReportedUsage: [])],
                 [],
                 []));
+        }
+
+        /// <summary>Checkpoints <paramref name="sourceKey"/> at version 1 and stores one record for it as the old reader wrote it.</summary>
+        public void SeedStoredUnit(string harnessId, string sourceKey, string sessionKey, CollectedRecord record)
+        {
+            SeedCheckpoint(harnessId, sourceKey, harnessId, $"{harnessId}-reader", $"{harnessId}-format", harnessId);
+            WriteStoredUnit(harnessId, sourceKey, sessionKey, [], record);
         }
 
         private void WriteStoredUnit(
