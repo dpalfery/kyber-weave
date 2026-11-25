@@ -84,7 +84,7 @@ keys differ, and they differ more than you would expect:
 | [ZCode](#zcode) | `zcode.json`, or `.zcode/config.json` | `mcp.servers` | A nested key path, and the files are found by walking up to the worktree root |
 | [Command Code](#command-code) | `.mcp.json` (repo root) | `mcpServers` | Same shape as Claude Code; a subagent reaches a tool only when its own `tools` list names it |
 | [Kilo](#kilo) | `kilo.jsonc` | `mcp` | Per-agent reach is the agent frontmatter `permission` map entry `kw-docs_*: allow` — an approval grant, not isolation |
-| [Antigravity](#antigravity) | `~/.gemini/config/mcp_config.json` (user, written by `squad install --global`) or `.agents/mcp_config.json` (workspace) | `mcpServers` | Starts servers from `/`, so the entry is `--any-repo`; the agent file carries its own `mcpServers` entry; MCP tools default to Ask until a policy pattern allows them |
+| [Antigravity](#antigravity) | `~/.gemini/config/mcp_config.json` (user, written by a global `squad install` or `squad update`) or `.agents/mcp_config.json` (workspace) | `mcpServers` | Starts servers from `/`, so the entry is `--any-repo`; the agent file carries its own `mcpServers` entry; MCP tools default to Ask until a policy pattern allows them |
 | [Pi](#pi) | `.mcp.json` (repo root), or `~/.config/mcp/mcp.json` | — | Read by the `pi-mcp-adapter` extension (6.0.0 or later) in the adapter's own schema; a project-scoped entry needs a trust approval on first use |
 | [Warp](#warp) | Warp's own MCP settings | — | Squad's Warp surface is role skills, which carry no tool scoping |
 

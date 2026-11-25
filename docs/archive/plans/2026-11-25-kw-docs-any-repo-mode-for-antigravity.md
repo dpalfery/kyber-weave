@@ -34,7 +34,7 @@ Autonomy: autonomous. Development mode: test-first.
 > 3. Amend ADR 0052 (or new ADR) for the agy user-scope write; update docs/kyber-squad/architecture.md, docs/docgraph/mcp-runbook.md, onboarding table.
 > 4. Check other harnesses that spawn MCP globally (Warp, Copilot CLI global, Codex, Pi, ZCode, Kilo) for the same `--repo-root .` breakage; fix or raise each with a recommendation.
 >
-> Constraints: stay out of dash/ and SelfUpdater.cs. Worktree from fresh origin/main under /Users/dave/git/opencode-worktrees. Branch/PR name includes [claude]. Gates in AGENTS.md must pass. PR draft->ready, Kilo review loop, never merge. Local agy config was already hand-fixed by Antigravity with a pinned --repo-root; don't touch ~/.gemini without David's yes.
+> Constraints: stay out of dash/ and SelfUpdater.cs. Worktree from fresh origin/main under the owner's usual worktree folder outside the repository. Branch/PR name includes [claude]. Gates in AGENTS.md must pass. PR draft->ready, Kilo review loop, never merge. Local agy config was already hand-fixed by Antigravity with a pinned --repo-root; don't touch ~/.gemini without David's yes.
 
 ## Problem and goal
 
@@ -81,7 +81,7 @@ kw-docs tools at all. A pinned absolute root works for one repository only.
 | 4. Check Warp, Copilot CLI global, Codex, Pi, ZCode, Kilo; fix or raise each | Investigation findings; docs-dev closeout; Out-of-scope `PR note:` lines; D19 | Runbook recommends `--any-repo` for each user-scope entry; live spawn-directory probes raised as PR notes |
 | Stay out of `dash/` and `SelfUpdater.cs` | Out-of-scope boundaries | No task names a file there |
 | Don't touch `~/.gemini` without David's yes | Out-of-scope boundaries; D20 | Every test uses the in-memory file seam; no task runs `squad install --global` on a real home |
-| Worktree, branch name, gates, PR draft->ready, Kilo loop, never merge | Conductor delivery; Verification gates; PR note | Branch `claude/feat/kw-docs-any-repo-mode-for-antigravity` from `origin/main` `b86a6b472`. The run worktree is under the repository's `.agent_worktrees/`, not `/Users/dave/git/opencode-worktrees` as asked: raised as a PR note, not changed by this plan. |
+| Worktree, branch name, gates, PR draft->ready, Kilo loop, never merge | Conductor delivery; Verification gates; PR note | Branch `claude/feat/kw-docs-any-repo-mode-for-antigravity` from `origin/main` `b86a6b472`. The run worktree is under the repository's `.agent_worktrees/`, not the owner's usual worktree folder as asked: raised as a PR note, not changed by this plan. |
 
 ## Scale
 
@@ -320,7 +320,7 @@ T1 and T4 run in parallel. T5 follows T4, T2 follows T5 and T3 follows T2 in the
 - PR note: `src/KyberWeave.Application/Squad/Rendering/AntigravityRenderer.cs` — the `codegraph` entry (`codegraph serve --mcp --path .`) is spawned from `/` by Antigravity just like kw-docs and likely gets no index — codegraph has no any-repo mode; recommend David decide between withholding codegraph from global Antigravity agent files or asking CodeGraph for a per-call path mode.
 - PR note: Warp, Copilot CLI (`~/.copilot/mcp-config.json`), Codex (`~/.codex/config.toml`), Pi (`~/.config/mcp/mcp.json`), ZCode user tier, Kilo global config — the directory each harness starts a global MCP server in was not probed live in this run; the runbook now recommends `kyber-weave-mcp --any-repo` for every user-scope entry, which works whatever that directory is; recommend one live probe per harness before claiming `--repo-root .` works anywhere at user scope.
 - PR note: `~/.gemini/config/mcp_config.json` on David's Mac — its hand-pinned `kw-docs --repo-root <path>` entry stays (insertion-only) and the next global install will warn; switching it to `--any-repo` is David's call.
-- PR note: run worktree location — this run's worktree is `.agent_worktrees/20261125T173944Z-…` inside the repository, not under `/Users/dave/git/opencode-worktrees` as the request asked; the run start chose it, and moving a live run is not a plan step; David to decide whether run start should default there.
+- PR note: run worktree location — this run's worktree is `.agent_worktrees/20261125T173944Z-…` inside the repository, not under the owner's usual worktree folder as the request asked; the run start chose it, and moving a live run is not a plan step; David to decide whether run start should default there.
 - PR note: a `kw-docs` entry written with an absolute command goes stale if the executable moves off that `PATH` directory; Squad never rewrites an existing entry, so the fix is manual.
 
 ## Verification gates
@@ -351,7 +351,7 @@ NOT VERIFIED: how each harness other than Antigravity starts a user-scope server
 |---|---|
 | DocGraph, D1, D3, D4, D5, D6, D7, D8, D9 | [Any-repo mode: no bound root](../../docgraph/mcp-runbook.md#any-repo-mode-no-bound-root), [Naming your worktree with `projectPath`](../../docgraph/mcp-runbook.md#naming-your-worktree-with-projectpath) |
 | D2, D24 | [Any-repo mode: no bound root](../../docgraph/mcp-runbook.md#any-repo-mode-no-bound-root); the composition detail is in `src/KyberWeave.Mcp/AGENTS.md` (an agent-guidance file, not a governed document) |
-| KyberSquad, D10, D11, D12, D25, D26 | [Antigravity](../../docgraph/mcp-runbook.md#antigravity), [Squad architecture, Antigravity user MCP config](../../kyber-squad/architecture.md#cross-process-mutex-lease) |
+| KyberSquad, D10, D11, D12, D25, D26 | [Antigravity](../../docgraph/mcp-runbook.md#antigravity), [Squad architecture, Antigravity user MCP config](../../kyber-squad/architecture.md#4-deployment-scopes-and-state-topology) |
 | D13, D14, D15, D16, D17, D18, D20 | [ADR 0094](../../adr/0094-squad-inserts-the-kw-docs-entry-into-antigravitys-user-mcp-config.md), [ADR 0052 amendment](../../adr/0052-docs-branch-writes-repository-scope-mcp-configuration.md) |
 | D19 | [Wiring it up, user-scope entries](../../docgraph/mcp-runbook.md#wiring-it-up), [kw-onboarding wiring table](../../../.apm/skills/kw-onboarding/references/mcp-and-index.md) |
 | D21, D28, D29, D30 | [Seam register](../../reference/seams.md) |

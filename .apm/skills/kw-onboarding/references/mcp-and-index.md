@@ -112,7 +112,7 @@ Everything else is a manual entry the user places; show them the entry and the f
 | Kilo | `kilo.jsonc`, `mcp` | manual |
 | Codex | `~/.codex/config.toml`, `[mcp_servers.<name>]`; use `--any-repo` | manual (user file: ask) |
 | ZCode | `zcode.json` or `.zcode/config.json`, `mcp.servers` | manual; ZCode fails every agent until `kw-docs` is wired |
-| Antigravity | `~/.gemini/config/mcp_config.json` (a global `squad install` inserts the entry) or `.agents/mcp_config.json`, `mcpServers`; entry `kyber-weave-mcp --any-repo`, because Antigravity starts servers from `/` | manual |
+| Antigravity | `~/.gemini/config/mcp_config.json` (a global `squad install` or `squad update` inserts the entry) or `.agents/mcp_config.json`, `mcpServers`; entry `kyber-weave-mcp --any-repo`, because Antigravity starts servers from `/` | manual |
 | Pi | `.mcp.json` in the `pi-mcp-adapter` schema, or `~/.config/mcp/mcp.json` (use `--any-repo` there) | manual |
 | Copilot CLI | `$COPILOT_HOME/mcp-config.json` (default `~/.copilot/`), `mcpServers`; use `--any-repo` | manual (user file: ask) |
 | Warp | Warp's own MCP settings; use `--any-repo` | manual |
