@@ -44,19 +44,25 @@ public class EngineLifecycleService : IEngineLifecycleService
 
     private readonly IServerStateRepository serverState;
     private readonly DashOptions options;
+    private readonly Func<string, string, bool> spawnEngine;
 
     /// <summary>
     /// Initializes a new <see cref="EngineLifecycleService"/>.
     /// </summary>
     /// <param name="serverState">Server-state repository owning the engine lease and descriptors.</param>
     /// <param name="options">Composition options naming the state directory and reported version.</param>
-    public EngineLifecycleService(IServerStateRepository serverState, DashOptions options)
+    /// <param name="spawnEngine">
+    /// Starts the replacement engine from its binary path and state directory and reports whether it started;
+    /// the detached <c>/bin/sh</c> launch when <see langword="null"/>. The seam lets a test see which binary is launched.
+    /// </param>
+    public EngineLifecycleService(IServerStateRepository serverState, DashOptions options, Func<string, string, bool>? spawnEngine = null)
     {
         ArgumentNullException.ThrowIfNull(serverState);
         ArgumentNullException.ThrowIfNull(options);
 
         this.serverState = serverState;
         this.options = options;
+        this.spawnEngine = spawnEngine ?? TrySpawnDetachedEngine;
     }
 
     /// <inheritdoc />
@@ -114,7 +120,7 @@ public class EngineLifecycleService : IEngineLifecycleService
         }
 
         string exePath = ResolveApiBinary(apiBinaryPath);
-        if (!TrySpawnDetachedEngine(exePath, resolvedStateDir))
+        if (!spawnEngine(exePath, resolvedStateDir))
         {
             return new EngineEnsureReport(false, $"engine: failed could not start {exePath} {NoOpenArgument}");
         }

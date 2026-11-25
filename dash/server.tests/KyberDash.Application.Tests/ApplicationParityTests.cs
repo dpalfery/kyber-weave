@@ -516,17 +516,26 @@ public class ApplicationParityTests
         };
         serverState.ProbeSequence.Enqueue((EngineProbeState.Running, new EngineDescriptor(42, "kyberdash-api", "0.20.0", "2026-11-15T00:00:00.000Z")));
         serverState.ProbeSequence.Enqueue((EngineProbeState.NotRunning, null));
-        EngineLifecycleService lifecycle = new(serverState, new DashOptions());
+        List<(string Binary, string StateDir)> spawned = [];
+        EngineLifecycleService lifecycle = new(
+            serverState,
+            new DashOptions(),
+            (binary, stateDir) =>
+            {
+                spawned.Add((binary, stateDir));
+                return true;
+            });
 
         EngineEnsureReport report = await lifecycle.EnsureRunningEngineMatchesVersionAsync(
             "2.0.0",
-            apiBinaryPath: "/usr/bin/true",
+            apiBinaryPath: "/opt/kyberdash/kyberdash-api",
             cancellationToken: TestContext.Current.CancellationToken);
 
         Assert.False(report.Succeeded);
         Assert.False(report.Replaced);
         Assert.Equal("engine: failed replacement reports 1.0.0, expected 2.0.0", report.Message);
         Assert.Equal(1, serverState.ShutdownRequests);
+        Assert.Equal("/opt/kyberdash/kyberdash-api", Assert.Single(spawned).Binary);
     }
 
     [Fact]
