@@ -110,7 +110,9 @@ public static class CanonRecordHydration
                 Text: definition.ToolName,
                 Tokens: definition.SchemaTokens,
                 Server: definition.Server,
-                Order: TypedDefinitionOrderBase + definition.Position));
+                Order: TypedDefinitionOrderBase + definition.Position,
+                Tokenizer: definition.Tokenizer,
+                TokenizerIsModelOwn: definition.Tokenizer is null ? null : definition.TokenizerIsModelOwn));
         }
 
         parts.Sort(static (left, right) => (left.Order ?? 0).CompareTo(right.Order ?? 0));

@@ -429,6 +429,8 @@ public class CollectedTypesTests
         map[(typeof(CollectedToolDefinition), nameof(CollectedToolDefinition.ToolName))] = Col("tool_definition", "tool_name");
         map[(typeof(CollectedToolDefinition), nameof(CollectedToolDefinition.Server))] = Col("tool_definition_server", "server_name");
         map[(typeof(CollectedToolDefinition), nameof(CollectedToolDefinition.SchemaTokens))] = Col("tool_definition", "schema_tokens");
+        map[(typeof(CollectedToolDefinition), nameof(CollectedToolDefinition.Tokenizer))] = Col("tool_definition_tokenizer", "tokenizer");
+        map[(typeof(CollectedToolDefinition), nameof(CollectedToolDefinition.TokenizerIsModelOwn))] = Col("tool_definition_tokenizer", "is_model_own");
 
         map[(typeof(CollectedToolContent), nameof(CollectedToolContent.PlainText))] = Cols(
             ("tool_call_input_text", "text"),

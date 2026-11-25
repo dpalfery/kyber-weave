@@ -520,22 +520,27 @@ public partial class SqliteRelationalStore : IRelationalStoreReader
         string whereClause = BuildSpanFilterWhere("td", spanId, sessionKey);
         string sql = TabReadScriptHeader +
                      "SELECT hex(CAST(td.span_id AS BLOB)), td.position, hex(CAST(td.tool_name AS BLOB)), " +
-                     "typeof(tds.server_name), COALESCE(hex(CAST(tds.server_name AS BLOB)), ''), td.schema_tokens " +
+                     "typeof(tds.server_name), COALESCE(hex(CAST(tds.server_name AS BLOB)), ''), td.schema_tokens, " +
+                     "typeof(tdt.tokenizer), COALESCE(hex(CAST(tdt.tokenizer AS BLOB)), ''), " +
+                     "typeof(tdt.is_model_own), COALESCE(CAST(tdt.is_model_own AS TEXT), '') " +
                      "FROM tool_definition td " +
-                     "LEFT JOIN tool_definition_server tds ON tds.span_id = td.span_id AND tds.position = td.position" +
+                     "LEFT JOIN tool_definition_server tds ON tds.span_id = td.span_id AND tds.position = td.position " +
+                     "LEFT JOIN tool_definition_tokenizer tdt ON tdt.span_id = td.span_id AND tdt.position = td.position" +
                      $"{whereClause} ORDER BY td.span_id ASC, td.position ASC;\n";
 
         string output = ExecuteSqlite(sql);
         List<StoredToolDefinition> results = [];
         foreach (string line in TabLines(output))
         {
-            string[] cols = SplitTabLine(line, 6, "tool_definition");
+            string[] cols = SplitTabLine(line, 10, "tool_definition");
             string rowSpan = ParseHexRequired(cols[0], "tool_definition.span_id");
             int position = ParseInt32Required(cols[1], "tool_definition.position");
             string toolName = ParseHexRequired(cols[2], "tool_definition.tool_name");
             string? server = ParseNullableHex(cols[3], cols[4], "tool_definition_server.server_name");
             long schemaTokens = ParseInt64Required(cols[5], "tool_definition.schema_tokens");
-            results.Add(new StoredToolDefinition(rowSpan, new CollectedToolDefinition(position, toolName, server, schemaTokens)));
+            string? tokenizer = ParseNullableHex(cols[6], cols[7], "tool_definition_tokenizer.tokenizer");
+            long? tokenizerIsModelOwn = ParseNullableInt64(cols[8], cols[9], "tool_definition_tokenizer.is_model_own");
+            results.Add(new StoredToolDefinition(rowSpan, new CollectedToolDefinition(position, toolName, server, schemaTokens, tokenizer, tokenizerIsModelOwn == 1L)));
         }
 
         return results;
@@ -3223,9 +3228,12 @@ public partial class SqliteRelationalStore : IRelationalStoreReader
         {
             sql.Append(
                 "SELECT 'TDEF', hex(CAST(td.span_id AS BLOB)), td.position, hex(CAST(td.tool_name AS BLOB)), " +
-                "typeof(tds.server_name), COALESCE(hex(CAST(tds.server_name AS BLOB)), ''), td.schema_tokens " +
+                "typeof(tds.server_name), COALESCE(hex(CAST(tds.server_name AS BLOB)), ''), td.schema_tokens, " +
+                "typeof(tdt.tokenizer), COALESCE(hex(CAST(tdt.tokenizer AS BLOB)), ''), " +
+                "typeof(tdt.is_model_own), COALESCE(CAST(tdt.is_model_own AS TEXT), '') " +
                 "FROM tool_definition td " +
-                "LEFT JOIN tool_definition_server tds ON tds.span_id = td.span_id AND tds.position = td.position" +
+                "LEFT JOIN tool_definition_server tds ON tds.span_id = td.span_id AND tds.position = td.position " +
+                "LEFT JOIN tool_definition_tokenizer tdt ON tdt.span_id = td.span_id AND tdt.position = td.position" +
                 $" WHERE td.span_id IN {linkedSpanIds} ORDER BY td.span_id ASC, td.position ASC;\n");
 
             // The tool-call metadata joins deliberately omit tool_call_input_text and
@@ -3283,9 +3291,9 @@ public partial class SqliteRelationalStore : IRelationalStoreReader
 
                 case "TDEF":
                     {
-                        if (cols.Length != 7)
+                        if (cols.Length != 11)
                         {
-                            throw new StoredDataException($"Expected 7 columns for TDEF row, got {cols.Length.ToString(CultureInfo.InvariantCulture)}.");
+                            throw new StoredDataException($"Expected 11 columns for TDEF row, got {cols.Length.ToString(CultureInfo.InvariantCulture)}.");
                         }
 
                         string spanId = ParseHexRequired(cols[1], "tool_definition.span_id");
@@ -3293,7 +3301,9 @@ public partial class SqliteRelationalStore : IRelationalStoreReader
                         string toolName = ParseHexRequired(cols[3], "tool_definition.tool_name");
                         string? server = ParseNullableHex(cols[4], cols[5], "tool_definition_server.server_name");
                         long schemaTokens = ParseInt64Required(cols[6], "tool_definition.schema_tokens");
-                        GetOrCreateList(defsBySpan, spanId).Add(new CollectedToolDefinition(position, toolName, server, schemaTokens));
+                        string? tokenizer = ParseNullableHex(cols[7], cols[8], "tool_definition_tokenizer.tokenizer");
+                        long? tokenizerIsModelOwn = ParseNullableInt64(cols[9], cols[10], "tool_definition_tokenizer.is_model_own");
+                        GetOrCreateList(defsBySpan, spanId).Add(new CollectedToolDefinition(position, toolName, server, schemaTokens, tokenizer, tokenizerIsModelOwn == 1L));
                         break;
                     }
 
@@ -3442,9 +3452,12 @@ public partial class SqliteRelationalStore : IRelationalStoreReader
 
         sql.Append(
             "SELECT 'TDEF', hex(CAST(td.span_id AS BLOB)), td.position, hex(CAST(td.tool_name AS BLOB)), " +
-            "typeof(tds.server_name), COALESCE(hex(CAST(tds.server_name AS BLOB)), ''), td.schema_tokens " +
+            "typeof(tds.server_name), COALESCE(hex(CAST(tds.server_name AS BLOB)), ''), td.schema_tokens, " +
+            "typeof(tdt.tokenizer), COALESCE(hex(CAST(tdt.tokenizer AS BLOB)), ''), " +
+            "typeof(tdt.is_model_own), COALESCE(CAST(tdt.is_model_own AS TEXT), '') " +
             "FROM tool_definition td " +
-            "LEFT JOIN tool_definition_server tds ON tds.span_id = td.span_id AND tds.position = td.position" +
+            "LEFT JOIN tool_definition_server tds ON tds.span_id = td.span_id AND tds.position = td.position " +
+            "LEFT JOIN tool_definition_tokenizer tdt ON tdt.span_id = td.span_id AND tdt.position = td.position" +
             $"{defFilter} ORDER BY td.span_id ASC, td.position ASC;\n");
 
         sql.Append("SELECT 'TC', hex(CAST(tc.span_id AS BLOB)), ");
@@ -3539,9 +3552,9 @@ public partial class SqliteRelationalStore : IRelationalStoreReader
 
                 case "TDEF":
                     {
-                        if (cols.Length != 7)
+                        if (cols.Length != 11)
                         {
-                            throw new StoredDataException($"Expected 7 columns for TDEF row, got {cols.Length.ToString(CultureInfo.InvariantCulture)}.");
+                            throw new StoredDataException($"Expected 11 columns for TDEF row, got {cols.Length.ToString(CultureInfo.InvariantCulture)}.");
                         }
 
                         string spanId = ParseHexRequired(cols[1], "tool_definition.span_id");
@@ -3549,7 +3562,9 @@ public partial class SqliteRelationalStore : IRelationalStoreReader
                         string toolName = ParseHexRequired(cols[3], "tool_definition.tool_name");
                         string? server = ParseNullableHex(cols[4], cols[5], "tool_definition_server.server_name");
                         long schemaTokens = ParseInt64Required(cols[6], "tool_definition.schema_tokens");
-                        GetOrCreateList(defsBySpan, spanId).Add(new CollectedToolDefinition(position, toolName, server, schemaTokens));
+                        string? tokenizer = ParseNullableHex(cols[7], cols[8], "tool_definition_tokenizer.tokenizer");
+                        long? tokenizerIsModelOwn = ParseNullableInt64(cols[9], cols[10], "tool_definition_tokenizer.is_model_own");
+                        GetOrCreateList(defsBySpan, spanId).Add(new CollectedToolDefinition(position, toolName, server, schemaTokens, tokenizer, tokenizerIsModelOwn == 1L));
                         break;
                     }
 
@@ -3776,6 +3791,10 @@ public partial class SqliteRelationalStore : IRelationalStoreReader
             $"SELECT 'CTX_T_SRV', hex(CAST(session_id AS BLOB)), position, hex(CAST(server AS BLOB)), tokens FROM session_context_turn_server_definitions{childWhere} ORDER BY session_id ASC, position ASC, rowid ASC;\n");
 
         sql.Append(
+            CultureInfo.InvariantCulture,
+            $"SELECT 'CTX_T_TOK', hex(CAST(session_id AS BLOB)), position, hex(CAST(tokenizer AS BLOB)), is_model_own FROM session_context_turn_tokenizer{childWhere} ORDER BY session_id ASC, position ASC, tokenizer ASC;\n");
+
+        sql.Append(
             "SELECT 'SCH', hex(CAST(t.session_id AS BLOB)), t.invocation_count, t.turn_count, " +
             "typeof(u.token_residencies), COALESCE(CAST(u.token_residencies AS TEXT), '') " +
             "FROM session_schema t " +
@@ -3810,6 +3829,7 @@ public partial class SqliteRelationalStore : IRelationalStoreReader
         Dictionary<string, List<RawContextTurnHeader>> ctxTurnsBySess = new(StringComparer.Ordinal);
         Dictionary<(string SessionId, int Position), List<StoredTurnBucketTokens>> ctxBucketsByTurn = [];
         Dictionary<(string SessionId, int Position), List<StoredTurnServerDefinitionTokens>> ctxServersByTurn = [];
+        Dictionary<(string SessionId, int Position), List<TokenizerLabel>> ctxTokenizersByTurn = [];
         Dictionary<string, (int InvocationCount, int TurnCount, long? Unused)> schemaHeadersBySess = new(StringComparer.Ordinal);
         Dictionary<string, List<StoredSchemaRankedTool>> rankedToolsBySess = new(StringComparer.Ordinal);
         Dictionary<string, List<StoredSchemaServerTokens>> schemaServersBySess = new(StringComparer.Ordinal);
@@ -3961,6 +3981,20 @@ public partial class SqliteRelationalStore : IRelationalStoreReader
                         break;
                     }
 
+                case "CTX_T_TOK":
+                    {
+                        if (cols.Length != 5)
+                        {
+                            throw new StoredDataException($"Expected 5 columns for CTX_T_TOK row, got {cols.Length.ToString(CultureInfo.InvariantCulture)}.");
+                        }
+
+                        (string, int) key = (ParseHexRequired(cols[1], "session_context_turn_tokenizer.session_id"), ParseInt32Required(cols[2], "session_context_turn_tokenizer.position"));
+                        GetOrCreateList(ctxTokenizersByTurn, key).Add(new TokenizerLabel(
+                            ParseHexRequired(cols[3], "session_context_turn_tokenizer.tokenizer"),
+                            ParseInt64Required(cols[4], "session_context_turn_tokenizer.is_model_own") == 1L));
+                        break;
+                    }
+
                 case "SCH":
                     if (cols.Length != 6)
                     {
@@ -4038,6 +4072,9 @@ public partial class SqliteRelationalStore : IRelationalStoreReader
                 foreach (RawContextTurnHeader rt in rawTurns)
                 {
                     (string, int) turnKey = (header.SessionId, rt.Position);
+                    // A turn with no label rows means its figures came only from harness-reported
+                    // counts — the schema-29 rebuild leaves no unlabelled measured row — so it is
+                    // shown as reported, never as not measured.
                     ctxTurns.Add(new StoredSessionContextTurn(
                         rt.Position,
                         rt.InputTokens,
@@ -4055,7 +4092,10 @@ public partial class SqliteRelationalStore : IRelationalStoreReader
                         rt.StrippedTokens,
                         rt.PreviousFreshInput,
                         rt.FreshJumpFactor,
-                        rt.NonResidentTokens));
+                        rt.NonResidentTokens)
+                    {
+                        Tokenizers = ctxTokenizersByTurn.TryGetValue(turnKey, out List<TokenizerLabel>? labels) ? labels : [],
+                    });
                 }
 
                 context = new StoredSessionContext(

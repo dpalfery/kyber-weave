@@ -21,7 +21,7 @@ public class SchemaVersionTests
     public void SchemaConstantsAndFileSystemTypes_MatchContractAndRemainUnsealed()
     {
         Assert.True(SqliteRelationalStore.SchemaVersion > 24);
-        Assert.Equal(28, SqliteRelationalStore.SchemaVersion);
+        Assert.Equal(29, SqliteRelationalStore.SchemaVersion);
         Assert.Equal(6, SqliteRelationalStore.DetectorVersion);
         Assert.Equal(32 * 1024 * 1024, SqliteRelationalStore.WalSizeLimitBytes);
 
@@ -52,12 +52,12 @@ public class SchemaVersionTests
     [Fact]
     public void FormatSchemaVersionRefusal_FormatsExpectedOperatorMessage()
     {
-        string message = SqliteRelationalStore.FormatSchemaVersionRefusal("/data/canon.db", 29);
+        string message = SqliteRelationalStore.FormatSchemaVersionRefusal("/data/canon.db", 30);
 
         Assert.Equal(
-            $"canon store at /data/canon.db was built with schema version 29, but this build understands version {SqliteRelationalStore.SchemaVersion.ToString(CultureInfo.InvariantCulture)}; upgrade KyberDash",
+            $"canon store at /data/canon.db was built with schema version 30, but this build understands version {SqliteRelationalStore.SchemaVersion.ToString(CultureInfo.InvariantCulture)}; upgrade KyberDash",
             message);
-        Assert.Throws<ArgumentException>(() => SqliteRelationalStore.FormatSchemaVersionRefusal(" ", 29));
+        Assert.Throws<ArgumentException>(() => SqliteRelationalStore.FormatSchemaVersionRefusal(" ", 30));
     }
 
     [Fact]
@@ -112,10 +112,10 @@ public class SchemaVersionTests
     }
 
     [Theory]
-    [InlineData("store_state", "29\t5", 29)]
+    [InlineData("store_state", "30\t5", 30)]
     [InlineData("store_state", "99\t5", 99)]
-    [InlineData("metadata", "29", 29)]
     [InlineData("metadata", "30", 30)]
+    [InlineData("metadata", "31", 31)]
     public void EnsureInitialized_RefusesNewerRelationalOrLegacyStore_WithoutMutatingOrDeletingFiles(
         string discoveredTable,
         string versionQueryResponse,

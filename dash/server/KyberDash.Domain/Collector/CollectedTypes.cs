@@ -292,16 +292,26 @@ public record CollectedContentPart(
     }
 }
 
-/// <summary>Ordered tool schema definition advertised on a record (<c>tool_definition</c>, <c>tool_definition_server</c>).</summary>
+/// <summary>Ordered tool schema definition advertised on a record (<c>tool_definition</c>, <c>tool_definition_server</c>, <c>tool_definition_tokenizer</c>).</summary>
 /// <param name="Position">Zero-based position (<c>tool_definition.position</c>).</param>
 /// <param name="ToolName">Tool name (<c>tool_definition.tool_name</c>).</param>
 /// <param name="Server">Optional MCP server name (<c>tool_definition_server.server_name</c>).</param>
 /// <param name="SchemaTokens">Token count of the tool schema (<c>tool_definition.schema_tokens</c>).</param>
+/// <param name="Tokenizer">
+/// Tokenizer that counted <paramref name="SchemaTokens"/> from text (<c>tool_definition_tokenizer.tokenizer</c>),
+/// or <see langword="null"/> when the count is harness-reported and carries no label.
+/// </param>
+/// <param name="TokenizerIsModelOwn">
+/// <see langword="true"/> when <paramref name="Tokenizer"/> is the model's own published tokenizer
+/// (<c>tool_definition_tokenizer.is_model_own</c>); <see langword="false"/> for the named standard stand-in.
+/// </param>
 public record CollectedToolDefinition(
     int Position,
     string ToolName,
     string? Server,
-    long SchemaTokens);
+    long SchemaTokens,
+    string? Tokenizer = null,
+    bool TokenizerIsModelOwn = false);
 
 /// <summary>Input or result payload metrics and optional text for a tool call (<c>tool_call_input_*</c> or <c>tool_call_result_*</c>).</summary>
 /// <param name="PlainText">Optional plain text (<c>tool_call_input_text.text</c> / <c>tool_call_result_text.text</c>).</param>

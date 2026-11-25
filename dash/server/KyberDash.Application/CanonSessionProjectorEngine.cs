@@ -3181,7 +3181,10 @@ public partial class CanonSessionProjectorEngine
                 FreshJumpFactor: turn.FreshInputJump is null
                     ? null
                     : double.IsFinite(turn.FreshInputJump.Factor) ? turn.FreshInputJump.Factor : null,
-                NonResidentTokens: turn.NonResidentToolDefinitions));
+                NonResidentTokens: turn.NonResidentToolDefinitions)
+            {
+                Tokenizers = turn.Tokenizers,
+            });
         }
 
         return new StoredSessionContext(

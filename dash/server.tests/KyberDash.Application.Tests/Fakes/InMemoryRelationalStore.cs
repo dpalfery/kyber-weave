@@ -4237,6 +4237,19 @@ public class InMemoryRelationalStore :
                     ("schema_tokens", definition.SchemaTokens),
                 ]);
 
+            if (definition.Tokenizer is string tokenizer)
+            {
+                InsertRowCore(
+                    working,
+                    "tool_definition_tokenizer",
+                    [
+                        ("span_id", record.RecordId),
+                        ("position", (long)definition.Position),
+                        ("tokenizer", tokenizer),
+                        ("is_model_own", definition.TokenizerIsModelOwn ? 1L : 0L),
+                    ]);
+            }
+
             if (definition.Server is not null)
             {
                 InsertRowCore(
@@ -4717,6 +4730,20 @@ public class InMemoryRelationalStore :
                             ("tokens", serverDef.Tokens),
                         ]);
                 }
+            }
+
+            foreach (TokenizerLabel label in turn.Tokenizers)
+            {
+                ArgumentNullException.ThrowIfNull(label);
+                InsertRowCore(
+                    working,
+                    "session_context_turn_tokenizer",
+                    [
+                        ("session_id", sessionId),
+                        ("position", (long)turn.Position),
+                        ("tokenizer", label.Tokenizer),
+                        ("is_model_own", label.IsModelOwn ? 1L : 0L),
+                    ]);
             }
 
             if (turn.StrippedBlockCount.HasValue || turn.StrippedTokens.HasValue)
@@ -5583,7 +5610,16 @@ public class InMemoryRelationalStore :
         object?[]? serverRow = FindRowByKey(currentState, "tool_definition_server", [("span_id", spanId), ("position", pos)]);
         string? server = serverRow is null ? null : GetString(GetTableMetadata("tool_definition_server"), serverRow, "server_name");
 
-        return new CollectedToolDefinition((int)pos, toolName, server, schemaTokens);
+        object?[]? labelRow = FindRowByKey(currentState, "tool_definition_tokenizer", [("span_id", spanId), ("position", pos)]);
+        TableMetadata labelMeta = GetTableMetadata("tool_definition_tokenizer");
+
+        return new CollectedToolDefinition(
+            (int)pos,
+            toolName,
+            server,
+            schemaTokens,
+            labelRow is null ? null : GetString(labelMeta, labelRow, "tokenizer"),
+            labelRow is not null && GetInt64(labelMeta, labelRow, "is_model_own") == 1L);
     }
 
     private static CollectedToolCall? MaterializeToolCall(StoreState currentState, string spanId)
@@ -5850,6 +5886,21 @@ public class InMemoryRelationalStore :
         object?[]? nonResRow = FindRowByKey(currentState, "session_context_turn_non_resident", [("session_id", sessionId), ("position", position)]);
         long? nonResTokens = nonResRow is null ? null : GetInt64(GetTableMetadata("session_context_turn_non_resident"), nonResRow, "tokens");
 
+        // A turn with no label rows means its figures came only from harness-reported counts —
+        // the schema-29 rebuild leaves no unlabelled measured row — so it reads back with no
+        // labels and stays shown as reported, never as not measured.
+        TableMetadata tokenizerMeta = GetTableMetadata("session_context_turn_tokenizer");
+        List<TokenizerLabel> tokenizers =
+        [
+            .. currentState.GetRows("session_context_turn_tokenizer")
+                .Where(r => string.Equals(GetString(tokenizerMeta, r, "session_id"), sessionId, StringComparison.Ordinal) &&
+                            GetInt64(tokenizerMeta, r, "position") == position)
+                .OrderBy(r => GetString(tokenizerMeta, r, "tokenizer"), StringComparer.Ordinal)
+                .Select(r => new TokenizerLabel(
+                    GetString(tokenizerMeta, r, "tokenizer"),
+                    GetInt64(tokenizerMeta, r, "is_model_own") == 1L)),
+        ];
+
         return new StoredSessionContextTurn(
             (int)position,
             GetInt64(turnMeta, turnRow, "input_tokens"),
@@ -5867,7 +5918,10 @@ public class InMemoryRelationalStore :
             strippedTokens,
             prevFresh,
             jumpFactor,
-            nonResTokens);
+            nonResTokens)
+        {
+            Tokenizers = tokenizers,
+        };
     }
 
     private static StoredSessionSchema? MaterializeSessionSchema(StoreState currentState, string sessionId)

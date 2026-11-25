@@ -743,6 +743,14 @@ public static partial class RelationalSchemaCatalog
             IsRepeatedItem: true));
 
         tables.Add(new TableDefinition(
+            Name: "tool_definition_tokenizer",
+            Columns: [NonEmptyText("span_id"), PositionCol(), NonEmptyText("tokenizer"), BoolInt("is_model_own")],
+            PrimaryKeyColumns: ["span_id", "position"],
+            ForeignKeys: [CompositeFk(["span_id", "position"], "tool_definition", ["span_id", "position"])],
+            Indexes: [],
+            IsRepeatedItem: true));
+
+        tables.Add(new TableDefinition(
             Name: "tool_definition_server",
             Columns: [NonEmptyText("span_id"), PositionCol(), NonEmptyText("server_name")],
             PrimaryKeyColumns: ["span_id", "position"],
@@ -951,6 +959,14 @@ public static partial class RelationalSchemaCatalog
             ],
             PrimaryKeyColumns: ["session_id", "position"],
             ForeignKeys: [Fk("session_id", "session_context", "session_id")],
+            Indexes: [],
+            IsRepeatedItem: true));
+
+        tables.Add(new TableDefinition(
+            Name: "session_context_turn_tokenizer",
+            Columns: [NonEmptyText("session_id"), PositionCol(), NonEmptyText("tokenizer"), BoolInt("is_model_own")],
+            PrimaryKeyColumns: ["session_id", "position", "tokenizer"],
+            ForeignKeys: [CompositeFk(["session_id", "position"], "session_context_turn", ["session_id", "position"])],
             Indexes: [],
             IsRepeatedItem: true));
 

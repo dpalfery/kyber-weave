@@ -24,7 +24,12 @@ namespace KyberDash.Data.Repositories;
 public partial class SqliteRelationalStore : BaseSqliteRepository, IRelationalStoreWriter, IProjectionStore
 {
     /// <summary>Current normalized relational schema version stamped in <c>store_state</c>.</summary>
-    public const int SchemaVersion = 28;
+    /// <remarks>
+    /// Version 29 adds <c>session_context_turn_tokenizer</c> and <c>tool_definition_tokenizer</c>,
+    /// the label children of the figures they name. The rebuild-and-re-ingest pattern applies, so
+    /// no measured row can survive the bump without its label.
+    /// </remarks>
+    public const int SchemaVersion = 29;
 
     /// <summary>Current detector generation stamped in <c>store_state</c>.</summary>
     /// <remarks>
@@ -954,6 +959,14 @@ public partial class SqliteRelationalStore : BaseSqliteRepository, IRelationalSt
                 CultureInfo.InvariantCulture,
                 $"INSERT INTO tool_definition (span_id, position, tool_name, schema_tokens) VALUES ({spanIdExpr}, {posSql}, {toolNameExpr}, {LongSql(definition.SchemaTokens)});\n");
 
+            if (definition.Tokenizer is string tokenizer)
+            {
+                string tokenizerExpr = GuardedTextExpr("tool_definition_tokenizer", "tokenizer", tokenizer);
+                sql.Append(
+                    CultureInfo.InvariantCulture,
+                    $"INSERT INTO tool_definition_tokenizer (span_id, position, tokenizer, is_model_own) VALUES ({spanIdExpr}, {posSql}, {tokenizerExpr}, {BoolSql(definition.TokenizerIsModelOwn)});\n");
+            }
+
             if (definition.Server is not null)
             {
                 string serverExpr = GuardedTextExpr("tool_definition_server", "server_name", definition.Server);
@@ -1299,6 +1312,15 @@ public partial class SqliteRelationalStore : BaseSqliteRepository, IRelationalSt
                     CultureInfo.InvariantCulture,
                     $"INSERT INTO session_context_turn_server_definitions (session_id, position, server, tokens) VALUES ({sessionIdExpr}, {posSql}, {serverExpr}, {LongSql(server.Tokens)});\n");
             }
+        }
+
+        foreach (TokenizerLabel label in turn.Tokenizers)
+        {
+            ArgumentNullException.ThrowIfNull(label);
+            string tokenizerExpr = GuardedTextExpr("session_context_turn_tokenizer", "tokenizer", label.Tokenizer);
+            sql.Append(
+                CultureInfo.InvariantCulture,
+                $"INSERT INTO session_context_turn_tokenizer (session_id, position, tokenizer, is_model_own) VALUES ({sessionIdExpr}, {posSql}, {tokenizerExpr}, {BoolSql(label.IsModelOwn)});\n");
         }
 
         RequireMatchedPair(
