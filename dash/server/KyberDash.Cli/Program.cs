@@ -591,7 +591,12 @@ public static partial class Program
         if (args.Contains("--json", StringComparer.Ordinal))
             return await DoctorAsync(provider, output, args).ConfigureAwait(false);
 
-        doctor.RunVacuum();
+        if (!doctor.RunVacuum())
+        {
+            await output.WriteLineAsync("kyberdash kyber vacuum: the store is not a SQLite file; vacuum does not apply.").ConfigureAwait(false);
+            return 0;
+        }
+
         await output.WriteLineAsync("kyberdash kyber vacuum: checkpoint and compaction complete.").ConfigureAwait(false);
         return 0;
     }

@@ -416,7 +416,8 @@ public interface IDoctorService
     DoctorDiagnosticsReport RunDiagnostics();
 
     /// <summary>Triggers SQLite vacuum / WAL checkpoint maintenance.</summary>
-    void RunVacuum();
+    /// <returns><see langword="true"/> when the store is a SQLite file and was compacted; <see langword="false"/> when vacuum does not apply to the store.</returns>
+    bool RunVacuum();
 }
 
 /// <summary>Formatted CLI report generation service contract.</summary>

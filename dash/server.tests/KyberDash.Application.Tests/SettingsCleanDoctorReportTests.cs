@@ -659,7 +659,7 @@ public static class SettingsCleanDoctorReportTests
 
             long bytesBeforeVacuum = new FileInfo(databasePath).Length;
 
-            new DoctorService(store, store, breaker.Object).RunVacuum();
+            Assert.True(new DoctorService(store, store, breaker.Object).RunVacuum());
 
             long bytesAfterVacuum = new FileInfo(databasePath).Length;
 
@@ -667,6 +667,15 @@ public static class SettingsCleanDoctorReportTests
                 bytesAfterVacuum < bytesBeforeVacuum,
                 $"RunVacuum should compact '{databasePath}' from {bytesBeforeVacuum} bytes, but it is {bytesAfterVacuum} bytes");
             Assert.Equal(SqliteRelationalStore.SchemaVersion, store.GetStoreState()?.SchemaVersion);
+        }
+
+        [Fact]
+        public void RunVacuumOnANonSqliteStoreReportsThatVacuumDoesNotApply()
+        {
+            InMemoryRelationalStore store = new();
+            Mock<ICircuitBreaker> breaker = new();
+
+            Assert.False(new DoctorService(store, store, breaker.Object).RunVacuum());
         }
 
         [Fact]

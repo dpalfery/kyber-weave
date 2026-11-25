@@ -24,8 +24,8 @@ namespace KyberDash.Application;
 /// <para>
 /// <c>RunVacuum</c> delegates to the concrete SQLite store's <c>Vacuum</c>, which checkpoints the
 /// write-ahead log and rebuilds the file to reclaim the pages freed by deleted records. A store
-/// that is in memory or a substitute has nothing to compact, so the command completes without
-/// touching it. The database path is reported from the concrete SQLite store; an in-memory or
+/// that is in memory or a substitute has nothing to compact, so the command leaves it untouched
+/// and reports that vacuum does not apply rather than a compaction that never ran. The database path is reported from the concrete SQLite store; an in-memory or
 /// substitute store reports an empty path.
 /// </para>
 /// </remarks>
@@ -74,7 +74,16 @@ public class DoctorService : IDoctorService
     }
 
     /// <inheritdoc />
-    public void RunVacuum() => (operationalStore as SqliteRelationalStore)?.Vacuum();
+    public bool RunVacuum()
+    {
+        if (operationalStore is not SqliteRelationalStore store)
+        {
+            return false;
+        }
+
+        store.Vacuum();
+        return true;
+    }
 
     /// <summary>Renders a breaker state as the lowercase wire string reported in diagnostics.</summary>
     /// <param name="state">Circuit breaker state.</param>
