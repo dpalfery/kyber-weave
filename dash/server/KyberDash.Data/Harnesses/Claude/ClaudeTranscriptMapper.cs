@@ -2,11 +2,14 @@ using System.Globalization;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
+using KyberDash.Contracts.Repositories;
 using KyberDash.Data.Collector;
 using KyberDash.Data.Collector.Sources;
 using KyberDash.Data.Harnesses.Otlp;
 using KyberDash.Data.Repositories;
+using KyberDash.Data.Tokenization;
 using KyberDash.Domain;
+using Microsoft.Extensions.DependencyInjection;
 
 namespace KyberDash.Data.Harnesses.Claude;
 
@@ -115,6 +118,28 @@ public class ClaudeTranscriptMapper : IHarnessMapper
     private const string FallbackSidechainBareId = "sidechain";
     private const string SystemReminderOpenTag = "<system-reminder>";
     private const string SystemReminderCloseTag = "</system-reminder>";
+
+    private readonly ITextTokenizer tokenizer;
+
+    /// <summary>
+    /// Initializes a mapper using the default shared <see cref="LocalTextTokenizer"/>.
+    /// </summary>
+    public ClaudeTranscriptMapper()
+        : this(LocalTextTokenizer.Shared)
+    {
+    }
+
+    /// <summary>
+    /// Initializes a mapper that measures tool inputs, withheld payloads, and error details with
+    /// <paramref name="tokenizer"/>.
+    /// </summary>
+    /// <param name="tokenizer">Text tokenizer used for content-part and tool-content token measurement.</param>
+    [ActivatorUtilitiesConstructor]
+    public ClaudeTranscriptMapper(ITextTokenizer tokenizer)
+    {
+        ArgumentNullException.ThrowIfNull(tokenizer);
+        this.tokenizer = tokenizer;
+    }
 
     /// <inheritdoc />
     public string HarnessId => TranscriptReaderRepository.ClaudeHarnessId;
@@ -586,7 +611,11 @@ public class ClaudeTranscriptMapper : IHarnessMapper
 
                 if (turns.Count > 0 && HasTurnContent(parsed))
                 {
-                    turns[^1] = MergeTailTurn(turns[^1], parsed);
+                    int targetIndex = FindLastTurnIndexForSession(turns, parsed.SessionId);
+                    if (targetIndex >= 0)
+                    {
+                        turns[targetIndex] = MergeTailTurn(turns[targetIndex], parsed);
+                    }
                 }
 
                 continue;
@@ -602,6 +631,19 @@ public class ClaudeTranscriptMapper : IHarnessMapper
         }
 
         return turns;
+    }
+
+    private static int FindLastTurnIndexForSession(IReadOnlyList<ParsedTurnGroup> turns, string? sessionId)
+    {
+        for (int i = turns.Count - 1; i >= 0; i--)
+        {
+            if (string.Equals(turns[i].SessionId, sessionId, StringComparison.Ordinal))
+            {
+                return i;
+            }
+        }
+
+        return -1;
     }
 
     private static bool IsCompactionMarker(ClaudeTranscriptLine line) =>
@@ -1088,7 +1130,7 @@ public class ClaudeTranscriptMapper : IHarnessMapper
             : (toolResult.IsError ? RecordStatus.Error : RecordStatus.Ok);
 
         CollectedToolContent? inputContent = toolCall.RawInputText is not null
-            ? ToolContentMeasurer.Measure(toolCall.RawInputText, CanonSynth.MaxToolArgumentsBytes, parent.Model)
+            ? ToolContentMeasurer.Measure(toolCall.RawInputText, tokenizer, parent.Model, CanonSynth.MaxToolArgumentsBytes)
                 .ToToolContent(includeFingerprint: true)
             : null;
 
@@ -1214,7 +1256,7 @@ public class ClaudeTranscriptMapper : IHarnessMapper
         return (tokens, reportedInput, reportedOutput);
     }
 
-    private static List<CollectedContentPart> BuildContentParts(IReadOnlyList<ParsedPart> parts, string? model)
+    private List<CollectedContentPart> BuildContentParts(IReadOnlyList<ParsedPart> parts, string? model)
     {
         List<CollectedContentPart> collected = new(parts.Count);
         int position = 0;
@@ -1233,7 +1275,7 @@ public class ClaudeTranscriptMapper : IHarnessMapper
         return collected;
     }
 
-    private static ToolContentMeasurement AppendMeasuredContentParts(
+    private ToolContentMeasurement AppendMeasuredContentParts(
         List<CollectedContentPart> collected,
         ref int position,
         ContentBucket bucket,
@@ -1242,7 +1284,7 @@ public class ClaudeTranscriptMapper : IHarnessMapper
         string? role,
         string? model)
     {
-        ToolContentMeasurement measurement = ToolContentMeasurer.Measure(text, CanonSynth.MaxToolResultBytes, model);
+        ToolContentMeasurement measurement = ToolContentMeasurer.Measure(text, tokenizer, model, CanonSynth.MaxToolResultBytes);
         if (measurement.IsDocument)
         {
             collected.Add(new CollectedContentPart(
@@ -1294,8 +1336,9 @@ public class ClaudeTranscriptMapper : IHarnessMapper
         {
             ToolContentMeasurement tailMeasurement = ToolContentMeasurer.Measure(
                 unretainedTail,
-                CanonSynth.MaxToolResultBytes,
-                model);
+                tokenizer,
+                model,
+                CanonSynth.MaxToolResultBytes);
             collected.Add(new CollectedContentPart(
                 Position: position++,
                 Bucket: bucket,
@@ -1379,14 +1422,14 @@ public class ClaudeTranscriptMapper : IHarnessMapper
         return (server, method);
     }
 
-    private static string BuildSafeToolErrorMessage(string? rawContent, string? model)
+    private string BuildSafeToolErrorMessage(string? rawContent, string? model)
     {
         if (string.IsNullOrWhiteSpace(rawContent))
         {
             return FallbackToolErrorMessage;
         }
 
-        ToolContentMeasurement measurement = ToolContentMeasurer.Measure(rawContent, CanonSynth.MaxToolResultBytes, model);
+        ToolContentMeasurement measurement = ToolContentMeasurer.Measure(rawContent, tokenizer, model, CanonSynth.MaxToolResultBytes);
         if (!measurement.IsDocument && !string.IsNullOrWhiteSpace(measurement.PlainText))
         {
             return measurement.PlainText;

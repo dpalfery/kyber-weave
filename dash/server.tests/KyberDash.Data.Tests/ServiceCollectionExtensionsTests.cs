@@ -5,6 +5,7 @@ using KyberDash.Core.Resilience;
 using KyberDash.Data.Collector.Sources;
 using KyberDash.Data.Repositories;
 using KyberDash.Data.Tests.Collector;
+using KyberDash.Data.Tokenization;
 using KyberDash.Domain;
 using Microsoft.Extensions.DependencyInjection;
 using Xunit;
@@ -47,6 +48,7 @@ public class ServiceCollectionExtensionsTests : IDisposable
         Assert.IsType<SettingsRepository>(provider.GetRequiredService<ISettingsRepository>());
         Assert.IsType<ServerStateRepository>(provider.GetRequiredService<IServerStateRepository>());
         Assert.IsType<WebAssetRepository>(provider.GetRequiredService<IWebAssetRepository>());
+        Assert.IsType<LocalTextTokenizer>(provider.GetRequiredService<ITextTokenizer>());
     }
 
     [Fact]

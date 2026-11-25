@@ -33,11 +33,12 @@ public partial class SqliteRelationalStore : BaseSqliteRepository, IRelationalSt
 
     /// <summary>Current detector generation stamped in <c>store_state</c>.</summary>
     /// <remarks>
-    /// Generation 6: records read back carry their source name, so the projector's source rules
-    /// (the Droid plugin/file split and the file-source twin collapses) apply again, and every
-    /// projection built under generation 5's source-less hydration is rebuilt.
+    /// Generation 7: Claude Code v2 transcript hydration adds streaming <c>message.id</c> coalescence,
+    /// <c>tool_use</c> parts, tail-only overflow measurement, <c>claude:compact_boundary</c> hydration,
+    /// and <c>#agent-</c> subagent isolation, so projections built under generation 6 and earlier rebuild
+    /// on upgrade (and v2 projections are invalidated cleanly on rollback to generation 6).
     /// </remarks>
-    public const int DetectorVersion = 6;
+    public const int DetectorVersion = 7;
 
     /// <summary>Maximum retained WAL journal size in bytes after checkpoint (32 MiB).</summary>
     public const int WalSizeLimitBytes = 32 * 1024 * 1024;

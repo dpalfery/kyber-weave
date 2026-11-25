@@ -13,10 +13,10 @@ namespace KyberDash.Data.Tests.Collector;
 /// next refresh re-reads the unit.
 /// </summary>
 /// <remarks>
-/// The <c>droid</c> and <c>cursor</c> file mappers stopped producing split or text-derived
-/// token counts, so their units declare contract "2" (the SQLite row exports of <c>warp</c>, <c>kilo</c>,
-/// <c>devin</c> and <c>cursor</c> declare their own, pinned in <c>HarnessSourceRegistryTests</c>): a checkpoint written under "1" must not be
-/// reused, or the estimated rows it covers would stay in the store. The <c>copilot-cli</c> mapper
+/// The <c>droid</c>, <c>cursor</c>, and <c>claude-code</c> file mappers bumped their contracts to "2"
+/// (the SQLite row exports of <c>warp</c>, <c>kilo</c>, <c>devin</c> and <c>cursor</c> declare their own,
+/// pinned in <c>HarnessSourceRegistryTests</c>): a checkpoint written under "1" must not be
+/// reused, or the estimated or stale rows it covers would stay in the store. The <c>copilot-cli</c> mapper
 /// stores fresh input net of cache tokens and declares its own contract version for the same reason, and
 /// <c>roo-code</c> declares "3" because its task id now comes from the task directory. Every other
 /// registration keeps "1", so its stored checkpoints stay reusable and nothing else is re-read.
@@ -27,6 +27,7 @@ public class ParserContractVersionTests
     private static readonly string StateRoot = Path.Combine(HomeRoot, ".kyberdash");
     private static readonly DateTimeOffset BaselineUtc = new(2026, 11, 24, 12, 0, 0, TimeSpan.Zero);
     private static readonly string[] ChangedHarnesses = ["droid", "cursor"];
+    private const string ClaudeHarnessId = "claude-code";
     private const string RooHarnessId = "roo-code";
     private const string CopilotCliHarnessId = "copilot-cli";
 
@@ -43,6 +44,10 @@ public class ParserContractVersionTests
             Assert.All(units, static unit => Assert.Equal("2", unit.ParserContractVersion));
         }
 
+        List<SourceUnit> claudeUnits = [.. result.Sources.Where(static unit => unit.HarnessId == ClaudeHarnessId)];
+        Assert.NotEmpty(claudeUnits);
+        Assert.All(claudeUnits, static unit => Assert.Equal(HarnessSourceRegistry.ClaudeTranscriptV2ParserContractVersion, unit.ParserContractVersion));
+
         List<SourceUnit> rooUnits = [.. result.Sources.Where(static unit => unit.HarnessId == RooHarnessId)];
         Assert.NotEmpty(rooUnits);
         Assert.All(rooUnits, static unit => Assert.Equal(HarnessSourceRegistry.RooTaskDirectoryIdParserContractVersion, unit.ParserContractVersion));
@@ -51,7 +56,7 @@ public class ParserContractVersionTests
         Assert.NotEmpty(copilotUnits);
         Assert.All(copilotUnits, static unit => Assert.Equal(HarnessSourceRegistry.CopilotCliFreshInputParserContractVersion, unit.ParserContractVersion));
 
-        List<SourceUnit> others = [.. result.Sources.Where(static unit => !ChangedHarnesses.Contains(unit.HarnessId) && unit.HarnessId != RooHarnessId && unit.HarnessId != CopilotCliHarnessId)];
+        List<SourceUnit> others = [.. result.Sources.Where(static unit => !ChangedHarnesses.Contains(unit.HarnessId) && unit.HarnessId != ClaudeHarnessId && unit.HarnessId != RooHarnessId && unit.HarnessId != CopilotCliHarnessId)];
         Assert.True(
             others.Select(static unit => unit.HarnessId).Distinct(StringComparer.Ordinal).Count() >= 11,
             "The fixture should discover units for most other registrations.");
@@ -63,6 +68,7 @@ public class ParserContractVersionTests
     [InlineData("droid")]
     [InlineData("cursor")]
     [InlineData("copilot-cli")]
+    [InlineData("claude-code")]
     public void CheckpointIsReusable_RefusesAVersionOneCheckpointForAChangedHarnessUnit(string harnessId)
     {
         SourceUnit unit = DiscoveredUnit(harnessId);
@@ -75,9 +81,9 @@ public class ParserContractVersionTests
     }
 
     [Fact]
-    public void CheckpointIsReusable_KeepsAVersionOneCheckpointReusableForAClaudeCodeUnit()
+    public void CheckpointIsReusable_KeepsAVersionOneCheckpointReusableForACodexCliUnit()
     {
-        SourceUnit unit = DiscoveredUnit("claude-code");
+        SourceUnit unit = DiscoveredUnit("codex-cli");
 
         bool reusable = CanonRefreshEngine.CheckpointIsReusable(
             CheckpointStampedOne(unit),
