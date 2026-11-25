@@ -8,6 +8,12 @@ updates:
     cooldown:
       default-days: 7
     open-pull-requests-limit: 10
+    # Microsoft.Extensions 11.0.0 is a new major. Stay on 10.0.x.
+    # Patch and minor updates are not ignored.
+    ignore:
+      - dependency-name: "Microsoft.Extensions.*"
+        update-types:
+          - "version-update:semver-major"
 
   - package-ecosystem: "github-actions"
     directory: "/"
