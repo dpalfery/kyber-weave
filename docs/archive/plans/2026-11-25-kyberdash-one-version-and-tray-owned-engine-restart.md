@@ -2,7 +2,7 @@
 id: plans/2026-11-25-kyberdash-one-version-and-tray-owned-engine-restart
 title: KyberDash reports one release version and the tray owns the engine after an update
 doc-type: plan
-status: current
+status: archived
 component: KyberDash
 owner: dpalfery
 last-reviewed: 2026-11-25
@@ -16,7 +16,7 @@ impact-components:
 
 # KyberDash reports one release version and the tray owns the engine after an update
 
-**Status: Ready, 2026-11-25.** (revision R1 of T1 after its diagnosed gate failure; T3, T4 and T5 are integrated and unchanged).
+**Status: Archived, 2026-11-25.** (revision R1 of T1 after its diagnosed gate failure; T3, T4 and T5 are integrated and unchanged).
 
 ## Request
 
@@ -326,20 +326,20 @@ NOT VERIFIED: one tray and one tray-owned engine on David's Mac after a publishe
 
 | ID | Destination | Impact | Components | Last reviewed | Status |
 |---|---|---|---|---|---|
-| D1, D2, D3 | [KyberDash runbook, One version](../dash/runbook.md); [engine version route](../dash/architecture.md); [install, Updating](../install.md) | extends-component | KyberDash | 2026-11-25 | archived |
-| D4, D15 | [KyberDash runbook, One version](../dash/runbook.md) (release stamps the tray with `tauri build --config`) | extends-component | KyberDash, Distribution | 2026-11-25 | archived |
-| D5, D6, D7, D10, D14, D16, D18 | [install, Updating](../install.md); [CLI command surface, update and menubar](../cli-command-surface.md); [distribution, self-update cases](../distribution.md); [KyberDash runbook, Tray verbs](../dash/runbook.md) | extends-component | KyberDash, Distribution | 2026-11-25 | archived |
-| D8, D11, D12 | [CLI command surface, engine and menubar verbs and exit codes](../cli-command-surface.md); [KyberDash runbook, Engine stop and verify](../dash/runbook.md) | extends-component | KyberDash | 2026-11-25 | archived |
-| D9, D17 | [KyberDash runbook, tray supervision](../dash/runbook.md); [KyberDash architecture, tray](../dash/architecture.md); [distribution, self-update sequence](../distribution.md) and [CLI command surface, finishing process](../cli-command-surface.md) (25 minutes) | extends-component | KyberDash, Distribution | 2026-11-25 | archived |
-| Distribution | [install, Updating](../install.md); [distribution, self-update sequence](../distribution.md) | extends-component | Distribution | 2026-11-25 | archived |
-| KyberDash | [KyberDash runbook](../dash/runbook.md); [KyberDash architecture](../dash/architecture.md) | extends-component | KyberDash | 2026-11-25 | archived |
+| D1, D2, D3 | [KyberDash runbook, One version](../../dash/runbook.md); [engine version route](../../dash/architecture.md); [install, Updating](../../install.md) | extends-component | KyberDash | 2026-11-25 | archived |
+| D4, D15 | [KyberDash runbook, One version](../../dash/runbook.md) (release stamps the tray with `tauri build --config`) | extends-component | KyberDash, Distribution | 2026-11-25 | archived |
+| D5, D6, D7, D10, D14, D16, D18 | [install, Updating](../../install.md); [CLI command surface, update and menubar](../../cli-command-surface.md); [distribution, self-update cases](../../distribution.md); [KyberDash runbook, Tray verbs](../../dash/runbook.md) | extends-component | KyberDash, Distribution | 2026-11-25 | archived |
+| D8, D11, D12 | [CLI command surface, engine and menubar verbs and exit codes](../../cli-command-surface.md); [KyberDash runbook, Engine stop and verify](../../dash/runbook.md) | extends-component | KyberDash | 2026-11-25 | archived |
+| D9, D17 | [KyberDash runbook, tray supervision](../../dash/runbook.md); [KyberDash architecture, tray](../../dash/architecture.md); [distribution, self-update sequence](../../distribution.md) and [CLI command surface, finishing process](../../cli-command-surface.md) (25 minutes) | extends-component | KyberDash, Distribution | 2026-11-25 | archived |
+| Distribution | [install, Updating](../../install.md); [distribution, self-update sequence](../../distribution.md) | extends-component | Distribution | 2026-11-25 | archived |
+| KyberDash | [KyberDash runbook](../../dash/runbook.md); [KyberDash architecture](../../dash/architecture.md) | extends-component | KyberDash | 2026-11-25 | archived |
 | D13 | Documentation waiver: a one-off owner check on a published release candidate, carried as a pull request note; no lasting invariant | n/a | n/a | 2026-11-25 | archived |
 | D19 | Documentation waiver: test-fixture scoped (pricing fixture path walk under the gate's artifacts folder); no behavior a future reader consults | n/a | n/a | 2026-11-25 | archived |
 | AP1 | Documentation waiver: approval record, no surviving behavior | n/a | n/a | 2026-11-25 | archived |
-| Design harvest: Versioning | [KyberDash runbook](../dash/runbook.md), [architecture](../dash/architecture.md) | extends-component | KyberDash | 2026-11-25 | archived |
-| Design harvest: Engine lifecycle verbs | [KyberDash runbook](../dash/runbook.md), [CLI command surface](../cli-command-surface.md) | extends-component | KyberDash | 2026-11-25 | archived |
-| Design harvest: Tray supervision | [KyberDash runbook](../dash/runbook.md), [architecture](../dash/architecture.md) | extends-component | KyberDash | 2026-11-25 | archived |
-| Design harvest: Self-update reconciliation | [install](../install.md), [distribution](../distribution.md), [CLI command surface](../cli-command-surface.md) | extends-component | Distribution | 2026-11-25 | archived |
+| Design harvest: Versioning | [KyberDash runbook](../../dash/runbook.md), [architecture](../../dash/architecture.md) | extends-component | KyberDash | 2026-11-25 | archived |
+| Design harvest: Engine lifecycle verbs | [KyberDash runbook](../../dash/runbook.md), [CLI command surface](../../cli-command-surface.md) | extends-component | KyberDash | 2026-11-25 | archived |
+| Design harvest: Tray supervision | [KyberDash runbook](../../dash/runbook.md), [architecture](../../dash/architecture.md) | extends-component | KyberDash | 2026-11-25 | archived |
+| Design harvest: Self-update reconciliation | [install](../../install.md), [distribution](../../distribution.md), [CLI command surface](../../cli-command-surface.md) | extends-component | Distribution | 2026-11-25 | archived |
 
 
 ADR waiver: no ADR — ADR waiver: the plan applies the established ensure-or-attach contract of ADR 0039 and tray ownership of ADR 0023; no new constraint with rejected alternatives.

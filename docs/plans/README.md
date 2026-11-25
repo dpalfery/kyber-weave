@@ -64,9 +64,7 @@ its `tasks.yml` is caught rather than carried as dead weight.
 
 ## Active Plans
 
-| Plan | Status | Components | Summary |
-|---|---|---|---|
-| [KyberDash one version and tray-owned engine restart](2026-11-25-kyberdash-one-version-and-tray-owned-engine-restart.md) | Ready | KyberDash, Distribution | One repository version for every binary and the tray bundle; `kyber-weave update` restarts the tray so it owns the engine; the tray recovers when the engine it attached to is gone |
+No plans are open.
 
 ## Archived Plans
 
