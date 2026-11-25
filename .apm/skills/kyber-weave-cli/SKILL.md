@@ -70,6 +70,19 @@ kyber-weave update --no-menubar         # leave the tray alone
 kyberdash menubar --update              # update the tray alone
 ```
 
+With a tray installed, `kyber-weave update` quits the tray, stops the engine, updates or relaunches
+the tray so it owns a fresh engine, then verifies the engine version and exactly one tray. With no
+tray it runs `kyberdash engine ensure --if-running` as before. The verbs it uses:
+
+```bash
+kyberdash engine stop                          # exit 0 stopped/not-running, 1 failed
+kyberdash engine verify --version <v> [--wait <s>]  # 0 ok, 1 not running, 3 other version, 4 unresponsive, 2 usage
+kyberdash menubar --quit | --launch | --running     # 0 or 1; --running needs exactly one tray; unknown option exits 2
+```
+
+`engine ensure` fails when the replacement reports the wrong version. The version comes only from
+the root `Directory.Build.props`; `KYBERDASH_VERSION` is gone.
+
 `kyber-weave update` does not wrap `install.sh`, and it refuses `dotnet run` and
 `dotnet tool` installs. Details: `docs/cli-command-surface.md#update` and the Updating
 section of `docs/install.md`.

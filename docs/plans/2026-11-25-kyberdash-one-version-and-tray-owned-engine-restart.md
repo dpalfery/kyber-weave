@@ -317,3 +317,28 @@ The end-of-run review council under the `code-review` skill reviews the whole ch
 ## docs-dev closeout
 
 `docs-dev` harvests the Design harvest rows into the KyberDash architecture and runbook pages and the Distribution self-update documentation (ADR 0065's area), fills the Closeout mapping, and clears the standards warning period with `kyber-weave docs standards migrate` in the closeout commit.
+
+## Closeout mapping
+
+**Acceptance check.** T1 to T6 are integrated on the run branch; the tests named in each task's Test contract row are the evidence and are the conductor's task-gate results. The new `kyberdash` verbs, the update flow, the version source and the 25-minute finishing bound are documented from the merged code.
+
+NOT VERIFIED: one tray and one tray-owned engine on David's Mac after a published release candidate, and the Windows NSIS acceptance of a prerelease bundle version. Both need a release built from the merged change (D13).
+
+| ID | Destination | Impact | Components | Last reviewed | Status |
+|---|---|---|---|---|---|
+| D1, D2, D3 | [KyberDash runbook, One version](../dash/runbook.md); [engine version route](../dash/architecture.md); [install, Updating](../install.md) | extends-component | KyberDash | 2026-11-25 | archived |
+| D4, D15 | [KyberDash runbook, One version](../dash/runbook.md) (release stamps the tray with `tauri build --config`) | extends-component | KyberDash, Distribution | 2026-11-25 | archived |
+| D5, D6, D7, D10, D14, D16, D18 | [install, Updating](../install.md); [CLI command surface, update and menubar](../cli-command-surface.md); [distribution, self-update cases](../distribution.md); [KyberDash runbook, Tray verbs](../dash/runbook.md) | extends-component | KyberDash, Distribution | 2026-11-25 | archived |
+| D8, D11, D12 | [CLI command surface, engine and menubar verbs and exit codes](../cli-command-surface.md); [KyberDash runbook, Engine stop and verify](../dash/runbook.md) | extends-component | KyberDash | 2026-11-25 | archived |
+| D9, D17 | [KyberDash runbook, tray supervision](../dash/runbook.md); [KyberDash architecture, tray](../dash/architecture.md); [distribution, self-update sequence](../distribution.md) and [CLI command surface, finishing process](../cli-command-surface.md) (25 minutes) | extends-component | KyberDash, Distribution | 2026-11-25 | archived |
+| Distribution | [install, Updating](../install.md); [distribution, self-update sequence](../distribution.md) | extends-component | Distribution | 2026-11-25 | archived |
+| KyberDash | [KyberDash runbook](../dash/runbook.md); [KyberDash architecture](../dash/architecture.md) | extends-component | KyberDash | 2026-11-25 | archived |
+| D13 | Documentation waiver: a one-off owner check on a published release candidate, carried as a pull request note; no lasting invariant | n/a | n/a | 2026-11-25 | archived |
+| D19 | Documentation waiver: test-fixture scoped (pricing fixture path walk under the gate's artifacts folder); no behavior a future reader consults | n/a | n/a | 2026-11-25 | archived |
+| AP1 | Documentation waiver: approval record, no surviving behavior | n/a | n/a | 2026-11-25 | archived |
+| Design harvest: Versioning | [KyberDash runbook](../dash/runbook.md), [architecture](../dash/architecture.md) | extends-component | KyberDash | 2026-11-25 | archived |
+| Design harvest: Engine lifecycle verbs | [KyberDash runbook](../dash/runbook.md), [CLI command surface](../cli-command-surface.md) | extends-component | KyberDash | 2026-11-25 | archived |
+| Design harvest: Tray supervision | [KyberDash runbook](../dash/runbook.md), [architecture](../dash/architecture.md) | extends-component | KyberDash | 2026-11-25 | archived |
+| Design harvest: Self-update reconciliation | [install](../install.md), [distribution](../distribution.md), [CLI command surface](../cli-command-surface.md) | extends-component | Distribution | 2026-11-25 | archived |
+
+ADR waiver: no ADR — ADR waiver: the plan applies the established ensure-or-attach contract of ADR 0039 and tray ownership of ADR 0023; no new constraint with rejected alternatives.
