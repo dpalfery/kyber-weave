@@ -17,6 +17,12 @@ public static class SquadDocsServerCommand
     public const string Executable = "kyber-weave-mcp";
 
     /// <summary>
+    /// The argument the <c>kw-docs</c> entry passes so one server answers for whichever repository the client works in.
+    /// Antigravity's user MCP config entry and its rendered agent entry both read it, so the two launch the same server.
+    /// </summary>
+    public const string AnyRepoArgument = "--any-repo";
+
+    /// <summary>
     /// The absolute path PATH names for <see cref="Executable"/> on a global render, or null for a project render, when
     /// the lookup finds nothing, or when no lookup is wired. The path is not resolved through symbolic links, so a
     /// self-update that swaps the link's target keeps the entry working.

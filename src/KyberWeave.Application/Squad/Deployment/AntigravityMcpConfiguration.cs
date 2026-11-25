@@ -34,8 +34,6 @@ public static class AntigravityMcpConfiguration
     private const string ConfigFileName = "mcp_config.json";
     private const string ServersKey = "mcpServers";
     private const string ServerName = "kw-docs";
-    private const string DefaultCommand = "kyber-weave-mcp";
-    private const string AnyRepoArgument = "--any-repo";
 
     private static readonly byte[] EmptyDocument = "{}\n"u8.ToArray();
     private static readonly string[] ServerKeyPath = [ServersKey];
@@ -125,8 +123,8 @@ public static class AntigravityMcpConfiguration
     {
         JsonObject entry = new()
         {
-            ["command"] = string.IsNullOrWhiteSpace(docsServerCommand) ? DefaultCommand : docsServerCommand,
-            ["args"] = new JsonArray(AnyRepoArgument)
+            ["command"] = string.IsNullOrWhiteSpace(docsServerCommand) ? SquadDocsServerCommand.Executable : docsServerCommand,
+            ["args"] = new JsonArray(SquadDocsServerCommand.AnyRepoArgument)
         };
         return entry.ToJsonString();
     }
@@ -186,7 +184,7 @@ public static class AntigravityMcpConfiguration
         && entry.TryGetProperty("args", out JsonElement args)
         && args.ValueKind == JsonValueKind.Array
         && args.EnumerateArray().Any(argument =>
-            argument.ValueKind == JsonValueKind.String && argument.ValueEquals(AnyRepoArgument));
+            argument.ValueKind == JsonValueKind.String && argument.ValueEquals(SquadDocsServerCommand.AnyRepoArgument));
 
     private static string Line(string path, string reason) =>
         $"{WarningCode}: '{SquadLifecycleService.SanitizeTargetTokenForWarning(path)}' {reason}";

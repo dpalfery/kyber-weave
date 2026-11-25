@@ -101,7 +101,7 @@ public sealed class AntigravityRenderer : SquadHarnessRenderer
     private const string ArbiterNotEnforcedCode = "arbiter-not-enforced";
     private const string NoPostDispatchFeedbackReason = "no-post-dispatch-feedback";
     private const string BareDocsServerCommand = SquadDocsServerCommand.Executable;
-    private const string AnyRepoArgument = "--any-repo";
+    private const string AnyRepoArgument = SquadDocsServerCommand.AnyRepoArgument;
 
     private static readonly SquadHarnessSpec HarnessSpec = new(
         SquadTarget.Antigravity,

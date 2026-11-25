@@ -62,6 +62,24 @@ public sealed class AntigravityMcpConfigurationTests
         Assert.Single(document.RootElement.EnumerateObject());
     }
 
+    /// <summary>
+    /// The config entry and the rendered agent entry launch the same server only while both read one shared
+    /// executable name and one shared argument; a literal in either would let them drift apart.
+    /// </summary>
+    [Fact]
+    public void Entry_LaunchesTheSharedExecutableWithTheSharedArgument()
+    {
+        Assert.Empty(Ensure());
+
+        using JsonDocument document = JsonDocument.Parse(_state.Files.ReadAllBytes(_configPath));
+        JsonElement entry = document.RootElement.GetProperty("mcpServers").GetProperty("kw-docs");
+        Assert.Equal(SquadDocsServerCommand.Executable, entry.GetProperty("command").GetString());
+        Assert.Equal(
+            [SquadDocsServerCommand.AnyRepoArgument],
+            entry.GetProperty("args").EnumerateArray().Select(arg => arg.GetString()));
+        Assert.Equal("--any-repo", SquadDocsServerCommand.AnyRepoArgument);
+    }
+
     [Fact]
     public void MissingDirectory_IsCreated()
     {
