@@ -1,6 +1,7 @@
 using System.Text.Json;
 using KyberDash.Application.Tests.Fakes;
 using KyberDash.Data.Collector.Sources;
+using KyberDash.Data.Repositories;
 using Xunit;
 
 namespace KyberDash.Application.Tests;
@@ -79,6 +80,37 @@ public class E2eSeederWorldTests
         Assert.Contains(
             runs.GetProperty("runs").EnumerateArray(),
             run => run.GetProperty("runId").GetString() == "hc-honest-run-1");
+    }
+
+    /// <summary>
+    /// The seeder stamps its store as a completed full pass does: the dirty state is cleared
+    /// before the watermark moves, so a crash between the two leaves the projection out of date
+    /// rather than current over dirty sessions, and the detector version is current.
+    /// </summary>
+    [Fact]
+    public void HarnessCollectionWorldStampsDirtyStateBeforeTheWatermarkAndTheDetectorVersion()
+    {
+        string repoRoot = LocateRepoRoot();
+        using TempDirectory directory = new();
+        InMemoryRelationalStore store = new();
+        FakePricingRepository pricing = new();
+        CanonSessionProjectorEngine projector = new(store, store, store, pricing);
+        CanonRollupsEngine rollups = new(store, store, pricing);
+        CanonProjectionService projection = new(store, store, store, projector, rollups);
+        TranscriptIngestionService ingestion = new(store, store, new HarnessSourceRegistry());
+        E2eSeederService seeder = new(store, store, store, ingestion, projection);
+        List<string> writeBacks = [];
+        store.BeforeProjectionWriteBack = writeBacks.Add;
+
+        Assert.Equal(
+            0,
+            seeder.SeedWorld(E2eSeederService.HarnessCollectionWorld, directory.Combine("world.db"), repoRoot));
+
+        Assert.Equal(
+            [nameof(InMemoryRelationalStore.ClearProjectionDirtyState), nameof(InMemoryRelationalStore.SetProjectionState)],
+            writeBacks.TakeLast(2));
+        Assert.Equal(SqliteRelationalStore.DetectorVersion, store.GetStoreState()?.DetectorVersion);
+        Assert.True(projector.IsProjectionCurrent());
     }
 
     /// <summary>Walks up from the test assembly until the fixture the seeder replays is found.</summary>

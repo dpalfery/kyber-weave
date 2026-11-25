@@ -120,14 +120,14 @@ public class E2eSeederService : IE2eSeederService
     /// Stamps the seeded store as a completed projection pass would. The rendering-only sessions
     /// are written after the last real pass, so each write moved <c>store_write_marker</c> and left
     /// its session dirty; without this stamp the server's first read pass would rebuild those
-    /// sessions and replace the explicit seeded runs with derived ones.
+    /// sessions and replace the explicit seeded runs with derived ones. It writes what a completed
+    /// full maintenance pass writes, in the same order: the dirty state is cleared before the
+    /// watermark and detector version are stamped.
     /// </summary>
     private void StampSeededProjectionCurrent()
     {
-        operationalStore.SetProjectionState(new ProjectionStateView(
-            SqliteRelationalStore.SchemaVersion,
-            operationalStore.GetWriteMarker()));
         operationalStore.ClearProjectionDirtyState();
+        CanonSessionProjectorEngine.StampProjectionState(operationalStore, operationalStore.GetWriteMarker(), stampDetector: true);
     }
 
     /// <summary>Replays both Factory hook fixtures with content capture off, then on.</summary>

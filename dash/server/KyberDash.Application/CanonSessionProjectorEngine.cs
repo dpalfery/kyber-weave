@@ -892,9 +892,20 @@ public partial class CanonSessionProjectorEngine
     /// The watermark is written first, so a failure between the two writes leaves the detector
     /// stamp stale and the next maintenance pass runs in full rather than skipping a session.
     /// </remarks>
-    private void StampProjectionState(long recordsMarker, bool stampDetector)
+    private void StampProjectionState(long recordsMarker, bool stampDetector) =>
+        StampProjectionState(operationalStore!, recordsMarker, stampDetector);
+
+    /// <summary>
+    /// Writes the projection watermark and, when <paramref name="stampDetector"/> is set, the
+    /// detector version on <paramref name="operationalStore"/>, exactly as a projection pass does;
+    /// see <see cref="StampProjectionState(long, bool)"/>. A caller writes the dirty state first.
+    /// </summary>
+    /// <param name="operationalStore">Store whose projection watermark is written.</param>
+    /// <param name="recordsMarker">Write marker the stored projection now covers.</param>
+    /// <param name="stampDetector">Whether the stamp stands for a completed full maintenance pass.</param>
+    internal static void StampProjectionState(IOperationalStore operationalStore, long recordsMarker, bool stampDetector)
     {
-        operationalStore!.SetProjectionState(new ProjectionStateView(SqliteRelationalStore.SchemaVersion, recordsMarker));
+        operationalStore.SetProjectionState(new ProjectionStateView(SqliteRelationalStore.SchemaVersion, recordsMarker));
         if (!stampDetector)
         {
             return;
