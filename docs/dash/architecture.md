@@ -1483,10 +1483,10 @@ The checkable rules that keep a new read in this shape are
 Whole-store reads exist, are off the request path, and are named so they cannot be mistaken for a
 page read:
 
-- `AllSessionRecordsForMaintenance()` — every stored record and child row in one query. Reserved
-  for the CLI and doctor. The projector no longer uses it: on a real store, every Claude Code
-  transcript imported, the query's output passed the 2^31 characters a .NET string can hold, and
-  every maintenance pass failed.
+- `AllSessionRecordsForMaintenance()` — every stored record and child row in one query. No production
+  code calls it any more; the store parity tests still use it. The projector stopped using it because,
+  on a real store with every Claude Code transcript imported, the query's output passed the 2^31
+  characters a .NET string can hold, and every maintenance pass failed.
 - `SessionRecordsForRebuild(sessionKey)` — full records, content included, for the one session a
   projection pass rebuilds (token counting, timeline, findings and previews need the part text).
   Every pass, maintenance included, reads each session this way when it builds it, so only one
