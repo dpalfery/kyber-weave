@@ -81,8 +81,9 @@ every list pages, and conversation text is fetched only when it is shown.
    or `100` rows (default `25`, persisted per section in `sessionStorage`) and sorts `desc`
    (default) or `asc` on the server through the one shared `Pager`, reusing `DashHttp.Pagination`
    alongside strict `TrySectionLimit` / `TrySortOrder` validation (`400` `{"error": "..."}` on
-   invalid values) and returning `{ total, page, limit, offset, order }` (with `entries`/`data` or
-   section-specific item keys). On `/api/kyber/session/{id}/charts` (amended 2026-11-25),
+   invalid values) and returning `{ total, page, limit, offset, order }` (alongside the
+   section-named list key and `data`, or section-specific keys `rows`, `nodes`, or `turns` +
+   `context` on `/charts`). On `/api/kyber/session/{id}/charts` (amended 2026-11-25),
    `context.turns` is paged and sorted on the server (`total`, `page`, `limit`, `offset`, `order`
    emitted on both measurable and unmeasurable responses, preserving 1-based `index = turn.Position + 1`),
    while whole-session `turns` (for the spend curve) and context summary aggregates (`first`, `last`,
