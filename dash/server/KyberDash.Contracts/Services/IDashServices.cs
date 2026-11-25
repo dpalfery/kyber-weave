@@ -1,4 +1,5 @@
 using System.Text.Json;
+using KyberDash.Core;
 using KyberDash.Core.Resilience;
 using KyberDash.Domain;
 
@@ -17,7 +18,7 @@ public class DashOptions
     public string? DashboardDir { get; set; }
 
     /// <summary>Reported binary/engine semantic version.</summary>
-    public string Version { get; set; } = "0.21.0";
+    public string Version { get; set; } = DashVersion.Current;
 
     /// <summary>Maximum OTLP per-request payload size in bytes.</summary>
     public long MaxOtlpBodyBytes { get; set; } = 64L * 1024 * 1024;

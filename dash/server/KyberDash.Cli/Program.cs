@@ -3,6 +3,7 @@ using System.Runtime.InteropServices;
 using System.Text.Json;
 using KyberDash.Application;
 using KyberDash.Contracts.Services;
+using KyberDash.Core;
 using KyberDash.Core.Exceptions;
 using KyberDash.Domain;
 using Microsoft.Extensions.DependencyInjection;
@@ -151,19 +152,7 @@ public static partial class Program
     /// <summary>Resolves the reported version from the assembly's informational version.</summary>
     public static string ResolveVersion()
     {
-        string? informational = typeof(Program).Assembly
-            .GetCustomAttributes(typeof(System.Reflection.AssemblyInformationalVersionAttribute), inherit: false)
-            .OfType<System.Reflection.AssemblyInformationalVersionAttribute>()
-            .FirstOrDefault()
-            ?.InformationalVersion;
-
-        if (!string.IsNullOrWhiteSpace(informational))
-        {
-            int plus = informational.IndexOf('+', StringComparison.Ordinal);
-            return plus >= 0 ? informational[..plus] : informational;
-        }
-
-        return "0.21.0";
+        return DashVersion.Current;
     }
 
     private static IEnumerable<string[]> ReadGlobalOptions(string[]? args)

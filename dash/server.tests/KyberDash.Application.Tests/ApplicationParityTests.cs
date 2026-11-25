@@ -3,6 +3,7 @@ using System.Text.Json;
 using KyberDash.Application.Tests.Fakes;
 using KyberDash.Contracts.Repositories;
 using KyberDash.Contracts.Services;
+using KyberDash.Core;
 using KyberDash.Core.Exceptions;
 using KyberDash.Data.Collector;
 using KyberDash.Data.Collector.Sources;
@@ -176,7 +177,7 @@ public class ApplicationParityTests
         string runsPayload = query.GetRuns().GetRawText();
         Assert.Contains("derived:copilot:", runsPayload, StringComparison.Ordinal);
         Assert.Equal(1, query.GetMeta().GetProperty("apiVersion").GetInt32());
-        Assert.Equal(KyberBridgeEngine.DefaultVersion, query.GetVersion().GetProperty("version").GetString());
+        Assert.Equal(DashVersion.Current, query.GetVersion().GetProperty("version").GetString());
         Assert.True(query.GetCoverage().TryGetProperty("harnesses", out _));
         Assert.True(query.GetQuarantinePage(null, 10, 0, 1).TryGetProperty("total", out _));
         Assert.Equal(0, query.GetProblemsPage(null, 10, 0, 1).GetProperty("total").GetInt32());

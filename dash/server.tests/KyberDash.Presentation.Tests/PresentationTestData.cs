@@ -1,5 +1,6 @@
 using System.Text.Json;
 using KyberDash.Contracts.Services;
+using KyberDash.Core;
 using KyberDash.Domain;
 
 namespace KyberDash.Presentation.Tests;
@@ -56,7 +57,7 @@ public static class PresentationTestData
         });
 
     /// <summary>A version payload.</summary>
-    public static JsonElement Version { get; } = JsonSerializer.SerializeToElement(new { version = "0.21.0", apiVersion = 1 });
+    public static JsonElement Version { get; } = JsonSerializer.SerializeToElement(new { version = DashVersion.Current, apiVersion = 1 });
 
     /// <summary>A metadata payload.</summary>
     public static JsonElement Meta { get; } = JsonSerializer.SerializeToElement(new { apiVersion = 1, harnesses = Array.Empty<string>() });
