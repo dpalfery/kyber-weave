@@ -2005,8 +2005,9 @@ public partial class SqliteRelationalStore : IRelationalStoreReader
                      "SELECT hex(CAST(rsk.span_id AS BLOB)), hex(CAST(rsk.skill_name AS BLOB)), COALESCE(st.position, -1) " +
                      "FROM record_skill_listing rsk " +
                      "JOIN record_session_link rsl ON rsl.span_id = rsk.span_id " +
+                     "JOIN record r ON r.span_id = rsk.span_id " +
                      $"LEFT JOIN session_turn st ON st.span_id = rsk.span_id AND st.session_id = {keyExpr} " +
-                     $"WHERE rsl.session_key = {keyExpr} ORDER BY rsk.rowid ASC;\n";
+                     $"WHERE rsl.session_key = {keyExpr} ORDER BY r.rowid ASC, rsk.position ASC;\n";
 
         string output = ExecuteSqlite(sql);
         List<StoredSkillListing> results = [];
