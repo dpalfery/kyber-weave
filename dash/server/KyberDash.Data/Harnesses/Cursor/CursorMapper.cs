@@ -817,33 +817,12 @@ public partial class CursorMapper : IHarnessMapper
             importedAtUtc);
         CollectedWorkspace? workspace = ResolveWorkspace(unit, problems, harnessId, importedAtUtc);
 
-        Dictionary<string, Queue<string>> userMessages = new(StringComparer.Ordinal);
-        foreach (CursorBubbleRow row in document.Rows)
-        {
-            if (row.BubbleType != 1 || string.IsNullOrWhiteSpace(row.UserText))
-            {
-                continue;
-            }
-
-            string? composerId = ParseComposerIdFromKey(row.BubbleKey);
-            if (composerId is null)
-            {
-                continue;
-            }
-
-            if (!userMessages.TryGetValue(composerId, out Queue<string>? queue))
-            {
-                queue = new Queue<string>();
-                userMessages[composerId] = queue;
-            }
-
-            queue.Enqueue(row.UserText);
-        }
-
-        List<CollectedRecord> records = [];
-        Dictionary<string, string> lastUserMessage = new(StringComparer.Ordinal);
-        Dictionary<string, List<CollectedRecord>> recordsByComposer = new(StringComparer.Ordinal);
-        HashSet<string> seenRecordIds = new(StringComparer.Ordinal);
+        // One turn is one user bubble together with the assistant bubbles that answer it, as on the
+        // cursor-agent transcript path. Assistant bubbles before any user bubble form one leading turn.
+        List<BubbleTurn> turns = [];
+        Dictionary<string, BubbleTurn> openTurns = new(StringComparer.Ordinal);
+        HashSet<string> composerIds = new(StringComparer.Ordinal);
+        List<string> composerOrder = [];
 
         foreach (CursorBubbleRow row in document.Rows)
         {
@@ -869,71 +848,83 @@ public partial class CursorMapper : IHarnessMapper
                 continue;
             }
 
-            string pairedUserText;
-            if (row.BubbleType == 1)
+            bool isUser = row.BubbleType == 1;
+            if (isUser || !openTurns.TryGetValue(composerId, out BubbleTurn? turn))
             {
-                pairedUserText = userMessages.TryGetValue(composerId, out Queue<string>? queue) && queue.Count > 0
-                    ? queue.Dequeue()
-                    : string.Empty;
-                lastUserMessage[composerId] = pairedUserText;
-            }
-            else
-            {
-                pairedUserText = lastUserMessage.GetValueOrDefault(composerId, string.Empty);
+                turn = new BubbleTurn(
+                    composerId,
+                    startedAt.Value,
+                    SafeOptionalText(row.RequestId) ?? TailSegment(row.BubbleKey),
+                    isUser ? row.UserText : null);
+                turns.Add(turn);
+                openTurns[composerId] = turn;
+                if (composerIds.Add(composerId))
+                {
+                    composerOrder.Add(composerId);
+                }
             }
 
-            string displayModel = string.IsNullOrWhiteSpace(row.Model) || string.Equals(row.Model, "default", StringComparison.Ordinal)
-                ? DefaultBubbleModel
-                : row.Model;
-            string anchor = SafeOptionalText(row.RequestId) ?? TailSegment(row.BubbleKey);
+            if (!isUser && !string.IsNullOrWhiteSpace(row.UserText))
+            {
+                turn.AssistantTexts.Add(row.UserText);
+            }
+
+            turn.InputTokens += nativeInput;
+            turn.OutputTokens += nativeOutput;
+            if (!isUser
+                && turn.Model is null
+                && !string.IsNullOrWhiteSpace(row.Model)
+                && !string.Equals(row.Model, "default", StringComparison.Ordinal))
+            {
+                turn.Model = row.Model;
+            }
+        }
+
+        List<CollectedRecord> records = [];
+        HashSet<string> seenRecordIds = new(StringComparer.Ordinal);
+        foreach (BubbleTurn turn in turns)
+        {
+            string displayModel = turn.Model ?? DefaultBubbleModel;
             string recordId = EnsureUniqueRecordId(
                 seenRecordIds,
-                string.Create(CultureInfo.InvariantCulture, $"{CanonSynth.SynthSpanPrefix}{harnessId}:{composerId}:{anchor}"));
+                string.Create(CultureInfo.InvariantCulture, $"{CanonSynth.SynthSpanPrefix}{harnessId}:{turn.ComposerId}:{turn.Anchor}"));
 
             List<CollectedContentPart> parts = [];
             int position = 0;
             string? correctionRule = null;
-            if (!string.IsNullOrWhiteSpace(pairedUserText))
+            if (!string.IsNullOrWhiteSpace(turn.UserText))
             {
-                CorrectionDetectionResult correction = CanonFindings.DetectUserCorrection(pairedUserText);
+                CorrectionDetectionResult correction = CanonFindings.DetectUserCorrection(turn.UserText);
                 if (correction.Matched)
                 {
                     correctionRule = correction.Rule;
                 }
 
-                parts.Add(ToolContentMeasurer.BuildContentPart(position++, ContentBucket.UserMessage, pairedUserText, "user", displayModel));
+                parts.Add(ToolContentMeasurer.BuildContentPart(position++, ContentBucket.UserMessage, turn.UserText, "user", displayModel));
             }
 
-            if (row.BubbleType != 1 && !string.IsNullOrWhiteSpace(row.UserText))
+            foreach (string text in turn.AssistantTexts)
             {
-                parts.Add(ToolContentMeasurer.BuildContentPart(position++, ContentBucket.ConversationHistory, row.UserText, "assistant", displayModel));
+                parts.Add(ToolContentMeasurer.BuildContentPart(position++, ContentBucket.ConversationHistory, text, "assistant", displayModel));
             }
 
             records.Add(BuildRecord(
                 recordId,
                 harnessId,
-                composerId,
+                turn.ComposerId,
                 string.Create(CultureInfo.InvariantCulture, $"cursor:{displayModel}"),
-                startedAt.Value,
+                turn.StartedAt,
                 displayModel,
-                nativeInput,
-                nativeOutput,
-                nativeInput > 0 ? nativeInput : null,
-                nativeOutput > 0 ? nativeOutput : null,
+                turn.InputTokens,
+                turn.OutputTokens,
+                turn.InputTokens > 0 ? turn.InputTokens : null,
+                turn.OutputTokens > 0 ? turn.OutputTokens : null,
                 parts,
                 correctionRule));
-
-            if (!recordsByComposer.TryGetValue(composerId, out List<CollectedRecord>? composerRecords))
-            {
-                composerRecords = [];
-                recordsByComposer[composerId] = composerRecords;
-            }
-
-            composerRecords.Add(records[^1]);
         }
 
         List<CollectedSession> sessions = [];
-        foreach (string composerId in recordsByComposer.Keys)
+        foreach (string composerId in composerOrder)
         {
             sessions.Add(new CollectedSession(
                 SessionKey: composerId,
@@ -1119,6 +1110,25 @@ public partial class CursorMapper : IHarnessMapper
         ];
 
         return new CollectedBatch(source, sessions, records, problems);
+    }
+
+    private sealed class BubbleTurn(string composerId, DateTimeOffset startedAt, string anchor, string? userText)
+    {
+        public string ComposerId { get; } = composerId;
+
+        public DateTimeOffset StartedAt { get; } = startedAt;
+
+        public string Anchor { get; } = anchor;
+
+        public string? UserText { get; } = userText;
+
+        public List<string> AssistantTexts { get; } = [];
+
+        public string? Model { get; set; }
+
+        public long InputTokens { get; set; }
+
+        public long OutputTokens { get; set; }
     }
 
     private CollectedRecord BuildRecord(
