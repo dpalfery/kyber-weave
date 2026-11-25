@@ -844,7 +844,7 @@ public class ClaudeTranscriptMapper : IHarnessMapper
                 : RecordStatus.Unspecified;
 
         (IReadOnlyList<CollectedTokenCount> tokens, long? reportedInput, long? reportedOutput) = BuildTokenCounts(turn.Usage);
-        List<CollectedContentPart> parts = BuildContentParts(turn.Parts);
+        List<CollectedContentPart> parts = BuildContentParts(turn.Parts, turn.Model);
         string displayModel = turn.Model ?? UnknownModelFallback;
 
         return new CollectedRecord(
@@ -915,7 +915,7 @@ public class ClaudeTranscriptMapper : IHarnessMapper
             : (toolResult.IsError ? RecordStatus.Error : RecordStatus.Ok);
 
         CollectedToolContent? inputContent = toolCall.RawInputText is not null
-            ? ToolContentMeasurer.Measure(toolCall.RawInputText, CanonSynth.MaxToolArgumentsBytes)
+            ? ToolContentMeasurer.Measure(toolCall.RawInputText, CanonSynth.MaxToolArgumentsBytes, parent.Model)
                 .ToToolContent(includeFingerprint: true)
             : null;
 
@@ -925,7 +925,8 @@ public class ClaudeTranscriptMapper : IHarnessMapper
         {
             ToolContentMeasurement resultMeasurement = ToolContentMeasurer.Measure(
                 toolResult.Content,
-                CanonSynth.MaxToolResultBytes);
+                CanonSynth.MaxToolResultBytes,
+                parent.Model);
             resultContent = resultMeasurement.ToToolContent(includeFingerprint: false);
             parts.Add(new CollectedContentPart(
                 Position: 0,
@@ -945,7 +946,7 @@ public class ClaudeTranscriptMapper : IHarnessMapper
         bool? succeeded = toolResult is null ? null : !toolResult.IsError;
         CollectedError? error = toolResult is { IsError: true }
             ? new CollectedError(
-                Message: BuildSafeToolErrorMessage(toolResult.Content),
+                Message: BuildSafeToolErrorMessage(toolResult.Content, parent.Model),
                 Code: toolResult.ErrorCode)
             : null;
 
@@ -1047,13 +1048,13 @@ public class ClaudeTranscriptMapper : IHarnessMapper
         return (tokens, reportedInput, reportedOutput);
     }
 
-    private static List<CollectedContentPart> BuildContentParts(IReadOnlyList<ParsedPart> parts)
+    private static List<CollectedContentPart> BuildContentParts(IReadOnlyList<ParsedPart> parts, string? model)
     {
         List<CollectedContentPart> collected = new(parts.Count);
         for (int i = 0; i < parts.Count; i++)
         {
             ParsedPart part = parts[i];
-            ToolContentMeasurement measurement = ToolContentMeasurer.Measure(part.Text, CanonSynth.MaxToolResultBytes);
+            ToolContentMeasurement measurement = ToolContentMeasurer.Measure(part.Text, CanonSynth.MaxToolResultBytes, model);
             collected.Add(new CollectedContentPart(
                 Position: i,
                 Bucket: part.Bucket,
@@ -1096,14 +1097,14 @@ public class ClaudeTranscriptMapper : IHarnessMapper
         return (server, method);
     }
 
-    private static string BuildSafeToolErrorMessage(string? rawContent)
+    private static string BuildSafeToolErrorMessage(string? rawContent, string? model)
     {
         if (string.IsNullOrWhiteSpace(rawContent))
         {
             return FallbackToolErrorMessage;
         }
 
-        ToolContentMeasurement measurement = ToolContentMeasurer.Measure(rawContent, CanonSynth.MaxToolResultBytes);
+        ToolContentMeasurement measurement = ToolContentMeasurer.Measure(rawContent, CanonSynth.MaxToolResultBytes, model);
         if (!measurement.IsDocument && !string.IsNullOrWhiteSpace(measurement.PlainText))
         {
             return measurement.PlainText;

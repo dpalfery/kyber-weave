@@ -9,6 +9,7 @@ using KyberDash.Contracts.Repositories;
 using KyberDash.Contracts.Services;
 using KyberDash.Data.Collector;
 using KyberDash.Data.Collector.Sources;
+using KyberDash.Data.Tokenization;
 using KyberDash.Domain;
 using Microsoft.Extensions.DependencyInjection;
 using Xunit;
@@ -809,6 +810,46 @@ public class RelationalIngestTests
             name,
             kind: "internal",
             attributes);
+
+    /// <summary>
+    /// Ingest counts a record's content part with the record's own model tokenizer: a span whose
+    /// model has its own published tokenizer stores the part with that model's own measured token
+    /// figure, not the stand-in's.
+    /// </summary>
+    [Fact]
+    public void IngestBatch_CountsContentPartsWithTheRecordModelOwnTokenizer()
+    {
+        InMemoryRelationalStore store = new();
+        string promptDoc = "{\"こんにちは\":\"世界\"}";
+
+        OtlpSpan span = OpenCodeSpan(
+            spanId: "aaaaaaaaaaaaaaaa",
+            name: "opencode.step",
+            attributes: new Dictionary<string, JsonElement>(StringComparer.Ordinal)
+            {
+                ["opencode.contract_version"] = Element("3"),
+                ["opencode.span.kind"] = Element("step"),
+                ["opencode.session.id"] = Element("sess-pipeline-own"),
+                ["opencode.model.id"] = Element("gpt-3.5-turbo"),
+                ["opencode.usage.input"] = Element(10),
+                ["opencode.usage.output"] = Element(5),
+                ["gen_ai.request.model"] = Element("gpt-3.5-turbo"),
+                ["opencode.prompt.text"] = Element(promptDoc),
+            });
+
+        IngestOutcome outcome = CanonIngestPipeline.IngestBatch([span], store, store);
+        Assert.Equal(new IngestOutcome(1, 0, 0), outcome);
+
+        CollectedRecord? stored = store.FindRecord("aaaaaaaaaaaaaaaa");
+        Assert.NotNull(stored);
+        Assert.Equal("gpt-3.5-turbo", stored!.Model);
+
+        CollectedContentPart part = Assert.Single(store.FindRecordParts("aaaaaaaaaaaaaaaa"));
+        Assert.Null(part.PlainText);
+        Assert.NotNull(part.Withheld);
+        Assert.Equal(LocalTextTokenizer.Shared.Count(promptDoc, "gpt-3.5-turbo").Count, part.Withheld!.MeasuredTokens);
+        Assert.NotEqual(LocalTextTokenizer.Shared.Count(promptDoc, null).Count, part.Withheld.MeasuredTokens);
+    }
 
     private static OtlpSpan MakeOtlpSpan(
         string spanId,

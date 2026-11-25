@@ -309,7 +309,7 @@ public class CopilotCliMapper : IHarnessMapper
 
             if (latestSystemPrompts.TryGetValue(agentKey, out string? systemPrompt))
             {
-                parts.Add(ToolContentMeasurer.BuildContentPart(position++, ContentBucket.SystemPrompt, systemPrompt, "system"));
+                parts.Add(ToolContentMeasurer.BuildContentPart(position++, ContentBucket.SystemPrompt, systemPrompt, "system", activeModel));
             }
 
             if (pendingUserMessages.TryGetValue(agentKey, out List<string>? userMessages))
@@ -325,7 +325,7 @@ public class CopilotCliMapper : IHarnessMapper
                         }
                     }
 
-                    parts.Add(ToolContentMeasurer.BuildContentPart(position++, ContentBucket.UserMessage, userMessage, "user"));
+                    parts.Add(ToolContentMeasurer.BuildContentPart(position++, ContentBucket.UserMessage, userMessage, "user", activeModel));
                 }
 
                 userMessages.Clear();
@@ -335,7 +335,7 @@ public class CopilotCliMapper : IHarnessMapper
             {
                 foreach (string reasoning in reasonings)
                 {
-                    parts.Add(ToolContentMeasurer.BuildContentPart(position++, ContentBucket.Reasoning, reasoning, "assistant"));
+                    parts.Add(ToolContentMeasurer.BuildContentPart(position++, ContentBucket.Reasoning, reasoning, "assistant", activeModel));
                 }
 
                 reasonings.Clear();
@@ -343,12 +343,12 @@ public class CopilotCliMapper : IHarnessMapper
 
             if (!string.IsNullOrEmpty(evt.ReasoningText))
             {
-                parts.Add(ToolContentMeasurer.BuildContentPart(position++, ContentBucket.Reasoning, evt.ReasoningText, "assistant"));
+                parts.Add(ToolContentMeasurer.BuildContentPart(position++, ContentBucket.Reasoning, evt.ReasoningText, "assistant", activeModel));
             }
 
             if (!string.IsNullOrEmpty(evt.Content))
             {
-                parts.Add(ToolContentMeasurer.BuildContentPart(position++, ContentBucket.ConversationHistory, evt.Content, "assistant"));
+                parts.Add(ToolContentMeasurer.BuildContentPart(position++, ContentBucket.ConversationHistory, evt.Content, "assistant", activeModel));
             }
 
             List<CollectedTokenCount> tokens = BuildTokens(evt);

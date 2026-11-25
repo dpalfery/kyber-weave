@@ -6,6 +6,7 @@ using KyberDash.Application.Tests.Fakes;
 using KyberDash.Data.Collector;
 using KyberDash.Data.Collector.Sources;
 using KyberDash.Data.Harnesses.Cursor;
+using KyberDash.Data.Tokenization;
 using KyberDash.Domain.Schema;
 using Xunit;
 
@@ -453,6 +454,37 @@ public class CursorMapperTests
                 Assert.False(string.IsNullOrWhiteSpace(reason) || reason is "—" or "-");
             }
         }
+    }
+
+    /// <summary>
+    /// The bubble row's resolved model with its own published tokenizer counts the paired user
+    /// part with that tokenizer: the measured tokens equal the model's own figure, not the
+    /// stand-in's.
+    /// </summary>
+    [Fact]
+    public void Map_CountsPairedUserPartsWithTheRowModelOwnTokenizer()
+    {
+        string userDoc = "{\"こんにちは\":\"世界\"}";
+        string rawText = """
+            [
+              {"bubble_key":"bubbleId:composer-own:11111111-1111-1111-1111-111111111111","input_tokens":60,"output_tokens":0,"model":null,"created_at":"2026-09-22T10:01:00.000Z","request_id":"req-own","user_text":"{\"こんにちは\":\"世界\"}","text_length":18,"bubble_type":1,"context_window":200000,"code_blocks":null},
+              {"bubble_key":"bubbleId:composer-own:22222222-2222-2222-2222-222222222222","input_tokens":120,"output_tokens":45,"model":"gpt-3.5-turbo","created_at":"2026-09-22T10:02:00.000Z","request_id":"req-own","user_text":"Here is the answer.","text_length":19,"bubble_type":2,"context_window":200000,"code_blocks":null}
+            ]
+            """;
+
+        NativeSourceUnit unit = MakeNativeUnit(
+            "/fake/Library/Application Support/Cursor/User/globalStorage/state.vscdb",
+            rawText,
+            "cursor",
+            "cursor-vscdb");
+        CollectedBatch batch = new CursorMapper().Map(unit, BaselineUtc);
+
+        Assert.Empty(batch.Problems);
+        CollectedRecord assistantRecord = Assert.Single(batch.Records, static r => r.Model == "gpt-3.5-turbo");
+        CollectedContentPart userPart = Assert.Single(assistantRecord.Parts, static p => p.Bucket == ContentBucket.UserMessage);
+        Assert.NotNull(userPart.Withheld);
+        Assert.Equal(LocalTextTokenizer.Shared.Count(userDoc, "gpt-3.5-turbo").Count, userPart.Withheld!.MeasuredTokens);
+        Assert.NotEqual(LocalTextTokenizer.Shared.Count(userDoc, null).Count, userPart.Withheld.MeasuredTokens);
     }
 
     private static NativeSourceUnit MakeNativeUnit(string path, string rawText, string harnessId, string format)

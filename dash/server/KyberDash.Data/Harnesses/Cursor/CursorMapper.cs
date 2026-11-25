@@ -888,12 +888,12 @@ public partial class CursorMapper : IHarnessMapper
                     correctionRule = correction.Rule;
                 }
 
-                parts.Add(ToolContentMeasurer.BuildContentPart(position++, ContentBucket.UserMessage, pairedUserText, "user"));
+                parts.Add(ToolContentMeasurer.BuildContentPart(position++, ContentBucket.UserMessage, pairedUserText, "user", displayModel));
             }
 
             if (row.BubbleType != 1 && !string.IsNullOrWhiteSpace(row.UserText))
             {
-                parts.Add(ToolContentMeasurer.BuildContentPart(position++, ContentBucket.ConversationHistory, row.UserText, "assistant"));
+                parts.Add(ToolContentMeasurer.BuildContentPart(position++, ContentBucket.ConversationHistory, row.UserText, "assistant", displayModel));
             }
 
             records.Add(BuildRecord(
@@ -995,17 +995,17 @@ public partial class CursorMapper : IHarnessMapper
                     correctionRule = correction.Rule;
                 }
 
-                parts.Add(ToolContentMeasurer.BuildContentPart(position++, ContentBucket.UserMessage, turn.UserMessage, "user"));
+                parts.Add(ToolContentMeasurer.BuildContentPart(position++, ContentBucket.UserMessage, turn.UserMessage, "user", DefaultTranscriptModel));
             }
 
             if (!string.IsNullOrWhiteSpace(turn.Body))
             {
-                parts.Add(ToolContentMeasurer.BuildContentPart(position++, ContentBucket.ConversationHistory, turn.Body, "assistant"));
+                parts.Add(ToolContentMeasurer.BuildContentPart(position++, ContentBucket.ConversationHistory, turn.Body, "assistant", DefaultTranscriptModel));
             }
 
             if (!string.IsNullOrWhiteSpace(turn.Reasoning))
             {
-                parts.Add(ToolContentMeasurer.BuildContentPart(position++, ContentBucket.Reasoning, turn.Reasoning, "assistant"));
+                parts.Add(ToolContentMeasurer.BuildContentPart(position++, ContentBucket.Reasoning, turn.Reasoning, "assistant", DefaultTranscriptModel));
             }
 
             records.Add(BuildRecord(

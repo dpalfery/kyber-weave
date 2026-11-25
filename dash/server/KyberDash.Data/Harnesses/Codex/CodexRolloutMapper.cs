@@ -590,7 +590,7 @@ public class CodexRolloutMapper : IHarnessMapper
             string turnName = turnModel is not null ? $"codex:{turnModel}" : "codex:codex";
 
             List<CollectedTokenCount> tokens = BuildTurnTokens(turn.Usage);
-            List<CollectedContentPart> turnParts = BuildTurnParts(document, turn, includeSessionHeaders: i == 0);
+            List<CollectedContentPart> turnParts = BuildTurnParts(document, turn, includeSessionHeaders: i == 0, turnModel);
 
             string? correctionRule = null;
             foreach (CodexRolloutMessage msg in turn.Messages)
@@ -696,7 +696,7 @@ public class CodexRolloutMapper : IHarnessMapper
 
         (RecordStatus status, bool? succeeded, string? errorMessage) = ResolveToolOutcome(toolCall, matchedResult);
 
-        ToolContentMeasurement inputMeasurement = ToolContentMeasurer.Measure(toolCall.RawInputText);
+        ToolContentMeasurement inputMeasurement = ToolContentMeasurer.Measure(toolCall.RawInputText, model: parentRecord.Model);
         CollectedToolContent inputContent = toolCall.WithholdInputPlainText
             ? inputMeasurement.ToToolContent(includeFingerprint: true) with { PlainText = null, OriginalUtf8BytesWhenTruncated = null }
             : inputMeasurement.ToToolContent(includeFingerprint: true);
@@ -705,7 +705,7 @@ public class CodexRolloutMapper : IHarnessMapper
         List<CollectedContentPart> parts = [];
         if (matchedResult?.OutputText is not null)
         {
-            ToolContentMeasurement resultMeasurement = ToolContentMeasurer.Measure(matchedResult.OutputText);
+            ToolContentMeasurement resultMeasurement = ToolContentMeasurer.Measure(matchedResult.OutputText, model: parentRecord.Model);
             resultContent = resultMeasurement.ToToolContent(includeFingerprint: false);
 
             string? plainText = resultMeasurement.IsDocument ? null : resultMeasurement.PlainText;
@@ -791,7 +791,8 @@ public class CodexRolloutMapper : IHarnessMapper
     private static List<CollectedContentPart> BuildTurnParts(
         CodexRolloutDocument document,
         CodexRolloutTurn turn,
-        bool includeSessionHeaders)
+        bool includeSessionHeaders,
+        string? model)
     {
         List<CollectedContentPart> parts = [];
         int position = 0;
@@ -800,18 +801,18 @@ public class CodexRolloutMapper : IHarnessMapper
         {
             if (document.SystemPrompt is not null)
             {
-                parts.Add(MeasurePart(position++, ContentBucket.SystemPrompt, document.SystemPrompt, "system"));
+                parts.Add(MeasurePart(position++, ContentBucket.SystemPrompt, document.SystemPrompt, "system", model));
             }
 
             if (document.InstructionContext is not null)
             {
-                parts.Add(MeasurePart(position++, ContentBucket.InstructionContext, document.InstructionContext, "system"));
+                parts.Add(MeasurePart(position++, ContentBucket.InstructionContext, document.InstructionContext, "system", model));
             }
         }
 
         foreach (CodexRolloutMessage message in turn.Messages)
         {
-            parts.Add(MeasurePart(position++, ContentBucket.ConversationHistory, message.Text, SafeOptionalText(message.Role)));
+            parts.Add(MeasurePart(position++, ContentBucket.ConversationHistory, message.Text, SafeOptionalText(message.Role), model));
         }
 
         return parts;
@@ -821,9 +822,10 @@ public class CodexRolloutMapper : IHarnessMapper
         int position,
         ContentBucket bucket,
         string text,
-        string? role)
+        string? role,
+        string? model)
     {
-        ToolContentMeasurement measurement = ToolContentMeasurer.Measure(text);
+        ToolContentMeasurement measurement = ToolContentMeasurer.Measure(text, model: model);
         string? plainText = measurement.IsDocument ? null : measurement.PlainText;
         CollectedWithheldText? withheld = measurement.IsDocument ? measurement.ToWithheldText() : null;
         long? originalBytes = measurement.IsDocument ? null : measurement.OriginalUtf8BytesWhenTruncated;

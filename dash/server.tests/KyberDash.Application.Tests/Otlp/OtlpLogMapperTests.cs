@@ -3,6 +3,7 @@ using KyberDash.Application.Tests.Fakes;
 using KyberDash.Contracts.Repositories;
 using KyberDash.Data.Collector;
 using KyberDash.Data.Harnesses.Otlp;
+using KyberDash.Data.Tokenization;
 using KyberDash.Domain;
 using Xunit;
 
@@ -83,6 +84,47 @@ public class OtlpLogMapperTests
         Assert.Equal(1, store.CountRecords("claude-code"));
         Assert.Empty(store.ListIngestProblems());
         Assert.All(store.FindRecordParts("log-claude-1"), static p => Assert.Null(p.PlainText));
+    }
+
+    /// <summary>
+    /// A log carrying a model with its own published tokenizer counts its body part with that
+    /// tokenizer: the measured tokens equal the model's own figure, not the stand-in's.
+    /// </summary>
+    [Fact]
+    public void Map_CountsBodyPartsWithTheLogModelOwnTokenizer()
+    {
+        string body = "{\"こんにちは\":\"世界\"}";
+        OtlpLog log = new(
+            LogId: "log-model-own",
+            TraceId: "cccccccccccccccccccccccccccccccc",
+            SpanId: "3333333333333333",
+            SessionId: "sess-model-own",
+            Timestamp: "2026-11-19T12:10:00.000Z",
+            Body: body,
+            Attributes: new Dictionary<string, JsonElement>(StringComparer.Ordinal)
+            {
+                ["claude_code.event"] = JsonSerializer.SerializeToElement("api_request_body"),
+                ["event.name"] = JsonSerializer.SerializeToElement("claude_code.api_request_body"),
+                ["gen_ai.request.model"] = JsonSerializer.SerializeToElement("gpt-3.5-turbo"),
+                ["gen_ai.usage.input_tokens"] = JsonSerializer.SerializeToElement(120),
+                ["gen_ai.usage.output_tokens"] = JsonSerializer.SerializeToElement(30),
+            },
+            Resource: new Dictionary<string, JsonElement>(StringComparer.Ordinal)
+            {
+                ["service.name"] = JsonSerializer.SerializeToElement("claude-code"),
+            },
+            Scope: new OtlpScope("claude_code", "1.0.0"));
+
+        OtlpLogMapResult result = OtlpLogMapper.Map([log]);
+
+        Assert.Equal(new IngestOutcome(1, 0, 0), result.Outcome);
+        CollectedRecord record = Assert.Single(Assert.Single(result.Batches).Records);
+        Assert.Equal("gpt-3.5-turbo", record.Model);
+        CollectedContentPart part = Assert.Single(record.Parts);
+        Assert.Null(part.PlainText);
+        Assert.NotNull(part.Withheld);
+        Assert.Equal(LocalTextTokenizer.Shared.Count(body, "gpt-3.5-turbo").Count, part.Withheld!.MeasuredTokens);
+        Assert.NotEqual(LocalTextTokenizer.Shared.Count(body, null).Count, part.Withheld.MeasuredTokens);
     }
 
     [Fact]
