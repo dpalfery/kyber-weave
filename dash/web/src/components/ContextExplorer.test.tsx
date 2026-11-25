@@ -7,7 +7,13 @@ import { renderToStaticMarkup } from 'react-dom/server'
 import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 
-import { AgentSessionRow, ContextExplorer, SESSION_LIST_COLUMNS } from './ContextExplorer.js'
+import {
+  AgentSessionRow,
+  ContextExplorer,
+  SESSION_LIST_COLUMNS,
+  SESSION_LIST_TRAILING,
+  SessionListHeader,
+} from './ContextExplorer.js'
 import type { KyberSessionSummary } from '../lib/kyberApi.js'
 import { formatCostFigure, normalizeCostBlock, STATUS_EXPLANATIONS } from './SessionCostPanel.js'
 
@@ -598,9 +604,11 @@ describe('ContextExplorer column headers', () => {
   })
 
   it("gives a child row the root rows' column widths, so its right-hand cells line up under the header", () => {
-    const child = session('claude-code', '-child')
+    // The child carries a parent link, so its trailing slot holds a button.
+    const child = { ...session('claude-code', '-child'), parent_session: sampleSession.session_id }
     render(
       <div>
+        <SessionListHeader />
         <AgentSessionRow s={sampleSession} open={false} onToggle={() => {}} onSelectSession={() => {}} />
         <AgentSessionRow s={child} open={false} onToggle={() => {}} onSelectSession={() => {}} isChild />
       </div>,
@@ -616,6 +624,20 @@ describe('ContextExplorer column headers', () => {
       const tokens = SESSION_LIST_COLUMNS[key].split(/\s+/)
       expect(rootCells[index]!.className.split(/\s+/)).toEqual(expect.arrayContaining(tokens))
       expect(childCells[index]!.className.split(/\s+/)).toEqual(expect.arrayContaining(tokens))
+    }
+    // Every row and the header end with the same trailing slot; the child's holds its parent link.
+    const trailingOf = (strip: Element | null) => strip?.querySelector('[data-testid="session-row-trailing"]')
+    const rootStrip = screen.getByTestId(`agent-session-row-${sampleSession.session_id}`).parentElement
+    const childStrip = screen.getByTestId(`agent-session-row-${child.session_id}`).parentElement
+    const headerTrailing = screen.getByTestId('explorer-column-headers').querySelector('[data-testid="session-row-trailing"]')
+    const rootTrailing = trailingOf(rootStrip)
+    const childTrailing = trailingOf(childStrip)
+    expect(rootTrailing).not.toBeNull()
+    expect(childTrailing?.querySelector('[data-testid="parent-session-link"]')).not.toBeNull()
+    expect(rootTrailing?.querySelector('button')).toBeNull()
+    const trailingTokens = SESSION_LIST_TRAILING.split(/\s+/)
+    for (const slot of [headerTrailing, rootTrailing, childTrailing]) {
+      expect(slot?.className.split(/\s+/)).toEqual(expect.arrayContaining(trailingTokens))
     }
     // The child reserves the same leading spacer width as a root row without subagents.
     expect(screen.getAllByTestId('subagent-toggle-spacer')).toHaveLength(2)

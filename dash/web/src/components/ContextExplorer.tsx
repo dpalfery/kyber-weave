@@ -94,6 +94,9 @@ export const SESSION_LIST_COLUMNS = {
   started: 'w-16 shrink-0 text-right',
 } as const
 
+/** The trailing slot after the columns: the child's parent link sits here, an empty spacer elsewhere. */
+export const SESSION_LIST_TRAILING = 'w-40 shrink-0 mr-4 flex justify-end'
+
 /** The subagent toggle's box (its margin, padding and 10px chevron); a row without subagents reserves the same width. */
 const SUBAGENT_TOGGLE_BOX = 'ml-3 shrink-0 p-1'
 
@@ -122,6 +125,7 @@ export function SessionListHeader() {
         <span className={SESSION_LIST_COLUMNS.cost}>Cost</span>
         <span className={SESSION_LIST_COLUMNS.started}>Started</span>
       </div>
+      <span aria-hidden="true" data-testid="session-row-trailing" className={SESSION_LIST_TRAILING} />
     </div>
   )
 }
@@ -285,17 +289,20 @@ export function AgentSessionRow({
           </span>
         </button>
 
-        {parentSession && (
-          <button
-            type="button"
-            data-testid="parent-session-link"
-            onClick={() => onSelectSession(parentSession)}
-            className="mr-4 shrink-0 text-xs text-primary hover:underline font-mono"
-            title={`Parent session: ${parentSession}`}
-          >
-            parent: {formatSessionId(parentSession)}
-          </button>
-        )}
+        {/* The trailing slot is the same width on every row and the header; a child's parent link fills it. */}
+        <span data-testid="session-row-trailing" className={SESSION_LIST_TRAILING}>
+          {parentSession && (
+            <button
+              type="button"
+              data-testid="parent-session-link"
+              onClick={() => onSelectSession(parentSession)}
+              className="shrink-0 text-xs text-primary hover:underline font-mono"
+              title={`Parent session: ${parentSession}`}
+            >
+              parent: {formatSessionId(parentSession)}
+            </button>
+          )}
+        </span>
       </div>
 
       {open && (
