@@ -378,7 +378,16 @@ public partial class MenubarService : IMenubarService
                 return new MenubarInstallOutcome(1, string.Create(CultureInfo.InvariantCulture, $"kyberdash: the tray bundle is missing at {record.Path}"));
             }
 
-            ProcessResult open = await runTool("/usr/bin/open", [record.Path], QuitTimeout, cancellationToken).ConfigureAwait(false);
+            ProcessResult open;
+            try
+            {
+                open = await runTool("/usr/bin/open", [record.Path], QuitTimeout, cancellationToken).ConfigureAwait(false);
+            }
+            catch (Exception exception) when (exception is Win32Exception or IOException or UnauthorizedAccessException or TimeoutException)
+            {
+                return new MenubarInstallOutcome(1, string.Create(CultureInfo.InvariantCulture, $"kyberdash menubar: launch: {exception.Message}"));
+            }
+
             return open.ExitCode == 0
                 ? new MenubarInstallOutcome(0, "kyberdash: the tray launched")
                 : new MenubarInstallOutcome(1, FirstNonEmpty(open.StandardError, string.Create(CultureInfo.InvariantCulture, $"kyberdash menubar: launch: open exited {open.ExitCode}")));

@@ -19,6 +19,7 @@ public class MenubarServiceTrayTests : IDisposable
     private Exception? quitThrows;
     private int? probeExitCode;
     private int killTakesPolls;
+    private Exception? openThrows;
     private Action<string> startDetached = _ => { };
     private readonly List<string> started = [];
     private int pendingPolls;
@@ -248,6 +249,24 @@ public class MenubarServiceTrayTests : IDisposable
         Assert.Equal([Path.Combine(state.Path, "KyberDash.app")], open.Args);
     }
 
+    [Theory]
+    [InlineData(typeof(System.ComponentModel.Win32Exception))]
+    [InlineData(typeof(IOException))]
+    [InlineData(typeof(UnauthorizedAccessException))]
+    [InlineData(typeof(TimeoutException))]
+    public async Task LaunchReportsAFailureOutcomeWhenOpenCannotRunOnMacos(Type exceptionType)
+    {
+        _ = RecordInstall(TrayPlatform.MacOS);
+        Directory.CreateDirectory(Path.Combine(state.Path, "KyberDash.app"));
+        openThrows = (Exception)Activator.CreateInstance(exceptionType, "blocked")!;
+        MenubarService service = Create(TrayPlatform.MacOS);
+
+        MenubarInstallOutcome outcome = await service.LaunchAsync();
+
+        Assert.Equal(1, outcome.ExitCode);
+        Assert.Equal("kyberdash menubar: launch: blocked", outcome.Message);
+    }
+
     [Fact]
     public async Task LaunchStartsTheRecordedExecutableOnWindows()
     {
@@ -382,6 +401,11 @@ public class MenubarServiceTrayTests : IDisposable
     private Task<ProcessResult> RunToolAsync(string fileName, string[] arguments, TimeSpan timeout, CancellationToken cancellationToken)
     {
         calls.Add((fileName, arguments));
+        if (fileName == "/usr/bin/open" && openThrows is not null)
+        {
+            throw openThrows;
+        }
+
         if (fileName == "/usr/bin/pkill")
         {
             if (killStopsTray && killTakesPolls > 0)
