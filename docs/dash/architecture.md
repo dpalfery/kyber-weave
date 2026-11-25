@@ -1296,6 +1296,42 @@ coverage, `CanonPricing.NormalizeHarnessName` alias folding (`claude-desktop -> 
 `ingest_problem` rows and children) atomically; `DeleteSource` cascades by `ON DELETE CASCADE`;
 `WriteProblem` persists a single diagnostic.
 
+### The SQLite source reader
+
+Kilo (`kilo.db`), Warp (`warp.sqlite`), Cursor (`state.vscdb`) and Devin (`sessions.db`) keep their history in SQLite
+stores, and one shared reader, `SqliteHarnessSourceReader`, turns them into the row exports the mappers already parse
+(`dash/server/KyberDash.Data/Collector/`). Each harness supplies an `ISqliteConversationSource` that lists its
+conversations and writes one conversation's export; the reader owns discovery, the open rule, the limits and the problems.
+
+- **One unit per conversation.** The `SourceKey` is `<database full path>#<conversation id>`, the revision token is per
+  conversation (an unchanged conversation keeps its checkpoint and is skipped), and the source-root label is the database
+  file name. A whole-database export would put gigabytes in one string. Kilo's unit is a root session with its non-archived
+  subagent sessions; Cursor's is one composer; Warp's and Devin's are one conversation and one session.
+- **Parser contract "4".** Every unit of `kilo-sqlite`, `warp-sqlite`, `cursor-vscdb` and `devin-sqlite` is stamped
+  `HarnessSourceRegistry.SqliteRowExportParserContractVersion`, so a checkpoint written by an older build is re-read.
+- **Read-only open with fallbacks.** The database opens `Mode=ReadOnly` with a 1000 ms busy timeout. When the directory is
+  read-only or the file is locked, the reader reopens it as an immutable URI when no non-empty `-wal` exists; otherwise it
+  copies the database and its `-wal` into `<state directory>/sqlite-ro` (beside `canon.db`, so `KYBER_CANON_DB` keeps test
+  copies out of the home folder), refuses a copy whose source changed during the copy, and opens the copy read-only. A
+  missing file or a permission denial is not retried. The decision is the pure `SqliteSourceOpenPolicy`; the
+  `MicrosoftDataSqliteHarnessSource` adapter (over `Microsoft.Data.Sqlite.Core` and the system SQLite) only executes it.
+- **Limits.** `HarnessSqliteLimits`: 64 MiB per export, 4 GiB per database copy, a 30 s command timeout, a 1000 ms busy
+  timeout. A hit is a recorded problem; a conversation over the export cap is refused, never truncated.
+- **Problems, never silence.** Discovery failures are `CollectedProblem` warnings keyed
+  `sqlite-source:<code>:<harness>:<path>`: `SQLITE_SOURCE_UNREADABLE` (the database cannot be opened or read) and
+  `SQLITE_SOURCE_SCHEMA_MISSING` (a required table or column is absent, so the database is refused rather than half read).
+  Read failures fail only their unit with `SQLITE_EXPORT_CAP_EXCEEDED` or `SQLITE_COPY_CAP_EXCEEDED`. An Antigravity `.pb`
+  file, whose format has no schema here, records `ANTIGRAVITY_PB_UNREADABLE` instead of an empty batch. See the
+  [runbook](runbook.md) for the operator's response.
+- **Time window.** Discovery skips a conversation last active before the import's start (Kilo's newest session in the
+  tree, Warp `last_modified_at`, Devin `last_activity_at`). Cursor does not filter: it lists composers from the bubble keys
+  and relies on the revision token.
+- **What each harness reports.** A Cursor turn is one user bubble plus the assistant bubbles that follow it; a Cursor
+  workspace with no `composer.composerData` row stays silent. Kilo's reported input is fresh plus cache-read plus
+  cache-write tokens. Warp exports one total per model, so there is no input/output split, and its blocks are read once per
+  database per discovery pass. Devin `total_time_ms` becomes the record's reported duration. A value the harness did not
+  report is stored as not measured, never estimated (see the [field register](field-register.md)).
+
 ## Analytics read path, error envelope, and stored-fields surface
 
 `KyberBridgeEngine` (`dash/server/KyberDash.Application/KyberBridgeEngine.cs`) reads only the

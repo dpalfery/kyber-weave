@@ -13,8 +13,9 @@ namespace KyberDash.Data.Tests.Collector;
 /// next refresh re-reads the unit.
 /// </summary>
 /// <remarks>
-/// The <c>droid</c>, <c>cursor</c> and <c>warp</c> mappers stopped producing split or text-derived
-/// token counts, so their units declare contract "2": a checkpoint written under "1" must not be
+/// The <c>droid</c> and <c>cursor</c> file mappers stopped producing split or text-derived
+/// token counts, so their units declare contract "2" (the SQLite row exports of <c>warp</c>, <c>kilo</c>,
+/// <c>devin</c> and <c>cursor</c> declare their own, pinned in <c>HarnessSourceRegistryTests</c>): a checkpoint written under "1" must not be
 /// reused, or the estimated rows it covers would stay in the store. The <c>copilot-cli</c> mapper
 /// stores fresh input net of cache tokens and declares its own contract version for the same reason, and
 /// <c>roo-code</c> declares "3" because its task id now comes from the task directory. Every other
@@ -25,14 +26,14 @@ public class ParserContractVersionTests
     private static readonly string HomeRoot = Path.Combine(Path.GetPathRoot(Environment.CurrentDirectory) ?? "/", "fake-home");
     private static readonly string StateRoot = Path.Combine(HomeRoot, ".kyberdash");
     private static readonly DateTimeOffset BaselineUtc = new(2026, 11, 24, 12, 0, 0, TimeSpan.Zero);
-    private static readonly string[] ChangedHarnesses = ["droid", "cursor", "warp"];
+    private static readonly string[] ChangedHarnesses = ["droid", "cursor"];
     private const string RooHarnessId = "roo-code";
     private const string CopilotCliHarnessId = "copilot-cli";
 
     [Fact]
-    public void DiscoverAll_StampsVersionTwoOnDroidCursorAndWarpUnitsAndVersionOneOnEveryOtherRegistration()
+    public void DiscoverAll_StampsVersionTwoOnDroidAndCursorFileUnitsAndVersionOneOnEveryOtherRegistration()
     {
-        SourceDiscoveryResult result = new HarnessSourceRegistry().DiscoverAll(
+        SourceDiscoveryResult result = new HarnessSourceRegistry(new InMemoryHarnessSqliteSource()).DiscoverAll(
             new SourceDiscoveryContext(HomeRoot, StateRoot, FilesForEveryRegistration()));
 
         foreach (string harnessId in ChangedHarnesses)
@@ -52,7 +53,7 @@ public class ParserContractVersionTests
 
         List<SourceUnit> others = [.. result.Sources.Where(static unit => !ChangedHarnesses.Contains(unit.HarnessId) && unit.HarnessId != RooHarnessId && unit.HarnessId != CopilotCliHarnessId)];
         Assert.True(
-            others.Select(static unit => unit.HarnessId).Distinct(StringComparer.Ordinal).Count() >= 13,
+            others.Select(static unit => unit.HarnessId).Distinct(StringComparer.Ordinal).Count() >= 11,
             "The fixture should discover units for most other registrations.");
         Assert.All(others, static unit => Assert.Equal(HarnessSourceRegistry.DefaultParserContractVersion, unit.ParserContractVersion));
         Assert.Equal("1", HarnessSourceRegistry.DefaultParserContractVersion);
@@ -61,7 +62,6 @@ public class ParserContractVersionTests
     [Theory]
     [InlineData("droid")]
     [InlineData("cursor")]
-    [InlineData("warp")]
     [InlineData("copilot-cli")]
     public void CheckpointIsReusable_RefusesAVersionOneCheckpointForAChangedHarnessUnit(string harnessId)
     {
@@ -88,7 +88,7 @@ public class ParserContractVersionTests
 
     private static SourceUnit DiscoveredUnit(string harnessId)
     {
-        SourceDiscoveryResult result = new HarnessSourceRegistry().DiscoverForHarness(
+        SourceDiscoveryResult result = new HarnessSourceRegistry(new InMemoryHarnessSqliteSource()).DiscoverForHarness(
             harnessId,
             new SourceDiscoveryContext(HomeRoot, StateRoot, FilesForEveryRegistration()));
         return result.Sources.First(unit => unit.HarnessId == harnessId);
@@ -203,6 +203,14 @@ public class ParserContractVersionTests
             files.ContainsKey(Normalize(filePath))
                 ? "{}"
                 : throw new FileNotFoundException("Memory file not found.", filePath);
+
+        public string ReadAllText(string filePath, long maxBytes)
+        {
+            string text = ReadAllText(filePath);
+            return System.Text.Encoding.UTF8.GetByteCount(text) <= maxBytes
+                ? text
+                : throw new InvalidDataException($"'{filePath}' holds more than {maxBytes} bytes.");
+        }
 
         public string GetFullPath(string path) => Normalize(path);
 

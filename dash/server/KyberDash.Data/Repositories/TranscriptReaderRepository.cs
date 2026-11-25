@@ -80,7 +80,7 @@ public class TranscriptReaderRepository : ITranscriptReaderRepository
                 ? Path.Combine(this.homeDirectory, CanonDbPath.DefaultDirectoryName)
                 : ServerStateRepository.ResolveStateDirectory();
         this.fileSystem = fileSystem ?? PhysicalHarnessFileSystem.Instance;
-        sourceRegistry = new HarnessSourceRegistry();
+        sourceRegistry = new HarnessSourceRegistry(HarnessSourceRegistry.CreateSqliteSource(this.stateDirectory));
     }
 
     /// <inheritdoc />

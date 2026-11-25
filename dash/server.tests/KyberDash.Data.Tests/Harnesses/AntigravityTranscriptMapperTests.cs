@@ -32,12 +32,9 @@ public class AntigravityTranscriptMapperTests
     }
 
     [Theory]
-    [InlineData(null, "antigravity-jsonl")]
     [InlineData("", "antigravity-jsonl")]
     [InlineData("   \r\n\t ", "antigravity-jsonl")]
-    [InlineData(null, "antigravity-pb")]
-    [InlineData("binary-placeholder", "antigravity-pb")]
-    public void Map_ReturnsEmptyBatch_WhenRawTextIsEmptyOrFormatIsBinary(string? rawText, string format)
+    public void Map_ReturnsEmptyBatch_WhenRawTextIsWhitespace(string rawText, string format)
     {
         AntigravityTranscriptMapper mapper = new();
         NativeSourceUnit unit = CreateUnit(

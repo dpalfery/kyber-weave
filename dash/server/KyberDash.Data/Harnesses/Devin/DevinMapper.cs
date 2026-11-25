@@ -49,6 +49,7 @@ public record DevinStepMetrics(
 /// <param name="OutputTokens">Legacy output tokens (<c>metrics.output_tokens</c>), when present.</param>
 /// <param name="CacheCreationTokens">Legacy cache-creation tokens (<c>metrics.cache_creation_tokens</c>), when present.</param>
 /// <param name="CacheReadTokens">Legacy cache-read tokens (<c>metrics.cache_read_tokens</c>), when present.</param>
+/// <param name="TotalTimeMs">Reported call duration (<c>metadata.metrics.total_time_ms</c> on a <c>message_nodes</c> assistant node), when present; never estimated.</param>
 public record DevinStepMetadata(
     string? CreatedAt,
     double? CommittedAcuCost,
@@ -57,7 +58,8 @@ public record DevinStepMetadata(
     double? InputTokens,
     double? OutputTokens,
     double? CacheCreationTokens,
-    double? CacheReadTokens);
+    double? CacheReadTokens,
+    double? TotalTimeMs = null);
 
 /// <summary>
 /// Native <c>extra</c> object on a Devin transcript step, carrying the ATIF v1.7
@@ -109,12 +111,18 @@ public record DevinParseProblem(
 /// <param name="AgentModelName">Transcript agent model name (<c>agent.model_name</c>), or <see langword="null"/> when absent.</param>
 /// <param name="Steps">Transcript steps in order.</param>
 /// <param name="ParseProblems">Non-fatal parse diagnostics.</param>
+/// <param name="Title">Session title (<c>title</c> on a <c>message_nodes</c> export), or <see langword="null"/> when absent.</param>
+/// <param name="WorkingDirectory">Session working directory (<c>working_directory</c> on a <c>message_nodes</c> export), or <see langword="null"/> when absent.</param>
+/// <param name="FromMessageNodes">Whether the document came from a <c>message_nodes</c> export, where an assistant step without metrics still maps to a token-less record.</param>
 public record DevinTranscriptDocument(
     bool IsValid,
     string? SessionId,
     string? AgentModelName,
     IReadOnlyList<DevinStep> Steps,
-    IReadOnlyList<DevinParseProblem> ParseProblems);
+    IReadOnlyList<DevinParseProblem> ParseProblems,
+    string? Title = null,
+    string? WorkingDirectory = null,
+    bool FromMessageNodes = false);
 
 /// <summary>
 /// Offline short display-name resolution porting the pricing-state-free core of
@@ -268,12 +276,13 @@ internal static partial class DevinModelShortNames
 /// <see cref="CollectedBatch"/> records without touching the filesystem or ambient clock.
 /// </summary>
 /// <remarks>
-/// Only the transcript surface is ported: usage-bearing non-user steps map to <c>llm.invoke</c>
-/// records with harness-reported tokens, tool calls map to child <c>tool.invoke</c> spans, and the
-/// nearest preceding user message maps to the <c>user_message</c> content part. Live-only surfaces
-/// (<c>sessions.db</c> project/title/model/timestamp enrichment and hidden-session filtering,
-/// discovery, the once-per-process unpriced-rate stderr warning, and fiscal config reads) have no
-/// offline input and are not persisted. ACU pricing needs the caller-supplied
+/// Two surfaces are mapped: the transcript JSON and the <c>sessions.db</c> <c>message_nodes</c>
+/// export, which also carries the session title and working directory. Usage-bearing non-user steps
+/// map to <c>llm.invoke</c> records with harness-reported tokens, tool calls map to child
+/// <c>tool.invoke</c> spans, and the nearest preceding user message maps to the
+/// <c>user_message</c> content part. Project enrichment, hidden-session filtering (hidden sessions
+/// are ingested), the once-per-process unpriced-rate stderr warning, and fiscal config reads are
+/// not persisted. ACU pricing needs the caller-supplied
 /// <c>devin.acuUsdRate</c>; without it costs stay unreported (never <c>$0</c>) so rate-table
 /// estimation applies downstream. Assistant message text and observations carry no call-level
 /// fields in the deleted provider and are dropped.
@@ -349,6 +358,12 @@ public partial class DevinMapper : IHarnessMapper
                 ? ReadOptionalString(agentEl, "model_name")
                 : null;
 
+            if (root.TryGetProperty("message_nodes", out JsonElement nodesEl)
+                && nodesEl.ValueKind == JsonValueKind.Array)
+            {
+                return ParseMessageNodes(root, nodesEl, sessionId);
+            }
+
             if (!root.TryGetProperty("steps", out JsonElement stepsEl)
                 || stepsEl.ValueKind != JsonValueKind.Array)
             {
@@ -389,6 +404,18 @@ public partial class DevinMapper : IHarnessMapper
         ArgumentNullException.ThrowIfNull(unit.Unit);
 
         CollectedSource source = new(DevinHarnessId, unit.Unit.Kind, unit.Unit.SourceKey);
+        if (unit.RawText is null)
+        {
+            return new CollectedBatch(
+                source,
+                [],
+                [],
+                BuildProblems(
+                    [new DevinParseProblem(0, MalformedDocumentCode, $"Skipping Devin source {unit.Unit.SourceKey}: the reader supplied no payload (null).")],
+                    unit.Unit.SourceKey,
+                    importedAtUtc));
+        }
+
         if (string.IsNullOrWhiteSpace(unit.RawText))
         {
             return new CollectedBatch(source, [], [], []);
@@ -420,6 +447,12 @@ public partial class DevinMapper : IHarnessMapper
             }
 
             DevinStepUsage? usage = GetUsage(step);
+            if (usage is null && document.FromMessageNodes)
+            {
+                // D9: an assistant node without metrics is still a call; it carries no token rows.
+                usage = new DevinStepUsage(0, null, null, null, null);
+            }
+
             if (usage is null)
             {
                 continue;
@@ -474,7 +507,7 @@ public partial class DevinMapper : IHarnessMapper
                 traceId,
                 model,
                 null,
-                null,
+                ToReportedDurationMs(step.Metadata?.TotalTimeMs),
                 tokens,
                 reportedCost,
                 parts,
@@ -508,8 +541,10 @@ public partial class DevinMapper : IHarnessMapper
                 SessionKey: sessionId,
                 HarnessId: DevinHarnessId,
                 NativeSessionId: sessionId,
-                Workspace: null,
-                Title: null,
+                Workspace: SafeOptionalText(document.WorkingDirectory) is { } workingDirectory
+                    ? new CollectedWorkspace(workingDirectory, null, null)
+                    : null,
+                Title: SafeOptionalText(document.Title),
                 ReportedUsage: []),
         ];
 
@@ -599,6 +634,145 @@ public partial class DevinMapper : IHarnessMapper
             AgentModelName: null,
             Steps: [],
             ParseProblems: [new DevinParseProblem(0, MalformedDocumentCode, message)]);
+
+    /// <summary>
+    /// Parses the Devin <c>sessions.db</c> export (a root holding a <c>message_nodes</c> array) into
+    /// the transcript model: <c>user</c> nodes become user-input steps, <c>assistant</c> nodes become
+    /// steps with metrics from <c>metadata.metrics</c>, and <c>tool</c> and <c>system</c> nodes emit
+    /// no step. A node whose <c>chat_message</c> is not an object, or whose role is unknown, is one
+    /// problem; the other nodes still map.
+    /// </summary>
+    private static DevinTranscriptDocument ParseMessageNodes(JsonElement root, JsonElement nodesEl, string? sessionId)
+    {
+        string? exportModel = ReadOptionalString(root, "model");
+        List<DevinStep> steps = [];
+        List<DevinParseProblem> problems = [];
+        int index = 0;
+        foreach (JsonElement nodeEl in nodesEl.EnumerateArray())
+        {
+            index++;
+            if (nodeEl.ValueKind != JsonValueKind.Object
+                || !nodeEl.TryGetProperty("chat_message", out JsonElement chatEl)
+                || chatEl.ValueKind != JsonValueKind.Object)
+            {
+                problems.Add(new DevinParseProblem(
+                    index,
+                    MalformedDocumentCode,
+                    string.Create(CultureInfo.InvariantCulture, $"Skipping Devin message node {index}: chat_message is not an object.")));
+                continue;
+            }
+
+            string? role = ReadOptionalString(chatEl, "role");
+            string stepId = ReadOptionalString(chatEl, "message_id")
+                ?? ReadOptionalString(nodeEl, "node_id")
+                ?? string.Create(CultureInfo.InvariantCulture, $"step-{index}");
+            string? content = chatEl.TryGetProperty("content", out JsonElement contentEl)
+                ? NormalizeMessageValue(contentEl)
+                : null;
+
+            switch (role)
+            {
+                case "tool":
+                case "system":
+                    break;
+                case "user":
+                    steps.Add(new DevinStep(
+                        stepId,
+                        role,
+                        null,
+                        content,
+                        [],
+                        null,
+                        null,
+                        new DevinStepMetadata(null, null, null, true, null, null, null, null)));
+                    break;
+                case "assistant":
+                    steps.Add(ParseAssistantNode(chatEl, stepId, content, exportModel));
+                    break;
+                default:
+                    problems.Add(new DevinParseProblem(
+                        index,
+                        MalformedDocumentCode,
+                        string.Create(CultureInfo.InvariantCulture, $"Skipping Devin message node {index}: unrecognised role.")));
+                    break;
+            }
+        }
+
+        return new DevinTranscriptDocument(
+            IsValid: true,
+            SessionId: sessionId,
+            AgentModelName: exportModel,
+            Steps: steps,
+            ParseProblems: problems,
+            Title: ReadOptionalString(root, "title"),
+            WorkingDirectory: ReadOptionalString(root, "working_directory"),
+            FromMessageNodes: true);
+    }
+
+    /// <remarks>
+    /// <c>(double)long.MaxValue</c> rounds up to 2^63, which no <see cref="long"/> holds, so the upper bound is
+    /// strict: a value at or beyond it is out of range and becomes no duration, never a clamped one.
+    /// </remarks>
+    private static long? ToReportedDurationMs(double? totalTimeMs) =>
+        totalTimeMs is { } value && double.IsFinite(value) && value >= 0 && value < (double)long.MaxValue
+            ? (long)Math.Round(value, MidpointRounding.AwayFromZero)
+            : null;
+
+    private static DevinStep ParseAssistantNode(JsonElement chatEl, string stepId, string? content, string? exportModel)
+    {
+        List<DevinToolCall> toolCalls = [];
+        if (chatEl.TryGetProperty("tool_calls", out JsonElement toolsEl)
+            && toolsEl.ValueKind == JsonValueKind.Array)
+        {
+            foreach (JsonElement toolEl in toolsEl.EnumerateArray())
+            {
+                string? name = toolEl.ValueKind == JsonValueKind.Object ? ReadOptionalString(toolEl, "name") : null;
+                if (string.IsNullOrWhiteSpace(name))
+                {
+                    continue;
+                }
+
+                string? argumentsJson = toolEl.TryGetProperty("arguments", out JsonElement argsEl)
+                    && argsEl.ValueKind is not (JsonValueKind.Null or JsonValueKind.Undefined)
+                    ? argsEl.GetRawText()
+                    : null;
+                toolCalls.Add(new DevinToolCall(ReadOptionalString(toolEl, "id"), name, argumentsJson));
+            }
+        }
+
+        string? createdAt = null;
+        string? generationModel = null;
+        double? input = null;
+        double? output = null;
+        double? cacheCreation = null;
+        double? cacheRead = null;
+        double? totalTimeMs = null;
+        if (chatEl.TryGetProperty("metadata", out JsonElement metadataEl)
+            && metadataEl.ValueKind == JsonValueKind.Object)
+        {
+            createdAt = ReadStringOnly(metadataEl, "created_at");
+            generationModel = ReadOptionalString(metadataEl, "generation_model");
+            if (metadataEl.TryGetProperty("metrics", out JsonElement metricsEl)
+                && metricsEl.ValueKind == JsonValueKind.Object)
+            {
+                input = ReadOptionalDouble(metricsEl, "input_tokens");
+                output = ReadOptionalDouble(metricsEl, "output_tokens");
+                cacheCreation = ReadOptionalDouble(metricsEl, "cache_creation_tokens");
+                cacheRead = ReadOptionalDouble(metricsEl, "cache_read_tokens");
+                totalTimeMs = ReadOptionalDouble(metricsEl, "total_time_ms");
+            }
+        }
+
+        return new DevinStep(
+            stepId,
+            "assistant",
+            generationModel ?? exportModel,
+            content,
+            toolCalls,
+            null,
+            null,
+            new DevinStepMetadata(createdAt, null, generationModel, false, input, output, cacheCreation, cacheRead, totalTimeMs));
+    }
 
     private static DevinStep ParseStep(JsonElement stepEl, int index)
     {
@@ -743,11 +917,13 @@ public partial class DevinMapper : IHarnessMapper
 
     private static string? NormalizeStepMessage(JsonElement stepEl)
     {
-        if (!stepEl.TryGetProperty("message", out JsonElement messageEl))
-        {
-            return null;
-        }
+        return stepEl.TryGetProperty("message", out JsonElement messageEl)
+            ? NormalizeMessageValue(messageEl)
+            : null;
+    }
 
+    private static string? NormalizeMessageValue(JsonElement messageEl)
+    {
         if (messageEl.ValueKind == JsonValueKind.String)
         {
             string? text = messageEl.GetString()?.Trim();

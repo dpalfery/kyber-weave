@@ -1638,10 +1638,9 @@ npm --prefix dash run build:web
 npx --prefix dash playwright test --config dash/playwright.isolated.config.ts dash/e2e/file-harness-dashboard.spec.ts
 ```
 
-**Known gap.** The four SQLite-format harnesses (`kilo-shared-runtime`, `warp`, `cursor`, `devin`) are marked expected failures
-(`test.fail`) in the file-harness suite: the C# engine has no SQLite source reader since the engine rewrite (#612), so their
-import yields nothing. The reader fix lives on branch `claude/fix/sqlite-harness-readers`; when it lands the marker is
-removed and the tests must pass.
+**SQLite harnesses.** The four SQLite-format harnesses (`kilo-shared-runtime`, `warp`, `cursor`, `devin`) are imported by the
+C# SQLite source reader, so their file-harness tests are ordinary passing tests with no `test.fail` marker. A SQLite source
+that cannot be read is a recorded warning problem, never a silent empty import; see the problem codes below.
 
 **Import outcomes.** A folder import, a refresh or a maintenance pass in which some source units fail (including the
 plugin-session pass and the one-time no-estimate re-read) reports `partial` with the number of `failedUnits` instead of
@@ -2018,6 +2017,23 @@ here.
 - **Fix**: on macOS grant Full Disk Access to the process reading Warp. There is no TCC
   workaround and no retry as another user. Check cache-directory ownership if the denial
   is kyberdash's own write.
+
+### 8a. A SQLite harness import records SQLITE_SOURCE_UNREADABLE or SQLITE_SOURCE_SCHEMA_MISSING
+
+Applies to Kilo (`kilo.db`), Warp (`warp.sqlite`), Cursor (`state.vscdb`) and Devin (`sessions.db`).
+
+- **`SQLITE_SOURCE_UNREADABLE`**: the database could not be opened or read. The reader opens it read-only; when the
+  directory is read-only or the file is locked it retries as an immutable open, then as a copy under
+  `<state directory>/sqlite-ro`. A missing file or a permission denial is not retried. **Fix**: on macOS grant Full Disk
+  Access to the process reading Warp's Group Containers folder; otherwise fix the file's owner and permissions, or close the
+  harness that holds the lock. The problem names the database path.
+- **`SQLITE_SOURCE_SCHEMA_MISSING`**: the database lacks a table or column the reader requires, so it is refused rather
+  than read in part. **Fix**: normally the harness was upgraded to a schema this build does not know; update KyberDash.
+  The problem names what is missing.
+- **`SQLITE_EXPORT_CAP_EXCEEDED`** and **`SQLITE_COPY_CAP_EXCEEDED`**: one conversation larger than 64 MiB, or a
+  database plus its `-wal` larger than 4 GiB to copy. The unit is refused, not truncated, because a truncated conversation
+  would under-report. These fail only the affected unit.
+- A Cursor workspace whose `state.vscdb` has no `composer.composerData` row never used chat; it is silent, not a problem.
 
 ### 9. A model shows "no published rate"
 

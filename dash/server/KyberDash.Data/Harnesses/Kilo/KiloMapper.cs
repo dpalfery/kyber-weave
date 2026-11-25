@@ -226,6 +226,18 @@ public class KiloMapper : IHarnessMapper
 
         string harnessId = ResolveHarnessId(unit.Unit.HarnessId);
         CollectedSource source = new(harnessId, unit.Unit.Kind, unit.Unit.SourceKey);
+        if (unit.RawText is null)
+        {
+            // A null payload is a source the reader could not give us content for, not an empty session: say so.
+            List<CollectedProblem> nullProblems = BuildProblems(
+                [Fail($"source '{unit.Unit.SourceKey}' carried no readable content")],
+                unit.Unit.SourceKey,
+                unit.Unit.SourceKey,
+                harnessId,
+                importedAtUtc);
+            return new CollectedBatch(source, [], [], nullProblems);
+        }
+
         if (string.IsNullOrWhiteSpace(unit.RawText))
         {
             return new CollectedBatch(source, [], [], []);
@@ -572,7 +584,7 @@ public class KiloMapper : IHarnessMapper
                 AgentInstanceId: null,
                 ToolDefinitions: [],
                 Signals: new CollectedRecordSignals(null, null, null, null),
-                ReportedInputTokens: request.TokensIn,
+                ReportedInputTokens: request.TokensIn + request.CacheReads + request.CacheWrites,
                 ReportedOutputTokens: request.TokensOut));
         }
 
@@ -704,7 +716,7 @@ public class KiloMapper : IHarnessMapper
             AgentInstanceId: null,
             ToolDefinitions: [],
             Signals: new CollectedRecordSignals(null, null, null, null),
-            ReportedInputTokens: message.Data.InputTokens,
+            ReportedInputTokens: message.Data.InputTokens + message.Data.CacheReadTokens + message.Data.CacheWriteTokens,
             ReportedOutputTokens: message.Data.OutputTokens);
 
         List<CollectedRecord> records = [parent];

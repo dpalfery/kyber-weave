@@ -205,7 +205,7 @@ public class DevinWarpMapperTests
             conversationId: "conv-tok");
 
         CollectedBatch batch = new WarpMapper().Map(
-            MakeNativeUnit("warp", "/home/u/Library/warp.sqlite:conv-tok", rawText),
+            MakeNativeUnit("warp", "/home/u/Library/warp.sqlite#conv-tok", rawText),
             BaselineUtc);
 
         CollectedRecord record = Assert.Single(batch.Records);
@@ -483,7 +483,7 @@ public class DevinWarpMapperTests
     // ------------------------------------------------------------------
 
     [Fact]
-    public void Map_KeepsPrimaryAgentTotalsAsSessionUsageAndLeavesExchangesNotMeasured()
+    public void Map_CountsEveryModelsFullReportedTotalAsSessionUsageAndLeavesExchangesNotMeasured()
     {
         string rawText = BuildWarpExport(
             conversationData: """{"conversation_usage_metadata":{"token_usage":[{"model_id":"GPT-5.3 Codex (medium reasoning)","warp_tokens":300,"byok_tokens":0,"warp_token_usage_by_category":{"primary_agent":300},"byok_token_usage_by_category":{}},{"model_id":"Claude Haiku 4.5","warp_tokens":90,"byok_tokens":0,"warp_token_usage_by_category":{"full_terminal_use":90},"byok_token_usage_by_category":{}}]}}""",
@@ -495,7 +495,7 @@ public class DevinWarpMapperTests
             blocks: [],
             conversationId: "conv-1");
 
-        NativeSourceUnit unit = MakeNativeUnit("warp", "/home/u/Library/warp.sqlite:conv-1", rawText);
+        NativeSourceUnit unit = MakeNativeUnit("warp", "/home/u/Library/warp.sqlite#conv-1", rawText);
         CollectedBatch batch = new WarpMapper().Map(unit, BaselineUtc);
 
         Assert.Equal("warp", new WarpMapper().HarnessId);
@@ -519,19 +519,23 @@ public class DevinWarpMapperTests
         Assert.All(batch.Records, static r => Assert.Empty(r.Tokens));
         Assert.All(batch.Records, static r => Assert.Null(r.ReportedInputTokens));
         Assert.All(batch.Records, static r => Assert.Null(r.ReportedOutputTokens));
-        CollectedModelUsage usage = Assert.Single(session.ReportedUsage);
-        Assert.Equal(new CollectedModelUsage(0, "gpt-5.3-codex", TokenClass.Total, 300L), usage);
+        Assert.Equal(
+            [
+                new CollectedModelUsage(0, "gpt-5.3-codex", TokenClass.Total, 300L),
+                new CollectedModelUsage(0, "claude-haiku-4-5", TokenClass.Total, 90L),
+            ],
+            session.ReportedUsage);
         Assert.All(batch.Records, static r => Assert.Equal("conv-1", r.SessionKey));
 
         InMemoryRelationalStore store = new();
         store.WriteBatch(batch);
         Assert.Equal(2, store.CountRecords("warp"));
         Assert.Empty(store.TokenCounts(sessionKey: "conv-1"));
-        Assert.Equal(300L, Assert.Single(store.SessionModelUsages("conv-1")).Usage.Count);
+        Assert.Equal(390L, store.SessionModelUsages("conv-1").Sum(static u => u.Usage.Count));
     }
 
     [Fact]
-    public void Map_FallsBackToPerModelConversationTotalsWhenNoPrimaryAgentCategoryIsReported()
+    public void Map_SumsPerModelConversationTotalsWhenNoCategoryIsReported()
     {
         string rawText = BuildWarpExport(
             conversationData: """{"conversation_usage_metadata":{"token_usage":[{"model_id":"GPT-5.3 Codex (medium reasoning)","warp_tokens":70,"byok_tokens":5,"warp_token_usage_by_category":{},"byok_token_usage_by_category":{}},{"model_id":"Claude Sonnet 4.5","warp_tokens":40,"byok_tokens":0},{"model_id":"GPT-5.3 Codex (medium reasoning)","warp_tokens":25,"byok_tokens":0}]}}""",
@@ -543,7 +547,7 @@ public class DevinWarpMapperTests
             conversationId: "conv-5");
 
         CollectedBatch batch = new WarpMapper().Map(
-            MakeNativeUnit("warp", "/home/u/Library/warp.sqlite:conv-5", rawText),
+            MakeNativeUnit("warp", "/home/u/Library/warp.sqlite#conv-5", rawText),
             BaselineUtc);
 
         CollectedSession session = Assert.Single(batch.Sessions);
@@ -553,6 +557,69 @@ public class DevinWarpMapperTests
         CollectedRecord record = Assert.Single(batch.Records);
         Assert.Empty(record.Tokens);
         Assert.Null(record.ReportedInputTokens);
+    }
+
+    [Fact]
+    public void Map_EntryWithNoModelAndTheLargestTotal_GoesToTheLargestNamedModel()
+    {
+        string rawText = BuildWarpExport(
+            conversationData: """{"conversation_usage_metadata":{"token_usage":[{"warp_tokens":300,"byok_tokens":0},{"model_id":"Claude Haiku 4.5","warp_tokens":90,"byok_tokens":0}]}}""",
+            queries:
+            [
+                ("ex-1", "2026-05-18 10:00:00.000000", """[{"Query":{"text":"prompt"}}]""", "auto-efficient", null, "\"Completed\""),
+            ],
+            blocks: [],
+            conversationId: "conv-6");
+
+        CollectedBatch batch = new WarpMapper().Map(
+            MakeNativeUnit("warp", "/home/u/Library/warp.sqlite#conv-6", rawText),
+            BaselineUtc);
+
+        CollectedSession session = Assert.Single(batch.Sessions);
+        Assert.Equal([new CollectedModelUsage(0, "claude-haiku-4-5", TokenClass.Total, 390L)], session.ReportedUsage);
+        Assert.Equal("claude-haiku-4-5", Assert.Single(batch.Records).Model);
+    }
+
+    [Fact]
+    public void Map_TokenCountWrittenAsADoublePastLongMax_RecordsAProblemAndReportsNoUsage()
+    {
+        string rawText = BuildWarpExport(
+            conversationData: """{"conversation_usage_metadata":{"token_usage":[{"model_id":"Claude Haiku 4.5","warp_tokens":1e20,"byok_tokens":0}]}}""",
+            queries:
+            [
+                ("ex-1", "2026-05-18 10:00:00.000000", """[{"Query":{"text":"prompt"}}]""", "auto-efficient", null, "\"Completed\""),
+            ],
+            blocks: [],
+            conversationId: "conv-8");
+
+        CollectedBatch batch = new WarpMapper().Map(
+            MakeNativeUnit("warp", "/home/u/Library/warp.sqlite#conv-8", rawText),
+            BaselineUtc);
+
+        Assert.Empty(Assert.Single(batch.Sessions).ReportedUsage);
+        Assert.Equal(WarpMapper.MalformedDocumentCode, Assert.Single(batch.Problems).Code);
+    }
+
+    [Fact]
+    public void Map_TokenTotalPastLongMax_RecordsAProblemAndReportsNoUsage()
+    {
+        string rawText = BuildWarpExport(
+            conversationData: """{"conversation_usage_metadata":{"token_usage":[{"model_id":"Claude Haiku 4.5","warp_tokens":9223372036854775807,"byok_tokens":1}]}}""",
+            queries:
+            [
+                ("ex-1", "2026-05-18 10:00:00.000000", """[{"Query":{"text":"prompt"}}]""", "auto-efficient", null, "\"Completed\""),
+            ],
+            blocks: [],
+            conversationId: "conv-7");
+
+        CollectedBatch batch = new WarpMapper().Map(
+            MakeNativeUnit("warp", "/home/u/Library/warp.sqlite#conv-7", rawText),
+            BaselineUtc);
+
+        Assert.Empty(Assert.Single(batch.Sessions).ReportedUsage);
+        CollectedProblem problem = Assert.Single(batch.Problems);
+        Assert.Equal(WarpMapper.MalformedDocumentCode, problem.Code);
+        Assert.Contains("token", problem.Message, StringComparison.OrdinalIgnoreCase);
     }
 
     [Fact]
@@ -569,7 +636,7 @@ public class DevinWarpMapperTests
             conversationId: "conv-2");
 
         CollectedBatch batch = new WarpMapper().Map(
-            MakeNativeUnit("warp", "/home/u/Library/warp.sqlite:conv-2", rawText),
+            MakeNativeUnit("warp", "/home/u/Library/warp.sqlite#conv-2", rawText),
             BaselineUtc);
 
         List<CollectedRecord> parents = batch.Records.Where(static r => r.Op == RecordOp.LlmInvoke).ToList();
@@ -597,7 +664,7 @@ public class DevinWarpMapperTests
             conversationId: "conv-3");
 
         CollectedBatch batch = new WarpMapper().Map(
-            MakeNativeUnit("warp", "/home/u/Library/warp.sqlite:conv-3", rawText),
+            MakeNativeUnit("warp", "/home/u/Library/warp.sqlite#conv-3", rawText),
             BaselineUtc);
 
         Assert.Empty(batch.Records);
@@ -617,7 +684,7 @@ public class DevinWarpMapperTests
             conversationId: "conv-4");
 
         CollectedBatch batch = new WarpMapper().Map(
-            MakeNativeUnit("warp", "/home/u/Library/warp.sqlite:conv-4", rawText),
+            MakeNativeUnit("warp", "/home/u/Library/warp.sqlite#conv-4", rawText),
             BaselineUtc);
 
         Assert.Equal(2, batch.Records.Count);
@@ -634,13 +701,70 @@ public class DevinWarpMapperTests
     public void Map_EmitsProblemForMalformedWarpExports(string rawText)
     {
         CollectedBatch batch = new WarpMapper().Map(
-            MakeNativeUnit("warp", "/home/u/Library/warp.sqlite:conv-9", rawText),
+            MakeNativeUnit("warp", "/home/u/Library/warp.sqlite#conv-9", rawText),
             BaselineUtc);
 
         Assert.Empty(batch.Records);
         Assert.Empty(batch.Sessions);
         CollectedProblem problem = Assert.Single(batch.Problems);
         Assert.Equal(WarpMapper.MalformedDocumentCode, problem.Code);
+    }
+
+    [Fact]
+    public void Map_NullWarpPayload_EmitsOneWarningProblemNamingTheSourceKey()
+    {
+        const string sourceKey = "/home/u/Library/warp.sqlite#conv-7";
+        NativeSourceUnit unit = new(
+            new SourceUnit("warp", sourceKey, "warp", "warp-reader", "1", "warp-test", "warp", "1-1", BaselineUtc, 0),
+            RawText: null,
+            SizeBytes: 0,
+            LastWriteUtc: BaselineUtc);
+
+        CollectedBatch batch = new WarpMapper().Map(unit, BaselineUtc);
+
+        Assert.Empty(batch.Records);
+        Assert.Empty(batch.Sessions);
+        CollectedProblem problem = Assert.Single(batch.Problems);
+        Assert.Equal("warning", problem.Severity);
+        Assert.Equal(WarpMapper.MalformedDocumentCode, problem.Code);
+        Assert.Contains(sourceKey, problem.Location, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Map_SourceKeyIdNotInExport_RecordsAProblemInsteadOfDroppingTheSession()
+    {
+        string rawText = BuildWarpExport(
+            conversationData: "{}",
+            queries:
+            [
+                ("ex-1", "2026-05-18 10:00:00.000000", """[{"Query":{"text":"hi"}}]""", "auto-efficient", "/Users/test/project-a", "\"Completed\""),
+            ],
+            blocks: [],
+            conversationId: "conv-1");
+
+        CollectedBatch batch = new WarpMapper().Map(
+            MakeNativeUnit("warp", "/home/u/Library/warp.sqlite#conv-other", rawText),
+            BaselineUtc);
+
+        Assert.Empty(batch.Records);
+        CollectedProblem problem = Assert.Single(batch.Problems);
+        Assert.Equal("warning", problem.Severity);
+        Assert.Equal(WarpMapper.MalformedDocumentCode, problem.Code);
+        Assert.Contains("conv-other", problem.Message, StringComparison.Ordinal);
+    }
+
+    [Theory]
+    [InlineData(" ")]
+    [InlineData("\n\t")]
+    public void Map_WhitespaceWarpPayload_ReturnsEmptyBatchWithoutProblems(string rawText)
+    {
+        CollectedBatch batch = new WarpMapper().Map(
+            MakeNativeUnit("warp", "/home/u/Library/warp.sqlite#conv-8", rawText),
+            BaselineUtc);
+
+        Assert.Empty(batch.Records);
+        Assert.Empty(batch.Sessions);
+        Assert.Empty(batch.Problems);
     }
 
     [Theory]

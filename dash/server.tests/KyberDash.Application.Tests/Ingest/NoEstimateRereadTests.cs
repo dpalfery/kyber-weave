@@ -42,18 +42,17 @@ public class NoEstimateRereadTests
         harness.AddPiTranscript("sess-p");
         harness.Writer.Clear();
 
-        RefreshReport report = harness.Ingestion.RereadCheckpointedSources(["droid", "cursor", "warp"]);
+        RefreshReport report = harness.Ingestion.RereadCheckpointedSources(["droid", "cursor"]);
 
         Assert.Equal(0, report.ExitCode);
         Assert.Equal(string.Empty, report.RunId);
         Assert.Equal(0, report.HistoryWeeks);
-        Assert.Equal(["droid", "cursor", "warp"], report.Rows.Select(static row => row.HarnessId));
+        Assert.Equal(["droid", "cursor"], report.Rows.Select(static row => row.HarnessId));
         Assert.All(report.Rows, static row => Assert.Equal("committed", row.Status));
-        Assert.Equal(3, harness.Writer.WriteBatchCalls.Count);
+        Assert.Equal(2, harness.Writer.WriteBatchCalls.Count);
 
         Assert.Equal("2", harness.Checkpoint("droid", harness.DroidPath("sess-a")).ParserContractVersion);
         Assert.Equal("2", harness.Checkpoint("cursor", harness.CursorPath("sess-c")).ParserContractVersion);
-        Assert.Equal("2", harness.Checkpoint("warp", harness.WarpPath()).ParserContractVersion);
         Assert.Null(harness.Store.GetSourceCheckpoint("droid", harness.DroidPath("sess-uncheckpointed")));
         Assert.Equal("1", harness.Checkpoint("pi", harness.PiPath("sess-p")).ParserContractVersion);
         Assert.Empty(harness.Store.ListRefreshRuns());
@@ -94,11 +93,10 @@ public class NoEstimateRereadTests
 
         Assert.Equal("succeeded", outcome.Outcome);
         Assert.NotNull(harness.Store.GetRefreshRun(JobSchedulerService.NoEstimateRereadKey));
-        Assert.Equal(3, harness.Writer.WriteBatchCalls.Count);
-        Assert.Equal(["droid", "cursor", "warp"], harness.Writer.WriteBatchCalls.Select(static batch => batch.Source.HarnessId));
+        Assert.Equal(2, harness.Writer.WriteBatchCalls.Count);
+        Assert.Equal(["droid", "cursor"], harness.Writer.WriteBatchCalls.Select(static batch => batch.Source.HarnessId));
         Assert.Equal("2", harness.Checkpoint("droid", harness.DroidPath("sess-a")).ParserContractVersion);
         Assert.Equal("2", harness.Checkpoint("cursor", harness.CursorPath("sess-c")).ParserContractVersion);
-        Assert.Equal("2", harness.Checkpoint("warp", harness.WarpPath()).ParserContractVersion);
     }
 
     /// <summary>Once the marker is recorded, the next maintenance pass re-reads nothing.</summary>
@@ -295,33 +293,54 @@ public class NoEstimateRereadTests
     }
 
     /// <summary>
-    /// A unit whose database file still exists but is now discovered under another source key (one
-    /// unit per conversation instead of one per file) is never rediscovered under its old key, so its
-    /// old estimates are cleared while the file's current unit is still re-read.
+    /// One pass re-reads a checkpointed unit that discovery still returns and clears the estimates
+    /// of a checkpointed unit of the same harness that discovery no longer returns.
     /// </summary>
     [Fact]
-    public void Reread_ClearsTheEstimatedTokens_OfAUnitWhoseFileExistsButIsKeyedDifferently()
+    public void Reread_CommitsARediscoveredUnit_AndClearsAVanishedUnit_OfTheSameHarness()
     {
         Harness harness = new();
-        harness.AddWarpFile();
+        harness.SeedCheckpoint("droid", harness.DroidPath("sess-a"), "factory", "droid-reader", "droid-jsonl", ".factory/sessions");
+        harness.AddDroidTranscript("sess-a");
+        harness.SeedGoneDroidUnit(parserContractVersion: "1", lastStatus: "ok");
+        harness.Writer.Clear();
 
-        // The legacy key names a file that exists on disk, so only "not rediscovered", never "file
-        // missing", can tell this unit apart; discovery now returns the database under another key.
-        string legacyKey = Combine(HomeRoot, "legacy-warp/warp.sqlite");
-        harness.FileSystem.AddFile(legacyKey, "SQLite format 3\0", BaselineUtc.AddMinutes(-10));
-        harness.SeedCheckpoint("warp", harness.WarpPath(), "warp", "warp-sqlite-reader", "warp-sqlite", "warp.sqlite");
-        harness.SeedStoredUnit("warp", legacyKey, "warp-legacy", StoredRecord("warp-legacy-exchange", "warp", "warp-legacy", [new(TokenClass.Input, 12)], reportedInput: 12));
+        RefreshReport report = harness.Ingestion.RereadCheckpointedSources(["droid"]);
+
+        Assert.Equal(0, report.ExitCode);
+        Assert.Equal(
+            [(harness.DroidPath("sess-a"), "committed"), (harness.DroidPath("sess-gone"), "cleared")],
+            report.Rows.Select(static row => (row.SourceKey, row.Status)));
+        Assert.Empty(harness.Store.TokenCounts("droid-gone-call"));
+        Assert.Single(harness.Store.FindRecordParts("droid-gone-call"));
+    }
+
+    /// <summary>
+    /// A version 1 Warp unit was keyed by its database file. The database still exists, but discovery
+    /// now returns one unit per conversation (<c>&lt;database&gt;#&lt;conversation id&gt;</c>), so the
+    /// file-level key is never rediscovered: its old estimates are cleared, and the conversation unit,
+    /// which the store has no checkpoint for, is left for the next folder import rather than re-read.
+    /// </summary>
+    [Fact]
+    public void Reread_ClearsTheEstimatedTokens_OfAFileLevelWarpUnitNowKeyedPerConversation()
+    {
+        Harness harness = new(new SingleWarpConversationSqliteSource());
+        harness.AddWarpFile();
+        harness.SeedStoredUnit("warp", harness.WarpPath(), "warp-legacy", StoredRecord("warp-legacy-exchange", "warp", "warp-legacy", [new(TokenClass.Input, 12)], reportedInput: 12));
         harness.Writer.Clear();
 
         RefreshReport report = harness.Ingestion.RereadCheckpointedSources(["warp"]);
 
         Assert.Equal(0, report.ExitCode);
         Assert.Equal(
-            [(harness.WarpPath(), "committed"), (legacyKey, "cleared")],
+            [(harness.WarpPath(), "cleared")],
             report.Rows.Select(static row => (row.SourceKey, row.Status)));
+        Assert.Empty(harness.Writer.WriteBatchCalls);
         Assert.Empty(harness.Store.TokenCounts("warp-legacy-exchange"));
         Assert.Empty(harness.Store.ReportedTotals("warp-legacy-exchange"));
         Assert.Single(harness.Store.FindRecordParts("warp-legacy-exchange"));
+        Assert.Null(harness.Store.GetSourceCheckpoint("warp", $"{harness.WarpPath()}#{SingleWarpConversationSqliteSource.ConversationId}"));
+        Assert.Equal("1", harness.Checkpoint("warp", harness.WarpPath()).ParserContractVersion);
     }
 
     /// <summary>A named harness with no registered mapper still has the estimates of its checkpointed units cleared.</summary>
@@ -347,30 +366,28 @@ public class NoEstimateRereadTests
         Assert.Empty(harness.Store.TokenCounts("droid-gone-call"));
     }
 
-    /// <summary>Builds a harness with one checkpointed unit for each of Droid, Cursor and Warp.</summary>
+    /// <summary>Builds a harness with one checkpointed unit for each of Droid and Cursor.</summary>
     private static Harness CheckpointedHarness()
     {
         Harness harness = new();
         harness.SeedCheckpoint("droid", harness.DroidPath("sess-a"), "factory", "droid-reader", "droid-jsonl", ".factory/sessions");
         harness.SeedCheckpoint("cursor", harness.CursorPath("sess-c"), "cursor", "cursor-agent-transcript-reader", "cursor-agent-jsonl", ".cursor/projects");
-        harness.SeedCheckpoint("warp", harness.WarpPath(), "warp", "warp-sqlite-reader", "warp-sqlite", "warp.sqlite");
         harness.AddDroidTranscript("sess-a");
         harness.AddCursorTranscript("sess-c");
-        harness.AddWarpFile();
         return harness;
     }
 
     /// <summary>The fakes and real services one test runs over, built once per test.</summary>
     private sealed class Harness
     {
-        public Harness()
+        public Harness(IHarnessSqliteSource? sqlite = null)
         {
             FileSystem = new FakeHarnessFileSystem();
             Writer = new SpyRelationalStoreWriter(Store);
             Ingestion = new TranscriptIngestionService(
                 Writer,
                 Store,
-                new HarnessSourceRegistry(),
+                new HarnessSourceRegistry(sqlite),
                 [new DroidSessionMapper(), new CursorMapper(), new WarpMapper()],
                 FileSystem,
                 new DashOptions { StateDirectory = StateRoot },
@@ -639,6 +656,39 @@ public class NoEstimateRereadTests
         }
     }
 
+    /// <summary>
+    /// A Warp database with the current schema and one conversation, enough for discovery to list
+    /// that conversation as a unit; any other path fails to open.
+    /// </summary>
+    private sealed class SingleWarpConversationSqliteSource : IHarnessSqliteSource
+    {
+        public const string ConversationId = "conv-1";
+
+        public IHarnessSqliteDatabase Open(string databasePath) =>
+            databasePath.EndsWith("warp.sqlite", StringComparison.Ordinal)
+                ? new Database()
+                : throw new IOException($"no fake database at '{databasePath}'");
+
+        private sealed class Database : IHarnessSqliteDatabase
+        {
+            private static readonly WarpSqliteConversationSource Schema = new();
+
+            public IReadOnlySet<string> GetColumns(string table) =>
+                Schema.RequiredColumns.TryGetValue(table, out IReadOnlyList<string>? columns)
+                    ? new HashSet<string>(columns, StringComparer.Ordinal)
+                    : new HashSet<string>(StringComparer.Ordinal);
+
+            public IEnumerable<IReadOnlyDictionary<string, object?>> Query(HarnessSqliteQuery query) =>
+                string.Equals(query.Name, "warp.conversations", StringComparison.Ordinal)
+                    ? [new Dictionary<string, object?> { ["conversation_id"] = ConversationId, ["last_modified_at"] = "2026-11-24 11:50:00" }]
+                    : throw new IOException($"unexpected query '{query.Name}'");
+
+            public void Dispose()
+            {
+            }
+        }
+    }
+
     private sealed class FakeHarnessFileSystem : IHarnessFileSystem
     {
         private readonly Dictionary<string, (string Content, long LengthBytes, DateTimeOffset LastWriteUtc)> files = new(StringComparer.Ordinal);
@@ -733,6 +783,14 @@ public class NoEstimateRereadTests
             unreadable.Contains(Path.GetFullPath(filePath))
                 ? throw new IOException("simulated unreadable file")
                 : files[Path.GetFullPath(filePath)].Content;
+
+        public string ReadAllText(string filePath, long maxBytes)
+        {
+            string text = ReadAllText(filePath);
+            return System.Text.Encoding.UTF8.GetByteCount(text) <= maxBytes
+                ? text
+                : throw new InvalidDataException($"'{filePath}' holds more than {maxBytes} bytes.");
+        }
 
         public string GetFullPath(string path) => Path.GetFullPath(path);
 
