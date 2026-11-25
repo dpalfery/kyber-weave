@@ -1,4 +1,5 @@
 using System.Text.Json;
+using KyberWeave.Core.Diagnostics;
 using KyberWeave.Core.Review;
 using Xunit;
 
@@ -323,4 +324,80 @@ public sealed class ReviewGatesRedModeTests : IDisposable
     [InlineData("dotnet format whitespace --verify-no-changes", false)]
     public void TheTestCommandMarkersSeparateTestGatesFromBuildGates(string command, bool isTests) =>
         Assert.Equal(isTests, RedClassifier.IsTestCommand(command));
+
+    private static PlannedTaskGate Planned(string id, params string[] run) => new(id, true, 60, [], run);
+
+    private static (RedOutcome Outcome, DiagnosticReport Report) Apply(
+        IReadOnlyList<(string Id, string Command, int Exit, string Output)> gates, params string[] changed)
+    {
+        GateReport ran = new(
+            GateReport.CurrentSchema,
+            [.. gates.Select(gate => new GateResult(gate.Id, true, gate.Exit, "ran"))]);
+        DiagnosticReport report = new();
+        (_, RedOutcome outcome) = ReviewGateReporting.ApplyRed(
+            ran,
+            [.. gates.Select(gate => Planned(gate.Id, gate.Command.Split(' ')))],
+            gates.ToDictionary(gate => gate.Id, gate => gate.Output, StringComparer.Ordinal),
+            changed,
+            _ => null,
+            report);
+        return (outcome, report);
+    }
+
+    [Fact]
+    public void GatesThatRunNoTestsAndAllPassAreRedNotApplicableAndNameTheGates()
+    {
+        (RedOutcome outcome, DiagnosticReport report) = Apply(
+            [("dash-lint", "npm run --prefix dash lint", 0, "ok"), ("dash-typecheck", "npm run --prefix dash typecheck", 0, "ok")],
+            "dash/tests/foo.test.ts");
+
+        Assert.True(outcome.Passed, outcome.Reason);
+        Assert.Contains("dash-lint", outcome.EvidenceLine, StringComparison.Ordinal);
+        Assert.Contains("dash-typecheck", outcome.EvidenceLine, StringComparison.Ordinal);
+        Assert.Contains(report.Items, item => item.Code == ReviewGateReporting.RedAccepted);
+        Assert.DoesNotContain(report.Items, item => item.Code == ReviewGateReporting.RedRejected);
+    }
+
+    [Fact]
+    public void ARelativeCompilerPathMatchesTheTasksOwnFileAndIsCompileRed()
+    {
+        (RedOutcome outcome, DiagnosticReport report) = Apply(
+            [("dash-lint", "npm run --prefix dash lint", 0, "ok"),
+             ("dash-typecheck", "npm run --prefix dash typecheck", 2, "tests/foo.test.ts(3,10): error TS2305: Module '\"../src/x\"' has no exported member 'Gadget'.")],
+            "dash/tests/foo.test.ts");
+
+        Assert.True(outcome.Passed, outcome.Reason);
+        Assert.Contains("Gadget", outcome.MissingSymbols);
+        Assert.Contains(report.Items, item => item.Code == ReviewGateReporting.RedAccepted);
+    }
+
+    [Fact]
+    public void ARelativeCompilerPathInAFileTheTaskDidNotChangeIsRejected()
+    {
+        (RedOutcome outcome, DiagnosticReport report) = Apply(
+            [("dash-typecheck", "npm run --prefix dash typecheck", 2, "tests/foo.test.ts(3,10): error TS2305: Module '\"../src/x\"' has no exported member 'Gadget'.")],
+            "dash/tests/other.test.ts");
+
+        Assert.False(outcome.Passed);
+        Assert.Contains(report.Items, item => item.Code == ReviewGateReporting.RedRejected);
+    }
+
+    [Fact]
+    public void ATestGateThatPassesIsStillRejectedWhateverElseIsPlanned()
+    {
+        (RedOutcome outcome, DiagnosticReport report) = Apply(
+            [("dash-lint", "npm run --prefix dash lint", 0, "ok"),
+             ("unit-tests", "dotnet test tests/Widget.Tests", 0, "Passed!  - Failed:     0, Passed:     4, Skipped:     0, Total:     4, Duration: 10 ms")],
+            TestFile);
+
+        Assert.False(outcome.Passed);
+        Assert.Contains(report.Items, item => item.Code == ReviewGateReporting.RedRejected);
+    }
+
+    [Theory]
+    [InlineData("dash/xtests/foo.test.ts", false)]
+    [InlineData("dash/tests/foo.test.ts", true)]
+    [InlineData("tests/foo.test.ts", true)]
+    public void ARelativePathMatchesOnASegmentBoundaryOnly(string own, bool expected) =>
+        Assert.Equal(expected, RedClassifier.IsOwnFile("tests/foo.test.ts", [own]));
 }

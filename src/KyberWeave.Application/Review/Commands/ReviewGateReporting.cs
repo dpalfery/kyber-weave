@@ -357,7 +357,11 @@ public static class ReviewGateReporting
                 observations.Add(new RedGateObservation(gate.Id, string.Join(' ', plannedGate.Run), gate.ExitCode, output));
         }
 
-        RedOutcome outcome = RedClassifier.Evaluate(observations, changed, projectOf);
+        RedOutcome outcome = RedClassifier.Evaluate(
+            observations,
+            changed,
+            projectOf,
+            anyTestGate: planned.Any(gate => RedClassifier.IsTestGate(gate.Id, string.Join(' ', gate.Run))));
         List<GateResult> results = [];
         foreach (GateResult gate in ran.Gates)
         {

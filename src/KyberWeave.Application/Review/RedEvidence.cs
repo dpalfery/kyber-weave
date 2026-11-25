@@ -444,11 +444,14 @@ public static partial class RedClassifier
     public static bool IsOwnFile(string file, IReadOnlyList<string> ownFiles)
     {
         string normalized = file.Replace('\\', '/');
+        string relative = normalized.StartsWith("./", StringComparison.Ordinal) ? normalized[2..] : normalized;
         return ownFiles.Any(own =>
         {
             string path = own.Replace('\\', '/').TrimStart('/');
             return normalized.Equals(path, StringComparison.OrdinalIgnoreCase)
-                   || normalized.EndsWith("/" + path, StringComparison.OrdinalIgnoreCase);
+                   || normalized.EndsWith("/" + path, StringComparison.OrdinalIgnoreCase)
+                   // A path printed relative to the gate's own folder (npm --prefix dash) is the tail of the repository path.
+                   || (relative.Length > 0 && !Path.IsPathRooted(relative) && path.EndsWith("/" + relative, StringComparison.OrdinalIgnoreCase));
         });
     }
 
@@ -502,7 +505,12 @@ public static partial class RedClassifier
     /// <param name="gates">Every gate that ran, in order.</param>
     /// <param name="ownFiles">The files the task changed; missing-symbol errors must be in these.</param>
     /// <param name="projectOf">Names the repository-relative project file a changed file belongs to, or null for none; when the delegate itself is null no project is named.</param>
-    public static RedOutcome Evaluate(IReadOnlyList<RedGateObservation> gates, IReadOnlyList<string> ownFiles, Func<string, string?>? projectOf = null)
+    /// <param name="anyTestGate">Whether any gate selected for the task runs tests; false lets a run where every gate exited 0 be accepted as RED not applicable.</param>
+    public static RedOutcome Evaluate(
+        IReadOnlyList<RedGateObservation> gates,
+        IReadOnlyList<string> ownFiles,
+        Func<string, string?>? projectOf = null,
+        bool anyTestGate = true)
     {
         ArgumentNullException.ThrowIfNull(gates);
         ArgumentNullException.ThrowIfNull(ownFiles);
@@ -582,6 +590,15 @@ public static partial class RedClassifier
         if (rejected.Count > 0)
         {
             return Fail(string.Join(" | ", rejected.Select(entry => $"gate '{entry.Key}': {entry.Value}")), accepted, rejected);
+        }
+
+        if (!anyTestGate && gates.Count > 0 && symbols.Count == 0 && failing.Count == 0 && accepted.Count == 0
+            && gates.All(gate => gate.ExitCode == 0))
+        {
+            // No selected gate can observe a failing test, so RED cannot be produced: it does not apply.
+            string names = string.Join(", ", gates.Select(gate => gate.Id));
+            return new RedOutcome(
+                true, string.Empty, $"RED_EVIDENCE: not applicable — no selected gate runs tests; gates passed: {names}", [], [], accepted, rejected);
         }
 
         if (symbols.Count == 0 && failing.Count == 0 && accepted.Count == 0)
