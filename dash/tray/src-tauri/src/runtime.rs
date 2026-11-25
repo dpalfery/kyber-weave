@@ -1312,4 +1312,92 @@ mod tests {
         }
         assert_eq!(validated_harness(" claude-code ").unwrap(), "claude-code");
     }
+
+    /// Records each launch, and hands out a server that announces itself on
+    /// loopback so the launch lands as an owned server.
+    struct RecordingSpawner {
+        launches: Arc<Mutex<Vec<String>>>,
+    }
+
+    impl Spawner for RecordingSpawner {
+        fn spawn(
+            &mut self,
+            program: &str,
+            _args: &[&str],
+        ) -> std::io::Result<Box<dyn supervisor::ServerProcess>> {
+            self.launches
+                .lock()
+                .expect("launches lock")
+                .push(program.to_string());
+            Ok(Box::new(AnnouncingProcess {
+                lines: vec![
+                    r#"{"event":"kyberdash.web.listening","url":"http://127.0.0.1:4748","pid":4242,"version":"9.8.7","apiVersion":1}"#
+                        .to_string(),
+                ],
+            }))
+        }
+    }
+
+    struct AnnouncingProcess {
+        lines: Vec<String>,
+    }
+
+    impl supervisor::ServerProcess for AnnouncingProcess {
+        fn next_line(&mut self, _within: Duration) -> Option<String> {
+            if self.lines.is_empty() {
+                None
+            } else {
+                Some(self.lines.remove(0))
+            }
+        }
+
+        fn kill_tree(&mut self) {}
+    }
+
+    /// The engine the tray attached to has died (its `server.json` may linger).
+    /// The next tick must launch one owned server and keep it, not stay on the
+    /// dead URL. A real child is killed and reaped so its pid names no process.
+    #[cfg(unix)]
+    #[test]
+    fn a_dead_attached_server_is_replaced_by_an_owned_launch() {
+        let mut child = std::process::Command::new("sleep")
+            .arg("60")
+            .spawn()
+            .expect("spawn a stand-in server");
+        let dead_pid = child.id();
+        child.kill().expect("kill the stand-in server");
+        child.wait().expect("reap the stand-in server");
+
+        let launches: Arc<Mutex<Vec<String>>> = Arc::default();
+        let mut runtime = attached_runtime(server_routes(), Arc::default());
+        runtime
+            .supervisor
+            .as_mut()
+            .expect("a supervisor for the cli")
+            .attach(supervisor::Listening {
+                url: SERVER.to_string(),
+                pid: dead_pid,
+                version: "9.8.7".to_string(),
+                api_version: 1,
+            });
+        runtime.dependencies.server_spawner = Box::new(RecordingSpawner {
+            launches: Arc::clone(&launches),
+        });
+        // `start` already ran for this attached server; only the tick is under test.
+        runtime.started = true;
+
+        runtime.tick(at(1_700_000_100)).expect("tick");
+
+        assert_eq!(
+            *launches.lock().expect("launches lock"),
+            vec!["kyberdash".to_string()],
+            "the tick launches the cli once"
+        );
+        let supervisor = runtime
+            .supervisor
+            .as_mut()
+            .expect("a supervisor for the cli");
+        assert!(supervisor.owns_server(), "the replacement is owned");
+        assert_eq!(supervisor.url(), Some("http://127.0.0.1:4748"));
+    }
 }

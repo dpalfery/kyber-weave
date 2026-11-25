@@ -28,11 +28,11 @@ internal sealed class SelfUpdateSystem : ISelfUpdateSystem
     private static readonly TimeSpan TrayUpdateTimeout = TimeSpan.FromMinutes(5);
 
     /// <summary>
-    /// The bound for the finish-update child the old process starts after every binary is committed. The child may run
-    /// the engine verb (120 s), the tray (5 min) and two plugin steps (120 s each), so 15 minutes is longer than all of
-    /// them together and a hung child is still stopped.
+    /// The bound for the finish-update child the old process starts after every binary is committed. The worst case is six
+    /// captures at 120 s (probe, quit, stop, running check, verify, running), the tray update at 300 s and two plugin
+    /// steps at 120 s, which is 1260 s, so 25 minutes is longer than all of them together and a hung child is still stopped.
     /// </summary>
-    private static readonly TimeSpan FinishUpdateTimeout = TimeSpan.FromMinutes(15);
+    private static readonly TimeSpan FinishUpdateTimeout = TimeSpan.FromMinutes(25);
 
     /// <summary>The bound for the pre-swap rehearsal, which runs the installed command with <c>--version</c> and must return at once.</summary>
     private static readonly TimeSpan RehearsalTimeout = TimeSpan.FromSeconds(30);

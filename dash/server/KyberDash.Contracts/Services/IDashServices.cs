@@ -1,4 +1,5 @@
 using System.Text.Json;
+using KyberDash.Core;
 using KyberDash.Core.Resilience;
 using KyberDash.Domain;
 
@@ -17,7 +18,7 @@ public class DashOptions
     public string? DashboardDir { get; set; }
 
     /// <summary>Reported binary/engine semantic version.</summary>
-    public string Version { get; set; } = "0.21.0";
+    public string Version { get; set; } = DashVersion.Current;
 
     /// <summary>Maximum OTLP per-request payload size in bytes.</summary>
     public long MaxOtlpBodyBytes { get; set; } = 64L * 1024 * 1024;
@@ -480,6 +481,15 @@ public interface IMenubarService
         string? requestedVersion,
         string cliVersion,
         CancellationToken cancellationToken = default);
+
+    /// <summary>Quits the tray recorded at install (<c>kyberdash menubar --quit</c>); touches no other tray.</summary>
+    Task<MenubarInstallOutcome> QuitAsync(CancellationToken cancellationToken = default);
+
+    /// <summary>Launches the recorded tray (<c>kyberdash menubar --launch</c>).</summary>
+    Task<MenubarInstallOutcome> LaunchAsync(CancellationToken cancellationToken = default);
+
+    /// <summary>Reports how many tray processes run (<c>kyberdash menubar --running</c>); exit 0 only for exactly one.</summary>
+    Task<MenubarInstallOutcome> CountRunningAsync(CancellationToken cancellationToken = default);
 }
 
 /// <summary>Process coordination service for checking and replacing the live <c>kyberdash-api</c> engine.</summary>
@@ -493,6 +503,31 @@ public interface IEngineLifecycleService
         string expectedVersion,
         string? stateDir = null,
         string? apiBinaryPath = null,
+        CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Stops the live <c>kyberdash-api</c> engine and waits until it has exited (<c>kyberdash engine stop</c>).
+    /// </summary>
+    /// <param name="stateDir">State directory to probe; the default state directory when omitted.</param>
+    /// <param name="cancellationToken">Cancels the wait.</param>
+    /// <returns>Success when no engine was running or the running one exited; failure otherwise.</returns>
+    Task<EngineEnsureReport> StopRunningEngineAsync(
+        string? stateDir = null,
+        CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Checks whether the live engine answers on <paramref name="expectedVersion"/> (<c>kyberdash engine verify</c>).
+    /// Probes up to <paramref name="attempts"/> times, about 150 ms apart, and stops at the first match.
+    /// </summary>
+    /// <param name="expectedVersion">Version the engine must report.</param>
+    /// <param name="attempts">Number of probes allowed; at least one.</param>
+    /// <param name="stateDir">State directory to probe; the default state directory when omitted.</param>
+    /// <param name="cancellationToken">Cancels the wait between probes.</param>
+    /// <returns>The report; its <c>Outcome</c> says whether the engine is on the version, absent, on another version, or unresponsive.</returns>
+    Task<EngineEnsureReport> VerifyRunningEngineVersionAsync(
+        string expectedVersion,
+        int attempts,
+        string? stateDir = null,
         CancellationToken cancellationToken = default);
 
     /// <summary>Attempts to acquire the single-engine IPC socket lock, returning either a lease or existing holder.</summary>

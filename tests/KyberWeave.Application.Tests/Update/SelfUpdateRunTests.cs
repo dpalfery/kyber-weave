@@ -967,10 +967,16 @@ public sealed class SelfUpdateRunTests : IDisposable
         int trayExitCode = 0)
     {
         Func<string, string?> readEnvironment = HomeWithTrayRecord(trayRecorded);
-        Func<string, IReadOnlyList<string>, int> runProcess = (file, args) =>
+        Func<string, IReadOnlyList<string>, int> runProcess = (_, _) => 0;
+        Func<string, IReadOnlyList<string>, ProcessResult> captureProcess = (file, args) =>
         {
-            spawned.Add((file, args));
-            return trayExitCode;
+            if (args.Count > 1 && args[0] == "menubar" && args[1] == "--update")
+            {
+                spawned.Add((file, args));
+                return trayExitCode == 0 ? QuietSuccess : Exit(trayExitCode, "kyberdash menubar: tray refused to start");
+            }
+
+            return QuietSuccess;
         };
         LoopbackFinishingProcess loopback = _world.Loopback(
             handler,
@@ -978,14 +984,14 @@ public sealed class SelfUpdateRunTests : IDisposable
             log.Add,
             readEnvironment,
             runProcess,
-            captureProcess: (_, _) => QuietSuccess);
+            captureProcess: captureProcess);
         using SelfUpdater updater = _world.CreateUpdater(
             handler,
             host,
             readEnvironment,
             log.Add,
             runProcess: runProcess,
-            captureProcess: (_, _) => QuietSuccess,
+            captureProcess: captureProcess,
             finishingProcess: loopback.Invoke);
         return updater.Run(options);
     }
@@ -1038,7 +1044,7 @@ public sealed class SelfUpdateRunTests : IDisposable
         SelfUpdateOutcome? child = _world.LastChild?.LastChildOutcome;
         Assert.NotNull(child);
         Assert.Contains("KyberDash tray step", child.Message, StringComparison.Ordinal);
-        Assert.Contains("exited 3", child.Message, StringComparison.Ordinal);
+        Assert.Contains("exited 3: kyberdash menubar: tray refused to start", child.Message, StringComparison.Ordinal);
     }
 
     /// <summary>
@@ -1101,7 +1107,8 @@ public sealed class SelfUpdateRunTests : IDisposable
         ProcessResult? pluginResult = null,
         Exception? trayException = null,
         Exception? engineException = null,
-        Exception? pluginException = null)
+        Exception? pluginException = null,
+        Func<IReadOnlyList<string>, ProcessResult?>? script = null)
     {
         ProcessResult engine = engineResult ?? new ProcessResult(0, "engine: not-running\n", string.Empty);
         ProcessResult plugin = pluginResult ?? new ProcessResult(0, string.Empty, string.Empty);
@@ -1109,14 +1116,20 @@ public sealed class SelfUpdateRunTests : IDisposable
         Func<string, IReadOnlyList<string>, int> runProcess = (file, args) =>
         {
             steps.Add(new ReconcileStep("tray", file, args));
-            if (trayException is not null)
-                throw trayException;
             return 0;
         };
         Func<string, IReadOnlyList<string>, ProcessResult> captureProcess = (file, args) =>
         {
             bool engineCall = args.Count > 0 && args[0] == "engine";
-            steps.Add(new ReconcileStep(engineCall ? "engine" : "plugin", file, args));
+            bool trayCall = args.Count > 0 && args[0] == "menubar";
+            steps.Add(new ReconcileStep(engineCall ? "engine" : trayCall ? "menubar" : "plugin", file, args));
+            if (trayException is not null && trayCall && args.Count > 1 && args[1] == "--update")
+                throw trayException;
+            ProcessResult? scripted = script?.Invoke(args);
+            if (scripted is { } answer)
+                return answer;
+            if (trayCall)
+                return QuietSuccess;
             if (engineCall && engineException is not null)
                 throw engineException;
             if (!engineCall && pluginException is not null)
@@ -1205,14 +1218,13 @@ public sealed class SelfUpdateRunTests : IDisposable
             handler, host, new SelfUpdateOptions("0.10.0", false, false), log, steps);
 
         Assert.Equal(0, outcome.ExitCode);
-        Assert.Equal<string>(["engine", "tray", "plugin", "plugin"], steps.Select(step => step.Name));
-        Assert.All(steps.Where(step => step.Name != "tray"), step => Assert.Equal(kyberdash, step.File));
-        Assert.Equal(EngineArgs, steps[0].Args);
-        Assert.Equal(["menubar", "--update", "--version", "0.10.0"], steps[1].Args);
-        Assert.Equal(PluginArgs, steps[2].Args);
+        Assert.Equal<string>(RestartWithUpdate("0.10.0"), steps.Select(Describe));
+        Assert.All(steps, step => Assert.Equal(kyberdash, step.File));
+        Assert.DoesNotContain(steps, step => step.Args.SequenceEqual(EngineArgs));
+        Assert.Equal(PluginArgs, steps[6].Args);
         // The two plugin steps are one per harness, and the order is fixed: OpenCode first, then Factory.
-        Assert.Equal("opencode", HarnessOf(steps[2].Args));
-        Assert.Equal("factory", HarnessOf(steps[3].Args));
+        Assert.Equal("opencode", HarnessOf(steps[6].Args));
+        Assert.Equal("factory", HarnessOf(steps[7].Args));
     }
 
     /// <summary>The "already on" path still runs the engine, tray and plugin reconciliation, and still does not download.</summary>
@@ -1232,11 +1244,352 @@ public sealed class SelfUpdateRunTests : IDisposable
 
         Assert.Equal(0, outcome.ExitCode);
         Assert.Equal("already on 0.10.0", outcome.Message);
-        Assert.Equal<string>(["engine", "tray", "plugin", "plugin"], steps.Select(step => step.Name));
+        // The recorded tray is older than the installed kyberdash, so the tray is restarted with an update.
+        Assert.Equal<string>(RestartWithUpdate("0.10.0"), steps.Select(Describe));
         // The "already on" path reconciles every harness's plugin, not only the first.
-        Assert.Equal("opencode", HarnessOf(steps[2].Args));
-        Assert.Equal("factory", HarnessOf(steps[3].Args));
+        Assert.Equal("opencode", HarnessOf(steps[6].Args));
+        Assert.Equal("factory", HarnessOf(steps[7].Args));
         Assert.DoesNotContain(handler.Uris, uri => uri.Contains("SHA256SUMS.txt", StringComparison.Ordinal));
+    }
+
+    /// <summary>The step as the argv a test names it: a plugin step is just "plugin", every other verb is its arguments.</summary>
+    private static string Describe(ReconcileStep step) =>
+        step.Name == "plugin" ? "plugin" : string.Join(' ', step.Args);
+
+    /// <summary>The restart sequence that updates the tray, then the two plugin steps.</summary>
+    private static string[] RestartWithUpdate(string version) =>
+    [
+        $"engine verify --version {version} --wait 0",
+        "menubar --quit",
+        "engine stop",
+        $"menubar --update --version {version}",
+        $"engine verify --version {version} --wait 60",
+        "menubar --running",
+        "plugin",
+        "plugin"
+    ];
+
+    /// <summary>The restart sequence that launches the tray after the given probe steps, then the two plugin steps.</summary>
+    private static string[] RestartWithLaunch(string version, params string[] afterProbe) =>
+    [
+        $"engine verify --version {version} --wait 0",
+        .. afterProbe,
+        "menubar --quit",
+        "engine stop",
+        "menubar --launch",
+        $"engine verify --version {version} --wait 60",
+        "menubar --running",
+        "plugin",
+        "plugin"
+    ];
+
+    private const string Probe = "engine verify --version 0.10.0 --wait 0";
+
+    /// <summary>Answers each listed verb (by its full argv text) with its result; every other verb succeeds quietly.</summary>
+    private static Func<IReadOnlyList<string>, ProcessResult?> Scripted(
+        params (string Argv, ProcessResult Result)[] answers) =>
+        args =>
+        {
+            string argv = string.Join(' ', args);
+            foreach ((string Argv, ProcessResult Result) answer in answers)
+            {
+                if (answer.Argv == argv)
+                    return answer.Result;
+            }
+
+            return null;
+        };
+
+    private static ProcessResult Exit(int code, string line = "") => new(code, string.Empty, line);
+
+    /// <summary>Runs an update that finds 0.10.0 already installed, with a tray recorded at the given version.</summary>
+    private SelfUpdateOutcome RunUnchanged(
+        string? trayVersion,
+        List<string> log,
+        List<ReconcileStep> steps,
+        Func<IReadOnlyList<string>, ProcessResult?>? script = null,
+        SelfUpdateOptions? options = null)
+    {
+        InstallKyberDash();
+        using ReleaseMapHandler handler = new();
+        handler.MapJson(
+            GitHubReleaseClient.LatestApi,
+            """{"tag_name":"v0.10.0","draft":false}""");
+        SelfUpdateHost host = CreateHost("0.10.0", "osx-arm64");
+        return RunReconciling(
+            handler, host, options ?? new SelfUpdateOptions(), log, steps, trayVersion, script: script);
+    }
+
+    /// <summary>Runs an update from 0.1.0 to 0.10.0 with a tray recorded, and returns the finishing child's message too.</summary>
+    private (SelfUpdateOutcome Outcome, string ChildMessage) RunChanged(
+        List<string> log,
+        List<ReconcileStep> steps,
+        Func<IReadOnlyList<string>, ProcessResult?> script)
+    {
+        InstallKyberDash();
+        using ReleaseMapHandler handler = MapRelease("0.10.0", "osx-arm64", false, true);
+        SelfUpdateHost host = CreateHost("0.1.0", "osx-arm64");
+        SelfUpdateOutcome outcome = RunReconciling(
+            handler,
+            host,
+            new SelfUpdateOptions("0.10.0", false, false),
+            log,
+            steps,
+            "0.9.23",
+            script: script);
+        return (outcome, _world.LastChild?.LastChildOutcome?.Message ?? string.Empty);
+    }
+
+    /// <summary>A current tray over a healthy engine is left alone: only the probe runs.</summary>
+    [Fact]
+    public void RunLeavesACurrentTrayAndItsEngineAloneWhenTheProbeSucceeds()
+    {
+        List<string> log = [];
+        List<ReconcileStep> steps = [];
+
+        SelfUpdateOutcome outcome = RunUnchanged("0.10.0", log, steps);
+
+        Assert.Equal(0, outcome.ExitCode);
+        Assert.Equal<string>([Probe, "plugin", "plugin"], steps.Select(Describe));
+    }
+
+    /// <summary>Nothing the user stopped is started: no engine and no tray ends the step.</summary>
+    [Fact]
+    public void RunStartsNothingWhenNeitherTheEngineNorTheTrayRuns()
+    {
+        List<string> log = [];
+        List<ReconcileStep> steps = [];
+
+        SelfUpdateOutcome outcome = RunUnchanged(
+            "0.10.0", log, steps, Scripted((Probe, Exit(1)), ("menubar --running", Exit(1))));
+
+        Assert.Equal(0, outcome.ExitCode);
+        Assert.Equal<string>([Probe, "menubar --running", "plugin", "plugin"], steps.Select(Describe));
+    }
+
+    /// <summary>A tray that runs without an engine is restarted so it owns one.</summary>
+    [Fact]
+    public void RunRestartsTheTrayWhenItRunsWithoutAnEngine()
+    {
+        List<string> log = [];
+        List<ReconcileStep> steps = [];
+
+        SelfUpdateOutcome outcome = RunUnchanged("0.10.0", log, steps, Scripted((Probe, Exit(1))));
+
+        Assert.Equal(0, outcome.ExitCode);
+        Assert.Equal<string>(RestartWithLaunch("0.10.0", "menubar --running"), steps.Select(Describe));
+    }
+
+    /// <summary>An engine of another version is replaced by restarting the tray.</summary>
+    [Fact]
+    public void RunRestartsACurrentTrayWhenTheEngineVersionDiffers()
+    {
+        List<string> log = [];
+        List<ReconcileStep> steps = [];
+
+        SelfUpdateOutcome outcome = RunUnchanged("0.10.0", log, steps, Scripted((Probe, Exit(3))));
+
+        Assert.Equal(0, outcome.ExitCode);
+        Assert.Equal<string>(RestartWithLaunch("0.10.0"), steps.Select(Describe));
+    }
+
+    /// <summary>An engine that does not answer is a failure that names the engine step.</summary>
+    [Fact]
+    public void RunNamesTheEngineStepWhenTheProbeFindsAnUnresponsiveEngine()
+    {
+        List<string> log = [];
+        List<ReconcileStep> steps = [];
+
+        SelfUpdateOutcome outcome = RunUnchanged("0.10.0", log, steps, Scripted((Probe, Exit(4, "engine did not answer"))));
+
+        Assert.Equal(1, outcome.ExitCode);
+        string message = outcome.Message;
+        Assert.Contains("the KyberDash engine step failed:", message, StringComparison.Ordinal);
+        Assert.Contains("engine verify", message, StringComparison.Ordinal);
+        Assert.Contains("engine did not answer", message, StringComparison.Ordinal);
+        Assert.Equal<string>([Probe], steps.Select(Describe));
+    }
+
+    /// <summary>An older tray is restarted with an update even when the release did not change.</summary>
+    [Fact]
+    public void RunRestartsAnOlderTrayWithAnUpdateWhenTheEngineIsHealthy()
+    {
+        List<string> log = [];
+        List<ReconcileStep> steps = [];
+
+        SelfUpdateOutcome outcome = RunUnchanged("0.9.23", log, steps);
+
+        Assert.Equal(0, outcome.ExitCode);
+        Assert.Equal<string>(RestartWithUpdate("0.10.0"), steps.Select(Describe));
+    }
+
+    /// <summary>With no tray recorded the engine alone is checked, the tray verbs never run and the skip is logged.</summary>
+    [Fact]
+    public void RunWithoutATrayKeepsTheDetachedEngineRestart()
+    {
+        List<string> log = [];
+        List<ReconcileStep> steps = [];
+
+        SelfUpdateOutcome outcome = RunUnchanged(null, log, steps);
+
+        Assert.Equal(0, outcome.ExitCode);
+        Assert.Equal<string>(["engine ensure --if-running", "plugin", "plugin"], steps.Select(Describe));
+        Assert.Contains(log, line => line.Contains("no tray install recorded", StringComparison.Ordinal));
+    }
+
+    /// <summary>--no-menubar keeps today's engine check and touches no tray verb.</summary>
+    [Fact]
+    public void RunWithNoMenubarEnsuresTheEngineAndRunsNoTrayVerb()
+    {
+        List<string> log = [];
+        List<ReconcileStep> steps = [];
+
+        SelfUpdateOutcome outcome = RunUnchanged(
+            "0.9.23", log, steps, options: new SelfUpdateOptions(null, false, false, NoMenubar: true));
+
+        Assert.Equal(0, outcome.ExitCode);
+        Assert.Equal<string>(["engine ensure --if-running", "plugin", "plugin"], steps.Select(Describe));
+        Assert.Contains(
+            log,
+            line => line.Contains("--no-menubar given; leaving the KyberDash tray unchanged", StringComparison.Ordinal));
+    }
+
+    /// <summary>A kyberdash that predates the verbs falls back to engine ensure and the tray update.</summary>
+    [Fact]
+    public void RunFallsBackToEngineEnsureWhenKyberDashPredatesTheTrayRestart()
+    {
+        List<string> log = [];
+        List<ReconcileStep> steps = [];
+
+        (SelfUpdateOutcome outcome, _) = RunChanged(
+            log,
+            steps,
+            Scripted((
+                "engine verify --version 0.10.0 --wait 0",
+                new ProcessResult(
+                    2, string.Empty, "Usage: kyberdash engine ensure --if-running [--state-dir <dir>]"))));
+
+        Assert.Equal(0, outcome.ExitCode);
+        Assert.Equal<string>(
+            [Probe, "engine ensure --if-running", "menubar --update --version 0.10.0", "plugin", "plugin"],
+            steps.Select(Describe));
+        Assert.Contains(log, line => line.Contains("predates the tray restart", StringComparison.Ordinal));
+    }
+
+    /// <summary>An older kyberdash that answers the new verb with "unknown command" is the old binary, whatever its exit code.</summary>
+    [Theory]
+    [InlineData(1)]
+    [InlineData(2)]
+    [InlineData(64)]
+    public void RunFallsBackWhenTheProbeAnswersUnknownCommandAtAnyExitCode(int exitCode)
+    {
+        List<string> log = [];
+        List<ReconcileStep> steps = [];
+
+        (SelfUpdateOutcome outcome, _) = RunChanged(
+            log,
+            steps,
+            Scripted(("engine verify --version 0.10.0 --wait 0", Exit(exitCode, "kyberdash: unknown command: engine verify"))));
+
+        Assert.Equal(0, outcome.ExitCode);
+        Assert.Equal<string>(
+            [Probe, "engine ensure --if-running", "menubar --update --version 0.10.0", "plugin", "plugin"],
+            steps.Select(Describe));
+        Assert.Contains(log, line => line.Contains("predates the tray restart", StringComparison.Ordinal));
+    }
+
+    /// <summary>Every failing step is named with its first output line, and says the binaries are already updated.</summary>
+    [Theory]
+    [InlineData("menubar --quit", "the KyberDash tray step failed:", false)]
+    [InlineData("engine stop", "the KyberDash engine step failed:", true)]
+    [InlineData("engine verify --version 0.10.0 --wait 60", "the KyberDash engine step failed:", true)]
+    [InlineData("menubar --running", "the KyberDash tray step failed:", true)]
+    public void RunNamesTheFailingRestartStep(string failing, string prefix, bool stopped)
+    {
+        List<string> log = [];
+        List<ReconcileStep> steps = [];
+
+        (SelfUpdateOutcome outcome, string message) = RunChanged(
+            log, steps, Scripted((failing, Exit(1, "kyberdash menubar: platform: not supported"))));
+
+        Assert.Equal(1, outcome.ExitCode);
+        Assert.Contains(prefix, message, StringComparison.Ordinal);
+        Assert.Contains(failing, message, StringComparison.Ordinal);
+        Assert.Contains("kyberdash menubar: platform: not supported", message, StringComparison.Ordinal);
+        Assert.Contains("binaries are already updated", message, StringComparison.Ordinal);
+        Assert.Equal(stopped, message.Contains("tray and engine are stopped", StringComparison.Ordinal));
+        if (stopped)
+            Assert.Contains("kyberdash menubar --launch", message, StringComparison.Ordinal);
+    }
+
+    /// <summary>A restarted engine that reports another version fails the verify step by name, with the tray and engine stopped.</summary>
+    [Fact]
+    public void RunFailsNamingTheVerifyStepWhenTheEngineReportsAnotherVersion()
+    {
+        List<string> log = [];
+        List<ReconcileStep> steps = [];
+
+        (SelfUpdateOutcome outcome, string message) = RunChanged(
+            log,
+            steps,
+            Scripted(("engine verify --version 0.10.0 --wait 60", Exit(3, "engine runs 0.9.23"))));
+
+        Assert.Equal(1, outcome.ExitCode);
+        Assert.Contains("the KyberDash engine step failed:", message, StringComparison.Ordinal);
+        Assert.Contains("engine verify --version 0.10.0 --wait 60", message, StringComparison.Ordinal);
+        Assert.Contains("exited 3: engine runs 0.9.23", message, StringComparison.Ordinal);
+        Assert.Contains("tray and engine are stopped", message, StringComparison.Ordinal);
+    }
+
+    /// <summary>A failed tray update names the verb's first output line, stderr first, with the text the update loop greps for.</summary>
+    [Fact]
+    public void RunNamesTheTrayUpdateOutputLineWhenItFailsAfterTheQuit()
+    {
+        List<string> log = [];
+        List<ReconcileStep> steps = [];
+
+        (SelfUpdateOutcome outcome, string message) = RunChanged(
+            log,
+            steps,
+            Scripted(("menubar --update --version 0.10.0", Exit(4, "kyberdash menubar: platform: not supported"))));
+
+        Assert.Equal(1, outcome.ExitCode);
+        Assert.Contains("the KyberDash tray step failed:", message, StringComparison.Ordinal);
+        Assert.Contains("exited 4: kyberdash menubar: platform: not supported", message, StringComparison.Ordinal);
+        // The update's output is captured, so the console needs this line before the step starts.
+        Assert.Contains(log, line => line.Contains("updating the KyberDash tray", StringComparison.Ordinal));
+    }
+
+    /// <summary>A failed tray update after the quit names the update command as the way back.</summary>
+    [Fact]
+    public void RunNamesTheUpdateCommandWhenTheTrayUpdateFailsAfterTheQuit()
+    {
+        InstallKyberDash();
+        using ReleaseMapHandler handler = MapRelease("0.10.0", "osx-arm64", false, true);
+        SelfUpdateHost host = CreateHost("0.1.0", "osx-arm64");
+        List<string> log = [];
+        Func<string, string?> readEnvironment = HomeWithTrayVersion("0.9.23");
+        Func<string, IReadOnlyList<string>, int> runProcess = (_, _) => 0;
+        Func<string, IReadOnlyList<string>, ProcessResult> captureProcess = (_, args) =>
+            args.Count > 1 && args[1] == "--update" ? Exit(5, "kyberdash menubar: update failed") : QuietSuccess;
+        LoopbackFinishingProcess loopback = _world.Loopback(
+            handler, host, log.Add, readEnvironment, runProcess, captureProcess: captureProcess);
+        using SelfUpdater updater = _world.CreateUpdater(
+            handler,
+            host,
+            readEnvironment,
+            log.Add,
+            runProcess: runProcess,
+            captureProcess: captureProcess,
+            finishingProcess: loopback.Invoke);
+
+        SelfUpdateOutcome outcome = updater.Run(new SelfUpdateOptions("0.10.0", false, false));
+
+        Assert.Equal(1, outcome.ExitCode);
+        string message = _world.LastChild?.LastChildOutcome?.Message ?? string.Empty;
+        Assert.Contains("the KyberDash tray step failed:", message, StringComparison.Ordinal);
+        Assert.Contains("tray and engine are stopped", message, StringComparison.Ordinal);
+        Assert.Contains("kyberdash menubar --update --version 0.10.0", message, StringComparison.Ordinal);
     }
 
     /// <summary>With no release change, a tray recorded older than the installed KyberDash is relaunched.</summary>
@@ -1256,8 +1609,9 @@ public sealed class SelfUpdateRunTests : IDisposable
             handler, host, new SelfUpdateOptions(), log, steps, "0.9.23");
 
         Assert.Equal(0, outcome.ExitCode);
-        ReconcileStep tray = Assert.Single(steps, step => step.Name == "tray");
+        ReconcileStep tray = Assert.Single(steps, step => step.Args.Contains("--update"));
         Assert.Equal(["menubar", "--update", "--version", "0.10.0"], tray.Args);
+        Assert.Equal<string>(RestartWithUpdate("0.10.0"), steps.Select(Describe));
     }
 
     /// <summary>A tray already at the installed version is left running on the no-change path.</summary>
@@ -1277,7 +1631,7 @@ public sealed class SelfUpdateRunTests : IDisposable
             handler, host, new SelfUpdateOptions(), log, steps, "0.10.0");
 
         Assert.Equal(0, outcome.ExitCode);
-        Assert.DoesNotContain(steps, step => step.Name == "tray");
+        Assert.Equal<string>(["engine verify --version 0.10.0 --wait 0", "plugin", "plugin"], steps.Select(Describe));
         Assert.Contains(log, line => line.Contains("already on 0.10.0", StringComparison.Ordinal));
     }
 
@@ -1369,6 +1723,7 @@ public sealed class SelfUpdateRunTests : IDisposable
             new SelfUpdateOptions("0.10.0", false, false),
             log,
             steps,
+            trayVersion: null,
             engineResult: new ProcessResult(2, string.Empty, "engine did not answer"));
 
         Assert.Equal(1, outcome.ExitCode);
@@ -1512,6 +1867,7 @@ public sealed class SelfUpdateRunTests : IDisposable
             new SelfUpdateOptions("0.10.0", false, false),
             log,
             steps,
+            trayVersion: null,
             engineResult: unknown,
             pluginResult: new ProcessResult(1, string.Empty, "error: unknown command 'capture'"));
 
@@ -1557,6 +1913,7 @@ public sealed class SelfUpdateRunTests : IDisposable
             new SelfUpdateOptions("0.10.0", false, false),
             log,
             steps,
+            trayVersion: null,
             engineException: new UnauthorizedAccessException("Access to the path kyberdash is denied."));
 
         Assert.Equal(1, outcome.ExitCode);
@@ -1593,7 +1950,8 @@ public sealed class SelfUpdateRunTests : IDisposable
         // The child names the step; the parent cannot carry it, so the child's own outcome is checked.
         SelfUpdateOutcome? child = _world.LastChild?.LastChildOutcome;
         Assert.NotNull(child);
-        Assert.Contains("KyberDash tray step could not start", child.Message, StringComparison.Ordinal);
+        Assert.Contains("KyberDash tray step failed", child.Message, StringComparison.Ordinal);
+        Assert.Contains("could not start", child.Message, StringComparison.Ordinal);
         Assert.Equal("new-cli", _world.Files.ReadAllText(host.ProcessPath));
     }
 

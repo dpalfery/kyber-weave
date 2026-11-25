@@ -5,7 +5,7 @@ doc-type: runbook
 status: current
 component: Distribution
 owner: dpalfery
-last-reviewed: 2026-11-22
+last-reviewed: 2026-11-25
 ---
 
 # Installing Kyber-Weave
@@ -483,12 +483,20 @@ kyber-weave update --no-restart       # replace binaries; do not restart the Kyb
 When a KyberDash binary is installed, `kyber-weave update` finishes the KyberDash side in the same
 run, with no second command:
 
-- **Engine.** It runs `kyberdash engine ensure --if-running`. A live engine of another version is
-  replaced by the new one. When no engine is running, nothing starts. This also runs when the
-  release is unchanged ("already on"), which clears an engine left over from an older build.
-- **Tray.** When a tray is installed, it hands off to `kyberdash menubar --update`, which quits the
-  running tray, replaces it, and relaunches it, restoring the previous app if any step fails. It also
-  runs when the release is unchanged but the recorded tray is older than the installed `kyberdash`.
+- **Engine and tray, tray installed.** The tray owns the engine, so the update restarts the tray
+  rather than starting a detached engine. It runs `kyberdash menubar --quit`, `kyberdash engine stop`,
+  then `kyberdash menubar --update --version <v>` (or `kyberdash menubar --launch` when the tray is
+  already current), so the relaunched tray starts and owns a fresh engine. It then checks, with
+  `kyberdash engine verify --version <v> --wait 60` and `kyberdash menubar --running`, that the engine
+  reports the new version and exactly one tray runs. A release that did not change still restarts a
+  running tray whose engine is down or on another version; with no tray running, nothing is started.
+  If a step fails after the quit, the message says the tray and engine are stopped and names the
+  command that starts them again (`kyberdash menubar --launch`, or `kyberdash menubar --update
+  --version <v>` when the tray update failed).
+- **Engine, no tray.** With no tray recorded (or `--no-menubar`), it runs `kyberdash engine ensure
+  --if-running`. A live engine of another version is replaced by the new one, and the replacement
+  must report the expected version or the step fails. When no engine is running, nothing starts.
+  A `kyberdash` that predates the new verbs gets this path too, with `menubar --update` when due.
 - **OpenCode capture plugin.** It runs `kyberdash kyber capture plugin install --harness opencode
   --preserve --if-installed`. An installed plugin is upgraded. A plugin you never installed is not
   added. An edited plugin file is kept with a warning.
@@ -510,6 +518,10 @@ Update the tray directly with:
 ```bash
 kyberdash menubar --update
 ```
+
+The tray and engine report the release version, taken from the repository's single
+`Directory.Build.props` version (the `KYBERDASH_VERSION` override no longer exists), so the
+tray's Settings shows the same version as `kyber-weave --version`.
 
 KyberDash is **replaced, never introduced**: update touches `kyberdash` only when it already
 sits beside the CLI. The Arbiter follows the same rule: update replaces an installed

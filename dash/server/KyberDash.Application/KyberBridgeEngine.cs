@@ -4,6 +4,7 @@ using System.Text.Json;
 using KyberDash.Application.Sessions;
 using KyberDash.Contracts.Repositories;
 using KyberDash.Contracts.Services;
+using KyberDash.Core;
 using KyberDash.Core.Exceptions;
 using KyberDash.Data.Collector;
 using KyberDash.Data.Repositories;
@@ -48,9 +49,6 @@ public class KyberBridgeEngine
 
     /// <summary>REST contract schema version expected by desktop tray and web clients.</summary>
     public const int ApiContractVersion = 1;
-
-    /// <summary>Default KyberDash engine version reported by <c>/api/kyber/version</c> and <c>/api/kyber/meta</c>.</summary>
-    public const string DefaultVersion = "0.21.0";
 
     /// <summary>Default number of root sessions on a sessions page.</summary>
     public const int DefaultSessionPageLimit = 100;
@@ -128,7 +126,7 @@ public class KyberBridgeEngine
     /// <param name="pricing">Model rate-table repository used as the read-time pricing lookup.</param>
     /// <param name="projector">Session projection engine.</param>
     /// <param name="rollups">Run and harness rollup engine.</param>
-    /// <param name="version">Engine build version string.</param>
+    /// <param name="version">Engine version to report; when omitted, <see cref="DashVersion.Current"/>.</param>
     /// <param name="clock">Optional UTC clock override for deterministic timestamps.</param>
     /// <param name="instanceId">Optional process instance identifier for analytics freshness metadata.</param>
     /// <param name="storePath">Optional backing store path surfaced in report coverage metadata.</param>
@@ -142,7 +140,7 @@ public class KyberBridgeEngine
         IPricingRepository pricing,
         CanonSessionProjectorEngine projector,
         CanonRollupsEngine rollups,
-        string version = DefaultVersion,
+        string? version = null,
         Func<DateTimeOffset>? clock = null,
         string? instanceId = null,
         string? storePath = null,
@@ -156,7 +154,10 @@ public class KyberBridgeEngine
         ArgumentNullException.ThrowIfNull(pricing);
         ArgumentNullException.ThrowIfNull(projector);
         ArgumentNullException.ThrowIfNull(rollups);
-        ArgumentException.ThrowIfNullOrWhiteSpace(version);
+        if (version is not null)
+        {
+            ArgumentException.ThrowIfNullOrWhiteSpace(version);
+        }
 
         this.reader = reader;
         this.projections = projections;
@@ -164,7 +165,7 @@ public class KyberBridgeEngine
         this.pricing = pricing;
         this.projector = projector;
         this.rollups = rollups;
-        this.version = version;
+        this.version = version ?? DashVersion.Current;
         this.clock = clock ?? (() => DateTimeOffset.UtcNow);
         this.instanceId = string.IsNullOrWhiteSpace(instanceId)
             ? string.Create(CultureInfo.InvariantCulture, $"kyberdash-{Environment.ProcessId}")
