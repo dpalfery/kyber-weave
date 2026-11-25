@@ -161,25 +161,78 @@ function buildKilo(db: DatabaseSync, plan: SessionPlan, baseTimeMs: number): voi
 }
 
 // --- devin: ~/.local/share/devin/cli/sessions.db ----------------------------------------------
-// DevinMapper documents sessions.db as project/title/model/timestamp enrichment only (no turn
-// data), and no retained source states its columns: the `sessions` columns below are the
-// documented enrichment fields. The sessions carry their own ids, apart from the transcript ones.
+// The real sessions.db schema: `sessions` (one row per session) and `message_nodes` (one row per chat
+// message, its `chat_message` column a JSON object with `role`, `content`, `metadata` and, on an
+// assistant node, `tool_calls`). DevinSqliteConversationSource exports both as the document DevinMapper
+// maps: user nodes are the turns, assistant nodes carry `metadata.metrics`, tool and system nodes emit
+// no step. The sessions carry their own ids, apart from the transcript ones.
 const DEVIN_SESSIONS_PATH = '.local/share/devin/cli/sessions.db'
+const DEVIN_MODEL = 'claude-sonnet-4-6'
 
 function buildDevinSessions(db: DatabaseSync, plan: SessionPlan, baseTimeMs: number): void {
   db.exec(`
     CREATE TABLE IF NOT EXISTS sessions (
-      id TEXT PRIMARY KEY, title TEXT, project TEXT, model TEXT, created_at TEXT, updated_at TEXT, hidden INTEGER NOT NULL DEFAULT 0
+      id TEXT PRIMARY KEY, working_directory TEXT, model TEXT, title TEXT, created_at TEXT,
+      last_activity_at TEXT, hidden INTEGER, metadata TEXT
+    );
+    CREATE TABLE IF NOT EXISTS message_nodes (
+      row_id INTEGER PRIMARY KEY, session_id TEXT NOT NULL, node_id TEXT NOT NULL, parent_node_id TEXT,
+      chat_message TEXT NOT NULL, created_at TEXT, metadata TEXT, UNIQUE(session_id, node_id)
     );
   `)
-  db.prepare('INSERT INTO sessions (id, title, project, model, created_at, updated_at, hidden) VALUES (?, ?, ?, ?, ?, ?, 0)').run(
+  db.prepare(
+    'INSERT INTO sessions (id, working_directory, model, title, created_at, last_activity_at, hidden, metadata) VALUES (?, ?, ?, ?, ?, ?, 0, NULL)',
+  ).run(
     plan.id,
-    `Devin sqlite import ${plan.id}`,
     '/workspace/repo',
-    'claude-sonnet-4-6',
+    DEVIN_MODEL,
+    `Devin sqlite import ${plan.id}`,
     iso(baseTimeMs),
     iso(baseTimeMs + plan.turns * TURN_SPACING_MS),
   )
+  const insertNode = db.prepare(
+    'INSERT INTO message_nodes (session_id, node_id, parent_node_id, chat_message, created_at, metadata) VALUES (?, ?, ?, ?, ?, NULL)',
+  )
+  let nodeNumber = 0
+  let parentId: string | null = null
+  const addNode = (chatMessage: Record<string, unknown>, at: number): void => {
+    nodeNumber += 1
+    const nodeId = `${plan.id}-node-${nodeNumber}`
+    insertNode.run(plan.id, nodeId, parentId, JSON.stringify(chatMessage), iso(at))
+    parentId = nodeId
+  }
+  addNode({ role: 'system', content: 'You are Devin, a software engineering agent.' }, baseTimeMs)
+  for (let turn = 1; turn <= plan.turns; turn += 1) {
+    const at = baseTimeMs + turn * TURN_SPACING_MS
+    addNode(
+      { role: 'user', content: `Step ${turn}: continue the work`, metadata: { is_user_input: true, created_at: iso(at) } },
+      at,
+    )
+    const toolCalls = hasTool(turn)
+      ? [{ id: `${plan.id}-tc-${turn}`, name: 'read_file', arguments: { path: `src/file-${turn}.ts` } }]
+      : undefined
+    addNode(
+      {
+        role: 'assistant',
+        content: `Step ${turn} done`,
+        metadata: {
+          generation_model: DEVIN_MODEL,
+          created_at: iso(at + 1_000),
+          metrics: {
+            input_tokens: 100 + turn,
+            output_tokens: 20 + turn,
+            cache_read_tokens: 5,
+            cache_creation_tokens: 10,
+          },
+        },
+        ...(toolCalls ? { tool_calls: toolCalls } : {}),
+      },
+      at + 1_000,
+    )
+    if (toolCalls) {
+      addNode({ role: 'tool', content: `contents of src/file-${turn}.ts`, tool_call_id: toolCalls[0].id }, at + 2_000)
+    }
+  }
 }
 
 // --- warp: warp.sqlite agent_conversations / ai_queries / blocks -------------------------------
@@ -365,10 +418,11 @@ export const FILE_HARNESS_SQLITE_FIXTURES: readonly FileHarnessFixture[] = [
       harness: 'devin',
       sessionId: plan.id,
       turns: plan.turns,
-      // sessions.db carries session metadata only: no steps, tokens or tool calls.
-      expectedToolCalls: null,
-      tokensMeasurable: false,
-      perTurnTokensMeasurable: false,
+      expectedToolCalls: toolCallCount(plan.turns),
+      tokensMeasurable: true,
+      cacheCreationMeasurable: true,
+      contextMeasurable: true,
+      perTurnTokensMeasurable: true,
       expectedCostStatus: 'out_of_scope',
       expectedModels: ['Sonnet 4.6'],
     }),
