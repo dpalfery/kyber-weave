@@ -281,6 +281,42 @@ public class SqliteHarnessSourceReaderTests
     }
 
     [Fact]
+    public void WriteJsonColumn_WritesBooleansAsJsonBooleansAndDecimalsExactly()
+    {
+        using MemoryStream stream = new();
+        using (Utf8JsonWriter writer = new(stream))
+        {
+            writer.WriteStartObject();
+            SqliteHarnessSourceReader.WriteJsonColumn(writer, "yes", true);
+            SqliteHarnessSourceReader.WriteJsonColumn(writer, "no", false);
+            SqliteHarnessSourceReader.WriteJsonColumn(writer, "dec", 0.1000000000000000000000000001m);
+            writer.WriteEndObject();
+        }
+
+        Assert.Equal(
+            "{\"yes\":true,\"no\":false,\"dec\":0.1000000000000000000000000001}",
+            Encoding.UTF8.GetString(stream.ToArray()));
+    }
+
+    [Fact]
+    public void WriteJsonColumn_TextWithTrailingContentOrTwoValues_IsWrittenAsAString()
+    {
+        using MemoryStream stream = new();
+        using (Utf8JsonWriter writer = new(stream))
+        {
+            writer.WriteStartObject();
+            SqliteHarnessSourceReader.WriteJsonColumn(writer, "trail", "{} x");
+            SqliteHarnessSourceReader.WriteJsonColumn(writer, "two", "[1] [2]");
+            SqliteHarnessSourceReader.WriteJsonColumn(writer, "padded", "  {\"a\":[1, 2]}  ");
+            writer.WriteEndObject();
+        }
+
+        Assert.Equal(
+            "{\"trail\":\"{} x\",\"two\":\"[1] [2]\",\"padded\":{\"a\":[1, 2]}}",
+            Encoding.UTF8.GetString(stream.ToArray()));
+    }
+
+    [Fact]
     public void WriteJsonColumn_WritesRawJsonStringsNumbersAndNull()
     {
         using MemoryStream stream = new();

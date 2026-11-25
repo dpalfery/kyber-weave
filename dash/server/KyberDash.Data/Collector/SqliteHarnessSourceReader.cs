@@ -79,8 +79,9 @@ public class SqliteHarnessSourceReader : IHarnessSourceReader
 
     /// <summary>Writes <paramref name="value"/> under <paramref name="propertyName"/> as the JSON it represents.</summary>
     /// <remarks>
-    /// Text that parses as a JSON object or array is written raw, other text as a string, integers and reals
-    /// as numbers, and NULL as <c>null</c>. A non-finite real has no JSON form and is written as <c>null</c>.
+    /// Text that parses as a JSON object or array is written raw, other text as a string, integers, decimals
+    /// and reals as numbers, booleans as JSON booleans, and NULL as <c>null</c>. A non-finite real has no JSON
+    /// form and is written as <c>null</c>.
     /// </remarks>
     public static void WriteJsonColumn(Utf8JsonWriter writer, string propertyName, object? value)
     {
@@ -94,10 +95,16 @@ public class SqliteHarnessSourceReader : IHarnessSourceReader
                 writer.WritePropertyName(propertyName);
                 WriteTextValue(writer, text);
                 break;
+            case bool flag:
+                writer.WriteBoolean(propertyName, flag);
+                break;
             case long or int or short or byte or sbyte or ushort or uint or ulong:
                 writer.WriteNumber(propertyName, Convert.ToDecimal(value, CultureInfo.InvariantCulture));
                 break;
-            case double or float or decimal:
+            case decimal exact:
+                writer.WriteNumber(propertyName, exact);
+                break;
+            case double or float:
                 double real = Convert.ToDouble(value, CultureInfo.InvariantCulture);
                 if (double.IsFinite(real))
                 {
@@ -201,14 +208,17 @@ public class SqliteHarnessSourceReader : IHarnessSourceReader
 
     private static void WriteTextValue(Utf8JsonWriter writer, string text)
     {
-        if (LooksLikeJsonContainer(text) && IsValidJson(text))
+        if (LooksLikeJsonContainer(text))
         {
-            writer.WriteRawValue(text.Trim(), skipInputValidation: true);
+            byte[] utf8 = Encoding.UTF8.GetBytes(text.Trim());
+            if (IsSingleJsonContainer(utf8))
+            {
+                writer.WriteRawValue(utf8, skipInputValidation: true);
+                return;
+            }
         }
-        else
-        {
-            writer.WriteStringValue(text);
-        }
+
+        writer.WriteStringValue(text);
     }
 
     private static bool LooksLikeJsonContainer(string text)
@@ -226,12 +236,19 @@ public class SqliteHarnessSourceReader : IHarnessSourceReader
         return false;
     }
 
-    private static bool IsValidJson(string text)
+    /// <summary>Validates <paramref name="utf8"/> as one JSON object or array by scanning its tokens, without building a document.</summary>
+    private static bool IsSingleJsonContainer(ReadOnlySpan<byte> utf8)
     {
+        Utf8JsonReader reader = new(utf8, isFinalBlock: true, state: default);
         try
         {
-            using JsonDocument document = JsonDocument.Parse(text);
-            return document.RootElement.ValueKind is JsonValueKind.Object or JsonValueKind.Array;
+            if (!reader.Read() || reader.TokenType is not (JsonTokenType.StartObject or JsonTokenType.StartArray))
+            {
+                return false;
+            }
+
+            reader.Skip();
+            return !reader.Read();
         }
         catch (JsonException)
         {
