@@ -1,0 +1,313 @@
+---
+id: plans/2026-11-25-kyberdash-one-version-and-tray-owned-engine-restart
+title: KyberDash reports one release version and the tray owns the engine after an update
+doc-type: plan
+status: current
+component: KyberDash
+owner: dpalfery
+last-reviewed: 2026-11-25
+development-mode: test-first
+autonomy: autonomous
+documentation-impact: extends-component
+impact-components:
+  - KyberDash
+  - Distribution
+---
+
+# KyberDash reports one release version and the tray owns the engine after an update
+
+**Status: Ready, 2026-11-25.**
+
+## Request
+
+> Background (from the session that started this one):
+> David (owner) ran `kyber-weave update --release-candidate` to 0.1.8-rc.31 on macOS on 2026-11-25 and saw the tray (`/Applications/KyberDash.app`, Tauri, `kyberdash-tray`) fail to come back cleanly; tray Settings showed "KyberDash version 0.21.0" and the popover showed "Collector down". Diagnosis in the earlier session: the app is signed/notarized and starts fine by hand; an rc.30→rc.31 round trip of `kyber-weave update` finished with exit 0 each way (no hang reproduced; note `kyberdash update` is not a command); after the update the engine ran detached, and when it died the tray never restarted it — relaunching the tray (`kyberdash-tray --quit` then `open /Applications/KyberDash.app`) made it start and own a fresh engine, which is the current state. Two other sessions run in parallel: one fixes the `UNIQUE constraint failed: record.span_id` Claude Code import errors, one adds Claude Code skill collection; stay out of the transcript import/parsers. Testing on David's Mac: Claude's Bash tool kills leftover background processes when a command ends, so a detached engine started from a tool call can die afterwards — launch real restarts through `open` or the tray so the test reflects his terminal. Branch from fresh `origin/main`; use CodeGraph and kw-docs before grep.
+>
+> Task:
+> Fix three KyberDash defects in one PR, through the conductor skill (it is a multi-part fix; route it as the repo's AGENTS.md says).
+>
+> 1. One version for everything. The engine reports a hard-coded `0.21.0`: `dash/server/KyberDash.Api/DashCommandLine.cs:55` sets `Version` from env `KYBERDASH_VERSION` or the literal `"0.21.0"`, ignoring the assembly's informational version (which the release stamps, e.g. `0.1.8-rc.31`; `Program.ResolveVersion()` already reads it). More literals: `DashRuntimeSettings.cs:53`, `KyberBridgeEngine.DefaultVersion` (`KyberDash.Application/KyberBridgeEngine.cs:53`), `KyberDash.Contracts/Services/IDashServices.cs:20`, the `ResolveVersion()` fallbacks in the Api/Cli/Mcp `Program.cs`, and `<Version>0.21.0</Version>` in every `dash/server/*.csproj` (while `src/*.csproj` say `0.1.0`). The tray's `dash/tray/src-tauri/tauri.conf.json`, `Cargo.toml` and `Info.plist` say `0.1.0` and `.github/workflows/release.yml` (job `build-tray`) never stamps them. Want: a single version source for the repo (e.g. one `Directory.Build.props`), every engine/CLI/MCP/tray reporting the release version, and the release stamping the tray bundle too. The tray's Settings view shows "KyberDash version" from the engine's `/api` version, so it must show `0.1.8-rc.N`.
+>
+> 2. `kyber-weave update` restarts the engine outside the tray. `src/KyberWeave.Application/Update/SelfUpdater.cs` `ReconcileKyberDash` → `EnsureEngine` runs `kyberdash engine ensure --if-running` (`dash/server/KyberDash.Application/Services/EngineLifecycleService.cs` `EnsureRunningEngineMatchesVersionAsync`), which shuts the running engine down and spawns a detached `kyberdash-api --no-open` that no one supervises; then `UpdateTray` runs `kyberdash menubar --update` (`MenubarService.InstallMacosAsync`: `--quit`, move, `open`). Because of bug 1 the version check always mismatches, so every update replaces the engine ("engine: replaced 0.21.0 -> 0.21.0"), and the "replaced" report can't detect a wrong version. Want: when the tray is installed, the update restarts the tray (which launches and owns a fresh engine) instead of spawning a detached one; with no tray, keep today's detached restart. Final step verifies the running engine reports the new version and the tray process is alive; if the tray is already on the target version it still gets restarted when the engine changed.
+>
+> 3. The tray never restarts an engine it didn't launch. `dash/tray/src-tauri/src/supervisor.rs` attaches to a server named in `~/.kyberdash/server.json` but only restarts servers it owns; if the attached engine dies, the tray shows "Collector down" forever. Want: when an attached server goes away, the supervisor launches and owns a replacement (with the existing backoff).
+>
+> Also check: on macOS the tray's LaunchAgent (`io.github.dpalfery.kyberdash`, KeepAlive only on unsuccessful exit) plus `open` from `menubar --update` can leave two launch paths; make sure exactly one tray runs after an update.
+>
+> Tests: in-memory unit tests through the existing seams (Supervisor/Spawner/Clock; SelfUpdater's process runner fakes; EngineLifecycleService fakes). Done = gates in AGENTS.md pass; on David's Mac a `kyber-weave update --release-candidate` (or an rc→rc round trip) leaves one tray and one tray-owned engine running, both on the release version, and the tray Settings shows that version. PR with `[claude]` in the title, draft→ready, Kilo review loop; never merge.
+
+## Problem and goal
+
+**Problem.** The KyberDash engine reports a hard-coded `0.21.0` instead of the release version, so the tray's Settings shows the wrong version and `kyber-weave update` always sees a version mismatch. The update then replaces the engine with a detached process nobody supervises, and the tray, which only restarts engines it launched, can be left showing "Collector down".
+
+**Goal.** One repository version value for every .NET project, every KyberDash binary and the tray bundle reporting the release version the release stamps; an update that, with a tray installed, stops the old engine and restarts the tray so the tray launches and owns the new engine, then verifies the engine version and that exactly one tray runs; and a tray supervisor that never ends up stuck when the engine it attached to is gone or when a launch finds another engine already holding the lease.
+
+## Request trace
+
+| Request instruction | Covered by | Evidence that it is met |
+|---|---|---|
+| Single version source for the repo (e.g. one `Directory.Build.props`) | T1, D1 | `<Version>` appears only in `Directory.Build.props`; no `.csproj` under `src/` or `dash/server/` carries one |
+| Engine/CLI/MCP report the release (assembly informational) version; remove `0.21.0` literals in `DashCommandLine`, `DashRuntimeSettings`, `KyberBridgeEngine.DefaultVersion`, `IDashServices` `DashOptions.Version`, the three `ResolveVersion()` fallbacks | T1, D2, D3 | `DashVersionTests` green: every surface equals `DashVersion.Current`; no `0.21.0` literal left in `dash/server/` |
+| Tray Settings shows `0.1.8-rc.N` (from the engine's version endpoint) | T1 (engine reports the stamped version), T5 (release stamps it) | `MinimalApiEndpointTests` asserts the version endpoint returns `DashVersion.Current`; release `-p:Version` already stamps the engine assemblies |
+| Release stamps the tray bundle (`tauri.conf.json`, `Cargo.toml`, `Info.plist`, job `build-tray`) | T5, D4 | `ReleaseTests.BuildTrayStampsTheReleaseVersionIntoTheTrayBundle` green |
+| With a tray installed, the update restarts the tray (which launches and owns the engine) instead of spawning a detached engine | T3 (SelfUpdater flow), T2 and T6 (verbs), D5, D6 | `SelfUpdateRunTests` new cases: argv sequence `menubar --quit`, `engine stop`, `menubar --update`/`--launch`, `engine verify`, `menubar --running`; no `engine ensure` call |
+| With no tray, keep today's detached restart | T3 | `SelfUpdateRunTests.RunWithoutATrayKeepsTheDetachedEngineRestart` |
+| Final step verifies the engine reports the new version and the tray process is alive | T2 (`engine verify`), T6 (`menubar --running`), T3 | `ApplicationParityTests` verify cases; `SelfUpdateRunTests.RunFailsNamingTheVerifyStepWhenTheEngineReportsAnotherVersion` |
+| Tray already on the target version still restarts when the engine changed | T3, D7 | `SelfUpdateRunTests.RunRestartsACurrentTrayWhenTheEngineVersionDiffers` |
+| The "replaced" report must detect a wrong version | T2, D8 | `ApplicationParityTests.EngineEnsureFailsWhenTheReplacementReportsAnotherVersion` |
+| Every update no longer replaces an engine already on the version | T1 (version fixed) + existing `engine: attached` path | `ApplicationParityTests.EngineEnsureAttachesWhenTheLiveVersionMatches` (existing) stays green |
+| Attached server goes away → supervisor launches and owns a replacement with the existing backoff | T4, D9, F8 | `runtime.rs` test `a_dead_attached_server_is_replaced_by_one_the_tray_owns`; supervisor test for the attached line; F8 records that "Collector down" is the receiver's health, so the observed symptom is also covered by D5 and the PR note |
+| Exactly one tray after an update (LaunchAgent + `open`) | T6 (`menubar --running` counts, quit waits before any kill), T3 (verify step), D10, D12, D14 | `TrayProcessesTests` (count and wait-then-kill helpers); `SelfUpdateRunTests` verify-step case; Investigation finding F6 |
+| The reported state (tray alive, engine dead, release unchanged) is recovered by re-running `kyber-weave update` | T3, D7 | `SelfUpdateRunTests.RunRestartsTheTrayWhenItRunsWithoutAnEngine` |
+| The real-binary update loop in CI keeps passing with the tray restart flow | T3, D16 | `scripts/update-loop.sh` case `tray-delegated` (CI job `update-loop`, ubuntu and macOS) |
+| Stay out of the transcript import/parsers | Out-of-scope boundaries | No task file under the importers or parsers |
+| In-memory unit tests through existing seams | Test contract | Every row uses `FakeServerStateRepository`, the SelfUpdater process fakes, `FakeSpawner`/`FakeClock`, or Moq over `IMenubarService` / `IEngineLifecycleService` |
+| Gates in AGENTS.md pass | Verification gates | Council gates and CI |
+| On David's Mac an rc update leaves one tray and one tray-owned engine on the release version, Settings shows it | Out-of-scope boundaries (PR note) | Needs a published release candidate built from this branch; owner checks after release |
+| PR with `[claude]` in the title, draft→ready, Kilo review loop, never merge | Review | Conductor delivery |
+| Branch from fresh `origin/main`; CodeGraph and kw-docs before grep | Investigation findings | Run branch at `b86a6b4` (origin/main); discovery counts recorded |
+
+## Scale
+
+`documentation-impact: extends-component` for **KyberDash** (engine version, engine lifecycle verbs, tray supervision) and **Distribution** (self-update reconciliation, release stamping). No new component.
+
+## Decisions
+
+| ID | Question | Answer / decision | Mitigating and supporting information | Status / approval provenance |
+|---|---|---|---|---|
+| D1 | Where does the single version live? | Root `Directory.Build.props` sets `<Version Condition="'$(Version)' == ''">0.1.0</Version>`; every `<Version>` element is removed from `src/*/*.csproj` and `dash/server/*/*.csproj`. | The root props file is already imported by every project. The release keeps passing `-p:Version=<tag>` (global property, wins). `0.1.0` is the existing `src/` dev value, so local kyber-weave builds keep their self-update behaviour. | autonomous: repository pattern (existing root props + release `-p:Version`) |
+| D2 | How do KyberDash binaries resolve their version? | New `KyberDash.Core.DashVersion` static class with `Current`: the `AssemblyInformationalVersionAttribute` of the KyberDash.Core assembly with `+metadata` stripped. The Api, Cli and Mcp `Program.ResolveVersion()` return `DashVersion.Current`; no literal fallback remains. | KyberDash.Core is referenced by every KyberDash project (Contracts and Domain reference it). All assemblies of one publish share the stamped version. The SDK always emits the attribute, so a fallback is dead code. | autonomous: low-confidence, no authoritative source; cheap to reverse |
+| D3 | What replaces the other literals? | `DashCommandLine.Parse` sets `Version = DashVersion.Current` and the `KYBERDASH_VERSION` override is removed; `DashRuntimeSettings.Version` and `DashOptions.Version` default to `DashVersion.Current`; `KyberBridgeEngine.DefaultVersion` (public const) is removed and the constructor parameter becomes `string? version = null`, resolved to `DashVersion.Current`. | No script, test or workflow sets `KYBERDASH_VERSION` (searched `dash`, `src`, `tests`, `scripts`, `.github`). Removing a public const is an in-repo contract change; the worker updates every caller. Tests asserting `"0.21.0"` from the engine change to `DashVersion.Current`. | autonomous: low-confidence, no authoritative source |
+| D4 | How is the tray bundle stamped? | `build-tray` passes `--config '{"version":"<release version>"}'` to both `tauri build` steps, read from `needs.version.outputs.version` through an `env:` value. Repository manifests (`tauri.conf.json`, `Cargo.toml`, `ui/package.json`) keep the dev value `0.1.0`, equal to D1. `Info.plist` holds no version key; Tauri writes `CFBundleShortVersionString`/`CFBundleVersion` from the config version. | Tauri v2 docs (Context7, tauri-docs v2): `--config` accepts raw JSON merged by RFC 7396; `version` maps to `CFBundleShortVersionString` and the default `CFBundleVersion`. | autonomous: Tauri v2 documentation |
+| D5 | What does the update do when a tray is installed? | `kyber-weave update` runs, in order: `kyberdash menubar --quit`; `kyberdash engine stop`; `kyberdash menubar --update --version <v>` when the tray needs the new build, otherwise `kyberdash menubar --launch`; then `kyberdash engine verify --version <v> --wait 60` and `kyberdash menubar --running`. `engine ensure` is not run. Once `menubar --quit` has succeeded, every later failure message says the KyberDash tray and engine are stopped and names the recovery command: `kyberdash menubar --update --version <v>` for a failed tray update, otherwise `kyberdash menubar --launch`. | The post-restart verify waits 60 s, not the verb's 20 s default, because the first launch of a freshly installed notarized app can take longer than 20 s (Gatekeeper check), and a spurious failure would leave exit 1 for a working install. Quitting the tray stops the engine it owns; `engine stop` removes any detached engine so the relaunched tray finds none to attach to and launches its own. The orchestration stays in `SelfUpdater`, where the request's process-runner fakes test it; each kyberdash verb is small. | autonomous: request instruction |
+| D6 | What if the installed kyberdash predates the new verbs (pinned older release)? | Every tray-managed run starts with the probe `kyberdash engine verify --version <v> --wait 0`. An older kyberdash answers any `engine` subcommand other than `ensure` with exit 2 and the line `Usage: kyberdash engine ensure --if-running [--state-dir <dir>]`; that exact line marks it pre-verb, and the update logs it and falls back to today's sequence (`engine ensure --if-running`, then `menubar --update` when due). | `menubar --quit` cannot be the probe: today's `RunMenubarAsync` ignores unknown flags and answers exit 0 "already installed", so an unknown-command check would never fire (`MentionsUnknownCommand` only matches "unknown command"). The new kyberdash's engine usage line names all three verbs, so it never equals the old line. | autonomous: code evidence (`KyberDash.Cli/Program.cs` `RunEngineAsync`, `RunMenubarAsync`) |
+| D7 | When is the tray restarted, and when is nothing started? | Release changed: always restart (quit, stop, update tray when due or launch, verify), as today's `menubar --update` also relaunches the tray. Release unchanged and tray current: the probe decides — exit 0 (engine on `<v>`) leaves tray and engine alone; exit 1 (no engine running) runs `menubar --running`: exit 0 (a tray runs without an engine) restarts with `menubar --launch`, any other exit leaves everything alone; exit 3 (engine on another version) restarts with `menubar --launch`; exit 4 (unresponsive) fails the step. Release unchanged and tray older than `<v>`: restart with `menubar --update`. | Satisfies "still gets restarted when the engine changed" and recovers the reported state (tray alive, engine dead) by re-running `kyber-weave update`, whatever tray build is running. It keeps today's rule that a no-op update starts nothing the user stopped: with no tray running, nothing is started. The plan reviewer suggested the inverse (restart when the tray is not running); that would start a tray the user quit and would leave the reported state unrecovered, so the plan restarts only when the tray is running. | autonomous: request instruction, existing behaviour and plan review |
+| D8 | How does `engine ensure` detect a wrong replacement? | After the replacement answers, `EnsureRunningEngineMatchesVersionAsync` compares the new holder's version with the expected one; a mismatch returns `Succeeded: false`, message `engine: failed replacement reports <actual>, expected <expected>`. | Request item 2. | autonomous: request instruction |
+| D9 | How does the tray handle an engine it did not launch? | Keep `runtime.rs` `ensure_server` (dead attached pid → discover → `attempt` launches an owned server with backoff) and pin it with a test. Add one change: when a launch prints `kyberdash.web.attached` (another engine holds the lease, e.g. one whose `server.json` is gone), `Supervisor::attempt` attaches to that loopback URL instead of counting a failure. When that engine dies, the next tick launches an owned one. | Finding F4: the death path already exists, and the popover's "Collector down" is the OTLP receiver's health from the coverage document, not the supervisor phase (F8). So T4 hardens supervision as asked but is not shown to be the cause of what David saw; D5 (tray and engine stopped before the tray relaunches) addresses the likelier cause. The attached line is parsed with the same loopback refusal as the listening line. | autonomous: low-confidence, no authoritative source; local to the tray |
+| D10 | How is "exactly one tray" made true and checked? | No LaunchAgent change. `kyberdash menubar --running` exits 0 only when exactly one `kyberdash-tray` process runs, and the update's verify step fails when it does not. The quit path waits for the tray to exit before any forced kill (D14). | `--quit` makes the tray exit 0, and the agent's `KeepAlive` is `SuccessfulExit=false`, so launchd does not relaunch it; `RunAtLoad` fires only at login; `tauri_plugin_single_instance` forwards a second launch and exits (finding F6). | autonomous: code evidence |
+| D11 | Verb names and outputs for the new kyberdash commands | `kyberdash engine stop [--state-dir <dir>]` → `engine: stopped <v>` / `engine: not-running` (exit 0) or `engine: failed …` (exit 1). `kyberdash engine verify --version <v> [--wait <seconds>] [--state-dir <dir>]` (default wait 20) → exit 0 `engine: running <v> (pid <n>)`; exit 1 `engine: not-running`; exit 3 `engine: running <actual>, expected <v>`; exit 4 `engine: unresponsive …`; exit 2 usage error. An `engine` subcommand that is not `ensure`, `stop` or `verify` prints `Usage: kyberdash engine ensure --if-running / stop / verify --version <v> [--wait <seconds>] [--state-dir <dir>]` and exits 2. `kyberdash menubar --quit` / `--launch` / `--running` → `MenubarInstallOutcome` exit 0 or 1 with one line. | Shape copies `engine ensure` and `menubar --update`; distinct verify exit codes let D7 tell "nothing running" from "wrong version". The verbs are a contract between T2, T6 and T3; each task states it so T3 runs in parallel with them. | autonomous: existing pattern |
+| D12 | Do the new `MenubarService` members get a process seam? | No process seam. The decisions they make move into a new public static class `KyberDash.Application.Services.TrayProcesses`, unit tested without processes: `CountTrayProcesses(string output, bool windows)` (macOS: non-empty `pgrep -f` lines; Windows: lines of `tasklist /FI "IMAGENAME eq kyberdash-tray.exe" /FO CSV /NH` starting with `"kyberdash-tray.exe",`, case-insensitive); `RunningOutcome(int count)` (`MenubarInstallOutcome` exit 0 only for 1, message `kyberdash: <n> tray processes running`, `kyberdash: no tray process running` for 0); `WaitForTrayExitAsync(Func<CancellationToken, Task<bool>> isRunning, Func<TimeSpan, CancellationToken, Task> delay, TimeSpan interval, TimeSpan timeout, CancellationToken)` returning true when a poll finds no tray before the timeout (the caller runs `pkill` only on false). `MenubarService` wires them to `RunToolAsync` and `Task.Delay`; its CLI dispatch is unit tested through a mocked `IMenubarService`. | The request names the seams to use and MenubarService has none, so the pure logic is lifted out and tested; adding a process seam stays a PR note. The class is public because KyberDash.Application declares no `InternalsVisibleTo`. | autonomous: request instruction and plan review |
+| D13 | Tray restart verification on David's Mac | Not a plan step: it needs a release candidate built by the release workflow from this branch. Carried as a PR note. | The planning rules forbid steps an autonomous run cannot do alone. | autonomous: planning rule |
+| D14 | Can the quit path leave a second tray? | Yes today: `QuitRunningTrayAsync` runs `--quit`, then immediately `pgrep`/`pkill`, so a tray still exiting can be killed by signal, which launchd counts as an unsuccessful exit and relaunches. Fix: after `--quit`, poll `pgrep -f` every 150 ms up to `QuitTimeout` through `TrayProcesses.WaitForTrayExitAsync` and use `pkill` only if a tray is still running then. The wait-then-kill decision is unit tested (D12). | `KeepAlive {SuccessfulExit: false}` relaunches on any non-zero or signal exit. The verify step's `menubar --running` catches a leftover second tray. | autonomous: code evidence |
+| D16 | How do the tray verbs' failures read, and what does `scripts/update-loop.sh` expect? | Every failure of a tray verb (`menubar --quit`, `--update`, `--launch`, `--running`) keeps today's prefix `the KyberDash tray step failed:` and appends the verb's first output line through `Reason`, which reads stderr first, where `RunMenubarAsync` writes a failed outcome, so a kyberdash `kyberdash menubar: …` line reaches the update's output; engine verbs keep `the KyberDash engine step failed:`. In the loop, only case `tray-delegated` takes the probe path, and it runs the release's real kyberdash (the stub is replaced before reconcile): on Linux the probe exits 1, the release changed, so `menubar --quit` fails with `kyberdash menubar: platform: …`; on macOS `--quit` finds no sandbox tray and exits 0 (a tray that is not running is not a quit failure), `engine stop` reports not-running, and `menubar --update` fails as today. Both keep the case's two expected lines; the worker updates the case comment, the third assertion's label ("ran a menubar verb") and the header comment (lines 25-28). `kyberdash-replaced` (no record) and `tray-opt-out` (`--no-menubar`) take today's `engine ensure` path, `kyberdash-opt-out` runs no kyberdash, `kyberdash-floor` skips the tray (release predates it); no case runs the `0.0.1-stub` against a tray verb. The script stays in T3 (`Technology: csharp`): the repository declares no shell standard, and the script tests T3's behaviour. | `scripts/update-loop.sh` lines 545-562; `SelfUpdater.UpdateTray` wording; `MenubarService` Linux message `kyberdash menubar: platform: …`; CI job `update-loop` runs on ubuntu-latest and macos-latest. | autonomous: code evidence and plan review |
+| D17 | How long may the finishing child run? | `SelfUpdateSystem.FinishUpdateTimeout` becomes 25 minutes, and its comment lists the worst case: probe, quit, stop, `menubar --running` check (D7), verify and running captures at 120 s each (720 s), the tray update at 5 min (300 s), and two plugin steps at 120 s each (240 s) = 1260 s (21 min), with headroom. The spawn-site allowlist entry that quotes the 15-minute bound is updated to match. | `SelfUpdateSystem.cs` lines 23-35; `tests/KyberWeave.RepoPolicy.Tests/Fixtures/spawn-sites-allowlist.json` quotes `FinishUpdateTimeout = 15 min`. | autonomous: code evidence and plan review |
+| D18 | What may `menubar --quit` stop? | Only the tray named in `tray.json`: it runs that bundle's `kyberdash-tray --quit` (Windows: the recorded exe), waits through `WaitForTrayExitAsync` matching that tray's own binary path, and kills only that path if it is still running. It never adds `/Applications/KyberDash.app` or the generic pattern; `menubar --update` keeps `QuitRunningTrayAsync`'s wider candidate list. No record → exit 1 `kyberdash: no tray install recorded`. | `scripts/update-loop.sh` points the record into the sandbox so no tray step reaches outside it; a generic quit would stop the developer's own tray when the loop runs on a Mac. | autonomous: code evidence |
+| D15 | Windows quoting of the tray `--config` argument | The Windows build step gets `shell: bash` (Git Bash on the runner) so both legs pass `--config "{\"version\":\"${TRAY_VERSION}\"}"` identically. | `release.yml` already uses `shell: bash` on the Windows "Collect the installer" step. | autonomous: existing pattern |
+| AP1 | Approve and execute | Approved for execution as planned. | Recorded by the finalize step, which changed no task, file scope, test row or command. | ANSWERED: autonomous: recommendation accepted, AUTONOMOUS_APPROVAL: approve-and-execute (plan review: 5 findings raised, 0 rejected), 2026-11-25 |
+
+## Design harvest
+
+| Target component | Target doc type | Section | Content to harvest |
+|---|---|---|---|
+| KyberDash | architecture | Versioning | One version from `Directory.Build.props`; `DashVersion.Current`; release stamps .NET via `-p:Version` and the tray via `tauri build --config` |
+| KyberDash | runbook | Engine lifecycle verbs | `engine stop`, `engine verify --version [--wait]`, `menubar --quit/--launch/--running`, their outputs and exit codes; `engine ensure` now fails on a wrong replacement version |
+| KyberDash | architecture | Tray supervision | Attached engine that dies → owned replacement with backoff; a launch that reports `kyberdash.web.attached` attaches instead of failing |
+| Distribution | architecture | Self-update KyberDash reconciliation | Tray installed: quit, stop engine, update or launch tray, verify engine version (60 s wait) and single tray; a running tray without an engine is restarted on a no-op update; a failure after the quit names the recovery command; no tray: detached `engine ensure`; pre-verb fallback; the finishing child's 25-minute bound |
+
+## Investigation findings
+
+- Discovery: codegraph 11, docs 8, direct reads 12 (adds `AGENTS.md` inner-loop section for the test command form; plan-review revision adds `scripts/update-loop.sh` KyberDash cases and `.github/workflows/ci.yml` job `update-loop`, neither a code symbol).
+- F10 (plan review): `scripts/update-loop.sh` runs a real `kyber-weave update` in CI on ubuntu and macOS; case `tray-delegated` expects a non-zero exit, `the KyberDash tray step failed` and `kyberdash menubar:`. `SelfUpdateSystem.FinishUpdateTimeout` (15 min) was budgeted for one engine verb, the tray and two plugin steps. Both are now in T3 (D16, D17). Direct reads, all on the run branch at `b86a6b4`: `runtime.rs` and `lib.rs` (tick and `ensure_server` bodies codegraph elided), `login_item_macos.rs` (plist), `supervisor.rs` test region, `release.yml` `build-tray` and `Directory.Build.props` (not code symbols), `docs/plans/README.md`, the brief output.
+- F1: Release already stamps every .NET publish with `-p:Version="${VERSION}"` (`release.yml` build and build-kyberdash jobs), so `Program.ResolveVersion()` returns the release version; the wrong value comes only from the literals in D3. `DashCommandLine.Parse` feeds `DashRuntimeSettings.Version` → `DashOptions.Version` → `TryAcquireEngineAsync` (engine descriptor) and the API version endpoint, so the engine publishes `0.21.0` while `kyberdash engine ensure` compares against `ResolveVersion()`: a mismatch every time.
+- F2: `build-tray` runs `tauri build` with no version input; the bundle takes `tauri.conf.json` `version` `0.1.0`.
+- F3: `EnsureRunningEngineMatchesVersionAsync` reports `replaced` once any engine answers, never comparing `nextHolder.Version`; `TrySpawnDetachedEngine` starts `kyberdash-api --no-open` via `/bin/sh -c 'exec … &'`, owned by no one.
+- F4: The tray's `Runtime::tick` (every poll) calls `ensure_server`: an attached server whose pid is dead fails `is_running`, `discover` refuses a dead pid, and `attempt` launches an owned server with `restart_delay` backoff. A launch that finds another engine holding the lease prints `kyberdash.web.attached` and exits 0 (`KyberDash.Api/Program.cs` `AcquireLeaseAsync`); `attempt` reads no listening line and records a failure, every tick, until Stale.
+- F5: The tray's version shown in Settings comes from the engine's version endpoint (`runtime.rs` `VERSION_PATH` → `kyberdash_version`), so fixing the engine fixes Settings.
+- F6: LaunchAgent plist: `RunAtLoad` true, `KeepAlive` `{SuccessfulExit: false}`; `--quit` exits 0 through `tauri_plugin_single_instance`; a second `open` is forwarded to the running instance.
+- F8: The popover's "Collector down" comes from `collectorLive` (`HealthFooter.tsx`) over the coverage document's `receiver` (enabled, healthy, listening, not paused, no failures in 5 minutes, fresh `checkedAt`), not from the supervisor phase; and `kyberdash_version` is cleared whenever the report fetch fails. Settings showing a version beside "Collector down" therefore means an engine was answering while its OTLP receiver was not healthy. That contradicts the request's diagnosis that the engine died and was never restarted; the plan still does T4 as asked and relies on D5 for the likelier cause (an engine started while the previous one still held its ports).
+- F9: The tray crate reads no version of its own (`CARGO_PKG_VERSION` and `package_info` appear nowhere in `src-tauri/src`), so the bundle version only affects the app's metadata.
+- F7: Divergence: `MenubarService` runs `ditto`, `codesign`, `spctl`, `pgrep`, `pkill`, `open` through a private static `RunToolAsync` with no seam, against the csharp rule "every outside resource … only through its seam". Left as a PR note (D12).
+
+## Test contract (development-mode: test-first)
+
+Existing tests keep their assertions except the ones this plan changes on purpose: assertions of `"0.21.0"` as the engine's own version (T1) and the SelfUpdater reconcile order tests (T3). A worker may narrow a locator or fixture the new work made ambiguous and names each such edit.
+
+| Task | Test project or file | Runner command | Observable behavior | RED evidence required | GREEN acceptance |
+|---|---|---|---|---|---|
+| T1 | `dash/server.tests/KyberDash.Presentation.Tests/DashVersionTests.cs` (new, `KyberDash.Presentation.Tests.DashVersionTests`); extend `KyberDash.Presentation.Tests.MinimalApiEndpointTests` | `dotnet test dash/server.tests/KyberDash.Presentation.Tests/KyberDash.Presentation.Tests.csproj -c Release --filter "FullyQualifiedName~KyberDash.Presentation.Tests.DashVersionTests" && dotnet test dash/server.tests/KyberDash.Presentation.Tests/KyberDash.Presentation.Tests.csproj -c Release --no-build --filter "FullyQualifiedName~KyberDash.Presentation.Tests.MinimalApiEndpointTests"` | `DashVersion.Current` equals the KyberDash.Core informational version without `+metadata`; Api, Cli and Mcp `Program.ResolveVersion()` equal it; `DashCommandLine.Parse([])` `Version` equals it with `KYBERDASH_VERSION` set to `9.9.9` (override gone); `new DashOptions().Version` and `new DashRuntimeSettings().Version` equal it; the version endpoint returns it | `DashVersion` missing (compile error), then the parse and endpoint assertions failing on `0.21.0` | All green; no `0.21.0` literal in `dash/server/` |
+| T2 | extend `dash/server.tests/KyberDash.Application.Tests/ApplicationParityTests.cs` (`KyberDash.Application.Tests.ApplicationParityTests`, copy `EngineEnsureReportsARefusedShutdownAsAFailure`); extend `dash/server.tests/KyberDash.Presentation.Tests/CliDispatchTests.cs` (`KyberDash.Presentation.Tests.CliDispatchTests`, copy `EngineEnsureDelegatesToTheLifecycleService`) | `dotnet test dash/server.tests/KyberDash.Application.Tests/KyberDash.Application.Tests.csproj -c Release --filter "FullyQualifiedName~KyberDash.Application.Tests.ApplicationParityTests" && dotnet test dash/server.tests/KyberDash.Presentation.Tests/KyberDash.Presentation.Tests.csproj -c Release --filter "FullyQualifiedName~KyberDash.Presentation.Tests.CliDispatchTests"` | ensure: replacement on another version → `Succeeded false`, message `engine: failed replacement reports 1.0.0, expected 2.0.0`; stop: not running → `engine: not-running` success, running then gone → `engine: stopped <v>`, refused shutdown → failure, never stops → failure; verify: matching → `engine: running <v> (pid <n>)`, other version → `engine: running <a>, expected <v>`, not running → `engine: not-running`, unresponsive → failure, becomes ready on a later probe → success; CLI: `engine stop` delegates; `engine verify --version v --wait 0` delegates and maps outcomes to exit 0, 1, 3, 4; `engine verify` without `--version` exits 2; a negative or non-numeric `--wait` exits 2; an unknown `engine` subcommand prints the new usage line (not the old `Usage: kyberdash engine ensure --if-running [--state-dir <dir>]` line) and exits 2 | New members missing (compile error), then the ensure mismatch case reporting success | All green |
+| T6 | `dash/server.tests/KyberDash.Application.Tests/TrayProcessesTests.cs` (new, `KyberDash.Application.Tests.TrayProcessesTests`); extend `dash/server.tests/KyberDash.Presentation.Tests/CliDispatchTests.cs` (`KyberDash.Presentation.Tests.CliDispatchTests`, copy `MenubarForwardsItsFlagsAndTheCliVersion`) | `dotnet test dash/server.tests/KyberDash.Application.Tests/KyberDash.Application.Tests.csproj -c Release --filter "FullyQualifiedName~KyberDash.Application.Tests.TrayProcessesTests" && dotnet test dash/server.tests/KyberDash.Presentation.Tests/KyberDash.Presentation.Tests.csproj -c Release --filter "FullyQualifiedName~KyberDash.Presentation.Tests.CliDispatchTests"` | CLI: `menubar --quit`, `--launch`, `--running` call the matching `IMenubarService` method and return its exit code; TrayProcesses: `CountTrayProcesses` returns 0 for empty or whitespace output, 1 and 3 for one and three `pgrep` lines, counts only `"kyberdash-tray.exe",` CSV lines on Windows and 0 for the `INFO: No tasks …` line; `RunningOutcome(0)` exit 1 `kyberdash: no tray process running`, `RunningOutcome(1)` exit 0, `RunningOutcome(2)` exit 1 `kyberdash: 2 tray processes running`; `WaitForTrayExitAsync` returns true without delaying when the first poll finds no tray, true when a later poll finds none (delay called between polls with the interval), false when every poll until the timeout finds a tray (fake delay advances a fake elapsed time) | `TrayProcesses` and the new `IMenubarService` members missing (compile error), then the CLI dispatch cases failing | All green |
+| T3 | extend `tests/KyberWeave.Application.Tests/Update/SelfUpdateRunTests.cs` (`KyberWeave.Application.Tests.Update.SelfUpdateRunTests`, copy `RunRelaunchesAStaleTrayEvenWhenTheReleaseDidNotChange`) | `dotnet test tests/KyberWeave.Application.Tests/KyberWeave.Application.Tests.csproj -c Release --filter "FullyQualifiedName~KyberWeave.Application.Tests.Update.SelfUpdateRunTests"` | Tray recorded, release changed: argv sequence `engine verify --version v --wait 0` (probe), `menubar --quit`, `engine stop`, `menubar --update --version v`, `engine verify --version v --wait 60`, `menubar --running`, then the plugin steps; no `engine ensure`. Tray current, release unchanged: probe exit 0 → no quit/stop/launch; probe exit 1 then `menubar --running` exit 1 → no quit/stop/launch (nothing the user stopped is started); `RunRestartsTheTrayWhenItRunsWithoutAnEngine`: probe exit 1 then `menubar --running` exit 0 → `menubar --quit`, `engine stop`, `menubar --launch`, `engine verify --version v --wait 60`, `menubar --running`; probe exit 3 → `menubar --quit`, `engine stop`, `menubar --launch`, `engine verify --version v --wait 60`, `menubar --running`; probe exit 4 → `SelfUpdateException` naming the engine step. Tray older, release unchanged → the restart sequence with `menubar --update`. No tray record: `engine ensure --if-running` as today, no tray verbs, no probe, log carries `no tray install recorded`. `--no-menubar`: today's engine ensure, no tray verbs, log carries `--no-menubar given; leaving the KyberDash tray unchanged`. Probe exits 2 with `Usage: kyberdash engine ensure --if-running [--state-dir <dir>]`: falls back to `engine ensure` then `menubar --update`, logs the fallback. Each step's non-zero exit or start failure → `SelfUpdateException` naming that step and stating the binaries are committed; a tray verb's failure starts `the KyberDash tray step failed:` and carries the verb's first output line (a scripted `kyberdash menubar: platform: …` line appears in the message); verify failure names `engine verify` with its output. Every failure after a successful `menubar --quit` says the tray and engine are stopped and names the recovery command: `kyberdash menubar --update --version v` when `menubar --update` failed, `kyberdash menubar --launch` for a failed `menubar --launch`, `engine stop`, `engine verify` or `menubar --running`. `--no-restart` and `--no-kyberdash` unchanged | New argv expectations failing (today runs `engine ensure` first) | All green; the changed existing tests (`RunReconcilesAfterCommitInEngineTrayPluginOrder`, `RunAlreadyCurrentStillReconcilesEngineTrayAndPlugin`, `RunRelaunchesAStaleTrayEvenWhenTheReleaseDidNotChange`, `RunLeavesACurrentTrayAloneWhenTheReleaseDidNotChange`, `RunDelegatesToKyberdashMenubarUpdate`) assert the new sequence |
+| T4 | `dash/tray/src-tauri/src/supervisor.rs` `mod tests`; `dash/tray/src-tauri/src/runtime.rs` `mod tests` | `cargo test --manifest-path dash/tray/src-tauri/Cargo.toml attached` | Supervisor: a launch whose output is a `kyberdash.web.attached` line with a loopback URL → `Attempt::Listening`, phase Ready, `owns_server()` false, failures 0, the spawned child reaped; an attached line with a non-loopback URL → failure; `parse_attached_line` refuses non-loopback, missing pid or url. Runtime (`#[cfg(unix)]`): attached to a server whose pid then dies (a spawned `sleep` child killed and waited) → next `tick` spawns the launcher once and the supervisor owns it | `parse_attached_line` missing (compile error), then the attached-line attempt reporting `Failed` | All green with a non-zero passed count; the runtime death test may pass before the change (it pins F4) and is named as such in the report |
+| T5 | extend `tests/KyberWeave.RepoPolicy.Tests/ReleaseTests.cs` (`KyberWeave.Tests.ReleaseTests`, copy `BuildTrayFailsTheMacOsLegsBeforeBuildingWhenASecretIsMissing`) | `dotnet test tests/KyberWeave.RepoPolicy.Tests/KyberWeave.RepoPolicy.Tests.csproj -c Release --filter "FullyQualifiedName~KyberWeave.Tests.ReleaseTests"` | `BuildTrayStampsTheReleaseVersionIntoTheTrayBundle`: both `tauri.js build` steps in `build-tray` pass `--config` carrying `version` from `needs.version.outputs.version` through `env:` (not inline `${{ }}` in `run:`), and the Windows build step runs under `shell: bash` | The new test failing on the current workflow | All green |
+
+## Tasks
+
+### T1: One version source and DashVersion for every KyberDash binary
+
+- **Objective:** Make every .NET project take its version from `Directory.Build.props` and every KyberDash surface report `DashVersion.Current`.
+- **Capabilities:** C# and MSBuild changes with xUnit tests
+- **Difficulty:** easy
+- **Technology:** csharp
+- **Session:** `kyberdash-server`
+- **Depends on:** none
+- **Files:**
+  - `Directory.Build.props`: add `<Version Condition="'$(Version)' == ''">0.1.0</Version>` to the first `PropertyGroup` (D1)
+  - `src/KyberWeave.Arbiter/KyberWeave.Arbiter.csproj`, `src/KyberWeave.Domain/KyberWeave.Domain.csproj`, `src/KyberWeave.Kernel/KyberWeave.Kernel.csproj`, `src/KyberWeave.Cli/KyberWeave.Cli.csproj`, `src/KyberWeave.Mcp/KyberWeave.Mcp.csproj`, `src/KyberWeave.Data/KyberWeave.Data.csproj`, `src/KyberWeave.Contracts/KyberWeave.Contracts.csproj`, `src/KyberWeave.Hooks/KyberWeave.Hooks.csproj`, `src/KyberWeave.Application/KyberWeave.Application.csproj`: remove `<Version>`
+  - `dash/server/KyberDash.Application/KyberDash.Application.csproj`, `dash/server/KyberDash.Data/KyberDash.Data.csproj`, `dash/server/KyberDash.Api/KyberDash.Api.csproj`, `dash/server/KyberDash.Domain/KyberDash.Domain.csproj`, `dash/server/KyberDash.Mcp/KyberDash.Mcp.csproj`, `dash/server/KyberDash.Cli/KyberDash.Cli.csproj`, `dash/server/KyberDash.Core/KyberDash.Core.csproj`, `dash/server/KyberDash.Contracts/KyberDash.Contracts.csproj`: remove `<Version>`
+  - `dash/server/KyberDash.Core/DashVersion.cs` (new): `public static class DashVersion` with `Current` (D2), XML docs
+  - `dash/server/KyberDash.Api/Program.cs`, `dash/server/KyberDash.Cli/Program.cs`, `dash/server/KyberDash.Mcp/Program.cs`: `ResolveVersion()` returns `DashVersion.Current`
+  - `dash/server/KyberDash.Api/DashCommandLine.cs`: `Parse` sets `Version = DashVersion.Current`, `KYBERDASH_VERSION` read removed (D3)
+  - `dash/server/KyberDash.Api/DashRuntimeSettings.cs`: `Version` default `DashVersion.Current`
+  - `dash/server/KyberDash.Contracts/Services/IDashServices.cs`: `DashOptions.Version` default `DashVersion.Current`
+  - `dash/server/KyberDash.Application/KyberBridgeEngine.cs`: remove `DefaultVersion`; constructor `string? version = null` → `DashVersion.Current`; update every caller of `DefaultVersion`
+  - `dash/server.tests/KyberDash.Presentation.Tests/DashVersionTests.cs` (new), `dash/server.tests/KyberDash.Presentation.Tests/MinimalApiEndpointTests.cs` (version endpoint assertion → `DashVersion.Current`), `dash/server.tests/KyberDash.Presentation.Tests/PresentationTestData.cs` only where it stands for the engine's own version
+- **Commands:**
+  - `kyber-weave review gates . --agent <agent> --task T1 --red`
+  - `kyber-weave review gates . --agent <agent> --task T1`
+- **Acceptance:**
+  - `<Version>` appears in no `.csproj` under `src/` or `dash/server/`; `dotnet build dash/server/KyberDash.sln -c Release` and the kyber-weave build stay warning-free
+  - No `0.21.0` literal remains under `dash/server/`; test data that stands for another engine's version may keep it
+  - `DashVersionTests` and `MinimalApiEndpointTests` green
+
+### T2: Engine stop and verify verbs and the wrong-version replacement report
+
+- **Objective:** Give `kyberdash` the `engine stop` and `engine verify` verbs the update orchestrates, and make `engine ensure` fail on a replacement of the wrong version.
+- **Capabilities:** C# service and CLI changes with xUnit and Moq tests
+- **Difficulty:** medium
+- **Technology:** csharp
+- **Session:** `kyberdash-server`
+- **Depends on:** T1 (shares `KyberDash.Cli/Program.cs` and `IDashServices.cs`)
+- **Files:**
+  - `dash/server/KyberDash.Contracts/Services/IDashServices.cs`: `IEngineLifecycleService` gains `Task<EngineEnsureReport> StopRunningEngineAsync(string? stateDir = null, CancellationToken cancellationToken = default)` and `Task<EngineEnsureReport> VerifyRunningEngineVersionAsync(string expectedVersion, int attempts, string? stateDir = null, CancellationToken cancellationToken = default)`; XML docs
+  - `dash/server/KyberDash.Application/Services/EngineLifecycleService.cs`: `EnsureRunningEngineMatchesVersionAsync` compares `nextHolder.Version` with the expected version; a mismatch returns `Succeeded: false`, message `engine: failed replacement reports <actual>, expected <expected>`; implement `StopRunningEngineAsync` (probe; not running → success `engine: not-running`; unresponsive → failure; shutdown request refused → failure; poll `ShutdownPollAttempts` × `PollInterval` until not running → `engine: stopped <v>`, else `engine: failed the engine did not stop in time`) and `VerifyRunningEngineVersionAsync` (probe up to `attempts` times, at least once, `PollInterval` apart, stopping at the first match; the report says which of: running on the version, not running, running another version, unresponsive — add a `EngineVerifyOutcome` enum to `KyberDash.Domain/StoreAndServiceDtos.cs` beside `EngineEnsureReport` if the report needs it)
+  - `dash/server/KyberDash.Cli/Program.cs`: `RunEngineAsync` dispatches `stop` and `verify` (`--version` required, `--wait <seconds>` whole number ≥ 0, default 20, attempts = ceiling(seconds / 0.15) with minimum 1); help text lists them
+  - `dash/server.tests/KyberDash.Application.Tests/ApplicationParityTests.cs`, `dash/server.tests/KyberDash.Application.Tests/Fakes.cs` (only if `FakeServerStateRepository` needs a probe sequence it lacks), `dash/server.tests/KyberDash.Presentation.Tests/CliDispatchTests.cs` (engine cases)
+- **Contract (consumed by T3, must match exactly):**
+  - `kyberdash engine stop [--state-dir <dir>]`: exit 0 with `engine: stopped <v>` or `engine: not-running`; exit 1 with `engine: failed …` or `engine: unresponsive …`
+  - `kyberdash engine verify --version <v> [--wait <seconds>] [--state-dir <dir>]`: exit 0 `engine: running <v> (pid <n>)`; exit 1 `engine: not-running`; exit 3 `engine: running <actual>, expected <v>`; exit 4 `engine: unresponsive …`; exit 2 for a usage error
+  - Any `engine` subcommand other than `ensure`, `stop`, `verify`: exit 2 and the line `Usage: kyberdash engine ensure --if-running / stop / verify --version <v> [--wait <seconds>] [--state-dir <dir>]` (never the old `Usage: kyberdash engine ensure --if-running [--state-dir <dir>]` line, which T3 reads as "pre-verb kyberdash")
+- **Commands:**
+  - `kyber-weave review gates . --agent <agent> --task T2 --red`
+  - `kyber-weave review gates . --agent <agent> --task T2`
+- **Acceptance:**
+  - Verb names, flags, messages and exit codes exactly as the contract above
+  - `ApplicationParityTests` and `CliDispatchTests` green
+
+### T3: Self-update restarts the tray so it owns the engine
+
+- **Objective:** Replace the detached engine restart with the tray restart sequence when a tray is installed, keeping today's path otherwise, and keep the real-binary update loop and the finishing child's bound in step with it.
+- **Capabilities:** C# application logic with xUnit tests over process-runner fakes; one bash test script
+- **Difficulty:** medium
+- **Technology:** csharp
+- **Session:** `self-update`
+- **Depends on:** none (the kyberdash verb contract is stated below)
+- **Files:**
+  - `src/KyberWeave.Application/Update/SelfUpdater.cs`: `ReconcileKyberDash` decides tray-managed (not `--no-menubar`, release ≥ `TrayMinVersion`, `tray.json` recorded, kyberdash installed — reuse the checks in `ShouldUpdateTray`); tray-managed → new `RestartTrayWithOwnedEngine(windows, version, releaseChanged, trayOlder)`; otherwise `EnsureEngine` as today, still logging verbatim `no tray install recorded`, `--no-menubar given; leaving the KyberDash tray unchanged` and `predates the KyberDash tray` (`scripts/update-loop.sh` greps them). The new method, through `_captureProcess` (verbs) and `_runProcess` (`menubar --update`, as `UpdateTray` does):
+    1. Probe: `engine verify --version <v> --wait 0`. Exit 2 with the exact line `Usage: kyberdash engine ensure --if-running [--state-dir <dir>]` → log that this kyberdash predates the tray restart, then run `EnsureEngine` and `UpdateTray` when due (today's path) and return.
+    2. Decide: release changed or tray older → restart; else probe exit 0 → log and return; exit 1 → `menubar --running`: exit 0 → restart, otherwise log and return; exit 3 → restart; exit 4 or any other code → `SelfUpdateException` naming the engine step.
+    3. Restart: `menubar --quit`; `engine stop`; `menubar --update --version <v>` when release changed or tray older, else `menubar --launch`; then `engine verify --version <v> --wait 60` and `menubar --running`.
+    4. Each non-zero exit, start failure or timeout is a `SelfUpdateException` naming the step and its first output line (through `Reason`), saying the binaries are already updated, as `EnsureEngine` and `UpdateTray` word theirs. Tray verbs keep the prefix `the KyberDash tray step failed:`, engine verbs `the KyberDash engine step failed:`. After `menubar --quit` succeeded, the message adds that the KyberDash tray and engine are stopped and names the recovery command: `kyberdash menubar --update --version <v>` when `menubar --update` failed, otherwise `kyberdash menubar --launch`
+  - `src/KyberWeave.Data/Update/SelfUpdateSystem.cs`: `FinishUpdateTimeout` 25 minutes; its comment names the worst case: six captures at 120 s (probe, quit, stop, running check, verify, running), the tray update at 300 s, two plugin steps at 120 s = 1260 s
+  - `tests/KyberWeave.RepoPolicy.Tests/Fixtures/spawn-sites-allowlist.json`: the `bound` text that quotes `FinishUpdateTimeout = 15 min` says 25 min
+  - `scripts/update-loop.sh`: header comment (lines 25-28) describes the tray restart (probe, quit, stop, update or launch, verify); case `tray-delegated` comment and its third assertion label say "a menubar verb" rather than `menubar --update`; its expected lines `the KyberDash tray step failed` and `kyberdash menubar:` stay. Only `tray-delegated` takes the probe path, with the release's real kyberdash: on Linux `menubar --quit` fails with `kyberdash menubar: platform: …`, on macOS `menubar --update` fails as today. No case runs the `0.0.1-stub` against a tray verb
+  - The kyberdash verb contract T2 and T6 implement: `engine stop` exit 0 or 1; `engine verify` exit 0 on the version, 1 not running, 3 another version, 4 unresponsive, 2 usage; `menubar --quit`, `--launch`, `--running` exit 0 or 1 with one line (Linux: `kyberdash menubar: platform: …`, exit 1)
+  - `tests/KyberWeave.Application.Tests/Update/SelfUpdateRunTests.cs`: new cases per the Test contract; update the five existing reconcile-order tests to the new sequence
+  - `tests/KyberWeave.Testing/Update/UpdateWorld.cs`: only if the fake process runner needs a scripted exit per argv it lacks
+- **Commands:**
+  - `kyber-weave review gates . --agent <agent> --task T3 --red`
+  - `kyber-weave review gates . --agent <agent> --task T3`
+- **Acceptance:**
+  - With a tray recorded, no run calls `engine ensure` unless the pre-verb fallback (step 1) fires
+  - The log names each step and its kyberdash output line
+  - `SelfUpdateRunTests` green
+  - `scripts/update-loop.sh` and its header comment match the new flow; `bash -n scripts/update-loop.sh` clean
+  - `FinishUpdateTimeout` covers the worst case named in its comment
+
+### T4: Tray supervisor attaches to an engine a launch reports and pins the owned replacement
+
+- **Objective:** A launch that reports `kyberdash.web.attached` attaches instead of failing, and the dead-attached-engine replacement path is pinned by a test (D9).
+- **Capabilities:** Rust tray crate changes with cargo unit tests
+- **Difficulty:** easy
+- **Technology:** rust
+- **Session:** `tray`
+- **Depends on:** none
+- **Files:**
+  - `dash/tray/src-tauri/src/supervisor.rs`: new `parse_attached_line` (same shape and loopback refusal as `parse_listening_line`, event `kyberdash.web.attached`); `Supervisor::attempt` reads lines until a listening line (owned, as today) or an attached line (reap the child with `kill_tree`, then the same state as `attach`: phase Ready, failures 0, `attached` true, no process kept); tests in `mod tests`
+  - `dash/tray/src-tauri/src/runtime.rs`: `#[cfg(unix)]` test in `mod tests` for the dead-attached-server replacement (use the existing attached-runtime helpers and a recording spawner)
+- **Commands:**
+  - `kyber-weave review gates . --agent <agent> --task T4 --red`
+  - `kyber-weave review gates . --agent <agent> --task T4`
+- **Acceptance:**
+  - `cargo fmt --check` and `cargo clippy -- -D warnings` clean on the crate
+  - Every new test's name contains `attached`, so the runner filter selects it; filtered `cargo test` reports a non-zero passed count; `parses_the_listening_line_and_only_that_line` keeps its assertions
+
+### T5: Release stamps the tray bundle with the release version
+
+- **Objective:** Both `tauri build` steps in `build-tray` receive the release version (D4).
+- **Capabilities:** GitHub Actions workflow edit with a repository policy test in C#
+- **Difficulty:** easy
+- **Technology:** github-actions
+- **Session:** `release`
+- **Depends on:** none
+- **Files:**
+  - `.github/workflows/release.yml`: job `build-tray`, steps "Build and sign the tray (macOS)" and "Build the tray (Windows)": add `env: TRAY_VERSION: ${{ needs.version.outputs.version }}` and pass `--config "{\"version\":\"${TRAY_VERSION}\"}"`; the Windows step gets `shell: bash` (D15)
+  - `tests/KyberWeave.RepoPolicy.Tests/ReleaseTests.cs`: `BuildTrayStampsTheReleaseVersionIntoTheTrayBundle`
+- **Commands:**
+  - `kyber-weave review gates . --agent <agent> --task T5 --red`
+  - `kyber-weave review gates . --agent <agent> --task T5`
+- **Acceptance:**
+  - `actionlint .github/workflows/release.yml` clean
+  - `ReleaseTests` green
+
+### T6: Tray quit, launch and running verbs
+
+- **Objective:** Give `kyberdash menubar` the `--quit`, `--launch` and `--running` verbs the update orchestrates, with their counting and wait-then-kill decisions unit tested, so exactly one tray runs after an update.
+- **Capabilities:** C# service and CLI changes with xUnit and Moq tests
+- **Difficulty:** medium
+- **Technology:** csharp
+- **Session:** `kyberdash-server`
+- **Depends on:** T2 (shares `KyberDash.Cli/Program.cs`, `IDashServices.cs` and `CliDispatchTests.cs`)
+- **Files:**
+  - `dash/server/KyberDash.Contracts/Services/IDashServices.cs`: `IMenubarService` gains `QuitAsync`, `LaunchAsync`, `CountRunningAsync`, each `Task<MenubarInstallOutcome>(CancellationToken)`; XML docs
+  - `dash/server/KyberDash.Application/Services/TrayProcesses.cs` (new): `public static class TrayProcesses` (public because KyberDash.Application declares no `InternalsVisibleTo`), XML docs:
+    - `int CountTrayProcesses(string output, bool windows)`: macOS non-empty `pgrep -f` lines; Windows lines of `tasklist /FI "IMAGENAME eq kyberdash-tray.exe" /FO CSV /NH` that start with `"kyberdash-tray.exe",` (case-insensitive)
+    - `MenubarInstallOutcome RunningOutcome(int count)`: exit 0 only for 1; 0 → exit 1 `kyberdash: no tray process running`; n > 1 → exit 1 `kyberdash: <n> tray processes running`
+    - `Task<bool> WaitForTrayExitAsync(Func<CancellationToken, Task<bool>> isRunning, Func<TimeSpan, CancellationToken, Task> delay, TimeSpan interval, TimeSpan timeout, CancellationToken cancellationToken)`: true when a poll finds no tray before the timeout; the caller runs `pkill` only on false
+  - `dash/server/KyberDash.Application/Services/MenubarService.cs`: `QuitAsync` quits only the tray named in `tray.json` (its `Contents/MacOS/kyberdash-tray --quit`, then `WaitForTrayExitAsync` over `pgrep -f <that binary path>`, `pkill -f <that path>` only on false; Windows the recorded `kyberdash-tray.exe --quit`), never the system-wide `KyberDash.app` copy or the generic pattern, so `scripts/update-loop.sh` cannot stop a developer's own tray; a missing bundle or no running tray → exit 0 `kyberdash: the tray is not running`, exit 1 only when the tray still runs after the kill; `LaunchAsync` (macOS `open <recorded path>`, Windows run the recorded exe); no record → exit 1 `kyberdash: no tray install recorded` for both; `CountRunningAsync` (macOS `pgrep -f Contents/MacOS/kyberdash-tray`, Windows the `tasklist` line above, through `CountTrayProcesses` and `RunningOutcome`); Linux returns the existing `kyberdash menubar: platform: …` message with exit 1. `QuitRunningTrayAsync` (the `--update` path, wider candidate list unchanged): after the `--quit` calls, wait through `WaitForTrayExitAsync` (150 ms interval, `QuitTimeout`) and run `pkill` only on false, so a tray still exiting is not killed by signal and relaunched by its LaunchAgent
+  - `dash/server/KyberDash.Cli/Program.cs`: `RunMenubarAsync` dispatches `--quit`, `--launch`, `--running`; help text lists them
+  - `dash/server.tests/KyberDash.Application.Tests/TrayProcessesTests.cs` (new), `dash/server.tests/KyberDash.Presentation.Tests/CliDispatchTests.cs` (menubar cases)
+- **Contract (consumed by T3, must match exactly):** `kyberdash menubar --quit`, `--launch`, `--running`: exit 0 or 1 with one line, a failure written to stderr; `--quit` exits 0 when the recorded tray is not running or its bundle is missing; `--running` exits 0 only when exactly one tray process runs
+- **Commands:**
+  - `kyber-weave review gates . --agent <agent> --task T6 --red`
+  - `kyber-weave review gates . --agent <agent> --task T6`
+- **Acceptance:**
+  - `TrayProcessesTests` and `CliDispatchTests` green
+  - `menubar --quit` reaches no tray but the recorded one, and exits 0 when that tray is not running
+
+## Dependency graph
+
+- T1 → T2 → T6 (same session `kyberdash-server`, shared files)
+- T3, T4, T5 have no dependencies and run in parallel with T1.
+
+## Risks
+
+- Windows NSIS may refuse a prerelease version such as `0.1.8-rc.31`; mitigation: the release run shows it at once, and the follow-up is a numeric `bundle.windows` version override (PR note).
+- `CFBundleShortVersionString` becomes `0.1.8-rc.31`, which Apple documents as numeric; Developer ID distribution (not App Store) accepts it, and the release job's `spctl`/`stapler` checks prove it on the first run.
+- A cold first launch of the freshly installed tray may still exceed the post-restart verify's 60 s wait (D5); the error says the tray and engine state and names the step and the recovery command, and the finishing child's 25-minute bound (D17) covers every step at its cap.
+- A failure part-way through the restart leaves no tray and no engine running; mitigation: the message says so and names the one command that starts them again (D5).
+- The reported "Collector down" is the OTLP receiver's health (F8), not proven to be the tray supervisor; if the cause is the receiver itself (for example a port still held when the replacement started), T4 does not fix it. Mitigation: D5 stops tray and engine before the tray relaunches, and the PR note asks the owner to check the collector state after the release-candidate update.
+- The process calls inside `menubar --quit/--launch/--running` (`pgrep`, `pkill`, `open`, `tasklist`) have no unit test, only the counting and wait-then-kill decisions do (D12); mitigation: the update's `menubar --running` verify step fails loudly on a second tray, and the `update-loop` CI job runs the real verbs.
+
+## Out-of-scope boundaries
+
+- Transcript import and parsers (`dash/server/KyberDash.Application` importers, `KyberDash.Data` record writers): parallel sessions own them.
+- LaunchAgent plist and autostart code: unchanged (D10).
+- PR note: on David's Mac — run `kyber-weave update --release-candidate` (or an rc→rc round trip) once a release candidate from this branch is published, launching through a terminal or `open`, and check one tray, one tray-owned engine, both on the release version, Settings showing it, and the popover showing "Collector live" — this needs a published release built from the merged change, which no gate can produce.
+- PR note: `dash/server/KyberDash.Application/Services/MenubarService.cs` — runs `ditto`, `codesign`, `spctl`, `pgrep`, `pkill`, `open` and the Windows installer through a private static `RunToolAsync` with no seam, against the csharp "every outside resource through its seam" rule — the request names the seams to test through; adding one is a refactor for a human to schedule.
+- PR note: `npm/package.json` and `homebrew/kyber-weave.rb` — each still carries its own `0.1.0` version, outside the `Directory.Build.props` scope of this change — "one version" is not yet true for the npm package and the Homebrew formula; whether their release jobs stamp them is for the owner to decide.
+- PR note: `.github/workflows/release.yml` `build-tray` Windows leg — NSIS acceptance of a prerelease version is proven only by a release run — if it refuses, a numeric Windows bundle version override is the fix.
+
+## Verification gates
+
+- Each task's own task gate (`kyber-weave review gates . --agent <agent> --task <id>`), test-first: once with `--red`, then green.
+- End of run: the review council's gates from `.kyber-weave/kyber-weave.yml` (build, format, unit, policy, `ts-test`, `cargo-test` where changed) and CI, including the `update-loop` job (`scripts/update-loop.sh`, ubuntu and macOS), which runs a real `kyber-weave update` through the tray restart flow (D16).
+- Docs gates: `kyber-weave docs validate . --merge-ready` and `kyber-weave docs drift .` after closeout.
+
+## Review
+
+The end-of-run review council under the `code-review` skill reviews the whole change; the conductor then opens the pull request with `[claude]` in the title, moves it from draft to ready, and runs the Kilo review loop. Nobody merges it.
+
+## docs-dev closeout
+
+`docs-dev` harvests the Design harvest rows into the KyberDash architecture and runbook pages and the Distribution self-update documentation (ADR 0065's area), fills the Closeout mapping, and clears the standards warning period with `kyber-weave docs standards migrate` in the closeout commit.
