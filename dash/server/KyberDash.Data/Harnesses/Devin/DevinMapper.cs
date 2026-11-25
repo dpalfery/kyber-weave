@@ -109,12 +109,18 @@ public record DevinParseProblem(
 /// <param name="AgentModelName">Transcript agent model name (<c>agent.model_name</c>), or <see langword="null"/> when absent.</param>
 /// <param name="Steps">Transcript steps in order.</param>
 /// <param name="ParseProblems">Non-fatal parse diagnostics.</param>
+/// <param name="Title">Session title (<c>title</c> on a <c>message_nodes</c> export), or <see langword="null"/> when absent.</param>
+/// <param name="WorkingDirectory">Session working directory (<c>working_directory</c> on a <c>message_nodes</c> export), or <see langword="null"/> when absent.</param>
+/// <param name="FromMessageNodes">Whether the document came from a <c>message_nodes</c> export, where an assistant step without metrics still maps to a token-less record.</param>
 public record DevinTranscriptDocument(
     bool IsValid,
     string? SessionId,
     string? AgentModelName,
     IReadOnlyList<DevinStep> Steps,
-    IReadOnlyList<DevinParseProblem> ParseProblems);
+    IReadOnlyList<DevinParseProblem> ParseProblems,
+    string? Title = null,
+    string? WorkingDirectory = null,
+    bool FromMessageNodes = false);
 
 /// <summary>
 /// Offline short display-name resolution porting the pricing-state-free core of
@@ -349,6 +355,12 @@ public partial class DevinMapper : IHarnessMapper
                 ? ReadOptionalString(agentEl, "model_name")
                 : null;
 
+            if (root.TryGetProperty("message_nodes", out JsonElement nodesEl)
+                && nodesEl.ValueKind == JsonValueKind.Array)
+            {
+                return ParseMessageNodes(root, nodesEl, sessionId);
+            }
+
             if (!root.TryGetProperty("steps", out JsonElement stepsEl)
                 || stepsEl.ValueKind != JsonValueKind.Array)
             {
@@ -389,6 +401,18 @@ public partial class DevinMapper : IHarnessMapper
         ArgumentNullException.ThrowIfNull(unit.Unit);
 
         CollectedSource source = new(DevinHarnessId, unit.Unit.Kind, unit.Unit.SourceKey);
+        if (unit.RawText is null)
+        {
+            return new CollectedBatch(
+                source,
+                [],
+                [],
+                BuildProblems(
+                    [new DevinParseProblem(0, MalformedDocumentCode, $"Skipping Devin source {unit.Unit.SourceKey}: the reader supplied no payload (null).")],
+                    unit.Unit.SourceKey,
+                    importedAtUtc));
+        }
+
         if (string.IsNullOrWhiteSpace(unit.RawText))
         {
             return new CollectedBatch(source, [], [], []);
@@ -420,6 +444,12 @@ public partial class DevinMapper : IHarnessMapper
             }
 
             DevinStepUsage? usage = GetUsage(step);
+            if (usage is null && document.FromMessageNodes)
+            {
+                // D9: an assistant node without metrics is still a call; it carries no token rows.
+                usage = new DevinStepUsage(0, null, null, null, null);
+            }
+
             if (usage is null)
             {
                 continue;
@@ -508,8 +538,10 @@ public partial class DevinMapper : IHarnessMapper
                 SessionKey: sessionId,
                 HarnessId: DevinHarnessId,
                 NativeSessionId: sessionId,
-                Workspace: null,
-                Title: null,
+                Workspace: SafeOptionalText(document.WorkingDirectory) is { } workingDirectory
+                    ? new CollectedWorkspace(workingDirectory, null, null)
+                    : null,
+                Title: SafeOptionalText(document.Title),
                 ReportedUsage: []),
         ];
 
@@ -599,6 +631,134 @@ public partial class DevinMapper : IHarnessMapper
             AgentModelName: null,
             Steps: [],
             ParseProblems: [new DevinParseProblem(0, MalformedDocumentCode, message)]);
+
+    /// <summary>
+    /// Parses the Devin <c>sessions.db</c> export (a root holding a <c>message_nodes</c> array) into
+    /// the transcript model: <c>user</c> nodes become user-input steps, <c>assistant</c> nodes become
+    /// steps with metrics from <c>metadata.metrics</c>, and <c>tool</c> and <c>system</c> nodes emit
+    /// no step. A node whose <c>chat_message</c> is not an object, or whose role is unknown, is one
+    /// problem; the other nodes still map.
+    /// </summary>
+    private static DevinTranscriptDocument ParseMessageNodes(JsonElement root, JsonElement nodesEl, string? sessionId)
+    {
+        string? exportModel = ReadOptionalString(root, "model");
+        List<DevinStep> steps = [];
+        List<DevinParseProblem> problems = [];
+        int index = 0;
+        foreach (JsonElement nodeEl in nodesEl.EnumerateArray())
+        {
+            index++;
+            if (nodeEl.ValueKind != JsonValueKind.Object
+                || !nodeEl.TryGetProperty("chat_message", out JsonElement chatEl)
+                || chatEl.ValueKind != JsonValueKind.Object)
+            {
+                problems.Add(new DevinParseProblem(
+                    index,
+                    MalformedDocumentCode,
+                    string.Create(CultureInfo.InvariantCulture, $"Skipping Devin message node {index}: chat_message is not an object.")));
+                continue;
+            }
+
+            string? role = ReadOptionalString(chatEl, "role");
+            string stepId = ReadOptionalString(chatEl, "message_id")
+                ?? ReadOptionalString(nodeEl, "node_id")
+                ?? string.Create(CultureInfo.InvariantCulture, $"step-{index}");
+            string? content = chatEl.TryGetProperty("content", out JsonElement contentEl)
+                ? NormalizeMessageValue(contentEl)
+                : null;
+
+            switch (role)
+            {
+                case "tool":
+                case "system":
+                    break;
+                case "user":
+                    steps.Add(new DevinStep(
+                        stepId,
+                        role,
+                        null,
+                        content,
+                        [],
+                        null,
+                        null,
+                        new DevinStepMetadata(null, null, null, true, null, null, null, null)));
+                    break;
+                case "assistant":
+                    steps.Add(ParseAssistantNode(chatEl, stepId, content, exportModel));
+                    break;
+                default:
+                    problems.Add(new DevinParseProblem(
+                        index,
+                        MalformedDocumentCode,
+                        string.Create(CultureInfo.InvariantCulture, $"Skipping Devin message node {index}: unrecognised role.")));
+                    break;
+            }
+        }
+
+        return new DevinTranscriptDocument(
+            IsValid: true,
+            SessionId: sessionId,
+            AgentModelName: exportModel,
+            Steps: steps,
+            ParseProblems: problems,
+            Title: ReadOptionalString(root, "title"),
+            WorkingDirectory: ReadOptionalString(root, "working_directory"),
+            FromMessageNodes: true);
+    }
+
+    private static DevinStep ParseAssistantNode(JsonElement chatEl, string stepId, string? content, string? exportModel)
+    {
+        List<DevinToolCall> toolCalls = [];
+        if (chatEl.TryGetProperty("tool_calls", out JsonElement toolsEl)
+            && toolsEl.ValueKind == JsonValueKind.Array)
+        {
+            foreach (JsonElement toolEl in toolsEl.EnumerateArray())
+            {
+                string? name = toolEl.ValueKind == JsonValueKind.Object ? ReadOptionalString(toolEl, "name") : null;
+                if (string.IsNullOrWhiteSpace(name))
+                {
+                    continue;
+                }
+
+                string? argumentsJson = toolEl.TryGetProperty("arguments", out JsonElement argsEl)
+                    && argsEl.ValueKind is not (JsonValueKind.Null or JsonValueKind.Undefined)
+                    ? argsEl.GetRawText()
+                    : null;
+                toolCalls.Add(new DevinToolCall(ReadOptionalString(toolEl, "id"), name, argumentsJson));
+            }
+        }
+
+        string? createdAt = null;
+        string? generationModel = null;
+        double? input = null;
+        double? output = null;
+        double? cacheCreation = null;
+        double? cacheRead = null;
+        if (chatEl.TryGetProperty("metadata", out JsonElement metadataEl)
+            && metadataEl.ValueKind == JsonValueKind.Object)
+        {
+            createdAt = ReadStringOnly(metadataEl, "created_at");
+            generationModel = ReadOptionalString(metadataEl, "generation_model");
+            if (metadataEl.TryGetProperty("metrics", out JsonElement metricsEl)
+                && metricsEl.ValueKind == JsonValueKind.Object)
+            {
+                input = ReadOptionalDouble(metricsEl, "input_tokens");
+                output = ReadOptionalDouble(metricsEl, "output_tokens");
+                cacheCreation = ReadOptionalDouble(metricsEl, "cache_creation_tokens");
+                cacheRead = ReadOptionalDouble(metricsEl, "cache_read_tokens");
+            }
+        }
+
+        return new DevinStep(
+            stepId,
+            "assistant",
+            generationModel ?? exportModel,
+            content,
+            toolCalls,
+            null,
+            null,
+            new DevinStepMetadata(createdAt, null, generationModel, false, input, output, cacheCreation, cacheRead));
+    }
 
     private static DevinStep ParseStep(JsonElement stepEl, int index)
     {
@@ -743,11 +903,13 @@ public partial class DevinMapper : IHarnessMapper
 
     private static string? NormalizeStepMessage(JsonElement stepEl)
     {
-        if (!stepEl.TryGetProperty("message", out JsonElement messageEl))
-        {
-            return null;
-        }
+        return stepEl.TryGetProperty("message", out JsonElement messageEl)
+            ? NormalizeMessageValue(messageEl)
+            : null;
+    }
 
+    private static string? NormalizeMessageValue(JsonElement messageEl)
+    {
         if (messageEl.ValueKind == JsonValueKind.String)
         {
             string? text = messageEl.GetString()?.Trim();
