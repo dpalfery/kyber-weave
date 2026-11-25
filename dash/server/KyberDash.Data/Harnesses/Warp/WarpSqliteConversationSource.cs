@@ -225,8 +225,9 @@ public class WarpSqliteConversationSource : ISqliteConversationSource
     /// <summary>
     /// The scan keeps only each conversation's block ids for the pass, not the block text, so memory does
     /// not grow with the size of the commands; an export then fetches just its own conversation's rows.
+    /// The rows stream straight into the writer, so the export cap stops the read while rows are still coming.
     /// </summary>
-    private IReadOnlyList<IReadOnlyDictionary<string, object?>> BlocksFor(IHarnessSqliteDatabase database, string conversationId)
+    private IEnumerable<IReadOnlyDictionary<string, object?>> BlocksFor(IHarnessSqliteDatabase database, string conversationId)
     {
         string path = DatabaseKey(database);
         List<string>? blockIds;
@@ -247,14 +248,11 @@ public class WarpSqliteConversationSource : ISqliteConversationSource
         }
 
         string idArray = JsonSerializer.Serialize(blockIds);
-        return
-        [
-            .. database.Query(new HarnessSqliteQuery(
-                BlockRowsQueryName,
-                "SELECT block_id, start_ts, stylized_command FROM blocks "
-                    + "WHERE block_id IN (SELECT value FROM json_each(?)) ORDER BY start_ts ASC, block_id ASC",
-                [idArray])),
-        ];
+        return database.Query(new HarnessSqliteQuery(
+            BlockRowsQueryName,
+            "SELECT block_id, start_ts, stylized_command FROM blocks "
+                + "WHERE block_id IN (SELECT value FROM json_each(?)) ORDER BY start_ts ASC, block_id ASC",
+            [idArray]));
     }
 
     /// <summary>

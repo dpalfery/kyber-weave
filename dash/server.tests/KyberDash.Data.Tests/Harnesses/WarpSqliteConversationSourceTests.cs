@@ -173,6 +173,36 @@ public class WarpSqliteConversationSourceTests
     }
 
     [Fact]
+    public void WriteExport_StreamsBlockRowsSoAFailingSinkStopsTheReadEarly()
+    {
+        const int Available = 200;
+        int pulled = 0;
+        string command = new('x', 1024);
+        using ScriptedDatabase database = new(query => query.Name switch
+        {
+            "warp.conversation" => [Row(("conversation_id", "conv-1"))],
+            "warp.blocks" => Enumerable.Range(0, Available).Select(i => IndexRow("conv-1", $"blk-{i}")),
+            "warp.block-rows" => BlockRows(),
+            _ => [],
+        });
+
+        IEnumerable<IReadOnlyDictionary<string, object?>> BlockRows()
+        {
+            for (int i = 0; i < Available; i++)
+            {
+                pulled++;
+                yield return BlockRow($"blk-{i}", "2026-05-18 10:00:30", command);
+            }
+        }
+
+        using Utf8JsonWriter writer = new(new FailingSink(16 * 1024));
+
+        Assert.Throws<InvalidDataException>(() => new WarpSqliteConversationSource().WriteExport(database, "conv-1", writer));
+        writer.Reset();
+        Assert.InRange(pulled, 1, Available - 1);
+    }
+
+    [Fact]
     public void WriteExport_ConversationNoLongerPresent_Throws()
     {
         Rig rig = new();
