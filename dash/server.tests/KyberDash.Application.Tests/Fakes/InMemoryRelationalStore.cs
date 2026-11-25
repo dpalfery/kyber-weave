@@ -273,9 +273,17 @@ public class InMemoryRelationalStore :
                 UpsertSessionCore(working, session);
             }
 
+            HashSet<string> seenRecords = new(StringComparer.Ordinal);
             foreach (CollectedRecord record in batch.Records)
             {
                 ArgumentNullException.ThrowIfNull(record);
+                if (!seenRecords.Add(record.RecordId))
+                {
+                    throw new DashValidationException(
+                        ConstraintViolatedCode,
+                        $"Duplicate span_id '{record.RecordId}' in CollectedBatch.Records.");
+                }
+
                 InsertRecordCore(working, sourceId, record);
             }
 
@@ -380,6 +388,19 @@ public class InMemoryRelationalStore :
         {
             StoreState working = state.Clone();
             UpsertProblemCore(working, problem);
+            state = working;
+        }
+    }
+
+    /// <inheritdoc />
+    public void DeleteProblem(string problemKey)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(problemKey);
+
+        lock (syncRoot)
+        {
+            StoreState working = state.Clone();
+            _ = DeleteRowsCore(working, "ingest_problem", [("problem_key", problemKey)]);
             state = working;
         }
     }
@@ -4025,6 +4046,8 @@ public class InMemoryRelationalStore :
 
     private static void InsertRecordCore(StoreState working, string sourceId, CollectedRecord record)
     {
+        // As the SQLite store: a span already written by another source is replaced, children included.
+        _ = DeleteRowsCore(working, "record", [("span_id", record.RecordId)]);
         InsertRowCore(
             working,
             "record",

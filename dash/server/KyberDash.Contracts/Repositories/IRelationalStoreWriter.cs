@@ -38,4 +38,11 @@ public interface IRelationalStoreWriter
     /// </summary>
     /// <param name="problem">Diagnostic problem to persist.</param>
     void WriteProblem(CollectedProblem problem);
+
+    /// <summary>
+    /// Deletes the <c>ingest_problem</c> row keyed <paramref name="problemKey"/> and its child rows, if
+    /// any; a missing key changes nothing.
+    /// </summary>
+    /// <param name="problemKey">Key of the problem to remove.</param>
+    void DeleteProblem(string problemKey);
 }

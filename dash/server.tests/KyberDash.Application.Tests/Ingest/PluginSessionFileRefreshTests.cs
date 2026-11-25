@@ -309,6 +309,8 @@ public class PluginSessionFileRefreshTests
             WriteProblemCalls.Add(problem);
             inner.WriteProblem(problem);
         }
+
+        public void DeleteProblem(string problemKey) => inner.DeleteProblem(problemKey);
     }
 
     private sealed class FakeHarnessFileSystem : IHarnessFileSystem

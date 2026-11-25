@@ -88,6 +88,16 @@ public class CanonRefreshEngine
     public const string SourceUnreadableCode = "SOURCE_UNREADABLE";
 
     /// <summary>
+    /// The key of the <see cref="SourceUnreadableCode"/> problem a failed source unit records, so the
+    /// unit's next successful import can remove it.
+    /// </summary>
+    /// <param name="harnessId">Harness owning the source unit.</param>
+    /// <param name="sourceKey">The source unit's key.</param>
+    /// <returns>The problem key.</returns>
+    public static string SourceUnreadableProblemKey(string harnessId, string sourceKey) =>
+        string.Create(CultureInfo.InvariantCulture, $"source-unreadable:{harnessId}:{sourceKey}");
+
+    /// <summary>
     /// Initializes a relational <see cref="CanonRefreshEngine"/> persisting batches and
     /// operational state exclusively through <see cref="IRelationalStoreWriter"/> and
     /// <see cref="IOperationalStore"/>.
@@ -407,6 +417,8 @@ public class CanonRefreshEngine
                 activeWriter.WriteProblem(batchProblem);
             }
 
+            activeWriter.DeleteProblem(SourceUnreadableProblemKey(unit.HarnessId, unit.SourceKey));
+
             SourceCheckpoint updatedCheckpoint = new(
                 HarnessId: unit.HarnessId,
                 SourceKey: unit.SourceKey,
@@ -435,7 +447,7 @@ public class CanonRefreshEngine
                 string.Create(CultureInfo.InvariantCulture, $"Failed to read or parse source unit '{unit.SourceKey}'."));
 
             activeWriter.WriteProblem(new CollectedProblem(
-                ProblemKey: string.Create(CultureInfo.InvariantCulture, $"source-unreadable:{unit.HarnessId}:{unit.SourceKey}"),
+                ProblemKey: SourceUnreadableProblemKey(unit.HarnessId, unit.SourceKey),
                 Severity: "error",
                 Code: SourceUnreadableCode,
                 Message: safeMessage,

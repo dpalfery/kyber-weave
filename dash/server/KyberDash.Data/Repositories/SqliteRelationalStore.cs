@@ -328,6 +328,14 @@ public partial class SqliteRelationalStore : BaseSqliteRepository, IRelationalSt
         ExecuteTransaction(body.ToString());
     }
 
+    /// <inheritdoc />
+    public void DeleteProblem(string problemKey)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(problemKey);
+        string problemKeyExpr = GuardedTextExpr("ingest_problem", "problem_key", problemKey);
+        ExecuteTransaction($"DELETE FROM ingest_problem WHERE problem_key = {problemKeyExpr};\n");
+    }
+
     public void ReplaceSessionProjection(StoredSessionProjection projection)
     {
         ArgumentNullException.ThrowIfNull(projection);
@@ -884,6 +892,10 @@ public partial class SqliteRelationalStore : BaseSqliteRepository, IRelationalSt
         string startedExpr = TextExpr(FormatTimestamp(record.StartedAt));
         string statusExpr = TextExpr(FormatRecordStatus(record.Status));
 
+        // One span can arrive from more than one source: a forked or resumed Claude Code transcript
+        // copies its parent's lines, parent session id and message ids included, so both files map
+        // to the same span id. The latest write owns the span; the delete cascades its child rows.
+        sql.Append(CultureInfo.InvariantCulture, $"DELETE FROM record WHERE span_id = {spanIdExpr};\n");
         sql.Append(
             CultureInfo.InvariantCulture,
             $"INSERT INTO record (span_id, source_id, harness_id, op, kind, name, started_at_utc, status) VALUES ({spanIdExpr}, {sourceIdExpr}, {harnessIdExpr}, {opExpr}, {kindExpr}, {nameExpr}, {startedExpr}, {statusExpr});\n");

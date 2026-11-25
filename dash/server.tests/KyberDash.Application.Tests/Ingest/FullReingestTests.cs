@@ -230,6 +230,8 @@ public class FullReingestTests
             inner.ClearEstimatedRecordTokens(harnessId, sourceLocator, estimated);
 
         public void WriteProblem(CollectedProblem problem) => inner.WriteProblem(problem);
+
+        public void DeleteProblem(string problemKey) => inner.DeleteProblem(problemKey);
     }
 
     private sealed class StubHarnessMapper(string harnessId) : IHarnessMapper

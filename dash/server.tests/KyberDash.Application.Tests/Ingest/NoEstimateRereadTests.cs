@@ -654,6 +654,8 @@ public class NoEstimateRereadTests
             WriteProblemCalls.Add(problem);
             inner.WriteProblem(problem);
         }
+
+        public void DeleteProblem(string problemKey) => inner.DeleteProblem(problemKey);
     }
 
     /// <summary>

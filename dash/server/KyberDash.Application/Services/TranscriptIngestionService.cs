@@ -508,6 +508,7 @@ public class TranscriptIngestionService : ITranscriptIngestionService
             }
 
             writer!.WriteBatch(batch);
+            writer.DeleteProblem(CanonRefreshEngine.SourceUnreadableProblemKey(unit.HarnessId, unit.SourceKey));
 
             foreach (CollectedSession session in batch.Sessions)
             {
@@ -545,7 +546,7 @@ public class TranscriptIngestionService : ITranscriptIngestionService
                 string.Create(CultureInfo.InvariantCulture, $"Failed to read or parse source unit '{unit.SourceKey}'."));
 
             CollectedProblem problem = new(
-                ProblemKey: string.Create(CultureInfo.InvariantCulture, $"source-unreadable:{unit.HarnessId}:{unit.SourceKey}"),
+                ProblemKey: CanonRefreshEngine.SourceUnreadableProblemKey(unit.HarnessId, unit.SourceKey),
                 Severity: "error",
                 Code: SourceUnreadableCode,
                 Message: safeMessage,

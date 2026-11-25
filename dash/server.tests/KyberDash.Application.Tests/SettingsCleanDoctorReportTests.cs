@@ -536,6 +536,8 @@ public static class SettingsCleanDoctorReportTests
                 throw new IOException("disk full");
 
             public void WriteProblem(CollectedProblem problem) => throw new IOException("disk full");
+
+            public void DeleteProblem(string problemKey) => throw new IOException("disk full");
         }
     }
 
