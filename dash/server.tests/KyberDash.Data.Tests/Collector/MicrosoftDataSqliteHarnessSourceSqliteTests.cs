@@ -9,7 +9,8 @@ namespace KyberDash.Data.Tests.Collector;
 /// <summary>
 /// Proves <see cref="MicrosoftDataSqliteHarnessSource"/> against real SQLite files: streaming, column
 /// discovery, leaving the source untouched, the immutable and cache-copy fallbacks in a read-only
-/// directory, copy reuse and replacement, and the refusal codes.
+/// directory, copy reuse and replacement, the refusal codes, URI escaping of the immutable path, and the
+/// busy and permission-denied classifications.
 /// </summary>
 public class MicrosoftDataSqliteHarnessSourceSqliteTests : IDisposable
 {
@@ -17,10 +18,19 @@ public class MicrosoftDataSqliteHarnessSourceSqliteTests : IDisposable
 
     private readonly TempDirectory directory = new();
     private readonly List<string> sealedDirectories = [];
+    private readonly List<string> unreadableFiles = [];
 
     /// <inheritdoc />
     public void Dispose()
     {
+        foreach (string unreadableFile in unreadableFiles)
+        {
+            if (!OperatingSystem.IsWindows())
+            {
+                File.SetUnixFileMode(unreadableFile, UnixFileMode.UserRead | UnixFileMode.UserWrite);
+            }
+        }
+
         foreach (string sealedDirectory in sealedDirectories)
         {
             if (!OperatingSystem.IsWindows())
@@ -104,6 +114,66 @@ public class MicrosoftDataSqliteHarnessSourceSqliteTests : IDisposable
 
         Assert.Empty(CacheFiles());
         Assert.Equal(["source.db", "source.db-wal"], Directory.GetFiles(sourceDirectory).Select(Path.GetFileName).Order(StringComparer.Ordinal));
+    }
+
+    [Fact]
+    public void Open_ReadOnlyDirectoryWhoseNameHoldsUriSpecialCharacters_ReadsInPlaceThroughImmutable()
+    {
+        // '#' would start a URI fragment, '?' the query and "%41" would decode to "A" if the immutable
+        // URI were not escaped, so SQLite would open some other path.
+        string sourceDirectory = directory.Combine("har#ness?dir%41");
+        Directory.CreateDirectory(sourceDirectory);
+        string path = CreateSource(sourceDirectory, 2, SqliteFixtureJournal.WalEmpty);
+        SkipUnlessSealed(sourceDirectory);
+        AssertPlainOpenFails(path);
+
+        using (IHarnessSqliteDatabase database = Source().Open(path))
+        {
+            Assert.Equal([1L, 2L], database.Query(new HarnessSqliteQuery("ids", "SELECT id FROM messages ORDER BY id", [])).Select(row => row["id"]));
+        }
+
+        Assert.Empty(CacheFiles());
+    }
+
+    [Fact]
+    public void Open_DatabaseUnderAnExclusiveWriteLock_IsClassifiedBusyAndReadThroughTheFallback()
+    {
+        string path = CreateSource(directory.Path, 2, SqliteFixtureJournal.Rollback);
+        using SqliteConnection writer = new(new SqliteConnectionStringBuilder
+        {
+            DataSource = path,
+            Mode = SqliteOpenMode.ReadWrite,
+            Pooling = false,
+        }.ToString());
+        writer.Open();
+        using (SqliteCommand begin = writer.CreateCommand())
+        {
+            begin.CommandText = "BEGIN EXCLUSIVE";
+            begin.ExecuteNonQuery();
+        }
+
+        SqliteException plain = Assert.Throws<SqliteException>(() => PlainOpen(path));
+        Assert.Equal(5, plain.SqliteErrorCode & 0xff);
+
+        using (IHarnessSqliteDatabase database = Source(new HarnessSqliteLimits(CommandTimeoutSeconds: 1, BusyTimeoutMilliseconds: 0)).Open(path))
+        {
+            Assert.Equal([1L, 2L], database.Query(new HarnessSqliteQuery("ids", "SELECT id FROM messages ORDER BY id", [])).Select(row => row["id"]));
+        }
+    }
+
+    [Fact]
+    public void Open_SourceFileTheProcessCannotRead_IsRefusedAsUnreadableWithoutACopy()
+    {
+        string path = CreateSource(directory.Path, 2, SqliteFixtureJournal.Rollback);
+        SkipUnlessUnreadable(path);
+
+        IOException exception = Assert.Throws<IOException>(() => Source().Open(path));
+
+        Assert.StartsWith(SqliteSourceOpenPolicy.SourceUnreadableCode, exception.Message, StringComparison.Ordinal);
+        Assert.Contains(path, exception.Message, StringComparison.Ordinal);
+        // Refused at classification: neither the immutable nor the copy fallback was tried.
+        Assert.DoesNotContain("immutable", exception.Message, StringComparison.Ordinal);
+        Assert.False(Directory.Exists(directory.Combine("cache")));
     }
 
     [Fact]
@@ -277,8 +347,38 @@ public class MicrosoftDataSqliteHarnessSourceSqliteTests : IDisposable
         }
     }
 
+    /// <summary>
+    /// Removes every permission from <paramref name="path"/>, or skips the test where that cannot be proved:
+    /// Windows has no POSIX file mode, and a superuser reads through one.
+    /// </summary>
+    private void SkipUnlessUnreadable(string path)
+    {
+        if (OperatingSystem.IsWindows())
+        {
+            Assert.Skip("An unreadable source needs a POSIX file mode, which Windows does not have.");
+            return;
+        }
+
+        File.SetUnixFileMode(path, UnixFileMode.None);
+        unreadableFiles.Add(path);
+        try
+        {
+            File.ReadAllBytes(path);
+        }
+        catch (UnauthorizedAccessException)
+        {
+            return;
+        }
+
+        Assert.Skip("The test user can read a file with no permissions (a superuser), so the refusal cannot be exercised.");
+    }
+
     /// <summary>Proves the fixture really needs the fallback, so the test cannot pass on a plain open.</summary>
-    private static void AssertPlainOpenFails(string path)
+    private static void AssertPlainOpenFails(string path) =>
+        Assert.Throws<SqliteException>(() => PlainOpen(path));
+
+    /// <summary>Opens <paramref name="path"/> plainly read-only and reads its schema; throws when SQLite refuses.</summary>
+    private static void PlainOpen(string path)
     {
         SqliteProvider.EnsureInitialized();
         using SqliteConnection connection = new(new SqliteConnectionStringBuilder
@@ -286,13 +386,15 @@ public class MicrosoftDataSqliteHarnessSourceSqliteTests : IDisposable
             DataSource = path,
             Mode = SqliteOpenMode.ReadOnly,
             Pooling = false,
-        }.ToString());
-        Assert.Throws<SqliteException>(() =>
+        }.ToString())
         {
-            connection.Open();
-            using SqliteCommand command = connection.CreateCommand();
-            command.CommandText = "SELECT count(*) FROM sqlite_master";
-            command.ExecuteScalar();
-        });
+            // Microsoft.Data.Sqlite retries SQLITE_BUSY for the whole command timeout; one second keeps the
+            // busy probe short.
+            DefaultTimeout = 1,
+        };
+        connection.Open();
+        using SqliteCommand command = connection.CreateCommand();
+        command.CommandText = "SELECT count(*) FROM sqlite_master";
+        command.ExecuteScalar();
     }
 }
