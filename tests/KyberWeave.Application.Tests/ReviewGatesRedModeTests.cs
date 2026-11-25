@@ -479,6 +479,20 @@ public sealed class ReviewGatesRedModeTests : IDisposable
     }
 
     [Theory]
+    [InlineData("/real/repo/dash/tests/foo.test.ts", "/alias/repo", "/real/repo", true)]
+    [InlineData("/alias/repo/dash/tests/foo.test.ts", "/alias/repo", "/real/repo", true)]
+    [InlineData("/other/repo/dash/tests/foo.test.ts", "/alias/repo", "/real/repo", false)]
+    public void PublicIsOwnFileResolvesBothLexicalAndCanonicalRepositoryRoots(
+        string reportedFile, string repositoryRoot, string canonicalRepositoryRoot, bool expected) =>
+        Assert.Equal(
+            expected,
+            RedClassifier.IsOwnFile(
+                reportedFile,
+                ["dash/tests/foo.test.ts"],
+                repositoryRoot: repositoryRoot,
+                canonicalRepositoryRoot: canonicalRepositoryRoot));
+
+    [Theory]
     [InlineData(null)]
     [InlineData("/work/repo")]
     public void EvaluateRejectsASiblingAbsoluteCompilerPathWithOrWithoutARepositoryRoot(string? repositoryRoot)

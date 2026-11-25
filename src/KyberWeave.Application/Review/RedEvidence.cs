@@ -455,19 +455,13 @@ public static partial class RedClassifier
     /// <param name="ownFiles">The repository-relative files the task changed.</param>
     /// <param name="workingDirectory">Repository-relative directory the gate ran in, or null for the repository root.</param>
     /// <param name="repositoryRoot">Absolute repository root used to resolve rooted compiler paths, or null to require exact rooted equality.</param>
+    /// <param name="canonicalRepositoryRoot">Canonical absolute repository root when different from <paramref name="repositoryRoot"/>, or null.</param>
     public static bool IsOwnFile(
         string file,
         IReadOnlyList<string> ownFiles,
         string? workingDirectory = null,
-        string? repositoryRoot = null) =>
-        IsOwnFileInRoots(file, ownFiles, workingDirectory, repositoryRoot, canonicalRepositoryRoot: null);
-
-    private static bool IsOwnFileInRoots(
-        string file,
-        IReadOnlyList<string> ownFiles,
-        string? workingDirectory,
-        string? repositoryRoot,
-        string? canonicalRepositoryRoot)
+        string? repositoryRoot = null,
+        string? canonicalRepositoryRoot = null)
     {
         ArgumentNullException.ThrowIfNull(file);
         ArgumentNullException.ThrowIfNull(ownFiles);
@@ -523,7 +517,7 @@ public static partial class RedClassifier
         if (errors.Count == 0 || HasUnparsedError(gate.Output, errors)
             || !TryGateDirectory(gate, out string? gateDirectory)
             || errors.Any(error => error.Symbol is null
-                || IsOwnFileInRoots(error.File, ownFiles, gateDirectory, gate.RepositoryRoot, gate.CanonicalRepositoryRoot)))
+                || IsOwnFile(error.File, ownFiles, gateDirectory, gate.RepositoryRoot, gate.CanonicalRepositoryRoot)))
         {
             return null;
         }
@@ -600,7 +594,7 @@ public static partial class RedClassifier
                 bool validDirectory = TryGateDirectory(gate, out string? gateDirectory);
                 bool Own(string file) =>
                     validDirectory
-                    && IsOwnFileInRoots(file, ownFiles, gateDirectory, gate.RepositoryRoot, gate.CanonicalRepositoryRoot);
+                    && IsOwnFile(file, ownFiles, gateDirectory, gate.RepositoryRoot, gate.CanonicalRepositoryRoot);
 
                 bool anyMissing = errors.Any(error => error.Symbol is not null && Own(error.File));
                 errors = [.. errors.Where(error => !(anyMissing && ConsequenceCodes.Contains(error.Code) && Own(error.File)))];
