@@ -7,11 +7,13 @@ using KyberDash.Application.Tests;
 using KyberDash.Application.Tests.Fakes;
 using KyberDash.Contracts.Repositories;
 using KyberDash.Contracts.Services;
+using KyberDash.Core.Exceptions;
 using KyberDash.Data.Collector;
 using KyberDash.Data.Collector.Sources;
 using KyberDash.Data.Tokenization;
 using KyberDash.Domain;
 using Microsoft.Extensions.DependencyInjection;
+using Moq;
 using Xunit;
 
 namespace KyberDash.Application.Tests.Ingest;
@@ -643,6 +645,105 @@ public class RelationalIngestTests
     }
 
     /// <summary>
+    /// A store write that fails with a SQLite constraint violation for one unit is recorded as that
+    /// unit's source-unreadable problem, the other unit still imports, and the import-history job
+    /// succeeds instead of failing for every harness.
+    /// </summary>
+    [Fact]
+    public async Task ImportHistory_WhenOneUnitWriteViolatesAConstraint_RecordsAProblemAndImportsTheRest()
+    {
+        UnitWriteHarness harness = new();
+        harness.Writer.WriteBatchFailure = static batch => batch.Records.Any(static r => r.RecordId == "rec-bad")
+            ? new SqliteExecutionException("sqlite3 error 19: UNIQUE constraint failed: record.id", 19, "UNIQUE constraint failed: record.id")
+            : null;
+
+        JobOutcome outcome = await harness.Jobs.TriggerImportHistoryAsync(TestContext.Current.CancellationToken);
+
+        Assert.Equal("succeeded", outcome.Outcome);
+        Assert.NotNull(harness.Store.FindRecord("rec-good"));
+        Assert.Null(harness.Store.FindRecord("rec-bad"));
+        CollectedProblem problem = Assert.Single(harness.Writer.WriteProblemCalls);
+        Assert.Equal("SOURCE_UNREADABLE", problem.Code);
+        Assert.Contains("UNIQUE constraint failed", problem.Message, StringComparison.Ordinal);
+        Assert.Equal("failed", harness.Store.GetSourceCheckpoint("commandcode", harness.BadPath)?.LastStatus);
+        Assert.Equal("ok", harness.Store.GetSourceCheckpoint("commandcode", harness.GoodPath)?.LastStatus);
+
+        RefreshReport report = harness.Ingestion.RefreshHarnessSources(historyWeeks: 2);
+        Assert.Equal(1, report.Rows.Count(static r => r.Status == "failed"));
+    }
+
+    /// <summary>
+    /// A store that is itself unusable (locked, broken file, or an open circuit breaker) is not a
+    /// per-unit problem: the exception escapes and the job fails.
+    /// </summary>
+    [Fact]
+    public async Task ImportHistory_WhenTheStoreIsUnusable_FailsTheJob()
+    {
+        Exception[] unusable =
+        [
+            new SqliteExecutionException("sqlite3 error 5: database is locked", 5, "database is locked"),
+            new SqliteExecutionException("sqlite3 error 11: database disk image is malformed", 11, "database disk image is malformed"),
+            new CircuitBreakerOpenException("sqlite circuit open"),
+        ];
+
+        foreach (Exception failure in unusable)
+        {
+            UnitWriteHarness harness = new();
+            harness.Writer.WriteBatchFailure = _ => failure;
+
+            JobOutcome outcome = await harness.Jobs.TriggerImportHistoryAsync(TestContext.Current.CancellationToken);
+
+            Assert.Equal("failed", outcome.Outcome);
+            Assert.Empty(harness.Writer.WriteProblemCalls);
+        }
+    }
+
+    /// <summary>Two commandcode units, one that maps a record that the failing writer rejects and one good unit.</summary>
+    private sealed class UnitWriteHarness
+    {
+        public UnitWriteHarness()
+        {
+            FakeHarnessFileSystem fs = new();
+            BadPath = Combine(HomeRoot, ".commandcode/projects/repo/01-bad.jsonl");
+            GoodPath = Combine(HomeRoot, ".commandcode/projects/repo/02-good.jsonl");
+            fs.AddFile(BadPath, "{\"type\":\"turn\",\"id\":\"rec-bad\"}\n", BaselineUtc.AddMinutes(-10));
+            fs.AddFile(GoodPath, "{\"type\":\"turn\",\"id\":\"rec-good\"}\n", BaselineUtc.AddMinutes(-5));
+            Writer = new SpyRelationalStoreWriter(Store);
+            Ingestion = new TranscriptIngestionService(
+                Writer,
+                Store,
+                new HarnessSourceRegistry(),
+                [new CountingCommandCodeMapper()],
+                fs,
+                new DashOptions { StateDirectory = StateRoot },
+                homeDirectory: HomeRoot,
+                clock: () => BaselineUtc);
+            Mock<ICanonProjectionService> projection = new();
+            Jobs = new JobSchedulerService(
+                Store,
+                Store,
+                projection.Object,
+                Ingestion,
+                new FakeSettingsRepository(),
+                new FakeServerStateRepository(),
+                new DashOptions { StateDirectory = StateRoot },
+                clock: () => BaselineUtc);
+        }
+
+        public string BadPath { get; }
+
+        public string GoodPath { get; }
+
+        public InMemoryRelationalStore Store { get; } = new();
+
+        public SpyRelationalStoreWriter Writer { get; }
+
+        public TranscriptIngestionService Ingestion { get; }
+
+        public JobSchedulerService Jobs { get; }
+    }
+
+    /// <summary>
     /// Verifies unknown event types are counted in <c>ingest_problem</c> with zero payload rows
     /// or raw payloads persisted.
     /// </summary>
@@ -910,6 +1011,8 @@ public class RelationalIngestTests
 
     private sealed class SpyRelationalStoreWriter(IRelationalStoreWriter inner) : IRelationalStoreWriter
     {
+        public Func<CollectedBatch, Exception?>? WriteBatchFailure { get; set; }
+
         public List<CollectedBatch> WriteBatchCalls { get; } = [];
 
         public List<string> DeleteSourceCalls { get; } = [];
@@ -918,6 +1021,12 @@ public class RelationalIngestTests
 
         public void WriteBatch(CollectedBatch batch)
         {
+            Exception? failure = WriteBatchFailure?.Invoke(batch);
+            if (failure is not null)
+            {
+                throw failure;
+            }
+
             WriteBatchCalls.Add(batch);
             inner.WriteBatch(batch);
         }

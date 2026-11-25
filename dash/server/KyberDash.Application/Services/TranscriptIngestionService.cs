@@ -443,7 +443,7 @@ public class TranscriptIngestionService : ITranscriptIngestionService
             operationalStore.UpsertSourceCheckpoint(updatedCheckpoint);
             return new RefreshSourceStatusRow(unit.HarnessId, unit.SourceKey, "committed", batch.Records.Count);
         }
-        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or InvalidDataException or InvalidOperationException or JsonException or ArgumentException)
+        catch (Exception ex) when (CanonRefreshEngine.IsSourceUnitFailure(ex))
         {
             string safeMessage = SafeProblemMessage(
                 ex.Message,
