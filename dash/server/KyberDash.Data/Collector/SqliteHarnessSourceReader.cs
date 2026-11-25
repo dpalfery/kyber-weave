@@ -285,7 +285,17 @@ public class SqliteHarnessSourceReader : IHarnessSourceReader
                 $"{SqliteSourceOpenPolicy.ExportCapExceededCode}: companion file '{companionKey}' is {lengthBytes} bytes, larger than {capBytes} bytes.");
         }
 
-        return fileSystem.ReadAllText(companionKey);
+        try
+        {
+            // The file can grow between the size check and the read; the bounded read still stops at the cap.
+            return fileSystem.ReadAllText(companionKey, capBytes);
+        }
+        catch (InvalidDataException ex)
+        {
+            throw new InvalidDataException(
+                $"{SqliteSourceOpenPolicy.ExportCapExceededCode}: companion file '{companionKey}' grew past {capBytes} bytes while it was read.",
+                ex);
+        }
     }
 
     private static CollectedProblem SourceProblem(

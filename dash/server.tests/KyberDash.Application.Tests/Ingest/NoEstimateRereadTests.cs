@@ -784,6 +784,14 @@ public class NoEstimateRereadTests
                 ? throw new IOException("simulated unreadable file")
                 : files[Path.GetFullPath(filePath)].Content;
 
+        public string ReadAllText(string filePath, long maxBytes)
+        {
+            string text = ReadAllText(filePath);
+            return System.Text.Encoding.UTF8.GetByteCount(text) <= maxBytes
+                ? text
+                : throw new InvalidDataException($"'{filePath}' holds more than {maxBytes} bytes.");
+        }
+
         public string GetFullPath(string path) => Path.GetFullPath(path);
 
         private static bool MatchesPattern(string fileName, string pattern)

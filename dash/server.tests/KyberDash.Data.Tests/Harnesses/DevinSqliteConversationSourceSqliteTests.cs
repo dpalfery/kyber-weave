@@ -166,6 +166,14 @@ public class DevinSqliteConversationSourceSqliteTests : IDisposable
 
         public string ReadAllText(string filePath) => throw new NotSupportedException();
 
+        public string ReadAllText(string filePath, long maxBytes)
+        {
+            string text = ReadAllText(filePath);
+            return System.Text.Encoding.UTF8.GetByteCount(text) <= maxBytes
+                ? text
+                : throw new InvalidDataException($"'{filePath}' holds more than {maxBytes} bytes.");
+        }
+
         public string GetFullPath(string path) => throw new NotSupportedException();
     }
 }

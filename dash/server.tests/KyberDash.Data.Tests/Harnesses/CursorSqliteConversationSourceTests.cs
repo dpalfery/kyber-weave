@@ -188,6 +188,14 @@ public class CursorSqliteConversationSourceTests
 
         public string ReadAllText(string filePath) => string.Empty;
 
+        public string ReadAllText(string filePath, long maxBytes)
+        {
+            string text = ReadAllText(filePath);
+            return System.Text.Encoding.UTF8.GetByteCount(text) <= maxBytes
+                ? text
+                : throw new InvalidDataException($"'{filePath}' holds more than {maxBytes} bytes.");
+        }
+
         public string GetFullPath(string path) => path;
     }
 }

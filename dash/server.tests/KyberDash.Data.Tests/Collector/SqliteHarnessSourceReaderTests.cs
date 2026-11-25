@@ -242,6 +242,20 @@ public class SqliteHarnessSourceReaderTests
     }
 
     [Fact]
+    public void Read_CompanionThatGrowsPastTheCapAfterItsSizeCheck_IsRefused()
+    {
+        Rig rig = new(new HarnessSqliteLimits(ExportCapBytes: 16));
+        rig.Sqlite.AddDatabase(DbPath);
+        rig.Files.Add("/home/u/c.json", new string('x', 17));
+        rig.Files.ReportLength("/home/u/c.json", 2);
+        SourceUnit unit = rig.Unit(DbPath + "#a") with { CompanionKey = "/home/u/c.json" };
+
+        InvalidDataException error = Assert.Throws<InvalidDataException>(() => rig.Reader.Read(unit, rig.Files));
+
+        Assert.StartsWith("SQLITE_EXPORT_CAP_EXCEEDED", error.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void Read_CompanionWithUnknownSize_IsRefusedWithoutReadingIt()
     {
         Rig rig = new();
@@ -438,12 +452,16 @@ public class SqliteHarnessSourceReaderTests
     {
         private readonly Dictionary<string, string> files = new(StringComparer.Ordinal);
         private readonly HashSet<string> hiddenStats = new(StringComparer.Ordinal);
+        private readonly Dictionary<string, long> reportedLengths = new(StringComparer.Ordinal);
 
         public List<string> ReadPaths { get; } = [];
 
         public void Add(string path, string content) => files[path] = content;
 
         public void HideStats(string path) => hiddenStats.Add(path);
+
+        /// <summary>Makes the file report <paramref name="lengthBytes"/> as its size, as if it grew after the size check.</summary>
+        public void ReportLength(string path, long lengthBytes) => reportedLengths[path] = lengthBytes;
 
         public bool DirectoryExists(string path) => false;
 
@@ -462,7 +480,7 @@ public class SqliteHarnessSourceReaderTests
                 return false;
             }
 
-            lengthBytes = Encoding.UTF8.GetByteCount(content);
+            lengthBytes = reportedLengths.TryGetValue(filePath, out long reported) ? reported : Encoding.UTF8.GetByteCount(content);
             return true;
         }
 
@@ -470,6 +488,14 @@ public class SqliteHarnessSourceReaderTests
         {
             ReadPaths.Add(filePath);
             return files[filePath];
+        }
+
+        public string ReadAllText(string filePath, long maxBytes)
+        {
+            string text = ReadAllText(filePath);
+            return System.Text.Encoding.UTF8.GetByteCount(text) <= maxBytes
+                ? text
+                : throw new InvalidDataException($"'{filePath}' holds more than {maxBytes} bytes.");
         }
 
         public string GetFullPath(string path) => path;

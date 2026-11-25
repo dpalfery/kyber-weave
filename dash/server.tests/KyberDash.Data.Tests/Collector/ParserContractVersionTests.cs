@@ -204,6 +204,14 @@ public class ParserContractVersionTests
                 ? "{}"
                 : throw new FileNotFoundException("Memory file not found.", filePath);
 
+        public string ReadAllText(string filePath, long maxBytes)
+        {
+            string text = ReadAllText(filePath);
+            return System.Text.Encoding.UTF8.GetByteCount(text) <= maxBytes
+                ? text
+                : throw new InvalidDataException($"'{filePath}' holds more than {maxBytes} bytes.");
+        }
+
         public string GetFullPath(string path) => Normalize(path);
 
         private static string Normalize(string path) =>
