@@ -1836,7 +1836,7 @@ the endpoint, and `engine: unresponsive` when the holder never answers.
 runs one maintenance tick at once, and when the store's detector stamp (`store_state.detector_version`) differs
 from this build's (`SqliteRelationalStore.DetectorVersion`), that tick projects the store to the new rules. You do not need `kyber build`.
 Rows from an older build, including OpenCode buckets that showed a measured zero, refresh on that tick.
-A current stamp means the tick does nothing.
+With a current stamp and no session a read request deferred, the tick does nothing.
 
 **Quarantined spans from before this change.** Test runs sent 41 spans (test session
 `opencode-session-7f3a`) into `canon.db` at contract `'1'`. They stay in quarantine under

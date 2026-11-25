@@ -1391,7 +1391,8 @@ flowchart LR
   and clean. It never defers.
 - `ProjectIncrementalForReads()` is the request path. It defers a dirty session whose record count
   exceeds the budget (default 2,000, constructor-injectable), writes the key back as still dirty so
-  the next pass retries it, and reports it. The bounded GET latency is a property of the deferral,
+  the next pass retries it, and reports it. It never stamps the detector version, and a key it left
+  dirty keeps `IsProjectionCurrent` false, so the next maintenance pass rebuilds it. The bounded GET latency is a property of the deferral,
   not of the store being small.
 - A single-flight guard inside the projector pass entry makes a concurrent caller return a skipped
   report and serve the current projections instead of stacking a second pass; waiting would make
@@ -2186,7 +2187,8 @@ by `dash/scripts/pack-sea-web.mjs`); in a source checkout it serves `dash/dist/d
 
 `KyberBridgeEngine` (`dash/server/KyberDash.Application/KyberBridgeEngine.cs`) serves `/api/kyber/*` queries over
 `SqliteRelationalStore` (`~/.kyberdash/canon.db`, resolved by `CanonDbPath.Resolve`), checking projection currency
-(`CanonSessionProjectorEngine.IsProjectionCurrent`) before reading derived summaries. A fixed `SqliteRelationalStore`
+(`CanonSessionProjectorEngine.IsProjectionCurrentForReads`, the write marker and schema version only) before
+reading derived summaries. A fixed `SqliteRelationalStore`
 instance (such as from `kyberdash report` or an in-memory store in tests) shares that instance directly.
 
 ### Jobs and shared settings (ADR 0033)
