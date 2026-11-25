@@ -230,7 +230,8 @@ public sealed class RunIntegrateService : IRunIntegrateService
             return Failed(timeout.Message);
         }
         // This catch answers for the work before the commits land. Once IntegrateUnderLock has applied them, its
-        // cleanup failures are reported there as "integrated at (sha), but …" and never reach this message.
+        // head reads and cleanup report the landed state there ("integrated at (sha), but …", or "the task commits
+        // are on the run branch, but …" when the sha could not be read) and never reach this message.
         catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
         {
             return Failed($"the task could not be integrated: {exception.Message}");
@@ -260,10 +261,14 @@ public sealed class RunIntegrateService : IRunIntegrateService
         {
             // A retry with nothing left to integrate still finishes the cleanup the first attempt began: the
             // scratchpad is copied and the task worktree goes, so a conductor's retry never leaves a stray worktree.
-            head = GitText(runWorktree, "rev-parse", "HEAD");
+            head = ReadLandedHead(runWorktree, out string? retryHeadFailure);
             if (head is null)
             {
-                return Failed($"git could not read the head of '{runBranch}'.");
+                // The first attempt landed the commits, so a failed head read reports them as landed; a second git
+                // call to recover the sha could fail the same way this one did.
+                return Failed(retryHeadFailure is null
+                    ? $"git could not read the head of '{runBranch}'."
+                    : $"the task commits are on the run branch, but reading its head failed: {retryHeadFailure}");
             }
         }
         else
@@ -399,10 +404,17 @@ public sealed class RunIntegrateService : IRunIntegrateService
                 $"git could not apply '{taskBranch}' onto '{runBranch}': {applied.FirstErrorLine}");
         }
 
-        head = GitText(runWorktree, "rev-parse", "HEAD");
-        return head is null
+        head = ReadLandedHead(runWorktree, out string? headLaunchFailure);
+        if (head is not null)
+        {
+            return null;
+        }
+
+        // The commits are on the run branch, so only the sha is missing; a second git call to recover it could
+        // fail the same way this one did.
+        return headLaunchFailure is null
             ? Failed($"git applied '{taskBranch}' but could not read the new head of '{runBranch}'.")
-            : null;
+            : Failed($"the task commits are on the run branch, but reading its head failed: {headLaunchFailure}");
     }
 
     /// <summary>
@@ -710,6 +722,29 @@ public sealed class RunIntegrateService : IRunIntegrateService
             Path.TrimEndingDirectorySeparator(gitDirectory),
             commonDirectory,
             SamePath(gitDirectory, commonDirectory));
+    }
+
+    /// <summary>
+    /// Reads the run branch's head once the task's commits are already on it — after Apply, or on a retry. A git
+    /// child that cannot even start there is a failure of reading work that has landed, not of the landing itself,
+    /// so it is caught here instead of escaping to Integrate's catch, which would report landed commits as
+    /// "could not be integrated".
+    /// </summary>
+    /// <param name="runWorktree">The run's worktree.</param>
+    /// <param name="launchFailure">Why git could not start, or null when the read ran and failed for git's own reasons.</param>
+    /// <returns>The head sha, or null when the read failed.</returns>
+    private string? ReadLandedHead(string runWorktree, out string? launchFailure)
+    {
+        try
+        {
+            launchFailure = null;
+            return GitText(runWorktree, "rev-parse", "HEAD");
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+        {
+            launchFailure = exception.Message;
+            return null;
+        }
     }
 
     private string? GitText(string worktree, params string[] arguments)

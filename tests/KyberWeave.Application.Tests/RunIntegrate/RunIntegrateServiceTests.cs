@@ -46,6 +46,7 @@ public sealed class RunIntegrateServiceTests
     private bool _worktreeRemoveThrows;
     private bool _branchDeleteThrows;
     private bool _mergeThrows;
+    private bool _headReadThrows;
     private bool _evidencePresentAtRemoval;
     private int _commitsAhead = 1;
     private string _dirtyStatus = string.Empty;
@@ -582,6 +583,37 @@ public sealed class RunIntegrateServiceTests
     }
 
     [Fact]
+    public void AHeadReadThatThrowsAfterTheApplyStillReportsTheLandedCommits()
+    {
+        _headReadThrows = true;
+
+        RunIntegrateOutcome outcome = Integrate(Request());
+
+        Assert.Equal(RunIntegrateStatus.Failed, outcome.Status);
+        Assert.Contains("the task commits are on the run branch, but reading its head failed", outcome.Message!, StringComparison.Ordinal);
+        Assert.Contains("Unable to find the specified file.", outcome.Message!, StringComparison.Ordinal);
+        Assert.DoesNotContain("could not be integrated", outcome.Message!, StringComparison.Ordinal);
+        Assert.DoesNotContain(_git.Calls, call => call.Arguments.Contains("worktree", StringComparer.Ordinal));
+        Assert.DoesNotContain(_git.Calls, call => call.Arguments.Contains("branch", StringComparer.Ordinal));
+    }
+
+    [Fact]
+    public void ARetryHeadReadThatThrowsStillReportsTheLandedCommits()
+    {
+        _commitsAhead = 0;
+        _headReadThrows = true;
+
+        RunIntegrateOutcome outcome = Integrate(Request());
+
+        Assert.Equal(RunIntegrateStatus.Failed, outcome.Status);
+        Assert.Contains("the task commits are on the run branch, but reading its head failed", outcome.Message!, StringComparison.Ordinal);
+        Assert.Contains("Unable to find the specified file.", outcome.Message!, StringComparison.Ordinal);
+        Assert.DoesNotContain("could not be integrated", outcome.Message!, StringComparison.Ordinal);
+        Assert.DoesNotContain(_git.Calls, call => call.Arguments.Contains("worktree", StringComparer.Ordinal));
+        Assert.DoesNotContain(_git.Calls, call => call.Arguments.Contains("branch", StringComparer.Ordinal));
+    }
+
+    [Fact]
     public void AThrowBeforeAnyCommitLandsStillReportsTheTaskAsNotIntegrated()
     {
         _mergeThrows = true;
@@ -740,6 +772,11 @@ public sealed class RunIntegrateServiceTests
 
         if (command == "rev-parse HEAD")
         {
+            if (_headReadThrows)
+            {
+                throw GitLaunchFailure();
+            }
+
             return Ok(_head);
         }
 
