@@ -330,7 +330,7 @@ public sealed class ArbiterHookDecisionEngine : IContextualHookDecisionEngine, I
 
         BackgroundDispatch dispatch = record.Dispatch;
         HookOutcome outcome = Decide(
-            harness, dispatch.Caller, dispatch.Target, ReturnPrompt(dispatch.Prompt, record.PreId, arbiterDirectory), response,
+            harness, dispatch.Caller, dispatch.Target, ReturnPrompt(dispatch.Prompt, record.PreId, arbiterDirectory, context), response,
             isPost: true, config, context,
             toolCallId: null, sessionId: dispatch.SessionId, preId: record.PreId);
         _background.Save(
@@ -346,7 +346,7 @@ public sealed class ArbiterHookDecisionEngine : IContextualHookDecisionEngine, I
     /// dispatch's pre event kept those headers; they are put back in front of the prompt, so the return is classified
     /// from the same header facts as its dispatch. The pairing digest ignores the header block, so it is unchanged.
     /// </summary>
-    private string ReturnPrompt(string prompt, string preId, string arbiterDirectory)
+    private string ReturnPrompt(string prompt, string preId, string arbiterDirectory, HookContext context)
     {
         if (HeaderBlock.Parse(prompt).Headers.Count > 0)
         {
@@ -364,6 +364,9 @@ public sealed class ArbiterHookDecisionEngine : IContextualHookDecisionEngine, I
         }
         catch (Exception exception) when (FileFailure.Is(exception))
         {
+            context.Log.WriteLine($"Arbiter: the routing headers of dispatch {preId} could not be read back for its " +
+                $"return ({OneLine(exception.Message)}); the return is judged from its saved prompt and may be recorded " +
+                "with no caller.");
             return prompt;
         }
 
