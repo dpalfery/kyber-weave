@@ -321,6 +321,41 @@ public class OtlpFileIdJoinTests
     }
 
     /// <summary>
+    /// Two OTLP and two rollout model calls with equal counters pair one to one, and a third rollout
+    /// call whose counters are all zero is neither paired nor dropped: it stays its own turn with
+    /// counters not measured and adds nothing to the session totals, which equal the OTLP sums.
+    /// </summary>
+    [Theory]
+    [InlineData("codex-cli")]
+    [InlineData("codex")]
+    public void Codex_UnreportedRolloutCall_StaysItsOwnTurnAndAddsNoTotals(string harness)
+    {
+        InMemoryRelationalStore store = new();
+        WriteOtlp(store, "cx-unreported", harness,
+        [
+            Record("otlp-1", "cx-unreported", 0, 2_000, 300, harness),
+            Record("otlp-2", "cx-unreported", 3, 2_500, 200, harness),
+        ]);
+        WriteFile(store, "cx-unreported", harness,
+        [
+            Record("file-1", "cx-unreported", 0, 2_000, 300, harness),
+            Record("file-2", "cx-unreported", 3, 2_500, 200, harness),
+            Record("file-unreported", "cx-unreported", 6, 0, 0, harness),
+        ]);
+
+        NewEngine(store).ProjectIncremental();
+
+        StoredSessionProjection projection = ((IProjectionStore)store).GetSessionProjection("cx-unreported")!;
+        Assert.Equal(
+            ["file-unreported", "otlp-1", "otlp-2"],
+            projection.Turns.Select(static t => t.SpanId).Order(StringComparer.Ordinal));
+        SessionSummaryFigure summary = ((IRelationalStoreReader)store).SessionSummaryFigures("cx-unreported")!;
+        Assert.Equal(3, summary.TurnCount);
+        Assert.Equal(4_500L, summary.TotalInput);
+        Assert.Equal(500L, summary.TotalOutput);
+    }
+
+    /// <summary>
     /// The pairing premise: the same reported usage (input, cached, output) written once through
     /// the Codex OTLP span path and once as a rollout record reads back from the store with equal
     /// counter figures (fresh input, cache read, cache creation, output, reported input, reported

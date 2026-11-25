@@ -65,6 +65,17 @@ public class HarnessSourceRegistry
     /// <remarks>Stored Roo rows were all keyed to one task id; the new version makes the next refresh re-read them.</remarks>
     public const string RooTaskDirectoryIdParserContractVersion = "3";
 
+    /// <summary>
+    /// Parser contract version of the <c>copilot-cli</c> reader, whose mapper now stores fresh input as
+    /// input minus cache read and cache write.
+    /// </summary>
+    /// <remarks>
+    /// Rows imported under <see cref="DefaultParserContractVersion"/> stored fresh input inclusive of
+    /// cache tokens. Bumping the version makes <c>CanonRefreshEngine.CheckpointIsReusable</c> refuse the
+    /// stored checkpoint, so the next refresh re-reads those sessions under the fresh-input mapping.
+    /// </remarks>
+    public const string CopilotCliFreshInputParserContractVersion = "2";
+
     private static readonly HashSet<string> ExcludedHarnessIds = new(
         ["windsurf", "aider"],
         StringComparer.Ordinal);
@@ -95,7 +106,13 @@ public class HarnessSourceRegistry
                     ["*.jsonl"])),
             new SpecHarnessSourceReader(
                 "copilot-cli",
-                new SourceRootSpec("copilot", "copilot-cli-reader", "copilot-cli-jsonl", [".copilot/session-state"], ["events.jsonl"])),
+                new SourceRootSpec(
+                    "copilot",
+                    "copilot-cli-reader",
+                    "copilot-cli-jsonl",
+                    [".copilot/session-state"],
+                    ["events.jsonl"],
+                    ParserContractVersion: CopilotCliFreshInputParserContractVersion)),
             new AntigravityHarnessSourceReader(),
             new SpecHarnessSourceReader(
                 "antigravity-cli",

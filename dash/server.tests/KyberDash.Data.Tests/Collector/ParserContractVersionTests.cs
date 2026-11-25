@@ -15,8 +15,9 @@ namespace KyberDash.Data.Tests.Collector;
 /// <remarks>
 /// The <c>droid</c>, <c>cursor</c> and <c>warp</c> mappers stopped producing split or text-derived
 /// token counts, so their units declare contract "2": a checkpoint written under "1" must not be
-/// reused, or the estimated rows it covers would stay in the store. Every other registration keeps
-/// "1", so its stored checkpoints stay reusable and nothing else is re-read.
+/// reused, or the estimated rows it covers would stay in the store. The <c>copilot-cli</c> mapper
+/// stores fresh input net of cache tokens and declares its own contract version for the same reason.
+/// Every other registration keeps "1", so its stored checkpoints stay reusable and nothing else is re-read.
 /// </remarks>
 public class ParserContractVersionTests
 {
@@ -25,6 +26,7 @@ public class ParserContractVersionTests
     private static readonly DateTimeOffset BaselineUtc = new(2026, 11, 24, 12, 0, 0, TimeSpan.Zero);
     private static readonly string[] ChangedHarnesses = ["droid", "cursor", "warp"];
     private const string RooHarnessId = "roo-code";
+    private const string CopilotCliHarnessId = "copilot-cli";
 
     [Fact]
     public void DiscoverAll_StampsVersionTwoOnDroidCursorAndWarpUnitsAndVersionOneOnEveryOtherRegistration()
@@ -43,9 +45,13 @@ public class ParserContractVersionTests
         Assert.NotEmpty(rooUnits);
         Assert.All(rooUnits, static unit => Assert.Equal(HarnessSourceRegistry.RooTaskDirectoryIdParserContractVersion, unit.ParserContractVersion));
 
-        List<SourceUnit> others = [.. result.Sources.Where(static unit => !ChangedHarnesses.Contains(unit.HarnessId) && unit.HarnessId != RooHarnessId)];
+        List<SourceUnit> copilotUnits = [.. result.Sources.Where(static unit => unit.HarnessId == CopilotCliHarnessId)];
+        Assert.NotEmpty(copilotUnits);
+        Assert.All(copilotUnits, static unit => Assert.Equal(HarnessSourceRegistry.CopilotCliFreshInputParserContractVersion, unit.ParserContractVersion));
+
+        List<SourceUnit> others = [.. result.Sources.Where(static unit => !ChangedHarnesses.Contains(unit.HarnessId) && unit.HarnessId != RooHarnessId && unit.HarnessId != CopilotCliHarnessId)];
         Assert.True(
-            others.Select(static unit => unit.HarnessId).Distinct(StringComparer.Ordinal).Count() >= 14,
+            others.Select(static unit => unit.HarnessId).Distinct(StringComparer.Ordinal).Count() >= 13,
             "The fixture should discover units for most other registrations.");
         Assert.All(others, static unit => Assert.Equal(HarnessSourceRegistry.DefaultParserContractVersion, unit.ParserContractVersion));
         Assert.Equal("1", HarnessSourceRegistry.DefaultParserContractVersion);
@@ -55,6 +61,7 @@ public class ParserContractVersionTests
     [InlineData("droid")]
     [InlineData("cursor")]
     [InlineData("warp")]
+    [InlineData("copilot-cli")]
     public void CheckpointIsReusable_RefusesAVersionOneCheckpointForAChangedHarnessUnit(string harnessId)
     {
         SourceUnit unit = DiscoveredUnit(harnessId);

@@ -192,7 +192,7 @@ public class PluginSessionFileRefreshTests
         fs.AddFile(Combine(HomeRoot, "escape/sess-droid-1.jsonl"), DroidTranscript("sess-droid-1"), BaselineUtc.AddMinutes(-10));
         TranscriptIngestionService service = CreateService(store, spyWriter, fs);
 
-        RefreshReport report = service.RefreshPluginSessionFiles("droid", ["..", "../escape", "repo/../sess-droid-1"]);
+        RefreshReport report = service.RefreshPluginSessionFiles("droid", ["..", "../escape", "repo/../sess-droid-1", "../../escape/sess-droid-1"]);
 
         Assert.Empty(report.Rows);
         Assert.Equal(1, store.CountRecords("droid"));
