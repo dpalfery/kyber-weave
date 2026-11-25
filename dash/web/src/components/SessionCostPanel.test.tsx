@@ -631,3 +631,33 @@ describe('SessionCostPanel: fed by the summary section', () => {
     expect(html).toContain('refusing to blend them into one total')
   })
 })
+
+describe('SessionCostPanel: the basis badge is green only for a priced figure', () => {
+  it('shows a neutral badge, not the green published one, when a published block is not priced', () => {
+    const block: CostBlock = { basis: 'published', status: 'no_rate' }
+    const element = React.createElement(SessionCostPanel, { costs: [block] })
+
+    const badge = findByTestId(element, 'cost-basis-badge-published')
+    expect(badge).toBeDefined()
+    const className = String(badge?.props.className ?? '')
+    expect(className).not.toContain('emerald')
+    expect(className).toContain('bg-muted')
+  })
+
+  it('keeps the green badge for a published block that is priced', () => {
+    const block: CostBlock = { basis: 'published', status: 'priced', value: 1.25, currency: 'USD' }
+    const element = React.createElement(SessionCostPanel, { costs: [block] })
+
+    const badge = findByTestId(element, 'cost-basis-badge-published')
+    expect(badge).toBeDefined()
+    expect(String(badge?.props.className ?? '')).toContain('emerald')
+  })
+
+  it('shows a neutral badge for a partially priced published block', () => {
+    const block: CostBlock = { basis: 'published', status: 'partial', value: 0.5, currency: 'USD' }
+    const element = React.createElement(SessionCostPanel, { costs: [block] })
+
+    const badge = findByTestId(element, 'cost-basis-badge-published')
+    expect(String(badge?.props.className ?? '')).not.toContain('emerald')
+  })
+})
