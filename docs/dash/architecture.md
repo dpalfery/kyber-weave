@@ -1336,8 +1336,11 @@ refused write keeps the rows it had, spans shared with another file included.
   the parent's session id and message ids included, so the parent file and the fork map to the same span ids.
   `WriteBatch` deletes a record already stored under a span id before inserting it, so the latest write owns
   the span and its child rows go with the delete; a span id repeated inside one batch is still refused with
-  `STORE_CONSTRAINT_VIOLATED`. A token or cost figure is never counted once per copy. A file that later
-  re-imports successfully without a span it owned removes that span until the other file re-imports.
+  `STORE_CONSTRAINT_VIOLATED`. A token or cost figure is never counted once per copy. Every file that wrote a
+  span keeps a row in `record_source_claim`; deleting or re-importing the owning file first hands each span
+  another file still claims to that file, so a span goes only when no file claims it. The table is additive:
+  `CREATE TABLE IF NOT EXISTS` adds it to an existing store at start-up with no schema version change, and
+  spans written before it existed carry no claim until their file is next imported.
 - **A failure clears on the next success.** A unit whose import fails records the problem
   `source-unreadable:<harness>:<source key>` (`CanonRefreshEngine.SourceUnreadableProblemKey`). The unit's next
   import attempt deletes it before writing, in both `CanonRefreshEngine` and `TranscriptIngestionService`, and a

@@ -138,6 +138,37 @@ public class ForkedTranscriptImportTests
         Assert.NotNull(store.FindRecord(ParentSpanId));
     }
 
+    /// <summary>
+    /// A fork that owns a span shared with its parent re-imports successfully after losing the copied
+    /// line: the span stays, now owned by the parent, whose checkpoint is unchanged.
+    /// </summary>
+    [Fact]
+    public void Refresh_ForkOwningASharedSpan_ReimportedWithoutIt_KeepsTheSpan()
+    {
+        InMemoryRelationalStore store = new();
+        FakeHarnessFileSystem fs = new();
+        fs.AddFile(ParentPath, ParentTranscript(), BaselineUtc.AddMinutes(-20));
+        fs.AddFile(LateForkPath, ForkTranscript(), BaselineUtc.AddMinutes(-10));
+        TranscriptIngestionService service = new(
+            store,
+            store,
+            new HarnessSourceRegistry(),
+            [new ClaudeTranscriptMapper()],
+            fs,
+            new DashOptions { StateDirectory = StateRoot },
+            homeDirectory: HomeRoot,
+            clock: () => BaselineUtc);
+        _ = service.RefreshHarnessSources(CanonRefreshEngine.DefaultHistoryWeeks);
+
+        string forkOnly = AssistantLine(ForkSessionId, "msg_fork_1", "toolu_fork_1", "2026-11-25T10:30:00.000Z") + "\n";
+        fs.AddFile(LateForkPath, forkOnly, BaselineUtc.AddMinutes(-5));
+        RefreshReport second = service.RefreshHarnessSources(CanonRefreshEngine.DefaultHistoryWeeks);
+
+        Assert.Equal("committed", Assert.Single(second.Rows, static r => r.SourceKey == LateForkPath).Status);
+        Assert.Equal("skipped", Assert.Single(second.Rows, r => r.SourceKey == ParentPath).Status);
+        Assert.NotNull(store.FindRecord(ParentSpanId));
+    }
+
     private static string ParentPath => Combine(HomeRoot, $".claude/projects/-repo/{ParentSessionId}.jsonl");
 
     /// <summary>A fork whose path sorts after the parent's, so it imports second and owns the shared spans.</summary>

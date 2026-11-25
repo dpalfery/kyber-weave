@@ -19,6 +19,7 @@ public class SharedSpanWriteParityTests : IDisposable
     private const string SpanId = "synth:claude-code:parent-session:msg_1";
     private const string SessionKey = "parent-session";
     private const string ForkLocator = "/home/dev/.claude/projects/repo/fork-session.jsonl";
+    private const string ParentLocator = "/home/dev/.claude/projects/repo/parent-session.jsonl";
 
     private readonly TempDirectory directory = new();
 
@@ -121,6 +122,41 @@ public class SharedSpanWriteParityTests : IDisposable
         DirtyProjectionState? dirty = store.Operational.GetProjectionDirtyState();
         Assert.NotNull(dirty);
         Assert.True(dirty.IsWildcard);
+    }
+
+    /// <summary>
+    /// The source that owns a shared span re-imports without it, or is deleted: the span stays, handed to the
+    /// other source that still claims it, and goes only when no source claims it.
+    /// </summary>
+    /// <param name="kind">Store under test.</param>
+    /// <param name="deleteOwner">Delete the owning source instead of re-importing it without the span.</param>
+    [Theory]
+    [InlineData("sqlite", false)]
+    [InlineData("sqlite", true)]
+    [InlineData("memory", false)]
+    [InlineData("memory", true)]
+    public void OwnerDropsASharedSpan_TheOtherClaimantKeepsIt(string kind, bool deleteOwner)
+    {
+        StoreUnderTest store = Create(kind);
+        store.Writer.WriteBatch(Batch(ParentLocator, inputTokens: 10));
+        store.Writer.WriteBatch(Batch(ForkLocator, inputTokens: 20));
+
+        string forkSourceId = Assert.Single(store.Reader.Sources("claude-code"), static s => s.Source.Locator == ForkLocator).SourceId;
+        if (deleteOwner)
+        {
+            store.Writer.DeleteSource(forkSourceId);
+        }
+        else
+        {
+            store.Writer.ReplaceSource(Batch(ForkLocator, inputTokens: 0) with { Records = [] });
+        }
+
+        AssertSingleRecordWithInputTokens(store, 20);
+
+        string parentSourceId = Assert.Single(store.Reader.Sources("claude-code"), static s => s.Source.Locator == ParentLocator).SourceId;
+        store.Writer.DeleteSource(parentSourceId);
+
+        Assert.Equal(0, store.Reader.CountRecords("claude-code"));
     }
 
     /// <summary><see cref="IRelationalStoreWriter.DeleteProblem"/> removes the keyed problem and ignores a missing key.</summary>

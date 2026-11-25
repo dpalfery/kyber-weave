@@ -264,10 +264,14 @@ public class InMemoryRelationalStore :
             EnsureHarness(working, harnessId);
             if (replaceSource)
             {
-                _ = DeleteRowsCore(
+                object?[]? stored = FindRowByKey(
                     working,
                     "source",
                     [("harness_id", batch.Source.HarnessId), ("source_kind", FormatSourceKind(batch.Source.Kind)), ("locator", batch.Source.Locator)]);
+                if (stored is not null)
+                {
+                    DeleteSourceCore(working, GetString(GetTableMetadata("source"), stored, "source_id"));
+                }
             }
 
             string sourceId = EnsureSource(working, batch.Source);
@@ -335,7 +339,7 @@ public class InMemoryRelationalStore :
         lock (syncRoot)
         {
             StoreState working = state.Clone();
-            _ = DeleteRowsCore(working, "source", [("source_id", sourceId)]);
+            DeleteSourceCore(working, sourceId);
 
             // The cascade removes records of sessions this call does not know: always wildcard.
             AdvanceWriteMarker(working, dirtyKeys: null);
@@ -4102,10 +4106,50 @@ public class InMemoryRelationalStore :
         }
     }
 
+    /// <summary>
+    /// As the SQLite store: hands each record of <paramref name="sourceId"/> that another source still claims
+    /// to that source, then deletes the source, cascading to its remaining records and its claims.
+    /// </summary>
+    private static void DeleteSourceCore(StoreState working, string sourceId)
+    {
+        TableMetadata recordMeta = GetTableMetadata("record");
+        TableMetadata claimMeta = GetTableMetadata("record_source_claim");
+        int recordSpan = recordMeta.ColumnIndices["span_id"];
+        int recordSource = recordMeta.ColumnIndices["source_id"];
+        int claimSpan = claimMeta.ColumnIndices["span_id"];
+        int claimSource = claimMeta.ColumnIndices["source_id"];
+        List<object?[]> claims = working.GetRows("record_source_claim");
+        foreach (object?[] row in working.GetRows("record"))
+        {
+            if (!string.Equals(row[recordSource] as string, sourceId, StringComparison.Ordinal))
+            {
+                continue;
+            }
+
+            string? heir = claims
+                .Where(c => string.Equals(c[claimSpan] as string, row[recordSpan] as string, StringComparison.Ordinal)
+                    && !string.Equals(c[claimSource] as string, sourceId, StringComparison.Ordinal))
+                .Select(c => (string)c[claimSource]!)
+                .Order(StringComparer.Ordinal)
+                .FirstOrDefault();
+            if (heir is not null)
+            {
+                row[recordSource] = heir;
+            }
+        }
+
+        _ = DeleteRowsCore(working, "source", [("source_id", sourceId)]);
+    }
+
     private static void InsertRecordCore(StoreState working, string sourceId, CollectedRecord record)
     {
-        // As the SQLite store: a span already written by another source is replaced, children included.
+        // As the SQLite store: a span already written by another source is replaced, children included,
+        // and every writer's claim is kept.
         _ = DeleteRowsCore(working, "record", [("span_id", record.RecordId)]);
+        if (FindRowByKey(working, "record_source_claim", [("span_id", record.RecordId), ("source_id", sourceId)]) is null)
+        {
+            InsertRowCore(working, "record_source_claim", [("span_id", record.RecordId), ("source_id", sourceId)]);
+        }
         InsertRowCore(
             working,
             "record",

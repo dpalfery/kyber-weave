@@ -17,6 +17,7 @@ public sealed partial class RelationalSchemaCatalogTests
     [
         "harness",
         "source",
+        "record_source_claim",
         "record",
         "record_session_link",
         "record_parent",
@@ -216,6 +217,7 @@ public sealed partial class RelationalSchemaCatalogTests
 
     private static readonly HashSet<string> NonRepeatedCompositeKeyTables = new(StringComparer.Ordinal)
     {
+        "record_source_claim",
         "record_token_count",
         "record_reported_total",
         "record_skill_invocation",
