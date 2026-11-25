@@ -1277,8 +1277,10 @@ session, and marks it:
   engine builds the prompt itself right after the rules decide, closes the pre row with
   `recovered: prompt-stopped`, and denies with the prompt's refusal, so a dispatch that never ran holds no files.
   A rule's denial still outranks the prompt refusal and writes no such row.
-- A background return from the main thread is judged as the caller its pre row resolved (the conductor, from
-  the dispatch header), not as `unidentified`, so it classifies as a `delegate` return.
+- A background launch saves the prompt the worker ran, which the hook expanded and stripped of its routing
+  headers. Its return is judged with the header lines its pre row kept (`PLAN_FILE`, `TASK`, `LENS`, `REFUTE`,
+  `TECHNOLOGY`) put back in front, so a main-thread return resolves the same caller as its dispatch and
+  classifies as a `delegate` return, not an investigation with no caller.
 - Factory's `SubagentStop` names the dispatch only by `task_name`, which is a description rather than
   an agent. The target comes from the transcript's `Task` call, the same place the dispatch path reads
   it, so recovery matches the agent the dispatch actually named.

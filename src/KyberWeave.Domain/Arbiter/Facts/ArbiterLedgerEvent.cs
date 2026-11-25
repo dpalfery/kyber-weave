@@ -25,6 +25,16 @@ public static class ArbiterLedgerPhases
     public const string Unmarked = "unmarked";
 }
 
+/// <summary>Values for the <c>recovered</c> field that no harness stop event names.</summary>
+public static class ArbiterRecoveries
+{
+    /// <summary>
+    /// The rules allowed the dispatch but its task prompt could not be built, so it was stopped before any worker
+    /// started. No return can ever answer it.
+    /// </summary>
+    public const string PromptStopped = "prompt-stopped";
+}
+
 /// <summary>Values for the <c>caller-source</c> field: how the caller was classified.</summary>
 public static class ArbiterCallerSources
 {

@@ -1,3 +1,4 @@
+using System.Text;
 using KyberWeave.Contracts.Repositories;
 using KyberWeave.Contracts.Services;
 using KyberWeave.Core.Arbiter;
@@ -329,7 +330,7 @@ public sealed class ArbiterHookDecisionEngine : IContextualHookDecisionEngine, I
 
         BackgroundDispatch dispatch = record.Dispatch;
         HookOutcome outcome = Decide(
-            harness, ReturnCaller(dispatch, record.PreId, arbiterDirectory), dispatch.Target, dispatch.Prompt, response,
+            harness, dispatch.Caller, dispatch.Target, ReturnPrompt(dispatch.Prompt, record.PreId, arbiterDirectory), response,
             isPost: true, config, context,
             toolCallId: null, sessionId: dispatch.SessionId, preId: record.PreId);
         _background.Save(
@@ -339,22 +340,42 @@ public sealed class ArbiterHookDecisionEngine : IContextualHookDecisionEngine, I
     }
 
     /// <summary>
-    /// The caller a background return is judged as. The launch event comes from the dispatching agent's own turn, and
-    /// on the main thread that names no agent, while the dispatch's pre event already resolved the caller from its
-    /// header. Judged as unidentified, a worker's return would classify as an investigation and skip the delegate
-    /// return rules. The saved record keeps the launch's caller, which is what its pending notes are matched by.
+    /// The prompt a background return is judged with. The launch saves the prompt the worker ran, which the hook
+    /// expanded and stripped of its routing headers, so the return could not name its caller or its plan task: a
+    /// worker's return from the main thread classified as an investigation and skipped the delegate return rules. The
+    /// dispatch's pre event kept those headers; they are put back in front of the prompt, so the return is classified
+    /// from the same header facts as its dispatch. The pairing digest ignores the header block, so it is unchanged.
     /// </summary>
-    private string ReturnCaller(BackgroundDispatch dispatch, string preId, string arbiterDirectory)
+    private string ReturnPrompt(string prompt, string preId, string arbiterDirectory)
     {
-        if (!IsUnidentified(dispatch.Caller))
+        if (HeaderBlock.Parse(prompt).Headers.Count > 0)
         {
-            return dispatch.Caller;
+            return prompt;
         }
 
-        string? preCaller = _state.OpenLedger(arbiterDirectory).ReadAll()
+        ArbiterLedgerHeaders? headers = _state.OpenLedger(arbiterDirectory).ReadAll()
             .FirstOrDefault(e => e.Phase == ArbiterLedgerPhases.Pre && string.Equals(e.Id, preId, StringComparison.Ordinal))
-            ?.Caller;
-        return string.IsNullOrWhiteSpace(preCaller) ? dispatch.Caller : preCaller;
+            ?.Headers;
+        if (headers is null)
+        {
+            return prompt;
+        }
+
+        StringBuilder block = new();
+        AppendHeader(block, "PLAN_FILE", headers.PlanFile);
+        AppendHeader(block, "TASK", headers.Task);
+        AppendHeader(block, "LENS", headers.Lens);
+        AppendHeader(block, "REFUTE", headers.Refute);
+        AppendHeader(block, "TECHNOLOGY", headers.Technology);
+        return block.Length == 0 ? prompt : block.Append('\n').Append(prompt).ToString();
+    }
+
+    private static void AppendHeader(StringBuilder block, string name, string? value)
+    {
+        if (!string.IsNullOrWhiteSpace(value))
+        {
+            block.Append(name).Append(": ").Append(value.Trim()).Append('\n');
+        }
     }
 
     /// <inheritdoc/>
@@ -713,9 +734,6 @@ public sealed class ArbiterHookDecisionEngine : IContextualHookDecisionEngine, I
         }
     }
 
-    /// <summary>The <c>recovered</c> value of the row that closes a dispatch whose task prompt could not be built.</summary>
-    internal const string PromptStoppedClose = "prompt-stopped";
-
     /// <summary>
     /// Stops a dispatch the rules let through when its task prompt cannot be built, and closes its pre event.
     /// </summary>
@@ -750,7 +768,7 @@ public sealed class ArbiterHookDecisionEngine : IContextualHookDecisionEngine, I
             e.Phase == ArbiterLedgerPhases.Pre && string.Equals(e.Id, result.LedgerId, StringComparison.Ordinal));
         if (pre is not null)
         {
-            _ = AppendRecovery(ledger, pre, PromptStoppedClose, target ?? "unknown", _clock.GetUtcNow(), context);
+            _ = AppendRecovery(ledger, pre, ArbiterRecoveries.PromptStopped, target ?? "unknown", _clock.GetUtcNow(), context);
         }
 
         return new HookOutcome(HookOutcomeKind.Deny, insertion.Reason);

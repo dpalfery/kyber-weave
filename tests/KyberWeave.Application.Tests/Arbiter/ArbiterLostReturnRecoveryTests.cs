@@ -266,6 +266,32 @@ public sealed class ArbiterLostReturnRecoveryTests : IDisposable
         Assert.Equal("ready", Answer("KW-ARB-READY-001"));
     }
 
+    /// <summary>
+    /// A harness that gives no call id pairs a return by its prompt's digest, oldest open dispatch first. The stopped
+    /// dispatch and its retry share that digest, so the retry's return must pair with the retry, not the dead one.
+    /// </summary>
+    [Fact]
+    public void ARetrysReturnPairsWithTheRetry_NotWithTheStoppedDispatchOfTheSamePrompt()
+    {
+        TextWriter log = TextWriter.Null;
+        Engine().DecidePreDispatch(
+            "copilot-cli", "conductor", "dev-easy", Prompt("T2"), Config(), UnbuildableContext(log),
+            toolCallId: null, sessionId: "session-1", dispatchModel: null);
+        Advance();
+        Engine().DecidePreDispatch(
+            "copilot-cli", "conductor", "dev-easy", Prompt("T2"), Config(), Context(log),
+            toolCallId: null, sessionId: "session-1", dispatchModel: null);
+        ArbiterLedgerEvent retry = Events().Last(e => e.Phase == ArbiterLedgerPhases.Pre);
+        Advance();
+
+        Engine().DecidePostDispatch(
+            "copilot-cli", "conductor", "dev-easy", Prompt("T2"), "All done.\nSTATUS: PASS\nRESULT: PASS\n",
+            Config(), Context(log), toolCallId: null, sessionId: "session-1");
+
+        ArbiterLedgerEvent returned = Assert.Single(Events(), e => e.Phase == ArbiterLedgerPhases.Post && e.Recovered is null);
+        Assert.Equal(retry.Id, returned.PreId);
+    }
+
     /// <summary>A rule's refusal still outranks a prompt that cannot be built, and writes no closing row.</summary>
     [Fact]
     public void ARefusedDispatchWhosePromptCannotBeBuilt_KeepsTheRulesDenial()

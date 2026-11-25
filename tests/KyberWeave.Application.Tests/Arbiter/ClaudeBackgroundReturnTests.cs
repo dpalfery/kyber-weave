@@ -449,21 +449,20 @@ public sealed class ClaudeBackgroundReturnTests : IDisposable
     }
 
     /// <summary>
-    /// On the main thread the dispatch and launch events name no agent, so the launch saves an unidentified caller,
-    /// while the pre event resolved the conductor from the dispatch's header. The return is judged as the
-    /// conductor's, so it classifies as a delegate return rather than an investigation.
+    /// On the main thread the dispatch and launch events name no agent, and the launch reports the prompt the hook
+    /// expanded, with its routing headers gone. The pre event resolved the conductor from those headers, so the
+    /// return is judged with them too and classifies as a delegate return rather than an investigation.
     /// </summary>
     [Fact]
-    public void AMainThreadBackgroundReturn_IsJudgedAsTheCallerThePreResolved()
+    public void AMainThreadBackgroundReturn_IsJudgedWithItsDispatchsHeaders()
     {
-        object input = new { description = "T2", prompt = Prompt("T2"), subagent_type = "dev-easy", run_in_background = true };
         Send(new
         {
             hook_event_name = "PreToolUse",
             session_id = Session,
             cwd = _host.RepoRoot,
             tool_name = "Agent",
-            tool_input = input,
+            tool_input = new { description = "T2", prompt = Prompt("T2"), subagent_type = "dev-easy", run_in_background = true },
             tool_use_id = "toolu-1",
         });
         Advance();
@@ -473,7 +472,7 @@ public sealed class ClaudeBackgroundReturnTests : IDisposable
             session_id = Session,
             cwd = _host.RepoRoot,
             tool_name = "Agent",
-            tool_input = input,
+            tool_input = new { description = "T2", prompt = "<task>\nWork on T2.\n</task>", subagent_type = "dev-easy", run_in_background = true },
             tool_use_id = "toolu-1",
             tool_response = new { status = "async_launched", agentId = "agent-1", content = Array.Empty<string>() },
         });
