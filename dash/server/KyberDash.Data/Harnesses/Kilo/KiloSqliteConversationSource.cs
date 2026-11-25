@@ -77,13 +77,34 @@ public class KiloSqliteConversationSource : ISqliteConversationSource
         List<SqliteConversation> conversations = [];
         foreach (IReadOnlyDictionary<string, object?> root in roots)
         {
-            string id = TextOf(root["id"]);
+            string id = TextOf(root.GetValueOrDefault("id"));
             IReadOnlyDictionary<string, object?>? stats = context.Database
                 .Query(new HarnessSqliteQuery(RevisionQuery, RevisionSql, [id]))
                 .FirstOrDefault();
-            long? latestMs = stats is null ? null : OptionalLong(stats["max_updated"]);
-            long messageCount = stats is null ? 0L : Convert.ToInt64(stats["message_count"], CultureInfo.InvariantCulture);
-            DateTimeOffset? lastActivity = latestMs is { } ms ? DateTimeOffset.FromUnixTimeMilliseconds(ms) : null;
+
+            long? latestMs;
+            long messageCount;
+            DateTimeOffset? lastActivity;
+            try
+            {
+                // Kilo stores time_updated in milliseconds since the epoch (every message row on the owner's
+                // kilo.db, 2026-11-25). A value outside the DateTimeOffset range is refused, never clamped.
+                latestMs = stats is null ? null : OptionalLong(stats.GetValueOrDefault("max_updated"));
+                messageCount = stats is null ? 0L : Convert.ToInt64(stats.GetValueOrDefault("message_count"), CultureInfo.InvariantCulture);
+                lastActivity = latestMs is { } ms ? DateTimeOffset.FromUnixTimeMilliseconds(ms) : null;
+            }
+            catch (Exception ex) when (ex is FormatException or InvalidCastException or OverflowException or ArgumentOutOfRangeException)
+            {
+                // One unusable root is recorded and skipped; the other roots are still listed.
+                context.Problems.Add(new CollectedProblem(
+                    ProblemKey: $"sqlite-source:{SqliteSourceOpenPolicy.SourceUnreadableCode}:{context.HarnessId}:{context.DatabasePath}:{id}",
+                    Severity: "warning",
+                    Code: SqliteSourceOpenPolicy.SourceUnreadableCode,
+                    Message: $"{SqliteSourceOpenPolicy.SourceUnreadableCode}: Kilo session '{id}' in '{context.DatabasePath}' has an unusable activity time or message count ({ex.Message}); it is not read.",
+                    Location: context.DatabasePath,
+                    HarnessId: context.HarnessId));
+                continue;
+            }
 
             if (context.SinceUtc is { } since && lastActivity is { } latest && latest < since)
             {
@@ -116,17 +137,15 @@ public class KiloSqliteConversationSource : ISqliteConversationSource
             throw new InvalidDataException($"The Kilo session '{conversationId}' no longer exists.");
         }
 
-        List<IReadOnlyDictionary<string, object?>> messages =
-            [.. database.Query(new HarnessSqliteQuery(MessagesQuery, MessagesSql, [conversationId]))];
-        List<IReadOnlyDictionary<string, object?>> parts =
-            [.. database.Query(new HarnessSqliteQuery(PartsQuery, PartsSql, [conversationId]))];
-
         writer.WriteStartObject();
         writer.WriteString("session_id", TextOf(root["id"]));
         WriteText(writer, "title", root["title"]);
 
+        // Each query streams straight into the writer, so the export cap stops the read while rows are still
+        // coming; the two queries run one after the other and never share the connection.
         writer.WriteStartArray("messages");
-        foreach (IReadOnlyDictionary<string, object?> message in messages)
+        foreach (IReadOnlyDictionary<string, object?> message in database.Query(
+                     new HarnessSqliteQuery(MessagesQuery, MessagesSql, [conversationId])))
         {
             writer.WriteStartObject();
             writer.WriteString("id", TextOf(message["id"]));
@@ -139,7 +158,8 @@ public class KiloSqliteConversationSource : ISqliteConversationSource
         writer.WriteEndArray();
 
         writer.WriteStartArray("parts");
-        foreach (IReadOnlyDictionary<string, object?> part in parts)
+        foreach (IReadOnlyDictionary<string, object?> part in database.Query(
+                     new HarnessSqliteQuery(PartsQuery, PartsSql, [conversationId])))
         {
             writer.WriteStartObject();
             writer.WriteString("id", TextOf(part["id"]));
