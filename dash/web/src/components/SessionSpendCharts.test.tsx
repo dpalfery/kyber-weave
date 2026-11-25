@@ -518,6 +518,21 @@ describe('TurnSpendChart', () => {
     expect(text).toContain('#3 (+300% vs previous measured turn (turn 1))')
     expect(text).not.toContain('#3 (+300% vs previous turn)')
   })
+
+  it('labels a server-provided jump "vs earlier turn", since the API does not name its baseline turn', () => {
+    // The server's fresh_jump_pct is not measured against a turn the API names,
+    // so the label must not claim "previous turn" or name one.
+    const turns: TurnSpendItem[] = [
+      { index: 1, fresh_input: 200, cache_read: 0, output: 50, input: 200 },
+      { index: 2, fresh_input: 800, cache_read: 0, output: 50, input: 800, fresh_jump_pct: 300 },
+    ]
+    const element = React.createElement(TurnSpendChart, { turns })
+    const text = normalizedRenderText(element)
+
+    expect(text).toContain('#2 (+300% vs earlier turn)')
+    expect(text).not.toContain('vs previous turn')
+    expect(text).not.toContain('vs previous measured turn')
+  })
 })
 
 describe('ContextCompositionChart', () => {

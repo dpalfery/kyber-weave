@@ -479,8 +479,16 @@ function isTurnMeasured(turn: TurnSpendItem): boolean {
   })
 }
 
+/**
+ * What a fresh-input jump is measured against. 'server': the server's own figure,
+ * whose baseline turn the API does not name. Otherwise the last measured turn,
+ * named, and whether it is the immediately preceding turn.
+ */
+type JumpBaseline = 'server' | { index: number; adjacent: boolean } | null
+
 /** Names the turn a fresh-input jump is measured against. */
-function jumpBasisLabel(from: { index: number; adjacent: boolean } | null): string {
+function jumpBasisLabel(from: JumpBaseline): string {
+  if (from === 'server') return 'vs earlier turn'
   if (from === null || from.adjacent) return 'vs previous turn'
   return `vs previous measured turn (turn ${from.index})`
 }
@@ -518,7 +526,7 @@ export function TurnSpendChart({
           totalTokens: 0,
           cumulativeInput: runningInput,
           freshJumpPct: null,
-          jumpFrom: null,
+          jumpFrom: null as JumpBaseline,
           requestStart: t.request_start,
         }
       }
@@ -548,10 +556,12 @@ export function TurnSpendChart({
         const jump = Math.round(((fresh - prevFresh) / prevFresh) * 100)
         if (jump >= 25) freshJumpPct = jump
       }
-      const jumpFrom =
-        prevMeasured === null
-          ? null
-          : { index: prevMeasured.index, adjacent: prevMeasured.position === i - 1 }
+      const jumpFrom: JumpBaseline =
+        t.fresh_jump_pct != null
+          ? 'server'
+          : prevMeasured === null
+            ? null
+            : { index: prevMeasured.index, adjacent: prevMeasured.position === i - 1 }
       prevFresh = fresh
       prevMeasured = { index: idx, position: i }
 
