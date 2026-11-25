@@ -235,6 +235,8 @@ test('measured harness renders measured dimensions and no lying zero', async ({ 
   await expect(page.getByTestId(/^drill-run-/).first()).toBeVisible()
 
   const measured = page.locator('[data-testid="dimension-value"]')
+  // count() does not retry: wait for the scorecard to render before counting.
+  await expect(measured.first()).toBeVisible()
   expect(await measured.count()).toBeGreaterThan(0)
 
   // Scorecard emits no data-measured attribute, so "never a lying zero" is
@@ -267,6 +269,7 @@ test('honest-empty harness renders a visible session as unmeasurable with reason
   await expect(page.getByTestId(/^drill-run-/).nth(1)).toBeVisible()
 
   const unmeasurable = page.getByTestId('dimension-unmeasurable')
+  await expect(unmeasurable.first()).toBeVisible()
   expect(await unmeasurable.count()).toBeGreaterThan(0)
 
   const reason = page.getByTestId(/^dimension-reason-/).first()
