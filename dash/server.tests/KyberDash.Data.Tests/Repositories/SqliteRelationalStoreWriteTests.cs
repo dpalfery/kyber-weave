@@ -294,10 +294,19 @@ public class SqliteRelationalStoreWriteTests
         Assert.DoesNotContain("Unusual prompt structure", problemSql, StringComparison.Ordinal);
         Assert.EndsWith("\nCOMMIT;\n", problemSql, StringComparison.Ordinal);
 
+        // The source delete moves the write marker and marks the dirty range wildcard in the same
+        // transaction as the delete, so a failed delete moves nothing.
         string deleteSql = NormalizeLineEndings(store.ExecutedSql[1]);
-        Assert.Equal(
-            $"PRAGMA foreign_keys = ON;\nBEGIN IMMEDIATE;\nDELETE FROM source WHERE source_id = {HexExpr("src-deadbeef")};\nCOMMIT;\n",
-            deleteSql);
+        Assert.StartsWith(
+            $"PRAGMA foreign_keys = ON;\nBEGIN IMMEDIATE;\nDELETE FROM source WHERE source_id = {HexExpr("src-deadbeef")};\n",
+            deleteSql,
+            StringComparison.Ordinal);
+        Assert.Contains("DELETE FROM projection_dirty_session;\n", deleteSql, StringComparison.Ordinal);
+        Assert.Contains("INSERT OR REPLACE INTO projection_dirty_range (singleton_id, from_seq, to_seq)", deleteSql, StringComparison.Ordinal);
+        Assert.Contains("INSERT OR REPLACE INTO store_write_marker (singleton_id, records_write_seq)", deleteSql, StringComparison.Ordinal);
+        Assert.Single(deleteSql.Split("BEGIN IMMEDIATE;", StringSplitOptions.None).Skip(1));
+        Assert.Single(deleteSql.Split("COMMIT;", StringSplitOptions.None).Skip(1));
+        Assert.EndsWith("\nCOMMIT;\n", deleteSql, StringComparison.Ordinal);
         Assert.False(Directory.Exists(rootDir));
     }
 

@@ -583,7 +583,7 @@ public partial class SqliteRelationalStore : BaseSqliteRepository, IRelationalSt
 
         foreach (CollectedRecord record in batch.Records)
         {
-            if (string.IsNullOrEmpty(record.SessionKey))
+            if (record.SessionKey is null)
             {
                 return null;
             }

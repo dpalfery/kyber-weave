@@ -76,6 +76,22 @@ public class StoreWriteMarkerParityTests : IDisposable
     [Theory]
     [InlineData("sqlite")]
     [InlineData("memory")]
+    public void BatchWithAnEmptyKeyRecord_IsRefusedAndLeavesTheMarkerAndRangeUnchanged(string kind)
+    {
+        StoreUnderTest store = Create(kind);
+        store.Writer.WriteBatch(Batch("claude-code", sessions: ["sess-a"], records: [Record("span-1", "sess-a")]));
+
+        DashValidationException exception = Assert.Throws<DashValidationException>(
+            () => store.Writer.WriteBatch(Batch("claude-code", sessions: ["sess-a"], records: [Record("span-2", string.Empty)])));
+
+        Assert.Equal("STORE_CONSTRAINT_VIOLATED", exception.Code);
+        Assert.Equal(1L, store.Operational.GetWriteMarker());
+        AssertDirty(store.Operational, 0, 1, ["sess-a"]);
+    }
+
+    [Theory]
+    [InlineData("sqlite")]
+    [InlineData("memory")]
     public void BatchWithOnlyProblems_LeavesTheMarkerAndRangeUnchanged(string kind)
     {
         StoreUnderTest store = Create(kind);
