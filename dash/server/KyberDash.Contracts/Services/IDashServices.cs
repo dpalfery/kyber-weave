@@ -153,6 +153,21 @@ public interface ITranscriptIngestionService
     /// <returns>Per-unit status rows with no run id and no history claim.</returns>
     RefreshReport RefreshPluginSessionFiles(string harnessId, IReadOnlyCollection<string> sessionKeys);
 
+    /// <summary>
+    /// Re-reads the source units of <paramref name="harnessIds"/> that already hold a checkpoint,
+    /// so a newer parser contract version replaces rows the harness stored with estimated tokens.
+    /// </summary>
+    /// <remarks>
+    /// Discovery runs through each named harness's registered reader only, so no other harness's
+    /// files are touched. A discovered unit is read only when the operational store already holds
+    /// its checkpoint; the standard checkpoint check then decides whether that checkpoint is still
+    /// reusable, which is how the parser contract version change forces a re-read. No
+    /// <c>refresh_run</c> row is written and no history coverage is claimed.
+    /// </remarks>
+    /// <param name="harnessIds">Harnesses whose checkpointed source units are re-read.</param>
+    /// <returns>Per-unit status rows with no run id and no history claim.</returns>
+    RefreshReport RereadCheckpointedSources(IReadOnlyCollection<string> harnessIds);
+
     /// <summary>Applies rolling 14-day content retention without dropping token or cost counters.</summary>
     PurgeExpiredContentResult PurgeExpiredContent(DateTimeOffset? now = null);
 }

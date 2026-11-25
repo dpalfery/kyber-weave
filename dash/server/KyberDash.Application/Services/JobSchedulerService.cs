@@ -39,6 +39,22 @@ public class JobSchedulerService : IJobSchedulerService
     /// <summary>Maximum plugin-captured sessions one pass reads files for.</summary>
     private const int PluginCapturedLimit = 80;
 
+    /// <summary>
+    /// Fixed refresh-run id recording that the one-time re-read of units stored with estimated
+    /// tokens completed. Its presence is the "already re-read" marker.
+    /// </summary>
+    /// <remarks>
+    /// The relational store has no general metadata table: the pre-rewrite <c>metadata</c> key/value
+    /// store was replaced by typed singletons. A completed one-time pass is therefore recorded as a
+    /// refresh run under this fixed id, which the existing
+    /// <see cref="IOperationalStore.GetRefreshRun"/> reads and
+    /// <see cref="IOperationalStore.UpsertRefreshRun"/> writes.
+    /// </remarks>
+    public const string NoEstimateRereadKey = "kyberdash.no_estimate_reread";
+
+    /// <summary>Harnesses whose estimated-token checkpoints the one-time re-read replaces.</summary>
+    private static readonly string[] NoEstimateRereadHarnessIds = ["droid", "cursor", "warp"];
+
     private readonly IRelationalStoreReader reader;
     private readonly IOperationalStore operationalStore;
     private readonly ICanonProjectionService projection;
@@ -342,6 +358,14 @@ public class JobSchedulerService : IJobSchedulerService
             SettingsView settingsView = settings.ReadSettings();
             if (!settingsView.JobsPaused)
             {
+                // Before anything reads or imports sources, replace once the rows the Droid, Cursor
+                // and Warp readers stored from estimated tokens. The marker makes it a one-time
+                // pass across host restarts; a failed read leaves it absent for the next tick.
+                if (operationalStore.GetRefreshRun(NoEstimateRereadKey) is null)
+                {
+                    RereadEstimatedTokenSources();
+                }
+
                 if (settingsView.FolderImportScheduled)
                 {
                     _ = ingestion.RefreshHarnessSources(CanonRefreshEngine.DefaultHistoryWeeks);
@@ -503,6 +527,42 @@ public class JobSchedulerService : IJobSchedulerService
             PluginCapturedSourceName,
             PluginCapturedLimit);
         _ = ingestion.RefreshPluginSessionFiles(PluginCapturedHarnessId, sessionKeys);
+    }
+
+    /// <summary>
+    /// Runs the one-time re-read over the Droid, Cursor and Warp readers and records the completion
+    /// marker only when the pass reported no failed unit.
+    /// </summary>
+    /// <remarks>
+    /// A failed unit is reported in the pass report rather than thrown, so checking its exit code is
+    /// what keeps the marker absent and makes the next tick retry the replacement.
+    /// </remarks>
+    private void RereadEstimatedTokenSources()
+    {
+        RefreshReport? report = ingestion.RereadCheckpointedSources(NoEstimateRereadHarnessIds);
+        if (report?.ExitCode != 0)
+        {
+            return;
+        }
+
+        MarkNoEstimateRereadComplete();
+    }
+
+    /// <summary>Records the one-time re-read as a completed refresh run under <see cref="NoEstimateRereadKey"/>.</summary>
+    private void MarkNoEstimateRereadComplete()
+    {
+        string timestamp = Timestamp();
+        operationalStore.UpsertRefreshRun(new RefreshRunRow(
+            Id: NoEstimateRereadKey,
+            StartedAt: timestamp,
+            CompletedAt: timestamp,
+            Status: "success",
+            Pid: Environment.ProcessId,
+            Trigger: "reread",
+            Summary: string.Create(
+                CultureInfo.InvariantCulture,
+                $"Re-read {string.Join(", ", NoEstimateRereadHarnessIds)} units stored with estimated tokens."),
+            HistoryWeeks: CanonRefreshEngine.DefaultHistoryWeeks));
     }
 
     private bool TryEnsureLeaseLocked()

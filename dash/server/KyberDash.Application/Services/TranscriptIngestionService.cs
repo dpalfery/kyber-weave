@@ -107,13 +107,13 @@ public class TranscriptIngestionService : ITranscriptIngestionService
         DateTimeOffset commandStarted = clock();
         if (sessionKeys.Count == 0)
         {
-            return PluginSessionReport([], commandStarted);
+            return UnloggedRefreshReport([], commandStarted);
         }
 
         IHarnessSourceReader? reader = sourceRegistry!.GetReader(harnessId);
         if (reader is null || HarnessMapperLookup.Resolve(mappersByHarness, harnessId) is null)
         {
-            return PluginSessionReport([], commandStarted);
+            return UnloggedRefreshReport([], commandStarted);
         }
 
         DateTimeOffset windowStart = commandStarted.AddDays(-7.0 * CanonRefreshEngine.DefaultHistoryWeeks);
@@ -152,14 +152,78 @@ public class TranscriptIngestionService : ITranscriptIngestionService
                 sessionKeysRead));
         }
 
-        return PluginSessionReport(rows, commandStarted, sessionKeysRead.Count);
+        return UnloggedRefreshReport(rows, commandStarted, sessionKeysRead.Count);
+    }
+
+    /// <inheritdoc />
+    public RefreshReport RereadCheckpointedSources(IReadOnlyCollection<string> harnessIds)
+    {
+        ArgumentNullException.ThrowIfNull(harnessIds);
+
+        DateTimeOffset commandStarted = clock();
+        DateTimeOffset windowStart = commandStarted.AddDays(-7.0 * CanonRefreshEngine.DefaultHistoryWeeks);
+        string coveredFromUtc = FormatUtc(windowStart);
+        string coveredThroughUtc = FormatUtc(commandStarted);
+        SourceDiscoveryContext context = new(
+            HomeDirectory: homeDirectory,
+            StateDirectory: stateDirectory,
+            FileSystem: fileSystem,
+            SinceUtc: windowStart);
+
+        List<RefreshSourceStatusRow> rows = [];
+        HashSet<string> sessionKeysRead = new(StringComparer.Ordinal);
+        HashSet<string> visitedHarnesses = new(StringComparer.Ordinal);
+        foreach (string harnessId in harnessIds)
+        {
+            if (string.IsNullOrWhiteSpace(harnessId) || !visitedHarnesses.Add(harnessId))
+            {
+                continue;
+            }
+
+            IHarnessSourceReader? reader = sourceRegistry!.GetReader(harnessId);
+            if (reader is null || HarnessMapperLookup.Resolve(mappersByHarness, harnessId) is null)
+            {
+                continue;
+            }
+
+            SourceDiscoveryResult discovery = reader.Discover(context);
+            foreach (CollectedProblem discoveryProblem in discovery.Problems)
+            {
+                writer!.WriteProblem(discoveryProblem);
+            }
+
+            foreach (SourceUnit unit in discovery.Sources)
+            {
+                if (!string.Equals(unit.HarnessId, harnessId, StringComparison.Ordinal))
+                {
+                    continue;
+                }
+
+                // Only a unit the store already knows is replaced; a never-imported file stays for
+                // the next folder import to pick up, so this pass cannot widen what was collected.
+                if (operationalStore!.GetSourceCheckpoint(unit.HarnessId, unit.SourceKey) is null)
+                {
+                    continue;
+                }
+
+                rows.Add(ProcessRelationalSourceUnit(
+                    unit,
+                    commandStarted,
+                    coveredFromUtc,
+                    coveredThroughUtc,
+                    coveredThroughUtc,
+                    sessionKeysRead));
+            }
+        }
+
+        return UnloggedRefreshReport(rows, commandStarted, sessionKeysRead.Count);
     }
 
     /// <summary>
-    /// Builds the pass report for <see cref="RefreshPluginSessionFiles"/>: no run id and no
-    /// history claim, because the pass writes no <c>refresh_run</c> row.
+    /// Builds a pass report that claims no run id and no history coverage, for a pass that writes
+    /// no <c>refresh_run</c> row.
     /// </summary>
-    private RefreshReport PluginSessionReport(
+    private static RefreshReport UnloggedRefreshReport(
         List<RefreshSourceStatusRow> rows,
         DateTimeOffset commandStarted,
         int sessions = 0)
