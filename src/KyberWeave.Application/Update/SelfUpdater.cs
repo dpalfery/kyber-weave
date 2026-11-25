@@ -727,7 +727,7 @@ internal sealed class SelfUpdater : IDisposable
         bool quitDone,
         string detail)
     {
-        string prefix = args[0] == "engine"
+        string prefix = args.Count > 0 && args[0] == "engine"
             ? "the KyberDash engine step failed:"
             : "the KyberDash tray step failed:";
         string message = $"{prefix} `{kyberdash} {string.Join(' ', args)}` {EndSentence(detail)} The binaries are already updated.";
