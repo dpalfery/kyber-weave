@@ -563,6 +563,40 @@ public class SqliteRelationalStoreWriteTests
         Assert.False(Directory.Exists(rootDir));
     }
 
+    /// <summary>
+    /// An empty session key is refused naming the column it would be written to, not the dirty
+    /// projection table the write marker advance fills from the same key.
+    /// </summary>
+    [Fact]
+    public void ConstraintGuard_EmptySessionKeyRefusalNamesTheSessionOrRecordLinkColumn()
+    {
+        string rootDir = NewNonExistentRoot();
+        string dbPath = Path.Combine(rootDir, "canon.db");
+        RecordingSqliteRelationalStore store = new(dbPath, new SqliteCircuitBreaker());
+        store.ClearRecordedSql();
+
+        CollectedBatch emptySessionBatch = new(
+            new CollectedSource("claude-code", SourceKind.File, "/tmp/a.jsonl"),
+            [new CollectedSession(string.Empty, "claude-code", "n1", null, null, [])],
+            [],
+            []);
+        DashValidationException sessionError = Assert.Throws<DashValidationException>(() => store.WriteBatch(emptySessionBatch));
+        Assert.Equal("STORE_CONSTRAINT_VIOLATED", sessionError.Code);
+        Assert.Contains("'session.session_id'", sessionError.Message, StringComparison.Ordinal);
+
+        CollectedRecord validRecord = BuildFullCollectedBatch("title", "plain text").Records[0];
+        CollectedBatch emptyRecordSessionBatch = new(
+            new CollectedSource("claude-code", SourceKind.File, "/tmp/a.jsonl"),
+            [],
+            [validRecord with { SessionKey = string.Empty }],
+            []);
+        DashValidationException recordError = Assert.Throws<DashValidationException>(() => store.WriteBatch(emptyRecordSessionBatch));
+        Assert.Equal("STORE_CONSTRAINT_VIOLATED", recordError.Code);
+        Assert.Contains("'record_session_link.session_key'", recordError.Message, StringComparison.Ordinal);
+
+        Assert.Empty(store.ExecutedSql);
+    }
+
     private static string NewNonExistentRoot() =>
         Path.Combine(Path.GetTempPath(), $"kyberdash-t7-nowrite-{Guid.NewGuid():N}");
 

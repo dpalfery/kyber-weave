@@ -786,7 +786,7 @@ public partial class SqliteRelationalStore : BaseSqliteRepository, IRelationalSt
 
     private static void AppendSessionUpsert(StringBuilder sql, CollectedSession session)
     {
-        string sessionIdExpr = GuardedTextExpr("session", "session_id", session.SessionKey);
+        string sessionIdExpr = GuardedNonEmptyTextExpr("session", "session_id", session.SessionKey);
         string harnessIdExpr = GuardedTextExpr("session", "harness_id", session.HarnessId);
         string nativeSessionIdExpr = GuardedTextExpr("session", "native_session_id", session.NativeSessionId);
 
@@ -843,7 +843,7 @@ public partial class SqliteRelationalStore : BaseSqliteRepository, IRelationalSt
             CultureInfo.InvariantCulture,
             $"INSERT INTO record (span_id, source_id, harness_id, op, kind, name, started_at_utc, status) VALUES ({spanIdExpr}, {sourceIdExpr}, {harnessIdExpr}, {opExpr}, {kindExpr}, {nameExpr}, {startedExpr}, {statusExpr});\n");
 
-        AppendOptionalTextChild(sql, "record_session_link", "span_id", spanIdExpr, "session_key", record.SessionKey);
+        AppendOptionalNonEmptyTextChild(sql, "record_session_link", "span_id", spanIdExpr, "session_key", record.SessionKey);
         AppendOptionalTextChild(sql, "record_parent", "span_id", spanIdExpr, "parent_span_id", record.ParentRecordId);
         AppendOptionalTextChild(sql, "record_trace", "span_id", spanIdExpr, "trace_id", record.TraceId);
         AppendOptionalTextChild(sql, "record_model", "span_id", spanIdExpr, "model_id", record.Model);
