@@ -2260,7 +2260,8 @@ public partial class SqliteRelationalStore : IRelationalStoreReader
         ArgumentException.ThrowIfNullOrWhiteSpace(sessionKey);
 
         // Only the columns BuildTimeline's nodes read, plus the record's source name (decision
-        // D11): no trace, end time, token count, reported total, error or correction signal, tool
+        // D11) and its response and request ids, so every record read hydrates the same join ids:
+        // no trace, end time, token count, reported total, error or correction signal, tool
         // metadata, or content child row (decision D17).
         StringBuilder sql = new(TabReadScriptHeader);
         sql.Append(

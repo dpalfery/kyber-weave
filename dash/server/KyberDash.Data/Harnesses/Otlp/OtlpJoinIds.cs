@@ -10,13 +10,13 @@ namespace KyberDash.Data.Harnesses.Otlp;
 /// the projector joins their OTLP turns to: Claude Code and Codex. Any other harness gets no ids,
 /// so the projector's id join never fires for a harness with no transcript twin.
 /// </summary>
-internal static class OtlpJoinIds
+public static class OtlpJoinIds
 {
     /// <summary>The OTLP attribute holding the provider response id.</summary>
-    internal const string ResponseIdKey = "gen_ai.response.id";
+    public const string ResponseIdKey = "gen_ai.response.id";
 
     /// <summary>The OTLP attribute holding the provider request id.</summary>
-    internal const string RequestIdKey = "request_id";
+    public const string RequestIdKey = "request_id";
 
     /// <summary>
     /// The harness ids Claude Code and Codex records carry: the log mapper names Codex
@@ -32,7 +32,7 @@ internal static class OtlpJoinIds
     /// <summary>Returns the response id and request id the attributes carry, or none for a harness with no transcript twin.</summary>
     /// <param name="harnessId">The record's harness id.</param>
     /// <param name="attributes">The span's or log's attributes.</param>
-    internal static (string? ResponseId, string? RequestId) Read(
+    public static (string? ResponseId, string? RequestId) Read(
         string? harnessId,
         IReadOnlyDictionary<string, JsonElement>? attributes)
     {

@@ -522,6 +522,7 @@ public static class CanonIngestPipeline
         CollectedToolCall? tool = BuildToolCall(record);
         IReadOnlyList<string> skillsInvoked = SkillExtraction.ExtractInvoked(record.Raw, tool?.ToolName);
         IReadOnlyList<CollectedToolDefinition> toolDefinitions = BuildToolDefinitions(record, out HashSet<int> definitionPartIndexes);
+        (string? ResponseId, string? RequestId) joinIds = OtlpJoinIds.Read(record.Harness, record.Raw);
 
         return new CollectedRecord(
             RecordId: record.SpanId,
@@ -547,7 +548,9 @@ public static class CanonIngestPipeline
             ToolDefinitions: toolDefinitions,
             Signals: new CollectedRecordSignals(errorMessage, null, null, null),
             ReportedInputTokens: inputUnmeasured || record.Tokens.ReportedInput < 0 ? null : record.Tokens.ReportedInput,
-            ReportedOutputTokens: outputUnmeasured || record.Tokens.ReportedOutput < 0 ? null : record.Tokens.ReportedOutput);
+            ReportedOutputTokens: outputUnmeasured || record.Tokens.ReportedOutput < 0 ? null : record.Tokens.ReportedOutput,
+            ResponseId: joinIds.ResponseId,
+            RequestId: joinIds.RequestId);
     }
 
     /// <summary>
