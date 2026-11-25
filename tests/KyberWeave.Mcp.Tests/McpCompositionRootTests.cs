@@ -1,6 +1,7 @@
 using System.Reflection;
 using KyberWeave.Application;
 using KyberWeave.Mcp;
+using KyberWeave.Contracts.Repositories;
 using KyberWeave.Contracts.Services;
 using KyberWeave.Tests;
 using Microsoft.Extensions.DependencyInjection;
@@ -51,6 +52,131 @@ public sealed class McpCompositionRootTests
         using ServiceProvider provider = services.BuildServiceProvider();
 
         AssertEveryToolTypeResolves(provider, typeof(DocsTools).Assembly);
+    }
+
+    /// <summary>
+    /// The bound container picks the root-bound constructor: a tool called without <c>projectPath</c> answers from the
+    /// server's own root, and the instructions carry no any-repo paragraph.
+    /// </summary>
+    [Fact]
+    public void TheBoundContainerAnswersFromItsOwnRoot()
+    {
+        _host.Services().GetRequiredService<IDocsScaffoldingService>().Scaffold(_host.Repo);
+
+        ServiceCollection services = new();
+        _host.Register(services);
+        services.AddWeaveApplication();
+        services.AddDocsHostServices(_host.Repo, codeGraphRefreshEnabled: false);
+        using ServiceProvider provider = services.BuildServiceProvider();
+
+        DocsTools tools = ActivatorUtilities.CreateInstance<DocsTools>(provider);
+
+        Assert.StartsWith("provenance: root=" + _host.Repo, tools.DocsStatus(), StringComparison.Ordinal);
+        McpServerOptions options = new();
+        DocsServerInstructions.Configure(options, anyRepo: false);
+        Assert.Equal(DocsServerInstructions.Text, options.ServerInstructions);
+        Assert.DoesNotContain(DocsServerInstructions.AnyRepoParagraph, options.ServerInstructions, StringComparison.Ordinal);
+    }
+
+    /// <summary>
+    /// The any-repo container builds with no root at all, which is what lets <c>kyber-weave-mcp --any-repo</c> start from
+    /// a directory with no host configuration, and every tool it constructs refuses a call without <c>projectPath</c>.
+    /// </summary>
+    [Fact]
+    public void TheAnyRepoContainerBuildsWithoutARootAndEveryToolRefusesAMissingProjectPath()
+    {
+        using ServiceProvider provider = AnyRepoContainer();
+
+        AssertEveryToolTypeResolves(provider, typeof(DocsTools).Assembly);
+        DocsTools tools = ActivatorUtilities.CreateInstance<DocsTools>(provider);
+        MethodInfo[] toolMethods = typeof(DocsTools)
+            .GetMethods(BindingFlags.Public | BindingFlags.Instance)
+            .Where(method => method.GetCustomAttribute<McpServerToolAttribute>() is not null)
+            .ToArray();
+
+        Assert.NotEmpty(toolMethods);
+        foreach (MethodInfo method in toolMethods)
+        {
+            string answer = method.GetParameters().Any(parameter => parameter.ParameterType == typeof(McpServer))
+                ? tools.BuildTaskPromptForClient("claude-code", taskId: "T1")
+                : (string)method.Invoke(tools, method.GetParameters().Select(ArgumentFor).ToArray())!;
+
+            Assert.Equal(MissingProjectPathRefusal, answer);
+        }
+    }
+
+    /// <summary>A call naming a directory inside an initialized repository answers with that repository's provenance.</summary>
+    [Fact]
+    public void TheAnyRepoContainerAnswersForTheRepositoryAProjectPathNames()
+    {
+        _host.Services().GetRequiredService<IDocsScaffoldingService>().Scaffold(_host.Repo);
+        using ServiceProvider provider = AnyRepoContainer();
+
+        DocsTools tools = ActivatorUtilities.CreateInstance<DocsTools>(provider);
+
+        Assert.StartsWith("provenance: root=" + _host.Repo, tools.DocsStatus(_host.Repo), StringComparison.Ordinal);
+    }
+
+    /// <summary>A directory that is no initialized repository is refused with the any-repo provenance line.</summary>
+    [Fact]
+    public void TheAnyRepoContainerRefusesAProjectPathWithItsReason()
+    {
+        using ServiceProvider provider = AnyRepoContainer();
+
+        DocsTools tools = ActivatorUtilities.CreateInstance<DocsTools>(provider);
+        string answer = tools.DocsStatus(_host.Repo);
+
+        Assert.StartsWith("provenance: root=(none) mode=any-repo\nprojectPath was refused: ", answer, StringComparison.Ordinal);
+        Assert.Contains("kyber-weave docs init", answer, StringComparison.Ordinal);
+    }
+
+    /// <summary>The any-repo instructions append the paragraph that says every tool needs <c>projectPath</c>.</summary>
+    [Fact]
+    public void TheAnyRepoInstructionsSayEveryToolRequiresAProjectPath()
+    {
+        McpServerOptions options = new();
+
+        DocsServerInstructions.Configure(options, anyRepo: true);
+
+        Assert.StartsWith(DocsServerInstructions.Text, options.ServerInstructions, StringComparison.Ordinal);
+        Assert.Contains(DocsServerInstructions.AnyRepoParagraph, options.ServerInstructions, StringComparison.Ordinal);
+        Assert.Contains("requires projectPath", DocsServerInstructions.AnyRepoParagraph, StringComparison.Ordinal);
+        Assert.Contains("absolute path of a directory inside the repository", DocsServerInstructions.AnyRepoParagraph, StringComparison.Ordinal);
+    }
+
+    private const string MissingProjectPathRefusal =
+        "provenance: root=(none) mode=any-repo\n"
+        + "projectPath is required: this server runs in any-repo mode. "
+        + "Pass the absolute path of a directory inside the repository you are working in.";
+
+    private ServiceProvider AnyRepoContainer()
+    {
+        ServiceCollection services = new();
+        _host.Register(services);
+
+        // The in-memory host has no git, so the one repository it holds is named by a scripted identity. Registered
+        // before the application's own, which only adds the real adapter when none is registered.
+        services.AddSingleton<IGitWorktreeIdentity>(new OneRepository(_host.Repo));
+        services.AddWeaveApplication();
+        services.AddAnyRepoDocsHostServices(codeGraphRefreshEnabled: false);
+        return services.BuildServiceProvider();
+    }
+
+    private static object? ArgumentFor(ParameterInfo parameter)
+    {
+        if (parameter.Name == "projectPath") return null;
+        if (parameter.HasDefaultValue) return parameter.DefaultValue;
+        return parameter.ParameterType == typeof(string) ? "value" : null;
+    }
+
+    /// <summary>Every directory is the top level of one repository, whose git directory is under <c>root</c>.</summary>
+    private sealed class OneRepository(string root) : IGitWorktreeIdentity
+    {
+        public bool TryRoots(string directory, out string? topLevel, out string? commonDirectory, out string? failure)
+        {
+            (topLevel, commonDirectory, failure) = (root, Path.Combine(root, ".git"), null);
+            return true;
+        }
     }
 
     /// <summary>Every advertised tool type in <paramref name="assembly"/> resolves, and there is at least one.</summary>

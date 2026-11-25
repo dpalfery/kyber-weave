@@ -38,72 +38,91 @@ HostApplicationBuilder builder = Host.CreateApplicationBuilder(args);
 // Every log line goes to stderr. One stray line on stdout breaks the transport.
 builder.Logging.AddConsole(o => o.LogToStandardErrorThreshold = LogLevel.Trace);
 
-string workingDirectory = Directory.GetCurrentDirectory();
-string? expectRootEnvironment = Environment.GetEnvironmentVariable(
-    RepositoryRootResolver.ExpectRootEnvironmentVariable);
-bool expectRootFromFlag = RepositoryRootResolver.HasExpectRootArgument(args);
-
-RepositoryRootResolver rootResolver = RealRootResolver();
-string repoRoot;
-try
-{
-    repoRoot = rootResolver.Resolve(
-        args,
-        workingDirectory,
-        Environment.GetEnvironmentVariable(RepositoryRootResolver.EnvironmentVariable));
-}
-catch (ExpectedRootMismatchException ex)
-{
-    // A client-asserted root that does not match is a refuse-to-serve, distinct from an
-    // unbound root: KW-MCP-ROOT-002 says the binding was intentional but wrong.
-    await Console.Error.WriteLineAsync($"KW-MCP-ROOT-002: {ex.Message}").ConfigureAwait(false);
-    return 1;
-}
-catch (Exception ex) when (ex is ArgumentException or InvalidOperationException)
+// --any-repo starts a server bound to no root: every call names its repository with projectPath. It is decided before
+// root resolution, because an any-repo server has no root to resolve and must start from any directory, and the root
+// variables a harness may export (KYBER_WEAVE_REPO_ROOT, KYBER_WEAVE_EXPECT_ROOT) are ignored in that mode.
+McpServeMode mode = McpServeMode.Parse(args);
+if (mode.ConflictDiagnostic is { } conflict)
 {
     // stdout is the JSON-RPC transport; startup diagnostics belong on stderr.
-    await Console.Error.WriteLineAsync($"KW-MCP-ROOT-001: {ex.Message}").ConfigureAwait(false);
+    await Console.Error.WriteLineAsync(conflict).ConfigureAwait(false);
     return 1;
 }
 
-// The environment assertion is honoured only when the flag is absent: an explicit CLI
-// expectation wins over the ambient one, so a shell export cannot override a project pin.
-if (!expectRootFromFlag && !string.IsNullOrWhiteSpace(expectRootEnvironment))
+bool anyRepo = mode.AnyRepo;
+builder.Services.AddWeaveApplication();
+if (anyRepo)
 {
-    string expectedRoot;
+    builder.Services.AddAnyRepoDocsHostServices(codeGraphRefreshEnabled);
+}
+else
+{
+    string workingDirectory = Directory.GetCurrentDirectory();
+    string? expectRootEnvironment = Environment.GetEnvironmentVariable(
+        RepositoryRootResolver.ExpectRootEnvironmentVariable);
+    bool expectRootFromFlag = RepositoryRootResolver.HasExpectRootArgument(args);
+
+    RepositoryRootResolver rootResolver = RealRootResolver();
+    string repoRoot;
     try
     {
-        expectedRoot = Path.GetFullPath(expectRootEnvironment, workingDirectory);
+        repoRoot = rootResolver.Resolve(
+            args,
+            workingDirectory,
+            Environment.GetEnvironmentVariable(RepositoryRootResolver.EnvironmentVariable));
     }
-    catch (Exception ex) when (ex is ArgumentException or NotSupportedException or PathTooLongException)
+    catch (ExpectedRootMismatchException ex)
     {
-        await Console.Error.WriteLineAsync(
-            "KW-MCP-ROOT-002: The KYBER_WEAVE_EXPECT_ROOT value is not a valid path. " +
-            "Refusing to serve.")
-            .ConfigureAwait(false);
+        // A client-asserted root that does not match is a refuse-to-serve, distinct from an
+        // unbound root: KW-MCP-ROOT-002 says the binding was intentional but wrong.
+        await Console.Error.WriteLineAsync($"KW-MCP-ROOT-002: {ex.Message}").ConfigureAwait(false);
+        return 1;
+    }
+    catch (Exception ex) when (ex is ArgumentException or InvalidOperationException)
+    {
+        // stdout is the JSON-RPC transport; startup diagnostics belong on stderr.
+        await Console.Error.WriteLineAsync($"KW-MCP-ROOT-001: {ex.Message}").ConfigureAwait(false);
         return 1;
     }
 
-    if (!rootResolver.PathsEqual(expectedRoot, repoRoot))
+    // The environment assertion is honoured only when the flag is absent: an explicit CLI
+    // expectation wins over the ambient one, so a shell export cannot override a project pin.
+    if (!expectRootFromFlag && !string.IsNullOrWhiteSpace(expectRootEnvironment))
     {
-        await Console.Error.WriteLineAsync(
-            $"KW-MCP-ROOT-002: The KYBER_WEAVE_EXPECT_ROOT value '{expectedRoot}' does not match " +
-            $"the resolved MCP root '{repoRoot}'. Refusing to serve because the client expects " +
-            "a different repository and answers would come from the wrong corpus.")
-            .ConfigureAwait(false);
-        return 1;
+        string expectedRoot;
+        try
+        {
+            expectedRoot = Path.GetFullPath(expectRootEnvironment, workingDirectory);
+        }
+        catch (Exception ex) when (ex is ArgumentException or NotSupportedException or PathTooLongException)
+        {
+            await Console.Error.WriteLineAsync(
+                "KW-MCP-ROOT-002: The KYBER_WEAVE_EXPECT_ROOT value is not a valid path. " +
+                "Refusing to serve.")
+                .ConfigureAwait(false);
+            return 1;
+        }
+
+        if (!rootResolver.PathsEqual(expectedRoot, repoRoot))
+        {
+            await Console.Error.WriteLineAsync(
+                $"KW-MCP-ROOT-002: The KYBER_WEAVE_EXPECT_ROOT value '{expectedRoot}' does not match " +
+                $"the resolved MCP root '{repoRoot}'. Refusing to serve because the client expects " +
+                "a different repository and answers would come from the wrong corpus.")
+                .ConfigureAwait(false);
+            return 1;
+        }
     }
+
+    // Composition root. The shared layers register their own services first; AddDocsHostServices adds every
+    // registration below it that is a host decision made once from this process's own argv and root. Core never
+    // invents these collaborators. The composition-root test builds the same container, so a tool whose constructor
+    // asks for a service this root does not register fails there rather than on its first call.
+    builder.Services.AddDocsHostServices(repoRoot, codeGraphRefreshEnabled);
 }
 
-// Composition root. The shared layers register their own services first; AddDocsHostServices adds every
-// registration below it that is a host decision made once from this process's own argv and root. Core never
-// invents these collaborators. The composition-root test builds the same container, so a tool whose constructor
-// asks for a service this root does not register fails there rather than on its first call.
-builder.Services.AddWeaveApplication();
-builder.Services.AddDocsHostServices(repoRoot, codeGraphRefreshEnabled);
-
 builder.Services
-    .AddMcpServer(DocsServerInstructions.Configure)
+    .AddMcpServer(options => DocsServerInstructions.Configure(options, anyRepo))
     .WithStdioServerTransport()
     .WithToolsFromAssembly();
 

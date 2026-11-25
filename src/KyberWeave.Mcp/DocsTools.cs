@@ -19,13 +19,14 @@ namespace KyberWeave.Mcp;
 [McpServerToolType]
 public sealed partial class DocsTools
 {
-    private readonly IDocsQueryService _query;
-    private readonly IPlanLifecycleService _planLifecycle;
-    private readonly IRunDeliveryService _delivery;
-    private readonly IToolingCheckService _toolingCheck;
-    private readonly ITaskPromptService _prompts;
-    private readonly IDocsHostConfiguration _hostConfiguration;
-    private readonly string _repositoryRoot;
+    /// <summary>The provenance line an any-repo server answers with before a call has named a repository.</summary>
+    private const string AnyRepoProvenance = "provenance: root=(none) mode=any-repo";
+
+    private const string MissingProjectPath =
+        "projectPath is required: this server runs in any-repo mode. "
+        + "Pass the absolute path of a directory inside the repository you are working in.";
+
+    private readonly BoundRoot? _bound;
     private readonly DocsRootRegistry? _roots;
 
     /// <summary>Tools over <paramref name="query"/> that also answer for other worktrees through <paramref name="roots"/>.</summary>
@@ -48,17 +49,37 @@ public sealed partial class DocsTools
         DocsHostRoot hostRoot,
         DocsRootRegistry? roots = null)
     {
-        _query = query ?? throw new ArgumentNullException(nameof(query));
-        _planLifecycle = planLifecycle ?? throw new ArgumentNullException(nameof(planLifecycle));
-        _delivery = delivery ?? throw new ArgumentNullException(nameof(delivery));
-        _toolingCheck = toolingCheck ?? throw new ArgumentNullException(nameof(toolingCheck));
-        _prompts = prompts ?? throw new ArgumentNullException(nameof(prompts));
-        _hostConfiguration = hostConfiguration ?? throw new ArgumentNullException(nameof(hostConfiguration));
+        ArgumentNullException.ThrowIfNull(query);
+        ArgumentNullException.ThrowIfNull(planLifecycle);
+        ArgumentNullException.ThrowIfNull(delivery);
+        ArgumentNullException.ThrowIfNull(toolingCheck);
+        ArgumentNullException.ThrowIfNull(prompts);
+        ArgumentNullException.ThrowIfNull(hostConfiguration);
         ArgumentNullException.ThrowIfNull(hostRoot);
         ArgumentException.ThrowIfNullOrWhiteSpace(hostRoot.Path);
-        _repositoryRoot = hostRoot.Path;
+        _bound = new BoundRoot(query, planLifecycle, delivery, toolingCheck, prompts, hostConfiguration, hostRoot.Path);
         _roots = roots;
     }
+
+    /// <summary>Tools for an any-repo server: bound to no root, they answer only for the repository each call names.</summary>
+    /// <param name="roots">The any-repo registry that resolves every call's <c>projectPath</c>.</param>
+    /// <remarks>
+    /// The SDK builds the tool type with <c>ActivatorUtilities</c>, which takes the longest constructor the container can
+    /// satisfy: the root-bound one when the host registered a root, this one when it registered only the registry.
+    /// </remarks>
+    public DocsTools(DocsRootRegistry roots)
+    {
+        ArgumentNullException.ThrowIfNull(roots);
+        if (!roots.IsAnyRepo)
+            throw new ArgumentException("Tools with no root need an any-repo registry.", nameof(roots));
+        _roots = roots;
+    }
+
+    /// <summary>
+    /// The root-bound services. Every tool body reaches them only after its <see cref="Redirect"/> line, which never
+    /// returns null in any-repo mode, so this throws only on a path that skipped that line.
+    /// </summary>
+    private BoundRoot Bound => _bound ?? throw new InvalidOperationException("an any-repo server reached a root-bound path");
 
     [McpServerTool(Name = "docs_answer_question_from_repo_documentation", ReadOnly = true, OpenWorld = false)]
     [Description("""
@@ -87,7 +108,7 @@ public sealed partial class DocsTools
         [Description("Absolute path of your worktree; omit for the server's checkout.")] string? projectPath = null)
     {
         if (Redirect(projectPath, tools => tools.Explore(query, cursor)) is { } redirected) return redirected;
-        return _query.Explore(query, cursor);
+        return Bound.Query.Explore(query, cursor);
     }
 
     [McpServerTool(Name = "docs_find_documents_citing_code_symbol", ReadOnly = true, OpenWorld = false)]
@@ -105,7 +126,7 @@ public sealed partial class DocsTools
         [Description("Absolute path of your worktree; omit for the server's checkout.")] string? projectPath = null)
     {
         if (Redirect(projectPath, tools => tools.ForSymbol(symbol)) is { } redirected) return redirected;
-        return _query.ForSymbol(symbol);
+        return Bound.Query.ForSymbol(symbol);
     }
 
     [McpServerTool(Name = "docs_find_duplicates_conflicts_ambiguous_terms", ReadOnly = true, OpenWorld = false)]
@@ -127,7 +148,7 @@ public sealed partial class DocsTools
         [Description("Absolute path of your worktree; omit for the server's checkout.")] string? projectPath = null)
     {
         if (Redirect(projectPath, tools => tools.AnalysisCandidates(kind, cursor, limit, charBudget)) is { } redirected) return redirected;
-        return _query.AnalysisCandidates(kind, cursor, limit, charBudget);
+        return Bound.Query.AnalysisCandidates(kind, cursor, limit, charBudget);
     }
 
     [McpServerTool(Name = "docs_look_up_glossary_term_definition", ReadOnly = true, OpenWorld = false)]
@@ -146,7 +167,7 @@ public sealed partial class DocsTools
         [Description("Absolute path of your worktree; omit for the server's checkout.")] string? projectPath = null)
     {
         if (Redirect(projectPath, tools => tools.Glossary(term)) is { } redirected) return redirected;
-        return _query.Glossary(term);
+        return Bound.Query.Glossary(term);
     }
 
     [McpServerTool(Name = "docs_validate_governed_document_schema", ReadOnly = true, OpenWorld = false)]
@@ -177,7 +198,7 @@ public sealed partial class DocsTools
         [Description("Absolute path of your worktree; omit for the server's checkout.")] string? projectPath = null)
     {
         if (Redirect(projectPath, tools => tools.DocsValidate(mergeReady, @base, charBudget)) is { } redirected) return redirected;
-        return _query.DocsValidate(mergeReady, @base, charBudget);
+        return Bound.Query.DocsValidate(mergeReady, @base, charBudget);
     }
 
     [McpServerTool(Name = "docs_detect_drift_between_documents_and_code", ReadOnly = true, OpenWorld = false)]
@@ -198,7 +219,7 @@ public sealed partial class DocsTools
         [Description("Absolute path of your worktree; omit for the server's checkout.")] string? projectPath = null)
     {
         if (Redirect(projectPath, tools => tools.DocsDrift(charBudget)) is { } redirected) return redirected;
-        return _query.DocsDrift(charBudget);
+        return Bound.Query.DocsDrift(charBudget);
     }
 
     /// <summary>
@@ -220,7 +241,7 @@ public sealed partial class DocsTools
         [Description("Absolute path of your worktree; omit for the server's checkout.")] string? projectPath = null)
     {
         if (Redirect(projectPath, tools => tools.DocsStatus()) is { } redirected) return redirected;
-        return _query.DocsStatus();
+        return Bound.Query.DocsStatus();
     }
 
     /// <summary>
@@ -277,7 +298,7 @@ public sealed partial class DocsTools
         [Description("Absolute path of your worktree; omit for the server's checkout.")] string? projectPath = null)
     {
         if (Redirect(projectPath, tools => tools.AgentCodingStandards(technology, topic, charBudget)) is { } redirected) return redirected;
-        return _query.AgentCodingStandards(technology, topic, charBudget);
+        return Bound.Query.AgentCodingStandards(technology, topic, charBudget);
     }
 
     /// <summary>Loads one KW skill by name: its instructions, its folder and the paths of its reference files.</summary>
@@ -296,7 +317,7 @@ public sealed partial class DocsTools
         [Description("Absolute path of your worktree; omit for the server's checkout.")] string? projectPath = null)
     {
         if (Redirect(projectPath, tools => tools.LoadSkill(name)) is { } redirected) return redirected;
-        return _query.LoadSkill(name);
+        return Bound.Query.LoadSkill(name);
     }
 
     /// <summary>
@@ -370,15 +391,15 @@ public sealed partial class DocsTools
         string? harness = McpClientHarness.TokenFor(clientName);
 
         DiagnosticReport report = new();
-        if (!_hostConfiguration.TryLoad(_repositoryRoot, report, out KyberWeaveConfig config))
+        if (!Bound.HostConfiguration.TryLoad(Bound.RepositoryRoot, report, out KyberWeaveConfig config))
         {
-            return _query.Provenance()
+            return Bound.Query.Provenance()
                    + "\nprompt: none\nreason: this checkout's configuration could not be loaded. Run 'kyber-weave docs validate .' in it.";
         }
 
-        TaskPromptResult prompt = _prompts.Build(
+        TaskPromptResult prompt = Bound.Prompts.Build(
             new TaskPromptRequest(
-                _repositoryRoot,
+                Bound.RepositoryRoot,
                 taskId,
                 plan,
                 PriorResultsPath: priorResults,
@@ -395,7 +416,7 @@ public sealed partial class DocsTools
     private string FormatTaskPrompt(TaskPromptResult prompt, string? clientName, string? harness)
     {
         StringBuilder text = new();
-        text.Append(_query.Provenance()).Append('\n');
+        text.Append(ProvenanceLine()).Append('\n');
         if (!prompt.Built)
         {
             text.Append("prompt: none\nreason: ").Append(prompt.Refusal);
@@ -436,19 +457,36 @@ public sealed partial class DocsTools
     }
 
     /// <summary>
-    /// Routes a per-call <c>projectPath</c> to the tools bound to that worktree, or refuses it. Null when the call is for
-    /// this server's own root, so the caller answers it.
+    /// Routes a per-call <c>projectPath</c> to the tools bound to that worktree, or refuses it. Null only in bound mode, when
+    /// the call is for this server's own root, so the caller answers it; an any-repo server always answers here.
     /// </summary>
     private string? Redirect(string? projectPath, Func<DocsTools, string> call)
     {
-        if (string.IsNullOrWhiteSpace(projectPath)) return null;
+        if (string.IsNullOrWhiteSpace(projectPath))
+            return _bound is null ? ProvenanceLine() + "\n" + MissingProjectPath : null;
 
         if (_roots is null)
-            return _query.Provenance() + "\nprojectPath was refused: this server answers for one checkout only.";
+            return ProvenanceLine() + "\nprojectPath was refused: this server answers for one checkout only.";
 
         if (!_roots.TryResolve(projectPath, out DocsTools? target, out string? refusal))
-            return _query.Provenance() + "\nprojectPath was refused: " + refusal;
+            return ProvenanceLine() + "\nprojectPath was refused: " + refusal;
 
-        return target is null ? null : call(target);
+        if (target is not null) return call(target);
+        return _bound is null
+            ? ProvenanceLine() + "\nprojectPath was refused: no tools were built for it."
+            : null;
     }
+
+    /// <summary>The provenance line of this server's own root, or the any-repo line when it holds none.</summary>
+    private string ProvenanceLine() => _bound is null ? AnyRepoProvenance : _bound.Query.Provenance();
+
+    /// <summary>The services bound to one root, held together so an any-repo server holds none of them.</summary>
+    private sealed record BoundRoot(
+        IDocsQueryService Query,
+        IPlanLifecycleService PlanLifecycle,
+        IRunDeliveryService Delivery,
+        IToolingCheckService ToolingCheck,
+        ITaskPromptService Prompts,
+        IDocsHostConfiguration HostConfiguration,
+        string RepositoryRoot);
 }
