@@ -69,5 +69,7 @@ public sealed class FactoryMcpConfigurationTests
         public IEnumerable<SquadDirectoryEntry> EnumerateRealDirectories(string directory) => throw new NotSupportedException();
 
         public string? FindCheckoutSquadSourceRoot() => throw new NotSupportedException();
+
+        public void WriteAllBytesAtomic(string path, byte[] contents) => throw new NotSupportedException();
     }
 }

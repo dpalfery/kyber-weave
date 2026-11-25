@@ -39,4 +39,7 @@ public sealed class InMemorySquadFileAccess(InMemoryFileSystem files) : ISquadFi
 
     /// <inheritdoc />
     public string? FindCheckoutSquadSourceRoot() => null;
+
+    /// <inheritdoc />
+    public void WriteAllBytesAtomic(string path, byte[] contents) => files.WriteAllBytesAtomic(path, contents);
 }

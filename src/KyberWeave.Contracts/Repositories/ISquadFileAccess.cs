@@ -34,6 +34,21 @@ public interface ISquadFileAccess
 
     /// <summary>Finds the checkout's <c>products/kyber-squad</c> directory above the running binary, or null.</summary>
     string? FindCheckoutSquadSourceRoot();
+
+    /// <summary>
+    /// Replaces a whole file atomically: a fully written temporary sibling is renamed over it, so a reader never
+    /// sees it half written.
+    /// </summary>
+    /// <remarks>
+    /// Missing parent directories are created. An existing file's Unix mode is kept, so a <c>0600</c> file that
+    /// holds secrets does not become readable by others. A symbolic link at <paramref name="path"/> is written
+    /// through: the file it names receives the bytes and the link itself stays.
+    /// </remarks>
+    /// <param name="path">The file to create or replace.</param>
+    /// <param name="contents">The complete bytes the file ends up holding.</param>
+    /// <exception cref="UnauthorizedAccessException">The process may not write the file.</exception>
+    /// <exception cref="IOException">The file could not be written.</exception>
+    void WriteAllBytesAtomic(string path, byte[] contents);
 }
 
 /// <summary>A directory found under another directory.</summary>

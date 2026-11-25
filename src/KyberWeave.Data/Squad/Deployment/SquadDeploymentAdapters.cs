@@ -62,6 +62,10 @@ public sealed class PhysicalSquadFileAccess : ISquadFileAccess
 
         return null;
     }
+
+    /// <inheritdoc />
+    public void WriteAllBytesAtomic(string path, byte[] contents) =>
+        AtomicFile.WriteAllBytes(path, contents, writeThroughSymlink: true, flushToDisk: false, preserveUnixFileMode: true);
 }
 
 /// <summary>Resolves canonical profiles from the checkout the binary runs from, then from the home snapshots.</summary>

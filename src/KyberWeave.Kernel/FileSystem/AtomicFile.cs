@@ -44,6 +44,14 @@ namespace KyberWeave.Core.FileSystem;
 /// the link points, so it belongs only where the operator owns the link. The temporary is created beside
 /// the final target, so the rename stays within one volume. A dangling link creates its target.
 /// </para>
+/// <para>
+/// By default the replaced file takes the mode a new file gets, because the temporary is a new file. A caller
+/// writing a file that holds secrets, such as a harness configuration kept at <c>0600</c>, opts in to keeping the
+/// existing file's Unix mode instead; otherwise every write would silently widen it to the umask default. The mode
+/// is read from the file a link names, never from the link, and set on the temporary before the rename, so the
+/// destination never holds the new content under a wider mode. It is opt-in so the callers that predate it keep
+/// their behaviour. Nothing is copied on Windows, which has no Unix mode, or when there is no existing file.
+/// </para>
 /// </remarks>
 public static class AtomicFile
 {
@@ -85,6 +93,22 @@ public static class AtomicFile
         }
 
         Write(path, writeThroughSymlink, temporaryPath => WriteFlushed(temporaryPath, content));
+    }
+
+    /// <summary>Writes bytes atomically, optionally keeping the replaced file's Unix mode.</summary>
+    /// <param name="path">The file to create or replace.</param>
+    /// <param name="content">The complete bytes the file ends up holding.</param>
+    /// <param name="writeThroughSymlink">True to replace the file a symbolic link at <paramref name="path"/> points to, keeping the link.</param>
+    /// <param name="flushToDisk">True to write through the operating system's cache and flush the file to the device, so a crash after the rename cannot lose the content.</param>
+    /// <param name="preserveUnixFileMode">True to give the new file the Unix mode of the file it replaces, read from the file a link names; false gives it the default mode of a new file.</param>
+    /// <exception cref="InvalidOperationException">The path has no parent directory.</exception>
+    public static void WriteAllBytes(string path, byte[] content, bool writeThroughSymlink, bool flushToDisk, bool preserveUnixFileMode)
+    {
+        ArgumentNullException.ThrowIfNull(content);
+        Action<string> writeTemporary = flushToDisk
+            ? temporaryPath => WriteFlushed(temporaryPath, content)
+            : temporaryPath => File.WriteAllBytes(temporaryPath, content);
+        Write(path, writeThroughSymlink, writeTemporary, preserveUnixFileMode);
     }
 
     /// <summary>
@@ -132,7 +156,7 @@ public static class AtomicFile
         stream.Flush(flushToDisk: true);
     }
 
-    private static void Write(string path, bool writeThroughSymlink, Action<string> writeTemporary)
+    private static void Write(string path, bool writeThroughSymlink, Action<string> writeTemporary, bool preserveUnixFileMode = false)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(path);
         ArgumentNullException.ThrowIfNull(writeTemporary);
@@ -153,12 +177,37 @@ public static class AtomicFile
         try
         {
             writeTemporary(temporaryPath);
+            if (preserveUnixFileMode)
+                CopyUnixFileMode(destination, temporaryPath);
             File.Move(temporaryPath, destination, overwrite: true);
         }
         finally
         {
             Discard(temporaryPath);
         }
+    }
+
+    /// <summary>
+    /// Gives the temporary the Unix mode of the file it is about to replace, so the rename cannot widen who may
+    /// read it.
+    /// </summary>
+    /// <remarks>
+    /// The destination is resolved through any link here rather than trusting the caller to have done it, so the
+    /// mode is always the named file's: a link's own mode is meaningless on Linux and not what a reader is checked
+    /// against. A dangling link resolves to a missing file and, like a missing destination, leaves the default mode.
+    /// </remarks>
+    /// <param name="destination">The fully qualified path the temporary is about to be renamed over.</param>
+    /// <param name="temporaryPath">The fully written temporary sibling.</param>
+    private static void CopyUnixFileMode(string destination, string temporaryPath)
+    {
+        if (OperatingSystem.IsWindows())
+            return;
+
+        string resolved = ResolveLinks(destination);
+        if (!File.Exists(resolved))
+            return;
+
+        File.SetUnixFileMode(temporaryPath, File.GetUnixFileMode(resolved));
     }
 
     /// <summary>

@@ -143,6 +143,8 @@ public sealed class SquadInstanceServiceTests
         public IEnumerable<SquadDirectoryEntry> EnumerateRealDirectories(string directory) => [];
 
         public string? FindCheckoutSquadSourceRoot() => null;
+
+        public void WriteAllBytesAtomic(string path, byte[] contents) => throw new NotSupportedException();
     }
 
     private sealed class HomeOnlyStateStore(ISquadUserPaths userPaths) : ISquadStateStore
