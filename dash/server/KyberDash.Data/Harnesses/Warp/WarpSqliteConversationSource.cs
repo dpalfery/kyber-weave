@@ -30,6 +30,7 @@ public class WarpSqliteConversationSource : ISqliteConversationSource
     private const string ConversationQueryName = "warp.conversation";
     private const string QueriesQueryName = "warp.queries";
     private const string BlocksQueryName = "warp.blocks";
+    private const string BlockRowsQueryName = "warp.block-rows";
     private const string DatabaseFileQueryName = "warp.database-file";
     private const string UnattributedBlocksQueryName = "warp.unattributed-blocks";
 
@@ -50,7 +51,7 @@ public class WarpSqliteConversationSource : ISqliteConversationSource
 
     private readonly object blocksLock = new();
 
-    private readonly Dictionary<string, Dictionary<string, List<IReadOnlyDictionary<string, object?>>>> blocksByDatabase =
+    private readonly Dictionary<string, Dictionary<string, List<long>>> blocksByDatabase =
         new(StringComparer.Ordinal);
 
     /// <summary>Number of databases whose block attribution is currently kept; read by tests to prove the cache is bounded.</summary>
@@ -221,19 +222,39 @@ public class WarpSqliteConversationSource : ISqliteConversationSource
             Stack: null));
     }
 
+    /// <summary>
+    /// The scan keeps only each conversation's block rowids for the pass, not the block text, so memory does
+    /// not grow with the size of the commands; an export then fetches just its own conversation's rows.
+    /// </summary>
     private IReadOnlyList<IReadOnlyDictionary<string, object?>> BlocksFor(IHarnessSqliteDatabase database, string conversationId)
     {
         string path = DatabaseKey(database);
+        List<long>? rowIds;
         lock (blocksLock)
         {
-            if (!blocksByDatabase.TryGetValue(path, out Dictionary<string, List<IReadOnlyDictionary<string, object?>>>? byConversation))
+            if (!blocksByDatabase.TryGetValue(path, out Dictionary<string, List<long>>? byConversation))
             {
-                byConversation = ReadBlocksByConversation(database);
+                byConversation = ReadBlockRowIdsByConversation(database);
                 blocksByDatabase[path] = byConversation;
             }
 
-            return byConversation.TryGetValue(conversationId, out List<IReadOnlyDictionary<string, object?>>? blocks) ? blocks : [];
+            byConversation.TryGetValue(conversationId, out rowIds);
         }
+
+        if (rowIds is null or { Count: 0 })
+        {
+            return [];
+        }
+
+        string idArray = "[" + string.Join(',', rowIds.Select(static id => id.ToString(CultureInfo.InvariantCulture))) + "]";
+        return
+        [
+            .. database.Query(new HarnessSqliteQuery(
+                BlockRowsQueryName,
+                "SELECT block_id, start_ts, stylized_command FROM blocks "
+                    + "WHERE rowid IN (SELECT value FROM json_each(?)) ORDER BY start_ts ASC, rowid ASC",
+                [idArray])),
+        ];
     }
 
     /// <summary>
@@ -252,32 +273,28 @@ public class WarpSqliteConversationSource : ISqliteConversationSource
             .FirstOrDefault(static file => !string.IsNullOrEmpty(file))
         ?? string.Empty;
 
-    private static Dictionary<string, List<IReadOnlyDictionary<string, object?>>> ReadBlocksByConversation(IHarnessSqliteDatabase database)
+    private static Dictionary<string, List<long>> ReadBlockRowIdsByConversation(IHarnessSqliteDatabase database)
     {
-        Dictionary<string, List<IReadOnlyDictionary<string, object?>>> byConversation = new(StringComparer.Ordinal);
+        Dictionary<string, List<long>> byConversation = new(StringComparer.Ordinal);
         foreach (IReadOnlyDictionary<string, object?> row in database.Query(new HarnessSqliteQuery(
             BlocksQueryName,
-            "SELECT json_extract(ai_metadata, '$.conversation_id') AS conversation_id, block_id, start_ts, stylized_command "
-                + "FROM blocks WHERE ai_metadata IS NOT NULL AND ai_metadata <> '' ORDER BY start_ts ASC",
+            "SELECT json_extract(ai_metadata, '$.conversation_id') AS conversation_id, rowid AS block_rowid "
+                + "FROM blocks WHERE ai_metadata IS NOT NULL AND ai_metadata <> ''",
             [])))
         {
-            if (row.GetValueOrDefault("conversation_id") is not string owner)
+            if (row.GetValueOrDefault("conversation_id") is not string owner
+                || row.GetValueOrDefault("block_rowid") is not long rowId)
             {
                 continue;
             }
 
-            if (!byConversation.TryGetValue(owner, out List<IReadOnlyDictionary<string, object?>>? blocks))
+            if (!byConversation.TryGetValue(owner, out List<long>? rowIds))
             {
-                blocks = [];
-                byConversation[owner] = blocks;
+                rowIds = [];
+                byConversation[owner] = rowIds;
             }
 
-            blocks.Add(new Dictionary<string, object?>(StringComparer.Ordinal)
-            {
-                ["block_id"] = row.GetValueOrDefault("block_id"),
-                ["start_ts"] = row.GetValueOrDefault("start_ts"),
-                ["stylized_command"] = row.GetValueOrDefault("stylized_command"),
-            });
+            rowIds.Add(rowId);
         }
 
         return byConversation;
