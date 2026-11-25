@@ -79,9 +79,10 @@ On open, `SqliteRelationalStore` does the following.
   catalog onto a database that is already this version. They do not change a table that
   already exists. A catalog change that does not bump `SchemaVersion` leaves every
   existing `canon.db` on the old shape.
-- `store_state` is inserted once (`INSERT OR IGNORE`). A later open updates
-  `detector_version` when it differs. It does not update `schema_version` on a row that
-  is already there. The schema version moves because the old file was deleted.
+- `store_state` is inserted once (`INSERT OR IGNORE`). A later open leaves that row
+  untouched, so opening a store never changes its `detector_version`; only a full
+  maintenance projection pass restamps `detector_version`. It does not update
+  `schema_version` on a row that is already there. The schema version moves because the old file was deleted.
 
 ### What a canon column holds
 
