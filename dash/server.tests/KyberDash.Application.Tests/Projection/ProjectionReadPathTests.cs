@@ -73,7 +73,8 @@ public class ProjectionReadPathTests
         string incrementalProjection = Serialize(store.GetSessionProjection("sess-b"));
         store.ClearReadLog();
         ProjectionPassReport full = engine.ProjectIncremental();
-        Assert.Contains(nameof(InMemoryRelationalStore.AllSessionRecordsForMaintenance), store.ReadLog);
+        Assert.DoesNotContain(nameof(InMemoryRelationalStore.AllSessionRecordsForMaintenance), store.ReadLog);
+        Assert.Contains(nameof(InMemoryRelationalStore.SessionRecordsForRebuild), store.ReadLog);
         Assert.Contains("sess-b", full.RebuiltKeys);
         Assert.Equal(incrementalProjection, Serialize(store.GetSessionProjection("sess-b")));
     }

@@ -1,5 +1,6 @@
 using System.Globalization;
 using KyberDash.Contracts.Services;
+using KyberDash.Core;
 
 namespace KyberDash.Api;
 
@@ -50,7 +51,7 @@ public class DashRuntimeSettings
     public string? DatabasePath { get; set; }
 
     /// <summary>Reported engine version.</summary>
-    public string Version { get; set; } = "0.21.0";
+    public string Version { get; set; } = DashVersion.Current;
 
     /// <summary>Maximum accepted OTLP request body in bytes.</summary>
     public long MaxOtlpBodyBytes { get; set; } = 64L * 1024 * 1024;

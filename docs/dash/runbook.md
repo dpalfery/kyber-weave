@@ -79,9 +79,10 @@ checkout to serve it; `KYBERDASH_DASH_DIR` still overrides it with a directory o
 The tray ships as its own release asset from `0.1.7-rc.13`:
 `kyberdash menubar` installs it, after checking its SHA-256 and — on macOS — its code
 signature, team id and Gatekeeper acceptance (`install.sh --with-menubar` does the same on
-macOS). `kyber-weave update` updates an installed tray by delegating to
-`kyberdash menubar --update`, which quits the running tray, replaces it and relaunches it,
-restoring the previous app if any step fails. On Linux, `kyberdash menubar` exits 1: the tray
+macOS). `kyber-weave update` restarts an installed tray so it owns a fresh engine: it quits the
+tray, stops the engine, runs `kyberdash menubar --update` (replace the tray, restoring the previous
+app if any step fails) when the release or tray changed or `kyberdash menubar --launch` otherwise,
+then verifies the engine version and that exactly one tray runs (see "Tray verbs" below). On Linux, `kyberdash menubar` exits 1: the tray
 ships for macOS and Windows only.
 
 ---
@@ -1272,11 +1273,14 @@ the tray at login (`dash/tray/src-tauri/src/autostart.rs`). On macOS:
   `install.sh`'s default install path, not a copy staged elsewhere — so the launchd
   environment needs no `node`, Homebrew, checkout, or `KYBERDASH_BIN`. An older record, or one
   recorded before this fix as a bare `kyberdash` with no directory, is not migrated in place:
-  the next `kyber-weave update` (which hands off to `kyberdash menubar --update`) and
+  the next `kyber-weave update` (which restarts the tray through `kyberdash menubar --update`) and
   `kyberdash menubar --force` both rewrite it, but a plain `kyberdash menubar` run against an
   already-installed tray leaves an existing record alone.
 - **Quit** through the tray stops it; it also stops a `web` child it launched itself, and
-  leaves an attached server running. An abnormal tray exit produces a fresh
+  leaves an attached server running. When a server the tray merely attached to goes away, the
+  tray launches and owns a replacement with its usual backoff; a launch that reports
+  `kyberdash.web.attached` (another engine holds the lease) attaches to that engine instead of
+  counting a failure. An abnormal tray exit produces a fresh
   launchd-started tray that rebinds the same loopback ports.
 
 Automatic reconciliation: `refresh_run` rows left in `running` after their refresh process dies or times out (older than 15 minutes) are automatically reconciled to `failure` with an audit summary before subsequent refreshes start — see
@@ -1864,7 +1868,28 @@ follows KyberDash's model-window catalog or its declared-window rules, and the v
 **Engine check.** `kyberdash engine ensure --if-running` replaces a live engine of another version and
 starts nothing when none runs. It prints one line: `engine: not-running`, `engine: attached <version>`,
 or `engine: replaced <old> -> <new>`. It exits 1 with `engine: unresponsive` or `engine: failed` when it
-cannot act. `kyber-weave update` runs it after the binaries commit.
+cannot act, including when the replacement reports a version other than the expected one
+(`engine: failed replacement reports <actual>, expected <expected>`). `kyber-weave update` runs it after
+the binaries commit when no tray is installed.
+
+**Engine stop and verify.** `kyberdash engine stop` shuts the running engine down and prints
+`engine: stopped <version>` or `engine: not-running` (exit 0), or `engine: failed …` (exit 1).
+`kyberdash engine verify --version <v> [--wait <seconds>]` (default 20 s) waits for an engine on that
+version: exit 0 `engine: running <v> (pid <n>)`, 1 `engine: not-running`, 3 `engine: running <actual>,
+expected <v>`, 4 `engine: unresponsive`, 2 for a usage error. Any other `engine` subcommand exits 2.
+
+**Tray verbs.** `kyberdash menubar --quit` quits only the tray recorded in `~/.kyberdash/tray.json` and
+waits for it to exit before any forced kill, so launchd does not relaunch a killed tray as a second
+one; a tray that is not running is not an error. `--launch` starts the recorded tray. `--running`
+exits 0 only when exactly one `kyberdash-tray` process runs. With no install recorded, `--quit` and
+`--launch` exit 1 with `kyberdash: no tray install recorded`. `menubar` rejects unknown options with
+exit 2. `kyber-weave update` uses these to restart the tray so it owns the engine (see
+[Updating](../install.md#updating)).
+
+**One version.** The engine, CLI, MCP server and tray all report the repository's single version:
+`Directory.Build.props` (`0.1.0` for local builds, overridden by the release's `-p:Version`), read at run
+time as `KyberDash.Core.DashVersion.Current`. The release also stamps the tray bundle with
+`tauri build --config '{"version":"<release>"}'`. The old `KYBERDASH_VERSION` override is gone.
 
 **Engine version in status.** `kyberdash kyber capture status` prints the running engine's version
 against the CLI's own, as `engine: running <engine>, cli <cli>`. When they differ it adds `(differs)`

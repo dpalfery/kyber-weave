@@ -244,6 +244,7 @@ public class InMemoryRelationalStoreTests
             "record_reported_total",
             "record_reported_cost",
             "record_skill_invocation",
+            "record_skill_listing",
             "record_agent_instance",
             "record_error",
             "record_edit_failure",
@@ -297,15 +298,15 @@ public class InMemoryRelationalStoreTests
     }
 
     [Fact]
-    public void WriteBatch_RejectsDuplicateRecordPrimaryKey_WithConstraintViolatedAndRollsBackAtomically()
+    public void WriteBatch_RejectsDuplicateRecordPrimaryKeyWithinOneBatch_WithConstraintViolatedAndRollsBackAtomically()
     {
         InMemoryRelationalStore store = new();
         CollectedSource source = new("claude-code", SourceKind.File, "/tmp/batch-a.jsonl");
-        CollectedRecord firstRecord = CreateMinimalRecord("span-dup", "claude-code", "sess-a");
+        CollectedRecord firstRecord = CreateMinimalRecord("span-first", "claude-code", "sess-a");
         store.WriteBatch(new CollectedBatch(source, [CreateMinimalSession("sess-a", "claude-code")], [firstRecord], []));
 
         CollectedRecord newRecord = CreateMinimalRecord("span-new", "claude-code", "sess-a");
-        CollectedRecord duplicateRecord = CreateMinimalRecord("span-dup", "claude-code", "sess-a");
+        CollectedRecord duplicateRecord = CreateMinimalRecord("span-new", "claude-code", "sess-a");
 
         DashValidationException ex = Assert.Throws<DashValidationException>(() =>
             store.WriteBatch(new CollectedBatch(source, [], [newRecord, duplicateRecord], [])));

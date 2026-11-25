@@ -809,6 +809,39 @@ public class CanonAnalysisTests
 
     private static readonly DateTimeOffset TurnBase = new(2026, 11, 14, 23, 0, 0, TimeSpan.Zero);
 
+    /// <summary>
+    /// A <c>kyber.skills.listed</c> attribute with no <c>isInitial</c> flag — the shape hydration writes
+    /// from <c>record_skill_listing</c> — still counts as a listing, while a flag that is present but
+    /// not a boolean leaves the listing unread.
+    /// </summary>
+    [Theory]
+    [InlineData(false, 1)]
+    [InlineData(true, 0)]
+    public void InactiveSkillReference_ReadsAListingWithoutIsInitialAndRejectsANonBooleanFlag(bool stringFlag, int expectedFindings)
+    {
+        object listing = stringFlag
+            ? new { isInitial = "yes", skills = ListedSkillEntries }
+            : new { skills = ListedSkillEntries };
+        CanonicalRecord turn = MakeLlmRecord(
+            "llm-listing",
+            "sess-listing",
+            "claude-code",
+            "2026-11-14T23:00:00.000Z",
+            freshInput: 100,
+            output: 10,
+            raw: new Dictionary<string, JsonElement>(StringComparer.Ordinal)
+            {
+                ["kyber.skills.listed"] = Element(listing),
+                ["kyber.skills.invoked"] = Element(InvokedSkills),
+            });
+
+        IReadOnlyList<Finding> findings = CanonFindings.DetectInactiveSkillReference(
+            new InactiveSkillReferenceInput(SessionId: "sess-listing", Records: [turn]));
+
+        Assert.Equal(expectedFindings, findings.Count);
+        Assert.All(findings, static f => Assert.Contains("\"dormant-skill\"", f.Title, StringComparison.Ordinal));
+    }
+
     private static CanonicalRecord MakeLlmRecord(
         string spanId,
         string sessionId,
