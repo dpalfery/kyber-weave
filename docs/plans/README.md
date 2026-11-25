@@ -64,9 +64,7 @@ its `tasks.yml` is caught rather than carried as dead weight.
 
 ## Active Plans
 
-| Plan | Status | Date | Archive Date | Canonical Docs / Harvested ADRs | Goal |
-|---|---|---|---|---|---|
-| [2026-11-24-projection-write-marker.md](2026-11-24-projection-write-marker.md) | Ready | 2026-11-24 | — | [dash/architecture.md](../dash/architecture.md), [dash/runbook.md](../dash/runbook.md) (planned) | Record writes move the projection write marker and mark dirty sessions again, so new telemetry reaches the sessions view; `kyber vacuum` compacts the store. |
+No plans are open.
 
 ## Archived Plans
 

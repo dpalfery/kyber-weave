@@ -2,7 +2,7 @@
 id: plans/2026-11-24-projection-write-marker
 title: Record writes move the projection write marker again
 doc-type: plan
-status: current
+status: archived
 component: KyberDash
 owner: dpalfery
 last-reviewed: 2026-11-24
@@ -15,7 +15,7 @@ impact-components:
 
 # Record writes move the projection write marker again
 
-**Status: Ready, 2026-11-25. Implementation complete T1-T4; closeout harvested.**
+**Status: Archived, 2026-11-25.**
 
 ## Request
 
@@ -260,10 +260,10 @@ End-of-run council under the `code-review` skill over the whole branch; it deriv
 
 | ID | Destination | Documentation-impact |
 |---|---|---|
-| D1, D2, D3, D4, D5 | [dash/architecture.md](../dash/architecture.md#the-shared-canonical-projection) | extends-component; impact-components: KyberDash; last-reviewed 2026-11-24; status archived. Verified: the incremental projection text names `store_write_marker`, `projection_dirty_range` and `projection_dirty_session`, which writes move the marker, which keys they mark, the merge rules, the same-transaction rule and the mid-pass rule; the old `projection_dirty_sessions` / `projection_session_key_map` names are gone |
-| D9, D10 | [dash/runbook.md](../dash/runbook.md#vacuum-and-full-reset) | extends-component; impact-components: KyberDash; last-reviewed 2026-11-24; status archived. Verified: 2b states that clean keeps quarantine and problems (correcting a line that said wipe-all clears `quarantine`), that `kyber vacuum` checkpoints, vacuums and checkpoints again, and the full-reset procedure (stop the engine, delete `canon.db` plus `-wal`/`-shm`) |
+| D1, D2, D3, D4, D5 | [dash/architecture.md](../../dash/architecture.md#the-shared-canonical-projection) | extends-component; impact-components: KyberDash; last-reviewed 2026-11-24; status archived. Verified: the incremental projection text names `store_write_marker`, `projection_dirty_range` and `projection_dirty_session`, which writes move the marker, which keys they mark, the merge rules, the same-transaction rule and the mid-pass rule; the old `projection_dirty_sessions` / `projection_session_key_map` names are gone |
+| D9, D10 | [dash/runbook.md](../../dash/runbook.md#vacuum-and-full-reset) | extends-component; impact-components: KyberDash; last-reviewed 2026-11-24; status archived. Verified: 2b states that clean keeps quarantine and problems (correcting a line that said wipe-all clears `quarantine`), that `kyber vacuum` checkpoints, vacuums and checkpoints again, and the full-reset procedure (stop the engine, delete `canon.db` plus `-wal`/`-shm`) |
 | D6, D7, D8, D11, AP1 | Documentation waiver: D6 (deferred keys on a quiet store), D7 (where the SQLite contract test lives), D8 (a comment kept) and D11 (test assertion changes) are implementation and test detail whose surviving invariants are in the PR notes; AP1 is the approval gate |
-| KyberDash | [dash/architecture.md](../dash/architecture.md), [dash/runbook.md](../dash/runbook.md) | The impact component's canonical documents, updated as above |
+| KyberDash | [dash/architecture.md](../../dash/architecture.md), [dash/runbook.md](../../dash/runbook.md) | The impact component's canonical documents, updated as above |
 
 no ADR - ADR waiver (D1 to D11): restores the pre-#652 write contract and applies the established store pattern; no new constraint on future work.
 
