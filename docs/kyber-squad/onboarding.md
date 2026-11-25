@@ -5,7 +5,7 @@ doc-type: onboarding
 component: KyberSquad
 source-root: src/KyberWeave.Domain/Squad
 owner: dpalfery
-last-reviewed: 2026-11-24
+last-reviewed: 2026-11-25
 status: current
 decided-by:
   - adr/0067-copilot-system-prompt-override-is-machine-wide
@@ -586,7 +586,7 @@ other profile decision are untouched. Do not "fix" it back: change the ADR first
 | Copilot | The agent's own `copilot-tools` frontmatter entry `kw-docs/*` — canonical source, not renderer output | That one entry |
 | Pi | Renderer-derived overlay on every entitled **subagent**: `extensions: [pi-mcp-adapter]`, the proxy entry `ext:pi-mcp-adapter/mcp`, then one `ext:pi-mcp-adapter/mcp__kw_docs__<tool>` entry per roster tool | Granted on the agent file. `conductor` lowers to a skill, and a skill's frontmatter carries no `tools` or `extensions`, so it reaches the server only if its session has it configured — its degradation record says so |
 | Kilo | The agent frontmatter `permission` map entry `kw-docs_*: allow`; an agent outside the entitlement emits no `permission` key at all | Granted: `permission: {kw-docs_*: allow}`. This is an approval, not isolation: `allow` removes the ask prompt, and a headless subagent's ask would fail closed |
-| Antigravity | The agent frontmatter `mcpServers` array entry `{name, command, args}`, with `command`/`args` read from the squad's own `mcp.json`; no entry when the squad declares none | Granted: `mcpServers: [{name: kw-docs, command: kyber-weave-mcp, args: [--repo-root, .]}]` |
+| Antigravity | The agent frontmatter `mcpServers` array entry `{name, command, args}`, with the server name read from the squad's own `mcp.json` and the args `[--any-repo]` (Antigravity starts servers from `/`); no entry when the squad declares none | Granted: `mcpServers: [{name: kw-docs, command: kyber-weave-mcp, args: [--any-repo]}]`; a global install also inserts the same entry into `~/.gemini/config/mcp_config.json` |
 | Cursor, Codex, Warp | No per-agent key: MCP reach is inherited from the session | Reaches `kw-docs` as soon as you wire the server |
 
 **Wiring, not granting, is your half.** Every row above decides whether an agent is *allowed* to
@@ -598,9 +598,9 @@ server to launch resolves to nothing.
 
 **What Kilo, Antigravity, and Pi each need from you beyond the rendered grant.** **Kilo** takes the
 server in `kilo.jsonc`'s `mcp` key — an agent file cannot add one. **Antigravity** takes the
-workspace `.agents/mcp_config.json`, and additionally its own `mcp(server/*)` policy patterns
+user `mcp_config.json`, which a global `squad install` or `squad update` writes for you (insertion only), or a workspace `.agents/mcp_config.json` you write as `--any-repo`, and additionally its own `mcp(server/*)` policy patterns
 decide whether a call is approved, since MCP tools default to Ask there; keep the same
-`--repo-root` in that entry as the rendered one, because a same-named global server definition can
+`--any-repo` command in that entry as the rendered one, because a same-named global server definition can
 take precedence over the per-agent declaration. **Pi** takes a project `.mcp.json` (or
 `~/.config/mcp/mcp.json`, `~/.agents/mcp.json`, or the adapter's own agent-directory `mcp.json`),
 and a project-scoped server needs a trust approval on first use. On Pi, the overlay also needs

@@ -931,8 +931,6 @@ public sealed class AntigravityRendererContractTests : IDisposable
         SquadAgent conductor = Assert.Single(source.Agents, agent => agent.Name == "conductor");
         Assert.Contains(conductor.Name, entitled, StringComparer.Ordinal);
 
-        (string Command, string[] Args) declaration = DeclaredKyberWeaveServer(source);
-
         SquadRenderResult result = await TestSquadCorpus.GetProjectRenderAsync(SquadTarget.Antigravity);
         Assert.True(result.Success, string.Join("; ", result.Errors));
 
@@ -991,9 +989,96 @@ public sealed class AntigravityRendererContractTests : IDisposable
             ];
             Assert.Equal(["name", "command", "args"], keys);
             Assert.Equal("kw-docs", RequireScalar(entry, "name"));
-            Assert.Equal(declaration.Command, RequireScalar(entry, "command"));
-            Assert.Equal(declaration.Args, RequireSequenceValues(entry, "args"));
+            Assert.Equal("kyber-weave-mcp", RequireScalar(entry, "command"));
+            Assert.Equal(["--any-repo"], RequireSequenceValues(entry, "args"));
         }
+    }
+
+    /// <summary>
+    ///     A global render with the resolved <c>kyber-weave-mcp</c> path launches that absolute command
+    ///     with <c>--any-repo</c>, and the codegraph entry beside it is the declared one, unchanged.
+    /// </summary>
+    /// <remarks>
+    ///     The absolute path makes the launch independent of the directory Antigravity spawns it from. No
+    ///     rendered agent file may carry the retired <c>--repo-root</c> argument.
+    /// </remarks>
+    [Fact]
+    public async Task AGlobalRenderWithAResolvedCommandLaunchesTheAbsolutePathWithAnyRepo()
+    {
+        const string resolved = "/opt/kyber/bin/kyber-weave-mcp";
+        SquadRenderResult result = await RenderGlobalAsync(resolved);
+        Assert.True(result.Success, string.Join("; ", result.Errors));
+
+        int checkedAgents = 0;
+        foreach (SquadDeploymentFile file in result.Files.Where(file => file.RelativePath.EndsWith("/agent.md", StringComparison.Ordinal)))
+        {
+            string content = Encoding.UTF8.GetString(file.Content.Span);
+            Assert.DoesNotContain("--repo-root", content, StringComparison.Ordinal);
+
+            YamlMappingNode frontmatter = ReadFrontmatter(file);
+            if (!frontmatter.Children.ContainsKey(new YamlScalarNode("mcpServers"))) continue;
+
+            YamlSequenceNode entries = Assert.IsType<YamlSequenceNode>(RequireNode(frontmatter, "mcpServers"));
+            YamlMappingNode docsEntry = Assert.IsType<YamlMappingNode>(
+                Assert.Single(entries.Children, node => node is YamlMappingNode map && RequireScalar(map, "name") == "kw-docs"));
+            Assert.Equal(resolved, RequireScalar(docsEntry, "command"));
+            Assert.Equal(["--any-repo"], RequireSequenceValues(docsEntry, "args"));
+
+            // The pure orchestrator is withheld codegraph, so only a specialist carries both entries.
+            if (entries.Children.Count < 2) continue;
+
+            YamlMappingNode codegraphEntry = Assert.IsType<YamlMappingNode>(
+                Assert.Single(entries.Children, node => node is YamlMappingNode map && RequireScalar(map, "name") == "codegraph"));
+            Assert.Equal("codegraph", RequireScalar(codegraphEntry, "command"));
+            Assert.Equal(["serve", "--mcp", "--path", "."], RequireSequenceValues(codegraphEntry, "args"));
+            checkedAgents++;
+        }
+
+        Assert.True(checkedAgents > 0, "No global agent carried both kw-docs and codegraph, so the assertion checked nothing.");
+    }
+
+    /// <summary>
+    ///     A global render with no resolved path falls back to the bare <c>kyber-weave-mcp</c> command, still
+    ///     with <c>--any-repo</c>.
+    /// </summary>
+    [Fact]
+    public async Task AGlobalRenderWithoutAResolvedCommandFallsBackToTheBareCommandWithAnyRepo()
+    {
+        SquadRenderResult result = await RenderGlobalAsync(docsServerCommand: null);
+        Assert.True(result.Success, string.Join("; ", result.Errors));
+
+        SquadDeploymentFile agentFile = Assert.Single(
+            result.Files,
+            file => file.RelativePath.EndsWith("/conductor/agent.md", StringComparison.Ordinal));
+        YamlSequenceNode entries = Assert.IsType<YamlSequenceNode>(RequireNode(ReadFrontmatter(agentFile), "mcpServers"));
+        YamlMappingNode docsEntry = Assert.IsType<YamlMappingNode>(
+            Assert.Single(entries.Children, node => node is YamlMappingNode map && RequireScalar(map, "name") == "kw-docs"));
+        Assert.Equal("kyber-weave-mcp", RequireScalar(docsEntry, "command"));
+        Assert.Equal(["--any-repo"], RequireSequenceValues(docsEntry, "args"));
+    }
+
+    /// <summary>
+    ///     A project render writes the bare command with <c>--any-repo</c> even when a resolved path is supplied,
+    ///     because project agent files are committed and a machine path would break every other clone.
+    /// </summary>
+    [Fact]
+    public async Task AProjectRenderKeepsTheBareCommandWithAnyRepoEvenWhenAPathIsSupplied()
+    {
+        SquadRenderResult result = await new AntigravityRenderer().RenderAsync(new SquadRenderRequest(
+            ProductRoot,
+            [SquadTarget.Antigravity],
+            SquadDeploymentScope.Project,
+            DocsServerCommand: "/opt/kyber/bin/kyber-weave-mcp").Prepared(CanonicalSquadTree.Shared));
+        Assert.True(result.Success, string.Join("; ", result.Errors));
+
+        SquadDeploymentFile agentFile = Assert.Single(
+            result.Files,
+            file => file.RelativePath == ".agents/agents/conductor/agent.md");
+        YamlSequenceNode entries = Assert.IsType<YamlSequenceNode>(RequireNode(ReadFrontmatter(agentFile), "mcpServers"));
+        YamlMappingNode docsEntry = Assert.IsType<YamlMappingNode>(
+            Assert.Single(entries.Children, node => node is YamlMappingNode map && RequireScalar(map, "name") == "kw-docs"));
+        Assert.Equal("kyber-weave-mcp", RequireScalar(docsEntry, "command"));
+        Assert.Equal(["--any-repo"], RequireSequenceValues(docsEntry, "args"));
     }
 
     /// <summary>
@@ -1474,29 +1559,16 @@ public sealed class AntigravityRendererContractTests : IDisposable
     }
 
     /// <summary>
-    ///     The launch definition the squad's own <c>mcp.json</c> declares for <c>kw-docs</c>, read
-    ///     from the loaded source so the rendered entry is compared against the declaration rather
-    ///     than against a literal the renderer could have drifted from.
+    ///     Renders the canonical squad for Antigravity at global scope, with the absolute
+    ///     <c>kyber-weave-mcp</c> path the lifecycle resolved (or none, when the lookup found nothing).
     /// </summary>
-    private static (string Command, string[] Args) DeclaredKyberWeaveServer(SquadSource source)
-    {
-        Assert.True(
-            source.McpConfiguration.TryGetProperty("mcpServers", out JsonElement servers),
-            "The canonical squad declares no 'mcpServers', so there is no server to grant.");
-        Assert.True(
-            servers.TryGetProperty(SquadMcpGrantProjection.KyberWeaveServer, out JsonElement server),
-            "The canonical squad declares no 'kw-docs' server, so there is no grant to assert.");
-        Assert.True(
-            server.TryGetProperty("command", out JsonElement command),
-            "The declared 'kw-docs' server carries no 'command'.");
-        Assert.True(
-            server.TryGetProperty("args", out JsonElement args),
-            "The declared 'kw-docs' server carries no 'args'.");
-
-        return (
-            command.GetString() ?? string.Empty,
-            [.. args.EnumerateArray().Select(arg => arg.GetString() ?? string.Empty)]);
-    }
+    private static Task<SquadRenderResult> RenderGlobalAsync(string? docsServerCommand) =>
+        new AntigravityRenderer().RenderAsync(new SquadRenderRequest(
+            ProductRoot,
+            [SquadTarget.Antigravity],
+            SquadDeploymentScope.Global,
+            GlobalRoots: new SquadGlobalRoots(static _ => null, Path.Combine(CanonicalSquadTree.Shared.Files.Root, "home")),
+            DocsServerCommand: docsServerCommand).Prepared(CanonicalSquadTree.Shared));
 
     private static YamlNode RequireNode(YamlMappingNode node, string key)
     {

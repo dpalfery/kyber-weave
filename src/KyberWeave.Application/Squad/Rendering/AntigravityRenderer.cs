@@ -74,9 +74,13 @@ namespace KyberWeave.Core.Squad.Rendering;
 ///         capability: <c>mcpServers</c> is an array of objects, each entry
 ///         <c>{name, command, args}</c>, and that entry — not the single-key map spelling
 ///         <c>- kw-docs: {command, args}</c>, which listed and ran but was never called — is the one the
-///         probe invoked successfully. <c>args</c> carries <c>--repo-root .</c>, workspace-relative, because
-///         an absolute path can be overridden by a same-named global server definition and because
-///         workspace-relative is what the rest of Squad emits.
+///         probe invoked successfully. The <c>kw-docs</c> entry is <c>kyber-weave-mcp --any-repo</c>: the
+///         server serves any initialized repository, named per call, so one global entry reaches every
+///         repository and no entry names a single one. A global render launches the absolute
+///         <c>kyber-weave-mcp</c> path the host resolved (<see cref="SquadRenderRequest.DocsServerCommand" />),
+///         which names the program the operator's PATH finds, rather than whatever a bare name resolves to in
+///         the harness's own launch environment. A project render, whose agent files may be committed, keeps the bare name, and
+///         so does a global render when the host found no path. The <c>codegraph</c> entry keeps its declared launch.
 ///     </para>
 ///     <para>
 ///         Three probe findings bound this emission. The <c>tools</c> allow-list does <b>not</b> gate MCP
@@ -96,6 +100,8 @@ public sealed class AntigravityRenderer : SquadHarnessRenderer
     private const string ArbiterMatcher = "^invoke_subagent$";
     private const string ArbiterNotEnforcedCode = "arbiter-not-enforced";
     private const string NoPostDispatchFeedbackReason = "no-post-dispatch-feedback";
+    private const string BareDocsServerCommand = SquadDocsServerCommand.Executable;
+    private const string AnyRepoArgument = SquadDocsServerCommand.AnyRepoArgument;
 
     private static readonly SquadHarnessSpec HarnessSpec = new(
         SquadTarget.Antigravity,
@@ -389,6 +395,27 @@ public sealed class AntigravityRenderer : SquadHarnessRenderer
         }
 
         return declarations;
+    }
+
+    /// <summary>
+    ///     The launch the declared <c>kw-docs</c> server carries in an agent's frontmatter; every other server
+    ///     keeps its declared launch.
+    /// </summary>
+    /// <remarks>
+    ///     The declaration's own <c>command</c> and <c>args</c> name the repository-relative form, which is wrong
+    ///     for an any-repo server, so only the <c>kw-docs</c> entry is replaced. The command is the absolute path
+    ///     only on a global render that the host resolved; every other render uses the bare name, so a committed
+    ///     project file never carries a machine path.
+    /// </remarks>
+    private static McpServerDeclaration WithDocsLaunch(McpServerDeclaration server, SquadRenderRequest request)
+    {
+        if (!string.Equals(server.Name, CapabilityDegradations.UniversalMcpServer, StringComparison.Ordinal))
+            return server;
+
+        string command = request.Scope == SquadDeploymentScope.Global && !string.IsNullOrWhiteSpace(request.DocsServerCommand)
+            ? request.DocsServerCommand
+            : BareDocsServerCommand;
+        return server with { Command = command, Args = [AnyRepoArgument] };
     }
 
     /// <summary>
@@ -764,7 +791,7 @@ public sealed class AntigravityRenderer : SquadHarnessRenderer
         bool UniversalToolsDeclared)
     {
         public static McpPlan Create(SquadHarnessRenderContext context) => new(
-            ResolveDeclaredMcpServers(context.Source),
+            [.. ResolveDeclaredMcpServers(context.Source).Select(server => WithDocsLaunch(server, context.Request))],
             ReadMcpShape(context.Source.McpConfiguration),
             CapabilityDegradations.UniversalMcpToolNames(context.Source.Toolchain.RequiredMcpTools).Count > 0);
     }

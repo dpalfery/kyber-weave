@@ -10,31 +10,49 @@ using Microsoft.Extensions.DependencyInjection;
 namespace KyberWeave.Mcp;
 
 /// <summary>
-/// Resolves the optional per-call <c>projectPath</c> to a set of tools bound to that checkout, and
-/// keeps the most recently used few so a worker's repeated calls reuse one corpus instead of
-/// rebuilding it.
+/// Resolves the per-call <c>projectPath</c> to a set of tools bound to that checkout, and keeps the most recently used
+/// few so a worker's repeated calls reuse one corpus instead of rebuilding it.
 /// </summary>
 /// <remarks>
 /// <para>
-/// The server binds one root at startup, but agent runs work in linked worktrees created after it
-/// started, so the corpus a call answers from has to be nameable per call. Only a worktree of the
-/// <b>same repository</b> as the server root is accepted: git is asked for the candidate's top
-/// level and common git directory, and the common directory must equal the server root's. Anything
-/// else is refused with a message, never silently answered from the server root.
+/// In bound mode the server binds one root at startup, but agent runs work in linked worktrees created after it
+/// started, so the corpus a call answers from has to be nameable per call. Only a worktree of the <b>same
+/// repository</b> as the server root is accepted: git is asked for the candidate's top level and common git directory,
+/// and the common directory must equal the server root's. Anything else is refused with a message, never silently
+/// answered from the server root.
 /// </para>
 /// <para>
-/// Per-root state is the document host, the analysis reader and the CodeGraph refresh schedule, all
-/// of which live inside the <see cref="DocsTools"/> the factory builds. The registry bounds how many
-/// of those it holds (<see cref="Capacity"/>, least recently used evicted); the server root's own
-/// tools are never evicted.
+/// In any-repo mode (<see cref="ForAnyRepo(bool, IServiceProvider?)"/>) the server holds no root, and any initialized
+/// repository can be named: the path must be an existing directory, git must name its top level, and that top level
+/// must hold a Kyber-Weave host configuration. Each failed step is a refusal that names it; the registry never walks up
+/// to a parent and never falls back to another root.
+/// </para>
+/// <para>
+/// Per-root state is the document host, the analysis reader and the CodeGraph refresh schedule, all of which live
+/// inside the <see cref="DocsTools"/> the factory builds. The registry bounds how many of those it holds
+/// (<see cref="Capacity"/>, least recently used evicted); a bound server's own tools are not among them and are never
+/// evicted. Both modes remember which top level a path resolved to, so a repeated path starts no git process.
+/// </para>
+/// <para>
+/// The factory runs outside the lock, so a slow first build of one root never stalls a call for another. Two calls
+/// that race to build the same root may both build; the second to finish finds the first's entry and uses it, so every
+/// caller ends on one instance and the duplicate is never used. Nothing is disposed, neither a dropped duplicate nor an
+/// evicted entry: nothing a <see cref="DocsTools"/> holds is disposable, and a call already holding an evicted entry
+/// finishes on it. If that ever changes, the registry must still not dispose an entry a call may hold.
 /// </para>
 /// </remarks>
 public sealed class DocsRootRegistry
 {
-    /// <summary>How many non-server roots are kept at once.</summary>
+    /// <summary>
+    /// How many roots are kept at once: the roots besides the server's own in bound mode, every root in any-repo mode.
+    /// </summary>
     public const int Capacity = 4;
 
-    private readonly string _serverRoot;
+    /// <summary>How many path-to-top-level answers are remembered before the memory is cleared.</summary>
+    private const int PathCacheCapacity = 64;
+
+    private readonly string? _serverRoot;
+    private readonly IKyberWeaveConfigRepository? _configs;
     private readonly Func<string, DocsTools> _factory;
     private readonly IGitWorktreeIdentity _git;
     private readonly IFileSystem _files;
@@ -42,6 +60,7 @@ public sealed class DocsRootRegistry
     private readonly IProcessEnvironment _environment;
     private readonly Lock _gate = new();
     private readonly LinkedList<(string Root, DocsTools Tools)> _recent = new();
+    private readonly Dictionary<string, (string TopLevel, string CommonDirectory)> _pathRoots;
     private (string? TopLevel, string? CommonDirectory, string? Error)? _serverIdentity;
 
     /// <summary>A registry for the repository bound at <paramref name="serverRoot"/>.</summary>
@@ -58,8 +77,20 @@ public sealed class DocsRootRegistry
         IFileSystem files,
         IPathResolver paths,
         IProcessEnvironment environment)
+        : this(factory, git, files, paths, environment, configs: null)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(serverRoot);
+        _serverRoot = paths.GetFullPath(serverRoot, environment.CurrentDirectory);
+    }
+
+    private DocsRootRegistry(
+        Func<string, DocsTools> factory,
+        IGitWorktreeIdentity git,
+        IFileSystem files,
+        IPathResolver paths,
+        IProcessEnvironment environment,
+        IKyberWeaveConfigRepository? configs)
+    {
         ArgumentNullException.ThrowIfNull(factory);
         ArgumentNullException.ThrowIfNull(git);
         ArgumentNullException.ThrowIfNull(files);
@@ -69,8 +100,46 @@ public sealed class DocsRootRegistry
         _files = files;
         _paths = paths;
         _environment = environment;
-        _serverRoot = paths.GetFullPath(serverRoot, environment.CurrentDirectory);
         _factory = factory;
+        _configs = configs;
+        _pathRoots = new Dictionary<string, (string TopLevel, string CommonDirectory)>(StringComparer.FromComparison(PathComparison));
+    }
+
+    /// <summary>True when this registry serves any initialized repository and the server holds no root of its own.</summary>
+    public bool IsAnyRepo => _configs is not null;
+
+    /// <summary>A registry for a server with no root, whose every root gets the composition a bound server root has.</summary>
+    /// <param name="codeGraphRefreshEnabled">False when the process runs with <c>--no-codegraph-refresh</c>.</param>
+    /// <param name="services">The container the roots' services are resolved from, or null for the default one.</param>
+    public static DocsRootRegistry ForAnyRepo(bool codeGraphRefreshEnabled, IServiceProvider? services = null)
+    {
+        IServiceProvider provider = DocsToolsComposition.ServicesOrDefault(services);
+        return ForAnyRepo(
+            root => CreateTools(root, codeGraphRefreshEnabled, null, services),
+            provider.GetRequiredService<IGitWorktreeIdentity>(),
+            provider.GetRequiredService<IFileSystem>(),
+            provider.GetRequiredService<IPathResolver>(),
+            provider.GetRequiredService<IProcessEnvironment>(),
+            provider.GetRequiredService<IKyberWeaveConfigRepository>());
+    }
+
+    /// <summary>A registry for a server with no root, over the given seams.</summary>
+    /// <param name="factory">Builds the tools for one repository's top level.</param>
+    /// <param name="git">Names the working tree a directory belongs to.</param>
+    /// <param name="files">Checks that a named project path is a directory.</param>
+    /// <param name="paths">Turns a named project path into a full path.</param>
+    /// <param name="environment">Names the directory a relative project path is resolved against, and the platform whose path-name rule compares roots.</param>
+    /// <param name="configs">Says whether a top level holds a Kyber-Weave host configuration.</param>
+    internal static DocsRootRegistry ForAnyRepo(
+        Func<string, DocsTools> factory,
+        IGitWorktreeIdentity git,
+        IFileSystem files,
+        IPathResolver paths,
+        IProcessEnvironment environment,
+        IKyberWeaveConfigRepository configs)
+    {
+        ArgumentNullException.ThrowIfNull(configs);
+        return new DocsRootRegistry(factory, git, files, paths, environment, configs);
     }
 
     /// <summary>A registry whose other roots get the same composition the server root has.</summary>
@@ -159,7 +228,7 @@ public sealed class DocsRootRegistry
         return OntologyConfig.ProductDefaults;
     }
 
-    /// <summary>How many non-server roots are currently held. For tests.</summary>
+    /// <summary>How many roots are currently held, besides a bound server's own. For tests.</summary>
     public int Count
     {
         get
@@ -169,32 +238,50 @@ public sealed class DocsRootRegistry
     }
 
     /// <summary>
-    /// The tools for <paramref name="projectPath"/>: null for the server root, otherwise the tools
-    /// bound to that worktree. A refusal comes back as a message and no tools.
+    /// The tools for <paramref name="projectPath"/>. In bound mode: null for the server root or a blank path, otherwise
+    /// the tools bound to that worktree. In any-repo mode a success always carries tools, and a blank path is refused.
+    /// A refusal comes back as a message and no tools.
     /// </summary>
     internal bool TryResolve(string? projectPath, out DocsTools? tools, out string? refusal)
     {
         tools = null;
         refusal = null;
-        if (string.IsNullOrWhiteSpace(projectPath)) return true;
+        if (string.IsNullOrWhiteSpace(projectPath))
+        {
+            if (!IsAnyRepo) return true;
+            refusal = "projectPath is required: this server runs in any-repo mode.";
+            return false;
+        }
 
-        string candidate;
+        if (!TryCandidate(projectPath, out string candidate, out refusal)) return false;
+        return IsAnyRepo
+            ? TryResolveAnyRepo(candidate, out tools, out refusal)
+            : TryResolveBound(candidate, out tools, out refusal);
+    }
+
+    private bool TryCandidate(string projectPath, out string candidate, out string? refusal)
+    {
+        refusal = null;
         try
         {
             candidate = _paths.GetFullPath(projectPath.Trim(), _environment.CurrentDirectory);
         }
         catch (Exception exception) when (exception is ArgumentException or NotSupportedException or PathTooLongException)
         {
+            candidate = projectPath;
             refusal = $"projectPath '{projectPath}' is not a valid path. Pass the absolute path of your worktree.";
             return false;
         }
 
-        if (!_files.DirectoryExists(candidate))
-        {
-            refusal = $"projectPath '{candidate}' is not a directory. Pass the absolute path of your worktree.";
-            return false;
-        }
+        if (_files.DirectoryExists(candidate)) return true;
+        refusal = $"projectPath '{candidate}' is not a directory. Pass the absolute path of your worktree.";
+        return false;
+    }
 
+    private bool TryResolveBound(string candidate, out DocsTools? tools, out string? refusal)
+    {
+        tools = null;
+        refusal = null;
         (string? serverTop, string? serverCommon, string? serverError) = ServerIdentity();
         if (serverCommon is null)
         {
@@ -203,7 +290,7 @@ public sealed class DocsRootRegistry
             return false;
         }
 
-        if (!_git.TryRoots(candidate, out string? topLevel, out string? common, out string? error))
+        if (!TryRoots(candidate, out string topLevel, out string common, out string? error))
         {
             refusal = $"projectPath '{candidate}' is not inside a git repository ({error}). "
                 + "Pass the absolute path of a worktree of this repository.";
@@ -219,24 +306,115 @@ public sealed class DocsRootRegistry
         }
 
         if (string.Equals(topLevel, serverTop, PathComparison)) return true;
+        return TryHeldOrBuild(topLevel, out tools, out refusal);
+    }
+
+    private bool TryResolveAnyRepo(string candidate, out DocsTools? tools, out string? refusal)
+    {
+        tools = null;
+        if (!TryRoots(candidate, out string topLevel, out _, out string? error))
+        {
+            refusal = $"projectPath '{candidate}' is not inside a git repository ({error}). "
+                + "Pass the absolute path of a directory inside an initialized repository.";
+            return false;
+        }
+
+        if (_configs is null || _configs.FindConfigPath(topLevel) is null)
+        {
+            refusal = $"the repository '{topLevel}' that projectPath '{candidate}' is in has no Kyber-Weave host configuration. "
+                + $"Run 'kyber-weave docs init \"{topLevel}\"' once in it, then call again.";
+            return false;
+        }
+
+        return TryHeldOrBuild(topLevel, out tools, out refusal);
+    }
+
+    /// <summary>
+    /// The held tools for <paramref name="root"/>, or new ones from the factory, which runs outside the lock. A root
+    /// another call stored while this one was building wins, so every caller ends on one instance.
+    /// </summary>
+    private bool TryHeldOrBuild(string root, out DocsTools? tools, out string? refusal)
+    {
+        refusal = null;
+        lock (_gate)
+        {
+            if (TryTakeHeld(root, out tools)) return true;
+        }
+
+        DocsTools created;
+        try
+        {
+            created = _factory(root);
+        }
+        catch (Exception exception) when (exception is InvalidOperationException or IOException
+            or UnauthorizedAccessException or InvalidDataException or ArgumentException or NotSupportedException)
+        {
+            refusal = $"the tools for '{root}' could not be built: {exception.Message}";
+            return false;
+        }
+
+        if (IsAnyRepo && created is null)
+        {
+            refusal = $"the tools for '{root}' could not be built.";
+            return false;
+        }
 
         lock (_gate)
         {
-            for (LinkedListNode<(string Root, DocsTools Tools)>? node = _recent.First; node is not null; node = node.Next)
-            {
-                if (!string.Equals(node.Value.Root, topLevel, PathComparison)) continue;
-                _recent.Remove(node);
-                _recent.AddFirst(node);
-                tools = node.Value.Tools;
-                return true;
-            }
-
-            DocsTools created = _factory(topLevel!);
-            _recent.AddFirst((topLevel!, created));
+            if (TryTakeHeld(root, out tools)) return true;
+            _recent.AddFirst((root, created));
             while (_recent.Count > Capacity) _recent.RemoveLast();
             tools = created;
             return true;
         }
+    }
+
+    /// <summary>Finds <paramref name="root"/> among the held entries and marks it most recently used. Call under <c>_gate</c>.</summary>
+    private bool TryTakeHeld(string root, out DocsTools? tools)
+    {
+        for (LinkedListNode<(string Root, DocsTools Tools)>? node = _recent.First; node is not null; node = node.Next)
+        {
+            if (!string.Equals(node.Value.Root, root, PathComparison)) continue;
+            _recent.Remove(node);
+            _recent.AddFirst(node);
+            tools = node.Value.Tools;
+            return true;
+        }
+
+        tools = null;
+        return false;
+    }
+
+    /// <summary>
+    /// The top level and common git directory of <paramref name="directory"/>, from memory when this path was answered
+    /// before. Git runs outside the lock; only a success is remembered, and the memory is cleared when it is full.
+    /// </summary>
+    private bool TryRoots(string directory, out string topLevel, out string commonDirectory, out string? error)
+    {
+        lock (_gate)
+        {
+            if (_pathRoots.TryGetValue(directory, out (string TopLevel, string CommonDirectory) known))
+            {
+                (topLevel, commonDirectory, error) = (known.TopLevel, known.CommonDirectory, null);
+                return true;
+            }
+        }
+
+        if (!_git.TryRoots(directory, out string? top, out string? common, out error) || top is null || common is null)
+        {
+            (topLevel, commonDirectory) = (string.Empty, string.Empty);
+            error ??= "git named no top level";
+            return false;
+        }
+
+        lock (_gate)
+        {
+            if (_pathRoots.Count >= PathCacheCapacity) _pathRoots.Clear();
+            _pathRoots[directory] = (top, common);
+        }
+
+        (topLevel, commonDirectory) = (top, common);
+        return true;
     }
 
     private (string? TopLevel, string? CommonDirectory, string? Error) ServerIdentity()
@@ -244,11 +422,22 @@ public sealed class DocsRootRegistry
         lock (_gate)
         {
             if (_serverIdentity is { CommonDirectory: not null } known) return known;
-            _serverIdentity = _git.TryRoots(_serverRoot, out string? top, out string? common, out string? error)
+        }
+
+        (string? TopLevel, string? CommonDirectory, string? Error) identity = (null, null, "this server holds no root");
+        if (_serverRoot is not null)
+        {
+            identity = _git.TryRoots(_serverRoot, out string? top, out string? common, out string? error)
                 ? (top, common, null)
                 : (null, null, error);
-            return _serverIdentity.Value;
         }
+
+        lock (_gate)
+        {
+            _serverIdentity = identity;
+        }
+
+        return identity;
     }
 
     private StringComparison PathComparison =>

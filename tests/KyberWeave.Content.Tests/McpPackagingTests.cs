@@ -130,7 +130,7 @@ public class McpPackagingTests
         }
 
         ModelContextProtocol.Server.McpServerOptions options = new();
-        DocsServerInstructions.Configure(options);
+        DocsServerInstructions.Configure(options, anyRepo: false);
         Assert.Equal(text, options.ServerInstructions);
     }
 
@@ -139,7 +139,7 @@ public class McpPackagingTests
     {
         string program = Corpus.ReadText("src/KyberWeave.Mcp/Program.cs");
 
-        Assert.Contains("AddMcpServer(DocsServerInstructions.Configure)", program, StringComparison.Ordinal);
+        Assert.Contains("AddMcpServer(options => DocsServerInstructions.Configure(options, anyRepo))", program, StringComparison.Ordinal);
     }
 
     /// <summary>

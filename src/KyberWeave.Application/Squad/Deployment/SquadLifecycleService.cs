@@ -28,6 +28,7 @@ public sealed class SquadLifecycleService : ISquadLifecycleService
     private readonly ISquadStateStore _stateStore;
     private readonly TimeProvider _timeProvider;
     private readonly Func<string, string?>? _environmentReader;
+    private readonly Func<string, string?>? _findExecutable;
     private readonly ISquadSourceLoader _sourceLoader;
     private readonly ISquadModelPresetValidator _presetValidator;
     private readonly ISquadDeploymentPlanner _planner;
@@ -62,6 +63,10 @@ public sealed class SquadLifecycleService : ISquadLifecycleService
     /// <param name="observer">Told of each transaction step, or null.</param>
     /// <param name="globalRoots">Resolves each target's global root, or null.</param>
     /// <param name="environmentReader">Reads environment variables for the render, or null for none.</param>
+    /// <param name="findExecutable">
+    /// Finds an executable on PATH, or null when none is wired. A global render resolves
+    /// <c>kyber-weave-mcp</c> through it so the Antigravity MCP entry launches the absolute path.
+    /// </param>
     public SquadLifecycleService(
         ISquadReleaseSource releaseSource,
         ISquadRenderer renderer,
@@ -80,7 +85,8 @@ public sealed class SquadLifecycleService : ISquadLifecycleService
         TimeProvider? timeProvider = null,
         ISquadTransactionObserver? observer = null,
         ISquadGlobalRootResolver? globalRoots = null,
-        Func<string, string?>? environmentReader = null)
+        Func<string, string?>? environmentReader = null,
+        Func<string, string?>? findExecutable = null)
     {
         ArgumentNullException.ThrowIfNull(releaseSource);
         ArgumentNullException.ThrowIfNull(renderer);
@@ -114,6 +120,7 @@ public sealed class SquadLifecycleService : ISquadLifecycleService
         _observer = observer;
         _globalRoots = globalRoots;
         _environmentReader = environmentReader;
+        _findExecutable = findExecutable;
     }
 
     /// <summary>
@@ -242,6 +249,7 @@ public sealed class SquadLifecycleService : ISquadLifecycleService
             if (request.Scope == SquadDeploymentScope.Instance && request.Targets.Count == 1)
                 effectiveGlobalRoots = new SquadInstanceRootResolver(targetRoot, request.Targets[0]);
 
+            string? docsServerCommand = SquadDocsServerCommand.Resolve(renderScope, _findExecutable, _files.FileExists);
             SquadRenderRequest renderRequest = new(
                 releaseResult.ExtractionRoot,
                 request.Targets,
@@ -253,7 +261,8 @@ public sealed class SquadLifecycleService : ISquadLifecycleService
                 null,
                 _environmentReader,
                 request.Arbiter,
-                WorkerRoster: request.WorkerRoster);
+                WorkerRoster: request.WorkerRoster,
+                DocsServerCommand: docsServerCommand);
 
             SquadRenderResult renderResult =
                 await _renderer.RenderAsync(renderRequest, cancellationToken).ConfigureAwait(false);
@@ -272,6 +281,7 @@ public sealed class SquadLifecycleService : ISquadLifecycleService
             if (!SquadResponsePreferencesInjector.HasAnyBlock(renderResult))
                 warnings.Add(SquadResponsePreferencesInjector.NoBlockWarning);
             renderResult = SquadResponsePreferencesInjector.Inject(renderResult, effectiveGuidance);
+            warnings.AddRange(SquadDocsServerCommand.MissingWarnings(renderScope, request.Targets, _findExecutable, docsServerCommand));
 
             SquadLock squadLock = BuildLock(
                 releaseResult.Version,
@@ -344,6 +354,12 @@ public sealed class SquadLifecycleService : ISquadLifecycleService
                 source,
                 targetRoot,
                 _stateStore.UserPaths.HomeDirectory));
+            warnings.AddRange(AntigravityMcpConfiguration.Ensure(_files,
+                request.Targets,
+                request.Scope,
+                _globalRoots,
+                docsServerCommand: docsServerCommand,
+                request.DryRun));
 
             if (request.DryRun)
                 return new SquadLifecycleResult(
@@ -648,6 +664,7 @@ public sealed class SquadLifecycleService : ISquadLifecycleService
             if (request.Scope == SquadDeploymentScope.Instance && targets.Count == 1)
                 effectiveGlobalRoots = new SquadInstanceRootResolver(targetRoot, targets[0]);
 
+            string? docsServerCommand = SquadDocsServerCommand.Resolve(renderScope, _findExecutable, _files.FileExists);
             SquadRenderRequest renderRequest = new(
                 releaseResult.ExtractionRoot,
                 targets,
@@ -659,7 +676,8 @@ public sealed class SquadLifecycleService : ISquadLifecycleService
                 null,
                 _environmentReader,
                 request.Arbiter,
-                WorkerRoster: request.WorkerRoster);
+                WorkerRoster: request.WorkerRoster,
+                DocsServerCommand: docsServerCommand);
 
             SquadRenderResult renderResult =
                 await _renderer.RenderAsync(renderRequest, cancellationToken).ConfigureAwait(false);
@@ -678,6 +696,7 @@ public sealed class SquadLifecycleService : ISquadLifecycleService
             if (!SquadResponsePreferencesInjector.HasAnyBlock(renderResult))
                 warnings.Add(SquadResponsePreferencesInjector.NoBlockWarning);
             renderResult = SquadResponsePreferencesInjector.Inject(renderResult, effectiveGuidance);
+            warnings.AddRange(SquadDocsServerCommand.MissingWarnings(renderScope, targets, _findExecutable, docsServerCommand));
 
             SquadLock squadLock = BuildLock(
                 releaseResult.Version,
@@ -734,6 +753,12 @@ public sealed class SquadLifecycleService : ISquadLifecycleService
                 source,
                 targetRoot,
                 _stateStore.UserPaths.HomeDirectory));
+            warnings.AddRange(AntigravityMcpConfiguration.Ensure(_files,
+                targets,
+                request.Scope,
+                _globalRoots,
+                docsServerCommand: docsServerCommand,
+                request.DryRun));
 
             if (request.DryRun)
                 return new SquadLifecycleResult(

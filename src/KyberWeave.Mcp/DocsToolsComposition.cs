@@ -104,6 +104,21 @@ internal static class DocsToolsComposition
         return services;
     }
 
+    /// <summary>
+    /// Registers what an any-repo server's tools resolve: the any-repo registry and nothing bound to a root. With no root
+    /// service registered, the SDK builds <see cref="DocsTools"/> through its one-parameter constructor, so every call
+    /// has to name its repository with <c>projectPath</c>.
+    /// </summary>
+    /// <param name="services">The collection to populate; <see cref="AddWeaveApplication"/> comes first.</param>
+    /// <param name="codeGraphRefreshEnabled">False when the process runs with <c>--no-codegraph-refresh</c>.</param>
+    /// <returns>The same collection, for chaining.</returns>
+    public static IServiceCollection AddAnyRepoDocsHostServices(this IServiceCollection services, bool codeGraphRefreshEnabled)
+    {
+        ArgumentNullException.ThrowIfNull(services);
+        services.AddSingleton(provider => DocsRootRegistry.ForAnyRepo(codeGraphRefreshEnabled, provider));
+        return services;
+    }
+
     /// <summary>The root the tools answer for, as a full path resolved against the process working directory.</summary>
     /// <param name="provider">The container the path and environment seams are resolved from.</param>
     /// <param name="repositoryRoot">The checkout root, as the caller spelled it.</param>

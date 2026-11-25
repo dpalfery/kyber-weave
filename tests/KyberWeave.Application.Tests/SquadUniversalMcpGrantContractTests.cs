@@ -437,7 +437,8 @@ public sealed class SquadUniversalMcpGrantContractTests
             piOverlay,
             entry => Assert.Contains(entry, piDocument, StringComparison.Ordinal));
 
-        // Antigravity: exactly the three keys, carrying the declared launch definition.
+        // Antigravity: exactly the three keys. The name comes from the declaration; a project render
+        // launches the bare command with --any-repo, never the declared --repo-root form.
         SquadDeclaredMcpServer declaration = SquadMcpGrantProjection.DeclaredServerLaunch(
             source,
             SquadMcpGrantProjection.KyberWeaveServer)
@@ -465,11 +466,11 @@ public sealed class SquadUniversalMcpGrantContractTests
                 .OfType<YamlScalarNode>()
                 .Select(key => key.Value ?? string.Empty));
         Assert.Equal(declaration.Name, Scalar(entry, "name"));
-        Assert.Equal(declaration.Command, Scalar(entry, "command"));
+        Assert.Equal("kyber-weave-mcp", Scalar(entry, "command"));
         IReadOnlyList<string> args = Sequence(entry, "args")
             ?? throw new InvalidOperationException(
                 "The rendered Antigravity entry declares no 'args' sequence.");
-        Assert.Equal(declaration.Args, args);
+        Assert.Equal(["--any-repo"], args);
     }
 
     /// <summary>

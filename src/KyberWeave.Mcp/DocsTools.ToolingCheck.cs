@@ -34,10 +34,10 @@ public sealed partial class DocsTools
     public string RunToolingCheck(
         [Description("Absolute path of the checkout or worktree to check. Required.")] string projectPath)
     {
-        if (string.IsNullOrWhiteSpace(projectPath))
-            return _query.Provenance() + "\nresult: refused\nprojectPath is required: pass the absolute path of the checkout or worktree to check.";
-        if (Redirect(projectPath, tools => tools._toolingCheck.RunToolingCheck()) is { } redirected)
+        if (Redirect(projectPath, tools => tools.Bound.ToolingCheck.RunToolingCheck()) is { } redirected)
             return redirected;
-        return _toolingCheck.RunToolingCheck();
+        if (string.IsNullOrWhiteSpace(projectPath))
+            return ProvenanceLine() + "\nresult: refused\nprojectPath is required: pass the absolute path of the checkout or worktree to check.";
+        return Bound.ToolingCheck.RunToolingCheck();
     }
 }
