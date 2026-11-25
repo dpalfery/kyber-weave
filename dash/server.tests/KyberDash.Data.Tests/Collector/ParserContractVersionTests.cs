@@ -16,8 +16,9 @@ namespace KyberDash.Data.Tests.Collector;
 /// The <c>droid</c>, <c>cursor</c> and <c>warp</c> mappers stopped producing split or text-derived
 /// token counts, so their units declare contract "2": a checkpoint written under "1" must not be
 /// reused, or the estimated rows it covers would stay in the store. The <c>copilot-cli</c> mapper
-/// stores fresh input net of cache tokens and declares its own contract version for the same reason.
-/// Every other registration keeps "1", so its stored checkpoints stay reusable and nothing else is re-read.
+/// stores fresh input net of cache tokens and declares its own contract version for the same reason, and
+/// <c>roo-code</c> declares "3" because its task id now comes from the task directory. Every other
+/// registration keeps "1", so its stored checkpoints stay reusable and nothing else is re-read.
 /// </remarks>
 public class ParserContractVersionTests
 {
