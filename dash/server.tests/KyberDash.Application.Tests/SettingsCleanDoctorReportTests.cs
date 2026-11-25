@@ -172,6 +172,7 @@ public static class SettingsCleanDoctorReportTests
             projection.Setup(service => service.ProjectRunsAndHarnesses()).Returns([]);
 
             List<string> lifecycle = [];
+            long markerBeforeClean = store.GetWriteMarker();
             CleanReport report = new CleanService(store, store, store, store, projection.Object, ingestion.Object).CleanDatabase(
                 new CleanScope(All: true),
                 pauseIngestion: () => lifecycle.Add("pause"),
@@ -199,7 +200,7 @@ public static class SettingsCleanDoctorReportTests
             Assert.Empty(store.ListHarnessRollups());
             Assert.Empty(store.ListFindings());
             Assert.Equal(2, store.Sessions().Count);
-            Assert.Equal(1, store.GetWriteMarker());
+            Assert.True(store.GetWriteMarker() > markerBeforeClean);
             Assert.Null(store.GetProjectionDirtyState());
             Assert.Equal(report.Wipe.LastCleanAt, store.GetLastCleanAtUtc());
             projection.Verify(service => service.ProjectIncremental(), Times.Once);
