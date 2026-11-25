@@ -29,6 +29,7 @@ public interface ISquadFileAccess
     /// <param name="maxBytes">The most bytes to return; a longer file yields exactly this many.</param>
     /// <returns>The file's bytes, or its first <paramref name="maxBytes"/> bytes when it is longer.</returns>
     /// <exception cref="FileNotFoundException">The file does not exist, or a directory above it does not.</exception>
+    /// <exception cref="ArgumentOutOfRangeException"><paramref name="maxBytes"/> is negative.</exception>
     byte[] ReadBytesUpTo(string path, int maxBytes);
 
     /// <summary>

@@ -147,6 +147,29 @@ public abstract class SquadFileAccessWriteContract : IDisposable
         Assert.Equal(written[..100_001], files.ReadBytesUpTo(path, 100_001));
     }
 
+    /// <summary>A negative cap is a caller error, refused before the file is opened.</summary>
+    [Fact]
+    public void ReadBytesUpToWithANegativeCapThrowsArgumentOutOfRange()
+    {
+        ISquadFileAccess files = Starting(out string root);
+        string path = Path.Combine(root, "short.bin");
+        files.WriteAllBytesAtomic(path, [1, 2, 3]);
+
+        ArgumentOutOfRangeException thrown = Assert.Throws<ArgumentOutOfRangeException>(() => files.ReadBytesUpTo(path, -1));
+        Assert.Equal("maxBytes", thrown.ParamName);
+    }
+
+    /// <summary>A cap of zero reads nothing and returns an empty array.</summary>
+    [Fact]
+    public void ReadBytesUpToWithAZeroCapReturnsNothing()
+    {
+        ISquadFileAccess files = Starting(out string root);
+        string path = Path.Combine(root, "short.bin");
+        files.WriteAllBytesAtomic(path, [1, 2, 3]);
+
+        Assert.Empty(files.ReadBytesUpTo(path, 0));
+    }
+
     /// <summary>A file shorter than the cap is returned whole.</summary>
     [Fact]
     public void ReadBytesUpToReturnsAShorterFileWhole()
