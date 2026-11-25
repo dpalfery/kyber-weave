@@ -353,9 +353,20 @@ public sealed class ArbiterHookDecisionEngine : IContextualHookDecisionEngine, I
             return prompt;
         }
 
-        ArbiterLedgerHeaders? headers = _state.OpenLedger(arbiterDirectory).ReadAll()
-            .FirstOrDefault(e => e.Phase == ArbiterLedgerPhases.Pre && string.Equals(e.Id, preId, StringComparison.Ordinal))
-            ?.Headers;
+        // The headers only sharpen the classification: a ledger that cannot be read, or whose read window no longer
+        // holds the pre event, leaves the return judged from its prompt as it was saved.
+        ArbiterLedgerHeaders? headers;
+        try
+        {
+            headers = _state.OpenLedger(arbiterDirectory).ReadAll()
+                .FirstOrDefault(e => e.Phase == ArbiterLedgerPhases.Pre && string.Equals(e.Id, preId, StringComparison.Ordinal))
+                ?.Headers;
+        }
+        catch (Exception exception) when (FileFailure.Is(exception))
+        {
+            return prompt;
+        }
+
         if (headers is null)
         {
             return prompt;
