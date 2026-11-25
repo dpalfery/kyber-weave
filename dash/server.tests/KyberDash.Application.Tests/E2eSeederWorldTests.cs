@@ -48,6 +48,39 @@ public class E2eSeederWorldTests
         Assert.Null(bridge.GetHarnessById("no-such-harness"));
     }
 
+    /// <summary>
+    /// A seeded harness-collection store is already projection-current: a request-time read pass
+    /// finds nothing to rebuild, so the explicit seeded runs survive instead of being replaced by
+    /// derived session-fallback runs.
+    /// </summary>
+    [Fact]
+    public void HarnessCollectionWorldSeedsAProjectionCurrentStoreThatReadsDoNotRebuild()
+    {
+        string repoRoot = LocateRepoRoot();
+        using TempDirectory directory = new();
+        InMemoryRelationalStore store = new();
+        FakePricingRepository pricing = new();
+        CanonSessionProjectorEngine projector = new(store, store, store, pricing);
+        CanonRollupsEngine rollups = new(store, store, pricing);
+        CanonProjectionService projection = new(store, store, store, projector, rollups);
+        TranscriptIngestionService ingestion = new(store, store, new HarnessSourceRegistry());
+        E2eSeederService seeder = new(store, store, store, ingestion, projection);
+
+        Assert.Equal(
+            0,
+            seeder.SeedWorld(E2eSeederService.HarnessCollectionWorld, directory.Combine("world.db"), repoRoot));
+
+        Assert.True(projector.IsProjectionCurrentForReads());
+        Assert.True(projector.IsProjectionCurrent());
+        Assert.Null(store.GetProjectionDirtyState());
+
+        KyberBridgeEngine bridge = new(store, store, store, pricing, projector, rollups);
+        JsonElement runs = bridge.GetRuns("opencode");
+        Assert.Contains(
+            runs.GetProperty("runs").EnumerateArray(),
+            run => run.GetProperty("runId").GetString() == "hc-honest-run-1");
+    }
+
     /// <summary>Walks up from the test assembly until the fixture the seeder replays is found.</summary>
     /// <returns>The repository root holding the seeder fixtures.</returns>
     private static string LocateRepoRoot()
