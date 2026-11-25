@@ -2862,8 +2862,8 @@ public partial class CanonSessionProjectorEngine
     /// a range whose end differs from the marker, which forces a full pass: every race here
     /// degrades to a full pass, never to a skipped session. The dirty state is written before the
     /// watermark, so a crash between the two leaves the previous watermark under a range that
-    /// starts at <paramref name="currentMarker"/>, or under no range, and the next pass runs in
-    /// full rather than incrementally over a range that has lost the deferred keys.
+    /// starts at <paramref name="currentMarker"/>, or under no range. The crash degrades to a full
+    /// pass or a correct incremental rebuild over the retained keys, never to a skipped session.
     /// </remarks>
     private void StampMidPassWrites(long currentMarker, long finalMarker, IReadOnlyCollection<string> deferredKeys, bool stampDetector)
     {
