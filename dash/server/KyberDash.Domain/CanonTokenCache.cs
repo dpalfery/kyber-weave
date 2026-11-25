@@ -21,7 +21,7 @@ public record TokenCount(
 /// <param name="Uncached">Lookups shorter than the cache threshold counted directly in memory.</param>
 public record CachedCounterStats(int Hits, int Misses, int Uncached);
 
-/// <summary>Pure token-count key derivation and 4-char heuristic fallback utilities.</summary>
+/// <summary>Pure token-count cache key derivation and cache sizing constants (decision D17).</summary>
 public static class CanonTokenCache
 {
     /// <summary>Minimum string length consulted in SQLite <c>token_cache</c>.</summary>
@@ -32,9 +32,6 @@ public static class CanonTokenCache
 
     /// <summary>Pending miss count that triggers an automatic SQLite batch flush.</summary>
     public const int FlushThreshold = 20_000;
-
-    /// <summary>Tokenizer name reported when using the 4-char heuristic fallback.</summary>
-    public const string ApproximateTokenizerName = "approximate/chars-per-4";
 
     /// <summary>
     /// Computes the deterministic <c>&lt;tokenizer&gt;:&lt;model&gt;:&lt;sha256&gt;</c> memo key.
@@ -64,11 +61,4 @@ public static class CanonTokenCache
     /// <param name="model">Model the text was counted for; <see langword="null"/> or blank when unknown.</param>
     public static string ModelSlot(string? model) =>
         string.IsNullOrWhiteSpace(model) ? string.Empty : model.Trim();
-
-    /// <summary>Character-count approximation (<c>ceil(length / 4)</c>) matching <c>approximateO200kBase</c>.</summary>
-    public static long ApproximateO200kBase(string text)
-    {
-        ArgumentNullException.ThrowIfNull(text);
-        return (text.Length + 3L) / 4L;
-    }
 }

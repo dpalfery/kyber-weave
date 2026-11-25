@@ -6,6 +6,7 @@ using KyberDash.Data.Collector;
 using KyberDash.Data.Collector.Sources;
 using KyberDash.Data.Harnesses.Claude;
 using KyberDash.Data.Repositories;
+using KyberDash.Data.Tokenization;
 using KyberDash.Domain;
 using Xunit;
 
@@ -300,7 +301,7 @@ public class ClaudeTranscriptMapperTests
         Assert.NotNull(docPart.Withheld);
         Assert.Equal(Encoding.UTF8.GetByteCount(jsonDocResult), docPart.Withheld!.Utf8Bytes);
         Assert.Equal(jsonDocResult.Length, docPart.Withheld.Characters);
-        Assert.Equal(CanonTokenCache.ApproximateO200kBase(jsonDocResult), docPart.Withheld.MeasuredTokens);
+        Assert.Equal(LocalTextTokenizer.Shared.Count(jsonDocResult, null).Count, docPart.Withheld.MeasuredTokens);
 
         CollectedRecord nestedTool = batch.Records[2];
         Assert.Null(nestedTool.Tool!.Result!.PlainText);
