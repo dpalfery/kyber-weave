@@ -15,7 +15,7 @@ import {
   SessionListHeader,
 } from './ContextExplorer.js'
 import type { KyberSessionSummary } from '../lib/kyberApi.js'
-import { formatCostFigure, normalizeCostBlock, STATUS_EXPLANATIONS } from './SessionCostPanel.js'
+import { formatCostFigure, normalizeCostBlock } from './SessionCostPanel.js'
 
 function createTestQueryClient() {
   // staleTime and gcTime pinned: data a test seeds (an expanded row's
@@ -498,14 +498,14 @@ describe('AgentSessionRow row cost cell (issue #186)', () => {
   })
 
   it.each([
-    ['no_rate'],
-    ['not_billed'],
-    ['out_of_scope'],
-    ['partial'],
-  ] as const)('explains the %s status in the cell title', (status) => {
+    ['no_rate', 'No published rate available for this model.'],
+    ['not_billed', 'Model is explicitly not billed by provider.'],
+    ['out_of_scope', 'No KyberDash price table covers this harness, so its cost is not estimated.'],
+    ['partial', 'Only a portion of turns could be priced.'],
+  ] as const)('explains the %s status in the cell title', (status, sentence) => {
     const { title } = renderCostCell({ basis: 'published', status })
     expect(title).toMatch(/published/i)
-    expect(title).toContain(STATUS_EXPLANATIONS[status])
+    expect(title).toContain(sentence)
   })
 
   it('titles a priced cell with its cost basis only', () => {
