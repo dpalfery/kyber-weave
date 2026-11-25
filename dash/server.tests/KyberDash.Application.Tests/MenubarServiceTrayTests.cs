@@ -19,6 +19,8 @@ public class MenubarServiceTrayTests : IDisposable
     private Exception? quitThrows;
     private int? probeExitCode;
     private int killTakesPolls;
+    private Action<string> startDetached = _ => { };
+    private readonly List<string> started = [];
     private int pendingPolls;
     private bool quitStopsTray = true;
 
@@ -246,6 +248,34 @@ public class MenubarServiceTrayTests : IDisposable
         Assert.Equal([Path.Combine(state.Path, "KyberDash.app")], open.Args);
     }
 
+    [Fact]
+    public async Task LaunchStartsTheRecordedExecutableOnWindows()
+    {
+        string binary = RecordInstall(TrayPlatform.Windows);
+        MenubarService service = Create(TrayPlatform.Windows);
+
+        MenubarInstallOutcome outcome = await service.LaunchAsync();
+
+        Assert.Equal(0, outcome.ExitCode);
+        Assert.Equal([binary], started);
+    }
+
+    [Theory]
+    [InlineData(typeof(System.ComponentModel.Win32Exception))]
+    [InlineData(typeof(IOException))]
+    [InlineData(typeof(UnauthorizedAccessException))]
+    public async Task LaunchReportsAFailureOutcomeWhenWindowsCannotStartTheTray(Type exceptionType)
+    {
+        _ = RecordInstall(TrayPlatform.Windows);
+        startDetached = _ => throw (Exception)Activator.CreateInstance(exceptionType, "blocked")!;
+        MenubarService service = Create(TrayPlatform.Windows);
+
+        MenubarInstallOutcome outcome = await service.LaunchAsync();
+
+        Assert.Equal(1, outcome.ExitCode);
+        Assert.Equal("kyberdash menubar: launch: blocked", outcome.Message);
+    }
+
     [Theory]
     [InlineData("4242\n", 0)]
     [InlineData("", 1)]
@@ -319,7 +349,12 @@ public class MenubarServiceTrayTests : IDisposable
         new FakeServerStateRepository(state.Path),
         RunToolAsync,
         platform,
-        (_, _) => Task.CompletedTask);
+        (_, _) => Task.CompletedTask,
+        path =>
+        {
+            started.Add(path);
+            startDetached(path);
+        });
 
     /// <summary>Writes the tray record and, unless told not to, the binary it names; returns the binary's path.</summary>
     private string RecordInstall(TrayPlatform platform, bool createBinary = true)

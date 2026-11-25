@@ -74,6 +74,7 @@ public partial class MenubarService : IMenubarService
     private readonly TrayToolRunner runTool;
     private readonly TrayPlatform platform;
     private readonly Func<TimeSpan, CancellationToken, Task> delay;
+    private readonly Action<string> startDetached;
 
     /// <summary>
     /// Initializes a new <see cref="MenubarService"/> that runs the real system tools on the real platform.
@@ -92,17 +93,25 @@ public partial class MenubarService : IMenubarService
     /// <param name="runTool">Runs an external tool; the system process runner when <see langword="null"/>.</param>
     /// <param name="platform">The platform to decide for; the running one when <see langword="null"/>.</param>
     /// <param name="delay">Waits between quit polls; <see cref="Task.Delay(TimeSpan, CancellationToken)"/> when <see langword="null"/>.</param>
+    /// <param name="startDetached">Starts the Windows tray executable without waiting for it; a real process start when <see langword="null"/>.</param>
     public MenubarService(
         IServerStateRepository serverState,
         TrayToolRunner? runTool,
         TrayPlatform? platform,
-        Func<TimeSpan, CancellationToken, Task>? delay)
+        Func<TimeSpan, CancellationToken, Task>? delay,
+        Action<string>? startDetached = null)
     {
         ArgumentNullException.ThrowIfNull(serverState);
         this.serverState = serverState;
         this.runTool = runTool ?? RunToolAsync;
         this.platform = platform ?? CurrentPlatform();
         this.delay = delay ?? Task.Delay;
+        this.startDetached = startDetached ?? StartProcessDetached;
+    }
+
+    private static void StartProcessDetached(string path)
+    {
+        using Process? started = Process.Start(new ProcessStartInfo(path) { UseShellExecute = false });
     }
 
     private static TrayPlatform CurrentPlatform() =>
@@ -382,9 +391,9 @@ public partial class MenubarService : IMenubarService
 
         try
         {
-            using Process? started = Process.Start(new ProcessStartInfo(record.Path) { UseShellExecute = false });
+            startDetached(record.Path);
         }
-        catch (Win32Exception ex)
+        catch (Exception ex) when (ex is Win32Exception or IOException or UnauthorizedAccessException)
         {
             return new MenubarInstallOutcome(1, string.Create(CultureInfo.InvariantCulture, $"kyberdash menubar: launch: {ex.Message}"));
         }
