@@ -5,6 +5,7 @@ using KyberDash.Contracts.Repositories;
 using KyberDash.Data.Collector;
 using KyberDash.Data.Collector.Sources;
 using KyberDash.Data.Harnesses.Pi;
+using KyberDash.Data.Tokenization;
 using Xunit;
 
 namespace KyberDash.Data.Tests.Harnesses;
@@ -16,6 +17,9 @@ namespace KyberDash.Data.Tests.Harnesses;
 public class PiMapperTests
 {
     private static readonly DateTimeOffset BaselineUtc = new(2026, 4, 14, 10, 5, 0, TimeSpan.Zero);
+
+    /// <summary>A JSON document whose token counts differ between cl100k_base and the o200k_base stand-in.</summary>
+    private const string DivergentJsonText = "{\"summary\":\"こんにちは世界、今日はいい天気ですね。\"}";
 
     [Fact]
     public void Map_ExtractsTokenUsageMetadataAndReportedCostFromAssistantMessage()
@@ -72,6 +76,28 @@ public class PiMapperTests
         store.WriteBatch(batch);
         Assert.Equal(1, store.CountRecords("pi"));
         Assert.Equal(4, store.TokenCounts(spanId: record.RecordId).Count);
+    }
+
+    [Fact]
+    public void Map_CountsPartsUnderTheMessageModelOwnTokenizer()
+    {
+        string jsonl = string.Join('\n',
+        [
+            "{\"type\":\"session\",\"id\":\"sess-tok\",\"timestamp\":\"2026-04-14T10:00:00.000Z\"}",
+            "{\"type\":\"message\",\"id\":\"m1\",\"timestamp\":\"2026-04-14T10:00:10.000Z\",\"message\":{\"role\":\"assistant\",\"model\":\"gpt-4\",\"responseId\":\"r1\",\"content\":[{\"type\":\"text\",\"text\":\"{\\\"summary\\\":\\\"こんにちは世界、今日はいい天気ですね。\\\"}\"}],\"usage\":{\"input\":100,\"output\":20}}}",
+        ]) + "\n";
+
+        NativeSourceUnit unit = MakeNativeUnit("pi", "/home/u/.pi/agent/sessions/proj/sess-tok.jsonl", jsonl);
+        CollectedBatch batch = new PiMapper().Map(unit, BaselineUtc);
+
+        CollectedRecord record = Assert.Single(batch.Records);
+        Assert.Equal("gpt-4", record.Model);
+        CollectedContentPart part = Assert.Single(record.Parts);
+        Assert.Null(part.PlainText);
+        Assert.NotNull(part.Withheld);
+        Assert.Equal(
+            LocalTextTokenizer.Shared.Count(DivergentJsonText, "gpt-4").Count,
+            part.Withheld!.MeasuredTokens);
     }
 
     [Fact]

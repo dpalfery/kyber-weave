@@ -455,7 +455,7 @@ public partial class DevinMapper : IHarnessMapper
                     correctionRule = check.Rule;
                 }
 
-                parts.Add(ToolContentMeasurer.BuildContentPart(0, ContentBucket.UserMessage, userMessage, "user"));
+                parts.Add(ToolContentMeasurer.BuildContentPart(0, ContentBucket.UserMessage, userMessage, "user", model));
             }
 
             (IReadOnlyList<CollectedTokenCount> tokens, long? reportedInput, long? reportedOutput) = BuildTokens(usage);
@@ -944,7 +944,7 @@ public partial class DevinMapper : IHarnessMapper
             toolIndex);
 
         CollectedToolContent? inputContent = toolCall.ArgumentsJson is not null
-            ? ToolContentMeasurer.Measure(toolCall.ArgumentsJson, CanonSynth.MaxToolArgumentsBytes)
+            ? ToolContentMeasurer.Measure(toolCall.ArgumentsJson, CanonSynth.MaxToolArgumentsBytes, parentRecord.Model)
                 .ToToolContent(includeFingerprint: true)
             : null;
 

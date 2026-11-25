@@ -6,6 +6,7 @@ using KyberDash.Application.Tests.Fakes;
 using KyberDash.Data.Collector;
 using KyberDash.Data.Collector.Sources;
 using KyberDash.Data.Harnesses.Kilo;
+using KyberDash.Data.Tokenization;
 using KyberDash.Domain;
 using KyberDash.Domain.Schema;
 using Xunit;
@@ -22,6 +23,9 @@ public class KiloMapperTests
     private static readonly DateTimeOffset BaselineUtc = new(2026, 11, 19, 12, 0, 0, TimeSpan.Zero);
 
     private static readonly DateTimeOffset T0 = new(2026, 9, 10, 10, 0, 0, TimeSpan.Zero);
+
+    /// <summary>A JSON document whose token counts differ between cl100k_base and the o200k_base stand-in.</summary>
+    private const string DivergentJsonText = "{\"summary\":\"こんにちは世界、今日はいい天気ですね。\"}";
 
     [Fact]
     public void HarnessId_IsKiloSharedRuntime()
@@ -233,6 +237,41 @@ public class KiloMapperTests
         CollectedBatch batch = new KiloMapper().Map(unit, BaselineUtc);
 
         Assert.Null(Assert.Single(batch.Sessions).Title);
+    }
+
+    [Fact]
+    public void Map_SharedRuntimeCountsPartsUnderTheMessageModelOwnTokenizer()
+    {
+        long t0 = T0.ToUnixTimeMilliseconds();
+        string export = """
+            {
+              "session_id": "sess-kilo-tok",
+              "messages": [
+                {"id": "msg-a1", "session_id": "sess-kilo-tok", "time_created": __KILO_TS__, "data": {"role": "assistant", "modelID": "gpt-4", "tokens": {"input": 10, "output": 2}}}
+              ],
+              "parts": [
+                {"id": "part-a1", "message_id": "msg-a1", "time_created": __KILO_TS__, "data": {"type": "text", "text": "{\"summary\":\"こんにちは世界、今日はいい天気ですね。\"}"}}
+              ]
+            }
+            """
+            .Replace("__KILO_TS__", t0.ToString(CultureInfo.InvariantCulture), StringComparison.Ordinal);
+        NativeSourceUnit unit = MakeNativeUnit(
+            "/fake-home/.local/share/kilo/kilo.db",
+            export,
+            KiloMapper.KiloSharedRuntimeHarnessId,
+            format: "kilo-sqlite",
+            parserId: "kilo-sqlite-reader");
+
+        CollectedBatch batch = new KiloMapper().Map(unit, BaselineUtc);
+
+        CollectedRecord record = Assert.Single(batch.Records);
+        Assert.Equal("gpt-4", record.Model);
+        CollectedContentPart part = Assert.Single(record.Parts);
+        Assert.Null(part.PlainText);
+        Assert.NotNull(part.Withheld);
+        Assert.Equal(
+            LocalTextTokenizer.Shared.Count(DivergentJsonText, "gpt-4").Count,
+            part.Withheld!.MeasuredTokens);
     }
 
     [Fact]

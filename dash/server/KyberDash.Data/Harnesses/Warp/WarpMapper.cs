@@ -348,7 +348,7 @@ public class WarpMapper : IHarnessMapper
                     correctionRule = check.Rule;
                 }
 
-                parts.Add(ToolContentMeasurer.BuildContentPart(0, ContentBucket.UserMessage, userMessage, "user"));
+                parts.Add(ToolContentMeasurer.BuildContentPart(0, ContentBucket.UserMessage, userMessage, "user", model));
             }
 
             string? projectPath = SafeOptionalText(exchange.Row.WorkingDirectory);
@@ -787,7 +787,7 @@ public class WarpMapper : IHarnessMapper
 
         CollectedToolContent? inputContent = string.IsNullOrEmpty(block.StylizedCommand)
             ? null
-            : ToolContentMeasurer.Measure(block.StylizedCommand, CanonSynth.MaxToolArgumentsBytes)
+            : ToolContentMeasurer.Measure(block.StylizedCommand, CanonSynth.MaxToolArgumentsBytes, parentRecord.Model)
                 .ToToolContent(includeFingerprint: true);
 
         CollectedToolCall collectedTool = new(

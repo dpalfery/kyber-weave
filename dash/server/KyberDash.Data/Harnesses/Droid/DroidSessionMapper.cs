@@ -606,15 +606,15 @@ public class DroidSessionMapper : IHarnessMapper
 
         List<CollectedContentPart> parts = [];
         int position = 0;
-        parts.Add(ToolContentMeasurer.BuildContentPart(position++, ContentBucket.UserMessage, call.UserMessage, "user"));
+        parts.Add(ToolContentMeasurer.BuildContentPart(position++, ContentBucket.UserMessage, call.UserMessage, "user", strippedModel));
         foreach (string thinking in call.ThinkingTexts)
         {
-            parts.Add(ToolContentMeasurer.BuildContentPart(position++, ContentBucket.Reasoning, thinking, "assistant"));
+            parts.Add(ToolContentMeasurer.BuildContentPart(position++, ContentBucket.Reasoning, thinking, "assistant", strippedModel));
         }
 
         foreach (string text in call.Texts)
         {
-            parts.Add(ToolContentMeasurer.BuildContentPart(position++, ContentBucket.ConversationHistory, text, "assistant"));
+            parts.Add(ToolContentMeasurer.BuildContentPart(position++, ContentBucket.ConversationHistory, text, "assistant", strippedModel));
         }
 
         List<string> skillsInvoked = [];
@@ -686,13 +686,13 @@ public class DroidSessionMapper : IHarnessMapper
         string childRecordId = EnsureUniqueRecordId(seenRecordIds, $"{parentRecord.RecordId}-t{toolHash}", toolIndex);
 
         CollectedToolContent? inputContent = tool.Use.RawInputJson is not null
-            ? ToolContentMeasurer.Measure(tool.Use.RawInputJson, CanonSynth.MaxToolArgumentsBytes)
+            ? ToolContentMeasurer.Measure(tool.Use.RawInputJson, CanonSynth.MaxToolArgumentsBytes, parentRecord.Model)
                 .ToToolContent(includeFingerprint: true)
             : null;
 
         string? resultText = SafeResultText(tool.ResultText);
         CollectedToolContent? resultContent = resultText is not null
-            ? ToolContentMeasurer.Measure(resultText, CanonSynth.MaxToolResultBytes)
+            ? ToolContentMeasurer.Measure(resultText, CanonSynth.MaxToolResultBytes, parentRecord.Model)
                 .ToToolContent(includeFingerprint: false)
             : null;
 
@@ -735,7 +735,7 @@ public class DroidSessionMapper : IHarnessMapper
         List<CollectedContentPart> parts = [];
         if (resultText is not null)
         {
-            parts.Add(ToolContentMeasurer.BuildContentPart(0, ContentBucket.ToolResultContent, resultText, "user"));
+            parts.Add(ToolContentMeasurer.BuildContentPart(0, ContentBucket.ToolResultContent, resultText, "user", parentRecord.Model));
         }
 
         return new CollectedRecord(

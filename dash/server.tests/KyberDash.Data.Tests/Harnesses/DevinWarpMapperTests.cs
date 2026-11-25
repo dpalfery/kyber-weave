@@ -6,6 +6,7 @@ using KyberDash.Data.Collector;
 using KyberDash.Data.Collector.Sources;
 using KyberDash.Data.Harnesses.Devin;
 using KyberDash.Data.Harnesses.Warp;
+using KyberDash.Data.Tokenization;
 using Xunit;
 
 namespace KyberDash.Data.Tests.Harnesses;
@@ -18,6 +19,9 @@ namespace KyberDash.Data.Tests.Harnesses;
 public class DevinWarpMapperTests
 {
     private static readonly DateTimeOffset BaselineUtc = new(2026, 4, 14, 10, 5, 0, TimeSpan.Zero);
+
+    /// <summary>A JSON document whose token counts differ between cl100k_base and the o200k_base stand-in.</summary>
+    private const string DivergentJsonText = "{\"summary\":\"こんにちは世界、今日はいい天気ですね。\"}";
 
     // ------------------------------------------------------------------
     // Devin: per-step usage, tools, and model resolution
@@ -148,6 +152,70 @@ public class DevinWarpMapperTests
         Assert.Equal("agent-model", DevinMapper.GetDisplayModelName(null, "agent-model"));
         Assert.Equal("devin", DevinMapper.GetDisplayModelName(null, "  "));
         Assert.Equal("step-model", DevinMapper.GetDisplayModelName(string.Empty, "step-model"));
+    }
+
+    [Fact]
+    public void Map_CountsPartsUnderTheRecordModelTokenizer()
+    {
+        string rawText = """
+            {
+              "session_id": "session-tok",
+              "steps": [
+                {
+                  "step_id": 1,
+                  "message": "{\"summary\":\"こんにちは世界、今日はいい天気ですね。\"}",
+                  "metadata": { "is_user_input": true, "created_at": "2027-01-15T08:00:00.000Z" }
+                },
+                {
+                  "step_id": 2,
+                  "metadata": {
+                    "created_at": "2027-01-15T08:00:01.000Z",
+                    "generation_model": "gpt-4-1106-preview",
+                    "metrics": { "input_tokens": 10, "output_tokens": 2 }
+                  }
+                }
+              ]
+            }
+            """;
+
+        CollectedBatch batch = new DevinMapper(acuUsdRate: 1.0).Map(
+            MakeNativeUnit("devin", "/home/u/.local/share/devin/cli/transcripts/session-tok.json", rawText),
+            BaselineUtc);
+
+        CollectedRecord record = Assert.Single(batch.Records, static r => r.Op == RecordOp.LlmInvoke);
+        Assert.Equal("gpt-4-1106-preview", record.Model);
+        CollectedContentPart userPart = Assert.Single(record.Parts);
+        Assert.Null(userPart.PlainText);
+        Assert.NotNull(userPart.Withheld);
+        Assert.Equal(
+            LocalTextTokenizer.Shared.Count(DivergentJsonText, record.Model).Count,
+            userPart.Withheld!.MeasuredTokens);
+    }
+
+    [Fact]
+    public void Map_CountsPartsUnderTheExchangeModelOwnTokenizer()
+    {
+        string rawText = BuildWarpExport(
+            conversationData: """{"conversation_usage_metadata":{"token_usage":[]}}""",
+            queries:
+            [
+                ("ex-1", "2026-05-18 10:00:00.000000", """[{"Query":{"text":"{\"summary\":\"こんにちは世界、今日はいい天気ですね。\"}"}}]""", "gpt-4", null, "\"Completed\""),
+            ],
+            blocks: [],
+            conversationId: "conv-tok");
+
+        CollectedBatch batch = new WarpMapper().Map(
+            MakeNativeUnit("warp", "/home/u/Library/warp.sqlite:conv-tok", rawText),
+            BaselineUtc);
+
+        CollectedRecord record = Assert.Single(batch.Records);
+        Assert.Equal("gpt-4", record.Model);
+        CollectedContentPart userPart = Assert.Single(record.Parts);
+        Assert.Null(userPart.PlainText);
+        Assert.NotNull(userPart.Withheld);
+        Assert.Equal(
+            LocalTextTokenizer.Shared.Count(DivergentJsonText, "gpt-4").Count,
+            userPart.Withheld!.MeasuredTokens);
     }
 
     [Fact]

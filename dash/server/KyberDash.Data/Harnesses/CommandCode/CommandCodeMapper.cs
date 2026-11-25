@@ -389,7 +389,7 @@ public class CommandCodeMapper : IHarnessMapper
                     correctionRule = check.Rule;
                 }
 
-                parts.Add(ToolContentMeasurer.BuildContentPart(position++, ContentBucket.UserMessage, pendingUserMessage, "user"));
+                parts.Add(ToolContentMeasurer.BuildContentPart(position++, ContentBucket.UserMessage, pendingUserMessage, "user", model));
             }
 
             foreach (CommandCodeContentBlock block in msg.Blocks)
@@ -397,7 +397,7 @@ public class CommandCodeMapper : IHarnessMapper
                 if (string.Equals(block.BlockType, "text", StringComparison.Ordinal)
                     && !string.IsNullOrEmpty(block.Text))
                 {
-                    parts.Add(ToolContentMeasurer.BuildContentPart(position++, ContentBucket.ConversationHistory, block.Text, "assistant"));
+                    parts.Add(ToolContentMeasurer.BuildContentPart(position++, ContentBucket.ConversationHistory, block.Text, "assistant", model));
                 }
             }
 
@@ -633,7 +633,7 @@ public class CommandCodeMapper : IHarnessMapper
         string childRecordId = EnsureUniqueRecordId(seenRecordIds, $"{parentRecord.RecordId}-t{toolHash}", toolIndex);
 
         CollectedToolContent? inputContent = toolCall.RawInputText is not null
-            ? ToolContentMeasurer.Measure(toolCall.RawInputText, CanonSynth.MaxToolArgumentsBytes)
+            ? ToolContentMeasurer.Measure(toolCall.RawInputText, CanonSynth.MaxToolArgumentsBytes, parentRecord.Model)
                 .ToToolContent(includeFingerprint: true)
             : null;
 

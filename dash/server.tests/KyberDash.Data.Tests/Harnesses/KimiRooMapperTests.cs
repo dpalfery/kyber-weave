@@ -5,6 +5,7 @@ using KyberDash.Data.Collector;
 using KyberDash.Data.Collector.Sources;
 using KyberDash.Data.Harnesses.KimiCode;
 using KyberDash.Data.Harnesses.RooCode;
+using KyberDash.Data.Tokenization;
 using Xunit;
 
 namespace KyberDash.Data.Tests.Harnesses;
@@ -19,6 +20,9 @@ namespace KyberDash.Data.Tests.Harnesses;
 public class KimiRooMapperTests
 {
     private static readonly DateTimeOffset BaselineUtc = new(2026, 7, 1, 10, 5, 0, TimeSpan.Zero);
+
+    /// <summary>A JSON document whose token counts differ between cl100k_base and the o200k_base stand-in.</summary>
+    private const string DivergentJsonText = "{\"summary\":\"こんにちは世界、今日はいい天気ですね。\"}";
 
     // ------------------------------------------------------------------
     // Kimi Code wire fixtures
@@ -172,6 +176,30 @@ public class KimiRooMapperTests
         Assert.NotNull(bashChild.Tool!.Input);
         Assert.Equal(64, bashChild.Tool.Input.Sha256Fingerprint?.Length);
         Assert.True(bashChild.Tool.Input.Utf8Bytes > 0);
+    }
+
+    [Fact]
+    public void Map_CountsPartsUnderTheRequestModelOwnTokenizer()
+    {
+        string wire = string.Join('\n',
+        [
+            KimiPrompt(DivergentJsonText, 1782900000000),
+            KimiRequest("0.1", "tok-alias", "gpt-4", 1782900001000),
+            KimiUsage("tok-alias", 1782900002000, input: 20, output: 5),
+        ]) + "\n";
+
+        NativeSourceUnit unit = MakeNativeUnit("kimi-code", KimiWirePath("session_tokenizer"), wire);
+
+        CollectedBatch batch = new KimiCodeMapper().Map(unit, BaselineUtc);
+
+        CollectedRecord record = Assert.Single(batch.Records);
+        Assert.Equal("gpt-4", record.Model);
+        CollectedContentPart part = Assert.Single(record.Parts);
+        Assert.Null(part.PlainText);
+        Assert.NotNull(part.Withheld);
+        Assert.Equal(
+            LocalTextTokenizer.Shared.Count(DivergentJsonText, "gpt-4").Count,
+            part.Withheld!.MeasuredTokens);
     }
 
     [Fact]
@@ -405,6 +433,25 @@ public class KimiRooMapperTests
         InMemoryRelationalStore store = new();
         store.WriteBatch(batch);
         Assert.Equal(1, store.CountRecords("roo-code"));
+    }
+
+    [Fact]
+    public void Map_CountsPartsUnderTheHistoryModelOwnTokenizer()
+    {
+        string uiMessages = RooUiMessages(tokensIn: 100, tokensOut: 50, userMessage: DivergentJsonText);
+        string history = RooHistoryJson(model: "gpt-4");
+        NativeSourceUnit unit = MakeNativeUnit("roo-code", RooTaskDir("task-tok"), uiMessages, companionText: history);
+
+        CollectedBatch batch = new RooCodeMapper().Map(unit, BaselineUtc);
+
+        CollectedRecord record = Assert.Single(batch.Records);
+        Assert.Equal("gpt-4", record.Model);
+        CollectedContentPart part = Assert.Single(record.Parts);
+        Assert.Null(part.PlainText);
+        Assert.NotNull(part.Withheld);
+        Assert.Equal(
+            LocalTextTokenizer.Shared.Count(DivergentJsonText, "gpt-4").Count,
+            part.Withheld!.MeasuredTokens);
     }
 
     [Fact]

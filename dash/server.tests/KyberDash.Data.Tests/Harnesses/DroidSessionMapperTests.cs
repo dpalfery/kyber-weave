@@ -5,6 +5,7 @@ using KyberDash.Contracts.Repositories;
 using KyberDash.Data.Collector;
 using KyberDash.Data.Collector.Sources;
 using KyberDash.Data.Harnesses.Droid;
+using KyberDash.Data.Tokenization;
 using KyberDash.Domain;
 using Xunit;
 
@@ -19,6 +20,9 @@ namespace KyberDash.Data.Tests.Harnesses;
 public class DroidSessionMapperTests
 {
     private static readonly DateTimeOffset BaselineUtc = new(2026, 11, 19, 12, 0, 0, TimeSpan.Zero);
+
+    /// <summary>A JSON document whose token counts differ between cl100k_base and the o200k_base stand-in.</summary>
+    private const string DivergentJsonText = "{\"summary\":\"こんにちは世界、今日はいい天気ですね。\"}";
 
     [Fact]
     public void Map_ThrowsArgumentNullException_WhenUnitIsNull()
@@ -416,6 +420,37 @@ public class DroidSessionMapperTests
         InMemoryRelationalStore store = new();
         store.WriteBatch(batch);
         Assert.Equal(1, store.CountRecords());
+    }
+
+    [Fact]
+    public void Map_CountsPartsUnderTheSessionModelOwnTokenizer()
+    {
+        string jsonl = string.Join('\n',
+        [
+            "{\"type\":\"session_start\",\"id\":\"sess-tok\",\"cwd\":\"/work/repo\"}",
+            "{\"type\":\"message\",\"timestamp\":\"2026-11-19T10:00:00.000Z\",\"message\":{\"role\":\"user\",\"content\":[{\"type\":\"text\",\"text\":\"{\\\"summary\\\":\\\"こんにちは世界、今日はいい天気ですね。\\\"}\"}]}}",
+            "{\"type\":\"message\",\"id\":\"a-1\",\"timestamp\":\"2026-11-19T10:00:02.000Z\",\"message\":{\"role\":\"assistant\",\"content\":[{\"type\":\"text\",\"text\":\"Done.\"}]}}",
+        ]) + "\n";
+
+        string settingsJson = """
+            {
+              "model": "gpt-4-turbo"
+            }
+            """;
+
+        DroidSessionMapper mapper = new();
+        CollectedBatch batch = mapper.Map(
+            CreateUnit("/home/dev/.factory/sessions/repo/sess-tok.jsonl", jsonl, settingsJson),
+            BaselineUtc);
+
+        CollectedRecord record = Assert.Single(batch.Records);
+        Assert.Equal("gpt-4-turbo", record.Model);
+        CollectedContentPart userPart = Assert.Single(record.Parts, static p => p.Bucket == ContentBucket.UserMessage);
+        Assert.Null(userPart.PlainText);
+        Assert.NotNull(userPart.Withheld);
+        Assert.Equal(
+            LocalTextTokenizer.Shared.Count(DivergentJsonText, "gpt-4-turbo").Count,
+            userPart.Withheld!.MeasuredTokens);
     }
 
     [Theory]

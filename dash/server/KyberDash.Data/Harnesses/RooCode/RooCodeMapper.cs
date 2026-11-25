@@ -269,7 +269,7 @@ public partial class RooCodeMapper : IHarnessMapper
                     correctionRule = check.Rule;
                 }
 
-                parts.Add(ToolContentMeasurer.BuildContentPart(0, ContentBucket.UserMessage, document.UserMessage, "user"));
+                parts.Add(ToolContentMeasurer.BuildContentPart(0, ContentBucket.UserMessage, document.UserMessage, "user", document.Model));
             }
 
             (IReadOnlyList<CollectedTokenCount> tokens, long? reportedInput, long? reportedOutput) = BuildTokens(request);
