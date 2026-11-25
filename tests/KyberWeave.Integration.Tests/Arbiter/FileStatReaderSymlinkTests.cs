@@ -1,3 +1,4 @@
+using System.Text;
 using KyberWeave.Core.Arbiter.Facts;
 using KyberWeave.Data.Arbiter;
 using KyberWeave.Tests;
@@ -12,7 +13,10 @@ namespace KyberWeave.Integration.Tests.Arbiter;
 /// </summary>
 public sealed class FileStatReaderSymlinkTests : IDisposable
 {
-    private const string Content = "twenty-six bytes of text!\n";
+    /// <summary>Not pure ASCII, so a length in characters would differ from the length in bytes.</summary>
+    private const string Content = "linked content: caf\u00e9\n";
+
+    private static readonly long ContentBytes = Encoding.UTF8.GetByteCount(Content);
 
     private readonly TempDirectory _temp = new();
     private readonly FileStatReader _stats = new();
@@ -26,7 +30,7 @@ public sealed class FileStatReaderSymlinkTests : IDisposable
         SkipOnWindows();
         string link = LinkToTarget(out _);
 
-        Assert.Equal(Content.Length, _stats.GetLength(link));
+        Assert.Equal(ContentBytes, _stats.GetLength(link));
     }
 
     [Fact]
@@ -37,7 +41,7 @@ public sealed class FileStatReaderSymlinkTests : IDisposable
         string second = Path.Combine(_temp.Path, "second-link.md");
         File.CreateSymbolicLink(second, first);
 
-        Assert.Equal(Content.Length, _stats.GetLength(second));
+        Assert.Equal(ContentBytes, _stats.GetLength(second));
     }
 
     [Fact]
@@ -76,7 +80,7 @@ public sealed class FileStatReaderSymlinkTests : IDisposable
     {
         SkipOnWindows();
 
-        Assert.ThrowsAny<IOException>(() => _stats.GetLength(LinkLoop()));
+        Assert.Throws<IOException>(() => _stats.GetLength(LinkLoop()));
     }
 
     [Fact]
@@ -84,7 +88,7 @@ public sealed class FileStatReaderSymlinkTests : IDisposable
     {
         SkipOnWindows();
 
-        Assert.ThrowsAny<IOException>(() => _stats.GetLastWriteTimeUtc(LinkLoop()));
+        Assert.Throws<IOException>(() => _stats.GetLastWriteTimeUtc(LinkLoop()));
     }
 
     [Fact]
@@ -93,7 +97,7 @@ public sealed class FileStatReaderSymlinkTests : IDisposable
         SkipOnWindows();
         string link = LinkToTarget(out _);
 
-        Assert.Equal(Content.Length, new ArbiterLogFiles().ByteLength(link));
+        Assert.Equal(ContentBytes, new ArbiterLogFiles().ByteLength(link));
     }
 
     [Fact]
@@ -104,6 +108,14 @@ public sealed class FileStatReaderSymlinkTests : IDisposable
         File.CreateSymbolicLink(link, Path.Combine(_temp.Path, "no-such-log.jsonl"));
 
         Assert.Equal(0, new ArbiterLogFiles().ByteLength(link));
+    }
+
+    [Fact]
+    public void ArbiterLogByteLengthOnALinkLoopIsZeroLikeAnUnreadableLog()
+    {
+        SkipOnWindows();
+
+        Assert.Equal(0, new ArbiterLogFiles().ByteLength(LinkLoop()));
     }
 
     private static void SkipOnWindows()

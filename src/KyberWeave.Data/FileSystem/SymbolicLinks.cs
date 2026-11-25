@@ -17,6 +17,7 @@ internal static class SymbolicLinks
     /// </summary>
     /// <param name="path">The path to resolve.</param>
     /// <returns>The path of the file the caller should stat.</returns>
+    /// <exception cref="FileNotFoundException">The path is a link that resolves to no target.</exception>
     /// <exception cref="IOException">The link chain loops or is too deep.</exception>
     public static string FinalTarget(string path)
     {
@@ -25,7 +26,8 @@ internal static class SymbolicLinks
         if (file.LinkTarget is null)
             return path;
 
-        FileSystemInfo? target = file.ResolveLinkTarget(returnFinalTarget: true);
-        return target is null ? path : Path.GetFullPath(target.FullName);
+        FileSystemInfo target = file.ResolveLinkTarget(returnFinalTarget: true)
+            ?? throw new FileNotFoundException("The symbolic link has no target.", path);
+        return Path.GetFullPath(target.FullName);
     }
 }
