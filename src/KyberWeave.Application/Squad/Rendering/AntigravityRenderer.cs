@@ -100,7 +100,7 @@ public sealed class AntigravityRenderer : SquadHarnessRenderer
     private const string ArbiterMatcher = "^invoke_subagent$";
     private const string ArbiterNotEnforcedCode = "arbiter-not-enforced";
     private const string NoPostDispatchFeedbackReason = "no-post-dispatch-feedback";
-    private const string BareDocsServerCommand = "kyber-weave-mcp";
+    private const string BareDocsServerCommand = SquadDocsServerCommand.Executable;
     private const string AnyRepoArgument = "--any-repo";
 
     private static readonly SquadHarnessSpec HarnessSpec = new(

@@ -455,7 +455,8 @@ internal static class SquadTestCommands
         ISquadRenderer? renderer = null,
         IKyberWeaveConfigRepository? configs = null,
         SquadConsole? output = null,
-        IMcpWiringService? wiring = null)
+        IMcpWiringService? wiring = null,
+        IProcessRunner? processRunner = null)
     {
         ArgumentNullException.ThrowIfNull(state);
         InMemorySquadServices services = new(state.Files);
@@ -480,7 +481,8 @@ internal static class SquadTestCommands
             console,
             state.Files,
             new SquadCommandRoots(state.Files, state.Paths, state.Environment, console),
-            wiring ?? new FakeMcpWiringService());
+            wiring ?? new FakeMcpWiringService(),
+            processRunner);
     }
 
     public static SquadPresetUseCommand PresetUse(

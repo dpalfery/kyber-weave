@@ -214,6 +214,59 @@ public sealed class SquadDoctorCommandInMemoryTests
         Assert.Contains("droids/architect.md", normalizedOutput.Replace('\\', '/'), StringComparison.Ordinal);
     }
 
+    /// <summary>
+    /// A global doctor scan renders Antigravity with the same absolute <c>kyber-weave-mcp</c> that install resolves, so
+    /// the expected agent files match what install wrote; without the resolved path the scan would expect the bare name.
+    /// </summary>
+    [Fact]
+    public void Doctor_GlobalScope_RendersAntigravityWithTheResolvedDocsServerCommand()
+    {
+        const string resolved = "/opt/kyber/bin/kyber-weave-mcp";
+        string tempHome = CreateDirectory("doctor-agy-home");
+        string repoPath = CreateCanonicalRepository("doctor-agy-repository");
+        RecordingRenderer renderer = new(new SquadRendererRegistry(
+            [new AntigravityRenderer()],
+            new InMemorySquadServices(_state.Files).RenderInputReader()));
+        ScriptedProcessRunner processes = new ScriptedProcessRunner()
+            .WithProgramOnPath(SquadDocsServerCommand.Executable, resolved);
+
+        SquadTestCommands.InMemoryDoctor(
+            _state,
+            new FakeProcessExecutor().WithProbeOutput("kyber-weave-mcp", "kyber-weave-mcp 1.2.3\n"),
+            repoPath,
+            new SquadGlobalRoots(_ => null, tempHome, isWindows: false),
+            renderer: renderer,
+            output: _console,
+            processRunner: processes).Execute(null!, new SquadDoctorSettings
+            {
+                Path = repoPath,
+                Global = true
+            });
+
+        List<SquadRenderRequest> antigravity = renderer.Requests
+            .Where(request => request.Scope == SquadDeploymentScope.Global
+                && request.Targets.Contains(SquadTarget.Antigravity))
+            .ToList();
+        Assert.NotEmpty(antigravity);
+        Assert.All(antigravity, request => Assert.Equal(resolved, request.DocsServerCommand));
+    }
+
+    /// <summary>Forwards every render to the real renderer and keeps the requests it was given.</summary>
+    private sealed class RecordingRenderer(ISquadRenderer inner) : ISquadRenderer
+    {
+        private readonly List<SquadRenderRequest> _requests = [];
+
+        public IReadOnlyList<SquadRenderRequest> Requests => _requests;
+
+        public IReadOnlyCollection<SquadTarget> SupportedTargets => inner.SupportedTargets;
+
+        public Task<SquadRenderResult> RenderAsync(SquadRenderRequest request, CancellationToken cancellationToken = default)
+        {
+            _requests.Add(request);
+            return inner.RenderAsync(request, cancellationToken);
+        }
+    }
+
     [Fact]
     public void Doctor_GlobalScope_ReportsRelativeOverrideAndExitsNonZero()
     {

@@ -55,6 +55,7 @@ internal sealed class SquadDoctorCommand : Command<SquadDoctorSettings>
     private readonly SquadConsole _console;
     private readonly IWritableFileSystem _files;
     private readonly IMcpWiringService _wiring;
+    private readonly Func<string, string?>? _findExecutable;
     private readonly SquadCommandRoots _roots;
 
     /// <summary>Creates the doctor command over the Squad services the host registers.</summary>
@@ -98,7 +99,8 @@ internal sealed class SquadDoctorCommand : Command<SquadDoctorSettings>
         SquadConsole output,
         IWritableFileSystem files,
         SquadCommandRoots roots,
-        IMcpWiringService wiring)
+        IMcpWiringService wiring,
+        IProcessRunner? processRunner = null)
     {
         ArgumentNullException.ThrowIfNull(stateStore);
         ArgumentNullException.ThrowIfNull(migration);
@@ -139,6 +141,7 @@ internal sealed class SquadDoctorCommand : Command<SquadDoctorSettings>
         _console = output;
         _files = files;
         _wiring = wiring;
+        _findExecutable = processRunner is null ? null : name => processRunner.FindOnPath(name);
         _roots = roots;
     }
 
@@ -913,6 +916,8 @@ internal sealed class SquadDoctorCommand : Command<SquadDoctorSettings>
 
             SquadSource sharedSource = _sourceLoader.Load(canonicalSourcePath);
 
+            // The same lookup install and update make, so the expected Antigravity files match what was written.
+            string? docsServerCommand = SquadDocsServerCommand.Resolve(SquadDeploymentScope.Global, _findExecutable);
             foreach (SquadTarget target in renderer.SupportedTargets)
             {
                 // A future native renderer whose per-user directory is not yet verified
@@ -947,7 +952,8 @@ internal sealed class SquadDoctorCommand : Command<SquadDoctorSettings>
                             GlobalRoots: globalRoots,
                             ModelPresets: loadedPresets,
                             PreloadedSource: sharedSource,
-                            EnvironmentReader: _environment.GetVariable))
+                            EnvironmentReader: _environment.GetVariable,
+                            DocsServerCommand: docsServerCommand))
                     .GetAwaiter()
                     .GetResult();
 
