@@ -104,11 +104,9 @@ public class CursorSqliteConversationSourceSqliteTests : IDisposable
         CollectedBatch batch = new CursorMapper().Map(unit, BaselineUtc);
 
         Assert.Empty(batch.Problems);
-        Assert.Equal(2, batch.Records.Count);
-        Assert.Equal(60, batch.Records[0].ReportedInputTokens);
-        Assert.Null(batch.Records[0].ReportedOutputTokens);
-        Assert.Equal(120, batch.Records[1].ReportedInputTokens);
-        Assert.Equal(45, batch.Records[1].ReportedOutputTokens);
+        CollectedRecord turn = Assert.Single(batch.Records);
+        Assert.Equal(180, turn.ReportedInputTokens);
+        Assert.Equal(45, turn.ReportedOutputTokens);
     }
 
     [Fact]
