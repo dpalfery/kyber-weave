@@ -572,10 +572,11 @@ internal sealed class SelfUpdater : IDisposable
     /// <summary>
     /// Restarts the tray so it, and not a detached process, owns the engine, but only when the engine needs it: a
     /// changed release, an older tray, an engine on another version, or a tray running without an engine.
+    /// A run with no release change never starts a stopped tray or engine; a release change always restarts the tray.
     /// </summary>
     /// <remarks>
     /// A kyberdash that predates these verbs falls back to today's path (engine ensure, then the tray update when due).
-    /// A user who stopped the tray is never started: a probe that finds no engine and no tray ends the step. Every
+    /// A probe that finds no engine and no tray ends the step when the release did not change. Every
     /// failure is named and says the binaries are already updated; one after the tray was quit also says the tray and
     /// engine are stopped and names the command that starts them.
     /// </remarks>
