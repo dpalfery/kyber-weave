@@ -1,3 +1,4 @@
+using System.ComponentModel;
 using System.Text;
 using KyberWeave.Contracts.Paths;
 using KyberWeave.Contracts.Repositories;
@@ -232,7 +233,7 @@ public sealed class RunIntegrateService : IRunIntegrateService
         // This catch answers for the work before the commits land. Once IntegrateUnderLock has applied them, its
         // head reads and cleanup report the landed state there ("integrated at (sha), but …", or "the task commits
         // are on the run branch, but …" when the sha could not be read) and never reach this message.
-        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+        catch (Exception exception) when (IsGitLaunchFailure(exception))
         {
             return Failed($"the task could not be integrated: {exception.Message}");
         }
@@ -302,7 +303,7 @@ public sealed class RunIntegrateService : IRunIntegrateService
             removed = _git.Run(
                 runWorktree, ["-C", runWorktree, "worktree", "remove", "--force", taskWorktree]);
         }
-        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+        catch (Exception exception) when (IsGitLaunchFailure(exception))
         {
             return Failed(
                 $"the task is integrated at {head}, but removing the task worktree '{taskWorktree}' failed: " +
@@ -321,7 +322,7 @@ public sealed class RunIntegrateService : IRunIntegrateService
         {
             deleted = _git.Run(runWorktree, ["-C", runWorktree, "branch", "-D", "--end-of-options", taskBranch]);
         }
-        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+        catch (Exception exception) when (IsGitLaunchFailure(exception))
         {
             return Failed(
                 $"the task is integrated at {head}, but deleting the task branch '{taskBranch}' failed: " +
@@ -740,12 +741,21 @@ public sealed class RunIntegrateService : IRunIntegrateService
             launchFailure = null;
             return GitText(runWorktree, "rev-parse", "HEAD");
         }
-        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+        catch (Exception exception) when (IsGitLaunchFailure(exception))
         {
             launchFailure = exception.Message;
             return null;
         }
     }
+
+    /// <summary>
+    /// Whether a git child could not be launched at all, as opposed to running and reporting git's own failure: the
+    /// executable is missing or not executable, its working directory is gone, or the operating system refused the
+    /// launch. Every catch that reports what already landed shares this one predicate.
+    /// </summary>
+    /// <param name="exception">The exception a git call threw.</param>
+    private static bool IsGitLaunchFailure(Exception exception) =>
+        exception is IOException or UnauthorizedAccessException or Win32Exception or InvalidOperationException;
 
     private string? GitText(string worktree, params string[] arguments)
     {

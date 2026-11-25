@@ -495,13 +495,13 @@ public sealed class ArbiterEvaluator : IArbiterEvaluator
         return new ArbiterDispatchEvaluation(trigger, dispatchOutcome) { Secondary = secondaryResults };
     }
 
-    /// <summary>The run the event's dispatch belongs to, when the git facts can read the run records; null outside any run.</summary>
     /// <summary>The parent technology of the dispatch's TECHNOLOGY header, resolved as the gate run does; null when the host has no file system or the dispatch names none.</summary>
     private string? ParentTechnologyOf(KyberWeaveConfig config, TriggerClassification classification, string? repoRoot) =>
         _files is not null && repoRoot is not null && classification.Headers.TryGetValue("TECHNOLOGY", out string? technology)
             ? TaskGateResolver.ParentTechnologyOrNone(_files, repoRoot, config, technology)
             : null;
 
+    /// <summary>The run the event's dispatch belongs to, when the git facts can read the run records; null outside any run.</summary>
     private ArbiterRunScope? RunScopeOf(ArbiterEvent ev) => (_gitFacts as IArbiterRunScopeSource)?.RunScopeOf(ev.Cwd);
 
     /// <summary>
