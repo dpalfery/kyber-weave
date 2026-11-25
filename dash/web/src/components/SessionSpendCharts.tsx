@@ -460,6 +460,25 @@ export function extractNormalizedContextTurns(context?: ContextCompositionData |
 // 1. Per-Turn Spend Chart (`TurnSpendChart`)
 // ---------------------------------------------------------------------------
 
+const TURN_COUNTER_FIELDS = [
+  'input',
+  'fresh_input',
+  'fresh',
+  'cache_read',
+  'cache_creation',
+  'output',
+  'visible_output',
+  'reasoning',
+] as const satisfies ReadonlyArray<keyof TurnSpendItem>
+
+/** A turn is measured when any of its token counters is a finite number. */
+function isTurnMeasured(turn: TurnSpendItem): boolean {
+  return TURN_COUNTER_FIELDS.some((field) => {
+    const value = turn[field]
+    return typeof value === 'number' && Number.isFinite(value)
+  })
+}
+
 export function TurnSpendChart({
   turns,
   selectedTurnIndex,
@@ -475,6 +494,25 @@ export function TurnSpendChart({
 
     return turns.map((t, i) => {
       const idx = t.index ?? i + 1
+      // An unmeasured turn carries no figure: its zeros are placeholders that
+      // nothing draws, sums or labels, and it does not move the running totals.
+      if (!isTurnMeasured(t)) {
+        return {
+          turn: t,
+          index: idx,
+          measured: false,
+          fresh: 0,
+          cacheRead: 0,
+          cacheCreation: 0,
+          hasCc: false,
+          output: 0,
+          reasoning: 0,
+          totalTokens: 0,
+          cumulativeInput: runningInput,
+          freshJumpPct: null,
+          requestStart: t.request_start,
+        }
+      }
       const cacheRead = Math.max(0, t.cache_read ?? 0)
       const cacheCreation = t.cache_creation != null ? Math.max(0, t.cache_creation) : 0
       const hasCc = t.cache_creation !== null && t.cache_creation !== undefined
@@ -508,6 +546,7 @@ export function TurnSpendChart({
       return {
         turn: t,
         index: idx,
+        measured: true,
         fresh,
         cacheRead,
         cacheCreation,
@@ -539,18 +578,40 @@ export function TurnSpendChart({
     )
   }
 
-  // Summary aggregation
-  const totalFresh = normalizedTurns.reduce((s, t) => s + t.fresh, 0)
-  const totalCacheRead = normalizedTurns.reduce((s, t) => s + t.cacheRead, 0)
-  const totalCacheCreation = normalizedTurns.reduce((s, t) => s + t.cacheCreation, 0)
-  const totalOutput = normalizedTurns.reduce((s, t) => s + t.output, 0)
-  const ccTurnCount = normalizedTurns.filter((t) => t.hasCc && t.cacheCreation > 0).length
+  const turnCount = normalizedTurns.length
+  const measuredTurns = normalizedTurns.filter((t) => t.measured)
+
+  // No turn carries a counter: say so, with no bars, chips or figures.
+  if (measuredTurns.length === 0) {
+    return (
+      <div
+        data-testid="turn-spend-not-measurable"
+        className={cn('rounded-lg border border-border bg-card p-4 text-card-foreground shadow-xs', className)}
+      >
+        <div className="flex items-center gap-2">
+          <h3 className="text-sm font-semibold text-foreground">Token Spend per Turn</h3>
+          <span className="rounded-full bg-interactive-secondary px-2 py-0.5 text-[11px] font-medium text-tertiary-foreground">
+            {turnCount} {turnCount === 1 ? 'turn' : 'turns'}
+          </span>
+        </div>
+        <p className="mt-2 text-xs text-muted-foreground">
+          This harness does not report token counts per turn. Session totals, where reported, are in the overview.
+        </p>
+      </div>
+    )
+  }
+
+  // Summary aggregation, over measured turns only
+  const totalFresh = measuredTurns.reduce((s, t) => s + t.fresh, 0)
+  const totalCacheRead = measuredTurns.reduce((s, t) => s + t.cacheRead, 0)
+  const totalCacheCreation = measuredTurns.reduce((s, t) => s + t.cacheCreation, 0)
+  const totalOutput = measuredTurns.reduce((s, t) => s + t.output, 0)
+  const ccTurnCount = measuredTurns.filter((t) => t.hasCc && t.cacheCreation > 0).length
   const hasRecordedCc = ccTurnCount > 0
   const inputSum = totalFresh + totalCacheRead + totalCacheCreation
   const cacheHitPercent = inputSum > 0 ? (totalCacheRead / inputSum) * 100 : 0
 
-  // SVG coordinate configuration
-  const turnCount = normalizedTurns.length
+  // SVG coordinate configuration: every turn keeps its slot, measured or not
   const barSlotWidth = Math.max(48, Math.min(84, 1100 / Math.max(1, turnCount)))
   const chartWidth = Math.max(640, turnCount * barSlotWidth + 120)
   const chartHeight = 280
@@ -561,19 +622,20 @@ export function TurnSpendChart({
   const innerWidth = chartWidth - padLeft - padRight
   const innerHeight = chartHeight - padTop - padBottom
 
-  const maxTurnTokens = Math.max(1, ...normalizedTurns.map((t) => t.totalTokens)) * 1.15
-  const maxCumulative = Math.max(1, ...normalizedTurns.map((t) => t.cumulativeInput)) * 1.08
+  const maxTurnTokens = Math.max(1, ...measuredTurns.map((t) => t.totalTokens)) * 1.15
+  const maxCumulative = Math.max(1, ...measuredTurns.map((t) => t.cumulativeInput)) * 1.08
   const barWidth = Math.min(42, Math.max(16, (innerWidth / turnCount) * 0.65))
 
-  // Cumulative line points
-  const linePoints = normalizedTurns.map((t, i) => {
+  // Cumulative line points: measured turns only, at their own slot
+  const linePoints = normalizedTurns.flatMap((t, i) => {
+    if (!t.measured) return []
     const cx = padLeft + innerWidth * ((i + 0.5) / turnCount)
     const cy = padTop + innerHeight - (t.cumulativeInput / maxCumulative) * innerHeight
-    return { cx, cy, turnIndex: t.index }
+    return [{ cx, cy, turnIndex: t.index }]
   })
   const linePath = linePoints.map((p, i) => `${i === 0 ? 'M' : 'L'} ${p.cx.toFixed(1)} ${p.cy.toFixed(1)}`).join(' ')
 
-  const jumps = normalizedTurns.filter((t) => t.freshJumpPct != null && t.freshJumpPct >= 25)
+  const jumps = measuredTurns.filter((t) => t.freshJumpPct != null && t.freshJumpPct >= 25)
   const activeHoverTurn =
     hoveredIndex != null ? normalizedTurns.find((t) => t.index === hoveredIndex) : null
 
@@ -703,15 +765,17 @@ export function TurnSpendChart({
             const isHovered = hoveredIndex === t.index
 
             // Segments bottom to top: cacheRead, cacheCreation, fresh, output, reasoning
-            const segments: Array<{ key: SpendTokenClass; value: number; color: string }> = (
-              [
-                { key: 'cache_read', value: t.cacheRead, color: SPEND_COLORS.cache_read },
-                { key: 'cache_creation', value: t.cacheCreation, color: SPEND_COLORS.cache_creation },
-                { key: 'fresh_input', value: t.fresh, color: SPEND_COLORS.fresh_input },
-                { key: 'output', value: t.output, color: SPEND_COLORS.output },
-                { key: 'reasoning', value: t.reasoning, color: SPEND_COLORS.reasoning },
-              ] as const
-            ).filter((s) => s.value > 0)
+            const segments: Array<{ key: SpendTokenClass; value: number; color: string }> = !t.measured
+              ? []
+              : (
+                  [
+                    { key: 'cache_read', value: t.cacheRead, color: SPEND_COLORS.cache_read },
+                    { key: 'cache_creation', value: t.cacheCreation, color: SPEND_COLORS.cache_creation },
+                    { key: 'fresh_input', value: t.fresh, color: SPEND_COLORS.fresh_input },
+                    { key: 'output', value: t.output, color: SPEND_COLORS.output },
+                    { key: 'reasoning', value: t.reasoning, color: SPEND_COLORS.reasoning },
+                  ] as const
+                ).filter((s) => s.value > 0)
 
             let accumulatedHeight = 0
 
@@ -719,10 +783,11 @@ export function TurnSpendChart({
               <g
                 key={`turn-${t.index}`}
                 data-testid={`turn-bar-${t.index}`}
+                data-measured={t.measured ? 'true' : 'false'}
                 className="cursor-pointer transition-opacity focus:outline-hidden"
                 tabIndex={0}
                 role="button"
-                aria-label={`Turn ${t.index}`}
+                aria-label={t.measured ? `Turn ${t.index}` : `Turn ${t.index}, tokens not measured`}
                 onClick={() => onSelectTurn?.(t.index)}
                 onKeyDown={(e) => {
                   if (e.key === 'Enter' || e.key === ' ') {
@@ -776,7 +841,7 @@ export function TurnSpendChart({
                 })}
 
                 {/* Selected highlight border */}
-                {isSelected && (
+                {isSelected && t.measured && (
                   <rect
                     x={x - 2}
                     y={padTop + innerHeight - accumulatedHeight - 2}
@@ -802,15 +867,17 @@ export function TurnSpendChart({
                   {t.index}
                 </text>
 
-                {/* Total turn tokens below index */}
-                <text
-                  x={cx}
-                  y={padTop + innerHeight + 28}
-                  textAnchor="middle"
-                  className="fill-tertiary-foreground text-[9px] tabular-nums"
-                >
-                  {fmtTokens(t.totalTokens)}
-                </text>
+                {/* Total turn tokens below index (measured turns only) */}
+                {t.measured && (
+                  <text
+                    x={cx}
+                    y={padTop + innerHeight + 28}
+                    textAnchor="middle"
+                    className="fill-tertiary-foreground text-[9px] tabular-nums"
+                  >
+                    {fmtTokens(t.totalTokens)}
+                  </text>
+                )}
 
                 {/* Fresh Input Jump Warning Annotation */}
                 {t.freshJumpPct != null && t.freshJumpPct >= 25 && (
@@ -901,73 +968,79 @@ export function TurnSpendChart({
           >
             <div className="flex items-center justify-between border-b border-border pb-1 font-medium text-foreground">
               <span>Turn #{activeHoverTurn.index}</span>
-              <span className="tabular-nums text-tertiary-foreground">
-                Total: {fmtNum(activeHoverTurn.totalTokens)} tok
-              </span>
+              {activeHoverTurn.measured ? (
+                <span className="tabular-nums text-tertiary-foreground">
+                  Total: {fmtNum(activeHoverTurn.totalTokens)} tok
+                </span>
+              ) : (
+                <span className="text-tertiary-foreground">Tokens not measured</span>
+              )}
             </div>
-            <div className="mt-1.5 space-y-1 text-[11px]">
-              <div className="flex items-center justify-between">
-                <span className="flex items-center gap-1 text-muted-foreground">
-                  <span className="h-2 w-2 rounded-xs" style={{ backgroundColor: SPEND_COLORS.fresh_input }} />
-                  Fresh input
-                </span>
-                <span className="tabular-nums text-foreground">
-                  {fmtNum(activeHoverTurn.fresh)} (
-                  {activeHoverTurn.totalTokens > 0
-                    ? ((activeHoverTurn.fresh / activeHoverTurn.totalTokens) * 100).toFixed(0)
-                    : 0}
-                  %)
-                </span>
-              </div>
-              <div className="flex items-center justify-between">
-                <span className="flex items-center gap-1 text-muted-foreground">
-                  <span className="h-2 w-2 rounded-xs" style={{ backgroundColor: SPEND_COLORS.cache_read }} />
-                  Cache read
-                </span>
-                <span className="tabular-nums text-foreground">
-                  {fmtNum(activeHoverTurn.cacheRead)} (
-                  {activeHoverTurn.totalTokens > 0
-                    ? ((activeHoverTurn.cacheRead / activeHoverTurn.totalTokens) * 100).toFixed(0)
-                    : 0}
-                  %)
-                </span>
-              </div>
-              {activeHoverTurn.cacheCreation > 0 && (
+            {activeHoverTurn.measured && (
+              <div className="mt-1.5 space-y-1 text-[11px]">
                 <div className="flex items-center justify-between">
                   <span className="flex items-center gap-1 text-muted-foreground">
-                    <span className="h-2 w-2 rounded-xs" style={{ backgroundColor: SPEND_COLORS.cache_creation }} />
-                    Cache creation
+                    <span className="h-2 w-2 rounded-xs" style={{ backgroundColor: SPEND_COLORS.fresh_input }} />
+                    Fresh input
                   </span>
                   <span className="tabular-nums text-foreground">
-                    {fmtNum(activeHoverTurn.cacheCreation)}
+                    {fmtNum(activeHoverTurn.fresh)} (
+                    {activeHoverTurn.totalTokens > 0
+                      ? ((activeHoverTurn.fresh / activeHoverTurn.totalTokens) * 100).toFixed(0)
+                      : 0}
+                    %)
                   </span>
                 </div>
-              )}
-              <div className="flex items-center justify-between">
-                <span className="flex items-center gap-1 text-muted-foreground">
-                  <span className="h-2 w-2 rounded-xs" style={{ backgroundColor: SPEND_COLORS.output }} />
-                  Output
-                </span>
-                <span className="tabular-nums text-foreground">
-                  {fmtNum(activeHoverTurn.output)}
-                </span>
-              </div>
-              {activeHoverTurn.reasoning > 0 && (
                 <div className="flex items-center justify-between">
                   <span className="flex items-center gap-1 text-muted-foreground">
-                    <span className="h-2 w-2 rounded-xs" style={{ backgroundColor: SPEND_COLORS.reasoning }} />
-                    Reasoning
+                    <span className="h-2 w-2 rounded-xs" style={{ backgroundColor: SPEND_COLORS.cache_read }} />
+                    Cache read
                   </span>
                   <span className="tabular-nums text-foreground">
-                    {fmtNum(activeHoverTurn.reasoning)}
+                    {fmtNum(activeHoverTurn.cacheRead)} (
+                    {activeHoverTurn.totalTokens > 0
+                      ? ((activeHoverTurn.cacheRead / activeHoverTurn.totalTokens) * 100).toFixed(0)
+                      : 0}
+                    %)
                   </span>
                 </div>
-              )}
-              <div className="mt-1 flex items-center justify-between border-t border-border pt-1 font-medium text-foreground">
-                <span className="text-tertiary-foreground">Cumulative input</span>
-                <span className="tabular-nums">{fmtNum(activeHoverTurn.cumulativeInput)}</span>
+                {activeHoverTurn.cacheCreation > 0 && (
+                  <div className="flex items-center justify-between">
+                    <span className="flex items-center gap-1 text-muted-foreground">
+                      <span className="h-2 w-2 rounded-xs" style={{ backgroundColor: SPEND_COLORS.cache_creation }} />
+                      Cache creation
+                    </span>
+                    <span className="tabular-nums text-foreground">
+                      {fmtNum(activeHoverTurn.cacheCreation)}
+                    </span>
+                  </div>
+                )}
+                <div className="flex items-center justify-between">
+                  <span className="flex items-center gap-1 text-muted-foreground">
+                    <span className="h-2 w-2 rounded-xs" style={{ backgroundColor: SPEND_COLORS.output }} />
+                    Output
+                  </span>
+                  <span className="tabular-nums text-foreground">
+                    {fmtNum(activeHoverTurn.output)}
+                  </span>
+                </div>
+                {activeHoverTurn.reasoning > 0 && (
+                  <div className="flex items-center justify-between">
+                    <span className="flex items-center gap-1 text-muted-foreground">
+                      <span className="h-2 w-2 rounded-xs" style={{ backgroundColor: SPEND_COLORS.reasoning }} />
+                      Reasoning
+                    </span>
+                    <span className="tabular-nums text-foreground">
+                      {fmtNum(activeHoverTurn.reasoning)}
+                    </span>
+                  </div>
+                )}
+                <div className="mt-1 flex items-center justify-between border-t border-border pt-1 font-medium text-foreground">
+                  <span className="text-tertiary-foreground">Cumulative input</span>
+                  <span className="tabular-nums">{fmtNum(activeHoverTurn.cumulativeInput)}</span>
+                </div>
               </div>
-            </div>
+            )}
           </div>
         )}
       </div>
