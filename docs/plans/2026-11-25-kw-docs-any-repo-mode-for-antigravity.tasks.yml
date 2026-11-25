@@ -1,6 +1,6 @@
 schema-version: 2
 plan: docs/plans/2026-11-25-kw-docs-any-repo-mode-for-antigravity.md
-execution-digest: d04d8fc44ffcaa2291199c16a1259bd2e6afa4d339983f8f40bf3786c0fcfa21
+execution-digest: 470ca1fe912d3e7bd4c2e8981632f33cfbd6b23fe15b7dbd57874905e2dec75f
 tasks:
   - id: T1
     capabilities: C# MCP server composition, concurrency-safe caching, xUnit unit tests over fakes
@@ -98,6 +98,7 @@ tasks:
   - id: T2
     capabilities: byte-exact JSON text splicing through an existing helper; C# lifecycle wiring; xUnit unit tests over in-memory fakes
     depends-on:
+      - T5
       - T4
     files:
       - src/KyberWeave.Application/Squad/Deployment/AntigravityMcpConfiguration.cs
@@ -124,19 +125,20 @@ tasks:
 
       - **Session:** `squad-agy`
 
-      - **Depends on:** T4 (uses `ISquadFileAccess.WriteAllBytesAtomic`)
+      - **Depends on:** T5 (uses `ISquadFileAccess.GetLength`; T5 follows T4, which added `ISquadFileAccess.WriteAllBytesAtomic`)
 
       - **Files:**
         - `src/KyberWeave.Application/Squad/Deployment/AntigravityMcpConfiguration.cs` (new): `public static IReadOnlyList<string> Ensure(ISquadFileAccess files, IReadOnlyCollection<SquadTarget> targets, SquadDeploymentScope scope, ISquadGlobalRootResolver? globalRoots, string? docsServerCommand, bool dryRun)`; behaviour under Design below.
         - `src/KyberWeave.Application/Squad/Deployment/SquadLifecycleService.cs`: call `AntigravityMcpConfiguration.Ensure` directly after each `FactoryMcpConfiguration.Warnings` call (install and update paths), passing `_globalRoots`, `request.DryRun` and the docs server command (null until T3 supplies it).
         - Tests: `tests/KyberWeave.Application.Tests/Squad/AntigravityMcpConfigurationTests.cs` (new).
       - **Design (advanced):** failure mode — the write loses or reorders another server's bytes, overwrites an existing entry, or quotes a key in a warning.
-        - Acts only for Global scope with Antigravity targeted. The file is `mcp_config.json` under `ResolveGlobalRoot(SquadTarget.Antigravity)`. The entry is `kw-docs` with command `docsServerCommand`, or `kyber-weave-mcp` when null, and args `--any-repo`, serialized with `System.Text.Json`.
-        - A file over 1 MiB gets one warning and no write; the size is checked before its bytes are read.
+        - Acts only for Global scope with Antigravity targeted and a non-null `globalRoots`; all three are checked before `ResolveGlobalRoot` is called. The file is `mcp_config.json` under `ResolveGlobalRoot(SquadTarget.Antigravity)`. The entry is `kw-docs` with command `docsServerCommand`, or `kyber-weave-mcp` when null, and args `--any-repo`, serialized with `System.Text.Json`.
+        - A file over 1 MiB gets one warning and no write; the size is checked with `files.GetLength` before `ReadAllBytes` (D29).
+        - `JsonException`, `IOException` and `UnauthorizedAccessException` are caught around the size probe and read, the `args` check, and the write; each gives one fixed-text warning with the path and no write. The `FactoryMcpConfiguration` `{exception.Message}` warning pattern is not copied (D17).
         - Splice with `JsonServerSplice.Plan` at container `mcpServers`, server `kw-docs`; a missing file is planned against an empty object. Write `plan.Document` with `files.WriteAllBytesAtomic` only for `Inserted`. `ServerAlreadyPresent` writes nothing and warns once only when the existing args lack `--any-repo`. Every other outcome gets one fixed-text warning and no write. A dry run writes nothing and adds one "would add" note.
         - A warning carries the path and fixed text only: never file bytes, a value, `JsonSplicePlan.Message` or an exception message. Sanitize with `SquadLifecycleService.SanitizeTargetTokenForWarning`.
         - Bytes change only through `JsonServerSplice.Plan`'s `Inserted` document; nothing else is ever written.
-        - The `args` check on an existing entry reads with `JsonDocument` and reports nothing of the value.
+        - The `args` check on an existing entry reads with `JsonDocument` as leniently as `JsonServerSplice` does (BOM stripped first, comments skipped, trailing commas allowed) and reports nothing of the value.
       - **Commands:**
         - `kyber-weave review gates . --agent <agent> --task T2 --red`
         - `kyber-weave review gates . --agent <agent> --task T2`
@@ -153,14 +155,25 @@ tasks:
 
       |---|---|---|---|---|---|
 
-      | T2 | `tests/KyberWeave.Application.Tests/Squad/AntigravityMcpConfigurationTests.cs` (new, `KyberWeave.Application.Tests.Squad.AntigravityMcpConfigurationTests`; copy the setup of `KyberWeave.Application.Tests.Squad.FactoryMcpConfigurationDeploymentTests`) | `dotnet test tests/KyberWeave.Application.Tests/KyberWeave.Application.Tests.csproj -c Release --no-build --filter "FullyQualifiedName~KyberWeave.Application.Tests.Squad.AntigravityMcpConfigurationTests\|FullyQualifiedName~KyberWeave.Application.Tests.Squad.FactoryMcpConfigurationDeploymentTests"` | Missing file → created with only the `kw-docs` entry; directory missing → created. File with other servers → the entry is inserted and every byte outside the inserted span is identical (BOM case too); root object with no `mcpServers` → key inserted; empty `mcpServers` → no stray comma. Existing `kw-docs` with `--any-repo` → no write, no warning; existing `kw-docs` without it → no write, one warning. A file with comments or a trailing comma → entry inserted, other bytes identical. Invalid JSON, non-object root, non-object `mcpServers`, over 1 MiB → no write, one warning each. A secret marker string in the file never appears in any warning. Dry run → no write, one "would add" note. Second run → no write. Lifecycle: global install and global update with Antigravity insert the entry; project scope, instance scope and a target list without Antigravity write nothing. The command written is the resolved absolute path when given, `kyber-weave-mcp` otherwise. | `AntigravityMcpConfiguration` does not exist (compile failure), or the assertions fail | Both unit classes pass with non-zero count |
+      | T2 | `tests/KyberWeave.Application.Tests/Squad/AntigravityMcpConfigurationTests.cs` (new, `KyberWeave.Application.Tests.Squad.AntigravityMcpConfigurationTests`; copy the setup of `KyberWeave.Application.Tests.Squad.FactoryMcpConfigurationDeploymentTests`) | `dotnet test tests/KyberWeave.Application.Tests/KyberWeave.Application.Tests.csproj -c Release --no-build --filter "FullyQualifiedName~KyberWeave.Application.Tests.Squad.AntigravityMcpConfigurationTests\|FullyQualifiedName~KyberWeave.Application.Tests.Squad.FactoryMcpConfigurationDeploymentTests"` | Missing file → created with only the `kw-docs` entry; directory missing → created. File with other servers → the entry is inserted and every byte outside the inserted span is identical (BOM case too), asserted on raw bytes as `before[..offset] + inserted + before[offset..]`, never by reparsing; root object with no `mcpServers` → key inserted; empty `mcpServers` → no stray comma. Existing `kw-docs` with `--any-repo` → no write, no warning; existing `kw-docs` without it → no write, one warning. A file with comments or a trailing comma → entry inserted, other bytes identical; a commented, BOM-prefixed file that already has `kw-docs` → no write, no exception. Invalid JSON, non-object root, non-object `mcpServers`, over 1 MiB (with no `ReadAllBytes` call on it) → no write, one warning each. A read or write that throws `IOException` or `UnauthorizedAccessException` → no write, one fixed-text warning. A secret marker string in the file never appears in any warning. Dry run → no write, one "would add" note. Second run → no write. Lifecycle: global install and global update with Antigravity insert the entry; project scope, instance scope and a target list without Antigravity write nothing. The command written is the resolved absolute path when given, `kyber-weave-mcp` otherwise. | `AntigravityMcpConfiguration` does not exist (compile failure), or the assertions fail | Both unit classes pass with non-zero count |
+
+
+      #### Decisions this task cites
+
+      | ID | Question | Answer / decision | Mitigating and supporting information | Status / approval provenance |
+
+      |---|---|---|---|---|
+
+      | D29 | T2 must refuse a file over 1 MiB before reading it, but `ISquadFileAccess` has no size probe (T2 worker stop, 2026-11-25) | Add `long GetLength(string path)` to `ISquadFileAccess` in a new task T5 before T2: the length in bytes of the file at `path`, a symbolic link followed, `FileNotFoundException` when it is missing. `PhysicalSquadFileAccess` returns `new FileInfo(path).Length`, as `PhysicalFileSystem.GetLength` does; `InMemorySquadFileAccess` forwards to `InMemoryFileSystem.GetLength`; `FileSet`, both `NoFiles` and `StubFiles` throw `NotSupportedException`. D15 stays as written: T2 calls `GetLength` before `ReadAllBytes`. | The alternative (check size after reading) loads an arbitrarily large file into memory once; the probe is one member following the pattern T4 just used to add `WriteAllBytesAtomic`, and every implementer is in this repository, so the compiler finds them all. | autonomous: recommendation accepted |
+
+      | D17 | What a warning may contain | The file path and a fixed reason text chosen from the splice outcome. Never file bytes, a property value, `JsonSplicePlan.Message`, or an exception message: a `System.Text.Json` reader message can quote the offending character. | The file can hold API keys for other servers. | autonomous: recommendation accepted |
 
 
       Results of the tasks this one follows, as their workers reported them:
 
       {prior_results}
     agent: dev-hard
-    agent-confidence: 1
+    agent-confidence: 0.98
     difficulty: hard
     difficulty-source: architect
     technology: csharp
@@ -320,6 +333,88 @@ tasks:
     agent: dev-hard
     agent-confidence: 0.98
     difficulty: hard
+    difficulty-source: architect
+    technology: csharp
+  - id: T5
+    capabilities: C# seam widening across contract, Data adapter and test doubles; xUnit contract suite
+    depends-on:
+      - T4
+    files:
+      - src/KyberWeave.Contracts/Repositories/ISquadFileAccess.cs
+      - src/KyberWeave.Data/Squad/Deployment/SquadDeploymentAdapters.cs
+      - tests/KyberWeave.Testing/Squad/InMemorySquadFileAccess.cs
+      - tests/KyberWeave.Application.Tests/Squad/FactoryMcpConfigurationTests.cs
+      - tests/KyberWeave.Application.Tests/Squad/Instances/SquadInstanceServiceTests.cs
+      - tests/KyberWeave.Cli.Tests/SquadInstanceRemoveCommandTests.cs
+      - tests/KyberWeave.Cli.Tests/SquadUpdateCommandTests.cs
+      - tests/KyberWeave.Testing/Squad/SquadFileAccessWriteContract.cs
+      - tests/KyberWeave.Application.Tests/Squad/InMemorySquadFileAccessWriteContractTests.cs
+      - tests/KyberWeave.Integration.Tests/PhysicalSquadFileAccessWriteTests.cs
+    session: squad-agy
+    prompt: >
+      Task T5: Size probe and link-following fake on the Squad file seam
+
+      Worktree: {worktree}
+
+
+      - **Objective:** `ISquadFileAccess` can report a file's length without reading it, and the in-memory fake writes through a file link as the seam documents, so T2 can refuse an oversized file before reading it.
+
+      - **Capabilities:** C# seam widening across contract, Data adapter and test doubles; xUnit contract suite
+
+      - **Difficulty:** easy
+
+      - **Technology:** csharp
+
+      - **Session:** `squad-agy`
+
+      - **Depends on:** T4 (extends the `WriteAllBytesAtomic` member, contract suite and fake it added)
+
+      - **Files:**
+        - `src/KyberWeave.Contracts/Repositories/ISquadFileAccess.cs`: add `long GetLength(string path)` with an XML doc comment: the file's length in bytes, a symbolic link followed; `FileNotFoundException` when it is missing (D29).
+        - `src/KyberWeave.Data/Squad/Deployment/SquadDeploymentAdapters.cs`: `PhysicalSquadFileAccess.GetLength` returns `new FileInfo(path).Length`, as `PhysicalFileSystem.GetLength` does.
+        - `tests/KyberWeave.Testing/Squad/InMemorySquadFileAccess.cs`: `GetLength` forwards to `InMemoryFileSystem.GetLength`; `WriteAllBytesAtomic` writes to `files.GetFinalLinkTarget(path) ?? path` (D30). `InMemoryFileSystem` is not changed.
+        - `tests/KyberWeave.Application.Tests/Squad/FactoryMcpConfigurationTests.cs` (`FileSet`), `tests/KyberWeave.Application.Tests/Squad/Instances/SquadInstanceServiceTests.cs`, `tests/KyberWeave.Cli.Tests/SquadInstanceRemoveCommandTests.cs`, `tests/KyberWeave.Cli.Tests/SquadUpdateCommandTests.cs` (the `NoFiles` and `StubFiles` doubles): `GetLength` throws `NotSupportedException`.
+        - `tests/KyberWeave.Testing/Squad/SquadFileAccessWriteContract.cs`: two cases — length after a write equals the bytes written; length of a missing file throws `FileNotFoundException`.
+        - `tests/KyberWeave.Application.Tests/Squad/InMemorySquadFileAccessWriteContractTests.cs`: fake-only cases — a write to a file link keeps the link and fills its target; `GetLength` on the link returns the target's length.
+        - `tests/KyberWeave.Integration.Tests/PhysicalSquadFileAccessWriteTests.cs` (CI only): `GetLength` on a symlink returns the target's length; skipped on Windows.
+      - **Commands:**
+        - `kyber-weave review gates . --agent <agent> --task T5 --red`
+        - `kyber-weave review gates . --agent <agent> --task T5`
+      - **Acceptance:**
+        - Every T5 Test-contract case passes over `InMemorySquadFileAccess`; T4's contract cases pass unchanged.
+        - The integration project builds (`dotnet build tests/KyberWeave.Integration.Tests/KyberWeave.Integration.Tests.csproj -c Release`), reported by the worker; its run is CI's (D28).
+
+      Reference content for this task, quoted exactly from its source document and complete as given:
+
+
+      #### Test contract row for T5
+
+      | Task | Test project or file | Runner command | Observable behavior | RED evidence required | GREEN acceptance |
+
+      |---|---|---|---|---|---|
+
+      | T5 | `tests/KyberWeave.Testing/Squad/SquadFileAccessWriteContract.cs` (extend, runs via `KyberWeave.Application.Tests.Squad.InMemorySquadFileAccessWriteContractTests`); `tests/KyberWeave.Application.Tests/Squad/InMemorySquadFileAccessWriteContractTests.cs` (extend with fake-only link cases); `tests/KyberWeave.Integration.Tests/PhysicalSquadFileAccessWriteTests.cs` (extend, CI only, D28) | `dotnet test tests/KyberWeave.Application.Tests/KyberWeave.Application.Tests.csproj -c Release --no-build --filter "FullyQualifiedName~KyberWeave.Application.Tests.Squad.InMemorySquadFileAccessWriteContractTests"` | Contract: `GetLength` after a write returns the number of bytes written; `GetLength` on a missing file throws `FileNotFoundException`. Fake only: a write to a file link leaves the link a link (`GetLinkTarget` unchanged) and the target holds the bytes; `GetLength` on the link returns the target's length. Integration (CI only): the inherited contract cases run on disk, and `GetLength` on a symlink returns the target's length (skipped on Windows). | `ISquadFileAccess.GetLength` does not exist (compile failure), or the fake link case fails against T4's fake | The unit class passes with non-zero count, T4's cases unchanged; the integration project builds |
+
+
+      #### Decisions this task cites
+
+      | ID | Question | Answer / decision | Mitigating and supporting information | Status / approval provenance |
+
+      |---|---|---|---|---|
+
+      | D29 | T2 must refuse a file over 1 MiB before reading it, but `ISquadFileAccess` has no size probe (T2 worker stop, 2026-11-25) | Add `long GetLength(string path)` to `ISquadFileAccess` in a new task T5 before T2: the length in bytes of the file at `path`, a symbolic link followed, `FileNotFoundException` when it is missing. `PhysicalSquadFileAccess` returns `new FileInfo(path).Length`, as `PhysicalFileSystem.GetLength` does; `InMemorySquadFileAccess` forwards to `InMemoryFileSystem.GetLength`; `FileSet`, both `NoFiles` and `StubFiles` throw `NotSupportedException`. D15 stays as written: T2 calls `GetLength` before `ReadAllBytes`. | The alternative (check size after reading) loads an arbitrarily large file into memory once; the probe is one member following the pattern T4 just used to add `WriteAllBytesAtomic`, and every implementer is in this repository, so the compiler finds them all. | autonomous: recommendation accepted |
+
+      | D30 | The in-memory fake replaces a symlink with a regular file on `WriteAllBytesAtomic` (T4 report) | `InMemoryFileSystem` stays unchanged: its atomic write models `IWritableFileSystem`, whose physical adapter calls `AtomicFile` without link write-through, so link replacement is the right model there. `InMemorySquadFileAccess.WriteAllBytesAtomic` (in T5) writes to `files.GetFinalLinkTarget(path) ?? path`, so the fake keeps the link as `ISquadFileAccess` documents; a T5 unit test proves it on the fake. T2 adds no link case; the real-disk link proof stays in `PhysicalSquadFileAccessWriteTests` in CI (D28). | The fake disagreed with the seam contract T4 wrote, in a file T4 changed, so this run fixes it (own what you touch). Changing `InMemoryFileSystem` would change every other test that uses its atomic write. | autonomous: recommendation accepted |
+
+      | D28 | Where the file-mode and link proof runs | `AtomicFile` is the Kernel file-system adapter and calls the static `File` API; there is no seam under it, so the mode branch cannot run in memory. Its proof is two CI-only classes in `tests/KyberWeave.Integration.Tests`: `AtomicFileUnixModeTests` (the new overload with `preserveUnixFileMode: true` keeps a `0600` target at `0600`, also through a symlink; with `false` and through the two existing overloads the target takes the default mode as today; a new file gets the default mode; skipped on Windows) and `PhysicalSquadFileAccessWriteTests` (the adapter keeps `0600` and keeps a symlink as a symlink whose target gets the bytes). They are not in the T2 task gate. Review checks the pull request's CI integration job passed for both before approving. | Host rule, `AGENTS.md` "Three kinds of test" and "Integration tests live in `tests/KyberWeave.Integration.Tests`": a unit test touches no disk, and task gates and the council run unit and content projects only, never the integration project. The plan reviewer's alternative (a temp-file unit test, or the integration class in the gate) breaks that rule. | autonomous: recommendation accepted |
+
+
+      Results of the tasks this one follows, as their workers reported them:
+
+      {prior_results}
+    agent: dev-easy
+    agent-confidence: 0.98
+    difficulty: easy
     difficulty-source: architect
     technology: csharp
 worker-roster: tiered
