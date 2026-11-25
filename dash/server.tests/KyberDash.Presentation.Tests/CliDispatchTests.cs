@@ -309,6 +309,41 @@ public class CliDispatchTests
         Assert.Equal(0, run.ExitCode);
     }
 
+    [Theory]
+    [InlineData("stop")]
+    [InlineData("verify")]
+    [InlineData("ensure")]
+    public async Task EngineRejectsAnUnusableStateDirWithExitTwoInsteadOfCrashing(string verb)
+    {
+        string[] args = verb switch
+        {
+            "verify" => ["engine", "verify", "--version", "2.0.0", "--state-dir", "bad\0dir"],
+            "ensure" => ["engine", "ensure", "--if-running", "--state-dir", "bad\0dir"],
+            _ => ["engine", verb, "--state-dir", "bad\0dir"],
+        };
+
+        CliRun run = await CliRun.ExecuteAsync(args, containerArgs: []);
+
+        Assert.Equal(2, run.ExitCode);
+        Assert.Contains("--state-dir", run.Error, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task AGlobalStateDirTheContainerCannotResolveExitsTwoInsteadOfCrashing()
+    {
+        using StringWriter output = new();
+        using StringWriter error = new();
+
+        int exitCode = await Program.RunAsync(
+            ["engine", "stop", "--state-dir", "bad\0dir"],
+            output,
+            error,
+            TestContext.Current.CancellationToken);
+
+        Assert.Equal(2, exitCode);
+        Assert.Contains("not a usable path", error.ToString(), StringComparison.Ordinal);
+    }
+
     [Fact]
     public async Task UnknownEngineSubcommandPrintsTheCurrentUsage()
     {
@@ -501,13 +536,14 @@ public class CliDispatchTests
         public static async Task<CliRun> ExecuteAsync(
             string[] args,
             Action<PresentationBuilder>? configure = null,
-            int processExitCode = 0)
+            int processExitCode = 0,
+            string[]? containerArgs = null)
         {
             PresentationBuilder builder = new();
             builder.ApplyCannedResults();
             configure?.Invoke(builder);
 
-            using ServiceProvider container = Program.BuildProvider(args);
+            using ServiceProvider container = Program.BuildProvider(containerArgs ?? args);
             IServiceProvider services = PresentationBuilder.Overlay(container, builder);
 
             RecordingProcessMode processMode = new(processExitCode);

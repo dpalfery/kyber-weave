@@ -1,4 +1,5 @@
 using System.Globalization;
+using System.Security;
 using System.Runtime.InteropServices;
 using System.Text.Json;
 using KyberDash.Application;
@@ -70,8 +71,20 @@ public static partial class Program
         ArgumentNullException.ThrowIfNull(output);
         ArgumentNullException.ThrowIfNull(error);
 
-        await using ServiceProvider provider = BuildProvider(args);
-        return await RunAsync(args, output, error, provider, null, cancellationToken).ConfigureAwait(false);
+        ServiceProvider provider;
+        try
+        {
+            provider = BuildProvider(args);
+        }
+        catch (Exception exception) when (exception is ArgumentException or NotSupportedException or PathTooLongException or SecurityException)
+        {
+            // --db and --state-dir come from the operator; a path the platform cannot resolve is a usage error.
+            await error.WriteLineAsync($"kyberdash: --db or --state-dir is not a usable path ({exception.Message})").ConfigureAwait(false);
+            return 2;
+        }
+
+        await using ServiceProvider owned = provider;
+        return await RunAsync(args, output, error, owned, null, cancellationToken).ConfigureAwait(false);
     }
 
     /// <summary>
@@ -427,7 +440,13 @@ public static partial class Program
         for (int index = 1; index < args.Length; index++)
         {
             if (args[index] == "--state-dir" && index + 1 < args.Length)
-                stateDir = Path.GetFullPath(args[++index]);
+            {
+                if (!TryFullPath(args[++index], out stateDir, out string stateDirProblem))
+                {
+                    await error.WriteLineAsync($"kyberdash engine ensure: {stateDirProblem}").ConfigureAwait(false);
+                    return 2;
+                }
+            }
         }
 
         EngineEnsureReport report = await lifecycle
@@ -452,7 +471,12 @@ public static partial class Program
             bool hasValue = index + 1 < args.Length;
             if (args[index] == "--state-dir" && hasValue)
             {
-                stateDir = Path.GetFullPath(args[++index]);
+                if (!TryFullPath(args[++index], out stateDir, out string pathProblem))
+                {
+                    options = new EngineOptions(null, null, 0);
+                    problem = $"kyberdash engine {verb}: {pathProblem}";
+                    return false;
+                }
             }
             else if (args[index] == "--version" && hasValue)
             {
@@ -476,6 +500,23 @@ public static partial class Program
         options = new EngineOptions(stateDir, version, waitSeconds);
         problem = string.Empty;
         return true;
+    }
+
+    /// <summary>Resolves an operator-supplied <c>--state-dir</c>; a path the platform cannot resolve is a usage error, not a crash.</summary>
+    private static bool TryFullPath(string raw, out string? fullPath, out string problem)
+    {
+        try
+        {
+            fullPath = Path.GetFullPath(raw);
+            problem = string.Empty;
+            return true;
+        }
+        catch (Exception exception) when (exception is ArgumentException or NotSupportedException or PathTooLongException or SecurityException)
+        {
+            fullPath = null;
+            problem = $"--state-dir is not a usable path ({exception.Message})";
+            return false;
+        }
     }
 
     private static async Task<int> WriteEngineReportAsync(
