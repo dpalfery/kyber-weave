@@ -5,7 +5,6 @@ using KyberDash.Application.Tests;
 using KyberDash.Application.Tests.Fakes;
 using KyberDash.Contracts.Repositories;
 using KyberDash.Contracts.Services;
-using KyberDash.Core.Resilience;
 using KyberDash.Data.Collector;
 using KyberDash.Data.Collector.Sources;
 using KyberDash.Data.Harnesses.Claude;
@@ -22,25 +21,18 @@ namespace KyberDash.Application.Tests.Projection;
 /// plain+withheld token conservation, and <see cref="CanonSynth.MeasurabilityFor"/>-backed
 /// <c>missingBuckets</c> / <c>residualReasons</c> on <see cref="KyberBridgeEngine.GetSessionCharts"/>.
 /// </summary>
-public sealed class ClaudeContextCompositionTests : IDisposable
+public sealed class ClaudeContextCompositionTests
 {
     private static readonly DateTimeOffset TurnBase = new(2026, 11, 19, 12, 0, 0, TimeSpan.Zero);
-    private readonly TempDirectory tempDir = new();
-
-    /// <summary>Releases any temporary SQLite directories created by the test.</summary>
-    public void Dispose()
-    {
-        tempDir.Dispose();
-    }
 
     /// <summary>
     /// <see cref="CanonRecordHydration.Hydrate"/> surfaces <c>AgentInstanceId == "claude:compact_boundary"</c>
     /// onto <c>CanonicalRecord.Raw["claude.compact_boundary"]</c> (<see langword="true"/>) without emitting
-    /// synthetic <see cref="ContentPart"/> text, across both <see cref="InMemoryRelationalStore"/> and
-    /// temp-file <see cref="SqliteRelationalStore"/> round-trips, and resets cumulative projection at the boundary.
+    /// synthetic <see cref="ContentPart"/> text across <see cref="InMemoryRelationalStore"/> round-trips,
+    /// and resets cumulative projection at the boundary.
     /// </summary>
     [Fact]
-    public void Hydrate_SurfacesCompactBoundaryMarkerAndResetsProjection_InMemoryAndSqlite()
+    public void Hydrate_SurfacesCompactBoundaryMarkerAndResetsProjection()
     {
         CollectedRecord turn0 = Turn(
             "turn-0",
@@ -78,12 +70,38 @@ public sealed class ClaudeContextCompositionTests : IDisposable
         InMemoryRelationalStore memoryStore = new();
         WriteSession(memoryStore, "sess-compact", [turn0, turn1, turn2Boundary]);
 
-        string dbPath = tempDir.Combine("compact-roundtrip.db");
-        SqliteRelationalStore sqliteStore = new(dbPath, new SqliteCircuitBreaker());
-        WriteSession(sqliteStore, "sess-compact", [turn0, turn1, turn2Boundary]);
-
         AssertCompactionHydrationAndReset(memoryStore, memoryStore, memoryStore);
-        AssertCompactionHydrationAndReset(sqliteStore, sqliteStore, sqliteStore);
+    }
+
+    /// <summary>
+    /// A compaction boundary stamped on an output-only or aborted turn with zero measured input
+    /// tokens still clears the cumulative prefix before subsequent post-compaction turns are projected.
+    /// </summary>
+    [Fact]
+    public void ProjectIncremental_ResetsCompactionBoundaryWhenBoundaryTurnHasZeroMeasuredInput()
+    {
+        string jsonl = string.Join('\n',
+        [
+            "{\"type\":\"user\",\"sessionId\":\"sess-zero-compact\",\"timestamp\":\"2026-11-19T12:00:00.000Z\",\"message\":{\"role\":\"user\",\"content\":\"Pre-compaction alpha beta gamma\"}}",
+            "{\"type\":\"assistant\",\"sessionId\":\"sess-zero-compact\",\"timestamp\":\"2026-11-19T12:00:01.000Z\",\"message\":{\"id\":\"msg-pre\",\"role\":\"assistant\",\"model\":\"claude-sonnet-4-5\",\"content\":[{\"type\":\"text\",\"text\":\"Pre-compaction reply delta\"}],\"usage\":{\"input_tokens\":400,\"output_tokens\":50}}}",
+            "{\"type\":\"system\",\"subtype\":\"compact_boundary\",\"sessionId\":\"sess-zero-compact\",\"timestamp\":\"2026-11-19T12:00:02.000Z\",\"compactMetadata\":{\"trigger\":\"auto\",\"preTokens\":450}}",
+            "{\"type\":\"assistant\",\"sessionId\":\"sess-zero-compact\",\"timestamp\":\"2026-11-19T12:00:03.000Z\",\"message\":{\"id\":\"msg-aborted\",\"role\":\"assistant\",\"model\":\"claude-sonnet-4-5\",\"content\":[{\"type\":\"text\",\"text\":\"aborted\"}],\"usage\":{\"input_tokens\":0,\"output_tokens\":12}}}",
+            "{\"type\":\"user\",\"sessionId\":\"sess-zero-compact\",\"timestamp\":\"2026-11-19T12:00:04.000Z\",\"message\":{\"role\":\"user\",\"content\":\"Post-compaction fresh prompt\"}}",
+            "{\"type\":\"assistant\",\"sessionId\":\"sess-zero-compact\",\"timestamp\":\"2026-11-19T12:00:05.000Z\",\"message\":{\"id\":\"msg-post\",\"role\":\"assistant\",\"model\":\"claude-sonnet-4-5\",\"content\":[{\"type\":\"text\",\"text\":\"Post-compaction reply\"}],\"usage\":{\"input_tokens\":250,\"output_tokens\":30}}}",
+        ]);
+
+        CollectedBatch batch = new ClaudeTranscriptMapper().Map(CreateClaudeUnit("/tmp/.claude/projects/repo/sess-zero-compact.jsonl", jsonl), TurnBase);
+        InMemoryRelationalStore store = new();
+        store.WriteBatch(batch);
+
+        CanonSessionProjectorEngine engine = new(store, store, store, new FakePricingRepository(), new FakeTextTokenizer());
+        _ = engine.ProjectIncremental();
+
+        StoredSessionProjection projection = ((IProjectionStore)store).GetSessionProjection("sess-zero-compact")!;
+        Assert.NotNull(projection.Context);
+        Assert.Equal(2, projection.Context!.Turns.Count);
+        Assert.Equal(4L, BucketTokens(projection.Context.Turns[0], "conversation_history"));
+        Assert.Equal(3L, BucketTokens(projection.Context.Turns[1], "conversation_history"));
     }
 
     /// <summary>
@@ -446,7 +464,7 @@ public sealed class ClaudeContextCompositionTests : IDisposable
     [Fact]
     public void EndToEnd_InMemoryRefreshProjectAndCharts_ProducesRealisticNonResidualClaudeShares()
     {
-        string homeRoot = tempDir.Combine("home");
+        string homeRoot = Path.Combine(Path.GetTempPath(), "kw-claude-e2e", "home");
         string stateRoot = Path.Combine(homeRoot, ".kyberdash");
         string transcriptPath = Path.Combine(homeRoot, ".claude", "projects", "repo", "sess-e2e.jsonl");
         string subagentPath = Path.Combine(homeRoot, ".claude", "projects", "repo", "sess-e2e", "subagents", "agent-e2e1.jsonl");

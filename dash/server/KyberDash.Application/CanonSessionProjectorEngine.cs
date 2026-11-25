@@ -3287,11 +3287,10 @@ public partial class CanonSessionProjectorEngine
             .Where(record => !IsSideAgentTurn(record) && (resolvedIsSubagent || TryExtractSubagentParentId(record.SessionId) is null))
             .ToList();
         List<CanonicalRecord> contextRecords = mainThreadRecords.Count > 0 ? mainThreadRecords : turnRecords;
-        List<CanonicalRecord> measuredTurns = contextRecords.Where(static record => CanonPricing.MeasuredInput(record.Tokens) > 0).ToList();
 
         List<ContextTurn> contextTurns = IsClaudeHarness(harness)
-            ? BuildClaudeContextTurns(measuredTurns, countTokens)
-            : BuildStandardContextTurns(measuredTurns);
+            ? BuildClaudeContextTurns(contextRecords, countTokens)
+            : BuildStandardContextTurns(contextRecords.Where(static record => CanonPricing.MeasuredInput(record.Tokens) > 0).ToList());
 
         IReadOnlyList<CanonicalRecord> windowRecords = contextRecords.Count > 0 ? contextRecords : records;
         ContextWindowResult window = CanonPricing.ContextLimitOf(windowRecords);
@@ -3371,17 +3370,22 @@ public partial class CanonSessionProjectorEngine
     }
 
     private static List<ContextTurn> BuildClaudeContextTurns(
-        IReadOnlyList<CanonicalRecord> measuredTurns,
+        IReadOnlyList<CanonicalRecord> contextRecords,
         TextTokenCounter countTokens)
     {
-        List<ContextTurn> contextTurns = new(measuredTurns.Count);
+        List<ContextTurn> contextTurns = new(contextRecords.Count);
         Dictionary<CumulativeSummaryKey, CumulativeBucketEntry> cumulative = [];
 
-        foreach (CanonicalRecord record in measuredTurns)
+        foreach (CanonicalRecord record in contextRecords)
         {
             if (HasCompactBoundary(record))
             {
                 cumulative.Clear();
+            }
+
+            if (CanonPricing.MeasuredInput(record.Tokens) <= 0)
+            {
+                continue;
             }
 
             (List<ContextPart> ownInputParts, List<ContextPart> ownAssistantParts) = SplitClaudeTurnParts(record);
