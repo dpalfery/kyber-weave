@@ -443,14 +443,14 @@ public sealed class SelfUpdateSystemTests
     }
 
     [Fact]
-    public void TheFinishUpdateChildSharesTheConsoleWithFifteenMinutes()
+    public void TheFinishUpdateChildSharesTheConsoleWithTwentyFiveMinutes()
     {
         _console.ExitCode = 3;
 
         Assert.Equal(3, _system.StartFinishingProcess("kyber-weave", ["update", "--finish-update"], discardOutput: false));
 
         (string FileName, IReadOnlyList<string> Arguments, TimeSpan Timeout, bool DiscardOutput) run = Assert.Single(_console.Runs);
-        Assert.Equal(TimeSpan.FromMinutes(15), run.Timeout);
+        Assert.Equal(TimeSpan.FromMinutes(25), run.Timeout);
         Assert.False(run.DiscardOutput);
         Assert.Empty(_processes.Calls);
     }

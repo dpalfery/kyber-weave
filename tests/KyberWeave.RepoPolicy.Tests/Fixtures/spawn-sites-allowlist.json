@@ -1133,7 +1133,7 @@
       "file": "src/KyberWeave.Data/Update/ProcessConsoleLauncher.cs",
       "text": "ProcessStartInfo child = new(fileName) { UseShellExecute = false };",
       "count": 1,
-      "bound": "Builds only; nothing starts on this line. Started by Run, whose wait is the caller's bound: TrayUpdateTimeout = 5 min, FinishUpdateTimeout = 15 min or RehearsalTimeout = 30 s, all set in SelfUpdateSystem."
+      "bound": "Builds only; nothing starts on this line. Started by Run, whose wait is the caller's bound: TrayUpdateTimeout = 5 min, FinishUpdateTimeout = 25 min or RehearsalTimeout = 30 s, all set in SelfUpdateSystem."
     },
     {
       "file": "src/KyberWeave.Data/Update/ProcessConsoleLauncher.cs",
