@@ -341,4 +341,6 @@ NOT VERIFIED: one tray and one tray-owned engine on David's Mac after a publishe
 | Design harvest: Tray supervision | [KyberDash runbook](../dash/runbook.md), [architecture](../dash/architecture.md) | extends-component | KyberDash | 2026-11-25 | archived |
 | Design harvest: Self-update reconciliation | [install](../install.md), [distribution](../distribution.md), [CLI command surface](../cli-command-surface.md) | extends-component | Distribution | 2026-11-25 | archived |
 
+Seam note: the tray verbs now run their tools (`pgrep`, `pkill`, `open`, `tasklist`) through a `TrayToolRunner` delegate and `TrayPlatform` in `dash/server/KyberDash.Application/Services/TrayToolSeam.cs`, with the decisions pinned by `MenubarServiceTrayTests`; this supersedes the plan's PR note that `MenubarService` has no seam (D12), and the destination is [KyberDash runbook, Tray verbs](../dash/runbook.md).
+
 ADR waiver: no ADR — ADR waiver: the plan applies the established ensure-or-attach contract of ADR 0039 and tray ownership of ADR 0023; no new constraint with rejected alternatives.

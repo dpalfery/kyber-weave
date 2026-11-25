@@ -79,9 +79,10 @@ checkout to serve it; `KYBERDASH_DASH_DIR` still overrides it with a directory o
 The tray ships as its own release asset from `0.1.7-rc.13`:
 `kyberdash menubar` installs it, after checking its SHA-256 and — on macOS — its code
 signature, team id and Gatekeeper acceptance (`install.sh --with-menubar` does the same on
-macOS). `kyber-weave update` updates an installed tray by delegating to
-`kyberdash menubar --update`, which quits the running tray, replaces it and relaunches it,
-restoring the previous app if any step fails. On Linux, `kyberdash menubar` exits 1: the tray
+macOS). `kyber-weave update` restarts an installed tray so it owns a fresh engine: it quits the
+tray, stops the engine, runs `kyberdash menubar --update` (replace the tray, restoring the previous
+app if any step fails) when the release or tray changed or `kyberdash menubar --launch` otherwise,
+then verifies the engine version and that exactly one tray runs (see "Tray verbs" below). On Linux, `kyberdash menubar` exits 1: the tray
 ships for macOS and Windows only.
 
 ---
