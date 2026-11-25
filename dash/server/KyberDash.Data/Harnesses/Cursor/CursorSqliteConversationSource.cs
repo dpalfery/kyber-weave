@@ -78,7 +78,8 @@ public class CursorSqliteConversationSource : ISqliteConversationSource
     /// Maps each composer id to the <c>workspace.json</c> of the workspace that claims it (D14). The map is
     /// built once per listing from every <c>Cursor/User/workspaceStorage/&lt;hash&gt;/state.vscdb</c>, whose
     /// <c>ItemTable</c> row <c>composer.composerData</c> lists <c>allComposers[].composerId</c>. A workspace
-    /// database that cannot be opened, has no such row, or holds malformed JSON adds one warning and is skipped.
+    /// database that cannot be opened or holds malformed JSON adds one warning and is skipped. A database with no
+    /// such row never used chat, so it holds no composers and adds no problem.
     /// </summary>
     private static Dictionary<string, string> BuildWorkspaceMap(SqliteConversationContext context)
     {
@@ -149,9 +150,10 @@ public class CursorSqliteConversationSource : ISqliteConversationSource
             break;
         }
 
+        // A workspace with no composer.composerData row never used chat: it holds no composers, and that is not a fault (D14).
         if (value is null)
         {
-            throw new InvalidDataException("the ItemTable has no composer.composerData text.");
+            return [];
         }
 
         using JsonDocument document = JsonDocument.Parse(value);

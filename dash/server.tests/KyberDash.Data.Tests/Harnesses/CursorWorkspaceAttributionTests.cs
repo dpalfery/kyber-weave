@@ -33,7 +33,7 @@ public class CursorWorkspaceAttributionTests
     }
 
     [Fact]
-    public void ListConversations_SkipsWorkspaceWithMissingRowAndWarnsOnce()
+    public void ListConversations_WorkspaceWithMissingRowHoldsNoComposersAndAddsNoProblem()
     {
         InMemoryHarnessSqliteSource sqlite = GlobalWithComposers("c1", "c2");
         sqlite.AddDatabase(StorageRoot + "/aaa/state.vscdb");
@@ -44,8 +44,7 @@ public class CursorWorkspaceAttributionTests
 
         Assert.Null(keys["c1"]);
         Assert.Equal(StorageRoot + "/bbb/workspace.json", keys["c2"]);
-        CollectedProblem problem = Assert.Single(problems);
-        Assert.Equal("warning", problem.Severity);
+        Assert.Empty(problems);
     }
 
     [Fact]
