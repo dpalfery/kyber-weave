@@ -2,6 +2,10 @@ using System.Globalization;
 using System.Text;
 using KyberDash.Data.Collector;
 using KyberDash.Data.Collector.Sources;
+using KyberDash.Data.Harnesses.Cursor;
+using KyberDash.Data.Harnesses.Devin;
+using KyberDash.Data.Harnesses.Kilo;
+using KyberDash.Data.Harnesses.Warp;
 using KyberDash.Data.Repositories;
 using KyberDash.Domain;
 using Xunit;
@@ -97,14 +101,10 @@ public class HarnessSourceRegistryTests
     {
         FakeHarnessFileSystem fs = new();
         fs.AddFile(Combine(HomeRoot, ".commandcode/projects/my-repo/cc-1.jsonl"), "{}", BaselineUtc);
-        fs.AddFile(Combine(HomeRoot, ".local/share/kilo/kilo.db"), "sqlite", BaselineUtc);
         fs.AddFile(Combine(HomeRoot, "Library/Application Support/Code/User/globalStorage/kilocode.kilo-code/tasks/k1/ui_messages.json"), "[]", BaselineUtc);
         fs.AddFile(Combine(HomeRoot, ".local/share/devin/cli/transcripts/devin-1.json"), "{}", BaselineUtc);
-        fs.AddFile(Combine(HomeRoot, ".local/share/devin/cli/sessions.db"), "sqlite", BaselineUtc);
-        fs.AddFile(Combine(HomeRoot, "Library/Group Containers/2BBY89MBSN.dev.warp/Library/Application Support/dev.warp.Warp-Stable/warp.sqlite"), "sqlite", BaselineUtc);
         fs.AddFile(Combine(HomeRoot, ".factory/sessions/proj/droid-1.jsonl"), "{}", BaselineUtc);
         fs.AddFile(Combine(HomeRoot, ".factory/sessions/proj/droid-1.settings.json"), "{}", BaselineUtc);
-        fs.AddFile(Combine(HomeRoot, "Library/Application Support/Cursor/User/globalStorage/state.vscdb"), "sqlite", BaselineUtc);
         fs.AddFile(Combine(HomeRoot, ".cursor/projects/my-proj/agent-transcripts/ca-1.jsonl"), "{}", BaselineUtc);
         fs.AddFile(Combine(HomeRoot, "Library/Application Support/Code/User/globalStorage/saoudrizwan.claude-dev/tasks/c1/ui_messages.json"), "[]", BaselineUtc);
         fs.AddFile(Combine(HomeRoot, ".cline/data/sessions/cs1/cs1.messages.json"), "[]", BaselineUtc);
@@ -118,18 +118,14 @@ public class HarnessSourceRegistryTests
 
         Assert.Empty(result.Problems);
         Assert.Contains(result.Sources, static s => s.HarnessId == "commandcode" && s.SourceKey.EndsWith("cc-1.jsonl", StringComparison.Ordinal));
-        Assert.Contains(result.Sources, static s => s.HarnessId == "kilo-shared-runtime" && s.SourceKey.EndsWith("kilo.db", StringComparison.Ordinal));
         Assert.Contains(result.Sources, static s => s.HarnessId == "kilo-vscode-legacy" && s.SourceKey.EndsWith("ui_messages.json", StringComparison.Ordinal));
         Assert.Contains(result.Sources, static s => s.HarnessId == "devin" && s.SourceKey.EndsWith("devin-1.json", StringComparison.Ordinal));
-        Assert.Contains(result.Sources, static s => s.HarnessId == "devin" && s.SourceKey.EndsWith("sessions.db", StringComparison.Ordinal));
-        Assert.Contains(result.Sources, static s => s.HarnessId == "warp" && s.SourceKey.EndsWith("warp.sqlite", StringComparison.Ordinal));
 
         SourceUnit droidUnit = Assert.Single(result.Sources, static s => s.HarnessId == "droid");
         Assert.EndsWith("droid-1.jsonl", droidUnit.SourceKey, StringComparison.Ordinal);
         Assert.NotNull(droidUnit.CompanionKey);
         Assert.EndsWith("droid-1.settings.json", droidUnit.CompanionKey, StringComparison.Ordinal);
 
-        Assert.Contains(result.Sources, static s => s.HarnessId == "cursor" && s.SourceKey.EndsWith("state.vscdb", StringComparison.Ordinal));
         Assert.Contains(result.Sources, static s => s.HarnessId == "cursor" && s.SourceKey.EndsWith("ca-1.jsonl", StringComparison.Ordinal));
         Assert.Contains(result.Sources, static s => s.HarnessId == "cline" && s.SourceKey.EndsWith("ui_messages.json", StringComparison.Ordinal));
         Assert.Contains(result.Sources, static s => s.HarnessId == "cline-cli" && s.SourceKey.EndsWith("cs1.messages.json", StringComparison.Ordinal));
@@ -304,6 +300,181 @@ public class HarnessSourceRegistryTests
         Assert.Equal("commandcode", batch.Source.HarnessId);
         Assert.Equal(SourceKind.File, batch.Source.Kind);
         Assert.Equal(path, batch.Source.Locator);
+    }
+
+    [Fact]
+    public void Kilo_DiscoversOneUnitPerConversationAndReadsTheExport()
+    {
+        string relative = ".local/share/kilo/kilo.db";
+        SqliteRig rig = new(relative, new KiloSqliteConversationSource());
+        rig.Database.AddRow("kilo-roots", Row(("id", "root-1"), ("title", "Root")));
+        rig.Database.AddRow("kilo-revision", Row(("max_updated", 1_700_000_000_000L), ("message_count", 2L)));
+        rig.Database.AddRow("kilo-root", Row(("id", "root-1"), ("title", "Root")));
+
+        SourceUnit unit = rig.DiscoverSingle("kilo-shared-runtime");
+
+        rig.AssertUnit(unit, "kilo-shared-runtime", "kilo", "kilo-sqlite-reader", "kilo-sqlite", "root-1");
+        Assert.Contains("\"root-1\"", rig.ReadExport("kilo-shared-runtime", unit), StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Warp_DiscoversOneUnitPerConversationAndReadsTheExport()
+    {
+        string relative = "Library/Group Containers/2BBY89MBSN.dev.warp/Library/Application Support/dev.warp.Warp-Stable/warp.sqlite";
+        SqliteRig rig = new(relative, new WarpSqliteConversationSource());
+        rig.Database.AddRow("warp.conversations", Row(("conversation_id", "conv-1"), ("last_modified_at", "2026-11-01 10:00:00")));
+        rig.Database.AddRow(
+            "warp.conversation",
+            Row(("conversation_id", "conv-1"), ("conversation_data", "{}"), ("last_modified_at", "2026-11-01 10:00:00")));
+
+        SourceUnit unit = rig.DiscoverSingle("warp");
+
+        rig.AssertUnit(unit, "warp", "warp", "warp-sqlite-reader", "warp-sqlite", "conv-1");
+        Assert.Contains("conv-1", rig.ReadExport("warp", unit), StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Devin_DiscoversOneSqliteUnitPerSessionAndKeepsTranscriptUnits()
+    {
+        string relative = ".local/share/devin/cli/sessions.db";
+        SqliteRig rig = new(relative, new DevinSqliteConversationSource());
+        rig.Files.AddFile(Combine(HomeRoot, ".local/share/devin/cli/transcripts/devin-1.json"), "{}", BaselineUtc);
+        rig.Database.AddRow(
+            "devin.conversations",
+            Row(("id", "sess-1"), ("last_activity_at", "2026-11-01T10:00:00Z"), ("node_count", 3L)));
+        rig.Database.AddRow(
+            "devin.session",
+            Row(
+                ("id", "sess-1"),
+                ("model", "m"),
+                ("title", "t"),
+                ("working_directory", "/w"),
+                ("created_at", "2026-11-01T09:00:00Z"),
+                ("last_activity_at", "2026-11-01T10:00:00Z"),
+                ("metadata", null)));
+
+        SourceDiscoveryResult result = rig.Registry.DiscoverForHarness("devin", rig.Context());
+
+        Assert.Empty(result.Problems);
+        SourceUnit transcript = Assert.Single(result.Sources, static s => s.Format == "devin-transcript-json");
+        Assert.EndsWith("devin-1.json", transcript.SourceKey, StringComparison.Ordinal);
+        Assert.Equal(HarnessSourceRegistry.DefaultParserContractVersion, transcript.ParserContractVersion);
+        SourceUnit unit = Assert.Single(result.Sources, static s => s.Format == "devin-sqlite");
+        rig.AssertUnit(unit, "devin", "devin", "devin-reader", "devin-sqlite", "sess-1");
+        Assert.Contains("sess-1", rig.ReadExport("devin", unit), StringComparison.Ordinal);
+        Assert.Equal("{}", rig.Registry.GetReader("devin")!.Read(transcript, rig.Files)!.RawText);
+    }
+
+    [Fact]
+    public void Cursor_DiscoversOneVscdbUnitPerComposerAndKeepsAgentTranscripts()
+    {
+        string relative = "Library/Application Support/Cursor/User/globalStorage/state.vscdb";
+        SqliteRig rig = new(relative, new CursorSqliteConversationSource());
+        rig.Files.AddFile(Combine(HomeRoot, ".cursor/projects/my-proj/agent-transcripts/ca-1.jsonl"), "{}", BaselineUtc);
+        rig.Database.AddRow("cursor-composers", Row(("composer_id", "comp-1"), ("bubble_count", 1L), ("max_rowid", 5L)));
+        rig.Database.AddRow(
+            "cursor-bubbles",
+            Row(
+                ("bubble_key", "bubbleId:comp-1:b1"),
+                ("input_tokens", 1L),
+                ("output_tokens", 2L),
+                ("model", "m"),
+                ("created_at", "2026-11-01T10:00:00Z"),
+                ("request_id", "r"),
+                ("user_text", "hi"),
+                ("text_length", 2L),
+                ("bubble_type", 1L),
+                ("context_window", null),
+                ("code_blocks", null)));
+
+        SourceDiscoveryResult result = rig.Registry.DiscoverForHarness("cursor", rig.Context());
+
+        Assert.Empty(result.Problems);
+        SourceUnit agent = Assert.Single(result.Sources, static s => s.Format == "cursor-agent-jsonl");
+        Assert.EndsWith("ca-1.jsonl", agent.SourceKey, StringComparison.Ordinal);
+        Assert.Equal(HarnessSourceRegistry.NoEstimatedTokensParserContractVersion, agent.ParserContractVersion);
+        SourceUnit unit = Assert.Single(result.Sources, static s => s.Format == "cursor-vscdb");
+        rig.AssertUnit(unit, "cursor", "cursor", "cursor-vscdb-reader", "cursor-vscdb", "comp-1");
+        Assert.Contains("bubbleId:comp-1:b1", rig.ReadExport("cursor", unit), StringComparison.Ordinal);
+        Assert.Equal("{}", rig.Registry.GetReader("cursor")!.Read(agent, rig.Files)!.RawText);
+    }
+
+    [Fact]
+    public void DiscoverAll_UnreadableWarpDatabase_YieldsOneUnreadableProblem()
+    {
+        string relative = "Library/Group Containers/2BBY89MBSN.dev.warp/Library/Application Support/dev.warp.Warp-Stable/warp.sqlite";
+        FakeHarnessFileSystem fs = new();
+        string path = Combine(HomeRoot, relative);
+        fs.AddFile(path, "sqlite", BaselineUtc);
+        InMemoryHarnessSqliteSource sqlite = new();
+        sqlite.FailOpen(path);
+
+        HarnessSourceRegistry registry = new(sqlite);
+        SourceDiscoveryResult result = registry.DiscoverAll(new SourceDiscoveryContext(HomeRoot, StateRoot, fs));
+
+        CollectedProblem problem = Assert.Single(result.Problems);
+        Assert.Equal("SQLITE_SOURCE_UNREADABLE", problem.Code);
+        Assert.Equal("warp", problem.HarnessId);
+        Assert.Empty(result.Sources);
+    }
+
+    private static IReadOnlyDictionary<string, object?> Row(params (string Key, object? Value)[] values) =>
+        values.ToDictionary(static v => v.Key, static v => v.Value, StringComparer.Ordinal);
+
+    private sealed class SqliteRig
+    {
+        private readonly string databasePath;
+
+        public SqliteRig(string relativePath, ISqliteConversationSource source)
+        {
+            databasePath = Combine(HomeRoot, relativePath);
+            Files = new FakeHarnessFileSystem();
+            Files.AddFile(databasePath, "sqlite", BaselineUtc);
+            Sqlite = new InMemoryHarnessSqliteSource();
+            Database = Sqlite.AddDatabase(databasePath);
+            foreach ((string table, IReadOnlyList<string> columns) in source.RequiredColumns)
+            {
+                Database.AddTable(table, [.. columns]);
+            }
+
+            Registry = new HarnessSourceRegistry(Sqlite);
+        }
+
+        public FakeHarnessFileSystem Files { get; }
+
+        public InMemoryHarnessSqliteSource Sqlite { get; }
+
+        public FakeDatabase Database { get; }
+
+        public HarnessSourceRegistry Registry { get; }
+
+        public SourceDiscoveryContext Context() => new(HomeRoot, StateRoot, Files);
+
+        public SourceUnit DiscoverSingle(string harnessId)
+        {
+            SourceDiscoveryResult result = Registry.DiscoverForHarness(harnessId, Context());
+            Assert.Empty(result.Problems);
+            return Assert.Single(result.Sources);
+        }
+
+        public void AssertUnit(SourceUnit unit, string harnessId, string providerId, string parserId, string format, string conversationId)
+        {
+            Assert.Equal(harnessId, unit.HarnessId);
+            Assert.Equal(providerId, unit.ProviderId);
+            Assert.Equal(parserId, unit.ParserId);
+            Assert.Equal(format, unit.Format);
+            Assert.Equal("4", HarnessSourceRegistry.SqliteRowExportParserContractVersion);
+            Assert.Equal(HarnessSourceRegistry.SqliteRowExportParserContractVersion, unit.ParserContractVersion);
+            Assert.Equal(databasePath + "#" + conversationId, unit.SourceKey);
+        }
+
+        public string ReadExport(string harnessId, SourceUnit unit)
+        {
+            NativeSourceUnit? native = Registry.GetReader(harnessId)!.Read(unit, Files);
+            Assert.NotNull(native);
+            Assert.NotNull(native.RawText);
+            return native.RawText;
+        }
     }
 
     private static string Combine(string root, string relative) =>

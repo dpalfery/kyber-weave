@@ -11,7 +11,6 @@ using KyberDash.Data.Collector;
 using KyberDash.Data.Collector.Sources;
 using KyberDash.Data.Harnesses.Cursor;
 using KyberDash.Data.Harnesses.Droid;
-using KyberDash.Data.Harnesses.Warp;
 using KyberDash.Domain;
 using Moq;
 using Xunit;
@@ -41,18 +40,17 @@ public class NoEstimateRereadTests
         harness.AddPiTranscript("sess-p");
         harness.Writer.Clear();
 
-        RefreshReport report = harness.Ingestion.RereadCheckpointedSources(["droid", "cursor", "warp"]);
+        RefreshReport report = harness.Ingestion.RereadCheckpointedSources(["droid", "cursor"]);
 
         Assert.Equal(0, report.ExitCode);
         Assert.Equal(string.Empty, report.RunId);
         Assert.Equal(0, report.HistoryWeeks);
-        Assert.Equal(["droid", "cursor", "warp"], report.Rows.Select(static row => row.HarnessId));
+        Assert.Equal(["droid", "cursor"], report.Rows.Select(static row => row.HarnessId));
         Assert.All(report.Rows, static row => Assert.Equal("committed", row.Status));
-        Assert.Equal(3, harness.Writer.WriteBatchCalls.Count);
+        Assert.Equal(2, harness.Writer.WriteBatchCalls.Count);
 
         Assert.Equal("2", harness.Checkpoint("droid", harness.DroidPath("sess-a")).ParserContractVersion);
         Assert.Equal("2", harness.Checkpoint("cursor", harness.CursorPath("sess-c")).ParserContractVersion);
-        Assert.Equal("2", harness.Checkpoint("warp", harness.WarpPath()).ParserContractVersion);
         Assert.Null(harness.Store.GetSourceCheckpoint("droid", harness.DroidPath("sess-uncheckpointed")));
         Assert.Equal("1", harness.Checkpoint("pi", harness.PiPath("sess-p")).ParserContractVersion);
         Assert.Empty(harness.Store.ListRefreshRuns());
@@ -69,11 +67,10 @@ public class NoEstimateRereadTests
 
         Assert.Equal("succeeded", outcome.Outcome);
         Assert.NotNull(harness.Store.GetRefreshRun(JobSchedulerService.NoEstimateRereadKey));
-        Assert.Equal(3, harness.Writer.WriteBatchCalls.Count);
-        Assert.Equal(["droid", "cursor", "warp"], harness.Writer.WriteBatchCalls.Select(static batch => batch.Source.HarnessId));
+        Assert.Equal(2, harness.Writer.WriteBatchCalls.Count);
+        Assert.Equal(["droid", "cursor"], harness.Writer.WriteBatchCalls.Select(static batch => batch.Source.HarnessId));
         Assert.Equal("2", harness.Checkpoint("droid", harness.DroidPath("sess-a")).ParserContractVersion);
         Assert.Equal("2", harness.Checkpoint("cursor", harness.CursorPath("sess-c")).ParserContractVersion);
-        Assert.Equal("2", harness.Checkpoint("warp", harness.WarpPath()).ParserContractVersion);
     }
 
     /// <summary>Once the marker is recorded, the next maintenance pass re-reads nothing.</summary>
@@ -135,16 +132,14 @@ public class NoEstimateRereadTests
         Assert.Equal("ok", harness.Checkpoint("droid", harness.DroidPath("sess-a")).LastStatus);
     }
 
-    /// <summary>Builds a harness with one checkpointed unit for each of Droid, Cursor and Warp.</summary>
+    /// <summary>Builds a harness with one checkpointed unit for each of Droid and Cursor.</summary>
     private static Harness CheckpointedHarness()
     {
         Harness harness = new();
         harness.SeedCheckpoint("droid", harness.DroidPath("sess-a"), "factory", "droid-reader", "droid-jsonl", ".factory/sessions");
         harness.SeedCheckpoint("cursor", harness.CursorPath("sess-c"), "cursor", "cursor-agent-transcript-reader", "cursor-agent-jsonl", ".cursor/projects");
-        harness.SeedCheckpoint("warp", harness.WarpPath(), "warp", "warp-sqlite-reader", "warp-sqlite", "warp.sqlite");
         harness.AddDroidTranscript("sess-a");
         harness.AddCursorTranscript("sess-c");
-        harness.AddWarpFile();
         return harness;
     }
 
@@ -159,7 +154,7 @@ public class NoEstimateRereadTests
                 Writer,
                 Store,
                 new HarnessSourceRegistry(),
-                [new DroidSessionMapper(), new CursorMapper(), new WarpMapper()],
+                [new DroidSessionMapper(), new CursorMapper()],
                 FileSystem,
                 new DashOptions { StateDirectory = StateRoot },
                 homeDirectory: HomeRoot,
@@ -197,9 +192,6 @@ public class NoEstimateRereadTests
         public string CursorPath(string sessionId) =>
             Combine(HomeRoot, $".cursor/projects/proj/agent-transcripts/{sessionId}.jsonl");
 
-        public string WarpPath() =>
-            Combine(HomeRoot, "Library/Group Containers/2BBY89MBSN.dev.warp/Library/Application Support/dev.warp.Warp-Stable/warp.sqlite");
-
         public string PiPath(string sessionId) =>
             Combine(HomeRoot, $".pi/agent/sessions/{sessionId}.jsonl");
 
@@ -208,9 +200,6 @@ public class NoEstimateRereadTests
 
         public void AddCursorTranscript(string sessionId) =>
             FileSystem.AddFile(CursorPath(sessionId), "{\"role\":\"user\",\"message\":\"hi\"}\n", BaselineUtc.AddMinutes(-10));
-
-        public void AddWarpFile() =>
-            FileSystem.AddFile(WarpPath(), "SQLite format 3\0", BaselineUtc.AddMinutes(-10));
 
         public void AddPiTranscript(string sessionId) =>
             FileSystem.AddFile(PiPath(sessionId), "{\"type\":\"session\"}\n", BaselineUtc.AddMinutes(-10));

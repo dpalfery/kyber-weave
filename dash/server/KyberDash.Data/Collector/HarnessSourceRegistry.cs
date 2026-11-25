@@ -1,5 +1,9 @@
 using System.Globalization;
 using System.Text;
+using KyberDash.Data.Harnesses.Cursor;
+using KyberDash.Data.Harnesses.Devin;
+using KyberDash.Data.Harnesses.Kilo;
+using KyberDash.Data.Harnesses.Warp;
 using KyberDash.Data.Repositories;
 using KyberDash.Domain;
 
@@ -76,6 +80,18 @@ public class HarnessSourceRegistry
     /// </remarks>
     public const string CopilotCliFreshInputParserContractVersion = "2";
 
+    /// <summary>
+    /// Parser contract version of the <c>kilo-sqlite</c>, <c>warp-sqlite</c>, <c>cursor-vscdb</c> and
+    /// <c>devin-sqlite</c> readers, which now read one conversation row export per unit (decision D7).
+    /// </summary>
+    /// <remarks>
+    /// The units are new because their <c>SourceKey</c> now ends in <c>#&lt;conversation id&gt;</c>, so the
+    /// version is belt and braces: it also keeps a checkpoint written by an older build, under
+    /// <see cref="NoEstimatedTokensParserContractVersion"/> or <see cref="DefaultParserContractVersion"/>,
+    /// from being reused for a row export.
+    /// </remarks>
+    public const string SqliteRowExportParserContractVersion = "4";
+
     private static readonly HashSet<string> ExcludedHarnessIds = new(
         ["windsurf", "aider"],
         StringComparer.Ordinal);
@@ -84,8 +100,10 @@ public class HarnessSourceRegistry
     private readonly IReadOnlyList<IHarnessSourceReader> localReaders;
 
     /// <summary>Initializes the registry with all BL-2, evidenced legacy, and OTLP-only harness registrations.</summary>
-    public HarnessSourceRegistry()
+    /// <param name="sqlite">Read-only SQLite seam for the Kilo, Warp, Devin and Cursor databases; defaults to <see cref="MicrosoftDataSqliteHarnessSource.CreateDefault"/>.</param>
+    public HarnessSourceRegistry(IHarnessSqliteSource? sqlite = null)
     {
+        IHarnessSqliteSource sqliteSource = sqlite ?? MicrosoftDataSqliteHarnessSource.CreateDefault();
         List<IHarnessSourceReader> local =
         [
             new SpecHarnessSourceReader(
@@ -121,21 +139,19 @@ public class HarnessSourceRegistry
             new SpecHarnessSourceReader(
                 "commandcode",
                 new SourceRootSpec("commandcode", "commandcode-reader", "commandcode-jsonl", [".commandcode/projects"], ["*.jsonl"])),
-            new SpecHarnessSourceReader(
+            CreateSqliteReader(
                 "kilo-shared-runtime",
-                new SourceRootSpec(
-                    "kilo",
-                    "kilo-sqlite-reader",
-                    "kilo-sqlite",
-                    [],
-                    [],
-                    ExplicitFiles:
-                    [
-                        ".local/share/kilo/kilo.db",
-                        "Library/Application Support/kilo/kilo.db",
-                        "AppData/Local/kilo/kilo.db",
-                        "AppData/Roaming/kilo/kilo.db",
-                    ])),
+                "kilo",
+                "kilo-sqlite-reader",
+                "kilo-sqlite",
+                [
+                    ".local/share/kilo/kilo.db",
+                    "Library/Application Support/kilo/kilo.db",
+                    "AppData/Local/kilo/kilo.db",
+                    "AppData/Roaming/kilo/kilo.db",
+                ],
+                new KiloSqliteConversationSource(),
+                sqliteSource),
             new SpecHarnessSourceReader(
                 "kilo-vscode-legacy",
                 new SourceRootSpec(
@@ -148,26 +164,31 @@ public class HarnessSourceRegistry
                         "AppData/Roaming/Code/User/globalStorage/kilocode.kilo-code/tasks",
                     ],
                     ["ui_messages.json"])),
-            new SpecHarnessSourceReader(
-                "devin",
-                new SourceRootSpec("devin", "devin-reader", "devin-transcript-json", [".local/share/devin/cli/transcripts"], ["*.json", "*.jsonl"]),
-                new SourceRootSpec("devin", "devin-reader", "devin-sqlite", [], [], ExplicitFiles: [".local/share/devin/cli/sessions.db"])),
-            new SpecHarnessSourceReader(
+            new DevinHarnessSourceReader(
+                new SpecHarnessSourceReader(
+                    "devin",
+                    new SourceRootSpec("devin", "devin-reader", "devin-transcript-json", [".local/share/devin/cli/transcripts"], ["*.json", "*.jsonl"])),
+                CreateSqliteReader(
+                    "devin",
+                    "devin",
+                    "devin-reader",
+                    "devin-sqlite",
+                    [".local/share/devin/cli/sessions.db"],
+                    new DevinSqliteConversationSource(),
+                    sqliteSource)),
+            CreateSqliteReader(
                 "warp",
-                new SourceRootSpec(
-                    "warp",
-                    "warp-sqlite-reader",
-                    "warp-sqlite",
-                    [],
-                    [],
-                    ParserContractVersion: NoEstimatedTokensParserContractVersion,
-                    ExplicitFiles:
-                    [
-                        "Library/Group Containers/2BBY89MBSN.dev.warp/Library/Application Support/dev.warp.Warp-Stable/warp.sqlite",
-                        "Library/Group Containers/2BBY89MBSN.dev.warp/Library/Application Support/dev.warp.Warp-Preview/warp.sqlite",
-                        ".local/state/warp-terminal/warp.sqlite",
-                        "AppData/Local/warp/Warp/data/warp.sqlite",
-                    ])),
+                "warp",
+                "warp-sqlite-reader",
+                "warp-sqlite",
+                [
+                    "Library/Group Containers/2BBY89MBSN.dev.warp/Library/Application Support/dev.warp.Warp-Stable/warp.sqlite",
+                    "Library/Group Containers/2BBY89MBSN.dev.warp/Library/Application Support/dev.warp.Warp-Preview/warp.sqlite",
+                    ".local/state/warp-terminal/warp.sqlite",
+                    "AppData/Local/warp/Warp/data/warp.sqlite",
+                ],
+                new WarpSqliteConversationSource(),
+                sqliteSource),
             new SpecHarnessSourceReader(
                 "droid",
                 new SourceRootSpec(
@@ -178,7 +199,19 @@ public class HarnessSourceRegistry
                     ["*.jsonl"],
                     CompanionExtension: ".settings.json",
                     ParserContractVersion: NoEstimatedTokensParserContractVersion)),
-            new CursorHarnessSourceReader(),
+            new CursorHarnessSourceReader(
+                CreateSqliteReader(
+                    "cursor",
+                    "cursor",
+                    "cursor-vscdb-reader",
+                    "cursor-vscdb",
+                    [
+                        "Library/Application Support/Cursor/User/globalStorage/state.vscdb",
+                        ".config/Cursor/User/globalStorage/state.vscdb",
+                        "AppData/Roaming/Cursor/User/globalStorage/state.vscdb",
+                    ],
+                    new CursorSqliteConversationSource(),
+                    sqliteSource)),
             new SpecHarnessSourceReader(
                 "cline",
                 new SourceRootSpec(
@@ -543,9 +576,26 @@ public class HarnessSourceRegistry
     }
 
     private static bool IsBinaryFormat(string format) =>
-        format.EndsWith("-pb", StringComparison.Ordinal)
-        || format.EndsWith("-sqlite", StringComparison.Ordinal)
-        || format.EndsWith("-vscdb", StringComparison.Ordinal);
+        format.EndsWith("-pb", StringComparison.Ordinal);
+
+    private static SqliteHarnessSourceReader CreateSqliteReader(
+        string harnessId,
+        string providerId,
+        string parserId,
+        string format,
+        IReadOnlyList<string> explicitRelativeDatabasePaths,
+        ISqliteConversationSource conversations,
+        IHarnessSqliteSource sqlite) =>
+        new(
+            harnessId,
+            providerId,
+            parserId,
+            format,
+            SqliteRowExportParserContractVersion,
+            explicitRelativeDatabasePaths,
+            conversations,
+            sqlite,
+            new HarnessSqliteLimits());
 
     private sealed record SourceRootSpec(
         string ProviderId,
@@ -698,15 +748,39 @@ public class HarnessSourceRegistry
             ReadLocalUnit(unit, fileSystem);
     }
 
-    private sealed class CursorHarnessSourceReader : IHarnessSourceReader
+    /// <summary>
+    /// Reads Devin transcripts through the file specs and <c>sessions.db</c> through the SQLite reader,
+    /// routing <see cref="Read"/> by <see cref="SourceUnit.Format"/>.
+    /// </summary>
+    private sealed class DevinHarnessSourceReader(
+        SpecHarnessSourceReader transcriptReader,
+        SqliteHarnessSourceReader sqliteReader) : IHarnessSourceReader
     {
-        private static readonly string[] VscdbFiles =
-        [
-            "Library/Application Support/Cursor/User/globalStorage/state.vscdb",
-            ".config/Cursor/User/globalStorage/state.vscdb",
-            "AppData/Roaming/Cursor/User/globalStorage/state.vscdb",
-        ];
+        public string HarnessId => "devin";
 
+        public bool IsOtlpOnly => false;
+
+        public SourceDiscoveryResult Discover(SourceDiscoveryContext context)
+        {
+            ArgumentNullException.ThrowIfNull(context);
+            SourceDiscoveryResult transcripts = transcriptReader.Discover(context);
+            SourceDiscoveryResult databases = sqliteReader.Discover(context);
+            return new SourceDiscoveryResult(
+                [.. transcripts.Sources, .. databases.Sources],
+                [.. transcripts.Problems, .. databases.Problems]);
+        }
+
+        public NativeSourceUnit? Read(SourceUnit unit, IHarnessFileSystem fileSystem)
+        {
+            ArgumentNullException.ThrowIfNull(unit);
+            return string.Equals(unit.Format, "devin-sqlite", StringComparison.Ordinal)
+                ? sqliteReader.Read(unit, fileSystem)
+                : transcriptReader.Read(unit, fileSystem);
+        }
+    }
+
+    private sealed class CursorHarnessSourceReader(SqliteHarnessSourceReader vscdbReader) : IHarnessSourceReader
+    {
         public string HarnessId => "cursor";
 
         public bool IsOtlpOnly => false;
@@ -714,30 +788,9 @@ public class HarnessSourceRegistry
         public SourceDiscoveryResult Discover(SourceDiscoveryContext context)
         {
             ArgumentNullException.ThrowIfNull(context);
-            List<SourceUnit> units = [];
-            HashSet<string> seen = new(StringComparer.Ordinal);
-
-            foreach (string relativeDb in VscdbFiles)
-            {
-                string dbPath = CombineRelative(context.HomeDirectory, relativeDb);
-                if (!context.FileSystem.FileExists(dbPath))
-                {
-                    continue;
-                }
-
-                SourceUnit? unit = TryBuildFileUnit(
-                    context,
-                    dbPath,
-                    HarnessId,
-                    "cursor",
-                    "cursor-vscdb-reader",
-                    NoEstimatedTokensParserContractVersion,
-                    "cursor-vscdb");
-                if (unit is not null && seen.Add(unit.SourceKey))
-                {
-                    units.Add(unit);
-                }
-            }
+            SourceDiscoveryResult databases = vscdbReader.Discover(context);
+            List<SourceUnit> units = [.. databases.Sources];
+            HashSet<string> seen = new(units.Select(static u => u.SourceKey), StringComparer.Ordinal);
 
             string projectsRoot = CombineRelative(context.HomeDirectory, ".cursor/projects");
             if (context.FileSystem.DirectoryExists(projectsRoot))
@@ -768,11 +821,16 @@ public class HarnessSourceRegistry
                 }
             }
 
-            return new SourceDiscoveryResult(units, []);
+            return new SourceDiscoveryResult(units, databases.Problems);
         }
 
-        public NativeSourceUnit? Read(SourceUnit unit, IHarnessFileSystem fileSystem) =>
-            ReadLocalUnit(unit, fileSystem);
+        public NativeSourceUnit? Read(SourceUnit unit, IHarnessFileSystem fileSystem)
+        {
+            ArgumentNullException.ThrowIfNull(unit);
+            return string.Equals(unit.Format, "cursor-vscdb", StringComparison.Ordinal)
+                ? vscdbReader.Read(unit, fileSystem)
+                : ReadLocalUnit(unit, fileSystem);
+        }
     }
 
     private sealed class CopilotVsCodeHarnessSourceReader : IHarnessSourceReader
