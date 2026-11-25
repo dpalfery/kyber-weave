@@ -4,6 +4,7 @@ using KyberDash.Application.Tests;
 using KyberDash.Application.Tests.Fakes;
 using KyberDash.Contracts.Repositories;
 using KyberDash.Data.Collector;
+using KyberDash.Data.Repositories;
 using KyberDash.Domain;
 using Xunit;
 
@@ -461,6 +462,120 @@ public class ProjectionReadPathTests
         // the page's own keys.
         Assert.Equal(degradedRow, Assert.Single(recoveredPage.EnumerateArray()).GetRawText());
     }
+
+    /// <summary>
+    /// On a detector-version mismatch a budget-bounded read pass that defers keeps the stale
+    /// detector stamp, the next read pass continues with the deferred keys instead of restarting
+    /// from the first session, and the next maintenance pass rebuilds every session, restamps the
+    /// detector version, and leaves nothing dirty.
+    /// </summary>
+    [Fact]
+    public void AReadPassThatDefersOnADetectorMismatchLeavesTheStampStaleForTheMaintenancePass()
+    {
+        InMemoryRelationalStore store = new();
+        CanonSessionProjectorEngine engine = new(
+            store,
+            store,
+            store,
+            new FakePricingRepository(),
+            readPathPassRecordBudget: 1);
+        CanonProjectionService maintenance = NewService(store, engine);
+
+        WriteSession(store, "sess-a", "claude-code", [Turn("span-a-1", "sess-a", 0)]);
+        WriteSession(store, "sess-b", "claude-code", [Turn("span-b-1", "sess-b", 0)]);
+        WriteSession(store, "sess-c", "claude-code", [Turn("span-c-1", "sess-c", 0)]);
+        Assert.Equal(3, maintenance.ProjectIncremental().Built);
+        Assert.Equal(SqliteRelationalStore.DetectorVersion, store.GetStoreState()?.DetectorVersion);
+
+        int staleDetector = SqliteRelationalStore.DetectorVersion - 1;
+        store.SetStoreState(new StoreStateView(SqliteRelationalStore.SchemaVersion, staleDetector));
+        WriteSession(store, "sess-a", "claude-code", [Turn("span-a-2", "sess-a", 1)]);
+        WriteSession(store, "sess-b", "claude-code", [Turn("span-b-2", "sess-b", 1)]);
+        WriteSession(store, "sess-c", "claude-code", [Turn("span-c-2", "sess-c", 1)]);
+
+        ProjectionPassReport firstRead = engine.ProjectIncrementalForReads();
+        Assert.Equal(["sess-a"], firstRead.RebuiltKeys);
+        Assert.Equal(["sess-b", "sess-c"], firstRead.DeferredKeys);
+        Assert.Equal(staleDetector, store.GetStoreState()?.DetectorVersion);
+        Assert.False(engine.IsProjectionCurrent());
+
+        ProjectionPassReport secondRead = engine.ProjectIncrementalForReads();
+        Assert.Equal(["sess-b"], secondRead.RebuiltKeys);
+        Assert.Equal(["sess-c"], secondRead.DeferredKeys);
+        Assert.Equal(staleDetector, store.GetStoreState()?.DetectorVersion);
+
+        ProjectionPassReport full = maintenance.ProjectIncremental();
+        Assert.Equal(3, full.Built);
+        Assert.Empty(full.SkippedKeys);
+        Assert.Equal(SqliteRelationalStore.DetectorVersion, store.GetStoreState()?.DetectorVersion);
+        Assert.Null(store.GetProjectionDirtyState());
+        Assert.True(engine.IsProjectionCurrent());
+
+        ProjectionPassReport afterMaintenance = engine.ProjectIncrementalForReads();
+        Assert.Empty(afterMaintenance.RebuiltKeys);
+    }
+
+    /// <summary>
+    /// A stale detector stamp with no new records and nothing dirty is the maintenance pass's to
+    /// clear: repeated read passes rebuild nothing rather than restarting from the first session
+    /// on every request, and the stamp stays stale until a maintenance pass rebuilds the store.
+    /// </summary>
+    [Fact]
+    public void ReadPassesOnAStaleDetectorStampWithNothingDirtyRebuildNothing()
+    {
+        InMemoryRelationalStore store = new();
+        CanonSessionProjectorEngine engine = new(
+            store,
+            store,
+            store,
+            new FakePricingRepository(),
+            readPathPassRecordBudget: 1);
+
+        WriteSession(store, "sess-a", "claude-code", [Turn("span-a-1", "sess-a", 0)]);
+        WriteSession(store, "sess-b", "claude-code", [Turn("span-b-1", "sess-b", 0)]);
+        Assert.Equal(2, NewService(store, engine).ProjectIncremental().Built);
+
+        int staleDetector = SqliteRelationalStore.DetectorVersion - 1;
+        store.SetStoreState(new StoreStateView(SqliteRelationalStore.SchemaVersion, staleDetector));
+
+        Assert.Empty(engine.ProjectIncrementalForReads().RebuiltKeys);
+        Assert.Empty(engine.ProjectIncrementalForReads().RebuiltKeys);
+        Assert.Equal(staleDetector, store.GetStoreState()?.DetectorVersion);
+        Assert.False(engine.IsProjectionCurrent());
+    }
+
+    /// <summary>
+    /// Keys a read pass deferred keep the projection out of date for the maintenance pass even
+    /// when the detector stamp is current, so the maintenance pass rebuilds them instead of
+    /// short-circuiting on a watermark that matches the write marker.
+    /// </summary>
+    [Fact]
+    public void TheMaintenancePassRebuildsKeysAReadPassDeferred()
+    {
+        InMemoryRelationalStore store = new();
+        CanonSessionProjectorEngine engine = new(
+            store,
+            store,
+            store,
+            new FakePricingRepository(),
+            readPathPassRecordBudget: 1);
+
+        WriteSession(store, "sess-a", "claude-code", [Turn("span-a-1", "sess-a", 0)]);
+        WriteSession(store, "sess-b", "claude-code", [Turn("span-b-1", "sess-b", 0)]);
+        store.SetStoreState(new StoreStateView(SqliteRelationalStore.SchemaVersion, SqliteRelationalStore.DetectorVersion));
+
+        ProjectionPassReport readPass = engine.ProjectIncrementalForReads();
+        Assert.Equal(["sess-b"], readPass.DeferredKeys);
+        Assert.False(engine.IsProjectionCurrent());
+
+        ProjectionPassReport maintenancePass = NewService(store, engine).ProjectIncremental();
+        Assert.Equal(["sess-b"], maintenancePass.RebuiltKeys);
+        Assert.Null(store.GetProjectionDirtyState());
+        Assert.True(engine.IsProjectionCurrent());
+    }
+
+    private static CanonProjectionService NewService(InMemoryRelationalStore store, CanonSessionProjectorEngine engine) =>
+        new(store, store, store, engine, new CanonRollupsEngine(store, store, new FakePricingRepository()));
 
     private static CanonSessionProjectorEngine NewEngine(InMemoryRelationalStore store) =>
         new(store, store, store, new FakePricingRepository());

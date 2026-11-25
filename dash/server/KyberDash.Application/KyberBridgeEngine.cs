@@ -181,7 +181,7 @@ public class KyberBridgeEngine
     public void EnsureProjected()
     {
         bool builtOrPruned = false;
-        if (!projector.IsProjectionCurrent())
+        if (!projector.IsProjectionCurrentForReads())
         {
             try
             {

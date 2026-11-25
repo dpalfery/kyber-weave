@@ -49,6 +49,32 @@ public class StoreWriteMarkerParityTests : IDisposable
     [Theory]
     [InlineData("sqlite")]
     [InlineData("memory")]
+    public void BatchWithOnlySessions_MovesTheMarkerAndMarksTheSessionKeysDirty(string kind)
+    {
+        StoreUnderTest store = Create(kind);
+
+        store.Writer.WriteBatch(Batch("claude-code", sessions: ["sess-a", "sess-b"], records: []));
+
+        Assert.Equal(1L, store.Operational.GetWriteMarker());
+        AssertDirty(store.Operational, 0, 1, ["sess-a", "sess-b"]);
+    }
+
+    [Theory]
+    [InlineData("sqlite")]
+    [InlineData("memory")]
+    public void BatchWithOnlyRecords_MovesTheMarkerAndMarksTheRecordKeysDirty(string kind)
+    {
+        StoreUnderTest store = Create(kind);
+
+        store.Writer.WriteBatch(Batch("claude-code", sessions: [], records: [Record("span-1", "sess-r"), Record("span-2", "sess-s")]));
+
+        Assert.Equal(1L, store.Operational.GetWriteMarker());
+        AssertDirty(store.Operational, 0, 1, ["sess-r", "sess-s"]);
+    }
+
+    [Theory]
+    [InlineData("sqlite")]
+    [InlineData("memory")]
     public void SecondKeyedBatch_ContinuesTheRangeAndMergesKeysWithoutDuplicates(string kind)
     {
         StoreUnderTest store = Create(kind);
