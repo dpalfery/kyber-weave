@@ -192,5 +192,7 @@ export async function assertHarnessSessionDashboard(
   const storedFieldsSection = dashboard.getByTestId('stored-fields-section')
   await expect(storedFieldsSection).toBeVisible()
   await expect(storedFieldsSection.getByTestId('stored-fields-panel')).toBeVisible()
-  await expect(storedFieldsSection).toContainText('session')
+  // The panel projected the `session` table itself, not just any text that mentions the word.
+  await expect(storedFieldsSection.getByTestId('stored-fields-table-session')).toBeVisible()
+  await expect(storedFieldsSection.getByTestId('stored-fields-no-tables')).toHaveCount(0)
 }
