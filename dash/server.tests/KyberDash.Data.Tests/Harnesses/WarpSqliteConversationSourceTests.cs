@@ -82,10 +82,8 @@ public class WarpSqliteConversationSourceTests
                 ("last_modified_at", "2026-05-18 10:10:00")))
             .AddRow("warp.queries", QueryRow("ex-1", "2026-05-18 10:00:00"))
             .AddRow("warp.queries", QueryRow("ex-2", "2026-05-18 10:01:00"))
-            .AddRow("warp.blocks", Row(
-                ("block_id", "blk-1"),
-                ("start_ts", "2026-05-18 10:00:30"),
-                ("stylized_command", "ls")));
+            .AddRow("warp.blocks", BlockRow("conv-1", "blk-1", "2026-05-18 10:00:30", "ls"))
+            .AddRow("warp.blocks", BlockRow("conv-2", "blk-2", "2026-05-18 10:00:40", "pwd"));
 
         JsonElement export = rig.Export("conv-1");
 
@@ -108,7 +106,7 @@ public class WarpSqliteConversationSourceTests
     }
 
     [Fact]
-    public void WriteExport_BindsTheConversationIdToEveryQuery()
+    public void WriteExport_BindsTheConversationIdToTheConversationAndQueryReads()
     {
         Rig rig = new();
         rig.Database.AddRow("warp.conversation", Row(("conversation_id", "conv-1")));
@@ -116,8 +114,40 @@ public class WarpSqliteConversationSourceTests
         rig.Export("conv-1");
 
         IReadOnlyList<HarnessSqliteQuery> executed = rig.Sqlite.ExecutedQueries(DbPath);
-        Assert.Equal(3, executed.Count);
-        Assert.All(executed, query => Assert.Equal("conv-1", Assert.Single(query.Parameters)));
+        Assert.Equal(["warp.conversation", "warp.queries", "warp.database-file", "warp.blocks"], executed.Select(query => query.Name));
+        Assert.Equal("conv-1", Assert.Single(executed[0].Parameters));
+        Assert.Equal("conv-1", Assert.Single(executed[1].Parameters));
+        Assert.Empty(executed[3].Parameters);
+    }
+
+    [Fact]
+    public void WriteExport_ReadsTheBlocksTableOncePerDatabaseAcrossConversations()
+    {
+        Rig rig = new();
+        rig.Database
+            .AddRow("warp.conversation", Row(("conversation_id", "conv-1")))
+            .AddRow("warp.blocks", BlockRow("conv-1", "blk-1", "2026-05-18 10:00:30", "ls"))
+            .AddRow("warp.blocks", BlockRow("conv-2", "blk-2", "2026-05-18 10:00:40", "pwd"));
+
+        JsonElement first = rig.Export("conv-1");
+        JsonElement second = rig.Export("conv-1");
+
+        Assert.Equal(1, rig.Sqlite.ExecutedQueries(DbPath).Count(query => query.Name == "warp.blocks"));
+        Assert.Equal("blk-1", Assert.Single(first.GetProperty("blocks").EnumerateArray().ToArray()).GetProperty("block_id").GetString());
+        Assert.Equal("blk-1", Assert.Single(second.GetProperty("blocks").EnumerateArray().ToArray()).GetProperty("block_id").GetString());
+    }
+
+    [Fact]
+    public void ListConversations_StartsANewPass_SoTheNextExportReadsTheBlocksAgain()
+    {
+        Rig rig = new();
+        rig.Database.AddRow("warp.conversation", Row(("conversation_id", "conv-1")));
+
+        rig.Export("conv-1");
+        rig.List();
+        rig.Export("conv-1");
+
+        Assert.Equal(2, rig.Sqlite.ExecutedQueries(DbPath).Count(query => query.Name == "warp.blocks"));
     }
 
     [Fact]
@@ -138,6 +168,13 @@ public class WarpSqliteConversationSourceTests
 
         return row;
     }
+
+    private static IReadOnlyDictionary<string, object?> BlockRow(string conversationId, string blockId, string startTs, string command) =>
+        Row(
+            ("conversation_id", conversationId),
+            ("block_id", blockId),
+            ("start_ts", startTs),
+            ("stylized_command", command));
 
     private static IReadOnlyDictionary<string, object?> QueryRow(string exchangeId, string startTs) =>
         Row(

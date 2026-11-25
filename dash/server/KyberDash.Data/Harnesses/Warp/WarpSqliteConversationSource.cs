@@ -15,6 +15,13 @@ namespace KyberDash.Data.Harnesses.Warp;
 /// column names here are the contract. Every exported value is written as a JSON string, including
 /// <c>conversation_data</c>: the mapper reads it with <c>GetString</c>, and writing it as an object
 /// would make the usage data vanish without an error.
+/// <para>
+/// Block attribution is a JSON filter on <c>blocks.ai_metadata</c> that no index supports, and the
+/// database is harness-owned so none can be added. Running it once per conversation would parse every
+/// block once per conversation, so the attribution is read in one scan per database and kept by database
+/// path. <see cref="ListConversations"/> drops the path's entry, so each discovery pass reads the
+/// current blocks and the exports that follow it share that single scan.
+/// </para>
 /// </remarks>
 public class WarpSqliteConversationSource : ISqliteConversationSource
 {
@@ -22,6 +29,7 @@ public class WarpSqliteConversationSource : ISqliteConversationSource
     private const string ConversationQueryName = "warp.conversation";
     private const string QueriesQueryName = "warp.queries";
     private const string BlocksQueryName = "warp.blocks";
+    private const string DatabaseFileQueryName = "warp.database-file";
 
     private static readonly string[] QueryColumns =
     [
@@ -37,6 +45,11 @@ public class WarpSqliteConversationSource : ISqliteConversationSource
     ];
 
     private static readonly string[] BlockColumns = ["block_id", "start_ts", "stylized_command"];
+
+    private readonly object blocksLock = new();
+
+    private readonly Dictionary<string, Dictionary<string, List<IReadOnlyDictionary<string, object?>>>> blocksByDatabase =
+        new(StringComparer.Ordinal);
 
     /// <inheritdoc />
     public IReadOnlyDictionary<string, IReadOnlyList<string>> RequiredColumns { get; } =
@@ -56,6 +69,11 @@ public class WarpSqliteConversationSource : ISqliteConversationSource
     public IEnumerable<SqliteConversation> ListConversations(SqliteConversationContext context)
     {
         ArgumentNullException.ThrowIfNull(context);
+
+        lock (blocksLock)
+        {
+            blocksByDatabase.Remove(DatabaseKey(context.Database));
+        }
 
         HarnessSqliteQuery query = new(
             ConversationsQueryName,
@@ -140,12 +158,7 @@ public class WarpSqliteConversationSource : ISqliteConversationSource
         writer.WriteEndArray();
 
         writer.WriteStartArray("blocks");
-        foreach (IReadOnlyDictionary<string, object?> block in database.Query(new HarnessSqliteQuery(
-            BlocksQueryName,
-            "SELECT block_id, start_ts, stylized_command FROM blocks "
-                + "WHERE ai_metadata IS NOT NULL AND ai_metadata <> '' "
-                + "AND json_extract(ai_metadata, '$.conversation_id') = ? ORDER BY start_ts ASC",
-            [conversationId])))
+        foreach (IReadOnlyDictionary<string, object?> block in BlocksFor(database, conversationId))
         {
             writer.WriteStartObject();
             foreach (string column in BlockColumns)
@@ -158,6 +171,68 @@ public class WarpSqliteConversationSource : ISqliteConversationSource
 
         writer.WriteEndArray();
         writer.WriteEndObject();
+    }
+
+    private IReadOnlyList<IReadOnlyDictionary<string, object?>> BlocksFor(IHarnessSqliteDatabase database, string conversationId)
+    {
+        string path = DatabaseKey(database);
+        lock (blocksLock)
+        {
+            if (!blocksByDatabase.TryGetValue(path, out Dictionary<string, List<IReadOnlyDictionary<string, object?>>>? byConversation))
+            {
+                byConversation = ReadBlocksByConversation(database);
+                blocksByDatabase[path] = byConversation;
+            }
+
+            return byConversation.TryGetValue(conversationId, out List<IReadOnlyDictionary<string, object?>>? blocks) ? blocks : [];
+        }
+    }
+
+    /// <summary>
+    /// Identifies an opened database by the file SQLite reports for it. The seam hands an export no path,
+    /// and the adapter may have opened a fingerprinted copy, which this key then names, so a changed
+    /// database never shares an entry with an older one. A handle that reports no file (the in-memory
+    /// fake) shares one empty key.
+    /// </summary>
+    private static string DatabaseKey(IHarnessSqliteDatabase database) =>
+        database
+            .Query(new HarnessSqliteQuery(
+                DatabaseFileQueryName,
+                "SELECT file FROM pragma_database_list WHERE name = 'main'",
+                []))
+            .Select(static row => row.GetValueOrDefault("file") as string)
+            .FirstOrDefault(static file => !string.IsNullOrEmpty(file))
+        ?? string.Empty;
+
+    private static Dictionary<string, List<IReadOnlyDictionary<string, object?>>> ReadBlocksByConversation(IHarnessSqliteDatabase database)
+    {
+        Dictionary<string, List<IReadOnlyDictionary<string, object?>>> byConversation = new(StringComparer.Ordinal);
+        foreach (IReadOnlyDictionary<string, object?> row in database.Query(new HarnessSqliteQuery(
+            BlocksQueryName,
+            "SELECT json_extract(ai_metadata, '$.conversation_id') AS conversation_id, block_id, start_ts, stylized_command "
+                + "FROM blocks WHERE ai_metadata IS NOT NULL AND ai_metadata <> '' ORDER BY start_ts ASC",
+            [])))
+        {
+            if (row.GetValueOrDefault("conversation_id") is not string owner)
+            {
+                continue;
+            }
+
+            if (!byConversation.TryGetValue(owner, out List<IReadOnlyDictionary<string, object?>>? blocks))
+            {
+                blocks = [];
+                byConversation[owner] = blocks;
+            }
+
+            blocks.Add(new Dictionary<string, object?>(StringComparer.Ordinal)
+            {
+                ["block_id"] = row.GetValueOrDefault("block_id"),
+                ["start_ts"] = row.GetValueOrDefault("start_ts"),
+                ["stylized_command"] = row.GetValueOrDefault("stylized_command"),
+            });
+        }
+
+        return byConversation;
     }
 
     private static void WriteText(Utf8JsonWriter writer, string propertyName, IReadOnlyDictionary<string, object?> row, string column)
