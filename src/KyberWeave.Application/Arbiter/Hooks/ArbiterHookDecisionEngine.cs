@@ -763,12 +763,23 @@ public sealed class ArbiterHookDecisionEngine : IContextualHookDecisionEngine, I
             return outcome;
         }
 
-        IArbiterLedger ledger = _state.OpenLedger(arbiterDirectory);
-        ArbiterLedgerEvent? pre = ledger.ReadAll().FirstOrDefault(e =>
-            e.Phase == ArbiterLedgerPhases.Pre && string.Equals(e.Id, result.LedgerId, StringComparison.Ordinal));
-        if (pre is not null)
+        // The dispatch is stopped whether or not its close is written: a ledger that cannot be read or appended to
+        // must not turn the stop into the loud allow the caller's failure path would give.
+        try
         {
-            _ = AppendRecovery(ledger, pre, ArbiterRecoveries.PromptStopped, target ?? "unknown", _clock.GetUtcNow(), context);
+            IArbiterLedger ledger = _state.OpenLedger(arbiterDirectory);
+            ArbiterLedgerEvent? pre = ledger.ReadAll().FirstOrDefault(e =>
+                e.Phase == ArbiterLedgerPhases.Pre && string.Equals(e.Id, result.LedgerId, StringComparison.Ordinal));
+            if (pre is not null)
+            {
+                _ = AppendRecovery(ledger, pre, ArbiterRecoveries.PromptStopped, target ?? "unknown", _clock.GetUtcNow(), context);
+            }
+        }
+        catch (Exception exception) when (FileFailure.Is(exception))
+        {
+            context.Log.WriteLine(
+                $"Arbiter: dispatch {result.LedgerId} was stopped before its worker started, but its close was not " +
+                $"written ({OneLine(exception.Message)}); it still looks in flight until the unreturned horizon.");
         }
 
         return new HookOutcome(HookOutcomeKind.Deny, insertion.Reason);
