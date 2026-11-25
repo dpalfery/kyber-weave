@@ -494,6 +494,30 @@ describe('TurnSpendChart', () => {
     for (const bar of bars) expect(bar.props['data-measured']).toBe('true')
     expect(findAllElements(element, (el) => el.props['data-testid'] === 'turn-spend-chart')).toHaveLength(1)
   })
+
+  it('words a fresh-input jump against the immediately preceding turn as "vs previous turn"', () => {
+    // Turn 3 (fresh 800) follows turn 2 (fresh 200): +300%, adjacent.
+    const element = React.createElement(TurnSpendChart, { turns: sampleTurns })
+    const text = normalizedRenderText(element)
+
+    expect(text).toContain('#3 (+300% vs previous turn)')
+    expect(text).not.toContain('vs previous measured turn')
+  })
+
+  it('names the compared turn when an unmeasured turn sits between the jump and its baseline', () => {
+    // Turn 1 is measured (fresh 200); turn 2 has no counter; turn 3 (fresh 800)
+    // is compared against turn 1, the previous measured turn: +300%.
+    const turns: TurnSpendItem[] = [
+      { index: 1, fresh_input: 200, cache_read: 0, output: 50, input: 200 },
+      unmeasuredTurn(2),
+      { index: 3, fresh_input: 800, cache_read: 0, output: 50, input: 800 },
+    ]
+    const element = React.createElement(TurnSpendChart, { turns })
+    const text = normalizedRenderText(element)
+
+    expect(text).toContain('#3 (+300% vs previous measured turn (turn 1))')
+    expect(text).not.toContain('#3 (+300% vs previous turn)')
+  })
 })
 
 describe('ContextCompositionChart', () => {

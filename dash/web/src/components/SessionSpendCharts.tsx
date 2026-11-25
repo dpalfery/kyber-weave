@@ -479,6 +479,12 @@ function isTurnMeasured(turn: TurnSpendItem): boolean {
   })
 }
 
+/** Names the turn a fresh-input jump is measured against. */
+function jumpBasisLabel(from: { index: number; adjacent: boolean } | null): string {
+  if (from === null || from.adjacent) return 'vs previous turn'
+  return `vs previous measured turn (turn ${from.index})`
+}
+
 export function TurnSpendChart({
   turns,
   selectedTurnIndex,
@@ -491,6 +497,8 @@ export function TurnSpendChart({
     if (!turns || turns.length === 0) return []
     let runningInput = 0
     let prevFresh: number | null = null
+    // The last measured turn: the baseline a fresh-input jump is measured against.
+    let prevMeasured: { index: number; position: number } | null = null
 
     return turns.map((t, i) => {
       const idx = t.index ?? i + 1
@@ -510,6 +518,7 @@ export function TurnSpendChart({
           totalTokens: 0,
           cumulativeInput: runningInput,
           freshJumpPct: null,
+          jumpFrom: null,
           requestStart: t.request_start,
         }
       }
@@ -539,7 +548,12 @@ export function TurnSpendChart({
         const jump = Math.round(((fresh - prevFresh) / prevFresh) * 100)
         if (jump >= 25) freshJumpPct = jump
       }
+      const jumpFrom =
+        prevMeasured === null
+          ? null
+          : { index: prevMeasured.index, adjacent: prevMeasured.position === i - 1 }
       prevFresh = fresh
+      prevMeasured = { index: idx, position: i }
 
       const totalTokens = fresh + cacheRead + cacheCreation + output + reasoning
 
@@ -556,6 +570,7 @@ export function TurnSpendChart({
         totalTokens,
         cumulativeInput,
         freshJumpPct,
+        jumpFrom,
         requestStart: t.request_start,
       }
     })
@@ -899,7 +914,7 @@ export function TurnSpendChart({
                     >
                       !
                     </text>
-                    <title>Fresh input jumped +{t.freshJumpPct}% vs previous turn</title>
+                    <title>Fresh input jumped +{t.freshJumpPct}% {jumpBasisLabel(t.jumpFrom)}</title>
                   </g>
                 )}
 
@@ -1052,7 +1067,7 @@ export function TurnSpendChart({
             <span className="font-bold">⚡</span>
             <span>
               Fresh-input jump &gt;25% at turn{jumps.length > 1 ? 's' : ''}{' '}
-              {jumps.map((j) => `#${j.index} (+${j.freshJumpPct}%)`).join(', ')} — context expansion or cache invalidation.
+              {jumps.map((j) => `#${j.index} (+${j.freshJumpPct}% ${jumpBasisLabel(j.jumpFrom)})`).join(', ')} — context expansion or cache invalidation.
             </span>
           </div>
         ) : (
