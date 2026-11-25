@@ -416,6 +416,55 @@ public class KiloMapperTests
     }
 
     [Fact]
+    public void Map_NullPayloadRecordsOneWarningNamingTheSource()
+    {
+        const string sourceKey = "/fake-home/.local/share/kilo/kilo.db";
+        NativeSourceUnit unit = new(
+            Unit: new SourceUnit(
+                HarnessId: KiloMapper.KiloSharedRuntimeHarnessId,
+                SourceKey: sourceKey,
+                ProviderId: "kilo",
+                ParserId: "kilo-sqlite-reader",
+                ParserContractVersion: "1",
+                Format: "kilo-sqlite",
+                SourceRootLabel: "kilo",
+                RevisionToken: "1-1",
+                LastWriteUtc: BaselineUtc,
+                SizeBytes: 0),
+            RawText: null,
+            SizeBytes: 0,
+            LastWriteUtc: BaselineUtc,
+            CompanionText: null);
+
+        CollectedBatch batch = new KiloMapper().Map(unit, BaselineUtc);
+
+        Assert.Empty(batch.Records);
+        Assert.Empty(batch.Sessions);
+        CollectedProblem problem = Assert.Single(batch.Problems);
+        Assert.Equal(KiloMapper.MalformedLineCode, problem.Code);
+        Assert.Equal("warning", problem.Severity);
+        Assert.Contains(sourceKey, problem.Message, StringComparison.Ordinal);
+        Assert.Contains("carried no readable content", problem.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Map_WhitespacePayloadKeepsEmptyBatchWithoutProblem()
+    {
+        NativeSourceUnit unit = MakeNativeUnit(
+            "/fake-home/.local/share/kilo/kilo.db",
+            " \n\t ",
+            KiloMapper.KiloSharedRuntimeHarnessId,
+            format: "kilo-sqlite",
+            parserId: "kilo-sqlite-reader");
+
+        CollectedBatch batch = new KiloMapper().Map(unit, BaselineUtc);
+
+        Assert.Empty(batch.Records);
+        Assert.Empty(batch.Sessions);
+        Assert.Empty(batch.Problems);
+    }
+
+    [Fact]
     public void Map_EmptyUnitReturnsEmptyBatch()
     {
         NativeSourceUnit unit = MakeNativeUnit(
