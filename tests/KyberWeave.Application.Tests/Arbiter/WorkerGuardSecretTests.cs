@@ -180,8 +180,87 @@ public sealed class WorkerGuardSecretTests
         { "shell", "dotnet test", true },
     };
 
+    /// <summary>
+    /// The calls the rule reads precisely: grep and rg options are parsed so an option's value is neither the
+    /// pattern nor a file, a known interpreter's heredoc body is judged as a script rather than as shell steps, and
+    /// <c>open(...)</c> and <c>Path(...)</c> fail closed on every literal they could open. Every real secret read is
+    /// still refused, including the forms the old reading caught only by accident.
+    /// </summary>
+    public static TheoryData<string, string, bool> CallsJudgedPreciselyByTheSecretRule => new()
+    {
+        // A grep or rg option's value is not the pattern, and a quoted pattern is one word.
+        { "shell", "grep -A 3 token src/a.cs", true },
+        { "shell", "grep -nA 3 token src/a.cs", true },
+        { "shell", "grep -A3 token src/a.cs", true },
+        { "shell", "grep -rn --include '*.cs' token src", true },
+        { "shell", "rg -g '*.yml' token", true },
+        { "shell", "rg -e token -n src", true },
+        { "shell", "grep -n \"bearer token\" src/a.cs", true },
+        { "shell", "bash -c \"grep -A 3 token src/a.cs\"", true },
+
+        // A search that names a secret file is still refused, wherever the file stands.
+        { "shell", "grep -A 3 x .env", false },
+        { "shell", "grep \"x\" \".env\"", false },
+        { "shell", "rg -e x secrets.json", false },
+        { "shell", "grep -- x .env", false },
+        { "shell", "grep x .env -n", false },
+        { "shell", "grep -r x --include .env .", false },
+        { "shell", "rg x -g .env", false },
+        { "shell", "bash -c \"grep -A 3 x .env\"", false },
+        { "shell", "sh -c 'grep x secrets.json'", false },
+        { "shell", "ls | xargs grep x .env", false },
+
+        // Every option value that names a file is judged, in a bundle or attached too.
+        { "shell", "grep -f .env x", false },
+        { "shell", "grep -nf .env x", false },
+        { "shell", "grep -f.env x", false },
+        { "shell", "grep -nf.env x", false },
+        { "shell", "grep -f pats.txt .env", false },
+        { "shell", "grep --file=secrets.json x", false },
+        { "shell", "grep --file secrets.json x", false },
+        { "shell", "grep --exclude-from=.env x", false },
+        { "shell", "grep --include-from .env x", false },
+        { "shell", "rg --ignore-file .env x", false },
+
+        // Nested shell text and plain readers are matched as before.
+        { "shell", "bash -c \"cat .env\"", false },
+        { "shell", "eval \"cat token.txt\"", false },
+        { "shell", "cat token.txt", false },
+
+        // A known interpreter's heredoc body is a script: its lines are not shell readers.
+        { "shell", "python3 - <<'EOF'\nhead = token_count[:3]\nprint(head)\nEOF", true },
+        { "shell", "python3 - <<'EOF'\nsort( token_list )\nEOF", true },
+        { "shell", "python3 - <<'EOF'\ntype (token)\nEOF", true },
+        {
+            "shell",
+            "python3 - <<'EOF'\ntoken_path = 'out/report.txt'\nwith open(token_path, 'w') as f:\n    f.write('done')\nEOF",
+            true
+        },
+
+        // Any other program's heredoc keeps its lines as shell steps, and a script body is still judged.
+        { "shell", "bash <<'EOF'\ncat .env\nEOF", false },
+        { "shell", "mytool <<'EOF'\ncat .env\nEOF", false },
+        { "shell", "ssh build-host python3 <<'EOF'\ncat .env\nEOF", false },
+        { "shell", "python3 - <<'EOF'\nprint('x')\nEOF\ncat .env", false },
+        { "shell", "python3 - <<'EOF'\ncat .env", false },
+        { "shell", "python3 <<EOF\nprint(\"$(cat .env)\")\nEOF", false },
+        { "shell", "python3 - <<'EOF'\nimport subprocess\nsubprocess.run('cat .env', shell=True)\nEOF", false },
+        { "shell", "python3 - <<'EOF'\nimport os\nprint(os.environ)\nEOF", false },
+        { "shell", "python3 - <<'EOF'\np = '.env'\nprint(open(p).read())\nEOF", false },
+
+        // open(...) and Path(...) judge every literal they could open, and every value an identifier is given.
+        { "shell", "python3 -c \"open('.env').read()\"", false },
+        { "shell", "python3 -c \"open(os.path.join(home, '.aws', 'credentials')).read()\"", false },
+        { "shell", "python3 -c \"open(d + '/.env').read()\"", false },
+        { "shell", "python3 -c 'open(f\"{d}/.env\").read()'", false },
+        { "shell", "python3 -c \"open(Path('.env')).read()\"", false },
+        { "shell", "python3 -c \"from pathlib import Path; Path('.env').read_text()\"", false },
+        { "shell", "python3 -c \"p = 'out.txt'; p = '.env'; print(open(p).read())\"", false },
+    };
+
     [Theory]
     [MemberData(nameof(CallsJudgedByTheSecretRule))]
+    [MemberData(nameof(CallsJudgedPreciselyByTheSecretRule))]
     public void EverySecretCallIsJudged(string tool, string call, bool allowed)
     {
         (string harness, string json) = tool switch
