@@ -399,7 +399,8 @@ public static class ReviewGateReporting
     /// <param name="agent">The agent whose gates ran.</param>
     /// <param name="report">The report just written.</param>
     /// <param name="reportPath">Where it was written, or null.</param>
-    public static IReadOnlyList<string> RedLines(RedOutcome outcome, string agent, GateReport report, string? reportPath)
+    /// <param name="runCount">The ordinal of this task-gate run, counting from 1.</param>
+    public static IReadOnlyList<string> RedLines(RedOutcome outcome, string agent, GateReport report, string? reportPath, int runCount)
     {
         int skipped = report.Gates.Count(gate => gate.NotApplicable);
         string failed = outcome.Passed
@@ -407,7 +408,7 @@ public static class ReviewGateReporting
             : string.Join(",", report.Gates.Where(gate => !gate.Passed && !gate.NotApplicable).Select(gate => gate.Id).DefaultIfEmpty("none"));
         return
         [
-            $"TASK_GATE: {(outcome.Passed ? "PASS" : "FAIL")} — agent={agent} gates={report.Gates.Count} failed={failed} skipped={skipped} report={reportPath ?? "<none>"} runs=1",
+            $"TASK_GATE: {(outcome.Passed ? "PASS" : "FAIL")} — agent={agent} gates={report.Gates.Count} failed={failed} skipped={skipped} report={reportPath ?? "<none>"} runs={runCount}",
             outcome.Passed ? outcome.EvidenceLine : $"RED_REJECTED: {outcome.Reason}",
         ];
     }

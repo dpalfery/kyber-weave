@@ -1,4 +1,5 @@
 using System.ComponentModel;
+using System.Globalization;
 using KyberWeave.Cli.Commands.Review;
 using KyberWeave.Cli.Commands.Squad.Infrastructure;
 using KyberWeave.Contracts.Paths;
@@ -709,6 +710,7 @@ public sealed class ReviewGatesService(
             parentTechnology);
 
         IReadOnlyList<ReviewTaskGate> agentGates = resolved.Gates;
+        int runCount = NextRunCount(root, taskSlug);
         if (agentGates.Count == 0)
         {
             // No route names a gate: not the task's technology, not its parent, not the agent. A task that names a
@@ -734,7 +736,7 @@ public sealed class ReviewGatesService(
             return ReviewCommandResultFactory.Reported(
                 report.HasErrors ? 1 : 0,
                 report,
-                request.HumanOutput && !resolved.IsRefused ? TaskGateNextStep.NoneDeclared(request.Agent!, paths, outPath) : []);
+                request.HumanOutput && !resolved.IsRefused ? TaskGateNextStep.NoneDeclared(request.Agent!, paths, outPath, runCount) : []);
         }
 
         IReadOnlyList<string> changed;
@@ -864,7 +866,7 @@ public sealed class ReviewGatesService(
             epilogue.AddRange(digest);
             if (redOutcome is not null)
             {
-                epilogue.AddRange(ReviewGateReporting.RedLines(redOutcome, request.Agent!, finalReport, outPath));
+                epilogue.AddRange(ReviewGateReporting.RedLines(redOutcome, request.Agent!, finalReport, outPath, runCount));
                 epilogue.AddRange(TaskGateNextStep.AfterFailingRun(redOutcome.Passed, request.Agent!, changed, taskSlug, fromPlan: target is not null));
             }
             else
@@ -874,7 +876,7 @@ public sealed class ReviewGatesService(
                     .. agentGates.Select(gate => new ReviewTaskGateView(
                         gate.Id, !gate.Run.Any(arg => arg.Contains("{changed}", StringComparison.Ordinal) || arg.Contains("{tests}", StringComparison.Ordinal)))),
                 ];
-                epilogue.AddRange(TaskGateNextStep.AfterRun(finalReport, views, fixChangedFiles, request.Agent!, changed, outPath));
+                epilogue.AddRange(TaskGateNextStep.AfterRun(finalReport, views, fixChangedFiles, request.Agent!, changed, outPath, runCount));
             }
         }
 
@@ -915,6 +917,48 @@ public sealed class ReviewGatesService(
         }
 
         return lines;
+    }
+
+    /// <summary>
+    ///     The ordinal this task-gate run gets, and the counter it leaves for the next run.
+    /// </summary>
+    /// <remarks>
+    ///     A counter file in the task's scratch folder names how many task-gate runs the task has had. The scratch
+    ///     folder is already the per-task evidence home, and one invocation cannot know the count any other way. A run
+    ///     with no task id names no folder, so it is always run 1. A counter that cannot be read or written counts as
+    ///     0: the run still reports its own number rather than failing on its own bookkeeping.
+    /// </remarks>
+    private int NextRunCount(string root, string? taskSlug)
+    {
+        if (taskSlug is null)
+            return 1;
+
+        string path = Path.Combine(root, ".agent_scratchpad", taskSlug, "task-gate-runs");
+        int previous = 0;
+        try
+        {
+            if (files.FileExists(path)
+                && int.TryParse(files.ReadAllText(path), NumberStyles.Integer, CultureInfo.InvariantCulture, out int read)
+                && read >= 0)
+                previous = read;
+        }
+        catch (Exception ex) when (FileFailure.Is(ex))
+        {
+            previous = 0;
+        }
+
+        int count = previous + 1;
+        try
+        {
+            files.CreateDirectory(Path.GetDirectoryName(path)!);
+            files.WriteAllText(path, count.ToString(CultureInfo.InvariantCulture));
+        }
+        catch (Exception ex) when (FileFailure.Is(ex))
+        {
+            // The run still reports the number it counted; only the next run's starting point is lost.
+        }
+
+        return count;
     }
 
     /// <summary>Reports every refusal, then ends the run before any gate process has started.</summary>
