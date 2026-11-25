@@ -284,7 +284,7 @@ public class MicrosoftDataSqliteHarnessSourceSqliteTests : IDisposable
             return File.Exists(file) ? new FileInfo(file).Length : 0;
         }
 
-        using (IHarnessSqliteDatabase database = new MicrosoftDataSqliteHarnessSource(new HarnessSqliteLimits(), directory.Combine("cache"), StaleWalLength).Open(path))
+        using (IHarnessSqliteDatabase database = new MicrosoftDataSqliteHarnessSource(new HarnessSqliteLimits(), directory.Combine("cache"), fileLength: StaleWalLength).Open(path))
         {
             Assert.Equal([1L, 2L, 3L], database.Query(new HarnessSqliteQuery("ids", "SELECT id FROM messages ORDER BY id", [])).Select(row => row["id"]));
         }
@@ -301,7 +301,7 @@ public class MicrosoftDataSqliteHarnessSourceSqliteTests : IDisposable
         string path = CreateSource(sourceDirectory, 3, SqliteFixtureJournal.WalUncheckpointed);
         SkipUnlessSealed(sourceDirectory);
         // The size check sees one byte per file, as it would before a writer grew them; the real files exceed the cap.
-        MicrosoftDataSqliteHarnessSource source = new(new HarnessSqliteLimits(CopyCapBytes: 100), directory.Combine("cache"), _ => 1);
+        MicrosoftDataSqliteHarnessSource source = new(new HarnessSqliteLimits(CopyCapBytes: 100), directory.Combine("cache"), fileLength: _ => 1);
 
         InvalidDataException exception = Assert.Throws<InvalidDataException>(() => source.Open(path));
 
@@ -424,6 +424,24 @@ public class MicrosoftDataSqliteHarnessSourceSqliteTests : IDisposable
         Assert.False(File.Exists(staleOther));
         // A recent temp may be another process's copy in progress.
         Assert.True(File.Exists(recent));
+    }
+
+    [Fact]
+    public void Open_SchemaProbeOverTheCommandTimeout_ThrowsIOExceptionNamingTheTimeout()
+    {
+        // A wide schema gives the probe enough SQLite steps for the progress handler to run.
+        string ddl = string.Concat(Enumerable.Range(1, 2_000).Select(table => $"CREATE TABLE t{table} (id INTEGER PRIMARY KEY, body TEXT);"));
+        string path = SqliteFixtureDatabase.Create(directory.Combine("wide.db"), ddl, [], SqliteFixtureJournal.Rollback);
+        // The clock reads zero when the deadline is armed and has passed it by every later reading.
+        long readings = 0;
+        long Clock() => Interlocked.Increment(ref readings) == 1 ? 0 : long.MaxValue / 2;
+        MicrosoftDataSqliteHarnessSource source = new(new HarnessSqliteLimits(CommandTimeoutSeconds: 1), directory.Combine("cache"), timestamp: Clock);
+
+        IOException exception = Assert.Throws<IOException>(() => source.Open(path));
+
+        Assert.StartsWith(SqliteSourceOpenPolicy.SourceUnreadableCode, exception.Message, StringComparison.Ordinal);
+        Assert.Contains("command timeout of 1 s", exception.Message, StringComparison.Ordinal);
+        Assert.Contains(path, exception.Message, StringComparison.Ordinal);
     }
 
     [Fact]

@@ -52,22 +52,27 @@ public class MicrosoftDataSqliteHarnessSource : IHarnessSqliteSource
     private readonly HarnessSqliteLimits limits;
     private readonly string cacheRoot;
     private readonly Func<string, long> fileLength;
+    private readonly Func<long> timestamp;
 
     /// <summary>Creates the adapter.</summary>
     /// <param name="limits">Size and time limits.</param>
     /// <param name="cacheRoot">Directory that holds the read-only copies; created on first use.</param>
     public MicrosoftDataSqliteHarnessSource(HarnessSqliteLimits limits, string cacheRoot)
-        : this(limits, cacheRoot, LengthOrZero)
+        : this(limits, cacheRoot, null, null)
     {
     }
 
-    /// <summary>Creates the adapter with the probe that sizes the database and WAL for the open decision.</summary>
+    /// <summary>Creates the adapter with the probes tests use to report a stale size or a late clock.</summary>
     /// <param name="limits">Size and time limits.</param>
     /// <param name="cacheRoot">Directory that holds the read-only copies; created on first use.</param>
-    /// <param name="fileLength">Length of a file, zero when it is absent; tests use it to report a stale size.</param>
-    internal MicrosoftDataSqliteHarnessSource(HarnessSqliteLimits limits, string cacheRoot, Func<string, long> fileLength)
+    /// <param name="fileLength">Length of a file, zero when it is absent, read for the open decision; the file system when null.</param>
+    /// <param name="timestamp">The clock the command timeout is measured on, in <see cref="Stopwatch"/> ticks; <see cref="Stopwatch.GetTimestamp"/> when null.</param>
+    internal MicrosoftDataSqliteHarnessSource(
+        HarnessSqliteLimits limits,
+        string cacheRoot,
+        Func<string, long>? fileLength = null,
+        Func<long>? timestamp = null)
     {
-        ArgumentNullException.ThrowIfNull(fileLength);
         ArgumentNullException.ThrowIfNull(limits);
         ArgumentException.ThrowIfNullOrWhiteSpace(cacheRoot);
         ArgumentOutOfRangeException.ThrowIfLessThanOrEqual(limits.CommandTimeoutSeconds, 0);
@@ -75,7 +80,8 @@ public class MicrosoftDataSqliteHarnessSource : IHarnessSqliteSource
         ArgumentOutOfRangeException.ThrowIfNegative(limits.CopyCapBytes);
         this.limits = limits;
         this.cacheRoot = Path.GetFullPath(cacheRoot);
-        this.fileLength = fileLength;
+        this.fileLength = fileLength ?? LengthOrZero;
+        this.timestamp = timestamp ?? Stopwatch.GetTimestamp;
     }
 
     /// <summary>Creates the adapter with default limits and the cache root <c>&lt;canon.db directory&gt;/sqlite-ro</c>.</summary>
@@ -245,13 +251,8 @@ public class MicrosoftDataSqliteHarnessSource : IHarnessSqliteSource
                 SqliteException.ThrowExceptionForRC(busyResult, connection.Handle);
             }
 
-            using (SqliteCommand probe = connection.CreateCommand())
-            {
-                probe.CommandText = "SELECT count(*) FROM sqlite_master";
-                probe.ExecuteScalar();
-            }
-
-            OpenDatabase database = new(connection, sourcePath, limits.CommandTimeoutSeconds);
+            OpenDatabase database = new(connection, sourcePath, limits.CommandTimeoutSeconds, timestamp);
+            database.ProbeSchema();
             handedOver = true;
             return database;
         }
@@ -531,17 +532,44 @@ public class MicrosoftDataSqliteHarnessSource : IHarnessSqliteSource
         private readonly string sourcePath;
         private readonly int commandTimeoutSeconds;
         private readonly long timeoutTicks;
+        private readonly Func<long> timestamp;
         private readonly delegate_progress progress;
         private long deadline = long.MaxValue;
 
-        public OpenDatabase(SqliteConnection connection, string sourcePath, int commandTimeoutSeconds)
+        public OpenDatabase(SqliteConnection connection, string sourcePath, int commandTimeoutSeconds, Func<long> timestamp)
         {
             this.connection = connection;
             this.sourcePath = sourcePath;
             this.commandTimeoutSeconds = commandTimeoutSeconds;
+            this.timestamp = timestamp;
             timeoutTicks = commandTimeoutSeconds * Stopwatch.Frequency;
-            progress = _ => Stopwatch.GetTimestamp() > Volatile.Read(ref deadline) ? 1 : 0;
+            progress = _ => timestamp() > Volatile.Read(ref deadline) ? 1 : 0;
             raw.sqlite3_progress_handler(connection.Handle, 1000, progress, null);
+        }
+
+        /// <summary>
+        /// Reads the schema under the command timeout. Any other SQLite error is rethrown as it is, so the
+        /// open can still classify it and fall back.
+        /// </summary>
+        public void ProbeSchema()
+        {
+            using SqliteCommand probe = connection.CreateCommand();
+            probe.CommandText = "SELECT count(*) FROM sqlite_master";
+            Volatile.Write(ref deadline, timestamp() + timeoutTicks);
+            try
+            {
+                probe.ExecuteScalar();
+            }
+            catch (SqliteException ex) when ((ex.SqliteErrorCode & 0xff) == SqliteInterrupt)
+            {
+                throw new IOException(
+                    $"{SqliteSourceOpenPolicy.SourceUnreadableCode}: reading the schema of '{sourcePath}' exceeded the command timeout of {commandTimeoutSeconds} s.",
+                    ex);
+            }
+            finally
+            {
+                Volatile.Write(ref deadline, long.MaxValue);
+            }
         }
 
         public IEnumerable<IReadOnlyDictionary<string, object?>> Query(HarnessSqliteQuery query)
@@ -609,7 +637,7 @@ public class MicrosoftDataSqliteHarnessSource : IHarnessSqliteSource
         /// </summary>
         private T Step<T>(HarnessSqliteQuery query, ref long remaining, Func<T> step)
         {
-            long started = Stopwatch.GetTimestamp();
+            long started = timestamp();
             Volatile.Write(ref deadline, started + remaining);
             try
             {
@@ -630,7 +658,7 @@ public class MicrosoftDataSqliteHarnessSource : IHarnessSqliteSource
             finally
             {
                 Volatile.Write(ref deadline, long.MaxValue);
-                remaining -= Stopwatch.GetTimestamp() - started;
+                remaining -= timestamp() - started;
             }
         }
     }
