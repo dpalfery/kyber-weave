@@ -445,6 +445,45 @@ public class MicrosoftDataSqliteHarnessSourceSqliteTests : IDisposable
     }
 
     [Fact]
+    public void Open_WalRewrittenAtTheSameSizeAndTimeBetweenTheCopies_DiscardsTheCopy()
+    {
+        string sourceDirectory = directory.Combine("harness");
+        Directory.CreateDirectory(sourceDirectory);
+        string path = CreateSource(sourceDirectory, 3, SqliteFixtureJournal.WalUncheckpointed);
+        SkipUnlessSealed(sourceDirectory);
+        // A checkpoint and a WAL restart inside one timestamp tick of a coarse file system: the WAL keeps its
+        // size and last-write time, and only its salts (header offsets 16 to 23) change.
+        void RestartWalInOneTick(string source)
+        {
+            string wal = source + "-wal";
+            DateTime written = File.GetLastWriteTimeUtc(wal);
+            using (FileStream stream = new(wal, FileMode.Open, FileAccess.ReadWrite, FileShare.ReadWrite))
+            {
+                byte[] salts = new byte[8];
+                stream.Position = 16;
+                stream.ReadExactly(salts);
+                for (int i = 0; i < salts.Length; i++)
+                {
+                    salts[i] ^= 0xff;
+                }
+
+                stream.Position = 16;
+                stream.Write(salts);
+            }
+
+            File.SetLastWriteTimeUtc(wal, written);
+        }
+
+        MicrosoftDataSqliteHarnessSource source = new(new HarnessSqliteLimits(), directory.Combine("cache"), betweenCopies: RestartWalInOneTick);
+
+        IOException exception = Assert.Throws<IOException>(() => source.Open(path));
+
+        Assert.StartsWith(SqliteSourceOpenPolicy.SourceUnreadableCode, exception.Message, StringComparison.Ordinal);
+        Assert.Contains("changed while copying", exception.Message, StringComparison.Ordinal);
+        Assert.Empty(CacheFiles());
+    }
+
+    [Fact]
     public void Open_MissingFile_IsRefusedAsUnreadable()
     {
         string path = directory.Combine("absent.db");

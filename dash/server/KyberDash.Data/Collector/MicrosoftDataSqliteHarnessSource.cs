@@ -1,3 +1,4 @@
+using System.Buffers.Binary;
 using System.Diagnostics;
 using System.Globalization;
 using System.Security.Cryptography;
@@ -53,6 +54,7 @@ public class MicrosoftDataSqliteHarnessSource : IHarnessSqliteSource
     private readonly string cacheRoot;
     private readonly Func<string, long> fileLength;
     private readonly Func<long> timestamp;
+    private readonly Action<string>? betweenCopies;
 
     /// <summary>Creates the adapter.</summary>
     /// <param name="limits">Size and time limits.</param>
@@ -67,11 +69,13 @@ public class MicrosoftDataSqliteHarnessSource : IHarnessSqliteSource
     /// <param name="cacheRoot">Directory that holds the read-only copies; created on first use.</param>
     /// <param name="fileLength">Length of a file, zero when it is absent, read for the open decision; the file system when null.</param>
     /// <param name="timestamp">The clock the command timeout is measured on, in <see cref="Stopwatch"/> ticks; <see cref="Stopwatch.GetTimestamp"/> when null.</param>
+    /// <param name="betweenCopies">Runs with the source path after the database is copied and before its WAL is; tests use it to change the source mid-copy.</param>
     internal MicrosoftDataSqliteHarnessSource(
         HarnessSqliteLimits limits,
         string cacheRoot,
         Func<string, long>? fileLength = null,
-        Func<long>? timestamp = null)
+        Func<long>? timestamp = null,
+        Action<string>? betweenCopies = null)
     {
         ArgumentNullException.ThrowIfNull(limits);
         ArgumentException.ThrowIfNullOrWhiteSpace(cacheRoot);
@@ -82,6 +86,7 @@ public class MicrosoftDataSqliteHarnessSource : IHarnessSqliteSource
         this.cacheRoot = Path.GetFullPath(cacheRoot);
         this.fileLength = fileLength ?? LengthOrZero;
         this.timestamp = timestamp ?? Stopwatch.GetTimestamp;
+        this.betweenCopies = betweenCopies;
     }
 
     /// <summary>Creates the adapter with default limits and the cache root <c>&lt;canon.db directory&gt;/sqlite-ro</c>.</summary>
@@ -334,7 +339,7 @@ public class MicrosoftDataSqliteHarnessSource : IHarnessSqliteSource
             string cachePath = Path.Combine(cacheRoot, name);
             if (!File.Exists(cachePath))
             {
-                Publish(sourcePath, cachePath, before, limits.CopyCapBytes);
+                Publish(sourcePath, cachePath, before, limits.CopyCapBytes, betweenCopies);
             }
 
             EvictSuperseded(sourceKey, name);
@@ -362,7 +367,7 @@ public class MicrosoftDataSqliteHarnessSource : IHarnessSqliteSource
         }
     }
 
-    private static void Publish(string sourcePath, string cachePath, SourceFingerprint before, long copyCapBytes)
+    private static void Publish(string sourcePath, string cachePath, SourceFingerprint before, long copyCapBytes, Action<string>? betweenCopies)
     {
         // A random name: a temp left by a stopped run, or by a process that reused this process id, can never
         // be the name this copy needs.
@@ -372,6 +377,7 @@ public class MicrosoftDataSqliteHarnessSource : IHarnessSqliteSource
         {
             // The cap is enforced on the bytes actually read, since the source can grow while it is copied.
             long copied = CopyWithinCap(sourcePath, tempDatabase, copyCapBytes, copyCapBytes);
+            betweenCopies?.Invoke(sourcePath);
             bool hasWal = File.Exists(sourcePath + "-wal");
             if (hasWal)
             {
@@ -501,9 +507,20 @@ public class MicrosoftDataSqliteHarnessSource : IHarnessSqliteSource
     private static string Hex(string value) =>
         Convert.ToHexStringLower(SHA256.HashData(Encoding.UTF8.GetBytes(value)));
 
-    /// <summary>Size and last-write time of a database and its WAL; a WAL that is absent records -1.</summary>
-    private readonly record struct SourceFingerprint(long DatabaseBytes, long DatabaseTicks, long WalBytes, long WalTicks)
+    /// <summary>
+    /// Size and last-write time of a database and its WAL, and the WAL header's salts; a WAL that is absent
+    /// records -1, and a WAL too short to hold its salts records -1 for them.
+    /// </summary>
+    /// <remarks>
+    /// SQLite writes new salts into the WAL header each time it restarts the WAL after a checkpoint. On a file
+    /// system whose timestamps are coarse, a checkpoint and a same-size WAL rewrite inside one tick leave the
+    /// size and time unchanged; the salts still differ, so the copy is still discarded.
+    /// </remarks>
+    private readonly record struct SourceFingerprint(long DatabaseBytes, long DatabaseTicks, long WalBytes, long WalTicks, long WalSalts)
     {
+        /// <summary>Offset of salt-1 in the 32-byte WAL header; salt-2 follows it at offset 20.</summary>
+        private const int WalSaltsOffset = 16;
+
         public static SourceFingerprint Of(string path)
         {
             FileInfo database = new(path);
@@ -517,12 +534,31 @@ public class MicrosoftDataSqliteHarnessSource : IHarnessSqliteSource
                 database.Length,
                 database.LastWriteTimeUtc.Ticks,
                 wal.Exists ? wal.Length : -1,
-                wal.Exists ? wal.LastWriteTimeUtc.Ticks : -1);
+                wal.Exists ? wal.LastWriteTimeUtc.Ticks : -1,
+                wal.Exists ? ReadWalSalts(wal.FullName) : -1);
+        }
+
+        private static long ReadWalSalts(string walPath)
+        {
+            try
+            {
+                using FileStream stream = new(walPath, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete);
+                Span<byte> salts = stackalloc byte[sizeof(long)];
+                stream.Position = WalSaltsOffset;
+                return stream.ReadAtLeast(salts, salts.Length, throwOnEndOfStream: false) == salts.Length
+                    ? BinaryPrimitives.ReadInt64BigEndian(salts)
+                    : -1;
+            }
+            catch (FileNotFoundException)
+            {
+                // Deleted since it was sized: the size and time recorded with it already differ from any later reading.
+                return -1;
+            }
         }
 
         public override string ToString() => string.Create(
             CultureInfo.InvariantCulture,
-            $"{DatabaseBytes}:{DatabaseTicks}:{WalBytes}:{WalTicks}");
+            $"{DatabaseBytes}:{DatabaseTicks}:{WalBytes}:{WalTicks}:{WalSalts}");
     }
 
     /// <summary>One open read-only connection; queries stream through a forward-only reader.</summary>
