@@ -22,7 +22,7 @@ public class SchemaVersionTests
     {
         Assert.True(SqliteRelationalStore.SchemaVersion > 24);
         Assert.Equal(30, SqliteRelationalStore.SchemaVersion);
-        Assert.Equal(6, SqliteRelationalStore.DetectorVersion);
+        Assert.Equal(7, SqliteRelationalStore.DetectorVersion);
         Assert.Equal(32 * 1024 * 1024, SqliteRelationalStore.WalSizeLimitBytes);
 
         Type fsType = typeof(PhysicalRelationalStoreFileSystem);

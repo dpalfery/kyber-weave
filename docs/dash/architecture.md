@@ -191,7 +191,7 @@ which is what the source rules in `CanonSessionProjectorEngine` key on: `SplitDr
 [Factory source-precedence rule](#the-factory-source-precedence-rule)), `IsFileSource`, the twin-turn collapse
 (`DedupeTwinTurns`, `CollapseCluster`) and `CollapseOverlapFileJoins` (Cursor). These rules are documented for every
 harness; they were silently inert for every session read back from the relational store until the source was restored.
-That change is why `SqliteRelationalStore.DetectorVersion` is `6`.
+That change is why `SqliteRelationalStore.DetectorVersion` became `6`; generation `7` is described under [Skills view contract](#skills-view-contract).
 
 ### Twin turns join on a vendor id, or on the session
 
@@ -1817,18 +1817,31 @@ type and the views render without it. The narrow turn-content route never walks 
   aggregate from `SessionSkillFigures` (the way the tools section serves its own) and forwarding
   it through `SessionSkillsSection` is the named follow-up.
 
-**Analysis inputs.** The `skillUtilisation` signal and the `inactive-skill-reference` finding take
-their listed and invoked sets from `CanonSynth` / `CanonSessionProjectorEngine` (see [Pure Signals and Findings Engine](#pure-signals-and-findings-engine-canonfindings)).
+**Analysis inputs.** The `inactive-skill-reference` finding takes its listed and invoked sets from
+the raw attributes `kyber.skills.listed` and `kyber.skills.invoked` on the records it is given (see [Pure Signals and Findings Engine](#pure-signals-and-findings-engine-canonfindings)).
+On the relational path the projector rebuilds a session from `SessionRecordsForRebuild`, whose records carry
+`SkillsInvoked` (`record_skill_invocation`) and `SkillsListed` (`record_skill_listing`, in listing position order;
+`null` when the record has no listing rows, since the store cannot tell an empty listing from none).
+`CanonRecordHydration.Hydrate` writes `kyber.skills.invoked` as the distinct invoked names and `kyber.skills.listed`
+as `{ skills: [{ name }] }`, each only when the record carries at least one name. The listing has no `isInitial`
+and no descriptions, because the store keeps neither; the detector reads `isInitial` only to reject a non-boolean
+value and unions every listing it sees. When `DedupeTwinTurns` keeps an OTLP turn over the transcript turn that
+carried the listing, the kept turn takes the absorbed turn's two skill attributes if it has none of its own, so a
+Claude Code session with both sources still raises the finding. The content-free and timeline reads do not carry
+`SkillsListed`; nothing on those paths runs the detector.
+The `skillUtilisation` scorecard dimension is not fed by these inputs: `CanonRollupsEngine.BuildScorecardDimensions`
+reports it as not measurable for every harness, and making it measurable needs a rollup metric that does not exist yet.
 On a partly covered Antigravity session the invoked set is the names read on the covered turns,
 since an uncovered turn carries no key. The finding does not state that coverage.
 Finding detail follows ADR 0013 D15/D16: the wording is "listed with N recorded turns and 0
 invocations", with no deletion or waste claim.
 
-**Detector version.** `SqliteRelationalStore.DetectorVersion` is `6` (`dash/server/KyberDash.Data/Repositories/SqliteRelationalStore.cs`). Stores stamped with
-an older generation (for example `4` or `5`) report their findings as outdated; `CanonSessionProjectorEngine`
-re-projects them to the current generation on maintenance/build. Generation 6 is the one that restored record source identity
-(see [Records keep their source](#records-keep-their-source)): every projection built under generation 5's source-less
-reads is rebuilt on the first start or tick after the upgrade, so no stale projection survives.
+**Detector version.** `SqliteRelationalStore.DetectorVersion` is `7` (`dash/server/KyberDash.Data/Repositories/SqliteRelationalStore.cs`). Stores stamped with
+an older generation (for example `5` or `6`) report their findings as outdated; `CanonSessionProjectorEngine`
+re-projects them to the current generation on maintenance/build. Generation 6 restored record source identity
+(see [Records keep their source](#records-keep-their-source)); generation 7 hydrates the stored skill listing and
+invocations into the detector's inputs (see **Analysis inputs** above). Every projection built under an older
+generation is rebuilt on the first start or tick after the upgrade, so no stale projection survives.
 
 **Web.** The Sessions page section **4 · Skills** renders one page of skill rows with the
 shared pager (`SessionSkillsSection`, one query per the

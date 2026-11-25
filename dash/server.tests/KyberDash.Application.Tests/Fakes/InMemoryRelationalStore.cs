@@ -5607,6 +5607,16 @@ public class InMemoryRelationalStore :
                 .Select(r => GetString(skillMeta, r, "skill_name")),
         ];
 
+        // A record with no listing rows reads back as null, the shape the SQLite reader returns.
+        TableMetadata listingMeta = GetTableMetadata("record_skill_listing");
+        List<string> listed =
+        [
+            .. currentState.GetRows("record_skill_listing")
+                .Where(r => string.Equals(GetString(listingMeta, r, "span_id"), spanId, StringComparison.Ordinal))
+                .OrderBy(r => (int)GetInt64(listingMeta, r, "position"))
+                .Select(r => GetString(listingMeta, r, "skill_name")),
+        ];
+
         TableMetadata partMeta = GetTableMetadata("content_part");
         List<CollectedContentPart> parts =
         [
@@ -5659,7 +5669,8 @@ public class InMemoryRelationalStore :
             reportedOutput,
             ReadRecordSourceName(currentState, recordRow),
             responseId,
-            requestId);
+            requestId,
+            listed.Count > 0 ? listed : null);
     }
 
     private static long? ReadOptionalReportedTotal(StoreState currentState, string spanId, string direction)

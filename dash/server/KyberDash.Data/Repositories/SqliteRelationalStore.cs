@@ -36,8 +36,11 @@ public partial class SqliteRelationalStore : BaseSqliteRepository, IRelationalSt
     /// Generation 6: records read back carry their source name, so the projector's source rules
     /// (the Droid plugin/file split and the file-source twin collapses) apply again, and every
     /// projection built under generation 5's source-less hydration is rebuilt.
+    /// Generation 7: records read back carry their stored skill listing, and hydration exposes the
+    /// listing and the stored skill invocations to the inactive-skill-reference detector, so every
+    /// Claude Code session's findings are rebuilt.
     /// </remarks>
-    public const int DetectorVersion = 6;
+    public const int DetectorVersion = 7;
 
     /// <summary>Maximum retained WAL journal size in bytes after checkpoint (32 MiB).</summary>
     public const int WalSizeLimitBytes = 32 * 1024 * 1024;

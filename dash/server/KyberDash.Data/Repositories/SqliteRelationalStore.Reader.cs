@@ -3468,6 +3468,10 @@ public partial class SqliteRelationalStore : IRelationalStoreReader
             "SELECT 'SKL', hex(CAST(r.span_id AS BLOB)), hex(CAST(r.skill_name AS BLOB)) " +
             $"FROM record_skill_invocation r{childSpanFilter} ORDER BY r.rowid ASC;\n");
 
+        sql.Append(
+            "SELECT 'LST', hex(CAST(r.span_id AS BLOB)), hex(CAST(r.skill_name AS BLOB)) " +
+            $"FROM record_skill_listing r{childSpanFilter} ORDER BY r.span_id ASC, r.position ASC;\n");
+
         sql.Append("SELECT 'PART', hex(CAST(cp.span_id AS BLOB)), ");
         sql.Append(BuildContentPartColumns("cp"));
         sql.Append(" FROM content_part cp " +
@@ -3520,6 +3524,7 @@ public partial class SqliteRelationalStore : IRelationalStoreReader
         List<RawRecordHeader> rawRecords = [];
         Dictionary<string, List<CollectedTokenCount>> tokensBySpan = new(StringComparer.Ordinal);
         Dictionary<string, List<string>> skillsBySpan = new(StringComparer.Ordinal);
+        Dictionary<string, List<string>> listedBySpan = new(StringComparer.Ordinal);
         Dictionary<string, List<CollectedContentPart>> partsBySpan = new(StringComparer.Ordinal);
         Dictionary<string, List<CollectedToolDefinition>> defsBySpan = new(StringComparer.Ordinal);
         Dictionary<string, CollectedToolCall> toolCallsBySpan = new(StringComparer.Ordinal);
@@ -3565,6 +3570,19 @@ public partial class SqliteRelationalStore : IRelationalStoreReader
                         string spanId = ParseHexRequired(cols[1], "record_skill_invocation.span_id");
                         string skill = ParseHexRequired(cols[2], "record_skill_invocation.skill_name");
                         GetOrCreateList(skillsBySpan, spanId).Add(skill);
+                        break;
+                    }
+
+                case "LST":
+                    {
+                        if (cols.Length != 3)
+                        {
+                            throw new StoredDataException($"Expected 3 columns for LST row, got {cols.Length.ToString(CultureInfo.InvariantCulture)}.");
+                        }
+
+                        string spanId = ParseHexRequired(cols[1], "record_skill_listing.span_id");
+                        string skill = ParseHexRequired(cols[2], "record_skill_listing.skill_name");
+                        GetOrCreateList(listedBySpan, spanId).Add(skill);
                         break;
                     }
 
@@ -3658,7 +3676,9 @@ public partial class SqliteRelationalStore : IRelationalStoreReader
                 header.ReportedOutputTokens,
                 header.SourceName,
                 header.ResponseId,
-                header.RequestId));
+                header.RequestId,
+                // No listing rows reads back as null: the store cannot tell "listed nothing" from "no listing".
+                listedBySpan.GetValueOrDefault(header.SpanId)));
         }
 
         return materialized;

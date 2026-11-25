@@ -222,7 +222,7 @@ public partial class CanonSessionProjectorEngine
 
             if (!IsFileSource(record.Source))
             {
-                CanonicalRecord mergedOtel = MergeOtelFirst(record, donor);
+                CanonicalRecord mergedOtel = WithDonorSkills(MergeOtelFirst(record, donor), donor);
                 output.Add(ReferenceEquals(tokens, record.Tokens) ? mergedOtel : mergedOtel with { Tokens = tokens });
                 continue;
             }
@@ -251,7 +251,7 @@ public partial class CanonSessionProjectorEngine
             }
 
             bool keepParts = (donor.Parts is { Count: > 0 }) || extraParts.Count > 0 || (record.Parts is { Count: > 0 });
-            output.Add(record with
+            output.Add(WithDonorSkills(record, donor) with
             {
                 Tokens = tokens,
                 Parts = keepParts ? newParts : record.Parts,
@@ -1596,7 +1596,35 @@ public partial class CanonSessionProjectorEngine
             merged = MergeDictionaries(merged, CanonValidation.ContentFromParts(parts));
         }
 
-        return first with { Parts = parts, Content = merged };
+        return WithDonorSkills(first, second) with { Parts = parts, Content = merged };
+    }
+
+    /// <summary>Raw attributes a twin keeps from the observation it absorbed when it has none of its own.</summary>
+    private static readonly string[] DonorSkillKeys = [CanonSynth.SkillsListedKey, CanonSynth.SkillsInvokedKey];
+
+    /// <summary>
+    /// Carries the skill listing and skill invocations of an absorbed twin onto the kept record when
+    /// the kept record has none: a Claude Code listing is stored only on the transcript turn, so an
+    /// OTLP keeper would otherwise drop it and the inactive-skill-reference detector would not see it.
+    /// </summary>
+    private static CanonicalRecord WithDonorSkills(CanonicalRecord keeper, CanonicalRecord donor)
+    {
+        if (donor.Raw is null)
+        {
+            return keeper;
+        }
+
+        Dictionary<string, JsonElement>? raw = null;
+        foreach (string key in DonorSkillKeys)
+        {
+            if (donor.Raw.TryGetValue(key, out JsonElement value) && (keeper.Raw is null || !keeper.Raw.ContainsKey(key)))
+            {
+                raw ??= keeper.Raw is null ? new(StringComparer.Ordinal) : new(keeper.Raw, StringComparer.Ordinal);
+                raw[key] = value;
+            }
+        }
+
+        return raw is null ? keeper : keeper with { Raw = raw };
     }
 
     private static bool IsFileSource(string source) =>
