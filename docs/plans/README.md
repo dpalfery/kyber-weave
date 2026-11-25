@@ -64,7 +64,9 @@ its `tasks.yml` is caught rather than carried as dead weight.
 
 ## Active Plans
 
-No plans are open.
+| Plan | Status | Scope |
+|---|---|---|
+| [Read the Kilo, Warp, Cursor and Devin SQLite stores in the C# import](2026-11-25-sqlite-harness-readers.md) | Ready | KyberDash shared read-only SQLite source reader, four per-harness conversation sources, recorded problems for unreadable sources, real-schema SQLite e2e fixtures |
 
 ## Archived Plans
 
