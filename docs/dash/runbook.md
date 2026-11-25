@@ -1588,8 +1588,8 @@ on every invocation, from the repository root:
 npx --prefix dash playwright test --config dash/playwright.isolated.config.ts
 ```
 
-That config runs the three isolated self-booting specs (`harness-collection.spec.ts`,
-`otel-web-dashboard.spec.ts`, and `otel-tray-dashboard.spec.ts`) with one worker. The only Playwright configs in `dash/` are
+That config runs the four isolated self-booting specs (`harness-collection.spec.ts`,
+`file-harness-dashboard.spec.ts`, `otel-web-dashboard.spec.ts`, and `otel-tray-dashboard.spec.ts`) with one worker. The only Playwright configs in `dash/` are
 `playwright.config.ts` and `playwright.isolated.config.ts`: a test pins that set. Do not run
 `dash/playwright.config.ts` by hand. Its `webServer` starts a dashboard on port 4747, the port the
 tray uses, and it is not the isolated path. Which specs have no sanctioned invocation is tracked in
@@ -1612,6 +1612,39 @@ Two isolated OTLP end-to-end suites verify live `/v1/traces` ingestion across al
   npx --prefix dash playwright test --config dash/playwright.isolated.config.ts dash/e2e/otel-tray-dashboard.spec.ts
   ```
   Validates `HarnessSelector`, `SessionPanel`, `FindingsList`, `HealthFooter`, `SettingsView` (`?days=` window and shared settings), `Maintenance` (`jobsPaused`, `refresh_now`, `import_folder_history`), `CleanDatabase`, and `open_view` / `hide_popover` / `quit` IPC commands.
+
+#### Per-harness dashboard suites: two sessions of 10 or more turns for every harness
+
+Every harness KyberDash can load has its own test that loads a database and checks every Agent Session Dashboard section for
+**two sessions of 10 or more turns each**, so a gap in one harness fails that harness's test and leaves the others readable.
+Fixture timestamps are relative to the run's clock (one hour back, floored to the minute), so retention never ages them out.
+
+| Suite | Harnesses | How the database is loaded |
+|---|---|---|
+| `dash/e2e/otel-web-dashboard.spec.ts` | the 7 OTLP-captured harnesses (`claude-code`, `opencode`, `droid`, `codex`, `copilot`, `pi`, `antigravity`) and the `gemini` exclusion | posts the OTLP payloads from `dash/e2e/otel-harness-payloads.ts` to `/v1/traces` and `/v1/logs`; paired Droid sessions also get their transcript and `<id>.settings.json` under the server's isolated `HOME`, and `POST /api/kyber/refresh` runs the plugin-captured counter pass |
+| `dash/e2e/file-harness-dashboard.spec.ts` | the 15 file-import harnesses, one test each | writes each harness's native files under the isolated `HOME` at the path its registry reader scans (`dash/e2e/file-harness-jsonl.ts`, `file-harness-json.ts`, `file-harness-sqlite.ts`, the last built with Node's `node:sqlite`, Node 22.13 or later), then `POST /api/kyber/import-history` |
+
+Both share the section assertions in `dash/e2e/session-dashboard-assertions.ts`, and a dimension a harness does not export is
+asserted as its explicit not-measurable state, never skipped. Where a harness cannot reach a section, the contract in
+`dash/e2e/file-harness-contracts.ts` or `otel-harness-payloads.ts` states the gap.
+
+**Prerequisites.** The boot never uses a `kyberdash-api` found on `PATH`, because that would test an installed engine of
+another schema: `assertKyberdashApiBuilt` throws unless the worktree's own Release build exists. From the repository root:
+
+```bash
+dotnet build dash/server/KyberDash.Api -c Release
+dotnet build dash/server/KyberDash.Cli -c Release
+npm --prefix dash run build:web
+npx --prefix dash playwright test --config dash/playwright.isolated.config.ts dash/e2e/file-harness-dashboard.spec.ts
+```
+
+**Known gap.** The four SQLite-format harnesses (`kilo-shared-runtime`, `warp`, `cursor`, `devin`) are marked expected failures
+(`test.fail`) in the file-harness suite: the C# engine has no SQLite source reader since the engine rewrite (#612), so their
+import yields nothing. The reader fix lives on branch `claude/fix/sqlite-harness-readers`; when it lands the marker is
+removed and the tests must pass.
+
+**Import outcomes.** A folder import in which some source units fail reports `partial` with the number of `failedUnits`
+(the maintenance panel shows it) instead of `succeeded`; a store constraint failure on one unit fails only that unit.
 
 **Leftovers from an earlier run.** With no watchdog and no ledger, a process a killed run left behind
 is yours to find and stop:

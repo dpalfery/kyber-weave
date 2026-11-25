@@ -49,6 +49,26 @@ counters come from OTLP; file-derived parts are used only when the OTLP record h
 Values are never summed across the two sources. `KyberBridgeEngine` reads `canon.db` only;
 `AGENTDASH_DB` / `KYBER_DB` cannot expose a legacy Python `sessions.db`.
 
+## Token figures, the per-turn chart and their labels
+
+A token figure on the dashboard is one of three things, and the web never blurs them:
+
+- **Reported**: the harness's own counter, per call or per turn.
+- **Reported for the session only**: Droid and Warp report one session snapshot, and Copilot CLI restates cumulative
+  per-model counters at each `session.shutdown`. The session tiles show these totals, resolved per harness by
+  `ReportedSessionUsage.Resolve` ([session totals](architecture.md#session-totals-come-from-reported-session-usage));
+  per-call and per-turn figures are **not measured**, and the Droid, Cursor and Warp mappers no longer split or guess them.
+  Warp's session figure is a `total` class with no input/output split (schema 26); Copilot CLI's shutdown input is stored as
+  fresh (cache-exclusive); a Copilot CLI counter that resets between legs makes the totals not measured.
+- **Counted locally from text**: tool definitions, skills and context buckets, produced by the local tokenizer and shown
+  with its label (`tokenizer`, `tokenizerIsModelOwn`, a session `tokenizers` list, "mixed" for a figure combining several).
+  The label is the model's own tokenizer, or the labelled `o200k_base` stand-in when the model publishes none.
+
+**Per-turn spend chart.** When no turn of a session carries a measured per-turn counter, the "Token Spend per Turn" chart
+shows a not-measurable state (`turn-spend-not-measurable`) in place of empty bars, for every harness. The tool-schema section
+shows the same not-measurable state when the session recorded no tool definitions, rather than an empty ranking. Cost is shown
+as "calculated from published rates" (`costIsCalculated`) when a published rate priced it, and never as an estimate.
+
 ## Verified harness outcomes
 
 | Harness/source | Verified collection outcome | Availability or gate |
@@ -251,15 +271,16 @@ The file source is read twice over, and both reads write the **same** rows.
 - The **refresh** reads every Factory session under the history window, and only when a run is
   allowed to read folder sources at all — `settings.folder_import.scheduled` is **off** by
   default, so an unattended run reads none.
-- The **live counter pass** (`dash/src/sync/factory-live-counters.ts`), run by the job host on
-  every tick, reads the sessions the **plugin** captured, while those sessions run. A live
-  Factory session therefore reaches the dashboard with its counters rather than waiting for a
-  folder import that is off by default.
+- The **plugin-captured counter pass** (`JobSchedulerService.RefreshPluginCapturedCounters`), run
+  on every refresh and every maintenance tick, reads the sessions the **plugin** captured, found
+  through the `droid` reader's own discovery and skipped when a file's checkpoint is unchanged. A
+  live Factory session therefore reaches the dashboard with its totals rather than waiting for a
+  folder import that is off by default. A paused install runs it on neither.
 
 Both reads go through the same provider and the same synthesizer, so the rows carry the same
 identity and a later folder import **replaces** the live rows rather than adding a second copy
-of the same counters. The pass reads only sessions the plugin captured, and it holds the refresh
-lock while it writes. Detail: [where the Factory file rows come
+of the same counters. The pass reads only sessions the plugin captured, and it runs under the
+caller's job guard. Detail: [where the Factory file rows come
 from](architecture.md#where-the-factory-file-rows-come-from).
 
 ### The model a Factory session publishes

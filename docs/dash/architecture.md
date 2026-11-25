@@ -178,6 +178,63 @@ floor, or an invented band. A cost computed from published per-token rates is a 
 is described as "calculated from published rates". The rule is decided in
 [honest unobservability](../rules/honest-unobservability.md#hard-rule-kyberdash-never-estimates).
 
+## Honest token figures in the projection
+
+Four rules decide which token figure a session shows once no figure is estimated. Each is decided in one place.
+
+### Records keep their source
+
+`CollectedRecord.SourceName` carries the source of every record a reader returns for projection: the OTLP
+service name for an OTLP row, `codeburn/<harness_id>` for a file row. `CanonRecordHydration.Hydrate`
+(`dash/server/KyberDash.Application/CanonRecordHydration.cs`) uses it instead of the placeholder `relational`,
+which is what the source rules in `CanonSessionProjectorEngine` key on: `SplitDroidSessionRecords` (the
+[Factory source-precedence rule](#the-factory-source-precedence-rule)), `IsFileSource`, the twin-turn collapse
+(`DedupeTwinTurns`, `CollapseCluster`) and `CollapseOverlapFileJoins` (Cursor). These rules are documented for every
+harness; they were silently inert for every session read back from the relational store until the source was restored.
+That change is why `SqliteRelationalStore.DetectorVersion` is `6`.
+
+### Twin turns join on a vendor id, or on the session
+
+A turn seen by both an OTLP source and a file source is one turn, and the sources never add up. `CollapseIdJoins`
+joins them on ids the vendor documents: a Claude Code OTLP `llm.invoke` row and its transcript row join on the provider
+`request_id` or on the Anthropic `message.id` (stored as `response_id`, schema 27; the mappers write them, and
+`OtlpJoinIds` reads them from a span). Codex carries no shared id (its `auth.request_id` names an auth request), so
+`CollapseCodexFileModelCalls` applies the source-precedence rule per session instead: a session with OTLP model calls counts only
+those, while its rollout-file records still supply what OTLP lacks, such as tool calls by `call_id`.
+
+### Session totals come from reported session usage
+
+A session whose records carry no token counter of their own takes its totals from the usage the harness reported for the
+whole session (`session_model_usage`), resolved by `ReportedSessionUsage.Resolve`
+(`dash/server/KyberDash.Domain/ReportedSessionUsage.cs`). Per-call and per-turn figures stay not measured; nothing is split.
+What a snapshot means is the harness's, so the rule reads it per harness:
+
+| Harness | Snapshots written | Totals |
+|---|---|---|
+| Droid, Warp | one, at position 0 | summed across models |
+| Copilot CLI | one per `session.shutdown`, each restating the CLI's cumulative per-model counters | the latest value per model and token class; a counter that goes down is the CLI resetting (compaction), the usage before the reset is in no snapshot, so the totals are not measured |
+| any other harness with several snapshots | several | not measured; nothing evidences whether they restate or add up |
+
+A figure reported with no input/output split is the `total` class (schema 26): Warp reports one, and it stays a total,
+never an invented split. Mixed with split classes it is ambiguous and not measured. Copilot CLI's shutdown input is
+stored as fresh input (cache-exclusive), the way the per-turn figure is. The cost of such a session is priced from
+the reported usage at each model's own published rate and is described as "calculated from published rates"
+(`costIsCalculated`).
+
+### Text-derived counts carry a tokenizer label
+
+Counts of text (tool definitions, skills, content parts, context buckets) are produced locally by `LocalTextTokenizer`
+(`dash/server/KyberDash.Data/Tokenization/LocalTextTokenizer.cs`) behind the `ITextTokenizer` seam, on
+`Microsoft.ML.Tokenizers` 3.0.0 with the `o200k_base` and `cl100k_base` vocabularies shipped in NuGet data packages, so a
+count never reaches the network. The model's own published tokenizer is used when the library knows the model; every other model
+(Claude included) gets the one standard stand-in, `o200k_base`, labelled as a stand-in. The label is stored beside the figure
+(`content_part_withheld_tokenizer`, `session_context_turn_tokenizer`, `tool_definition_tokenizer`) and served as `tokenizer`
+and `tokenizerIsModelOwn`, with a session-level `tokenizers` list and the value "mixed" when one figure combines several. A
+stored figure with no label, or one labelled by the retired characters-per-four counter, reads as not measured. The web shows
+the label ("o200k_base, standard tokenizer — not <model>'s own") and never presents a text count as an estimate. Findings built on
+these counts carry no error bar and no heuristic floor, and a jump in fresh input is measured against the previous
+measured turn.
+
 ## High-level architecture
 
 ```mermaid
@@ -400,7 +457,7 @@ OpenCode plugin bundler under `dash/src/capture/` was retired in the C# cutover
 **Engine and projection.** `kyberdash engine ensure --if-running` (`dash/server/KyberDash.Cli/Program.cs`) attaches
 only when a live engine holds the endpoint (ADR 0039) and starts nothing when none runs. `kyber-weave update`
 runs it after the binaries commit, then the tray step. The detector generation is `SqliteRelationalStore.DetectorVersion`
-`5` (`dash/server/KyberDash.Data/Repositories/SqliteRelationalStore.cs`). `CanonSessionProjectorEngine.IsProjectionCurrent`
+`6` (`dash/server/KyberDash.Data/Repositories/SqliteRelationalStore.cs`). `CanonSessionProjectorEngine.IsProjectionCurrent`
 (`dash/server/KyberDash.Application/CanonSessionProjectorEngine.cs`) treats a store stamped with any other value as stale,
 so derived findings are rebuilt with the current rules rather than kept. Under `kyberdash web`, `JobSchedulerService`
 runs maintenance ticks that invoke `TranscriptIngestionService.PurgeExpiredContent` and call
@@ -764,6 +821,11 @@ has to say which source owns which half of it. The rule is decided in one place 
 | token totals (input, output, cache read, cache creation) and the availability that gates them | the **file rows** | the file source is the only source of counters. Session totals are stored once as session usage; per-call and per-turn tokens are not measured |
 | cost | the turn records **and** the counter records | the file row carries the only priced cost — the plugin rows carry none — and the two record sets are disjoint, so pricing the union prices nothing twice |
 
+A paired Droid session has no per-turn token figure to draw. The per-turn spend chart therefore shows its
+`turn-spend-not-measurable` state (any harness whose turns carry no counter gets the same state), while the overview tiles
+show the file's session totals, read from reported session usage (see
+[Session totals come from reported session usage](#session-totals-come-from-reported-session-usage)).
+
 The split is **total over two buckets**: every Factory record lands in exactly one of them, the
 **turn records** or the **counter records**, and `SplitDroidSessionRecords` is the one place that
 assigns them. The two buckets are disjoint, so nothing is priced twice.
@@ -817,13 +879,24 @@ The file source is read over, and both reads write the **same** rows.
 - The **refresh** reads every Factory session under the history window — and only when a run is
   allowed to read folder sources at all (`settings.folder_import.scheduled` is off by default, so
   an unattended run reads none).
-- **Live counter and file refresh (`CanonRefreshEngine`, `JobSchedulerService`):** Explicitly enabled folder imports and scheduled maintenance run `TranscriptIngestionService.RefreshHarnessSources` and `CanonSessionProjectorEngine.ProjectIncremental` under `JobsLease` so file-sourced counter rows pair cleanly against `kyberdash-factory-plugin` turn rows without double-counting.
+- The **plugin-captured counter pass** (`JobSchedulerService.RefreshPluginCapturedCounters`,
+  `dash/server/KyberDash.Application/Services/JobSchedulerService.cs`) reads only the sessions the
+  Factory plugin captured. It asks the store for the Droid sessions that have a record from the
+  plugin's OTLP source (`kyberdash-factory-plugin`), newest first and at most 80 per pass, then
+  `TranscriptIngestionService.RefreshPluginSessionFiles` finds each file through the `droid`
+  registration's own reader — never a path built from a session id — and sends it through the same
+  checkpoint check, mapper and store write the folder import uses. It writes per-file source
+  checkpoints only: no refresh-run row, and no claim of history coverage. The pass runs in the one
+  step that both `POST /api/kyber/refresh` (and the import paths) and every maintenance tick call
+  before projection, so a plugin-captured session gains its counters on the next refresh or tick
+  rather than waiting for a folder import that is off by default. A paused install
+  (`settings.jobs.paused`) runs neither this pass nor the scheduled import on the timer.
 
 Both reads go through the same provider and the same synthesizer, so the rows carry the same
 identity: a later folder import **replaces** the live rows rather than adding a second copy of
 the same counters, and the split above still prices and counts nothing twice. The pass reads
 only sessions the plugin captured — it never invents a Factory session the capture did not see —
-and it holds the refresh lock while it writes, so a refresh never runs under it.
+and it runs under the caller's job guard, so it never overlaps a folder import.
 
 The pass says what it read. A sessions root that exists and cannot be read **fails** the pass
 and names the root, because "no Factory sessions" and "the sessions root cannot be read" are
@@ -1144,7 +1217,11 @@ view and catalog tests read it directly. `SqliteRelationalStore`
 (`dash/server/KyberDash.Data/Repositories/SqliteRelationalStore*.cs`) implements all four store
 seams — `IRelationalStoreWriter`, `IRelationalStoreReader`, `IProjectionStore`,
 `IOperationalStore` — against `canon.db` (`CanonDbPath.Resolve`) through bounded `ProcessRunner`
-calls to the system `sqlite3` CLI, stamped at `SchemaVersion = 25`.
+calls to the system `sqlite3` CLI, stamped at `SchemaVersion = 29`. The versions since 25 added the `total` token
+class (26, a session figure a harness reports with no input/output split), the `record_response_id` and `record_request_id`
+children (27, the ids the twin join reads), `content_part_withheld_tokenizer` (28) and `session_context_turn_tokenizer` plus
+`tool_definition_tokenizer` (29, the tokenizer label beside each text-derived count). Each bump follows the rebuild-and-re-ingest
+pattern, so no stored figure survives without the label or id it now needs.
 
 ```mermaid
 flowchart LR
@@ -1663,9 +1740,11 @@ since an uncovered turn carries no key. The finding does not state that coverage
 Finding detail follows ADR 0013 D15/D16: the wording is "listed with N recorded turns and 0
 invocations", with no deletion or waste claim.
 
-**Detector version.** `SqliteRelationalStore.DetectorVersion` is `5` (`dash/server/KyberDash.Data/Repositories/SqliteRelationalStore.cs`). Stores stamped with
-an older generation (for example `3` or `4`) report their findings as outdated; `CanonSessionProjectorEngine`
-re-projects them to the current generation on maintenance/build.
+**Detector version.** `SqliteRelationalStore.DetectorVersion` is `6` (`dash/server/KyberDash.Data/Repositories/SqliteRelationalStore.cs`). Stores stamped with
+an older generation (for example `4` or `5`) report their findings as outdated; `CanonSessionProjectorEngine`
+re-projects them to the current generation on maintenance/build. Generation 6 is the one that restored record source identity
+(see [Records keep their source](#records-keep-their-source)): every projection built under generation 5's source-less
+reads is rebuilt on the first start or tick after the upgrade, so no stale projection survives.
 
 **Web.** The Sessions page section **4 · Skills** renders one page of skill rows with the
 shared pager (`SessionSkillsSection`, one query per the
@@ -2182,8 +2261,15 @@ scheduled maintenance across engine instances, reporting `running-elsewhere` if 
 
 **Folder import is opt-in and shared.** `settings.folder_import.scheduled` — off by
 default — decides whether a *scheduled* web or tray maintenance pass imports folder sources
-(`SettingsService.FolderImportScheduledKey` in `dash/server/KyberDash.Application/Services/SettingsService.cs`). With it off, a tick
-runs maintenance only (retention purge then incremental projection). A terminal `kyberdash kyber refresh`
+(`SettingsService.FolderImportScheduledKey` in `dash/server/KyberDash.Application/Services/SettingsService.cs`). With it on, the tick runs the full
+harness-source refresh before the purge and the projection; with it off, a tick reads only the plugin-captured
+Droid counter pass (see [Where the Factory file rows come from](#where-the-factory-file-rows-come-from)), then runs the
+retention purge and the incremental projection. A paused install reads no files on the timer in either case.
+The first tick after a deploy also re-reads, once, the already-imported sources of the harnesses whose stored rows came from
+estimated tokens (`droid`, `cursor` and `warp`, whose registrations carry a bumped parser contract version so their old checkpoints are refused), so the replacement needs no manual
+import; a completion marker (the refresh run keyed `kyberdash.no_estimate_reread`) is written only when no source unit failed, so a failed
+pass retries on the next tick. A pass in which source units failed is reported as `partial` with `failedUnits`, never as a
+clean success: a store constraint failure on one source unit is that unit's problem, and the rest of the import still lands. A terminal `kyberdash kyber refresh`
 always imports, because a person typing it asked for their own history back;
 so does `POST /api/kyber/import-history` / `kyberdash kyber import-history`, which never reads or
 changes the setting.
