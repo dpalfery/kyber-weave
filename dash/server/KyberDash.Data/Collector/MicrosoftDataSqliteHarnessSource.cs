@@ -158,7 +158,18 @@ public class MicrosoftDataSqliteHarnessSource : IHarnessSqliteSource
                         throw Unreadable(path, $"the immutable open failed with SQLite error {ex.SqliteErrorCode}: {ex.Message}", ex);
                     }
 
-                    if (LengthOrZero(path + "-wal") <= 0)
+                    long walBytesAfterOpen;
+                    try
+                    {
+                        walBytesAfterOpen = fileLength(path + "-wal");
+                    }
+                    catch (Exception ex) when (ex is UnauthorizedAccessException or IOException)
+                    {
+                        immutable.Dispose();
+                        throw Unreadable(path, "the WAL could not be checked after the immutable open", ex);
+                    }
+
+                    if (walBytesAfterOpen <= 0)
                     {
                         return immutable;
                     }

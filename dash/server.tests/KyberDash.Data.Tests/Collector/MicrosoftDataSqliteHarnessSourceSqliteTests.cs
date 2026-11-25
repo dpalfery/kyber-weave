@@ -323,6 +323,38 @@ public class MicrosoftDataSqliteHarnessSourceSqliteTests : IDisposable
     }
 
     [Fact]
+    public void Open_WalRecheckAfterTheImmutableOpen_GoesThroughTheLengthProbe()
+    {
+        string sourceDirectory = directory.Combine("harness");
+        Directory.CreateDirectory(sourceDirectory);
+        string path = CreateSource(sourceDirectory, 3, SqliteFixtureJournal.WalUncheckpointed);
+        SkipUnlessSealed(sourceDirectory);
+        AssertPlainOpenFails(path);
+        // The probe reports an empty WAL every time; the recheck must ask the probe, not the file system,
+        // so a denied or vanished WAL surfaces through the probe's error mapping.
+        int walChecks = 0;
+        long EmptyWal(string file)
+        {
+            if (file.EndsWith("-wal", StringComparison.Ordinal))
+            {
+                walChecks++;
+                return 0;
+            }
+
+            return new FileInfo(file).Length;
+        }
+
+        MicrosoftDataSqliteHarnessSource source = new(new HarnessSqliteLimits(), directory.Combine("cache"), fileLength: EmptyWal);
+
+        using (source.Open(path))
+        {
+        }
+
+        Assert.Equal(2, walChecks);
+        Assert.Empty(CacheFiles());
+    }
+
+    [Fact]
     public void Open_SourceThatGrewPastTheCopyCapAfterTheSizeCheck_IsRefusedWithTheCopyCapCode()
     {
         string sourceDirectory = directory.Combine("harness");
