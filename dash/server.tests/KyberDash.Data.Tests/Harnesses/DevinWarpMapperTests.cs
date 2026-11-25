@@ -415,7 +415,7 @@ public class DevinWarpMapperTests
     // ------------------------------------------------------------------
 
     [Fact]
-    public void Map_ParsesOneCallPerCompletedExchangeFromPrimaryAgentTotals()
+    public void Map_KeepsPrimaryAgentTotalsAsSessionUsageAndLeavesExchangesNotMeasured()
     {
         string rawText = BuildWarpExport(
             conversationData: """{"conversation_usage_metadata":{"token_usage":[{"model_id":"GPT-5.3 Codex (medium reasoning)","warp_tokens":300,"byok_tokens":0,"warp_token_usage_by_category":{"primary_agent":300},"byok_token_usage_by_category":{}},{"model_id":"Claude Haiku 4.5","warp_tokens":90,"byok_tokens":0,"warp_token_usage_by_category":{"full_terminal_use":90},"byok_token_usage_by_category":{}}]}}""",
@@ -448,13 +448,43 @@ public class DevinWarpMapperTests
             batch.Records.Select(static r => r.Parts[0].PlainText).ToArray());
         Assert.All(batch.Records, static r => Assert.Equal("gpt-5.3-codex", r.Model));
         Assert.All(batch.Records, static r => Assert.Null(r.ReportedCost));
-        Assert.Equal(300L, batch.Records.Sum(static r => r.ReportedInputTokens ?? 0L));
-        Assert.True(batch.Records[1].ReportedInputTokens > batch.Records[0].ReportedInputTokens);
+        Assert.All(batch.Records, static r => Assert.Empty(r.Tokens));
+        Assert.All(batch.Records, static r => Assert.Null(r.ReportedInputTokens));
+        Assert.All(batch.Records, static r => Assert.Null(r.ReportedOutputTokens));
+        CollectedModelUsage usage = Assert.Single(session.ReportedUsage);
+        Assert.Equal(new CollectedModelUsage(0, "gpt-5.3-codex", TokenClass.Input, 300L), usage);
         Assert.All(batch.Records, static r => Assert.Equal("conv-1", r.SessionKey));
 
         InMemoryRelationalStore store = new();
         store.WriteBatch(batch);
         Assert.Equal(2, store.CountRecords("warp"));
+        Assert.Empty(store.TokenCounts(sessionKey: "conv-1"));
+        Assert.Equal(300L, Assert.Single(store.SessionModelUsages("conv-1")).Usage.Count);
+    }
+
+    [Fact]
+    public void Map_FallsBackToPerModelConversationTotalsWhenNoPrimaryAgentCategoryIsReported()
+    {
+        string rawText = BuildWarpExport(
+            conversationData: """{"conversation_usage_metadata":{"token_usage":[{"model_id":"GPT-5.3 Codex (medium reasoning)","warp_tokens":70,"byok_tokens":5,"warp_token_usage_by_category":{},"byok_token_usage_by_category":{}},{"model_id":"Claude Sonnet 4.5","warp_tokens":40,"byok_tokens":0},{"model_id":"GPT-5.3 Codex (medium reasoning)","warp_tokens":25,"byok_tokens":0}]}}""",
+            queries:
+            [
+                ("ex-1", "2026-05-18 10:00:00.000000", """[{"Query":{"text":"a much longer prompt that a text-length guess would weight heavily"}}]""", "auto-efficient", null, "\"Completed\""),
+            ],
+            blocks: [],
+            conversationId: "conv-5");
+
+        CollectedBatch batch = new WarpMapper().Map(
+            MakeNativeUnit("warp", "/home/u/Library/warp.sqlite:conv-5", rawText),
+            BaselineUtc);
+
+        CollectedSession session = Assert.Single(batch.Sessions);
+        Assert.Equal(2, session.ReportedUsage.Count);
+        Assert.Contains(new CollectedModelUsage(0, "gpt-5.3-codex", TokenClass.Input, 100L), session.ReportedUsage);
+        Assert.Contains(new CollectedModelUsage(0, "claude-sonnet-4-5", TokenClass.Input, 40L), session.ReportedUsage);
+        CollectedRecord record = Assert.Single(batch.Records);
+        Assert.Empty(record.Tokens);
+        Assert.Null(record.ReportedInputTokens);
     }
 
     [Fact]
@@ -525,6 +555,9 @@ public class DevinWarpMapperTests
         Assert.Equal(2, batch.Records.Count);
         Assert.Equal("claude-sonnet-4-5", batch.Records[0].Model);
         Assert.Equal("warp-auto-efficient", batch.Records[1].Model);
+        Assert.Empty(Assert.Single(batch.Sessions).ReportedUsage);
+        Assert.All(batch.Records, static r => Assert.Empty(r.Tokens));
+        Assert.All(batch.Records, static r => Assert.Null(r.ReportedInputTokens));
     }
 
     [Theory]

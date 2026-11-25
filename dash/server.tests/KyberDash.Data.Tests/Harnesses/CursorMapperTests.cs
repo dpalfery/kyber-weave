@@ -14,7 +14,8 @@ namespace KyberDash.Data.Tests.Harnesses;
 /// <summary>
 /// Unit tests for <see cref="CursorMapper"/> covering <c>cursorDiskKV</c> bubble-row mapping,
 /// <c>cursor-agent</c> JSONL and legacy text transcript mapping, <c>cursor-agent -&gt; cursor</c>
-/// harness normalization, and field register completeness.
+/// harness normalization, native token counts only (text length never becomes tokens), and
+/// field register completeness.
 /// </summary>
 public class CursorMapperTests
 {
@@ -110,7 +111,7 @@ public class CursorMapperTests
     }
 
     [Fact]
-    public void Map_BubbleRowsWithZeroTokensEstimateUsageFromTextAndSkipEmptyOnes()
+    public void Map_BubbleRowsWithZeroNativeTokensYieldNotMeasuredRecordsAndSkipEmptyOnes()
     {
         string rawText = """
             [
@@ -131,7 +132,8 @@ public class CursorMapperTests
         CollectedRecord record = Assert.Single(batch.Records);
         Assert.Equal(RecordOp.LlmInvoke, record.Op);
         Assert.Equal("cursor-auto", record.Model);
-        Assert.Equal(100, Assert.Single(record.Tokens, static t => t.TokenClass == TokenClass.Output).Count);
+        Assert.Equal("user_text excerpt", Assert.Single(record.Parts).PlainText);
+        Assert.Empty(record.Tokens);
         Assert.Null(record.ReportedInputTokens);
         Assert.Null(record.ReportedOutputTokens);
     }
@@ -190,12 +192,10 @@ public class CursorMapperTests
             Assert.Equal("cursor", record.HarnessId);
             Assert.Equal("cursor-agent-auto", record.Model);
             Assert.Equal(BaselineUtc, record.StartedAt);
-            Assert.DoesNotContain(record.Tokens, static t => t.Count <= 0);
+            Assert.Empty(record.Tokens);
         }
 
         CollectedRecord first = batch.Records[0];
-        Assert.Equal(4, Assert.Single(first.Tokens, static t => t.TokenClass == TokenClass.Input).Count);
-        Assert.Equal(8, Assert.Single(first.Tokens, static t => t.TokenClass == TokenClass.Output).Count);
         Assert.Null(first.ReportedInputTokens);
         Assert.Null(first.ReportedOutputTokens);
         Assert.Equal("explain closures", first.Parts[0].PlainText);
@@ -233,17 +233,65 @@ public class CursorMapperTests
         Assert.Empty(batch.Problems);
         CollectedRecord record = Assert.Single(batch.Records);
         Assert.Equal(RecordOp.LlmInvoke, record.Op);
-        Assert.Equal(4, Assert.Single(record.Tokens, static t => t.TokenClass == TokenClass.Input).Count);
+
+        // A transcript carries no token counts, so the turn is kept with none rather than with a
+        // figure guessed from its text length.
+        Assert.Empty(record.Tokens);
+        Assert.Null(record.ReportedInputTokens);
+        Assert.Null(record.ReportedOutputTokens);
 
         // The `[Tool result]` marker regex requires a word boundary after `]`, which never
         // occurs before the trailing text, so the line stays in the body exactly as in
-        // `cursor-agent.ts` (37 characters -> 10 estimated tokens).
-        Assert.Equal(10, Assert.Single(record.Tokens, static t => t.TokenClass == TokenClass.Output).Count);
-        Assert.Equal(5, Assert.Single(record.Tokens, static t => t.TokenClass == TokenClass.Reasoning).Count);
+        // `cursor-agent.ts`.
+        Assert.EndsWith("[Tool result] ok", record.Parts[1].PlainText, StringComparison.Ordinal);
         Assert.Equal(3, record.Parts.Count);
         Assert.Equal(ContentBucket.Reasoning, record.Parts[2].Bucket);
         Assert.Equal("consider edge cases", record.Parts[2].PlainText);
         Assert.DoesNotContain(batch.Records, static r => r.Op == RecordOp.ToolInvoke);
+    }
+
+    [Fact]
+    public void Map_BubbleRowWithNativeCountsAndLongTextKeepsOnlyTheNativeCounts()
+    {
+        string rawText = """
+            [
+              {"bubble_key":"bubbleId:composer-5:11111111-1111-1111-1111-111111111111","input_tokens":0,"output_tokens":7,"model":null,"created_at":"2026-09-22T10:01:00.000Z","request_id":null,"user_text":"reply","text_length":4000,"bubble_type":2,"context_window":null,"code_blocks":null}
+            ]
+            """;
+        NativeSourceUnit unit = MakeNativeUnit("/fake/state.vscdb", rawText, "cursor", "cursor-vscdb");
+
+        CollectedBatch batch = new CursorMapper().Map(unit, BaselineUtc);
+
+        CollectedRecord record = Assert.Single(batch.Records);
+        CollectedTokenCount output = Assert.Single(record.Tokens);
+        Assert.Equal(TokenClass.Output, output.TokenClass);
+        Assert.Equal(7, output.Count);
+        Assert.Null(record.ReportedInputTokens);
+        Assert.Equal(7, record.ReportedOutputTokens);
+    }
+
+    [Fact]
+    public void Map_TranscriptTurnWithOnlyAToolCallIsKeptAsTurnWithNoCounts()
+    {
+        string rawText = string.Join('\n',
+        [
+            """{"role":"user","message":{"content":[{"type":"text","text":"go"}]}}""",
+            """{"role":"assistant","message":{"content":[{"type":"tool_use","name":"Read"}]}}""",
+        ]) + "\n";
+        NativeSourceUnit unit = MakeNativeUnit(
+            "/fake/.cursor/projects/p1/agent-transcripts/tool-only.jsonl",
+            rawText,
+            "cursor",
+            "cursor-agent-jsonl");
+
+        CollectedBatch batch = new CursorMapper().Map(unit, BaselineUtc);
+
+        CollectedRecord record = Assert.Single(batch.Records);
+        Assert.Empty(record.Tokens);
+        Assert.Null(record.ReportedInputTokens);
+        Assert.Null(record.ReportedOutputTokens);
+        Assert.Equal("go", Assert.Single(record.Parts).PlainText);
+        Assert.Single(batch.Sessions);
     }
 
     [Fact]

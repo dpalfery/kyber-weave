@@ -47,6 +47,17 @@ public class HarnessSourceRegistry
     /// <summary>Default parser contract version stamped onto discovered source units.</summary>
     public const string DefaultParserContractVersion = "1";
 
+    /// <summary>
+    /// Parser contract version of the <c>droid</c>, <c>cursor</c> and <c>warp</c> readers, whose
+    /// mappers stopped splitting or guessing token counts (decision D15).
+    /// </summary>
+    /// <remarks>
+    /// A unit's version is part of its checkpoint, and <c>CanonRefreshEngine.CheckpointIsReusable</c>
+    /// refuses a checkpoint stamped with another version, so the next refresh re-reads these units
+    /// and replaces the estimated token rows stored under version <see cref="DefaultParserContractVersion"/>.
+    /// </remarks>
+    public const string NoEstimatedTokensParserContractVersion = "2";
+
     private static readonly HashSet<string> ExcludedHarnessIds = new(
         ["windsurf", "aider"],
         StringComparer.Ordinal);
@@ -125,6 +136,7 @@ public class HarnessSourceRegistry
                     "warp-sqlite",
                     [],
                     [],
+                    ParserContractVersion: NoEstimatedTokensParserContractVersion,
                     ExplicitFiles:
                     [
                         "Library/Group Containers/2BBY89MBSN.dev.warp/Library/Application Support/dev.warp.Warp-Stable/warp.sqlite",
@@ -134,7 +146,14 @@ public class HarnessSourceRegistry
                     ])),
             new SpecHarnessSourceReader(
                 "droid",
-                new SourceRootSpec("factory", "droid-reader", "droid-jsonl", [".factory/sessions"], ["*.jsonl"], CompanionExtension: ".settings.json")),
+                new SourceRootSpec(
+                    "factory",
+                    "droid-reader",
+                    "droid-jsonl",
+                    [".factory/sessions"],
+                    ["*.jsonl"],
+                    CompanionExtension: ".settings.json",
+                    ParserContractVersion: NoEstimatedTokensParserContractVersion)),
             new CursorHarnessSourceReader(),
             new SpecHarnessSourceReader(
                 "cline",
@@ -387,6 +406,7 @@ public class HarnessSourceRegistry
         string harnessId,
         string providerId,
         string parserId,
+        string parserContractVersion,
         string format,
         string? companionExtension = null,
         string? rootLabelOverride = null)
@@ -405,7 +425,7 @@ public class HarnessSourceRegistry
                     SourceKey: fullPath,
                     ProviderId: providerId,
                     ParserId: parserId,
-                    ParserContractVersion: DefaultParserContractVersion,
+                    ParserContractVersion: parserContractVersion,
                     Format: format,
                     SourceRootLabel: rootLabelOverride ?? ParentLabel(fullPath),
                     RevisionToken: unknownRevision);
@@ -427,7 +447,7 @@ public class HarnessSourceRegistry
             SourceKey: fullPath,
             ProviderId: providerId,
             ParserId: parserId,
-            ParserContractVersion: DefaultParserContractVersion,
+            ParserContractVersion: parserContractVersion,
             Format: format,
             SourceRootLabel: rootLabelOverride ?? ParentLabel(fullPath),
             RevisionToken: revision,
@@ -509,7 +529,8 @@ public class HarnessSourceRegistry
         IReadOnlyList<string> RelativeRoots,
         IReadOnlyList<string> SearchPatterns,
         IReadOnlyList<string>? ExplicitFiles = null,
-        string? CompanionExtension = null);
+        string? CompanionExtension = null,
+        string ParserContractVersion = DefaultParserContractVersion);
 
     private sealed class OtlpOnlyHarnessSourceReader(string harnessId) : IHarnessSourceReader
     {
@@ -594,6 +615,7 @@ public class HarnessSourceRegistry
                 HarnessId,
                 spec.ProviderId,
                 spec.ParserId,
+                spec.ParserContractVersion,
                 spec.Format,
                 spec.CompanionExtension);
             if (unit is not null && seen.Add(unit.SourceKey))
@@ -634,6 +656,7 @@ public class HarnessSourceRegistry
                         HarnessId,
                         "google",
                         "antigravity-statusline-reader",
+                        DefaultParserContractVersion,
                         "antigravity-statusline-jsonl",
                         rootLabelOverride: "cache");
                     if (statusUnit is not null && seen.Add(statusUnit.SourceKey))
@@ -683,6 +706,7 @@ public class HarnessSourceRegistry
                     HarnessId,
                     "cursor",
                     "cursor-vscdb-reader",
+                    NoEstimatedTokensParserContractVersion,
                     "cursor-vscdb");
                 if (unit is not null && seen.Add(unit.SourceKey))
                 {
@@ -709,6 +733,7 @@ public class HarnessSourceRegistry
                             HarnessId,
                             "cursor",
                             "cursor-agent-transcript-reader",
+                            NoEstimatedTokensParserContractVersion,
                             "cursor-agent-jsonl");
                         if (unit is not null && seen.Add(unit.SourceKey))
                         {
@@ -800,6 +825,7 @@ public class HarnessSourceRegistry
                         HarnessId,
                         "copilot",
                         "copilot-vscode-reader",
+                        DefaultParserContractVersion,
                         "copilot-vscode-journal");
                     if (unit is not null && seen.Add(unit.SourceKey))
                     {

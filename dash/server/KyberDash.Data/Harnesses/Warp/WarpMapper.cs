@@ -86,9 +86,14 @@ public record WarpExportDocument(
 /// <remarks>
 /// The offline seam parses a per-conversation JSON export mirroring the <c>agent_conversations</c>,
 /// <c>ai_queries</c>, and <c>blocks</c> projections; opening SQLite files in unit tests is forbidden
-/// (OD-9), so the export rows arrive as text. Each completed exchange maps to one <c>llm.invoke</c>
-/// record with tokens allocated from the conversation-level primary-agent budget (falling back to
-/// input-length weights), and each attributed command block maps to a child <c>tool.invoke</c>
+/// (OD-9), so the export rows arrive as text. Warp reports token usage per conversation and model,
+/// never per exchange, so the conversation totals (primary-agent category, falling back to each
+/// entry's Warp plus BYOK total) become the session's reported usage and each completed exchange
+/// maps to one <c>llm.invoke</c> record whose tokens are not measured: a split of the conversation
+/// total across exchanges would be an estimate, which KyberDash never produces (decision D15).
+/// Warp's figure is a single total with no input/output breakdown; it is kept in the
+/// <see cref="TokenClass.Input"/> class, the class Warp's figures have always been stored in.
+/// Each attributed command block maps to a child <c>tool.invoke</c>
 /// span named <c>Bash</c> carrying the full command text. Live-SQLite-only surfaces (schema
 /// validation, discovery, access-denial draining, workspace maps, <c>run_command</c> display-name
 /// mapping, and <c>calculateCost</c> pricing) have no offline input: costs stay unreported so
@@ -108,7 +113,6 @@ public class WarpMapper : IHarnessMapper
 
     private const string PrimaryAgentCategory = "primary_agent";
     private const string DefaultModelId = "warp-auto-efficient";
-    private const int CharsPerToken = 4;
 
     private static readonly IReadOnlyDictionary<string, string> ModelAliases =
         new Dictionary<string, string>(StringComparer.Ordinal)
@@ -301,10 +305,8 @@ public class WarpMapper : IHarnessMapper
 
         exchanges.Sort(static (a, b) => a.StartedAt.CompareTo(b.StartedAt));
 
-        (long tokenBudget, string dominantModel) = ExtractTokenBudget(document.Conversation.ConversationData);
-        long[] weights = exchanges.Select(static exchange => EstimateWeight(exchange.Row.Input)).ToArray();
-        long fallbackBudget = weights.Sum();
-        long[] allocatedTokens = AllocateTokens(weights, tokenBudget > 0 ? tokenBudget : fallbackBudget);
+        (IReadOnlyList<CollectedModelUsage> reportedUsage, string dominantModel) =
+            ExtractConversationUsage(document.Conversation.ConversationData);
         IReadOnlyDictionary<string, IReadOnlyList<WarpBlockRow>> blocksByExchange =
             AssignCommandBlocksToExchanges(document.Blocks, exchanges);
 
@@ -325,7 +327,6 @@ public class WarpMapper : IHarnessMapper
             }
 
             string model = ResolveModelForExchange(exchange.Row, dominantModel);
-            long inputTokens = allocatedTokens[index];
             string userMessage = ExtractUserMessage(exchange.Row.Input);
             if (userMessage.Length > 500)
             {
@@ -350,10 +351,6 @@ public class WarpMapper : IHarnessMapper
                 parts.Add(ToolContentMeasurer.BuildContentPart(0, ContentBucket.UserMessage, userMessage, "user"));
             }
 
-            List<CollectedTokenCount> tokens = inputTokens > 0
-                ? [new CollectedTokenCount(TokenClass.Input, inputTokens)]
-                : [];
-
             string? projectPath = SafeOptionalText(exchange.Row.WorkingDirectory);
 
             CollectedRecord parentRecord = new(
@@ -370,7 +367,7 @@ public class WarpMapper : IHarnessMapper
                 model,
                 null,
                 null,
-                tokens,
+                [],
                 null,
                 parts,
                 null,
@@ -378,9 +375,7 @@ public class WarpMapper : IHarnessMapper
                 [],
                 null,
                 [],
-                new CollectedRecordSignals(null, null, correctionRule, null),
-                inputTokens,
-                null);
+                new CollectedRecordSignals(null, null, correctionRule, null));
 
             records.Add(parentRecord);
 
@@ -401,7 +396,7 @@ public class WarpMapper : IHarnessMapper
                 NativeSessionId: conversationId,
                 Workspace: workspaceDirectory is null ? null : new CollectedWorkspace(workspaceDirectory, null, null),
                 Title: null,
-                ReportedUsage: []),
+                ReportedUsage: reportedUsage),
         ];
 
         return new CollectedBatch(source, sessions, records, problems);
@@ -521,7 +516,21 @@ public class WarpMapper : IHarnessMapper
         return index < 0 ? value : string.Concat(value.AsSpan(0, index), "T", value.AsSpan(index + 1));
     }
 
-    private static (long TokenBudget, string DominantModel) ExtractTokenBudget(string conversationData)
+    /// <summary>
+    /// Reads the conversation's reported token usage into per-model session usage rows, and the
+    /// model that carried the most of it.
+    /// </summary>
+    /// <remarks>
+    /// Each <c>token_usage</c> entry is one model's reported figures. When any entry reports the
+    /// <c>primary_agent</c> category, the usage is that category per model; otherwise it is each
+    /// entry's <c>warp_tokens</c> plus <c>byok_tokens</c>. Entries for the same model are summed,
+    /// which is arithmetic on reported values, not an estimate. An entry with no model id is
+    /// attributed to the dominant model (or <c>warp-auto-efficient</c> when none is known). No
+    /// reported usage yields no rows: the figure is then not measured.
+    /// </remarks>
+    /// <param name="conversationData">The conversation's <c>conversation_data</c> JSON.</param>
+    /// <returns>Per-model usage rows at snapshot position 0, and the normalized dominant model.</returns>
+    private static (IReadOnlyList<CollectedModelUsage> Usage, string DominantModel) ExtractConversationUsage(string conversationData)
     {
         JsonDocument document;
         try
@@ -530,7 +539,7 @@ public class WarpMapper : IHarnessMapper
         }
         catch (JsonException)
         {
-            return (0, string.Empty);
+            return ([], string.Empty);
         }
 
         using (document)
@@ -541,14 +550,13 @@ public class WarpMapper : IHarnessMapper
                 || !usageMetadataEl.TryGetProperty("token_usage", out JsonElement tokenUsageEl)
                 || tokenUsageEl.ValueKind != JsonValueKind.Array)
             {
-                return (0, string.Empty);
+                return ([], string.Empty);
             }
 
-            long primaryTotal = 0L;
-            long fallbackTotal = 0L;
             long dominantPrimaryTokens = 0L;
             long dominantFallbackTokens = 0L;
             string dominantModel = string.Empty;
+            List<(string? Model, long PrimaryTokens, long EntryTotal)> entries = [];
 
             foreach (JsonElement entry in tokenUsageEl.EnumerateArray())
             {
@@ -561,13 +569,13 @@ public class WarpMapper : IHarnessMapper
                     + ExtractCategoryTokens(entry, "byok_token_usage_by_category");
                 long entryTotal = ReadSafeLong(entry, "warp_tokens") + ReadSafeLong(entry, "byok_tokens");
 
-                primaryTotal += primaryTokens;
-                fallbackTotal += entryTotal;
-
-                string entryModel = entry.TryGetProperty("model_id", out JsonElement modelEl)
+                string? reportedModel = entry.TryGetProperty("model_id", out JsonElement modelEl)
                     && modelEl.ValueKind == JsonValueKind.String
-                    ? modelEl.GetString() ?? dominantModel
-                    : dominantModel;
+                    ? modelEl.GetString()
+                    : null;
+                entries.Add((reportedModel, primaryTokens, entryTotal));
+
+                string entryModel = reportedModel ?? dominantModel;
                 if (primaryTokens > dominantPrimaryTokens)
                 {
                     dominantPrimaryTokens = primaryTokens;
@@ -581,8 +589,40 @@ public class WarpMapper : IHarnessMapper
                 }
             }
 
-            long tokenBudget = primaryTotal > 0 ? primaryTotal : fallbackTotal;
-            return (Math.Max(0, tokenBudget), NormalizeModel(dominantModel));
+            string normalizedDominant = NormalizeModel(dominantModel);
+            bool usePrimary = entries.Any(static entry => entry.PrimaryTokens > 0);
+            List<string> modelOrder = [];
+            Dictionary<string, long> countsByModel = new(StringComparer.Ordinal);
+            foreach ((string? model, long primaryTokens, long entryTotal) in entries)
+            {
+                long count = usePrimary ? primaryTokens : entryTotal;
+                if (count <= 0)
+                {
+                    continue;
+                }
+
+                string normalized = NormalizeModel(model);
+                if (normalized.Length == 0)
+                {
+                    normalized = normalizedDominant.Length > 0 ? normalizedDominant : DefaultModelId;
+                }
+
+                if (countsByModel.TryGetValue(normalized, out long existing))
+                {
+                    countsByModel[normalized] = existing + count;
+                }
+                else
+                {
+                    modelOrder.Add(normalized);
+                    countsByModel[normalized] = count;
+                }
+            }
+
+            List<CollectedModelUsage> usage =
+            [
+                .. modelOrder.Select(model => new CollectedModelUsage(0, model, TokenClass.Input, countsByModel[model])),
+            ];
+            return (usage, normalizedDominant);
         }
     }
 
@@ -637,67 +677,6 @@ public class WarpMapper : IHarnessMapper
 
             return string.Empty;
         }
-    }
-
-    private static long EstimateWeight(string rawInput)
-    {
-        string userMessage = ExtractUserMessage(rawInput);
-        string sourceText = userMessage.Length > 0 ? userMessage : rawInput;
-        long tokens = (sourceText.Length + CharsPerToken - 1) / CharsPerToken;
-        return Math.Max(1, tokens);
-    }
-
-    private static long[] AllocateTokens(long[] weights, long tokenBudget)
-    {
-        if (weights.Length == 0)
-        {
-            return [];
-        }
-
-        long[] normalized = weights.Select(static w => Math.Max(0, w)).ToArray();
-        long totalWeight = normalized.Sum();
-        long budget = Math.Max(0, tokenBudget);
-
-        if (budget == 0)
-        {
-            return new long[normalized.Length];
-        }
-
-        if (totalWeight == 0)
-        {
-            long even = budget / normalized.Length;
-            long[] allocated = normalized.Select(_ => even).ToArray();
-            long remainder = budget - (even * normalized.Length);
-            int index = 0;
-            while (remainder > 0)
-            {
-                allocated[index] = allocated[index] + 1;
-                remainder--;
-                index = (index + 1) % normalized.Length;
-            }
-
-            return allocated;
-        }
-
-        double[] rawAllocation = normalized.Select(weight => ((double)budget * weight) / totalWeight).ToArray();
-        long[] floored = rawAllocation.Select(static value => (long)Math.Floor(value)).ToArray();
-        long leftover = budget - floored.Sum();
-
-        int[] byLargestFraction = rawAllocation
-            .Select((value, i) => (Index: i, Fraction: value - Math.Floor(value)))
-            .OrderByDescending(static entry => entry.Fraction)
-            .Select(static entry => entry.Index)
-            .ToArray();
-
-        int pointer = 0;
-        while (leftover > 0 && byLargestFraction.Length > 0)
-        {
-            floored[byLargestFraction[pointer]] = floored[byLargestFraction[pointer]] + 1;
-            leftover--;
-            pointer = (pointer + 1) % byLargestFraction.Length;
-        }
-
-        return floored;
     }
 
     private static string ResolveModelForExchange(WarpQueryRow exchange, string dominantModel)

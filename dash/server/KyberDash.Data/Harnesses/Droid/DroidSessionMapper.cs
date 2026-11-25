@@ -137,8 +137,9 @@ public record DroidDocument(
 /// <c>session_start</c> and <c>message</c> entries and ignores other Droid session entry types per
 /// the Droid JSONL format; skips harness-internal housekeeping sessions whose working directory is
 /// the Factory root itself; strips Droid model wrappers (<c>custom:</c> prefixes, bracket segments,
-/// trailing numeric suffixes) for record model identity; distributes session-level token usage
-/// evenly across emitted assistant calls with the remainder on the last call; pairs
+/// trailing numeric suffixes) for record model identity; keeps the companion's session-level token
+/// usage as the session's reported usage and leaves each assistant call's tokens not measured
+/// (decision D15: a split of the session total would be an estimate); pairs
 /// <c>tool_result</c> blocks from user messages onto pending tool calls by <c>tool_use_id</c> to
 /// set child durations, outcomes, and error details; and withholds JSON document content while
 /// reporting malformed lines and settings as warnings. Cost is never persisted: Droid reports no
@@ -388,10 +389,8 @@ public class DroidSessionMapper : IHarnessMapper
         HashSet<string> seenRecordIds = new(StringComparer.Ordinal);
         int callCount = calls.Count;
 
-        for (int i = 0; i < calls.Count; i++)
+        foreach (PendingAssistantCall call in calls)
         {
-            bool isLast = i == calls.Count - 1;
-            PendingAssistantCall call = calls[i];
             records.AddRange(BuildParentRecord(
                 call,
                 harnessId,
@@ -399,9 +398,7 @@ public class DroidSessionMapper : IHarnessMapper
                 traceId,
                 strippedModel,
                 displayModel,
-                settings.TokenUsage,
                 callCount,
-                isLast,
                 seenRecordIds));
         }
 
@@ -599,9 +596,7 @@ public class DroidSessionMapper : IHarnessMapper
         string traceId,
         string? strippedModel,
         string displayModel,
-        DroidTokenUsage? usage,
         int callCount,
-        bool isLast,
         HashSet<string> seenRecordIds)
     {
         string recordId = EnsureUniqueRecordId(
@@ -652,7 +647,9 @@ public class DroidSessionMapper : IHarnessMapper
             Model: strippedModel,
             EndedAt: endedAt,
             ReportedDurationMs: call.ActiveDurationMs,
-            Tokens: BuildRecordTokens(usage, callCount, isLast),
+            // Droid reports tokens for the whole session only (BuildReportedUsage); the call's own
+            // tokens are not measured rather than a share of that total.
+            Tokens: [],
             ReportedCost: null,
             Parts: parts,
             Tool: null,
@@ -766,34 +763,15 @@ public class DroidSessionMapper : IHarnessMapper
             Signals: new CollectedRecordSignals(null, null, null, null));
     }
 
-    private static IReadOnlyList<CollectedTokenCount> BuildRecordTokens(DroidTokenUsage? usage, int callCount, bool isLast)
-    {
-        if (usage is null || callCount <= 0)
-        {
-            return [];
-        }
-
-        List<CollectedTokenCount> tokens = [];
-        AddDistributedTokens(tokens, TokenClass.Input, usage.InputTokens, callCount, isLast);
-        AddDistributedTokens(tokens, TokenClass.Output, usage.OutputTokens, callCount, isLast);
-        AddDistributedTokens(tokens, TokenClass.CacheWrite, usage.CacheCreationTokens, callCount, isLast);
-        AddDistributedTokens(tokens, TokenClass.CacheRead, usage.CacheReadTokens, callCount, isLast);
-        AddDistributedTokens(tokens, TokenClass.Reasoning, usage.ThinkingTokens, callCount, isLast);
-        return tokens;
-    }
-
-    private static void AddDistributedTokens(List<CollectedTokenCount> tokens, TokenClass tokenClass, long? total, int callCount, bool isLast)
-    {
-        if (!total.HasValue)
-        {
-            return;
-        }
-
-        long perCall = total.Value / callCount;
-        long count = isLast ? total.Value - (perCall * (callCount - 1)) : perCall;
-        tokens.Add(new CollectedTokenCount(tokenClass, count));
-    }
-
+    /// <summary>
+    /// Keeps the companion's session-level counters as the session's reported usage, the single
+    /// home of Droid's token figures.
+    /// </summary>
+    /// <remarks>
+    /// Droid reports usage for the whole session only. The assistant-call records carry no token
+    /// counts, because any per-call figure would be a split of this total, an estimate KyberDash
+    /// never produces (decision D15); session totals read this usage instead.
+    /// </remarks>
     private static IReadOnlyList<CollectedModelUsage> BuildReportedUsage(string displayModel, DroidTokenUsage? usage)
     {
         if (usage is null)

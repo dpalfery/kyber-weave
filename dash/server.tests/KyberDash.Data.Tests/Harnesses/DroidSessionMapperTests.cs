@@ -12,7 +12,8 @@ namespace KyberDash.Data.Tests.Harnesses;
 
 /// <summary>
 /// Unit tests for <see cref="DroidSessionMapper"/> verifying pure Factory Droid session JSONL
-/// and companion <c>.settings.json</c> mapping, even token distribution, model prefix stripping,
+/// and companion <c>.settings.json</c> mapping, companion totals as session usage with assistant
+/// calls left not measured, model prefix stripping,
 /// absent child rows, tool call pairing, JSON document withholding, and internal session filtering.
 /// </summary>
 public class DroidSessionMapperTests
@@ -80,7 +81,7 @@ public class DroidSessionMapperTests
     }
 
     [Fact]
-    public void Map_DistributesCompanionTokenUsageAcrossAssistantCallsAndPopulatesSessionModelUsage()
+    public void Map_KeepsCompanionTokenUsageAsSessionUsageAndLeavesAssistantCallsNotMeasured()
     {
         string jsonl = string.Join('\n',
         [
@@ -146,11 +147,7 @@ public class DroidSessionMapperTests
         Assert.Equal(new DateTimeOffset(2026, 11, 19, 10, 0, 5, 0, TimeSpan.Zero), first.EndedAt);
         Assert.Null(first.ReportedInputTokens);
         Assert.Null(first.ReportedOutputTokens);
-        Assert.Contains(new CollectedTokenCount(TokenClass.Input, 50L), first.Tokens);
-        Assert.Contains(new CollectedTokenCount(TokenClass.Output, 20L), first.Tokens);
-        Assert.Contains(new CollectedTokenCount(TokenClass.CacheWrite, 5L), first.Tokens);
-        Assert.Contains(new CollectedTokenCount(TokenClass.CacheRead, 101L), first.Tokens);
-        Assert.Contains(new CollectedTokenCount(TokenClass.Reasoning, 3L), first.Tokens);
+        Assert.Empty(first.Tokens);
 
         Assert.Equal(3, first.Parts.Count);
         Assert.Equal(ContentBucket.UserMessage, first.Parts[0].Bucket);
@@ -166,19 +163,17 @@ public class DroidSessionMapperTests
         CollectedRecord second = batch.Records[1];
         Assert.Equal("synth:droid:sess-droid-1:a-2", second.RecordId);
         Assert.Equal(4000L, second.ReportedDurationMs);
-        Assert.Contains(new CollectedTokenCount(TokenClass.Input, 51L), second.Tokens);
-        Assert.Contains(new CollectedTokenCount(TokenClass.Output, 21L), second.Tokens);
-        Assert.Contains(new CollectedTokenCount(TokenClass.CacheWrite, 5L), second.Tokens);
-        Assert.Contains(new CollectedTokenCount(TokenClass.CacheRead, 102L), second.Tokens);
-        Assert.Contains(new CollectedTokenCount(TokenClass.Reasoning, 4L), second.Tokens);
+        Assert.Empty(second.Tokens);
+        Assert.Null(second.ReportedInputTokens);
+        Assert.Null(second.ReportedOutputTokens);
 
         InMemoryRelationalStore store = new();
         store.WriteBatch(batch);
 
         Assert.Equal(2, store.CountRecords());
         Assert.Equal(5, store.SessionModelUsages("sess-droid-1").Count);
-        Assert.Equal(5, store.TokenCounts(spanId: first.RecordId).Count);
-        Assert.Equal(5, store.TokenCounts(spanId: second.RecordId).Count);
+        Assert.Empty(store.TokenCounts(spanId: first.RecordId));
+        Assert.Empty(store.TokenCounts(spanId: second.RecordId));
     }
 
     [Fact]
@@ -269,16 +264,48 @@ public class DroidSessionMapperTests
         Assert.DoesNotContain(session.ReportedUsage, static u => u.TokenClass == TokenClass.CacheWrite);
         Assert.DoesNotContain(session.ReportedUsage, static u => u.TokenClass == TokenClass.Reasoning);
 
+        Assert.Contains(new CollectedModelUsage(0, "claude-sonnet-4-5", TokenClass.Input, 40L), session.ReportedUsage);
+        Assert.Contains(new CollectedModelUsage(0, "claude-sonnet-4-5", TokenClass.Output, 12L), session.ReportedUsage);
+
         CollectedRecord record = Assert.Single(batch.Records);
         Assert.Equal("claude-sonnet-4-5", record.Model);
-        Assert.Equal(2, record.Tokens.Count);
-        Assert.Contains(new CollectedTokenCount(TokenClass.Input, 40L), record.Tokens);
-        Assert.Contains(new CollectedTokenCount(TokenClass.Output, 12L), record.Tokens);
-        Assert.DoesNotContain(record.Tokens, static t => t.TokenClass == TokenClass.CacheRead);
-        Assert.DoesNotContain(record.Tokens, static t => t.TokenClass == TokenClass.CacheWrite);
-        Assert.DoesNotContain(record.Tokens, static t => t.TokenClass == TokenClass.Reasoning);
+        Assert.Empty(record.Tokens);
         Assert.Null(record.ReportedDurationMs);
         Assert.Null(record.EndedAt);
+    }
+
+    [Fact]
+    public void Map_ReportsNoUsageAndNoRecordCounts_WhenCompanionHasNoTokenUsage()
+    {
+        string jsonl = string.Join('\n',
+        [
+            "{\"type\":\"session_start\",\"id\":\"sess-no-usage\",\"cwd\":\"/work/app\"}",
+            "{\"type\":\"message\",\"timestamp\":\"2026-11-19T10:00:00.000Z\",\"message\":{\"role\":\"user\",\"content\":\"Plan the fix\"}}",
+            "{\"type\":\"message\",\"id\":\"a-1\",\"timestamp\":\"2026-11-19T10:00:02.000Z\",\"message\":{\"role\":\"assistant\",\"content\":[{\"type\":\"text\",\"text\":\"Planned.\"}]}}",
+            "{\"type\":\"message\",\"id\":\"a-2\",\"timestamp\":\"2026-11-19T10:00:05.000Z\",\"message\":{\"role\":\"assistant\",\"content\":[{\"type\":\"text\",\"text\":\"Applied.\"}]}}",
+        ]) + "\n";
+
+        string settingsJson = """
+            {
+              "model": "claude-sonnet-4-5-20250929"
+            }
+            """;
+
+        DroidSessionMapper mapper = new();
+        CollectedBatch batch = mapper.Map(
+            CreateUnit("/home/dev/.factory/sessions/app/sess-no-usage.jsonl", jsonl, settingsJson),
+            BaselineUtc);
+
+        CollectedSession session = Assert.Single(batch.Sessions);
+        Assert.Empty(session.ReportedUsage);
+        Assert.Equal(2, batch.Records.Count);
+        Assert.All(batch.Records, static record =>
+        {
+            Assert.Equal("claude-sonnet-4-5", record.Model);
+            Assert.Empty(record.Tokens);
+            Assert.Null(record.ReportedInputTokens);
+            Assert.Null(record.ReportedOutputTokens);
+        });
     }
 
     [Fact]

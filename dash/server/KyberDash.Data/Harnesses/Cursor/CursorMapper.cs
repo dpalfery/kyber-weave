@@ -465,9 +465,15 @@ public record CursorTranscriptDocument(
 /// Bubble rows arrive as a JSON export mirroring the <c>BUBBLE_QUERY_BASE</c> projection columns;
 /// opening SQLite files in unit tests is forbidden (OD-9), so the offline seam parses the exported
 /// rows directly. Only the offline-derivable semantics are ported: per-bubble usage (harness-reported
-/// counts, estimated from text length when both are zero), composer session attribution, and
-/// <c>cursor-agent -&gt; cursor</c> normalization. Live-SQLite-only surfaces (workspace map, composer
-/// meter, agent-stream tool attachment, results cache, paged scans) are intentionally absent.
+/// counts only), composer session attribution, and <c>cursor-agent -&gt; cursor</c> normalization.
+/// Live-SQLite-only surfaces (workspace map, composer meter, agent-stream tool attachment, results
+/// cache, paged scans) are intentionally absent.
+/// <para>
+/// Token counts are the ones Cursor reported, or none. A bubble whose reported counts are both zero,
+/// and every transcript turn (transcripts carry no counts), becomes a record whose tokens are not
+/// measured: a count derived from text length would be an estimate, which KyberDash never produces
+/// (decision D15). A bubble with neither counts nor text carries nothing to record and is skipped.
+/// </para>
 /// </remarks>
 public partial class CursorMapper : IHarnessMapper
 {
@@ -486,7 +492,6 @@ public partial class CursorMapper : IHarnessMapper
     /// <summary>Maximum user prompt characters retained per turn.</summary>
     internal const int MaxUserTextLength = 500;
 
-    private const int CharsPerToken = 4;
     private const string DefaultBubbleModel = "cursor-auto";
     private const string DefaultTranscriptModel = "cursor-agent-auto";
     private const string UserQueryOpen = "<user_query>";
@@ -724,9 +729,6 @@ public partial class CursorMapper : IHarnessMapper
     private static bool IsBubbleExport(string rawText) =>
         rawText.TrimStart().StartsWith('[');
 
-    private static long EstimateTokens(long charCount) =>
-        charCount <= 0 ? 0 : (charCount + CharsPerToken - 1) / CharsPerToken;
-
     private static string TranscriptStem(string transcriptPath)
     {
         string fileName = Path.GetFileName(transcriptPath);
@@ -846,27 +848,12 @@ public partial class CursorMapper : IHarnessMapper
 
             long nativeInput = Math.Max(0, row.InputTokens ?? 0);
             long nativeOutput = Math.Max(0, row.OutputTokens ?? 0);
-            long input = nativeInput;
-            long output = nativeOutput;
-            if (input == 0 && output == 0)
+            if (nativeInput == 0
+                && nativeOutput == 0
+                && (row.TextLength ?? 0) <= 0
+                && string.IsNullOrWhiteSpace(row.UserText))
             {
-                long textLength = Math.Max(0, row.TextLength ?? 0);
-                if (textLength > 0)
-                {
-                    if (row.BubbleType == 1)
-                    {
-                        input = EstimateTokens(textLength);
-                    }
-                    else
-                    {
-                        output = EstimateTokens(textLength);
-                    }
-                }
-
-                if (input == 0 && output == 0)
-                {
-                    continue;
-                }
+                continue;
             }
 
             string pairedUserText;
@@ -916,9 +903,8 @@ public partial class CursorMapper : IHarnessMapper
                 string.Create(CultureInfo.InvariantCulture, $"cursor:{displayModel}"),
                 startedAt.Value,
                 displayModel,
-                input,
-                output,
-                0,
+                nativeInput,
+                nativeOutput,
                 nativeInput > 0 ? nativeInput : null,
                 nativeOutput > 0 ? nativeOutput : null,
                 parts,
@@ -992,14 +978,6 @@ public partial class CursorMapper : IHarnessMapper
         for (int index = 0; index < document.Turns.Count; index++)
         {
             CursorTranscriptTurn turn = document.Turns[index];
-            long input = EstimateTokens(turn.UserMessage.Length);
-            long output = EstimateTokens(turn.Body.Length);
-            long reasoning = EstimateTokens(turn.Reasoning.Length);
-            if (input == 0 && output == 0)
-            {
-                continue;
-            }
-
             string recordId = EnsureUniqueRecordId(
                 seenRecordIds,
                 string.Create(
@@ -1037,11 +1015,10 @@ public partial class CursorMapper : IHarnessMapper
                 string.Create(CultureInfo.InvariantCulture, $"cursor:{DefaultTranscriptModel}"),
                 startedAt,
                 DefaultTranscriptModel,
-                input,
-                output,
-                reasoning,
-                null,
-                null,
+                inputTokens: 0,
+                outputTokens: 0,
+                reportedInputTokens: null,
+                reportedOutputTokens: null,
                 parts,
                 correctionRule));
         }
@@ -1074,7 +1051,6 @@ public partial class CursorMapper : IHarnessMapper
         string model,
         long inputTokens,
         long outputTokens,
-        long reasoningTokens,
         long? reportedInputTokens,
         long? reportedOutputTokens,
         List<CollectedContentPart> parts,
@@ -1089,11 +1065,6 @@ public partial class CursorMapper : IHarnessMapper
         if (outputTokens > 0)
         {
             tokens.Add(new CollectedTokenCount(TokenClass.Output, outputTokens));
-        }
-
-        if (reasoningTokens > 0)
-        {
-            tokens.Add(new CollectedTokenCount(TokenClass.Reasoning, reasoningTokens));
         }
 
         return new CollectedRecord(
