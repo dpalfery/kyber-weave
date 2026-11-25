@@ -780,6 +780,14 @@ describe('costBasisText: the cost basis wording', () => {
     expect(costBasisText('harness_rollup')).toBe('reported by the harness')
   })
 
+  it.each(['harness', 'harness_reported'])('names the %s basis as reported by the harness', (basis) => {
+    expect(costBasisText(basis)).toBe('reported by the harness')
+  })
+
+  it('does not infer provenance from a basis that merely contains the word harness', () => {
+    expect(costBasisText('not_from_harness')).toBe('not_from_harness')
+  })
+
   it('names the published rate table as a calculation', () => {
     expect(costBasisText('published')).toBe('calculated from published rates')
   })

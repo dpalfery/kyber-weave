@@ -126,6 +126,9 @@ export function formatDimensionDisplay(dim?: ScorecardDimensionValue): {
   }
 }
 
+/** The bases the engine and the rollups stamp on a figure the harness itself reported. */
+const HARNESS_REPORTED_BASES: ReadonlySet<string> = new Set(['harness', 'harness_reported', 'harness_rollup'])
+
 /**
  * The visible wording for a cost basis. A harness-reported cost says so; a price
  * computed from a published rate table is a calculation, named as one (D15); a
@@ -134,7 +137,7 @@ export function formatDimensionDisplay(dim?: ScorecardDimensionValue): {
  */
 export function costBasisText(basis?: string): string {
   if (!basis) return 'basis not reported'
-  if (/harness/i.test(basis)) return 'reported by the harness'
+  if (HARNESS_REPORTED_BASES.has(basis)) return 'reported by the harness'
   if (basis === 'published') return 'calculated from published rates'
   if (basis === 'run_summary') return 'run summary'
   return basis
