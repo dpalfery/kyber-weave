@@ -8,8 +8,9 @@ updates:
     cooldown:
       default-days: 7
     open-pull-requests-limit: 10
-    # Microsoft.Extensions 11.0.0 is a new major. Stay on 10.0.x.
-    # Patch and minor updates are not ignored.
+    # Ignore major updates of Microsoft.Extensions.*. Packages on 10.0.14 are
+    # not moved to 11.0.0. Microsoft.Extensions.TimeProvider.Testing is already
+    # 11.0.0 and is not downgraded. Patch and minor updates still open.
     ignore:
       - dependency-name: "Microsoft.Extensions.*"
         update-types:
