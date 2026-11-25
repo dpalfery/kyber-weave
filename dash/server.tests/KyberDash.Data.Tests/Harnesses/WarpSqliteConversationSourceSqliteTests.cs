@@ -191,6 +191,31 @@ public class WarpSqliteConversationSourceSqliteTests : IDisposable
         Assert.All(pageSizes, static size => Assert.InRange(size, 1, 500));
     }
 
+    [Fact]
+    public void WriteExport_BlobColumn_IsWrittenAsBase64InSegmentsRatherThanAsOneEscapedString()
+    {
+        string path = directory.Combine("blob.sqlite");
+        byte[] blob = [.. Enumerable.Range(0, 20_000).Select(static i => (byte)(0xFB + (i % 3)))];
+        SqliteFixtureDatabase.Create(
+            path,
+            SchemaDdl,
+            [
+                new SqliteFixtureStatement("INSERT INTO agent_conversations VALUES (?1, ?2, ?3)", ["conv-1", ConversationData, "2026-05-18 10:10:00"]),
+                Query("ex-a", "conv-1", "2026-05-18 10:00:00"),
+                new SqliteFixtureStatement(
+                    "INSERT INTO blocks VALUES (?1, ?2, ?3, ?4)",
+                    ["blk-1", "2026-05-18 10:00:01", blob, "{\"conversation_id\":\"conv-1\"}"]),
+            ]);
+        using IHarnessSqliteDatabase database = Source().Open(path);
+
+        string text = ExportText(new WarpSqliteConversationSource(), database, "conv-1");
+
+        // The base64 value writer emits '+' as is; a base64 string written through the text writer escapes it.
+        Assert.DoesNotContain("\\u002B", text, StringComparison.Ordinal);
+        JsonElement block = Assert.Single(JsonDocument.Parse(text).RootElement.GetProperty("blocks").EnumerateArray());
+        Assert.Equal(Convert.ToBase64String(blob), block.GetProperty("stylized_command").GetString());
+    }
+
     /// <summary>Passes every query through to a real database and keeps the queries it was asked.</summary>
     private sealed class RecordingDatabase(IHarnessSqliteDatabase inner) : IHarnessSqliteDatabase
     {

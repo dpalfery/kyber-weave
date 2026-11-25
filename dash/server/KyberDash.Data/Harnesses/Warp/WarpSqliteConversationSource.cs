@@ -327,7 +327,7 @@ public class WarpSqliteConversationSource : ISqliteConversationSource
                 SqliteHarnessSourceReader.WriteJsonString(writer, propertyName, text);
                 break;
             case byte[] bytes:
-                SqliteHarnessSourceReader.WriteJsonString(writer, propertyName, Convert.ToBase64String(bytes));
+                SqliteHarnessSourceReader.WriteJsonColumn(writer, propertyName, bytes);
                 break;
             default:
                 SqliteHarnessSourceReader.WriteJsonString(writer, propertyName, Convert.ToString(value, CultureInfo.InvariantCulture));
