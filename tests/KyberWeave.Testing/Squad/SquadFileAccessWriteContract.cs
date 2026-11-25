@@ -117,6 +117,47 @@ public abstract class SquadFileAccessWriteContract : IDisposable
         Assert.False(files.DirectoryExists(second));
     }
 
+    /// <summary>A file whose parent directory is missing has no length: the same exception as a missing file.</summary>
+    [Fact]
+    public void GetLengthWithAMissingParentDirectoryThrowsFileNotFound()
+    {
+        ISquadFileAccess files = Starting(out string root);
+
+        _ = Assert.Throws<FileNotFoundException>(() => files.GetLength(Path.Combine(root, "no-such-dir", "absent.json")));
+    }
+
+    /// <summary>A bounded read of a file with a missing parent throws the missing-file exception too.</summary>
+    [Fact]
+    public void ReadBytesUpToWithAMissingParentDirectoryThrowsFileNotFound()
+    {
+        ISquadFileAccess files = Starting(out string root);
+
+        _ = Assert.Throws<FileNotFoundException>(() => files.ReadBytesUpTo(Path.Combine(root, "no-such-dir", "absent.json"), 8));
+    }
+
+    /// <summary>A file longer than the cap yields exactly its first cap bytes, never more.</summary>
+    [Fact]
+    public void ReadBytesUpToStopsAtTheCap()
+    {
+        ISquadFileAccess files = Starting(out string root);
+        string path = Path.Combine(root, "long.bin");
+        byte[] written = [.. Enumerable.Range(0, 200_000).Select(i => (byte)(i % 251))];
+        files.WriteAllBytesAtomic(path, written);
+
+        Assert.Equal(written[..100_001], files.ReadBytesUpTo(path, 100_001));
+    }
+
+    /// <summary>A file shorter than the cap is returned whole.</summary>
+    [Fact]
+    public void ReadBytesUpToReturnsAShorterFileWhole()
+    {
+        ISquadFileAccess files = Starting(out string root);
+        string path = Path.Combine(root, "short.bin");
+        files.WriteAllBytesAtomic(path, [1, 2, 3]);
+
+        Assert.Equal([1, 2, 3], files.ReadBytesUpTo(path, 10));
+    }
+
     /// <summary>Asking the length of a file that is not there throws, rather than reporting zero.</summary>
     [Fact]
     public void GetLengthOfAMissingFileThrowsFileNotFound()

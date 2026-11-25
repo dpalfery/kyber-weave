@@ -21,6 +21,17 @@ public interface ISquadFileAccess
     byte[] ReadAllBytes(string path);
 
     /// <summary>
+    /// Reads at most <paramref name="maxBytes"/> bytes from the start of a file, so a caller that caps a file's
+    /// size never loads more than the cap, whatever the file grows to after a length probe.
+    /// </summary>
+    /// <remarks>A symbolic link at <paramref name="path"/> is followed.</remarks>
+    /// <param name="path">The file.</param>
+    /// <param name="maxBytes">The most bytes to return; a longer file yields exactly this many.</param>
+    /// <returns>The file's bytes, or its first <paramref name="maxBytes"/> bytes when it is longer.</returns>
+    /// <exception cref="FileNotFoundException">The file does not exist, or a directory above it does not.</exception>
+    byte[] ReadBytesUpTo(string path, int maxBytes);
+
+    /// <summary>
     /// Gets a file's length in bytes without reading its content, so a caller can refuse an oversized file before it
     /// loads the file.
     /// </summary>
@@ -29,7 +40,7 @@ public interface ISquadFileAccess
     /// </remarks>
     /// <param name="path">The file.</param>
     /// <returns>The file's length in bytes.</returns>
-    /// <exception cref="FileNotFoundException">The file does not exist.</exception>
+    /// <exception cref="FileNotFoundException">The file does not exist, or a directory above it does not.</exception>
     long GetLength(string path);
 
     /// <summary>Creates a directory and any missing parents.</summary>

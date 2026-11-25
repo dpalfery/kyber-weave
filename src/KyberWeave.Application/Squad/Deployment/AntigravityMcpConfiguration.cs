@@ -137,8 +137,15 @@ public static class AntigravityMcpConfiguration
     /// or unreadable.
     /// </summary>
     /// <remarks>
-    /// The length probe refuses an oversized file before it is loaded, but the file can grow between the probe and the
-    /// read, so the cap is checked again on the bytes the read returned.
+    /// The length probe refuses an oversized file early, but the file can grow between the probe and the read. So the
+    /// read itself is bounded to one byte past the cap: a file that grew is never loaded whole, and the extra byte is
+    /// what tells it is over the cap.
+    /// <para>
+    /// A malformed path (an embedded null, a path the platform cannot represent) surfaces as
+    /// <see cref="ArgumentException"/> or <see cref="NotSupportedException"/>, a too-long one as
+    /// <see cref="PathTooLongException"/> (an <see cref="IOException"/>); all become the same fixed-text warning, so a
+    /// bad path never crashes the deployment and its exception message is never quoted.
+    /// </para>
     /// </remarks>
     private static ConfigRead Read(ISquadFileAccess files, string path)
     {
@@ -154,16 +161,19 @@ public static class AntigravityMcpConfiguration
                 return new ConfigRead(null, TooLarge(path));
             }
 
-            byte[] document = files.ReadAllBytes(path);
+            byte[] document = files.ReadBytesUpTo(path, checked((int)MaxConfigBytes + 1));
             return document.LongLength > MaxConfigBytes
                 ? new ConfigRead(null, TooLarge(path))
                 : new ConfigRead(document, null);
         }
-        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+        catch (Exception exception) when (IsPathOrAccessFailure(exception))
         {
             return new ConfigRead(null, Line(path, "could not be read, so the kw-docs MCP server was not added to it."));
         }
     }
+
+    private static bool IsPathOrAccessFailure(Exception exception) =>
+        exception is IOException or UnauthorizedAccessException or ArgumentException or NotSupportedException;
 
     private static string TooLarge(string path) =>
         Line(path, "is larger than 1 MiB, so the kw-docs MCP server was not added to it.");
@@ -186,7 +196,7 @@ public static class AntigravityMcpConfiguration
             files.WriteAllBytesAtomic(path, contents);
             return [];
         }
-        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+        catch (Exception exception) when (IsPathOrAccessFailure(exception))
         {
             return [Line(path, "could not be written, so the kw-docs MCP server was not added to it.")];
         }

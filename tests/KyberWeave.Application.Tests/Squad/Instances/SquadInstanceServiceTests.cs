@@ -132,6 +132,8 @@ public sealed class SquadInstanceServiceTests
 
         public byte[] ReadAllBytes(string path) => throw new NotSupportedException();
 
+        public byte[] ReadBytesUpTo(string path, int maxBytes) => throw new NotSupportedException();
+
         public long GetLength(string path) => throw new NotSupportedException();
 
         public void CreateDirectory(string path)

@@ -22,7 +22,15 @@ public sealed class InMemorySquadFileAccess(InMemoryFileSystem files) : ISquadFi
     public byte[] ReadAllBytes(string path) => files.ReadAllBytes(path);
 
     /// <inheritdoc />
-    public long GetLength(string path) => files.GetLength(path);
+    public byte[] ReadBytesUpTo(string path, int maxBytes)
+    {
+        ArgumentOutOfRangeException.ThrowIfNegative(maxBytes);
+        byte[] all = AsFileNotFound(path, () => files.ReadAllBytes(path));
+        return all.Length <= maxBytes ? all : all[..maxBytes];
+    }
+
+    /// <inheritdoc />
+    public long GetLength(string path) => AsFileNotFound(path, () => files.GetLength(path));
 
     /// <inheritdoc />
     public void CreateDirectory(string path) => files.CreateDirectory(path);
@@ -42,6 +50,19 @@ public sealed class InMemorySquadFileAccess(InMemoryFileSystem files) : ISquadFi
 
     /// <inheritdoc />
     public string? FindCheckoutSquadSourceRoot() => null;
+
+    /// <summary>Reports a missing parent directory as the missing file the seam documents, as the physical adapter does.</summary>
+    private static T AsFileNotFound<T>(string path, Func<T> probe)
+    {
+        try
+        {
+            return probe();
+        }
+        catch (DirectoryNotFoundException exception)
+        {
+            throw new FileNotFoundException(exception.Message, path, exception);
+        }
+    }
 
     /// <inheritdoc />
     public void WriteAllBytesAtomic(string path, byte[] contents) =>

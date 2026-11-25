@@ -306,14 +306,23 @@ public sealed class AntigravityMcpConfigurationTests
     public void FileThatKeepsChangingBeforeTheWrite_WritesNothingAndWarnsOnce()
     {
         WriteConfig("{ \"mcpServers\": {} }");
-        _files.AfterEveryRead(read => WriteConfig(
-            "{ \"mcpServers\": { \"s" + read.ToString(System.Globalization.CultureInfo.InvariantCulture) + "\": {} } }"));
+        int edits = 0;
+        _files.AfterEveryRead(read =>
+        {
+            edits++;
+            WriteConfig("{ \"mcpServers\": { \"s" + read.ToString(System.Globalization.CultureInfo.InvariantCulture) + "\": {} } }");
+        });
 
         string warning = Assert.Single(Ensure());
 
-        Assert.Contains(_configPath, warning, StringComparison.Ordinal);
-        Assert.Contains("changed", warning, StringComparison.Ordinal);
+        Assert.Equal(
+            $"{AntigravityMcpConfiguration.WarningCode}: '{_configPath}' changed while it was being updated, so the " +
+            "kw-docs MCP server was not added to it. Run the command again.",
+            warning);
         Assert.Equal(0, _files.Writes);
+        // The first read, the re-read before the write, and the re-read after the plan was made again: the loop ran.
+        Assert.Equal(3, _files.Reads);
+        Assert.Equal(3, edits);
     }
 
     /// <summary>A file that appears between the first look and the write is planned again from its bytes.</summary>
@@ -332,6 +341,19 @@ public sealed class AntigravityMcpConfigurationTests
 
     public static TheoryData<string, Exception> Failures => new()
     {
+        { "exists", new IOException(SecretMarker) },
+        { "exists", new UnauthorizedAccessException(SecretMarker) },
+        { "exists", new ArgumentException(SecretMarker) },
+        { "exists", new NotSupportedException(SecretMarker) },
+        { "length", new ArgumentException(SecretMarker) },
+        { "length", new NotSupportedException(SecretMarker) },
+        { "length", new PathTooLongException(SecretMarker) },
+        { "read", new ArgumentException(SecretMarker) },
+        { "read", new NotSupportedException(SecretMarker) },
+        { "read", new PathTooLongException(SecretMarker) },
+        { "write", new ArgumentException(SecretMarker) },
+        { "write", new NotSupportedException(SecretMarker) },
+        { "write", new PathTooLongException(SecretMarker) },
         { "length", new IOException(SecretMarker) },
         { "length", new UnauthorizedAccessException(SecretMarker) },
         { "read", new IOException(SecretMarker) },
@@ -352,6 +374,21 @@ public sealed class AntigravityMcpConfigurationTests
         Assert.Contains(_configPath, warning, StringComparison.Ordinal);
         Assert.DoesNotContain(SecretMarker, warning, StringComparison.Ordinal);
         Assert.Equal(0, _files.Writes);
+    }
+
+    /// <summary>
+    /// The config is only ever read through the bounded read, capped one byte past the limit, so a file that grows
+    /// after the size probe is never loaded whole.
+    /// </summary>
+    [Fact]
+    public void TheConfigIsReadThroughTheBoundedReadCappedOneByteOverTheLimit()
+    {
+        WriteConfig("{ \"mcpServers\": {} }");
+
+        Assert.Empty(Ensure());
+
+        Assert.NotEmpty(_files.ReadLimits);
+        Assert.All(_files.ReadLimits, limit => Assert.Equal(AntigravityMcpConfiguration.MaxConfigBytes + 1, limit));
     }
 
     [Fact]
@@ -607,6 +644,7 @@ public sealed class AntigravityMcpConfigurationTests
     /// <summary>Counts reads and writes over the in-memory files, and throws on the one operation a test names.</summary>
     private sealed class RecordingFiles(ISquadFileAccess inner) : ISquadFileAccess
     {
+        private readonly List<long> _readLimits = [];
         private string? _failing;
         private Exception? _failure;
         private long? _reportedLength;
@@ -616,6 +654,9 @@ public sealed class AntigravityMcpConfigurationTests
         private int _existenceChecks;
 
         public int Reads { get; private set; }
+
+        /// <summary>The cap of every bounded read, in order.</summary>
+        public IReadOnlyList<long> ReadLimits => _readLimits;
 
         public int Writes { get; private set; }
 
@@ -639,6 +680,7 @@ public sealed class AntigravityMcpConfigurationTests
 
         public bool FileExists(string path)
         {
+            Fail("exists");
             bool exists = inner.FileExists(path);
             _existenceChecks++;
             if (_afterExists.Remove(_existenceChecks, out Action? change))
@@ -655,11 +697,15 @@ public sealed class AntigravityMcpConfigurationTests
             return inner.ReadAllText(path);
         }
 
-        public byte[] ReadAllBytes(string path)
+        public byte[] ReadAllBytes(string path) =>
+            throw new InvalidOperationException("an unbounded read of a file whose size is capped.");
+
+        public byte[] ReadBytesUpTo(string path, int maxBytes)
         {
             Fail("read");
             Reads++;
-            byte[] bytes = inner.ReadAllBytes(path);
+            _readLimits.Add(maxBytes);
+            byte[] bytes = inner.ReadBytesUpTo(path, maxBytes);
             if (_afterRead.Remove(Reads, out Action? change))
                 change();
             _afterEveryRead?.Invoke(Reads);

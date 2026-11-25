@@ -23,12 +23,58 @@ public sealed class PhysicalSquadFileAccess : ISquadFileAccess
 
     /// <inheritdoc />
     /// <remarks>
+    /// Reads through a stream in chunks and stops at the cap, so a file that grew after the caller's length probe is
+    /// never loaded whole. A missing parent directory is reported as <see cref="FileNotFoundException"/>, as for a
+    /// missing file, so a caller handles one exception for both.
+    /// </remarks>
+    public byte[] ReadBytesUpTo(string path, int maxBytes)
+    {
+        ArgumentOutOfRangeException.ThrowIfNegative(maxBytes);
+        try
+        {
+            using FileStream stream = File.OpenRead(path);
+            using MemoryStream result = new();
+            byte[] chunk = new byte[Math.Min(maxBytes, 81920)];
+            int remaining = maxBytes;
+            while (remaining > 0)
+            {
+                int read = stream.Read(chunk, 0, Math.Min(chunk.Length, remaining));
+                if (read == 0)
+                {
+                    break;
+                }
+
+                result.Write(chunk, 0, read);
+                remaining -= read;
+            }
+
+            return result.ToArray();
+        }
+        catch (DirectoryNotFoundException exception)
+        {
+            throw new FileNotFoundException(exception.Message, path, exception);
+        }
+    }
+
+    /// <inheritdoc />
+    /// <remarks>
     /// <see cref="FileInfo.Length"/> does not follow a symbolic link on Linux or macOS: it reports the link's own size,
     /// the length of the path it holds. So the path is resolved to the file the link finally names first, the way
     /// <see cref="WriteAllBytesAtomic"/> resolves it; a dangling link then names a missing file, whose length throws
-    /// <see cref="FileNotFoundException"/> as the seam documents.
+    /// <see cref="FileNotFoundException"/> as the seam documents. A missing parent directory is the same case: the
+    /// file is not there, so it is the same exception, never <see cref="DirectoryNotFoundException"/>.
     /// </remarks>
-    public long GetLength(string path) => new FileInfo(AtomicFile.ResolveLinks(Path.GetFullPath(path))).Length;
+    public long GetLength(string path)
+    {
+        try
+        {
+            return new FileInfo(AtomicFile.ResolveLinks(Path.GetFullPath(path))).Length;
+        }
+        catch (DirectoryNotFoundException exception)
+        {
+            throw new FileNotFoundException(exception.Message, path, exception);
+        }
+    }
 
     /// <inheritdoc />
     public void CreateDirectory(string path) => _ = Directory.CreateDirectory(path);
