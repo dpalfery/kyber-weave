@@ -213,6 +213,8 @@ internal static partial class OtlpSpanMapperCore
         string? errorMessage = SafeOptionalText(native.ErrorMessage)
             ?? (status == RecordStatus.Error ? SafeOptionalText(native.StatusMessage) : null);
 
+        (string? ResponseId, string? RequestId) joinIds = OtlpJoinIds.Read(harnessId, native.Attributes);
+
         CollectedRecordSignals signals = new(
             ErrorMessage: errorMessage,
             EditFailures: native.EditFailures,
@@ -243,7 +245,9 @@ internal static partial class OtlpSpanMapperCore
             ToolDefinitions: [],
             Signals: signals,
             ReportedInputTokens: reportedInputTokens,
-            ReportedOutputTokens: reportedOutputTokens);
+            ReportedOutputTokens: reportedOutputTokens,
+            ResponseId: joinIds.ResponseId,
+            RequestId: joinIds.RequestId);
     }
 
     /// <summary>Maps collected content parts, dropping wire buckets the canon store does not keep.</summary>

@@ -77,6 +77,7 @@ public record ClaudeTranscriptMessage(
 /// <param name="ExitCode">Reported process exit code (<c>exitCode</c>, <c>exit_code</c>, or <c>code</c>).</param>
 /// <param name="AttributionMcpServer">Optional ground-truth MCP server attribution.</param>
 /// <param name="Message">Parsed <c>message</c> payload, when present.</param>
+/// <param name="RequestId">The provider request id the line carries (<c>requestId</c>), when present.</param>
 public record ClaudeTranscriptLine(
     string? RecordType,
     string? SessionId,
@@ -85,7 +86,8 @@ public record ClaudeTranscriptLine(
     string? TerminationReason,
     int? ExitCode,
     string? AttributionMcpServer,
-    ClaudeTranscriptMessage? Message);
+    ClaudeTranscriptMessage? Message,
+    string? RequestId = null);
 
 /// <summary>
 /// Pure <see cref="IHarnessMapper"/> translating a loaded Claude Code JSONL
@@ -251,7 +253,8 @@ public class ClaudeTranscriptMapper : IHarnessMapper
                 TerminationReason: terminationReason,
                 ExitCode: exitCode,
                 AttributionMcpServer: server,
-                Message: message);
+                Message: message,
+                RequestId: ReadSafeMetadataText(root, "requestId"));
         }
     }
 
@@ -532,6 +535,7 @@ public class ClaudeTranscriptMapper : IHarnessMapper
     {
         string? discoveredSessionId = null;
         string? nativeRecordId = usageSnapshot?.MessageId;
+        string? requestId = null;
         string? sessionTitle = null;
         string? terminationReason = null;
         int? exitCode = null;
@@ -544,6 +548,10 @@ public class ClaudeTranscriptMapper : IHarnessMapper
         {
             discoveredSessionId ??= line.SessionId;
             sessionTitle ??= line.SessionTitle;
+            if (string.Equals(line.Message?.Role, "assistant", StringComparison.Ordinal))
+            {
+                requestId ??= line.RequestId;
+            }
 
             if (line.ExitCode.HasValue)
             {
@@ -669,6 +677,7 @@ public class ClaudeTranscriptMapper : IHarnessMapper
         return new ParsedTurnGroup(
             SessionId: sessionId,
             NativeRecordId: nativeRecordId,
+            RequestId: requestId,
             Timestamp: usageSnapshot?.Timestamp ?? FallbackTimestamp,
             Model: usageSnapshot?.Model,
             Usage: usageSnapshot?.Usage,
@@ -866,7 +875,9 @@ public class ClaudeTranscriptMapper : IHarnessMapper
                 CorrectionRule: turn.CorrectionRule,
                 DeclaredContextWindow: null),
             ReportedInputTokens: reportedInput,
-            ReportedOutputTokens: reportedOutput);
+            ReportedOutputTokens: reportedOutput,
+            ResponseId: string.IsNullOrEmpty(turn.NativeRecordId) ? null : turn.NativeRecordId,
+            RequestId: turn.RequestId);
     }
 
     private CollectedRecord BuildToolRecord(
@@ -1270,6 +1281,7 @@ public class ClaudeTranscriptMapper : IHarnessMapper
     private record ParsedTurnGroup(
         string? SessionId,
         string? NativeRecordId,
+        string? RequestId,
         string Timestamp,
         string? Model,
         ClaudeTranscriptUsage? Usage,

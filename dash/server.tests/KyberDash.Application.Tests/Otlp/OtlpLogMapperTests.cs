@@ -389,4 +389,72 @@ public class OtlpLogMapperTests
         Assert.Equal(0.0425, record.ReportedCost.Amount, 6);
         Assert.Equal("USD", record.ReportedCost.Currency);
     }
+
+    /// <summary>
+    /// A Claude Code or Codex log carrying <c>gen_ai.response.id</c> and <c>request_id</c> maps to a
+    /// record with both ids, the ids the projector joins it to its transcript twin on.
+    /// </summary>
+    [Theory]
+    [InlineData("claude-code")]
+    [InlineData("codex")]
+    public void Map_TwinHarnessLog_WritesResponseIdAndRequestId(string harness)
+    {
+        OtlpLogMapResult result = OtlpLogMapper.Map([JoinIdLog(harness, responseId: "msg_01ABC", requestId: "req_01XYZ")]);
+
+        CollectedBatch batch = Assert.Single(result.Batches);
+        Assert.Equal(harness, batch.Source.HarnessId);
+        CollectedRecord record = Assert.Single(batch.Records);
+        Assert.Equal("msg_01ABC", record.ResponseId);
+        Assert.Equal("req_01XYZ", record.RequestId);
+    }
+
+    /// <summary>A Claude Code log with neither id maps to a record with both ids absent.</summary>
+    [Fact]
+    public void Map_TwinHarnessLogWithoutIds_LeavesIdsAbsent()
+    {
+        OtlpLogMapResult result = OtlpLogMapper.Map([JoinIdLog("claude-code", responseId: null, requestId: null)]);
+
+        CollectedRecord record = Assert.Single(Assert.Single(result.Batches).Records);
+        Assert.Null(record.ResponseId);
+        Assert.Null(record.RequestId);
+    }
+
+    private static OtlpLog JoinIdLog(string harness, string? responseId, string? requestId)
+    {
+        bool claude = harness == "claude-code";
+        Dictionary<string, JsonElement> attributes = new(StringComparer.Ordinal)
+        {
+            ["event.name"] = JsonSerializer.SerializeToElement(claude ? "claude_code.api_request" : "codex.api_request"),
+            ["gen_ai.request.model"] = JsonSerializer.SerializeToElement(claude ? "claude-sonnet-4-5" : "gpt-5-codex"),
+            ["gen_ai.usage.input_tokens"] = JsonSerializer.SerializeToElement(100),
+            ["gen_ai.usage.output_tokens"] = JsonSerializer.SerializeToElement(25),
+        };
+        if (claude)
+        {
+            attributes["claude_code.event"] = JsonSerializer.SerializeToElement("api_request");
+        }
+
+        if (responseId is not null)
+        {
+            attributes["gen_ai.response.id"] = JsonSerializer.SerializeToElement(responseId);
+        }
+
+        if (requestId is not null)
+        {
+            attributes["request_id"] = JsonSerializer.SerializeToElement(requestId);
+        }
+
+        return new OtlpLog(
+            LogId: $"log-ids-{harness}",
+            TraceId: "dddddddddddddddddddddddddddddddd",
+            SpanId: null,
+            SessionId: $"sess-ids-{harness}",
+            Timestamp: "2026-11-19T12:40:00.000Z",
+            Body: "api request",
+            Attributes: attributes,
+            Resource: claude
+                ? new Dictionary<string, JsonElement>(StringComparer.Ordinal) { ["service.name"] = JsonSerializer.SerializeToElement("claude-code") }
+                : new Dictionary<string, JsonElement>(StringComparer.Ordinal),
+            Scope: claude ? new OtlpScope("claude_code", "1.0.0") : new OtlpScope("codex", "0.1.0"));
+    }
 }

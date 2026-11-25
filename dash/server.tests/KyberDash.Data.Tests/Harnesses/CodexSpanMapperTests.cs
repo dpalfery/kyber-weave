@@ -206,6 +206,39 @@ public class CodexSpanMapperTests
         Assert.Null(record.ReportedOutputTokens);
     }
 
+    /// <summary>
+    /// A Codex span carrying <c>gen_ai.response.id</c> and <c>request_id</c> maps to a record with
+    /// both ids, the ids the projector joins it to its rollout twin on.
+    /// </summary>
+    [Fact]
+    public void MapSpan_WritesResponseIdAndRequestId()
+    {
+        OtlpSpan span = new(
+            TraceId: "abab",
+            SpanId: "cdcd",
+            ParentSpanId: null,
+            Name: "codex.response",
+            Kind: "client",
+            StartTimeUnixNano: "1763550000000000000",
+            EndTimeUnixNano: "1763550000100000000",
+            Timestamp: "2026-11-19T11:00:00.000Z",
+            DurationMs: 100.0,
+            Status: new OtlpStatus("ok"),
+            Attributes: new Dictionary<string, JsonElement>(StringComparer.Ordinal)
+            {
+                ["conversation.id"] = Element("conv-codex-ids"),
+                ["gen_ai.response.id"] = Element("resp_01ABC"),
+                ["request_id"] = Element("req_01XYZ"),
+            },
+            Resource: new Dictionary<string, JsonElement>(StringComparer.Ordinal),
+            Scope: new OtlpScope("openai.codex", null));
+
+        CollectedRecord record = new CodexSpanMapper().MapSpan(span);
+
+        Assert.Equal("resp_01ABC", record.ResponseId);
+        Assert.Equal("req_01XYZ", record.RequestId);
+    }
+
     [Fact]
     public void MapSpan_ErrorStatus_MapsStatusMessageWhileDroppingUnallowlistedErrorDetail()
     {

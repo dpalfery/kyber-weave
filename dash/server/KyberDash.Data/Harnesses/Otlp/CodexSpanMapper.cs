@@ -35,6 +35,8 @@ public class CodexSpanMapper : IHarnessMapper
         "gen_ai.session.id",
         "session.id",
         "event.timestamp",
+        OtlpJoinIds.ResponseIdKey,
+        OtlpJoinIds.RequestIdKey,
     ];
 
     /// <summary>Codex OTLP allowlisted attribute key prefixes from <c>CodexAdapter</c>.</summary>
@@ -267,6 +269,8 @@ public class CodexSpanMapper : IHarnessMapper
         string? sessionId = ResolveSession(native);
         string? errorMessage = status == RecordStatus.Error ? SafeOptionalText(native.StatusMessage) : null;
 
+        (string? ResponseId, string? RequestId) joinIds = OtlpJoinIds.Read(harnessId, native.Attributes);
+
         CollectedRecordSignals signals = new(
             ErrorMessage: errorMessage,
             EditFailures: null,
@@ -297,7 +301,9 @@ public class CodexSpanMapper : IHarnessMapper
             ToolDefinitions: [],
             Signals: signals,
             ReportedInputTokens: reportedInputTokens,
-            ReportedOutputTokens: reportedOutputTokens);
+            ReportedOutputTokens: reportedOutputTokens,
+            ResponseId: joinIds.ResponseId,
+            RequestId: joinIds.RequestId);
     }
 
     private static RecordOp ResolveOp(OtlpSpanNative native)

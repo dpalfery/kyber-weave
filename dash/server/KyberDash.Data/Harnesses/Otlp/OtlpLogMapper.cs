@@ -407,6 +407,8 @@ public static class OtlpLogMapper
             ? normalized.Name
             : CanonRecordVocabulary.FormatRecordOp(op);
 
+        (string? ResponseId, string? RequestId) joinIds = OtlpJoinIds.Read(normalized.Harness, log.Attributes);
+
         string? spanId = SafeOptionalText(log.SpanId);
         string? parentRecordId = spanId is not null && !string.Equals(spanId, log.LogId, StringComparison.Ordinal)
             ? spanId
@@ -449,7 +451,9 @@ public static class OtlpLogMapper
             ToolDefinitions: [],
             Signals: new CollectedRecordSignals(errorMessage, null, null, null),
             ReportedInputTokens: normalized.Tokens.ReportedInput >= 0 ? normalized.Tokens.ReportedInput : null,
-            ReportedOutputTokens: normalized.Tokens.ReportedOutput >= 0 ? normalized.Tokens.ReportedOutput : null);
+            ReportedOutputTokens: normalized.Tokens.ReportedOutput >= 0 ? normalized.Tokens.ReportedOutput : null,
+            ResponseId: joinIds.ResponseId,
+            RequestId: joinIds.RequestId);
     }
 
     private static RecordOp ResolveLogOp(

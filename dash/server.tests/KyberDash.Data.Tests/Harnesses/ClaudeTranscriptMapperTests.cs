@@ -410,6 +410,38 @@ public class ClaudeTranscriptMapperTests
         Assert.Equal("Correction session", sessions[0].Title);
     }
 
+    /// <summary>
+    /// The turn record carries the transcript's message id as its response id and the line's
+    /// <c>requestId</c> as its request id, the ids the projector joins an OTLP turn to it on.
+    /// </summary>
+    [Fact]
+    public void Map_WritesMessageIdAndRequestIdOnTheTurnRecord()
+    {
+        string jsonl = "{\"type\":\"assistant\",\"sessionId\":\"sess-ids\",\"requestId\":\"req_011CXYZ\",\"timestamp\":\"2026-11-19T10:00:01.000Z\",\"message\":{\"id\":\"msg_01ABC\",\"role\":\"assistant\",\"model\":\"claude-sonnet-4-5\",\"content\":[{\"type\":\"text\",\"text\":\"done\"}],\"usage\":{\"input_tokens\":10,\"output_tokens\":5}}}";
+
+        CollectedBatch batch = new ClaudeTranscriptMapper().Map(CreateUnit("/tmp/.claude/projects/repo/sess-ids.jsonl", jsonl), ImportedAt);
+
+        CollectedRecord turn = Assert.Single(batch.Records, static r => r.Op == RecordOp.LlmInvoke);
+        Assert.Equal("msg_01ABC", turn.ResponseId);
+        Assert.Equal("req_011CXYZ", turn.RequestId);
+    }
+
+    /// <summary>
+    /// A transcript line with no message id and no request id leaves both ids absent: the record id's
+    /// hash fallback is never written as a response id.
+    /// </summary>
+    [Fact]
+    public void Map_LeavesIdsAbsent_WhenTheTranscriptHasNone()
+    {
+        string jsonl = "{\"type\":\"assistant\",\"sessionId\":\"sess-noid\",\"timestamp\":\"2026-11-19T10:00:01.000Z\",\"message\":{\"role\":\"assistant\",\"model\":\"claude-sonnet-4-5\",\"content\":[{\"type\":\"text\",\"text\":\"done\"}],\"usage\":{\"input_tokens\":10,\"output_tokens\":5}}}";
+
+        CollectedBatch batch = new ClaudeTranscriptMapper().Map(CreateUnit("/tmp/.claude/projects/repo/sess-noid.jsonl", jsonl), ImportedAt);
+
+        CollectedRecord turn = Assert.Single(batch.Records, static r => r.Op == RecordOp.LlmInvoke);
+        Assert.Null(turn.ResponseId);
+        Assert.Null(turn.RequestId);
+    }
+
     private static NativeSourceUnit CreateUnit(string sourceKey, string? rawText) =>
         new(
             Unit: new SourceUnit(
