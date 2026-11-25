@@ -1339,8 +1339,9 @@ refused write keeps the rows it had, spans shared with another file included.
   `STORE_CONSTRAINT_VIOLATED`. A token or cost figure is never counted once per copy. Every file that wrote a
   span keeps a row in `record_source_claim`; deleting or re-importing the owning file first hands each span
   another file still claims to that file, so a span goes only when no file claims it. The table is additive:
-  `CREATE TABLE IF NOT EXISTS` adds it to an existing store at start-up with no schema version change, and
-  spans written before it existed carry no claim until their file is next imported.
+  `CREATE TABLE IF NOT EXISTS` adds it to an existing store at start-up with no schema version change. Just
+  before it does, the store marks every folder checkpoint `invalidated`, so the next folder import, whenever it
+  runs, re-reads every file and records its claims; that step imports nothing by itself.
 - **A failure clears on the next success.** A unit whose import fails records the problem
   `source-unreadable:<harness>:<source key>` (`CanonRefreshEngine.SourceUnreadableProblemKey`). The unit's next
   import attempt deletes it before writing, in both `CanonRefreshEngine` and `TranscriptIngestionService`, and a

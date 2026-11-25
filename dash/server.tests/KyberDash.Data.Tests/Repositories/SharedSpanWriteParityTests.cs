@@ -159,6 +159,31 @@ public class SharedSpanWriteParityTests : IDisposable
         Assert.Equal(0, store.Reader.CountRecords("claude-code"));
     }
 
+    /// <summary>
+    /// A store written before <c>record_source_claim</c> existed, reopened by this build, marks its folder
+    /// checkpoints stale, so the next folder import re-reads every file and records each file's claims; a
+    /// store that already has the table keeps its checkpoints.
+    /// </summary>
+    [Fact]
+    public void ReopeningAStoreWithoutTheClaimTable_MarksFolderCheckpointsStale_Once()
+    {
+        string dbPath = Path.Combine(directory.Path, $"upgrade-{Guid.NewGuid():N}.db");
+        RawSqliteStore first = new(dbPath);
+        first.WriteBatch(Batch(ParentLocator, inputTokens: 10));
+        first.UpsertSourceCheckpoint(Checkpoint(ParentLocator));
+        _ = first.Raw("DROP TABLE record_source_claim;");
+
+        SqliteRelationalStore upgraded = new(dbPath, new SqliteCircuitBreaker());
+
+        Assert.Equal("invalidated", upgraded.GetSourceCheckpoint("claude-code", ParentLocator)?.LastStatus);
+        Assert.Equal(1, upgraded.CountRecords("claude-code"));
+
+        upgraded.UpsertSourceCheckpoint(Checkpoint(ParentLocator));
+        SqliteRelationalStore reopened = new(dbPath, new SqliteCircuitBreaker());
+
+        Assert.Equal("ok", reopened.GetSourceCheckpoint("claude-code", ParentLocator)?.LastStatus);
+    }
+
     /// <summary><see cref="IRelationalStoreWriter.DeleteProblem"/> removes the keyed problem and ignores a missing key.</summary>
     /// <param name="kind">Store under test.</param>
     [Theory]
@@ -246,6 +271,30 @@ public class SharedSpanWriteParityTests : IDisposable
         HarnessId: "claude-code",
         TimestampUtc: "2026-11-25T11:00:00Z",
         Stack: null);
+
+    private static SourceCheckpoint Checkpoint(string sourceKey) => new(
+        HarnessId: "claude-code",
+        SourceKey: sourceKey,
+        ProviderId: "anthropic",
+        ParserId: "claude-jsonl",
+        ParserContractVersion: "1",
+        Format: "jsonl",
+        SourceRootLabel: "~/.claude/projects",
+        RevisionToken: "1:100",
+        CoveredFromUtc: "2026-11-11T00:00:00.000Z",
+        CoveredThroughUtc: "2026-11-25T00:00:00.000Z",
+        LastAttemptUtc: "2026-11-25T00:00:00.000Z",
+        LastSuccessUtc: "2026-11-25T00:00:00.000Z",
+        LastStatus: "ok",
+        LastErrorCode: null,
+        UnitCount: 1,
+        RecordCount: 1);
+
+    /// <summary>The SQLite store with raw SQL, to build a store as an older build left it.</summary>
+    private sealed class RawSqliteStore(string databasePath) : SqliteRelationalStore(databasePath, new SqliteCircuitBreaker())
+    {
+        public string Raw(string sql) => ExecuteSqlite(sql);
+    }
 
     private sealed record StoreUnderTest(
         IRelationalStoreWriter Writer,

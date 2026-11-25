@@ -74,6 +74,10 @@ public partial class SqliteRelationalStore
                 ThrowWhenInvalidOrNewerSchemaVersion(version);
                 RebuildOlderStoreUnread(version);
             }
+            else if (existingVersion is not null)
+            {
+                InvalidateCheckpointsWhenSpanClaimsAreNew();
+            }
 
             ApplyWalPragmasAndStoreState();
             ApplyFullSchemaAndStampState();
@@ -96,6 +100,19 @@ public partial class SqliteRelationalStore
     /// and schema skeleton state, and records the rebuild so the caller triggers full re-ingest.
     /// </summary>
     /// <param name="version">Schema version discovered in the pre-existing store (<c>1 &lt;= version &lt; <see cref="SchemaVersion"/></c>).</param>
+    /// <summary>
+    /// A store written before <c>record_source_claim</c> existed holds shared spans with no claims, so the first
+    /// re-import of their owning file would drop a span another file still holds. Before the schema adds the
+    /// table, mark every folder checkpoint stale: the next folder import, whenever it runs, re-reads every file
+    /// and records each file's claims. This imports nothing by itself. Runs once, while the table is missing.
+    /// </summary>
+    private void InvalidateCheckpointsWhenSpanClaimsAreNew() =>
+        ExecuteSqlite(
+            "BEGIN IMMEDIATE;\n" +
+            "UPDATE source_checkpoint SET last_status = 'invalidated' " +
+            "WHERE NOT EXISTS (SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'record_source_claim');\n" +
+            "COMMIT;\n");
+
     private void RebuildOlderStoreUnread(int version)
     {
         fileSystem.DeleteFile(DatabasePath);
