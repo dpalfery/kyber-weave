@@ -455,6 +455,65 @@ public class OperationalStoreTests : IDisposable
         AssertAllScriptsUseTabbedHexWithoutJson(sqlite.ExecutedSql);
     }
 
+    [Fact]
+    public void Vacuum_CompactsTheDatabaseFileAndLeavesTheStoreAnswering()
+    {
+        string dbPath = Path.Combine(directory.Path, "vacuum-compact", "canon.db");
+        SeamSqliteRelationalStore sqlite = new(dbPath, new SqliteCircuitBreaker());
+        string filler = new('x', 2000);
+
+        for (int batchIndex = 0; batchIndex < 80; batchIndex++)
+        {
+            CollectedRecord[] records = new CollectedRecord[10];
+            for (int recordIndex = 0; recordIndex < records.Length; recordIndex++)
+            {
+                records[recordIndex] = CreateMinimalRecord($"span-{batchIndex}-{recordIndex}", "claude-code") with
+                {
+                    Parts =
+                    [
+                        new CollectedContentPart(0, ContentBucket.UserPrompt, filler, null, null, null, "user", null, null),
+                        new CollectedContentPart(1, ContentBucket.Reasoning, filler, null, null, null, "assistant", null, null),
+                    ],
+                };
+            }
+
+            sqlite.WriteBatch(new CollectedBatch(
+                new CollectedSource("claude-code", SourceKind.File, $"/tmp/vacuum-batch-{batchIndex}.jsonl"),
+                [],
+                records,
+                []));
+        }
+
+        foreach (StoredSource source in sqlite.Sources("claude-code"))
+        {
+            sqlite.DeleteSource(source.SourceId);
+        }
+
+        sqlite.SetWriteMarker(7);
+        long bytesBeforeVacuum = new FileInfo(dbPath).Length;
+
+        sqlite.Vacuum();
+
+        long bytesAfterVacuum = new FileInfo(dbPath).Length;
+        Assert.True(
+            bytesAfterVacuum < bytesBeforeVacuum,
+            $"vacuum should compact '{dbPath}' from {bytesBeforeVacuum} bytes, but it is {bytesAfterVacuum} bytes");
+        Assert.Equal(0, sqlite.CountRecords());
+        Assert.Equal(7L, sqlite.GetWriteMarker());
+    }
+
+    [Fact]
+    public void Vacuum_OnAnEmptyStoreSucceeds()
+    {
+        string dbPath = Path.Combine(directory.Path, "vacuum-empty", "canon.db");
+        SeamSqliteRelationalStore sqlite = new(dbPath, new SqliteCircuitBreaker());
+
+        sqlite.Vacuum();
+
+        Assert.Equal(0, sqlite.CountRecords());
+        Assert.Equal(SqliteRelationalStore.SchemaVersion, sqlite.GetStoreState()?.SchemaVersion);
+    }
+
     [Theory]
     [InlineData("{\"kind\":\"object\"}")]
     [InlineData(" \n\t [1, 2, 3]\t ")]

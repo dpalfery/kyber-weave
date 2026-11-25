@@ -1065,6 +1065,32 @@ public partial class SqliteRelationalStore : IOperationalStore
         return results;
     }
 
+    /// <summary>
+    /// Compacts the store file: checkpoints the write-ahead log with <c>TRUNCATE</c> and then
+    /// rebuilds the database with <c>VACUUM</c>, reclaiming the pages freed by deleted records.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <c>VACUUM</c> refuses to run inside a transaction, so the statements go through
+    /// <c>ExecuteSqlite</c> rather than through the transactional write helper.
+    /// </para>
+    /// <para>
+    /// The checkpoint after <c>VACUUM</c> is not redundant. In WAL mode the rebuilt pages are
+    /// written through the write-ahead log, so the database file keeps its previous length until a
+    /// checkpoint copies them back and truncates it to the compacted size — the length an operator
+    /// reclaims disk from only after that second checkpoint.
+    /// </para>
+    /// </remarks>
+    public void Vacuum()
+    {
+        EnsureInitialized();
+
+        lock (writeGate)
+        {
+            ExecuteSqlite("PRAGMA wal_checkpoint(TRUNCATE);\nVACUUM;\nPRAGMA wal_checkpoint(TRUNCATE);\n");
+        }
+    }
+
     private string? ReadSingletonHexString(string tableName, string columnName)
     {
         string sql = TabReadScriptHeader +
