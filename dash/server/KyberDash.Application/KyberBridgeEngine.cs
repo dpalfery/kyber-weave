@@ -67,6 +67,9 @@ public class KyberBridgeEngine
     /// <summary>Session marker answered when a single session's projection read fails.</summary>
     private const string ProjectionFailedStatus = "PROJECTION_FAILED";
 
+    /// <summary>Tokenizer name a figure carries when more than one tokenizer counted it.</summary>
+    private const string MixedTokenizer = "mixed";
+
     /// <summary>The label shown beside a session total the harness reported with no input/output split.</summary>
     private const string ReportedTotalOnlyNote = "total, split not reported";
 
@@ -3182,7 +3185,7 @@ public class KyberBridgeEngine
         StoredSessionContextTurn? firstStored = ctx.Turns.Count > 0 ? ctx.Turns[0] : null;
         StoredSessionContextTurn? lastStored = ctx.Turns.Count > 0 ? ctx.Turns[^1] : null;
 
-        return new Dictionary<string, object?>(StringComparer.Ordinal)
+        Dictionary<string, object?> payload = new(StringComparer.Ordinal)
         {
             ["measurable"] = true,
             ["contextLimit"] = ctx.ContextLimit,
@@ -3198,11 +3201,40 @@ public class KyberBridgeEngine
             ["first"] = BuildContextEdge(firstBucket, firstStored),
             ["last"] = BuildContextEdge(lastBucket, lastStored),
         };
+        AddTokenizerLabels(payload, TokenizerLabel.Ordered(ctx.Turns.SelectMany(static turn => turn.Tokenizers)));
+        return payload;
+    }
+
+    /// <summary>
+    /// Adds the tokenizer label trio beside a figure measured from text: the tokenizer that
+    /// counted it — <see cref="MixedTokenizer"/> when more than one did — the full labelled list,
+    /// and whether that tokenizer is the model's own (<see langword="null"/> when mixed). A
+    /// figure with no labels came only from harness-reported counts, so nothing is added and it
+    /// stays shown as reported, never as not measured.
+    /// </summary>
+    /// <param name="target">Payload entry carrying the text-derived figures.</param>
+    /// <param name="labels">Tokenizers that counted those figures, in name order.</param>
+    private static void AddTokenizerLabels(Dictionary<string, object?> target, IReadOnlyList<TokenizerLabel> labels)
+    {
+        if (labels.Count == 0)
+        {
+            return;
+        }
+
+        target["tokenizer"] = labels.Count == 1 ? labels[0].Tokenizer : MixedTokenizer;
+        target["tokenizers"] = labels.Select(static label => new Dictionary<string, object?>(StringComparer.Ordinal)
+        {
+            ["name"] = label.Tokenizer,
+            ["isModelOwn"] = label.IsModelOwn,
+        }).ToList();
+        target["tokenizerIsModelOwn"] = labels.Count == 1 ? labels[0].IsModelOwn : null;
     }
 
     /// <summary>
     /// Projects one stored context turn onto the per-turn entry the charts context object and the
-    /// widened turn section both render, so the two routes answer the same buckets.
+    /// widened turn section both render, so the two routes answer the same buckets. The turn's
+    /// measured figures carry its tokenizer label trio; a turn whose figures are all
+    /// harness-reported adds no labels and stays shown as reported.
     /// </summary>
     private static Dictionary<string, object?> BuildStoredContextTurn(StoredSessionContextTurn turn)
     {
@@ -3218,7 +3250,7 @@ public class KyberBridgeEngine
             toolDefsByServer[serverDef.Server] = serverDef.Tokens;
         }
 
-        return new Dictionary<string, object?>(StringComparer.Ordinal)
+        Dictionary<string, object?> entry = new(StringComparer.Ordinal)
         {
             ["index"] = turn.Position + 1,
             ["inputTokens"] = turn.InputTokens,
@@ -3245,6 +3277,8 @@ public class KyberBridgeEngine
             ["freshJumpFactor"] = turn.FreshJumpFactor,
             ["nonResidentTokens"] = turn.NonResidentTokens,
         };
+        AddTokenizerLabels(entry, turn.Tokenizers);
+        return entry;
     }
 
     private static Dictionary<string, object?>? BuildContextEdge(
