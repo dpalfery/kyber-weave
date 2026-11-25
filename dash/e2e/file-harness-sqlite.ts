@@ -204,7 +204,7 @@ function buildWarp(db: DatabaseSync, plan: SessionPlan, baseTimeMs: number): voi
       exchange_id TEXT PRIMARY KEY, conversation_id TEXT NOT NULL, start_ts TEXT, input TEXT, working_directory TEXT,
       output_status TEXT, model_id TEXT, planning_model_id TEXT, coding_model_id TEXT
     );
-    CREATE TABLE IF NOT EXISTS blocks (block_id TEXT PRIMARY KEY, start_ts TEXT, stylized_command TEXT);
+    CREATE TABLE IF NOT EXISTS blocks (block_id TEXT PRIMARY KEY, start_ts TEXT, stylized_command TEXT, ai_metadata TEXT);
   `)
   // Warp reports usage per conversation and model, never per exchange.
   const usage = {
@@ -228,7 +228,7 @@ function buildWarp(db: DatabaseSync, plan: SessionPlan, baseTimeMs: number): voi
   const insertQuery = db.prepare(
     'INSERT INTO ai_queries (exchange_id, conversation_id, start_ts, input, working_directory, output_status, model_id, planning_model_id, coding_model_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)',
   )
-  const insertBlock = db.prepare('INSERT INTO blocks (block_id, start_ts, stylized_command) VALUES (?, ?, ?)')
+  const insertBlock = db.prepare('INSERT INTO blocks (block_id, start_ts, stylized_command, ai_metadata) VALUES (?, ?, ?, ?)')
   for (let turn = 1; turn <= plan.turns; turn += 1) {
     const at = baseTimeMs + turn * TURN_SPACING_MS
     insertQuery.run(
@@ -243,7 +243,12 @@ function buildWarp(db: DatabaseSync, plan: SessionPlan, baseTimeMs: number): voi
       '',
     )
     if (hasTool(turn)) {
-      insertBlock.run(`${plan.id}-block-${turn}`, warpTimestamp(at + 2_000), `npm test -- step-${turn}`)
+      insertBlock.run(
+        `${plan.id}-block-${turn}`,
+        warpTimestamp(at + 2_000),
+        `npm test -- step-${turn}`,
+        JSON.stringify({ conversation_id: plan.id }),
+      )
     }
   }
 }
@@ -349,11 +354,15 @@ export const FILE_HARNESS_SQLITE_FIXTURES: readonly FileHarnessFixture[] = [
       sessionId: plan.id,
       turns: plan.turns,
       expectedToolCalls: toolCallCount(plan.turns),
-      // Warp reports tokens per conversation and model, never per exchange (decision D15).
-      tokensMeasurable: true,
+      // Warp reports one total per conversation and model (TokenClass.Total), never per exchange (decision D15)
+      // and never split into input and output, so the Total Input and Total Output cards stay unmeasured.
+      tokensMeasurable: false,
       perTurnTokensMeasurable: false,
-      expectedCostStatus: 'published_priced',
-      expectedModels: [WARP_MODEL],
+      // Warp reports no cost of its own and only a per-model total, which ReportedSessionUsage.Price cannot
+      // price from the published table, so the panel states no published rate.
+      expectedCostStatus: 'no_rate',
+      // WarpMapper.NormalizeModel maps the display name Warp stores to the canonical model id.
+      expectedModels: ['claude-sonnet-4-5'],
     }),
     buildWarp,
     WARP_PATH,
