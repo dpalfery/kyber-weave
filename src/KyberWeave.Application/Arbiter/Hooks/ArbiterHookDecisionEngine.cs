@@ -366,6 +366,8 @@ public sealed class ArbiterHookDecisionEngine : IContextualHookDecisionEngine, I
             headers = pre?.Headers;
             missing = read.Unreadable is { } unreadable ? OneLine(unreadable)
                 : pre is null && read.Truncated ? "its pre event is older than the ledger window that was read"
+                : pre is null && read.MalformedLines > 0
+                    ? $"{read.MalformedLines} ledger line(s) are not a record, and its pre event may be one of them"
                 : null;
         }
         catch (Exception exception) when (FileFailure.Is(exception))
