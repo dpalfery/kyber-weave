@@ -304,12 +304,18 @@ public static class ReviewGateReporting
     /// <param name="ran">What they reported.</param>
     /// <param name="outputs">Each gate's output, by gate id.</param>
     /// <param name="changed">The files the task changed.</param>
+    /// <param name="repositoryRoot">Absolute repository root used to resolve rooted compiler paths, or null when unbound.</param>
+    /// <param name="canonicalRepositoryRoot">Canonical absolute repository root when different from <paramref name="repositoryRoot"/>, or null.</param>
+    /// <param name="isFileSystemCaseInsensitive">Whether rooted and repository-relative paths compare without regard to case.</param>
     public static void AddSiblingNotes(
         DiagnosticReport report,
         IReadOnlyList<PlannedTaskGate> planned,
         GateReport ran,
         IReadOnlyDictionary<string, string> outputs,
-        IReadOnlyList<string> changed)
+        IReadOnlyList<string> changed,
+        string? repositoryRoot = null,
+        string? canonicalRepositoryRoot = null,
+        bool isFileSystemCaseInsensitive = false)
     {
         foreach (GateResult gate in ran.Gates.Where(result => !result.Passed))
         {
@@ -317,7 +323,15 @@ public static class ReviewGateReporting
             if (plannedGate is null || !outputs.TryGetValue(gate.Id, out string? output))
                 continue;
 
-            RedGateObservation observation = new(gate.Id, string.Join(' ', plannedGate.Run), gate.ExitCode, output);
+            RedGateObservation observation = new(
+                gate.Id,
+                string.Join(' ', plannedGate.Run),
+                gate.ExitCode,
+                output,
+                plannedGate.WorkingDirectory,
+                repositoryRoot,
+                canonicalRepositoryRoot,
+                isFileSystemCaseInsensitive);
             if (RedClassifier.SiblingSymbols(observation, changed) is not { Count: > 0 } symbols)
                 continue;
 
@@ -341,23 +355,41 @@ public static class ReviewGateReporting
     /// <param name="changed">The files the task changed.</param>
     /// <param name="projectOf">Names the project file a changed file belongs to.</param>
     /// <param name="report">Receives the verdict.</param>
+    /// <param name="repositoryRoot">Absolute repository root used to resolve rooted compiler paths, or null when unbound.</param>
+    /// <param name="canonicalRepositoryRoot">Canonical absolute repository root when different from <paramref name="repositoryRoot"/>, or null.</param>
+    /// <param name="isFileSystemCaseInsensitive">Whether rooted and repository-relative paths compare without regard to case.</param>
     public static (GateReport Report, RedOutcome Outcome) ApplyRed(
         GateReport ran,
         IReadOnlyList<PlannedTaskGate> planned,
         IReadOnlyDictionary<string, string> outputs,
         IReadOnlyList<string> changed,
         Func<string, string?> projectOf,
-        DiagnosticReport report)
+        DiagnosticReport report,
+        string? repositoryRoot = null,
+        string? canonicalRepositoryRoot = null,
+        bool isFileSystemCaseInsensitive = false)
     {
         List<RedGateObservation> observations = [];
         foreach (GateResult gate in ran.Gates)
         {
             PlannedTaskGate? plannedGate = planned.FirstOrDefault(candidate => string.Equals(candidate.Id, gate.Id, StringComparison.Ordinal));
             if (plannedGate is not null && outputs.TryGetValue(gate.Id, out string? output))
-                observations.Add(new RedGateObservation(gate.Id, string.Join(' ', plannedGate.Run), gate.ExitCode, output));
+                observations.Add(new RedGateObservation(
+                    gate.Id,
+                    string.Join(' ', plannedGate.Run),
+                    gate.ExitCode,
+                    output,
+                    plannedGate.WorkingDirectory,
+                    repositoryRoot,
+                    canonicalRepositoryRoot,
+                    isFileSystemCaseInsensitive));
         }
 
-        RedOutcome outcome = RedClassifier.Evaluate(observations, changed, projectOf);
+        RedOutcome outcome = RedClassifier.Evaluate(
+            observations,
+            changed,
+            projectOf,
+            anyTestGate: planned.Any(gate => RedClassifier.IsTestGate(gate.Id, string.Join(' ', gate.Run))));
         List<GateResult> results = [];
         foreach (GateResult gate in ran.Gates)
         {
@@ -399,7 +431,8 @@ public static class ReviewGateReporting
     /// <param name="agent">The agent whose gates ran.</param>
     /// <param name="report">The report just written.</param>
     /// <param name="reportPath">Where it was written, or null.</param>
-    public static IReadOnlyList<string> RedLines(RedOutcome outcome, string agent, GateReport report, string? reportPath)
+    /// <param name="runCount">The ordinal of this task-gate run, counting from 1.</param>
+    public static IReadOnlyList<string> RedLines(RedOutcome outcome, string agent, GateReport report, string? reportPath, int runCount)
     {
         int skipped = report.Gates.Count(gate => gate.NotApplicable);
         string failed = outcome.Passed
@@ -407,7 +440,7 @@ public static class ReviewGateReporting
             : string.Join(",", report.Gates.Where(gate => !gate.Passed && !gate.NotApplicable).Select(gate => gate.Id).DefaultIfEmpty("none"));
         return
         [
-            $"TASK_GATE: {(outcome.Passed ? "PASS" : "FAIL")} — agent={agent} gates={report.Gates.Count} failed={failed} skipped={skipped} report={reportPath ?? "<none>"} runs=1",
+            $"TASK_GATE: {(outcome.Passed ? "PASS" : "FAIL")} — agent={agent} gates={report.Gates.Count} failed={failed} skipped={skipped} report={reportPath ?? "<none>"} runs={runCount}",
             outcome.Passed ? outcome.EvidenceLine : $"RED_REJECTED: {outcome.Reason}",
         ];
     }

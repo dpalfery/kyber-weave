@@ -11,7 +11,8 @@ public sealed class ArbiterEvaluatorFactory(
     IArbiterModelTargetsReader modelTargets,
     IGateReportFacts gateReports,
     TimeProvider defaultClock,
-    IIdGenerator ids) : IArbiterEvaluatorFactory
+    IIdGenerator ids,
+    IFileSystem files) : IArbiterEvaluatorFactory
 {
     /// <inheritdoc />
     public IArbiterEvaluator Create(
@@ -34,7 +35,8 @@ public sealed class ArbiterEvaluatorFactory(
             state,
             clock ?? defaultClock,
             ids,
-            modelTargetsDirectory: modelTargetsDirectory);
+            modelTargetsDirectory: modelTargetsDirectory,
+            files: files);
 }
 
 /// <summary>Creates comment triage services over the Arbiter's registered ports.</summary>

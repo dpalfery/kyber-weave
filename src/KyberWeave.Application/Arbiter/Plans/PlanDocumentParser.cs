@@ -504,7 +504,7 @@ public static partial class PlanDocumentParser
             int paragraphEnd = RegionEnd(plain, filesLabel.ValueStart, Math.Min(
                 Math.Min(nextLabelStart, DoubleNewlineIndex(plain, filesLabel.ValueStart)),
                 FirstBulletIndex(plain, filesLabel.ValueStart)));
-            files.AddRange(ArbiterPathRule.ExtractPaths(plain[filesLabel.ValueStart..paragraphEnd]));
+            files.AddRange(ArbiterPathRule.ExtractFilesPaths(plain[filesLabel.ValueStart..paragraphEnd]));
             files.AddRange(HarvestBulletRun(plain, paragraphEnd, boldStarts, LineIndent(plain, filesLabel.Start)));
         }
         else if (isSpec)
@@ -670,7 +670,7 @@ public static partial class PlanDocumentParser
             break;
         }
 
-        return ArbiterPathRule.ExtractPaths(string.Join("\n", run));
+        return ArbiterPathRule.ExtractFilesPaths(string.Join("\n", run));
     }
 
     private static List<LabelMatch> CollectLabels(string plain)
@@ -1061,6 +1061,59 @@ internal static partial class ArbiterPathRule
                 }
 
                 if (span.Contains('/', StringComparison.Ordinal))
+                {
+                    directory = span[..(span.LastIndexOf('/') + 1)];
+                }
+            }
+        }
+
+        return paths;
+    }
+
+    /// <summary>
+    /// Extracts a Files block's paths, bullet by bullet, in declaration order. The text after a
+    /// bullet's first colon is the bullet's description, so a span there names a path only when it
+    /// contains a slash; a bare name in the description is prose and inherits no directory.
+    /// </summary>
+    /// <remarks>
+    /// A workflow bullet wrote its file, a colon, and a description naming <c>process.env.VERSION</c>
+    /// and <c>matrix.target</c>. Both match the file-extension shape and took the bullet's directory
+    /// in front of them, so the task claimed two files that do not exist. The lead spans before the
+    /// colon keep <see cref="ExtractPaths"/>' rule unchanged, because that is where a file list
+    /// writes its paths; the description can still name a file by its path.
+    /// </remarks>
+    public static IReadOnlyList<string> ExtractFilesPaths(string text)
+    {
+        List<string> paths = [];
+        foreach (string unit in SplitUnits(text))
+        {
+            int colon = unit.IndexOf(':', StringComparison.Ordinal);
+            string directory = string.Empty;
+            foreach (Match match in BacktickSpan().Matches(unit))
+            {
+                string span = match.Groups[1].Value;
+                bool inDescription = colon >= 0 && match.Index > colon;
+                if (string.IsNullOrWhiteSpace(span) || !IsPathSpan(span))
+                {
+                    continue;
+                }
+
+                bool containsSlash = span.Contains('/', StringComparison.Ordinal);
+                if (inDescription && !containsSlash)
+                {
+                    continue;
+                }
+
+                string normalized = NormalizeSpan(span);
+                string resolved = containsSlash || inDescription || directory.Length == 0 ? normalized : directory + normalized;
+                if (resolved.Length > 0 && !paths.Contains(resolved))
+                {
+                    paths.Add(resolved);
+                }
+
+                // A lead path is what a later bare name in the same bullet inherits; the
+                // description is prose, so nothing in it becomes the inherited directory.
+                if (containsSlash && !inDescription)
                 {
                     directory = span[..(span.LastIndexOf('/') + 1)];
                 }

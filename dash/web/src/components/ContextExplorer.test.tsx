@@ -7,7 +7,13 @@ import { renderToStaticMarkup } from 'react-dom/server'
 import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 
-import { AgentSessionRow, ContextExplorer } from './ContextExplorer.js'
+import {
+  AgentSessionRow,
+  ContextExplorer,
+  SESSION_LIST_COLUMNS,
+  SESSION_LIST_TRAILING,
+  SessionListHeader,
+} from './ContextExplorer.js'
 import type { KyberSessionSummary } from '../lib/kyberApi.js'
 import { formatCostFigure, normalizeCostBlock } from './SessionCostPanel.js'
 
@@ -489,6 +495,161 @@ describe('AgentSessionRow row cost cell (issue #186)', () => {
     expect(text).toBe(formatCostFigure(normalizeCostBlock({ basis: 'published', status: 'no_rate' })))
     expect(className.split(/\s+/)).toEqual(expect.arrayContaining(['w-28', 'whitespace-nowrap', 'shrink-0']))
     expect(className.split(/\s+/)).not.toContain('w-20')
+  })
+
+  it.each([
+    ['no_rate', 'No published rate available for this model.'],
+    ['not_billed', 'Model is explicitly not billed by provider.'],
+    ['out_of_scope', 'No KyberDash price table covers this harness, so its cost is not estimated.'],
+    ['partial', 'Only a portion of turns could be priced.'],
+  ] as const)('explains the %s status in the cell title', (status, sentence) => {
+    const { title } = renderCostCell({ basis: 'published', status })
+    expect(title).toMatch(/published/i)
+    expect(title).toContain(sentence)
+  })
+
+  it('titles a priced cell with its cost basis only', () => {
+    const { title } = renderCostCell({ basis: 'published', status: 'priced', value: 0.185, currency: 'USD' })
+    expect(title).toBe('Cost basis: published')
+  })
+
+  it('titles a rolled-up figure as including subagents', () => {
+    const markup = renderToStaticMarkup(
+      <AgentSessionRow
+        s={{ ...sampleSession, cost_usd: null, rollup: { cost_usd: 1.5 } } as KyberSessionSummary}
+        open={false}
+        onToggle={() => {}}
+        onSelectSession={() => {}}
+      />,
+    )
+    expect(markup).toContain('title="Cost including subagents"')
+  })
+})
+
+describe('ContextExplorer column headers', () => {
+  const headerLabels = ['Session', 'Title', 'Harness', 'Turns', 'Cost', 'Started']
+
+  /** The text of each named column label in a header, in order, without the blank spacer slots. */
+  function headerCellTexts(header: HTMLElement): string[] {
+    return Array.from(header.querySelectorAll('span'))
+      .map((el) => el.textContent ?? '')
+      .filter((text) => text !== '')
+  }
+
+  it('names each column once, in order, above the first row', () => {
+    renderExplorer({ sessions: [sampleSession, session('codex-cli')] })
+    const headers = screen.getAllByTestId('explorer-column-headers')
+    expect(headers).toHaveLength(1)
+    expect(headerCellTexts(headers[0]!)).toEqual(headerLabels)
+    const firstRow = screen.getByTestId(`agent-session-row-${sampleSession.session_id}`)
+    expect(headers[0]!.compareDocumentPosition(firstRow) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+  })
+
+  it('renders no header when the embedded list is empty', () => {
+    renderExplorer({ sessions: [] })
+    expect(screen.queryByTestId('explorer-column-headers')).toBeNull()
+  })
+
+  it('renders no header when the server answers an empty page', async () => {
+    stubServer([])
+    renderExplorer()
+    expect(await screen.findByTestId('explorer-empty')).toBeTruthy()
+    expect(screen.queryByTestId('explorer-column-headers')).toBeNull()
+  })
+
+  it('renders no header while the list is loading', async () => {
+    const server = stubServer(inventory, {}, { hold: true })
+    renderExplorer()
+    expect(await screen.findByTestId('explorer-loading')).toBeTruthy()
+    expect(screen.queryByTestId('explorer-column-headers')).toBeNull()
+    server.release()
+  })
+
+  it('renders no header when the list request fails', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => jsonResponse({}, 500)))
+    renderExplorer()
+    expect(await screen.findByTestId('explorer-error')).toBeTruthy()
+    expect(screen.queryByTestId('explorer-column-headers')).toBeNull()
+  })
+
+  it('renders the header for the data state the server serves', async () => {
+    stubServer(inventory)
+    renderExplorer()
+    expect(await screen.findByTestId('explorer-column-headers')).toBeTruthy()
+  })
+
+  it.each([
+    ['Session', 'id', 0],
+    ['Harness', 'harness', 2],
+    ['Turns', 'turns', 3],
+    ['Cost', 'cost', 4],
+    ['Started', 'started', 5],
+  ] as const)('gives the %s header the width class of its row cell', (label, key, cellIndex) => {
+    renderExplorer({ sessions: [sampleSession] })
+    const header = screen.getByTestId('explorer-column-headers')
+    const row = screen.getByTestId(`agent-session-row-${sampleSession.session_id}`)
+    // Row cells follow the chevron: id, title, harness, turns, cost, started.
+    const rowCells = Array.from(row.children).filter((el) => el.tagName.toLowerCase() !== 'svg')
+    const tokens = SESSION_LIST_COLUMNS[key].split(/\s+/)
+    expect(within(header).getByText(label).className.split(/\s+/)).toEqual(expect.arrayContaining(tokens))
+    expect(rowCells[cellIndex]!.className.split(/\s+/)).toEqual(expect.arrayContaining(tokens))
+  })
+
+  it('leaves a spacer the toggle width on a root row without subagents', () => {
+    const markup = renderToStaticMarkup(
+      <AgentSessionRow s={sampleSession} open={false} onToggle={() => {}} onSelectSession={() => {}} />,
+    )
+    expect(markup).toContain('data-testid="subagent-toggle-spacer"')
+    expect(markup).not.toContain(`data-testid="subagent-toggle-${sampleSession.session_id}"`)
+  })
+
+  it("gives a child row the root rows' column widths, so its right-hand cells line up under the header", () => {
+    // The child carries a parent link, so its trailing slot holds a button.
+    const child = { ...session('claude-code', '-child'), parent_session: sampleSession.session_id }
+    render(
+      <div>
+        <SessionListHeader />
+        <AgentSessionRow s={sampleSession} open={false} onToggle={() => {}} onSelectSession={() => {}} />
+        <AgentSessionRow s={child} open={false} onToggle={() => {}} onSelectSession={() => {}} isChild />
+      </div>,
+    )
+    const cellsOf = (id: string) =>
+      Array.from(screen.getByTestId(`agent-session-row-${id}`).children).filter(
+        (el) => el.tagName.toLowerCase() !== 'svg',
+      )
+    const rootCells = cellsOf(sampleSession.session_id)
+    const childCells = cellsOf(child.session_id)
+    // Harness, turns, cost and started sit at the same index in both rows.
+    for (const [key, index] of [['harness', 2], ['turns', 3], ['cost', 4], ['started', 5]] as const) {
+      const tokens = SESSION_LIST_COLUMNS[key].split(/\s+/)
+      expect(rootCells[index]!.className.split(/\s+/)).toEqual(expect.arrayContaining(tokens))
+      expect(childCells[index]!.className.split(/\s+/)).toEqual(expect.arrayContaining(tokens))
+    }
+    // Every row and the header end with the same trailing slot; the child's holds its parent link.
+    const trailingOf = (strip: Element | null) => strip?.querySelector('[data-testid="session-row-trailing"]')
+    const rootStrip = screen.getByTestId(`agent-session-row-${sampleSession.session_id}`).parentElement
+    const childStrip = screen.getByTestId(`agent-session-row-${child.session_id}`).parentElement
+    const headerTrailing = screen.getByTestId('explorer-column-headers').querySelector('[data-testid="session-row-trailing"]')
+    const rootTrailing = trailingOf(rootStrip)
+    const childTrailing = trailingOf(childStrip)
+    expect(rootTrailing).not.toBeNull()
+    expect(childTrailing?.querySelector('[data-testid="parent-session-link"]')).not.toBeNull()
+    expect(rootTrailing?.querySelector('button')).toBeNull()
+    const trailingTokens = SESSION_LIST_TRAILING.split(/\s+/)
+    for (const slot of [headerTrailing, rootTrailing, childTrailing]) {
+      expect(slot?.className.split(/\s+/)).toEqual(expect.arrayContaining(trailingTokens))
+    }
+    // The child reserves the same leading spacer width as a root row without subagents.
+    expect(screen.getAllByTestId('subagent-toggle-spacer')).toHaveLength(2)
+  })
+
+  it('renders the toggle, and no spacer, on a root row with subagents', () => {
+    const root = rootWithChildren('root-1', [session('claude-code', '-child')])
+    const markup = renderToStaticMarkup(
+      <AgentSessionRow s={root} open={false} onToggle={() => {}} onSelectSession={() => {}} />,
+    )
+    expect(markup).toContain('data-testid="subagent-toggle-root-1"')
+    expect(markup).not.toContain('data-testid="subagent-toggle-spacer"')
   })
 })
 

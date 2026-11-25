@@ -58,6 +58,14 @@ export const STATUS_WORDS: Record<CostStatus, string> = {
   not_billed: 'not billed',
 }
 
+/** Why a non-priced status has no figure, in one sentence; shared by the tile and the list's cost hover text. */
+export const STATUS_EXPLANATIONS: Record<Exclude<CostStatus, 'priced'>, string> = {
+  not_billed: 'Model is explicitly not billed by provider.',
+  out_of_scope: 'No KyberDash price table covers this harness, so its cost is not estimated.',
+  no_rate: 'No published rate available for this model.',
+  partial: 'Only a portion of turns could be priced.',
+}
+
 /**
  * Format a cost block for display according to KyberDash cost rules:
  * - 'priced' displays formatted money via renderCost
@@ -337,10 +345,7 @@ export function SessionCostPanel({ session, cost, costs, className }: SessionCos
 
               {block.status !== 'priced' && (
                 <div className="mt-1 text-[11px] text-tertiary-foreground">
-                  {block.status === 'not_billed' && 'Model is explicitly not billed by provider.'}
-                  {block.status === 'out_of_scope' && 'Harness is outside rate table applicability.'}
-                  {block.status === 'no_rate' && 'No published rate available for this model.'}
-                  {block.status === 'partial' && 'Only a portion of turns could be priced.'}
+                  {STATUS_EXPLANATIONS[block.status]}
                 </div>
               )}
             </div>

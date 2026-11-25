@@ -52,4 +52,27 @@ public interface IBackgroundDispatchEngine
     /// <param name="caller">The dispatching agent, or <c>unidentified</c>.</param>
     /// <param name="context">What the event is evaluated against.</param>
     IReadOnlyList<string> TakePendingNotes(string sessionId, string caller, HookContext context);
+
+    /// <summary>
+    /// Keeps the report of an agent that returned before the Arbiter knew its dispatch, so the dispatch's completed
+    /// event, a separate hook process, can record it with the dispatch's own prompt and target.
+    /// </summary>
+    /// <param name="sessionId">The harness session the agent runs in.</param>
+    /// <param name="agentId">The harness's id for the agent.</param>
+    /// <param name="message">The agent's report.</param>
+    /// <param name="context">What the event is evaluated against.</param>
+    /// <remarks>
+    /// The default keeps nothing, so an engine that does not follow returns across hook processes still compiles and
+    /// behaves as before: the completed event then finds no report and records nothing.
+    /// </remarks>
+    void KeepUnpairedReturn(string sessionId, string agentId, string message, HookContext context)
+    {
+    }
+
+    /// <summary>Takes, once, the report kept for an agent by <see cref="KeepUnpairedReturn"/>.</summary>
+    /// <param name="sessionId">The harness session the agent runs in.</param>
+    /// <param name="agentId">The harness's id for the agent.</param>
+    /// <param name="context">What the event is evaluated against.</param>
+    /// <returns>The kept report, or null when none is kept. The default keeps nothing, so it returns null.</returns>
+    string? TakeUnpairedReturn(string sessionId, string agentId, HookContext context) => null;
 }

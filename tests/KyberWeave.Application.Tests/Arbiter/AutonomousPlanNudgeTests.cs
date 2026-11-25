@@ -97,6 +97,20 @@ public sealed class AutonomousPlanNudgeTests : IDisposable
         Assert.Null(outcome.Reason);
     }
 
+    /// <summary>Several live runs with no signal choosing one leave no run to read the autonomy from, so no note is added.</summary>
+    [Fact]
+    public void AnAmbiguousRunContextGetsNoNote()
+    {
+        string root = _host.RepoRoot;
+        HookRunContext ambiguous = new(
+            root, null, null, root, [root], null, null, null, false, HookRunContextSource.Ambiguous, []);
+        HookContext context = new(root, () => "decision-nudge", TextWriter.Null, RunContext: ambiguous);
+
+        HookOutcome outcome = Return(Engine(), context, Ready);
+
+        Assert.Null(outcome.Reason);
+    }
+
     [Fact]
     public void APlannerReturnWithoutPlanReadyGetsNoNote()
     {

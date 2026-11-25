@@ -433,7 +433,7 @@ review:
     csharp:
       - &fmt-whitespace
         id: format-whitespace
-        include: &net-paths ["**/*.cs", "**/*.csproj", "**/*.props", "**/*.targets"]
+        include: &net-paths ["src/**/*.cs", "tests/**/*.cs", "src/**/*.csproj", "tests/**/*.csproj", "**/*.props", "**/*.targets"]
         run: [dotnet, format, KyberWeave.sln, whitespace, --verify-no-changes, --include, "{changed}", "-p:BaseOutputPath=.agent_scratchpad/{task}/artifacts/bin/", "-p:BaseIntermediateOutputPath=.agent_scratchpad/{task}/artifacts/obj/"]
         fix: [dotnet, format, KyberWeave.sln, whitespace, --include, "{changed}", "-p:BaseOutputPath=.agent_scratchpad/{task}/artifacts/bin/", "-p:BaseIntermediateOutputPath=.agent_scratchpad/{task}/artifacts/obj/"]
       - &fmt-style
@@ -447,7 +447,7 @@ review:
         # .editorconfig changes what compiles and how analyzers read it. The format gates keep the
         # source-only *net-paths, because `dotnet format` given a solution in --include checks
         # nothing and exits 0.
-        include: &net-build-paths ["**/*.cs", "**/*.csproj", "**/*.props", "**/*.targets", "**/*.sln*", "**/NuGet.config", "**/.editorconfig"]
+        include: &net-build-paths ["src/**/*.cs", "tests/**/*.cs", "src/**/*.csproj", "tests/**/*.csproj", "**/*.props", "**/*.targets", "KyberWeave.sln*", "**/NuGet.config", "**/.editorconfig"]
         run: [dotnet, build, KyberWeave.sln, -c, Release, --artifacts-path, ".agent_scratchpad/{task}/artifacts", -nr:false, -p:UseSharedCompilation=false]
       - &suppressions
         id: suppressions
@@ -502,6 +502,46 @@ review:
         id: unit-tests-content
         include: *net-paths
         run: [dotnet, test, tests/KyberWeave.Content.Tests/KyberWeave.Content.Tests.csproj, -c, Release, --no-build, --artifacts-path, ".agent_scratchpad/{task}/artifacts"]
+        timeout: 600
+      # A csharp task may edit the review configuration or a repository-policy test, whose only proof is
+      # this project. It is defined here rather than in test-dev so the technology entry carries it too, and
+      # test-dev below aliases the same gate. Its include is the broad net-test-paths because an edit to this
+      # file or to a workflow is what the project checks, and neither is C# under src/ or tests/.
+      - &test-policy
+        id: test-policy
+        include: *net-test-paths
+        run: [dotnet, test, tests/KyberWeave.RepoPolicy.Tests/KyberWeave.RepoPolicy.Tests.csproj, -c, Release, --no-build, --artifacts-path, ".agent_scratchpad/{task}/artifacts"]
+        blocking: true
+      # KyberDash's clean-architecture C# server is its own solution under dash/server. The KyberWeave gates
+      # above check the KyberWeave solution, which does not contain it, and their include is narrowed to src/
+      # and tests/ so a dash change never selects them. These carry the council's dash-server-paths anchor,
+      # so a dash C# change builds and tests the solution it actually changed. The format gates take the
+      # per-task output paths the KyberWeave format gates take, because parallel workers must not share an
+      # obj/ tree. Only the Application and Domain test projects run here: the csharp standard keeps disk and
+      # host tests out of task gates, and the council's dash-server-test gate still runs all four projects.
+      - &dash-fmt-whitespace
+        id: dash-format-whitespace
+        include: *dash-server-paths
+        run: [dotnet, format, dash/server/KyberDash.sln, whitespace, --verify-no-changes, -v, minimal, --include, "{changed}", "-p:BaseOutputPath=.agent_scratchpad/{task}/artifacts/bin/", "-p:BaseIntermediateOutputPath=.agent_scratchpad/{task}/artifacts/obj/"]
+        fix: [dotnet, format, dash/server/KyberDash.sln, whitespace, -v, minimal, --include, "{changed}", "-p:BaseOutputPath=.agent_scratchpad/{task}/artifacts/bin/", "-p:BaseIntermediateOutputPath=.agent_scratchpad/{task}/artifacts/obj/"]
+      - &dash-fmt-style
+        id: dash-format-style
+        include: *dash-server-paths
+        run: [dotnet, format, dash/server/KyberDash.sln, style, --verify-no-changes, --severity, warn, -v, minimal, --include, "{changed}", "-p:BaseOutputPath=.agent_scratchpad/{task}/artifacts/bin/", "-p:BaseIntermediateOutputPath=.agent_scratchpad/{task}/artifacts/obj/"]
+        fix: [dotnet, format, dash/server/KyberDash.sln, style, --severity, warn, -v, minimal, --include, "{changed}", "-p:BaseOutputPath=.agent_scratchpad/{task}/artifacts/bin/", "-p:BaseIntermediateOutputPath=.agent_scratchpad/{task}/artifacts/obj/"]
+      - &dash-build
+        id: dash-build
+        include: *dash-server-paths
+        run: [dotnet, build, dash/server/KyberDash.sln, -c, Release, --artifacts-path, ".agent_scratchpad/{task}/artifacts", -nr:false, -p:UseSharedCompilation=false]
+      - &dash-unit-application
+        id: dash-unit-application
+        include: *dash-server-paths
+        run: [dotnet, test, dash/server.tests/KyberDash.Application.Tests/KyberDash.Application.Tests.csproj, -c, Release, --no-build, --artifacts-path, ".agent_scratchpad/{task}/artifacts"]
+        timeout: 600
+      - &dash-unit-domain
+        id: dash-unit-domain
+        include: *dash-server-paths
+        run: [dotnet, test, dash/server.tests/KyberDash.Domain.Tests/KyberDash.Domain.Tests.csproj, -c, Release, --no-build, --artifacts-path, ".agent_scratchpad/{task}/artifacts"]
         timeout: 600
 
     # The three file kinds no language gate selects. A task that edits only a workflow, a shell
@@ -577,6 +617,100 @@ review:
       - *cargo-clippy
 
   task-gates:
+    # Every developer difficulty tier runs the full technology gate set. A task may name no
+    # technology, and the resolver reads the agent's own entry before any technology, so an
+    # agent without one runs no gate at all and reports that nothing applied to a change it
+    # never checked. The three tiers alias every gate review.technology-gates declares, once
+    # each; `include` still decides which of them run, so a tier runs the same gates its task's
+    # technology would. TaskGatesRepositoryConfigTests fails when a technology gains a gate
+    # that no tier carries, so this union cannot go stale.
+    dev-easy:
+      - *fmt-whitespace
+      - *fmt-style
+      - *dotnet-build
+      - *suppressions
+      - *dotnet-unit-application
+      - *dotnet-unit-cli
+      - *dotnet-unit-data
+      - *dotnet-unit-kernel
+      - *dotnet-unit-mcp
+      - *dotnet-unit-arbiter
+      - *dotnet-unit-hooks
+      - *dotnet-unit-architecture
+      - *dotnet-unit-content
+      - *test-policy
+      - *dash-fmt-whitespace
+      - *dash-fmt-style
+      - *dash-build
+      - *dash-unit-application
+      - *dash-unit-domain
+      - *dash-typecheck
+      - *dash-lint
+      - *tray-ui-typecheck
+      - *cargo-fmt
+      - *cargo-clippy
+      - *workflow-lint
+      - *shellcheck
+      - *review-config
+
+    dev-medium:
+      - *fmt-whitespace
+      - *fmt-style
+      - *dotnet-build
+      - *suppressions
+      - *dotnet-unit-application
+      - *dotnet-unit-cli
+      - *dotnet-unit-data
+      - *dotnet-unit-kernel
+      - *dotnet-unit-mcp
+      - *dotnet-unit-arbiter
+      - *dotnet-unit-hooks
+      - *dotnet-unit-architecture
+      - *dotnet-unit-content
+      - *test-policy
+      - *dash-fmt-whitespace
+      - *dash-fmt-style
+      - *dash-build
+      - *dash-unit-application
+      - *dash-unit-domain
+      - *dash-typecheck
+      - *dash-lint
+      - *tray-ui-typecheck
+      - *cargo-fmt
+      - *cargo-clippy
+      - *workflow-lint
+      - *shellcheck
+      - *review-config
+
+    dev-hard:
+      - *fmt-whitespace
+      - *fmt-style
+      - *dotnet-build
+      - *suppressions
+      - *dotnet-unit-application
+      - *dotnet-unit-cli
+      - *dotnet-unit-data
+      - *dotnet-unit-kernel
+      - *dotnet-unit-mcp
+      - *dotnet-unit-arbiter
+      - *dotnet-unit-hooks
+      - *dotnet-unit-architecture
+      - *dotnet-unit-content
+      - *test-policy
+      - *dash-fmt-whitespace
+      - *dash-fmt-style
+      - *dash-build
+      - *dash-unit-application
+      - *dash-unit-domain
+      - *dash-typecheck
+      - *dash-lint
+      - *tray-ui-typecheck
+      - *cargo-fmt
+      - *cargo-clippy
+      - *workflow-lint
+      - *shellcheck
+      - *review-config
+
     # .NET. The format gates are the review.gates format checks in their per-change form. `fix`
     # is the form `--fix` applies first; the verify form then decides, so a fix that does not
     # converge still fails the gate. The build is Release and writes under a per-task artifacts
@@ -603,11 +737,9 @@ review:
       - *dotnet-build
       - *suppressions
       # Gate configuration and repository-policy tests are test-dev's subject, so test-dev runs the
-      # policy project too; without this entry a policy-test change has no RED or GREEN gate.
-      - id: test-policy
-        include: *net-test-paths
-        run: [dotnet, test, tests/KyberWeave.RepoPolicy.Tests/KyberWeave.RepoPolicy.Tests.csproj, -c, Release, --no-build, --artifacts-path, ".agent_scratchpad/{task}/artifacts"]
-        blocking: true
+      # policy project too; without this entry a policy-test change has no RED or GREEN gate. The gate
+      # is defined once under the csharp technology so the two entries cannot drift.
+      - *test-policy
       - *dotnet-unit-application
       - *dotnet-unit-cli
       - *dotnet-unit-data
@@ -617,6 +749,12 @@ review:
       - *dotnet-unit-hooks
       - *dotnet-unit-architecture
       - *dotnet-unit-content
+      # The KyberDash server's own C# solution, which the .NET gates above do not build.
+      - *dash-fmt-whitespace
+      - *dash-fmt-style
+      - *dash-build
+      - *dash-unit-application
+      - *dash-unit-domain
       - *dash-typecheck
       - *dash-lint
       - *cargo-fmt

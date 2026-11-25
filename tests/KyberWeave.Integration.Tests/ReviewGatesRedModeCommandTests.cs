@@ -139,12 +139,24 @@ public sealed class ReviewGatesRedModeCommandTests : IDisposable
     [Fact]
     public void RedModeRefusesABuildThatSucceedsBecauseNoTestFails()
     {
-        string root = Project("namespace Widget.Tests; public class WidgetTests { public void T() { } }");
+        string root = Project("namespace Widget.Tests; public class WidgetTests { public void T() { } }", withTestGate: true);
 
         (int exit, string output) = Run(root, "--red");
 
         Assert.Equal(1, exit);
         Assert.Contains("KW-REVIEW-052", output, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void RedModeAcceptsAPassingBuildAsNotApplicableWhenNoSelectedGateRunsTests()
+    {
+        string root = Project("namespace Widget.Tests; public class WidgetTests { public void T() { } }");
+
+        (int exit, string output) = Run(root, "--red");
+
+        Assert.Equal(0, exit);
+        Assert.Contains("KW-REVIEW-051", output, StringComparison.Ordinal);
+        Assert.Contains("not applicable", output, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -174,8 +186,9 @@ public sealed class ReviewGatesRedModeCommandTests : IDisposable
         Assert.Contains("STATUS: PASS", output, StringComparison.Ordinal);
         Assert.Contains($"FILES: {TestFile}", output, StringComparison.Ordinal);
         string claim = output.Split('\n').Select(line => line.Trim()).Single(line => line.StartsWith("TASK_GATE: ", StringComparison.Ordinal));
-        // The worker fills in the run count; the rest of the line is the report's own and must corroborate.
-        Assert.True(RealGateReportFacts.Create().Agrees(claim.Replace("runs=<k>", "runs=2", StringComparison.Ordinal), root), claim);
+        // The gate prints the real run count since the count was added; the line is the report's own and must corroborate as printed.
+        Assert.DoesNotContain("runs=<k>", claim, StringComparison.Ordinal);
+        Assert.True(RealGateReportFacts.Create().Agrees(claim, root), claim);
     }
 
     [Fact]
