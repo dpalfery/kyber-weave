@@ -22,6 +22,9 @@ public sealed class PhysicalSquadFileAccess : ISquadFileAccess
     public byte[] ReadAllBytes(string path) => File.ReadAllBytes(path);
 
     /// <inheritdoc />
+    public long GetLength(string path) => new FileInfo(path).Length;
+
+    /// <inheritdoc />
     public void CreateDirectory(string path) => _ = Directory.CreateDirectory(path);
 
     /// <inheritdoc />

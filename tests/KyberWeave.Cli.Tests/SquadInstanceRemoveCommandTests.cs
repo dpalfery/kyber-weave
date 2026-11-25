@@ -109,6 +109,8 @@ public sealed class SquadInstanceRemoveCommandTests
 
         public byte[] ReadAllBytes(string path) => throw new NotSupportedException();
 
+        public long GetLength(string path) => throw new NotSupportedException();
+
         public void CreateDirectory(string path) => throw new NotSupportedException();
 
         public void DeleteDirectory(string path) => throw new NotSupportedException();

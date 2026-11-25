@@ -20,6 +20,18 @@ public interface ISquadFileAccess
     /// <summary>Reads a file's bytes.</summary>
     byte[] ReadAllBytes(string path);
 
+    /// <summary>
+    /// Gets a file's length in bytes without reading its content, so a caller can refuse an oversized file before it
+    /// loads the file.
+    /// </summary>
+    /// <remarks>
+    /// A symbolic link at <paramref name="path"/> is followed: the length is the one of the file it names.
+    /// </remarks>
+    /// <param name="path">The file.</param>
+    /// <returns>The file's length in bytes.</returns>
+    /// <exception cref="FileNotFoundException">The file does not exist.</exception>
+    long GetLength(string path);
+
     /// <summary>Creates a directory and any missing parents.</summary>
     void CreateDirectory(string path);
 

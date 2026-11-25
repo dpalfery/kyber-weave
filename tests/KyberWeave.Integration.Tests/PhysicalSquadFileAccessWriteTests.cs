@@ -62,4 +62,26 @@ public sealed class PhysicalSquadFileAccessWriteTests : SquadFileAccessWriteCont
         Assert.Equal("new", files.ReadAllText(target));
         Assert.Equal(OwnerOnly, File.GetUnixFileMode(target));
     }
+
+    /// <summary>The length of a symbolic link is the length of the file it names, as the seam documents.</summary>
+    [Fact]
+    public void GetLengthOnASymlinkReturnsTheTargetsLength()
+    {
+        if (OperatingSystem.IsWindows())
+        {
+            Assert.Skip("Creating a symbolic link needs a privilege Windows does not grant by default.");
+            return;
+        }
+
+        ISquadFileAccess files = Starting(out string root);
+        string target = Path.Combine(root, "dotfiles", "settings.json");
+        string home = Path.Combine(root, "home");
+        string link = Path.Combine(home, "settings.json");
+        byte[] written = [.. "a document of known length"u8];
+        files.WriteAllBytesAtomic(target, written);
+        files.CreateDirectory(home);
+        _ = File.CreateSymbolicLink(link, target);
+
+        Assert.Equal(written.Length, files.GetLength(link));
+    }
 }

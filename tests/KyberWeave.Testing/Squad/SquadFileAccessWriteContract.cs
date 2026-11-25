@@ -91,4 +91,27 @@ public abstract class SquadFileAccessWriteContract : IDisposable
 
         Assert.Equal(written, files.ReadAllBytes(path));
     }
+
+    /// <summary>The length reported after a write is the number of bytes written, read without reading the content.</summary>
+    [Fact]
+    public void GetLengthAfterAWriteIsTheNumberOfBytesWritten()
+    {
+        ISquadFileAccess files = Starting(out string root);
+        string path = Path.Combine(root, "blob.bin");
+        byte[] written = [0x00, 0xFF, 0x0A, 0x0D, 0xEF, 0xBB, 0xBF, 0x80, 0x41];
+
+        files.WriteAllBytesAtomic(path, written);
+
+        Assert.Equal(written.Length, files.GetLength(path));
+    }
+
+    /// <summary>Asking the length of a file that is not there throws, rather than reporting zero.</summary>
+    [Fact]
+    public void GetLengthOfAMissingFileThrowsFileNotFound()
+    {
+        ISquadFileAccess files = Starting(out string root);
+        files.CreateDirectory(root);
+
+        _ = Assert.Throws<FileNotFoundException>(() => files.GetLength(Path.Combine(root, "absent.json")));
+    }
 }

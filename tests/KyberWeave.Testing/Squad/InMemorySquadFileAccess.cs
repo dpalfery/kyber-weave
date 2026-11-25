@@ -22,6 +22,9 @@ public sealed class InMemorySquadFileAccess(InMemoryFileSystem files) : ISquadFi
     public byte[] ReadAllBytes(string path) => files.ReadAllBytes(path);
 
     /// <inheritdoc />
+    public long GetLength(string path) => files.GetLength(path);
+
+    /// <inheritdoc />
     public void CreateDirectory(string path) => files.CreateDirectory(path);
 
     /// <inheritdoc />
@@ -41,5 +44,6 @@ public sealed class InMemorySquadFileAccess(InMemoryFileSystem files) : ISquadFi
     public string? FindCheckoutSquadSourceRoot() => null;
 
     /// <inheritdoc />
-    public void WriteAllBytesAtomic(string path, byte[] contents) => files.WriteAllBytesAtomic(path, contents);
+    public void WriteAllBytesAtomic(string path, byte[] contents) =>
+        files.WriteAllBytesAtomic(files.GetFinalLinkTarget(path) ?? path, contents);
 }
