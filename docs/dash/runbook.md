@@ -2136,12 +2136,14 @@ Applies to Kilo (`kilo.db`), Warp (`warp.sqlite`), Cursor (`state.vscdb`) and De
   section, turn, timeline, coverage and analytics paths answer from figures computed over
   content-free record scalars ([the read-model register](architecture.md#the-read-model-register)).
   The sessions list resolves, filters, searches and pages in SQL and prices only the page it
-  returns; the session view is ten section queries issued at mount in page order, each paging
-  and sorting its own list on the server at `25`, `50`, or `100` rows (default `25`, newest-first
-  `desc` default, with the selected page size persisted per section in browser `sessionStorage`;
-  sessions list defaults to `100`). `/api/kyber/session/{id}/charts` also pages and sorts
-  `context.turns` on the server (`25 / 50 / 100`, `desc` / `asc`) while keeping the whole-session
-  `turns` spend curve and context summary aggregates unpaged. Content text is read by one view,
+  returns; at mount in page order, the session view issues `/summary`, the nine server-paged and
+  server-sorted list section queries (`charts` `context.turns`, `tools`, `servers`, `skills`,
+  `kw-skills`, `timeline`, `requests`, `reconciliation`, and `problems`, each at `25`, `50`, or
+  `100` rows with default `25` and newest-first `desc` default, and selected page size persisted
+  per section in browser `sessionStorage`; the sessions list defaults to `100`), and the
+  unpaged `/stored-fields` inventory. `/api/kyber/session/{id}/charts` also keeps the
+  whole-session `turns` spend curve and context summary aggregates unpaged while paging and
+  sorting `context.turns` on the server. Content text is read by one view,
   one turn or one request at a time, from
   `TurnContentParts(sessionKey, turnIndex, spanId, part, budget, full)` and the two
   section-scoped content reads (the shown requests page's prompt previews, the inspected span's

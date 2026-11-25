@@ -1763,13 +1763,15 @@ never reported as zero. It is declared in one of two ways: a key is absent (the 
 `skills` view, and each row's `invocations`). `[]` is a measured none. Per-harness sources are in the [telemetry inventory](telemetry-inventory.md#skill-availability-by-harness).
 
 **Skills section** (`GET /api/kyber/session/:id/skills`, additive). The route serves one page of
-the session's skill rows with the page envelope (`rows`, `total`, `page`, `limit`), or the
-whole-block `{availability: 'not_measurable', reason}` verdict when the harness measured neither
-side. The whole-session counts live on the summary: `skills_count`, always served. (The engine
-also emits the `skills_invoked` name array, which the summary validator does not carry; the
-panel tiles that read the arrays therefore render "not measurable" — see the known limit below.)
+the session's skill rows with the page envelope (`{ rows, total, page, limit, offset, order }`),
+retaining that envelope (with `rows: []`, `total: 0`) alongside the whole-block
+`{availability: 'not_measurable', reason}` verdict when the harness measured neither side. The
+whole-session counts live on the summary: `skills_count`, always served. (The engine also emits
+the `skills_invoked` name array, which the summary validator does not carry; the panel tiles that
+read the arrays therefore render "not measurable" — see the known limit below.)
 
-- `skills.rows` is sorted by name. Each row is `{name, listed, invocations, turns_listed,
+- `skills.rows` is sorted by `invocations` (`DESC` by default, or `ASC`, tiebreak `name`
+  ascending). Each row is `{name, listed, invocations, turns_listed,
   description?, derived_tokens?}`.
     - `listed` is always a boolean. It is `true` when a measured listing named the skill on at
       least one turn, and `false` for a skill that was only invoked.
@@ -2124,9 +2126,11 @@ flowchart LR
   `DashHttp.TrySortOrder`): `limit` must be `25`, `50`, or `100` (default `25`), `order` must be
   trimmed case-insensitive `"desc"` or `"asc"` (default `"desc"`), and invalid values return HTTP
   `400` (`DashHttp.Error` `{"error": "..."}`) rather than silently clamping. Responses carry
-  `{ total, page, limit, offset, order }` alongside `{ entries, data }` or section-specific
-  payload keys (`rows`, `nodes`, or `turns` + `context` on `/charts`). A page past the end
-  answers empty entries with the true `total`. A 404 check reads the projection header row only,
+  `{ total, page, limit, offset, order }` alongside the section-named list key and `data`
+  (`{ tools, data }`, `{ servers, data }`, `{ requests, data }`, `{ reconciliation, data }`,
+  `{ problems, data }`) or section-specific payload keys (`rows`, `nodes`, or `turns` + `context`
+  on `/charts`). A page past the end answers an empty list with the true `total`. A 404 check
+  reads the projection header row only,
   never turns or content. Under live capture a new session can shift the sessions list by one
   row between pages; accepted for a monitoring view.
 
@@ -2592,13 +2596,13 @@ The web dashboard server wires HTTP requests directly to `KyberBridgeEngine`:
 | `/api/kyber/session/:id` | `GET` | 404 | **Retired.** The monolithic session payload is gone; the session view reads one route per section (below). The report prices its window with one keyed batched read and the run page reads turn figures. |
 | `/api/kyber/session/:id/summary` | `GET` | Widened bounded session summary | The header strip, banners and overview strip source: identity fields plus `span_count`, `request_count`, cost blocks by basis and model, `costBasisMismatch`, reconciliation totals, `problems_count`, tool counts (`tools_offered_count`, `tools_invoked_count`, `unused_tools_count`), `skills_count`, aux-call fields and schema waste fields. 404 for an unknown id; no run or execution linkage, deliberately. |
 | `/api/kyber/session/:id/charts` | `GET` | `{ sessionId, turns, context, total, limit, offset, page, order }` | Whole-session `turns` array for the spend curve plus `context` (`measurable`, `contextLimit`, `contextLimitSource`, `residualTotal`, `measuredInputTotal`, `maxBucketTokens`, `freshJumpFactor`, `accumulationRate`, `observedBuckets`, `observedServers`, `derivedCounts`, `flaggedTurns`, `unmeasuredTurns`, `first`, `last`, tokenizer labels, `missingBuckets`/`residualReasons` from `CanonSynth.MeasurabilityFor`, and server-paged/sorted `context.turns` preserving 1-based `index = turn.Position + 1`). Accepts `?page=&limit=&order=` (`25`/`50`/`100`, `desc`/`asc`, defaults `25`, `desc`; HTTP `400` `{"error": "..."}` on invalid values) and emits top-level `total`, `limit`, `offset`, `page`, `order` on both measurable and unmeasurable responses. |
-| `/api/kyber/session/:id/tools` | `GET` | `{ entries, data, total, page, limit, offset, order, aggregate }` | Ranked tool rows (never-invoked included and flagged), sorted by `TotalSchemaCost` then `Invocations` (`DESC`/`ASC`, tiebreak `name ASC`) and paged (`limit` `25`/`50`/`100`, default `25`; `order` `desc`/`asc`, default `desc`), with the page-independent `aggregate` (`measurable` / `reason`, `maxCost`, `residualCostTotal`, `invocationCount`, `unusedCount`, `unusedRange`, `byServer`, `definitionsSpanId`) priced over every row before paging. |
-| `/api/kyber/session/:id/servers` | `GET` | `{ entries, data, total, page, limit, offset, order }` | Server rollup rows, sorted by `UnusedCost` then `total_schema_cost` then `invocations` (`DESC`/`ASC`, tiebreak `server ASC`) and paged (`25`/`50`/`100`, default `25`; `order` `desc`/`asc`, default `desc`). |
-| `/api/kyber/session/:id/skills` | `GET` | `{ rows, total, page, limit, offset, order }` or the not-measurable verdict | Skill rows, sorted by `invocations` (`DESC`/`ASC`, tiebreak `name ASC`) and paged (`25`/`50`/`100`, default `25`; `order` `desc`/`asc`, default `desc`); the whole-block `{availability: 'not_measurable', reason}` verdict when neither side is measured. Whole-list aggregates are not served yet ([skills view contract](#skills-view-contract)). |
+| `/api/kyber/session/:id/tools` | `GET` | `{ tools, data, total, page, limit, offset, order, aggregate }` | Ranked tool rows (never-invoked included and flagged), sorted by `TotalSchemaCost` then `Invocations` (`DESC`/`ASC`, tiebreak `name ASC`) and paged (`limit` `25`/`50`/`100`, default `25`; `order` `desc`/`asc`, default `desc`), with the page-independent `aggregate` (`measurable` / `reason`, `maxCost`, `residualCostTotal`, `invocationCount`, `unusedCount`, `unusedRange`, `byServer`, `definitionsSpanId`) priced over every row before paging. |
+| `/api/kyber/session/:id/servers` | `GET` | `{ servers, data, total, page, limit, offset, order }` | Server rollup rows, sorted by `UnusedCost` then `total_schema_cost` then `invocations` (`DESC`/`ASC`, tiebreak `server ASC`) and paged (`25`/`50`/`100`, default `25`; `order` `desc`/`asc`, default `desc`). |
+| `/api/kyber/session/:id/skills` | `GET` | `{ rows, total, page, limit, offset, order }` (plus `{ availability: 'not_measurable', reason }` when unmeasured, with `rows: []`, `total: 0`) | Skill rows, sorted by `invocations` (`DESC`/`ASC`, tiebreak `name ASC`) and paged (`25`/`50`/`100`, default `25`; `order` `desc`/`asc`, default `desc`); adds the whole-block `{availability: 'not_measurable', reason}` verdict with `rows: []`, `total: 0` when neither side is measured. Whole-list aggregates are not served yet ([skills view contract](#skills-view-contract)). |
 | `/api/kyber/session/:id/kw-skills` | `GET` | `{ rows, total, limit, offset, page, order }` | KW skill loads, sorted by `started_at_utc, tc.rowid` (`DESC`/`ASC`, default `desc`) and paged (`25`/`50`/`100`, default `25`); 404 for an unknown session. A row is `{ skill: string\|null, agent: string\|null, session_id, span_id, loaded_at: string\|null }`. The web shows it as its own `KW skills` section right after Skills, apart from harness skills ([KW skill loads](#kw-skill-loads)). |
-| `/api/kyber/session/:id/requests` | `GET` | `{ entries, data, total, page, limit, offset, order }` | Request rows (`request`, `timestamp`, `turns`, `model`, `prompt` preview), sorted by `position` (`DESC`/`ASC`, default `desc`) and paged (`25`/`50`/`100`, default `25`). Prompt previews are read for the page's spans only. |
-| `/api/kyber/session/:id/reconciliation` | `GET` | `{ entries, data, total, page, limit, offset, order }` | Reconciliation rows (today's snake-case fields, null-match rows omitted as before), sorted by `position` (`DESC`/`ASC`, default `desc`) and paged (`25`/`50`/`100`, default `25`). |
-| `/api/kyber/session/:id/problems` | `GET` | `{ entries, data, total, page, limit, offset, order }` | Problem rows joining `ingest_problem_timestamp`, sorting non-null timestamps first (`DESC`/`ASC`, default `desc`) then null timestamps (`problem_id` tiebreak) identically in SQLite and `InMemoryRelationalStore`, paged (`25`/`50`/`100`, default `25`). |
+| `/api/kyber/session/:id/requests` | `GET` | `{ requests, data, total, page, limit, offset, order }` | Request rows (`request`, `timestamp`, `turns`, `model`, `prompt` preview), sorted by `position` (`DESC`/`ASC`, default `desc`) and paged (`25`/`50`/`100`, default `25`). Prompt previews are read for the page's spans only. |
+| `/api/kyber/session/:id/reconciliation` | `GET` | `{ reconciliation, data, total, page, limit, offset, order }` | Reconciliation rows (today's snake-case fields, null-match rows omitted as before), sorted by `position` (`DESC`/`ASC`, default `desc`) and paged (`25`/`50`/`100`, default `25`). |
+| `/api/kyber/session/:id/problems` | `GET` | `{ problems, data, total, page, limit, offset, order }` | Problem rows joining `ingest_problem_timestamp`, sorting non-null timestamps first (`DESC`/`ASC`, default `desc`) then null timestamps (`problem_id` tiebreak) identically in SQLite and `InMemoryRelationalStore`, paged (`25`/`50`/`100`, default `25`). |
 | `/api/kyber/session/:id/subagents` | `GET` | `{ entries, data, total, page, limit }` | One root's subagent rows, 25 per page. |
 | `/api/kyber/session/:id/timeline` | `GET` | `{ nodes, total, page, limit, offset, order, bounds }` | One tree level's nodes (today's node fields without `children`, plus `childCount`), sorted by `StartMs DESC/ASC, SpanId ASC` (default `desc`) and paged (`25`/`50`/`100`, default `25`), with the whole tree's `bounds`. `parent` omitted answers the top level; otherwise the URL-decoded node id — synthetic `(auxiliary)` and `(orphan:…)` ids included. |
 | `/api/kyber/session/:id/turn/:index` | `GET` | Bounded per-turn figures with context | One turn's figures served from a single `session_turn` row — 404 for an unknown turn under the strict 0-based identity lookup — plus that turn's `context` buckets. The turn page's counters and the drawer drill-down read kilobytes here instead of the whole payload (up to 10,933 turns) they once fetched for one row's counters. |
