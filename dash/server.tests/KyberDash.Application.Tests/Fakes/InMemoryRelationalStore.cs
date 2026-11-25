@@ -6258,6 +6258,7 @@ public class InMemoryRelationalStore :
         List<Problem> problems = CollectSessionProblems(currentState, sessionKey, sessionSpanIds);
         problems.AddRange(extraProblems);
 
+        ReportedSessionUsageTotals? listUsageTotals = ResolveReportedSessionUsageTotals(session, records);
         return new SessionListFigure(
             SessionKey: sessionKey,
             HarnessId: harnessId,
@@ -6265,8 +6266,8 @@ public class InMemoryRelationalStore :
             Branch: session.Workspace?.Branch,
             TurnCount: turnEntries.Count,
             RequestCount: requestCount,
-            TotalInput: hasInput ? totalInput : null,
-            TotalOutput: hasOutput ? totalOutput : null,
+            TotalInput: listUsageTotals is not null ? listUsageTotals.CombinedInput : hasInput ? totalInput : null,
+            TotalOutput: listUsageTotals is not null ? listUsageTotals.Output : hasOutput ? totalOutput : null,
             ReportedCost: sessionReportedCost,
             PublishedCost: sessionPublishedCost,
             CostBasisMismatch: basisMismatch,
@@ -6387,6 +6388,79 @@ public class InMemoryRelationalStore :
     /// definitions, agent invocations, and skills stay absent, and signals stay absent because
     /// no list figure reads them.
     /// </summary>
+    /// <summary>
+    /// Session token totals taken from the harness's reported session usage
+    /// (<c>session_model_usage</c>), used only when no record in the session carries its own
+    /// token counters.
+    /// </summary>
+    /// <param name="FreshInput">Summed <c>input</c> class, or <see langword="null"/> when not reported.</param>
+    /// <param name="CacheRead">Summed <c>cache_read</c> class, or <see langword="null"/> when not reported.</param>
+    /// <param name="CacheWrite">Summed <c>cache_write</c> class, or <see langword="null"/> when not reported.</param>
+    /// <param name="Output">Summed <c>output</c> class, or <see langword="null"/> when not reported.</param>
+    private sealed record ReportedSessionUsageTotals(long? FreshInput, long? CacheRead, long? CacheWrite, long? Output)
+    {
+        /// <summary>Gets the combined input (fresh input plus both cache classes), matching the per-turn figure.</summary>
+        public long? CombinedInput => FreshInput.HasValue || CacheRead.HasValue || CacheWrite.HasValue
+            ? (FreshInput ?? 0L) + (CacheRead ?? 0L) + (CacheWrite ?? 0L)
+            : null;
+    }
+
+    /// <summary>
+    /// Resolves the session totals a harness reported for the whole session when its records
+    /// carry no token counters of their own (for example Droid, which reports usage per session
+    /// only); otherwise <see langword="null"/>, so record sums stay the only source.
+    /// </summary>
+    /// <remarks>
+    /// Reads the latest snapshot position only, summed across models per token class: a later
+    /// snapshot restates the session's usage rather than adding to it. Reported figures are
+    /// summed, never split or estimated (decision D15). No reported usage yields
+    /// <see langword="null"/>, so the totals stay not measured.
+    /// </remarks>
+    /// <param name="session">The session whose reported usage is read.</param>
+    /// <param name="records">The session's records.</param>
+    private static ReportedSessionUsageTotals? ResolveReportedSessionUsageTotals(
+        CollectedSession session,
+        IReadOnlyList<CollectedRecord> records)
+    {
+        if (session.ReportedUsage is not { Count: > 0 } usage || records.Any(static r => r.Tokens.Count > 0))
+        {
+            return null;
+        }
+
+        int latestSnapshot = usage.Max(static u => u.SnapshotPosition);
+        long? freshInput = null;
+        long? cacheRead = null;
+        long? cacheWrite = null;
+        long? output = null;
+        foreach (CollectedModelUsage row in usage)
+        {
+            if (row.SnapshotPosition != latestSnapshot)
+            {
+                continue;
+            }
+
+            switch (row.TokenClass)
+            {
+                case TokenClass.Input:
+                    freshInput = (freshInput ?? 0L) + row.Count;
+                    break;
+                case TokenClass.CacheRead:
+                    cacheRead = (cacheRead ?? 0L) + row.Count;
+                    break;
+                case TokenClass.CacheWrite:
+                    cacheWrite = (cacheWrite ?? 0L) + row.Count;
+                    break;
+                case TokenClass.Output:
+                    output = (output ?? 0L) + row.Count;
+                    break;
+                default:
+                    break;
+            }
+        }
+
+        return new ReportedSessionUsageTotals(freshInput, cacheRead, cacheWrite, output);
+    }
+
     /// <summary>
     /// Derives one session's bounded summary figures, tool residency rows, and request metadata
     /// from content-free record scalars, its stored projection, and ingest diagnostics: the
@@ -6600,10 +6674,21 @@ public class InMemoryRelationalStore :
         long? nullableTotalCacheRead = hasCacheRead ? totalCacheRead : null;
         long? nullableTotalCacheCreation = hasCacheCreation ? totalCacheCreation : null;
 
+        ReportedSessionUsageTotals? reportedUsageTotals = ResolveReportedSessionUsageTotals(session, records);
+        if (reportedUsageTotals is not null)
+        {
+            nullableTotalInput = reportedUsageTotals.CombinedInput;
+            nullableTotalOutput = reportedUsageTotals.Output;
+            nullableTotalCacheRead = reportedUsageTotals.CacheRead;
+            nullableTotalCacheCreation = reportedUsageTotals.CacheWrite;
+        }
+
         double? cacheHitRatio = nullableTotalInput is > 0 && nullableTotalCacheRead.HasValue
             ? (double)nullableTotalCacheRead.Value / nullableTotalInput.Value
             : null;
-        int? cacheCreationCoverage = nullableTotalInput is > 0 && nullableTotalCacheCreation.HasValue && turnEntries.Count > 0
+
+        // Cache-creation coverage counts turns; reported session usage has no per-turn figures.
+        int? cacheCreationCoverage = reportedUsageTotals is null && nullableTotalInput is > 0 && nullableTotalCacheCreation.HasValue && turnEntries.Count > 0
             ? cacheCreationTurns
             : null;
 
