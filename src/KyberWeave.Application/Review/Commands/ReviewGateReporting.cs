@@ -306,6 +306,7 @@ public static class ReviewGateReporting
     /// <param name="changed">The files the task changed.</param>
     /// <param name="repositoryRoot">Absolute repository root used to resolve rooted compiler paths, or null when unbound.</param>
     /// <param name="canonicalRepositoryRoot">Canonical absolute repository root when different from <paramref name="repositoryRoot"/>, or null.</param>
+    /// <param name="isFileSystemCaseInsensitive">Whether rooted and repository-relative paths compare without regard to case.</param>
     public static void AddSiblingNotes(
         DiagnosticReport report,
         IReadOnlyList<PlannedTaskGate> planned,
@@ -313,7 +314,8 @@ public static class ReviewGateReporting
         IReadOnlyDictionary<string, string> outputs,
         IReadOnlyList<string> changed,
         string? repositoryRoot = null,
-        string? canonicalRepositoryRoot = null)
+        string? canonicalRepositoryRoot = null,
+        bool isFileSystemCaseInsensitive = false)
     {
         foreach (GateResult gate in ran.Gates.Where(result => !result.Passed))
         {
@@ -328,7 +330,8 @@ public static class ReviewGateReporting
                 output,
                 plannedGate.WorkingDirectory,
                 repositoryRoot,
-                canonicalRepositoryRoot);
+                canonicalRepositoryRoot,
+                isFileSystemCaseInsensitive);
             if (RedClassifier.SiblingSymbols(observation, changed) is not { Count: > 0 } symbols)
                 continue;
 
@@ -354,6 +357,7 @@ public static class ReviewGateReporting
     /// <param name="report">Receives the verdict.</param>
     /// <param name="repositoryRoot">Absolute repository root used to resolve rooted compiler paths, or null when unbound.</param>
     /// <param name="canonicalRepositoryRoot">Canonical absolute repository root when different from <paramref name="repositoryRoot"/>, or null.</param>
+    /// <param name="isFileSystemCaseInsensitive">Whether rooted and repository-relative paths compare without regard to case.</param>
     public static (GateReport Report, RedOutcome Outcome) ApplyRed(
         GateReport ran,
         IReadOnlyList<PlannedTaskGate> planned,
@@ -362,7 +366,8 @@ public static class ReviewGateReporting
         Func<string, string?> projectOf,
         DiagnosticReport report,
         string? repositoryRoot = null,
-        string? canonicalRepositoryRoot = null)
+        string? canonicalRepositoryRoot = null,
+        bool isFileSystemCaseInsensitive = false)
     {
         List<RedGateObservation> observations = [];
         foreach (GateResult gate in ran.Gates)
@@ -376,7 +381,8 @@ public static class ReviewGateReporting
                     output,
                     plannedGate.WorkingDirectory,
                     repositoryRoot,
-                    canonicalRepositoryRoot));
+                    canonicalRepositoryRoot,
+                    isFileSystemCaseInsensitive));
         }
 
         RedOutcome outcome = RedClassifier.Evaluate(

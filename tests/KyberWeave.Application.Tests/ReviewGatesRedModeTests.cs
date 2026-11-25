@@ -3,6 +3,10 @@ using System.Text.Json;
 using KyberWeave.Contracts.Repositories;
 using KyberWeave.Core.Diagnostics;
 using KyberWeave.Core.Review;
+using KyberWeave.Tests.Fakes;
+using KyberWeave.Tests.FileSystem;
+using Microsoft.Extensions.DependencyInjection;
+using Spectre.Console.Cli;
 using Xunit;
 
 namespace KyberWeave.Tests;
@@ -517,6 +521,31 @@ public sealed class ReviewGatesRedModeTests : IDisposable
                 canonicalRepositoryRoot));
 
     [Theory]
+    [InlineData("/WORK/repo/dash/tests/foo.test.ts", "dash/tests/foo.test.ts", null, "/work/repo", false, false)]
+    [InlineData("/WORK/repo/dash/tests/foo.test.ts", "dash/tests/foo.test.ts", null, "/work/repo", true, true)]
+    [InlineData("/work/repo/dash/tests/Foo.test.ts", "dash/tests/foo.test.ts", null, "/work/repo", false, false)]
+    [InlineData("/work/repo/dash/tests/Foo.test.ts", "dash/tests/foo.test.ts", null, "/work/repo", true, true)]
+    [InlineData("tests/Foo.test.ts", "dash/tests/foo.test.ts", "dash", null, false, false)]
+    [InlineData("tests/Foo.test.ts", "dash/tests/foo.test.ts", "dash", null, true, true)]
+    [InlineData("/WORK/repo/dash/tests/foo.test.ts", "/work/repo/dash/tests/foo.test.ts", null, null, false, false)]
+    [InlineData("/WORK/repo/dash/tests/foo.test.ts", "/work/repo/dash/tests/foo.test.ts", null, null, true, true)]
+    public void ARootedOrRelativePathFollowsTheVolumesCaseRule(
+        string reportedFile,
+        string ownFile,
+        string? workingDirectory,
+        string? repositoryRoot,
+        bool isFileSystemCaseInsensitive,
+        bool expected) =>
+        Assert.Equal(
+            expected,
+            RedClassifier.IsOwnFile(
+                reportedFile,
+                [ownFile],
+                workingDirectory,
+                repositoryRoot,
+                isFileSystemCaseInsensitive: isFileSystemCaseInsensitive));
+
+    [Theory]
     [InlineData(null)]
     [InlineData("/work/repo")]
     public void EvaluateRejectsASiblingAbsoluteCompilerPathWithOrWithoutARepositoryRoot(string? repositoryRoot)
@@ -613,6 +642,88 @@ public sealed class ReviewGatesRedModeTests : IDisposable
 
         Assert.Equal(0, result.Result);
         Assert.Contains("RED_EVIDENCE:", result.Output, StringComparison.Ordinal);
+    }
+
+    [Theory]
+    [InlineData(false, 1, "RED_REJECTED:")]
+    [InlineData(true, 0, "RED_EVIDENCE:")]
+    public void ReviewGatesRedRunHonorsEnvironmentCaseSensitivityOnRootedCompilerPaths(
+        bool isFileSystemCaseInsensitive,
+        int expectedExit,
+        string expectedMarker)
+    {
+        InMemoryFileSystem files = new(caseSensitive: !isFileSystemCaseInsensitive);
+        string repo = Path.Combine(files.Root, "work", "repo");
+        string siblingCaseDir = Path.Combine(files.Root, "work", "REPO");
+        files.CreateDirectory(Path.Combine(repo, ".kyber-weave"));
+        files.CreateDirectory(Path.Combine(repo, "tests", "Widget.Tests"));
+        files.WriteAllText(Path.Combine(repo, TestFile), "namespace Widget.Tests; public class WidgetTests { }\n");
+        files.WriteAllText(
+            Path.Combine(repo, ".kyber-weave", "kyber-weave.yml"),
+            """
+            review:
+              task-gates:
+                csharp-dev:
+                  - id: dotnet-build
+                    include: ["**/*.cs"]
+                    run: [dotnet, build]
+                  - id: tests
+                    include: ["**/*.cs"]
+                    run: [dotnet, test]
+            """);
+
+        string reportedFile = Path.Combine(siblingCaseDir, TestFile).Replace('\\', '/');
+        CapturedConsoleExecution<int> RunCase(params string[] extraArgs)
+        {
+            using InMemoryReviewServices services = new(files);
+            services.Processes.Script(
+                "dotnet",
+                request => request.Arguments.Contains("build", StringComparer.Ordinal)
+                    ? new ProcessRunResult(1, string.Empty, TimedOut: false)
+                    {
+                        StandardOutput = $"{reportedFile}(12,17): error CS0246: The type or namespace name 'WidgetRepository' could not be found\nBuild FAILED.",
+                    }
+                    : new ProcessRunResult(0, string.Empty, TimedOut: false)
+                    {
+                        StandardOutput = "Passed!  - Failed:     0, Passed:    1, Skipped:     0, Total:    1, Duration: 10 ms",
+                    });
+
+            CommandApp app = CommandAppFixture.ReviewGates(
+                collection =>
+                {
+                    services.Register(collection);
+                    collection.AddSingleton<IProcessEnvironment>(new FakeProcessEnvironment(
+                        currentDirectory: services.Root,
+                        homeDirectory: Path.Combine(files.Root, "home"),
+                        tempDirectory: Path.Combine(files.Root, "temp"),
+                        isFileSystemCaseInsensitive: isFileSystemCaseInsensitive));
+                },
+                services.Ansi);
+
+            return services.Run(
+                app,
+                ["review", "gates", repo, "--agent", "csharp-dev", "--paths", TestFile, "--task", "t1", .. extraArgs]);
+        }
+
+        CapturedConsoleExecution<int> result = RunCase("--red");
+
+        Assert.Equal(expectedExit, result.Result);
+        Assert.Contains(expectedMarker, result.Output, StringComparison.Ordinal);
+        if (!isFileSystemCaseInsensitive)
+        {
+            Assert.Contains("did not change", result.Output, StringComparison.Ordinal);
+            Assert.DoesNotContain("not run — RED build", result.Output, StringComparison.Ordinal);
+        }
+
+        CapturedConsoleExecution<int> nonRed = RunCase();
+        if (isFileSystemCaseInsensitive)
+        {
+            Assert.DoesNotContain("sibling RED tests reference", nonRed.Output, StringComparison.Ordinal);
+        }
+        else
+        {
+            Assert.Contains("sibling RED tests reference symbols no task has created yet: WidgetRepository", nonRed.Output, StringComparison.Ordinal);
+        }
     }
 
     private CapturedConsoleExecution<int> RunBuildGate(string repoRoot, string reportedFile, params string[] extraOptions)

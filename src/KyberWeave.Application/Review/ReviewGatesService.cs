@@ -791,6 +791,7 @@ public sealed class ReviewGatesService(
         ReviewGateReporting.AddSkips(report, plan.Skipped);
 
         string? canonicalRoot = CanonicalRootOrNull(root);
+        bool caseInsensitivePaths = environment.IsFileSystemCaseInsensitive;
 
         // The classifiers read what each verify command printed, so a build that fails on missing symbols is told
         // apart from one that fails on anything else.
@@ -805,7 +806,7 @@ public sealed class ReviewGatesService(
                 if (request.Red && !result.Passed && brokenBuildSymbols is null && outputs.TryGetValue(gate.Id, out string? gateOutput))
                     brokenBuildSymbols = RedClassifier.AcceptedMissingSymbols(
                         new RedGateObservation(
-                            gate.Id, string.Join(' ', gate.Run), result.ExitCode, gateOutput, gate.WorkingDirectory, root, canonicalRoot),
+                            gate.Id, string.Join(' ', gate.Run), result.ExitCode, gateOutput, gate.WorkingDirectory, root, canonicalRoot, caseInsensitivePaths),
                         changed);
             },
             SkipReason = gate => request.Red && brokenBuildSymbols is not null && RedClassifier.IsTestGate(gate.Id, string.Join(' ', gate.Run))
@@ -833,7 +834,7 @@ public sealed class ReviewGatesService(
         if (request.Red)
         {
             (finalReport, redOutcome) = ReviewGateReporting.ApplyRed(
-                run.Report, plan.Gates, outputs, changed, file => projectFiles.NearestProjectFile(repoRoot, file), report, root, canonicalRoot);
+                run.Report, plan.Gates, outputs, changed, file => projectFiles.NearestProjectFile(repoRoot, file), report, root, canonicalRoot, caseInsensitivePaths);
         }
 
         foreach (GateResult gate in finalReport.Gates)
@@ -841,7 +842,7 @@ public sealed class ReviewGatesService(
 
         if (!request.Red)
         {
-            ReviewGateReporting.AddSiblingNotes(report, plan.Gates, run.Report, outputs, changed, root, canonicalRoot);
+            ReviewGateReporting.AddSiblingNotes(report, plan.Gates, run.Report, outputs, changed, root, canonicalRoot, caseInsensitivePaths);
         }
 
         foreach (GateResult fix in run.FixFailures)

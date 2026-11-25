@@ -11,6 +11,7 @@ namespace KyberWeave.Core.Review;
 /// <param name="WorkingDirectory">Repository-relative directory the gate ran in, or null for the repository root.</param>
 /// <param name="RepositoryRoot">Absolute path to the repository root that rooted compiler paths must stay within, or null when unbound.</param>
 /// <param name="CanonicalRepositoryRoot">Canonical absolute repository root when different from <paramref name="RepositoryRoot"/> (for example <c>/private/var</c> for <c>/var</c>), or null.</param>
+/// <param name="IsFileSystemCaseInsensitive">Whether rooted and repository-relative paths compare without regard to case.</param>
 public sealed record RedGateObservation(
     string Id,
     string Command,
@@ -18,7 +19,8 @@ public sealed record RedGateObservation(
     string Output,
     string? WorkingDirectory = null,
     string? RepositoryRoot = null,
-    string? CanonicalRepositoryRoot = null);
+    string? CanonicalRepositoryRoot = null,
+    bool IsFileSystemCaseInsensitive = false);
 
 /// <summary>One compiler error found in a gate's output.</summary>
 /// <param name="File">The file the compiler named, as it printed it; empty when the error names none.</param>
@@ -456,12 +458,14 @@ public static partial class RedClassifier
     /// <param name="workingDirectory">Repository-relative directory the gate ran in, or null for the repository root.</param>
     /// <param name="repositoryRoot">Absolute repository root used to resolve rooted compiler paths, or null to require exact rooted equality.</param>
     /// <param name="canonicalRepositoryRoot">Canonical absolute repository root when different from <paramref name="repositoryRoot"/>, or null.</param>
+    /// <param name="isFileSystemCaseInsensitive">Whether rooted and repository-relative paths compare without regard to case.</param>
     public static bool IsOwnFile(
         string file,
         IReadOnlyList<string> ownFiles,
         string? workingDirectory = null,
         string? repositoryRoot = null,
-        string? canonicalRepositoryRoot = null)
+        string? canonicalRepositoryRoot = null,
+        bool isFileSystemCaseInsensitive = false)
     {
         ArgumentNullException.ThrowIfNull(file);
         ArgumentNullException.ThrowIfNull(ownFiles);
@@ -472,13 +476,16 @@ public static partial class RedClassifier
             return false;
         }
 
+        StringComparison comparison = isFileSystemCaseInsensitive
+            ? StringComparison.OrdinalIgnoreCase
+            : StringComparison.Ordinal;
         RootedPath? parsedRoot = TryParseRoot(repositoryRoot);
         RootedPath? parsedCanonicalRoot = TryParseRoot(canonicalRepositoryRoot);
 
         if (IsRootedPath(normalized, file))
         {
             return TryNormalizeRooted(file, out RootedPath rootedFile)
-                && ownFiles.Any(own => MatchesRootedCompilerFile(rootedFile, own, parsedRoot, parsedCanonicalRoot));
+                && ownFiles.Any(own => MatchesRootedCompilerFile(rootedFile, own, parsedRoot, parsedCanonicalRoot, comparison));
         }
 
         if (!TryResolveRelative(workingDirectory, normalized, allowEmpty: false, out string? resolved) || resolved is null)
@@ -486,7 +493,7 @@ public static partial class RedClassifier
             return false;
         }
 
-        return ownFiles.Any(own => MatchesRelativeCompilerFile(resolved, own, parsedRoot, parsedCanonicalRoot));
+        return ownFiles.Any(own => MatchesRelativeCompilerFile(resolved, own, parsedRoot, parsedCanonicalRoot, comparison));
     }
 
     /// <summary>
@@ -506,7 +513,13 @@ public static partial class RedClassifier
         if (errors.Count == 0 || HasUnparsedError(gate.Output, errors)
             || !TryGateDirectory(gate, out string? gateDirectory)
             || errors.Any(error => error.Symbol is null
-                || IsOwnFile(error.File, ownFiles, gateDirectory, gate.RepositoryRoot, gate.CanonicalRepositoryRoot)))
+                || IsOwnFile(
+                    error.File,
+                    ownFiles,
+                    gateDirectory,
+                    gate.RepositoryRoot,
+                    gate.CanonicalRepositoryRoot,
+                    gate.IsFileSystemCaseInsensitive)))
         {
             return null;
         }
@@ -583,7 +596,13 @@ public static partial class RedClassifier
                 bool validDirectory = TryGateDirectory(gate, out string? gateDirectory);
                 bool Own(string file) =>
                     validDirectory
-                    && IsOwnFile(file, ownFiles, gateDirectory, gate.RepositoryRoot, gate.CanonicalRepositoryRoot);
+                    && IsOwnFile(
+                        file,
+                        ownFiles,
+                        gateDirectory,
+                        gate.RepositoryRoot,
+                        gate.CanonicalRepositoryRoot,
+                        gate.IsFileSystemCaseInsensitive);
 
                 bool anyMissing = errors.Any(error => error.Symbol is not null && Own(error.File));
                 errors = [.. errors.Where(error => !(anyMissing && ConsequenceCodes.Contains(error.Code) && Own(error.File)))];
@@ -737,7 +756,8 @@ public static partial class RedClassifier
         RootedPath rootedFile,
         string own,
         RootedPath? parsedRoot,
-        RootedPath? parsedCanonicalRoot)
+        RootedPath? parsedCanonicalRoot,
+        StringComparison comparison)
     {
         string ownNormalized = own.Replace('\\', '/');
         if (string.IsNullOrWhiteSpace(ownNormalized))
@@ -748,19 +768,20 @@ public static partial class RedClassifier
         if (IsRootedPath(ownNormalized, own))
         {
             return TryNormalizeRooted(own, out RootedPath rootedOwn)
-                && (rootedFile.EqualsRooted(rootedOwn)
-                    || MatchesAcrossRoots(rootedFile, rootedOwn, parsedRoot, parsedCanonicalRoot));
+                && (rootedFile.EqualsRooted(rootedOwn, comparison)
+                    || MatchesAcrossRoots(rootedFile, rootedOwn, parsedRoot, parsedCanonicalRoot, comparison));
         }
 
         return NormalizeRepositoryRelative(own) is { } relativeOwn
-            && MatchesRelativeUnderAnyRoot(rootedFile, parsedRoot, parsedCanonicalRoot, relativeOwn);
+            && MatchesRelativeUnderAnyRoot(rootedFile, parsedRoot, parsedCanonicalRoot, relativeOwn, comparison);
     }
 
     private static bool MatchesRelativeCompilerFile(
         string resolvedFile,
         string own,
         RootedPath? parsedRoot,
-        RootedPath? parsedCanonicalRoot)
+        RootedPath? parsedCanonicalRoot,
+        StringComparison comparison)
     {
         string ownNormalized = own.Replace('\\', '/');
         if (string.IsNullOrWhiteSpace(ownNormalized))
@@ -771,47 +792,49 @@ public static partial class RedClassifier
         if (IsRootedPath(ownNormalized, own))
         {
             return TryNormalizeRooted(own, out RootedPath rootedOwn)
-                && MatchesRelativeUnderAnyRoot(rootedOwn, parsedRoot, parsedCanonicalRoot, resolvedFile);
+                && MatchesRelativeUnderAnyRoot(rootedOwn, parsedRoot, parsedCanonicalRoot, resolvedFile, comparison);
         }
 
         return NormalizeRepositoryRelative(own) is { } relativeOwn
-            && resolvedFile.Equals(relativeOwn, StringComparison.OrdinalIgnoreCase);
+            && resolvedFile.Equals(relativeOwn, comparison);
     }
 
     private static bool MatchesAcrossRoots(
         RootedPath rootedFile,
         RootedPath rootedOwn,
         RootedPath? parsedRoot,
-        RootedPath? parsedCanonicalRoot)
+        RootedPath? parsedCanonicalRoot,
+        StringComparison comparison)
     {
         if (parsedRoot is { } root
-            && TryRelativeToRoot(root, rootedOwn, out string ownRelative)
-            && MatchesRelativeUnderAnyRoot(rootedFile, parsedRoot, parsedCanonicalRoot, ownRelative))
+            && TryRelativeToRoot(root, rootedOwn, comparison, out string ownRelative)
+            && MatchesRelativeUnderAnyRoot(rootedFile, parsedRoot, parsedCanonicalRoot, ownRelative, comparison))
         {
             return true;
         }
 
         return parsedCanonicalRoot is { } canonical
-            && TryRelativeToRoot(canonical, rootedOwn, out string ownCanonicalRelative)
-            && MatchesRelativeUnderAnyRoot(rootedFile, parsedRoot, parsedCanonicalRoot, ownCanonicalRelative);
+            && TryRelativeToRoot(canonical, rootedOwn, comparison, out string ownCanonicalRelative)
+            && MatchesRelativeUnderAnyRoot(rootedFile, parsedRoot, parsedCanonicalRoot, ownCanonicalRelative, comparison);
     }
 
     private static bool MatchesRelativeUnderAnyRoot(
         RootedPath rootedPath,
         RootedPath? parsedRoot,
         RootedPath? parsedCanonicalRoot,
-        string expectedRelative) =>
+        string expectedRelative,
+        StringComparison comparison) =>
         (parsedRoot is { } root
-            && TryRelativeToRoot(root, rootedPath, out string relative)
-            && relative.Equals(expectedRelative, StringComparison.OrdinalIgnoreCase))
+            && TryRelativeToRoot(root, rootedPath, comparison, out string relative)
+            && relative.Equals(expectedRelative, comparison))
         || (parsedCanonicalRoot is { } canonical
-            && TryRelativeToRoot(canonical, rootedPath, out string canonicalRelative)
-            && canonicalRelative.Equals(expectedRelative, StringComparison.OrdinalIgnoreCase));
+            && TryRelativeToRoot(canonical, rootedPath, comparison, out string canonicalRelative)
+            && canonicalRelative.Equals(expectedRelative, comparison));
 
-    private static bool TryRelativeToRoot(RootedPath root, RootedPath candidate, out string relative)
+    private static bool TryRelativeToRoot(RootedPath root, RootedPath candidate, StringComparison comparison, out string relative)
     {
         relative = string.Empty;
-        if (!string.Equals(root.Prefix, candidate.Prefix, StringComparison.OrdinalIgnoreCase)
+        if (!string.Equals(root.Prefix, candidate.Prefix, comparison)
             || candidate.Segments.Count <= root.Segments.Count)
         {
             return false;
@@ -819,7 +842,7 @@ public static partial class RedClassifier
 
         for (int index = 0; index < root.Segments.Count; index++)
         {
-            if (!string.Equals(root.Segments[index], candidate.Segments[index], StringComparison.OrdinalIgnoreCase))
+            if (!string.Equals(root.Segments[index], candidate.Segments[index], comparison))
             {
                 return false;
             }
@@ -899,9 +922,9 @@ public static partial class RedClassifier
 
     private readonly record struct RootedPath(string Prefix, IReadOnlyList<string> Segments)
     {
-        public bool EqualsRooted(RootedPath other)
+        public bool EqualsRooted(RootedPath other, StringComparison comparison)
         {
-            if (!string.Equals(Prefix, other.Prefix, StringComparison.OrdinalIgnoreCase)
+            if (!string.Equals(Prefix, other.Prefix, comparison)
                 || Segments.Count != other.Segments.Count)
             {
                 return false;
@@ -909,7 +932,7 @@ public static partial class RedClassifier
 
             for (int index = 0; index < Segments.Count; index++)
             {
-                if (!string.Equals(Segments[index], other.Segments[index], StringComparison.OrdinalIgnoreCase))
+                if (!string.Equals(Segments[index], other.Segments[index], comparison))
                 {
                     return false;
                 }
