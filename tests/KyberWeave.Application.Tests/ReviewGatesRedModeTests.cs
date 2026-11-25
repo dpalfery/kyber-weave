@@ -1,4 +1,6 @@
+using System.Security;
 using System.Text.Json;
+using KyberWeave.Contracts.Repositories;
 using KyberWeave.Core.Diagnostics;
 using KyberWeave.Core.Review;
 using Xunit;
@@ -541,6 +543,38 @@ public sealed class ReviewGatesRedModeTests : IDisposable
 
         CapturedConsoleExecution<int> ownNonRed = RunBuildGate(aliasedRepo, canonicalOwnPath);
         Assert.DoesNotContain("sibling RED tests reference", ownNonRed.Output, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void ALockedDownRootCanonicalProbeThrowingSecurityExceptionFallsBackToSingleRootRedMatching()
+    {
+        string lockedParent = Path.Combine(_services.Files.Root, "locked");
+        string repo = Path.Combine(lockedParent, "repo");
+        _services.Files.CreateDirectory(Path.Combine(repo, ".kyber-weave"));
+        _services.Files.CreateDirectory(Path.Combine(repo, "tests", "Widget.Tests"));
+        _services.Files.WriteAllText(Path.Combine(repo, TestFile), "namespace Widget.Tests; public class WidgetTests { }\n");
+        _services.Files.WriteAllText(
+            Path.Combine(repo, ".kyber-weave", "kyber-weave.yml"),
+            """
+            review:
+              task-gates:
+                csharp-dev:
+                  - id: dotnet-build
+                    include: ["**/*.cs"]
+                    run: [dotnet, build]
+            """);
+
+        // A locked-down parent raises SecurityException when Canonicalize enumerates it; --red must fall back to lexical matching.
+        _services.Files.FailWhen(
+            op => op.Name == nameof(IFileSystem.EnumerateEntries)
+                  && string.Equals(op.Path, lockedParent, StringComparison.Ordinal),
+            new SecurityException("Access to locked directory denied."));
+
+        string lexicalOwnPath = Path.Combine(repo, TestFile).Replace('\\', '/');
+        CapturedConsoleExecution<int> result = RunBuildGate(repo, lexicalOwnPath, "--red");
+
+        Assert.Equal(0, result.Result);
+        Assert.Contains("RED_EVIDENCE:", result.Output, StringComparison.Ordinal);
     }
 
     private CapturedConsoleExecution<int> RunBuildGate(string repoRoot, string reportedFile, params string[] extraOptions)

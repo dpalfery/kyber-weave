@@ -592,7 +592,7 @@ public sealed class ReviewGatesService(
             string canonical = pathResolver.Canonicalize(root);
             return string.Equals(canonical, root, StringComparison.Ordinal) ? null : canonical;
         }
-        catch (Exception ex) when (ex is ArgumentException or NotSupportedException or PathTooLongException or IOException or UnauthorizedAccessException)
+        catch (Exception ex) when (FileFailure.Is(ex))
         {
             return null;
         }
