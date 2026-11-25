@@ -2801,35 +2801,6 @@ public partial class CanonSessionProjectorEngine
             passRecordCount += recordCountByKey[key];
         }
 
-        Dictionary<string, List<CollectedRecord>> collectedByKey = new(StringComparer.Ordinal);
-        if (canIncremental || forReads)
-        {
-            foreach (string key in rebuildKeys)
-            {
-                collectedByKey[key] = [.. reader.SessionRecordsForRebuild(key)];
-            }
-        }
-        else
-        {
-            // Only the maintenance full/wildcard path reads the whole store in one query; the
-            // read path stays attribution-driven and per key so a request never pays for it.
-            foreach (CollectedRecord record in reader.AllSessionRecordsForMaintenance())
-            {
-                if (string.IsNullOrEmpty(record.SessionKey))
-                {
-                    continue;
-                }
-
-                if (!collectedByKey.TryGetValue(record.SessionKey!, out List<CollectedRecord>? list))
-                {
-                    list = [];
-                    collectedByKey[record.SessionKey!] = list;
-                }
-
-                list.Add(record);
-            }
-        }
-
         // A stored projection survives the pass when its session is still attributed records —
         // built, skipped-clean, or deferred — so only sessions whose records disappeared are
         // pruned, and a deferred session keeps its last stored projection for reads to answer.
@@ -2851,7 +2822,10 @@ public partial class CanonSessionProjectorEngine
 
         foreach (string key in rebuildKeys)
         {
-            List<CanonicalRecord> hydrated = [.. collectedByKey[key].Select(CanonRecordHydration.Hydrate)];
+            // Each session's records are read when its turn comes and released after it is built:
+            // reading the whole store at once outgrew the sqlite3 output a string can hold on a
+            // real store, and held every session's text in memory for the length of the pass.
+            List<CanonicalRecord> hydrated = [.. reader.SessionRecordsForRebuild(key).Select(CanonRecordHydration.Hydrate)];
             hydrated.Sort(CompareRecordTimestamps);
             Dictionary<string, List<CanonicalRecord>> grouped = GroupByCanonicalHarness(hydrated);
             if (grouped.Count == 0)

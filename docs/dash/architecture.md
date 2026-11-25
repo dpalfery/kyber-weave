@@ -1484,10 +1484,13 @@ Whole-store reads exist, are off the request path, and are named so they cannot 
 page read:
 
 - `AllSessionRecordsForMaintenance()` — every stored record and child row in one query. Reserved
-  for `kyber build` (`CanonProjectionService.ProjectAll`), a wildcard projection rebuild, and
-  doctor.
+  for the CLI and doctor. The projector no longer uses it: on a real store, every Claude Code
+  transcript imported, the query's output passed the 2^31 characters a .NET string can hold, and
+  every maintenance pass failed.
 - `SessionRecordsForRebuild(sessionKey)` — full records, content included, for the one session a
   projection pass rebuilds (token counting, timeline, findings and previews need the part text).
+  Every pass, maintenance included, reads each session this way when it builds it, so only one
+  session's records are in memory at a time.
 - `SessionAttributions()` — distinct `(session key, harness)` pairs with record counts from one
   grouped query over `record` joined to `record_session_link`. It feeds the pass's identities,
   skip decisions and per-session record budgets without materializing a record. Its ordering
@@ -1514,7 +1517,7 @@ flowchart LR
     ATTRIB --> BIG["dirty session over the budget<br/>(default 2,000 records)"]
     BIG --> DEFER["deferred: left dirty,<br/>reported in deferredSessions"]
     JOBS["maintenance tick, kyber build,<br/>refresh, clean"] --> FULL["ProjectIncremental()<br/>never defers"]
-    FULL --> ALL["AllSessionRecordsForMaintenance()"]
+    FULL --> ALL["SessionRecordsForRebuild(key)<br/>one session at a time"]
     DEFER --> JOBS
 ```
 
