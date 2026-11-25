@@ -13,12 +13,12 @@ public record KwSkillLoad(string SpanId, string? Skill, DateTimeOffset StartedAt
 /// </summary>
 /// <remarks>
 /// <para>
-/// A load is a tool call the kw-docs server's <c>load_skill</c> tool made. When the harness split
-/// the MCP server and tool apart, the split decides: the server name, lower-cased with <c>_</c>
-/// read as <c>-</c>, must be <c>kw-docs</c> and the tool must be <c>load_skill</c>. Without a split,
-/// the tool name must be one of the five unsplit spellings. A split call is judged by its split
-/// alone, so another server's <c>load_skill</c> is never a load, even when its tool name reads as
-/// kw-docs.
+/// A load is a tool call the kw-docs server's <c>load_skill</c> tool made. Machines installed before
+/// the server was renamed still register it under its retired key <c>kyber-weave</c>, so both names count. When the harness split the MCP server and
+/// tool apart, the split decides: the server name, lower-cased with <c>_</c> read as <c>-</c>, must be
+/// <c>kw-docs</c> or <c>kyber-weave</c> and the tool must be <c>load_skill</c>. Without a split, the
+/// tool name must be one of the unsplit spellings. A split call is judged by its split alone, so
+/// another server's <c>load_skill</c> is never a load, even when its tool name reads as kw-docs.
 /// </para>
 /// <para>
 /// This type is pure: it takes the candidate rows the reader returns and touches no store, clock or
@@ -30,6 +30,9 @@ public static class KwSkillLoads
 {
     /// <summary>The MCP server a KW skill load is made to.</summary>
     public const string ServerName = "kw-docs";
+
+    /// <summary>The server's retired key, still registered on machines installed before the rename.</summary>
+    public const string AlternateServerName = "kyber-weave";
 
     /// <summary>The MCP tool a KW skill load calls.</summary>
     public const string ToolName = "load_skill";
@@ -46,6 +49,8 @@ public static class KwSkillLoads
         "kw-docs_load_skill",
         "kw-docs__load_skill",
         "kw-docs/load_skill",
+        "mcp__kyber-weave__load_skill",
+        "mcp__kyber_weave__load_skill",
     ];
 
     /// <summary>Recognizes the loads among <paramref name="calls"/>, keeping their call order.</summary>
@@ -74,7 +79,9 @@ public static class KwSkillLoads
         ArgumentNullException.ThrowIfNull(call);
         if (call.McpServerName is not null || call.McpToolName is not null)
         {
-            return string.Equals(NormalizeServerName(call.McpServerName), ServerName, StringComparison.OrdinalIgnoreCase)
+            string? server = NormalizeServerName(call.McpServerName);
+            return (string.Equals(server, ServerName, StringComparison.OrdinalIgnoreCase)
+                    || string.Equals(server, AlternateServerName, StringComparison.OrdinalIgnoreCase))
                 && string.Equals(call.McpToolName, ToolName, StringComparison.Ordinal);
         }
 
