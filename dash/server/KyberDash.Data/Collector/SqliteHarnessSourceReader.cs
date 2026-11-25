@@ -140,6 +140,10 @@ public class SqliteHarnessSourceReader : IHarnessSourceReader
     }
 
     /// <summary>Splits a unit's source key (<c>&lt;database path&gt;#&lt;conversation id&gt;</c>) at its last separator.</summary>
+    /// <remarks>
+    /// The last separator is the right one because a database path may contain <c>#</c> and a conversation id
+    /// never does: discovery refuses an id that contains it rather than build a key that splits wrongly.
+    /// </remarks>
     /// <param name="sourceKey">The unit's source key.</param>
     /// <returns>The database path and conversation id, or <see langword="null"/> when the key has no separator.</returns>
     internal static (string DatabasePath, string ConversationId)? SplitSourceKey(string sourceKey)
@@ -257,9 +261,12 @@ public class SqliteHarnessSourceReader : IHarnessSourceReader
         return fileSystem.ReadAllText(companionKey);
     }
 
-    private static CollectedProblem SourceProblem(string code, string harnessId, string databasePath, string message) =>
+    private static CollectedProblem SourceProblem(
+        string code, string harnessId, string databasePath, string message, string? conversationId = null) =>
         new(
-            ProblemKey: $"sqlite-source:{code}:{harnessId}:{databasePath}",
+            ProblemKey: conversationId is null
+                ? $"sqlite-source:{code}:{harnessId}:{databasePath}"
+                : $"sqlite-source:{code}:{harnessId}:{databasePath}:{conversationId}",
             Severity: "warning",
             Code: code,
             Message: message,
@@ -312,6 +319,17 @@ public class SqliteHarnessSourceReader : IHarnessSourceReader
             string label = Path.GetFileName(databasePath);
             foreach (SqliteConversation conversation in listed)
             {
+                if (conversation.Id.Contains(KeySeparator, StringComparison.Ordinal))
+                {
+                    problems.Add(SourceProblem(
+                        SqliteSourceOpenPolicy.SourceUnreadableCode,
+                        HarnessId,
+                        databasePath,
+                        $"{SqliteSourceOpenPolicy.SourceUnreadableCode}: conversation id '{conversation.Id}' in '{databasePath}' contains '{KeySeparator}', which separates the id in its source key; it is not read.",
+                        conversation.Id));
+                    continue;
+                }
+
                 units.Add(new SourceUnit(
                     HarnessId,
                     $"{databasePath}{KeySeparator}{conversation.Id}",

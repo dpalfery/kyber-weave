@@ -161,7 +161,7 @@ public class SqliteHarnessSourceReaderTests
     }
 
     [Fact]
-    public void Read_ConversationIdMayContainHash_SplitsAtLastHash()
+    public void Read_DatabasePathMayContainHash_SplitsAtLastHash()
     {
         Rig rig = new();
         rig.Sqlite.AddDatabase("/home/u/a#b.db#c");
@@ -169,6 +169,24 @@ public class SqliteHarnessSourceReaderTests
         _ = rig.Reader.Read(rig.Unit("/home/u/a#b.db#c#d"), rig.Files);
 
         Assert.Equal("d", rig.Source.ExportedId);
+    }
+
+    [Fact]
+    public void Discover_ConversationIdContainingHash_IsRefusedWithAProblemAndTheOthersAreListed()
+    {
+        Rig rig = new();
+        rig.Sqlite.AddDatabase(DbPath).AddTable("chats", "id");
+        rig.Files.Add(DbPath, "");
+        rig.Source.Conversations.Add(new SqliteConversation("a#b", "r", null, null));
+        rig.Source.Conversations.Add(new SqliteConversation("c", "r", null, null));
+
+        SourceDiscoveryResult result = rig.Reader.Discover(rig.Context());
+
+        Assert.Equal([DbPath + "#c"], result.Sources.Select(unit => unit.SourceKey));
+        CollectedProblem problem = Assert.Single(result.Problems);
+        Assert.Equal("SQLITE_SOURCE_UNREADABLE", problem.Code);
+        Assert.Contains("a#b", problem.Message, StringComparison.Ordinal);
+        Assert.Equal(DbPath, problem.Location);
     }
 
     [Fact]
