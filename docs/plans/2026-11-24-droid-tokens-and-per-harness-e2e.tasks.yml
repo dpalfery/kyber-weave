@@ -1,6 +1,6 @@
 schema-version: 2
 plan: docs/plans/2026-11-24-droid-tokens-and-per-harness-e2e.md
-execution-digest: 4c1619a539c4d61f8d7f79fb731641fd39d0a12cc19dc3e92f706e5b61950119
+execution-digest: 1f79c454c49f4f19dbb1ff5268d8b5b9c078e0f6bdc22746fa391e6b99a7b583
 tasks:
   - id: T4
     capabilities: C# domain records, SQLite reader queries and projection with xUnit in-memory and SQLite unit tests
@@ -810,6 +810,144 @@ tasks:
       |---|---|---|---|---|---|
 
       | T11 | Documentation only | `kyber-weave docs validate . && kyber-weave docs drift .` | The rule text "KyberDash never estimates the data it collects and displays: a value the harness did not report is shown as not measured; the fix is capturing the real value. This rule applies to KyberDash (`dash/**` and `docs/dash/**`) only. One exception: token counts of text may use the model's own published tokenizer or, when the model publishes none, the closest standard local tokenizer, always labelled with the tokenizer used and whether it is the model's own; tokenization never calls an API. Every other estimate stays banned." appears as a hard rule in each target, scoped to KyberDash and never worded as a repository-wide or general ban; every documented estimate (even or weighted token splits, characters / 4 counts, invented error bars, heuristic waste figures) is removed or restated as not measured | Not applicable: no code behaviour; verification is the two docs checks and the reviewer reading each target | Both checks report no findings |
+
+
+      Results of the tasks this one follows, as their workers reported them:
+
+      {prior_results}
+    agent: docs-dev
+    agent-confidence: 1
+    difficulty: easy
+    difficulty-source: architect
+  - id: T14
+    capabilities: C# projection rules with xUnit in-memory unit tests
+    depends-on:
+      - T4
+    files:
+      - dash/server/KyberDash.Application/CanonSessionProjectorEngine.cs
+      - dash/server.tests/KyberDash.Application.Tests/Projection/OtlpFileIdJoinTests.cs
+      - CanonSessionProjectorEngine.cs
+    session: engine
+    prompt: >
+      Task T14: Codex file model calls drop only when an OTLP call pairs with them
+
+      Worktree: {worktree}
+
+
+      - **Objective:** Replace the session-level Codex drop with pairing on data both sources carry, so rollout parts reach the kept OTLP turn and file turns OTLP never saw stay (D21).
+
+      - **Capabilities:** C# projection rules with xUnit in-memory unit tests
+
+      - **Difficulty:** hard
+
+      - **Technology:** csharp
+
+      - **Session:** `engine`
+
+      - **Depends on:** T4 (record source identity and the join-key follow-up this task corrects)
+
+      - **Files:**
+        - `dash/server/KyberDash.Application/CanonSessionProjectorEngine.cs`: replace `CollapseCodexFileModelCalls` with `PairCodexFileModelCalls(records, shareKey, dropped, transplant)`, which returns the Codex model calls it handled (every `IsCodexModelCall` record with reported counters). Rules:
+          - Group Codex model calls by `CounterKey` and sort each side by timestamp.
+          - Pair each file call with the earliest unpaired OTLP call of the same group within `TwinTurnMaxSkewMs`, one to one.
+          - A paired file call goes into `dropped`, and its parts into `transplant[otlp]` (`MergeDonors` when the OTLP call already has a donor), only when `HasParts(file)`.
+          - An unpaired call stays.
+          - In `DedupeTwinTurns`, the counter-cluster loop skips the returned set as it skips `idJoined`, so `CollapseCluster` never sees a Codex model call.
+          - Keep `IsCodexModelCall` and `CodexHarnessIds`. Update the `DedupeTwinTurns` summary and the method's own summary so neither names a session-level precedence.
+        - `dash/server.tests/KyberDash.Application.Tests/Projection/OtlpFileIdJoinTests.cs`: rewrite `Codex_SessionWithBothSources_CountsOtlpModelCallsOnly` as the no-shared-data case, and add the paired, mid-session, skew and no-parts cases from the T14 Test-contract row. Reuse the class's `Record`, `ToolRecord`, `WriteOtlp` and `WriteFile` helpers; give `Record` an optional parts argument only if it has none.
+      - **Design (failure mode and mitigation):** Failure mode: a wrong pairing silently drops a real turn or counts one turn twice in stored projections. Mitigation:
+        - Pair only on equal reported counters in the same session within `TwinTurnMaxSkewMs`, one OTLP call per file call; never pair by nearest timestamp or turn order alone (D21).
+        - Counter equality across the two sources is the premise: `CodexSpanMapper.TryBuildTokenUsage` and the `codex` log adapter use `CanonAdapters.InclusiveConvention`, and `CodexRolloutMapper.BuildTurnTokens` stores fresh = input − cached and cache read = cached. If hydrating a stored rollout record gives a `CounterKey` different from the OTLP record for the same reported usage, stop and return BLOCKED with the two `TokenUsage` values; do not add another pairing rule.
+        - `SqliteRelationalStore.DetectorVersion` stays 6: it has not shipped since T4 bumped it, so every stored projection is still rebuilt once after deploy.
+        - Scope note: `CanonSessionProjectorEngine.cs` is also in T8, T9 and T13, which are integrated; touch only the members named here.
+      - **Commands:**
+        - `kyber-weave review gates . --agent <your agent name> --task T14 --red`
+        - `kyber-weave review gates . --agent <your agent name> --task T14`
+      - **Acceptance:**
+        - The T14 Test-contract cases pass with a non-zero count; `CollapseCodexFileModelCalls` no longer exists; no existing case outside the rewritten one changes.
+
+      Reference content for this task, quoted exactly from its source document and complete as given:
+
+
+      #### Test contract row for T14
+
+      | Task | Test project or file | Runner command | Observable behavior | RED evidence required | GREEN acceptance |
+
+      |---|---|---|---|---|---|
+
+      | T14 | `dash/server.tests/KyberDash.Application.Tests/Projection/OtlpFileIdJoinTests.cs` (`KyberDash.Application.Tests.Projection.OtlpFileIdJoinTests`) | `dotnet test dash/server.tests/KyberDash.Application.Tests/KyberDash.Application.Tests.csproj --filter "FullyQualifiedName~KyberDash.Application.Tests.Projection.OtlpFileIdJoinTests" && dotnet test dash/server.tests/KyberDash.Application.Tests/KyberDash.Application.Tests.csproj --filter "FullyQualifiedName~KyberDash.Application.Tests.Projection.RelationalSourceIdentityTests"` | Each Codex case runs for both harness ids (`codex-cli`, `codex`), through `ProjectIncremental` on the in-memory store:<br>- Paired: 2 OTLP and 2 rollout model calls with equal counters, timestamps within `TwinTurnMaxSkewMs`, the rollout calls carrying user and reasoning parts, plus one rollout tool call by `call_id`. Projects 2 turns with the OTLP span ids. Totals equal the OTLP sums, never both. Each kept turn carries its paired rollout call's parts. Tool calls 1.<br>- OTLP began mid-session: 3 rollout calls, the last 2 paired with 2 OTLP calls on equal counters. Projects 3 turns: the first rollout turn with its own parts, then the 2 OTLP turns. Totals are rollout call 1 plus the OTLP sums.<br>- No shared data: 2 OTLP and 2 rollout calls with different counters (today's `Codex_SessionWithBothSources` fixture). Projects 4 turns, and totals are the sum of all four (D21: nothing pairs, nothing is guessed).<br>- Equal counters but more than `TwinTurnMaxSkewMs` apart: both turns stay.<br>- One to one: 1 OTLP call and 2 rollout calls, all with equal counters and within the skew. Projects 2 turns: the OTLP turn carrying the earlier rollout call's parts, and the later rollout call as its own turn.<br>- Hydration premise: the same reported usage (input, cached, output) written once through the Codex OTLP path and once as a rollout record reads back with equal `CounterKey` figures (fresh input, cache read, output, reported input, reported output).<br>- A Claude Code counter twin (OTLP plus transcript, equal counters, no id) still collapses as before through `CollapseCluster`.<br>- A paired rollout call with no parts: the OTLP turn is unchanged.<br>- A rollout-only session is unchanged (`Codex_FileOnlySession_UsesTheFile` keeps its assertions).<br>The Claude Code id-join cases in the class keep their assertions. | The paired case fails because the kept OTLP turns carry no rollout parts; the mid-session case fails because the first rollout turn is dropped | All cases pass with a non-zero count; only `Codex_SessionWithBothSources_CountsOtlpModelCallsOnly` changes, rewritten as the no-shared-data case per D21; `RelationalSourceIdentityTests` keep their assertions |
+
+
+      #### Decisions this task cites
+
+      | ID | Question | Answer / decision | Mitigating and supporting information | Status / approval provenance |
+
+      |---|---|---|---|---|
+
+      | D21 | When does a Codex session seen by both OTLP and its rollout file drop a file model call? (review finding `correctness/codex-file-model-call-parts-dropped`; the T4 join-key follow-up added `CollapseCodexFileModelCalls`, which drops every rollout `llm.invoke` of any session holding an OTLP Codex model call, without moving its parts) | Only when an OTLP model call pairs with it on data both sides carry. Codex has no shared call id, so the pairing data is the reported counters: same session key, equal `CounterKey`, timestamps within `TwinTurnMaxSkewMs`, and strictly one OTLP call per file call. A paired file call is dropped and its parts and content are transplanted onto its OTLP call (`MergeDonors`, as `Adopt` does). An unpaired file call stays a turn, including file turns before OTLP began and a second file call whose counters equal an already-paired one. Among calls with identical counters, the earliest unpaired file call pairs with the earliest unpaired OTLP call within the skew; no call is paired by timestamp alone or by turn order. `CollapseCodexFileModelCalls` is replaced by a Codex-scoped one-to-one pairing step, and Codex model calls it handles skip the shared counter-cluster path, because `CollapseCluster` drops every file row of a cluster once one OTLP row exists and assigns parts by nearest timestamp, which would break one-to-one. The shared path stays unchanged for every other harness. Counter equality holds by construction: both Codex OTLP mappers use `CanonAdapters.InclusiveConvention` (fresh = input − cached, `ReportedInput` = input), and `CodexRolloutMapper.BuildTurnTokens` stores fresh = input − cached and cache read = cached from the same API usage. | Owner's standing rule (D1, D15: never guess) as relayed by the conductor for this fix: "drop a file model call only when an OTLP call pairs with it by data both sides carry; transplant its parts; keep unpaired file turns; never guess". This reverses the T4 follow-up's session-level precedence pinned by `OtlpFileIdJoinTests.Codex_SessionWithBothSources_CountsOtlpModelCallsOnly` (OTLP and file counters differ there): that test is rewritten (T14). Cost: OTLP and rollout calls whose counters differ are both counted, the Codex double count already listed among the open items in the completion summary; that is a reported figure shown twice, not an invented one, and the fix is a shared call id from Codex. | ANSWERED — conductor-relayed rule; changes a pinned projection contract, so rated `hard` (T14) |
+
+
+      Results of the tasks this one follows, as their workers reported them:
+
+      {prior_results}
+    agent: dev-hard
+    agent-confidence: 1
+    difficulty: hard
+    difficulty-source: architect
+    technology: csharp
+  - id: T15
+    capabilities: documentation in Markdown under the governed-docs rules
+    depends-on:
+      - T14
+    files:
+      - docs/dash/field-register.md
+      - docs/dash/architecture.md
+    session: docs
+    prompt: >
+      Task T15: Field register and architecture text match the Codex pairing and the Claude request id
+
+      Worktree: {worktree}
+
+
+      - **Objective:** Clear the failing `FieldRegisterTests` gate and make the architecture text describe D21's rule instead of the deleted session-level precedence.
+
+      - **Capabilities:** documentation in Markdown under the governed-docs rules
+
+      - **Difficulty:** easy
+
+      - **Session:** `docs`
+
+      - **Depends on:** T14 (the rule the architecture text describes)
+
+      - **Files:**
+        - `docs/dash/field-register.md`: delete the `ClaudeTurnGroup` | `RequestId` row (line 39); `ClaudeTurnGroup` has no such property. State the same mapping on the `ClaudeTranscriptLine` entry of the transcript path (line 28): `RequestId` (`requestId`) maps to `record_request_id.request_id`, the provider request id the OTLP `request_id` joins to (schema 27).
+        - `docs/dash/architecture.md`: § Twin turns join on a vendor id, or on the session (lines 196–203), keeping the heading so its anchor stays: Codex carries no shared id, so a rollout model call joins an OTLP model call only on equal reported counters in the same session within `TwinTurnMaxSkewMs`, one to one (`PairCodexFileModelCalls`); the joined file call's parts move onto the OTLP turn; a file call nothing pairs with stays a turn, so calls whose counters differ are both counted until Codex exports a shared call id.
+      - **Commands:**
+        - `dotnet test dash/server.tests/KyberDash.Data.Tests/KyberDash.Data.Tests.csproj --filter "FullyQualifiedName~KyberDash.Data.Tests.Collector.FieldRegisterTests"`
+        - `kyber-weave docs validate .`
+        - `kyber-weave docs drift .`
+      - **Acceptance:**
+        - `FieldRegisterTests` passes with a non-zero count; both docs checks report no finding; no document names `CollapseCodexFileModelCalls`.
+
+      Reference content for this task, quoted exactly from its source document and complete as given:
+
+
+      #### Test contract row for T15
+
+      | Task | Test project or file | Runner command | Observable behavior | RED evidence required | GREEN acceptance |
+
+      |---|---|---|---|---|---|
+
+      | T15 | Documentation, checked by `dash/server.tests/KyberDash.Data.Tests/Collector/FieldRegisterTests.cs` (`KyberDash.Data.Tests.Collector.FieldRegisterTests`, unchanged) | `dotnet test dash/server.tests/KyberDash.Data.Tests/KyberDash.Data.Tests.csproj --filter "FullyQualifiedName~KyberDash.Data.Tests.Collector.FieldRegisterTests" && kyber-weave docs validate . && kyber-weave docs drift .` | `FieldRegisterDocument_ReflectsEveryNativeReaderPropertyWithValidMappingOrDropReason` passes: the register has no `ClaudeTurnGroup.RequestId` row, and the `requestId` mapping (`record_request_id.request_id`, the OTLP `request_id` join) is stated on the `ClaudeTranscriptLine` entry, the public type that carries it. `docs/dash/architecture.md` § Twin turns join on a vendor id, or on the session names no `CollapseCodexFileModelCalls` and states D21's rule | RED: `FieldRegisterTests` fails today on the stale `ClaudeTurnGroup.RequestId` entry (cycle-1 `dash-server-test` gate) | `FieldRegisterTests` passes with a non-zero count; both docs checks report no finding |
+
+
+      #### Decisions this task cites
+
+      | ID | Question | Answer / decision | Mitigating and supporting information | Status / approval provenance |
+
+      |---|---|---|---|---|
+
+      | D21 | When does a Codex session seen by both OTLP and its rollout file drop a file model call? (review finding `correctness/codex-file-model-call-parts-dropped`; the T4 join-key follow-up added `CollapseCodexFileModelCalls`, which drops every rollout `llm.invoke` of any session holding an OTLP Codex model call, without moving its parts) | Only when an OTLP model call pairs with it on data both sides carry. Codex has no shared call id, so the pairing data is the reported counters: same session key, equal `CounterKey`, timestamps within `TwinTurnMaxSkewMs`, and strictly one OTLP call per file call. A paired file call is dropped and its parts and content are transplanted onto its OTLP call (`MergeDonors`, as `Adopt` does). An unpaired file call stays a turn, including file turns before OTLP began and a second file call whose counters equal an already-paired one. Among calls with identical counters, the earliest unpaired file call pairs with the earliest unpaired OTLP call within the skew; no call is paired by timestamp alone or by turn order. `CollapseCodexFileModelCalls` is replaced by a Codex-scoped one-to-one pairing step, and Codex model calls it handles skip the shared counter-cluster path, because `CollapseCluster` drops every file row of a cluster once one OTLP row exists and assigns parts by nearest timestamp, which would break one-to-one. The shared path stays unchanged for every other harness. Counter equality holds by construction: both Codex OTLP mappers use `CanonAdapters.InclusiveConvention` (fresh = input − cached, `ReportedInput` = input), and `CodexRolloutMapper.BuildTurnTokens` stores fresh = input − cached and cache read = cached from the same API usage. | Owner's standing rule (D1, D15: never guess) as relayed by the conductor for this fix: "drop a file model call only when an OTLP call pairs with it by data both sides carry; transplant its parts; keep unpaired file turns; never guess". This reverses the T4 follow-up's session-level precedence pinned by `OtlpFileIdJoinTests.Codex_SessionWithBothSources_CountsOtlpModelCallsOnly` (OTLP and file counters differ there): that test is rewritten (T14). Cost: OTLP and rollout calls whose counters differ are both counted, the Codex double count already listed among the open items in the completion summary; that is a reported figure shown twice, not an invented one, and the fix is a shared call id from Codex. | ANSWERED — conductor-relayed rule; changes a pinned projection contract, so rated `hard` (T14) |
 
 
       Results of the tasks this one follows, as their workers reported them:
