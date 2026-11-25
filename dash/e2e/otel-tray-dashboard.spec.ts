@@ -13,7 +13,22 @@ import {
   GEMINI_EXCLUDED_SESSION_ID,
   STORED_OTLP_HARNESS_CONTRACTS,
   buildAllHarnessOtlpFixtures,
+  type HarnessExpectationContract,
 } from './otel-harness-payloads.js'
+
+// T3: two sessions per harness now. The tray renders only each harness's latest session, so the
+// switch loop uses each harness's latest-session contract — the `b` fixture runs later than the
+// `a` fixture, and the contract list names `a` before `b` — and the selector's per-harness
+// session counts derive from the contract list instead of the single session it showed before.
+const LATEST_CONTRACT_BY_HARNESS = new Map<string, HarnessExpectationContract>()
+for (const contract of STORED_OTLP_HARNESS_CONTRACTS) {
+  LATEST_CONTRACT_BY_HARNESS.set(contract.harness, contract)
+}
+const TRAY_SESSION_CONTRACTS: readonly HarnessExpectationContract[] = [...LATEST_CONTRACT_BY_HARNESS.values()]
+
+function sessionCountForHarness(harness: string): number {
+  return STORED_OTLP_HARNESS_CONTRACTS.filter((contract) => contract.harness === harness).length
+}
 import {
   installTrayTauriBridge,
   startTrayBridge,
@@ -120,9 +135,11 @@ test('ingests all 7 stored harnesses, excludes gemini, and renders initial Tray 
   const optionValues = await select.locator('option').evaluateAll((nodes) =>
     nodes.map((node) => (node as HTMLOptionElement).value),
   )
-  for (const contract of STORED_OTLP_HARNESS_CONTRACTS) {
+  for (const contract of TRAY_SESSION_CONTRACTS) {
     expect(optionValues).toContain(contract.harness)
-    expect(optionsText.some((text) => text.includes(contract.harness) && text.includes('(1)'))).toBe(true)
+    expect(
+      optionsText.some((text) => text.includes(contract.harness) && text.includes(`(${sessionCountForHarness(contract.harness)})`)),
+    ).toBe(true)
   }
   expect(optionValues).not.toContain('gemini')
 
@@ -147,7 +164,7 @@ test('switches every harness in HarnessSelector and validates SessionPanel, Find
 
   let sawFindings = false
 
-  for (const contract of STORED_OTLP_HARNESS_CONTRACTS) {
+  for (const contract of TRAY_SESSION_CONTRACTS) {
     await select.selectOption(contract.harness)
     await expect(select).toHaveValue(contract.harness)
 

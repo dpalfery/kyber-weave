@@ -299,6 +299,8 @@ export type IsolatedServerHandle = {
   readonly dbPath: string
   readonly stateDir: string
   readonly rootDir: string
+  /** The isolated home directory the server resolves harness file sources under. */
+  readonly homeDir: string
   stop: () => Promise<void>
 }
 
@@ -349,6 +351,7 @@ export async function startIsolatedServer(options?: {
 
   let dbPath: string
   let stateDir: string
+  let homeDir: string
   let child: ReturnType<typeof spawn> | undefined
   let pid: number | undefined
   let killOnExit: (() => void) | undefined
@@ -360,7 +363,7 @@ export async function startIsolatedServer(options?: {
     }
 
     stateDir = join(rootDir, 'state')
-    const homeDir = join(rootDir, 'home')
+    homeDir = join(rootDir, 'home')
     mkdirSync(stateDir, { recursive: true })
     mkdirSync(homeDir, { recursive: true })
 
@@ -488,6 +491,7 @@ export async function startIsolatedServer(options?: {
     dbPath,
     stateDir,
     rootDir,
+    homeDir,
     stop: async () => {
       if (stopped) return
       stopped = true
@@ -527,6 +531,70 @@ export async function postOtlpTraces(baseUrl: string, payload: unknown): Promise
 
 export async function postOtlpLogs(baseUrl: string, payload: unknown): Promise<void> {
   await postOtlpSignal(baseUrl, '/v1/logs', payload)
+}
+
+/**
+ * Posts the engine's refresh route and fails on a non-200 answer: the refresh runs synchronously
+ * inside the job, so a 200 means the pass over every registered harness source has completed.
+ */
+export async function postRefresh(baseUrl: string): Promise<void> {
+  const response = await fetch(`${baseUrl}/api/kyber/refresh`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ surface: 'web' }),
+    signal: AbortSignal.timeout(120_000),
+  })
+  if (!response.ok) {
+    const body = await response.text().catch(() => '')
+    throw new Error(`POST /api/kyber/refresh failed (${response.status}): ${body.slice(0, 400)}`)
+  }
+}
+
+/**
+ * Waits until the paired Droid session `sessionId` reports a measured token total, so the
+ * refresh's file read and its projection have landed before the dashboards are asserted. The
+ * pairing is exact-match on the session id, so the row's total going measured is the proof.
+ */
+export async function waitForPairedDroidSession(baseUrl: string, sessionId: string): Promise<void> {
+  const timeoutMs = 45_000
+  const pollIntervalMs = 500
+  const deadline = Date.now() + timeoutMs
+  let lastError: string | undefined
+
+  while (Date.now() <= deadline) {
+    try {
+      const response = await fetch(
+        `${baseUrl}/api/kyber/sessions?q=${encodeURIComponent(sessionId)}&limit=${SESSION_PAGE_LIMIT}`,
+        { signal: AbortSignal.timeout(10_000) },
+      )
+      if (response.ok) {
+        const page: unknown = await response.json()
+        const rows = page !== null && typeof page === 'object' && Array.isArray((page as Record<string, unknown>)['sessions'])
+          ? (page as Record<string, unknown>)['sessions'] as Array<Record<string, unknown>>
+          : []
+        const row = rows.find(
+          (candidate) => candidate['session_id'] === sessionId || candidate['sessionId'] === sessionId,
+        )
+        const totalInput = row?.['total_input']
+        if (typeof totalInput === 'number' && Number.isFinite(totalInput)) {
+          return
+        }
+        lastError = row === undefined
+          ? 'session row not listed yet'
+          : `total_input not measured yet (${JSON.stringify(totalInput)})`
+      } else {
+        lastError = `sessions search HTTP ${response.status}`
+      }
+    } catch (error) {
+      lastError = error instanceof Error ? error.message : String(error)
+    }
+
+    await new Promise<void>((resolveWait) => setTimeout(resolveWait, pollIntervalMs))
+  }
+
+  throw new Error(
+    `the paired Droid session ${sessionId} did not report measured totals within ${timeoutMs}ms after the refresh${lastError ? `; last state: ${lastError}` : ''}`,
+  )
 }
 
 export async function waitForOtlpIngest(
