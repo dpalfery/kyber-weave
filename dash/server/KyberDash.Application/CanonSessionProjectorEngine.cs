@@ -2483,9 +2483,10 @@ public partial class CanonSessionProjectorEngine
     /// timeline marks on the parent row instead.
     /// </para>
     /// <para>
-    /// Until ingest wiring advances <c>store_write_marker</c> on writes, the watermark comparison
-    /// alone cannot observe new records; callers therefore request a projection after ingest, the
-    /// same flow the projection service already uses.
+    /// Every record-changing write moves <c>store_write_marker</c> and records its sessions as
+    /// dirty, so a pass compares the marker with its stored watermark to find new records. A
+    /// write that lands while the pass runs is left dirty for the next pass; see
+    /// <see cref="StampMidPassWrites"/>.
     /// </para>
     /// </remarks>
     private ProjectionPassReport ProjectIncrementalRelational(bool forReads)
@@ -2703,28 +2704,24 @@ public partial class CanonSessionProjectorEngine
         RebuildRunExecutionProjection();
 
         long finalMarker = operationalStore.GetWriteMarker();
-        operationalStore.SetProjectionState(new ProjectionStateView(SqliteRelationalStore.SchemaVersion, finalMarker));
-        if (deferredKeys.Count > 0)
+        if (finalMarker > currentMarker)
+        {
+            StampMidPassWrites(currentMarker, finalMarker, deferredKeys);
+        }
+        else if (deferredKeys.Count > 0)
         {
             // Deferred keys stay dirty at the watermark this pass just wrote, so the next pass
-            // (read or maintenance) retries them and a span ingested during the pass is not
-            // lost. When a span arrived mid-pass, the keys dirty at pass start stay dirty too:
-            // a rebuilt session's per-key read cannot have seen a span ingested after it, so
-            // the next pass rebuilds those sessions instead of skipping them clean.
-            HashSet<string> writeBackKeys = new(deferredKeys, StringComparer.Ordinal);
-            if (finalMarker > currentMarker && dirtySet is not null)
-            {
-                writeBackKeys.UnionWith(dirtySet);
-            }
-
+            // (read or maintenance) retries them.
+            operationalStore.SetProjectionState(new ProjectionStateView(SqliteRelationalStore.SchemaVersion, finalMarker));
             operationalStore.SetProjectionDirtyState(new DirtyProjectionState(
                 FromSeq: finalMarker,
                 ToSeq: finalMarker,
-                Keys: [.. writeBackKeys.Order(StringComparer.Ordinal)],
+                Keys: [.. deferredKeys.Order(StringComparer.Ordinal)],
                 IsWildcard: false));
         }
         else
         {
+            operationalStore.SetProjectionState(new ProjectionStateView(SqliteRelationalStore.SchemaVersion, finalMarker));
             operationalStore.ClearProjectionDirtyState();
         }
 
@@ -2736,6 +2733,53 @@ public partial class CanonSessionProjectorEngine
             RebuiltKeys: rebuiltKeys,
             SkippedKeys: skippedKeys,
             DeferredKeys: forReads ? deferredKeys : null);
+    }
+
+    /// <summary>
+    /// Ends a pass during which a record-changing write moved the marker: stamps the marker the
+    /// pass read at its start and keeps the writes since then dirty, so the next pass rebuilds
+    /// them.
+    /// </summary>
+    /// <param name="currentMarker">Write marker the pass read at its start.</param>
+    /// <param name="finalMarker">Write marker read at the end of the pass.</param>
+    /// <param name="deferredKeys">Keys this pass deferred.</param>
+    /// <remarks>
+    /// A per-key or whole-store read cannot have seen a record written after it, so stamping
+    /// <paramref name="finalMarker"/> would mark the projection current while a session misses
+    /// that record. The writes merged their keys into the stored dirty range,
+    /// so when that range still ends at <paramref name="finalMarker"/> it is rewritten to start
+    /// at <paramref name="currentMarker"/> with the deferred keys added, or kept wildcard. Any
+    /// other stored state, including a write landing between these reads and the rewrite, leaves
+    /// a range whose end differs from the marker, which forces a full pass: every race here
+    /// degrades to a full pass, never to a skipped session.
+    /// </remarks>
+    private void StampMidPassWrites(long currentMarker, long finalMarker, IReadOnlyCollection<string> deferredKeys)
+    {
+        operationalStore!.SetProjectionState(new ProjectionStateView(SqliteRelationalStore.SchemaVersion, currentMarker));
+        DirtyProjectionState? stored = operationalStore.GetProjectionDirtyState();
+        if (stored is null || stored.ToSeq != finalMarker)
+        {
+            operationalStore.ClearProjectionDirtyState();
+            return;
+        }
+
+        if (stored.IsWildcard || stored.Keys is null)
+        {
+            operationalStore.SetProjectionDirtyState(new DirtyProjectionState(
+                FromSeq: currentMarker,
+                ToSeq: finalMarker,
+                Keys: null,
+                IsWildcard: true));
+            return;
+        }
+
+        HashSet<string> keys = new(stored.Keys, StringComparer.Ordinal);
+        keys.UnionWith(deferredKeys);
+        operationalStore.SetProjectionDirtyState(new DirtyProjectionState(
+            FromSeq: currentMarker,
+            ToSeq: finalMarker,
+            Keys: [.. keys.Order(StringComparer.Ordinal)],
+            IsWildcard: false));
     }
 
     /// <summary>

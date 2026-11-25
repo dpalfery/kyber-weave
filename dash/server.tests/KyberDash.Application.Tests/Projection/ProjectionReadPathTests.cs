@@ -762,7 +762,7 @@ public class ProjectionReadPathTests
     /// <summary>
     /// Reader decorator ingesting one span for a session while that session's records are being
     /// read, so the span lands after the per-key read but before the pass writes its final
-    /// watermark: exactly the mid-pass ingestion window.
+    /// watermark: exactly the mid-pass ingestion window. The write moves the marker itself.
     /// </summary>
     private sealed class MidPassIngestReader(InMemoryRelationalStore inner, string sessionKey, CollectedRecord midPassRecord) : DelegatingReader(inner)
     {
@@ -773,7 +773,6 @@ public class ProjectionReadPathTests
             if (string.Equals(key, sessionKey, StringComparison.Ordinal))
             {
                 WriteSession(inner, sessionKey, "claude-code", [midPassRecord]);
-                inner.SetWriteMarker(inner.GetWriteMarker() + 1);
             }
 
             return records;
