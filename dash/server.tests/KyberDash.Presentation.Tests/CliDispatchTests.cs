@@ -214,10 +214,21 @@ public class CliDispatchTests
     [Fact]
     public async Task VacuumDelegatesToTheDoctorService()
     {
-        CliRun run = await CliRun.ExecuteAsync(["kyber", "vacuum"]);
+        CliRun run = await CliRun.ExecuteAsync(["kyber", "vacuum"], builder => builder.Doctor.Setup(d => d.RunVacuum()).Returns(true));
 
         Assert.Equal(0, run.ExitCode);
         run.Builder.Doctor.Verify(d => d.RunVacuum(), Times.Once);
+        Assert.Contains("checkpoint and compaction complete", run.Output, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task VacuumOnAStoreItDoesNotApplyToSaysSoInsteadOfReportingCompaction()
+    {
+        CliRun run = await CliRun.ExecuteAsync(["kyber", "vacuum"], builder => builder.Doctor.Setup(d => d.RunVacuum()).Returns(false));
+
+        Assert.Equal(0, run.ExitCode);
+        Assert.Contains("vacuum does not apply", run.Output, StringComparison.Ordinal);
+        Assert.DoesNotContain("compaction complete", run.Output, StringComparison.Ordinal);
     }
 
     [Fact]

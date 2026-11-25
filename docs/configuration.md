@@ -4,7 +4,7 @@ title: Configuration
 doc-type: reference
 status: current
 owner: dpalfery
-last-reviewed: 2026-11-23
+last-reviewed: 2026-11-25
 code-refs:
   - KyberWeaveConfig
   - KyberWeaveConfigDiagnosticCodes
@@ -766,7 +766,11 @@ shipped map names, then the same two steps for the parent technology the standar
 key names. The first entry that exists is the task's whole gate list; lists are never merged and
 no gate is added. A task that names a technology and resolves nothing is refused with a non-zero
 exit and a message naming both `technology-gates.<technology>` and the technology's agent entry.
-A task with no technology keeps the old behaviour: no entry is a warning and an empty report.
+A task with no technology keeps the old behaviour: no entry is a warning and an empty report. This
+repository gives each developer tier (`dev-easy`, `dev-medium`, `dev-hard`) an agent entry that holds every
+gate of `technology-gates` once, so a tier still runs the gates its change selects when the task names no
+technology; because the agent's entry is read first, a gate added to a technology must be added to those
+entries too (`TaskGatesRepositoryConfigTests` fails when it is not).
 
 An agent-keyed entry whose agent the removal phase deletes keeps resolving this way for two minor
 releases, and `docs validate` warns about it — under `worker-roster: tiered`, where that agent is a

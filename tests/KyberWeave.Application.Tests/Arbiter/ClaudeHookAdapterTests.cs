@@ -2,10 +2,14 @@ using System.Text.Json;
 using System.Text.Json.Nodes;
 using KyberWeave.Arbiter.Hooks;
 using KyberWeave.Arbiter.Hooks.Adapters;
+using KyberWeave.Contracts.Repositories;
 using KyberWeave.Core.Arbiter;
+using KyberWeave.Core.Arbiter.Facts;
+using KyberWeave.Core.Arbiter.Providers;
 using KyberWeave.Core.Configuration;
 using Xunit;
 using KyberWeave.Tests.Corpus;
+using KyberWeave.Tests.Fakes;
 
 namespace KyberWeave.Tests.Arbiter;
 
@@ -724,5 +728,259 @@ public sealed class ClaudeHookAdapterTests
         Assert.Equal(0, exit);
         AssertShellDenied(stdout.ToString());
         Assert.Contains("KW-ARB-SHELL-001", log.ToString(), StringComparison.Ordinal);
+    }
+
+    /// <summary>The notice Claude Code returns from a foreground lens dispatch whose report went through its hand-back.</summary>
+    private const string Wrapper =
+        "This agent's report was delivered to you as a message from \"a52bf17cfe6305406\" (its SubagentHandback call). " +
+        "Read it there; it is not repeated here.";
+
+    private const string LensReport = "NO FINDINGS: nothing to report\nREVIEW.md sections checked: all";
+
+    [Fact]
+    public void DeliveryWrapper_IsRecognisedOnlyAsAWholeReply()
+    {
+        Assert.True(ClaudeDeliveryWrapper.IsWrapper(Wrapper));
+        Assert.True(ClaudeDeliveryWrapper.IsWrapper("\n  " + Wrapper + "\n"));
+        Assert.False(ClaudeDeliveryWrapper.IsWrapper(Wrapper + "\n\nF1: the seat holds the wrapper."));
+        Assert.False(ClaudeDeliveryWrapper.IsWrapper("Quoting the harness: " + Wrapper));
+        Assert.False(ClaudeDeliveryWrapper.IsWrapper(null));
+        Assert.False(ClaudeDeliveryWrapper.IsWrapper("  "));
+    }
+
+    /// <summary>Today's order: the hand-back carries the report first, then the completed post carries only the notice.</summary>
+    [Fact]
+    public void HandbackThenWrapperPost_TheSeatHoldsTheReportOnce_AndTheReturnPairsWithItsPre()
+    {
+        using DeliveryRig rig = new();
+        rig.Dispatch();
+
+        rig.Handback(LensReport);
+        rig.CompletedPost(Wrapper);
+
+        Assert.Equal(LensReport, rig.SeatText());
+        Assert.Single(rig.Posts(), p => p.PreId == rig.Pre().Id);
+    }
+
+    /// <summary>The completed post arrives before the hand-back: the report still reaches the seat once and pairs.</summary>
+    [Fact]
+    public void WrapperPostThenHandback_TheSeatHoldsTheReportOnce_AndTheReturnPairsWithItsPre()
+    {
+        using DeliveryRig rig = new();
+        rig.Dispatch();
+
+        rig.CompletedPost(Wrapper);
+        Assert.False(rig.SeatExists());
+        rig.Handback(LensReport);
+
+        Assert.Equal(LensReport, rig.SeatText());
+        Assert.Single(rig.Posts(), p => p.PreId == rig.Pre().Id);
+    }
+
+    /// <summary>With no hand-back, the stop event's last assistant message is the report, in either order.</summary>
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public void WrapperPostWithNoHandback_TheStopEventsLastAssistantMessageIsSaved(bool stopFirst)
+    {
+        using DeliveryRig rig = new();
+        rig.Dispatch();
+
+        if (stopFirst)
+        {
+            rig.Stop(LensReport);
+            rig.CompletedPost(Wrapper);
+        }
+        else
+        {
+            rig.CompletedPost(Wrapper);
+            rig.Stop(LensReport);
+        }
+
+        // A stop that comes first also closes the dispatch with a recovery row, as it does today; the report that
+        // follows still pairs with it, once.
+        Assert.Equal(LensReport, rig.SeatText());
+        Assert.Single(rig.Posts(), p => p.PreId == rig.Pre().Id && p.Recovered is null);
+    }
+
+    /// <summary>A notice with no report anywhere records nothing and says so in one line.</summary>
+    [Fact]
+    public void WrapperPostWithNoReport_SavesNoSeat_AndLogsOneLine()
+    {
+        using DeliveryRig rig = new();
+        rig.Dispatch();
+
+        string log = rig.CompletedPost(Wrapper);
+
+        Assert.False(rig.SeatExists());
+        Assert.DoesNotContain(rig.Posts(), p => p.PreId == rig.Pre().Id);
+        Assert.Single(
+            log.Split('\n'),
+            line => line.Contains("carries only the delivery notice", StringComparison.Ordinal));
+    }
+
+    /// <summary>A completed post that carries the report itself is saved as today.</summary>
+    [Fact]
+    public void CompletedPostWithARealReply_SavesItAsToday()
+    {
+        using DeliveryRig rig = new();
+        rig.Dispatch();
+
+        rig.CompletedPost(LensReport);
+
+        Assert.Equal(LensReport, rig.SeatText());
+        Assert.Single(rig.Posts(), p => p.PreId == rig.Pre().Id);
+    }
+
+    /// <summary>A followed background dispatch still records its hand-back as its return, and its notice adds nothing.</summary>
+    [Fact]
+    public void FollowedBackgroundDispatch_StillRecordsItsHandbackAsToday()
+    {
+        using DeliveryRig rig = new();
+        rig.Dispatch(background: true);
+        rig.Launched();
+
+        rig.Handback(LensReport);
+        rig.CompletedPost(Wrapper);
+
+        Assert.Equal(LensReport, rig.SeatText());
+        Assert.Single(rig.Posts(), p => p.PreId == rig.Pre().Id);
+    }
+
+    /// <summary>
+    /// One lens dispatch's hook events, each sent as its own process would send it: a fresh command over a fresh
+    /// engine, sharing only the in-memory host's store, ledger and files.
+    /// </summary>
+    private sealed class DeliveryRig : IDisposable
+    {
+        private const string Session = "session-lens-1";
+        private const string ToolUseId = "toolu-lens-1";
+        private const string AgentId = "a52bf17cfe6305406";
+
+        private readonly InMemoryArbiterHost _host = InMemoryArbiterHost.Create();
+
+        private readonly FakeArbiterProvider _provider = new()
+        {
+            DefaultAnswer = ArbiterStep1BatchResult.NotEvaluated,
+            ScoreDefaultAnswer = true,
+            Confidence = 0.95,
+            Model = "stub",
+        };
+
+        private static readonly KyberWeaveConfig Config = new()
+        {
+            Arbiter = new ArbiterConfig { Enabled = true, Rules = [] },
+            Ontology = OntologyConfig.ProductDefaults.WithDocsRoot("docs"),
+        };
+
+        public void Dispose() => _host.Dispose();
+
+        private string Cycle => Path.Combine(_host.RepoRoot, ".agent_scratchpad", "feat", "review", "cycle-1");
+
+        private string Seat => Path.Combine(Cycle, "seats", "correctness.md");
+
+        private string Prompt =>
+            "KYBER-ARBITER: true\nLENS: correctness\nREVIEW_RUN: run-1\n\nPacket: "
+            + Path.Combine(Cycle, "packets", "correctness.md") + "\n\nApply the lens.";
+
+        public bool SeatExists() => _host.Files.FileExists(Seat);
+
+        public string SeatText() => _host.Files.ReadAllText(Seat);
+
+        public ArbiterLedgerEvent Pre() =>
+            Assert.Single(_host.Ledger.ReadAll(), e => e.Phase == ArbiterLedgerPhases.Pre && e.CallId == ToolUseId);
+
+        public IReadOnlyList<ArbiterLedgerEvent> Posts() =>
+            [.. _host.Ledger.ReadAll().Where(e => e.Phase == ArbiterLedgerPhases.Post)];
+
+        public void Dispatch(bool background = false) => Send(new
+        {
+            hook_event_name = "PreToolUse",
+            session_id = Session,
+            cwd = _host.RepoRoot,
+            agent_type = "code-reviewer",
+            tool_name = "Agent",
+            tool_input = new { description = "correctness", prompt = Prompt, subagent_type = "review-lens", run_in_background = background },
+            tool_use_id = ToolUseId,
+        });
+
+        public void Launched() => Send(new
+        {
+            hook_event_name = "PostToolUse",
+            session_id = Session,
+            cwd = _host.RepoRoot,
+            agent_type = "code-reviewer",
+            tool_name = "Agent",
+            tool_input = new { description = "correctness", prompt = Prompt, subagent_type = "review-lens", run_in_background = true },
+            tool_use_id = ToolUseId,
+            tool_response = new { status = "async_launched", agentId = AgentId, content = Array.Empty<string>() },
+        });
+
+        public void Handback(string message) => Send(new
+        {
+            hook_event_name = "PreToolUse",
+            session_id = Session,
+            cwd = _host.RepoRoot,
+            agent_id = AgentId,
+            agent_type = "review-lens",
+            tool_name = "SubagentHandback",
+            tool_input = new { message },
+            tool_use_id = "toolu-handback-1",
+        });
+
+        public string CompletedPost(string text) => Send(new
+        {
+            hook_event_name = "PostToolUse",
+            session_id = Session,
+            cwd = _host.RepoRoot,
+            agent_type = "code-reviewer",
+            tool_name = "Agent",
+            tool_input = new { description = "correctness", prompt = Prompt, subagent_type = "review-lens" },
+            tool_use_id = ToolUseId,
+            tool_response = new
+            {
+                status = "completed",
+                agentId = AgentId,
+                content = new[] { new { type = "text", text } },
+            },
+        });
+
+        public void Stop(string lastAssistantMessage) => Send(new
+        {
+            hook_event_name = "SubagentStop",
+            session_id = Session,
+            cwd = _host.RepoRoot,
+            agent_id = AgentId,
+            agent_type = "review-lens",
+            last_assistant_message = lastAssistantMessage,
+        });
+
+        private string Send(object payload)
+        {
+            using StringWriter stdout = new();
+            using StringWriter log = new();
+            ArbiterHookDecisionEngine engine = _host.Engine(
+                providerFactory: _ => _provider,
+                gitFactsFactory: _ => new NoGitFacts(),
+                planReaderFactory: _ => new NoPlan(),
+                homeDirectory: () => _host.RepoRoot);
+            HookCommand command = _host.HookCommand(ArbiterTestServices.Registry(engine), configLoader: _ => Config);
+            int exit = command.Run("claude", null, JsonSerializer.Serialize(payload), stdout, log);
+            Assert.Equal(0, exit);
+            _host.Clock.Advance(TimeSpan.FromSeconds(1));
+            return log.ToString();
+        }
+
+        private sealed class NoGitFacts : IArbiterGitFacts
+        {
+            public ArbiterFactSet Enrich(
+                ArbiterFactSet facts, TriggerClassification classification, ArbiterEvent ev) => facts;
+        }
+
+        private sealed class NoPlan : IArbiterPlanReader
+        {
+            public ArbiterFactSet Enrich(
+                ArbiterFactSet facts, TriggerClassification classification) => facts;
+        }
     }
 }

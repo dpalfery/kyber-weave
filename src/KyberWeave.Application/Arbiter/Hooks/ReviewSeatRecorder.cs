@@ -1,6 +1,7 @@
 using System.Text;
 using System.Text.Json;
 using System.Text.RegularExpressions;
+using KyberWeave.Arbiter.Hooks.Adapters;
 using KyberWeave.Contracts.Paths;
 using KyberWeave.Contracts.Repositories;
 using KyberWeave.Core.Arbiter.Facts;
@@ -49,10 +50,28 @@ public sealed partial class ReviewSeatRecorder(IWritableFileSystem files, IPathR
             return;
         }
 
+        // With no active run, a relative path resolves against whichever checkout the hook process started in, which
+        // may not be the worktree the review runs in; a seat written there is one the verdict never reads.
+        if (!Path.IsPathFullyQualified(packetPath) && context.RunContext?.ActiveRun is null)
+        {
+            context.Log.WriteLine(
+                $"Arbiter: review seat '{lens}' not saved: the dispatch names a relative packet path and no run is active to resolve it against.");
+            return;
+        }
+
         string? reply = ReplyText(toolOutput);
         if (string.IsNullOrWhiteSpace(reply))
         {
             context.Log.WriteLine($"Arbiter: review seat '{lens}' not saved: the return has no reply text.");
+            return;
+        }
+
+        // Claude Code's delivery notice says where the report went; it is not the report, and saving it would leave
+        // the verdict a seat with no findings section to read.
+        if (ClaudeDeliveryWrapper.IsWrapper(reply))
+        {
+            context.Log.WriteLine(
+                $"Arbiter: review seat '{lens}' not saved: the return is only the harness's delivery notice, not the report.");
             return;
         }
 
@@ -83,7 +102,8 @@ public sealed partial class ReviewSeatRecorder(IWritableFileSystem files, IPathR
                 return;
             }
 
-            text = existing.Length == 0
+            // A seat that holds only a delivery notice, saved before the notice was recognised, holds no reply to keep.
+            text = existing.Length == 0 || ClaudeDeliveryWrapper.IsWrapper(existing)
                 ? reply
                 : existing.TrimEnd('\n') + "\n\n" + reply;
         }

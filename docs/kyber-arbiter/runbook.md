@@ -4,7 +4,7 @@ title: Kyber Arbiter runbook
 doc-type: runbook
 component: KyberArbiter
 owner: dpalfery
-last-reviewed: 2026-11-23
+last-reviewed: 2026-11-25
 status: current
 decided-by:
   - adr/0053-kyber-arbiter-three-step-decision-gates
@@ -413,6 +413,13 @@ and a command whose text it cannot read is refused rather than allowed. It refus
   `~/.aws/credentials`, `~/.azure/`, `~/.docker/config.json` or `~/.kube/config`, or one named
   `~/.netrc`, `~/.git-credentials`, `~/.npmrc` or `~/.pypirc`; and any `*.pem`, `*.key`, `*.pfx` or `*.p12`.
   Listing a directory or testing whether a file exists is allowed.
+  `grep` and `rg` are read by their options, so the pattern is never taken for a file: in `grep -A 3 token f` and
+  `rg -g '*.yml' token`, `token` is the pattern, and a quoted multi-word pattern is one pattern. A file named by
+  `-f`, `--file`, `--exclude-from`, `--include-from` or `--ignore-file` is judged as a file, and `-e` or `--regexp`
+  makes the next free word a file. A heredoc body is read as a script, not as shell lines, only when a known script
+  interpreter (`python`, `python3`, `py`, `node`, `ruby`, `perl`) opens it; `open(...)` and `Path(...)` in it are
+  judged by every quoted literal and assigned value in their argument, so a path held in an identifier is judged by
+  what it was assigned, and a literal secret path is refused. A heredoc to any other program stays shell lines.
 - **Printing a secret from a store.** `dotnet user-secrets list`; `docker inspect` unless its `--format`/`-f`
   template names no environment value; `env` or `printenv` with nothing to print, or `printenv` of a secret-named
   variable; `echo`, `printf`, `Write-Output` or `Write-Host` of one; `Get-ChildItem env:`, `gci env:` or

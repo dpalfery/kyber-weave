@@ -1,7 +1,9 @@
+using System.ComponentModel;
 using System.Text;
 using KyberWeave.Contracts.Paths;
 using KyberWeave.Contracts.Repositories;
 using KyberWeave.Contracts.Services;
+using KyberWeave.Core.Processes;
 using KyberWeave.Core.RunStart;
 
 namespace KyberWeave.Application.RunIntegrate;
@@ -229,7 +231,10 @@ public sealed class RunIntegrateService : IRunIntegrateService
         {
             return Failed(timeout.Message);
         }
-        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+        // This catch answers for the work before the commits land. Once IntegrateUnderLock has applied them, its
+        // head reads and cleanup report the landed state there ("integrated at (sha), but …", or "the task commits
+        // are on the run branch, but …" when the sha could not be read) and never reach this message.
+        catch (Exception exception) when (IsGitProcessFailure(exception))
         {
             return Failed($"the task could not be integrated: {exception.Message}");
         }
@@ -258,10 +263,14 @@ public sealed class RunIntegrateService : IRunIntegrateService
         {
             // A retry with nothing left to integrate still finishes the cleanup the first attempt began: the
             // scratchpad is copied and the task worktree goes, so a conductor's retry never leaves a stray worktree.
-            head = GitText(runWorktree, "rev-parse", "HEAD");
+            head = ReadLandedHead(runWorktree, out string? retryHeadFailure);
             if (head is null)
             {
-                return Failed($"git could not read the head of '{runBranch}'.");
+                // The first attempt landed the commits, so a failed head read reports them as landed; a second git
+                // call to recover the sha could fail the same way this one did.
+                return Failed(retryHeadFailure is null
+                    ? $"git could not read the head of '{runBranch}'."
+                    : $"the task commits are on the run branch, but reading its head failed: {retryHeadFailure}");
             }
         }
         else
@@ -286,8 +295,22 @@ public sealed class RunIntegrateService : IRunIntegrateService
                 Notes: notes);
         }
 
-        GitOutcome removed = _git.Run(
-            runWorktree, ["-C", runWorktree, "worktree", "remove", "--force", taskWorktree]);
+        // The commits are on the run branch before cleanup starts, so a git child that fails to start, times out,
+        // is cancelled, or exceeds its output limit is a cleanup failure: catching it here keeps it from reaching
+        // Integrate's catch, which would report work that landed as "could not be integrated" or a bare timeout.
+        GitOutcome removed;
+        try
+        {
+            removed = _git.Run(
+                runWorktree, ["-C", runWorktree, "worktree", "remove", "--force", taskWorktree]);
+        }
+        catch (Exception exception) when (IsGitProcessFailure(exception))
+        {
+            return Failed(
+                $"the task is integrated at {head}, but removing the task worktree '{taskWorktree}' failed: " +
+                exception.Message);
+        }
+
         if (!removed.Succeeded)
         {
             return Failed(
@@ -295,7 +318,18 @@ public sealed class RunIntegrateService : IRunIntegrateService
                 removed.FirstErrorLine);
         }
 
-        GitOutcome deleted = _git.Run(runWorktree, ["-C", runWorktree, "branch", "-D", "--end-of-options", taskBranch]);
+        GitOutcome deleted;
+        try
+        {
+            deleted = _git.Run(runWorktree, ["-C", runWorktree, "branch", "-D", "--end-of-options", taskBranch]);
+        }
+        catch (Exception exception) when (IsGitProcessFailure(exception))
+        {
+            return Failed(
+                $"the task is integrated at {head}, but deleting the task branch '{taskBranch}' failed: " +
+                exception.Message);
+        }
+
         if (!deleted.Succeeded)
         {
             return Failed(
@@ -372,10 +406,17 @@ public sealed class RunIntegrateService : IRunIntegrateService
                 $"git could not apply '{taskBranch}' onto '{runBranch}': {applied.FirstErrorLine}");
         }
 
-        head = GitText(runWorktree, "rev-parse", "HEAD");
-        return head is null
+        head = ReadLandedHead(runWorktree, out string? headLaunchFailure);
+        if (head is not null)
+        {
+            return null;
+        }
+
+        // The commits are on the run branch, so only the sha is missing; a second git call to recover it could
+        // fail the same way this one did.
+        return headLaunchFailure is null
             ? Failed($"git applied '{taskBranch}' but could not read the new head of '{runBranch}'.")
-            : null;
+            : Failed($"the task commits are on the run branch, but reading its head failed: {headLaunchFailure}");
     }
 
     /// <summary>
@@ -684,6 +725,47 @@ public sealed class RunIntegrateService : IRunIntegrateService
             commonDirectory,
             SamePath(gitDirectory, commonDirectory));
     }
+
+    /// <summary>
+    /// Reads the run branch's head once the task's commits are already on it — after Apply, or on a retry. A git
+    /// child failure there is a failure of reading work that has landed, not of the landing itself,
+    /// so it is caught here instead of escaping to Integrate's catch, which would report landed commits as
+    /// "could not be integrated" or a bare timeout.
+    /// </summary>
+    /// <param name="runWorktree">The run's worktree.</param>
+    /// <param name="failure">Why the git call threw, or null when the read ran and failed for git's own reasons.</param>
+    /// <returns>The head sha, or null when the read failed.</returns>
+    private string? ReadLandedHead(string runWorktree, out string? failure)
+    {
+        try
+        {
+            failure = null;
+            return GitText(runWorktree, "rev-parse", "HEAD");
+        }
+        catch (Exception exception) when (IsGitProcessFailure(exception))
+        {
+            failure = exception.Message;
+            return null;
+        }
+    }
+
+    /// <summary>
+    /// Whether a git child could not be launched at all, as opposed to running and failing afterwards: the executable
+    /// is missing or not executable, its working directory is gone, or the operating system refused the launch.
+    /// </summary>
+    /// <param name="exception">The exception a git call threw.</param>
+    internal static bool IsGitLaunchFailure(Exception exception) =>
+        exception is IOException or UnauthorizedAccessException or Win32Exception
+        || (exception is InvalidOperationException && exception is not OutputLimitExceededException);
+
+    /// <summary>
+    /// Whether a git call threw a process-runner failure — either a launch failure or a child that timed out, was
+    /// cancelled, or exceeded its output budget. Every catch that reports what already landed shares this predicate.
+    /// </summary>
+    /// <param name="exception">The exception a git call threw.</param>
+    internal static bool IsGitProcessFailure(Exception exception) =>
+        IsGitLaunchFailure(exception)
+        || exception is TimeoutException or OutputLimitExceededException or OperationCanceledException;
 
     private string? GitText(string worktree, params string[] arguments)
     {

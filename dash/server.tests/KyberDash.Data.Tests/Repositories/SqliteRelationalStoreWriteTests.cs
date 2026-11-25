@@ -140,7 +140,7 @@ public class SqliteRelationalStoreWriteTests
     }
 
     [Fact]
-    public void EnsureInitialized_UpdatesDetectorVersionWhenSchemaVersionMatches()
+    public void EnsureInitialized_KeepsStoredDetectorVersionForTheProjectorToRestamp()
     {
         string rootDir = NewNonExistentRoot();
         string dbPath = Path.Combine(rootDir, "canon.db");
@@ -153,8 +153,9 @@ public class SqliteRelationalStoreWriteTests
 
         Assert.Equal(3, store.ExecutedSql.Count);
         string ddlSql = NormalizeLineEndings(store.ExecutedSql[2]);
+        Assert.DoesNotContain("UPDATE store_state", ddlSql, StringComparison.Ordinal);
         Assert.Contains(
-            $"UPDATE store_state SET detector_version = {SqliteRelationalStore.DetectorVersion.ToString(CultureInfo.InvariantCulture)} WHERE singleton_id = 1 AND detector_version <> {SqliteRelationalStore.DetectorVersion.ToString(CultureInfo.InvariantCulture)};",
+            $"INSERT OR IGNORE INTO store_state (singleton_id, schema_version, detector_version) VALUES (1, {SqliteRelationalStore.SchemaVersion.ToString(CultureInfo.InvariantCulture)}, {SqliteRelationalStore.DetectorVersion.ToString(CultureInfo.InvariantCulture)});",
             ddlSql,
             StringComparison.Ordinal);
         Assert.False(Directory.Exists(rootDir));
@@ -294,10 +295,19 @@ public class SqliteRelationalStoreWriteTests
         Assert.DoesNotContain("Unusual prompt structure", problemSql, StringComparison.Ordinal);
         Assert.EndsWith("\nCOMMIT;\n", problemSql, StringComparison.Ordinal);
 
+        // The source delete moves the write marker and marks the dirty range wildcard in the same
+        // transaction as the delete, so a failed delete moves nothing.
         string deleteSql = NormalizeLineEndings(store.ExecutedSql[1]);
-        Assert.Equal(
-            $"PRAGMA foreign_keys = ON;\nBEGIN IMMEDIATE;\nDELETE FROM source WHERE source_id = {HexExpr("src-deadbeef")};\nCOMMIT;\n",
-            deleteSql);
+        Assert.StartsWith(
+            $"PRAGMA foreign_keys = ON;\nBEGIN IMMEDIATE;\nDELETE FROM source WHERE source_id = {HexExpr("src-deadbeef")};\n",
+            deleteSql,
+            StringComparison.Ordinal);
+        Assert.Contains("DELETE FROM projection_dirty_session;\n", deleteSql, StringComparison.Ordinal);
+        Assert.Contains("INSERT OR REPLACE INTO projection_dirty_range (singleton_id, from_seq, to_seq)", deleteSql, StringComparison.Ordinal);
+        Assert.Contains("INSERT OR REPLACE INTO store_write_marker (singleton_id, records_write_seq)", deleteSql, StringComparison.Ordinal);
+        Assert.Single(deleteSql.Split("BEGIN IMMEDIATE;", StringSplitOptions.None).Skip(1));
+        Assert.Single(deleteSql.Split("COMMIT;", StringSplitOptions.None).Skip(1));
+        Assert.EndsWith("\nCOMMIT;\n", deleteSql, StringComparison.Ordinal);
         Assert.False(Directory.Exists(rootDir));
     }
 
@@ -551,6 +561,40 @@ public class SqliteRelationalStoreWriteTests
 
         Assert.Empty(store.ExecutedSql);
         Assert.False(Directory.Exists(rootDir));
+    }
+
+    /// <summary>
+    /// An empty session key is refused naming the column it would be written to, not the dirty
+    /// projection table the write marker advance fills from the same key.
+    /// </summary>
+    [Fact]
+    public void ConstraintGuard_EmptySessionKeyRefusalNamesTheSessionOrRecordLinkColumn()
+    {
+        string rootDir = NewNonExistentRoot();
+        string dbPath = Path.Combine(rootDir, "canon.db");
+        RecordingSqliteRelationalStore store = new(dbPath, new SqliteCircuitBreaker());
+        store.ClearRecordedSql();
+
+        CollectedBatch emptySessionBatch = new(
+            new CollectedSource("claude-code", SourceKind.File, "/tmp/a.jsonl"),
+            [new CollectedSession(string.Empty, "claude-code", "n1", null, null, [])],
+            [],
+            []);
+        DashValidationException sessionError = Assert.Throws<DashValidationException>(() => store.WriteBatch(emptySessionBatch));
+        Assert.Equal("STORE_CONSTRAINT_VIOLATED", sessionError.Code);
+        Assert.Contains("'session.session_id'", sessionError.Message, StringComparison.Ordinal);
+
+        CollectedRecord validRecord = BuildFullCollectedBatch("title", "plain text").Records[0];
+        CollectedBatch emptyRecordSessionBatch = new(
+            new CollectedSource("claude-code", SourceKind.File, "/tmp/a.jsonl"),
+            [],
+            [validRecord with { SessionKey = string.Empty }],
+            []);
+        DashValidationException recordError = Assert.Throws<DashValidationException>(() => store.WriteBatch(emptyRecordSessionBatch));
+        Assert.Equal("STORE_CONSTRAINT_VIOLATED", recordError.Code);
+        Assert.Contains("'record_session_link.session_key'", recordError.Message, StringComparison.Ordinal);
+
+        Assert.Empty(store.ExecutedSql);
     }
 
     private static string NewNonExistentRoot() =>

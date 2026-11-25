@@ -43,7 +43,12 @@ public sealed class ReviewTaskGatesRepositoryConfigTests
         string[] roles =
         [
             // These roles do not map to one technology, so they keep an agent-keyed entry that the
-            // resolver reads first.
+            // resolver reads first. The three developer tiers take the task's difficulty as their
+            // agent name, and a task may name no technology at all, so each aliases every technology
+            // gate; TaskGatesRepositoryConfigTests keeps that union whole.
+            "dev-easy",
+            "dev-medium",
+            "dev-hard",
             "sql-database-architect",
             "test-dev",
 

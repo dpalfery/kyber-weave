@@ -8,6 +8,7 @@ import {
   formatCostFigure,
   normalizeCostBlock,
   STATUS_WORDS,
+  STATUS_EXPLANATIONS,
   type CostBlock,
   type CostStatus,
 } from './SessionCostPanel.js'
@@ -629,6 +630,37 @@ describe('SessionCostPanel: fed by the summary section', () => {
 
     expect(findByTestId(element, 'cost-basis-mismatch-warning')).toBeDefined()
     expect(html).toContain('refusing to blend them into one total')
+  })
+})
+
+describe('SessionCostPanel: STATUS_EXPLANATIONS in the tile', () => {
+  it.each([
+    ['not_billed', 'Model is explicitly not billed by provider.'],
+    ['out_of_scope', 'No KyberDash price table covers this harness, so its cost is not estimated.'],
+    ['no_rate', 'No published rate available for this model.'],
+    ['partial', 'Only a portion of turns could be priced.'],
+  ] as const)('renders the explanation for a %s block', (status, sentence) => {
+    const html = renderHtml(
+      React.createElement(SessionCostPanel, { cost: { basis: 'published', status } }),
+    )
+    expect(html).toContain(sentence)
+  })
+
+  it('explains out_of_scope with the price-table sentence', () => {
+    expect(STATUS_EXPLANATIONS.out_of_scope).toBe(
+      'No KyberDash price table covers this harness, so its cost is not estimated.',
+    )
+  })
+
+  it('renders no explanation for a priced block', () => {
+    const html = renderHtml(
+      React.createElement(SessionCostPanel, {
+        cost: { basis: 'published', status: 'priced', value: 0.185, currency: 'USD' },
+      }),
+    )
+    for (const explanation of Object.values(STATUS_EXPLANATIONS)) {
+      expect(html).not.toContain(explanation)
+    }
   })
 })
 

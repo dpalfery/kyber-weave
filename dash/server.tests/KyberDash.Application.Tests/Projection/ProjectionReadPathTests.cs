@@ -4,6 +4,7 @@ using KyberDash.Application.Tests;
 using KyberDash.Application.Tests.Fakes;
 using KyberDash.Contracts.Repositories;
 using KyberDash.Data.Collector;
+using KyberDash.Data.Repositories;
 using KyberDash.Domain;
 using Xunit;
 
@@ -47,7 +48,6 @@ public class ProjectionReadPathTests
             "sess-b",
             "codex",
             [Turn("span-b-1", "sess-b", 0, harnessId: "codex", inputTokens: 300, outputTokens: 30, parts: [TextPart(0, betaFirstText)])]);
-        store.SetWriteMarker(1);
         _ = engine.ProjectIncremental();
 
         WriteSession(
@@ -55,8 +55,7 @@ public class ProjectionReadPathTests
             "sess-b",
             "codex",
             [Turn("span-b-2", "sess-b", 1, harnessId: "codex", inputTokens: 200, outputTokens: 20, parts: [TextPart(0, betaSecondText)])]);
-        store.SetWriteMarker(2);
-        store.SetProjectionDirtyState(new DirtyProjectionState(FromSeq: 1, ToSeq: 2, Keys: ["sess-b"], IsWildcard: false));
+        MarkSessionsDirty(store, "sess-b");
         store.ClearReadLog();
 
         ProjectionPassReport pass = engine.ProjectIncremental();
@@ -160,14 +159,12 @@ public class ProjectionReadPathTests
                 Turn("span-big-2", "sess-big", 1, harnessId: "codex", inputTokens: 100, outputTokens: 10),
                 Turn("span-big-3", "sess-big", 2, harnessId: "codex", inputTokens: 100, outputTokens: 10),
             ]);
-        store.SetWriteMarker(1);
         ProjectionPassReport full = engine.ProjectIncremental();
         Assert.Equal(2, full.Built);
 
         WriteSession(store, "sess-small", "claude-code", [Turn("span-small-2", "sess-small", 1, harnessId: "claude-code", inputTokens: 100, outputTokens: 10)]);
         WriteSession(store, "sess-big", "codex", [Turn("span-big-4", "sess-big", 3, harnessId: "codex", inputTokens: 100, outputTokens: 10)]);
-        store.SetWriteMarker(2);
-        store.SetProjectionDirtyState(new DirtyProjectionState(FromSeq: 1, ToSeq: 2, Keys: ["sess-small", "sess-big"], IsWildcard: false));
+        MarkSessionsDirty(store, "sess-small", "sess-big");
 
         StoredSessionProjection? bigBefore = store.GetSessionProjection("sess-big");
         Assert.NotNull(bigBefore);
@@ -210,7 +207,6 @@ public class ProjectionReadPathTests
         WriteSession(store, "sess-b", "claude-code", [Turn("span-b-1", "sess-b", 0), Turn("span-b-2", "sess-b", 1)]);
         WriteSession(store, "sess-c", "claude-code", [Turn("span-c-1", "sess-c", 0), Turn("span-c-2", "sess-c", 1)]);
         WriteSession(store, "sess-d", "claude-code", [Turn("span-d-1", "sess-d", 0), Turn("span-d-2", "sess-d", 1)]);
-        store.SetWriteMarker(1);
 
         ProjectionPassReport firstPass = engine.ProjectIncrementalForReads();
 
@@ -250,7 +246,6 @@ public class ProjectionReadPathTests
         WriteSession(store, "sess-a", "claude-code", [Turn("span-a-1", "sess-a", 0), Turn("span-a-2", "sess-a", 1)]);
         WriteSession(store, "sess-b", "claude-code", [Turn("span-b-1", "sess-b", 0), Turn("span-b-2", "sess-b", 1)]);
         WriteSession(store, "sess-c", "claude-code", [Turn("span-c-1", "sess-c", 0), Turn("span-c-2", "sess-c", 1)]);
-        store.SetWriteMarker(1);
 
         ProjectionPassReport firstPass = engine.ProjectIncrementalForReads();
         Assert.Equal(["sess-a"], firstPass.RebuiltKeys);
@@ -281,12 +276,10 @@ public class ProjectionReadPathTests
 
         WriteSession(store, "sess-a", "claude-code", [Turn("span-a-1", "sess-a", 0, harnessId: "claude-code", inputTokens: 100, outputTokens: 10)]);
         WriteSession(store, "sess-b", "codex", [Turn("span-b-1", "sess-b", 0, harnessId: "codex", inputTokens: 100, outputTokens: 10)]);
-        store.SetWriteMarker(1);
         _ = NewEngine(store).ProjectIncremental();
 
         WriteSession(store, "sess-b", "codex", [Turn("span-b-2", "sess-b", 1, harnessId: "codex", inputTokens: 100, outputTokens: 10)]);
-        store.SetWriteMarker(2);
-        store.SetProjectionDirtyState(new DirtyProjectionState(FromSeq: 1, ToSeq: 2, Keys: ["sess-b"], IsWildcard: false));
+        MarkSessionsDirty(store, "sess-b");
 
         using GateReader reader = new(store);
         CanonSessionProjectorEngine projector = new(reader, store, store, pricing, new FakeTextTokenizer());
@@ -310,8 +303,7 @@ public class ProjectionReadPathTests
         await AwaitForCompletion(firstPass);
 
         WriteSession(store, "sess-a", "claude-code", [Turn("span-a-2", "sess-a", 1, harnessId: "claude-code", inputTokens: 100, outputTokens: 10)]);
-        store.SetWriteMarker(3);
-        store.SetProjectionDirtyState(new DirtyProjectionState(FromSeq: 2, ToSeq: 3, Keys: ["sess-a"], IsWildcard: false));
+        MarkSessionsDirty(store, "sess-a");
         bridge.EnsureProjected();
         Assert.Null(store.GetProjectionDirtyState());
     }
@@ -345,7 +337,6 @@ public class ProjectionReadPathTests
                 Turn("span-big-2", "sess-big", 1, harnessId: "codex", inputTokens: 100, outputTokens: 10),
                 Turn("span-big-3", "sess-big", 2, harnessId: "codex", inputTokens: 100, outputTokens: 10),
             ]);
-        store.SetWriteMarker(1);
 
         JsonElement coverage = bridge.GetCoverage();
 
@@ -368,7 +359,6 @@ public class ProjectionReadPathTests
     {
         InMemoryRelationalStore store = new();
         WriteSession(store, "sess-a", "claude-code", [Turn("span-a-1", "sess-a", 0, harnessId: "claude-code", inputTokens: 100, outputTokens: 10)]);
-        store.SetWriteMarker(1);
 
         FaultingAttributionReader reader = new(store);
         CanonSessionProjectorEngine engine = new(reader, store, store, new FakePricingRepository(), new FakeTextTokenizer());
@@ -409,13 +399,11 @@ public class ProjectionReadPathTests
                 Turn("span-big-2", "sess-big", 1, harnessId: "codex", inputTokens: 100, outputTokens: 10),
                 Turn("span-big-3", "sess-big", 2, harnessId: "codex", inputTokens: 100, outputTokens: 10),
             ]);
-        store.SetWriteMarker(1);
         _ = maintenanceEngine.ProjectIncremental();
 
         WriteSession(store, "sess-small", "claude-code", [Turn("span-small-2", "sess-small", 1, harnessId: "claude-code", inputTokens: 100, outputTokens: 10)]);
         WriteSession(store, "sess-big", "codex", [Turn("span-big-4", "sess-big", 3, harnessId: "codex", inputTokens: 100, outputTokens: 10)]);
-        store.SetWriteMarker(2);
-        store.SetProjectionDirtyState(new DirtyProjectionState(FromSeq: 1, ToSeq: 2, Keys: ["sess-small", "sess-big"], IsWildcard: false));
+        MarkSessionsDirty(store, "sess-small", "sess-big");
 
         CollectedRecord midPassSpan = Turn("span-small-3", "sess-small", 2, harnessId: "claude-code", inputTokens: 100, outputTokens: 10);
         MidPassIngestReader reader = new(store, "sess-small", midPassSpan);
@@ -450,7 +438,6 @@ public class ProjectionReadPathTests
         InMemoryRelationalStore store = new();
         FakePricingRepository pricing = new();
         WriteSession(store, "sess-a", "claude-code", [Turn("span-a-1", "sess-a", 0, harnessId: "claude-code", inputTokens: 400, outputTokens: 40)]);
-        store.SetWriteMarker(1);
         _ = NewEngine(store).ProjectIncremental();
 
         FaultingBatchFiguresReader reader = new(store);
@@ -481,8 +468,224 @@ public class ProjectionReadPathTests
         Assert.Equal(degradedRow, Assert.Single(recoveredPage.EnumerateArray()).GetRawText());
     }
 
+    /// <summary>
+    /// On a detector-version mismatch a budget-bounded read pass that defers keeps the stale
+    /// detector stamp, the next read pass continues with the deferred keys instead of restarting
+    /// from the first session, and the next maintenance pass rebuilds every session, restamps the
+    /// detector version, and leaves nothing dirty.
+    /// </summary>
+    [Fact]
+    public void AReadPassThatDefersOnADetectorMismatchLeavesTheStampStaleForTheMaintenancePass()
+    {
+        InMemoryRelationalStore store = new();
+        CanonSessionProjectorEngine engine = new(
+            store,
+            store,
+            store,
+            new FakePricingRepository(),
+            new FakeTextTokenizer(),
+            readPathPassRecordBudget: 1);
+        CanonProjectionService maintenance = NewService(store, engine);
+
+        WriteSession(store, "sess-a", "claude-code", [Turn("span-a-1", "sess-a", 0)]);
+        WriteSession(store, "sess-b", "claude-code", [Turn("span-b-1", "sess-b", 0)]);
+        WriteSession(store, "sess-c", "claude-code", [Turn("span-c-1", "sess-c", 0)]);
+        Assert.Equal(3, maintenance.ProjectIncremental().Built);
+        Assert.Equal(SqliteRelationalStore.DetectorVersion, store.GetStoreState()?.DetectorVersion);
+
+        int staleDetector = SqliteRelationalStore.DetectorVersion - 1;
+        store.SetStoreState(new StoreStateView(SqliteRelationalStore.SchemaVersion, staleDetector));
+        WriteSession(store, "sess-a", "claude-code", [Turn("span-a-2", "sess-a", 1)]);
+        WriteSession(store, "sess-b", "claude-code", [Turn("span-b-2", "sess-b", 1)]);
+        WriteSession(store, "sess-c", "claude-code", [Turn("span-c-2", "sess-c", 1)]);
+
+        ProjectionPassReport firstRead = engine.ProjectIncrementalForReads();
+        Assert.Equal(["sess-a"], firstRead.RebuiltKeys);
+        Assert.Equal(["sess-b", "sess-c"], firstRead.DeferredKeys);
+        Assert.Equal(staleDetector, store.GetStoreState()?.DetectorVersion);
+        Assert.False(engine.IsProjectionCurrent());
+
+        ProjectionPassReport secondRead = engine.ProjectIncrementalForReads();
+        Assert.Equal(["sess-b"], secondRead.RebuiltKeys);
+        Assert.Equal(["sess-c"], secondRead.DeferredKeys);
+        Assert.Equal(staleDetector, store.GetStoreState()?.DetectorVersion);
+
+        ProjectionPassReport full = maintenance.ProjectIncremental();
+        Assert.Equal(3, full.Built);
+        Assert.Empty(full.SkippedKeys);
+        Assert.Equal(SqliteRelationalStore.DetectorVersion, store.GetStoreState()?.DetectorVersion);
+        Assert.Null(store.GetProjectionDirtyState());
+        Assert.True(engine.IsProjectionCurrent());
+
+        ProjectionPassReport afterMaintenance = engine.ProjectIncrementalForReads();
+        Assert.Empty(afterMaintenance.RebuiltKeys);
+    }
+
+    /// <summary>
+    /// A stale detector stamp with no new records and nothing dirty is the maintenance pass's to
+    /// clear: repeated read passes rebuild nothing rather than restarting from the first session
+    /// on every request, and the stamp stays stale until a maintenance pass rebuilds the store.
+    /// </summary>
+    [Fact]
+    public void ReadPassesOnAStaleDetectorStampWithNothingDirtyRebuildNothing()
+    {
+        InMemoryRelationalStore store = new();
+        CanonSessionProjectorEngine engine = new(
+            store,
+            store,
+            store,
+            new FakePricingRepository(),
+            new FakeTextTokenizer(),
+            readPathPassRecordBudget: 1);
+
+        WriteSession(store, "sess-a", "claude-code", [Turn("span-a-1", "sess-a", 0)]);
+        WriteSession(store, "sess-b", "claude-code", [Turn("span-b-1", "sess-b", 0)]);
+        Assert.Equal(2, NewService(store, engine).ProjectIncremental().Built);
+
+        int staleDetector = SqliteRelationalStore.DetectorVersion - 1;
+        store.SetStoreState(new StoreStateView(SqliteRelationalStore.SchemaVersion, staleDetector));
+
+        Assert.Empty(engine.ProjectIncrementalForReads().RebuiltKeys);
+        Assert.Empty(engine.ProjectIncrementalForReads().RebuiltKeys);
+        Assert.Equal(staleDetector, store.GetStoreState()?.DetectorVersion);
+        Assert.False(engine.IsProjectionCurrent());
+    }
+
+    /// <summary>
+    /// Keys a read pass deferred keep the projection out of date for the maintenance pass even
+    /// when the detector stamp is current, so the maintenance pass rebuilds them instead of
+    /// short-circuiting on a watermark that matches the write marker.
+    /// </summary>
+    [Fact]
+    public void TheMaintenancePassRebuildsKeysAReadPassDeferred()
+    {
+        InMemoryRelationalStore store = new();
+        CanonSessionProjectorEngine engine = new(
+            store,
+            store,
+            store,
+            new FakePricingRepository(),
+            new FakeTextTokenizer(),
+            readPathPassRecordBudget: 1);
+
+        WriteSession(store, "sess-a", "claude-code", [Turn("span-a-1", "sess-a", 0)]);
+        WriteSession(store, "sess-b", "claude-code", [Turn("span-b-1", "sess-b", 0)]);
+        store.SetStoreState(new StoreStateView(SqliteRelationalStore.SchemaVersion, SqliteRelationalStore.DetectorVersion));
+
+        ProjectionPassReport readPass = engine.ProjectIncrementalForReads();
+        Assert.Equal(["sess-b"], readPass.DeferredKeys);
+        Assert.False(engine.IsProjectionCurrent());
+
+        ProjectionPassReport maintenancePass = NewService(store, engine).ProjectIncremental();
+        Assert.Equal(["sess-b"], maintenancePass.RebuiltKeys);
+        Assert.Null(store.GetProjectionDirtyState());
+        Assert.True(engine.IsProjectionCurrent());
+    }
+
+    /// <summary>
+    /// A read pass that defers a session with no dirty range stored before it writes the deferred
+    /// keys before it moves the watermark: a crash between the two write-back writes leaves the
+    /// projection out of date for the maintenance pass, never current with the deferred session
+    /// skipped.
+    /// </summary>
+    [Fact]
+    public void ACrashBetweenTheDeferredWriteBackWritesNeverLeavesTheProjectionCurrent()
+    {
+        InMemoryRelationalStore store = new();
+        CanonSessionProjectorEngine engine = new(
+            store,
+            store,
+            store,
+            new FakePricingRepository(),
+            new FakeTextTokenizer(),
+            readPathPassRecordBudget: 1);
+
+        WriteSession(store, "sess-a", "claude-code", [Turn("span-a-1", "sess-a", 0)]);
+        WriteSession(store, "sess-b", "claude-code", [Turn("span-b-1", "sess-b", 0)]);
+        store.SetStoreState(new StoreStateView(SqliteRelationalStore.SchemaVersion, SqliteRelationalStore.DetectorVersion));
+        store.ClearProjectionDirtyState();
+
+        int writeBackCalls = 0;
+        store.BeforeProjectionWriteBack = name =>
+        {
+            if (++writeBackCalls == 2)
+            {
+                throw new InvalidOperationException($"simulated crash before {name}");
+            }
+        };
+
+        Assert.Throws<InvalidOperationException>(() => engine.ProjectIncrementalForReads());
+        store.BeforeProjectionWriteBack = null;
+
+        Assert.False(engine.IsProjectionCurrent());
+        ProjectionPassReport maintenancePass = NewService(store, engine).ProjectIncremental();
+        Assert.Contains("sess-b", maintenancePass.RebuiltKeys);
+    }
+
+    /// <summary>
+    /// A dashboard read gates on the read-path check, not the maintenance check: with a stale
+    /// detector stamp, a current write marker, and a current schema, <see cref="KyberBridgeEngine.EnsureProjected"/>
+    /// starts no projection pass, while a write that moves the marker does start one.
+    /// </summary>
+    [Fact]
+    public void ADashboardReadWithAStaleDetectorStampStartsNoProjectionPass()
+    {
+        InMemoryRelationalStore store = new();
+        FakePricingRepository pricing = new();
+        CanonSessionProjectorEngine engine = new(store, store, store, pricing, new FakeTextTokenizer());
+        KyberBridgeEngine bridge = new(
+            store,
+            store,
+            store,
+            pricing,
+            engine,
+            new CanonRollupsEngine(store, store, pricing));
+
+        WriteSession(store, "sess-a", "claude-code", [Turn("span-a-1", "sess-a", 0)]);
+        Assert.Equal(1, NewService(store, engine).ProjectIncremental().Built);
+
+        int staleDetector = SqliteRelationalStore.DetectorVersion - 1;
+        store.SetStoreState(new StoreStateView(SqliteRelationalStore.SchemaVersion, staleDetector));
+        Assert.True(engine.IsProjectionCurrentForReads());
+        Assert.False(engine.IsProjectionCurrent());
+
+        store.ClearReadLog();
+        bridge.EnsureProjected();
+        bridge.EnsureProjected();
+        Assert.DoesNotContain(nameof(InMemoryRelationalStore.SessionAttributions), store.ReadLog);
+
+        WriteSession(store, "sess-a", "claude-code", [Turn("span-a-2", "sess-a", 1)]);
+        Assert.False(engine.IsProjectionCurrentForReads());
+
+        store.ClearReadLog();
+        bridge.EnsureProjected();
+        Assert.Contains(nameof(InMemoryRelationalStore.SessionAttributions), store.ReadLog);
+    }
+
+    private static CanonProjectionService NewService(InMemoryRelationalStore store, CanonSessionProjectorEngine engine) =>
+        new(store, store, store, engine, new CanonRollupsEngine(store, store, new FakePricingRepository()));
+
     private static CanonSessionProjectorEngine NewEngine(InMemoryRelationalStore store) =>
         new(store, store, store, new FakePricingRepository(), new FakeTextTokenizer());
+
+    /// <summary>
+    /// Arranges the dirty range the preceding writes already produced, against the store's real
+    /// watermarks: the range starts at the marker the last pass stamped and ends at the current
+    /// write marker, which is what <see cref="CanonSessionProjectorEngine"/> needs to take the
+    /// incremental path.
+    /// </summary>
+    /// <param name="store">Store whose projection and write watermarks frame the range.</param>
+    /// <param name="keys">Session keys the range marks dirty.</param>
+    private static void MarkSessionsDirty(InMemoryRelationalStore store, params string[] keys)
+    {
+        ProjectionStateView? projectionState = store.GetProjectionState();
+        Assert.NotNull(projectionState);
+        store.SetProjectionDirtyState(new DirtyProjectionState(
+            FromSeq: projectionState.RecordsMarker,
+            ToSeq: store.GetWriteMarker(),
+            Keys: keys,
+            IsWildcard: false));
+    }
 
     /// <summary>
     /// Awaits <paramref name="task"/> through a deadlock guard rather than a blocking wait: the
@@ -577,153 +780,11 @@ public class ProjectionReadPathTests
             OriginalUtf8BytesWhenTruncated: null);
 
     /// <summary>
-    /// Reader decorator delegating every member to the inner store, so test decorators override
-    /// only the member whose behaviour they inject.
-    /// </summary>
-    private abstract class DelegatingReader(InMemoryRelationalStore innerStore) : IRelationalStoreReader
-    {
-        /// <summary>The store every member delegates to.</summary>
-        protected readonly InMemoryRelationalStore inner = innerStore;
-
-        /// <inheritdoc />
-        public virtual IReadOnlyList<StoredSessionAttribution> SessionAttributions() => inner.SessionAttributions();
-
-        /// <inheritdoc />
-        public virtual IReadOnlyList<CollectedRecord> SessionRecordsForRebuild(string sessionKey) => inner.SessionRecordsForRebuild(sessionKey);
-
-        /// <inheritdoc />
-        public IReadOnlyList<CollectedRecord> AllSessionRecordsForMaintenance() => inner.AllSessionRecordsForMaintenance();
-
-        /// <inheritdoc />
-        public IReadOnlyList<string> Harnesses() => inner.Harnesses();
-
-        /// <inheritdoc />
-        public IReadOnlyList<StoredSource> Sources(string? harnessId = null) => inner.Sources(harnessId);
-
-        /// <inheritdoc />
-        public int CountRecords(string? harnessId = null) => inner.CountRecords(harnessId);
-
-        /// <inheritdoc />
-        public IReadOnlyList<StoredSourceCount> SourceRecordCounts() => inner.SourceRecordCounts();
-
-        public IReadOnlyList<string> SessionKeysWithRecordSource(string harnessId, string sourceName, int limit) =>
-            inner.SessionKeysWithRecordSource(harnessId, sourceName, limit);
-
-        /// <inheritdoc />
-        public CollectedRecord? RecordContentFree(string spanId) => inner.RecordContentFree(spanId);
-
-        /// <inheritdoc />
-        public string? SpanPromptText(string spanId) => inner.SpanPromptText(spanId);
-
-        /// <inheritdoc />
-        public IReadOnlyList<StoredTokenCount> TokenCounts(string? spanId = null, string? sessionKey = null) => inner.TokenCounts(spanId, sessionKey);
-
-        /// <inheritdoc />
-        public IReadOnlyList<StoredReportedTotal> ReportedTotals(string? spanId = null, string? sessionKey = null) => inner.ReportedTotals(spanId, sessionKey);
-
-        /// <inheritdoc />
-        public IReadOnlyList<StoredReportedCost> ReportedCosts(string? spanId = null, string? sessionKey = null) => inner.ReportedCosts(spanId, sessionKey);
-
-        /// <inheritdoc />
-        public IReadOnlyList<StoredSkillInvocation> SkillsInvoked(string? spanId = null, string? sessionKey = null) => inner.SkillsInvoked(spanId, sessionKey);
-
-        /// <inheritdoc />
-        public IReadOnlyList<StoredToolCall> ToolCalls(string? spanId = null, string? sessionKey = null) => inner.ToolCalls(spanId, sessionKey);
-
-        /// <inheritdoc />
-        public IReadOnlyList<StoredContentPart> TurnContentParts(
-            string sessionKey,
-            int? turnIndex = null,
-            string? spanId = null,
-            string? part = null,
-            int budget = 0,
-            bool full = false) =>
-            inner.TurnContentParts(sessionKey, turnIndex, spanId, part, budget, full);
-
-        /// <inheritdoc />
-        public int TurnContentPartCount(
-            string sessionKey,
-            int? turnIndex = null,
-            string? spanId = null,
-            string? part = null) =>
-            inner.TurnContentPartCount(sessionKey, turnIndex, spanId, part);
-
-        /// <inheritdoc />
-        public IReadOnlyList<StoredToolDefinition> ToolDefinitions(string? spanId = null, string? sessionKey = null) => inner.ToolDefinitions(spanId, sessionKey);
-
-        /// <inheritdoc />
-        public IReadOnlyList<StoredAgentInvocation> AgentInvocations(string? spanId = null, string? sessionKey = null) => inner.AgentInvocations(spanId, sessionKey);
-
-        /// <inheritdoc />
-        public IReadOnlyList<StoredRecordSignals> RecordSignals(string? spanId = null, string? sessionKey = null) => inner.RecordSignals(spanId, sessionKey);
-
-        /// <inheritdoc />
-        public CollectedSession? GetSession(string sessionKey) => inner.GetSession(sessionKey);
-
-        /// <inheritdoc />
-        public IReadOnlyList<CollectedSession> Sessions(string? harnessId = null) => inner.Sessions(harnessId);
-
-        /// <inheritdoc />
-        public IReadOnlyList<StoredSessionModelUsage> SessionModelUsages(string? sessionKey = null) => inner.SessionModelUsages(sessionKey);
-
-        /// <inheritdoc />
-        public StoredFieldsInventoryView StoredFieldsInventory(string sessionKey) => inner.StoredFieldsInventory(sessionKey);
-
-        /// <inheritdoc />
-        public StoredTableRows? StoredFieldsRows(string sessionKey, string table, int page, int limit) => inner.StoredFieldsRows(sessionKey, table, page, limit);
-
-        /// <inheritdoc />
-        public virtual IReadOnlyList<SessionListFigure> SessionListFigures(string? harnessId = null, IModelPricingLookup? pricing = null) => inner.SessionListFigures(harnessId, pricing);
-
-        /// <inheritdoc />
-        public virtual IReadOnlyList<SessionListFigure> SessionListFigures(IReadOnlyCollection<string> sessionKeys, IModelPricingLookup? pricing = null) => inner.SessionListFigures(sessionKeys, pricing);
-
-        /// <inheritdoc />
-        public SessionSummaryFigure? SessionSummaryFigures(string sessionKey, IModelPricingLookup? pricing = null) => inner.SessionSummaryFigures(sessionKey, pricing);
-
-        /// <inheritdoc />
-        public virtual IReadOnlyList<SessionReportFigure> SessionReportFigures(IReadOnlyCollection<string> sessionKeys, IModelPricingLookup? pricing = null) => inner.SessionReportFigures(sessionKeys, pricing);
-
-        /// <inheritdoc />
-        public ReadTimeTurnSummary? TurnFigures(string sessionKey, int turnIndex, IModelPricingLookup? pricing = null) => inner.TurnFigures(sessionKey, turnIndex, pricing);
-
-        /// <inheritdoc />
-        public virtual SessionTurnFigureSet? SessionTurnFigures(string sessionKey, IModelPricingLookup? pricing = null) => inner.SessionTurnFigures(sessionKey, pricing);
-
-        /// <inheritdoc />
-        public virtual SessionRequestFigurePageResult SessionRequestFigures(string sessionKey, int page, int limit) => inner.SessionRequestFigures(sessionKey, page, limit);
-
-        /// <inheritdoc />
-        public virtual SessionReconciliationFigurePageResult SessionReconciliationFigures(string sessionKey, int page, int limit) => inner.SessionReconciliationFigures(sessionKey, page, limit);
-
-        /// <inheritdoc />
-        public virtual SessionProblemPageResult SessionProblems(string sessionKey, int page, int limit) => inner.SessionProblems(sessionKey, page, limit);
-
-        /// <inheritdoc />
-        public IReadOnlyList<StoredRequestPromptPreview> RequestPromptPreviews(string sessionKey, IReadOnlyCollection<string> requestSpanIds) => inner.RequestPromptPreviews(sessionKey, requestSpanIds);
-
-        /// <inheritdoc />
-        public IReadOnlyList<CollectedRecord> SessionRecordsContentFree(string sessionKey) => inner.SessionRecordsContentFree(sessionKey);
-
-        /// <inheritdoc />
-        public IReadOnlyList<CollectedRecord> SessionTimelineRecords(string sessionKey) => inner.SessionTimelineRecords(sessionKey);
-
-        /// <inheritdoc />
-        public SessionToolFigureSet SessionToolFigures(string sessionKey, IModelPricingLookup? pricing = null) => inner.SessionToolFigures(sessionKey, pricing);
-
-        /// <inheritdoc />
-        public IReadOnlyList<StoredSkillInvocation> SessionSkillFigures(string sessionKey) => inner.SessionSkillFigures(sessionKey);
-
-        /// <inheritdoc />
-        public SessionKwSkillLoadPageResult SessionKwSkillLoads(string sessionKey, int page, int limit) => inner.SessionKwSkillLoads(sessionKey, page, limit);
-    }
-
-    /// <summary>
     /// Reader decorator holding the first projection pass inside
     /// <see cref="IRelationalStoreReader.SessionAttributions"/> until the test releases the gate,
     /// so a concurrent caller's behaviour is observed deterministically without timing.
     /// </summary>
-    private sealed class GateReader(InMemoryRelationalStore inner) : DelegatingReader(inner), IDisposable
+    private sealed class GateReader(InMemoryRelationalStore innerStore) : DelegatingRelationalStoreReader(innerStore), IDisposable
     {
         private readonly ManualResetEventSlim gate = new(false);
         private readonly TaskCompletionSource entered = new(TaskCreationOptions.RunContinuationsAsynchronously);
@@ -742,7 +803,7 @@ public class ProjectionReadPathTests
         {
             _ = entered.TrySetResult();
             gate.Wait();
-            return inner.SessionAttributions();
+            return innerStore.SessionAttributions();
         }
     }
 
@@ -750,7 +811,7 @@ public class ProjectionReadPathTests
     /// Reader decorator whose first attribution read faults, so a projection pass entering the
     /// single-flight slot throws mid-body; later reads delegate.
     /// </summary>
-    private sealed class FaultingAttributionReader(InMemoryRelationalStore inner) : DelegatingReader(inner)
+    private sealed class FaultingAttributionReader(InMemoryRelationalStore innerStore) : DelegatingRelationalStoreReader(innerStore)
     {
         private bool hasFaulted;
 
@@ -763,25 +824,24 @@ public class ProjectionReadPathTests
                 throw new InvalidOperationException("attribution read exploded");
             }
 
-            return inner.SessionAttributions();
+            return innerStore.SessionAttributions();
         }
     }
 
     /// <summary>
     /// Reader decorator ingesting one span for a session while that session's records are being
     /// read, so the span lands after the per-key read but before the pass writes its final
-    /// watermark: exactly the mid-pass ingestion window.
+    /// watermark: exactly the mid-pass ingestion window. The write moves the marker itself.
     /// </summary>
-    private sealed class MidPassIngestReader(InMemoryRelationalStore inner, string sessionKey, CollectedRecord midPassRecord) : DelegatingReader(inner)
+    private sealed class MidPassIngestReader(InMemoryRelationalStore innerStore, string sessionKey, CollectedRecord midPassRecord) : DelegatingRelationalStoreReader(innerStore)
     {
         /// <inheritdoc />
         public override IReadOnlyList<CollectedRecord> SessionRecordsForRebuild(string key)
         {
-            IReadOnlyList<CollectedRecord> records = inner.SessionRecordsForRebuild(key);
+            IReadOnlyList<CollectedRecord> records = innerStore.SessionRecordsForRebuild(key);
             if (string.Equals(key, sessionKey, StringComparison.Ordinal))
             {
-                WriteSession(inner, sessionKey, "claude-code", [midPassRecord]);
-                inner.SetWriteMarker(inner.GetWriteMarker() + 1);
+                WriteSession(innerStore, sessionKey, "claude-code", [midPassRecord]);
             }
 
             return records;
@@ -792,7 +852,7 @@ public class ProjectionReadPathTests
     /// Reader decorator whose first batched figures read faults with a transient store fault, so
     /// the session list degrades to per-session reads; later reads delegate.
     /// </summary>
-    private sealed class FaultingBatchFiguresReader(InMemoryRelationalStore inner) : DelegatingReader(inner)
+    private sealed class FaultingBatchFiguresReader(InMemoryRelationalStore innerStore) : DelegatingRelationalStoreReader(innerStore)
     {
         private bool hasFaulted;
 
@@ -805,7 +865,7 @@ public class ProjectionReadPathTests
                 throw new IOException("batched figures read exploded");
             }
 
-            return inner.SessionListFigures(sessionKeys, pricing);
+            return innerStore.SessionListFigures(sessionKeys, pricing);
         }
     }
 }

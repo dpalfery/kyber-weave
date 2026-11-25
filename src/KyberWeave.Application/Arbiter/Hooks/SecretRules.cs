@@ -1,3 +1,4 @@
+using System.Buffers;
 using System.Text;
 using System.Text.RegularExpressions;
 
@@ -11,8 +12,13 @@ namespace KyberWeave.Arbiter.Hooks;
 /// </summary>
 /// <remarks>
 /// The whole command text is matched, quotes and nested shell strings included, so wrapping a command in
-/// <c>bash -c</c>, <c>sh -c</c> or <c>pwsh -Command</c> escapes nothing. A command whose text cannot be read is
-/// refused rather than allowed, which is why <see cref="Refusal" /> catches its own failure. Listing a directory or
+/// <c>bash -c</c>, <c>sh -c</c> or <c>pwsh -Command</c> escapes nothing. Two readings are precise rather than
+/// word-based: a grep or rg call has its options parsed, so an option's value is never taken for the pattern or a
+/// file, and the heredoc body of a known interpreter that reads its script from standard input is judged as a script
+/// (the shell text in its string literals, its <c>$(...)</c> and backtick spans, the environment it prints) rather
+/// than line by line as shell steps. Every <c>open(...)</c> or <c>Path(...)</c> call anywhere in the command fails
+/// closed on each literal or assigned value it could open. A command whose text cannot be read is refused rather
+/// than allowed, which is why <see cref="Refusal" /> catches its own failure. Listing a directory or
 /// testing whether a file exists is not a read, and a value passed by reference (<c>"$VAR"</c>) never enters the
 /// transcript, so both are allowed.
 /// </remarks>
@@ -73,6 +79,60 @@ internal static partial class SecretRules
         "sudo", "command", "exec", "nohup", "time", "-c", "-command", "/c",
     };
 
+    /// <summary>The search programs whose options are parsed, so an option's value is never taken for the pattern or a file.</summary>
+    private static readonly HashSet<string> OptionParsedSearchPrograms = new(StringComparer.OrdinalIgnoreCase)
+    {
+        "grep", "egrep", "fgrep", "rg",
+    };
+
+    /// <summary>The short grep, egrep and fgrep options that take a value.</summary>
+    private static readonly SearchValues<char> GrepValueLetters = SearchValues.Create("efABCmdD");
+
+    /// <summary>
+    /// The short interpreter flags that take no value and name no script, so an interpreter given only these and
+    /// <c>-</c> still reads its script from a heredoc. Case matters: Python's <c>-u</c>, <c>-B</c>, <c>-I</c>,
+    /// <c>-s</c>, <c>-S</c>, <c>-q</c> and <c>-O</c>, and Perl's or Ruby's <c>-w</c>.
+    /// </summary>
+    private const string StandardInputFlagLetters = "uBIsSqOw";
+
+    /// <summary>The short rg options that take a value.</summary>
+    private static readonly SearchValues<char> RipgrepValueLetters = SearchValues.Create("efABCmdgtTMj");
+
+    /// <summary>The short grep and rg options that supply the pattern, so every free word is a file.</summary>
+    private static readonly SearchValues<char> SearchPatternLetters = SearchValues.Create("ef");
+
+    /// <summary>The short grep and rg options whose value names a file or a glob of files, so the value is judged.</summary>
+    private const string SearchJudgedLetters = "fg";
+
+    /// <summary>The long grep and rg options that take a value, as <c>--name=value</c> or as the next word.</summary>
+    private static readonly HashSet<string> SearchValueLongOptions = new(StringComparer.Ordinal)
+    {
+        "--regexp", "--file", "--after-context", "--before-context", "--context", "--max-count", "--glob", "--iglob",
+        "--include", "--exclude", "--type", "--type-not", "--exclude-from", "--include-from", "--ignore-file",
+    };
+
+    /// <summary>The long grep and rg options whose value names a file or a glob of files, so the value is judged.</summary>
+    private static readonly HashSet<string> SearchJudgedLongOptions = new(StringComparer.Ordinal)
+    {
+        "--file", "--exclude-from", "--include-from", "--ignore-file", "--glob", "--iglob", "--include", "--exclude",
+    };
+
+    /// <summary>The long grep and rg options that supply the pattern, so every free word is a file.</summary>
+    private static readonly HashSet<string> SearchPatternLongOptions = new(StringComparer.Ordinal)
+    {
+        "--regexp", "--file",
+    };
+
+    /// <summary>The characters a word is trimmed of before it is read as a program name, as <see cref="Words" /> trims.</summary>
+    private static readonly char[] WordEdges = ['(', ')', '{', '}', '`', ',', ';', '&', '|', '<', '>', '!'];
+
+    /// <summary>The characters that separate the words of a script expression once its literals are taken out.</summary>
+    private static readonly char[] ScriptWordSeparators =
+        [' ', '\t', '\r', '\n', ',', '+', '(', ')', '[', ']', '{', '}', '=', '\\', '*', '%'];
+
+    /// <summary>How deep quoted nested shell text is read again, so a pathological command cannot recurse forever.</summary>
+    private const int MaximumNesting = 8;
+
     /// <summary>The refusal this call earns, or null when it would put no secret into the transcript.</summary>
     internal static string? Refusal(WorkerGuardRules.ToolCall call)
     {
@@ -115,19 +175,82 @@ internal static partial class SecretRules
             return null;
         }
 
-        foreach (string step in Steps(command))
+        HeredocSplit split = SplitInterpreterHeredocs(command);
+        foreach (string step in Steps(split.Shell))
         {
-            if (ReadsSecretFile(step))
+            if (StepRefusal(step) is { } refusal)
             {
-                return RefusalText(SecretCase.ReadsSecretFile);
+                return refusal;
             }
+        }
 
-            if (PrintsStoredSecret(step))
+        foreach (ScriptBody body in split.Bodies)
+        {
+            if (ScriptBodyRefusal(body) is { } refusal)
+            {
+                return refusal;
+            }
+        }
+
+        return ScriptOpensSecretFile(command) ? RefusalText(SecretCase.ReadsSecretFile) : null;
+    }
+
+    /// <summary>The refusal one shell step earns, or null.</summary>
+    private static string? StepRefusal(string step)
+    {
+        if (ReadsSecretFile(step) || SearchReadsSecretFile(step))
+        {
+            return RefusalText(SecretCase.ReadsSecretFile);
+        }
+
+        if (PrintsStoredSecret(step))
+        {
+            return RefusalText(SecretCase.PrintsStoredSecret);
+        }
+
+        return PutsLiteralSecret(step) ? RefusalText(SecretCase.PutsLiteralSecret) : null;
+    }
+
+    /// <summary>
+    /// The refusal a known interpreter's heredoc body earns, or null. The body is a script, so its lines are not
+    /// read as shell readers; what the script could still expose is judged instead: shell text inside its string
+    /// literals (a <c>subprocess</c> or <c>os.system</c> call), read both line by line and across lines so a
+    /// triple-quoted or multi-line literal is judged too, the whole environment, and on each line the printing and
+    /// literal-secret checks a shell step gets. Every <c>$(...)</c> or backtick span in the body is judged as a shell
+    /// step whatever the delimiter: the shell expands an unquoted body first, and Ruby, Perl and a Node template
+    /// literal can run a backtick span as shell themselves.
+    /// </summary>
+    private static string? ScriptBodyRefusal(ScriptBody body)
+    {
+        IEnumerable<string> literals = QuotedLiteral().Matches(body.Text).Select(LiteralText)
+            .Concat(MultiLineLiteral().Matches(body.Text).Select(match => match.Groups["text"].Value));
+        if (Steps(string.Join(' ', literals))
+            .Any(literal => ReadsSecretFile(literal) || SearchReadsSecretFile(literal)))
+        {
+            return RefusalText(SecretCase.ReadsSecretFile);
+        }
+
+        if (WholeEnvironment().IsMatch(body.Text))
+        {
+            return RefusalText(SecretCase.PrintsStoredSecret);
+        }
+
+        foreach (string step in ExpandedCommands(body.Text).SelectMany(Steps))
+        {
+            if (StepRefusal(step) is { } refusal)
+            {
+                return refusal;
+            }
+        }
+
+        foreach (string line in body.Text.Split('\n'))
+        {
+            if (PrintsStoredSecret(line))
             {
                 return RefusalText(SecretCase.PrintsStoredSecret);
             }
 
-            if (PutsLiteralSecret(step))
+            if (PutsLiteralSecret(line))
             {
                 return RefusalText(SecretCase.PutsLiteralSecret);
             }
@@ -137,9 +260,11 @@ internal static partial class SecretRules
     }
 
     /// <summary>
-    /// Whether this step reads a secret file: a reading program takes one as an argument, a single <c>&lt;</c>
-    /// redirect feeds one to the step, or a script's <c>open(...)</c> call names one. Listing a directory and
-    /// testing a file names no reader, so neither is judged here.
+    /// Whether this step reads a secret file: a reading program takes one as an argument, or a single <c>&lt;</c>
+    /// redirect feeds one to the step. A grep or rg call is judged by <see cref="SearchReadsSecretFile" />, which
+    /// parses its options; the word scan here reads it too only when that parser found fewer search calls than the
+    /// step's words name, so a call the parser missed still fails closed. Listing a directory and testing a file
+    /// names no reader, so neither is judged here.
     /// </summary>
     private static bool ReadsSecretFile(string step)
     {
@@ -149,15 +274,38 @@ internal static partial class SecretRules
             return false;
         }
 
+        bool scanSearches = SearchCallsMissed(step, words);
         for (int index = 0; index < words.Length; index++)
         {
+            if (!scanSearches && OptionParsedSearchPrograms.Contains(ProgramName(words[index])))
+            {
+                continue;
+            }
+
             if (ReadsSecretFileArgument(words, index))
             {
                 return true;
             }
         }
 
-        return ReadsThroughInputRedirect(step) || ScriptOpensSecretFile(step);
+        return ReadsThroughInputRedirect(step);
+    }
+
+    /// <summary>
+    /// Whether the option parser found fewer grep or rg calls in this step than its words name, so the word scan
+    /// must read them as well.
+    /// </summary>
+    private static bool SearchCallsMissed(string step, string[] words)
+    {
+        int named = words.Count(word => OptionParsedSearchPrograms.Contains(ProgramName(word)));
+        if (named == 0)
+        {
+            return false;
+        }
+
+        List<SearchCall> calls = [];
+        FindSearchCalls(step, calls, 0);
+        return calls.Count < named;
     }
 
     /// <summary>Whether the program at this word reads a secret file among the arguments that follow it.</summary>
@@ -238,9 +386,575 @@ internal static partial class SecretRules
     private static bool ReadsThroughInputRedirect(string step) =>
         InputRedirect().Matches(step).Any(match => IsSecretFile(match.Groups["path"].Value));
 
-    /// <summary>Whether a script's <c>open(...)</c> call names a secret file as its argument.</summary>
-    private static bool ScriptOpensSecretFile(string step) =>
-        ScriptsOpenAFile().Matches(step).Any(match => IsSecretFile(match.Groups["path"].Value.Trim()));
+    /// <summary>
+    /// Whether a grep or rg call in this step reads a secret file, read from the step's raw text so a quoted
+    /// pattern is one word. Every call is found, a call inside a quoted nested shell string too.
+    /// </summary>
+    private static bool SearchReadsSecretFile(string step)
+    {
+        List<SearchCall> calls = [];
+        FindSearchCalls(step, calls, 0);
+        return calls.Any(SearchArgumentsReadSecretFile);
+    }
+
+    /// <summary>
+    /// The arguments of every grep or rg call in this text: a word that names one starts a call whose arguments are
+    /// the words after it, and a quoted word holding a space is read again as the shell text a nested shell runs.
+    /// </summary>
+    private static void FindSearchCalls(string text, List<SearchCall> calls, int depth)
+    {
+        if (depth > MaximumNesting)
+        {
+            return;
+        }
+
+        List<ShellWord> words = ShellWords(text);
+        for (int index = 0; index < words.Count; index++)
+        {
+            if (words[index].Quoted && words[index].Text.Any(char.IsWhiteSpace))
+            {
+                foreach (string nested in Steps(words[index].Text))
+                {
+                    FindSearchCalls(nested, calls, depth + 1);
+                }
+            }
+
+            string program = ProgramName(words[index].Text.Trim(WordEdges));
+            if (OptionParsedSearchPrograms.Contains(program))
+            {
+                calls.Add(new SearchCall(program, [.. words.Skip(index + 1).Select(word => word.Text)]));
+            }
+        }
+    }
+
+    /// <summary>
+    /// Whether grep or rg, given these arguments, reads a secret file. Options are parsed as the programs parse
+    /// them: a short bundle letter by letter, where the last letter that takes a value takes the rest of the bundle
+    /// or else the next word, and a long option its <c>=</c> value or the next word. A value that names a file or a
+    /// glob of files is judged wherever it stands. The first free word is the pattern unless <c>-e</c>,
+    /// <c>-f</c> or their long forms supplied one, and every other free word is a file. Which short options take a
+    /// value is the program's own: <c>-g</c>, <c>-t</c>, <c>-T</c>, <c>-M</c> and <c>-j</c> do in rg and are flags in
+    /// grep. An option this rule does not know is read as a flag, as before.
+    /// </summary>
+    private static bool SearchArgumentsReadSecretFile(SearchCall call)
+    {
+        string[] arguments = call.Arguments;
+        SearchValues<char> valueLetters = string.Equals(call.Program, "rg", StringComparison.OrdinalIgnoreCase)
+            ? RipgrepValueLetters
+            : GrepValueLetters;
+        bool patternSupplied = false;
+        bool optionsEnded = false;
+        List<string> free = [];
+        for (int index = 0; index < arguments.Length; index++)
+        {
+            string argument = arguments[index];
+            if (optionsEnded || argument.Length < 2 || argument[0] != '-')
+            {
+                free.Add(argument);
+                continue;
+            }
+
+            if (string.Equals(argument, "--", StringComparison.Ordinal))
+            {
+                optionsEnded = true;
+                continue;
+            }
+
+            if (argument.StartsWith("--", StringComparison.Ordinal))
+            {
+                int equals = argument.IndexOf('=', StringComparison.Ordinal);
+                string name = equals < 0 ? argument : argument[..equals];
+                string? value = equals < 0 ? null : argument[(equals + 1)..];
+                if (value is null && SearchValueLongOptions.Contains(name) && index + 1 < arguments.Length)
+                {
+                    value = arguments[++index];
+                }
+
+                patternSupplied |= SearchPatternLongOptions.Contains(name);
+                if (value is not null && SearchJudgedLongOptions.Contains(name) && IsSecretFile(value))
+                {
+                    return true;
+                }
+
+                continue;
+            }
+
+            string bundle = argument[1..];
+            int lastValueLetter = bundle.AsSpan().LastIndexOfAny(valueLetters);
+            string? next = lastValueLetter == bundle.Length - 1 && index + 1 < arguments.Length
+                ? arguments[++index]
+                : null;
+            patternSupplied |= bundle.AsSpan().ContainsAny(SearchPatternLetters);
+            foreach (char letter in SearchJudgedLetters)
+            {
+                int position = bundle.IndexOf(letter, StringComparison.Ordinal);
+                if (position < 0)
+                {
+                    continue;
+                }
+
+                string attached = bundle[(position + 1)..];
+                if ((attached.Length > 0 && IsSecretFile(attached)) || (next is not null && IsSecretFile(next)))
+                {
+                    return true;
+                }
+            }
+        }
+
+        return free.Skip(patternSupplied ? 0 : 1).Any(IsSecretFile);
+    }
+
+    /// <summary>
+    /// Whether an <c>open(...)</c> or <c>Path(...)</c> call anywhere in the command could open a secret file. It
+    /// fails closed: every quoted literal inside the call is judged, every value assigned anywhere in the command to
+    /// an identifier the call names is judged, and every other unquoted word in it is judged as a path. Only a first
+    /// argument that is one bare identifier never assigned in the command is not a path, because then the match was
+    /// the variable's own name.
+    /// </summary>
+    private static bool ScriptOpensSecretFile(string command)
+    {
+        foreach (Match call in FileOpeningCall().Matches(command))
+        {
+            int open = call.Index + call.Length - 1;
+            int close = MatchingParenthesis(command, open);
+            string argument = close < 0 ? command[(open + 1)..] : command[(open + 1)..close];
+            if (OpenedArgumentIsSecret(argument, command))
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    /// <summary>Whether the argument text of one <c>open(...)</c> or <c>Path(...)</c> call could name a secret file.</summary>
+    private static bool OpenedArgumentIsSecret(string argument, string command)
+    {
+        if (QuotedLiteral().Matches(argument).Select(LiteralText).Any(IsSecretFile))
+        {
+            return true;
+        }
+
+        string first = FirstArgument(argument).Trim();
+        bool loneIdentifier = Identifier().IsMatch(first);
+        foreach (string word in UnquotedWords(argument))
+        {
+            if (!Identifier().IsMatch(word))
+            {
+                if (IsSecretFile(word))
+                {
+                    return true;
+                }
+
+                continue;
+            }
+
+            if (AssignedValueIsSecret(word, command, new HashSet<string>(StringComparer.Ordinal)))
+            {
+                return true;
+            }
+
+            bool ownNameOnly = loneIdentifier && string.Equals(word, first, StringComparison.Ordinal);
+            if (!ownNameOnly && IsSecretFile(word))
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    /// <summary>
+    /// Whether any value assigned to this identifier anywhere in the command could name a secret file: every
+    /// quoted literal in the assigned value, every other unquoted word in it, and the values of the identifiers it
+    /// names in turn.
+    /// </summary>
+    private static bool AssignedValueIsSecret(string identifier, string command, HashSet<string> visited)
+    {
+        if (!visited.Add(identifier))
+        {
+            return false;
+        }
+
+        foreach (Match assignment in IdentifierAssignment().Matches(command))
+        {
+            if (!string.Equals(assignment.Groups["name"].Value, identifier, StringComparison.Ordinal))
+            {
+                continue;
+            }
+
+            string value = assignment.Groups["value"].Value;
+            if (QuotedLiteral().Matches(value).Select(LiteralText).Any(IsSecretFile))
+            {
+                return true;
+            }
+
+            foreach (string word in UnquotedWords(value))
+            {
+                bool secret = Identifier().IsMatch(word)
+                    ? AssignedValueIsSecret(word, command, visited)
+                    : IsSecretFile(word);
+                if (secret)
+                {
+                    return true;
+                }
+            }
+        }
+
+        return false;
+    }
+
+    /// <summary>The text of a call's first argument: everything before its first comma outside quotes and brackets.</summary>
+    private static string FirstArgument(string argument)
+    {
+        int depth = 0;
+        char quote = '\0';
+        for (int index = 0; index < argument.Length; index++)
+        {
+            char current = argument[index];
+            if (quote != '\0')
+            {
+                if (current == quote)
+                {
+                    quote = '\0';
+                }
+
+                continue;
+            }
+
+            switch (current)
+            {
+                case '"' or '\'':
+                    quote = current;
+                    break;
+                case '(' or '[' or '{':
+                    depth++;
+                    break;
+                case ')' or ']' or '}':
+                    depth--;
+                    break;
+                case ',' when depth == 0:
+                    return argument[..index];
+            }
+        }
+
+        return argument;
+    }
+
+    /// <summary>The words of a script's text once its quoted literals are taken out, split at its operators.</summary>
+    private static string[] UnquotedWords(string text) =>
+        QuotedLiteral().Replace(text, " ")
+            .Split(ScriptWordSeparators, StringSplitOptions.RemoveEmptyEntries)
+            .Select(word => word.Trim('"', '\'', '`'))
+            .Where(word => word.Length > 0)
+            .ToArray();
+
+    /// <summary>The text inside one quoted literal match.</summary>
+    private static string LiteralText(Match literal) =>
+        literal.Groups["single"].Value + literal.Groups["double"].Value;
+
+    /// <summary>
+    /// The command with each known script interpreter's heredoc body taken out of its shell text, and those bodies
+    /// apart. A heredoc counts only when its <c>&lt;&lt;</c> stands outside quotes, its delimiter is a plain word,
+    /// its terminator line is found, and the step that opens it runs <c>python</c>, <c>py</c>, <c>node</c>,
+    /// <c>ruby</c> or <c>perl</c> itself. Any other heredoc keeps its body lines in the shell text, as before.
+    /// </summary>
+    private static HeredocSplit SplitInterpreterHeredocs(string command)
+    {
+        StringBuilder shell = new();
+        List<ScriptBody> bodies = [];
+        List<PendingHeredoc> pending = [];
+        char quote = '\0';
+        int stepStart = 0;
+        for (int index = 0; index < command.Length; index++)
+        {
+            char current = command[index];
+            if (quote != '\0')
+            {
+                shell.Append(current);
+                if (current == quote)
+                {
+                    quote = '\0';
+                }
+
+                continue;
+            }
+
+            if (current is '"' or '\'')
+            {
+                quote = current;
+                shell.Append(current);
+                continue;
+            }
+
+            if (current == '<' && IsHeredocOperator(command, index)
+                && HeredocDelimiter(command, index + 2) is { } heredoc)
+            {
+                bool interpreter = IsInterpreterStep(command[stepStart..index]);
+                pending.Add(new PendingHeredoc(heredoc.Delimiter, heredoc.StripsTabs, interpreter));
+                shell.Append(command[index..heredoc.End]);
+                index = heredoc.End - 1;
+                continue;
+            }
+
+            shell.Append(current);
+            if (current is ';' or '&' or '|')
+            {
+                stepStart = index + 1;
+            }
+
+            if (current != '\n')
+            {
+                continue;
+            }
+
+            stepStart = index + 1;
+            int position = index + 1;
+            foreach (PendingHeredoc opened in pending)
+            {
+                if (HeredocBody(command, position, opened) is not { } body)
+                {
+                    shell.Append(command[position..]);
+                    position = command.Length;
+                    break;
+                }
+
+                if (opened.Interpreter)
+                {
+                    bodies.Add(new ScriptBody(command[position..body.BodyEnd]));
+                }
+                else
+                {
+                    shell.Append(command[position..body.After]);
+                }
+
+                position = body.After;
+            }
+
+            pending.Clear();
+            index = position - 1;
+            stepStart = position;
+        }
+
+        return new HeredocSplit(shell.ToString(), bodies);
+    }
+
+    /// <summary>Whether the <c>&lt;</c> at this index starts a <c>&lt;&lt;</c> heredoc rather than a here-string.</summary>
+    private static bool IsHeredocOperator(string command, int index) =>
+        index + 1 < command.Length
+        && command[index + 1] == '<'
+        && (index + 2 >= command.Length || command[index + 2] != '<')
+        && (index == 0 || command[index - 1] != '<');
+
+    /// <summary>
+    /// The heredoc delimiter that starts at this index, after the <c>&lt;&lt;</c>, or null when it is not a plain
+    /// word, so an arithmetic shift or an odd form is never read as a heredoc.
+    /// </summary>
+    private static HeredocOpening? HeredocDelimiter(string command, int start)
+    {
+        int position = start;
+        bool stripsTabs = position < command.Length && command[position] == '-';
+        if (stripsTabs)
+        {
+            position++;
+        }
+
+        while (position < command.Length && command[position] is ' ' or '\t')
+        {
+            position++;
+        }
+
+        StringBuilder delimiter = new();
+        while (position < command.Length)
+        {
+            char current = command[position];
+            if (current is '"' or '\'')
+            {
+                int close = command.IndexOf(current, position + 1);
+                if (close < 0)
+                {
+                    return null;
+                }
+
+                delimiter.Append(command, position + 1, close - position - 1);
+                position = close + 1;
+                continue;
+            }
+
+            if (current == '\\')
+            {
+                position++;
+                continue;
+            }
+
+            if (char.IsWhiteSpace(current) || current is ';' or '&' or '|' or '<' or '>' or '(' or ')')
+            {
+                break;
+            }
+
+            delimiter.Append(current);
+            position++;
+        }
+
+        string word = delimiter.ToString();
+        return Identifier().IsMatch(word) ? new HeredocOpening(word, stripsTabs, position) : null;
+    }
+
+    /// <summary>The body of a heredoc that starts at this index, or null when its terminator line never comes.</summary>
+    private static HeredocExtent? HeredocBody(string command, int start, PendingHeredoc heredoc)
+    {
+        int lineStart = start;
+        while (lineStart <= command.Length)
+        {
+            int newline = command.IndexOf('\n', lineStart);
+            int lineEnd = newline < 0 ? command.Length : newline;
+            string line = command[lineStart..lineEnd].TrimEnd('\r');
+            if (heredoc.StripsTabs)
+            {
+                line = line.TrimStart('\t');
+            }
+
+            if (string.Equals(line, heredoc.Delimiter, StringComparison.Ordinal))
+            {
+                return new HeredocExtent(lineStart, newline < 0 ? command.Length : newline + 1);
+            }
+
+            if (newline < 0)
+            {
+                return null;
+            }
+
+            lineStart = newline + 1;
+        }
+
+        return null;
+    }
+
+    /// <summary>
+    /// Whether the step that opens a heredoc runs a known script interpreter itself, past any wrapper or
+    /// <c>NAME=value</c> word before it, that reads its script from standard input: nothing follows the interpreter
+    /// but <c>-</c> and plain flags. An interpreter given <c>-c</c>, <c>-e</c>, <c>-m</c>, a script file or any other
+    /// word has a script of its own, so the heredoc is data it may hand to a shell, and its lines stay shell steps.
+    /// </summary>
+    private static bool IsInterpreterStep(string step)
+    {
+        string[] words =
+        [
+            .. step.Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries)
+                .Select(token => token.Trim(WordEdges))
+                .Where(word => word.Length > 0),
+        ];
+        for (int index = 0; index < words.Length; index++)
+        {
+            string word = words[index];
+            if (CommandWrappers.Contains(word) || EnvironmentAssignmentWord().IsMatch(word))
+            {
+                continue;
+            }
+
+            return InterpreterProgram().IsMatch(ProgramName(word))
+                && words[(index + 1)..].All(IsStandardInputScriptFlag);
+        }
+
+        return false;
+    }
+
+    /// <summary>
+    /// Whether a word after an interpreter leaves it reading its script from standard input: <c>-</c> itself, or a
+    /// bundle of short flags that take no value and name no script.
+    /// </summary>
+    private static bool IsStandardInputScriptFlag(string word) =>
+        string.Equals(word, "-", StringComparison.Ordinal)
+        || (word.Length > 1 && word[0] == '-' && word[1..].All(letter => StandardInputFlagLetters.Contains(letter, StringComparison.Ordinal)));
+
+    /// <summary>
+    /// The commands a heredoc body could run as shell: each <c>$(...)</c> and backtick span, which the shell runs
+    /// while it expands an unquoted body and Ruby, Perl or a Node template literal can run itself. Quotes do not
+    /// protect text in a heredoc body, so none is skipped; a span that never closes runs to the end.
+    /// </summary>
+    private static List<string> ExpandedCommands(string body)
+    {
+        List<string> commands = [];
+        for (int index = 0; index < body.Length; index++)
+        {
+            if (body[index] == '$' && index + 1 < body.Length && body[index + 1] == '(')
+            {
+                int close = MatchingParenthesis(body, index + 1);
+                commands.Add(close < 0 ? body[(index + 2)..] : body[(index + 2)..close]);
+                index = close < 0 ? body.Length : close;
+                continue;
+            }
+
+            if (body[index] == '`')
+            {
+                int close = body.IndexOf('`', index + 1);
+                commands.Add(close < 0 ? body[(index + 1)..] : body[(index + 1)..close]);
+                index = close < 0 ? body.Length : close;
+            }
+        }
+
+        return commands;
+    }
+
+    /// <summary>
+    /// The step's words as a shell reads them: split at whitespace outside quotes, with the quote characters taken
+    /// out, and marked when any part of the word was quoted.
+    /// </summary>
+    private static List<ShellWord> ShellWords(string text)
+    {
+        List<ShellWord> words = [];
+        StringBuilder word = new();
+        bool started = false;
+        bool quoted = false;
+        char quote = '\0';
+        foreach (char current in text)
+        {
+            if (quote != '\0')
+            {
+                if (current == quote)
+                {
+                    quote = '\0';
+                }
+                else
+                {
+                    word.Append(current);
+                }
+
+                continue;
+            }
+
+            if (current is '"' or '\'')
+            {
+                quote = current;
+                quoted = true;
+                started = true;
+                continue;
+            }
+
+            if (char.IsWhiteSpace(current))
+            {
+                if (started)
+                {
+                    words.Add(new ShellWord(word.ToString(), quoted));
+                    word.Clear();
+                    started = false;
+                    quoted = false;
+                }
+
+                continue;
+            }
+
+            word.Append(current);
+            started = true;
+        }
+
+        if (started)
+        {
+            words.Add(new ShellWord(word.ToString(), quoted));
+        }
+
+        return words;
+    }
 
     /// <summary>Whether this step prints a secret from a store: a secret manager, a process environment, or a
     /// variable whose name says it holds one.</summary>
@@ -685,6 +1399,56 @@ internal static partial class SecretRules
         UnreadableCommand,
     }
 
+    /// <summary>One word of a step as a shell reads it, and whether any part of it was quoted.</summary>
+    private readonly record struct ShellWord(string Text, bool Quoted);
+
+    /// <summary>A known interpreter's heredoc body, the script that interpreter reads from its standard input.</summary>
+    private sealed record ScriptBody(string Text);
+
+    /// <summary>The command's shell text with interpreter heredoc bodies taken out, and those bodies.</summary>
+    private sealed record HeredocSplit(string Shell, IReadOnlyList<ScriptBody> Bodies);
+
+    /// <summary>A heredoc opened on the current line whose body starts on the next.</summary>
+    private sealed record PendingHeredoc(string Delimiter, bool StripsTabs, bool Interpreter);
+
+    /// <summary>A heredoc's delimiter as written after <c>&lt;&lt;</c>, and the index just past it.</summary>
+    private sealed record HeredocOpening(string Delimiter, bool StripsTabs, int End);
+
+    /// <summary>One grep, egrep, fgrep or rg call: the program it runs and the words after it.</summary>
+    private sealed record SearchCall(string Program, string[] Arguments);
+
+    /// <summary>Where a heredoc's body ends and where the text after its terminator line starts.</summary>
+    private readonly record struct HeredocExtent(int BodyEnd, int After);
+
+    /// <summary>A single- or double-quoted literal on one line.</summary>
+    [GeneratedRegex(@"'(?<single>[^'\r\n]*)'|""(?<double>[^""\r\n]*)""")]
+    private static partial Regex QuotedLiteral();
+
+    /// <summary>
+    /// A string literal read across lines: a triple-quoted one first, else a single- or double-quoted one that may
+    /// span lines, so the shell text a script keeps in a multi-line literal is judged too.
+    /// </summary>
+    [GeneratedRegex(@"'''(?<text>[\s\S]*?)'''|""""""(?<text>[\s\S]*?)""""""|'(?<text>[^']*)'|""(?<text>[^""]*)""")]
+    private static partial Regex MultiLineLiteral();
+
+    /// <summary>A script call that opens a file by the path it is given: <c>open(</c> or <c>Path(</c>.</summary>
+    [GeneratedRegex(@"(?i)\b(?:open|path)\s*\(")]
+    private static partial Regex FileOpeningCall();
+
+    [GeneratedRegex(@"^[A-Za-z_][A-Za-z0-9_]*$")]
+    private static partial Regex Identifier();
+
+    /// <summary>An assignment to a name, in a script or a shell, with the value up to the end of its statement.</summary>
+    [GeneratedRegex(@"(?<![A-Za-z0-9_])(?<name>[A-Za-z_][A-Za-z0-9_]*)\s*\+?=(?!=)(?<value>(?:'[^'\r\n]*'|""[^""\r\n]*""|[^'""\r\n;])*)")]
+    private static partial Regex IdentifierAssignment();
+
+    [GeneratedRegex(@"^[A-Za-z_][A-Za-z0-9_]*=")]
+    private static partial Regex EnvironmentAssignmentWord();
+
+    /// <summary>The script interpreters whose heredoc body is a script rather than shell lines.</summary>
+    [GeneratedRegex(@"(?i)^(?:python(?:[0-9]+(?:\.[0-9]+)*)?|py|node|ruby|perl)(?:\.exe)?$")]
+    private static partial Regex InterpreterProgram();
+
     [GeneratedRegex(@"(?i)\bdotnet\s+user-secrets\s+list\b")]
     private static partial Regex UserSecretsList();
 
@@ -726,9 +1490,6 @@ internal static partial class SecretRules
 
     [GeneratedRegex(@"(?<!<)<(?!<)\s*(?<path>[^\s<>]+)")]
     private static partial Regex InputRedirect();
-
-    [GeneratedRegex(@"(?i)\bopen\s*\(\s*(?<path>[^,)\r\n]*)")]
-    private static partial Regex ScriptsOpenAFile();
 
     [GeneratedRegex(@"(?i)\b(?:echo|printf|write-output|write-host)\b")]
     private static partial Regex PrintingWord();

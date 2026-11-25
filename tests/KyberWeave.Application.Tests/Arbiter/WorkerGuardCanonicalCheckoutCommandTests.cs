@@ -68,6 +68,20 @@ public sealed class WorkerGuardCanonicalCheckoutCommandTests
             reason);
     }
 
+    /// <summary>Defect 9: with two live runs the refusal names both worktrees, not just the first run's.</summary>
+    [Fact]
+    public void ACommandFromTheCanonicalCheckoutWithTwoLiveRunsNamesBothWorktreesAndIsRefused()
+    {
+        StartRun();
+        string other = StartSecondRun();
+
+        string reason = DenialReason(Guard("copilot-cli", Copilot(_repo, "dotnet test")));
+
+        Assert.StartsWith(RuleId, reason, StringComparison.Ordinal);
+        Assert.Contains(_worktree, reason, StringComparison.Ordinal);
+        Assert.Contains(other, reason, StringComparison.Ordinal);
+    }
+
     [Fact]
     public void AChangeDirectoryIntoTheCanonicalCheckoutIsRefusedFromTheRunWorktree()
     {
@@ -427,6 +441,25 @@ public sealed class WorkerGuardCanonicalCheckoutCommandTests
             Branch,
             "origin/main",
             new RunStartPlace(Path.Combine(_repo, ".git"), _worktree, DateTimeOffset.UnixEpoch));
+
+    /// <summary>A second live run of the same repository, in a worktree of its own; returns that worktree.</summary>
+    private string StartSecondRun()
+    {
+        const string OtherBranch = "copilot/fix/other";
+        string other = Path.Combine(_files.Root, "kw", "repo.worktrees", "fix-other");
+        _files.CreateDirectory(Path.Combine(other, "src"));
+        _files.WriteAllText(
+            Path.Combine(other, ".git"),
+            $"gitdir: {Path.Combine(_repo, ".git", "worktrees", "fix-other")}\n");
+        _files.CreateDirectory(Path.Combine(_repo, ".git", "worktrees", "fix-other"));
+        _files.WriteAllText(Path.Combine(_repo, ".git", "worktrees", "fix-other", "HEAD"), $"ref: refs/heads/{OtherBranch}\n");
+        new FileRunStateStore(_files, new FakeCheckedOutBranchReader(), new FakePathResolver(_files), _environment).Write(
+            _home,
+            OtherBranch,
+            "origin/main",
+            new RunStartPlace(Path.Combine(_repo, ".git"), other, DateTimeOffset.UnixEpoch.AddHours(1)));
+        return other;
+    }
 
     private string Guard(string harness, string json)
     {

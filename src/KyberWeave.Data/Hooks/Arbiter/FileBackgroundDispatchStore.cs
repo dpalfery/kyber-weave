@@ -3,6 +3,7 @@ using System.Text;
 using System.Text.Json;
 using KyberWeave.Arbiter.Hooks;
 using KyberWeave.Contracts.Repositories;
+using KyberWeave.Core.FileSystem;
 
 namespace KyberWeave.Data.Hooks.Arbiter;
 
@@ -10,11 +11,13 @@ namespace KyberWeave.Data.Hooks.Arbiter;
 /// The background dispatch records, one JSON file per agent under <c>&lt;arbiter directory&gt;/background/</c>. The
 /// file name is a digest of the session and a digest of the agent id, so one session's records share a prefix and no
 /// harness-supplied text reaches the file system. A record is written to a temporary file and moved into place, so a
-/// reader never sees half of one. Records older than a week are pruned, at most once an hour.
+/// reader never sees half of one. Records older than a week are pruned, at most once an hour. The reports kept for
+/// agents with no followed dispatch live the same way under <c>&lt;arbiter directory&gt;/background-kept/</c>.
 /// </summary>
 public sealed class FileBackgroundDispatchStore(IWritableFileSystem files, TimeProvider time, IIdGenerator ids) : IBackgroundDispatchStore
 {
     private const string FolderName = "background";
+    private const string KeptFolderName = "background-kept";
     private const string PruneMarker = ".last-prune";
     private const int SessionKeyLength = 16;
 
@@ -61,13 +64,69 @@ public sealed class FileBackgroundDispatchStore(IWritableFileSystem files, TimeP
             .Where(record => string.Equals(record.Dispatch.SessionId, sessionId, StringComparison.Ordinal))];
     }
 
+    /// <inheritdoc/>
+    /// <remarks>
+    /// A kept report lives in the sibling <c>background-kept/</c> folder, under the same session and agent file name a
+    /// record uses, so <see cref="ForSession"/> never reads one as a followed dispatch. It is written and pruned the
+    /// way a record is: through a temporary file moved into place, and swept after a week when no post takes it.
+    /// </remarks>
+    public void Keep(string arbiterDirectory, string sessionId, string agentId, string message)
+    {
+        ArgumentNullException.ThrowIfNull(arbiterDirectory);
+        ArgumentNullException.ThrowIfNull(sessionId);
+        ArgumentNullException.ThrowIfNull(agentId);
+        ArgumentNullException.ThrowIfNull(message);
+        string directory = Path.Combine(arbiterDirectory, KeptFolderName);
+        files.CreateDirectory(directory);
+        PruneStale(directory);
+        string path = Path.Combine(directory, FileNameOf(sessionId, agentId));
+        string temp = Path.Combine(directory, $".{ids.NewGuid():N}.tmp");
+        files.WriteAllText(temp, JsonSerializer.Serialize(message));
+        files.MoveFile(temp, path, overwrite: true);
+    }
+
+    /// <inheritdoc/>
+    public string? Take(string arbiterDirectory, string sessionId, string agentId)
+    {
+        ArgumentNullException.ThrowIfNull(arbiterDirectory);
+        ArgumentNullException.ThrowIfNull(sessionId);
+        ArgumentNullException.ThrowIfNull(agentId);
+        string path = Path.Combine(arbiterDirectory, KeptFolderName, FileNameOf(sessionId, agentId));
+        string? message;
+        try
+        {
+            message = JsonSerializer.Deserialize<string>(files.ReadAllText(path));
+        }
+        catch (Exception ex) when (ex is FileNotFoundException or DirectoryNotFoundException)
+        {
+            return null;
+        }
+        catch (Exception ex) when (FileFailure.Is(ex) || ex is JsonException)
+        {
+            // An unreadable kept report is no report; it is removed below so it is not read again.
+            message = null;
+        }
+
+        // Taking removes the report, so a second completed event for the same agent finds none and records nothing.
+        try
+        {
+            files.DeleteFile(path);
+        }
+        catch (Exception ex) when (FileFailure.Is(ex))
+        {
+            // Removing an unreadable report is best-effort; permission-denied deletions must not crash the hook.
+        }
+
+        return message;
+    }
+
     private BackgroundDispatchRecord? Read(string path)
     {
         try
         {
             return JsonSerializer.Deserialize<BackgroundDispatchRecord>(files.ReadAllText(path));
         }
-        catch (Exception ex) when (ex is FileNotFoundException or DirectoryNotFoundException or JsonException)
+        catch (Exception ex) when (FileFailure.Is(ex) || ex is JsonException)
         {
             // A record that is gone or unreadable is an agent the Arbiter is not following.
             return null;

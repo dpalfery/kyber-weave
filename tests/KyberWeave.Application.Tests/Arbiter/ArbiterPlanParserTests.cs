@@ -248,6 +248,86 @@ public sealed class ArbiterPlanParserTests
     }
 
     /// <summary>
+    /// A Files bullet's description is prose, not file scope: the version expression and the matrix
+    /// key it names are not paths. Both match the path rule's file-extension shape, so before the fix
+    /// they were returned with the bullet's directory in front of them and a task that edits one
+    /// workflow file took scope of two files that do not exist.
+    /// </summary>
+    [Fact]
+    public void FilesBulletDescriptionNamesAreNotPaths()
+    {
+        PlanDocument parsed = PlanDocumentParser.Parse(
+            """
+            ## Tasks
+
+            ### T1: Release workflow
+
+            - **Files:**
+              - `.github/workflows/release.yml`: reads `process.env.VERSION` and `matrix.target`.
+            """);
+
+        Assert.Equal([".github/workflows/release.yml"], Task(parsed, "T1").Files);
+    }
+
+    /// <summary>
+    /// A description may still name a path: a span with a slash is file scope wherever it sits in
+    /// the bullet, and it is taken as written rather than under the lead path's directory.
+    /// </summary>
+    [Fact]
+    public void FilesBulletDescriptionSpanWithASlashIsStillAPath()
+    {
+        PlanDocument parsed = PlanDocumentParser.Parse(
+            """
+            ## Tasks
+
+            ### T1: Release notes
+
+            - **Files:**
+              - `src/Release.cs`: see `tests/ReleaseTests.cs` and `Notes.md` for the shape.
+            """);
+
+        Assert.Equal(["src/Release.cs", "tests/ReleaseTests.cs"], Task(parsed, "T1").Files);
+    }
+
+    /// <summary>
+    /// Lead paths sit before the bullet's colon and keep the path rule, so every one of them counts.
+    /// </summary>
+    [Fact]
+    public void FilesBulletLeadPathsBeforeTheColonAllCount()
+    {
+        PlanDocument parsed = PlanDocumentParser.Parse(
+            """
+            ## Tasks
+
+            ### T1: Two files
+
+            - **Files:**
+              - `src/One.cs` and `tests/Two.cs`: the two files the task changes.
+            """);
+
+        Assert.Equal(["src/One.cs", "tests/Two.cs"], Task(parsed, "T1").Files);
+    }
+
+    /// <summary>
+    /// A bare file name in the lead list still inherits the directory named before it.
+    /// </summary>
+    [Fact]
+    public void FilesBulletBareLeadNameStillInheritsItsDirectory()
+    {
+        PlanDocument parsed = PlanDocumentParser.Parse(
+            """
+            ## Tasks
+
+            ### T1: Widget model
+
+            - **Files:**
+              - `src/Widgets/` and `Widget.cs`: the model the task changes.
+            """);
+
+        Assert.Equal(["src/Widgets/**", "src/Widgets/Widget.cs"], Task(parsed, "T1").Files);
+    }
+
+    /// <summary>
     /// A spec task list with two checkbox tasks in the layout the spec task files use: task 1.1
     /// depends on nothing, task 1.2 depends on 1.1, and each names one file. The dependency and
     /// file lines are passed in so a test can vary exactly the line it proves.

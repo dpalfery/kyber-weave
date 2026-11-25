@@ -313,8 +313,10 @@ rules:
         answer: disagrees
       - when: { fact: delegation.returned-tail, exists: false }
         answer: no-report
-      # The host declares no task gate for this agent (the documentation developer has none), so a
-      # report with no TASK_GATE claim is expected, not a skipped gate.
+      # No task gate is owed: the host declares none for this agent and technology, or every gate it
+      # resolves has an include that selects none of the task's files (a docs-only task for docs-dev,
+      # whose one gate selects only the host configuration). A report with no TASK_GATE claim is then
+      # expected, not a skipped gate. A task whose files are not known keeps the declared answer.
       - when: { fact: config.task-gates-declared, equals: false }
         answer: no-gates-declared
       # A dispatch identified from machine facts that names no plan task (a delivery, a check, a closeout) owes no

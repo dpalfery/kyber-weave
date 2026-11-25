@@ -109,5 +109,7 @@ public sealed class RunStateAndCheckoutTests
     private sealed class ScriptedBranchReader(Dictionary<string, string?> branches) : ICheckedOutBranchReader
     {
         public string? Read(string worktree) => branches.GetValueOrDefault(worktree);
+
+        public bool? IsAncestor(string workingDirectory, string ancestor, string descendant) => null;
     }
 }

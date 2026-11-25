@@ -1,5 +1,6 @@
 using System.Security.Cryptography;
 using System.Text;
+using KyberWeave.Application.Review;
 using KyberWeave.Contracts.Repositories;
 using KyberWeave.Contracts.Services;
 using KyberWeave.Core.Arbiter.Credentials;
@@ -45,6 +46,7 @@ public sealed class ArbiterEvaluator : IArbiterEvaluator
     private readonly IArbiterModelTargetsReader _modelTargets;
     private readonly IGateReportFacts _gateReports;
     private readonly IArbiterStateFactory _state;
+    private readonly IFileSystem? _files;
     private readonly TimeProvider _clock;
     private readonly IIdGenerator _ids;
     private readonly Func<string, ArbiterEvent, IReadOnlyList<string>> _secondaryTriggers;
@@ -68,6 +70,7 @@ public sealed class ArbiterEvaluator : IArbiterEvaluator
     /// global-scope evaluation reads the table a user-scope install deployed under the harness's global root,
     /// not the per-project state directory its ledger lives in.
     /// </param>
+    /// <param name="files">The file system the standards are read through to resolve a technology's parent; null resolves none.</param>
     public ArbiterEvaluator(
         IArbiterProvider provider,
         Func<Uri, string?> keyResolver,
@@ -81,7 +84,8 @@ public sealed class ArbiterEvaluator : IArbiterEvaluator
         TimeProvider clock,
         IIdGenerator ids,
         Func<string, ArbiterEvent, IReadOnlyList<string>>? secondaryTriggers = null,
-        string? modelTargetsDirectory = null)
+        string? modelTargetsDirectory = null,
+        IFileSystem? files = null)
     {
         ArgumentNullException.ThrowIfNull(provider);
         ArgumentNullException.ThrowIfNull(keyResolver);
@@ -107,6 +111,7 @@ public sealed class ArbiterEvaluator : IArbiterEvaluator
         _ids = ids;
         _secondaryTriggers = secondaryTriggers ?? SecondaryTriggers.For;
         _modelTargetsDirectory = modelTargetsDirectory;
+        _files = files;
     }
 
     /// <summary>Runs the evaluation flow for <paramref name="ev"/> end to end.</summary>
@@ -255,11 +260,13 @@ public sealed class ArbiterEvaluator : IArbiterEvaluator
             trigger, ev with { Target = classification.Target, Prompt = prompt });
         ArbiterFactSet facts = TriggerFactBuilder.Build(
             classification, prompt, config, ev.ObservesReturns, ev.ModelOverrideField, ev.Model, secondaryNames,
-            ev.PromptInserted(), ev.Cwd);
+            ev.PromptInserted(), ev.Cwd, _files);
         facts = _gitFacts.Enrich(facts, classification, ev);
         facts = GovernedPathsFacts.Enrich(facts, config.Ontology.DocsRoots);
         facts = _planReader.Enrich(facts, classification);
         facts = TriggerFactBuilder.WithTestsOnlyTaskFact(facts, config.Arbiter.TestFilePatterns);
+        facts = TriggerFactBuilder.WithTaskGatesApplyFact(
+            facts, config, classification.Target, prompt, ParentTechnologyOf(config, classification, ev.Cwd));
         ArbiterRunScope? runScope = RunScopeOf(ev);
         facts = LedgerFacts.Enrich(facts, _ledger, _decisionLog, ev, ledgerId, runScope);
         facts = AttributedChangeFacts.Enrich(facts, _ledger, _decisionLog, ledgerId);
@@ -487,6 +494,12 @@ public sealed class ArbiterEvaluator : IArbiterEvaluator
         string dispatchOutcome = answered ? RuleEffects.Answer : advised ? RuleEffects.SameFailure : primaryOutcome;
         return new ArbiterDispatchEvaluation(trigger, dispatchOutcome) { Secondary = secondaryResults };
     }
+
+    /// <summary>The parent technology of the dispatch's TECHNOLOGY header, resolved as the gate run does; null when the host has no file system or the dispatch names none.</summary>
+    private string? ParentTechnologyOf(KyberWeaveConfig config, TriggerClassification classification, string? repoRoot) =>
+        _files is not null && repoRoot is not null && classification.Headers.TryGetValue("TECHNOLOGY", out string? technology)
+            ? TaskGateResolver.ParentTechnologyOrNone(_files, repoRoot, config, technology)
+            : null;
 
     /// <summary>The run the event's dispatch belongs to, when the git facts can read the run records; null outside any run.</summary>
     private ArbiterRunScope? RunScopeOf(ArbiterEvent ev) => (_gitFacts as IArbiterRunScopeSource)?.RunScopeOf(ev.Cwd);
