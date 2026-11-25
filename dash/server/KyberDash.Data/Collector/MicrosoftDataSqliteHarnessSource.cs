@@ -46,7 +46,8 @@ public class MicrosoftDataSqliteHarnessSource : IHarnessSqliteSource
 
     private const int MaxOpenAttempts = 3;
 
-    private static long tempSequence;
+    /// <summary>A temp file not written for this long is left over from a run that stopped; younger ones may be in progress.</summary>
+    private static readonly TimeSpan StaleTempAge = TimeSpan.FromHours(1);
 
     private readonly HarnessSqliteLimits limits;
     private readonly string cacheRoot;
@@ -318,6 +319,7 @@ public class MicrosoftDataSqliteHarnessSource : IHarnessSqliteSource
         try
         {
             EnsureCacheRoot();
+            EvictStaleTemps();
             string sourceKey = Hex(sourcePath)[..32];
             SourceFingerprint before = SourceFingerprint.Of(sourcePath);
             long walBytes = Math.Max(before.WalBytes, 0);
@@ -361,7 +363,9 @@ public class MicrosoftDataSqliteHarnessSource : IHarnessSqliteSource
 
     private static void Publish(string sourcePath, string cachePath, SourceFingerprint before, long copyCapBytes)
     {
-        string tempDatabase = $"{cachePath}.tmp-{Environment.ProcessId}-{Interlocked.Increment(ref tempSequence)}";
+        // A random name: a temp left by a stopped run, or by a process that reused this process id, can never
+        // be the name this copy needs.
+        string tempDatabase = $"{cachePath}.tmp-{Convert.ToHexStringLower(RandomNumberGenerator.GetBytes(16))}";
         string tempWal = tempDatabase + "-wal";
         try
         {
@@ -444,7 +448,14 @@ public class MicrosoftDataSqliteHarnessSource : IHarnessSqliteSource
     internal static long CopyWithinCap(string source, string destination, long budget, long copyCapBytes)
     {
         using FileStream input = new(source, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete);
-        using FileStream output = new(destination, FileMode.CreateNew, FileAccess.Write, FileShare.None);
+        FileStreamOptions create = new() { Mode = FileMode.CreateNew, Access = FileAccess.Write, Share = FileShare.None };
+        if (!OperatingSystem.IsWindows())
+        {
+            // Owner-only, whatever the source's mode or the umask: the copy holds the harness's conversations.
+            create.UnixCreateMode = UnixFileMode.UserRead | UnixFileMode.UserWrite;
+        }
+
+        using FileStream output = new(destination, create);
         byte[] buffer = new byte[81_920];
         long copied = 0;
         int read;
@@ -461,6 +472,29 @@ public class MicrosoftDataSqliteHarnessSource : IHarnessSqliteSource
         }
 
         return copied;
+    }
+
+    /// <summary>
+    /// Deletes temp copies, of any source, that have not been written for <see cref="StaleTempAge"/>: a run
+    /// that stopped mid-copy leaves them, and no publish ever renames them.
+    /// </summary>
+    private void EvictStaleTemps()
+    {
+        DateTime staleBefore = DateTime.UtcNow - StaleTempAge;
+        foreach (string file in Directory.EnumerateFiles(cacheRoot, "*.db.tmp-*"))
+        {
+            try
+            {
+                if (File.GetLastWriteTimeUtc(file) < staleBefore)
+                {
+                    File.Delete(file);
+                }
+            }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+            {
+                Trace.TraceWarning("KyberDash: stale SQLite cache temp '{0}' not deleted yet: {1}", file, ex.Message);
+            }
+        }
     }
 
     private static string Hex(string value) =>

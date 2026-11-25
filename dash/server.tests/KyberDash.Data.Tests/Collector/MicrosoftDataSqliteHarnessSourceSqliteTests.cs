@@ -338,6 +338,95 @@ public class MicrosoftDataSqliteHarnessSourceSqliteTests : IDisposable
     }
 
     [Fact]
+    public void Open_CacheCopyOfAWorldReadableSource_IsReadableByTheOwnerOnly()
+    {
+        string sourceDirectory = directory.Combine("harness");
+        Directory.CreateDirectory(sourceDirectory);
+        string path = CreateSource(sourceDirectory, 3, SqliteFixtureJournal.WalUncheckpointed);
+        if (!OperatingSystem.IsWindows())
+        {
+            UnixFileMode worldReadable = UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.GroupRead | UnixFileMode.OtherRead;
+            File.SetUnixFileMode(path, worldReadable);
+            File.SetUnixFileMode(path + "-wal", worldReadable);
+        }
+
+        SkipUnlessSealed(sourceDirectory);
+
+        using (Source().Open(path))
+        {
+        }
+
+        string copy = Assert.Single(CacheCopies());
+        if (!OperatingSystem.IsWindows())
+        {
+            Assert.Equal(UnixFileMode.UserRead | UnixFileMode.UserWrite, File.GetUnixFileMode(copy));
+            Assert.Equal(UnixFileMode.UserRead | UnixFileMode.UserWrite, File.GetUnixFileMode(copy + "-wal"));
+        }
+    }
+
+    [Fact]
+    public void Open_LeftoverTempFilesUnderTheOldSequentialNames_DoNotBlockTheCopy()
+    {
+        string sourceDirectory = directory.Combine("harness");
+        Directory.CreateDirectory(sourceDirectory);
+        string path = CreateSource(sourceDirectory, 3, SqliteFixtureJournal.WalUncheckpointed);
+        SkipUnlessSealed(sourceDirectory);
+        using (Source().Open(path))
+        {
+        }
+
+        string copy = Assert.Single(CacheCopies());
+        File.Delete(copy);
+        File.Delete(copy + "-wal");
+        // A crashed run, or another process under a reused process id, left temps at every name the old
+        // pid-and-sequence scheme would pick next.
+        for (int sequence = 1; sequence <= 2_000; sequence++)
+        {
+            File.WriteAllBytes($"{copy}.tmp-{Environment.ProcessId}-{sequence}", []);
+        }
+
+        using (IHarnessSqliteDatabase database = Source().Open(path))
+        {
+            Assert.Equal(3, database.Query(new HarnessSqliteQuery("ids", "SELECT id FROM messages", [])).Count());
+        }
+
+        Assert.True(File.Exists(copy));
+    }
+
+    [Fact]
+    public void Open_StaleTempFilesInTheCache_AreDeletedAndARecentOneIsKept()
+    {
+        string sourceDirectory = directory.Combine("harness");
+        Directory.CreateDirectory(sourceDirectory);
+        string path = CreateSource(sourceDirectory, 3, SqliteFixtureJournal.WalUncheckpointed);
+        SkipUnlessSealed(sourceDirectory);
+        Directory.CreateDirectory(directory.Combine("cache"));
+        string staleOwn = Path.Combine(directory.Combine("cache"), "0123456789abcdef0123456789abcdef.0123456789abcdef.db.tmp-1-1");
+        string staleWal = staleOwn + "-wal";
+        string staleOther = Path.Combine(directory.Combine("cache"), "fedcba9876543210fedcba9876543210.fedcba9876543210.db.tmp-0a1b2c");
+        string recent = Path.Combine(directory.Combine("cache"), "fedcba9876543210fedcba9876543210.fedcba9876543210.db.tmp-3d4e5f");
+        foreach (string temp in new[] { staleOwn, staleWal, staleOther, recent })
+        {
+            File.WriteAllBytes(temp, [1, 2, 3]);
+        }
+
+        foreach (string temp in new[] { staleOwn, staleWal, staleOther })
+        {
+            File.SetLastWriteTimeUtc(temp, DateTime.UtcNow.AddDays(-1));
+        }
+
+        using (Source().Open(path))
+        {
+        }
+
+        Assert.False(File.Exists(staleOwn));
+        Assert.False(File.Exists(staleWal));
+        Assert.False(File.Exists(staleOther));
+        // A recent temp may be another process's copy in progress.
+        Assert.True(File.Exists(recent));
+    }
+
+    [Fact]
     public void Open_MissingFile_IsRefusedAsUnreadable()
     {
         string path = directory.Combine("absent.db");
