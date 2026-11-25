@@ -570,6 +570,30 @@ public class ClaudeTranscriptMapperTests
     }
 
     /// <summary>
+    /// A skill the user ran as a slash command is an invocation on the turn that answered it, when the
+    /// command names a skill the transcript listed; a built-in command such as <c>/model</c> is not.
+    /// </summary>
+    [Fact]
+    public void Map_CountsASlashCommandThatNamesAListedSkillAsAnInvocation()
+    {
+        string jsonl = string.Join('\n',
+        [
+            "{\"type\":\"attachment\",\"sessionId\":\"sess-slash\",\"timestamp\":\"2026-11-19T12:00:00.000Z\",\"attachment\":{\"type\":\"skill_listing\",\"content\":\"- conductor: Orchestrates.\",\"names\":[\"conductor\"]}}",
+            "{\"type\":\"user\",\"sessionId\":\"sess-slash\",\"timestamp\":\"2026-11-19T12:00:01.000Z\",\"message\":{\"role\":\"user\",\"content\":\"<command-message>conductor</command-message>\\n<command-name>/conductor</command-name>\\n<command-args>fix it</command-args>\"}}",
+            "{\"type\":\"assistant\",\"sessionId\":\"sess-slash\",\"timestamp\":\"2026-11-19T12:00:02.000Z\",\"message\":{\"id\":\"msg-sl1\",\"role\":\"assistant\",\"model\":\"claude-sonnet-4-5\",\"content\":[{\"type\":\"text\",\"text\":\"On it.\"}],\"usage\":{\"input_tokens\":50,\"output_tokens\":10}}}",
+            "{\"type\":\"user\",\"sessionId\":\"sess-slash\",\"timestamp\":\"2026-11-19T12:00:03.000Z\",\"message\":{\"role\":\"user\",\"content\":[{\"type\":\"text\",\"text\":\"<command-name>/model</command-name>\"}]}}",
+            "{\"type\":\"assistant\",\"sessionId\":\"sess-slash\",\"timestamp\":\"2026-11-19T12:00:04.000Z\",\"message\":{\"id\":\"msg-sl2\",\"role\":\"assistant\",\"model\":\"claude-sonnet-4-5\",\"content\":[{\"type\":\"text\",\"text\":\"Model set.\"}],\"usage\":{\"input_tokens\":60,\"output_tokens\":5}}}",
+        ]);
+
+        CollectedBatch batch = new ClaudeTranscriptMapper().Map(CreateUnit("/tmp/.claude/projects/repo/sess-slash.jsonl", jsonl), ImportedAt);
+
+        CollectedRecord[] turns = [.. batch.Records.Where(static r => r.Op == RecordOp.LlmInvoke)];
+        Assert.Equal(2, turns.Length);
+        Assert.Equal(["conductor"], turns[0].SkillsInvoked);
+        Assert.Empty(turns[1].SkillsInvoked);
+    }
+
+    /// <summary>
     /// A tool result whose content holds image blocks keeps its text and drops the images: an image is
     /// not text, and keeping its JSON made the store refuse the whole import. A result of images alone
     /// carries no result text.

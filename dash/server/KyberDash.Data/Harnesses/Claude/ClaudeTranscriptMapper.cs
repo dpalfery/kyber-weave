@@ -145,7 +145,8 @@ public class ClaudeTranscriptMapper : IHarnessMapper
 
         Dictionary<string, IReadOnlyList<ClaudeTranscriptToolSchema>> requestShapes = IndexRequestShapes(rawGroups);
         List<MergedLineGroup> mergedGroups = MergeClaudeGroups(rawGroups, fileStem);
-        List<ParsedTurnGroup> keptTurns = BuildKeptTurns(mergedGroups, fileStem);
+        HashSet<string> listedSkills = IndexListedSkills(rawGroups);
+        List<ParsedTurnGroup> keptTurns = BuildKeptTurns(mergedGroups, fileStem, listedSkills);
         if (keptTurns.Count == 0)
         {
             return new CollectedBatch(source, [], [], []);
@@ -664,13 +665,63 @@ public class ClaudeTranscriptMapper : IHarnessMapper
         return true;
     }
 
-    private static List<ParsedTurnGroup> BuildKeptTurns(List<MergedLineGroup> mergedGroups, string fileStem)
+    /// <summary>Every skill name a listing anywhere in the transcript announced.</summary>
+    private static HashSet<string> IndexListedSkills(List<List<ClaudeTranscriptLine>> rawGroups)
+    {
+        HashSet<string> names = new(StringComparer.Ordinal);
+        foreach (List<ClaudeTranscriptLine> group in rawGroups)
+        {
+            foreach (ClaudeTranscriptLine line in group)
+            {
+                if (line.ListedSkills is { } listed)
+                {
+                    names.UnionWith(listed);
+                }
+            }
+        }
+
+        return names;
+    }
+
+    /// <summary>
+    /// The skill a user's slash command ran: the <c>&lt;command-name&gt;/name&lt;/command-name&gt;</c> tag Claude Code
+    /// writes into the user message, when the name is a skill the transcript listed. A built-in command such as
+    /// <c>/model</c> is not a listed skill, so it is not an invocation.
+    /// </summary>
+    private static void AddSlashCommandSkills(string text, IReadOnlySet<string> listedSkills, List<string> skillsInvoked)
+    {
+        const string Open = "<command-name>";
+        const string Close = "</command-name>";
+        int start = text.IndexOf(Open, StringComparison.Ordinal);
+        while (start >= 0)
+        {
+            int nameStart = start + Open.Length;
+            int end = text.IndexOf(Close, nameStart, StringComparison.Ordinal);
+            if (end < 0)
+            {
+                return;
+            }
+
+            string name = text[nameStart..end].Trim().TrimStart('/');
+            if (listedSkills.Contains(name))
+            {
+                AddDistinct(skillsInvoked, [name]);
+            }
+
+            start = text.IndexOf(Open, end + Close.Length, StringComparison.Ordinal);
+        }
+    }
+
+    private static List<ParsedTurnGroup> BuildKeptTurns(
+        List<MergedLineGroup> mergedGroups,
+        string fileStem,
+        IReadOnlySet<string> listedSkills)
     {
         List<ParsedTurnGroup> turns = [];
 
         foreach (MergedLineGroup mergedGroup in mergedGroups)
         {
-            ParsedTurnGroup? parsed = ParseTurnGroup(mergedGroup.Lines, mergedGroup.FirstUsage, fileStem);
+            ParsedTurnGroup? parsed = ParseTurnGroup(mergedGroup.Lines, mergedGroup.FirstUsage, fileStem, listedSkills);
             if (parsed is null)
             {
                 continue;
@@ -695,7 +746,8 @@ public class ClaudeTranscriptMapper : IHarnessMapper
     private static ParsedTurnGroup? ParseTurnGroup(
         List<ClaudeTranscriptLine> lines,
         UsageSnapshot? usageSnapshot,
-        string fileStem)
+        string fileStem,
+        IReadOnlySet<string> listedSkills)
     {
         string? discoveredSessionId = null;
         string? nativeRecordId = usageSnapshot?.MessageId;
@@ -765,6 +817,8 @@ public class ClaudeTranscriptMapper : IHarnessMapper
                         {
                             correctionRule = check.Rule;
                         }
+
+                        AddSlashCommandSkills(text, listedSkills, skillsInvoked);
                     }
 
                     parts.Add(new ParsedPart(ContentBucket.ConversationHistory, text, server, role));
@@ -790,6 +844,8 @@ public class ClaudeTranscriptMapper : IHarnessMapper
                         {
                             correctionRule = check.Rule;
                         }
+
+                        AddSlashCommandSkills(text, listedSkills, skillsInvoked);
                     }
 
                     parts.Add(new ParsedPart(ContentBucket.ConversationHistory, text, server, role));
