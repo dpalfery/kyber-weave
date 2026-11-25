@@ -2,6 +2,7 @@ using KyberDash.Application.Tests;
 using KyberDash.Application.Tests.Fakes;
 using KyberDash.Contracts.Repositories;
 using KyberDash.Data.Collector;
+using KyberDash.Data.Repositories;
 using KyberDash.Domain;
 using Xunit;
 
@@ -255,10 +256,43 @@ public class SessionProjectionTests
         Assert.Equal(0, second.Built);
         Assert.Equal(1, second.Skipped);
 
-        store.SetWriteMarker(store.GetWriteMarker() + 1);
+        WriteSession(store, "sess-current", [Turn("turn-2", sessionKey: "sess-current", minuteOffset: 1, inputTokens: 300, outputTokens: 30)]);
         Assert.False(engine.IsProjectionCurrent());
         ProjectionPassReport third = service.ProjectIncremental();
         Assert.Equal(1, third.Built);
+    }
+
+    /// <summary>
+    /// A store whose findings were projected with another detector version is stale even when its
+    /// write marker and schema version match: the next pass rebuilds every session key, stamps the
+    /// current detector version, and the pass after it is incremental again.
+    /// </summary>
+    [Fact]
+    public void ProjectIncremental_DetectorVersionChange_ForcesFullPassAndRestampsDetector()
+    {
+        InMemoryRelationalStore store = new();
+        WriteSession(store, "sess-a", [Turn("turn-a", sessionKey: "sess-a", minuteOffset: 0, inputTokens: 300, outputTokens: 30)]);
+        WriteSession(store, "sess-b", [Turn("turn-b", sessionKey: "sess-b", minuteOffset: 0, inputTokens: 400, outputTokens: 40)]);
+
+        CanonSessionProjectorEngine engine = NewEngine(store);
+        ProjectionPassReport first = engine.ProjectIncremental();
+        Assert.Equal(2, first.Built);
+        Assert.Equal(SqliteRelationalStore.DetectorVersion, store.GetStoreState()?.DetectorVersion);
+        Assert.True(engine.IsProjectionCurrent());
+
+        store.SetStoreState(new StoreStateView(SqliteRelationalStore.SchemaVersion, SqliteRelationalStore.DetectorVersion - 1));
+        Assert.False(engine.IsProjectionCurrent());
+
+        ProjectionPassReport full = engine.ProjectIncremental();
+        Assert.Equal(2, full.Built);
+        Assert.Empty(full.SkippedKeys);
+        Assert.Equal(SqliteRelationalStore.DetectorVersion, store.GetStoreState()?.DetectorVersion);
+        Assert.True(engine.IsProjectionCurrent());
+
+        WriteSession(store, "sess-a", [Turn("turn-a2", sessionKey: "sess-a", minuteOffset: 1, inputTokens: 300, outputTokens: 30)]);
+        ProjectionPassReport incremental = engine.ProjectIncremental();
+        Assert.Equal(1, incremental.Built);
+        Assert.Equal(["sess-b"], incremental.SkippedKeys);
     }
 
     /// <summary>

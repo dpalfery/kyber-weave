@@ -464,7 +464,9 @@ runs it after the binaries commit, then the tray step. The detector generation i
 (`dash/server/KyberDash.Application/CanonSessionProjectorEngine.cs`) treats a store stamped with any other value as stale,
 so derived findings are rebuilt with the current rules rather than kept. Under `kyberdash web`, `JobSchedulerService`
 runs maintenance ticks that invoke `TranscriptIngestionService.PurgeExpiredContent` and call
-`CanonSessionProjectorEngine.ProjectIncremental` when `IsProjectionCurrent` is false. A store stamped with an older
+`CanonSessionProjectorEngine.ProjectIncremental` when `IsProjectionCurrent` is false. Read requests gate on
+`IsProjectionCurrentForReads`, which ignores the detector stamp, and a budget-bounded read pass never restamps it,
+so only a full maintenance pass moves the stamp. A store stamped with an older
 detector version is therefore re-projected to `SqliteRelationalStore.DetectorVersion` on startup/tick, and a current
 stamp skips redundant projection with no separate `kyber build`.
 
@@ -1147,10 +1149,41 @@ Inside the running `kyberdash web` server, `OtlpCollectorService` accepts span/l
 `BoundedIngestWriter` (which enforces 64 MiB request / 256 MiB pending bounds and 64 KiB
 UTF-8-safe content truncation via `CanonValidation`), notifies `JobSchedulerService` / `DashEndpointMappings` on
 updates, and relies on `JobSchedulerService` (coordinated via `JobsLease` on `jobs.lock`) and incremental
-dirty-key projection (`projection_dirty_sessions` / `projection_session_key_map`) rather than
-recomputing the whole corpus on every incoming OTLP request. Unchanged runs skip projection via the
-monotonic `records_write_seq` marker, schema version, and `SqliteRelationalStore.DetectorVersion`, while
-unchanged session/run/execution rows avoid redundant writes.
+dirty-key projection rather than recomputing the whole corpus on every incoming OTLP request.
+
+The incremental projection rests on three tables, with no other bookkeeping: `store_write_marker`
+(`records_write_seq`, a counter that rises by exactly 1 per record-changing write; an absent row reads 0),
+`projection_dirty_range` (`from_seq`, `to_seq`: the writes since `from_seq`, up to `to_seq`) and
+`projection_dirty_session` (the session keys those writes touched). A maintenance pass is skipped when
+`projection_state.records_marker` equals the write marker, `projection_state.projection_schema_version` equals
+`SqliteRelationalStore.SchemaVersion`, `store_state.detector_version` equals `SqliteRelationalStore.DetectorVersion`,
+no dirty state names work (a stored dirty range that is wildcard or lists any session key, such as a session a read
+pass deferred, keeps the pass running), and the store either has no records or holds at least one session projection.
+A read-path pass is skipped on the marker and schema version alone. A new store stamps the current detector version and only a full maintenance pass restamps it (opening a
+store or a budget-bounded read pass never does), so bumping the constant makes the next maintenance pass run in
+full; unchanged session/run/execution rows also avoid redundant writes.
+
+- **Which writes move the marker.** Only `IRelationalStoreWriter.WriteBatch` (when it carries at least one
+  session or record) and `IRelationalStoreWriter.DeleteSource`. Problems, quarantine, provenance, metrics,
+  checkpoints, settings and every projector output write leave it alone, so a projection pass never
+  invalidates itself. The marker and the dirty range move in the same transaction as the record write
+  (`SqliteRelationalStore`, and `InMemoryRelationalStore` in its lock), so a rejected write moves nothing
+  and a caller cannot forget the bump.
+- **Which keys a write marks dirty.** `WriteBatch` marks the union of its session keys and its records'
+  session keys; a record with no session key, and every `DeleteSource` (the cascade removes records of
+  sessions the call does not name), make the write a wildcard: a range with no `projection_dirty_session`
+  rows, meaning every session.
+- **Merge rules.** A write continues the stored range when its `to_seq` equals the marker before the write:
+  `from_seq` stays, `to_seq` becomes the new marker, a keyed write adds its keys (duplicates ignored) and a
+  wildcard write drops the key rows. A keyed write never adds keys to a wildcard range. When the stored
+  range is absent or its `to_seq` differs from the marker, the range restarts at the marker before the write.
+  The projector rebuilds only the keys of a range that ends at the current marker and starts at the marker it
+  last projected; any other combination is a full pass.
+- **A write during a pass is never lost.** When the marker moved while a pass ran, the pass stamps
+  `records_marker` with the marker it read, not the newer one, and keeps the new writes dirty (range from the
+  marker it read to the newer marker, keys stored plus deferred; wildcard stays wildcard; anything else
+  clears), so the next pass rebuilds them. Every race in this path degrades to a full pass, never to a
+  skipped session.
 
 The C# canonical engine under `dash/server/` owns the schema-25 relational SQLite layout:
 - **Storage & transport (`CanonDbPath`, `RelationalSchemaCatalog`, `SchemaDdlGenerator`, `SqliteRelationalStore`)**:
@@ -1488,7 +1521,8 @@ flowchart LR
   and clean. It never defers.
 - `ProjectIncrementalForReads()` is the request path. It defers a dirty session whose record count
   exceeds the budget (default 2,000, constructor-injectable), writes the key back as still dirty so
-  the next pass retries it, and reports it. The bounded GET latency is a property of the deferral,
+  the next pass retries it, and reports it. It never stamps the detector version, and a key it left
+  dirty keeps `IsProjectionCurrent` false, so the next maintenance pass rebuilds it. The bounded GET latency is a property of the deferral,
   not of the store being small.
 - A single-flight guard inside the projector pass entry makes a concurrent caller return a skipped
   report and serve the current projections instead of stacking a second pass; waiting would make
@@ -2293,7 +2327,8 @@ by `dash/scripts/pack-sea-web.mjs`); in a source checkout it serves `dash/dist/d
 
 `KyberBridgeEngine` (`dash/server/KyberDash.Application/KyberBridgeEngine.cs`) serves `/api/kyber/*` queries over
 `SqliteRelationalStore` (`~/.kyberdash/canon.db`, resolved by `CanonDbPath.Resolve`), checking projection currency
-(`CanonSessionProjectorEngine.IsProjectionCurrent`) before reading derived summaries. A fixed `SqliteRelationalStore`
+(`CanonSessionProjectorEngine.IsProjectionCurrentForReads`, the write marker and schema version only) before
+reading derived summaries. A fixed `SqliteRelationalStore`
 instance (such as from `kyberdash report` or an in-memory store in tests) shares that instance directly.
 
 ### Jobs and shared settings (ADR 0033)

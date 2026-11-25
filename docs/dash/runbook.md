@@ -419,15 +419,18 @@ directory and the tree KyberDash published is ever written by KyberDash.
 ### 2. Derived Projection Rebuilding (`kyber build`)
 
 The `session`, `run`, `execution`, and `finding` tables are derived projections over raw canonical
-records. If detector algorithms change or migrations are applied, rebuild projections without re-ingesting:
+records. To rebuild projections on demand without re-ingesting:
 
 ```bash
 kyberdash kyber build --db ~/.kyberdash/canon.db
 ```
 
-Upgrading the binary does not itself rebuild derived tables: opening an existing store serves
-the rows its `detector_version` stamp describes until the next build, refresh, or live-collector
-projection runs. After deploying a release whose detectors changed, run the rebuild above once.
+A detector change needs no manual rebuild. Opening an existing store keeps its
+`store_state.detector_version` stamp, and while that stamp differs from this build's
+`SqliteRelationalStore.DetectorVersion` the store reads as out of date to the maintenance pass: the
+engine's maintenance tick (or `kyber build`, if you run it) rebuilds every session in full and only
+then restamps the detector version. Read requests in between serve the existing rows and project
+only new records, within their budgets; they never restamp the detector version.
 
 This rebuilds:
 - Derived sessions from canonical records.
@@ -559,8 +562,10 @@ wipes the scope in one store transaction (records including `records.raw`, prove
 checkpoints, and harness-scoped derived caches), projects the derived tables, re-ingests
 the scope **only if a window was requested**, and resumes ingestion. `ingest_log`,
 `refresh_run`, `metadata` (stamped `last_clean_at`/scope), `token_cache`, and the
-model-window catalog are never wiped. Wipe-all clears `quarantine` and the
-log-enrichment tables. A per-harness wipe now deletes the `quarantine`, `pending_logs`,
+model-window catalog are never wiped. Neither is the diagnostic evidence: a clean, including
+`--all`, keeps the quarantined spans (`quarantined_span*`) and the ingest problems (`ingest_problem*`)
+and reports `QuarantineDeleted: 0` and `ProblemsDeleted: 0`, so the file keeps their pages. Wipe-all clears
+the log-enrichment tables. A per-harness wipe now deletes the `quarantine`, `pending_logs`,
 and `quarantined_logs` rows whose `harness` matches the wiped raw names — the nullable
 column schema v19 added for exactly this
 ([ADR 0035](../adr/0035-kyberdash-quarantine-raw-packet-evidence.md)). A row with no
@@ -576,6 +581,22 @@ Both surfaces reach the same operation at `POST /api/kyber/clean` (confirmed dia
 dashboard's Maintenance panel and in the tray's two-step confirm), passing the scope, the
 explicit confirmation, and a `reingestWeeks` window or its absence. Neither spawns a clean
 child, and neither holds clean logic.
+
+#### Vacuum and full reset
+
+`kyberdash kyber vacuum` compacts the SQLite store: it checkpoints the WAL with `TRUNCATE`, runs
+`VACUUM`, and checkpoints again. SQLite keeps pages freed by a clean inside the file, so the file only
+shrinks after a vacuum, and a vacuum frees nothing the clean kept (quarantine and problems stay). It runs
+under the store's bounded runner; a very large file can hit the store's batch timeout and surfaces as the
+store's normal error. On a store that is not a SQLite file the command says vacuum does not apply instead of
+reporting a compaction. A `kyberdash web` server writing to the same store while the vacuum runs waits on
+SQLite's busy timeout and retries; if the vacuum outlasts those retries, that write fails with the store's normal
+busy error. Run it while the server is idle.
+
+To start from an empty database (a clean does not remove the quarantine and problem rows): stop the
+engine, delete `canon.db` and its `canon.db-wal` and `canon.db-shm` files (`KYBER_CANON_DB` overrides the
+path), then start it. The store recreates the schema on first open and the first write triggers a full
+projection. There is no backup and no undo, and OTLP-collected records do not come back.
 
 ### 2c. Import folder history (`dash import-history`)
 
@@ -743,11 +764,13 @@ The quarantine **list** stays light and never serves payloads.
 The Sessions **4 · Skills** section reads the `skills` block of the session payload. That block
 is built on projection and stored in the derived `session` row
 ([skills view contract](architecture.md#skills-view-contract)). The skills work set
-`CanonSchema.DetectorVersion` to **5** (`dash/server/KyberDash.Domain/CanonSchema.cs`). A store stamped with an older generation
-reports its findings as outdated until they are rebuilt. A session row stored before the change
-has no `skills` key, so it renders "not yet projected".
+`SqliteRelationalStore.DetectorVersion` to **5** (`dash/server/KyberDash.Data/Repositories/SqliteRelationalStore.cs`).
+A store stamped with an older generation keeps serving its existing rows until the next maintenance
+pass, which rebuilds every session and restamps the store. A session row stored before the change
+has no `skills` key, so it renders "not yet projected" until then.
 
-Run the rebuild once against the store:
+The engine's maintenance tick does this on its own. Without a running engine, run the rebuild once
+against the store:
 
 ```bash
 kyberdash kyber build --db ~/.kyberdash/canon.db
@@ -1849,10 +1872,10 @@ and the remedy `kyber-weave update`. It prints `engine: not-running (cli <cli>)`
 the endpoint, and `engine: unresponsive` when the holder never answers.
 
 **Re-projection after an upgrade.** The engine re-projects the store on its own start. The job host
-runs one maintenance tick at once, and when the store's detector stamp is older than this build's
-(`CanonSchema.DetectorVersion`), that tick projects the store to the new rules. You do not need `kyber build`.
+runs one maintenance tick at once, and when the store's detector stamp (`store_state.detector_version`) differs
+from this build's (`SqliteRelationalStore.DetectorVersion`), that tick projects the store to the new rules. You do not need `kyber build`.
 Rows from an older build, including OpenCode buckets that showed a measured zero, refresh on that tick.
-A current stamp means the tick does nothing.
+With a current stamp and no session a read request deferred, the tick does nothing.
 
 **Quarantined spans from before this change.** Test runs sent 41 spans (test session
 `opencode-session-7f3a`) into `canon.db` at contract `'1'`. They stay in quarantine under

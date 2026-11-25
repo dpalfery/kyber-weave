@@ -750,16 +750,37 @@ public partial class CanonSessionProjectorEngine
     }
 
     /// <summary>
-    /// Returns <see langword="true"/> when the backing store already holds a current session
-    /// projection matching its <c>records</c> write marker, schema version, and detector version.
+    /// Returns <see langword="true"/> when the backing store already holds a complete, current
+    /// session projection: it matches the <c>records</c> write marker, schema version, and
+    /// detector version, and no session a read pass deferred is still dirty.
     /// </summary>
-    /// <returns><see langword="true"/> when stored projections match the current write marker and versions.</returns>
+    /// <returns><see langword="true"/> when no maintenance pass is needed.</returns>
+    /// <remarks>
+    /// This is the maintenance gate: <c>kyber build</c> and the job scheduler skip their pass only
+    /// when it holds, so a detector-version change or a deferred session always reaches a
+    /// maintenance pass.
+    /// </remarks>
     public bool IsProjectionCurrent()
     {
-        return IsRelationalProjectionCurrent();
+        return IsRelationalProjectionCurrent(forReads: false);
     }
 
-    private bool IsRelationalProjectionCurrent()
+    /// <summary>
+    /// Returns <see langword="true"/> when the read path has nothing to project: the stored
+    /// projection matches the <c>records</c> write marker and schema version.
+    /// </summary>
+    /// <returns><see langword="true"/> when a read-path pass would have no new records to project.</returns>
+    /// <remarks>
+    /// A stale detector stamp and sessions a read pass deferred do not count here: rebuilding
+    /// every session for a detector change and rebuilding deferred sessions is the maintenance
+    /// pass's work, so a request never restarts a whole-store rebuild.
+    /// </remarks>
+    public bool IsProjectionCurrentForReads()
+    {
+        return IsRelationalProjectionCurrent(forReads: true);
+    }
+
+    private bool IsRelationalProjectionCurrent(bool forReads)
     {
         long currentMarker = operationalStore!.GetWriteMarker();
         ProjectionStateView? state = operationalStore.GetProjectionState();
@@ -768,12 +789,25 @@ public partial class CanonSessionProjectorEngine
             return currentMarker == 0 && reader!.CountRecords() == 0 && projections!.ListSessionProjections().Count == 0;
         }
 
-        if (state.RecordsMarker != currentMarker || !HasCurrentProjectionEnvironment())
+        if (state.RecordsMarker != currentMarker
+            || state.ProjectionSchemaVersion != SqliteRelationalStore.SchemaVersion)
+        {
+            return false;
+        }
+
+        if (!forReads && (!HasCurrentProjectionEnvironment() || HasOutstandingDirtyKeys()))
         {
             return false;
         }
 
         return reader!.CountRecords() == 0 || projections!.ListSessionProjections().Count > 0;
+    }
+
+    /// <summary>True when the stored dirty state still names sessions to rebuild (or is wildcard).</summary>
+    private bool HasOutstandingDirtyKeys()
+    {
+        DirtyProjectionState? dirty = operationalStore!.GetProjectionDirtyState();
+        return dirty is not null && (dirty.IsWildcard || dirty.Keys is null || dirty.Keys.Count > 0);
     }
 
     /// <summary>
@@ -848,10 +882,62 @@ public partial class CanonSessionProjectorEngine
         SkippedKeys: [],
         DeferredKeys: null);
 
+    /// <summary>
+    /// True when the stored projection was built under this build's schema version and with its
+    /// detector version (<see cref="SqliteRelationalStore.DetectorVersion"/>, stamped in
+    /// <c>store_state.detector_version</c>); a missing row on either side reads as not current.
+    /// </summary>
     private bool HasCurrentProjectionEnvironment()
     {
         ProjectionStateView? projectionState = operationalStore!.GetProjectionState();
-        return projectionState is not null && projectionState.ProjectionSchemaVersion == SqliteRelationalStore.SchemaVersion;
+        StoreStateView? storeState = operationalStore.GetStoreState();
+        return projectionState is not null
+            && projectionState.ProjectionSchemaVersion == SqliteRelationalStore.SchemaVersion
+            && storeState is not null
+            && storeState.DetectorVersion == SqliteRelationalStore.DetectorVersion;
+    }
+
+    /// <summary>
+    /// Writes the projection watermark at <paramref name="recordsMarker"/> under the current schema
+    /// version and, when <paramref name="stampDetector"/> is set, then stamps the current detector
+    /// version in <c>store_state</c>.
+    /// </summary>
+    /// <param name="recordsMarker">Write marker the stored projection now covers.</param>
+    /// <param name="stampDetector">
+    /// <see langword="true"/> only for a full maintenance pass, the one pass that rebuilt every
+    /// session under this build's detectors. A budget-bounded read pass never stamps, so a stale
+    /// stamp keeps the store out of date until a maintenance pass rebuilds the sessions it deferred.
+    /// </param>
+    /// <remarks>
+    /// The watermark is written first, so a failure between the two writes leaves the detector
+    /// stamp stale and the next maintenance pass runs in full rather than skipping a session.
+    /// </remarks>
+    private void StampProjectionState(long recordsMarker, bool stampDetector) =>
+        StampProjectionState(operationalStore!, recordsMarker, stampDetector);
+
+    /// <summary>
+    /// Writes the projection watermark and, when <paramref name="stampDetector"/> is set, the
+    /// detector version on <paramref name="operationalStore"/>, exactly as a projection pass does;
+    /// see <see cref="StampProjectionState(long, bool)"/>. A caller writes the dirty state first.
+    /// </summary>
+    /// <param name="operationalStore">Store whose projection watermark is written.</param>
+    /// <param name="recordsMarker">Write marker the stored projection now covers.</param>
+    /// <param name="stampDetector">Whether the stamp stands for a completed full maintenance pass.</param>
+    internal static void StampProjectionState(IOperationalStore operationalStore, long recordsMarker, bool stampDetector)
+    {
+        operationalStore.SetProjectionState(new ProjectionStateView(SqliteRelationalStore.SchemaVersion, recordsMarker));
+        if (!stampDetector)
+        {
+            return;
+        }
+
+        StoreStateView? storeState = operationalStore.GetStoreState();
+        if (storeState is null || storeState.DetectorVersion != SqliteRelationalStore.DetectorVersion)
+        {
+            operationalStore.SetStoreState(new StoreStateView(
+                storeState?.SchemaVersion ?? SqliteRelationalStore.SchemaVersion,
+                SqliteRelationalStore.DetectorVersion));
+        }
     }
 
     private static Dictionary<string, object?> SerializeContextPayload(
@@ -2593,9 +2679,10 @@ public partial class CanonSessionProjectorEngine
     /// timeline marks on the parent row instead.
     /// </para>
     /// <para>
-    /// Until ingest wiring advances <c>store_write_marker</c> on writes, the watermark comparison
-    /// alone cannot observe new records; callers therefore request a projection after ingest, the
-    /// same flow the projection service already uses.
+    /// Every record-changing write moves <c>store_write_marker</c> and records its sessions as
+    /// dirty, so a pass compares the marker with its stored watermark to find new records. A
+    /// write that lands while the pass runs is left dirty for the next pass; see
+    /// <see cref="StampMidPassWrites"/>.
     /// </para>
     /// </remarks>
     private ProjectionPassReport ProjectIncrementalRelational(bool forReads)
@@ -2605,19 +2692,35 @@ public partial class CanonSessionProjectorEngine
         long currentMarker = operationalStore!.GetWriteMarker();
         ProjectionStateView? previousState = operationalStore.GetProjectionState();
         DirtyProjectionState? dirtyState = operationalStore.GetProjectionDirtyState();
-        bool environmentCurrent = HasCurrentProjectionEnvironment();
+        // A maintenance pass on a stale detector stamp rebuilds every session; a read pass only
+        // needs the projection schema to match, so a stale stamp never makes a request restart a
+        // whole-store rebuild from the first session.
+        bool environmentCurrent = forReads
+            ? previousState is not null && previousState.ProjectionSchemaVersion == SqliteRelationalStore.SchemaVersion
+            : HasCurrentProjectionEnvironment();
+
+        // A read pass with no write since its watermark and nothing dirty has nothing new to
+        // project: it continues incrementally over an empty dirty set.
+        bool nothingDirtyForReads = forReads
+            && previousState is not null
+            && dirtyState is null
+            && previousState.RecordsMarker == currentMarker;
 
         bool canIncremental = environmentCurrent
             && previousState is not null
-            && dirtyState is not null
-            && dirtyState.FromSeq == previousState.RecordsMarker
-            && dirtyState.ToSeq == currentMarker
-            && !dirtyState.IsWildcard
-            && dirtyState.Keys is not null;
+            && (nothingDirtyForReads
+                || (dirtyState is not null
+                    && dirtyState.FromSeq == previousState.RecordsMarker
+                    && dirtyState.ToSeq == currentMarker
+                    && !dirtyState.IsWildcard
+                    && dirtyState.Keys is not null));
 
         HashSet<string>? dirtySet = canIncremental
-            ? new HashSet<string>(dirtyState!.Keys!, StringComparer.Ordinal)
+            ? new HashSet<string>(dirtyState?.Keys ?? [], StringComparer.Ordinal)
             : null;
+
+        // Only a full maintenance pass rebuilt every session under this build's detectors.
+        bool stampDetector = !forReads && !canIncremental;
 
         // Attribution rows replace the whole-store record read: identities, skip decisions, and
         // the per-session and per-pass record budgets are planned from (session key, harness,
@@ -2815,29 +2918,31 @@ public partial class CanonSessionProjectorEngine
         RebuildRunExecutionProjection();
 
         long finalMarker = operationalStore.GetWriteMarker();
-        operationalStore.SetProjectionState(new ProjectionStateView(SqliteRelationalStore.SchemaVersion, finalMarker));
-        if (deferredKeys.Count > 0)
+        if (finalMarker > currentMarker)
         {
-            // Deferred keys stay dirty at the watermark this pass just wrote, so the next pass
-            // (read or maintenance) retries them and a span ingested during the pass is not
-            // lost. When a span arrived mid-pass, the keys dirty at pass start stay dirty too:
-            // a rebuilt session's per-key read cannot have seen a span ingested after it, so
-            // the next pass rebuilds those sessions instead of skipping them clean.
-            HashSet<string> writeBackKeys = new(deferredKeys, StringComparer.Ordinal);
-            if (finalMarker > currentMarker && dirtySet is not null)
-            {
-                writeBackKeys.UnionWith(dirtySet);
-            }
-
+            StampMidPassWrites(currentMarker, finalMarker, deferredKeys, stampDetector);
+        }
+        else if (deferredKeys.Count > 0)
+        {
+            // Deferred keys stay dirty at the watermark this pass then writes, so the next read
+            // pass continues with them and the maintenance pass sees the projection as not
+            // current until it rebuilds them. Only a read pass defers, so this never stamps the
+            // detector version. The dirty state is written before the watermark: a crash between
+            // the two leaves a range that does not start at the stored watermark, which forces a
+            // full pass, never a watermark that hides the deferred keys.
             operationalStore.SetProjectionDirtyState(new DirtyProjectionState(
                 FromSeq: finalMarker,
                 ToSeq: finalMarker,
-                Keys: [.. writeBackKeys.Order(StringComparer.Ordinal)],
+                Keys: [.. deferredKeys.Order(StringComparer.Ordinal)],
                 IsWildcard: false));
+            StampProjectionState(finalMarker, stampDetector);
         }
         else
         {
+            // Dirty state before the watermark, as above: a crash between them leaves the old
+            // watermark with nothing dirty, which forces a full pass.
             operationalStore.ClearProjectionDirtyState();
+            StampProjectionState(finalMarker, stampDetector);
         }
 
         return new ProjectionPassReport(
@@ -2848,6 +2953,63 @@ public partial class CanonSessionProjectorEngine
             RebuiltKeys: rebuiltKeys,
             SkippedKeys: skippedKeys,
             DeferredKeys: forReads ? deferredKeys : null);
+    }
+
+    /// <summary>
+    /// Ends a pass during which a record-changing write moved the marker: stamps the marker the
+    /// pass read at its start and keeps the writes since then dirty, so the next pass rebuilds
+    /// them.
+    /// </summary>
+    /// <param name="currentMarker">Write marker the pass read at its start.</param>
+    /// <param name="finalMarker">Write marker read at the end of the pass.</param>
+    /// <param name="deferredKeys">Keys this pass deferred.</param>
+    /// <param name="stampDetector">Whether this pass may stamp the detector version; see <see cref="StampProjectionState"/>.</param>
+    /// <remarks>
+    /// A per-key or whole-store read cannot have seen a record written after it, so stamping
+    /// <paramref name="finalMarker"/> would mark the projection current while a session misses
+    /// that record. The writes merged their keys into the stored dirty range,
+    /// so when that range still ends at <paramref name="finalMarker"/> it is rewritten to start
+    /// at <paramref name="currentMarker"/> with the deferred keys added, or kept wildcard. Any
+    /// other stored state, including a write landing between these reads and the rewrite, leaves
+    /// a range whose end differs from the marker, which forces a full pass: every race here
+    /// degrades to a full pass, never to a skipped session. The dirty state is written before the
+    /// watermark, so a crash between the two leaves the previous watermark under a range that
+    /// starts at <paramref name="currentMarker"/>, or under no range. The crash degrades to a full
+    /// pass or a correct incremental rebuild over the retained keys, never to a skipped session.
+    /// </remarks>
+    private void StampMidPassWrites(long currentMarker, long finalMarker, IReadOnlyCollection<string> deferredKeys, bool stampDetector)
+    {
+        WriteMidPassDirtyState(currentMarker, finalMarker, deferredKeys);
+        StampProjectionState(currentMarker, stampDetector);
+    }
+
+    /// <summary>Rewrites the dirty state <see cref="StampMidPassWrites"/> leaves behind it.</summary>
+    private void WriteMidPassDirtyState(long currentMarker, long finalMarker, IReadOnlyCollection<string> deferredKeys)
+    {
+        DirtyProjectionState? stored = operationalStore!.GetProjectionDirtyState();
+        if (stored is null || stored.ToSeq != finalMarker)
+        {
+            operationalStore.ClearProjectionDirtyState();
+            return;
+        }
+
+        if (stored.IsWildcard || stored.Keys is null)
+        {
+            operationalStore.SetProjectionDirtyState(new DirtyProjectionState(
+                FromSeq: currentMarker,
+                ToSeq: finalMarker,
+                Keys: null,
+                IsWildcard: true));
+            return;
+        }
+
+        HashSet<string> keys = new(stored.Keys, StringComparer.Ordinal);
+        keys.UnionWith(deferredKeys);
+        operationalStore.SetProjectionDirtyState(new DirtyProjectionState(
+            FromSeq: currentMarker,
+            ToSeq: finalMarker,
+            Keys: [.. keys.Order(StringComparer.Ordinal)],
+            IsWildcard: false));
     }
 
     /// <summary>

@@ -335,9 +335,9 @@ public class CleanService : ICleanService
             writer.DeleteSource(source.SourceId);
         }
 
-        // Deleting sources does not move the records write marker, so the projection pass that
-        // follows would short-circuit and never rebuild: invalidate the watermarks the same way a
-        // write does, and clear the incremental dirty range in favour of a full pass.
+        // The wipe deletes projection rows directly and may delete no source at all, so the pass
+        // that follows would otherwise find the marker where the last pass left it and skip:
+        // bumping the marker forces a full pass, and the dirty range is cleared in its favour.
         operationalStore.SetWriteMarker(operationalStore.GetWriteMarker() + 1);
         operationalStore.ClearProjectionDirtyState();
         operationalStore.SetLastCleanAtUtc(nowIso);

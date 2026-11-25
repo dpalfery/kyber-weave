@@ -22,10 +22,11 @@ namespace KyberDash.Application;
 /// <c>isolated</c> breaker is a deliberate maintenance state, not a failure this service can judge.
 /// </para>
 /// <para>
-/// <c>RunVacuum</c> has no store-level work to do: the relational store bounds its own WAL with
-/// <c>journal_size_limit</c> at every initialization, so the command completes without touching the
-/// store. The database path is reported from the concrete SQLite store; an in-memory or substitute
-/// store reports an empty path.
+/// <c>RunVacuum</c> delegates to the concrete SQLite store's <c>Vacuum</c>, which checkpoints the
+/// write-ahead log and rebuilds the file to reclaim the pages freed by deleted records. A store
+/// that is in memory or a substitute has nothing to compact, so the command leaves it untouched
+/// and reports that vacuum does not apply rather than a compaction that never ran. The database path is reported from the concrete SQLite store; an in-memory or
+/// substitute store reports an empty path.
 /// </para>
 /// </remarks>
 public class DoctorService : IDoctorService
@@ -73,8 +74,15 @@ public class DoctorService : IDoctorService
     }
 
     /// <inheritdoc />
-    public void RunVacuum()
+    public bool RunVacuum()
     {
+        if (operationalStore is not SqliteRelationalStore store)
+        {
+            return false;
+        }
+
+        store.Vacuum();
+        return true;
     }
 
     /// <summary>Renders a breaker state as the lowercase wire string reported in diagnostics.</summary>
