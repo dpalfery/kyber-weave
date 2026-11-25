@@ -2,7 +2,7 @@
 id: plans/2026-11-24-kyber-weave-tooling-defects
 title: Fix ten Kyber-Weave tooling defects seen in today's runs
 doc-type: plan
-status: current
+status: archived
 component: KyberArbiter
 owner: dpalfery
 last-reviewed: 2026-11-24
@@ -17,7 +17,7 @@ impact-components:
 
 # Fix ten Kyber-Weave tooling defects seen in today's runs
 
-**Status: Ready, 2026-11-25.**
+**Status: Archived, 2026-11-25.**
 
 **Autonomy:** autonomous. **Development mode:** test-first.
 
@@ -450,16 +450,16 @@ applies an established pattern, and none adds a new boundary. The documentation-
 
 | ID | Destination | Verified |
 |---|---|---|
-| D8 | [Kyber Arbiter architecture](../kyber-arbiter/architecture.md): Review seat files ("The delivery notice is never a seat") and Claude hand-back | **Verified.** Whole-reply wrapper recognition, the kept hand-back, the SubagentStop fallback and the pruning sweep are described |
-| D9, D15 | [Kyber Arbiter architecture](../kyber-arbiter/architecture.md): The run context | **Verified.** Resolution order, the `Ambiguous` source, run mapping by containment or branch ancestry through `ICheckedOutBranchReader.IsAncestor`, and the checkout refusal naming every live run |
-| D12 | [Kyber Arbiter architecture](../kyber-arbiter/architecture.md): the `KW-ARB-SECRET-001` paragraph; [Kyber Arbiter runbook](../kyber-arbiter/runbook.md): Reading a secret refusal | **Verified.** Option parsing, file-naming option values, interpreter heredocs and fail-closed `open(...)` and `Path(...)` |
-| D10 | [Kyber Arbiter architecture](../kyber-arbiter/architecture.md): the `KW-ARB-GATE-REPORT-001` table row and paragraph | **Verified.** `no-gates-declared` covers a task whose files no gate selects |
-| D6, D7 | [Code review architecture](../code-review/architecture.md): Task gates and RED mode; [rule reference](../ci-pipelines/rule-reference.md): `KW-REVIEW-051`, `KW-REVIEW-052` | **Verified.** RED not applicable, relative compiler paths on a segment boundary, and the `runs=<k>` counter file |
-| D3, D4, D5, D13 | [Code review architecture](../code-review/architecture.md): Task gates; [Configuration](../configuration.md): `review.task-gates` | **Verified.** Developer tier union entries and their drift test, KyberDash C# gates under `csharp`, `test-policy`, and the narrowed KyberWeave include |
-| T7 | [Kyber Squad architecture](../kyber-squad/architecture.md): "A Files bullet's paths are its lead, not its prose" | **Verified.** Lead spans are paths; a description span counts only with a slash |
-| D11 | [Command surface](../cli-command-surface.md): `run integrate` | **Verified.** Cleanup failures after the landing name the landed commit; git is resolved by full path |
-| KyberArbiter, ReviewCouncil, KyberSquad | [Kyber Arbiter architecture](../kyber-arbiter/architecture.md), [Code review architecture](../code-review/architecture.md), [Kyber Squad architecture](../kyber-squad/architecture.md) | **Verified.** Each impact component's canonical document carries the harvest above and is reviewed 2026-11-25 |
-| DocGraph | [DocGraph architecture](../docgraph/architecture.md): Plan parsing reads a task's paths from its Files bullets | **Verified.** The Files-bullet rule is stated |
+| D8 | [Kyber Arbiter architecture](../../kyber-arbiter/architecture.md): Review seat files ("The delivery notice is never a seat") and Claude hand-back | **Verified.** Whole-reply wrapper recognition, the kept hand-back, the SubagentStop fallback and the pruning sweep are described |
+| D9, D15 | [Kyber Arbiter architecture](../../kyber-arbiter/architecture.md): The run context | **Verified.** Resolution order, the `Ambiguous` source, run mapping by containment or branch ancestry through `ICheckedOutBranchReader.IsAncestor`, and the checkout refusal naming every live run |
+| D12 | [Kyber Arbiter architecture](../../kyber-arbiter/architecture.md): the `KW-ARB-SECRET-001` paragraph; [Kyber Arbiter runbook](../../kyber-arbiter/runbook.md): Reading a secret refusal | **Verified.** Option parsing, file-naming option values, interpreter heredocs and fail-closed `open(...)` and `Path(...)` |
+| D10 | [Kyber Arbiter architecture](../../kyber-arbiter/architecture.md): the `KW-ARB-GATE-REPORT-001` table row and paragraph | **Verified.** `no-gates-declared` covers a task whose files no gate selects |
+| D6, D7 | [Code review architecture](../../code-review/architecture.md): Task gates and RED mode; [rule reference](../../ci-pipelines/rule-reference.md): `KW-REVIEW-051`, `KW-REVIEW-052` | **Verified.** RED not applicable, relative compiler paths on a segment boundary, and the `runs=<k>` counter file |
+| D3, D4, D5, D13 | [Code review architecture](../../code-review/architecture.md): Task gates; [Configuration](../../configuration.md): `review.task-gates` | **Verified.** Developer tier union entries and their drift test, KyberDash C# gates under `csharp`, `test-policy`, and the narrowed KyberWeave include |
+| T7 | [Kyber Squad architecture](../../kyber-squad/architecture.md): "A Files bullet's paths are its lead, not its prose" | **Verified.** Lead spans are paths; a description span counts only with a slash |
+| D11 | [Command surface](../../cli-command-surface.md): `run integrate` | **Verified.** Cleanup failures after the landing name the landed commit; git is resolved by full path |
+| KyberArbiter, ReviewCouncil, KyberSquad | [Kyber Arbiter architecture](../../kyber-arbiter/architecture.md), [Code review architecture](../../code-review/architecture.md), [Kyber Squad architecture](../../kyber-squad/architecture.md) | **Verified.** Each impact component's canonical document carries the harvest above and is reviewed 2026-11-25 |
+| DocGraph | [DocGraph architecture](../../docgraph/architecture.md): Plan parsing reads a task's paths from its Files bullets | **Verified.** The Files-bullet rule is stated |
 | D1, D2, D14, D16, AP1 | Documentation waiver — plan-local delivery choices (one PR, task grouping, how this run proceeded before its fixes were installed, the Linux container layout, the approval record) with no surviving behavior or invariant for a future engineer to consult | **Waived.** Preserved in this plan's Decisions table |
 
 ## Completion summary
