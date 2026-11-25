@@ -843,10 +843,12 @@ public class KyberBridgeEngine
         }
 
         (IReadOnlyList<StoredSkillInvocation> skillRows, string? projectionStatus) = TrySessionSkillFigures(sessionId);
+        (IReadOnlyList<StoredSkillListing> listingRows, string? listingStatus) = TrySessionSkillListings(sessionId);
+        projectionStatus ??= listingStatus;
         (IReadOnlyList<string> distinctSkills, IReadOnlyDictionary<string, int> skillCounts) = CollectSkillCounts(skillRows);
         CollectedSession? session = reader.GetSession(sessionId);
         string harness = session?.HarnessId ?? string.Empty;
-        Dictionary<string, object?> payload = BuildSkillsPayload(distinctSkills, skillCounts, harness);
+        Dictionary<string, object?> payload = BuildSkillsPayload(distinctSkills, skillCounts, listingRows, harness);
         if (payload.TryGetValue("rows", out object? rowsValue) && rowsValue is List<Dictionary<string, object?>> allRows)
         {
             payload["rows"] = PageOf(allRows, page, limit);
@@ -2764,6 +2766,22 @@ public class KyberBridgeEngine
         }
     }
 
+    /// <summary>Reads a session's stored skill listings, isolating any fault to that session.</summary>
+    /// <param name="sessionKey">Canonical session key.</param>
+    /// <returns>The listing rows when readable, empty with the isolation marker when the read failed.</returns>
+    private (IReadOnlyList<StoredSkillListing> Rows, string? ProjectionStatus) TrySessionSkillListings(string sessionKey)
+    {
+        try
+        {
+            return (reader.SessionSkillListings(sessionKey), null);
+        }
+        catch (Exception ex) when (IsSessionReadFault(ex))
+        {
+            RecordProjectionFailure(sessionKey, ex.Message);
+            return ([], ProjectionFailedStatus);
+        }
+    }
+
     /// <summary>Reads one page of a session's KW skill loads, isolating any fault to that session.</summary>
     /// <param name="sessionKey">Canonical session key.</param>
     /// <param name="page">One-based page number.</param>
@@ -3105,25 +3123,61 @@ public class KyberBridgeEngine
         return (distinct, counts);
     }
 
+    /// <summary>
+    /// Builds the skills block: one row per invoked skill, in invocation order, then one per listed skill
+    /// never invoked, in listing order. When the harness recorded a listing, every row says whether the
+    /// skill was listed and on which turns (0-based); without one, the listed state is not measurable.
+    /// </summary>
     private static Dictionary<string, object?> BuildSkillsPayload(
         IReadOnlyList<string> distinctSkills,
         IReadOnlyDictionary<string, int> skillCounts,
+        IReadOnlyList<StoredSkillListing> listings,
         string harness)
     {
-        if (distinctSkills.Count == 0)
+        List<string> listedOrder = [];
+        Dictionary<string, SortedSet<int>> turnsListed = new(StringComparer.Ordinal);
+        foreach (StoredSkillListing listing in listings)
+        {
+            if (string.IsNullOrWhiteSpace(listing.SkillName))
+            {
+                continue;
+            }
+
+            if (!turnsListed.TryGetValue(listing.SkillName, out SortedSet<int>? turns))
+            {
+                turns = [];
+                turnsListed[listing.SkillName] = turns;
+                listedOrder.Add(listing.SkillName);
+            }
+
+            if (listing.TurnIndex is int turn)
+            {
+                turns.Add(turn);
+            }
+        }
+
+        if (distinctSkills.Count == 0 && listedOrder.Count == 0)
         {
             return NotMeasurableBlock($"{harness} did not record skill invocations or listed skills for this session.");
         }
 
-        List<Dictionary<string, object?>> rows = new(distinctSkills.Count);
-        foreach (string skillName in distinctSkills)
+        bool listingMeasured = listedOrder.Count > 0;
+        List<string> names = [.. distinctSkills];
+        HashSet<string> invoked = new(distinctSkills, StringComparer.Ordinal);
+        names.AddRange(listedOrder.Where(name => !invoked.Contains(name)));
+
+        List<Dictionary<string, object?>> rows = new(names.Count);
+        foreach (string skillName in names)
         {
+            bool listed = turnsListed.TryGetValue(skillName, out SortedSet<int>? turns);
             rows.Add(new Dictionary<string, object?>(StringComparer.Ordinal)
             {
                 ["name"] = skillName,
-                ["listed"] = NotMeasurableBlock($"{harness} did not export the session's listed skills."),
-                ["invocations"] = skillCounts[skillName],
-                ["turns_listed"] = Array.Empty<int>(),
+                ["listed"] = listingMeasured
+                    ? listed
+                    : NotMeasurableBlock($"{harness} did not export the session's listed skills."),
+                ["invocations"] = skillCounts.GetValueOrDefault(skillName),
+                ["turns_listed"] = listed ? turns!.ToArray() : Array.Empty<int>(),
             });
         }
 

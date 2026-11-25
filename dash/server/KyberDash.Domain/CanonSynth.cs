@@ -15,10 +15,14 @@ public record ListedSkillItem(
     [property: JsonPropertyName("description"), JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? Description = null);
 
 /// <summary>Skill listing attachment carried onto <c>raw["kyber.skills.listed"]</c>.</summary>
-/// <param name="IsInitial">True when this listing was the session's initial skill announcement.</param>
+/// <param name="IsInitial">
+/// True when this listing was the session's initial skill announcement; <see langword="null"/> when
+/// the source did not keep the flag (a listing hydrated from <c>record_skill_listing</c>), and then
+/// the key is left out of the attribute.
+/// </param>
 /// <param name="Skills">Declared skills visible in the listing.</param>
 public record ListedSkillsPayload(
-    [property: JsonPropertyName("isInitial")] bool IsInitial,
+    [property: JsonPropertyName("isInitial"), JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] bool? IsInitial,
     [property: JsonPropertyName("skills")] IReadOnlyList<ListedSkillItem> Skills);
 
 /// <summary>Normalized model call emitted by a harness/provider session file parser (<c>dash/src/providers/types.ts</c>).</summary>
