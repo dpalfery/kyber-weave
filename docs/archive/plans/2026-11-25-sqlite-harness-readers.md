@@ -2,7 +2,7 @@
 id: plans/2026-11-25-sqlite-harness-readers
 title: Read the Kilo, Warp, Cursor and Devin SQLite stores in the C# import
 doc-type: plan
-status: current
+status: archived
 component: KyberDash
 owner: dpalfery
 last-reviewed: 2026-11-25
@@ -14,7 +14,7 @@ impact-components:
 
 # Read the Kilo, Warp, Cursor and Devin SQLite stores in the C# import
 
-**Status: Ready, 2026-11-25.**
+**Status: Archived, 2026-11-25.**
 
 Autonomy: autonomous. Development mode: test-first. Run branch `claude/fix/sqlite-harness-readers`,
 based on `claude/fix/droid-chart-and-per-harness-e2e` at `715f74c61` (pull request #710), stacked per D1;
@@ -631,11 +631,11 @@ NOT VERIFIED: the Playwright end-to-end runs (T12-T15) were not re-run by docs-d
 
 | ID | Destination |
 |---|---|
-| KyberDash, D1, D2, D3, D4, D6, D7, D11, D12, D13, D16, D17 | [The SQLite source reader](../dash/architecture.md#the-sqlite-source-reader) |
+| KyberDash, D1, D2, D3, D4, D6, D7, D11, D12, D13, D16, D17 | [The SQLite source reader](../../dash/architecture.md#the-sqlite-source-reader) |
 | D5 | Documentation waiver — a test-layout choice for this change; the shape (in-memory fake for logic, real SQLite files for adapter and SQL) is stated in the SQLite standard and the test standard. |
-| D8, D9, D10, D18 | [Devin field register rows](../dash/field-register.md#devin), [Kilo and Warp rows](../dash/field-register.md#kilo) |
-| D14 | [Cursor field register rows](../dash/field-register.md#cursor) |
-| D15 | [SQLite stores read by the C# import](../dash/telemetry-inventory.md#sqlite-stores-read-by-the-c-import) |
+| D8, D9, D10, D18 | [Devin field register rows](../../dash/field-register.md#devin), [Kilo and Warp rows](../../dash/field-register.md#kilo) |
+| D14 | [Cursor field register rows](../../dash/field-register.md#cursor) |
+| D15 | [SQLite stores read by the C# import](../../dash/telemetry-inventory.md#sqlite-stores-read-by-the-c-import) |
 | AP1 | Documentation waiver — approval record, no lasting design content. |
-| Problem codes and the macOS permission (F6) | [Runbook, SQLite harness problems](../dash/runbook.md#8a-a-sqlite-harness-import-records-sqlite_source_unreadable-or-sqlite_source_schema_missing) |
-| D2 stale rules file | [SQLite rules](../standards/sqlite/sqlite.rules.md) |
+| Problem codes and the macOS permission (F6) | [Runbook, SQLite harness problems](../../dash/runbook.md#8a-a-sqlite-harness-import-records-sqlite_source_unreadable-or-sqlite_source_schema_missing) |
+| D2 stale rules file | [SQLite rules](../../standards/sqlite/sqlite.rules.md) |
