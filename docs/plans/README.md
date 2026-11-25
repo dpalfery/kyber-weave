@@ -64,7 +64,9 @@ its `tasks.yml` is caught rather than carried as dead weight.
 
 ## Active Plans
 
-No plans are open.
+| Plan | Component | Status | Created | Summary |
+|---|---|---|---|---|
+| [kw-docs any-repo mode, and Squad wiring it for Antigravity](2026-11-25-kw-docs-any-repo-mode-for-antigravity.md) | DocGraph | Ready | 2026-11-25 | `kyber-weave-mcp --any-repo` serves any initialized repository per call; Squad renders it for Antigravity and inserts it into Antigravity's user MCP config. |
 
 ## Archived Plans
 
