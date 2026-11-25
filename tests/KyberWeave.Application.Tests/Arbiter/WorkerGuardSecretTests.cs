@@ -247,6 +247,18 @@ public sealed class WorkerGuardSecretTests
         { "shell", "python3 - <<'EOF'\nimport subprocess\nsubprocess.run('cat .env', shell=True)\nEOF", false },
         { "shell", "python3 - <<'EOF'\nimport os\nprint(os.environ)\nEOF", false },
         { "shell", "python3 - <<'EOF'\np = '.env'\nprint(open(p).read())\nEOF", false },
+        { "shell", "ruby <<'EOF'\nputs `cat .env`\nEOF", false },
+        { "shell", "node - <<'EOF'\nrequire('child_process').execSync(`cat .env`)\nEOF", false },
+        { "shell", "python3 - <<'EOF'\nimport subprocess\nsubprocess.run('''\ncat .env\n''', shell=True)\nEOF", false },
+        { "shell", "python3 - <<'EOF'\nimport subprocess\nsubprocess.run(\"\"\"\ncat .env\n\"\"\", shell=True)\nEOF", false },
+        { "shell", "python3 -c \"import os,sys; os.system(sys.stdin.read())\" <<'EOF'\ncat .env\nEOF", false },
+        { "shell", "python3 run.py <<'EOF'\ncat .env\nEOF", false },
+
+        // grep options that take a value only in rg are flags in grep, so they never swallow the pattern.
+        { "shell", "grep -T x .env", false },
+        { "shell", "grep -nT x .env", false },
+        { "shell", "egrep -M x .env", false },
+        { "shell", "rg -t yaml token", true },
 
         // open(...) and Path(...) judge every literal they could open, and every value an identifier is given.
         { "shell", "python3 -c \"open('.env').read()\"", false },
