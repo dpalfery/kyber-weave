@@ -184,9 +184,7 @@ public class SqliteHarnessSourceReader : IHarnessSourceReader
             exportText = Encoding.UTF8.GetString(buffer.WrittenSpan);
         }
 
-        string? companionText = unit.CompanionKey is not null && fileSystem.FileExists(unit.CompanionKey)
-            ? fileSystem.ReadAllText(unit.CompanionKey)
-            : null;
+        string? companionText = ReadCompanion(unit.CompanionKey, fileSystem);
 
         return new NativeSourceUnit(
             unit,
@@ -234,6 +232,28 @@ public class SqliteHarnessSourceReader : IHarnessSourceReader
         {
             return false;
         }
+    }
+
+    private string? ReadCompanion(string? companionKey, IHarnessFileSystem fileSystem)
+    {
+        if (companionKey is null || !fileSystem.FileExists(companionKey))
+        {
+            return null;
+        }
+
+        if (!fileSystem.TryGetFileStats(companionKey, out long lengthBytes, out _))
+        {
+            throw new InvalidDataException(
+                $"{SqliteSourceOpenPolicy.SourceUnreadableCode}: companion file '{companionKey}' has no readable size, so it is not read.");
+        }
+
+        if (lengthBytes > limits.ExportCapBytes)
+        {
+            throw new InvalidDataException(
+                $"{SqliteSourceOpenPolicy.ExportCapExceededCode}: companion file '{companionKey}' is {lengthBytes} bytes, larger than {limits.ExportCapBytes} bytes.");
+        }
+
+        return fileSystem.ReadAllText(companionKey);
     }
 
     private static CollectedProblem SourceProblem(string code, string harnessId, string databasePath, string message) =>

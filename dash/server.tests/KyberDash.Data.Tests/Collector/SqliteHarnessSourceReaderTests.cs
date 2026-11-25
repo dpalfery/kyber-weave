@@ -210,6 +210,35 @@ public class SqliteHarnessSourceReaderTests
     }
 
     [Fact]
+    public void Read_CompanionLargerThanTheExportCap_IsRefusedWithoutReadingIt()
+    {
+        Rig rig = new(new HarnessSqliteLimits(ExportCapBytes: 16));
+        rig.Sqlite.AddDatabase(DbPath);
+        rig.Files.Add("/home/u/c.json", new string('x', 17));
+        SourceUnit unit = rig.Unit(DbPath + "#a") with { CompanionKey = "/home/u/c.json" };
+
+        InvalidDataException error = Assert.Throws<InvalidDataException>(() => rig.Reader.Read(unit, rig.Files));
+
+        Assert.StartsWith("SQLITE_EXPORT_CAP_EXCEEDED", error.Message, StringComparison.Ordinal);
+        Assert.Empty(rig.Files.ReadPaths);
+    }
+
+    [Fact]
+    public void Read_CompanionWithUnknownSize_IsRefusedWithoutReadingIt()
+    {
+        Rig rig = new();
+        rig.Sqlite.AddDatabase(DbPath);
+        rig.Files.Add("/home/u/c.json", "{}");
+        rig.Files.HideStats("/home/u/c.json");
+        SourceUnit unit = rig.Unit(DbPath + "#a") with { CompanionKey = "/home/u/c.json" };
+
+        InvalidDataException error = Assert.Throws<InvalidDataException>(() => rig.Reader.Read(unit, rig.Files));
+
+        Assert.StartsWith("SQLITE_SOURCE_UNREADABLE", error.Message, StringComparison.Ordinal);
+        Assert.Empty(rig.Files.ReadPaths);
+    }
+
+    [Fact]
     public void WriteJsonColumn_WritesRawJsonStringsNumbersAndNull()
     {
         using MemoryStream stream = new();
@@ -330,8 +359,13 @@ public class SqliteHarnessSourceReaderTests
     private sealed class MemoryFiles : IHarnessFileSystem
     {
         private readonly Dictionary<string, string> files = new(StringComparer.Ordinal);
+        private readonly HashSet<string> hiddenStats = new(StringComparer.Ordinal);
+
+        public List<string> ReadPaths { get; } = [];
 
         public void Add(string path, string content) => files[path] = content;
+
+        public void HideStats(string path) => hiddenStats.Add(path);
 
         public bool DirectoryExists(string path) => false;
 
@@ -343,12 +377,22 @@ public class SqliteHarnessSourceReaderTests
 
         public bool TryGetFileStats(string filePath, out long lengthBytes, out DateTimeOffset lastWriteUtc)
         {
-            lengthBytes = 0;
             lastWriteUtc = default;
-            return false;
+            if (hiddenStats.Contains(filePath) || !files.TryGetValue(filePath, out string? content))
+            {
+                lengthBytes = 0;
+                return false;
+            }
+
+            lengthBytes = Encoding.UTF8.GetByteCount(content);
+            return true;
         }
 
-        public string ReadAllText(string filePath) => files[filePath];
+        public string ReadAllText(string filePath)
+        {
+            ReadPaths.Add(filePath);
+            return files[filePath];
+        }
 
         public string GetFullPath(string path) => path;
     }
