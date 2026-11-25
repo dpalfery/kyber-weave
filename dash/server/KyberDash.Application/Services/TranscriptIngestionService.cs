@@ -502,13 +502,16 @@ public class TranscriptIngestionService : ITranscriptIngestionService
             }
 
             CollectedBatch batch = mapper.Map(nativeUnit, commandStarted);
+
+            // Clear the unit's earlier failure before writing: if anything below fails, the catch records it
+            // again, so no committed write is ever paired with a stale failure, nor a failure with no problem.
+            writer!.DeleteProblem(CanonRefreshEngine.SourceUnreadableProblemKey(unit.HarnessId, unit.SourceKey));
             if (existing?.LastSuccessUtc is not null)
             {
-                writer!.DeleteSource(ComputeSourceId(batch.Source));
+                writer.DeleteSource(ComputeSourceId(batch.Source));
             }
 
-            writer!.WriteBatch(batch);
-            writer.DeleteProblem(CanonRefreshEngine.SourceUnreadableProblemKey(unit.HarnessId, unit.SourceKey));
+            writer.WriteBatch(batch);
 
             foreach (CollectedSession session in batch.Sessions)
             {

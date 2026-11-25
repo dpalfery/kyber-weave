@@ -410,6 +410,10 @@ public class CanonRefreshEngine
 
             CollectedBatch batch = mapper.Map(nativeUnit, commandStarted);
 
+            // Clear the unit's earlier failure before writing: if anything below fails, the catch records it
+            // again, so no committed write is ever paired with a stale failure, nor a failure with no problem.
+            activeWriter.DeleteProblem(SourceUnreadableProblemKey(unit.HarnessId, unit.SourceKey));
+
             string? existingSourceId = activeReader.Sources(unit.HarnessId)
                 .FirstOrDefault(s => string.Equals(s.Source.Locator, unit.SourceKey, StringComparison.Ordinal))?.SourceId;
             if (existingSourceId is not null)
@@ -422,8 +426,6 @@ public class CanonRefreshEngine
             {
                 activeWriter.WriteProblem(batchProblem);
             }
-
-            activeWriter.DeleteProblem(SourceUnreadableProblemKey(unit.HarnessId, unit.SourceKey));
 
             SourceCheckpoint updatedCheckpoint = new(
                 HarnessId: unit.HarnessId,

@@ -1335,8 +1335,11 @@ coverage, `CanonPricing.NormalizeHarnessName` alias folding (`claude-desktop -> 
   the span and its child rows go with the delete; a span id repeated inside one batch is still refused with
   `STORE_CONSTRAINT_VIOLATED`. A token or cost figure is never counted once per copy.
 - **A failure clears on the next success.** A unit whose import fails records the problem
-  `source-unreadable:<harness>:<source key>` (`CanonRefreshEngine.SourceUnreadableProblemKey`); the unit's
-  next successful import deletes it, in both `CanonRefreshEngine` and `TranscriptIngestionService`.
+  `source-unreadable:<harness>:<source key>` (`CanonRefreshEngine.SourceUnreadableProblemKey`). The unit's next
+  import attempt deletes it before writing, in both `CanonRefreshEngine` and `TranscriptIngestionService`, and a
+  failure records it again, so a committed import never keeps a stale failure. Only a store row refusal
+  (`STORE_CONSTRAINT_VIOLATED`, `STORE_JSON_TEXT_REFUSED`, or SQLite constraint code 19) fails just its unit; any
+  other validation error fails the pass.
 
 ### The SQLite source reader
 
