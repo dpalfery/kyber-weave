@@ -4,6 +4,7 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 
 import {
   Scorecard,
+  costBasisText,
   formatDimensionDisplay,
   ORDERED_DIMENSION_KEYS,
   DIMENSION_METADATA,
@@ -90,7 +91,7 @@ describe('Scorecard Component (Decision D3 & D9 Compliance)', () => {
     },
     secondaryCost: {
       costUsd: 0.42,
-      basis: 'derived_estimate',
+      basis: 'published',
       status: 'derived',
     },
   }
@@ -771,5 +772,38 @@ describe('ScorecardMatrix honesty (issues #189/#199, T10)', () => {
     expect(html).not.toContain('aria-label="codeburn/')
     // The canonical id still rides along for drill-down filtering and auditability.
     expect(html).toContain('drill-harness-codeburn/claude-desktop')
+  })
+})
+
+describe('costBasisText: the cost basis wording', () => {
+  it('names a harness rollup as reported by the harness', () => {
+    expect(costBasisText('harness_rollup')).toBe('reported by the harness')
+  })
+
+  it('names the published rate table as a calculation', () => {
+    expect(costBasisText('published')).toBe('calculated from published rates')
+  })
+
+  it('names the run summary as the run summary', () => {
+    expect(costBasisText('run_summary')).toBe('run summary')
+  })
+
+  it('states a missing basis as not reported, never as a calculation', () => {
+    expect(costBasisText(undefined)).toBe('basis not reported')
+  })
+
+  it('shows an unrecognised basis verbatim, in the visible text and the title', () => {
+    const basis = 'run_summary (partial: incomplete cost total)'
+    const html = renderToStaticMarkup(
+      <Scorecard
+        data={{
+          dimensions: {},
+          secondaryCost: { costUsd: 0.42, basis, status: 'derived' },
+        } as unknown as ScorecardData}
+      />,
+    )
+    expect(html).toContain(`(${basis})</span>`)
+    expect(html).toMatch(new RegExp(`title="Cost: [^"]*\\(${basis.replace(/[()]/g, '\\$&')}\\)"`))
+    expect(html).not.toContain('calculated from published rates')
   })
 })

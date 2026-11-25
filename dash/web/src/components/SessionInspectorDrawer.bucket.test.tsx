@@ -118,6 +118,82 @@ describe('SessionInspectorDrawer: bucket drill-down shared toolbar', () => {
   })
 })
 
+function bucketFigures(container: HTMLElement): string {
+  const inspector = container.querySelector('[data-testid="context-bucket-inspector"]')
+  if (!inspector) throw new Error('bucket inspector did not render')
+  return inspector.textContent ?? ''
+}
+
+describe('SessionInspectorDrawer: bucket drill-down figures are never NaN', () => {
+  it('shows not measured for a not-measurable bucket, never NaN% or 0.0%', () => {
+    const { container } = renderBucketTurn({
+      sessionId: SESSION_ID,
+      turnIndex: 0,
+      turn: { index: 0, spanId: 'span-t0' },
+      context: {
+        index: 1,
+        buckets: { tool_definitions: { availability: 'not_measurable', reason: 'not exported' }, residual: 500 },
+        reported_input: 1000,
+      },
+    })
+
+    const text = bucketFigures(container)
+    expect(text.match(/not measured/g)).toHaveLength(2)
+    expect(text).not.toContain('NaN%')
+    expect(text).not.toContain('0.0%')
+  })
+
+  it('shows not measured when the bucket key is absent', () => {
+    const { container } = renderBucketTurn({
+      sessionId: SESSION_ID,
+      turnIndex: 0,
+      turn: { index: 0, spanId: 'span-t0' },
+      context: { index: 1, buckets: { residual: 500 }, reported_input: 1000 },
+    })
+
+    const text = bucketFigures(container)
+    expect(text.match(/not measured/g)).toHaveLength(2)
+    expect(text).not.toContain('NaN%')
+  })
+
+  it('shows a measured zero as 0 and 0.0%, staying measured', () => {
+    const { container } = renderBucketTurn({
+      sessionId: SESSION_ID,
+      turnIndex: 0,
+      turn: { index: 0, spanId: 'span-t0' },
+      context: { index: 1, buckets: { tool_definitions: 0, residual: 1000 }, reported_input: 1000 },
+    })
+
+    const text = bucketFigures(container)
+    expect(text).toContain('0.0%')
+    expect(text).not.toContain('not measured')
+  })
+
+  it('shows a measured 250 of 1000 as 25.0%', () => {
+    const { container } = renderBucketTurn({
+      sessionId: SESSION_ID,
+      turnIndex: 0,
+      turn: { index: 0, spanId: 'span-t0' },
+      context: { index: 1, buckets: { tool_definitions: 250, residual: 750 }, reported_input: 1000 },
+    })
+
+    expect(bucketFigures(container)).toContain('25.0%')
+  })
+
+  it('takes the bucket sum as the total when every reported figure is non-numeric', () => {
+    const { container } = renderBucketTurn({
+      sessionId: SESSION_ID,
+      turnIndex: 0,
+      turn: { index: 0, spanId: 'span-t0', cumulative_input: { x: 1 }, input: 'n/a', fresh: null },
+      context: { index: 1, buckets: { tool_definitions: 250, residual: 750 }, reported_input: 'n/a' },
+    })
+
+    const text = bucketFigures(container)
+    expect(text).toContain('25.0%')
+    expect(text).not.toContain('NaN')
+  })
+})
+
 describe('SessionInspectorDrawer: bucket drill-down on a faulted projection', () => {
   it('shows the error state, never the bucket figures or a zero', () => {
     renderBucketTurn({

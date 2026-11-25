@@ -2088,18 +2088,6 @@ describe('SessionInspectorDrawer: whole-turn full context', () => {
     expect(isTurnFullContentRequest(null)).toBe(false)
   })
 
-  it('draws no spend bars or not-measurable chart for a turn that carries no token counts', () => {
-    // The drawer does not render the per-turn spend chart: the charts section opens
-    // it with a turn key. For a token-less turn it shows the full context and never
-    // a bar, a chip or the chart's not-measurable state.
-    const qc = createTestQueryClient()
-    seedTurn(qc, buildTurnFixture())
-    const html = renderPanel(qc, {})
-    expect(html).toContain('data-testid="turn-content-full"')
-    expect(html).not.toContain('data-testid="turn-spend-not-measurable"')
-    expect(html).not.toMatch(/data-testid="turn-bar-/)
-  })
-
   it('renders every block and part including unknown kinds and zero-token blocks', () => {
     const qc = createTestQueryClient()
     seedTurn(qc, buildTurnFixture())

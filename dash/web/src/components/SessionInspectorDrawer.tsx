@@ -3230,14 +3230,19 @@ function TurnBucketPanel({ request }: { request: TurnBucketContentRequest }) {
   // measured counters are the fallbacks, exactly as the retired opener read
   // them. An unmeasurable figure renders as the formatter's dash.
   const rawBuckets = context?.buckets ?? turn.buckets ?? {}
-  const tokens = Number(rawBuckets[request.bucket] ?? turn[request.bucket] ?? 0)
+  // A bucket figure is taken only when it is a number; a not-measurable verdict
+  // or an absent key stays undefined, so the inspector shows "not measured".
+  const bucketValue = rawBuckets[request.bucket] ?? turn[request.bucket]
+  const tokens = typeof bucketValue === 'number' ? bucketValue : undefined
   const bucketSum = Object.values(rawBuckets).reduce(
     (sum: number, v) => sum + (typeof v === 'number' ? v : 0),
     0,
   )
-  const reported = Number(
-    context?.reported_input ?? turn.cumulative_input ?? turn.input ?? turn.fresh ?? bucketSum ?? 0,
+  // The first reported total that is a number; the bucket sum when none is.
+  const reportedInput = [context?.reported_input, turn.cumulative_input, turn.input, turn.fresh].find(
+    (v): v is number => typeof v === 'number',
   )
+  const reported = reportedInput ?? bucketSum
   const total = Math.max(reported, bucketSum)
   const label = (CONTEXT_BUCKET_LABELS as Record<string, string>)[request.bucket] || request.bucket
   const content =

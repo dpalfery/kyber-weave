@@ -127,12 +127,17 @@ export function formatDimensionDisplay(dim?: ScorecardDimensionValue): {
 }
 
 /**
- * The visible wording for a cost basis. A price computed from a published rate
- * table is a calculation, so it is named as one (D15); a harness-reported cost
- * says so. The dashboard never calls either an estimate.
+ * The visible wording for a cost basis. A harness-reported cost says so; a price
+ * computed from a published rate table is a calculation, named as one (D15); a
+ * run summary is named as one. A missing basis is stated as not reported, and any
+ * other basis is shown verbatim, so no basis is named as something it is not.
  */
 export function costBasisText(basis?: string): string {
-  return basis && /harness/i.test(basis) ? 'reported by the harness' : 'calculated from published rates'
+  if (!basis) return 'basis not reported'
+  if (/harness/i.test(basis)) return 'reported by the harness'
+  if (basis === 'published') return 'calculated from published rates'
+  if (basis === 'run_summary') return 'run summary'
+  return basis
 }
 
 /**
