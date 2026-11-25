@@ -1,11 +1,10 @@
 import { useCallback } from 'react'
-import { useQuery } from '@tanstack/react-query'
 import { cn } from '../../lib/utils.js'
 import { SessionSpendCharts, type ContextCompositionData, type TurnSpendItem } from '../SessionSpendCharts.js'
 import { SectionLoading } from './SectionLoading.js'
 import { SectionError } from './SectionError.js'
-import { sectionErrorMessage, projectionFailureMessage, PROJECTION_FAILED_STATUS } from './useSectionPage.js'
-import { fetchKyberSessionCharts, kyberSessionSectionQueryKey } from '../../lib/kyberApi.js'
+import { useSectionPage } from './useSectionPage.js'
+import { fetchKyberSessionCharts } from '../../lib/kyberApi.js'
 import type { OpenInspector } from './types.js'
 
 /**
@@ -22,10 +21,8 @@ export interface SessionChartsSectionProps {
 }
 
 export function SessionChartsSection({ sessionId, openInspector, className }: SessionChartsSectionProps) {
-  const { data, isPending, isError, error, refetch } = useQuery({
-    queryKey: kyberSessionSectionQueryKey(sessionId, 'charts'),
-    queryFn: () => fetchKyberSessionCharts(sessionId),
-  })
+  const charts = useSectionPage(sessionId, 'charts', fetchKyberSessionCharts)
+  const data = charts.data
 
   const openTurnInspector = useCallback(
     (turnIndex: number, bucketName?: string) => {
@@ -49,23 +46,19 @@ export function SessionChartsSection({ sessionId, openInspector, className }: Se
 
   // A faulted projection is an error state, not a chart: the payload names the
   // fault, so nothing here may render as an honest-looking zero.
-  if (isError || data?.projection_status === PROJECTION_FAILED_STATUS) {
+  if (charts.failure) {
     return (
       <SectionError
         testId="section-error-charts"
         label="Spend charts"
-        message={
-          data?.projection_status === PROJECTION_FAILED_STATUS
-            ? projectionFailureMessage(data)
-            : sectionErrorMessage(error)
-        }
-        onRetry={() => void refetch()}
+        message={charts.failure}
+        onRetry={charts.refetch}
         className={className}
       />
     )
   }
 
-  if (isPending || data === undefined) {
+  if (data === undefined) {
     return <SectionLoading testId="session-charts-loading" label="spend charts" />
   }
 
@@ -74,6 +67,7 @@ export function SessionChartsSection({ sessionId, openInspector, className }: Se
       <SessionSpendCharts
         turns={data.turns as unknown as TurnSpendItem[]}
         context={data.context as unknown as ContextCompositionData}
+        contextPager={{ ...charts.pagerProps, ariaLabel: 'Context composition pages' }}
         onSelectTurn={(turnIndex, bucket) => openTurnInspector(turnIndex, bucket)}
       />
     </div>

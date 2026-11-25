@@ -10,9 +10,10 @@ import {
   type TimelineLevelState,
   type TimelineNode,
 } from '../analysis/TimelineView.js'
+import { Pager } from '../ui/Pager.js'
 import { SectionLoading } from './SectionLoading.js'
 import { SectionError } from './SectionError.js'
-import { PROJECTION_FAILED_STATUS, projectionFailureMessage, sectionErrorMessage } from './useSectionPage.js'
+import { sectionErrorMessage, useSectionPage } from './useSectionPage.js'
 import {
   fetchKyberSessionTimeline,
   type KyberSessionSummarySection,
@@ -22,9 +23,6 @@ import type { DrawerContent, OpenInspector, SessionSummaryPayload } from './type
 
 // The legend and the duration bars share the operation colours with the view.
 export { TIMELINE_OP_COLORS }
-
-/** The state-map key of the top level, whose parent the route names as null. */
-const TOP_LEVEL = '(top level)'
 
 /** One served timeline node adapted to the call-tree view's node shape. */
 function adaptTimelineNode(node: KyberSessionTimelineNode): TimelineNode {
@@ -90,27 +88,43 @@ export function SessionTimelineSection({
   openInspector,
   className,
 }: SessionTimelineSectionProps) {
-  // Expansion and paging are viewer state; the queries below derive from them.
-  // A session change collapses both: the previous session's expanded nodes and
-  // per-level pages are not where a viewer opening another session is. Adjusted
-  // during render (the React state-when-props-change pattern), so no request
-  // leaves under the new session's id carrying the previous session's levels.
-  const [prevSessionId, setPrevSessionId] = useState(sessionId)
+  const timeline = useSectionPage(sessionId, 'timeline', (id, page, limit, order) =>
+    fetchKyberSessionTimeline(id, { parent: null, page, limit, order }),
+  )
+
+  // Expansion and child-level paging are viewer state; the queries below derive
+  // from them. A session, root page, page-size, or sort-order change resets
+  // both (D8) during render (the React state-when-props-change pattern), so no
+  // child request leaves carrying stale levels under the new window.
+  const [prevResetKey, setPrevResetKey] = useState({
+    sessionId,
+    page: timeline.page,
+    limit: timeline.limit,
+    order: timeline.order,
+  })
   const [expandedIds, setExpandedIds] = useState<string[]>([])
   const [levelPages, setLevelPages] = useState<Record<string, number>>({})
-  if (prevSessionId !== sessionId) {
-    setPrevSessionId(sessionId)
+  const resetPending =
+    prevResetKey.sessionId !== sessionId ||
+    prevResetKey.page !== timeline.page ||
+    prevResetKey.limit !== timeline.limit ||
+    prevResetKey.order !== timeline.order
+  if (resetPending) {
+    setPrevResetKey({
+      sessionId,
+      page: timeline.page,
+      limit: timeline.limit,
+      order: timeline.order,
+    })
     setExpandedIds([])
     setLevelPages({})
   }
+  const activeExpandedIds = resetPending ? [] : expandedIds
+  const activeLevelPages = resetPending ? {} : levelPages
 
-  const levelRequests: Array<{ parent: string | null; page: number; levelKey: string }> = []
-  const topPages = levelPages[TOP_LEVEL] ?? 1
-  for (let page = 1; page <= topPages; page++) {
-    levelRequests.push({ parent: null, page, levelKey: TOP_LEVEL })
-  }
-  for (const parentId of expandedIds) {
-    const pages = levelPages[parentId] ?? 1
+  const levelRequests: Array<{ parent: string; page: number; levelKey: string }> = []
+  for (const parentId of activeExpandedIds) {
+    const pages = activeLevelPages[parentId] ?? 1
     for (let page = 1; page <= pages; page++) {
       levelRequests.push({ parent: parentId, page, levelKey: parentId })
     }
@@ -118,8 +132,23 @@ export function SessionTimelineSection({
 
   const levelQueries = useQueries({
     queries: levelRequests.map((request) => ({
-      queryKey: ['kyber-session', sessionId, 'timeline', request.parent, request.page],
-      queryFn: () => fetchKyberSessionTimeline(sessionId, { parent: request.parent, page: request.page }),
+      queryKey: [
+        'kyber-session',
+        sessionId,
+        'timeline',
+        'children',
+        request.parent,
+        request.page,
+        timeline.limit,
+        timeline.order,
+      ],
+      queryFn: () =>
+        fetchKyberSessionTimeline(sessionId, {
+          parent: request.parent,
+          page: request.page,
+          limit: timeline.limit,
+          order: timeline.order,
+        }),
       retry: false,
     })),
   })
@@ -148,18 +177,19 @@ export function SessionTimelineSection({
 
   const childrenByParent = new Map<string, KyberSessionTimelineNode[]>()
   for (const [levelKey, bucket] of levels) {
-    if (levelKey !== TOP_LEVEL) childrenByParent.set(levelKey, bucket.nodes)
+    childrenByParent.set(levelKey, bucket.nodes)
   }
 
   const buildNode = (raw: KyberSessionTimelineNode): TimelineNode => {
-    const expanded = expandedIds.includes(raw.spanId)
+    const expanded = activeExpandedIds.includes(raw.spanId)
     return {
       ...adaptTimelineNode(raw),
       children: expanded ? (childrenByParent.get(raw.spanId) ?? []).map(buildNode) : [],
     }
   }
 
-  const topNodes = (levels.get(TOP_LEVEL)?.nodes ?? []).map(buildNode)
+  const data = timeline.data
+  const topNodes = (data?.nodes ?? []).map(buildNode)
   const loadedNodes: TimelineNode[] = []
   const walk = (nodes: TimelineNode[]) => {
     for (const node of nodes) {
@@ -170,7 +200,8 @@ export function SessionTimelineSection({
   walk(topNodes)
 
   const levelState = (parent: string | null): TimelineLevelState | undefined => {
-    const bucket = levels.get(parent ?? TOP_LEVEL)
+    if (parent === null) return undefined
+    const bucket = levels.get(parent)
     if (!bucket) return undefined
     return {
       loading: bucket.loading,
@@ -187,18 +218,14 @@ export function SessionTimelineSection({
     )
   }
   const loadMore = (parent: string | null) => {
-    const key = parent ?? TOP_LEVEL
-    setLevelPages((pages) => ({ ...pages, [key]: (pages[key] ?? 1) + 1 }))
+    if (parent === null) return
+    setLevelPages((pages) => ({ ...pages, [parent]: (pages[parent] ?? 1) + 1 }))
   }
   const retryLevel = (parent: string | null) => {
-    const bucket = levels.get(parent ?? TOP_LEVEL)
+    if (parent === null) return
+    const bucket = levels.get(parent)
     for (const refetch of bucket?.refetches ?? []) refetch()
   }
-
-  // requests[0] is always the top level's first page, so it carries the
-  // section's own window: the bounds every view scales by.
-  const rootQuery = levelQueries[0]
-  const data = rootQuery?.data
 
   const timelineRoot: TimelineNode | null =
     data && topNodes.length > 0
@@ -239,23 +266,19 @@ export function SessionTimelineSection({
   // A faulted projection is an error state, not an empty tree: the top level's
   // payload names the fault for the whole session, so no level renders as
   // "no spans recorded".
-  if (rootQuery?.isError || data?.projection_status === PROJECTION_FAILED_STATUS) {
+  if (timeline.failure) {
     return (
       <SectionError
         testId="section-error-timeline"
         label="Execution timeline"
-        message={
-          data?.projection_status === PROJECTION_FAILED_STATUS
-            ? projectionFailureMessage(data)
-            : sectionErrorMessage(rootQuery?.error)
-        }
-        onRetry={() => void rootQuery.refetch()}
+        message={timeline.failure}
+        onRetry={timeline.refetch}
         className={className}
       />
     )
   }
 
-  if (rootQuery?.isPending || data === undefined) {
+  if (data === undefined) {
     return <SectionLoading testId="session-timeline-loading" label="execution timeline" />
   }
 
@@ -322,26 +345,31 @@ export function SessionTimelineSection({
         <p data-testid="timeline-empty" className="py-6 text-center text-xs text-tertiary-foreground italic">
           No timeline spans recorded.
         </p>
-      ) : activeTimelineTab === 'tree' ? (
-        <div data-testid="timeline-tree-view">
-          <TimelineView
-            root={timelineRoot}
-            expandedIds={expandedIds}
-            levelState={levelState}
-            onToggleExpand={toggleExpand}
-            onLoadMore={loadMore}
-            onRetryLevel={retryLevel}
-            selectedId={selectedSpanId}
-            onSelectNode={(node) => openSpanInspector(node)}
-          />
-        </div>
       ) : (
-        <DurationView
-          nodes={loadedNodes}
-          bounds={data.bounds}
-          selectedId={selectedSpanId}
-          onSelectNode={(node) => openSpanInspector(node)}
-        />
+        <>
+          {activeTimelineTab === 'tree' ? (
+            <div data-testid="timeline-tree-view">
+              <TimelineView
+                root={timelineRoot}
+                expandedIds={activeExpandedIds}
+                levelState={levelState}
+                onToggleExpand={toggleExpand}
+                onLoadMore={loadMore}
+                onRetryLevel={retryLevel}
+                selectedId={selectedSpanId}
+                onSelectNode={(node) => openSpanInspector(node)}
+              />
+            </div>
+          ) : (
+            <DurationView
+              nodes={loadedNodes}
+              bounds={data.bounds}
+              selectedId={selectedSpanId}
+              onSelectNode={(node) => openSpanInspector(node)}
+            />
+          )}
+          <Pager {...timeline.pagerProps} ariaLabel="Timeline pages" />
+        </>
       )}
     </div>
   )
