@@ -1768,6 +1768,8 @@ export interface KyberJobStatus {
     lastSuccessAt: string | null
     lastFailure: string | null
     nextDueAt: string | null
+    /** Source units the last pass could not read and skipped; zero when it read them all. */
+    failedUnits: number
   }
   /** Whether SCHEDULED jobs are paused. The pause button and label read this. */
   paused: boolean
@@ -1863,35 +1865,61 @@ export async function updateKyberSettings(update: KyberSettingsUpdate): Promise<
   return res.json() as Promise<KyberSettings>
 }
 
+/**
+ * How a finished job pass ended, as the host reports it. `partial` means the
+ * pass completed but `failedUnits` source units could not be read and were
+ * skipped, so it is never a clean success.
+ */
+export interface KyberJobOutcome {
+  outcome: 'succeeded' | 'partial'
+  failedUnits: number
+}
+
+/**
+ * Reads the outcome of a job route. The host answers only after the pass has
+ * finished, so the reply IS the result. A non-2xx reply, or a 2xx body without a
+ * known outcome, is an error: a missing answer is never shown as success.
+ */
+async function readJobOutcome(res: Response, path: string): Promise<KyberJobOutcome> {
+  if (!res.ok) throw new KyberApiError(res.status, path)
+  const body = (await res.json()) as Partial<KyberJobOutcome> | null
+  const known = body?.outcome === 'succeeded' || body?.outcome === 'partial'
+  if (!known || typeof body?.failedUnits !== 'number') throw new KyberApiError(res.status, path)
+  return { outcome: body.outcome as KyberJobOutcome['outcome'], failedUnits: body.failedUnits }
+}
+
 /** Which surface asked for a refresh; `scheduled` is reserved for the host. */
 export type KyberRefreshSurface = 'web' | 'tray'
 
 /**
- * Requests a manual refresh. WHY `surface`: the host records which surface
- * triggered the run, and the dashboard must never ask for the scheduled one —
- * that decision belongs to the host's own cadence. A 409 arrives as a
- * `KyberApiError` for the caller to render as "already running".
+ * Requests a manual refresh and resolves to the outcome the host reports. WHY
+ * `surface`: the host records which surface triggered the run, and the dashboard
+ * must never ask for the scheduled one — that decision belongs to the host's own
+ * cadence. A 409 arrives as a `KyberApiError` for the caller to render as
+ * "already running".
  */
-export async function requestKyberRefresh(surface: KyberRefreshSurface = 'web'): Promise<void> {
+export async function requestKyberRefresh(
+  surface: KyberRefreshSurface = 'web',
+): Promise<KyberJobOutcome> {
   const path = '/api/kyber/refresh'
   const res = await fetch(path, {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
     body: JSON.stringify({ surface }),
   })
-  if (!res.ok) throw new KyberApiError(res.status, path)
+  return readJobOutcome(res, path)
 }
 
 /**
  * One-off folder-history import (issue #319). It NEVER touches the scheduled
  * folder-import setting: "import this once" and "keep importing" are different
  * decisions, and conflating them made a single import look like a standing
- * preference.
+ * preference. Resolves to the outcome the host reports.
  */
 export async function importKyberHistory(request: {
   weeks: number
   harnesses?: readonly string[]
-}): Promise<void> {
+}): Promise<KyberJobOutcome> {
   const path = '/api/kyber/import-history'
   const res = await fetch(path, {
     method: 'POST',
@@ -1905,7 +1933,7 @@ export async function importKyberHistory(request: {
         : {}),
     }),
   })
-  if (!res.ok) throw new KyberApiError(res.status, path)
+  return readJobOutcome(res, path)
 }
 
 // ===========================================================================
