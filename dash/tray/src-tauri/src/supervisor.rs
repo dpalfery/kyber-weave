@@ -82,6 +82,18 @@ pub fn parse_attached_line(line: &str) -> Option<Listening> {
     parse_server_announcement(line, "kyberdash.web.attached")
 }
 
+/// Whether the line is a JSON server announcement, listening or attached,
+/// whatever its fields hold. Lines that are not one are not refused here.
+fn is_server_announcement(line: &str) -> bool {
+    let Ok(value) = serde_json::from_str::<serde_json::Value>(line.trim()) else {
+        return false;
+    };
+    matches!(
+        value.get("event").and_then(serde_json::Value::as_str),
+        Some("kyberdash.web.listening" | "kyberdash.web.attached")
+    )
+}
+
 fn parse_server_announcement(line: &str, event: &str) -> Option<Listening> {
     let value: serde_json::Value = serde_json::from_str(line.trim()).ok()?;
     if value.get("event")?.as_str()? != event {
@@ -339,6 +351,14 @@ impl Supervisor {
                         process.kill_tree();
                         self.attach(listening.clone());
                         return Attempt::Listening(listening);
+                    }
+                    if is_server_announcement(&line) {
+                        // A recognised announcement that fails validation (an address
+                        // off loopback, or a missing field) is refused outright, so a
+                        // good line after it cannot rescue the launch.
+                        process.kill_tree();
+                        return self
+                            .record_failure("server announced an unusable address".to_string());
                     }
                 }
                 None => {
@@ -1036,6 +1056,30 @@ mod tests {
             !supervisor.owns_server(),
             "the attached server is not owned"
         );
+        assert!(*killed.lock().unwrap(), "the launched child is reaped");
+    }
+
+    /// A recognised attached line that fails loopback validation ends the
+    /// launch; a good listening line after it must not rescue the attempt.
+    #[test]
+    fn a_bad_attached_line_before_a_good_one_fails_the_launch() {
+        let killed = Arc::new(Mutex::new(false));
+        let mut spawner = FakeSpawner {
+            scripted: vec![vec![
+                attached_line("http://10.0.0.5:4747", 4242),
+                listening_line(4747),
+            ]],
+            killed: Arc::clone(&killed),
+            ..Default::default()
+        };
+        let mut clock = FakeClock::default();
+        let mut supervisor = Supervisor::new("kyberdash");
+
+        match supervisor.attempt(&mut spawner, &mut clock) {
+            Attempt::Failed { .. } => {}
+            other => panic!("expected a failure, got {other:?}"),
+        }
+        assert_eq!(supervisor.url(), None);
         assert!(*killed.lock().unwrap(), "the launched child is reaped");
     }
 
