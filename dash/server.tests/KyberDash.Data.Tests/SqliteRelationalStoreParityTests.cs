@@ -9,7 +9,7 @@ namespace KyberDash.Data.Tests;
 
 /// <summary>
 /// Store-parity tests for <see cref="SqliteRelationalStore"/> over a real <c>sqlite3</c> database:
-/// nested directory creation, schema v26 stamping, idempotent initialization, newer-store refusal
+/// nested directory creation, current schema version stamping, idempotent initialization, newer-store refusal
 /// without mutating or deleting any database file, the unconsumed rebuild re-ingest flag, and the
 /// source-delete cascade the clean path relies on. Scripted <c>ExecuteSqliteCore</c> coverage lives
 /// in <c>SqliteRelationalStoreWriteTests</c> and <c>SchemaVersionTests</c>.
@@ -26,7 +26,7 @@ public class SqliteRelationalStoreParityTests : IDisposable
     }
 
     [Fact]
-    public void Constructor_CreatesNestedDirectoryAndStampsSchemaV26()
+    public void Constructor_CreatesNestedDirectoryAndStampsTheCurrentSchemaVersion()
     {
         string databasePath = Path.Combine(directory.Path, "nested", "deeper", "canon.db");
 
