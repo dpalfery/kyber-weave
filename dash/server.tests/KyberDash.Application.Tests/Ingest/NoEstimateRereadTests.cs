@@ -108,7 +108,7 @@ public class NoEstimateRereadTests
         Assert.Equal("1", harness.Checkpoint("droid", harness.DroidPath("sess-a")).ParserContractVersion);
     }
 
-    /// <summary>A failed re-read leaves the marker absent, so the next tick retries and records it.</summary>
+    /// <summary>A failed re-read reports the pass partial and leaves the marker absent, so the next tick retries and records it.</summary>
     [Fact]
     public void MaintenancePass_WhenTheRereadFails_LeavesTheMarkerAbsent_AndRetriesOnTheNextTick()
     {
@@ -120,7 +120,8 @@ public class NoEstimateRereadTests
 
         JobOutcome failed = harness.Jobs.RunMaintenancePass();
 
-        Assert.Equal("succeeded", failed.Outcome);
+        Assert.Equal("partial", failed.Outcome);
+        Assert.Equal(1, failed.FailedUnits);
         Assert.Null(harness.Store.GetRefreshRun(JobSchedulerService.NoEstimateRereadKey));
         Assert.Empty(harness.Writer.WriteBatchCalls);
         Assert.Single(harness.Writer.WriteProblemCalls);

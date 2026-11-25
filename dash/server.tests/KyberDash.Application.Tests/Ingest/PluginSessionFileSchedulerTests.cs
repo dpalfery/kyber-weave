@@ -1,4 +1,5 @@
 using System.Collections.Generic;
+using System.Linq;
 using System.Threading.Tasks;
 using KyberDash.Application;
 using KyberDash.Application.Tests.Fakes;
@@ -111,6 +112,87 @@ public class PluginSessionFileSchedulerTests
         harness.CounterPassVerify(Times.Never(), null);
     }
 
+    /// <summary>A maintenance pass whose plugin-captured counter pass fails a unit is partial, never succeeded.</summary>
+    [Fact]
+    public void MaintenancePass_WhenThePluginPassFailsAUnit_ReportsPartial()
+    {
+        SchedulerHarness harness = new();
+        harness.SeedPluginCapture("sess-plug");
+        harness.PluginRows = [new RefreshSourceStatusRow("droid", "sess-plug.jsonl", "failed", 0, "unreadable")];
+
+        JobOutcome outcome = harness.Jobs.RunMaintenancePass();
+
+        Assert.Equal("partial", outcome.Outcome);
+        Assert.Equal(1, outcome.FailedUnits);
+        Assert.Equal(1, harness.Jobs.GetStatus().LastFailedUnits);
+    }
+
+    /// <summary>A manual refresh whose plugin-captured counter pass fails a unit is partial, never succeeded.</summary>
+    [Fact]
+    public async Task TriggerRefresh_WhenThePluginPassFailsAUnit_ReportsPartial()
+    {
+        SchedulerHarness harness = new();
+        harness.SeedPluginCapture("sess-plug");
+        harness.PluginRows = [new RefreshSourceStatusRow("droid", "sess-plug.jsonl", "failed", 0, "unreadable")];
+
+        JobOutcome outcome = await harness.Jobs.TriggerRefreshAsync(TestContext.Current.CancellationToken);
+
+        Assert.Equal("partial", outcome.Outcome);
+        Assert.Equal(1, outcome.FailedUnits);
+        Assert.Equal(1, harness.Jobs.GetStatus().LastFailedUnits);
+    }
+
+    /// <summary>A unit that fails in both the folder import and the plugin pass of one maintenance pass counts once.</summary>
+    [Fact]
+    public void MaintenancePass_WhenTheSameUnitFailsInTwoReads_CountsItOnce()
+    {
+        SchedulerHarness harness = new();
+        harness.SeedPluginCapture("sess-plug");
+        harness.Settings.WriteBooleanSetting(SettingsService.FolderImportScheduledKey, true);
+        harness.ImportRows = [new RefreshSourceStatusRow("droid", "sess-plug.jsonl", "failed", 0, "unreadable")];
+        harness.PluginRows = [new RefreshSourceStatusRow("droid", "sess-plug.jsonl", "failed", 0, "unreadable")];
+
+        JobOutcome outcome = harness.Jobs.RunMaintenancePass();
+
+        Assert.Equal("partial", outcome.Outcome);
+        Assert.Equal(1, outcome.FailedUnits);
+    }
+
+    /// <summary>
+    /// The failed-unit count in the status describes the last pass that read sources: a later clean
+    /// pass with no folder import replaces an earlier import's failures instead of leaving them stale.
+    /// </summary>
+    [Fact]
+    public void MaintenancePass_AfterAFailedImport_ACleanPassWithoutImportClearsTheFailedUnits()
+    {
+        SchedulerHarness harness = new();
+        harness.Settings.WriteBooleanSetting(SettingsService.FolderImportScheduledKey, true);
+        harness.ImportRows = [new RefreshSourceStatusRow("droid", "sess-a.jsonl", "failed", 0, "unreadable")];
+        Assert.Equal("partial", harness.Jobs.RunMaintenancePass().Outcome);
+        Assert.Equal(1, harness.Jobs.GetStatus().LastFailedUnits);
+
+        harness.Settings.WriteBooleanSetting(SettingsService.FolderImportScheduledKey, false);
+        JobOutcome outcome = harness.Jobs.RunMaintenancePass();
+
+        Assert.Equal("succeeded", outcome.Outcome);
+        Assert.Equal(0, harness.Jobs.GetStatus().LastFailedUnits);
+    }
+
+    /// <summary>A paused pass reads no source, so it keeps the failed-unit count of the last pass that did.</summary>
+    [Fact]
+    public void MaintenancePass_WhenPaused_KeepsTheLastReadPassFailedUnits()
+    {
+        SchedulerHarness harness = new();
+        harness.Settings.WriteBooleanSetting(SettingsService.FolderImportScheduledKey, true);
+        harness.ImportRows = [new RefreshSourceStatusRow("droid", "sess-a.jsonl", "failed", 0, "unreadable")];
+        Assert.Equal("partial", harness.Jobs.RunMaintenancePass().Outcome);
+
+        harness.Settings.WriteBooleanSetting(SettingsService.JobsPausedKey, true);
+        Assert.Equal("succeeded", harness.Jobs.RunMaintenancePass().Outcome);
+
+        Assert.Equal(1, harness.Jobs.GetStatus().LastFailedUnits);
+    }
+
     /// <summary>The fakes and mocks one scheduler test runs over, built once per test.</summary>
     private sealed class SchedulerHarness
     {
@@ -123,17 +205,7 @@ public class PluginSessionFileSchedulerTests
             Ingestion = new Mock<ITranscriptIngestionService>();
             Ingestion
                 .Setup(service => service.RefreshHarnessSources(It.IsAny<int>()))
-                .Returns(new RefreshReport(
-                    RunId: string.Empty,
-                    HistoryWeeks: 0,
-                    CommandStartedAt: string.Empty,
-                    Rows: [],
-                    PurgedContentCount: 0,
-                    Sessions: 0,
-                    Runs: 0,
-                    Executions: 0,
-                    Rollups: 0,
-                    ExitCode: 0));
+                .Returns(() => Report(ImportRows));
             Events = [];
             IReadOnlyCollection<string>? capturedKeys = null;
             Projection
@@ -146,7 +218,8 @@ public class PluginSessionFileSchedulerTests
                     _ = harnessId;
                     capturedKeys = sessionKeys;
                     Events.Add("counters");
-                });
+                })
+                .Returns(() => Report(PluginRows));
             CapturedKeys = () => capturedKeys;
             Jobs = new JobSchedulerService(
                 Store,
@@ -159,6 +232,12 @@ public class PluginSessionFileSchedulerTests
         }
 
         public InMemoryRelationalStore Store { get; }
+
+        /// <summary>The rows the folder import reports; empty for a clean import.</summary>
+        public IReadOnlyList<RefreshSourceStatusRow> ImportRows { get; set; } = [];
+
+        /// <summary>The rows the plugin-captured counter pass reports; empty for a clean pass.</summary>
+        public IReadOnlyList<RefreshSourceStatusRow> PluginRows { get; set; } = [];
 
         public FakeSettingsRepository Settings { get; }
 
@@ -198,6 +277,18 @@ public class PluginSessionFileSchedulerTests
                 Assert.Equal(expectedKeys, CapturedKeys());
             }
         }
+
+        private static RefreshReport Report(IReadOnlyList<RefreshSourceStatusRow> rows) => new(
+            RunId: string.Empty,
+            HistoryWeeks: 0,
+            CommandStartedAt: string.Empty,
+            Rows: rows,
+            PurgedContentCount: 0,
+            Sessions: 0,
+            Runs: 0,
+            Executions: 0,
+            Rollups: 0,
+            ExitCode: rows.Any(static row => row.Status == "failed") ? 1 : 0);
 
         private static CollectedRecord PluginTurn(string sessionKey) => new(
             RecordId: $"plugin-{sessionKey}",

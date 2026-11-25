@@ -358,25 +358,24 @@ public class JobSchedulerService : IJobSchedulerService
             // plugin-captured counter pass. The purge and the projection still run so display
             // layers keep moving and content retention stays stamped.
             SettingsView settingsView = settings.ReadSettings();
-            int importFailedUnits = 0;
-            bool imported = false;
-            if (!settingsView.JobsPaused)
+            HashSet<(string HarnessId, string SourceKey)> failedUnits = [];
+            bool readSources = !settingsView.JobsPaused;
+            if (readSources)
             {
                 // Before anything reads or imports sources, replace once the rows the Droid, Cursor
                 // and Warp readers stored from estimated tokens. The marker makes it a one-time
                 // pass across host restarts; a failed read leaves it absent for the next tick.
                 if (operationalStore.GetRefreshRun(NoEstimateRereadKey) is null)
                 {
-                    RereadEstimatedTokenSources();
+                    RereadEstimatedTokenSources(failedUnits);
                 }
 
                 if (settingsView.FolderImportScheduled)
                 {
-                    importFailedUnits = FailedUnitsOf(ingestion.RefreshHarnessSources(CanonRefreshEngine.DefaultHistoryWeeks));
-                    imported = true;
+                    AddFailedUnits(failedUnits, ingestion.RefreshHarnessSources(CanonRefreshEngine.DefaultHistoryWeeks));
                 }
 
-                RefreshPluginCapturedCounters();
+                AddFailedUnits(failedUnits, RefreshPluginCapturedCounters());
             }
 
             _ = ingestion.PurgeExpiredContent(clock());
@@ -388,13 +387,15 @@ public class JobSchedulerService : IJobSchedulerService
                 lastSuccessAt = Timestamp();
                 lastFailure = null;
                 state = "idle";
-                if (imported)
+
+                // A paused pass read no source, so it keeps the count of the last pass that did.
+                if (readSources)
                 {
-                    lastFailedUnits = importFailedUnits;
+                    lastFailedUnits = failedUnits.Count;
                 }
             }
 
-            return CompletedOutcome(importFailedUnits);
+            return CompletedOutcome(failedUnits.Count);
         }
         catch (Exception exception) when (IsJobFailure(exception))
         {
@@ -454,7 +455,7 @@ public class JobSchedulerService : IJobSchedulerService
 
     /// <summary>Waits until the timer is stopped.</summary>
     /// <returns><see langword="true"/>, meaning the loop should end.</returns>
-    private JobOutcome RunJob(Func<int>? work)
+    private JobOutcome RunJob(Func<RefreshReport>? work)
     {
         if (work is null && settings.ReadSettings().JobsPaused)
         {
@@ -484,8 +485,13 @@ public class JobSchedulerService : IJobSchedulerService
 
         try
         {
-            int failedUnits = work?.Invoke() ?? 0;
-            RefreshPluginCapturedCounters();
+            HashSet<(string HarnessId, string SourceKey)> failedUnits = [];
+            if (work is not null)
+            {
+                AddFailedUnits(failedUnits, work());
+            }
+
+            AddFailedUnits(failedUnits, RefreshPluginCapturedCounters());
             _ = ingestion.PurgeExpiredContent(clock());
             _ = projection.ProjectAll();
 
@@ -494,13 +500,10 @@ public class JobSchedulerService : IJobSchedulerService
                 lastSuccessAt = Timestamp();
                 lastFailure = null;
                 state = "idle";
-                if (work is not null)
-                {
-                    lastFailedUnits = failedUnits;
-                }
+                lastFailedUnits = failedUnits.Count;
             }
 
-            return CompletedOutcome(failedUnits);
+            return CompletedOutcome(failedUnits.Count);
         }
         catch (Exception exception) when (IsJobFailure(exception))
         {
@@ -522,12 +525,32 @@ public class JobSchedulerService : IJobSchedulerService
         }
     }
 
-    /// <summary>Runs the history import and returns how many of its source units failed.</summary>
-    private int ImportHistory() => FailedUnitsOf(ingestion.RefreshHarnessSources(CanonRefreshEngine.DefaultHistoryWeeks));
+    /// <summary>Runs the history import and returns its refresh report.</summary>
+    private RefreshReport ImportHistory() => ingestion.RefreshHarnessSources(CanonRefreshEngine.DefaultHistoryWeeks);
 
-    /// <summary>Counts the source units a refresh report recorded as failed; each one was skipped, not imported.</summary>
-    private static int FailedUnitsOf(RefreshReport report) =>
-        report.Rows.Count(static row => string.Equals(row.Status, "failed", StringComparison.Ordinal));
+    /// <summary>
+    /// Adds the source units <paramref name="report"/> recorded as failed to <paramref name="failedUnits"/>;
+    /// each one was skipped, not imported.
+    /// </summary>
+    /// <remarks>
+    /// One pass can read the same unit more than once (the re-read, the folder import and the plugin
+    /// pass), so units are keyed by harness and source key and a unit that failed twice counts once.
+    /// </remarks>
+    private static void AddFailedUnits(HashSet<(string HarnessId, string SourceKey)> failedUnits, RefreshReport? report)
+    {
+        if (report is null)
+        {
+            return;
+        }
+
+        foreach (RefreshSourceStatusRow row in report.Rows)
+        {
+            if (string.Equals(row.Status, "failed", StringComparison.Ordinal))
+            {
+                _ = failedUnits.Add((row.HarnessId, row.SourceKey));
+            }
+        }
+    }
 
     /// <summary>
     /// The outcome of a pass that completed. A pass in which source units failed is <c>partial</c>, so the
@@ -540,15 +563,16 @@ public class JobSchedulerService : IJobSchedulerService
     /// The plugin-captured counter pass: asks the store which Droid sessions the Factory plugin
     /// captured, then reads only those sessions' transcript files so their counters and models
     /// land on every refresh and every maintenance tick. Runs under the caller's job guard, so
-    /// it never overlaps a folder import; a failure here fails the caller's job.
+    /// it never overlaps a folder import; a thrown failure here fails the caller's job.
     /// </summary>
-    private void RefreshPluginCapturedCounters()
+    /// <returns>The pass report, whose failed units the caller counts into its outcome.</returns>
+    private RefreshReport RefreshPluginCapturedCounters()
     {
         IReadOnlyList<string> sessionKeys = reader.SessionKeysWithRecordSource(
             PluginCapturedHarnessId,
             PluginCapturedSourceName,
             PluginCapturedLimit);
-        _ = ingestion.RefreshPluginSessionFiles(PluginCapturedHarnessId, sessionKeys);
+        return ingestion.RefreshPluginSessionFiles(PluginCapturedHarnessId, sessionKeys);
     }
 
     /// <summary>
@@ -557,11 +581,14 @@ public class JobSchedulerService : IJobSchedulerService
     /// </summary>
     /// <remarks>
     /// A failed unit is reported in the pass report rather than thrown, so checking its exit code is
-    /// what keeps the marker absent and makes the next tick retry the replacement.
+    /// what keeps the marker absent and makes the next tick retry the replacement. Its failed units
+    /// are added to <paramref name="failedUnits"/> so the pass reports them.
     /// </remarks>
-    private void RereadEstimatedTokenSources()
+    /// <param name="failedUnits">The pass's failed units, keyed by harness and source key.</param>
+    private void RereadEstimatedTokenSources(HashSet<(string HarnessId, string SourceKey)> failedUnits)
     {
         RefreshReport? report = ingestion.RereadCheckpointedSources(NoEstimateRereadHarnessIds);
+        AddFailedUnits(failedUnits, report);
         if (report?.ExitCode != 0)
         {
             return;
