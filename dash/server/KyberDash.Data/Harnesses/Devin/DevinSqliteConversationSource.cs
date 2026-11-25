@@ -78,7 +78,17 @@ public class DevinSqliteConversationSource : ISqliteConversationSource
                 continue;
             }
 
-            long nodeCount = Convert.ToInt64(row["node_count"], CultureInfo.InvariantCulture);
+            long nodeCount;
+            try
+            {
+                nodeCount = Convert.ToInt64(row["node_count"], CultureInfo.InvariantCulture);
+            }
+            catch (Exception ex) when (ex is FormatException or InvalidCastException or OverflowException)
+            {
+                RecordProblem(context, id, $"Skipping Devin session '{id}': node_count is not an integer ({ex.Message}).");
+                continue;
+            }
+
             yield return new SqliteConversation(id, $"{activityText}-{nodeCount}", lastActivity, CompanionKey: null);
         }
     }

@@ -85,6 +85,23 @@ public class DevinSqliteConversationSourceTests
     }
 
     [Fact]
+    public void ListConversations_NonIntegerNodeCount_RecordsAProblemAndListsTheOthers()
+    {
+        InMemoryHarnessSqliteSource sqlite = new();
+        sqlite.AddDatabase(DatabasePath)
+            .AddRow(DevinSqliteConversationSource.ConversationsQuery, Row("s1", "2026-11-20T10:00:00Z", "many"))
+            .AddRow(DevinSqliteConversationSource.ConversationsQuery, Row("s2", "2026-11-20T10:00:00Z", 2L));
+        using IHarnessSqliteDatabase database = sqlite.Open(DatabasePath);
+        List<CollectedProblem> problems = [];
+
+        List<SqliteConversation> listed = [.. new DevinSqliteConversationSource().ListConversations(
+            Context(database, since: null, problems))];
+
+        Assert.Equal("s2", Assert.Single(listed).Id);
+        Assert.Contains("s1", Assert.Single(problems).Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void RequiredColumns_NameTheColumnsEachQueryReads()
     {
         IReadOnlyDictionary<string, IReadOnlyList<string>> required = new DevinSqliteConversationSource().RequiredColumns;
@@ -176,7 +193,7 @@ public class DevinSqliteConversationSourceTests
         Assert.Throws<InvalidDataException>(() => Export(database, "gone"));
     }
 
-    private static Dictionary<string, object?> Row(string id, string lastActivityAt, long nodeCount) => new()
+    private static Dictionary<string, object?> Row(string id, string lastActivityAt, object nodeCount) => new()
     {
         ["id"] = id,
         ["last_activity_at"] = lastActivityAt,
