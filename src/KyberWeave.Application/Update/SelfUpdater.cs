@@ -587,8 +587,7 @@ internal sealed class SelfUpdater : IDisposable
 
         _log("checking the KyberDash engine…");
         ProcessResult probe = CaptureVerb(kyberdash, verify, version, false);
-        if (probe.ExitCode == 2 && (probe.StandardOutput + "\n" + probe.StandardError).Contains(
-                PreVerbUsageLine, StringComparison.Ordinal))
+        if (PredatesTheVerbs(probe))
         {
             _log("this KyberDash predates the tray restart; checking the engine the earlier way");
             EnsureEngine(windows);
@@ -647,6 +646,19 @@ internal sealed class SelfUpdater : IDisposable
 
     /// <summary>The line an older kyberdash prints for <c>engine verify</c>, which it does not have.</summary>
     private const string PreVerbUsageLine = "Usage: kyberdash engine ensure --if-running [--state-dir <dir>]";
+
+    /// <summary>
+    /// True when a verb's answer shows a kyberdash that predates the restart verbs: its usage line with exit 2, or the
+    /// words "unknown command" at any exit code, which is how <c>EnsureEngine</c> recognises an old binary too.
+    /// </summary>
+    private static bool PredatesTheVerbs(ProcessResult result)
+    {
+        if (MentionsUnknownCommand(result))
+            return true;
+
+        return result.ExitCode == 2 && (result.StandardOutput + "\n" + result.StandardError).Contains(
+            PreVerbUsageLine, StringComparison.Ordinal);
+    }
 
     /// <summary>Runs one KyberDash verb through the capture seam, and turns a start failure or a timeout into a named failure.</summary>
     private ProcessResult CaptureVerb(string kyberdash, IReadOnlyList<string> args, string version, bool quitDone)

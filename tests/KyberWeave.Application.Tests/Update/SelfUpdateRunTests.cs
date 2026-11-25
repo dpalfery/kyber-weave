@@ -1470,6 +1470,28 @@ public sealed class SelfUpdateRunTests : IDisposable
         Assert.Contains(log, line => line.Contains("predates the tray restart", StringComparison.Ordinal));
     }
 
+    /// <summary>An older kyberdash that answers the new verb with "unknown command" is the old binary, whatever its exit code.</summary>
+    [Theory]
+    [InlineData(1)]
+    [InlineData(2)]
+    [InlineData(64)]
+    public void RunFallsBackWhenTheProbeAnswersUnknownCommandAtAnyExitCode(int exitCode)
+    {
+        List<string> log = [];
+        List<ReconcileStep> steps = [];
+
+        (SelfUpdateOutcome outcome, _) = RunChanged(
+            log,
+            steps,
+            Scripted(("engine verify --version 0.10.0 --wait 0", Exit(exitCode, "kyberdash: unknown command: engine verify"))));
+
+        Assert.Equal(0, outcome.ExitCode);
+        Assert.Equal<string>(
+            [Probe, "engine ensure --if-running", "menubar --update --version 0.10.0", "plugin", "plugin"],
+            steps.Select(Describe));
+        Assert.Contains(log, line => line.Contains("predates the tray restart", StringComparison.Ordinal));
+    }
+
     /// <summary>Every failing step is named with its first output line, and says the binaries are already updated.</summary>
     [Theory]
     [InlineData("menubar --quit", "the KyberDash tray step failed:", false)]
