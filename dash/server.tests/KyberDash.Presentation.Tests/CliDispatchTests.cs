@@ -283,6 +283,32 @@ public class CliDispatchTests
             Times.Never);
     }
 
+    [Theory]
+    [InlineData("601")]
+    [InlineData("2147483647")]
+    public async Task EngineVerifyRejectsAWaitAboveTheCapWithUsage(string wait)
+    {
+        CliRun run = await CliRun.ExecuteAsync(["engine", "verify", "--version", "2.0.0", "--wait", wait]);
+
+        Assert.Equal(2, run.ExitCode);
+        Assert.Contains("Usage: kyberdash engine", run.Error, StringComparison.Ordinal);
+        run.Builder.Lifecycle.Verify(
+            l => l.VerifyRunningEngineVersionAsync(It.IsAny<string>(), It.IsAny<int>(), It.IsAny<string?>(), It.IsAny<CancellationToken>()),
+            Times.Never);
+    }
+
+    [Fact]
+    public async Task EngineVerifyAcceptsAWaitAtTheCap()
+    {
+        CliRun run = await CliRun.ExecuteAsync(
+            ["engine", "verify", "--version", "2.0.0", "--wait", "600"],
+            configure: builder => builder.Lifecycle
+                .Setup(l => l.VerifyRunningEngineVersionAsync(It.IsAny<string>(), It.IsAny<int>(), It.IsAny<string?>(), It.IsAny<CancellationToken>()))
+                .ReturnsAsync(new EngineEnsureReport(true, "engine: probe", Outcome: EngineVerifyOutcome.Running)));
+
+        Assert.Equal(0, run.ExitCode);
+    }
+
     [Fact]
     public async Task UnknownEngineSubcommandPrintsTheCurrentUsage()
     {

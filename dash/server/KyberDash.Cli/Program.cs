@@ -345,6 +345,12 @@ public static partial class Program
     private const string EngineUsage =
         "Usage: kyberdash engine ensure --if-running / stop / verify --version <v> [--wait <seconds>] [--state-dir <dir>]";
 
+    /// <summary>
+    /// Longest <c>--wait</c> accepted. An unbounded wait would clamp to <see cref="int.MaxValue"/> probes and
+    /// hold the caller for years; the updater asks for 60 seconds, so ten minutes is generous.
+    /// </summary>
+    private const int MaxEngineWaitSeconds = 600;
+
     private sealed record EngineOptions(string? StateDir, string? Version, int WaitSeconds);
 
     private static async Task<int> RunEngineAsync(
@@ -454,7 +460,7 @@ public static partial class Program
             }
             else if (args[index] == "--wait" && hasValue
                 && int.TryParse(args[index + 1], NumberStyles.None, CultureInfo.InvariantCulture, out int seconds)
-                && seconds >= 0)
+                && seconds is >= 0 and <= MaxEngineWaitSeconds)
             {
                 waitSeconds = seconds;
                 index++;
@@ -462,7 +468,7 @@ public static partial class Program
             else
             {
                 options = new EngineOptions(null, null, 0);
-                problem = $"kyberdash engine {verb}: unknown or incomplete option '{args[index]}'.";
+                problem = $"kyberdash engine {verb}: unknown, incomplete or out-of-range option '{args[index]}' (--wait accepts 0 to {MaxEngineWaitSeconds}).{Environment.NewLine}{EngineUsage}";
                 return false;
             }
         }
