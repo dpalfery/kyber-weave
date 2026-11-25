@@ -2,6 +2,7 @@ using System.ComponentModel;
 using KyberWeave.Application.RunIntegrate;
 using KyberWeave.Contracts.Repositories;
 using KyberWeave.Contracts.Services;
+using KyberWeave.Core.Processes;
 using KyberWeave.Core.RunStart;
 using KyberWeave.Tests.Fakes;
 using KyberWeave.Tests.FileSystem;
@@ -700,6 +701,128 @@ public sealed class RunIntegrateServiceTests
         Assert.DoesNotContain("could not be integrated", outcome.Message!, StringComparison.Ordinal);
     }
 
+    [Theory]
+    [InlineData("timeout")]
+    [InlineData("canceled")]
+    [InlineData("output-limit")]
+    public void AProcessFailureBeforeAnyCommitLandsStillReportsTheTaskAsNotIntegrated(string failureKind)
+    {
+        Exception failure = LaunchFailure(failureKind);
+        _gitLaunchFailure = failure;
+        _mergeThrows = true;
+
+        RunIntegrateOutcome outcome = Integrate(Request());
+
+        Assert.Equal(RunIntegrateStatus.Failed, outcome.Status);
+        if (failure is not TimeoutException)
+        {
+            Assert.Contains("the task could not be integrated", outcome.Message!, StringComparison.Ordinal);
+        }
+
+        Assert.Contains(failure.Message, outcome.Message!, StringComparison.Ordinal);
+        Assert.DoesNotContain(_git.Calls, call => call.Arguments.Contains("worktree", StringComparer.Ordinal));
+    }
+
+    [Theory]
+    [InlineData("timeout")]
+    [InlineData("canceled")]
+    [InlineData("output-limit")]
+    public void AProcessFailureAtThePostApplyHeadReadStillReportsTheLandedCommits(string failureKind)
+    {
+        Exception failure = LaunchFailure(failureKind);
+        _gitLaunchFailure = failure;
+        _headReadThrows = true;
+
+        RunIntegrateOutcome outcome = Integrate(Request());
+
+        Assert.Equal(RunIntegrateStatus.Failed, outcome.Status);
+        Assert.Contains(
+            "the task commits are on the run branch, but reading its head failed",
+            outcome.Message!,
+            StringComparison.Ordinal);
+        Assert.Contains(failure.Message, outcome.Message!, StringComparison.Ordinal);
+        Assert.DoesNotContain("could not be integrated", outcome.Message!, StringComparison.Ordinal);
+    }
+
+    [Theory]
+    [InlineData("timeout")]
+    [InlineData("canceled")]
+    [InlineData("output-limit")]
+    public void AProcessFailureRemovingTheWorktreeStillReportsTheIntegrationItAlreadyMade(string failureKind)
+    {
+        Exception failure = LaunchFailure(failureKind);
+        _gitLaunchFailure = failure;
+        _worktreeRemoveThrows = true;
+
+        RunIntegrateOutcome outcome = Integrate(Request());
+
+        Assert.Equal(RunIntegrateStatus.Failed, outcome.Status);
+        Assert.Contains("the task is integrated at " + AfterHead, outcome.Message!, StringComparison.Ordinal);
+        Assert.Contains("removing the task worktree", outcome.Message!, StringComparison.Ordinal);
+        Assert.Contains(failure.Message, outcome.Message!, StringComparison.Ordinal);
+        Assert.DoesNotContain("could not be integrated", outcome.Message!, StringComparison.Ordinal);
+    }
+
+    [Theory]
+    [InlineData("timeout")]
+    [InlineData("canceled")]
+    [InlineData("output-limit")]
+    public void AProcessFailureDeletingTheTaskBranchStillReportsTheIntegrationItAlreadyMade(string failureKind)
+    {
+        Exception failure = LaunchFailure(failureKind);
+        _gitLaunchFailure = failure;
+        _branchDeleteThrows = true;
+
+        RunIntegrateOutcome outcome = Integrate(Request());
+
+        Assert.Equal(RunIntegrateStatus.Failed, outcome.Status);
+        Assert.Contains("the task is integrated at " + AfterHead, outcome.Message!, StringComparison.Ordinal);
+        Assert.Contains("deleting the task branch", outcome.Message!, StringComparison.Ordinal);
+        Assert.Contains(failure.Message, outcome.Message!, StringComparison.Ordinal);
+        Assert.DoesNotContain("could not be integrated", outcome.Message!, StringComparison.Ordinal);
+    }
+
+    [Theory]
+    [InlineData("timeout")]
+    [InlineData("canceled")]
+    [InlineData("output-limit")]
+    public void ARetryHeadReadProcessFailureStillReportsTheLandedCommits(string failureKind)
+    {
+        Exception failure = LaunchFailure(failureKind);
+        _commitsAhead = 0;
+        _gitLaunchFailure = failure;
+        _headReadThrows = true;
+
+        RunIntegrateOutcome outcome = Integrate(Request());
+
+        Assert.Equal(RunIntegrateStatus.Failed, outcome.Status);
+        Assert.Contains(
+            "the task commits are on the run branch, but reading its head failed",
+            outcome.Message!,
+            StringComparison.Ordinal);
+        Assert.Contains(failure.Message, outcome.Message!, StringComparison.Ordinal);
+        Assert.DoesNotContain("could not be integrated", outcome.Message!, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void LaunchFailureExcludesOutputLimitWhileProcessFailureCoversEveryProcessRunnerException()
+    {
+        OutputLimitExceededException outputLimit = new("too much output");
+        TimeoutException timeout = new("timed out");
+        OperationCanceledException canceled = new("canceled");
+        InvalidOperationException launch = new("failed to start");
+
+        Assert.False(RunIntegrateService.IsGitLaunchFailure(outputLimit));
+        Assert.False(RunIntegrateService.IsGitLaunchFailure(timeout));
+        Assert.False(RunIntegrateService.IsGitLaunchFailure(canceled));
+        Assert.True(RunIntegrateService.IsGitLaunchFailure(launch));
+
+        Assert.True(RunIntegrateService.IsGitProcessFailure(outputLimit));
+        Assert.True(RunIntegrateService.IsGitProcessFailure(timeout));
+        Assert.True(RunIntegrateService.IsGitProcessFailure(canceled));
+        Assert.True(RunIntegrateService.IsGitProcessFailure(launch));
+    }
+
     private RunIntegrateOutcome Integrate(RunIntegrateRequest request)
     {
         return Service().Integrate(request);
@@ -892,6 +1015,9 @@ public sealed class RunIntegrateServiceTests
     {
         "win32" => new Win32Exception(2, "The system cannot find the file specified."),
         "invalid-operation" => new InvalidOperationException("The child process could not be started."),
+        "timeout" => new TimeoutException("The process did not exit within 120 seconds."),
+        "canceled" => new OperationCanceledException("The operation was canceled."),
+        "output-limit" => new OutputLimitExceededException("The process output exceeded the limit."),
         _ => throw new ArgumentOutOfRangeException(nameof(kind), kind, "Unknown launch failure kind.")
     };
 }

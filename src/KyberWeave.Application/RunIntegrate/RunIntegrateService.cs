@@ -3,6 +3,7 @@ using System.Text;
 using KyberWeave.Contracts.Paths;
 using KyberWeave.Contracts.Repositories;
 using KyberWeave.Contracts.Services;
+using KyberWeave.Core.Processes;
 using KyberWeave.Core.RunStart;
 
 namespace KyberWeave.Application.RunIntegrate;
@@ -233,7 +234,7 @@ public sealed class RunIntegrateService : IRunIntegrateService
         // This catch answers for the work before the commits land. Once IntegrateUnderLock has applied them, its
         // head reads and cleanup report the landed state there ("integrated at (sha), but …", or "the task commits
         // are on the run branch, but …" when the sha could not be read) and never reach this message.
-        catch (Exception exception) when (IsGitLaunchFailure(exception))
+        catch (Exception exception) when (IsGitProcessFailure(exception))
         {
             return Failed($"the task could not be integrated: {exception.Message}");
         }
@@ -294,16 +295,16 @@ public sealed class RunIntegrateService : IRunIntegrateService
                 Notes: notes);
         }
 
-        // The commits are on the run branch before cleanup starts, so a git child that cannot even start — the
-        // executable or its working directory gone from under us — is a cleanup failure: catching it here keeps it
-        // from reaching Integrate's catch, which would report work that landed as "could not be integrated".
+        // The commits are on the run branch before cleanup starts, so a git child that fails to start, times out,
+        // is cancelled, or exceeds its output limit is a cleanup failure: catching it here keeps it from reaching
+        // Integrate's catch, which would report work that landed as "could not be integrated" or a bare timeout.
         GitOutcome removed;
         try
         {
             removed = _git.Run(
                 runWorktree, ["-C", runWorktree, "worktree", "remove", "--force", taskWorktree]);
         }
-        catch (Exception exception) when (IsGitLaunchFailure(exception))
+        catch (Exception exception) when (IsGitProcessFailure(exception))
         {
             return Failed(
                 $"the task is integrated at {head}, but removing the task worktree '{taskWorktree}' failed: " +
@@ -322,7 +323,7 @@ public sealed class RunIntegrateService : IRunIntegrateService
         {
             deleted = _git.Run(runWorktree, ["-C", runWorktree, "branch", "-D", "--end-of-options", taskBranch]);
         }
-        catch (Exception exception) when (IsGitLaunchFailure(exception))
+        catch (Exception exception) when (IsGitProcessFailure(exception))
         {
             return Failed(
                 $"the task is integrated at {head}, but deleting the task branch '{taskBranch}' failed: " +
@@ -727,35 +728,44 @@ public sealed class RunIntegrateService : IRunIntegrateService
 
     /// <summary>
     /// Reads the run branch's head once the task's commits are already on it — after Apply, or on a retry. A git
-    /// child that cannot even start there is a failure of reading work that has landed, not of the landing itself,
+    /// child failure there is a failure of reading work that has landed, not of the landing itself,
     /// so it is caught here instead of escaping to Integrate's catch, which would report landed commits as
-    /// "could not be integrated".
+    /// "could not be integrated" or a bare timeout.
     /// </summary>
     /// <param name="runWorktree">The run's worktree.</param>
-    /// <param name="launchFailure">Why git could not start, or null when the read ran and failed for git's own reasons.</param>
+    /// <param name="failure">Why the git call threw, or null when the read ran and failed for git's own reasons.</param>
     /// <returns>The head sha, or null when the read failed.</returns>
-    private string? ReadLandedHead(string runWorktree, out string? launchFailure)
+    private string? ReadLandedHead(string runWorktree, out string? failure)
     {
         try
         {
-            launchFailure = null;
+            failure = null;
             return GitText(runWorktree, "rev-parse", "HEAD");
         }
-        catch (Exception exception) when (IsGitLaunchFailure(exception))
+        catch (Exception exception) when (IsGitProcessFailure(exception))
         {
-            launchFailure = exception.Message;
+            failure = exception.Message;
             return null;
         }
     }
 
     /// <summary>
-    /// Whether a git child could not be launched at all, as opposed to running and reporting git's own failure: the
-    /// executable is missing or not executable, its working directory is gone, or the operating system refused the
-    /// launch. Every catch that reports what already landed shares this one predicate.
+    /// Whether a git child could not be launched at all, as opposed to running and failing afterwards: the executable
+    /// is missing or not executable, its working directory is gone, or the operating system refused the launch.
     /// </summary>
     /// <param name="exception">The exception a git call threw.</param>
-    private static bool IsGitLaunchFailure(Exception exception) =>
-        exception is IOException or UnauthorizedAccessException or Win32Exception or InvalidOperationException;
+    internal static bool IsGitLaunchFailure(Exception exception) =>
+        exception is IOException or UnauthorizedAccessException or Win32Exception
+        || (exception is InvalidOperationException && exception is not OutputLimitExceededException);
+
+    /// <summary>
+    /// Whether a git call threw a process-runner failure — either a launch failure or a child that timed out, was
+    /// cancelled, or exceeded its output budget. Every catch that reports what already landed shares this predicate.
+    /// </summary>
+    /// <param name="exception">The exception a git call threw.</param>
+    internal static bool IsGitProcessFailure(Exception exception) =>
+        IsGitLaunchFailure(exception)
+        || exception is TimeoutException or OutputLimitExceededException or OperationCanceledException;
 
     private string? GitText(string worktree, params string[] arguments)
     {
