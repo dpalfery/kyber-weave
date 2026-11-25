@@ -585,6 +585,19 @@ public sealed class ReviewGatesService(
 
     private string FullPath(string path) => pathResolver.GetFullPath(path, environment.CurrentDirectory);
 
+    private string? CanonicalRootOrNull(string root)
+    {
+        try
+        {
+            string canonical = pathResolver.Canonicalize(root);
+            return string.Equals(canonical, root, StringComparison.Ordinal) ? null : canonical;
+        }
+        catch (Exception ex) when (ex is ArgumentException or NotSupportedException or PathTooLongException or IOException or UnauthorizedAccessException)
+        {
+            return null;
+        }
+    }
+
     /// <summary>
     ///     Whether two report paths name the same file, so a run that writes both the file <c>--out</c> names and the
     ///     task's own report writes each one once. A path that cannot be resolved is compared as spelled.
@@ -775,6 +788,8 @@ public sealed class ReviewGatesService(
         int runCount = NextRunCount(root, taskSlug);
         ReviewGateReporting.AddSkips(report, plan.Skipped);
 
+        string? canonicalRoot = CanonicalRootOrNull(root);
+
         // The classifiers read what each verify command printed, so a build that fails on missing symbols is told
         // apart from one that fails on anything else.
         Dictionary<string, string> outputs = new(StringComparer.Ordinal);
@@ -788,7 +803,7 @@ public sealed class ReviewGatesService(
                 if (request.Red && !result.Passed && brokenBuildSymbols is null && outputs.TryGetValue(gate.Id, out string? gateOutput))
                     brokenBuildSymbols = RedClassifier.AcceptedMissingSymbols(
                         new RedGateObservation(
-                            gate.Id, string.Join(' ', gate.Run), result.ExitCode, gateOutput, gate.WorkingDirectory),
+                            gate.Id, string.Join(' ', gate.Run), result.ExitCode, gateOutput, gate.WorkingDirectory, root, canonicalRoot),
                         changed);
             },
             SkipReason = gate => request.Red && brokenBuildSymbols is not null && RedClassifier.IsTestGate(gate.Id, string.Join(' ', gate.Run))
@@ -816,7 +831,7 @@ public sealed class ReviewGatesService(
         if (request.Red)
         {
             (finalReport, redOutcome) = ReviewGateReporting.ApplyRed(
-                run.Report, plan.Gates, outputs, changed, file => projectFiles.NearestProjectFile(repoRoot, file), report);
+                run.Report, plan.Gates, outputs, changed, file => projectFiles.NearestProjectFile(repoRoot, file), report, root, canonicalRoot);
         }
 
         foreach (GateResult gate in finalReport.Gates)
@@ -824,7 +839,7 @@ public sealed class ReviewGatesService(
 
         if (!request.Red)
         {
-            ReviewGateReporting.AddSiblingNotes(report, plan.Gates, run.Report, outputs, changed);
+            ReviewGateReporting.AddSiblingNotes(report, plan.Gates, run.Report, outputs, changed, root, canonicalRoot);
         }
 
         foreach (GateResult fix in run.FixFailures)

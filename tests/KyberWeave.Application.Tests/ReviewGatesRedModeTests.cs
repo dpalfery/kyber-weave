@@ -20,7 +20,9 @@ public sealed class ReviewGatesRedModeTests : IDisposable
     public void Dispose() => _services.Dispose();
 
     private static RedOutcome Judge(string output, int exitCode = 1, params string[] ownFiles) =>
-        RedClassifier.Evaluate([new RedGateObservation("dotnet-build", "dotnet build tests/Widget.Tests", exitCode, output)], ownFiles.Length > 0 ? ownFiles : [TestFile]);
+        RedClassifier.Evaluate(
+            [new RedGateObservation("dotnet-build", "dotnet build tests/Widget.Tests", exitCode, output, RepositoryRoot: "/work/repo")],
+            ownFiles.Length > 0 ? ownFiles : [TestFile]);
 
     private static string CSharpError(string file, string code, string message) =>
         $"/work/repo/{file}(12,17): error {code}: {message} [/work/repo/tests/Widget.Tests/Widget.Tests.csproj]";
@@ -204,7 +206,12 @@ public sealed class ReviewGatesRedModeTests : IDisposable
     [Fact]
     public void SiblingSymbolsAreReportedOnlyWhenEveryErrorIsAMissingSymbolOutsideTheTasksFiles()
     {
-        RedGateObservation gate = new("dotnet-build", "dotnet build", 1, CSharpError("tests/Widget.Tests/SiblingTests.cs", "CS0246", "The type or namespace name 'WidgetRepository' could not be found"));
+        RedGateObservation gate = new(
+            "dotnet-build",
+            "dotnet build",
+            1,
+            CSharpError("tests/Widget.Tests/SiblingTests.cs", "CS0246", "The type or namespace name 'WidgetRepository' could not be found"),
+            RepositoryRoot: "/work/repo");
 
         Assert.Equal(["WidgetRepository"], RedClassifier.SiblingSymbols(gate, ["src/Widget/Panel.cs"]));
         Assert.Null(RedClassifier.SiblingSymbols(gate, ["tests/Widget.Tests/SiblingTests.cs"]));
@@ -439,5 +446,114 @@ public sealed class ReviewGatesRedModeTests : IDisposable
 
         Assert.True(outcome.Passed, outcome.Reason);
         Assert.Contains("Gadget", outcome.MissingSymbols);
+    }
+
+    [Theory]
+    [InlineData("/tmp/other/dash/tests/foo.test.ts", null, false)]
+    [InlineData("/dash/tests/foo.test.ts", null, false)]
+    [InlineData("/tmp/other/dash/tests/foo.test.ts/", null, false)]
+    [InlineData("/tmp/other/dash/tests/foo.test.ts", "/work/repo", false)]
+    [InlineData("/work/repo-sibling/dash/tests/foo.test.ts", "/work/repo", false)]
+    [InlineData("/work/repo/other/dash/tests/foo.test.ts", "/work/repo", false)]
+    [InlineData("/work/repo/dash/../../other/dash/tests/foo.test.ts", "/work/repo", false)]
+    [InlineData("/work/repo/dash/tests/foo.test.ts", "/work/repo", true)]
+    [InlineData("/work/repo/dash/tests/../tests/foo.test.ts", "/work/repo/", true)]
+    [InlineData("/work/repo/dash/tests/foo.test.ts", "work/repo", false)]
+    [InlineData(@"C:\other\dash\tests\foo.test.ts", @"C:\work\repo", false)]
+    [InlineData(@"D:\work\repo\dash\tests\foo.test.ts", @"C:\work\repo", false)]
+    [InlineData("C:dash/tests/foo.test.ts", @"C:\work\repo", false)]
+    [InlineData(@"C:\work\repo\dash\tests\foo.test.ts", @"C:\work\repo", true)]
+    [InlineData(@"\\server\share\other\dash\tests\foo.test.ts", @"\\server\share\repo", false)]
+    [InlineData(@"\\server\share\repo\dash\tests\foo.test.ts", @"\\server\share\repo", true)]
+    public void ARootedCompilerPathResolvesOnlyInsideTheGivenRepositoryRoot(
+        string reportedFile, string? repositoryRoot, bool expected) =>
+        Assert.Equal(expected, RedClassifier.IsOwnFile(reportedFile, ["dash/tests/foo.test.ts"], repositoryRoot: repositoryRoot));
+
+    [Fact]
+    public void ARootedCompilerPathWithoutARepositoryRootMatchesOnlyAnIdenticalRootedOwnPath()
+    {
+        Assert.True(RedClassifier.IsOwnFile("/work/repo/dash/tests/foo.test.ts", ["/work/repo/dash/tests/foo.test.ts"]));
+        Assert.False(RedClassifier.IsOwnFile("/tmp/other/dash/tests/foo.test.ts", ["/work/repo/dash/tests/foo.test.ts"]));
+    }
+
+    [Theory]
+    [InlineData(null)]
+    [InlineData("/work/repo")]
+    public void EvaluateRejectsASiblingAbsoluteCompilerPathWithOrWithoutARepositoryRoot(string? repositoryRoot)
+    {
+        RedGateObservation gate = new(
+            "dash-typecheck",
+            "npm run --prefix dash typecheck",
+            2,
+            "/tmp/other/dash/tests/foo.test.ts(3,10): error TS2305: Module '\"../src/x\"' has no exported member 'Gadget'.",
+            WorkingDirectory: "dash",
+            RepositoryRoot: repositoryRoot);
+
+        RedOutcome outcome = RedClassifier.Evaluate([gate], ["dash/tests/foo.test.ts"]);
+
+        Assert.False(outcome.Passed);
+        Assert.Contains("did not change", outcome.Reason, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void ReviewGatesRedRunRejectsSiblingAbsoluteCompilerPathAndAcceptsRootedAndCanonicalOwnPaths()
+    {
+        string physicalParent = Path.Combine(_services.Files.Root, "physical");
+        string repo = Path.Combine(physicalParent, "repo");
+        string aliasParent = Path.Combine(_services.Files.Root, "alias");
+        string aliasedRepo = Path.Combine(aliasParent, "repo");
+        _services.Files.CreateDirectory(Path.Combine(repo, ".kyber-weave"));
+        _services.Files.CreateDirectory(Path.Combine(repo, "tests", "Widget.Tests"));
+        _services.Files.WriteAllText(Path.Combine(repo, TestFile), "namespace Widget.Tests; public class WidgetTests { }\n");
+        _services.Files.WriteAllText(
+            Path.Combine(repo, ".kyber-weave", "kyber-weave.yml"),
+            """
+            review:
+              task-gates:
+                csharp-dev:
+                  - id: dotnet-build
+                    include: ["**/*.cs"]
+                    run: [dotnet, build]
+            """);
+        _services.Files.CreateDirectoryLink(aliasParent, physicalParent);
+
+        string siblingPath = Path.Combine(_services.Files.Root, "other", TestFile).Replace('\\', '/');
+        CapturedConsoleExecution<int> rejected = RunBuildGate(aliasedRepo, siblingPath, "--red");
+
+        Assert.Equal(1, rejected.Result);
+        Assert.Contains("RED_REJECTED:", rejected.Output, StringComparison.Ordinal);
+        Assert.Contains("did not change", rejected.Output, StringComparison.Ordinal);
+
+        string canonicalOwnPath = Path.Combine(repo, TestFile).Replace('\\', '/');
+        CapturedConsoleExecution<int> acceptedCanonical = RunBuildGate(aliasedRepo, canonicalOwnPath, "--red");
+
+        Assert.Equal(0, acceptedCanonical.Result);
+        Assert.Contains("RED_EVIDENCE:", acceptedCanonical.Output, StringComparison.Ordinal);
+
+        string lexicalOwnPath = Path.Combine(aliasedRepo, TestFile).Replace('\\', '/');
+        CapturedConsoleExecution<int> acceptedLexical = RunBuildGate(aliasedRepo, lexicalOwnPath, "--red");
+
+        Assert.Equal(0, acceptedLexical.Result);
+        Assert.Contains("RED_EVIDENCE:", acceptedLexical.Output, StringComparison.Ordinal);
+
+        CapturedConsoleExecution<int> siblingNote = RunBuildGate(aliasedRepo, siblingPath);
+        Assert.Contains("sibling RED tests reference symbols no task has created yet: WidgetRepository", siblingNote.Output, StringComparison.Ordinal);
+
+        CapturedConsoleExecution<int> ownNonRed = RunBuildGate(aliasedRepo, canonicalOwnPath);
+        Assert.DoesNotContain("sibling RED tests reference", ownNonRed.Output, StringComparison.Ordinal);
+    }
+
+    private CapturedConsoleExecution<int> RunBuildGate(string repoRoot, string reportedFile, params string[] extraOptions)
+    {
+        using InMemoryReviewServices services = new(_services.Files);
+        services.Processes.Script(
+            "dotnet",
+            new KyberWeave.Contracts.Repositories.ProcessRunResult(1, string.Empty, TimedOut: false)
+            {
+                StandardOutput = $"{reportedFile}(12,17): error CS0246: The type or namespace name 'WidgetRepository' could not be found\nBuild FAILED.",
+            });
+        return services.Run(
+            services.ReviewGatesApp(),
+            ["review", "gates", repoRoot, "--agent", "csharp-dev", "--paths", TestFile, "--task", "t1", .. extraOptions]);
     }
 }

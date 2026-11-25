@@ -9,12 +9,16 @@ namespace KyberWeave.Core.Review;
 /// <param name="ExitCode">The process exit code.</param>
 /// <param name="Output">Standard output followed by standard error.</param>
 /// <param name="WorkingDirectory">Repository-relative directory the gate ran in, or null for the repository root.</param>
+/// <param name="RepositoryRoot">Absolute path to the repository root that rooted compiler paths must stay within, or null when unbound.</param>
+/// <param name="CanonicalRepositoryRoot">Canonical absolute repository root when different from <paramref name="RepositoryRoot"/> (for example <c>/private/var</c> for <c>/var</c>), or null.</param>
 public sealed record RedGateObservation(
     string Id,
     string Command,
     int ExitCode,
     string Output,
-    string? WorkingDirectory = null);
+    string? WorkingDirectory = null,
+    string? RepositoryRoot = null,
+    string? CanonicalRepositoryRoot = null);
 
 /// <summary>One compiler error found in a gate's output.</summary>
 /// <param name="File">The file the compiler named, as it printed it; empty when the error names none.</param>
@@ -450,7 +454,20 @@ public static partial class RedClassifier
     /// <param name="file">The file path the compiler printed.</param>
     /// <param name="ownFiles">The repository-relative files the task changed.</param>
     /// <param name="workingDirectory">Repository-relative directory the gate ran in, or null for the repository root.</param>
-    public static bool IsOwnFile(string file, IReadOnlyList<string> ownFiles, string? workingDirectory = null)
+    /// <param name="repositoryRoot">Absolute repository root used to resolve rooted compiler paths, or null to require exact rooted equality.</param>
+    public static bool IsOwnFile(
+        string file,
+        IReadOnlyList<string> ownFiles,
+        string? workingDirectory = null,
+        string? repositoryRoot = null) =>
+        IsOwnFileInRoots(file, ownFiles, workingDirectory, repositoryRoot, canonicalRepositoryRoot: null);
+
+    private static bool IsOwnFileInRoots(
+        string file,
+        IReadOnlyList<string> ownFiles,
+        string? workingDirectory,
+        string? repositoryRoot,
+        string? canonicalRepositoryRoot)
     {
         ArgumentNullException.ThrowIfNull(file);
         ArgumentNullException.ThrowIfNull(ownFiles);
@@ -463,10 +480,20 @@ public static partial class RedClassifier
 
         if (IsRootedPath(normalized, file))
         {
+            if (!TryNormalizeRooted(file, out RootedPath rootedFile))
+            {
+                return false;
+            }
+
+            if (!string.IsNullOrWhiteSpace(repositoryRoot) || !string.IsNullOrWhiteSpace(canonicalRepositoryRoot))
+            {
+                return MatchesRoot(rootedFile, repositoryRoot, ownFiles)
+                    || MatchesRoot(rootedFile, canonicalRepositoryRoot, ownFiles);
+            }
+
             return ownFiles.Any(own =>
-                NormalizeRepositoryRelative(own) is { } path
-                && (normalized.Equals(path, StringComparison.OrdinalIgnoreCase)
-                    || normalized.EndsWith("/" + path, StringComparison.OrdinalIgnoreCase)));
+                TryNormalizeRooted(own, out RootedPath rootedOwn)
+                && rootedFile.EqualsRooted(rootedOwn));
         }
 
         if (!TryResolveRelative(workingDirectory, normalized, allowEmpty: false, out string? resolved) || resolved is null)
@@ -495,7 +522,8 @@ public static partial class RedClassifier
         IReadOnlyList<CompileError> errors = ParseErrors(gate.Output);
         if (errors.Count == 0 || HasUnparsedError(gate.Output, errors)
             || !TryGateDirectory(gate, out string? gateDirectory)
-            || errors.Any(error => error.Symbol is null || IsOwnFile(error.File, ownFiles, gateDirectory)))
+            || errors.Any(error => error.Symbol is null
+                || IsOwnFileInRoots(error.File, ownFiles, gateDirectory, gate.RepositoryRoot, gate.CanonicalRepositoryRoot)))
         {
             return null;
         }
@@ -570,7 +598,9 @@ public static partial class RedClassifier
             if (errors.Count > 0 || HasUnparsedError(gate.Output, errors))
             {
                 bool validDirectory = TryGateDirectory(gate, out string? gateDirectory);
-                bool Own(string file) => validDirectory && IsOwnFile(file, ownFiles, gateDirectory);
+                bool Own(string file) =>
+                    validDirectory
+                    && IsOwnFileInRoots(file, ownFiles, gateDirectory, gate.RepositoryRoot, gate.CanonicalRepositoryRoot);
 
                 bool anyMissing = errors.Any(error => error.Symbol is not null && Own(error.File));
                 errors = [.. errors.Where(error => !(anyMissing && ConsequenceCodes.Contains(error.Code) && Own(error.File)))];
@@ -716,6 +746,131 @@ public static partial class RedClassifier
         normalized.StartsWith('/')
         || (normalized.Length >= 2 && char.IsAsciiLetter(normalized[0]) && normalized[1] == ':')
         || Path.IsPathRooted(original);
+
+    private static bool MatchesRoot(RootedPath rootedFile, string? candidateRoot, IReadOnlyList<string> ownFiles)
+    {
+        if (string.IsNullOrWhiteSpace(candidateRoot)
+            || !TryNormalizeRooted(candidateRoot, out RootedPath parsedRoot)
+            || !TryRelativeToRoot(parsedRoot, rootedFile, out string relative))
+        {
+            return false;
+        }
+
+        return ownFiles.Any(own =>
+            NormalizeRepositoryRelative(own) is { } path
+            && relative.Equals(path, StringComparison.OrdinalIgnoreCase));
+    }
+
+    private static bool TryRelativeToRoot(RootedPath root, RootedPath candidate, out string relative)
+    {
+        relative = string.Empty;
+        if (!string.Equals(root.Prefix, candidate.Prefix, StringComparison.OrdinalIgnoreCase)
+            || candidate.Segments.Count <= root.Segments.Count)
+        {
+            return false;
+        }
+
+        for (int index = 0; index < root.Segments.Count; index++)
+        {
+            if (!string.Equals(root.Segments[index], candidate.Segments[index], StringComparison.OrdinalIgnoreCase))
+            {
+                return false;
+            }
+        }
+
+        relative = string.Join('/', candidate.Segments.Skip(root.Segments.Count));
+        return true;
+    }
+
+    private static bool TryNormalizeRooted(string path, out RootedPath rooted)
+    {
+        rooted = default;
+        if (string.IsNullOrWhiteSpace(path))
+        {
+            return false;
+        }
+
+        string normalized = path.Replace('\\', '/');
+        string prefix;
+        string remainder;
+
+        if (normalized.StartsWith("//", StringComparison.Ordinal)
+            && (path.StartsWith(@"\\", StringComparison.Ordinal) || (normalized.Length > 2 && normalized[2] != '/')))
+        {
+            int serverEnd = normalized.IndexOf('/', 2);
+            if (serverEnd <= 2)
+            {
+                return false;
+            }
+
+            int shareEnd = normalized.IndexOf('/', serverEnd + 1);
+            if (shareEnd == serverEnd + 1)
+            {
+                return false;
+            }
+
+            if (shareEnd < 0)
+            {
+                if (serverEnd + 1 >= normalized.Length)
+                {
+                    return false;
+                }
+
+                prefix = normalized + "/";
+                remainder = string.Empty;
+            }
+            else
+            {
+                prefix = normalized[..(shareEnd + 1)];
+                remainder = normalized[(shareEnd + 1)..];
+            }
+        }
+        else if (normalized.StartsWith('/'))
+        {
+            prefix = "/";
+            remainder = normalized[1..];
+        }
+        else if (normalized.Length >= 3 && char.IsAsciiLetter(normalized[0]) && normalized[1] == ':' && normalized[2] == '/')
+        {
+            prefix = char.ToUpperInvariant(normalized[0]) + ":/";
+            remainder = normalized[3..];
+        }
+        else
+        {
+            return false;
+        }
+
+        List<string> segments = [];
+        if (!AppendSegments(segments, remainder))
+        {
+            return false;
+        }
+
+        rooted = new RootedPath(prefix, segments);
+        return true;
+    }
+
+    private readonly record struct RootedPath(string Prefix, IReadOnlyList<string> Segments)
+    {
+        public bool EqualsRooted(RootedPath other)
+        {
+            if (!string.Equals(Prefix, other.Prefix, StringComparison.OrdinalIgnoreCase)
+                || Segments.Count != other.Segments.Count)
+            {
+                return false;
+            }
+
+            for (int index = 0; index < Segments.Count; index++)
+            {
+                if (!string.Equals(Segments[index], other.Segments[index], StringComparison.OrdinalIgnoreCase))
+                {
+                    return false;
+                }
+            }
+
+            return true;
+        }
+    }
 
     private static string? NormalizeRepositoryRelative(string path)
     {

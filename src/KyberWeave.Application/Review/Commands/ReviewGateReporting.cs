@@ -304,12 +304,16 @@ public static class ReviewGateReporting
     /// <param name="ran">What they reported.</param>
     /// <param name="outputs">Each gate's output, by gate id.</param>
     /// <param name="changed">The files the task changed.</param>
+    /// <param name="repositoryRoot">Absolute repository root used to resolve rooted compiler paths, or null when unbound.</param>
+    /// <param name="canonicalRepositoryRoot">Canonical absolute repository root when different from <paramref name="repositoryRoot"/>, or null.</param>
     public static void AddSiblingNotes(
         DiagnosticReport report,
         IReadOnlyList<PlannedTaskGate> planned,
         GateReport ran,
         IReadOnlyDictionary<string, string> outputs,
-        IReadOnlyList<string> changed)
+        IReadOnlyList<string> changed,
+        string? repositoryRoot = null,
+        string? canonicalRepositoryRoot = null)
     {
         foreach (GateResult gate in ran.Gates.Where(result => !result.Passed))
         {
@@ -318,7 +322,13 @@ public static class ReviewGateReporting
                 continue;
 
             RedGateObservation observation = new(
-                gate.Id, string.Join(' ', plannedGate.Run), gate.ExitCode, output, plannedGate.WorkingDirectory);
+                gate.Id,
+                string.Join(' ', plannedGate.Run),
+                gate.ExitCode,
+                output,
+                plannedGate.WorkingDirectory,
+                repositoryRoot,
+                canonicalRepositoryRoot);
             if (RedClassifier.SiblingSymbols(observation, changed) is not { Count: > 0 } symbols)
                 continue;
 
@@ -342,13 +352,17 @@ public static class ReviewGateReporting
     /// <param name="changed">The files the task changed.</param>
     /// <param name="projectOf">Names the project file a changed file belongs to.</param>
     /// <param name="report">Receives the verdict.</param>
+    /// <param name="repositoryRoot">Absolute repository root used to resolve rooted compiler paths, or null when unbound.</param>
+    /// <param name="canonicalRepositoryRoot">Canonical absolute repository root when different from <paramref name="repositoryRoot"/>, or null.</param>
     public static (GateReport Report, RedOutcome Outcome) ApplyRed(
         GateReport ran,
         IReadOnlyList<PlannedTaskGate> planned,
         IReadOnlyDictionary<string, string> outputs,
         IReadOnlyList<string> changed,
         Func<string, string?> projectOf,
-        DiagnosticReport report)
+        DiagnosticReport report,
+        string? repositoryRoot = null,
+        string? canonicalRepositoryRoot = null)
     {
         List<RedGateObservation> observations = [];
         foreach (GateResult gate in ran.Gates)
@@ -356,7 +370,13 @@ public static class ReviewGateReporting
             PlannedTaskGate? plannedGate = planned.FirstOrDefault(candidate => string.Equals(candidate.Id, gate.Id, StringComparison.Ordinal));
             if (plannedGate is not null && outputs.TryGetValue(gate.Id, out string? output))
                 observations.Add(new RedGateObservation(
-                    gate.Id, string.Join(' ', plannedGate.Run), gate.ExitCode, output, plannedGate.WorkingDirectory));
+                    gate.Id,
+                    string.Join(' ', plannedGate.Run),
+                    gate.ExitCode,
+                    output,
+                    plannedGate.WorkingDirectory,
+                    repositoryRoot,
+                    canonicalRepositoryRoot));
         }
 
         RedOutcome outcome = RedClassifier.Evaluate(
