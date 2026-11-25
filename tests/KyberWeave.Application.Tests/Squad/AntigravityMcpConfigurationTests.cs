@@ -360,6 +360,67 @@ public sealed class AntigravityMcpConfigurationTests
         Assert.False(_state.Files.FileExists(_configPath));
     }
 
+    [Fact]
+    public async Task GlobalInstall_WithAResolvedPath_PassesItToTheRenderAndTheConfigEntry()
+    {
+        using FakeSquadReleaseSource release = FakeSquadReleaseSource.FromDirectory(_source, _state.Files);
+        string resolved = Path.Combine(_state.Files.Root, "tools", "kyber-weave-mcp");
+        RecordingRenderer renderer = new(new AntigravityRenderer());
+
+        SquadLifecycleResult result = await NewService(
+            release,
+            renderer,
+            name => name == "kyber-weave-mcp" ? resolved : null).InstallAsync(
+            new SquadInstallRequest(_home, SquadDeploymentScope.Global, [SquadTarget.Antigravity], Version: Version));
+
+        Assert.True(result.Success);
+        Assert.Equal(resolved, renderer.LastRequest?.DocsServerCommand);
+        Assert.Equal(resolved, ConfigKwDocsCommand());
+        Assert.DoesNotContain(result.Warnings ?? [], warning => warning.Contains("PATH", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public async Task GlobalUpdate_WithAResolvedPath_PassesItToTheRenderAndTheConfigEntry()
+    {
+        using FakeSquadReleaseSource release = FakeSquadReleaseSource.FromDirectory(_source, _state.Files);
+        string resolved = Path.Combine(_state.Files.Root, "tools", "kyber-weave-mcp");
+        RecordingRenderer renderer = new(new AntigravityRenderer());
+        SquadLifecycleService service = NewService(release, renderer, _ => resolved);
+        await service.InstallAsync(
+            new SquadInstallRequest(_home, SquadDeploymentScope.Global, [SquadTarget.Antigravity], Version: Version));
+        _state.Files.DeleteFile(_configPath);
+
+        SquadLifecycleResult result = await service.UpdateAsync(
+            new SquadUpdateRequest(_home, SquadDeploymentScope.Global, [SquadTarget.Antigravity], Version: Version));
+
+        Assert.True(result.Success);
+        Assert.Equal(resolved, renderer.LastRequest?.DocsServerCommand);
+        Assert.Equal(resolved, ConfigKwDocsCommand());
+    }
+
+    [Fact]
+    public async Task GlobalInstall_WithAnUnresolvedPath_AddsOneWarningAndTheBareCommand()
+    {
+        using FakeSquadReleaseSource release = FakeSquadReleaseSource.FromDirectory(_source, _state.Files);
+        RecordingRenderer renderer = new(new AntigravityRenderer());
+
+        SquadLifecycleResult result = await NewService(release, renderer, _ => null).InstallAsync(
+            new SquadInstallRequest(_home, SquadDeploymentScope.Global, [SquadTarget.Antigravity], Version: Version));
+
+        Assert.True(result.Success);
+        Assert.Null(renderer.LastRequest?.DocsServerCommand);
+        Assert.Equal(1, (result.Warnings ?? []).Count(warning => warning.Contains("kyber-weave-mcp", StringComparison.Ordinal)
+            && warning.Contains("PATH", StringComparison.Ordinal)));
+        Assert.Equal("kyber-weave-mcp", ConfigKwDocsCommand());
+    }
+
+    private string ConfigKwDocsCommand()
+    {
+        using JsonDocument document = JsonDocument.Parse(_state.Files.ReadAllBytes(_configPath));
+        return document.RootElement.GetProperty("mcpServers").GetProperty("kw-docs").GetProperty("command").GetString()
+            ?? string.Empty;
+    }
+
     private IReadOnlyList<string> Ensure(bool dryRun = false, string? command = null) =>
         AntigravityMcpConfiguration.Ensure(
             _files,
@@ -402,12 +463,30 @@ public sealed class AntigravityMcpConfigurationTests
         Assert.Equal(["--any-repo"], entry.GetProperty("args").EnumerateArray().Select(arg => arg.GetString()));
     }
 
-    private SquadLifecycleService NewService(ISquadReleaseSource release, ISquadRenderer renderer) =>
+    private SquadLifecycleService NewService(
+        ISquadReleaseSource release,
+        ISquadRenderer renderer,
+        Func<string, string?>? findExecutable = null) =>
         SquadTestCommands.InMemoryLifecycle(
             _state,
             release,
             new SquadRendererRegistry([renderer], new InMemorySquadServices(_state.Files).RenderInputReader()),
-            new SquadGlobalRoots(_ => null, _home));
+            new SquadGlobalRoots(_ => null, _home),
+            findExecutable: findExecutable);
+
+    /// <summary>Forwards every render to the real renderer and keeps the last request it was given.</summary>
+    private sealed class RecordingRenderer(ISquadRenderer inner) : ISquadRenderer
+    {
+        public SquadRenderRequest? LastRequest { get; private set; }
+
+        public IReadOnlyCollection<SquadTarget> SupportedTargets => inner.SupportedTargets;
+
+        public Task<SquadRenderResult> RenderAsync(SquadRenderRequest request, CancellationToken cancellationToken = default)
+        {
+            LastRequest = request;
+            return inner.RenderAsync(request, cancellationToken);
+        }
+    }
 
     /// <summary>A resolver that fails the test if the code asks it for a root.</summary>
     private sealed class ThrowingRoots : ISquadGlobalRootResolver

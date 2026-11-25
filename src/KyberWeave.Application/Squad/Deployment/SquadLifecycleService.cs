@@ -18,6 +18,9 @@ namespace KyberWeave.Core.Squad.Deployment;
 /// </summary>
 public sealed class SquadLifecycleService : ISquadLifecycleService
 {
+    /// <summary>The executable the Antigravity kw-docs entry launches, looked up on PATH for a global render.</summary>
+    private const string DocsServerExecutable = "kyber-weave-mcp";
+
     private readonly ISquadGlobalRootResolver? _globalRoots;
     private readonly ISquadTransactionObserver? _observer;
     private readonly ISquadModelPresetStore _presetStore;
@@ -28,6 +31,7 @@ public sealed class SquadLifecycleService : ISquadLifecycleService
     private readonly ISquadStateStore _stateStore;
     private readonly TimeProvider _timeProvider;
     private readonly Func<string, string?>? _environmentReader;
+    private readonly Func<string, string?>? _findExecutable;
     private readonly ISquadSourceLoader _sourceLoader;
     private readonly ISquadModelPresetValidator _presetValidator;
     private readonly ISquadDeploymentPlanner _planner;
@@ -62,6 +66,10 @@ public sealed class SquadLifecycleService : ISquadLifecycleService
     /// <param name="observer">Told of each transaction step, or null.</param>
     /// <param name="globalRoots">Resolves each target's global root, or null.</param>
     /// <param name="environmentReader">Reads environment variables for the render, or null for none.</param>
+    /// <param name="findExecutable">
+    /// Finds an executable on PATH, or null when none is wired. A global render resolves
+    /// <c>kyber-weave-mcp</c> through it so the Antigravity MCP entry launches the absolute path.
+    /// </param>
     public SquadLifecycleService(
         ISquadReleaseSource releaseSource,
         ISquadRenderer renderer,
@@ -80,7 +88,8 @@ public sealed class SquadLifecycleService : ISquadLifecycleService
         TimeProvider? timeProvider = null,
         ISquadTransactionObserver? observer = null,
         ISquadGlobalRootResolver? globalRoots = null,
-        Func<string, string?>? environmentReader = null)
+        Func<string, string?>? environmentReader = null,
+        Func<string, string?>? findExecutable = null)
     {
         ArgumentNullException.ThrowIfNull(releaseSource);
         ArgumentNullException.ThrowIfNull(renderer);
@@ -114,6 +123,7 @@ public sealed class SquadLifecycleService : ISquadLifecycleService
         _observer = observer;
         _globalRoots = globalRoots;
         _environmentReader = environmentReader;
+        _findExecutable = findExecutable;
     }
 
     /// <summary>
@@ -242,6 +252,7 @@ public sealed class SquadLifecycleService : ISquadLifecycleService
             if (request.Scope == SquadDeploymentScope.Instance && request.Targets.Count == 1)
                 effectiveGlobalRoots = new SquadInstanceRootResolver(targetRoot, request.Targets[0]);
 
+            string? docsServerCommand = ResolveDocsServerCommand(renderScope);
             SquadRenderRequest renderRequest = new(
                 releaseResult.ExtractionRoot,
                 request.Targets,
@@ -253,7 +264,8 @@ public sealed class SquadLifecycleService : ISquadLifecycleService
                 null,
                 _environmentReader,
                 request.Arbiter,
-                WorkerRoster: request.WorkerRoster);
+                WorkerRoster: request.WorkerRoster,
+                DocsServerCommand: docsServerCommand);
 
             SquadRenderResult renderResult =
                 await _renderer.RenderAsync(renderRequest, cancellationToken).ConfigureAwait(false);
@@ -272,6 +284,7 @@ public sealed class SquadLifecycleService : ISquadLifecycleService
             if (!SquadResponsePreferencesInjector.HasAnyBlock(renderResult))
                 warnings.Add(SquadResponsePreferencesInjector.NoBlockWarning);
             renderResult = SquadResponsePreferencesInjector.Inject(renderResult, effectiveGuidance);
+            warnings.AddRange(MissingDocsServerWarnings(renderScope, request.Targets, docsServerCommand));
 
             SquadLock squadLock = BuildLock(
                 releaseResult.Version,
@@ -348,7 +361,7 @@ public sealed class SquadLifecycleService : ISquadLifecycleService
                 request.Targets,
                 request.Scope,
                 _globalRoots,
-                docsServerCommand: null,
+                docsServerCommand: docsServerCommand,
                 request.DryRun));
 
             if (request.DryRun)
@@ -529,6 +542,38 @@ public sealed class SquadLifecycleService : ISquadLifecycleService
     ///     shows them. Without this a render warning, such as the operator channel's missing-server notice,
     ///     reaches no operator.
     /// </summary>
+    /// <summary>
+    /// The absolute path of <c>kyber-weave-mcp</c> as PATH names it, for a global render; null for a project render,
+    /// when the lookup finds nothing, or when no lookup is wired. The path is not resolved through symbolic links, so
+    /// a self-update that swaps the link's target keeps the entry working.
+    /// </summary>
+    private string? ResolveDocsServerCommand(SquadDeploymentScope renderScope)
+    {
+        if (renderScope != SquadDeploymentScope.Global || _findExecutable is null)
+            return null;
+
+        string? found = _findExecutable(DocsServerExecutable);
+        return string.IsNullOrWhiteSpace(found) ? null : found;
+    }
+
+    /// <summary>
+    /// One warning when Antigravity is targeted globally, a lookup is wired, and it found no <c>kyber-weave-mcp</c>:
+    /// the Antigravity entry and agent files then fall back to the bare command name.
+    /// </summary>
+    private IEnumerable<string> MissingDocsServerWarnings(
+        SquadDeploymentScope renderScope,
+        IReadOnlyCollection<SquadTarget> targets,
+        string? docsServerCommand)
+    {
+        if (renderScope == SquadDeploymentScope.Global
+            && _findExecutable is not null
+            && docsServerCommand is null
+            && targets.Contains(SquadTarget.Antigravity))
+        {
+            yield return $"{DocsServerExecutable} was not found on PATH, so the Antigravity kw-docs entry and agent files use the bare command name.";
+        }
+    }
+
     private static List<string> RenderWarningMessages(IReadOnlyList<SquadRenderWarning> warnings)
     {
         // Only the operator channel's warnings reach the CLI. A default install prints exactly what it printed
@@ -654,6 +699,7 @@ public sealed class SquadLifecycleService : ISquadLifecycleService
             if (request.Scope == SquadDeploymentScope.Instance && targets.Count == 1)
                 effectiveGlobalRoots = new SquadInstanceRootResolver(targetRoot, targets[0]);
 
+            string? docsServerCommand = ResolveDocsServerCommand(renderScope);
             SquadRenderRequest renderRequest = new(
                 releaseResult.ExtractionRoot,
                 targets,
@@ -665,7 +711,8 @@ public sealed class SquadLifecycleService : ISquadLifecycleService
                 null,
                 _environmentReader,
                 request.Arbiter,
-                WorkerRoster: request.WorkerRoster);
+                WorkerRoster: request.WorkerRoster,
+                DocsServerCommand: docsServerCommand);
 
             SquadRenderResult renderResult =
                 await _renderer.RenderAsync(renderRequest, cancellationToken).ConfigureAwait(false);
@@ -684,6 +731,7 @@ public sealed class SquadLifecycleService : ISquadLifecycleService
             if (!SquadResponsePreferencesInjector.HasAnyBlock(renderResult))
                 warnings.Add(SquadResponsePreferencesInjector.NoBlockWarning);
             renderResult = SquadResponsePreferencesInjector.Inject(renderResult, effectiveGuidance);
+            warnings.AddRange(MissingDocsServerWarnings(renderScope, targets, docsServerCommand));
 
             SquadLock squadLock = BuildLock(
                 releaseResult.Version,
@@ -744,7 +792,7 @@ public sealed class SquadLifecycleService : ISquadLifecycleService
                 targets,
                 request.Scope,
                 _globalRoots,
-                docsServerCommand: null,
+                docsServerCommand: docsServerCommand,
                 request.DryRun));
 
             if (request.DryRun)

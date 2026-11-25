@@ -35,6 +35,12 @@ namespace KyberWeave.Core.Squad.Rendering;
 /// <c>delegates-to</c> leaves out every agent that declares the <c>technology</c> roster, so the technology
 /// developers are not offered to a run that cannot dispatch them. Any other value renders unchanged.
 /// </param>
+/// <param name="DocsServerCommand">
+/// The absolute path of <c>kyber-weave-mcp</c> as PATH names it, or null when the host found none. A global render
+/// whose target launches the documentation server by a command line (Antigravity) uses it as that command; a
+/// project render and a null value use the bare name, because a machine path in a committed file breaks every
+/// other clone.
+/// </param>
 /// <remarks>
 /// <see cref="UserScopeDirectory"/> is the Kyber-Weave app-data directory, so it cannot tell
 /// a renderer where a harness actually reads its global agents from (for Copilot that is
@@ -58,7 +64,8 @@ public sealed record SquadRenderRequest(
     Func<string, string?>? EnvironmentReader = null,
     SquadArbiterWiring? Arbiter = null,
     SquadRenderDiskInputs? DiskInputs = null,
-    string? WorkerRoster = null)
+    string? WorkerRoster = null,
+    string? DocsServerCommand = null)
 {
     /// <summary>
     /// Convenience constructor applying a single <see cref="SquadModelPreset"/> across all requested targets.
