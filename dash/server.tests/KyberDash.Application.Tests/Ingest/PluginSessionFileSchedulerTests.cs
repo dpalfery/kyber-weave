@@ -121,6 +121,19 @@ public class PluginSessionFileSchedulerTests
             ServerState = new FakeServerStateRepository();
             Projection = new Mock<ICanonProjectionService>();
             Ingestion = new Mock<ITranscriptIngestionService>();
+            Ingestion
+                .Setup(service => service.RefreshHarnessSources(It.IsAny<int>()))
+                .Returns(new RefreshReport(
+                    RunId: string.Empty,
+                    HistoryWeeks: 0,
+                    CommandStartedAt: string.Empty,
+                    Rows: [],
+                    PurgedContentCount: 0,
+                    Sessions: 0,
+                    Runs: 0,
+                    Executions: 0,
+                    Rollups: 0,
+                    ExitCode: 0));
             Events = [];
             IReadOnlyCollection<string>? capturedKeys = null;
             Projection

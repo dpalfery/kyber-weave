@@ -306,7 +306,7 @@ public static class SettingsCleanDoctorReportTests
             Mock<ITranscriptIngestionService> ingestion = new();
             projection.Setup(service => service.ProjectIncremental()).Returns(EmptyProjection);
             projection.Setup(service => service.ProjectRunsAndHarnesses()).Returns([]);
-            ingestion.Setup(service => service.RefreshHarnessSources(2)).Returns(EmptyRefreshReport);
+            ingestion.Setup(service => service.RefreshHarnessSources(2)).Returns(new RefreshReport(string.Empty, 0, string.Empty, [], 0, 0, 0, 0, 0, 0));
 
             CleanReport report = new CleanService(store, store, store, store, projection.Object, ingestion.Object).CleanDatabase(
                 new CleanScope(All: true, ReingestWeeks: 2));
@@ -881,6 +881,7 @@ public static class SettingsCleanDoctorReportTests
 
             Mock<ICanonProjectionService> projection = new();
             Mock<ITranscriptIngestionService> ingestion = new();
+            ingestion.Setup(service => service.RefreshHarnessSources(It.IsAny<int>())).Returns(new RefreshReport(string.Empty, 0, string.Empty, [], 0, 0, 0, 0, 0, 0));
             FakeSettingsRepository settings = new();
             FakeServerStateRepository serverState = new();
 
@@ -900,6 +901,7 @@ public static class SettingsCleanDoctorReportTests
 
             Mock<ICanonProjectionService> projection = new();
             Mock<ITranscriptIngestionService> ingestion = new();
+            ingestion.Setup(service => service.RefreshHarnessSources(It.IsAny<int>())).Returns(new RefreshReport(string.Empty, 0, string.Empty, [], 0, 0, 0, 0, 0, 0));
             FakeSettingsRepository settings = new();
             FakeServerStateRepository serverState = new();
             List<string> logs = [];
@@ -930,6 +932,7 @@ public static class SettingsCleanDoctorReportTests
 
             Mock<ICanonProjectionService> projection = new();
             Mock<ITranscriptIngestionService> ingestion = new();
+            ingestion.Setup(service => service.RefreshHarnessSources(It.IsAny<int>())).Returns(new RefreshReport(string.Empty, 0, string.Empty, [], 0, 0, 0, 0, 0, 0));
             FakeSettingsRepository settings = new();
             FakeServerStateRepository serverState = new();
 
@@ -948,6 +951,7 @@ public static class SettingsCleanDoctorReportTests
             FakeServerStateRepository serverState = new();
             Mock<ICanonProjectionService> projection = new();
             Mock<ITranscriptIngestionService> ingestion = new();
+            ingestion.Setup(service => service.RefreshHarnessSources(It.IsAny<int>())).Returns(new RefreshReport(string.Empty, 0, string.Empty, [], 0, 0, 0, 0, 0, 0));
 
             using JobSchedulerService jobs = new(store, store, projection.Object, ingestion.Object, settings, serverState, Options(serverState));
 
@@ -972,6 +976,7 @@ public static class SettingsCleanDoctorReportTests
             FakeServerStateRepository serverState = new();
             Mock<ICanonProjectionService> projection = new();
             Mock<ITranscriptIngestionService> ingestion = new();
+            ingestion.Setup(service => service.RefreshHarnessSources(It.IsAny<int>())).Returns(new RefreshReport(string.Empty, 0, string.Empty, [], 0, 0, 0, 0, 0, 0));
 
             JobSchedulerService jobs = new(store, store, projection.Object, ingestion.Object, settings, serverState, Options(serverState));
             try

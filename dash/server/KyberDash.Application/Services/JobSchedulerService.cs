@@ -74,6 +74,7 @@ public class JobSchedulerService : IJobSchedulerService
     private string? lastSuccessAt;
     private string? lastFailure;
     private string? lastMaintenanceFailure;
+    private int lastFailedUnits;
     private bool runningJob;
     private bool disposed;
 
@@ -177,7 +178,8 @@ public class JobSchedulerService : IJobSchedulerService
                 Paused: current.JobsPaused,
                 HostedElsewhere: hostedElsewhere,
                 LastMaintenanceFailure: lastMaintenanceFailure,
-                LastSyncFailure: null);
+                LastSyncFailure: null,
+                LastFailedUnits: lastFailedUnits);
         }
     }
 
@@ -356,6 +358,8 @@ public class JobSchedulerService : IJobSchedulerService
             // plugin-captured counter pass. The purge and the projection still run so display
             // layers keep moving and content retention stays stamped.
             SettingsView settingsView = settings.ReadSettings();
+            int importFailedUnits = 0;
+            bool imported = false;
             if (!settingsView.JobsPaused)
             {
                 // Before anything reads or imports sources, replace once the rows the Droid, Cursor
@@ -368,7 +372,8 @@ public class JobSchedulerService : IJobSchedulerService
 
                 if (settingsView.FolderImportScheduled)
                 {
-                    _ = ingestion.RefreshHarnessSources(CanonRefreshEngine.DefaultHistoryWeeks);
+                    importFailedUnits = FailedUnitsOf(ingestion.RefreshHarnessSources(CanonRefreshEngine.DefaultHistoryWeeks));
+                    imported = true;
                 }
 
                 RefreshPluginCapturedCounters();
@@ -383,9 +388,13 @@ public class JobSchedulerService : IJobSchedulerService
                 lastSuccessAt = Timestamp();
                 lastFailure = null;
                 state = "idle";
+                if (imported)
+                {
+                    lastFailedUnits = importFailedUnits;
+                }
             }
 
-            return new JobOutcome("succeeded");
+            return CompletedOutcome(importFailedUnits);
         }
         catch (Exception exception) when (IsJobFailure(exception))
         {
@@ -445,7 +454,7 @@ public class JobSchedulerService : IJobSchedulerService
 
     /// <summary>Waits until the timer is stopped.</summary>
     /// <returns><see langword="true"/>, meaning the loop should end.</returns>
-    private JobOutcome RunJob(Action? work)
+    private JobOutcome RunJob(Func<int>? work)
     {
         if (work is null && settings.ReadSettings().JobsPaused)
         {
@@ -475,7 +484,7 @@ public class JobSchedulerService : IJobSchedulerService
 
         try
         {
-            work?.Invoke();
+            int failedUnits = work?.Invoke() ?? 0;
             RefreshPluginCapturedCounters();
             _ = ingestion.PurgeExpiredContent(clock());
             _ = projection.ProjectAll();
@@ -485,9 +494,13 @@ public class JobSchedulerService : IJobSchedulerService
                 lastSuccessAt = Timestamp();
                 lastFailure = null;
                 state = "idle";
+                if (work is not null)
+                {
+                    lastFailedUnits = failedUnits;
+                }
             }
 
-            return new JobOutcome("succeeded");
+            return CompletedOutcome(failedUnits);
         }
         catch (Exception exception) when (IsJobFailure(exception))
         {
@@ -509,10 +522,19 @@ public class JobSchedulerService : IJobSchedulerService
         }
     }
 
-    private void ImportHistory()
-    {
-        _ = ingestion.RefreshHarnessSources(CanonRefreshEngine.DefaultHistoryWeeks);
-    }
+    /// <summary>Runs the history import and returns how many of its source units failed.</summary>
+    private int ImportHistory() => FailedUnitsOf(ingestion.RefreshHarnessSources(CanonRefreshEngine.DefaultHistoryWeeks));
+
+    /// <summary>Counts the source units a refresh report recorded as failed; each one was skipped, not imported.</summary>
+    private static int FailedUnitsOf(RefreshReport report) =>
+        report.Rows.Count(static row => string.Equals(row.Status, "failed", StringComparison.Ordinal));
+
+    /// <summary>
+    /// The outcome of a pass that completed. A pass in which source units failed is <c>partial</c>, so the
+    /// caller never reads it as a clean success.
+    /// </summary>
+    private static JobOutcome CompletedOutcome(int failedUnits) =>
+        failedUnits > 0 ? new JobOutcome("partial", FailedUnits: failedUnits) : new JobOutcome("succeeded");
 
     /// <summary>
     /// The plugin-captured counter pass: asks the store which Droid sessions the Factory plugin

@@ -659,7 +659,8 @@ public class RelationalIngestTests
 
         JobOutcome outcome = await harness.Jobs.TriggerImportHistoryAsync(TestContext.Current.CancellationToken);
 
-        Assert.Equal("succeeded", outcome.Outcome);
+        Assert.Equal("partial", outcome.Outcome);
+        Assert.Equal(1, outcome.FailedUnits);
         Assert.NotNull(harness.Store.FindRecord("rec-good"));
         Assert.Null(harness.Store.FindRecord("rec-bad"));
         CollectedProblem problem = Assert.Single(harness.Writer.WriteProblemCalls);
