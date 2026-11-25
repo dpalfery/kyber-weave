@@ -1,6 +1,6 @@
 schema-version: 2
 plan: docs/plans/2026-11-25-kyberdash-one-version-and-tray-owned-engine-restart.md
-execution-digest: 78f124f993e97348bca611bf27ce87ed7674000b0a7a5c9b3fef77e94747d4a3
+execution-digest: 3c3ab73c5bbd68dbf19d8ccb8bafdca359af46a59d1b0f9c30312570570e91b2
 tasks:
   - id: T1
     capabilities: C# and MSBuild changes with xUnit tests
@@ -32,10 +32,14 @@ tasks:
       - dash/server/KyberDash.Api/DashRuntimeSettings.cs
       - dash/server/KyberDash.Contracts/Services/IDashServices.cs
       - dash/server/KyberDash.Application/KyberBridgeEngine.cs
+      - dash/server/KyberDash.Application/ServiceCollectionExtensions.cs
+      - dash/server.tests/KyberDash.Application.Tests/SettingsCleanDoctorReportTests.cs
+      - dash/server.tests/KyberDash.Application.Tests/ApplicationParityTests.cs
       - dash/server.tests/KyberDash.Presentation.Tests/DashVersionTests.cs
       - dash/server.tests/KyberDash.Presentation.Tests/MinimalApiEndpointTests.cs
-      - dash/server.tests/KyberDash.Presentation.Tests/DashVersion.Current
       - dash/server.tests/KyberDash.Presentation.Tests/PresentationTestData.cs
+      - dash/server.tests/KyberDash.Application.Tests/PricingFixture.cs
+      - dash/server.tests/KyberDash.Domain.Tests/PricingFixture.cs
     session: kyberdash-server
     prompt: >
       Task T1: One version source and DashVersion for every KyberDash binary
@@ -65,7 +69,9 @@ tasks:
         - `dash/server/KyberDash.Api/DashRuntimeSettings.cs`: `Version` default `DashVersion.Current`
         - `dash/server/KyberDash.Contracts/Services/IDashServices.cs`: `DashOptions.Version` default `DashVersion.Current`
         - `dash/server/KyberDash.Application/KyberBridgeEngine.cs`: remove `DefaultVersion`; constructor `string? version = null` → `DashVersion.Current`; update every caller of `DefaultVersion`
-        - `dash/server.tests/KyberDash.Presentation.Tests/DashVersionTests.cs` (new), `dash/server.tests/KyberDash.Presentation.Tests/MinimalApiEndpointTests.cs` (version endpoint assertion → `DashVersion.Current`), `dash/server.tests/KyberDash.Presentation.Tests/PresentationTestData.cs` only where it stands for the engine's own version
+        - `dash/server/KyberDash.Application/ServiceCollectionExtensions.cs`, `dash/server.tests/KyberDash.Application.Tests/SettingsCleanDoctorReportTests.cs`, `dash/server.tests/KyberDash.Application.Tests/ApplicationParityTests.cs`: the callers of `KyberBridgeEngine.DefaultVersion` (searched `dash`), changed only to stop using the removed const
+        - `dash/server.tests/KyberDash.Presentation.Tests/DashVersionTests.cs` (new), `dash/server.tests/KyberDash.Presentation.Tests/MinimalApiEndpointTests.cs` (the version endpoint assertion expects the `DashVersion` current value), `dash/server.tests/KyberDash.Presentation.Tests/PresentationTestData.cs` only where it stands for the engine's own version
+        - `dash/server.tests/KyberDash.Application.Tests/PricingFixture.cs`, `dash/server.tests/KyberDash.Domain.Tests/PricingFixture.cs`: `PricingDirectory()` also finds the pricing snapshot below a `dash` folder of each ancestor, exactly as D19 states (today's check, exception and message kept; the pricing JSON files themselves do not change); update the XML `<returns>` doc if it no longer fits
       - **Commands:**
         - `kyber-weave review gates . --agent <agent> --task T1 --red`
         - `kyber-weave review gates . --agent <agent> --task T1`
@@ -73,6 +79,7 @@ tasks:
         - `<Version>` appears in no `.csproj` under `src/` or `dash/server/`; `dotnet build dash/server/KyberDash.sln -c Release` and the kyber-weave build stay warning-free
         - No `0.21.0` literal remains under `dash/server/`; test data that stands for another engine's version may keep it
         - `DashVersionTests` and `MinimalApiEndpointTests` green
+        - The task gate's `dash-unit-application` and `dash-unit-domain` runs pass (D19)
 
       Reference content for this task, quoted exactly from its source document and complete as given:
 
@@ -83,7 +90,7 @@ tasks:
 
       |---|---|---|---|---|---|
 
-      | T1 | `dash/server.tests/KyberDash.Presentation.Tests/DashVersionTests.cs` (new, `KyberDash.Presentation.Tests.DashVersionTests`); extend `KyberDash.Presentation.Tests.MinimalApiEndpointTests` | `dotnet test dash/server.tests/KyberDash.Presentation.Tests/KyberDash.Presentation.Tests.csproj -c Release --filter "FullyQualifiedName~KyberDash.Presentation.Tests.DashVersionTests" && dotnet test dash/server.tests/KyberDash.Presentation.Tests/KyberDash.Presentation.Tests.csproj -c Release --no-build --filter "FullyQualifiedName~KyberDash.Presentation.Tests.MinimalApiEndpointTests"` | `DashVersion.Current` equals the KyberDash.Core informational version without `+metadata`; Api, Cli and Mcp `Program.ResolveVersion()` equal it; `DashCommandLine.Parse([])` `Version` equals it with `KYBERDASH_VERSION` set to `9.9.9` (override gone); `new DashOptions().Version` and `new DashRuntimeSettings().Version` equal it; the version endpoint returns it | `DashVersion` missing (compile error), then the parse and endpoint assertions failing on `0.21.0` | All green; no `0.21.0` literal in `dash/server/` |
+      | T1 | `dash/server.tests/KyberDash.Presentation.Tests/DashVersionTests.cs` (new, `KyberDash.Presentation.Tests.DashVersionTests`); extend `KyberDash.Presentation.Tests.MinimalApiEndpointTests` | `dotnet test dash/server.tests/KyberDash.Presentation.Tests/KyberDash.Presentation.Tests.csproj -c Release --filter "FullyQualifiedName~KyberDash.Presentation.Tests.DashVersionTests" && dotnet test dash/server.tests/KyberDash.Presentation.Tests/KyberDash.Presentation.Tests.csproj -c Release --no-build --filter "FullyQualifiedName~KyberDash.Presentation.Tests.MinimalApiEndpointTests"` | `DashVersion.Current` equals the KyberDash.Core informational version without `+metadata`; Api, Cli and Mcp `Program.ResolveVersion()` equal it; `DashCommandLine.Parse([])` `Version` equals it with `KYBERDASH_VERSION` set to `9.9.9` (override gone); `new DashOptions().Version` and `new DashRuntimeSettings().Version` equal it; the version endpoint returns it | `DashVersion` missing (compile error), then the parse and endpoint assertions failing on `0.21.0` | All green; no `0.21.0` literal in `dash/server/`; the `KyberDash.Application.Tests` and `KyberDash.Domain.Tests` suites pass under the task gate's own run (`kyber-weave review gates . --agent <agent> --task T1`, test binaries under `.agent_scratchpad/<task>/artifacts`) with the D19 `PricingFixture` change |
 
 
       #### Decisions this task cites
@@ -98,12 +105,14 @@ tasks:
 
       | D3 | What replaces the other literals? | `DashCommandLine.Parse` sets `Version = DashVersion.Current` and the `KYBERDASH_VERSION` override is removed; `DashRuntimeSettings.Version` and `DashOptions.Version` default to `DashVersion.Current`; `KyberBridgeEngine.DefaultVersion` (public const) is removed and the constructor parameter becomes `string? version = null`, resolved to `DashVersion.Current`. | No script, test or workflow sets `KYBERDASH_VERSION` (searched `dash`, `src`, `tests`, `scripts`, `.github`). Removing a public const is an in-repo contract change; the worker updates every caller. Tests asserting `"0.21.0"` from the engine change to `DashVersion.Current`. | autonomous: low-confidence, no authoritative source |
 
+      | D19 | T1's task gate fails in `dash-unit-application` and `dash-unit-domain`: how is it fixed? | T1 also changes `PricingDirectory()` in `dash/server.tests/KyberDash.Application.Tests/PricingFixture.cs` and `dash/server.tests/KyberDash.Domain.Tests/PricingFixture.cs` (identical code): walking up from `AppContext.BaseDirectory`, each folder is checked for `server/KyberDash.Data/Pricing/litellm-snapshot.json` (today's check, kept) and for `dash/server/KyberDash.Data/Pricing/litellm-snapshot.json`; the first hit returns its `Pricing` folder; no hit throws today's `DirectoryNotFoundException` and message. | Finding F11: the task gate builds with `--artifacts-path .agent_scratchpad/<task>/artifacts`, so the test binary sits beside `dash/`, never under it, and today's walk (which only matches when an ancestor is `dash/`) reaches the worktree root without a hit. The other walk-up fixtures in both suites (`E2eSeederWorldTests`, `LegacyColumnAbsenceTests`) already look for `dash/…` from each ancestor and pass. The fix is test-only and keeps the normal `bin/` layout working. | autonomous: code evidence, AUTONOMOUS_APPROVAL: diagnosed-task-revision-T1 |
+
 
       Results of the tasks this one follows, as their workers reported them:
 
       {prior_results}
     agent: dev-easy
-    agent-confidence: 0.97
+    agent-confidence: 0.96
     difficulty: easy
     difficulty-source: architect
     technology: csharp
