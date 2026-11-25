@@ -211,6 +211,7 @@ export const FILE_HARNESS_JSON_FIXTURES: readonly FileHarnessFixture[] = [
       },
     ],
   ),
+  ...uiMessagesFixtures('roo-code', 'rooveterinaryinc.roo-cline'),
   ...uiMessagesFixtures('kilo-vscode-legacy', 'kilocode.kilo-code'),
   ...fixturesFor(
     'copilot-vscode',
