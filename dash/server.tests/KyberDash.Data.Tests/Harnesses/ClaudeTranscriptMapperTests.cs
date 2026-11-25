@@ -5,6 +5,7 @@ using KyberDash.Contracts.Repositories;
 using KyberDash.Data.Collector;
 using KyberDash.Data.Collector.Sources;
 using KyberDash.Data.Harnesses.Claude;
+using KyberDash.Data.Harnesses.Otlp;
 using KyberDash.Data.Repositories;
 using KyberDash.Data.Tokenization;
 using KyberDash.Domain;
@@ -468,6 +469,24 @@ public class ClaudeTranscriptMapperTests
         CollectedRecord turn = Assert.Single(batch.Records, static r => r.Op == RecordOp.LlmInvoke);
         Assert.Null(turn.ResponseId);
         Assert.Null(turn.RequestId);
+    }
+
+    /// <summary>
+    /// An id longer than the join key bound is no join key: the turn record leaves it absent rather than
+    /// storing it or cutting it down, while an id exactly at the bound is kept.
+    /// </summary>
+    [Fact]
+    public void Map_LeavesAnIdLongerThanTheJoinBoundAbsent_AndKeepsOneAtTheBound()
+    {
+        string tooLongMessageId = new('m', OtlpJoinIds.MaxIdCharacters + 1);
+        string atBoundRequestId = new('r', OtlpJoinIds.MaxIdCharacters);
+        string jsonl = "{\"type\":\"assistant\",\"sessionId\":\"sess-longid\",\"requestId\":\"" + atBoundRequestId + "\",\"timestamp\":\"2026-11-19T10:00:01.000Z\",\"message\":{\"id\":\"" + tooLongMessageId + "\",\"role\":\"assistant\",\"model\":\"claude-sonnet-4-5\",\"content\":[{\"type\":\"text\",\"text\":\"done\"}],\"usage\":{\"input_tokens\":10,\"output_tokens\":5}}}";
+
+        CollectedBatch batch = new ClaudeTranscriptMapper().Map(CreateUnit("/tmp/.claude/projects/repo/sess-longid.jsonl", jsonl), ImportedAt);
+
+        CollectedRecord turn = Assert.Single(batch.Records, static r => r.Op == RecordOp.LlmInvoke);
+        Assert.Null(turn.ResponseId);
+        Assert.Equal(atBoundRequestId, turn.RequestId);
     }
 
     private static NativeSourceUnit CreateUnit(string sourceKey, string? rawText) =>

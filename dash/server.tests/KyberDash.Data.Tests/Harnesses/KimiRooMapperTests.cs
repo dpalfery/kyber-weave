@@ -496,6 +496,18 @@ public class KimiRooMapperTests
     }
 
     [Fact]
+    public void Map_BareTaskDirectoryKeyEndingInJson_IsItsOwnTaskId()
+    {
+        string uiMessages = RooUiMessages(tokensIn: 100, tokensOut: 50);
+        NativeSourceUnit unit = MakeNativeUnit("roo-code", RooTaskDir("task-c.json"), uiMessages);
+
+        CollectedBatch batch = new RooCodeMapper().Map(unit, BaselineUtc);
+
+        Assert.Equal("task-c.json", Assert.Single(batch.Sessions).SessionKey);
+        Assert.Equal("synth:roo-code:task-c.json:0", Assert.Single(batch.Records).RecordId);
+    }
+
+    [Fact]
     public void Map_SkipsZeroTokenEntries()
     {
         string uiMessages = "[{\"type\":\"say\",\"say\":\"api_req_started\",\"text\":\"{\\\"tokensIn\\\":0,\\\"tokensOut\\\":0}\",\"ts\":1700000000000}]";

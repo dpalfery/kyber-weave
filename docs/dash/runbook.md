@@ -6,7 +6,7 @@ status: current
 component: KyberDash
 source-root: dash
 owner: dpalfery
-last-reviewed: 2026-11-23
+last-reviewed: 2026-11-25
 decided-by:
   - adr/0084-kyberdash-csharp-engine
   - adr/0031-kyberdash-capture-command-owns-harness-telemetry-keys
@@ -1622,7 +1622,7 @@ Fixture timestamps are relative to the run's clock (one hour back, floored to th
 | Suite | Harnesses | How the database is loaded |
 |---|---|---|
 | `dash/e2e/otel-web-dashboard.spec.ts` | the 7 OTLP-captured harnesses (`claude-code`, `opencode`, `droid`, `codex`, `copilot`, `pi`, `antigravity`) and the `gemini` exclusion | posts the OTLP payloads from `dash/e2e/otel-harness-payloads.ts` to `/v1/traces` and `/v1/logs`; paired Droid sessions also get their transcript and `<id>.settings.json` under the server's isolated `HOME`, and `POST /api/kyber/refresh` runs the plugin-captured counter pass |
-| `dash/e2e/file-harness-dashboard.spec.ts` | the 15 file-import harnesses, one test each | writes each harness's native files under the isolated `HOME` at the path its registry reader scans (`dash/e2e/file-harness-jsonl.ts`, `file-harness-json.ts`, `file-harness-sqlite.ts`, the last built with Node's `node:sqlite`, Node 22.13 or later), then `POST /api/kyber/import-history` |
+| `dash/e2e/file-harness-dashboard.spec.ts` | the 13 file-import harnesses, one test each | writes each harness's native files under the isolated `HOME` at the path its registry reader scans (`dash/e2e/file-harness-jsonl.ts`, `file-harness-json.ts`, `file-harness-sqlite.ts`, the last built with Node's `node:sqlite`, Node 22.13 or later), then `POST /api/kyber/import-history` |
 
 Both share the section assertions in `dash/e2e/session-dashboard-assertions.ts`, and a dimension a harness does not export is
 asserted as its explicit not-measurable state, never skipped. Where a harness cannot reach a section, the contract in
@@ -1643,8 +1643,12 @@ npx --prefix dash playwright test --config dash/playwright.isolated.config.ts da
 import yields nothing. The reader fix lives on branch `claude/fix/sqlite-harness-readers`; when it lands the marker is
 removed and the tests must pass.
 
-**Import outcomes.** A folder import in which some source units fail reports `partial` with the number of `failedUnits`
-(the maintenance panel shows it) instead of `succeeded`; a store constraint failure on one unit fails only that unit.
+**Import outcomes.** A folder import, a refresh or a maintenance pass in which some source units fail (including the
+plugin-session pass and the one-time no-estimate re-read) reports `partial` with the number of `failedUnits` instead of
+`succeeded`; `failedUnits` is the count from the last pass that read sources, and the maintenance panel shows it. A store
+constraint failure on one unit fails only that unit.
+
+**One-time re-read of estimated tokens.** A droid, cursor or warp checkpoint at contract "1" whose source key discovery no longer returns (a deleted file, a folder that cannot be listed, or a unit re-keyed to a new key) cannot be re-read, so the re-read instead clears only the token values that version stored as estimates; they read "not measured". Sessions, records, text and harness-reported values stay.
 
 **Leftovers from an earlier run.** With no watchdog and no ledger, a process a killed run left behind
 is yours to find and stop:

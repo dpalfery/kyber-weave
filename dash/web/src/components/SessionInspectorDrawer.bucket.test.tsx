@@ -156,6 +156,36 @@ describe('SessionInspectorDrawer: bucket drill-down figures are never NaN', () =
     expect(text).not.toContain('NaN%')
   })
 
+  it.each([
+    ['NaN', Number.NaN],
+    ['Infinity', Number.POSITIVE_INFINITY],
+  ])('shows not measured for a %s bucket figure, never NaN%% or Infinity%%', (_name, value) => {
+    const { container } = renderBucketTurn({
+      sessionId: SESSION_ID,
+      turnIndex: 0,
+      turn: { index: 0, spanId: 'span-t0' },
+      context: { index: 1, buckets: { tool_definitions: value, residual: 500 }, reported_input: 1000 },
+    })
+
+    const text = bucketFigures(container)
+    expect(text.match(/not measured/g)).toHaveLength(2)
+    expect(text).not.toContain('NaN')
+    expect(text).not.toContain('Infinity')
+  })
+
+  it('ignores a non-finite reported total and divides by the finite bucket sum', () => {
+    const { container } = renderBucketTurn({
+      sessionId: SESSION_ID,
+      turnIndex: 0,
+      turn: { index: 0, spanId: 'span-t0' },
+      context: { index: 1, buckets: { tool_definitions: 250, residual: 250 }, reported_input: Number.NaN },
+    })
+
+    const text = bucketFigures(container)
+    expect(text).toContain('50.0%')
+    expect(text).not.toContain('NaN')
+  })
+
   it('shows a measured zero as 0 and 0.0%, staying measured', () => {
     const { container } = renderBucketTurn({
       sessionId: SESSION_ID,

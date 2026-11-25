@@ -4,6 +4,7 @@ using System.Text;
 using System.Text.Json;
 using KyberDash.Data.Collector;
 using KyberDash.Data.Collector.Sources;
+using KyberDash.Data.Harnesses.Otlp;
 using KyberDash.Data.Repositories;
 using KyberDash.Domain;
 
@@ -876,8 +877,8 @@ public class ClaudeTranscriptMapper : IHarnessMapper
                 DeclaredContextWindow: null),
             ReportedInputTokens: reportedInput,
             ReportedOutputTokens: reportedOutput,
-            ResponseId: string.IsNullOrEmpty(turn.NativeRecordId) ? null : turn.NativeRecordId,
-            RequestId: turn.RequestId);
+            ResponseId: OtlpJoinIds.WithinBound(string.IsNullOrEmpty(turn.NativeRecordId) ? null : turn.NativeRecordId),
+            RequestId: OtlpJoinIds.WithinBound(turn.RequestId));
     }
 
     private CollectedRecord BuildToolRecord(

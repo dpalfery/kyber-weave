@@ -22,6 +22,13 @@ public static class OtlpJoinIds
     /// <summary>The OTLP attribute holding the provider request id.</summary>
     public const string RequestIdKey = "request_id";
 
+    /// <summary>
+    /// The longest id read as a join key. Claude Code's message and request ids are a few dozen
+    /// characters; a longer attribute value is not one of them, so it joins nothing rather than
+    /// being stored as a key or cut down to one.
+    /// </summary>
+    public const int MaxIdCharacters = 256;
+
     /// <summary>The harness id whose OTLP turns the projector joins to a transcript file twin: Claude Code.</summary>
     private static readonly HashSet<string> TwinHarnesses = new(StringComparer.Ordinal)
     {
@@ -51,6 +58,16 @@ public static class OtlpJoinIds
         }
 
         string? text = element.GetString();
-        return string.IsNullOrWhiteSpace(text) || JsonDocumentText.IsDocument(text) ? null : text;
+        return string.IsNullOrWhiteSpace(text) || JsonDocumentText.IsDocument(text)
+            ? null
+            : WithinBound(text);
     }
+
+    /// <summary>
+    /// Returns the id when it fits the join key bound, or null: an id longer than <see cref="MaxIdCharacters"/>
+    /// is no join key, and is never cut down to one.
+    /// </summary>
+    /// <param name="id">The id to bound.</param>
+    public static string? WithinBound(string? id) =>
+        id is null || id.Length > MaxIdCharacters ? null : id;
 }

@@ -531,6 +531,9 @@ public static class SettingsCleanDoctorReportTests
 
             public void DeleteSource(string sourceId) => throw new IOException("disk full");
 
+            public void ClearEstimatedRecordTokens(string harnessId, string sourceLocator, EstimatedRecordTokens estimated) =>
+                throw new IOException("disk full");
+
             public void WriteProblem(CollectedProblem problem) => throw new IOException("disk full");
         }
     }

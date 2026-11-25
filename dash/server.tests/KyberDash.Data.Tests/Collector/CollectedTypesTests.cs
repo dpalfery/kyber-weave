@@ -42,6 +42,7 @@ public class CollectedTypesTests
         typeof(CollectedCost),
         typeof(CollectedError),
         typeof(CollectedTokenCount),
+        typeof(EstimatedRecordTokens),
     ];
 
     [Fact]

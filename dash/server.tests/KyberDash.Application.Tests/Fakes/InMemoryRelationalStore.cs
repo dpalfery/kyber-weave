@@ -304,6 +304,59 @@ public class InMemoryRelationalStore :
     }
 
     /// <inheritdoc />
+    public void ClearEstimatedRecordTokens(string harnessId, string sourceLocator, EstimatedRecordTokens estimated)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(harnessId);
+        ArgumentException.ThrowIfNullOrWhiteSpace(sourceLocator);
+        if (estimated == EstimatedRecordTokens.None)
+        {
+            return;
+        }
+
+        lock (syncRoot)
+        {
+            StoreState working = state.Clone();
+            object?[]? source = FindRowByKey(
+                working,
+                "source",
+                [("harness_id", harnessId), ("source_kind", "file"), ("locator", sourceLocator)]);
+            if (source is null)
+            {
+                return;
+            }
+
+            string sourceId = GetString(GetTableMetadata("source"), source, "source_id");
+            TableMetadata recordMeta = GetTableMetadata("record");
+            TableMetadata totalMeta = GetTableMetadata("record_reported_total");
+            HashSet<string> reportedSpans = new(
+                working.GetRows("record_reported_total").Select(row => GetString(totalMeta, row, "span_id")),
+                StringComparer.Ordinal);
+            List<string> sourceSpans =
+            [
+                .. working.GetRows("record")
+                    .Where(row => string.Equals(GetString(recordMeta, row, "source_id"), sourceId, StringComparison.Ordinal))
+                    .Select(row => GetString(recordMeta, row, "span_id")),
+            ];
+
+            foreach (string spanId in sourceSpans)
+            {
+                switch (estimated)
+                {
+                    case EstimatedRecordTokens.AllRecordTokens:
+                        _ = DeleteRowsCore(working, "record_token_count", [("span_id", spanId)]);
+                        _ = DeleteRowsCore(working, "record_reported_total", [("span_id", spanId)]);
+                        break;
+                    case EstimatedRecordTokens.RecordsWithoutReportedTotal when !reportedSpans.Contains(spanId):
+                        _ = DeleteRowsCore(working, "record_token_count", [("span_id", spanId)]);
+                        break;
+                }
+            }
+
+            state = working;
+        }
+    }
+
+    /// <inheritdoc />
     public void WriteProblem(CollectedProblem problem)
     {
         ArgumentNullException.ThrowIfNull(problem);

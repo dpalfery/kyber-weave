@@ -1,5 +1,7 @@
 using KyberDash.Application.Tests.Fakes;
+using KyberDash.Contracts.Repositories;
 using KyberDash.Domain;
+using Moq;
 using Xunit;
 
 namespace KyberDash.Application.Tests.Tokenization;
@@ -155,5 +157,84 @@ public class CachedTokenCounterTests
         Assert.Equal(counted.Count, store.GetCachedTokenCount(CanonTokenCache.CacheKey(text, "model-x", "fake_tokenizer")));
         counter.Flush();
         Assert.Equal(counted.Count, store.GetCachedTokenCount(CanonTokenCache.CacheKey(text, "model-x", "fake_tokenizer")));
+    }
+
+    /// <summary>
+    /// A flush persists outside the counter's lock: while the store is still writing a batch, a
+    /// concurrent memoized <see cref="CachedTokenCounter.Count"/> and <see cref="CachedTokenCounter.Stats"/>
+    /// return instead of waiting for the write.
+    /// </summary>
+    [Fact]
+    public async Task Flush_WhileTheStoreIsWriting_DoesNotBlockConcurrentCounts()
+    {
+        using ManualResetEventSlim writing = new();
+        using ManualResetEventSlim release = new();
+        Mock<IOperationalStore> store = new();
+        store.Setup(s => s.GetCachedTokenCount(It.IsAny<string>())).Returns((long?)null);
+        store
+            .Setup(s => s.PutCachedTokenCounts(It.IsAny<IEnumerable<StoredTokenCacheEntry>>()))
+            .Callback(() =>
+            {
+                writing.Set();
+                _ = release.Wait(TimeSpan.FromSeconds(10));
+            });
+        CachedTokenCounter counter = new(store.Object, new FakeTextTokenizer());
+        string text = LongWords(200);
+        TokenCount counted = counter.Count(text, "model-x");
+
+        Task flush = Task.Run(counter.Flush, TestContext.Current.CancellationToken);
+        try
+        {
+            Assert.True(writing.Wait(TimeSpan.FromSeconds(5)), "The flush never reached the store.");
+
+            Task<TokenCount> memoized = Task.Run(() => counter.Count(text, "model-x"), TestContext.Current.CancellationToken);
+            Task<CachedCounterStats> stats = Task.Run(counter.Stats, TestContext.Current.CancellationToken);
+
+            Assert.Same(memoized, await Task.WhenAny(memoized, Task.Delay(TimeSpan.FromSeconds(2), TestContext.Current.CancellationToken)));
+            Assert.Same(stats, await Task.WhenAny(stats, Task.Delay(TimeSpan.FromSeconds(2), TestContext.Current.CancellationToken)));
+            Assert.Equal(counted, await memoized);
+        }
+        finally
+        {
+            release.Set();
+            await flush.WaitAsync(TimeSpan.FromSeconds(10), TestContext.Current.CancellationToken);
+        }
+
+        store.Verify(s => s.PutCachedTokenCounts(It.IsAny<IEnumerable<StoredTokenCacheEntry>>()), Times.Once);
+    }
+
+    /// <summary>
+    /// <see cref="CachedTokenCounter.Flush"/> returns only after every batch taken before it is written,
+    /// so a caller that flushes can read back everything counted before the call.
+    /// </summary>
+    [Fact]
+    public async Task Flush_WaitsForABatchAnotherFlushIsStillWriting()
+    {
+        using ManualResetEventSlim writing = new();
+        using ManualResetEventSlim release = new();
+        int writes = 0;
+        Mock<IOperationalStore> store = new();
+        store.Setup(s => s.GetCachedTokenCount(It.IsAny<string>())).Returns((long?)null);
+        store
+            .Setup(s => s.PutCachedTokenCounts(It.IsAny<IEnumerable<StoredTokenCacheEntry>>()))
+            .Callback(() =>
+            {
+                writing.Set();
+                _ = release.Wait(TimeSpan.FromSeconds(10));
+                _ = Interlocked.Increment(ref writes);
+            });
+        CachedTokenCounter counter = new(store.Object, new FakeTextTokenizer());
+        _ = counter.Count(LongWords(200), "model-x");
+
+        Task first = Task.Run(counter.Flush, TestContext.Current.CancellationToken);
+        Assert.True(writing.Wait(TimeSpan.FromSeconds(5)), "The first flush never reached the store.");
+        Task second = Task.Run(counter.Flush, TestContext.Current.CancellationToken);
+
+        Task settled = await Task.WhenAny(second, Task.Delay(TimeSpan.FromMilliseconds(200), TestContext.Current.CancellationToken));
+        bool secondReturnedEarly = ReferenceEquals(settled, second);
+        release.Set();
+        await Task.WhenAll(first, second).WaitAsync(TimeSpan.FromSeconds(10), TestContext.Current.CancellationToken);
+        Assert.False(secondReturnedEarly, "A flush returned before the earlier batch was written.");
+        Assert.Equal(1, Volatile.Read(ref writes));
     }
 }

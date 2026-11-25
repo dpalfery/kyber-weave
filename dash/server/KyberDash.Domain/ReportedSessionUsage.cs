@@ -248,6 +248,12 @@ public static class ReportedSessionUsage
         return latest;
     }
 
+    /// <summary>
+    /// Sums the rows per token class, or returns <see langword="null"/> when the figures are not
+    /// measured: a total mixed with split classes is ambiguous, and figures too large to add up in a
+    /// 64-bit count (a class sum, or the combined input) are refused rather than wrapped. Reasoning
+    /// rows are not added: reasoning is a subset of output (<see cref="CanonPricing.PriceStoredTokens"/>).
+    /// </summary>
     private static ReportedSessionUsageTotals? Sum(IReadOnlyList<CollectedModelUsage> rows)
     {
         long? freshInput = null;
@@ -255,28 +261,37 @@ public static class ReportedSessionUsage
         long? cacheWrite = null;
         long? output = null;
         long? total = null;
-        foreach (CollectedModelUsage row in rows)
+        try
         {
-            switch (row.TokenClass)
+            foreach (CollectedModelUsage row in rows)
             {
-                case TokenClass.Input:
-                    freshInput = (freshInput ?? 0L) + row.Count;
-                    break;
-                case TokenClass.CacheRead:
-                    cacheRead = (cacheRead ?? 0L) + row.Count;
-                    break;
-                case TokenClass.CacheWrite:
-                    cacheWrite = (cacheWrite ?? 0L) + row.Count;
-                    break;
-                case TokenClass.Output:
-                    output = (output ?? 0L) + row.Count;
-                    break;
-                case TokenClass.Total:
-                    total = (total ?? 0L) + row.Count;
-                    break;
-                default:
-                    break;
+                switch (row.TokenClass)
+                {
+                    case TokenClass.Input:
+                        freshInput = checked((freshInput ?? 0L) + row.Count);
+                        break;
+                    case TokenClass.CacheRead:
+                        cacheRead = checked((cacheRead ?? 0L) + row.Count);
+                        break;
+                    case TokenClass.CacheWrite:
+                        cacheWrite = checked((cacheWrite ?? 0L) + row.Count);
+                        break;
+                    case TokenClass.Output:
+                        output = checked((output ?? 0L) + row.Count);
+                        break;
+                    case TokenClass.Total:
+                        total = checked((total ?? 0L) + row.Count);
+                        break;
+                    default:
+                        break;
+                }
             }
+
+            _ = checked((freshInput ?? 0L) + (cacheRead ?? 0L) + (cacheWrite ?? 0L));
+        }
+        catch (OverflowException)
+        {
+            return null;
         }
 
         bool hasSplit = freshInput.HasValue || cacheRead.HasValue || cacheWrite.HasValue || output.HasValue;

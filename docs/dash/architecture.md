@@ -2270,7 +2270,7 @@ Droid counter pass (see [Where the Factory file rows come from](#where-the-facto
 retention purge and the incremental projection. A paused install reads no files on the timer in either case.
 The first tick after a deploy also re-reads, once, the already-imported sources of the harnesses whose stored rows came from
 estimated tokens (`droid`, `cursor` and `warp`, whose registrations carry a bumped parser contract version so their old checkpoints are refused), so the replacement needs no manual
-import; a completion marker (the refresh run keyed `kyberdash.no_estimate_reread`) is written only when no source unit failed, so a failed
+import. A droid, cursor or warp checkpoint at contract "1" whose source key discovery no longer returns (a deleted file, a folder that cannot be listed, or a unit re-keyed to a new key) cannot be re-read, so the re-read instead clears only the token values that version stored as estimates; they read "not measured". Sessions, records, text and harness-reported values stay. A completion marker (the refresh run keyed `kyberdash.no_estimate_reread`) is written only when no source unit failed, so a failed
 pass retries on the next tick. A pass in which source units failed is reported as `partial` with `failedUnits`, never as a
 clean success: a store constraint failure on one source unit is that unit's problem, and the rest of the import still lands. A terminal `kyberdash kyber refresh`
 always imports, because a person typing it asked for their own history back;

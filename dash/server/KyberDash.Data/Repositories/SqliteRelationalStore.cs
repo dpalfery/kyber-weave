@@ -273,6 +273,41 @@ public partial class SqliteRelationalStore : BaseSqliteRepository, IRelationalSt
     }
 
     /// <inheritdoc />
+    public void ClearEstimatedRecordTokens(string harnessId, string sourceLocator, EstimatedRecordTokens estimated)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(harnessId);
+        ArgumentException.ThrowIfNullOrWhiteSpace(sourceLocator);
+        if (estimated == EstimatedRecordTokens.None)
+        {
+            return;
+        }
+
+        string harnessExpr = GuardedTextExpr("source", "harness_id", harnessId);
+        string locatorExpr = GuardedTextExpr("source", "locator", sourceLocator);
+        string sourceSpans =
+            "SELECT r.span_id FROM record r JOIN source s ON s.source_id = r.source_id " +
+            $"WHERE s.harness_id = {harnessExpr} AND s.source_kind = {TextExpr("file")} AND s.locator = {locatorExpr}";
+
+        StringBuilder body = new();
+        switch (estimated)
+        {
+            case EstimatedRecordTokens.AllRecordTokens:
+                body.Append(CultureInfo.InvariantCulture, $"DELETE FROM record_token_count WHERE span_id IN ({sourceSpans});\n");
+                body.Append(CultureInfo.InvariantCulture, $"DELETE FROM record_reported_total WHERE span_id IN ({sourceSpans});\n");
+                break;
+            case EstimatedRecordTokens.RecordsWithoutReportedTotal:
+                body.Append(
+                    CultureInfo.InvariantCulture,
+                    $"DELETE FROM record_token_count WHERE span_id IN ({sourceSpans}) AND span_id NOT IN (SELECT span_id FROM record_reported_total);\n");
+                break;
+            default:
+                throw new ArgumentOutOfRangeException(nameof(estimated), estimated, "Unsupported estimated token scope.");
+        }
+
+        ExecuteTransaction(body.ToString());
+    }
+
+    /// <inheritdoc />
     public void WriteProblem(CollectedProblem problem)
     {
         ArgumentNullException.ThrowIfNull(problem);
