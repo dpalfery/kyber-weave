@@ -840,6 +840,6 @@ public class CanonAnalysisTests
     private static JsonElement Element(object value) => JsonSerializer.SerializeToElement(value);
 
     /// <summary>Stand-in counter: one count per whitespace-separated word, never characters / 4.</summary>
-    private static long CountWords(string text, string? model) =>
-        text.Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries).LongLength;
+    private static TokenCount CountWords(string text, string? model) =>
+        new(text.Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries).LongLength, "word-count", false);
 }

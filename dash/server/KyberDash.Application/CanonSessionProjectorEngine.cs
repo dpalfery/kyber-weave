@@ -275,7 +275,7 @@ public partial class CanonSessionProjectorEngine
 
         // Each text counts under the model its own record was sent to; a record that names no
         // model counts under the tokenizer's labelled stand-in (D19).
-        SessionSummaryRow row = BuildSessionSummary(sessionId, records, (text, model) => counter.Count(text, model).Count);
+        SessionSummaryRow row = BuildSessionSummary(sessionId, records, counter.Count);
         counter.Flush();
         return row;
     }
@@ -1920,7 +1920,7 @@ public partial class CanonSessionProjectorEngine
 
     private static List<ToolDefinition> ToolDefinitionsOf(IReadOnlyList<CanonicalRecord> records, TextTokenCounter countTokens)
     {
-        Dictionary<string, (string? Server, long Tokens, int TurnsResident)> byName = new(StringComparer.Ordinal);
+        Dictionary<string, (string? Server, TokenCount Count, int TurnsResident)> byName = new(StringComparer.Ordinal);
         foreach (CanonicalRecord record in records)
         {
             string? model = ModelOf(record);
@@ -1967,7 +1967,7 @@ public partial class CanonSessionProjectorEngine
                     }
 
                     string trimmed = name.Trim();
-                    if (!byName.TryGetValue(trimmed, out (string? Server, long Tokens, int TurnsResident) existing))
+                    if (!byName.TryGetValue(trimmed, out (string? Server, TokenCount Count, int TurnsResident) existing))
                     {
                         byName[trimmed] = (server, countTokens(itemText, model), 1);
                     }
@@ -1979,7 +1979,7 @@ public partial class CanonSessionProjectorEngine
             }
         }
 
-        return byName.Select(kv => new ToolDefinition(kv.Key, kv.Value.Server, kv.Value.Tokens, kv.Value.TurnsResident)).ToList();
+        return byName.Select(kv => new ToolDefinition(kv.Key, kv.Value.Server, kv.Value.Count.Count, kv.Value.TurnsResident, kv.Value.Count.Tokenizer, kv.Value.Count.IsModelOwn)).ToList();
     }
 
     private static List<(string Name, string Text)> SplitToolDefinitionsText(string text)
@@ -2753,7 +2753,7 @@ public partial class CanonSessionProjectorEngine
                 StoredSessionProjection projection = BuildStoredSessionProjection(
                     sessionId,
                     merged,
-                    (text, model) => counter.Count(text, model).Count,
+                    counter.Count,
                     sessionsByKey[sessionId].Title);
                 projections.ReplaceSessionProjection(projection);
                 builtCount++;

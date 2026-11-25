@@ -14,8 +14,27 @@ namespace KyberDash.Domain;
 /// </remarks>
 /// <param name="text">Text to count.</param>
 /// <param name="model">Model the text was sent to; <see langword="null"/> or blank when unknown.</param>
-/// <returns>Number of tokens the model's tokenizer gives the text.</returns>
-public delegate long TextTokenCounter(string text, string? model);
+/// <returns>Number of tokens the model's tokenizer gives the text, labelled with that tokenizer.</returns>
+public delegate TokenCount TextTokenCounter(string text, string? model);
+
+/// <summary>A tokenizer that counted text-derived figures, and whether it is the model's own.</summary>
+/// <param name="Tokenizer">Tokenizer name, such as <c>o200k_base</c>.</param>
+/// <param name="IsModelOwn">Whether the tokenizer is the counted model's own rather than a stand-in.</param>
+public record TokenizerLabel(string Tokenizer, bool IsModelOwn)
+{
+    /// <summary>Distinct labels in tokenizer-name order, so equal sets compare and serialize alike.</summary>
+    /// <param name="labels">Labels to order; duplicates collapse.</param>
+    /// <returns>The distinct labels ordered by tokenizer name, then model-own last.</returns>
+    public static IReadOnlyList<TokenizerLabel> Ordered(IEnumerable<TokenizerLabel> labels)
+    {
+        ArgumentNullException.ThrowIfNull(labels);
+        return labels
+            .Distinct()
+            .OrderBy(static label => label.Tokenizer, StringComparer.Ordinal)
+            .ThenBy(static label => label.IsModelOwn)
+            .ToList();
+    }
+}
 
 /// <summary>One piece of a turn's context payload keyed by canonical part type.</summary>
 /// <param name="Part">Canonical part type, such as <c>conversation_history</c>.</param>
@@ -27,6 +46,8 @@ public delegate long TextTokenCounter(string text, string? model);
 /// <param name="StrippedCount">Number of instruction blocks stripped out of the part.</param>
 /// <param name="Resident">Explicit <see langword="false"/> for deferred tools not loaded into resident context.</param>
 /// <param name="Model">Model the part was sent to, whose tokenizer counts its text; <see langword="null"/> when unknown.</param>
+/// <param name="Tokenizer">Tokenizer that counted <paramref name="Tokens"/> from text; <see langword="null"/> for a reported or absent count.</param>
+/// <param name="TokenizerIsModelOwn">Whether <paramref name="Tokenizer"/> is the model's own; <see langword="null"/> when <paramref name="Tokenizer"/> is.</param>
 public record ContextPart(
     string Part,
     string Text,
@@ -36,7 +57,9 @@ public record ContextPart(
     long? InstructionTokens = null,
     int? StrippedCount = null,
     bool? Resident = null,
-    string? Model = null)
+    string? Model = null,
+    string? Tokenizer = null,
+    bool? TokenizerIsModelOwn = null)
 {
     /// <summary>Adapts a persisted <see cref="ContentPart"/> into an analysis <see cref="ContextPart"/>.</summary>
     /// <param name="part">Persisted content part.</param>
@@ -50,8 +73,13 @@ public record ContextPart(
             Tokens: part.Tokens,
             Server: part.Server,
             Resident: part.Resident,
-            Model: model);
+            Model: model,
+            Tokenizer: part.Tokenizer,
+            TokenizerIsModelOwn: part.TokenizerIsModelOwn);
     }
+
+    /// <summary>The label of this part's text-derived count, or <see langword="null"/> when it has none.</summary>
+    public TokenizerLabel? Label => Tokenizer is null ? null : new TokenizerLabel(Tokenizer, TokenizerIsModelOwn ?? false);
 }
 
 /// <summary>Single turn of a session supplied to <see cref="CanonContextAnalysis.AnalyzeContext"/>.</summary>
@@ -96,7 +124,14 @@ public record TurnPressure(
     long AccumulationRate,
     long? FreshInput,
     FreshInputJump? FreshInputJump = null,
-    int? NonResidentToolDefinitions = null);
+    int? NonResidentToolDefinitions = null)
+{
+    /// <summary>
+    /// Tokenizers that counted this turn's text-derived figures, in name order; empty when every
+    /// figure is harness-reported. More than one entry means the turn's sums mix tokenizers.
+    /// </summary>
+    public IReadOnlyList<TokenizerLabel> Tokenizers { get; init; } = [];
+}
 
 /// <summary>Session-level context composition and pressure analysis result.</summary>
 public record ContextAnalysis(
@@ -111,14 +146,20 @@ public record ContextAnalysis(
     bool DerivedCounts,
     double FreshJumpFactor,
     IReadOnlyList<int> FlaggedTurns,
-    double SessionAccumulationRate);
+    double SessionAccumulationRate)
+{
+    /// <summary>Union of every turn's <see cref="TurnPressure.Tokenizers"/>, in name order.</summary>
+    public IReadOnlyList<TokenizerLabel> Tokenizers { get; init; } = [];
+}
 
 /// <summary>Tool definition entry supplied to <see cref="CanonContextAnalysis.RankSchemas"/>.</summary>
 public record ToolDefinition(
     string Name,
     string? Server = null,
     long Tokens = 0,
-    int? TurnsResident = null);
+    int? TurnsResident = null,
+    string? Tokenizer = null,
+    bool? TokenizerIsModelOwn = null);
 
 /// <summary>One tool definition ordered in the schema-cost ranking.</summary>
 public record RankedTool(
@@ -260,10 +301,11 @@ public static class CanonContextAnalysis
                 text.Contains(markers.Close, StringComparison.Ordinal))
             {
                 (List<string> blocks, string remainder) = StripInstructionBlocks(text, markers);
-                long remainderTokens = countTokens(remainder, part.Model);
+                TokenCount remainderCount = countTokens(remainder, part.Model);
+                long remainderTokens = remainderCount.Count;
                 long instructionTokens = 0;
                 foreach (string block in blocks)
-                    instructionTokens += countTokens(block, part.Model);
+                    instructionTokens += countTokens(block, part.Model).Count;
 
                 reduced.Add(new ContextPart(
                     Part: part.Part,
@@ -274,20 +316,25 @@ public static class CanonContextAnalysis
                     InstructionTokens: instructionTokens,
                     StrippedCount: blocks.Count,
                     Resident: part.Resident == false ? false : null,
-                    Model: part.Model));
+                    Model: part.Model,
+                    Tokenizer: remainderCount.Tokenizer,
+                    TokenizerIsModelOwn: remainderCount.IsModelOwn));
                 continue;
             }
 
             long? measured = CanonPricing.MeasuredCount(part.Tokens);
             bool hasStructure = text.Length > 0 || measured.HasValue;
+            TokenCount? counted = hasStructure && !measured.HasValue ? countTokens(text, part.Model) : null;
             reduced.Add(new ContextPart(
                 Part: part.Part,
                 Text: string.Empty,
-                Tokens: hasStructure ? (measured ?? countTokens(text, part.Model)) : null,
+                Tokens: hasStructure ? (measured ?? counted!.Count) : null,
                 Server: part.Server,
                 Derived: !measured.HasValue,
                 Resident: part.Resident == false ? false : null,
-                Model: part.Model));
+                Model: part.Model,
+                Tokenizer: counted?.Tokenizer ?? (measured.HasValue ? part.Tokenizer : null),
+                TokenizerIsModelOwn: counted?.IsModelOwn ?? (measured.HasValue ? part.TokenizerIsModelOwn : null)));
         }
 
         return reduced;
@@ -367,6 +414,7 @@ public static class CanonContextAnalysis
             long strippedTokens = 0;
             bool derivedThisTurn = false;
             int nonResidentCount = 0;
+            HashSet<TokenizerLabel> turnLabels = [];
 
             foreach (ContextPart part in turn.Parts)
             {
@@ -390,13 +438,17 @@ public static class CanonContextAnalysis
                     text.Contains(markers.Close, StringComparison.Ordinal))
                 {
                     (List<string> blocks, string remainder) = StripInstructionBlocks(text, markers);
-                    long remainderTokens = countTokens(remainder, part.Model);
+                    TokenCount remainderCount = countTokens(remainder, part.Model);
+                    turnLabels.Add(new TokenizerLabel(remainderCount.Tokenizer, remainderCount.IsModelOwn));
+                    long remainderTokens = remainderCount.Count;
                     buckets[part.Part] = buckets.GetValueOrDefault(part.Part) + remainderTokens;
                     derivedThisTurn = true;
                     partTokens = remainderTokens;
                     foreach (string block in blocks)
                     {
-                        long blockTokens = countTokens(block, part.Model);
+                        TokenCount blockCount = countTokens(block, part.Model);
+                        turnLabels.Add(new TokenizerLabel(blockCount.Tokenizer, blockCount.IsModelOwn));
+                        long blockTokens = blockCount.Count;
                         buckets["instruction_context"] = buckets.GetValueOrDefault("instruction_context") + blockTokens;
                         strippedCount++;
                         strippedTokens += blockTokens;
@@ -405,7 +457,19 @@ public static class CanonContextAnalysis
                 }
                 else
                 {
-                    partTokens = measured ?? countTokens(text, part.Model);
+                    if (measured.HasValue)
+                    {
+                        partTokens = measured.Value;
+                        if (part.Label is TokenizerLabel measuredLabel)
+                            turnLabels.Add(measuredLabel);
+                    }
+                    else
+                    {
+                        TokenCount counted = countTokens(text, part.Model);
+                        turnLabels.Add(new TokenizerLabel(counted.Tokenizer, counted.IsModelOwn));
+                        partTokens = counted.Count;
+                    }
+
                     if (!measured.HasValue || part.Derived)
                         derivedThisTurn = true;
 
@@ -473,7 +537,10 @@ public static class CanonContextAnalysis
                 AccumulationRate: accumulationRate,
                 FreshInput: turn.FreshInput,
                 FreshInputJump: freshInputJump,
-                NonResidentToolDefinitions: nonResidentCount > 0 ? nonResidentCount : null));
+                NonResidentToolDefinitions: nonResidentCount > 0 ? nonResidentCount : null)
+            {
+                Tokenizers = TokenizerLabel.Ordered(turnLabels),
+            });
 
             if (freshInputJump is not null)
                 flaggedTurns.Add(position + 1);
@@ -502,7 +569,10 @@ public static class CanonContextAnalysis
             DerivedCounts: derivedCounts,
             FreshJumpFactor: options.FreshJumpFactor,
             FlaggedTurns: flaggedTurns,
-            SessionAccumulationRate: sessionAccumulationRate);
+            SessionAccumulationRate: sessionAccumulationRate)
+        {
+            Tokenizers = TokenizerLabel.Ordered(perTurn.SelectMany(static turn => turn.Tokenizers)),
+        };
     }
 
     /// <summary>
