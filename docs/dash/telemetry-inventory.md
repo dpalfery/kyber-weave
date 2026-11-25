@@ -5,7 +5,7 @@ doc-type: reference
 status: current
 component: KyberDash
 owner: dpalfery
-last-reviewed: 2026-11-09
+last-reviewed: 2026-11-25
 decided-by:
   - adr/0048-opencode-capture-is-a-v2-only-plugin-pipeline
   - adr/0055-factory-capture-is-a-hooks-plugin-pipeline
