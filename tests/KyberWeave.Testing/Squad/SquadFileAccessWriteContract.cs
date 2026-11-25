@@ -105,6 +105,18 @@ public abstract class SquadFileAccessWriteContract : IDisposable
         Assert.Equal(written.Length, files.GetLength(path));
     }
 
+    /// <summary>Every scratch path is new, so two tests' writes never land in one directory.</summary>
+    [Fact]
+    public void EachScratchDirectoryPathIsDistinctAndDoesNotExistYet()
+    {
+        ISquadFileAccess files = Starting(out string first);
+        string second = files.NewScratchDirectoryPath("kw-squad-write-contract-");
+
+        Assert.NotEqual(first, second);
+        Assert.False(files.DirectoryExists(first));
+        Assert.False(files.DirectoryExists(second));
+    }
+
     /// <summary>Asking the length of a file that is not there throws, rather than reporting zero.</summary>
     [Fact]
     public void GetLengthOfAMissingFileThrowsFileNotFound()

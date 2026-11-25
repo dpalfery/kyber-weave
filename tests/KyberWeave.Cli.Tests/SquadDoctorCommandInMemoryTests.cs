@@ -221,7 +221,9 @@ public sealed class SquadDoctorCommandInMemoryTests
     [Fact]
     public void Doctor_GlobalScope_RendersAntigravityWithTheResolvedDocsServerCommand()
     {
-        const string resolved = "/opt/kyber/bin/kyber-weave-mcp";
+        string resolved = Path.Combine(_state.Files.Root, "opt", "kyber", "bin", SquadDocsServerCommand.Executable);
+        _state.Files.CreateDirectory(Path.GetDirectoryName(resolved)!);
+        _state.Files.WriteAllBytes(resolved, [0x7F]);
         string tempHome = CreateDirectory("doctor-agy-home");
         string repoPath = CreateCanonicalRepository("doctor-agy-repository");
         RecordingRenderer renderer = new(new SquadRendererRegistry(

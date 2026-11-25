@@ -27,16 +27,30 @@ public static class SquadDocsServerCommand
     /// the lookup finds nothing, or when no lookup is wired. The path is not resolved through symbolic links, so a
     /// self-update that swaps the link's target keeps the entry working.
     /// </summary>
+    /// <remarks>
+    /// The answer is written into the operator's Antigravity config and agent files, which launch it later from any
+    /// directory, so the lookup is not taken on trust: an answer that is not fully qualified, or that names no existing
+    /// file, is treated as not found and the entry falls back to the bare name.
+    /// </remarks>
     /// <param name="renderScope">The scope the render writes to; the lifecycle maps an instance render to global.</param>
     /// <param name="findExecutable">Finds an executable on PATH, or null when none is wired.</param>
+    /// <param name="fileExists">Tells whether a file exists, following a symbolic link to the file it names.</param>
     /// <returns>The path, or null.</returns>
-    public static string? Resolve(SquadDeploymentScope renderScope, Func<string, string?>? findExecutable)
+    public static string? Resolve(
+        SquadDeploymentScope renderScope,
+        Func<string, string?>? findExecutable,
+        Func<string, bool> fileExists)
     {
+        ArgumentNullException.ThrowIfNull(fileExists);
+
         if (renderScope != SquadDeploymentScope.Global || findExecutable is null)
             return null;
 
         string? found = findExecutable(Executable);
-        return string.IsNullOrWhiteSpace(found) ? null : found;
+        if (string.IsNullOrWhiteSpace(found) || !Path.IsPathFullyQualified(found) || !fileExists(found))
+            return null;
+
+        return found;
     }
 
     /// <summary>

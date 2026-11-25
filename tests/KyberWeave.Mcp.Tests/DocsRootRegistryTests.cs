@@ -252,23 +252,31 @@ public sealed class DocsRootRegistryTests
         Assert.Equal(1, registry.Count);
     }
 
+    /// <summary>
+    /// The root a fifth one evicts is the one used least recently, not the one built first: the first root is used
+    /// again before the fifth arrives, so a first-in-first-out cache would evict it and this one must not.
+    /// </summary>
     [Fact]
     public void AnyRepoFifthRootEvictsTheLeastRecentlyUsed()
     {
         string[] roots = InitializedRoots(5);
         DocsRootRegistry registry = AnyRegistry(Git(roots));
 
-        foreach (string root in roots)
+        foreach (string root in roots[..4])
         {
             Assert.True(registry.TryResolve(root, out _, out string? refusal), refusal);
         }
 
+        Assert.True(registry.TryResolve(roots[0], out _, out string? again), again);
+        Assert.True(registry.TryResolve(roots[4], out _, out again), again);
         Assert.Equal(DocsRootRegistry.Capacity, registry.Count);
-        Assert.True(registry.TryResolve(roots[4], out _, out string? again), again);
         Assert.Equal(5, _built.Count);
 
         Assert.True(registry.TryResolve(roots[0], out _, out again), again);
-        Assert.Equal(2, _built.Count(root => root == roots[0]));
+        Assert.Equal(1, _built.Count(root => root == roots[0]));
+
+        Assert.True(registry.TryResolve(roots[1], out _, out again), again);
+        Assert.Equal(2, _built.Count(root => root == roots[1]));
         Assert.Equal(DocsRootRegistry.Capacity, registry.Count);
     }
 

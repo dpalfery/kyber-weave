@@ -83,5 +83,24 @@ public sealed class PhysicalSquadFileAccessWriteTests : SquadFileAccessWriteCont
         _ = File.CreateSymbolicLink(link, target);
 
         Assert.Equal(written.Length, files.GetLength(link));
+        Assert.Equal(files.GetLength(target), files.GetLength(link));
+    }
+
+    /// <summary>A link whose target is gone has no length: it throws the missing-file exception the seam documents.</summary>
+    [Fact]
+    public void GetLengthOnADanglingSymlinkThrowsFileNotFound()
+    {
+        if (OperatingSystem.IsWindows())
+        {
+            Assert.Skip("Creating a symbolic link needs a privilege Windows does not grant by default.");
+            return;
+        }
+
+        ISquadFileAccess files = Starting(out string root);
+        files.CreateDirectory(root);
+        string link = Path.Combine(root, "settings.json");
+        _ = File.CreateSymbolicLink(link, Path.Combine(root, "missing.json"));
+
+        _ = Assert.Throws<FileNotFoundException>(() => files.GetLength(link));
     }
 }

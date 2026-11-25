@@ -18,6 +18,13 @@ namespace KyberWeave.Core.Squad.Deployment;
 /// is ever re-serialized.
 /// </para>
 /// <para>
+/// Antigravity, or the operator, can edit the file while Squad updates it, and a plan applied to stale bytes would
+/// put back the document as first read and drop their change. So the file is read again just before the write, and
+/// the write happens only when it still holds the bytes the plan was made from. When it changed, the change is
+/// planned once more from the new bytes; when it changed again, the file is left alone with a warning. That narrows
+/// the window to the rename itself; it does not close it, because the seam offers no lock the editor also takes.
+/// </para>
+/// <para>
 /// A warning carries the path and fixed text only. File bytes, property values, the splice's message and
 /// exception messages are all left out, because a <see cref="System.Text.Json"/> reader message can quote the
 /// offending character and the file can hold another server's secret.
@@ -30,6 +37,12 @@ public static class AntigravityMcpConfiguration
 
     /// <summary>The largest file the config is read from; a larger one is refused before it is loaded.</summary>
     public const long MaxConfigBytes = 1024 * 1024;
+
+    /// <summary>
+    /// How many times the change is planned: once from the first read, and once more from the bytes another program
+    /// wrote in between, before the update gives up and leaves the file alone.
+    /// </summary>
+    private const int MaxPlans = 2;
 
     private const string ConfigFileName = "mcp_config.json";
     private const string ServersKey = "mcpServers";
@@ -77,46 +90,83 @@ public static class AntigravityMcpConfiguration
         }
 
         string path = Path.Combine(globalRoots.ResolveGlobalRoot(SquadTarget.Antigravity), ConfigFileName);
+        string entryJson = EntryJson(docsServerCommand);
 
-        byte[] document;
+        ConfigRead current = Read(files, path);
+        for (int attempt = 0; attempt < MaxPlans; attempt++)
+        {
+            if (current.Refusal is not null)
+            {
+                return [current.Refusal];
+            }
+
+            byte[] document = current.Document ?? EmptyDocument;
+            JsonSplicePlan plan = JsonServerSplice.Plan(document, ServerKeyPath, ServerName, entryJson);
+
+            switch (plan.Outcome)
+            {
+                case JsonSpliceOutcome.Inserted when dryRun:
+                    return [$"{WarningCode}: would add the kw-docs MCP server to '{SquadLifecycleService.SanitizeTargetTokenForWarning(path)}'."];
+                case JsonSpliceOutcome.Inserted:
+                    ConfigRead latest = Read(files, path);
+                    if (latest.Refusal is null && latest.SameAs(current))
+                    {
+                        return Write(files, path, plan.Document);
+                    }
+
+                    current = latest;
+                    continue;
+                case JsonSpliceOutcome.ServerAlreadyPresent:
+                    return ExistingEntryWarnings(path, document);
+                case JsonSpliceOutcome.MalformedDocument:
+                    return [Line(path, "is not valid JSON, so the kw-docs MCP server was not added to it.")];
+                case JsonSpliceOutcome.ForeignDocument:
+                    return [Line(path, "is not a JSON object with an mcpServers object, so the kw-docs MCP server was not added to it.")];
+                default:
+                    return [Line(path, "could not be changed safely, so the kw-docs MCP server was not added to it.")];
+            }
+        }
+
+        return current.Refusal is not null
+            ? [current.Refusal]
+            : [Line(path, "changed while it was being updated, so the kw-docs MCP server was not added to it. Run the command again.")];
+    }
+
+    /// <summary>
+    /// Reads the config, or notes it is missing, or says why it was refused: larger than <see cref="MaxConfigBytes"/>
+    /// or unreadable.
+    /// </summary>
+    /// <remarks>
+    /// The length probe refuses an oversized file before it is loaded, but the file can grow between the probe and the
+    /// read, so the cap is checked again on the bytes the read returned.
+    /// </remarks>
+    private static ConfigRead Read(ISquadFileAccess files, string path)
+    {
         try
         {
             if (!files.FileExists(path))
             {
-                document = EmptyDocument;
+                return new ConfigRead(null, null);
             }
-            else if (files.GetLength(path) > MaxConfigBytes)
+
+            if (files.GetLength(path) > MaxConfigBytes)
             {
-                return [Line(path, "is larger than 1 MiB, so the kw-docs MCP server was not added to it.")];
+                return new ConfigRead(null, TooLarge(path));
             }
-            else
-            {
-                document = files.ReadAllBytes(path);
-            }
+
+            byte[] document = files.ReadAllBytes(path);
+            return document.LongLength > MaxConfigBytes
+                ? new ConfigRead(null, TooLarge(path))
+                : new ConfigRead(document, null);
         }
         catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
         {
-            return [Line(path, "could not be read, so the kw-docs MCP server was not added to it.")];
-        }
-
-        JsonSplicePlan plan = JsonServerSplice.Plan(document, ServerKeyPath, ServerName, EntryJson(docsServerCommand));
-
-        switch (plan.Outcome)
-        {
-            case JsonSpliceOutcome.Inserted:
-                return dryRun
-                    ? [$"{WarningCode}: would add the kw-docs MCP server to '{SquadLifecycleService.SanitizeTargetTokenForWarning(path)}'."]
-                    : Write(files, path, plan.Document);
-            case JsonSpliceOutcome.ServerAlreadyPresent:
-                return ExistingEntryWarnings(path, document);
-            case JsonSpliceOutcome.MalformedDocument:
-                return [Line(path, "is not valid JSON, so the kw-docs MCP server was not added to it.")];
-            case JsonSpliceOutcome.ForeignDocument:
-                return [Line(path, "is not a JSON object with an mcpServers object, so the kw-docs MCP server was not added to it.")];
-            default:
-                return [Line(path, "could not be changed safely, so the kw-docs MCP server was not added to it.")];
+            return new ConfigRead(null, Line(path, "could not be read, so the kw-docs MCP server was not added to it."));
         }
     }
+
+    private static string TooLarge(string path) =>
+        Line(path, "is larger than 1 MiB, so the kw-docs MCP server was not added to it.");
 
     /// <remarks>Built as a node so the command is escaped by <see cref="System.Text.Json"/>, never by hand.</remarks>
     private static string EntryJson(string? docsServerCommand)
@@ -188,4 +238,16 @@ public static class AntigravityMcpConfiguration
 
     private static string Line(string path, string reason) =>
         $"{WarningCode}: '{SquadLifecycleService.SanitizeTargetTokenForWarning(path)}' {reason}";
+
+    /// <summary>One read of the config: its bytes, or null when it does not exist, or the line saying why it was refused.</summary>
+    /// <param name="Document">The file's bytes, or null when the file does not exist or was refused.</param>
+    /// <param name="Refusal">The warning when the file is too large or unreadable, otherwise null.</param>
+    private sealed record ConfigRead(byte[]? Document, string? Refusal)
+    {
+        /// <summary>True when both reads saw a missing file, or the same bytes.</summary>
+        public bool SameAs(ConfigRead other) =>
+            Document is null
+                ? other.Document is null
+                : other.Document is not null && Document.AsSpan().SequenceEqual(other.Document);
+    }
 }

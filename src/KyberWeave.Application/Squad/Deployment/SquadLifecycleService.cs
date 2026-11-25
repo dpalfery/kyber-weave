@@ -249,7 +249,7 @@ public sealed class SquadLifecycleService : ISquadLifecycleService
             if (request.Scope == SquadDeploymentScope.Instance && request.Targets.Count == 1)
                 effectiveGlobalRoots = new SquadInstanceRootResolver(targetRoot, request.Targets[0]);
 
-            string? docsServerCommand = SquadDocsServerCommand.Resolve(renderScope, _findExecutable);
+            string? docsServerCommand = SquadDocsServerCommand.Resolve(renderScope, _findExecutable, _files.FileExists);
             SquadRenderRequest renderRequest = new(
                 releaseResult.ExtractionRoot,
                 request.Targets,
@@ -664,7 +664,7 @@ public sealed class SquadLifecycleService : ISquadLifecycleService
             if (request.Scope == SquadDeploymentScope.Instance && targets.Count == 1)
                 effectiveGlobalRoots = new SquadInstanceRootResolver(targetRoot, targets[0]);
 
-            string? docsServerCommand = SquadDocsServerCommand.Resolve(renderScope, _findExecutable);
+            string? docsServerCommand = SquadDocsServerCommand.Resolve(renderScope, _findExecutable, _files.FileExists);
             SquadRenderRequest renderRequest = new(
                 releaseResult.ExtractionRoot,
                 targets,

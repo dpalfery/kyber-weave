@@ -248,6 +248,88 @@ public sealed class AntigravityMcpConfigurationTests
         Assert.Equal(1, _files.Writes);
     }
 
+    /// <summary>
+    /// The size probe and the read are two calls, so the file can grow between them; the cap holds on the bytes the
+    /// read returned, not only on the length the probe reported.
+    /// </summary>
+    [Fact]
+    public void FileThatGrowsPastOneMebibyteAfterTheSizeProbe_IsRefused()
+    {
+        WriteConfig("{ \"mcpServers\": {}, \"pad\": \"" + new string('a', 1024 * 1024) + "\" }");
+        _files.ReportLength(16);
+
+        string warning = Assert.Single(Ensure());
+
+        Assert.Contains(_configPath, warning, StringComparison.Ordinal);
+        Assert.Contains("1 MiB", warning, StringComparison.Ordinal);
+        Assert.Equal(0, _files.Writes);
+    }
+
+    /// <summary>
+    /// A server another program adds between the read and the write is kept: the change is re-planned from the bytes
+    /// the file holds now, so the write never puts back the document as it was first read.
+    /// </summary>
+    [Fact]
+    public void ConcurrentEditBeforeTheWrite_IsKeptAndTheEntryIsAdded()
+    {
+        WriteConfig("{ \"mcpServers\": { \"first\": { \"command\": \"a\" } } }");
+        _files.AfterRead(1, () => WriteConfig(
+            "{ \"mcpServers\": { \"first\": { \"command\": \"a\" }, \"added\": { \"command\": \"b\" } } }"));
+
+        Assert.Empty(Ensure());
+
+        using JsonDocument document = JsonDocument.Parse(_state.Files.ReadAllBytes(_configPath));
+        JsonElement servers = document.RootElement.GetProperty("mcpServers");
+        Assert.Equal(
+            ["added", "first", "kw-docs"],
+            servers.EnumerateObject().Select(server => server.Name).Order(StringComparer.Ordinal));
+        Assert.Equal(1, _files.Writes);
+    }
+
+    /// <summary>A concurrent edit that itself adds the entry leaves nothing to write.</summary>
+    [Fact]
+    public void ConcurrentEditThatAddsTheEntry_WritesNothing()
+    {
+        WriteConfig("{ \"mcpServers\": {} }");
+        byte[] theirs = Encoding.UTF8.GetBytes(
+            "{ \"mcpServers\": { \"kw-docs\": { \"command\": \"x\", \"args\": [\"--any-repo\"] } } }");
+        _files.AfterRead(1, () => WriteConfig(theirs));
+
+        Assert.Empty(Ensure());
+
+        Assert.Equal(0, _files.Writes);
+        Assert.Equal(theirs, _state.Files.ReadAllBytes(_configPath));
+    }
+
+    /// <summary>A file that keeps changing under the update is left alone with one warning rather than overwritten.</summary>
+    [Fact]
+    public void FileThatKeepsChangingBeforeTheWrite_WritesNothingAndWarnsOnce()
+    {
+        WriteConfig("{ \"mcpServers\": {} }");
+        _files.AfterEveryRead(read => WriteConfig(
+            "{ \"mcpServers\": { \"s" + read.ToString(System.Globalization.CultureInfo.InvariantCulture) + "\": {} } }"));
+
+        string warning = Assert.Single(Ensure());
+
+        Assert.Contains(_configPath, warning, StringComparison.Ordinal);
+        Assert.Contains("changed", warning, StringComparison.Ordinal);
+        Assert.Equal(0, _files.Writes);
+    }
+
+    /// <summary>A file that appears between the first look and the write is planned again from its bytes.</summary>
+    [Fact]
+    public void FileCreatedBeforeTheWrite_IsKeptAndTheEntryIsAdded()
+    {
+        _state.Files.CreateDirectory(_agyRoot);
+        _files.AfterExistenceCheck(1, () => WriteConfig("{ \"mcpServers\": { \"theirs\": {} } }"));
+
+        Assert.Empty(Ensure());
+
+        using JsonDocument document = JsonDocument.Parse(_state.Files.ReadAllBytes(_configPath));
+        Assert.True(document.RootElement.GetProperty("mcpServers").TryGetProperty("theirs", out _));
+        Assert.True(document.RootElement.GetProperty("mcpServers").TryGetProperty("kw-docs", out _));
+    }
+
     public static TheoryData<string, Exception> Failures => new()
     {
         { "length", new IOException(SecretMarker) },
@@ -382,7 +464,7 @@ public sealed class AntigravityMcpConfigurationTests
     public async Task GlobalInstall_WithAResolvedPath_PassesItToTheRenderAndTheConfigEntry()
     {
         using FakeSquadReleaseSource release = FakeSquadReleaseSource.FromDirectory(_source, _state.Files);
-        string resolved = Path.Combine(_state.Files.Root, "tools", "kyber-weave-mcp");
+        string resolved = SeedExecutable();
         RecordingRenderer renderer = new(new AntigravityRenderer());
 
         SquadLifecycleResult result = await NewService(
@@ -401,7 +483,7 @@ public sealed class AntigravityMcpConfigurationTests
     public async Task GlobalUpdate_WithAResolvedPath_PassesItToTheRenderAndTheConfigEntry()
     {
         using FakeSquadReleaseSource release = FakeSquadReleaseSource.FromDirectory(_source, _state.Files);
-        string resolved = Path.Combine(_state.Files.Root, "tools", "kyber-weave-mcp");
+        string resolved = SeedExecutable();
         RecordingRenderer renderer = new(new AntigravityRenderer());
         SquadLifecycleService service = NewService(release, renderer, _ => resolved);
         await service.InstallAsync(
@@ -437,6 +519,15 @@ public sealed class AntigravityMcpConfigurationTests
         using JsonDocument document = JsonDocument.Parse(_state.Files.ReadAllBytes(_configPath));
         return document.RootElement.GetProperty("mcpServers").GetProperty("kw-docs").GetProperty("command").GetString()
             ?? string.Empty;
+    }
+
+    /// <summary>Creates the <c>kyber-weave-mcp</c> a PATH lookup names, since the lookup's answer must be a file that exists.</summary>
+    private string SeedExecutable()
+    {
+        string path = Path.Combine(_state.Files.Root, "tools", "kyber-weave-mcp");
+        _state.Files.CreateDirectory(Path.GetDirectoryName(path)!);
+        _state.Files.WriteAllBytes(path, [0x7F]);
+        return path;
     }
 
     private IReadOnlyList<string> Ensure(bool dryRun = false, string? command = null) =>
@@ -518,6 +609,11 @@ public sealed class AntigravityMcpConfigurationTests
     {
         private string? _failing;
         private Exception? _failure;
+        private long? _reportedLength;
+        private readonly Dictionary<int, Action> _afterRead = [];
+        private readonly Dictionary<int, Action> _afterExists = [];
+        private Action<int>? _afterEveryRead;
+        private int _existenceChecks;
 
         public int Reads { get; private set; }
 
@@ -529,12 +625,32 @@ public sealed class AntigravityMcpConfigurationTests
             _failure = failure;
         }
 
-        public bool FileExists(string path) => inner.FileExists(path);
+        /// <summary>Makes the size probe report <paramref name="length"/> whatever the file holds.</summary>
+        public void ReportLength(long length) => _reportedLength = length;
+
+        /// <summary>Runs <paramref name="change"/> right after the <paramref name="read"/>th byte read returns.</summary>
+        public void AfterRead(int read, Action change) => _afterRead[read] = change;
+
+        /// <summary>Runs <paramref name="change"/> after every byte read, given the read's number.</summary>
+        public void AfterEveryRead(Action<int> change) => _afterEveryRead = change;
+
+        /// <summary>Runs <paramref name="change"/> right after the <paramref name="check"/>th existence check returns.</summary>
+        public void AfterExistenceCheck(int check, Action change) => _afterExists[check] = change;
+
+        public bool FileExists(string path)
+        {
+            bool exists = inner.FileExists(path);
+            _existenceChecks++;
+            if (_afterExists.Remove(_existenceChecks, out Action? change))
+                change();
+            return exists;
+        }
 
         public bool DirectoryExists(string path) => inner.DirectoryExists(path);
 
         public string ReadAllText(string path)
         {
+            Fail("read");
             Reads++;
             return inner.ReadAllText(path);
         }
@@ -543,13 +659,17 @@ public sealed class AntigravityMcpConfigurationTests
         {
             Fail("read");
             Reads++;
-            return inner.ReadAllBytes(path);
+            byte[] bytes = inner.ReadAllBytes(path);
+            if (_afterRead.Remove(Reads, out Action? change))
+                change();
+            _afterEveryRead?.Invoke(Reads);
+            return bytes;
         }
 
         public long GetLength(string path)
         {
             Fail("length");
-            return inner.GetLength(path);
+            return _reportedLength ?? inner.GetLength(path);
         }
 
         public void CreateDirectory(string path) => inner.CreateDirectory(path);

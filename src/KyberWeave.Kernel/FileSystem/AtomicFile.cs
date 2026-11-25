@@ -214,8 +214,12 @@ public static class AtomicFile
     /// Follows a symbolic link at <paramref name="destination"/> to its final target, so the write replaces
     /// the file the link names instead of the link. A path that is not a link is returned unchanged.
     /// </summary>
+    /// <remarks>
+    /// Internal so a file adapter that must answer for the file a link names, such as a length probe, follows links
+    /// exactly the way the write does rather than with a second copy of this rule.
+    /// </remarks>
     /// <param name="destination">The fully qualified path the caller asked to write.</param>
-    private static string ResolveLinks(string destination)
+    internal static string ResolveLinks(string destination)
     {
         // LinkTarget is null for a regular file and for a path that does not exist; ResolveLinkTarget throws on the latter.
         FileInfo file = new(destination);

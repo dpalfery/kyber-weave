@@ -22,7 +22,13 @@ public sealed class PhysicalSquadFileAccess : ISquadFileAccess
     public byte[] ReadAllBytes(string path) => File.ReadAllBytes(path);
 
     /// <inheritdoc />
-    public long GetLength(string path) => new FileInfo(path).Length;
+    /// <remarks>
+    /// <see cref="FileInfo.Length"/> does not follow a symbolic link on Linux or macOS: it reports the link's own size,
+    /// the length of the path it holds. So the path is resolved to the file the link finally names first, the way
+    /// <see cref="WriteAllBytesAtomic"/> resolves it; a dangling link then names a missing file, whose length throws
+    /// <see cref="FileNotFoundException"/> as the seam documents.
+    /// </remarks>
+    public long GetLength(string path) => new FileInfo(AtomicFile.ResolveLinks(Path.GetFullPath(path))).Length;
 
     /// <inheritdoc />
     public void CreateDirectory(string path) => _ = Directory.CreateDirectory(path);

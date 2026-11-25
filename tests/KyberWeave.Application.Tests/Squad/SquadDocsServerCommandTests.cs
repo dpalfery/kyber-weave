@@ -9,16 +9,19 @@ namespace KyberWeave.Application.Tests.Squad;
 /// </summary>
 public sealed class SquadDocsServerCommandTests
 {
-    private const string Found = "/home/me/.local/bin/kyber-weave-mcp";
+    private static readonly string Found = Path.Combine(Path.GetTempPath(), "kw-bin", SquadDocsServerCommand.Executable);
 
     private static string? Lookup(string name) => name == SquadDocsServerCommand.Executable ? Found : null;
 
     private static string? Nothing(string name) => null;
 
+    /// <summary>Only <see cref="Found"/> exists, so a lookup answer naming any other file is one that is not there.</summary>
+    private static bool OnlyFoundExists(string path) => path == Found;
+
     [Fact]
     public void Resolve_GlobalScopeWithWiredLookup_ReturnsThePathPathNames()
     {
-        Assert.Equal(Found, SquadDocsServerCommand.Resolve(SquadDeploymentScope.Global, Lookup));
+        Assert.Equal(Found, SquadDocsServerCommand.Resolve(SquadDeploymentScope.Global, Lookup, OnlyFoundExists));
     }
 
     [Theory]
@@ -26,13 +29,13 @@ public sealed class SquadDocsServerCommandTests
     [InlineData(SquadDeploymentScope.Instance)]
     public void Resolve_NonGlobalRenderScope_ReturnsNullEvenWithWiredLookup(SquadDeploymentScope scope)
     {
-        Assert.Null(SquadDocsServerCommand.Resolve(scope, Lookup));
+        Assert.Null(SquadDocsServerCommand.Resolve(scope, Lookup, OnlyFoundExists));
     }
 
     [Fact]
     public void Resolve_WithoutALookup_ReturnsNull()
     {
-        Assert.Null(SquadDocsServerCommand.Resolve(SquadDeploymentScope.Global, null));
+        Assert.Null(SquadDocsServerCommand.Resolve(SquadDeploymentScope.Global, null, OnlyFoundExists));
     }
 
     [Theory]
@@ -40,7 +43,29 @@ public sealed class SquadDocsServerCommandTests
     [InlineData("   ")]
     public void Resolve_BlankLookupResult_ReturnsNull(string blank)
     {
-        Assert.Null(SquadDocsServerCommand.Resolve(SquadDeploymentScope.Global, _ => blank));
+        Assert.Null(SquadDocsServerCommand.Resolve(SquadDeploymentScope.Global, _ => blank, OnlyFoundExists));
+    }
+
+    /// <summary>
+    /// A lookup answer that is not fully qualified would resolve against whatever directory Antigravity starts in, so
+    /// it is treated as not found even when a file of that name exists.
+    /// </summary>
+    [Theory]
+    [InlineData("kyber-weave-mcp")]
+    [InlineData("bin/kyber-weave-mcp")]
+    [InlineData("./kyber-weave-mcp")]
+    public void Resolve_RelativeLookupResult_ReturnsNull(string relative)
+    {
+        Assert.Null(SquadDocsServerCommand.Resolve(SquadDeploymentScope.Global, _ => relative, _ => true));
+    }
+
+    /// <summary>A fully qualified lookup answer naming no existing file is treated as not found.</summary>
+    [Fact]
+    public void Resolve_LookupResultNamingNoFile_ReturnsNull()
+    {
+        string elsewhere = Path.Combine(Path.GetTempPath(), "kw-elsewhere", SquadDocsServerCommand.Executable);
+
+        Assert.Null(SquadDocsServerCommand.Resolve(SquadDeploymentScope.Global, _ => elsewhere, OnlyFoundExists));
     }
 
     [Fact]

@@ -917,7 +917,7 @@ internal sealed class SquadDoctorCommand : Command<SquadDoctorSettings>
             SquadSource sharedSource = _sourceLoader.Load(canonicalSourcePath);
 
             // The same lookup install and update make, so the expected Antigravity files match what was written.
-            string? docsServerCommand = SquadDocsServerCommand.Resolve(SquadDeploymentScope.Global, _findExecutable);
+            string? docsServerCommand = SquadDocsServerCommand.Resolve(SquadDeploymentScope.Global, _findExecutable, _files.FileExists);
             foreach (SquadTarget target in renderer.SupportedTargets)
             {
                 // A future native renderer whose per-user directory is not yet verified
