@@ -601,9 +601,9 @@ public class WarpMapper : IHarnessMapper
                     continue;
                 }
 
-                long warpTokens = ReadSafeLong(entry, "warp_tokens");
-                long byokTokens = ReadSafeLong(entry, "byok_tokens");
-                if (warpTokens > long.MaxValue - byokTokens)
+                long? warpCount = ReadSafeLong(entry, "warp_tokens");
+                long? byokCount = ReadSafeLong(entry, "byok_tokens");
+                if (warpCount is not { } warpTokens || byokCount is not { } byokTokens || warpTokens > long.MaxValue - byokTokens)
                 {
                     return ([], string.Empty, true);
                 }
@@ -892,7 +892,8 @@ public class WarpMapper : IHarnessMapper
     private static string? FirstPresentString(params string?[] values) =>
         HarnessJson.FirstPresentString(values);
 
-    private static long ReadSafeLong(JsonElement obj, string key)
+    /// <summary>Reads a positive token count; zero when absent or not positive, null when it is past <see cref="long.MaxValue"/>.</summary>
+    private static long? ReadSafeLong(JsonElement obj, string key)
     {
         if (!obj.TryGetProperty(key, out JsonElement el) || el.ValueKind != JsonValueKind.Number)
         {
@@ -904,12 +905,14 @@ public class WarpMapper : IHarnessMapper
             return value;
         }
 
-        if (el.TryGetDouble(out double doubleVal) && double.IsFinite(doubleVal) && doubleVal > 0)
+        if (!el.TryGetDouble(out double doubleVal) || !double.IsFinite(doubleVal))
         {
-            return (long)doubleVal;
+            // A number too large for a double is past long.MaxValue too, unless it is negative.
+            return el.GetRawText().StartsWith('-') ? 0 : null;
         }
 
-        return 0;
+        // 2^63 is the first double past long.MaxValue; casting it would saturate to an invented count.
+        return doubleVal <= 0 ? 0 : doubleVal >= 9_223_372_036_854_775_808d ? null : (long)doubleVal;
     }
 
 

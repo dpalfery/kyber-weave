@@ -581,6 +581,26 @@ public class DevinWarpMapperTests
     }
 
     [Fact]
+    public void Map_TokenCountWrittenAsADoublePastLongMax_RecordsAProblemAndReportsNoUsage()
+    {
+        string rawText = BuildWarpExport(
+            conversationData: """{"conversation_usage_metadata":{"token_usage":[{"model_id":"Claude Haiku 4.5","warp_tokens":1e20,"byok_tokens":0}]}}""",
+            queries:
+            [
+                ("ex-1", "2026-05-18 10:00:00.000000", """[{"Query":{"text":"prompt"}}]""", "auto-efficient", null, "\"Completed\""),
+            ],
+            blocks: [],
+            conversationId: "conv-8");
+
+        CollectedBatch batch = new WarpMapper().Map(
+            MakeNativeUnit("warp", "/home/u/Library/warp.sqlite#conv-8", rawText),
+            BaselineUtc);
+
+        Assert.Empty(Assert.Single(batch.Sessions).ReportedUsage);
+        Assert.Equal(WarpMapper.MalformedDocumentCode, Assert.Single(batch.Problems).Code);
+    }
+
+    [Fact]
     public void Map_TokenTotalPastLongMax_RecordsAProblemAndReportsNoUsage()
     {
         string rawText = BuildWarpExport(
