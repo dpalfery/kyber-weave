@@ -1556,6 +1556,8 @@ public sealed class SelfUpdateRunTests : IDisposable
         Assert.Equal(1, outcome.ExitCode);
         Assert.Contains("the KyberDash tray step failed:", message, StringComparison.Ordinal);
         Assert.Contains("exited 4: kyberdash menubar: platform: not supported", message, StringComparison.Ordinal);
+        // The update's output is captured, so the console needs this line before the step starts.
+        Assert.Contains(log, line => line.Contains("updating the KyberDash tray", StringComparison.Ordinal));
     }
 
     /// <summary>A failed tray update after the quit names the update command as the way back.</summary>
