@@ -481,6 +481,15 @@ public interface IMenubarService
         string? requestedVersion,
         string cliVersion,
         CancellationToken cancellationToken = default);
+
+    /// <summary>Quits the tray recorded at install (<c>kyberdash menubar --quit</c>); touches no other tray.</summary>
+    Task<MenubarInstallOutcome> QuitAsync(CancellationToken cancellationToken = default);
+
+    /// <summary>Launches the recorded tray (<c>kyberdash menubar --launch</c>).</summary>
+    Task<MenubarInstallOutcome> LaunchAsync(CancellationToken cancellationToken = default);
+
+    /// <summary>Reports how many tray processes run (<c>kyberdash menubar --running</c>); exit 0 only for exactly one.</summary>
+    Task<MenubarInstallOutcome> CountRunningAsync(CancellationToken cancellationToken = default);
 }
 
 /// <summary>Process coordination service for checking and replacing the live <c>kyberdash-api</c> engine.</summary>

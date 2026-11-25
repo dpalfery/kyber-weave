@@ -190,6 +190,16 @@ public class PresentationBuilder
         Lifecycle
             .Setup(l => l.VerifyRunningEngineVersionAsync(It.IsAny<string>(), It.IsAny<int>(), It.IsAny<string?>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(new EngineEnsureReport(true, "engine: running 2.0.0 (pid 42)", Outcome: EngineVerifyOutcome.Running));
+        Menubar
+            .Setup(m => m.QuitAsync(It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new MenubarInstallOutcome(0, "kyberdash: the tray is not running"));
+        Menubar
+            .Setup(m => m.LaunchAsync(It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new MenubarInstallOutcome(0, "kyberdash: the tray launched"));
+        Menubar
+            .Setup(m => m.CountRunningAsync(It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new MenubarInstallOutcome(0, "kyberdash: the tray is running"));
+
         Lifecycle
             .Setup(l => l.ResolveLiveServerUriAsync(It.IsAny<string?>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync((Uri?)null);
