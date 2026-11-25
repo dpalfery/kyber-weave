@@ -167,12 +167,14 @@ public class TranscriptIngestionService : ITranscriptIngestionService
 
         // Discovery is not limited to the history window: the caller records this pass as complete
         // once, so a checkpointed unit last written before the window would otherwise never be
-        // replaced. The checkpoint check below keeps the pass to units the store already knows.
+        // replaced. The checkpoint check below keeps the pass to units the store already knows. The
+        // floor is the earliest instant rather than none, because a reader given a cutoff still lists
+        // a file it cannot stat, which then fails loudly instead of vanishing from the pass.
         SourceDiscoveryContext context = new(
             HomeDirectory: homeDirectory,
             StateDirectory: stateDirectory,
             FileSystem: fileSystem,
-            SinceUtc: null);
+            SinceUtc: DateTimeOffset.MinValue);
 
         List<RefreshSourceStatusRow> rows = [];
         HashSet<string> sessionKeysRead = new(StringComparer.Ordinal);

@@ -156,6 +156,27 @@ public class NoEstimateRereadTests
         Assert.NotNull(harness.Store.GetRefreshRun(JobSchedulerService.NoEstimateRereadKey));
     }
 
+    /// <summary>
+    /// A checkpointed file the reader lists but can neither stat nor read is reported as a failed
+    /// unit, so the marker stays absent instead of recording a pass that never replaced that unit.
+    /// </summary>
+    [Fact]
+    public void MaintenancePass_WhenACheckpointedFileIsUnreadable_LeavesTheMarkerAbsent()
+    {
+        Harness harness = new();
+        harness.SeedCheckpoint("droid", harness.DroidPath("sess-nostat"), "factory", "droid-reader", "droid-jsonl", ".factory/sessions");
+        harness.AddDroidTranscript("sess-nostat", BaselineUtc.AddDays(-60));
+        harness.FileSystem.MakeUnreadable(harness.DroidPath("sess-nostat"));
+        harness.Writer.Clear();
+
+        JobOutcome outcome = harness.Jobs.RunMaintenancePass();
+
+        Assert.Equal("partial", outcome.Outcome);
+        Assert.Equal(1, outcome.FailedUnits);
+        Assert.Null(harness.Store.GetRefreshRun(JobSchedulerService.NoEstimateRereadKey));
+        Assert.Empty(harness.Writer.WriteBatchCalls);
+    }
+
     /// <summary>Builds a harness with one checkpointed unit for each of Droid, Cursor and Warp.</summary>
     private static Harness CheckpointedHarness()
     {
@@ -325,6 +346,13 @@ public class NoEstimateRereadTests
     {
         private readonly Dictionary<string, (string Content, long LengthBytes, DateTimeOffset LastWriteUtc)> files = new(StringComparer.Ordinal);
         private readonly HashSet<string> directories = new(StringComparer.Ordinal);
+        private readonly HashSet<string> unreadable = new(StringComparer.Ordinal);
+
+        /// <summary>
+        /// Makes <see cref="TryGetFileStats"/> and <see cref="ReadAllText"/> fail for <paramref name="path"/>
+        /// while the file stays listed, as for a file removed or locked after it was enumerated.
+        /// </summary>
+        public void MakeUnreadable(string path) => _ = unreadable.Add(Path.GetFullPath(path));
 
         public void AddFile(string path, string content, DateTimeOffset lastWriteUtc)
         {
@@ -392,7 +420,7 @@ public class NoEstimateRereadTests
 
         public bool TryGetFileStats(string filePath, out long lengthBytes, out DateTimeOffset lastWriteUtc)
         {
-            if (files.TryGetValue(Path.GetFullPath(filePath), out (string Content, long LengthBytes, DateTimeOffset LastWriteUtc) entry))
+            if (!unreadable.Contains(Path.GetFullPath(filePath)) && files.TryGetValue(Path.GetFullPath(filePath), out (string Content, long LengthBytes, DateTimeOffset LastWriteUtc) entry))
             {
                 lengthBytes = entry.LengthBytes;
                 lastWriteUtc = entry.LastWriteUtc;
@@ -404,7 +432,10 @@ public class NoEstimateRereadTests
             return false;
         }
 
-        public string ReadAllText(string filePath) => files[Path.GetFullPath(filePath)].Content;
+        public string ReadAllText(string filePath) =>
+            unreadable.Contains(Path.GetFullPath(filePath))
+                ? throw new IOException("simulated unreadable file")
+                : files[Path.GetFullPath(filePath)].Content;
 
         public string GetFullPath(string path) => Path.GetFullPath(path);
 
