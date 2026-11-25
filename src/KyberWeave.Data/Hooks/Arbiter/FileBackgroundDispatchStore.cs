@@ -3,6 +3,7 @@ using System.Text;
 using System.Text.Json;
 using KyberWeave.Arbiter.Hooks;
 using KyberWeave.Contracts.Repositories;
+using KyberWeave.Core.FileSystem;
 
 namespace KyberWeave.Data.Hooks.Arbiter;
 
@@ -100,14 +101,22 @@ public sealed class FileBackgroundDispatchStore(IWritableFileSystem files, TimeP
         {
             return null;
         }
-        catch (JsonException)
+        catch (Exception ex) when (FileFailure.Is(ex) || ex is JsonException)
         {
             // An unreadable kept report is no report; it is removed below so it is not read again.
             message = null;
         }
 
         // Taking removes the report, so a second completed event for the same agent finds none and records nothing.
-        files.DeleteFile(path);
+        try
+        {
+            files.DeleteFile(path);
+        }
+        catch (Exception ex) when (FileFailure.Is(ex))
+        {
+            // Removing an unreadable report is best-effort; permission-denied deletions must not crash the hook.
+        }
+
         return message;
     }
 
@@ -117,7 +126,7 @@ public sealed class FileBackgroundDispatchStore(IWritableFileSystem files, TimeP
         {
             return JsonSerializer.Deserialize<BackgroundDispatchRecord>(files.ReadAllText(path));
         }
-        catch (Exception ex) when (ex is FileNotFoundException or DirectoryNotFoundException or JsonException)
+        catch (Exception ex) when (FileFailure.Is(ex) || ex is JsonException)
         {
             // A record that is gone or unreadable is an agent the Arbiter is not following.
             return null;
