@@ -1374,8 +1374,9 @@ filters, so narrowing one page's scope never touches the A/B selectors.
   Dashboard from `canon.db` — not a restored Context tab:
   - *Overview Strip*: Spans, turns, total tokens, cache hit ratio, cost USD/credits, exact reconciliation status, and subagent links.
   - *Subagent Session Hierarchy*: Nested tree display of child subagent sessions underneath parent sessions, with dual spend visibility (rolled-up totals across the delegation tree alongside unaggregated direct parent metrics; see [§2h](#2h-subagent-session-hierarchy-and-post-run-transcript-synchronization) and [ADR 0038](../adr/0038-post-run-transcript-sync-subagent-hierarchy.md)).
-  - *Per-Turn Spend Chart (`SessionSpendCharts`)*: Stacked token breakdown per turn (fresh input, cache read, cache creation, output).
-  - *Context Composition Heatmap & Chart*: Semantic token distribution by part type (`system_prompt`, `instruction_context`, `tool_definitions`, `conversation_history`, `tool_result_content`, `residual`).
+  - *Per-Turn Spend Chart (`SessionSpendCharts`)*: Stacked token breakdown per turn (fresh input, cache read, cache creation, output), kept unpaged across the whole session.
+  - *Context Composition Heatmap & Chart*: Semantic token distribution by part type (`system_prompt`, `instruction_context`, `tool_definitions`, `conversation_history`, `tool_result_content`, `residual`). Both Stacked Bars and Heatmap Matrix views page and sort `context.turns` on the server (`25 / 50 / 100`, default `25`, `Newest first` / `Oldest first`, default `Newest first`), while scaling, legends (`observedBuckets`, `observedServers`), and `Residual %` reflect the whole session. When a harness transcript omits `system_prompt` or tool definitions (such as Claude Code), the caveat explains why those tokens stay in `residual`.
+  - *Session List Sections & Paging (`Pager` / `useSectionPage`)*: Every list section on the session detail view (Context Composition, Tools, Servers, Skills, KW skills, Execution Timeline / Call Tree, Requests, Reconciliation, and Problems) shares the `Pager` control bar whenever items exist (`total > 0`): `25 / 50 / 100` page-size selector (persisted per section in browser `sessionStorage`), page navigation, and a `Newest first` / `Oldest first` sort toggle (`desc` default; changing page size or sort resets to page `1`). Non-list summary/cost cards (`SessionSummarySection`, `SessionCostSection`) do not page.
   - *Tool & Schema Cost Table*: Ranked tool schema sizes, resident turns, invocations, and unused schema waste range.
   - *Skills (`4 · Skills`)*: Two tiles (skills listed, skills invoked) and a headline,
     "X of Y listed skills had no observed invocation", rendered from the served counts. The
@@ -2136,23 +2137,31 @@ Applies to Kilo (`kilo.db`), Warp (`warp.sqlite`), Cursor (`state.vscdb`) and De
   content-free record scalars ([the read-model register](architecture.md#the-read-model-register)).
   The sessions list resolves, filters, searches and pages in SQL and prices only the page it
   returns; the session view is ten section queries issued at mount in page order, each paging
-  its own list at 25 (sessions at 100). Content text is read by one view, one turn or one request
-  at a time, from `TurnContentParts(sessionKey, turnIndex, spanId, part, budget, full)` and the
-  two section-scoped content reads (the shown requests page's prompt previews, the inspected
-  span's consent-allowed prompt). The projection pass reads only the dirty sessions it rebuilds
-  and defers oversized ones to the maintenance tick, and a second concurrent pass returns instead
-  of stacking.
+  and sorting its own list on the server at `25`, `50`, or `100` rows (default `25`, newest-first
+  `desc` default, with the selected page size persisted per section in browser `sessionStorage`;
+  sessions list defaults to `100`). `/api/kyber/session/{id}/charts` also pages and sorts
+  `context.turns` on the server (`25 / 50 / 100`, `desc` / `asc`) while keeping the whole-session
+  `turns` spend curve and context summary aggregates unpaged. Content text is read by one view,
+  one turn or one request at a time, from
+  `TurnContentParts(sessionKey, turnIndex, spanId, part, budget, full)` and the two
+  section-scoped content reads (the shown requests page's prompt previews, the inspected span's
+  consent-allowed prompt). The projection pass reads only the dirty sessions it rebuilds and
+  defers oversized ones to the maintenance tick, and a second concurrent pass returns instead of
+  stacking.
 - **What to expect on an oversized store.** The Sessions list, the context report, coverage and
   findings answer from figures regardless of how much text a session holds. Opening a session
   paints the header first from `/summary` while the sections fill in below in page order; only
-  the first page of each list is fetched, and the next page is fetched when the viewer presses
-  the page button. Nothing on the list, summary or section paths reads that session's content.
-  The charts section is the one heavy section by design: it carries the whole session's turns
-  and context object (content-free, but per-turn tool-definition maps grow with servers ×
-  turns), so on a session with tens of thousands of turns it is the last section to arrive —
-  still a fraction of the retired whole-payload response. The timeline section rebuilds the
-  session's metadata tree (never its content) once per page. Under live capture a new session
-  can shift the sessions list by one row between pages.
+  the first page (`limit=25`, `order=desc` unless the viewer changed page size in this browser
+  session) of each list is fetched, and the next page, size, or sort order is fetched when the
+  viewer changes the shared `Pager` control (which stays visible whenever a section has items).
+  Nothing on the list, summary or section paths reads that session's content.
+  On `/charts`, `context.turns` is sliced to the active page and sort order on the server, while
+  the whole-session `turns` spend curve and per-turn context aggregates (`first`, `last`,
+  `measuredInputTotal`, `maxBucketTokens`, `observedBuckets`, `observedServers`) still cover the
+  whole session so spend curves, chart scale, legends, and `Residual %` stay exact across pages.
+  The timeline section rebuilds the session's metadata tree (never its content) once per page
+  and resets expanded branches and child pages when the viewer changes page, page size, or sort
+  order. Under live capture a new session can shift the sessions list by one row between pages.
 - **Deferred sessions.** A dirty session whose record count exceeds the read-path budget (default
   2,000 records) is deferred rather than rebuilt inside a GET: its stored projection stays as it
   was and its key stays dirty, so its figures can lag capture by up to the refresh cadence
@@ -2164,10 +2173,11 @@ Applies to Kilo (`kilo.db`), Warp (`warp.sqlite`), Cursor (`state.vscdb`) and De
   the maintenance pass never defers and rebuilds them.
 - **What stays heavy by design.** A stored-fields table holding hundreds of megabytes of captured
   text no longer stalls the view: the inventory is content-free and a table's rows page in SQL
-  at 25. The costs that remain are the ones the design names: the charts payload on a very long
-  session, the per-page timeline metadata tree, a maintenance rebuild (`kyber build`, a projection
-  tick), which reads the sessions it rebuilds because token counting and findings consume the
-  part text. Neither the rebuild nor any content read is on a dashboard page read.
+  at 25. The costs that remain are the ones the design names: the whole-session `turns` spend
+  curve on `/charts` for a very long session, the per-page timeline metadata tree, and a
+  maintenance rebuild (`kyber build`, a projection tick), which reads the sessions it rebuilds
+  because token counting and findings consume the part text. Neither the rebuild nor any content
+  read is on a dashboard page read.
 - **Not a remedy.** `kyberdash dash clean` discards captured data, and these docs do not prescribe
   it. Removing data is the owner's decision, taken with the loss in view; this entry documents how
   the dashboard behaves on an oversized store, not how to shrink one. The content-retention window

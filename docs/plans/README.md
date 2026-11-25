@@ -64,7 +64,9 @@ its `tasks.yml` is caught rather than carried as dead weight.
 
 ## Active Plans
 
-No plans are open.
+| Plan | Status | Date | Summary |
+|---|---|---|---|
+| [2026-11-25-session-detail-paging-sort-claude-composition.md](2026-11-25-session-detail-paging-sort-claude-composition.md) | Ready | 2026-11-25 | KyberDash session detail paging/sorting across every list section and honest Claude Code context composition |
 
 ## Archived Plans
 

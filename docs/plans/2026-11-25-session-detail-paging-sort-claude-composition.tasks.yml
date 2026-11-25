@@ -1,0 +1,560 @@
+schema-version: 2
+plan: docs/plans/2026-11-25-session-detail-paging-sort-claude-composition.md
+execution-digest: 6a93079395b11248fbed91756e4e8db012d96104d782f4a07b794ef3b582a933
+tasks:
+  - id: T0
+    capabilities: Repository gate YAML configuration, repository-policy xUnit assertions, and C# test-fixture path probing.
+    depends-on: []
+    files:
+      - .kyber-weave/kyber-weave.yml
+      - tests/KyberWeave.RepoPolicy.Tests/TaskGatesRepositoryConfigTests.cs
+      - dash/server.tests/KyberDash.Application.Tests/PricingFixture.cs
+      - dash/server.tests/KyberDash.Domain.Tests/PricingFixture.cs
+    session: task-gate-setup
+    prompt: >
+      Task T0: Isolate test-policy from dash/** and fix PricingFixture path resolution under --artifacts-path
+
+      Worktree: {worktree}
+
+
+      - **Objective:** Prevent `dash/**` changes from triggering `test-policy` without `dotnet-build` and allow `PricingFixture` in `KyberDash.Application.Tests` and `KyberDash.Domain.Tests` to locate `dash/server/KyberDash.Data/Pricing` when tests run under `--artifacts-path`.
+
+      - **Capabilities:** Repository gate YAML configuration, repository-policy xUnit assertions, and C# test-fixture path probing.
+
+      - **Difficulty:** easy
+
+      - **Technology:** csharp
+
+      - **Session:** task-gate-setup
+
+      - **Depends on:** none
+
+      - **Files:**
+        - `.kyber-weave/kyber-weave.yml`: `review.technology-gates.csharp` (`&test-policy`, `&net-policy-paths`) — define `&net-policy-paths` (covering KyberWeave C# sources, tests, project files, props and targets, `KyberWeave.sln*`, root/KyberWeave `NuGet.config` and `.editorconfig`, `global.json`, review config, `apm.yml`, `.apm`, `products`, `REVIEW.md`, and `scripts` while excluding KyberDash paths per `D14`) on `&test-policy` instead of `*net-test-paths`, and remove `--no-build` from `&test-policy` `run` argv so policy-only edits build `KyberWeave.RepoPolicy.Tests` under `.agent_scratchpad` per-task artifacts without changing council `review.gates` `*net-test-paths` (`D14`).
+        - `tests/KyberWeave.RepoPolicy.Tests/TaskGatesRepositoryConfigTests.cs`: `TaskGatesRepositoryConfigTests.CsharpRunsTheKyberDashGatesForAKyberDashChange`, `TaskGatesRepositoryConfigTests.CsharpRunsThePolicyTestsForAPolicyTestChange` — strengthen assertions so KyberDash server and server-test C# changes do not select `test-policy`, while policy test, review config, and shell script changes still select `test-policy` and `&test-policy` omits `--no-build` (`D14`).
+        - `dash/server.tests/KyberDash.Application.Tests/PricingFixture.cs`: `PricingFixture.PricingDirectory` — probe both the relative `server` and repo-root `dash` `server` `KyberDash.Data` `Pricing` directories for `litellm-snapshot.json` while walking parent directories from `AppContext.BaseDirectory`, so `--artifacts-path` resolves cleanly alongside standard output layouts (`D14`).
+        - `dash/server.tests/KyberDash.Domain.Tests/PricingFixture.cs`: `PricingFixture.PricingDirectory` — probe both the relative `server` and repo-root `dash` `server` `KyberDash.Data` `Pricing` directories for `litellm-snapshot.json` while walking parent directories from `AppContext.BaseDirectory`, matching `KyberDash.Application.Tests` (`D14`).
+      - **Commands:**
+        - `kyber-weave review gates . --agent <you> --task T0 --red`
+        - `dotnet test tests/KyberWeave.RepoPolicy.Tests/KyberWeave.RepoPolicy.Tests.csproj -c Release --artifacts-path .agent_scratchpad/T0/artifacts --filter "FullyQualifiedName~KyberWeave.Tests.TaskGatesRepositoryConfigTests"`
+        - `dotnet test dash/server.tests/KyberDash.Application.Tests/KyberDash.Application.Tests.csproj -c Release --artifacts-path .agent_scratchpad/T0/artifacts --filter "FullyQualifiedName~KyberDash.Application.Tests.ApplicationParityTests"`
+        - `dotnet test dash/server.tests/KyberDash.Domain.Tests/KyberDash.Domain.Tests.csproj -c Release --artifacts-path .agent_scratchpad/T0/artifacts --filter "FullyQualifiedName~KyberDash.Domain.Tests.CanonAnalysisTests"`
+        - `kyber-weave review gates . --agent <you> --task T0`
+      - **Acceptance:**
+        - `TaskGatesRepositoryConfigTests`, `ApplicationParityTests`, `CanonAnalysisTests`, and `kyber-weave review gates . --agent <you> --task T0` pass with non-zero test counts; `dash/server/**` and `dash/server.tests/**` changes no longer select `test-policy`, `&test-policy` omits `--no-build`, and both `PricingFixture.PricingDirectory()` implementations resolve `dash/server/KyberDash.Data/Pricing` under `--artifacts-path`.
+
+      Reference content for this task, quoted exactly from its source document and complete as given:
+
+
+      #### Test contract row for T0
+
+      | Task | Test project or file | Runner command | Observable behavior | RED evidence required | GREEN acceptance |
+
+      |---|---|---|---|---|---|
+
+      | T0 | `tests/KyberWeave.RepoPolicy.Tests/TaskGatesRepositoryConfigTests.cs` (`KyberWeave.Tests.TaskGatesRepositoryConfigTests`), `dash/server.tests/KyberDash.Application.Tests/PricingFixture.cs` (`KyberDash.Application.Tests.ApplicationParityTests`), `dash/server.tests/KyberDash.Domain.Tests/PricingFixture.cs` (`KyberDash.Domain.Tests.CanonAnalysisTests`) | `dotnet test tests/KyberWeave.RepoPolicy.Tests/KyberWeave.RepoPolicy.Tests.csproj -c Release --artifacts-path .agent_scratchpad/T0/artifacts --filter "FullyQualifiedName~KyberWeave.Tests.TaskGatesRepositoryConfigTests" && dotnet test dash/server.tests/KyberDash.Application.Tests/KyberDash.Application.Tests.csproj -c Release --artifacts-path .agent_scratchpad/T0/artifacts --filter "FullyQualifiedName~KyberDash.Application.Tests.ApplicationParityTests" && dotnet test dash/server.tests/KyberDash.Domain.Tests/KyberDash.Domain.Tests.csproj -c Release --artifacts-path .agent_scratchpad/T0/artifacts --filter "FullyQualifiedName~KyberDash.Domain.Tests.CanonAnalysisTests"` | Normal: `TaskGatesRepositoryConfigTests` verifies `dash/server/**` (`dash/server/KyberDash.Core/X.cs`) and `dash/server.tests/**` (`dash/server.tests/KyberDash.Domain.Tests/XTests.cs`) select `dash-build`, `dash-unit-application`, and `dash-unit-domain`, select zero `KyberWeave.sln` gates, and do NOT select `test-policy` across `csharp` and developer tiers (`dev-easy`, `dev-medium`, `dev-hard`); policy files (`tests/KyberWeave.RepoPolicy.Tests/X.cs`, `.kyber-weave/kyber-weave.yml`, `scripts/fast-loop.sh`) continue selecting `test-policy` without `--no-build`; `PricingFixture.PricingDirectory()` probes both `server/KyberDash.Data/Pricing` and `dash/server/KyberDash.Data/Pricing` so `PricingFixture.Initialize()` and `EnsureInstalled()` succeed under both standard `bin/` output and `--artifacts-path .agent_scratchpad/T0/artifacts`. Missing pricing directory still throws `DirectoryNotFoundException`; auth/endpoint access N/A (repo-policy & test-fixture checks). | Strengthened `TaskGatesRepositoryConfigTests` fails asserting `test-policy` is excluded for `dash/server/KyberDash.Core/X.cs` and `dash/server.tests/KyberDash.Domain.Tests/XTests.cs` before `.kyber-weave/kyber-weave.yml` defines `&net-policy-paths`; running `ApplicationParityTests` and `CanonAnalysisTests` with `--artifacts-path .agent_scratchpad/T0/artifacts` fails in `PricingFixture.Initialize()` with `DirectoryNotFoundException` before `PricingFixture.cs` probes `dash/server/...`. | `KyberWeave.Tests.TaskGatesRepositoryConfigTests`, `KyberDash.Application.Tests.ApplicationParityTests`, `KyberDash.Domain.Tests.CanonAnalysisTests`, and `kyber-weave review gates . --agent <you> --task T0` (`review-config`, `dotnet-build`, `test-policy`, `dash-build`, `dash-unit-application`, `dash-unit-domain`) pass with non-zero test counts and zero failures. |
+
+
+      #### Decisions this task cites
+
+      | ID | Question | Answer / decision | Mitigating and supporting information | Status / approval provenance |
+
+      |---|---|---|---|---|
+
+      | D14 | How should the task-gate `test-policy` selection and `PricingFixture` path resolution failures under `--artifacts-path` be resolved before `T1`–`T3` execute? | Add prerequisite task `T0` (`csharp`, `easy`, `depends-on: []`) before `T1`: define `&net-policy-paths` in `.kyber-weave/kyber-weave.yml` so `dash/**` does not trigger `test-policy` and remove `--no-build` from `&test-policy`; strengthen `TaskGatesRepositoryConfigTests` to assert `dash/server/**` and `dash/server.tests/**` do not select `test-policy`; update `PricingFixture.PricingDirectory()` in both `KyberDash.Application.Tests` and `KyberDash.Domain.Tests` to probe both `server/KyberDash.Data/Pricing` and `dash/server/KyberDash.Data/Pricing`. | Keeps council `review.gates` `*net-test-paths` intact for `ReviewTaskGatesRepositoryConfigTests.TestPolicyGateIsSelectedExactlyWhereTheBuildGateIs`, avoids unbuilt `RepoPolicy.Tests` failures when policy-only files skip `dotnet-build`, and unblocks `[ModuleInitializer]` `PricingFixture` loading under `--artifacts-path .agent_scratchpad/{task}/artifacts`. | Accepted (`MEDITATION_DECISION: Accept Option A`; `autonomous`: covered by `.kyber-weave/kyber-weave.yml` & `TaskGatesRepositoryConfigTests`) |
+
+
+      Results of the tasks this one follows, as their workers reported them:
+
+      {prior_results}
+    agent: dev-easy
+    difficulty: easy
+    difficulty-source: architect
+    technology: csharp
+  - id: T1
+    capabilities: C# harness transcript parsing, streaming JSONL coalescence, token-measurement boundary handling, and unit testing with in-memory fakes.
+    depends-on:
+      - T0
+    files:
+      - dash/server/KyberDash.Data/Harnesses/Claude/ClaudeTranscriptMapper.cs
+      - dash/server/KyberDash.Data/Collector/HarnessSourceRegistry.cs
+      - dash/server.tests/KyberDash.Data.Tests/Harnesses/ClaudeTranscriptMapperTests.cs
+      - dash/server.tests/KyberDash.Data.Tests/Collector/HarnessSourceRegistryTests.cs
+      - dash/server.tests/KyberDash.Data.Tests/Collector/SkillExtractionTests.cs
+    session: claude-parser
+    prompt: >
+      Task T1: Fix Claude Code transcript parsing, streaming merge, tool_use parts, >64 KiB overflow, compaction markers, subagent isolation, and parser contract version
+
+      Worktree: {worktree}
+
+
+      - **Objective:** Fix `ClaudeTranscriptMapper` and bump Claude's `ParserContractVersion` so real Claude Code transcripts preserve streamed blocks, `tool_use` content, >64 KiB tokens, compaction boundaries, and isolated subagent sessions safely.
+
+      - **Capabilities:** C# harness transcript parsing, streaming JSONL coalescence, token-measurement boundary handling, and unit testing with in-memory fakes.
+
+      - **Difficulty:** medium
+
+      - **Technology:** csharp
+
+      - **Session:** claude-parser
+
+      - **Depends on:** T0 (consumes T0's `test-policy` isolation so `dash/server/**` edits do not trigger unbuilt `KyberWeave.RepoPolicy.Tests`, and T0's `PricingFixture` path probing so `dash-unit-application` / `dash-unit-domain` pass under `--artifacts-path`)
+
+      - **Files:**
+        - `dash/server/KyberDash.Data/Harnesses/Claude/ClaudeTranscriptMapper.cs`: `ClaudeTranscriptMapper`, `TryParseLine`, `ExtractFileStem`, `ParseTurnGroup`, `BuildContentParts`, `IsMatchingClaudeUsage`, `BuildRecords` — merge streamed assistant entries sharing the same non-empty `message.id` even when usage token counters grow (retaining earliest deterministic `RecordId` so PR #721 `record.span_id` uniqueness holds, preserving PR #722 skill extraction, accumulating content blocks in order, keeping non-empty model and latest usage snapshot); emit `ContentBuckets.ConversationHistory` `CollectedContentPart` items for `tool_use` blocks (`toolName` + serialized JSON input measured with `ToolContentMeasurer`); split plain text exceeding `MaxToolResultBytes` (64 KiB) cleanly on intact `<system-reminder>...</system-reminder>` boundaries (extracting intact complete reminder blocks or backing up the 64 KiB `PlainText` cut before any unclosed `<system-reminder>` tag) plus ONE `Withheld` (`CollectedWithheldText`) continuation chunk measured via `ToolContentMeasurer.Measure` over **only the unretained remainder tail** (preventing double-counting the first 64 KiB in `AnalyzeContext`, while satisfying `PlainText` XOR `Withheld`); fold `compact_boundary` (`type == "system" && subtype == "compact_boundary"`) and `isCompactSummary == true` transitions onto the next kept `llm.invoke` turn via `CollectedRecord.AgentInstanceId = "claude:compact_boundary"` (persisted and round-tripped in `record_agent_instance` with zero schema change); resolve `parentSessionId` from `line.SessionId` or the directory immediately above the `subagents` directory, resolve `bareId` from `agentId` or `agent-*` filename stem / fallback, and isolate `isSidechain == true`, non-empty `agentId`, or nested subagent transcript files under `$"{parentSessionId}#agent-{bareId}"` (`D11`).
+        - `dash/server/KyberDash.Data/Collector/HarnessSourceRegistry.cs`: `HarnessSourceRegistry` — bump `claude` harness `ParserContractVersion` from `"1"` to `"2"` so stale `canon.db` checkpoints re-ingest automatically on refresh.
+        - `dash/server.tests/KyberDash.Data.Tests/Harnesses/ClaudeTranscriptMapperTests.cs`: `ClaudeTranscriptMapperTests` — update authorized `Parts.Count` expectations (`D9`) for emitted `tool_use` parts and add RED->GREEN unit tests for streamed same-`message.id` growing usage merge, `<system-reminder>`-safe >64 KiB `PlainText` + tail-only `Withheld` overflow preservation, `AgentInstanceId = "claude:compact_boundary"` folding, and `${parentSessionId}#agent-{bareId}` subagent isolation (both `line.SessionId` and `subagents` directory fallback).
+        - `dash/server.tests/KyberDash.Data.Tests/Collector/HarnessSourceRegistryTests.cs`: `HarnessSourceRegistryTests` — assert Claude source units receive `ParserContractVersion == "2"`.
+        - `dash/server.tests/KyberDash.Data.Tests/Collector/SkillExtractionTests.cs`: `SkillExtractionTests` — verify PR #722 skill extraction expectations stay intact alongside coalesced streamed Claude turns (`D9`).
+      - **Commands:**
+        - `kyber-weave review gates . --agent <you> --task T1 --red`
+        - `dotnet test dash/server.tests/KyberDash.Data.Tests/KyberDash.Data.Tests.csproj -c Release --artifacts-path .agent_scratchpad/T1/artifacts --filter "FullyQualifiedName~KyberDash.Data.Tests.Harnesses.ClaudeTranscriptMapperTests|FullyQualifiedName~KyberDash.Data.Tests.Collector.HarnessSourceRegistryTests|FullyQualifiedName~KyberDash.Data.Tests.Collector.SkillExtractionTests"`
+        - `kyber-weave review gates . --agent <you> --task T1`
+      - **Acceptance:**
+        - Every `ClaudeTranscriptMapperTests`, `HarnessSourceRegistryTests`, and `SkillExtractionTests` case passes against the Test contract command, streamed `message.id` chunks merge with latest usage, `tool_use` blocks and tail-measured >64 KiB overflow avoid double-counting, compaction markers fold via `AgentInstanceId`, subagents link via `${parentSessionId}#agent-{bareId}`, and `ParserContractVersion == "2"`.
+
+      Reference content for this task, quoted exactly from its source document and complete as given:
+
+
+      #### Test contract row for T1
+
+      | Task | Test project or file | Runner command | Observable behavior | RED evidence required | GREEN acceptance |
+
+      |---|---|---|---|---|---|
+
+      | T1 | `dash/server.tests/KyberDash.Data.Tests/Harnesses/ClaudeTranscriptMapperTests.cs` (`KyberDash.Data.Tests.Harnesses.ClaudeTranscriptMapperTests`), `dash/server.tests/KyberDash.Data.Tests/Collector/HarnessSourceRegistryTests.cs` (`KyberDash.Data.Tests.Collector.HarnessSourceRegistryTests`), `dash/server.tests/KyberDash.Data.Tests/Collector/SkillExtractionTests.cs` (`KyberDash.Data.Tests.Collector.SkillExtractionTests`) | `dotnet test dash/server.tests/KyberDash.Data.Tests/KyberDash.Data.Tests.csproj -c Release --artifacts-path .agent_scratchpad/T1/artifacts --filter "FullyQualifiedName~KyberDash.Data.Tests.Harnesses.ClaudeTranscriptMapperTests\|FullyQualifiedName~KyberDash.Data.Tests.Collector.HarnessSourceRegistryTests\|FullyQualifiedName~KyberDash.Data.Tests.Collector.SkillExtractionTests"` | Normal: `tool_use` emits measured `ConversationHistory` `CollectedContentPart`, and user/assistant/`tool_result`/skill parts remain preserved (`SkillExtractionTests` verified); streamed chunks sharing non-empty `message.id` with advancing usage coalesce keeping earliest `RecordId` and latest usage; >64 KiB non-document text splits cleanly on intact `<system-reminder>...</system-reminder>` boundaries (extracting intact blocks or backing up cut before an unclosed tag) plus ONE `Withheld` continuation chunk measured via `ToolContentMeasurer.Measure` over only the unretained remainder tail (never double-counting the first 64 KiB); `compact_boundary` / `isCompactSummary` folds onto the next kept `llm.invoke` turn via `CollectedRecord.AgentInstanceId = "claude:compact_boundary"`; `isSidechain` / `agentId` / `.../subagents/agent-*.jsonl` files resolve `parentSessionId` from `line.SessionId` or the directory immediately above `subagents/` and isolate to `${parentSessionId}#agent-{bareId}`; non-sidechain defaults cleanly; `HarnessSourceRegistry` stamps Claude `ParserContractVersion == "2"`. Empty transcript yields zero records. Auth/endpoint access N/A (pure in-memory parser & registry unit tests). | Fail assertions expecting merged `message.id` usage snapshot, `tool_use` `ConversationHistory` part, intact `<system-reminder>` tail-measured >64 KiB `Withheld` part, `AgentInstanceId = "claude:compact_boundary"` carrier, `${parentSessionId}#agent-{bareId}` subagent isolation, or `ParserContractVersion == "2"`. | All tests in `ClaudeTranscriptMapperTests`, `HarnessSourceRegistryTests`, and `SkillExtractionTests` pass (zero failures, non-zero test count) without weakening assertions beyond D9's authorized `Parts.Count` adjustments. |
+
+
+      #### Decisions this task cites
+
+      | ID | Question | Answer / decision | Mitigating and supporting information | Status / approval provenance |
+
+      |---|---|---|---|---|
+
+      | D11 | How does `ClaudeTranscriptMapper` fix streaming loss, missing `tool_use` parts, >64 KiB truncation, compaction, subagents, and stale checkpoints alongside PR #721/#722? | Coalesce streamed assistant entries sharing non-empty `message.id` across advancing usage (retain earliest `RecordId` for PR #721 `span_id` safety, preserve PR #722 skill extraction); emit `tool_use` `ConversationHistory` parts measured via `ToolContentMeasurer`; for >64 KiB non-document text split on intact `<system-reminder>...</system-reminder>` boundaries (cutting before an unclosed tag or extracting complete blocks) plus ONE `Withheld` continuation part measuring **only the unretained remainder tail** via `ToolContentMeasurer.Measure`; fold `compact_boundary`/`isCompactSummary` onto the next kept `llm.invoke` turn via `CollectedRecord.AgentInstanceId = "claude:compact_boundary"` (already persisted/round-tripped in `record_agent_instance` with no schema change); resolve `parentSessionId` from `line.SessionId` or directory above `subagents/` and isolate sidechain/subagent records to `${parentSessionId}#agent-{bareId}`; bump Claude `ParserContractVersion` to `"2"`. | Satisfies `CollectedContentPart` XOR rule, prevents double-counting the first 64 KiB in `AnalyzeContext`, preserves SQLite compaction hydration with zero schema change, links subagents to parent sessions, and triggers automatic re-ingest on refresh. | Accepted (`autonomous`: medium reversal cost, isolated to parser seam; respects PR #721/#722) |
+
+      | D9 | Which existing test expectations intentionally shift under the new defaults and contract? | Authorize updating expectations for `desc` default (`SessionSectionEndpointsTests`, `SessionKwSkillLoadsTests`, `SqliteRelationalStoreReadTests`), HTTP `400` `{"error": "..."}` / `limit=25&order=desc` route mock signatures (`MinimalApiEndpointTests`, `AnalyticsReadPathTests`, `AnalyticsOperationsDetailTests`, `ApplicationParityTests`), `&limit=25&order=desc` URLs (`kyberApi.sections.test.ts`, `AgentSessionDashboard.test.tsx`), single-page `<Pager>` visibility (`Session*Section.test.tsx`, `SchemaCostRanking.test.tsx`, `SkillsPanel.test.tsx`), root `timeline-level-more` load-more -> `<Pager>` transition (`SessionTimelineSection.test.tsx`), and `tool_use` `Parts.Count` (`ClaudeTranscriptMapperTests`). | Explicitly records contract shifts under `plan-authoring.md` rather than relaxing invariants silently. | Accepted (`autonomous`: covered by request contract changes) |
+
+
+      Results of the tasks this one follows, as their workers reported them:
+
+      {prior_results}
+    agent: dev-medium
+    agent-confidence: 1
+    difficulty: medium
+    difficulty-source: architect
+    technology: csharp
+  - id: T2
+    capabilities: C# record hydration, linear context projection, in-memory & SQLite store round-trip testing, and analytics payload construction.
+    depends-on:
+      - T1
+    files:
+      - dash/server/KyberDash.Application/CanonRecordHydration.cs
+      - dash/server/KyberDash.Application/CanonSessionProjectorEngine.cs
+      - dash/server/KyberDash.Application/KyberBridgeEngine.cs
+      - dash/server.tests/KyberDash.Application.Tests/Projection/ClaudeContextCompositionTests.cs
+    session: claude-projection
+    prompt: >
+      Task T2: Reconstruct cumulative Claude Code multi-turn context composition and surface honest residual reasons in /charts
+
+      Worktree: {worktree}
+
+
+      - **Objective:** Hydrate compaction boundaries cleanly, reconstruct cumulative Claude Code prompt buckets in linear time inside `CanonSessionProjectorEngine`, link `#agent-` subagents while excluding them from parent context, and expose `missingBuckets` and `residualReasons` from `KyberBridgeEngine.GetSessionCharts`.
+
+      - **Capabilities:** C# record hydration, linear context projection, in-memory & SQLite store round-trip testing, and analytics payload construction.
+
+      - **Difficulty:** medium
+
+      - **Technology:** csharp
+
+      - **Session:** claude-projection
+
+      - **Depends on:** T1 (consumes T1's merged streamed assistant turns, `tool_use` parts, tail-measured >64 KiB parts, `AgentInstanceId = "claude:compact_boundary"` markers, and `${parentSessionId}#agent-{bareId}` subagent records)
+
+      - **Files:**
+        - `dash/server/KyberDash.Application/CanonRecordHydration.cs`: `CanonRecordHydration.Hydrate` — surface `record.AgentInstanceId == "claude:compact_boundary"` onto `CanonicalRecord.Raw["claude.compact_boundary"]` (`true`) without emitting synthetic `ContentPart` text (`D11`, `D12`).
+        - `dash/server/KyberDash.Application/CanonSessionProjectorEngine.cs`: `CanonSessionProjectorEngine.BuildStoredSessionProjection` — recognize `#agent-` subagent session keys (extracting `ParentSessionId` from prefix before `#agent-` and setting `IsSubagent = true`) while keeping subagent turns excluded from parent context turns; reset cumulative prefix when hydrated `Raw["claude.compact_boundary"]` is present; accumulate Claude prompt-eligible context parts (`system_prompt`, `instruction_context`, `conversation_history`, `tool_result_content`) across turns `< k` in a linear `O(T)` pass by reducing and tokenizing each turn's own parts once and carrying per-bucket pre-counted summary `ContextPart` entries (`Text = string.Empty`, `Derived = true`, `Tokens`, `InstructionTokens`, `StrippedCount`, `Tokenizer`, `TokenizerIsModelOwn`) forward rather than quadratically re-tokenizing prior raw text; exclude Turn `k`'s own assistant output and thinking from Turn `k`'s input buckets (`D12`).
+        - `dash/server/KyberDash.Application/KyberBridgeEngine.cs`: `KyberBridgeEngine.BuildContextPayload` — emit `missingBuckets` and plain-language `residualReasons` derived from existing `CanonSynth.MeasurabilityFor(harness)` on the charts `context` payload when transcript unmeasurable buckets apply (`claude` omitting `system_prompt` and tool definitions), leaving non-omitted harnesses unaffected (`D12`).
+        - `dash/server.tests/KyberDash.Application.Tests/Projection/ClaudeContextCompositionTests.cs`: `ClaudeContextCompositionTests` — new test class following `SessionProjectionTests` + `InMemoryRelationalStore` AND temp-file `SqliteRelationalStore` round-trip hydration testing (`AgentInstanceId = "claude:compact_boundary"` persisted in SQLite -> `SessionRecordsForRebuild` -> `CanonRecordHydration.Hydrate` -> `CanonSessionProjectorEngine.BuildStoredSessionProjection`), plus multi-turn linear cumulative Claude buckets, Turn `k` own-output exclusion, `#agent-` subagent parent linkage & parent exclusion, >64 KiB `PlainText` + tail-only `Withheld` token-conservation assertion matching full-text tokenization without double-counting the first 64 KiB, `CanonSynth.MeasurabilityFor`-backed `missingBuckets`/`residualReasons` on charts, and full in-memory refresh -> project -> `GetSessionCharts` verification.
+      - **Commands:**
+        - `kyber-weave review gates . --agent <you> --task T2 --red`
+        - `dotnet test dash/server.tests/KyberDash.Application.Tests/KyberDash.Application.Tests.csproj -c Release --artifacts-path .agent_scratchpad/T2/artifacts --filter "FullyQualifiedName~KyberDash.Application.Tests.Projection.ClaudeContextCompositionTests|FullyQualifiedName~KyberDash.Application.Tests.Projection.SessionProjectionTests"`
+        - `kyber-weave review gates . --agent <you> --task T2`
+      - **Acceptance:**
+        - `ClaudeContextCompositionTests` and `SessionProjectionTests` pass; SQLite & in-memory compaction hydration resets cleanly, >64 KiB token conservation holds without doubling, `#agent-` subagents link to parents and stay excluded from parent context, cumulative Claude multi-turn sessions show populated message/tool-call/tool-result buckets rather than ~100% residual, and `missingBuckets`/`residualReasons` reflect `CanonSynth.MeasurabilityFor`.
+
+      Reference content for this task, quoted exactly from its source document and complete as given:
+
+
+      #### Test contract row for T2
+
+      | Task | Test project or file | Runner command | Observable behavior | RED evidence required | GREEN acceptance |
+
+      |---|---|---|---|---|---|
+
+      | T2 | `dash/server.tests/KyberDash.Application.Tests/Projection/ClaudeContextCompositionTests.cs` (`KyberDash.Application.Tests.Projection.ClaudeContextCompositionTests`, copy setup pattern from `SessionProjectionTests`) and `dash/server.tests/KyberDash.Application.Tests/Projection/SessionProjectionTests.cs` (`KyberDash.Application.Tests.Projection.SessionProjectionTests`) | `dotnet test dash/server.tests/KyberDash.Application.Tests/KyberDash.Application.Tests.csproj -c Release --artifacts-path .agent_scratchpad/T2/artifacts --filter "FullyQualifiedName~KyberDash.Application.Tests.Projection.ClaudeContextCompositionTests\|FullyQualifiedName~KyberDash.Application.Tests.Projection.SessionProjectionTests"` | Normal: multi-turn Claude session Turn `k` accumulates prior turns `< k` (`conversation_history`, `tool_result_content`, `instruction_context`, `system_prompt`) in a linear O(T) pre-reduced pass without counting Turn `k`'s own output inside Turn `k`'s input buckets; `CanonRecordHydration.Hydrate` surfaces `AgentInstanceId == "claude:compact_boundary"` onto `CanonicalRecord.Raw["claude.compact_boundary"]` without emitting synthetic `ContentPart` text, verified across both `InMemoryRelationalStore` and temp-file `SqliteRelationalStore` round-trip hydration -> projection reset to post-compaction turns; `${parentSessionId}#agent-{bareId}` subagents persist `IsSubagent = true` & `ParentSessionId = parentSessionId` while staying excluded from parent context turns; >64 KiB plain + withheld token-conservation assertion matches full-text tokenization without double-counting the first 64 KiB; `GetSessionCharts` derives `missingBuckets` (`system_prompt`, tool definitions) and plain-text `residualReasons` from `CanonSynth.MeasurabilityFor(harness)` for `claude` and omits them for non-omitted harnesses; end-to-end in-memory refresh -> projection -> `GetSessionCharts` yields realistic non-residual turn shares. Empty session returns empty turns safely. Endpoint auth/bad-input normalization covered in `T3`. | Fail assertions checking multi-turn cumulative `ConversationHistory` > delta-only Turn `k` count, >64 KiB plain + withheld token conservation, SQLite & in-memory `AgentInstanceId` compaction hydration/reset, `#agent-` subagent parent linkage & exclusion, or `CanonSynth.MeasurabilityFor`-backed `missingBuckets`/`residualReasons` on `/charts`. | `ClaudeContextCompositionTests` and `SessionProjectionTests` pass (zero failures, non-zero test count). |
+
+
+      #### Decisions this task cites
+
+      | ID | Question | Answer / decision | Mitigating and supporting information | Status / approval provenance |
+
+      |---|---|---|---|---|
+
+      | D11 | How does `ClaudeTranscriptMapper` fix streaming loss, missing `tool_use` parts, >64 KiB truncation, compaction, subagents, and stale checkpoints alongside PR #721/#722? | Coalesce streamed assistant entries sharing non-empty `message.id` across advancing usage (retain earliest `RecordId` for PR #721 `span_id` safety, preserve PR #722 skill extraction); emit `tool_use` `ConversationHistory` parts measured via `ToolContentMeasurer`; for >64 KiB non-document text split on intact `<system-reminder>...</system-reminder>` boundaries (cutting before an unclosed tag or extracting complete blocks) plus ONE `Withheld` continuation part measuring **only the unretained remainder tail** via `ToolContentMeasurer.Measure`; fold `compact_boundary`/`isCompactSummary` onto the next kept `llm.invoke` turn via `CollectedRecord.AgentInstanceId = "claude:compact_boundary"` (already persisted/round-tripped in `record_agent_instance` with no schema change); resolve `parentSessionId` from `line.SessionId` or directory above `subagents/` and isolate sidechain/subagent records to `${parentSessionId}#agent-{bareId}`; bump Claude `ParserContractVersion` to `"2"`. | Satisfies `CollectedContentPart` XOR rule, prevents double-counting the first 64 KiB in `AnalyzeContext`, preserves SQLite compaction hydration with zero schema change, links subagents to parent sessions, and triggers automatic re-ingest on refresh. | Accepted (`autonomous`: medium reversal cost, isolated to parser seam; respects PR #721/#722) |
+
+      | D12 | How is cumulative multi-turn Claude context reconstructed and explained without estimating? | In `CanonRecordHydration.Hydrate`, surface `AgentInstanceId == "claude:compact_boundary"` onto `CanonicalRecord.Raw["claude.compact_boundary"]` without emitting synthetic `ContentPart` text; in `CanonSessionProjectorEngine.BuildStoredSessionProjection`, recognize `#agent-` subagent keys (`IsSubagent = true`, `ParentSessionId`), exclude subagent turns from parent context, and accumulate prior turns `< k` (`system_prompt`, `instruction_context`, `conversation_history`, `tool_result_content`) since `"claude.compact_boundary"` in a linear `O(T)` pass using pre-reduced/pre-counted summary `ContextPart`s (`Derived = true`, `Text = string.Empty`) rather than quadratic re-tokenization; derive `/charts` `missingBuckets` and `residualReasons` from existing `CanonSynth.MeasurabilityFor(harness)`, render omission reasons in `ContextCaveat`/footer, suppress `heavyDrift` ("proxy is a poor fit") when omission telemetry explains residual share, and build chart legend/server flags from whole-session `observedBuckets`/`observedServers`. | Exact linear reconstruction with zero heuristic multipliers (`docs/rules/honest-unobservability.md`) and accurate legends/explanations across paged charts views. | Accepted (`autonomous`: covered by `docs/rules/honest-unobservability.md` & request) |
+
+
+      Results of the tasks this one follows, as their workers reported them:
+
+      {prior_results}
+    agent: dev-medium
+    agent-confidence: 1
+    difficulty: medium
+    difficulty-source: architect
+    technology: csharp
+  - id: T3
+    capabilities: ASP.NET Core minimal API validation, C# application services, SQLite queries, in-memory store fakes, and multi-project .NET testing.
+    depends-on:
+      - T2
+    files:
+      - dash/server/KyberDash.Api/Endpoints/DashHttp.cs
+      - dash/server/KyberDash.Api/Endpoints/DashEndpointMappings.cs
+      - dash/server/KyberDash.Contracts/Services/IDashServices.cs
+      - dash/server/KyberDash.Contracts/Repositories/IRelationalStoreReader.cs
+      - dash/server/KyberDash.Data/Repositories/SqliteRelationalStore.Reader.cs
+      - dash/server/KyberDash.Application/Services/DashboardQueryService.cs
+      - dash/server/KyberDash.Application/KyberBridgeEngine.cs
+      - dash/server.tests/KyberDash.Application.Tests/Fakes/InMemoryRelationalStore.cs
+      - dash/server.tests/KyberDash.Application.Tests/Fakes/DelegatingRelationalStoreReader.cs
+      - dash/server.tests/KyberDash.Application.Tests/Analytics/AnalyticsReadPathTests.cs
+      - dash/server.tests/KyberDash.Application.Tests/Analytics/AnalyticsOperationsDetailTests.cs
+      - dash/server.tests/KyberDash.Application.Tests/ApplicationParityTests.cs
+      - dash/server.tests/KyberDash.Application.Tests/Sessions/SessionSectionEndpointsTests.cs
+      - dash/server.tests/KyberDash.Application.Tests/Sessions/SessionKwSkillLoadsTests.cs
+      - dash/server.tests/KyberDash.Data.Tests/Repositories/SqliteRelationalStoreReadTests.cs
+      - dash/server.tests/KyberDash.Presentation.Tests/PresentationBuilder.cs
+      - dash/server.tests/KyberDash.Presentation.Tests/MinimalApiEndpointTests.cs
+    session: server-paging
+    prompt: >
+      Task T3: Implement strict server-side paging (25, 50, 100) and sorting (desc, asc) across every session detail route including /charts
+
+      Worktree: {worktree}
+
+
+      - **Objective:** Extend shared API validation, query service, `KyberBridgeEngine`, `IRelationalStoreReader`, and `SqliteRelationalStore` so all nine session detail section endpoints sort and slice server-side with `limit` in `{25, 50, 100}` and `order` in `{desc, asc}` (default `25`, `desc`).
+
+      - **Capabilities:** ASP.NET Core minimal API validation, C# application services, SQLite queries, in-memory store fakes, and multi-project `.NET` testing.
+
+      - **Difficulty:** easy
+
+      - **Technology:** csharp
+
+      - **Session:** server-paging
+
+      - **Depends on:** T2 (shares `dash/server/KyberDash.Application/KyberBridgeEngine.cs`)
+
+      - **Files:**
+        - `dash/server/KyberDash.Api/Endpoints/DashHttp.cs`: `DashHttp.Pagination` — add strict section-limit (`25`, `50`, `100` only) and trimmed case-insensitive `order` (`"desc"` default, `"asc"`) validation helpers returning `DashHttp.Error(StatusCodes.Status400BadRequest, ...)` (`{"error": "..."}`) on invalid values.
+        - `dash/server/KyberDash.Api/Endpoints/DashEndpointMappings.cs`: `DashEndpointMappings` — add `ReadSectionPageWindow` composing/parameterizing shared `ReadPageWindow`, `OffsetStartsThePage`, and `sessionId` validation helpers to enforce `limit in {25, 50, 100}` and `order in {"desc", "asc"}` (defaults `25`, `"desc"`) across all nine session detail routes (`requests`, `reconciliation`, `problems`, `tools`, `servers`, `skills`, `kw-skills`, `timeline`, `charts`) while keeping sessions and subagents `ReadPageWindow` unchanged.
+        - `dash/server/KyberDash.Contracts/Services/IDashServices.cs`: `IDashboardQueryService` — add `string order = "desc"` to the 8 existing paged section methods and `(int page = 1, int limit = 25, string order = "desc")` to `GetSessionCharts`.
+        - `dash/server/KyberDash.Contracts/Repositories/IRelationalStoreReader.cs`: `IRelationalStoreReader` — add `string order = "desc"` to `SessionRequestFigures`, `SessionReconciliationFigures`, `SessionProblems`, and `SessionKwSkillLoads`.
+        - `dash/server/KyberDash.Data/Repositories/SqliteRelationalStore.Reader.cs`: `SqliteRelationalStore` — support validated `desc` (newest/latest first) and `asc` (oldest/earliest first) SQL ordering in `SessionRequestFigures` (`p.position`), `SessionReconciliationFigures` (`position`), `SessionProblems` (`LEFT JOIN ingest_problem_timestamp ipt ON ipt.problem_id = ip.problem_id` sorting non-null timestamps first via `CASE WHEN ipt.timestamp_utc IS NULL THEN 1 ELSE 0 END ASC`, ordered `DESC` or `ASC`, then null timestamps, tiebreak `ip.problem_id DESC` or `ASC`), and `SessionKwSkillLoads` (`r.started_at_utc, tc.rowid`).
+        - `dash/server/KyberDash.Application/Services/DashboardQueryService.cs`: `DashboardQueryService` — forward `page`, `limit`, `order` across all 9 session section query methods.
+        - `dash/server/KyberDash.Application/KyberBridgeEngine.cs`: `KyberBridgeEngine` — implement `order` sorting (`desc` default, `asc` reverse) + paging envelope (`total`, `page`, `limit`, `offset`, `order`) across all 9 section methods: chronological `requests`, `reconciliation`, `problems`, `kw-skills`, `timeline` (sorting root spans & child levels by `StartMs DESC/ASC, SpanId ASC`); ranked `skills` sorted by `invocations` (`DESC` or `ASC`, tiebreak `name ASC`), `tools` sorted by `TotalSchemaCost` (`total_schema_cost`, schema token residency per the secondary-cost-display rule, never dollar cost) then `Invocations` (`DESC` or `ASC`, tiebreak `name ASC`), and `servers` sorted by `UnusedCost` then `totalSchemaCost` then `Invocations` (`DESC` or `ASC`, tiebreak `server ASC`); plus `GetSessionCharts` / `BuildContextPayload` emitting top-level `total`, `page`, `limit`, `offset`, `order` on both measurable and unmeasurable (`projection.Context == null`, `total = 0`) responses, computing `first`, `last`, `flaggedTurns`, `residualTotal`, `measuredInputTotal`, `maxBucketTokens`, `observedBuckets`, `observedServers`, `missingBuckets`, `residualReasons`, and tokenizer labels from unpaged `ctx.Turns` before slicing `context.turns`, preserving 1-based `index = turn.Position + 1` in both orders, and keeping whole-session `turns` intact.
+        - `dash/server.tests/KyberDash.Application.Tests/Fakes/InMemoryRelationalStore.cs`: `InMemoryRelationalStore` — match SQLite `desc` and `asc` ordering on all updated `IRelationalStoreReader` methods (including `SessionProblems` non-null timestamps first, null timestamps after, `problem_id` tiebreak).
+        - `dash/server.tests/KyberDash.Application.Tests/Fakes/DelegatingRelationalStoreReader.cs`: `DelegatingRelationalStoreReader` — forward `order` argument.
+        - `dash/server.tests/KyberDash.Application.Tests/Analytics/AnalyticsReadPathTests.cs`: `FaultingSessionReader` — update interface signatures for `order`.
+        - `dash/server.tests/KyberDash.Application.Tests/Analytics/AnalyticsOperationsDetailTests.cs`: `FaultingSessionReader` — update interface signatures for `order`.
+        - `dash/server.tests/KyberDash.Application.Tests/ApplicationParityTests.cs`: `ApplicationParityTests` — align session query call signatures for `order`.
+        - `dash/server.tests/KyberDash.Application.Tests/Sessions/SessionSectionEndpointsTests.cs`: `SessionSectionEndpointsTests` — test `desc` default, `asc` reversal, limits 25, 50, 100, measurable and unmeasurable `/charts` envelopes (`total`, `first`, `last`, 1-based `index`, whole-session summary aggregates), null-timestamp `problems` sort parity, timeline root/child ordering, ranked `tools`/`servers`/`skills` primary+secondary keys, and invalid `order` handling (`D9`).
+        - `dash/server.tests/KyberDash.Application.Tests/Sessions/SessionKwSkillLoadsTests.cs`: `SessionKwSkillLoadsTests` — update default expectation to `desc` (`D9`) and test `asc` vs `desc`.
+        - `dash/server.tests/KyberDash.Data.Tests/Repositories/SqliteRelationalStoreReadTests.cs`: `SqliteRelationalStoreReadTests` — verify SQLite `desc` and `asc` ordering (including `ingest_problem_timestamp` nulls-last ordering), invalid `order` rejection (`D9`), and `AgentInstanceId = "claude:compact_boundary"` persistence/read-back parity.
+        - `dash/server.tests/KyberDash.Presentation.Tests/PresentationBuilder.cs`: `PresentationBuilder` — align test helper signatures with `IDashboardQueryService`.
+        - `dash/server.tests/KyberDash.Presentation.Tests/MinimalApiEndpointTests.cs`: `MinimalApiEndpointTests` — update all existing section route `Setup`/`Verify` mocks across all 9 routes for `limit = 25, order = "desc"` (`D9`), and assert limits 25, 50, 100 acceptance, HTTP `400` `{"error": "..."}` (`DashHttp.Error`, not ProblemDetails) on invalid `limit`/`order` (`limit=10`, `limit=500`, `order=bad`), and serialized measurable & unmeasurable charts paging envelopes (`D9`).
+      - **Commands:**
+        - `kyber-weave review gates . --agent <you> --task T3 --red`
+        - `dotnet test dash/server.tests/KyberDash.Presentation.Tests/KyberDash.Presentation.Tests.csproj -c Release --artifacts-path .agent_scratchpad/T3/artifacts --filter "FullyQualifiedName~KyberDash.Presentation.Tests.MinimalApiEndpointTests"`
+        - `dotnet test dash/server.tests/KyberDash.Application.Tests/KyberDash.Application.Tests.csproj -c Release --artifacts-path .agent_scratchpad/T3/artifacts --filter "FullyQualifiedName~KyberDash.Application.Tests.Sessions.SessionSectionEndpointsTests|FullyQualifiedName~KyberDash.Application.Tests.Sessions.SessionKwSkillLoadsTests|FullyQualifiedName~KyberDash.Application.Tests.Analytics.AnalyticsReadPathTests|FullyQualifiedName~KyberDash.Application.Tests.Analytics.AnalyticsOperationsDetailTests|FullyQualifiedName~KyberDash.Application.Tests.ApplicationParityTests"`
+        - `dotnet test dash/server.tests/KyberDash.Data.Tests/KyberDash.Data.Tests.csproj -c Release --artifacts-path .agent_scratchpad/T3/artifacts --filter "FullyQualifiedName~KyberDash.Data.Tests.Repositories.SqliteRelationalStoreReadTests"`
+        - `kyber-weave review gates . --agent <you> --task T3`
+      - **Acceptance:**
+        - `MinimalApiEndpointTests`, `SessionSectionEndpointsTests`, `SessionKwSkillLoadsTests`, `AnalyticsReadPathTests`, `AnalyticsOperationsDetailTests`, `ApplicationParityTests`, and `SqliteRelationalStoreReadTests` pass; all 9 section endpoints validate `{25,50,100}` / `{desc,asc}` strictly (`DashHttp.Error` 400), default to `25` + `desc`, sort server-side deterministically across SQLite & in-memory stores, and preserve unmeasurable windows + whole-session context aggregates and 1-based indices on `/charts`.
+
+      Reference content for this task, quoted exactly from its source document and complete as given:
+
+
+      #### Test contract row for T3
+
+      | Task | Test project or file | Runner command | Observable behavior | RED evidence required | GREEN acceptance |
+
+      |---|---|---|---|---|---|
+
+      | T3 | `dash/server.tests/KyberDash.Presentation.Tests/MinimalApiEndpointTests.cs`, `dash/server.tests/KyberDash.Application.Tests/Sessions/SessionSectionEndpointsTests.cs`, `dash/server.tests/KyberDash.Application.Tests/Sessions/SessionKwSkillLoadsTests.cs`, `dash/server.tests/KyberDash.Application.Tests/Analytics/AnalyticsReadPathTests.cs`, `dash/server.tests/KyberDash.Application.Tests/Analytics/AnalyticsOperationsDetailTests.cs`, `dash/server.tests/KyberDash.Application.Tests/ApplicationParityTests.cs`, `dash/server.tests/KyberDash.Data.Tests/Repositories/SqliteRelationalStoreReadTests.cs` | `dotnet test dash/server.tests/KyberDash.Presentation.Tests/KyberDash.Presentation.Tests.csproj -c Release --artifacts-path .agent_scratchpad/T3/artifacts --filter "FullyQualifiedName~KyberDash.Presentation.Tests.MinimalApiEndpointTests" && dotnet test dash/server.tests/KyberDash.Application.Tests/KyberDash.Application.Tests.csproj -c Release --artifacts-path .agent_scratchpad/T3/artifacts --filter "FullyQualifiedName~KyberDash.Application.Tests.Sessions.SessionSectionEndpointsTests\|FullyQualifiedName~KyberDash.Application.Tests.Sessions.SessionKwSkillLoadsTests\|FullyQualifiedName~KyberDash.Application.Tests.Analytics.AnalyticsReadPathTests\|FullyQualifiedName~KyberDash.Application.Tests.Analytics.AnalyticsOperationsDetailTests\|FullyQualifiedName~KyberDash.Application.Tests.ApplicationParityTests" && dotnet test dash/server.tests/KyberDash.Data.Tests/KyberDash.Data.Tests.csproj -c Release --artifacts-path .agent_scratchpad/T3/artifacts --filter "FullyQualifiedName~KyberDash.Data.Tests.Repositories.SqliteRelationalStoreReadTests"` | Normal: all 9 session section routes (`requests`, `reconciliation`, `problems`, `tools`, `servers`, `skills`, `kw-skills`, `timeline`, `charts`) return top-level `total`, `page`, `limit`, `offset`, `order` (including `/charts` when `context.measurable` is `false` with `total = 0`); options set (`limit=25,50,100`, `order=asc\|desc`, `page>=1`, `parentSpanId`/`level`) vs unset default (`page=1, limit=25, order=desc`); whitespace/mixed-case `order` normalized (`" ASC "` -> `"asc"`) while blank/unknown `order` (`"sideways"`) and non-`{25,50,100}` `limit` (`10`, `500`) reject with HTTP `400` `DashHttp.Error` `{"error": "..."}`; unknown session returns `404`; empty section list returns `items: []`, `total: 0`; `/charts` computes `first`, `last`, `flaggedTurns`, `residualTotal`, `measuredInputTotal`, `maxBucketTokens`, `observedBuckets`, `observedServers`, `missingBuckets`, `residualReasons`, and tokenizer labels from unpaged `ctx.Turns` before slicing `context.turns`, preserving 1-based `index = turn.Position + 1` in both `desc` and `asc`; `problems` joins `ingest_problem_timestamp` sorting non-null timestamps first (`DESC`/`ASC`) then null timestamps (`problem_id` tiebreak) identically in SQLite & in-memory; ranked routes sort `skills` by `invocations`, `tools` by `TotalSchemaCost` then `Invocations`, and `servers` by `UnusedCost` then `totalSchemaCost` then `Invocations` (`DESC`/`ASC`, tiebreak name ASC); SQLite persists & round-trips `AgentInstanceId = "claude:compact_boundary"`; all existing `MinimalApiEndpointTests` route mocks updated for `order = "desc"`. Loopback local API uses no bearer auth policy. | Fail on missing `order` parameter/property, `limit=50` clamping or `limit=500` not returning `400` `{"error": "..."}`, `/charts` missing unmeasurable top-level window / unpaged `first` & `last` / 1-based `index`, null-timestamp `problems` SQLite vs in-memory divergence, or `asc` default order on section stores. | All 7 test classes across Presentation, Application, and Data projects pass (zero failures, non-zero test count). |
+
+
+      #### Decisions this task cites
+
+      | ID | Question | Answer / decision | Mitigating and supporting information | Status / approval provenance |
+
+      |---|---|---|---|---|
+
+      | D9 | Which existing test expectations intentionally shift under the new defaults and contract? | Authorize updating expectations for `desc` default (`SessionSectionEndpointsTests`, `SessionKwSkillLoadsTests`, `SqliteRelationalStoreReadTests`), HTTP `400` `{"error": "..."}` / `limit=25&order=desc` route mock signatures (`MinimalApiEndpointTests`, `AnalyticsReadPathTests`, `AnalyticsOperationsDetailTests`, `ApplicationParityTests`), `&limit=25&order=desc` URLs (`kyberApi.sections.test.ts`, `AgentSessionDashboard.test.tsx`), single-page `<Pager>` visibility (`Session*Section.test.tsx`, `SchemaCostRanking.test.tsx`, `SkillsPanel.test.tsx`), root `timeline-level-more` load-more -> `<Pager>` transition (`SessionTimelineSection.test.tsx`), and `tool_use` `Parts.Count` (`ClaudeTranscriptMapperTests`). | Explicitly records contract shifts under `plan-authoring.md` rather than relaxing invariants silently. | Accepted (`autonomous`: covered by request contract changes) |
+
+
+      Results of the tasks this one follows, as their workers reported them:
+
+      {prior_results}
+    agent: dev-easy
+    agent-confidence: 1
+    difficulty: easy
+    difficulty-source: architect
+    technology: csharp
+  - id: T4
+    capabilities: React hooks, TypeScript API client typing, accessible UI controls, browser sessionStorage handling, and Vitest / Testing Library tests.
+    depends-on: []
+    files:
+      - dash/web/src/lib/kyberApi.ts
+      - dash/web/src/components/session/types.ts
+      - dash/web/src/components/session/useSectionPage.ts
+      - dash/web/src/components/ui/Pager.tsx
+      - dash/web/src/lib/kyberApi.sections.test.ts
+      - dash/web/src/components/session/useSectionPage.test.tsx
+      - dash/web/src/components/ui/Pager.test.tsx
+      - dash/web/src/components/AgentSessionDashboard.test.tsx
+    session: frontend-shared-paging
+    prompt: >
+      Task T4: Extend kyberApi, useSectionPage, types, and shared Pager for 25, 50, 100, per-section sessionStorage, and sort toggle
+
+      Worktree: {worktree}
+
+
+      - **Objective:** Update the shared session API client, query key builder, `useSectionPage` hook, and `Pager` UI control so every list section shares one implementation of page size persistence (`25`, `50`, `100`), sort order toggle (`desc`, `asc`), page-1 reset, and reachable controls whenever `total > 0`.
+
+      - **Capabilities:** React hooks, TypeScript API client typing, accessible UI controls, browser `sessionStorage` handling, and Vitest / Testing Library tests.
+
+      - **Difficulty:** easy
+
+      - **Technology:** react
+
+      - **Session:** frontend-shared-paging
+
+      - **Depends on:** none
+
+      - **Files:**
+        - `dash/web/src/lib/kyberApi.ts`: `KYBER_SECTION_PAGE_LIMIT`, `KyberSectionPageLimit`, `KyberSectionPageOrder`, `KyberSectionWindow`, `KyberSessionChartsSection`, `kyberSessionSectionQueryKey`, `sectionPath`, `fetchKyberSession*` — define `KyberSectionPageLimit` (`25 | 50 | 100`) and `KyberSectionPageOrder` (`'desc' | 'asc'`) beside `KyberSectionWindow`, carry `order` on `KyberSectionWindow`, extend `KyberSessionChartsSection` from `KyberSectionWindow` with whole-session `context` fields (`measuredInputTotal`, `maxBucketTokens`, `observedBuckets`, `observedServers`, `missingBuckets`, `residualReasons`) without renaming `KyberSessionChartsSection`, and thread `page`, `limit` (default `25`), and `order` (default `'desc'`) across query keys and URL parameters for all section fetchers including `fetchKyberSessionCharts` and `fetchKyberSessionTimeline`.
+        - `dash/web/src/components/session/types.ts`: `PagedWindow`, `KyberSectionPageLimit`, `KyberSectionPageOrder` — import and re-export `KyberSectionPageLimit` / `KyberSectionPageOrder` (plus compatibility aliases `SectionPageLimit`, `SectionPageOrder` if used) from `kyberApi.ts` and extend `PagedWindow` with optional `limitOptions`, `onLimitChange`, `order`, `onOrderChange`, `orderLabels`, `loading`, and `ariaLabel`.
+        - `dash/web/src/components/session/useSectionPage.ts`: `useSectionPage` — read/write per-section `limit` in `sessionStorage` (`kyberdash:session-section:limit:${section}`, guarded try-catch validating `{25,50,100}` and defaulting to `25`), default `order` to `'desc'`, reset `page` to `1` on `setLimit` or `setOrder`, include `[sessionId, section, page, limit, order]` in query key, and expose ready-to-spread `pagerProps` with `limitOptions: [25, 50, 100]`, `onLimitChange`, `order`, `onOrderChange`.
+        - `dash/web/src/components/ui/Pager.tsx`: `Pager` — add accessible `<select>` (`data-testid="pager-limit"`) for `limitOptions` and toggle `<button>` (`data-testid="pager-order"`, `"Newest first"` vs `"Oldest first"` or `orderLabels`) rendered inside `list-pager` whenever `total > 0` and `onLimitChange`/`onOrderChange` are supplied, while preserving `total <= limit` hide when neither callback is present.
+        - `dash/web/src/lib/kyberApi.sections.test.ts`: test query keys, URL params (`limit`, `order`), and `fetchKyberSessionCharts` paging/sort requests (`D9`).
+        - `dash/web/src/components/session/useSectionPage.test.tsx`: test default `25` & `'desc'`, per-section `sessionStorage` persistence/isolation, invalid stored value fallback to `25`, `page = 1` reset on limit/order change, and query key `[sessionId, section, page, limit, order]`.
+        - `dash/web/src/components/ui/Pager.test.tsx`: test reachable limit/order controls on `total > 0 && total <= limit`, callback invocations, zero-total hide, and backward-compatible single-page hide when callbacks are omitted.
+        - `dash/web/src/components/AgentSessionDashboard.test.tsx`: update section fetch URL assertions for `&limit=25&order=desc` (`D9`).
+      - **Commands:**
+        - `kyber-weave review gates . --agent <you> --task T4 --red`
+        - `npm --prefix dash run test:related -- web/src/lib/kyberApi.sections.test.ts web/src/components/session/useSectionPage.test.tsx web/src/components/ui/Pager.test.tsx web/src/components/AgentSessionDashboard.test.tsx`
+        - `npm --prefix dash run check:reachable`
+        - `kyber-weave review gates . --agent <you> --task T4`
+      - **Acceptance:**
+        - All 4 shared frontend Vitest files and `check:reachable` pass; `KyberSectionPageLimit` / `KyberSectionPageOrder` / `KyberSessionChartsSection` live in `kyberApi.ts` and re-export in `types.ts`; `useSectionPage` persists per-section `25, 50, 100` sizes in `sessionStorage`, resets to page `1` on limit/order change, encodes `page`, `limit`, and `order` in query keys and URLs, and `<Pager>` exposes controls whenever `total > 0`.
+
+      Reference content for this task, quoted exactly from its source document and complete as given:
+
+
+      #### Test contract row for T4
+
+      | Task | Test project or file | Runner command | Observable behavior | RED evidence required | GREEN acceptance |
+
+      |---|---|---|---|---|---|
+
+      | T4 | `dash/web/src/lib/kyberApi.sections.test.ts`, `dash/web/src/components/session/useSectionPage.test.tsx`, `dash/web/src/components/ui/Pager.test.tsx`, `dash/web/src/components/AgentSessionDashboard.test.tsx` | `npm --prefix dash run test:related -- web/src/lib/kyberApi.sections.test.ts web/src/components/session/useSectionPage.test.tsx web/src/components/ui/Pager.test.tsx web/src/components/AgentSessionDashboard.test.tsx && npm --prefix dash run check:reachable` | Normal: `KyberSectionPageLimit`, `KyberSectionPageOrder`, and `KyberSessionChartsSection` (extending `KyberSectionWindow`) live in `kyberApi.ts` and are re-exported by `session/types.ts`; `kyberSessionSectionQueryKey` includes `[sessionId, section, page, limit, order]`; `sectionPath` and `fetchKyberSession*` (including `fetchKyberSessionCharts` and `fetchKyberSessionTimeline`) send `page`, `limit`, `order`; `useSectionPage` persists `limit` in `sessionStorage` per section, defaults `limit=25` / `order='desc'`, resets invalid stored sizes (`"30"`, non-numeric, throws on `sessionStorage`) to `25`, resets `page` to `1` on `setLimit`/`setOrder`; `Pager` shows page-size selector + sort toggle when `total > 0` with callbacks even if `total <= limit`, still hides when `total === 0` or bare single-page legacy usage without limit/order handlers. | Fail assertions checking `&limit=50&order=asc`, query key containing `limit`/`order`, `sessionStorage` per-section persistence, page reset to `1`, or visible single-page controls when callbacks supplied. | All tests across all 4 Vitest files and `check:reachable` pass (non-zero count, zero failures). |
+
+
+      #### Decisions this task cites
+
+      | ID | Question | Answer / decision | Mitigating and supporting information | Status / approval provenance |
+
+      |---|---|---|---|---|
+
+      | D9 | Which existing test expectations intentionally shift under the new defaults and contract? | Authorize updating expectations for `desc` default (`SessionSectionEndpointsTests`, `SessionKwSkillLoadsTests`, `SqliteRelationalStoreReadTests`), HTTP `400` `{"error": "..."}` / `limit=25&order=desc` route mock signatures (`MinimalApiEndpointTests`, `AnalyticsReadPathTests`, `AnalyticsOperationsDetailTests`, `ApplicationParityTests`), `&limit=25&order=desc` URLs (`kyberApi.sections.test.ts`, `AgentSessionDashboard.test.tsx`), single-page `<Pager>` visibility (`Session*Section.test.tsx`, `SchemaCostRanking.test.tsx`, `SkillsPanel.test.tsx`), root `timeline-level-more` load-more -> `<Pager>` transition (`SessionTimelineSection.test.tsx`), and `tool_use` `Parts.Count` (`ClaudeTranscriptMapperTests`). | Explicitly records contract shifts under `plan-authoring.md` rather than relaxing invariants silently. | Accepted (`autonomous`: covered by request contract changes) |
+
+
+      Results of the tasks this one follows, as their workers reported them:
+
+      {prior_results}
+    agent: dev-easy
+    agent-confidence: 1
+    difficulty: easy
+    difficulty-source: architect
+    technology: react
+  - id: T5
+    capabilities: React component integration, Testing Library interaction tests, and removal of client-side sorting in favor of server ordering.
+    depends-on:
+      - T4
+    files:
+      - dash/web/src/components/SchemaCostRanking.tsx
+      - dash/web/src/components/SkillsPanel.tsx
+      - dash/web/src/components/session/SessionToolsSection.tsx
+      - dash/web/src/components/session/SessionServersSection.tsx
+      - dash/web/src/components/session/SessionSkillsSection.tsx
+      - dash/web/src/components/session/SessionKwSkillsSection.tsx
+      - dash/web/src/components/session/SessionRequestsSection.tsx
+      - dash/web/src/components/session/SessionReconciliationSection.tsx
+      - dash/web/src/components/session/SessionProblemsSection.tsx
+      - dash/web/src/components/SchemaCostRanking.test.tsx
+      - dash/web/src/components/SkillsPanel.test.tsx
+      - dash/web/src/components/session/SessionToolsSection.test.tsx
+      - dash/web/src/components/session/SessionServersSection.test.tsx
+      - dash/web/src/components/session/SessionSkillsSection.test.tsx
+      - dash/web/src/components/session/SessionKwSkillsSection.test.tsx
+      - dash/web/src/components/session/SessionRequestsSection.test.tsx
+      - dash/web/src/components/session/SessionReconciliationSection.test.tsx
+      - dash/web/src/components/session/SessionProblemsSection.test.tsx
+    session: frontend-list-sections
+    prompt: >
+      Task T5: Wire shared Pager (page size + sort order) across standard session detail list sections and panels
+
+      Worktree: {worktree}
+
+
+      - **Objective:** Connect `useSectionPage` `pagerProps` to all standard list sections (`SessionToolsSection`, `SchemaCostRanking`, `SessionServersSection`, `SessionSkillsSection`, `SkillsPanel`, `SessionKwSkillsSection`, `SessionRequestsSection`, `SessionReconciliationSection`, `SessionProblemsSection`), remove client-side sorting in `SchemaCostRanking`, and test page, page-size, and order transitions in each component.
+
+      - **Capabilities:** React component integration, Testing Library interaction tests, and removal of client-side sorting in favor of server ordering.
+
+      - **Difficulty:** easy
+
+      - **Technology:** react
+
+      - **Session:** frontend-list-sections
+
+      - **Depends on:** T4 (consumes updated `useSectionPage`, `PagedWindow`, and `Pager`)
+
+      - **Files:**
+        - `dash/web/src/components/SchemaCostRanking.tsx`: `SchemaCostRanking` — remove client-side `.sort(...)` (`sortedTools`) so server order governs `tools`, and forward extended `pager` props into `<Pager>` (`D6`).
+        - `dash/web/src/components/SkillsPanel.tsx`: `SkillsPanel` — forward extended `pager` props into `<Pager>`.
+        - `dash/web/src/components/session/SessionToolsSection.tsx`: `SessionToolsSection` — wire `useSectionPage('tools', ...)` `pagerProps` cleanly into `SchemaCostRanking`.
+        - `dash/web/src/components/session/SessionServersSection.tsx`: `SessionServersSection` — pass full `pagerProps` (including limit/order controls) into `<Pager>`.
+        - `dash/web/src/components/session/SessionSkillsSection.tsx`: `SessionSkillsSection` — pass full `pagerProps` into `SkillsPanel`.
+        - `dash/web/src/components/session/SessionKwSkillsSection.tsx`: `SessionKwSkillsSection` — pass full `pagerProps` into `<Pager>`.
+        - `dash/web/src/components/session/SessionRequestsSection.tsx`: `SessionRequestsSection` — pass full `pagerProps` into `<Pager>`.
+        - `dash/web/src/components/session/SessionReconciliationSection.tsx`: `SessionReconciliationSection` — pass full `pagerProps` into `<Pager>`.
+        - `dash/web/src/components/session/SessionProblemsSection.tsx`: `SessionProblemsSection` — pass full `pagerProps` into `<Pager>`.
+        - `dash/web/src/components/SchemaCostRanking.test.tsx`, `dash/web/src/components/SkillsPanel.test.tsx`, `dash/web/src/components/session/SessionToolsSection.test.tsx`, `dash/web/src/components/session/SessionServersSection.test.tsx`, `dash/web/src/components/session/SessionSkillsSection.test.tsx`, `dash/web/src/components/session/SessionKwSkillsSection.test.tsx`, `dash/web/src/components/session/SessionRequestsSection.test.tsx`, `dash/web/src/components/session/SessionReconciliationSection.test.tsx`, `dash/web/src/components/session/SessionProblemsSection.test.tsx`: update single-page assertions where controls stay reachable on `total > 0` (`D9`) and test page change, page-size change (25, 50, 100), sort order toggle (Newest first vs Oldest first), page-1 reset, and `SchemaCostRanking` server-order preservation.
+      - **Commands:**
+        - `kyber-weave review gates . --agent <you> --task T5 --red`
+        - `npm --prefix dash run test:related -- web/src/components/SchemaCostRanking.test.tsx web/src/components/SkillsPanel.test.tsx web/src/components/session/SessionToolsSection.test.tsx web/src/components/session/SessionServersSection.test.tsx web/src/components/session/SessionSkillsSection.test.tsx web/src/components/session/SessionKwSkillsSection.test.tsx web/src/components/session/SessionRequestsSection.test.tsx web/src/components/session/SessionReconciliationSection.test.tsx web/src/components/session/SessionProblemsSection.test.tsx`
+        - `npm --prefix dash run check:reachable`
+        - `kyber-weave review gates . --agent <you> --task T5`
+      - **Acceptance:**
+        - All 9 component Vitest files and `check:reachable` pass; every standard session list section + reusable panel displays working 25, 50, 100, paging, and sort order controls backed by `useSectionPage` whenever `total > 0`.
+
+      Reference content for this task, quoted exactly from its source document and complete as given:
+
+
+      #### Test contract row for T5
+
+      | Task | Test project or file | Runner command | Observable behavior | RED evidence required | GREEN acceptance |
+
+      |---|---|---|---|---|---|
+
+      | T5 | `dash/web/src/components/SchemaCostRanking.test.tsx`, `dash/web/src/components/SkillsPanel.test.tsx`, `dash/web/src/components/session/SessionToolsSection.test.tsx`, `dash/web/src/components/session/SessionServersSection.test.tsx`, `dash/web/src/components/session/SessionSkillsSection.test.tsx`, `dash/web/src/components/session/SessionKwSkillsSection.test.tsx`, `dash/web/src/components/session/SessionRequestsSection.test.tsx`, `dash/web/src/components/session/SessionReconciliationSection.test.tsx`, `dash/web/src/components/session/SessionProblemsSection.test.tsx` | `npm --prefix dash run test:related -- web/src/components/SchemaCostRanking.test.tsx web/src/components/SkillsPanel.test.tsx web/src/components/session/SessionToolsSection.test.tsx web/src/components/session/SessionServersSection.test.tsx web/src/components/session/SessionSkillsSection.test.tsx web/src/components/session/SessionKwSkillsSection.test.tsx web/src/components/session/SessionRequestsSection.test.tsx web/src/components/session/SessionReconciliationSection.test.tsx web/src/components/session/SessionProblemsSection.test.tsx && npm --prefix dash run check:reachable` | Each of the 9 list/table sections + reusable panels handles page change (`page=2`), page-size change (`25 -> 50 -> 100`, resetting to `page=1` and persisting per section), sort toggle (`Newest first` <-> `Oldest first`, resetting to `page=1`), renders controls even on 1-page non-empty results (`total > 0`), hides cleanly on empty results (`total === 0`), and `SchemaCostRanking` preserves server-provided `tools` order without client re-sorting. | Fail assertions testing page-size change, order toggle, page-1 reset, single-page control visibility on `total > 0`, and server-order preservation in `SchemaCostRanking`. | All tests across all 9 Vitest files and `check:reachable` pass (non-zero count, zero failures). |
+
+
+      #### Decisions this task cites
+
+      | ID | Question | Answer / decision | Mitigating and supporting information | Status / approval provenance |
+
+      |---|---|---|---|---|
+
+      | D6 | How is `SchemaCostRanking.tsx` client-side sorting handled? | Remove `.sort(...)` (`sortedTools`) in `SchemaCostRanking.tsx` and render server-returned order directly. | Eliminates client override of server ordering when schema metrics are absent. | Accepted (`autonomous`: covered by `dash/AGENTS.md` & server-sort constraint) |
+
+      | D9 | Which existing test expectations intentionally shift under the new defaults and contract? | Authorize updating expectations for `desc` default (`SessionSectionEndpointsTests`, `SessionKwSkillLoadsTests`, `SqliteRelationalStoreReadTests`), HTTP `400` `{"error": "..."}` / `limit=25&order=desc` route mock signatures (`MinimalApiEndpointTests`, `AnalyticsReadPathTests`, `AnalyticsOperationsDetailTests`, `ApplicationParityTests`), `&limit=25&order=desc` URLs (`kyberApi.sections.test.ts`, `AgentSessionDashboard.test.tsx`), single-page `<Pager>` visibility (`Session*Section.test.tsx`, `SchemaCostRanking.test.tsx`, `SkillsPanel.test.tsx`), root `timeline-level-more` load-more -> `<Pager>` transition (`SessionTimelineSection.test.tsx`), and `tool_use` `Parts.Count` (`ClaudeTranscriptMapperTests`). | Explicitly records contract shifts under `plan-authoring.md` rather than relaxing invariants silently. | Accepted (`autonomous`: covered by request contract changes) |
+
+
+      Results of the tasks this one follows, as their workers reported them:
+
+      {prior_results}
+    agent: dev-easy
+    agent-confidence: 1
+    difficulty: easy
+    difficulty-source: architect
+    technology: react
+  - id: T6
+    capabilities: React Query / useQueries coordination, SVG/chart component state without client-side domain calculations, and Vitest interaction testing.
+    depends-on:
+      - T4
+    files:
+      - dash/web/src/components/session/SessionChartsSection.tsx
+      - dash/web/src/components/SessionSpendCharts.tsx
+      - dash/web/src/components/session/SessionTimelineSection.tsx
+      - dash/web/src/components/session/SessionChartsSection.test.tsx
+      - dash/web/src/components/SessionSpendCharts.test.tsx
+      - dash/web/src/components/session/SessionTimelineSection.test.tsx
+    session: frontend-complex-sections
+    prompt: >
+      Task T6: Add server-backed paging and sorting to Context Composition and Timeline, plus honest Claude residual copy
+
+      Worktree: {worktree}
+
+
+      - **Objective:** Page and sort Context Composition (both Stacked Bars and Heatmap Matrix views) and Timeline (both Call Tree and Duration Timeline views) through `useSectionPage` + `<Pager>`, preserve whole-session chart scaling and legend attribution, and surface honest transcript-omission reasons on the Context Composition card.
+
+      - **Capabilities:** React Query / `useQueries` coordination, SVG/chart component state without client-side domain calculations, and Vitest interaction testing.
+
+      - **Difficulty:** medium
+
+      - **Technology:** react
+
+      - **Session:** frontend-complex-sections
+
+      - **Depends on:** T4 (consumes updated `useSectionPage`, `fetchKyberSessionCharts`, `fetchKyberSessionTimeline`, and `Pager`)
+
+      - **Files:**
+        - `dash/web/src/components/session/SessionChartsSection.tsx`: `SessionChartsSection` — switch from raw `useQuery` to `useSectionPage('charts', ...)` calling `fetchKyberSessionCharts` and passing paged/sorted data + `pagerProps` to `SessionSpendCharts`.
+        - `dash/web/src/components/SessionSpendCharts.tsx`: `SessionSpendCharts`, `ContextCompositionChart`, `ContextCaveat` — accept `contextPager` prop and render shared `<Pager>` across BOTH `'bars'` (Stacked Bars) and `'heatmap'` (Heatmap Matrix) views; build `legendSegments` and `hasServerAttribution` from whole-session `context.observedBuckets` and `context.observedServers` when present (falling back to current page `rows` if absent); size `Residual %` and Heatmap intensity from whole-session `measuredInputTotal` and `maxBucketTokens` when present; update `ContextCaveat` and card footer to render server `missingBuckets`/`residualReasons` explaining omitted Claude system prompt & tool schemas plainly and suppress `heavyDrift` ("proxy is a poor fit") warning copy when `residualReasons`/`missingBuckets` explains the omitted harness telemetry (`D12`).
+        - `dash/web/src/components/session/SessionTimelineSection.tsx`: `SessionTimelineSection` — connect top-level timeline query to `useSectionPage('timeline', ...)`, share `<Pager>` across Call Tree and Duration Timeline views, forward active `limit` & `order` to child level `useQueries`, and clear/reset BOTH `levelPages` AND `expandedIds` whenever `limit`, `order`, or root `page` changes (`D8`).
+        - `dash/web/src/components/session/SessionChartsSection.test.tsx`, `dash/web/src/components/SessionSpendCharts.test.tsx`, `dash/web/src/components/session/SessionTimelineSection.test.tsx`: update root `timeline-level-more` load-more tests to shared `<Pager>` controls while preserving child `timeline-level-more` tests (`D9`), test `expandedIds` reset on limit, order, or root page changes, and test page change, page-size change (25, 50, 100 -> page `1`), and order toggle (`desc` vs `asc` -> page `1`) in Stacked Bars, Heatmap Matrix, Call Tree, and Duration Timeline, plus whole-session `observedBuckets`/`observedServers` legend stability, `Residual %` invariance, and `heavyDrift` suppression when `residualReasons` explains omitted telemetry.
+      - **Commands:**
+        - `kyber-weave review gates . --agent <you> --task T6 --red`
+        - `npm --prefix dash run test:related -- web/src/components/session/SessionChartsSection.test.tsx web/src/components/SessionSpendCharts.test.tsx web/src/components/session/SessionTimelineSection.test.tsx`
+        - `npm --prefix dash run check:reachable`
+        - `kyber-weave review gates . --agent <you> --task T6`
+      - **Acceptance:**
+        - All 3 complex-section Vitest files and `check:reachable` pass; Context Composition pages and sorts in both Stacked Bars and Heatmap Matrix views with whole-session scaling, stable legend attribution, and honest Claude residual explanations, and Timeline pages and sorts across Call Tree and Duration Timeline including child-level & expansion reset on limit/order/page changes.
+
+      Reference content for this task, quoted exactly from its source document and complete as given:
+
+
+      #### Test contract row for T6
+
+      | Task | Test project or file | Runner command | Observable behavior | RED evidence required | GREEN acceptance |
+
+      |---|---|---|---|---|---|
+
+      | T6 | `dash/web/src/components/session/SessionChartsSection.test.tsx`, `dash/web/src/components/SessionSpendCharts.test.tsx`, `dash/web/src/components/session/SessionTimelineSection.test.tsx` | `npm --prefix dash run test:related -- web/src/components/session/SessionChartsSection.test.tsx web/src/components/SessionSpendCharts.test.tsx web/src/components/session/SessionTimelineSection.test.tsx && npm --prefix dash run check:reachable` | `SessionChartsSection` uses `useSectionPage('charts', ...)` and drives `<Pager>` across BOTH Context Composition Stacked Bars and Heatmap Matrix (page change, `25`/`50`/`100` page-size change, newest/oldest order change resetting to page `1`, single-page `total > 0` reachable, empty `total === 0` hidden); `Residual %`, `legendSegments`, `hasServerAttribution`, and heatmap scale use whole-session `measuredInputTotal`, `maxBucketTokens`, `observedBuckets`, and `observedServers` consistently across pages; `ContextCaveat` and card footer display `residualReasons`/`missingBuckets` explaining omitted Claude system prompt & tool schemas plainly and suppress `heavyDrift` ("proxy is a poor fit") copy when harness omission telemetry explains the residual share; `SessionTimelineSection` shares `useSectionPage('timeline', ...)` + `<Pager>` across Call Tree & Duration Timeline, propagates `limit` & `order` to expanded children, resets `levelPages` and `expandedIds` on `limit`/`order`/`page` changes, and updates root `timeline-level-more` tests to `<Pager>` controls. | Fail assertions on Context Composition paging in Stacked Bars & Heatmap Matrix, whole-session `observedBuckets`/`observedServers` legend stability, `heavyDrift` suppression with `residualReasons`, whole-session residual % invariance, or Timeline Call Tree / Duration Timeline `limit`/`order` + `expandedIds` reset. | All tests across all 3 Vitest files and `check:reachable` pass (non-zero count, zero failures). |
+
+
+      #### Decisions this task cites
+
+      | ID | Question | Answer / decision | Mitigating and supporting information | Status / approval provenance |
+
+      |---|---|---|---|---|
+
+      | D12 | How is cumulative multi-turn Claude context reconstructed and explained without estimating? | In `CanonRecordHydration.Hydrate`, surface `AgentInstanceId == "claude:compact_boundary"` onto `CanonicalRecord.Raw["claude.compact_boundary"]` without emitting synthetic `ContentPart` text; in `CanonSessionProjectorEngine.BuildStoredSessionProjection`, recognize `#agent-` subagent keys (`IsSubagent = true`, `ParentSessionId`), exclude subagent turns from parent context, and accumulate prior turns `< k` (`system_prompt`, `instruction_context`, `conversation_history`, `tool_result_content`) since `"claude.compact_boundary"` in a linear `O(T)` pass using pre-reduced/pre-counted summary `ContextPart`s (`Derived = true`, `Text = string.Empty`) rather than quadratic re-tokenization; derive `/charts` `missingBuckets` and `residualReasons` from existing `CanonSynth.MeasurabilityFor(harness)`, render omission reasons in `ContextCaveat`/footer, suppress `heavyDrift` ("proxy is a poor fit") when omission telemetry explains residual share, and build chart legend/server flags from whole-session `observedBuckets`/`observedServers`. | Exact linear reconstruction with zero heuristic multipliers (`docs/rules/honest-unobservability.md`) and accurate legends/explanations across paged charts views. | Accepted (`autonomous`: covered by `docs/rules/honest-unobservability.md` & request) |
+
+      | D8 | How do `SessionTimelineSection` Call Tree and Duration Timeline coordinate `limit`, `order`, and expanded child levels? | Drive root timeline via `useSectionPage('timeline', ...)`, share one `<Pager>` across both views, pass `limit`/`order` into child `useQueries`, and reset both `levelPages` and `expandedIds` whenever `limit`, `order`, or root `page` changes. | Keeps both timeline views consistent and prevents stale child caches or mismatched expanded branches. | Accepted (`autonomous`: low reversal cost, covered by shared-hook constraint) |
+
+      | D9 | Which existing test expectations intentionally shift under the new defaults and contract? | Authorize updating expectations for `desc` default (`SessionSectionEndpointsTests`, `SessionKwSkillLoadsTests`, `SqliteRelationalStoreReadTests`), HTTP `400` `{"error": "..."}` / `limit=25&order=desc` route mock signatures (`MinimalApiEndpointTests`, `AnalyticsReadPathTests`, `AnalyticsOperationsDetailTests`, `ApplicationParityTests`), `&limit=25&order=desc` URLs (`kyberApi.sections.test.ts`, `AgentSessionDashboard.test.tsx`), single-page `<Pager>` visibility (`Session*Section.test.tsx`, `SchemaCostRanking.test.tsx`, `SkillsPanel.test.tsx`), root `timeline-level-more` load-more -> `<Pager>` transition (`SessionTimelineSection.test.tsx`), and `tool_use` `Parts.Count` (`ClaudeTranscriptMapperTests`). | Explicitly records contract shifts under `plan-authoring.md` rather than relaxing invariants silently. | Accepted (`autonomous`: covered by request contract changes) |
+
+
+      Results of the tasks this one follows, as their workers reported them:
+
+      {prior_results}
+    agent: dev-medium
+    agent-confidence: 1
+    difficulty: medium
+    difficulty-source: architect
+    technology: react
+worker-roster: tiered
