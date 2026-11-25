@@ -26,7 +26,7 @@ public class ClaudeTranscriptMapperTests
     [Fact]
     public void Map_ThrowsArgumentNullException_WhenUnitIsNull()
     {
-        ClaudeTranscriptMapper mapper = new();
+        ClaudeTranscriptMapper mapper = CreateMapper();
 
         Assert.Throws<ArgumentNullException>(() => mapper.Map(null!, ImportedAt));
     }
@@ -39,7 +39,7 @@ public class ClaudeTranscriptMapperTests
     [InlineData("{\"type\":\"user\",\"sessionId\":\"sess-no-usage\",\"timestamp\":\"2026-11-19T10:00:00Z\",\"message\":{\"role\":\"user\",\"content\":\"hello\"}}")]
     public void Map_ReturnsEmptyCollections_WhenRawTextIsEmptyMalformedOrWithoutUsage(string? rawText)
     {
-        ClaudeTranscriptMapper mapper = new();
+        ClaudeTranscriptMapper mapper = CreateMapper();
         NativeSourceUnit unit = CreateUnit("/home/dev/.claude/projects/repo/empty-session.jsonl", rawText);
 
         CollectedBatch batch = mapper.Map(unit, ImportedAt);
@@ -62,7 +62,7 @@ public class ClaudeTranscriptMapperTests
             "{\"type\":\"assistant\",\"sessionId\":\"sess-all\",\"timestamp\":\"2026-11-19T10:00:01.000Z\",\"terminationReason\":\"task_complete\",\"message\":{\"id\":\"msg-all-1\",\"role\":\"assistant\",\"model\":\"claude-sonnet-4-5\",\"content\":[{\"type\":\"thinking\",\"thinking\":\"Checking files\"},{\"type\":\"text\",\"text\":\"Build looks clean.\"}],\"usage\":{\"input_tokens\":120,\"output_tokens\":80,\"cache_read_input_tokens\":500,\"cache_creation_input_tokens\":40,\"reasoning_tokens\":15}}}",
         ]);
 
-        ClaudeTranscriptMapper mapper = new();
+        ClaudeTranscriptMapper mapper = CreateMapper();
         CollectedBatch batch = mapper.Map(CreateUnit("/tmp/.claude/projects/repo/sess-all.jsonl", jsonl), ImportedAt);
 
         Assert.Equal("claude-code", batch.Source.HarnessId);
@@ -146,7 +146,7 @@ public class ClaudeTranscriptMapperTests
         string jsonl =
             "{\"type\":\"assistant\",\"timestamp\":\"2026-11-19T10:05:00.000Z\",\"message\":{\"role\":\"assistant\",\"content\":\"Done\",\"usage\":{\"input_tokens\":10,\"output_tokens\":5}}}";
 
-        ClaudeTranscriptMapper mapper = new();
+        ClaudeTranscriptMapper mapper = CreateMapper();
         CollectedBatch batch = mapper.Map(CreateUnit("/tmp/.claude/projects/repo/stem-session.jsonl", jsonl), ImportedAt);
 
         CollectedSession session = Assert.Single(batch.Sessions);
@@ -200,7 +200,7 @@ public class ClaudeTranscriptMapperTests
             "{\"type\":\"assistant\",\"sessionId\":\"sess-tools\",\"timestamp\":\"2026-11-19T11:00:02.000Z\",\"message\":{\"id\":\"msg-t2\",\"role\":\"assistant\",\"model\":\"claude-opus-4-6\",\"content\":[{\"type\":\"text\",\"text\":\"Handled tool errors\"}],\"usage\":{\"input_tokens\":60,\"output_tokens\":10}}}",
         ]);
 
-        ClaudeTranscriptMapper mapper = new();
+        ClaudeTranscriptMapper mapper = CreateMapper();
         CollectedBatch batch = mapper.Map(CreateUnit("/tmp/.claude/projects/repo/sess-tools.jsonl", jsonl), ImportedAt);
 
         Assert.Single(batch.Sessions);
@@ -288,7 +288,7 @@ public class ClaudeTranscriptMapperTests
             $"{{\"type\":\"user\",\"sessionId\":\"sess-json\",\"timestamp\":\"2026-11-19T11:10:01.000Z\",\"message\":{{\"role\":\"user\",\"content\":[{{\"type\":\"tool_result\",\"tool_use_id\":\"tc-doc\",\"content\":{System.Text.Json.JsonSerializer.Serialize(jsonDocResult)}}},{{\"type\":\"tool_result\",\"tool_use_id\":\"tc-nested\",\"content\":{System.Text.Json.JsonSerializer.Serialize(nestedJsonString)}}},{{\"type\":\"tool_result\",\"tool_use_id\":\"tc-prose\",\"content\":{System.Text.Json.JsonSerializer.Serialize(proseWithJson)}}}]}}}}",
         ]);
 
-        ClaudeTranscriptMapper mapper = new();
+        ClaudeTranscriptMapper mapper = CreateMapper(LocalTextTokenizer.Shared);
         CollectedBatch batch = mapper.Map(CreateUnit("/tmp/.claude/projects/repo/sess-json.jsonl", jsonl), ImportedAt);
 
         Assert.Equal(4, batch.Records.Count);
@@ -336,7 +336,7 @@ public class ClaudeTranscriptMapperTests
             $"{{\"type\":\"user\",\"sessionId\":\"sess-model-own\",\"timestamp\":\"2026-11-19T11:30:01.000Z\",\"message\":{{\"role\":\"user\",\"content\":[{{\"type\":\"tool_result\",\"tool_use_id\":\"tc-own\",\"content\":{System.Text.Json.JsonSerializer.Serialize(jsonDocResult)}}}]}}}}",
         ]);
 
-        ClaudeTranscriptMapper mapper = new();
+        ClaudeTranscriptMapper mapper = CreateMapper(LocalTextTokenizer.Shared);
         CollectedBatch batch = mapper.Map(CreateUnit("/tmp/.claude/projects/repo/sess-model-own.jsonl", jsonl), ImportedAt);
 
         CollectedRecord toolRecord = batch.Records[1];
@@ -358,7 +358,7 @@ public class ClaudeTranscriptMapperTests
             $"{{\"type\":\"user\",\"sessionId\":\"sess-kw-load\",\"timestamp\":\"2026-11-19T11:20:01.000Z\",\"message\":{{\"role\":\"user\",\"content\":[{{\"type\":\"tool_result\",\"tool_use_id\":\"tc-kw\",\"content\":{System.Text.Json.JsonSerializer.Serialize(reply)}}}]}}}}",
         ]);
 
-        ClaudeTranscriptMapper mapper = new();
+        ClaudeTranscriptMapper mapper = CreateMapper();
         CollectedBatch batch = mapper.Map(CreateUnit("/tmp/.claude/projects/repo/sess-kw-load.jsonl", jsonl), ImportedAt);
 
         CollectedRecord loadTool = batch.Records[1];
@@ -382,7 +382,7 @@ public class ClaudeTranscriptMapperTests
             "{\"type\":\"assistant\",\"sessionId\":\"sess-scalars\",\"timestamp\":\"2026-11-19T11:20:01.000Z\",\"message\":{\"id\":\"msg-sc\",\"role\":\"assistant\",\"model\":\"claude-sonnet-4-5\",\"content\":[{\"type\":\"thinking\",\"thinking\":false},{\"type\":\"text\",\"text\":99.5},{\"type\":\"tool_use\",\"id\":\"tc-num\",\"name\":\"calc\",\"input\":7},{\"type\":\"tool_result\",\"tool_use_id\":\"tc-num\",\"content\":true}],\"usage\":{\"input_tokens\":25,\"output_tokens\":5}}}",
         ]);
 
-        ClaudeTranscriptMapper mapper = new();
+        ClaudeTranscriptMapper mapper = CreateMapper();
         CollectedBatch batch = mapper.Map(CreateUnit("/tmp/.claude/projects/repo/sess-scalars.jsonl", jsonl), ImportedAt);
 
         CollectedSession session = Assert.Single(batch.Sessions);
@@ -419,7 +419,7 @@ public class ClaudeTranscriptMapperTests
             "{\"type\":\"user\",\"sessionId\":\"sess-corr\",\"timestamp\":\"2026-11-19T11:30:03.000Z\",\"message\":{\"role\":\"user\",\"content\":[{\"type\":\"tool_result\",\"tool_use_id\":\"tc-fix\",\"content\":\"Written\"}]}}",
         ]);
 
-        ClaudeTranscriptMapper mapper = new();
+        ClaudeTranscriptMapper mapper = CreateMapper();
         CollectedBatch batch = mapper.Map(CreateUnit("/tmp/.claude/projects/repo/sess-corr.jsonl", jsonl), ImportedAt);
 
         Assert.Single(batch.Sessions);
@@ -456,7 +456,7 @@ public class ClaudeTranscriptMapperTests
     {
         string jsonl = "{\"type\":\"assistant\",\"sessionId\":\"sess-ids\",\"requestId\":\"req_011CXYZ\",\"timestamp\":\"2026-11-19T10:00:01.000Z\",\"message\":{\"id\":\"msg_01ABC\",\"role\":\"assistant\",\"model\":\"claude-sonnet-4-5\",\"content\":[{\"type\":\"text\",\"text\":\"done\"}],\"usage\":{\"input_tokens\":10,\"output_tokens\":5}}}";
 
-        CollectedBatch batch = new ClaudeTranscriptMapper().Map(CreateUnit("/tmp/.claude/projects/repo/sess-ids.jsonl", jsonl), ImportedAt);
+        CollectedBatch batch = CreateMapper().Map(CreateUnit("/tmp/.claude/projects/repo/sess-ids.jsonl", jsonl), ImportedAt);
 
         CollectedRecord turn = Assert.Single(batch.Records, static r => r.Op == RecordOp.LlmInvoke);
         Assert.Equal("msg_01ABC", turn.ResponseId);
@@ -472,7 +472,7 @@ public class ClaudeTranscriptMapperTests
     {
         string jsonl = "{\"type\":\"assistant\",\"sessionId\":\"sess-noid\",\"timestamp\":\"2026-11-19T10:00:01.000Z\",\"message\":{\"role\":\"assistant\",\"model\":\"claude-sonnet-4-5\",\"content\":[{\"type\":\"text\",\"text\":\"done\"}],\"usage\":{\"input_tokens\":10,\"output_tokens\":5}}}";
 
-        CollectedBatch batch = new ClaudeTranscriptMapper().Map(CreateUnit("/tmp/.claude/projects/repo/sess-noid.jsonl", jsonl), ImportedAt);
+        CollectedBatch batch = CreateMapper().Map(CreateUnit("/tmp/.claude/projects/repo/sess-noid.jsonl", jsonl), ImportedAt);
 
         CollectedRecord turn = Assert.Single(batch.Records, static r => r.Op == RecordOp.LlmInvoke);
         Assert.Null(turn.ResponseId);
@@ -490,7 +490,7 @@ public class ClaudeTranscriptMapperTests
         string atBoundRequestId = new('r', OtlpJoinIds.MaxIdCharacters);
         string jsonl = "{\"type\":\"assistant\",\"sessionId\":\"sess-longid\",\"requestId\":\"" + atBoundRequestId + "\",\"timestamp\":\"2026-11-19T10:00:01.000Z\",\"message\":{\"id\":\"" + tooLongMessageId + "\",\"role\":\"assistant\",\"model\":\"claude-sonnet-4-5\",\"content\":[{\"type\":\"text\",\"text\":\"done\"}],\"usage\":{\"input_tokens\":10,\"output_tokens\":5}}}";
 
-        CollectedBatch batch = new ClaudeTranscriptMapper().Map(CreateUnit("/tmp/.claude/projects/repo/sess-longid.jsonl", jsonl), ImportedAt);
+        CollectedBatch batch = CreateMapper().Map(CreateUnit("/tmp/.claude/projects/repo/sess-longid.jsonl", jsonl), ImportedAt);
 
         CollectedRecord turn = Assert.Single(batch.Records, static r => r.Op == RecordOp.LlmInvoke);
         Assert.Null(turn.ResponseId);
@@ -510,7 +510,7 @@ public class ClaudeTranscriptMapperTests
             "{\"type\":\"assistant\",\"sessionId\":\"sess-stream\",\"timestamp\":\"2026-11-19T12:00:05.000Z\",\"message\":{\"id\":\"msg-stream-2\",\"role\":\"assistant\",\"model\":\"claude-sonnet-4-5\",\"content\":[{\"type\":\"text\",\"text\":\"All done.\"}],\"usage\":{\"input_tokens\":100,\"output_tokens\":65,\"cache_read_input_tokens\":40,\"cache_creation_input_tokens\":10}}}",
         ]);
 
-        CollectedBatch batch = new ClaudeTranscriptMapper().Map(CreateUnit("/tmp/.claude/projects/repo/sess-stream.jsonl", jsonl), ImportedAt);
+        CollectedBatch batch = CreateMapper().Map(CreateUnit("/tmp/.claude/projects/repo/sess-stream.jsonl", jsonl), ImportedAt);
 
         Assert.Single(batch.Sessions);
         Assert.Equal(3, batch.Records.Count);
@@ -567,7 +567,7 @@ public class ClaudeTranscriptMapperTests
         string jsonl =
             $"{{\"type\":\"assistant\",\"sessionId\":\"sess-over\",\"timestamp\":\"2026-11-19T12:10:00.000Z\",\"message\":{{\"id\":\"msg-over\",\"role\":\"assistant\",\"model\":\"claude-sonnet-4-5\",\"content\":[{{\"type\":\"text\",\"text\":{System.Text.Json.JsonSerializer.Serialize(fullText)}}}],\"usage\":{{\"input_tokens\":10,\"output_tokens\":5}}}}}}";
 
-        CollectedBatch batch = new ClaudeTranscriptMapper().Map(CreateUnit("/tmp/.claude/projects/repo/sess-over.jsonl", jsonl), ImportedAt);
+        CollectedBatch batch = CreateMapper(LocalTextTokenizer.Shared).Map(CreateUnit("/tmp/.claude/projects/repo/sess-over.jsonl", jsonl), ImportedAt);
 
         CollectedRecord turn = Assert.Single(batch.Records);
         Assert.Equal(2, turn.Parts.Count);
@@ -623,7 +623,7 @@ public class ClaudeTranscriptMapperTests
         string jsonl =
             $"{{\"type\":\"assistant\",\"sessionId\":\"sess-midtag\",\"timestamp\":\"2026-11-19T12:15:00.000Z\",\"message\":{{\"id\":\"msg-midtag\",\"role\":\"assistant\",\"model\":\"claude-sonnet-4-5\",\"content\":[{{\"type\":\"text\",\"text\":{System.Text.Json.JsonSerializer.Serialize(fullText)}}}],\"usage\":{{\"input_tokens\":10,\"output_tokens\":5}}}}}}";
 
-        CollectedBatch batch = new ClaudeTranscriptMapper().Map(CreateUnit("/tmp/.claude/projects/repo/sess-midtag.jsonl", jsonl), ImportedAt);
+        CollectedBatch batch = CreateMapper(LocalTextTokenizer.Shared).Map(CreateUnit("/tmp/.claude/projects/repo/sess-midtag.jsonl", jsonl), ImportedAt);
 
         CollectedRecord turn = Assert.Single(batch.Records);
         Assert.Equal(2, turn.Parts.Count);
@@ -651,7 +651,7 @@ public class ClaudeTranscriptMapperTests
             "{\"type\":\"assistant\",\"sessionId\":\"sess-compact\",\"timestamp\":\"2026-11-19T12:20:05.000Z\",\"message\":{\"id\":\"msg-c3\",\"role\":\"assistant\",\"model\":\"claude-sonnet-4-5\",\"content\":[{\"type\":\"text\",\"text\":\"Answer 3\"}],\"usage\":{\"input_tokens\":30,\"output_tokens\":12}}}",
         ]);
 
-        CollectedBatch batch = new ClaudeTranscriptMapper().Map(CreateUnit("/tmp/.claude/projects/repo/sess-compact.jsonl", jsonl), ImportedAt);
+        CollectedBatch batch = CreateMapper().Map(CreateUnit("/tmp/.claude/projects/repo/sess-compact.jsonl", jsonl), ImportedAt);
 
         Assert.Equal(3, batch.Records.Count);
         Assert.Null(batch.Records[0].AgentInstanceId);
@@ -671,7 +671,7 @@ public class ClaudeTranscriptMapperTests
         string sidechainJsonl =
             "{\"type\":\"assistant\",\"sessionId\":\"sess-main\",\"isSidechain\":true,\"agentId\":\"a1b2c3\",\"timestamp\":\"2026-11-19T12:30:00.000Z\",\"message\":{\"id\":\"msg-sub-1\",\"role\":\"assistant\",\"model\":\"claude-sonnet-4-5\",\"content\":[{\"type\":\"text\",\"text\":\"Subagent output\"}],\"usage\":{\"input_tokens\":15,\"output_tokens\":5}}}";
 
-        CollectedBatch sidechainBatch = new ClaudeTranscriptMapper().Map(
+        CollectedBatch sidechainBatch = CreateMapper().Map(
             CreateUnit("/tmp/.claude/projects/repo/sess-main.jsonl", sidechainJsonl),
             ImportedAt);
 
@@ -685,7 +685,7 @@ public class ClaudeTranscriptMapperTests
         string nestedFallbackJsonl =
             "{\"type\":\"assistant\",\"timestamp\":\"2026-11-19T12:31:00.000Z\",\"message\":{\"id\":\"msg-sub-2\",\"role\":\"assistant\",\"model\":\"claude-sonnet-4-5\",\"content\":[{\"type\":\"text\",\"text\":\"Nested subagent\"}],\"usage\":{\"input_tokens\":12,\"output_tokens\":4}}}";
 
-        CollectedBatch nestedBatch = new ClaudeTranscriptMapper().Map(
+        CollectedBatch nestedBatch = CreateMapper().Map(
             CreateUnit("/tmp/.claude/projects/repo/sess-dir-parent/subagents/agent-xyz999.jsonl", nestedFallbackJsonl),
             ImportedAt);
 
@@ -699,7 +699,7 @@ public class ClaudeTranscriptMapperTests
         string normalJsonl =
             "{\"type\":\"assistant\",\"sessionId\":\"sess-regular\",\"isSidechain\":false,\"timestamp\":\"2026-11-19T12:32:00.000Z\",\"message\":{\"id\":\"msg-norm\",\"role\":\"assistant\",\"model\":\"claude-sonnet-4-5\",\"content\":[{\"type\":\"text\",\"text\":\"Main output\"}],\"usage\":{\"input_tokens\":10,\"output_tokens\":3}}}";
 
-        CollectedBatch normalBatch = new ClaudeTranscriptMapper().Map(
+        CollectedBatch normalBatch = CreateMapper().Map(
             CreateUnit("/tmp/.claude/projects/repo/sess-regular.jsonl", normalJsonl),
             ImportedAt);
 
@@ -716,7 +716,7 @@ public class ClaudeTranscriptMapperTests
             "{\"type\":\"assistant\",\"sessionId\":\"sess-parent\",\"isSidechain\":true,\"agentId\":\"sub1\",\"timestamp\":\"2026-11-19T12:40:01.000Z\",\"message\":{\"id\":\"msg-sub-tail\",\"role\":\"assistant\",\"model\":\"claude-sonnet-4-5\",\"content\":[{\"type\":\"text\",\"text\":\"Sidechain tail only\"}]}}",
         ]);
 
-        CollectedBatch sidechainTailBatch = new ClaudeTranscriptMapper().Map(
+        CollectedBatch sidechainTailBatch = CreateMapper().Map(
             CreateUnit("/tmp/.claude/projects/repo/sess-parent.jsonl", sidechainTailJsonl),
             ImportedAt);
 
@@ -732,7 +732,7 @@ public class ClaudeTranscriptMapperTests
             "{\"type\":\"assistant\",\"sessionId\":\"sess-parent\",\"timestamp\":\"2026-11-19T12:40:03.000Z\",\"message\":{\"id\":\"msg-p-tail\",\"role\":\"assistant\",\"model\":\"claude-sonnet-4-5\",\"content\":[{\"type\":\"text\",\"text\":\"Parent tail\"}]}}",
         ]);
 
-        CollectedBatch interleavedBatch = new ClaudeTranscriptMapper().Map(
+        CollectedBatch interleavedBatch = CreateMapper().Map(
             CreateUnit("/tmp/.claude/projects/repo/sess-parent.jsonl", interleavedJsonl),
             ImportedAt);
 
@@ -804,6 +804,9 @@ public class ClaudeTranscriptMapperTests
         Assert.Equal("di_registered_tokenizer", withheldPart.Withheld!.Tokenizer);
         Assert.False(withheldPart.Withheld.TokenizerIsModelOwn);
     }
+
+    private static ClaudeTranscriptMapper CreateMapper(ITextTokenizer? tokenizer = null) =>
+        new(tokenizer ?? new StubTextTokenizer("fake_tokenizer", isModelOwn: false));
 
     private sealed class StubTextTokenizer(string tokenizer, bool isModelOwn) : ITextTokenizer
     {

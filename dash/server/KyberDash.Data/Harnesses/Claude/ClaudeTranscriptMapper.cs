@@ -7,9 +7,7 @@ using KyberDash.Data.Collector;
 using KyberDash.Data.Collector.Sources;
 using KyberDash.Data.Harnesses.Otlp;
 using KyberDash.Data.Repositories;
-using KyberDash.Data.Tokenization;
 using KyberDash.Domain;
-using Microsoft.Extensions.DependencyInjection;
 
 namespace KyberDash.Data.Harnesses.Claude;
 
@@ -122,19 +120,10 @@ public class ClaudeTranscriptMapper : IHarnessMapper
     private readonly ITextTokenizer tokenizer;
 
     /// <summary>
-    /// Initializes a mapper using the default shared <see cref="LocalTextTokenizer"/>.
-    /// </summary>
-    public ClaudeTranscriptMapper()
-        : this(LocalTextTokenizer.Shared)
-    {
-    }
-
-    /// <summary>
     /// Initializes a mapper that measures tool inputs, withheld payloads, and error details with
     /// <paramref name="tokenizer"/>.
     /// </summary>
     /// <param name="tokenizer">Text tokenizer used for content-part and tool-content token measurement.</param>
-    [ActivatorUtilitiesConstructor]
     public ClaudeTranscriptMapper(ITextTokenizer tokenizer)
     {
         ArgumentNullException.ThrowIfNull(tokenizer);

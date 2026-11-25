@@ -90,11 +90,12 @@ public sealed class ClaudeContextCompositionTests
             "{\"type\":\"assistant\",\"sessionId\":\"sess-zero-compact\",\"timestamp\":\"2026-11-19T12:00:05.000Z\",\"message\":{\"id\":\"msg-post\",\"role\":\"assistant\",\"model\":\"claude-sonnet-4-5\",\"content\":[{\"type\":\"text\",\"text\":\"Post-compaction reply\"}],\"usage\":{\"input_tokens\":250,\"output_tokens\":30}}}",
         ]);
 
-        CollectedBatch batch = new ClaudeTranscriptMapper().Map(CreateClaudeUnit("/tmp/.claude/projects/repo/sess-zero-compact.jsonl", jsonl), TurnBase);
+        FakeTextTokenizer tokenizer = new();
+        CollectedBatch batch = new ClaudeTranscriptMapper(tokenizer).Map(CreateClaudeUnit("/tmp/.claude/projects/repo/sess-zero-compact.jsonl", jsonl), TurnBase);
         InMemoryRelationalStore store = new();
         store.WriteBatch(batch);
 
-        CanonSessionProjectorEngine engine = new(store, store, store, new FakePricingRepository(), new FakeTextTokenizer());
+        CanonSessionProjectorEngine engine = new(store, store, store, new FakePricingRepository(), tokenizer);
         _ = engine.ProjectIncremental();
 
         StoredSessionProjection projection = ((IProjectionStore)store).GetSessionProjection("sess-zero-compact")!;
@@ -208,11 +209,11 @@ public sealed class ClaudeContextCompositionTests
             "{\"type\":\"assistant\",\"sessionId\":\"sess-own\",\"timestamp\":\"2026-11-19T12:00:03.000Z\",\"message\":{\"id\":\"msg-2\",\"role\":\"assistant\",\"model\":\"claude-sonnet-4-5\",\"content\":[{\"type\":\"thinking\",\"thinking\":\"second thought six seven\"},{\"type\":\"text\",\"text\":\"final eight nine ten\"}],\"usage\":{\"input_tokens\":200,\"output_tokens\":25}}}",
         ]);
 
-        CollectedBatch batch = new ClaudeTranscriptMapper().Map(CreateClaudeUnit("/tmp/.claude/projects/repo/sess-own.jsonl", jsonl), TurnBase);
+        FakeTextTokenizer tokenizer = new();
+        CollectedBatch batch = new ClaudeTranscriptMapper(tokenizer).Map(CreateClaudeUnit("/tmp/.claude/projects/repo/sess-own.jsonl", jsonl), TurnBase);
         InMemoryRelationalStore store = new();
         store.WriteBatch(batch);
 
-        FakeTextTokenizer tokenizer = new();
         CanonSessionProjectorEngine engine = new(store, store, store, new FakePricingRepository(), tokenizer);
         _ = engine.ProjectIncremental();
 
@@ -254,7 +255,7 @@ public sealed class ClaudeContextCompositionTests
             "{\"type\":\"assistant\",\"timestamp\":\"2026-11-19T12:01:01.000Z\",\"message\":{\"id\":\"msg-sub2\",\"role\":\"assistant\",\"model\":\"claude-sonnet-4-5\",\"content\":[{\"type\":\"text\",\"text\":\"Nested subagent reply\"}],\"usage\":{\"input_tokens\":300,\"output_tokens\":30}}}",
         ]);
 
-        ClaudeTranscriptMapper mapper = new();
+        ClaudeTranscriptMapper mapper = new(new FakeTextTokenizer());
         CollectedBatch parentBatch = mapper.Map(CreateClaudeUnit("/tmp/.claude/projects/repo/sess-parent.jsonl", parentJsonl), TurnBase);
         CollectedBatch nestedBatch = mapper.Map(CreateClaudeUnit("/tmp/.claude/projects/repo/sess-parent/subagents/agent-nested7.jsonl", nestedSubagentJsonl), TurnBase);
 
@@ -337,7 +338,7 @@ public sealed class ClaudeContextCompositionTests
             "{\"type\":\"assistant\",\"sessionId\":\"sess-64k\",\"timestamp\":\"2026-11-19T12:00:03.000Z\",\"message\":{\"id\":\"msg-2\",\"role\":\"assistant\",\"model\":\"claude-sonnet-4-5\",\"content\":[{\"type\":\"text\",\"text\":\"done\"}],\"usage\":{\"input_tokens\":51000,\"output_tokens\":10}}}",
         ]);
 
-        CollectedBatch batch = new ClaudeTranscriptMapper().Map(CreateClaudeUnit("/tmp/.claude/projects/repo/sess-64k.jsonl", jsonl), TurnBase);
+        CollectedBatch batch = new ClaudeTranscriptMapper(LocalTextTokenizer.Shared).Map(CreateClaudeUnit("/tmp/.claude/projects/repo/sess-64k.jsonl", jsonl), TurnBase);
         InMemoryRelationalStore store = new();
         store.WriteBatch(batch);
 
@@ -497,7 +498,7 @@ public sealed class ClaudeContextCompositionTests
             store,
             store,
             new HarnessSourceRegistry(),
-            [new ClaudeTranscriptMapper()],
+            [new ClaudeTranscriptMapper(tokenizer)],
             fs,
             projector,
             rollups,
