@@ -153,12 +153,32 @@ public sealed class HookRunContextResolverTests
         TwoLiveRuns();
         _branches.Branches[_taskWorktree] = "task/t1";
         _branches.Ancestry[("run/a", "task/t1")] = true;
+        _branches.Ancestry[("run/b", "task/t1")] = false;
 
         HookRunContext context = _resolver.Resolve(Request("TASK: T1", cwd: _taskWorktree));
 
         Assert.Equal(_taskWorktree, context.Worktree);
         Assert.Equal("run/a", context.ActiveRun?.Branch);
         Assert.NotEqual(HookRunContextSource.Ambiguous, context.Source);
+    }
+
+    [Fact]
+    public void AnUnscriptedAncestryPairAnswersNullAndLeavesTheRunContextAmbiguous()
+    {
+        TwoLiveRuns();
+        _branches.Branches[_taskWorktree] = "task/t1";
+        _branches.Ancestry[("run/a", "task/t1")] = true;
+
+        Assert.Null(_branches.IsAncestor(_taskWorktree, "run/b", "task/t1"));
+
+        HookRunContext context = _resolver.Resolve(Request("TASK: T1", cwd: _taskWorktree));
+
+        Assert.Equal(HookRunContextSource.Ambiguous, context.Source);
+        Assert.Null(context.ActiveRun);
+        Assert.Equal(_main, context.Worktree);
+        Assert.Contains(
+            context.Notes,
+            note => note.Contains("git could not tell whether 'run/b' is an ancestor of 'task/t1'", StringComparison.Ordinal));
     }
 
     [Theory]
