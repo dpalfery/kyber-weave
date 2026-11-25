@@ -292,6 +292,34 @@ public sealed class ArbiterLostReturnRecoveryTests : IDisposable
         Assert.Equal(retry.Id, returned.PreId);
     }
 
+    /// <summary>
+    /// A ledger that cannot take the close must not turn the stop into an allow: the dispatch is still denied, and one
+    /// log line says it still looks in flight.
+    /// </summary>
+    [Fact]
+    public void APromptStoppedDispatchWhoseCloseCannotBeWritten_IsStillDenied()
+    {
+        StringWriter log = new();
+        HookContext context = Context(log) with
+        {
+            // The prompt is built only after the rules wrote the pre row, so the ledger fails for the close alone.
+            BuildDispatchPrompt = _ =>
+            {
+                _host.State.Log.AppendFailure = new IOException("the ledger lock was not acquired");
+                return new DispatchPromptExpansion(false, string.Empty, "No prompt: the task file is stale.");
+            },
+        };
+
+        HookOutcome stopped = Engine().DecidePreDispatch(
+            "claude", "conductor", "dev-easy", Prompt("T2"), Config(), context,
+            "call-1", sessionId: "session-1", dispatchModel: null);
+
+        Assert.Equal(HookOutcomeKind.Deny, stopped.Kind);
+        Assert.Contains("task file is stale", stopped.Reason, StringComparison.Ordinal);
+        Assert.Empty(RecoveredPosts());
+        Assert.Contains("close was not written", log.ToString(), StringComparison.Ordinal);
+    }
+
     /// <summary>A rule's refusal still outranks a prompt that cannot be built, and writes no closing row.</summary>
     [Fact]
     public void ARefusedDispatchWhosePromptCannotBeBuilt_KeepsTheRulesDenial()
