@@ -394,7 +394,9 @@ runs it after the binaries commit, then the tray step. The detector generation i
 (`dash/server/KyberDash.Application/CanonSessionProjectorEngine.cs`) treats a store stamped with any other value as stale,
 so derived findings are rebuilt with the current rules rather than kept. Under `kyberdash web`, `JobSchedulerService`
 runs maintenance ticks that invoke `TranscriptIngestionService.PurgeExpiredContent` and call
-`CanonSessionProjectorEngine.ProjectIncremental` when `IsProjectionCurrent` is false. A store stamped with an older
+`CanonSessionProjectorEngine.ProjectIncremental` when `IsProjectionCurrent` is false. Read requests gate on
+`IsProjectionCurrentForReads`, which ignores the detector stamp, and a budget-bounded read pass never restamps it,
+so only a full maintenance pass moves the stamp. A store stamped with an older
 detector version is therefore re-projected to `SqliteRelationalStore.DetectorVersion` on startup/tick, and a current
 stamp skips redundant projection with no separate `kyber build`.
 
@@ -1063,11 +1065,13 @@ dirty-key projection rather than recomputing the whole corpus on every incoming 
 The incremental projection rests on three tables, with no other bookkeeping: `store_write_marker`
 (`records_write_seq`, a counter that rises by exactly 1 per record-changing write; an absent row reads 0),
 `projection_dirty_range` (`from_seq`, `to_seq`: the writes since `from_seq`, up to `to_seq`) and
-`projection_dirty_session` (the session keys those writes touched). A projection pass is skipped when
+`projection_dirty_session` (the session keys those writes touched). A maintenance pass is skipped when
 `projection_state.records_marker` equals the write marker, `projection_state.projection_schema_version` equals
-`SqliteRelationalStore.SchemaVersion`, and `store_state.detector_version` equals `SqliteRelationalStore.DetectorVersion`.
-A new store stamps the current detector version and only a projection pass restamps it (opening a store never
-does), so bumping the constant makes the next pass run in full; unchanged session/run/execution rows also avoid redundant writes.
+`SqliteRelationalStore.SchemaVersion`, `store_state.detector_version` equals `SqliteRelationalStore.DetectorVersion`,
+and no session a read pass deferred is still dirty. A read-path pass is skipped on the marker and schema version
+alone. A new store stamps the current detector version and only a full maintenance pass restamps it (opening a
+store or a budget-bounded read pass never does), so bumping the constant makes the next maintenance pass run in
+full; unchanged session/run/execution rows also avoid redundant writes.
 
 - **Which writes move the marker.** Only `IRelationalStoreWriter.WriteBatch` (when it carries at least one
   session or record) and `IRelationalStoreWriter.DeleteSource`. Problems, quarantine, provenance, metrics,
@@ -1679,8 +1683,8 @@ Finding detail follows ADR 0013 D15/D16: the wording is "listed with N recorded 
 invocations", with no deletion or waste claim.
 
 **Detector version.** `SqliteRelationalStore.DetectorVersion` is `5` (`dash/server/KyberDash.Data/Repositories/SqliteRelationalStore.cs`). Stores stamped with
-an older generation (for example `3` or `4`) report their findings as outdated; `CanonSessionProjectorEngine`
-re-projects them to the current generation on maintenance/build.
+an older generation (for example `3` or `4`) keep serving their existing rows until a maintenance pass;
+`CanonSessionProjectorEngine` re-projects them to the current generation on maintenance/build.
 
 **Web.** The Sessions page section **4 · Skills** renders one page of skill rows with the
 shared pager (`SessionSkillsSection`, one query per the

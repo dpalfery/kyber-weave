@@ -419,15 +419,18 @@ directory and the tree KyberDash published is ever written by KyberDash.
 ### 2. Derived Projection Rebuilding (`kyber build`)
 
 The `session`, `run`, `execution`, and `finding` tables are derived projections over raw canonical
-records. If detector algorithms change or migrations are applied, rebuild projections without re-ingesting:
+records. To rebuild projections on demand without re-ingesting:
 
 ```bash
 kyberdash kyber build --db ~/.kyberdash/canon.db
 ```
 
-Upgrading the binary does not itself rebuild derived tables: opening an existing store serves
-the rows its `detector_version` stamp describes until the next build, refresh, or live-collector
-projection runs. After deploying a release whose detectors changed, run the rebuild above once.
+A detector change needs no manual rebuild. Opening an existing store keeps its
+`store_state.detector_version` stamp, and while that stamp differs from this build's
+`SqliteRelationalStore.DetectorVersion` the store reads as out of date to the maintenance pass: the
+engine's maintenance tick (or `kyber build`, if you run it) rebuilds every session in full and only
+then restamps the detector version. Read requests in between serve the existing rows and project
+only new records, within their budgets; they never restamp the detector version.
 
 This rebuilds:
 - Derived sessions from canonical records.
@@ -758,11 +761,13 @@ The quarantine **list** stays light and never serves payloads.
 The Sessions **4 · Skills** section reads the `skills` block of the session payload. That block
 is built on projection and stored in the derived `session` row
 ([skills view contract](architecture.md#skills-view-contract)). The skills work set
-`CanonSchema.DetectorVersion` to **5** (`dash/server/KyberDash.Domain/CanonSchema.cs`). A store stamped with an older generation
-reports its findings as outdated until they are rebuilt. A session row stored before the change
-has no `skills` key, so it renders "not yet projected".
+`SqliteRelationalStore.DetectorVersion` to **5** (`dash/server/KyberDash.Data/Repositories/SqliteRelationalStore.cs`).
+A store stamped with an older generation keeps serving its existing rows until the next maintenance
+pass, which rebuilds every session and restamps the store. A session row stored before the change
+has no `skills` key, so it renders "not yet projected" until then.
 
-Run the rebuild once against the store:
+The engine's maintenance tick does this on its own. Without a running engine, run the rebuild once
+against the store:
 
 ```bash
 kyberdash kyber build --db ~/.kyberdash/canon.db
