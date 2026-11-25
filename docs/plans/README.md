@@ -64,7 +64,9 @@ its `tasks.yml` is caught rather than carried as dead weight.
 
 ## Active Plans
 
-No plans are open.
+| Plan | Status | Created | Last updated | Scope |
+|---|---|---|---|---|
+| [2026-11-24-kyber-weave-tooling-defects.md](2026-11-24-kyber-weave-tooling-defects.md) | Ready | 2026-11-24 | 2026-11-24 | Fix ten Kyber-Weave tooling defects (Claude seat-save, cross-run hook context, secret guard precision, gate-report rule, RED rule, tiered-agent and KyberDash task gates, run count, Files prose parsing, run integrate cleanup) in one pull request |
 
 ## Archived Plans
 
