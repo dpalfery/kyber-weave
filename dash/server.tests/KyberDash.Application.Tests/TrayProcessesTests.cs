@@ -14,6 +14,16 @@ public class TrayProcessesTests
         Assert.Equal(0, TrayProcesses.CountTrayProcesses(output, windows: false));
     }
 
+    [Theory]
+    [InlineData("pgrep: warning: something odd\n4242\n", 1)]
+    [InlineData("some tool warning\n", 0)]
+    [InlineData("12abc\n", 0)]
+    [InlineData("4242 kyberdash-tray\n", 1)]
+    public void CountOnMacosRequiresALeadingPidSoToolWarningsDoNotCount(string output, int expected)
+    {
+        Assert.Equal(expected, TrayProcesses.CountTrayProcesses(output, windows: false));
+    }
+
     [Fact]
     public void CountIsOneForOneMacosPgrepLine()
     {

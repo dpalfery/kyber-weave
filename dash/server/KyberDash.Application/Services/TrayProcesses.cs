@@ -22,7 +22,8 @@ public static class TrayProcesses
     /// <param name="windows">Whether <paramref name="output"/> is the Windows <c>tasklist</c> listing.</param>
     /// <returns>The number of tray processes listed.</returns>
     /// <remarks>
-    /// On macOS every non-empty line is one process. On Windows only lines naming <c>kyberdash-tray.exe</c>
+    /// On macOS every line that starts with a process id (digits, then the end of the line or whitespace) is one process;
+    /// any other line is a tool warning, not a process. On Windows only lines naming <c>kyberdash-tray.exe</c>
     /// count, so the <c>INFO: No tasks are running</c> line that <c>tasklist</c> prints for no match is not
     /// mistaken for a process.
     /// </remarks>
@@ -39,13 +40,24 @@ public static class TrayProcesses
                 continue;
             }
 
-            if (!windows || line.StartsWith(WindowsTrayLinePrefix, StringComparison.OrdinalIgnoreCase))
+            if (windows ? line.StartsWith(WindowsTrayLinePrefix, StringComparison.OrdinalIgnoreCase) : StartsWithPid(line))
             {
                 count++;
             }
         }
 
         return count;
+    }
+
+    private static bool StartsWithPid(string line)
+    {
+        int digits = 0;
+        while (digits < line.Length && char.IsAsciiDigit(line[digits]))
+        {
+            digits++;
+        }
+
+        return digits > 0 && (digits == line.Length || char.IsWhiteSpace(line[digits]));
     }
 
     /// <summary>Turns a tray count into the exit code and one-line message <c>kyberdash menubar --running</c> reports.</summary>
