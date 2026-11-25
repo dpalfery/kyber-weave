@@ -634,13 +634,16 @@ describe('SessionCostPanel: fed by the summary section', () => {
 })
 
 describe('SessionCostPanel: STATUS_EXPLANATIONS in the tile', () => {
-  const nonPricedStatuses = ['not_billed', 'out_of_scope', 'no_rate', 'partial'] as const
-
-  it.each(nonPricedStatuses)('renders the explanation for a %s block', (status) => {
+  it.each([
+    ['not_billed', 'Model is explicitly not billed by provider.'],
+    ['out_of_scope', 'No KyberDash price table covers this harness, so its cost is not estimated.'],
+    ['no_rate', 'No published rate available for this model.'],
+    ['partial', 'Only a portion of turns could be priced.'],
+  ] as const)('renders the explanation for a %s block', (status, sentence) => {
     const html = renderHtml(
       React.createElement(SessionCostPanel, { cost: { basis: 'published', status } }),
     )
-    expect(html).toContain(STATUS_EXPLANATIONS[status])
+    expect(html).toContain(sentence)
   })
 
   it('explains out_of_scope with the price-table sentence', () => {
