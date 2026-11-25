@@ -119,6 +119,9 @@ public partial class AntigravityTranscriptMapper : IHarnessMapper
     /// <summary>Source format identifier for Antigravity CLI statusline JSONL cache units.</summary>
     public const string AntigravityStatusLineFormat = "antigravity-statusline-jsonl";
 
+    /// <summary>Diagnostic code emitted when a unit's payload cannot be read, including every <c>antigravity-pb</c> unit.</summary>
+    public const string PbUnreadableCode = "ANTIGRAVITY_PB_UNREADABLE";
+
     /// <summary>Diagnostic code emitted when a JSONL line cannot be parsed as a JSON object.</summary>
     public const string MalformedJsonCode = "ANTIGRAVITY_MALFORMED_LINE";
 
@@ -155,8 +158,13 @@ public partial class AntigravityTranscriptMapper : IHarnessMapper
             : unit.Unit.HarnessId.Trim();
         CollectedSource source = new(sourceHarnessId, unit.Unit.Kind, unit.Unit.SourceKey);
 
-        if (string.Equals(unit.Unit.Format, AntigravityPbFormat, StringComparison.Ordinal)
-            || string.IsNullOrWhiteSpace(unit.RawText))
+        if (string.Equals(unit.Unit.Format, AntigravityPbFormat, StringComparison.Ordinal) || unit.RawText is null)
+        {
+            string unreadableHarnessId = ResolveTranscriptHarnessId(unit.Unit);
+            return MapUnreadable(unit, source, unreadableHarnessId, importedAtUtc);
+        }
+
+        if (string.IsNullOrWhiteSpace(unit.RawText))
         {
             return new CollectedBatch(source, [], [], []);
         }
@@ -352,6 +360,32 @@ public partial class AntigravityTranscriptMapper : IHarnessMapper
         }
 
         return segments;
+    }
+
+    /// <summary>
+    /// Records one <see cref="PbUnreadableCode"/> warning for a unit whose payload cannot be decoded: every
+    /// <c>antigravity-pb</c> unit (the repository has no schema for those files) and a JSONL unit with no payload.
+    /// The problem replaces the silent empty batch so the gap stays visible in the collector's problem list.
+    /// </summary>
+    private static CollectedBatch MapUnreadable(
+        NativeSourceUnit unit,
+        CollectedSource source,
+        string harnessId,
+        DateTimeOffset importedAtUtc)
+    {
+        string sessionId = ResolveTranscriptSessionId(unit.Unit.SourceKey);
+        bool isBinary = string.Equals(unit.Unit.Format, AntigravityPbFormat, StringComparison.Ordinal);
+        string message = isBinary
+            ? string.Create(CultureInfo.InvariantCulture, $"Antigravity binary unit '{unit.Unit.SourceKey}' is not decoded: the repository has no schema for this format, so its records are not imported.")
+            : string.Create(CultureInfo.InvariantCulture, $"Antigravity transcript unit '{unit.Unit.SourceKey}' has no readable payload, so its records are not imported.");
+
+        List<AntigravityParseProblem> parseProblems =
+        [
+            new AntigravityParseProblem(LineNumber: 0, Code: PbUnreadableCode, Message: message),
+        ];
+        List<CollectedProblem> problems = BuildProblems(parseProblems, unit.Unit.SourceKey, sessionId, harnessId, importedAtUtc);
+
+        return new CollectedBatch(source, [], [], problems);
     }
 
     private static CollectedBatch MapTranscript(

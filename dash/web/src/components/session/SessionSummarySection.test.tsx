@@ -243,7 +243,7 @@ describe('SessionSummarySection overview tiles', () => {
     const tile = await screen.findByTestId('metric-cost')
     expect(tile.textContent).toContain('$0.85')
     expect(tile.textContent).toContain('reported')
-    expect(tile.textContent).not.toContain('published rates')
+    expect(tile.textContent).not.toContain('calculated from published rates')
   })
 
   it('shows a harness-reported zero instead of an unpriced published block', async () => {
@@ -259,16 +259,17 @@ describe('SessionSummarySection overview tiles', () => {
     const tile = await screen.findByTestId('metric-cost')
     expect(tile.textContent).toContain('$0.00')
     expect(tile.textContent).toContain('reported')
-    expect(tile.textContent).not.toContain('published rates')
+    expect(tile.textContent).not.toContain('calculated from published rates')
   })
 
-  it('labels a published cost basis as published rates', async () => {
+  it('labels a published cost basis as calculated from published rates', async () => {
     stubFetch(() => jsonResponse(summaryBody({ cost: { usd: 0.85, basis: 'published', status: 'ok' }, cost_reported: undefined })))
     mount()
     const tile = await screen.findByTestId('metric-cost')
     expect(tile.textContent).toContain('$0.85')
-    expect(tile.textContent).toContain('published')
+    expect(tile.textContent).toContain('calculated from published rates')
     expect(tile.textContent).not.toContain('reported by harness')
+    expect(tile.textContent).not.toMatch(/estimated/i)
   })
 })
 

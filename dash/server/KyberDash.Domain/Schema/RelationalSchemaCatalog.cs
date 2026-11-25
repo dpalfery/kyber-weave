@@ -627,6 +627,18 @@ public static partial class RelationalSchemaCatalog
             nonEmpty: true,
             Idx("record_model_by_model_id", "model_id")));
 
+        tables.Add(RecordSingleText(
+            "record_response_id",
+            "response_id",
+            nonEmpty: true,
+            Idx("record_response_id_by_response_id", "response_id")));
+
+        tables.Add(RecordSingleText(
+            "record_request_id",
+            "request_id",
+            nonEmpty: true,
+            Idx("record_request_id_by_request_id", "request_id")));
+
         tables.Add(RecordSingleText("record_end", "ended_at_utc", nonEmpty: true));
         tables.Add(RecordSingleNonNegInt("record_reported_duration", "duration_ms"));
 
@@ -700,6 +712,13 @@ public static partial class RelationalSchemaCatalog
             NonNegInt("utf8_bytes"),
             NonNegInt("characters"),
             NonNegInt("measured_tokens")));
+        tables.Add(new TableDefinition(
+            Name: "content_part_withheld_tokenizer",
+            Columns: [NonEmptyText("span_id"), PositionCol(), NonEmptyText("tokenizer"), BoolInt("is_model_own")],
+            PrimaryKeyColumns: ["span_id", "position"],
+            ForeignKeys: [CompositeFk(["span_id", "position"], "content_part_withheld", ["span_id", "position"])],
+            Indexes: [],
+            IsRepeatedItem: true));
         tables.Add(ContentPartExtension("content_part_reported_tokens", NonNegInt("token_count")));
         tables.Add(ContentPartExtension("content_part_server", NonEmptyText("server_name")));
         tables.Add(ContentPartExtension("content_part_role", NonEmptyText("role_name")));
@@ -721,6 +740,14 @@ public static partial class RelationalSchemaCatalog
             PrimaryKeyColumns: ["span_id", "position"],
             ForeignKeys: [Fk("span_id", "record", "span_id")],
             Indexes: [Idx("tool_definition_by_name", "tool_name")],
+            IsRepeatedItem: true));
+
+        tables.Add(new TableDefinition(
+            Name: "tool_definition_tokenizer",
+            Columns: [NonEmptyText("span_id"), PositionCol(), NonEmptyText("tokenizer"), BoolInt("is_model_own")],
+            PrimaryKeyColumns: ["span_id", "position"],
+            ForeignKeys: [CompositeFk(["span_id", "position"], "tool_definition", ["span_id", "position"])],
+            Indexes: [],
             IsRepeatedItem: true));
 
         tables.Add(new TableDefinition(
@@ -817,7 +844,7 @@ public static partial class RelationalSchemaCatalog
                 NonEmptyText("session_id"),
                 NonNegInt("snapshot_position"),
                 NonEmptyText("model_id"),
-                EnumText("token_class", "'input', 'cache_read', 'cache_write', 'output', 'reasoning'"),
+                EnumText("token_class", "'input', 'cache_read', 'cache_write', 'output', 'reasoning', 'total'"),
                 NonNegInt("token_count"),
             ],
             PrimaryKeyColumns: ["session_id", "snapshot_position", "model_id", "token_class"],
@@ -932,6 +959,14 @@ public static partial class RelationalSchemaCatalog
             ],
             PrimaryKeyColumns: ["session_id", "position"],
             ForeignKeys: [Fk("session_id", "session_context", "session_id")],
+            Indexes: [],
+            IsRepeatedItem: true));
+
+        tables.Add(new TableDefinition(
+            Name: "session_context_turn_tokenizer",
+            Columns: [NonEmptyText("session_id"), PositionCol(), NonEmptyText("tokenizer"), BoolInt("is_model_own")],
+            PrimaryKeyColumns: ["session_id", "position", "tokenizer"],
+            ForeignKeys: [CompositeFk(["session_id", "position"], "session_context_turn", ["session_id", "position"])],
             Indexes: [],
             IsRepeatedItem: true));
 

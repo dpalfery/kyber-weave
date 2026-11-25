@@ -1,4 +1,5 @@
-import { cn, fmtTokens } from '../../lib/utils.js'
+import { cn } from '../../lib/utils.js'
+import { fmtMeasuredTokens } from '../../lib/kyberApi.js'
 import { Card } from '../ui/card.js'
 
 export interface RelocationAction {
@@ -10,13 +11,9 @@ export interface RelocationAction {
 
 export interface RecommendationPanelProps {
   recommendation: string
-  // Absent for unmeasured (coverage-gap) findings: the bar normalises
-  // around zero and the label renders '—' via fmtTokens, never zero waste.
-  estimatedWasteTokens?: number
-  errorBar?: {
-    lower: number
-    upper: number
-  }
+  // Absent or null for unmeasured (coverage-gap) findings: the figure reads
+  // "not measured", never zero and never a range.
+  estimatedWasteTokens?: number | null
   relocationAction?: RelocationAction
   className?: string
 }
@@ -68,28 +65,19 @@ function deriveRelocationStrategy(recommendation: string, actionProp?: Relocatio
 }
 
 /**
- * Recommendation panel rendering Decision D8 relocation/progressive disclosure actions,
- * estimated recoverable waste tokens, and calibrated error bars.
+ * Recommendation panel rendering Decision D8 relocation/progressive disclosure
+ * actions and the recoverable waste the server measured. No error bar is drawn:
+ * an invented band is an estimate (D15).
  */
 export function RecommendationPanel({
   recommendation,
   estimatedWasteTokens,
-  errorBar,
   relocationAction,
   className,
 }: RecommendationPanelProps) {
   const strategy = deriveRelocationStrategy(recommendation, relocationAction)
-  const hasErrorBar = errorBar !== undefined && errorBar !== null
-  const wasteOrZero = estimatedWasteTokens ?? 0
-  const lowerBound = hasErrorBar ? errorBar.lower : wasteOrZero
-  const upperBound = hasErrorBar ? errorBar.upper : wasteOrZero
-
-  // Normalized position calculation for visual error-bar range
-  const maxRange = Math.max(upperBound * 1.15, wasteOrZero * 1.25, 1)
-  const lowerPct = Math.min(100, Math.max(0, (lowerBound / maxRange) * 100))
-  const estimatePct = Math.min(100, Math.max(0, (wasteOrZero / maxRange) * 100))
-  const upperPct = Math.min(100, Math.max(0, (upperBound / maxRange) * 100))
-  const barWidthPct = Math.max(2, upperPct - lowerPct)
+  const wasteLabel =
+    estimatedWasteTokens == null ? 'not measured' : `${fmtMeasuredTokens(estimatedWasteTokens)} tokens`
 
   return (
     <Card className={cn('p-5 space-y-4', className)} data-testid="recommendation-panel">
@@ -115,22 +103,14 @@ export function RecommendationPanel({
         {/* Recoverable Waste Highlight */}
         <div className="text-right shrink-0">
           <div className="text-[10px] uppercase tracking-wider text-tertiary-foreground">
-            Recoverable Waste Estimate
+            Recoverable Waste
           </div>
           <div
             className="font-display text-xl font-bold text-amber-500 dark:text-amber-400 tabular-nums"
             data-testid="recoverable-waste-tokens"
           >
-            {fmtTokens(estimatedWasteTokens)} tokens
+            {wasteLabel}
           </div>
-          {hasErrorBar && (
-            <div
-              className="text-[10.5px] font-mono text-tertiary-foreground tabular-nums"
-              data-testid="recommendation-error-bar"
-            >
-              [{fmtTokens(lowerBound)} – {fmtTokens(upperBound)}]
-            </div>
-          )}
         </div>
       </div>
 
@@ -147,48 +127,6 @@ export function RecommendationPanel({
           {recommendation}
         </p>
       </div>
-
-      {/* Calibrated Error Bar Visual Gauge (Decision D5) */}
-      {hasErrorBar && (
-        <div
-          className="rounded-md border border-border/80 bg-card p-3 space-y-2"
-          data-testid="error-bar-visual"
-        >
-          <div className="flex items-center justify-between text-xs">
-            <span className="font-semibold uppercase tracking-wider text-muted-foreground text-[10.5px]">
-              Calibrated Error Bar Bounds
-            </span>
-            <span className="font-mono text-[11px] text-tertiary-foreground tabular-nums">
-              Lower: {fmtTokens(lowerBound)} · Upper: {fmtTokens(upperBound)}
-            </span>
-          </div>
-
-          {/* Visual Range Track */}
-          <div className="relative h-4 bg-interactive-secondary rounded-full overflow-hidden border border-border/60">
-            {/* Range Span */}
-            <div
-              className="absolute top-0 bottom-0 bg-amber-500/25 border-x border-amber-500/50"
-              style={{
-                left: `${lowerPct}%`,
-                width: `${barWidthPct}%`,
-              }}
-              title={`Confidence Interval: ${fmtTokens(lowerBound)} to ${fmtTokens(upperBound)} tokens`}
-            />
-            {/* Estimate Marker */}
-            <div
-              className="absolute top-0 bottom-0 w-1 bg-primary z-10 -ml-0.5"
-              style={{ left: `${estimatePct}%` }}
-              title={`Median Recoverable Waste: ${fmtTokens(estimatedWasteTokens)} tokens`}
-            />
-          </div>
-
-          <div className="flex justify-between text-[10px] font-mono text-tertiary-foreground">
-            <span>0</span>
-            <span className="text-primary font-semibold">Estimate: {fmtTokens(estimatedWasteTokens)}</span>
-            <span>{fmtTokens(maxRange)} max</span>
-          </div>
-        </div>
-      )}
 
       {/* D8 Relocation & Progressive Disclosure Action Card */}
       <div

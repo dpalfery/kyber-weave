@@ -6,6 +6,7 @@ using KyberDash.Application.Tests.Fakes;
 using KyberDash.Data.Collector;
 using KyberDash.Data.Collector.Sources;
 using KyberDash.Data.Harnesses.Cline;
+using KyberDash.Data.Tokenization;
 using KyberDash.Domain.Schema;
 using Xunit;
 
@@ -20,6 +21,9 @@ namespace KyberDash.Data.Tests.Harnesses;
 public class ClineMapperTests
 {
     private static readonly DateTimeOffset BaselineUtc = new(2026, 11, 19, 12, 0, 0, TimeSpan.Zero);
+
+    /// <summary>A JSON document whose token counts differ between cl100k_base and the o200k_base stand-in.</summary>
+    private const string DivergentJsonText = "{\"summary\":\"こんにちは世界、今日はいい天気ですね。\"}";
 
     [Fact]
     public void HarnessId_IsCline()
@@ -192,6 +196,37 @@ public class ClineMapperTests
         InMemoryRelationalStore store = new();
         store.WriteBatch(batch);
         Assert.Equal(4, store.CountRecords("cline-cli"));
+    }
+
+    [Fact]
+    public void Map_ClineCliSessionCountsPartsUnderTheMessageModelOwnTokenizer()
+    {
+        string rawText = """
+            {
+              "version":1,
+              "sessionId":"sess-tok",
+              "messages":[
+                {"id":"msg_0","role":"user","content":[{"type":"text","text":"{\"summary\":\"こんにちは世界、今日はいい天気ですね。\"}"}],"ts":1785701064304},
+                {"id":"msg_1","role":"assistant","content":[{"type":"text","text":"done"}],"ts":1785701065304,"metrics":{"inputTokens":120,"outputTokens":40},"modelInfo":{"id":"gpt-4"}}
+              ]
+            }
+            """;
+
+        NativeSourceUnit unit = MakeNativeUnit(
+            "/fake/.cline/data/sessions/sess-tok/sess-tok.messages.json",
+            rawText,
+            "cline-cli",
+            "cline-cli-messages-json");
+        CollectedBatch batch = new ClineMapper().Map(unit, BaselineUtc);
+
+        CollectedRecord first = Assert.Single(batch.Records, static r => r.Op == RecordOp.LlmInvoke);
+        Assert.Equal("gpt-4", first.Model);
+        CollectedContentPart userPart = Assert.Single(first.Parts);
+        Assert.Null(userPart.PlainText);
+        Assert.NotNull(userPart.Withheld);
+        Assert.Equal(
+            LocalTextTokenizer.Shared.Count(DivergentJsonText, "gpt-4").Count,
+            userPart.Withheld!.MeasuredTokens);
     }
 
     [Fact]

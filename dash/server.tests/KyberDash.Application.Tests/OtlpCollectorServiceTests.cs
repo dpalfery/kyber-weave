@@ -190,7 +190,12 @@ public class OtlpCollectorServiceTests
             // The floor is the loop's own interval plus generous scheduling room; the wake on
             // admission normally lands it in milliseconds.
             DateTime deadline = DateTime.UtcNow + OtlpCollectorService.FlushInterval + TimeSpan.FromSeconds(10);
-            while (harness.Store.CountRecords() == 0 && DateTime.UtcNow < deadline)
+            // Wait for everything asserted below: the store write lands before the flush raises
+            // StoreUpdated and drains the pending count, so waiting on the record alone races them.
+            while ((harness.Store.CountRecords() == 0
+                    || harness.Collector.PendingCount != 0
+                    || Volatile.Read(ref storeUpdated) == 0)
+                && DateTime.UtcNow < deadline)
                 await Task.Delay(20, TestContext.Current.CancellationToken);
 
             Assert.NotNull(harness.Store.FindRecord("1111111111111111"));

@@ -4,6 +4,7 @@ using System.Text;
 using System.Text.Json;
 using KyberDash.Data.Collector;
 using KyberDash.Data.Collector.Sources;
+using KyberDash.Data.Harnesses.Otlp;
 using KyberDash.Data.Repositories;
 using KyberDash.Domain;
 
@@ -77,6 +78,7 @@ public record ClaudeTranscriptMessage(
 /// <param name="ExitCode">Reported process exit code (<c>exitCode</c>, <c>exit_code</c>, or <c>code</c>).</param>
 /// <param name="AttributionMcpServer">Optional ground-truth MCP server attribution.</param>
 /// <param name="Message">Parsed <c>message</c> payload, when present.</param>
+/// <param name="RequestId">The provider request id the line carries (<c>requestId</c>), when present.</param>
 public record ClaudeTranscriptLine(
     string? RecordType,
     string? SessionId,
@@ -85,7 +87,8 @@ public record ClaudeTranscriptLine(
     string? TerminationReason,
     int? ExitCode,
     string? AttributionMcpServer,
-    ClaudeTranscriptMessage? Message);
+    ClaudeTranscriptMessage? Message,
+    string? RequestId = null);
 
 /// <summary>
 /// Pure <see cref="IHarnessMapper"/> translating a loaded Claude Code JSONL
@@ -251,7 +254,8 @@ public class ClaudeTranscriptMapper : IHarnessMapper
                 TerminationReason: terminationReason,
                 ExitCode: exitCode,
                 AttributionMcpServer: server,
-                Message: message);
+                Message: message,
+                RequestId: ReadSafeMetadataText(root, "requestId"));
         }
     }
 
@@ -532,6 +536,7 @@ public class ClaudeTranscriptMapper : IHarnessMapper
     {
         string? discoveredSessionId = null;
         string? nativeRecordId = usageSnapshot?.MessageId;
+        string? requestId = null;
         string? sessionTitle = null;
         string? terminationReason = null;
         int? exitCode = null;
@@ -544,6 +549,10 @@ public class ClaudeTranscriptMapper : IHarnessMapper
         {
             discoveredSessionId ??= line.SessionId;
             sessionTitle ??= line.SessionTitle;
+            if (string.Equals(line.Message?.Role, "assistant", StringComparison.Ordinal))
+            {
+                requestId ??= line.RequestId;
+            }
 
             if (line.ExitCode.HasValue)
             {
@@ -669,6 +678,7 @@ public class ClaudeTranscriptMapper : IHarnessMapper
         return new ParsedTurnGroup(
             SessionId: sessionId,
             NativeRecordId: nativeRecordId,
+            RequestId: requestId,
             Timestamp: usageSnapshot?.Timestamp ?? FallbackTimestamp,
             Model: usageSnapshot?.Model,
             Usage: usageSnapshot?.Usage,
@@ -835,7 +845,7 @@ public class ClaudeTranscriptMapper : IHarnessMapper
                 : RecordStatus.Unspecified;
 
         (IReadOnlyList<CollectedTokenCount> tokens, long? reportedInput, long? reportedOutput) = BuildTokenCounts(turn.Usage);
-        List<CollectedContentPart> parts = BuildContentParts(turn.Parts);
+        List<CollectedContentPart> parts = BuildContentParts(turn.Parts, turn.Model);
         string displayModel = turn.Model ?? UnknownModelFallback;
 
         return new CollectedRecord(
@@ -866,7 +876,9 @@ public class ClaudeTranscriptMapper : IHarnessMapper
                 CorrectionRule: turn.CorrectionRule,
                 DeclaredContextWindow: null),
             ReportedInputTokens: reportedInput,
-            ReportedOutputTokens: reportedOutput);
+            ReportedOutputTokens: reportedOutput,
+            ResponseId: OtlpJoinIds.WithinBound(string.IsNullOrEmpty(turn.NativeRecordId) ? null : turn.NativeRecordId),
+            RequestId: OtlpJoinIds.WithinBound(turn.RequestId));
     }
 
     private CollectedRecord BuildToolRecord(
@@ -904,7 +916,7 @@ public class ClaudeTranscriptMapper : IHarnessMapper
             : (toolResult.IsError ? RecordStatus.Error : RecordStatus.Ok);
 
         CollectedToolContent? inputContent = toolCall.RawInputText is not null
-            ? ToolContentMeasurer.Measure(toolCall.RawInputText, CanonSynth.MaxToolArgumentsBytes)
+            ? ToolContentMeasurer.Measure(toolCall.RawInputText, CanonSynth.MaxToolArgumentsBytes, parent.Model)
                 .ToToolContent(includeFingerprint: true)
             : null;
 
@@ -914,7 +926,8 @@ public class ClaudeTranscriptMapper : IHarnessMapper
         {
             ToolContentMeasurement resultMeasurement = ToolContentMeasurer.Measure(
                 toolResult.Content,
-                CanonSynth.MaxToolResultBytes);
+                CanonSynth.MaxToolResultBytes,
+                parent.Model);
             resultContent = resultMeasurement.ToToolContent(includeFingerprint: false);
             parts.Add(new CollectedContentPart(
                 Position: 0,
@@ -934,7 +947,7 @@ public class ClaudeTranscriptMapper : IHarnessMapper
         bool? succeeded = toolResult is null ? null : !toolResult.IsError;
         CollectedError? error = toolResult is { IsError: true }
             ? new CollectedError(
-                Message: BuildSafeToolErrorMessage(toolResult.Content),
+                Message: BuildSafeToolErrorMessage(toolResult.Content, parent.Model),
                 Code: toolResult.ErrorCode)
             : null;
 
@@ -1036,13 +1049,13 @@ public class ClaudeTranscriptMapper : IHarnessMapper
         return (tokens, reportedInput, reportedOutput);
     }
 
-    private static List<CollectedContentPart> BuildContentParts(IReadOnlyList<ParsedPart> parts)
+    private static List<CollectedContentPart> BuildContentParts(IReadOnlyList<ParsedPart> parts, string? model)
     {
         List<CollectedContentPart> collected = new(parts.Count);
         for (int i = 0; i < parts.Count; i++)
         {
             ParsedPart part = parts[i];
-            ToolContentMeasurement measurement = ToolContentMeasurer.Measure(part.Text, CanonSynth.MaxToolResultBytes);
+            ToolContentMeasurement measurement = ToolContentMeasurer.Measure(part.Text, CanonSynth.MaxToolResultBytes, model);
             collected.Add(new CollectedContentPart(
                 Position: i,
                 Bucket: part.Bucket,
@@ -1085,14 +1098,14 @@ public class ClaudeTranscriptMapper : IHarnessMapper
         return (server, method);
     }
 
-    private static string BuildSafeToolErrorMessage(string? rawContent)
+    private static string BuildSafeToolErrorMessage(string? rawContent, string? model)
     {
         if (string.IsNullOrWhiteSpace(rawContent))
         {
             return FallbackToolErrorMessage;
         }
 
-        ToolContentMeasurement measurement = ToolContentMeasurer.Measure(rawContent, CanonSynth.MaxToolResultBytes);
+        ToolContentMeasurement measurement = ToolContentMeasurer.Measure(rawContent, CanonSynth.MaxToolResultBytes, model);
         if (!measurement.IsDocument && !string.IsNullOrWhiteSpace(measurement.PlainText))
         {
             return measurement.PlainText;
@@ -1270,6 +1283,7 @@ public class ClaudeTranscriptMapper : IHarnessMapper
     private record ParsedTurnGroup(
         string? SessionId,
         string? NativeRecordId,
+        string? RequestId,
         string Timestamp,
         string? Model,
         ClaudeTranscriptUsage? Usage,

@@ -36,7 +36,7 @@ public record CopilotCliToolRequest(
 /// Per-model token usage snapshot from a Copilot CLI <c>session.shutdown</c> event's <c>modelMetrics</c>.
 /// </summary>
 /// <param name="Model">Model identifier for this usage snapshot.</param>
-/// <param name="InputTokens">Fresh input token count when reported.</param>
+/// <param name="InputTokens">Input token count as the CLI reports it, cache-inclusive (cache read and write are part of it) when reported.</param>
 /// <param name="OutputTokens">Generated output token count when reported.</param>
 /// <param name="CacheReadTokens">Prompt-cache read token count when reported.</param>
 /// <param name="CacheWriteTokens">Prompt-cache creation/write token count when reported.</param>
@@ -309,7 +309,7 @@ public class CopilotCliMapper : IHarnessMapper
 
             if (latestSystemPrompts.TryGetValue(agentKey, out string? systemPrompt))
             {
-                parts.Add(ToolContentMeasurer.BuildContentPart(position++, ContentBucket.SystemPrompt, systemPrompt, "system"));
+                parts.Add(ToolContentMeasurer.BuildContentPart(position++, ContentBucket.SystemPrompt, systemPrompt, "system", activeModel));
             }
 
             if (pendingUserMessages.TryGetValue(agentKey, out List<string>? userMessages))
@@ -325,7 +325,7 @@ public class CopilotCliMapper : IHarnessMapper
                         }
                     }
 
-                    parts.Add(ToolContentMeasurer.BuildContentPart(position++, ContentBucket.UserMessage, userMessage, "user"));
+                    parts.Add(ToolContentMeasurer.BuildContentPart(position++, ContentBucket.UserMessage, userMessage, "user", activeModel));
                 }
 
                 userMessages.Clear();
@@ -335,7 +335,7 @@ public class CopilotCliMapper : IHarnessMapper
             {
                 foreach (string reasoning in reasonings)
                 {
-                    parts.Add(ToolContentMeasurer.BuildContentPart(position++, ContentBucket.Reasoning, reasoning, "assistant"));
+                    parts.Add(ToolContentMeasurer.BuildContentPart(position++, ContentBucket.Reasoning, reasoning, "assistant", activeModel));
                 }
 
                 reasonings.Clear();
@@ -343,12 +343,12 @@ public class CopilotCliMapper : IHarnessMapper
 
             if (!string.IsNullOrEmpty(evt.ReasoningText))
             {
-                parts.Add(ToolContentMeasurer.BuildContentPart(position++, ContentBucket.Reasoning, evt.ReasoningText, "assistant"));
+                parts.Add(ToolContentMeasurer.BuildContentPart(position++, ContentBucket.Reasoning, evt.ReasoningText, "assistant", activeModel));
             }
 
             if (!string.IsNullOrEmpty(evt.Content))
             {
-                parts.Add(ToolContentMeasurer.BuildContentPart(position++, ContentBucket.ConversationHistory, evt.Content, "assistant"));
+                parts.Add(ToolContentMeasurer.BuildContentPart(position++, ContentBucket.ConversationHistory, evt.Content, "assistant", activeModel));
             }
 
             List<CollectedTokenCount> tokens = BuildTokens(evt);
@@ -500,7 +500,7 @@ public class CopilotCliMapper : IHarnessMapper
                     continue;
                 }
 
-                AddModelUsageRow(usage, position, model, TokenClass.Input, metric.InputTokens);
+                AddModelUsageRow(usage, position, model, TokenClass.Input, FreshInputTokens(metric));
                 AddModelUsageRow(usage, position, model, TokenClass.CacheRead, metric.CacheReadTokens);
                 AddModelUsageRow(usage, position, model, TokenClass.CacheWrite, metric.CacheWriteTokens);
                 AddModelUsageRow(usage, position, model, TokenClass.Output, metric.OutputTokens);
@@ -509,6 +509,36 @@ public class CopilotCliMapper : IHarnessMapper
         }
 
         return usage;
+    }
+
+    /// <summary>
+    /// The shutdown <c>inputTokens</c> is cache-inclusive (input + cache read + cache write), so the
+    /// fresh input stored is that count less both cache classes. The legacy provider did the same
+    /// (copilot.ts:959-986 at fc80ddf9^). A negative cache class, or a result below zero, means the
+    /// snapshot does not hold together: the fresh input is not measured and no input row is stored.
+    /// The cache classes are compared with what is left before each is taken away, so no reported
+    /// value, however large, can wrap the subtraction round to a positive count.
+    /// </summary>
+    private static long? FreshInputTokens(CopilotCliModelUsage metric)
+    {
+        if (metric.InputTokens is not { } input)
+        {
+            return null;
+        }
+
+        long cacheRead = metric.CacheReadTokens ?? 0;
+        long cacheWrite = metric.CacheWriteTokens ?? 0;
+        if (input < 0 || cacheRead < 0 || cacheWrite < 0)
+        {
+            return null;
+        }
+
+        if (cacheRead > input || cacheWrite > input - cacheRead)
+        {
+            return null;
+        }
+
+        return input - cacheRead - cacheWrite;
     }
 
     private static void AddModelUsageRow(

@@ -20,7 +20,7 @@ public class FindingPredictionProjectionTests
 
     /// <summary>
     /// A measured dormant tool schema and a compaction hazard project typed evidence links, a
-    /// waste/error-bar pair for the measured finding, and a compaction hazard row carrying the
+    /// waste row for the measured finding and no error-bar rows, and a compaction hazard row carrying the
     /// declared window, while the unmeasured dormant finding omits waste and error-bar rows.
     /// </summary>
     [Fact]
@@ -54,7 +54,7 @@ public class FindingPredictionProjectionTests
                 && finding.MeasurementClass == "deterministic");
         Assert.Equal("finding-dormant-tool-measured_tool-sess-dormant", measured.FindingId);
         Assert.Equal(240, measured.EstimatedWasteTokens);
-        Assert.Equal(new FindingErrorBar(192, 288), measured.ErrorBar);
+        Assert.Null(measured.ErrorBar);
         Assert.Equal(
             ["turn-d1", "turn-d3"],
             measured.EvidenceLinks.Select(static link => link.SpanId));
@@ -74,7 +74,7 @@ public class FindingPredictionProjectionTests
         Assert.Equal("compaction-hazard", hazard.DetectorId);
         Assert.Equal(["turn-c1", "turn-c2"], hazard.EvidenceLinks.Select(static link => link.SpanId));
         Assert.Equal(100, hazard.EstimatedWasteTokens);
-        Assert.NotNull(hazard.ErrorBar);
+        Assert.Null(hazard.ErrorBar);
         Assert.NotNull(hazard.CompactionHazard);
         Assert.Equal(2000, hazard.CompactionHazard!.ContextLimit);
         Assert.Equal("declared", hazard.CompactionHazard.ContextLimitSource);
@@ -82,7 +82,7 @@ public class FindingPredictionProjectionTests
         Assert.Equal(3, store.CountRows("finding"));
         Assert.Equal(6, store.CountRows("finding_evidence_link"));
         Assert.Equal(2, store.CountRows("finding_estimated_waste"));
-        Assert.Equal(2, store.CountRows("finding_error_bar"));
+        Assert.Equal(0, store.CountRows("finding_error_bar"));
         Assert.Equal(1, store.CountRows("finding_compaction_hazard"));
         Assert.Equal(3, store.CountRows("finding_run"));
         Assert.Equal(3, store.CountRows("finding_session"));
@@ -209,7 +209,7 @@ public class FindingPredictionProjectionTests
     }
 
     private static CanonSessionProjectorEngine NewProjector(InMemoryRelationalStore store) =>
-        new(store, store, store, new FakePricingRepository());
+        new(store, store, store, new FakePricingRepository(), new FakeTextTokenizer());
 
     private static KyberBridgeEngine NewBridge(InMemoryRelationalStore projections) =>
         new(
@@ -217,7 +217,7 @@ public class FindingPredictionProjectionTests
             projections,
             projections,
             new FakePricingRepository(),
-            new CanonSessionProjectorEngine(projections, projections, projections, new FakePricingRepository()),
+            new CanonSessionProjectorEngine(projections, projections, projections, new FakePricingRepository(), new FakeTextTokenizer()),
             new CanonRollupsEngine(projections, projections, new FakePricingRepository()),
             clock: () => FixedTimestamp,
             instanceId: "test-instance");

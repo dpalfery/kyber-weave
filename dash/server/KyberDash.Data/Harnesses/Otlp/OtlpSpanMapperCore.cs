@@ -195,13 +195,15 @@ internal static partial class OtlpSpanMapperCore
             ? new CollectedCost(costValue, "USD")
             : null;
 
-        List<CollectedContentPart> parts = BuildCollectedParts(native);
+        string? model = SafeOptionalText(ResolveModel(hooks, native));
+
+        List<CollectedContentPart> parts = BuildCollectedParts(native, model);
         hooks.AppendParts?.Invoke(native, parts);
 
         CollectedToolCall? tool = null;
         if (op == RecordOp.ToolInvoke)
         {
-            tool = BuildToolCall(native, name, status, parts, hooks);
+            tool = BuildToolCall(native, name, status, parts, hooks, model);
         }
 
         CollectedAgentInvocation? agent = null;
@@ -212,6 +214,8 @@ internal static partial class OtlpSpanMapperCore
 
         string? errorMessage = SafeOptionalText(native.ErrorMessage)
             ?? (status == RecordStatus.Error ? SafeOptionalText(native.StatusMessage) : null);
+
+        (string? ResponseId, string? RequestId) joinIds = OtlpJoinIds.Read(harnessId, native.Attributes);
 
         CollectedRecordSignals signals = new(
             ErrorMessage: errorMessage,
@@ -230,7 +234,7 @@ internal static partial class OtlpSpanMapperCore
             SessionKey: SafeOptionalText(ResolveSessionKey(hooks, native)),
             ParentRecordId: SafeOptionalText(native.ParentSpanId),
             TraceId: SafeOptionalText(native.TraceId),
-            Model: SafeOptionalText(ResolveModel(hooks, native)),
+            Model: model,
             EndedAt: native.EndedAt,
             ReportedDurationMs: native.ReportedDurationMs,
             Tokens: tokens,
@@ -243,11 +247,13 @@ internal static partial class OtlpSpanMapperCore
             ToolDefinitions: [],
             Signals: signals,
             ReportedInputTokens: reportedInputTokens,
-            ReportedOutputTokens: reportedOutputTokens);
+            ReportedOutputTokens: reportedOutputTokens,
+            ResponseId: joinIds.ResponseId,
+            RequestId: joinIds.RequestId);
     }
 
     /// <summary>Maps collected content parts, dropping wire buckets the canon store does not keep.</summary>
-    internal static List<CollectedContentPart> BuildCollectedParts(OtlpSpanNative native)
+    internal static List<CollectedContentPart> BuildCollectedParts(OtlpSpanNative native, string? model)
     {
         ArgumentNullException.ThrowIfNull(native);
 
@@ -270,7 +276,7 @@ internal static partial class OtlpSpanMapperCore
 
             nextPosition = Math.Max(nextPosition, position + 1);
 
-            ToolContentMeasurement measurement = ToolContentMeasurer.Measure(part.Text ?? string.Empty);
+            ToolContentMeasurement measurement = ToolContentMeasurer.Measure(part.Text ?? string.Empty, model: model);
             string? plainText = measurement.IsDocument ? null : measurement.PlainText;
             CollectedWithheldText? withheld = measurement.IsDocument ? measurement.ToWithheldText() : null;
             long? originalBytes = measurement.IsDocument ? null : measurement.OriginalUtf8BytesWhenTruncated;
@@ -296,7 +302,8 @@ internal static partial class OtlpSpanMapperCore
         string fallbackName,
         RecordStatus status,
         List<CollectedContentPart> parts,
-        OtlpMapperHooks hooks)
+        OtlpMapperHooks hooks,
+        string? model)
     {
         ArgumentNullException.ThrowIfNull(native);
         ArgumentNullException.ThrowIfNull(parts);
@@ -324,13 +331,13 @@ internal static partial class OtlpSpanMapperCore
         }
 
         CollectedToolContent? input = native.ToolRawInput is not null
-            ? ToolContentMeasurer.Measure(native.ToolRawInput).ToToolContent(includeFingerprint: true)
+            ? ToolContentMeasurer.Measure(native.ToolRawInput, model: model).ToToolContent(includeFingerprint: true)
             : null;
 
         CollectedToolContent? result = null;
         if (native.ToolRawResult is not null)
         {
-            ToolContentMeasurement resultMeasurement = ToolContentMeasurer.Measure(native.ToolRawResult);
+            ToolContentMeasurement resultMeasurement = ToolContentMeasurer.Measure(native.ToolRawResult, model: model);
             result = resultMeasurement.ToToolContent(includeFingerprint: false);
 
             bool hasResultPart = parts.Any(static p => p.Bucket == ContentBucket.ToolResultContent);

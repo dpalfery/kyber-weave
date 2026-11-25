@@ -5,6 +5,7 @@ using KyberDash.Application.Tests.Fakes;
 using KyberDash.Data.Collector;
 using KyberDash.Data.Collector.Sources;
 using KyberDash.Data.Harnesses.Otlp;
+using KyberDash.Data.Tokenization;
 using KyberDash.Domain;
 using Xunit;
 
@@ -668,6 +669,35 @@ public class AntigravityOpenCodeSpanMapperTests
                 ["service.name"] = Element("antigravity"),
             },
             Scope: new OtlpScope("google.antigravity", "1.0.0"));
+    }
+
+    /// <summary>
+    /// An OpenCode step span carrying a model with its own published tokenizer counts its prompt
+    /// part with that tokenizer: the measured tokens equal the model's own figure, not the
+    /// stand-in's.
+    /// </summary>
+    [Fact]
+    public void OpenCodeMapSpan_CountsPromptPartWithTheModelOwnTokenizer()
+    {
+        string promptDoc = "{\"こんにちは\":\"世界\"}";
+        OtlpSpan span = OpenCodeStepSpanWithUsage(
+            "dddddddddddddddd",
+            "sess-oc-own",
+            40,
+            12,
+            new Dictionary<string, JsonElement>(StringComparer.Ordinal)
+            {
+                ["opencode.model.id"] = Element("gpt-3.5-turbo"),
+                ["opencode.prompt.text"] = Element(promptDoc),
+            });
+
+        CollectedRecord record = new OpenCodeSpanMapper().MapSpan(span);
+
+        Assert.Equal("gpt-3.5-turbo", record.Model);
+        CollectedContentPart part = Assert.Single(record.Parts, static p => p.Bucket == ContentBucket.ConversationHistory);
+        Assert.NotNull(part.Withheld);
+        Assert.Equal(LocalTextTokenizer.Shared.Count(promptDoc, "gpt-3.5-turbo").Count, part.Withheld!.MeasuredTokens);
+        Assert.NotEqual(LocalTextTokenizer.Shared.Count(promptDoc, null).Count, part.Withheld.MeasuredTokens);
     }
 
     private static OtlpSpan OpenCodeStepSpanWithUsage(

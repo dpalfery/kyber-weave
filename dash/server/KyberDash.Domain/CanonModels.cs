@@ -114,6 +114,8 @@ public record Problem(
 /// <param name="Order">Stable position within the turn for deterministic round-trips.</param>
 /// <param name="Resident">Explicit <see langword="false"/> for deferred tools not loaded into resident context.</param>
 /// <param name="Truncated">True when text was bounded at the canonical 64 KiB cap.</param>
+/// <param name="Tokenizer">Tokenizer that counted <paramref name="Tokens"/> from text; <see langword="null"/> when the count is harness-reported or absent.</param>
+/// <param name="TokenizerIsModelOwn">Whether <paramref name="Tokenizer"/> is the model's own tokenizer; <see langword="null"/> when <paramref name="Tokenizer"/> is.</param>
 public record ContentPart(
     [property: JsonPropertyName("part")] string Part,
     [property: JsonPropertyName("text")] string Text,
@@ -122,7 +124,9 @@ public record ContentPart(
     [property: JsonPropertyName("role"), JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? Role = null,
     [property: JsonPropertyName("order"), JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] int? Order = null,
     [property: JsonPropertyName("resident"), JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] bool? Resident = null,
-    [property: JsonPropertyName("truncated"), JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] bool? Truncated = null);
+    [property: JsonPropertyName("truncated"), JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] bool? Truncated = null,
+    [property: JsonPropertyName("tokenizer"), JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? Tokenizer = null,
+    [property: JsonPropertyName("tokenizerIsModelOwn"), JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] bool? TokenizerIsModelOwn = null);
 
 /// <summary>
 /// Normalized canonical telemetry record stored in the <c>records</c> table of <c>canon.db</c>.

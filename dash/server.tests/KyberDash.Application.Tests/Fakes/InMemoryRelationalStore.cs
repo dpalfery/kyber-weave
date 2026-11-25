@@ -304,6 +304,59 @@ public class InMemoryRelationalStore :
     }
 
     /// <inheritdoc />
+    public void ClearEstimatedRecordTokens(string harnessId, string sourceLocator, EstimatedRecordTokens estimated)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(harnessId);
+        ArgumentException.ThrowIfNullOrWhiteSpace(sourceLocator);
+        if (estimated == EstimatedRecordTokens.None)
+        {
+            return;
+        }
+
+        lock (syncRoot)
+        {
+            StoreState working = state.Clone();
+            object?[]? source = FindRowByKey(
+                working,
+                "source",
+                [("harness_id", harnessId), ("source_kind", "file"), ("locator", sourceLocator)]);
+            if (source is null)
+            {
+                return;
+            }
+
+            string sourceId = GetString(GetTableMetadata("source"), source, "source_id");
+            TableMetadata recordMeta = GetTableMetadata("record");
+            TableMetadata totalMeta = GetTableMetadata("record_reported_total");
+            HashSet<string> reportedSpans = new(
+                working.GetRows("record_reported_total").Select(row => GetString(totalMeta, row, "span_id")),
+                StringComparer.Ordinal);
+            List<string> sourceSpans =
+            [
+                .. working.GetRows("record")
+                    .Where(row => string.Equals(GetString(recordMeta, row, "source_id"), sourceId, StringComparison.Ordinal))
+                    .Select(row => GetString(recordMeta, row, "span_id")),
+            ];
+
+            foreach (string spanId in sourceSpans)
+            {
+                switch (estimated)
+                {
+                    case EstimatedRecordTokens.AllRecordTokens:
+                        _ = DeleteRowsCore(working, "record_token_count", [("span_id", spanId)]);
+                        _ = DeleteRowsCore(working, "record_reported_total", [("span_id", spanId)]);
+                        break;
+                    case EstimatedRecordTokens.RecordsWithoutReportedTotal when !reportedSpans.Contains(spanId):
+                        _ = DeleteRowsCore(working, "record_token_count", [("span_id", spanId)]);
+                        break;
+                }
+            }
+
+            state = working;
+        }
+    }
+
+    /// <inheritdoc />
     public void WriteProblem(CollectedProblem problem)
     {
         ArgumentNullException.ThrowIfNull(problem);
@@ -402,6 +455,67 @@ public class InMemoryRelationalStore :
                 .. counts
                     .OrderBy(static pair => pair.Key, StringComparer.Ordinal)
                     .Select(static pair => new StoredSourceCount(pair.Key, pair.Value)),
+            ];
+        }
+    }
+
+    /// <inheritdoc />
+    public IReadOnlyList<string> SessionKeysWithRecordSource(string harnessId, string sourceName, int limit)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(harnessId);
+        ArgumentException.ThrowIfNullOrWhiteSpace(sourceName);
+        ArgumentOutOfRangeException.ThrowIfLessThan(limit, 1);
+
+        lock (syncRoot)
+        {
+            NoteRead(nameof(SessionKeysWithRecordSource));
+            TableMetadata recordMeta = GetTableMetadata("record");
+            TableMetadata sourceMeta = GetTableMetadata("source");
+            Dictionary<string, string> newestStartedAtBySession = new(StringComparer.Ordinal);
+
+            foreach (object?[] row in state.GetRows("record"))
+            {
+                if (!string.Equals(GetString(recordMeta, row, "harness_id"), harnessId, StringComparison.Ordinal)
+                    || row[recordMeta.ColumnIndices["source_id"]] is not string sourceId)
+                {
+                    continue;
+                }
+
+                object?[]? sourceRow = FindRowByKey(state, "source", [("source_id", sourceId)]);
+                if (sourceRow is null
+                    || !string.Equals(GetString(sourceMeta, sourceRow, "locator"), sourceName, StringComparison.Ordinal))
+                {
+                    continue;
+                }
+
+                string? sessionKey = ReadOptionalSingleString(
+                    state,
+                    "record_session_link",
+                    "span_id",
+                    GetString(recordMeta, row, "span_id"),
+                    "session_key");
+                if (sessionKey is null)
+                {
+                    continue;
+                }
+
+                // Started-at values are stored in one fixed ISO-8601 format, so the ordinal
+                // comparison orders chronologically, matching the SQLite MAX() the adapter runs.
+                string startedAt = GetString(recordMeta, row, "started_at_utc");
+                if (!newestStartedAtBySession.TryGetValue(sessionKey, out string? current)
+                    || string.CompareOrdinal(startedAt, current) > 0)
+                {
+                    newestStartedAtBySession[sessionKey] = startedAt;
+                }
+            }
+
+            return
+            [
+                .. newestStartedAtBySession
+                    .OrderByDescending(static pair => pair.Value, StringComparer.Ordinal)
+                    .ThenBy(static pair => pair.Key, StringComparer.Ordinal)
+                    .Take(limit)
+                    .Select(static pair => pair.Key),
             ];
         }
     }
@@ -3926,6 +4040,16 @@ public class InMemoryRelationalStore :
             InsertRowCore(working, "record_model", [("span_id", record.RecordId), ("model_id", record.Model)]);
         }
 
+        if (record.ResponseId is not null)
+        {
+            InsertRowCore(working, "record_response_id", [("span_id", record.RecordId), ("response_id", record.ResponseId)]);
+        }
+
+        if (record.RequestId is not null)
+        {
+            InsertRowCore(working, "record_request_id", [("span_id", record.RecordId), ("request_id", record.RequestId)]);
+        }
+
         if (record.EndedAt.HasValue)
         {
             InsertRowCore(working, "record_end", [("span_id", record.RecordId), ("ended_at_utc", FormatTimestamp(record.EndedAt.Value))]);
@@ -4082,6 +4206,18 @@ public class InMemoryRelationalStore :
                         ("characters", part.Withheld.Characters),
                         ("measured_tokens", part.Withheld.MeasuredTokens),
                     ]);
+                if (part.Withheld.Tokenizer is string tokenizer)
+                {
+                    InsertRowCore(
+                        working,
+                        "content_part_withheld_tokenizer",
+                        [
+                            ("span_id", record.RecordId),
+                            ("position", (long)part.Position),
+                            ("tokenizer", tokenizer),
+                            ("is_model_own", part.Withheld.TokenizerIsModelOwn ? 1L : 0L),
+                        ]);
+                }
             }
 
             if (part.ReportedTokens.HasValue)
@@ -4153,6 +4289,19 @@ public class InMemoryRelationalStore :
                     ("tool_name", definition.ToolName),
                     ("schema_tokens", definition.SchemaTokens),
                 ]);
+
+            if (definition.Tokenizer is string tokenizer)
+            {
+                InsertRowCore(
+                    working,
+                    "tool_definition_tokenizer",
+                    [
+                        ("span_id", record.RecordId),
+                        ("position", (long)definition.Position),
+                        ("tokenizer", tokenizer),
+                        ("is_model_own", definition.TokenizerIsModelOwn ? 1L : 0L),
+                    ]);
+            }
 
             if (definition.Server is not null)
             {
@@ -4634,6 +4783,20 @@ public class InMemoryRelationalStore :
                             ("tokens", serverDef.Tokens),
                         ]);
                 }
+            }
+
+            foreach (TokenizerLabel label in turn.Tokenizers)
+            {
+                ArgumentNullException.ThrowIfNull(label);
+                InsertRowCore(
+                    working,
+                    "session_context_turn_tokenizer",
+                    [
+                        ("session_id", sessionId),
+                        ("position", (long)turn.Position),
+                        ("tokenizer", label.Tokenizer),
+                        ("is_model_own", label.IsModelOwn ? 1L : 0L),
+                    ]);
             }
 
             if (turn.StrippedBlockCount.HasValue || turn.StrippedTokens.HasValue)
@@ -5341,6 +5504,8 @@ public class InMemoryRelationalStore :
         string? parentSpanId = ReadOptionalSingleString(currentState, "record_parent", "span_id", spanId, "parent_span_id");
         string? traceId = ReadOptionalSingleString(currentState, "record_trace", "span_id", spanId, "trace_id");
         string? model = ReadOptionalSingleString(currentState, "record_model", "span_id", spanId, "model_id");
+        string? responseId = ReadOptionalSingleString(currentState, "record_response_id", "span_id", spanId, "response_id");
+        string? requestId = ReadOptionalSingleString(currentState, "record_request_id", "span_id", spanId, "request_id");
         string? endedRaw = ReadOptionalSingleString(currentState, "record_end", "span_id", spanId, "ended_at_utc");
         DateTimeOffset? endedAt = endedRaw is null ? null : ParseTimestamp(endedRaw);
         long? reportedDurationMs = ReadOptionalSingleInt64(currentState, "record_reported_duration", "span_id", spanId, "duration_ms");
@@ -5420,7 +5585,10 @@ public class InMemoryRelationalStore :
             toolDefs,
             signals,
             reportedInput,
-            reportedOutput);
+            reportedOutput,
+            ReadRecordSourceName(currentState, recordRow),
+            responseId,
+            requestId);
     }
 
     private static long? ReadOptionalReportedTotal(StoreState currentState, string spanId, string direction)
@@ -5447,10 +5615,14 @@ public class InMemoryRelationalStore :
         if (withheldRow is not null)
         {
             TableMetadata withheldMeta = GetTableMetadata("content_part_withheld");
+            object?[]? labelRow = FindRowByKey(currentState, "content_part_withheld_tokenizer", [("span_id", spanId), ("position", pos)]);
+            TableMetadata labelMeta = GetTableMetadata("content_part_withheld_tokenizer");
             withheld = new CollectedWithheldText(
                 GetInt64(withheldMeta, withheldRow, "utf8_bytes"),
                 GetInt64(withheldMeta, withheldRow, "characters"),
-                GetInt64(withheldMeta, withheldRow, "measured_tokens"));
+                GetInt64(withheldMeta, withheldRow, "measured_tokens"),
+                labelRow is null ? null : GetString(labelMeta, labelRow, "tokenizer"),
+                labelRow is not null && GetInt64(labelMeta, labelRow, "is_model_own") == 1L);
         }
 
         object?[]? repTokensRow = FindRowByKey(currentState, "content_part_reported_tokens", [("span_id", spanId), ("position", pos)]);
@@ -5491,7 +5663,16 @@ public class InMemoryRelationalStore :
         object?[]? serverRow = FindRowByKey(currentState, "tool_definition_server", [("span_id", spanId), ("position", pos)]);
         string? server = serverRow is null ? null : GetString(GetTableMetadata("tool_definition_server"), serverRow, "server_name");
 
-        return new CollectedToolDefinition((int)pos, toolName, server, schemaTokens);
+        object?[]? labelRow = FindRowByKey(currentState, "tool_definition_tokenizer", [("span_id", spanId), ("position", pos)]);
+        TableMetadata labelMeta = GetTableMetadata("tool_definition_tokenizer");
+
+        return new CollectedToolDefinition(
+            (int)pos,
+            toolName,
+            server,
+            schemaTokens,
+            labelRow is null ? null : GetString(labelMeta, labelRow, "tokenizer"),
+            labelRow is not null && GetInt64(labelMeta, labelRow, "is_model_own") == 1L);
     }
 
     private static CollectedToolCall? MaterializeToolCall(StoreState currentState, string spanId)
@@ -5758,6 +5939,21 @@ public class InMemoryRelationalStore :
         object?[]? nonResRow = FindRowByKey(currentState, "session_context_turn_non_resident", [("session_id", sessionId), ("position", position)]);
         long? nonResTokens = nonResRow is null ? null : GetInt64(GetTableMetadata("session_context_turn_non_resident"), nonResRow, "tokens");
 
+        // A turn with no label rows means its figures came only from harness-reported counts —
+        // the schema-29 rebuild leaves no unlabelled measured row — so it reads back with no
+        // labels and stays shown as reported, never as not measured.
+        TableMetadata tokenizerMeta = GetTableMetadata("session_context_turn_tokenizer");
+        List<TokenizerLabel> tokenizers =
+        [
+            .. currentState.GetRows("session_context_turn_tokenizer")
+                .Where(r => string.Equals(GetString(tokenizerMeta, r, "session_id"), sessionId, StringComparison.Ordinal) &&
+                            GetInt64(tokenizerMeta, r, "position") == position)
+                .OrderBy(r => GetString(tokenizerMeta, r, "tokenizer"), StringComparer.Ordinal)
+                .Select(r => new TokenizerLabel(
+                    GetString(tokenizerMeta, r, "tokenizer"),
+                    GetInt64(tokenizerMeta, r, "is_model_own") == 1L)),
+        ];
+
         return new StoredSessionContextTurn(
             (int)position,
             GetInt64(turnMeta, turnRow, "input_tokens"),
@@ -5775,7 +5971,10 @@ public class InMemoryRelationalStore :
             strippedTokens,
             prevFresh,
             jumpFactor,
-            nonResTokens);
+            nonResTokens)
+        {
+            Tokenizers = tokenizers,
+        };
     }
 
     private static StoredSessionSchema? MaterializeSessionSchema(StoreState currentState, string sessionId)
@@ -6220,9 +6419,19 @@ public class InMemoryRelationalStore :
             ? AggregateCostBlocks(reportedRecordBlocks, CostBasis.Harness, extraProblems)
             : null;
 
-        ReadTimeCostSummary sessionPublishedCost = turnPublishedBlocks.Count > 0
-            ? AggregateCostBlocks(turnPublishedBlocks, CostBasis.Published, extraProblems)
-            : new ReadTimeCostSummary(CostBasis.Unknown, CostStatus.NoRate, null, null, []);
+        // A session whose records carry no tokens is priced from the usage the harness reported
+        // for the whole session, per model; records with tokens keep pricing per turn.
+        ReportedUsageCost? reportedUsageCost = ReportedSessionUsage.Price(session, records, pricing);
+        if (reportedUsageCost is not null)
+        {
+            extraProblems.AddRange(reportedUsageCost.Problems);
+        }
+
+        ReadTimeCostSummary sessionPublishedCost = reportedUsageCost is not null
+            ? ToReadTimeCostSummary(reportedUsageCost.Cost)
+            : turnPublishedBlocks.Count > 0
+                ? AggregateCostBlocks(turnPublishedBlocks, CostBasis.Published, extraProblems)
+                : new ReadTimeCostSummary(CostBasis.Unknown, CostStatus.NoRate, null, null, []);
 
         ReadTimeCostBasisMismatch? basisMismatch = null;
         if (valuedTurnHarnessBlocks.Count > 0 && valuedTurnPublishedBlocks.Count > 0)
@@ -6258,6 +6467,7 @@ public class InMemoryRelationalStore :
         List<Problem> problems = CollectSessionProblems(currentState, sessionKey, sessionSpanIds);
         problems.AddRange(extraProblems);
 
+        ReportedSessionUsageTotals? listUsageTotals = ReportedSessionUsage.Resolve(session, records);
         return new SessionListFigure(
             SessionKey: sessionKey,
             HarnessId: harnessId,
@@ -6265,13 +6475,14 @@ public class InMemoryRelationalStore :
             Branch: session.Workspace?.Branch,
             TurnCount: turnEntries.Count,
             RequestCount: requestCount,
-            TotalInput: hasInput ? totalInput : null,
-            TotalOutput: hasOutput ? totalOutput : null,
+            TotalInput: listUsageTotals is not null ? listUsageTotals.CombinedInput : hasInput ? totalInput : null,
+            TotalOutput: listUsageTotals is not null ? listUsageTotals.Output : hasOutput ? totalOutput : null,
             ReportedCost: sessionReportedCost,
             PublishedCost: sessionPublishedCost,
             CostBasisMismatch: basisMismatch,
             Models: models,
-            ProblemsCount: problems.Count);
+            ProblemsCount: problems.Count,
+            ReportedTotalTokens: listUsageTotals?.Total);
     }
 
     /// <summary>
@@ -6327,8 +6538,8 @@ public class InMemoryRelationalStore :
 
     /// <summary>
     /// Materializes the record-header columns the timeline tree's nodes read — the span, parent,
-    /// harness, timestamp, duration, kind, name, status, cost, model and declared window — with
-    /// every other child row absent, matching the SQLite timeline read row for row.
+    /// harness, timestamp, duration, kind, name, status, cost, model, declared window and source
+    /// — with every other child row absent, matching the SQLite timeline read row for row.
     /// </summary>
     private static CollectedRecord MaterializeRecordTimeline(StoreState currentState, object?[] recordRow)
     {
@@ -6344,6 +6555,8 @@ public class InMemoryRelationalStore :
         string? sessionKey = ReadOptionalSingleString(currentState, "record_session_link", "span_id", spanId, "session_key");
         string? parentSpanId = ReadOptionalSingleString(currentState, "record_parent", "span_id", spanId, "parent_span_id");
         string? model = ReadOptionalSingleString(currentState, "record_model", "span_id", spanId, "model_id");
+        string? responseId = ReadOptionalSingleString(currentState, "record_response_id", "span_id", spanId, "response_id");
+        string? requestId = ReadOptionalSingleString(currentState, "record_request_id", "span_id", spanId, "request_id");
         long? reportedDurationMs = ReadOptionalSingleInt64(currentState, "record_reported_duration", "span_id", spanId, "duration_ms");
         long? declaredWindow = ReadOptionalSingleInt64(currentState, "record_declared_context_window", "span_id", spanId, "declared_context_window");
 
@@ -6378,7 +6591,27 @@ public class InMemoryRelationalStore :
             ToolDefinitions: [],
             new CollectedRecordSignals(ErrorMessage: null, EditFailures: null, CorrectionRule: null, declaredWindow),
             ReportedInputTokens: null,
-            ReportedOutputTokens: null);
+            ReportedOutputTokens: null,
+            SourceName: ReadRecordSourceName(currentState, recordRow),
+            ResponseId: responseId,
+            RequestId: requestId);
+    }
+
+    /// <summary>
+    /// Reads a record's source name from its stored <c>source</c> row, matching the SQLite reader:
+    /// the locator for an OTLP source, or <see cref="CanonSynth.FileSourcePrefix"/> followed by the
+    /// source's harness for a file source. Never inferred from record attributes.
+    /// </summary>
+    private static string ReadRecordSourceName(StoreState currentState, object?[] recordRow)
+    {
+        string sourceId = GetString(GetTableMetadata("record"), recordRow, "source_id");
+        object?[] sourceRow = FindRowByKey(currentState, "source", [("source_id", sourceId)])
+            ?? throw new InvalidOperationException($"Record source '{sourceId}' has no source row.");
+        TableMetadata sourceMeta = GetTableMetadata("source");
+        SourceKind kind = ParseSourceKind(GetString(sourceMeta, sourceRow, "source_kind"));
+        return kind == SourceKind.File
+            ? CanonSynth.FileSourcePrefix + GetString(sourceMeta, sourceRow, "harness_id")
+            : GetString(sourceMeta, sourceRow, "locator");
     }
 
     /// <summary>
@@ -6564,9 +6797,19 @@ public class InMemoryRelationalStore :
             ? AggregateCostBlocks(reportedRecordBlocks, CostBasis.Harness, extraProblems)
             : null;
 
-        ReadTimeCostSummary sessionPublishedCost = turnPublishedBlocks.Count > 0
-            ? AggregateCostBlocks(turnPublishedBlocks, CostBasis.Published, extraProblems)
-            : new ReadTimeCostSummary(CostBasis.Unknown, CostStatus.NoRate, null, null, []);
+        // A session whose records carry no tokens is priced from the usage the harness reported
+        // for the whole session, per model; records with tokens keep pricing per turn.
+        ReportedUsageCost? reportedUsageCost = ReportedSessionUsage.Price(session, records, pricing);
+        if (reportedUsageCost is not null)
+        {
+            extraProblems.AddRange(reportedUsageCost.Problems);
+        }
+
+        ReadTimeCostSummary sessionPublishedCost = reportedUsageCost is not null
+            ? ToReadTimeCostSummary(reportedUsageCost.Cost)
+            : turnPublishedBlocks.Count > 0
+                ? AggregateCostBlocks(turnPublishedBlocks, CostBasis.Published, extraProblems)
+                : new ReadTimeCostSummary(CostBasis.Unknown, CostStatus.NoRate, null, null, []);
 
         ReadTimeCostBasisMismatch? basisMismatch = null;
         if (valuedTurnHarnessBlocks.Count > 0 && valuedTurnPublishedBlocks.Count > 0)
@@ -6600,10 +6843,21 @@ public class InMemoryRelationalStore :
         long? nullableTotalCacheRead = hasCacheRead ? totalCacheRead : null;
         long? nullableTotalCacheCreation = hasCacheCreation ? totalCacheCreation : null;
 
+        ReportedSessionUsageTotals? reportedUsageTotals = ReportedSessionUsage.Resolve(session, records);
+        if (reportedUsageTotals is not null)
+        {
+            nullableTotalInput = reportedUsageTotals.CombinedInput;
+            nullableTotalOutput = reportedUsageTotals.Output;
+            nullableTotalCacheRead = reportedUsageTotals.CacheRead;
+            nullableTotalCacheCreation = reportedUsageTotals.CacheWrite;
+        }
+
         double? cacheHitRatio = nullableTotalInput is > 0 && nullableTotalCacheRead.HasValue
             ? (double)nullableTotalCacheRead.Value / nullableTotalInput.Value
             : null;
-        int? cacheCreationCoverage = nullableTotalInput is > 0 && nullableTotalCacheCreation.HasValue && turnEntries.Count > 0
+
+        // Cache-creation coverage counts turns; reported session usage has no per-turn figures.
+        int? cacheCreationCoverage = reportedUsageTotals is null && nullableTotalInput is > 0 && nullableTotalCacheCreation.HasValue && turnEntries.Count > 0
             ? cacheCreationTurns
             : null;
 
@@ -6743,7 +6997,8 @@ public class InMemoryRelationalStore :
                 ToolRowsCount: tools.Count,
                 UnmeasuredInputTurns: unmeasuredInputTurns,
                 ReconciliationTotal: reconciliationTotal,
-                ReconciliationMismatched: reconciliationMismatched),
+                ReconciliationMismatched: reconciliationMismatched,
+                ReportedTotalTokens: reportedUsageTotals?.Total),
             tools,
             requests,
             servers,
@@ -6796,6 +7051,8 @@ public class InMemoryRelationalStore :
         string? parentSpanId = ReadOptionalSingleString(currentState, "record_parent", "span_id", spanId, "parent_span_id");
         string? traceId = ReadOptionalSingleString(currentState, "record_trace", "span_id", spanId, "trace_id");
         string? model = ReadOptionalSingleString(currentState, "record_model", "span_id", spanId, "model_id");
+        string? responseId = ReadOptionalSingleString(currentState, "record_response_id", "span_id", spanId, "response_id");
+        string? requestId = ReadOptionalSingleString(currentState, "record_request_id", "span_id", spanId, "request_id");
         string? endedRaw = ReadOptionalSingleString(currentState, "record_end", "span_id", spanId, "ended_at_utc");
         DateTimeOffset? endedAt = endedRaw is null ? null : ParseTimestamp(endedRaw);
         long? reportedDurationMs = ReadOptionalSingleInt64(currentState, "record_reported_duration", "span_id", spanId, "duration_ms");
@@ -6854,7 +7111,10 @@ public class InMemoryRelationalStore :
             toolDefs,
             MaterializeRecordSignals(currentState, spanId),
             reportedInput,
-            reportedOutput);
+            reportedOutput,
+            ReadRecordSourceName(currentState, recordRow),
+            responseId,
+            requestId);
     }
 
     /// <summary>
@@ -8117,6 +8377,7 @@ public class InMemoryRelationalStore :
         TokenClass.CacheWrite => "cache_write",
         TokenClass.Output => "output",
         TokenClass.Reasoning => "reasoning",
+        TokenClass.Total => "total",
         _ => tokenClass.ToString(),
     };
 
@@ -8127,6 +8388,7 @@ public class InMemoryRelationalStore :
         "cache_write" => TokenClass.CacheWrite,
         "output" => TokenClass.Output,
         "reasoning" => TokenClass.Reasoning,
+        "total" => TokenClass.Total,
         _ => throw new InvalidOperationException($"Unknown token_class '{value}'."),
     };
 

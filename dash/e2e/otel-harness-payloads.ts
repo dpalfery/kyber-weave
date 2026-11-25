@@ -1,4 +1,4 @@
-// Multi-turn OTLP trace and log payload builders (up to 12 turns per harness) and
+// Multi-turn OTLP trace and log payload builders (two sessions of 10+ turns per harness) and
 // expected-vs-gap dashboard contracts for all 7 stored OTLP harnesses plus the excluded `gemini` check.
 
 export type StoredOtlpHarnessId =
@@ -83,6 +83,10 @@ export type HarnessExpectationContract = {
   readonly contextMeasurable: boolean
   readonly schemaMeasurable: boolean
   readonly skillsMeasurable: boolean
+  /** Whether the engine draws one measured bar per turn, or the not-measurable chart state. */
+  readonly perTurnTokensMeasurable: boolean
+  /** Whether the session pairs with transcript + companion files read from the server's home on refresh. */
+  readonly pairedWithSessionFiles: boolean
   readonly expectedSkills: readonly string[]
   readonly expectedCostStatus: 'harness' | 'published_priced' | 'out_of_scope' | 'no_rate'
   readonly expectedModels: readonly string[]
@@ -98,10 +102,24 @@ export type HarnessOtlpFixture = {
   readonly logPayload: OtlpExportLogsServiceRequest | null
 }
 
+/** One paired Droid session's transcript and companion, with the paths they live at under the server's home. */
+export type DroidSessionFilePair = {
+  /** Relative path of the transcript under the server's home directory. */
+  readonly transcriptPath: string
+  /** Relative path of the companion settings under the server's home directory. */
+  readonly companionPath: string
+  readonly transcript: string
+  readonly companion: string
+}
+
 export const GEMINI_EXCLUDED_SESSION_ID = 'otel-e2e-gemini-excluded'
 
-// Recent UTC base timestamp (2026-11-20T10:00:00.000Z) so 14-day retention never purges parts.
-const BASE_TIME_NS = 1_795_168_800_000_000_000n
+// The base time is one hour before this run, floored to the minute (decision D10), so the
+// 14-day retention window and the refresh history window never age the fixtures out, whatever
+// day the suite runs on.
+const RUN_MINUTE_MS = Math.floor(Date.now() / 60_000) * 60_000
+const BASE_TIME_MS = RUN_MINUTE_MS - 3_600_000
+const BASE_TIME_NS = BigInt(BASE_TIME_MS) * 1_000_000n
 
 function strAttr(key: string, value: string): OtlpKeyValue {
   return { key, value: { stringValue: value } }
@@ -126,20 +144,25 @@ function strArrayAttr(key: string, values: readonly string[]): OtlpKeyValue {
   }
 }
 
-function hexTraceId(harnessIndex: number, runIndex = 1): string {
+function hexTraceId(harnessIndex: number, runIndex: number): string {
   const hi = harnessIndex.toString(16).padStart(4, '0')
-  const lo = runIndex.toString(16).padStart(4, '0')
-  return `${hi}${lo}000000000000000000000000`.slice(0, 32)
+  const mid = runIndex.toString(16).padStart(4, '0')
+  return `${hi}${mid}000000000000000000000000`.slice(0, 32)
 }
 
-function hexSpanId(harnessIndex: number, seq: number): string {
+function hexSpanId(harnessIndex: number, runIndex: number, seq: number): string {
   const hi = harnessIndex.toString(16).padStart(4, '0')
-  const lo = seq.toString(16).padStart(12, '0')
-  return `${hi}${lo}`
+  const mid = runIndex.toString(16).padStart(2, '0')
+  const lo = seq.toString(16).padStart(10, '0')
+  return `${hi}${mid}${lo}`
 }
 
 function nanoAt(offsetMs: number): string {
   return (BASE_TIME_NS + BigInt(offsetMs) * 1_000_000n).toString()
+}
+
+function isoAt(offsetMs: number): string {
+  return new Date(BASE_TIME_MS + offsetMs).toISOString()
 }
 
 function wrapTraces(
@@ -190,10 +213,14 @@ const SHARED_TOOL_DEFS_JSON = JSON.stringify([
   { name: 'codegraph_explore', description: 'Explore symbol graph', server: 'codegraph' },
 ])
 
+// Two contracts per harness (T3): the `a` session runs 12 turns first, the `b` session 10 turns
+// later — except Droid, whose paired `a` session runs 10 turns and whose plugin-only `b` session
+// runs 12, with the UUID-shaped ids Factory writes. Every contract states what the engine may
+// show for that session and nothing else.
 export const STORED_OTLP_HARNESS_CONTRACTS: readonly HarnessExpectationContract[] = [
   {
     harness: 'claude-code',
-    sessionId: 'otel-e2e-claude-code-12t',
+    sessionId: 'otel-e2e-claude-code-a-12t',
     turns: 12,
     expectedToolCalls: 4,
     tokensMeasurable: true,
@@ -201,6 +228,26 @@ export const STORED_OTLP_HARNESS_CONTRACTS: readonly HarnessExpectationContract[
     contextMeasurable: false,
     schemaMeasurable: false,
     skillsMeasurable: true,
+    perTurnTokensMeasurable: true,
+    pairedWithSessionFiles: false,
+    expectedSkills: ['tdd-workflow'],
+    expectedCostStatus: 'harness',
+    expectedModels: ['claude-sonnet-4-20250514'],
+    expectedGapSubstrings: ['no_message_structure', 'tool-definition schema data'],
+    sendsLogs: true,
+  },
+  {
+    harness: 'claude-code',
+    sessionId: 'otel-e2e-claude-code-b-10t',
+    turns: 10,
+    expectedToolCalls: 4,
+    tokensMeasurable: true,
+    cacheCreationMeasurable: true,
+    contextMeasurable: false,
+    schemaMeasurable: false,
+    skillsMeasurable: true,
+    perTurnTokensMeasurable: true,
+    pairedWithSessionFiles: false,
     expectedSkills: ['tdd-workflow'],
     expectedCostStatus: 'harness',
     expectedModels: ['claude-sonnet-4-20250514'],
@@ -209,7 +256,7 @@ export const STORED_OTLP_HARNESS_CONTRACTS: readonly HarnessExpectationContract[
   },
   {
     harness: 'opencode',
-    sessionId: 'otel-e2e-opencode-12t',
+    sessionId: 'otel-e2e-opencode-a-12t',
     turns: 12,
     expectedToolCalls: 4,
     tokensMeasurable: true,
@@ -217,6 +264,8 @@ export const STORED_OTLP_HARNESS_CONTRACTS: readonly HarnessExpectationContract[
     contextMeasurable: true,
     schemaMeasurable: true,
     skillsMeasurable: true,
+    perTurnTokensMeasurable: true,
+    pairedWithSessionFiles: false,
     expectedSkills: ['kw-probe-skill'],
     expectedCostStatus: 'harness',
     expectedModels: ['claude-sonnet-4-20250514'],
@@ -224,15 +273,66 @@ export const STORED_OTLP_HARNESS_CONTRACTS: readonly HarnessExpectationContract[
     sendsLogs: false,
   },
   {
+    harness: 'opencode',
+    sessionId: 'otel-e2e-opencode-b-10t',
+    turns: 10,
+    expectedToolCalls: 4,
+    tokensMeasurable: true,
+    cacheCreationMeasurable: true,
+    contextMeasurable: true,
+    schemaMeasurable: true,
+    skillsMeasurable: true,
+    perTurnTokensMeasurable: true,
+    pairedWithSessionFiles: false,
+    expectedSkills: ['kw-probe-skill'],
+    expectedCostStatus: 'harness',
+    expectedModels: ['claude-sonnet-4-20250514'],
+    expectedGapSubstrings: ['Skill listings were not exported'],
+    sendsLogs: false,
+  },
+  {
+    // Paired with transcript + companion files (T4's counters): the session totals and cost come
+    // from the companion's reported session usage over the plugin's turns, the tool calls come
+    // from the transcript's tool records (the Factory source-precedence rule), and the per-turn
+    // chart states the not-measured turn counters instead of drawing split bars. Context reads
+    // the plugin turns and falls back to the counter records, but the file source measures
+    // session totals only, never per-call input, so neither carries a per-turn context figure.
     harness: 'droid',
-    sessionId: 'otel-e2e-droid-8t',
-    turns: 8,
+    sessionId: '9f1c3a57-2e4b-4a68-9d02-5b7c8e1a3f44',
+    turns: 10,
+    expectedToolCalls: 3,
+    tokensMeasurable: true,
+    cacheCreationMeasurable: true,
+    contextMeasurable: false,
+    schemaMeasurable: false,
+    skillsMeasurable: false,
+    perTurnTokensMeasurable: false,
+    pairedWithSessionFiles: true,
+    expectedSkills: [],
+    expectedCostStatus: 'published_priced',
+    expectedModels: ['gpt-5-codex'],
+    expectedGapSubstrings: [
+      'tool-definition schema data',
+      'Tool definitions were not exported',
+      'Harness-reported cost was not exported',
+      'One or more turns lack input token counts',
+      'No skill listings or skill invocations were recorded',
+    ],
+    sendsLogs: false,
+  },
+  {
+    // Plugin only: the plugin exports no counters at all, so every token figure stays unmeasured.
+    harness: 'droid',
+    sessionId: '4c8e2b90-7d1a-4f35-8b46-2a9e6c0d7f11',
+    turns: 12,
     expectedToolCalls: 3,
     tokensMeasurable: false,
     cacheCreationMeasurable: false,
     contextMeasurable: false,
     schemaMeasurable: false,
     skillsMeasurable: false,
+    perTurnTokensMeasurable: false,
+    pairedWithSessionFiles: false,
     expectedSkills: [],
     expectedCostStatus: 'out_of_scope',
     expectedModels: ['gpt-5-codex'],
@@ -241,7 +341,7 @@ export const STORED_OTLP_HARNESS_CONTRACTS: readonly HarnessExpectationContract[
   },
   {
     harness: 'codex',
-    sessionId: 'otel-e2e-codex-12t',
+    sessionId: 'otel-e2e-codex-a-12t',
     turns: 12,
     expectedToolCalls: null,
     tokensMeasurable: true,
@@ -249,6 +349,26 @@ export const STORED_OTLP_HARNESS_CONTRACTS: readonly HarnessExpectationContract[
     contextMeasurable: false,
     schemaMeasurable: false,
     skillsMeasurable: false,
+    perTurnTokensMeasurable: true,
+    pairedWithSessionFiles: false,
+    expectedSkills: [],
+    expectedCostStatus: 'published_priced',
+    expectedModels: ['gpt-5-codex'],
+    expectedGapSubstrings: ['no_message_structure', 'tool-definition schema data'],
+    sendsLogs: true,
+  },
+  {
+    harness: 'codex',
+    sessionId: 'otel-e2e-codex-b-10t',
+    turns: 10,
+    expectedToolCalls: null,
+    tokensMeasurable: true,
+    cacheCreationMeasurable: true,
+    contextMeasurable: false,
+    schemaMeasurable: false,
+    skillsMeasurable: false,
+    perTurnTokensMeasurable: true,
+    pairedWithSessionFiles: false,
     expectedSkills: [],
     expectedCostStatus: 'published_priced',
     expectedModels: ['gpt-5-codex'],
@@ -257,7 +377,7 @@ export const STORED_OTLP_HARNESS_CONTRACTS: readonly HarnessExpectationContract[
   },
   {
     harness: 'copilot',
-    sessionId: 'otel-e2e-copilot-12t',
+    sessionId: 'otel-e2e-copilot-a-12t',
     turns: 12,
     expectedToolCalls: 3,
     tokensMeasurable: true,
@@ -265,6 +385,26 @@ export const STORED_OTLP_HARNESS_CONTRACTS: readonly HarnessExpectationContract[
     contextMeasurable: false,
     schemaMeasurable: false,
     skillsMeasurable: false,
+    perTurnTokensMeasurable: true,
+    pairedWithSessionFiles: false,
+    expectedSkills: [],
+    expectedCostStatus: 'no_rate',
+    expectedModels: ['gpt-4o'],
+    expectedGapSubstrings: ['no_message_structure', 'tool-definition schema data'],
+    sendsLogs: false,
+  },
+  {
+    harness: 'copilot',
+    sessionId: 'otel-e2e-copilot-b-10t',
+    turns: 10,
+    expectedToolCalls: 3,
+    tokensMeasurable: true,
+    cacheCreationMeasurable: true,
+    contextMeasurable: false,
+    schemaMeasurable: false,
+    skillsMeasurable: false,
+    perTurnTokensMeasurable: true,
+    pairedWithSessionFiles: false,
     expectedSkills: [],
     expectedCostStatus: 'no_rate',
     expectedModels: ['gpt-4o'],
@@ -273,7 +413,7 @@ export const STORED_OTLP_HARNESS_CONTRACTS: readonly HarnessExpectationContract[
   },
   {
     harness: 'pi',
-    sessionId: 'otel-e2e-pi-12t',
+    sessionId: 'otel-e2e-pi-a-12t',
     turns: 12,
     expectedToolCalls: 3,
     tokensMeasurable: true,
@@ -281,6 +421,26 @@ export const STORED_OTLP_HARNESS_CONTRACTS: readonly HarnessExpectationContract[
     contextMeasurable: true,
     schemaMeasurable: true,
     skillsMeasurable: true,
+    perTurnTokensMeasurable: true,
+    pairedWithSessionFiles: false,
+    expectedSkills: ['pi-telemetry-skill'],
+    expectedCostStatus: 'out_of_scope',
+    expectedModels: ['claude-sonnet-4-20250514'],
+    expectedGapSubstrings: ['Skill listings were not exported'],
+    sendsLogs: false,
+  },
+  {
+    harness: 'pi',
+    sessionId: 'otel-e2e-pi-b-10t',
+    turns: 10,
+    expectedToolCalls: 3,
+    tokensMeasurable: true,
+    cacheCreationMeasurable: true,
+    contextMeasurable: true,
+    schemaMeasurable: true,
+    skillsMeasurable: true,
+    perTurnTokensMeasurable: true,
+    pairedWithSessionFiles: false,
     expectedSkills: ['pi-telemetry-skill'],
     expectedCostStatus: 'out_of_scope',
     expectedModels: ['claude-sonnet-4-20250514'],
@@ -289,7 +449,25 @@ export const STORED_OTLP_HARNESS_CONTRACTS: readonly HarnessExpectationContract[
   },
   {
     harness: 'antigravity',
-    sessionId: 'otel-e2e-antigravity-10t',
+    sessionId: 'otel-e2e-antigravity-a-12t',
+    turns: 12,
+    expectedToolCalls: 2,
+    tokensMeasurable: true,
+    cacheCreationMeasurable: true,
+    contextMeasurable: false,
+    schemaMeasurable: false,
+    skillsMeasurable: false,
+    perTurnTokensMeasurable: true,
+    pairedWithSessionFiles: false,
+    expectedSkills: [],
+    expectedCostStatus: 'out_of_scope',
+    expectedModels: ['gemini-2.5-pro'],
+    expectedGapSubstrings: ['no_message_structure', 'tool-definition schema data'],
+    sendsLogs: false,
+  },
+  {
+    harness: 'antigravity',
+    sessionId: 'otel-e2e-antigravity-b-10t',
     turns: 10,
     expectedToolCalls: 2,
     tokensMeasurable: true,
@@ -297,6 +475,8 @@ export const STORED_OTLP_HARNESS_CONTRACTS: readonly HarnessExpectationContract[
     contextMeasurable: false,
     schemaMeasurable: false,
     skillsMeasurable: false,
+    perTurnTokensMeasurable: true,
+    pairedWithSessionFiles: false,
     expectedSkills: [],
     expectedCostStatus: 'out_of_scope',
     expectedModels: ['gemini-2.5-pro'],
@@ -305,25 +485,37 @@ export const STORED_OTLP_HARNESS_CONTRACTS: readonly HarnessExpectationContract[
   },
 ]
 
-function buildClaudeCodeFixture(): HarnessOtlpFixture {
-  const sessionId = 'otel-e2e-claude-code-12t'
-  const traceId = hexTraceId(1)
-  const rootSpanId = hexSpanId(1, 1)
+/** The trace and span id ranges one session's fixture uses, so two sessions never share a record id. */
+type FixtureIdRange = {
+  readonly harnessIndex: number
+  readonly runIndex: 1 | 2
+}
+
+/** The per-session base offset: the `b` fixture runs 5 minutes after the `a` fixture. */
+function runBaseOffsetMs(range: FixtureIdRange): number {
+  return range.runIndex === 1 ? 0 : 300_000
+}
+
+function buildClaudeCodeFixture(contract: HarnessExpectationContract, range: FixtureIdRange): HarnessOtlpFixture {
+  const sessionId = contract.sessionId
+  const traceId = hexTraceId(range.harnessIndex, range.runIndex)
+  const rootSpanId = hexSpanId(range.harnessIndex, range.runIndex, 1)
+  const baseShiftMs = runBaseOffsetMs(range)
   const spans: OtlpSpanWire[] = [
     {
       traceId,
       spanId: rootSpanId,
       name: 'invoke_agent claude-code',
       kind: 'SPAN_KIND_INTERNAL',
-      startTimeUnixNano: nanoAt(0),
-      endTimeUnixNano: nanoAt(24_000),
+      startTimeUnixNano: nanoAt(baseShiftMs),
+      endTimeUnixNano: nanoAt(baseShiftMs + contract.turns * 2_000 + 4_000),
       status: { code: 'STATUS_CODE_OK' },
       attributes: [
         strAttr('gen_ai.operation.name', 'invoke_agent'),
         strAttr('claude_code.session.id', sessionId),
         strAttr('gen_ai.session.id', sessionId),
         strAttr('gen_ai.agent.name', 'claude-code'),
-        strAttr('kyber.session.label', 'Claude Code 12-turn OTLP run'),
+        strAttr('kyber.session.label', `Claude Code ${contract.turns}-turn OTLP run (${sessionId})`),
       ],
     },
   ]
@@ -331,10 +523,10 @@ function buildClaudeCodeFixture(): HarnessOtlpFixture {
   let seq = 2
   const logRecords: OtlpLogRecordWire[] = []
 
-  for (let turn = 0; turn < 12; turn++) {
-    const startMs = turn * 1_800 + 50
+  for (let turn = 0; turn < contract.turns; turn++) {
+    const startMs = baseShiftMs + turn * 1_800 + 50
     const endMs = startMs + 900
-    const turnSpanId = hexSpanId(1, seq++)
+    const turnSpanId = hexSpanId(range.harnessIndex, range.runIndex, seq++)
     spans.push({
       traceId,
       spanId: turnSpanId,
@@ -357,7 +549,7 @@ function buildClaudeCodeFixture(): HarnessOtlpFixture {
     })
 
     if (turn < 4) {
-      const toolSpanId = hexSpanId(1, seq++)
+      const toolSpanId = hexSpanId(range.harnessIndex, range.runIndex, seq++)
       const isSkillTool = turn === 0
       spans.push({
         traceId,
@@ -398,41 +590,42 @@ function buildClaudeCodeFixture(): HarnessOtlpFixture {
   return {
     harness: 'claude-code',
     sessionId,
-    turns: 12,
+    turns: contract.turns,
     tracePayload: wrapTraces('claude-code', 'com.anthropic.claude_code', spans),
     logPayload: wrapLogs('claude-code', 'com.anthropic.claude_code', logRecords),
   }
 }
 
-function buildOpencodeFixture(): HarnessOtlpFixture {
-  const sessionId = 'otel-e2e-opencode-12t'
-  const traceId = hexTraceId(2)
-  const requestSpanId = hexSpanId(2, 1)
+function buildOpencodeFixture(contract: HarnessExpectationContract, range: FixtureIdRange): HarnessOtlpFixture {
+  const sessionId = contract.sessionId
+  const traceId = hexTraceId(range.harnessIndex, range.runIndex)
+  const requestSpanId = hexSpanId(range.harnessIndex, range.runIndex, 1)
+  const baseShiftMs = runBaseOffsetMs(range)
   const spans: OtlpSpanWire[] = [
     {
       traceId,
       spanId: requestSpanId,
       name: 'opencode.request',
       kind: 'SPAN_KIND_INTERNAL',
-      startTimeUnixNano: nanoAt(0),
-      endTimeUnixNano: nanoAt(26_000),
+      startTimeUnixNano: nanoAt(baseShiftMs),
+      endTimeUnixNano: nanoAt(baseShiftMs + contract.turns * 2_100 + 5_000),
       status: { code: 'STATUS_CODE_OK' },
       attributes: [
         strAttr('opencode.contract_version', '3'),
         strAttr('opencode.session.id', sessionId),
         strAttr('opencode.span.kind', 'request'),
         strAttr('opencode.agent', 'build'),
-        strAttr('opencode.prompt.text', 'Run the 12-turn OpenCode telemetry validation pass'),
-        strAttr('kyber.session.label', 'OpenCode v3 12-turn OTLP run'),
+        strAttr('opencode.prompt.text', `Run the ${contract.turns}-turn OpenCode telemetry validation pass`),
+        strAttr('kyber.session.label', `OpenCode v3 ${contract.turns}-turn OTLP run (${sessionId})`),
       ],
     },
   ]
 
   let seq = 2
-  for (let turn = 0; turn < 12; turn++) {
-    const startMs = turn * 1_900 + 40
+  for (let turn = 0; turn < contract.turns; turn++) {
+    const startMs = baseShiftMs + turn * 1_900 + 40
     const endMs = startMs + 950
-    const stepSpanId = hexSpanId(2, seq++)
+    const stepSpanId = hexSpanId(range.harnessIndex, range.runIndex, seq++)
     const stepAttrs: OtlpKeyValue[] = [
       strAttr('opencode.contract_version', '3'),
       strAttr('opencode.session.id', sessionId),
@@ -471,7 +664,7 @@ function buildOpencodeFixture(): HarnessOtlpFixture {
       const toolName = turn === 0 ? 'codegraph_explore' : turn % 2 === 0 ? 'read' : 'edit'
       spans.push({
         traceId,
-        spanId: hexSpanId(2, seq++),
+        spanId: hexSpanId(range.harnessIndex, range.runIndex, seq++),
         parentSpanId: stepSpanId,
         name: 'opencode.tool',
         kind: 'SPAN_KIND_INTERNAL',
@@ -483,7 +676,7 @@ function buildOpencodeFixture(): HarnessOtlpFixture {
           strAttr('opencode.session.id', sessionId),
           strAttr('opencode.span.kind', 'tool'),
           strAttr('opencode.tool.name', toolName),
-          strAttr('opencode.tool.call_id', `oc_call_${turn + 1}`),
+          strAttr('opencode.tool.call_id', `${sessionId}_call_${turn + 1}`),
           strAttr('opencode.tool.status', 'completed'),
         ],
       })
@@ -493,39 +686,40 @@ function buildOpencodeFixture(): HarnessOtlpFixture {
   return {
     harness: 'opencode',
     sessionId,
-    turns: 12,
+    turns: contract.turns,
     tracePayload: wrapTraces('kyberdash-opencode-plugin', 'kyberdash.opencode-plugin', spans),
     logPayload: null,
   }
 }
 
-function buildDroidFixture(): HarnessOtlpFixture {
-  const sessionId = 'otel-e2e-droid-8t'
-  const traceId = hexTraceId(3)
-  const rootSpanId = hexSpanId(3, 1)
+function buildDroidFixture(contract: HarnessExpectationContract, range: FixtureIdRange): HarnessOtlpFixture {
+  const sessionId = contract.sessionId
+  const traceId = hexTraceId(range.harnessIndex, range.runIndex)
+  const rootSpanId = hexSpanId(range.harnessIndex, range.runIndex, 1)
+  const baseShiftMs = runBaseOffsetMs(range)
   const spans: OtlpSpanWire[] = [
     {
       traceId,
       spanId: rootSpanId,
       name: 'factory.session',
       kind: 'SPAN_KIND_INTERNAL',
-      startTimeUnixNano: nanoAt(0),
-      endTimeUnixNano: nanoAt(16_000),
+      startTimeUnixNano: nanoAt(baseShiftMs),
+      endTimeUnixNano: nanoAt(baseShiftMs + contract.turns * 1_700 + 2_000),
       status: { code: 'STATUS_CODE_OK' },
       attributes: [
         strAttr('factory.contract_version', '1'),
         strAttr('factory.session.id', sessionId),
         strAttr('factory.cwd', '/tmp/kyber-droid-e2e'),
-        strAttr('kyber.session.label', 'Factory Droid 8-turn OTLP run'),
+        strAttr('kyber.session.label', `Factory Droid ${contract.turns}-turn OTLP run (${sessionId})`),
       ],
     },
   ]
 
   let seq = 2
-  for (let turn = 0; turn < 8; turn++) {
-    const startMs = turn * 1_700 + 30
+  for (let turn = 0; turn < contract.turns; turn++) {
+    const startMs = baseShiftMs + turn * 1_700 + 30
     const endMs = startMs + 700
-    const turnSpanId = hexSpanId(3, seq++)
+    const turnSpanId = hexSpanId(range.harnessIndex, range.runIndex, seq++)
     const turnAttrs: OtlpKeyValue[] = [
       strAttr('factory.contract_version', '1'),
       strAttr('factory.session.id', sessionId),
@@ -550,7 +744,7 @@ function buildDroidFixture(): HarnessOtlpFixture {
     if (turn < 3) {
       spans.push({
         traceId,
-        spanId: hexSpanId(3, seq++),
+        spanId: hexSpanId(range.harnessIndex, range.runIndex, seq++),
         parentSpanId: turnSpanId,
         name: 'factory.tool',
         kind: 'SPAN_KIND_INTERNAL',
@@ -561,7 +755,7 @@ function buildDroidFixture(): HarnessOtlpFixture {
           strAttr('factory.contract_version', '1'),
           strAttr('factory.session.id', sessionId),
           strAttr('factory.tool.name', turn === 0 ? 'Read' : 'Bash'),
-          strAttr('factory.tool.call_id', `droid_call_${turn + 1}`),
+          strAttr('factory.tool.call_id', `droid_${sessionId}_call_${turn + 1}`),
           strAttr('factory.tool.status', 'completed'),
         ],
       })
@@ -571,24 +765,25 @@ function buildDroidFixture(): HarnessOtlpFixture {
   return {
     harness: 'droid',
     sessionId,
-    turns: 8,
+    turns: contract.turns,
     tracePayload: wrapTraces('kyberdash-factory-plugin', 'kyberdash.factory-plugin', spans),
     logPayload: null,
   }
 }
 
-function buildCodexFixture(): HarnessOtlpFixture {
-  const sessionId = 'otel-e2e-codex-12t'
-  const traceId = hexTraceId(4)
+function buildCodexFixture(contract: HarnessExpectationContract, range: FixtureIdRange): HarnessOtlpFixture {
+  const sessionId = contract.sessionId
+  const traceId = hexTraceId(range.harnessIndex, range.runIndex)
+  const baseShiftMs = runBaseOffsetMs(range)
   const spans: OtlpSpanWire[] = []
 
   let seq = 1
   const logRecords: OtlpLogRecordWire[] = []
 
-  for (let turn = 0; turn < 12; turn++) {
-    const startMs = turn * 1_800 + 60
+  for (let turn = 0; turn < contract.turns; turn++) {
+    const startMs = baseShiftMs + turn * 1_800 + 60
     const endMs = startMs + 820
-    const turnSpanId = hexSpanId(4, seq++)
+    const turnSpanId = hexSpanId(range.harnessIndex, range.runIndex, seq++)
     const cacheRead = 2_400 + turn * 300
     const cacheWrite = turn === 0 ? 1_200 : 200
     const fresh = 1_100 + turn * 150
@@ -625,7 +820,7 @@ function buildCodexFixture(): HarnessOtlpFixture {
           strAttr('event.name', 'codex.tool_result'),
           strAttr('conversation.id', sessionId),
           strAttr('tool_name', turn === 0 ? 'shell' : 'apply_patch'),
-          strAttr('call_id', `codex_call_${turn + 1}`),
+          strAttr('call_id', `${sessionId}_call_${turn + 1}`),
           strAttr('output', 'ok'),
         ],
       })
@@ -635,38 +830,39 @@ function buildCodexFixture(): HarnessOtlpFixture {
   return {
     harness: 'codex',
     sessionId,
-    turns: 12,
+    turns: contract.turns,
     tracePayload: wrapTraces('codex_cli_rs', 'codex.otel', spans),
     logPayload: wrapLogs('codex_cli_rs', 'codex.otel', logRecords),
   }
 }
 
-function buildCopilotFixture(): HarnessOtlpFixture {
-  const sessionId = 'otel-e2e-copilot-12t'
-  const traceId = hexTraceId(5)
-  const rootSpanId = hexSpanId(5, 1)
+function buildCopilotFixture(contract: HarnessExpectationContract, range: FixtureIdRange): HarnessOtlpFixture {
+  const sessionId = contract.sessionId
+  const traceId = hexTraceId(range.harnessIndex, range.runIndex)
+  const rootSpanId = hexSpanId(range.harnessIndex, range.runIndex, 1)
+  const baseShiftMs = runBaseOffsetMs(range)
   const spans: OtlpSpanWire[] = [
     {
       traceId,
       spanId: rootSpanId,
       name: 'invoke_agent copilot',
       kind: 'SPAN_KIND_INTERNAL',
-      startTimeUnixNano: nanoAt(0),
-      endTimeUnixNano: nanoAt(22_000),
+      startTimeUnixNano: nanoAt(baseShiftMs),
+      endTimeUnixNano: nanoAt(baseShiftMs + contract.turns * 2_000 + 3_000),
       status: { code: 'STATUS_CODE_OK' },
       attributes: [
         strAttr('gen_ai.operation.name', 'invoke_agent'),
         strAttr('copilot_chat.chat_session_id', sessionId),
-        strAttr('kyber.session.label', 'Copilot 12-turn OTLP run'),
+        strAttr('kyber.session.label', `Copilot ${contract.turns}-turn OTLP run (${sessionId})`),
       ],
     },
   ]
 
   let seq = 2
-  for (let turn = 0; turn < 12; turn++) {
-    const startMs = turn * 1_750 + 40
+  for (let turn = 0; turn < contract.turns; turn++) {
+    const startMs = baseShiftMs + turn * 1_750 + 40
     const endMs = startMs + 780
-    const turnSpanId = hexSpanId(5, seq++)
+    const turnSpanId = hexSpanId(range.harnessIndex, range.runIndex, seq++)
     const cacheRead = 1_800 + turn * 250
     const cacheCreation = turn === 0 ? 900 : 150
     const fresh = 950 + turn * 100
@@ -692,7 +888,7 @@ function buildCopilotFixture(): HarnessOtlpFixture {
     if (turn < 3) {
       spans.push({
         traceId,
-        spanId: hexSpanId(5, seq++),
+        spanId: hexSpanId(range.harnessIndex, range.runIndex, seq++),
         parentSpanId: turnSpanId,
         name: `copilot_chat.tool.${turn + 1}`,
         kind: 'SPAN_KIND_INTERNAL',
@@ -710,38 +906,39 @@ function buildCopilotFixture(): HarnessOtlpFixture {
   return {
     harness: 'copilot',
     sessionId,
-    turns: 12,
+    turns: contract.turns,
     tracePayload: wrapTraces('copilot-chat', 'github.copilot.chat', spans),
     logPayload: null,
   }
 }
 
-function buildPiFixture(): HarnessOtlpFixture {
-  const sessionId = 'otel-e2e-pi-12t'
-  const traceId = hexTraceId(6)
-  const rootSpanId = hexSpanId(6, 1)
+function buildPiFixture(contract: HarnessExpectationContract, range: FixtureIdRange): HarnessOtlpFixture {
+  const sessionId = contract.sessionId
+  const traceId = hexTraceId(range.harnessIndex, range.runIndex)
+  const rootSpanId = hexSpanId(range.harnessIndex, range.runIndex, 1)
+  const baseShiftMs = runBaseOffsetMs(range)
   const spans: OtlpSpanWire[] = [
     {
       traceId,
       spanId: rootSpanId,
       name: 'invoke_agent pi',
       kind: 'SPAN_KIND_INTERNAL',
-      startTimeUnixNano: nanoAt(0),
-      endTimeUnixNano: nanoAt(23_000),
+      startTimeUnixNano: nanoAt(baseShiftMs),
+      endTimeUnixNano: nanoAt(baseShiftMs + contract.turns * 2_000 + 3_000),
       status: { code: 'STATUS_CODE_OK' },
       attributes: [
         strAttr('gen_ai.operation.name', 'invoke_agent'),
         strAttr('pi.session.id', sessionId),
-        strAttr('kyber.session.label', 'Pi 12-turn OTLP run'),
+        strAttr('kyber.session.label', `Pi ${contract.turns}-turn OTLP run (${sessionId})`),
       ],
     },
   ]
 
   let seq = 2
-  for (let turn = 0; turn < 12; turn++) {
-    const startMs = turn * 1_800 + 45
+  for (let turn = 0; turn < contract.turns; turn++) {
+    const startMs = baseShiftMs + turn * 1_800 + 45
     const endMs = startMs + 810
-    const turnSpanId = hexSpanId(6, seq++)
+    const turnSpanId = hexSpanId(range.harnessIndex, range.runIndex, seq++)
     const turnAttrs: OtlpKeyValue[] = [
       strAttr('pi.session.id', sessionId),
       strAttr('gen_ai.response.model', 'claude-sonnet-4-20250514'),
@@ -775,7 +972,7 @@ function buildPiFixture(): HarnessOtlpFixture {
     if (turn < 3) {
       spans.push({
         traceId,
-        spanId: hexSpanId(6, seq++),
+        spanId: hexSpanId(range.harnessIndex, range.runIndex, seq++),
         parentSpanId: turnSpanId,
         name: `pi.tool.${turn + 1}`,
         kind: 'SPAN_KIND_INTERNAL',
@@ -793,39 +990,40 @@ function buildPiFixture(): HarnessOtlpFixture {
   return {
     harness: 'pi',
     sessionId,
-    turns: 12,
+    turns: contract.turns,
     tracePayload: wrapTraces('pi-agent', 'pi.telemetry', spans),
     logPayload: null,
   }
 }
 
-function buildAntigravityFixture(): HarnessOtlpFixture {
-  const sessionId = 'otel-e2e-antigravity-10t'
-  const traceId = hexTraceId(7)
-  const rootSpanId = hexSpanId(7, 1)
+function buildAntigravityFixture(contract: HarnessExpectationContract, range: FixtureIdRange): HarnessOtlpFixture {
+  const sessionId = contract.sessionId
+  const traceId = hexTraceId(range.harnessIndex, range.runIndex)
+  const rootSpanId = hexSpanId(range.harnessIndex, range.runIndex, 1)
+  const baseShiftMs = runBaseOffsetMs(range)
   const spans: OtlpSpanWire[] = [
     {
       traceId,
       spanId: rootSpanId,
       name: 'invoke_agent antigravity',
       kind: 'SPAN_KIND_INTERNAL',
-      startTimeUnixNano: nanoAt(0),
-      endTimeUnixNano: nanoAt(19_000),
+      startTimeUnixNano: nanoAt(baseShiftMs),
+      endTimeUnixNano: nanoAt(baseShiftMs + contract.turns * 1_900 + 3_000),
       status: { code: 'STATUS_CODE_OK' },
       attributes: [
         strAttr('gen_ai.operation.name', 'invoke_agent'),
         strAttr('gen_ai.agent.name', 'antigravity'),
         strAttr('gen_ai.session.id', sessionId),
-        strAttr('kyber.session.label', 'Antigravity 10-turn OTLP run'),
+        strAttr('kyber.session.label', `Antigravity ${contract.turns}-turn OTLP run (${sessionId})`),
       ],
     },
   ]
 
   let seq = 2
-  for (let turn = 0; turn < 10; turn++) {
-    const startMs = turn * 1_700 + 40
+  for (let turn = 0; turn < contract.turns; turn++) {
+    const startMs = baseShiftMs + turn * 1_700 + 40
     const endMs = startMs + 760
-    const turnSpanId = hexSpanId(7, seq++)
+    const turnSpanId = hexSpanId(range.harnessIndex, range.runIndex, seq++)
     const cacheRead = 1_600 + turn * 200
     const fresh = 900 + turn * 120
     spans.push({
@@ -851,7 +1049,7 @@ function buildAntigravityFixture(): HarnessOtlpFixture {
     if (turn < 2) {
       spans.push({
         traceId,
-        spanId: hexSpanId(7, seq++),
+        spanId: hexSpanId(range.harnessIndex, range.runIndex, seq++),
         parentSpanId: turnSpanId,
         name: `antigravity.tool.${turn + 1}`,
         kind: 'SPAN_KIND_INTERNAL',
@@ -870,7 +1068,7 @@ function buildAntigravityFixture(): HarnessOtlpFixture {
   return {
     harness: 'antigravity',
     sessionId,
-    turns: 10,
+    turns: contract.turns,
     tracePayload: wrapTraces('antigravity', 'antigravity.otel', spans),
     logPayload: null,
   }
@@ -878,11 +1076,11 @@ function buildAntigravityFixture(): HarnessOtlpFixture {
 
 function buildGeminiExcludedFixture(): HarnessOtlpFixture {
   const sessionId = GEMINI_EXCLUDED_SESSION_ID
-  const traceId = hexTraceId(8)
+  const traceId = hexTraceId(8, 1)
   const spans: OtlpSpanWire[] = [
     {
       traceId,
-      spanId: hexSpanId(8, 1),
+      spanId: hexSpanId(8, 1, 1),
       name: 'gemini.generate_content',
       kind: 'SPAN_KIND_CLIENT',
       startTimeUnixNano: nanoAt(100),
@@ -909,36 +1107,122 @@ function buildGeminiExcludedFixture(): HarnessOtlpFixture {
   }
 }
 
-export function buildHarnessOtlpFixture(harness: AllOtlpHarnessId): HarnessOtlpFixture {
-  switch (harness) {
-    case 'claude-code':
-      return buildClaudeCodeFixture()
-    case 'opencode':
-      return buildOpencodeFixture()
-    case 'droid':
-      return buildDroidFixture()
-    case 'codex':
-      return buildCodexFixture()
-    case 'copilot':
-      return buildCopilotFixture()
-    case 'pi':
-      return buildPiFixture()
-    case 'antigravity':
-      return buildAntigravityFixture()
-    case 'gemini':
-      return buildGeminiExcludedFixture()
+function buildContractFixture(contract: HarnessExpectationContract): HarnessOtlpFixture {
+  const harnessIndex = 1 + STORED_OTLP_HARNESS_CONTRACTS.findIndex(
+    (candidate) => candidate.harness === contract.harness,
+  )
+  const ordinal = STORED_OTLP_HARNESS_CONTRACTS.filter(
+    (candidate) => candidate.harness === contract.harness,
+  ).indexOf(contract)
+  if (ordinal < 0) {
+    throw new Error(`contract ${contract.sessionId} is not in STORED_OTLP_HARNESS_CONTRACTS`)
   }
+  const runIndex: 1 | 2 = ordinal === 0 ? 1 : 2
+  const range: FixtureIdRange = { harnessIndex, runIndex }
+  switch (contract.harness) {
+    case 'claude-code':
+      return buildClaudeCodeFixture(contract, range)
+    case 'opencode':
+      return buildOpencodeFixture(contract, range)
+    case 'droid':
+      return buildDroidFixture(contract, range)
+    case 'codex':
+      return buildCodexFixture(contract, range)
+    case 'copilot':
+      return buildCopilotFixture(contract, range)
+    case 'pi':
+      return buildPiFixture(contract, range)
+    case 'antigravity':
+      return buildAntigravityFixture(contract, range)
+  }
+}
+
+export function buildHarnessOtlpFixture(contract: HarnessExpectationContract): HarnessOtlpFixture {
+  return buildContractFixture(contract)
 }
 
 export function buildAllHarnessOtlpFixtures(): readonly HarnessOtlpFixture[] {
   return [
-    buildClaudeCodeFixture(),
-    buildOpencodeFixture(),
-    buildDroidFixture(),
-    buildCodexFixture(),
-    buildCopilotFixture(),
-    buildPiFixture(),
-    buildAntigravityFixture(),
+    ...STORED_OTLP_HARNESS_CONTRACTS.map(buildHarnessOtlpFixture),
     buildGeminiExcludedFixture(),
   ]
+}
+
+// The workspace folder mirrors the cwd leaf, the way Factory names the sessions folder.
+const DROID_WORKSPACE = 'kyber-droid-e2e'
+const DROID_CWD = `/tmp/${DROID_WORKSPACE}`
+
+/**
+ * Builds the paired Droid session's transcript (`<id>.jsonl`) and companion
+ * (`<id>.settings.json`) files, shaped as `DroidSessionMapperTests` writes them: the
+ * `session_start` carries the session id, one assistant message per turn, and the companion
+ * carries the reported session usage (the pinned counters) with the model the session ran on.
+ */
+export function buildDroidSessionFiles(contract: HarnessExpectationContract): DroidSessionFilePair {
+  const transcriptPath = `.factory/sessions/${DROID_WORKSPACE}/${contract.sessionId}.jsonl`
+  const companionPath = `.factory/sessions/${DROID_WORKSPACE}/${contract.sessionId}.settings.json`
+
+  const lines: string[] = [
+    JSON.stringify({
+      type: 'session_start',
+      id: contract.sessionId,
+      title: 'Droid paired OTLP run',
+      cwd: DROID_CWD,
+    }),
+    // Turn 1 carries the transcript's tool records: three tool_use calls with their results, so
+    // the file source owns the session's tool invocations under the source-precedence rule.
+    JSON.stringify({
+      type: 'message',
+      id: 'droid-msg-1',
+      timestamp: isoAt(0),
+      message: {
+        role: 'assistant',
+        content: [
+          { type: 'tool_use', id: 'tu-1', name: 'Read', input: { path: 'src/telemetry.ts' } },
+          { type: 'tool_use', id: 'tu-2', name: 'Bash', input: { command: 'dotnet test' } },
+          { type: 'tool_use', id: 'tu-3', name: 'Edit', input: { path: 'src/telemetry.ts' } },
+        ],
+      },
+    }),
+    JSON.stringify({
+      type: 'message',
+      timestamp: isoAt(4_000),
+      message: {
+        role: 'user',
+        content: [
+          { type: 'tool_result', tool_use_id: 'tu-1', is_error: false, content: 'const collector = 1' },
+          { type: 'tool_result', tool_use_id: 'tu-2', is_error: false, content: 'tests passed' },
+          { type: 'tool_result', tool_use_id: 'tu-3', is_error: false, content: 'edited' },
+        ],
+      },
+    }),
+  ]
+  for (let turn = 1; turn < contract.turns; turn++) {
+    lines.push(JSON.stringify({
+      type: 'message',
+      id: `droid-msg-${turn + 1}`,
+      timestamp: isoAt(turn * 1_700 + 30),
+      message: {
+        role: 'assistant',
+        content: [{ type: 'text', text: `Turn ${turn + 1}: paired-session analysis complete.` }],
+      },
+    }))
+  }
+
+  const companion = JSON.stringify({
+    model: 'gpt-5-codex',
+    tokenUsage: {
+      inputTokens: 25829,
+      outputTokens: 6811,
+      cacheReadTokens: 283904,
+      cacheCreationTokens: 1200,
+    },
+  })
+
+  return {
+    transcriptPath,
+    companionPath,
+    transcript: lines.join('\n') + '\n',
+    companion: companion + '\n',
+  }
 }

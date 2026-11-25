@@ -31,7 +31,7 @@ public class CanonSynthTests
             CacheCreationInputTokens = 40,
             ReasoningTokens = 30,
             CostUsd = 0.045,
-            CostIsEstimated = false,
+            CostIsCalculated = false,
             SessionId = "sess-1",
             TurnId = "msg-1",
             SessionTitle = "Fix build pipeline",
@@ -61,7 +61,7 @@ public class CanonSynthTests
             OutputTokens = 60,
             ReasoningTokens = 40,
             CostUsd = 0,
-            CostIsEstimated = true,
+            CostIsCalculated = true,
             SessionId = "sess-pi",
             DeduplicationKey = "pi:sess-pi:call-9",
         };

@@ -5,7 +5,9 @@ using KyberDash.Contracts.Repositories;
 using KyberDash.Data.Collector;
 using KyberDash.Data.Collector.Sources;
 using KyberDash.Data.Harnesses.Claude;
+using KyberDash.Data.Harnesses.Otlp;
 using KyberDash.Data.Repositories;
+using KyberDash.Data.Tokenization;
 using KyberDash.Domain;
 using Xunit;
 
@@ -300,7 +302,7 @@ public class ClaudeTranscriptMapperTests
         Assert.NotNull(docPart.Withheld);
         Assert.Equal(Encoding.UTF8.GetByteCount(jsonDocResult), docPart.Withheld!.Utf8Bytes);
         Assert.Equal(jsonDocResult.Length, docPart.Withheld.Characters);
-        Assert.Equal(CanonTokenCache.ApproximateO200kBase(jsonDocResult), docPart.Withheld.MeasuredTokens);
+        Assert.Equal(LocalTextTokenizer.Shared.Count(jsonDocResult, "claude-sonnet-4-5").Count, docPart.Withheld.MeasuredTokens);
 
         CollectedRecord nestedTool = batch.Records[2];
         Assert.Null(nestedTool.Tool!.Result!.PlainText);
@@ -315,6 +317,33 @@ public class ClaudeTranscriptMapperTests
         CollectedContentPart prosePart = Assert.Single(proseTool.Parts);
         Assert.Equal(proseWithJson, prosePart.PlainText);
         Assert.Null(prosePart.Withheld);
+    }
+
+    /// <summary>
+    /// A record sent to a model whose own published tokenizer differs from the stand-in counts its
+    /// tool-result part with the model's own tokenizer: the measured tokens equal the tokenizer the
+    /// model itself resolves to, not the stand-in figure a missing model would produce.
+    /// </summary>
+    [Fact]
+    public void Map_CountsToolResultPartsWithTheRecordModelOwnTokenizer()
+    {
+        string jsonDocResult = "{\"こんにちは\":\"世界\"}";
+
+        string jsonl = string.Join('\n',
+        [
+            "{\"type\":\"assistant\",\"sessionId\":\"sess-model-own\",\"timestamp\":\"2026-11-19T11:30:00.000Z\",\"message\":{\"id\":\"msg-m1\",\"role\":\"assistant\",\"model\":\"gpt-3.5-turbo\",\"content\":[{\"type\":\"tool_use\",\"id\":\"tc-own\",\"name\":\"read_json\",\"input\":{\"path\":\"a.json\"}}],\"usage\":{\"input_tokens\":30,\"output_tokens\":10}}}",
+            $"{{\"type\":\"user\",\"sessionId\":\"sess-model-own\",\"timestamp\":\"2026-11-19T11:30:01.000Z\",\"message\":{{\"role\":\"user\",\"content\":[{{\"type\":\"tool_result\",\"tool_use_id\":\"tc-own\",\"content\":{System.Text.Json.JsonSerializer.Serialize(jsonDocResult)}}}]}}}}",
+        ]);
+
+        ClaudeTranscriptMapper mapper = new();
+        CollectedBatch batch = mapper.Map(CreateUnit("/tmp/.claude/projects/repo/sess-model-own.jsonl", jsonl), ImportedAt);
+
+        CollectedRecord toolRecord = batch.Records[1];
+        Assert.Equal("gpt-3.5-turbo", batch.Records[0].Model);
+        CollectedContentPart part = Assert.Single(toolRecord.Parts);
+        Assert.NotNull(part.Withheld);
+        Assert.Equal(LocalTextTokenizer.Shared.Count(jsonDocResult, "gpt-3.5-turbo").Count, part.Withheld!.MeasuredTokens);
+        Assert.NotEqual(LocalTextTokenizer.Shared.Count(jsonDocResult, null).Count, part.Withheld.MeasuredTokens);
     }
 
     [Fact]
@@ -408,6 +437,56 @@ public class ClaudeTranscriptMapperTests
         IReadOnlyList<CollectedSession> sessions = store.Sessions();
         Assert.Single(sessions);
         Assert.Equal("Correction session", sessions[0].Title);
+    }
+
+    /// <summary>
+    /// The turn record carries the transcript's message id as its response id and the line's
+    /// <c>requestId</c> as its request id, the ids the projector joins an OTLP turn to it on.
+    /// </summary>
+    [Fact]
+    public void Map_WritesMessageIdAndRequestIdOnTheTurnRecord()
+    {
+        string jsonl = "{\"type\":\"assistant\",\"sessionId\":\"sess-ids\",\"requestId\":\"req_011CXYZ\",\"timestamp\":\"2026-11-19T10:00:01.000Z\",\"message\":{\"id\":\"msg_01ABC\",\"role\":\"assistant\",\"model\":\"claude-sonnet-4-5\",\"content\":[{\"type\":\"text\",\"text\":\"done\"}],\"usage\":{\"input_tokens\":10,\"output_tokens\":5}}}";
+
+        CollectedBatch batch = new ClaudeTranscriptMapper().Map(CreateUnit("/tmp/.claude/projects/repo/sess-ids.jsonl", jsonl), ImportedAt);
+
+        CollectedRecord turn = Assert.Single(batch.Records, static r => r.Op == RecordOp.LlmInvoke);
+        Assert.Equal("msg_01ABC", turn.ResponseId);
+        Assert.Equal("req_011CXYZ", turn.RequestId);
+    }
+
+    /// <summary>
+    /// A transcript line with no message id and no request id leaves both ids absent: the record id's
+    /// hash fallback is never written as a response id.
+    /// </summary>
+    [Fact]
+    public void Map_LeavesIdsAbsent_WhenTheTranscriptHasNone()
+    {
+        string jsonl = "{\"type\":\"assistant\",\"sessionId\":\"sess-noid\",\"timestamp\":\"2026-11-19T10:00:01.000Z\",\"message\":{\"role\":\"assistant\",\"model\":\"claude-sonnet-4-5\",\"content\":[{\"type\":\"text\",\"text\":\"done\"}],\"usage\":{\"input_tokens\":10,\"output_tokens\":5}}}";
+
+        CollectedBatch batch = new ClaudeTranscriptMapper().Map(CreateUnit("/tmp/.claude/projects/repo/sess-noid.jsonl", jsonl), ImportedAt);
+
+        CollectedRecord turn = Assert.Single(batch.Records, static r => r.Op == RecordOp.LlmInvoke);
+        Assert.Null(turn.ResponseId);
+        Assert.Null(turn.RequestId);
+    }
+
+    /// <summary>
+    /// An id longer than the join key bound is no join key: the turn record leaves it absent rather than
+    /// storing it or cutting it down, while an id exactly at the bound is kept.
+    /// </summary>
+    [Fact]
+    public void Map_LeavesAnIdLongerThanTheJoinBoundAbsent_AndKeepsOneAtTheBound()
+    {
+        string tooLongMessageId = new('m', OtlpJoinIds.MaxIdCharacters + 1);
+        string atBoundRequestId = new('r', OtlpJoinIds.MaxIdCharacters);
+        string jsonl = "{\"type\":\"assistant\",\"sessionId\":\"sess-longid\",\"requestId\":\"" + atBoundRequestId + "\",\"timestamp\":\"2026-11-19T10:00:01.000Z\",\"message\":{\"id\":\"" + tooLongMessageId + "\",\"role\":\"assistant\",\"model\":\"claude-sonnet-4-5\",\"content\":[{\"type\":\"text\",\"text\":\"done\"}],\"usage\":{\"input_tokens\":10,\"output_tokens\":5}}}";
+
+        CollectedBatch batch = new ClaudeTranscriptMapper().Map(CreateUnit("/tmp/.claude/projects/repo/sess-longid.jsonl", jsonl), ImportedAt);
+
+        CollectedRecord turn = Assert.Single(batch.Records, static r => r.Op == RecordOp.LlmInvoke);
+        Assert.Null(turn.ResponseId);
+        Assert.Equal(atBoundRequestId, turn.RequestId);
     }
 
     private static NativeSourceUnit CreateUnit(string sourceKey, string? rawText) =>

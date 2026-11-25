@@ -163,7 +163,7 @@ public class CanonRecordHydrationTests
                     Position: 2,
                     Bucket: ContentBucket.Reasoning,
                     PlainText: null,
-                    Withheld: new CollectedWithheldText(2048, 512, 17),
+                    Withheld: new CollectedWithheldText(2048, 512, 17, Tokenizer: "o200k_base", TokenizerIsModelOwn: false),
                     ReportedTokens: null,
                     Server: null,
                     Role: null,

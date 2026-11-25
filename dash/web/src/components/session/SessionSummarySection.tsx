@@ -355,7 +355,7 @@ export function SessionSummarySection({
                 ? `${formatCredits(cost.credits)} credits`
                 : isReported
                   ? 'reported by harness'
-                  : 'published rates'}
+                  : 'calculated from published rates'}
             </div>
           </Card>
 

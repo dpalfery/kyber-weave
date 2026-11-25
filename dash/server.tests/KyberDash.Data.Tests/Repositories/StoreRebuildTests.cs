@@ -12,17 +12,19 @@ namespace KyberDash.Data.Tests.Repositories;
 /// <summary>
 /// Verifies destructive rebuild of incompatible older relational stores: unread deletion of
 /// <c>canon.db</c>, <c>-wal</c>, and <c>-shm</c> without backup, fresh schema creation stamped
-/// at <c>v25</c>, rebuild diagnostics logging, and full source re-ingest triggering, all over
+/// at <c>v26</c>, rebuild diagnostics logging, and full source re-ingest triggering, all over
 /// an in-memory <see cref="IRelationalStoreFileSystem"/> seam without opening real SQLite files.
 /// </summary>
 public class StoreRebuildTests
 {
     [Theory]
+    [InlineData("store_state", "25\t5", 25)]
     [InlineData("store_state", "24\t5", 24)]
     [InlineData("store_state", "1\t5", 1)]
+    [InlineData("metadata", "25", 25)]
     [InlineData("metadata", "24", 24)]
     [InlineData("metadata", "1", 1)]
-    public void EnsureInitialized_RebuildsOlderStoreUnread_DeletesFilesStampsV25AndTriggersCallback(
+    public void EnsureInitialized_RebuildsOlderStoreUnread_DeletesFilesStampsV26AndTriggersCallback(
         string discoveredTable,
         string versionQueryResponse,
         int expectedOldVersion)
@@ -192,7 +194,7 @@ public class StoreRebuildTests
     }
 
     [Fact]
-    public void EnsureInitialized_CurrentV25Store_OpensWithoutDeletingOrReingesting()
+    public void EnsureInitialized_CurrentV26Store_OpensWithoutDeletingOrReingesting()
     {
         string rootDir = NewNonExistentRoot();
         string dbPath = Path.Combine(rootDir, "canon.db");

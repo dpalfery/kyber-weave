@@ -167,6 +167,45 @@ describe('fetchKyberSessionTurns per-turn route', () => {
     expect(content.parts[0]?.tokens).toBeUndefined()
   })
 
+  it('keeps the tokenizer label beside a text-derived part count', async () => {
+    stubFetch(200, {
+      sessionId: 'sess-1',
+      turnIndex: 1,
+      parts: [
+        {
+          part: 'system_prompt',
+          text: 'sys',
+          tokens: 12,
+          tokenizer: 'o200k_base',
+          tokenizerIsModelOwn: false,
+        },
+      ],
+    })
+
+    const content = await fetchTurnContent('sess-1', 1)
+
+    expect(content.parts[0]).toMatchObject({
+      tokens: 12,
+      tokenizer: 'o200k_base',
+      tokenizerIsModelOwn: false,
+    })
+    expect(content.blocks[0]).toMatchObject({
+      tokens: 12,
+      tokenizer: 'o200k_base',
+      tokenizerIsModelOwn: false,
+    })
+  })
+
+  it('rejects a content part that carries half a tokenizer label', async () => {
+    stubFetch(200, {
+      sessionId: 'sess-1',
+      turnIndex: 1,
+      parts: [{ part: 'system_prompt', text: 'sys', tokens: 12, tokenizer: 'o200k_base' }],
+    })
+
+    await expect(fetchTurnContent('sess-1', 1)).rejects.toThrow(/incomplete tokenizer label/i)
+  })
+
   it('reads a marker other than PROJECTION_FAILED as no fault on either turn route', async () => {
     // One fault contract: only the exact sections' marker names a faulted read.
     stubFetch(200, { sessionId: 'sess-1', turnIndex: 1, projection_status: 'PENDING' })

@@ -6,14 +6,14 @@
 // definitions, and assembly, with no recurrence, shared context, or skills — those
 // need earlier turns' text and stay absent for consumers to render without.
 
-import type { KyberTurnContentBlock, KyberTurnContentPart } from './kyberApi.js'
+import type { KyberTurnContentBlock, KyberTurnContentPart, KyberTokenizerFigure } from './kyberApi.js'
 
 /**
  * One served content part as the engine's turn-content route serializes it: the
  * part key, its plain text, and the measured detail it carries. Labels, ids, and
  * block membership are derived here, never trusted off the wire.
  */
-export interface TurnContentSourcePart {
+export interface TurnContentSourcePart extends KyberTokenizerFigure {
   spanId?: string
   part: string
   text: string
@@ -128,6 +128,13 @@ export function labelTurnContentParts(source: readonly TurnContentSourcePart[]):
     const tokens = p.tokens
     const server = p.server
     const truncated = p.truncated === true ? true : undefined
+    const labelFields: KyberTokenizerFigure = {
+      ...(p.tokenizer ? { tokenizer: p.tokenizer } : {}),
+      ...(p.tokenizers ? { tokenizers: p.tokenizers } : {}),
+      ...(p.tokenizerIsModelOwn !== undefined
+        ? { tokenizerIsModelOwn: p.tokenizerIsModelOwn }
+        : {}),
+    }
 
     if (p.part === 'system_prompt') {
       parts.push({
@@ -137,6 +144,7 @@ export function labelTurnContentParts(source: readonly TurnContentSourcePart[]):
         label: 'System Prompt',
         text: p.text,
         tokens,
+        ...labelFields,
         server,
         truncated,
         order: orderCounter,
@@ -149,6 +157,7 @@ export function labelTurnContentParts(source: readonly TurnContentSourcePart[]):
         label: server ? `Tools (${server})` : 'Tools',
         text: p.text,
         tokens,
+        ...labelFields,
         server,
         truncated,
         order: orderCounter,
@@ -162,6 +171,7 @@ export function labelTurnContentParts(source: readonly TurnContentSourcePart[]):
         label: 'Instruction Context',
         text: p.text,
         tokens,
+        ...labelFields,
         server,
         truncated,
         order: orderCounter,
@@ -174,6 +184,7 @@ export function labelTurnContentParts(source: readonly TurnContentSourcePart[]):
         label: 'Tool Results',
         text: p.text,
         tokens,
+        ...labelFields,
         server,
         truncated,
         order: orderCounter,
@@ -195,6 +206,7 @@ export function labelTurnContentParts(source: readonly TurnContentSourcePart[]):
             label: 'User Messages',
             text: userMessages.join('\n\n'),
             tokens: userTokens,
+            ...labelFields,
             truncated,
             order: orderCounter,
           })
@@ -207,6 +219,7 @@ export function labelTurnContentParts(source: readonly TurnContentSourcePart[]):
             label: 'Assistant Turns',
             text: assistantMessages.join('\n\n'),
             tokens: assistantTokens,
+            ...labelFields,
             truncated,
             order: orderCounter,
           })
@@ -222,6 +235,7 @@ export function labelTurnContentParts(source: readonly TurnContentSourcePart[]):
           label: 'User Messages',
           text: p.text,
           tokens,
+          ...labelFields,
           truncated,
           order: orderCounter,
         })
@@ -246,6 +260,7 @@ export function labelTurnContentParts(source: readonly TurnContentSourcePart[]):
         label: String(p.part).replace(/_/g, ' '),
         text: p.text,
         tokens,
+        ...labelFields,
         server,
         truncated,
         order: orderCounter,
@@ -256,8 +271,40 @@ export function labelTurnContentParts(source: readonly TurnContentSourcePart[]):
   return parts
 }
 
-/** The canonical context blocks, in rail order, with the part kinds each aggregates. */
-const BLOCK_DEFS: ReadonlyArray<{ key: string; label: string; partKeys: string[] }> = [
+/**
+ * Merges the label trios of the parts that contributed a block's token figure.
+ * One tokenizer keeps its name; several become the engine's mixed label, which
+ * the UI renders by listing each. Reported parts carry none.
+ */
+function mergePartTokenizers(parts: readonly KyberTurnContentPart[]): KyberTokenizerFigure {
+  const labels: Array<{ name: string; isModelOwn: boolean }> = []
+  const seen = new Set<string>()
+  for (const part of parts) {
+    const list =
+      part.tokenizers && part.tokenizers.length > 0
+        ? part.tokenizers
+        : part.tokenizer && part.tokenizer !== 'mixed'
+          ? [{ name: part.tokenizer, isModelOwn: part.tokenizerIsModelOwn === true }]
+          : []
+    for (const label of list) {
+      const key = `${label.name}\u0000${label.isModelOwn ? '1' : '0'}`
+      if (seen.has(key)) continue
+      seen.add(key)
+      labels.push(label)
+    }
+  }
+  if (labels.length === 0) return {}
+  if (labels.length === 1) {
+    return {
+      tokenizer: labels[0]!.name,
+      tokenizers: labels,
+      tokenizerIsModelOwn: labels[0]!.isModelOwn,
+    }
+  }
+  return { tokenizer: 'mixed', tokenizers: labels, tokenizerIsModelOwn: null }
+}
+
+/** The canonical context blocks, in rail order, with the part kinds each aggregates. */const BLOCK_DEFS: ReadonlyArray<{ key: string; label: string; partKeys: string[] }> = [
   { key: 'system_prompt', label: 'System prompt', partKeys: ['system_prompt'] },
   { key: 'tool_definitions', label: 'Tools', partKeys: ['tool_definitions'] },
   { key: 'instruction_context', label: 'Instruction context', partKeys: ['instruction_context'] },
@@ -287,6 +334,11 @@ export function buildTurnContentBlocks(parts: readonly KyberTurnContentPart[]): 
     const text = unique.map((p) => p.text).join('\n\n')
     // A zero sum is no figure: the block measured nothing resident, never zero tokens.
     const tokenSum = unique.reduce((sum, p) => sum + (p.resident === false ? 0 : (p.tokens ?? 0)), 0)
+    // Only the parts that contributed tokens label the block: a non-resident
+    // definition adds none, and a reported part carries no tokenizer.
+    const label = mergePartTokenizers(
+      unique.filter((p) => p.resident !== false && (p.tokens ?? 0) > 0),
+    )
 
     blocks.push({
       key: def.key,
@@ -294,6 +346,7 @@ export function buildTurnContentBlocks(parts: readonly KyberTurnContentPart[]): 
       parts: unique,
       text,
       tokens: tokenSum > 0 ? tokenSum : undefined,
+      ...label,
     })
   }
 

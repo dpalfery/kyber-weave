@@ -71,6 +71,13 @@ public enum TokenClass
 
     /// <summary>Reasoning / thinking tokens (<c>reasoning</c>).</summary>
     Reasoning,
+
+    /// <summary>
+    /// One reported total with no input/output split (<c>total</c>), stored for a session's reported
+    /// usage only (<c>session_model_usage</c>): a harness that reports no split must never have its
+    /// total recorded as input or output.
+    /// </summary>
+    Total,
 }
 
 /// <summary>Origin mechanism of a collected telemetry source (<c>source.source_kind</c>).</summary>
@@ -222,10 +229,27 @@ public record CollectedError(
 /// <param name="Utf8Bytes">Original UTF-8 byte length (<c>content_part_withheld.utf8_bytes</c>).</param>
 /// <param name="Characters">Original character count (<c>content_part_withheld.characters</c>).</param>
 /// <param name="MeasuredTokens">Measured token count (<c>content_part_withheld.measured_tokens</c>).</param>
+/// <param name="Tokenizer">
+/// Tokenizer that counted <paramref name="MeasuredTokens"/> (<c>content_part_withheld_tokenizer.tokenizer</c>),
+/// or <see langword="null"/> when the stored count carries no label and so reads as not measured (D17).
+/// </param>
+/// <param name="TokenizerIsModelOwn">
+/// <see langword="true"/> when <paramref name="Tokenizer"/> is the model's own published tokenizer
+/// (<c>content_part_withheld_tokenizer.is_model_own</c>); <see langword="false"/> for the named standard stand-in.
+/// </param>
 public record CollectedWithheldText(
     long Utf8Bytes,
     long Characters,
-    long MeasuredTokens);
+    long MeasuredTokens,
+    string? Tokenizer = null,
+    bool TokenizerIsModelOwn = false)
+{
+    /// <summary>
+    /// The measured count when a tokenizer label names how it was counted; otherwise
+    /// <see langword="null"/>, because an unlabelled text-derived figure is never shown as a count.
+    /// </summary>
+    public long? LabeledTokens => Tokenizer is null ? null : MeasuredTokens;
+}
 
 /// <summary>
 /// Ordered content part of a record (<c>content_part</c> and child extension tables).
@@ -268,16 +292,26 @@ public record CollectedContentPart(
     }
 }
 
-/// <summary>Ordered tool schema definition advertised on a record (<c>tool_definition</c>, <c>tool_definition_server</c>).</summary>
+/// <summary>Ordered tool schema definition advertised on a record (<c>tool_definition</c>, <c>tool_definition_server</c>, <c>tool_definition_tokenizer</c>).</summary>
 /// <param name="Position">Zero-based position (<c>tool_definition.position</c>).</param>
 /// <param name="ToolName">Tool name (<c>tool_definition.tool_name</c>).</param>
 /// <param name="Server">Optional MCP server name (<c>tool_definition_server.server_name</c>).</param>
 /// <param name="SchemaTokens">Token count of the tool schema (<c>tool_definition.schema_tokens</c>).</param>
+/// <param name="Tokenizer">
+/// Tokenizer that counted <paramref name="SchemaTokens"/> from text (<c>tool_definition_tokenizer.tokenizer</c>),
+/// or <see langword="null"/> when the count is harness-reported and carries no label.
+/// </param>
+/// <param name="TokenizerIsModelOwn">
+/// <see langword="true"/> when <paramref name="Tokenizer"/> is the model's own published tokenizer
+/// (<c>tool_definition_tokenizer.is_model_own</c>); <see langword="false"/> for the named standard stand-in.
+/// </param>
 public record CollectedToolDefinition(
     int Position,
     string ToolName,
     string? Server,
-    long SchemaTokens);
+    long SchemaTokens,
+    string? Tokenizer = null,
+    bool TokenizerIsModelOwn = false);
 
 /// <summary>Input or result payload metrics and optional text for a tool call (<c>tool_call_input_*</c> or <c>tool_call_result_*</c>).</summary>
 /// <param name="PlainText">Optional plain text (<c>tool_call_input_text.text</c> / <c>tool_call_result_text.text</c>).</param>
@@ -360,6 +394,22 @@ public record CollectedRecordSignals(
 /// <param name="Signals">Diagnostic signals attached to the record.</param>
 /// <param name="ReportedInputTokens">Optional reported input total (<c>record_reported_total.token_count</c> with direction <c>input</c>).</param>
 /// <param name="ReportedOutputTokens">Optional reported output total (<c>record_reported_total.token_count</c> with direction <c>output</c>).</param>
+/// <param name="SourceName">
+/// The record's source as the projection rules read it, taken from the stored <c>source</c> row
+/// (<c>record.source_id</c>): the locator (the OTLP service name, such as
+/// <c>kyberdash-factory-plugin</c>) for an OTLP source, or <c>codeburn/&lt;harness_id&gt;</c> for a
+/// file source. <see langword="null"/> only for a record a mapper built in memory before it was
+/// stored; every store read that returns records for hydration fills it.
+/// </param>
+/// <param name="ResponseId">
+/// Optional provider response id (<c>record_response_id.response_id</c>): an OTLP record's
+/// <c>message.id</c> (the transcript message id Claude Code reports on <c>api_response_body</c>),
+/// or a transcript record's native message id. Never a synthesized counter or hash.
+/// </param>
+/// <param name="RequestId">
+/// Optional provider request id (<c>record_request_id.request_id</c>): an OTLP record's
+/// <c>request_id</c>, or a transcript record's <c>requestId</c>. Never a synthesized counter or hash.
+/// </param>
 public record CollectedRecord(
     string RecordId,
     string HarnessId,
@@ -384,4 +434,7 @@ public record CollectedRecord(
     IReadOnlyList<CollectedToolDefinition> ToolDefinitions,
     CollectedRecordSignals Signals,
     long? ReportedInputTokens = null,
-    long? ReportedOutputTokens = null);
+    long? ReportedOutputTokens = null,
+    string? SourceName = null,
+    string? ResponseId = null,
+    string? RequestId = null);

@@ -308,7 +308,7 @@ export function SessionCostPanel({ session, cost, costs, className }: SessionCos
                     'rounded px-1.5 py-0.5 font-mono text-[10px] uppercase font-semibold',
                     block.basis === 'harness'
                       ? 'bg-primary/15 text-primary'
-                      : block.basis === 'published'
+                      : block.basis === 'published' && isPriced
                         ? 'bg-emerald-500/15 text-emerald-600 dark:text-emerald-400'
                         : 'bg-muted text-muted-foreground'
                   )}

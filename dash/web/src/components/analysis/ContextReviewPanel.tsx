@@ -13,10 +13,12 @@ import {
   type KyberReviewRecommendation,
   type KyberReviewResult,
 } from '../../lib/kyberApi.js'
+import { fmtTokens } from '../../lib/utils.js'
 
 export interface ReviewContextBlock {
   key?: string
   label?: string
+  /** The engine's token figure for this block; absent when it was not measured. */
   tokens?: number
   text: string
 }
@@ -56,17 +58,16 @@ export interface ContextReviewPanelProps {
   ) => Promise<KyberReviewResult>
   /** Optional callback to close or dismiss panel */
   onClose?: () => void
+  /** Start with the payload preview expanded (used by tests and deep links). */
+  initialShowPreview?: boolean
   /** Optional custom CSS classes */
   className?: string
 }
 
 /**
- * Approximate token count using standard 1 token ~= 4 characters estimation.
+ * The payload has no served token figure of its own: only the composition
+ * blocks the engine measured carry one. Never derive a count from text length.
  */
-function estimateTokens(text: string): number {
-  if (!text) return 0
-  return Math.ceil(text.length / 4)
-}
 
 export function ContextReviewPanel({
   content,
@@ -78,18 +79,18 @@ export function ContextReviewPanel({
   initialProvider = 'auto',
   onRunReview,
   onClose,
+  initialShowPreview = false,
   className = '',
 }: ContextReviewPanelProps) {
   const previewId = useId()
   const [provider, setProvider] = useState<string>(initialProvider)
   const [endpoint, setEndpoint] = useState<string>('')
   const [focus, setFocus] = useState<string>('')
-  const [showPreview, setShowPreview] = useState<boolean>(false)
+  const [showPreview, setShowPreview] = useState<boolean>(initialShowPreview)
   const [loading, setLoading] = useState<boolean>(false)
   const [result, setResult] = useState<KyberReviewResult | null>(null)
   const [copied, setCopied] = useState<boolean>(false)
 
-  const tokenEstimate = estimateTokens(content)
   const charCount = (content || '').length
 
   // Explicit opt-in: never invoked on mount or automatically (ADR 0015).
@@ -129,7 +130,6 @@ export function ContextReviewPanel({
         review: `Failed to execute review: ${err instanceof Error ? err.message : String(err)}`,
         error: err instanceof Error ? err.message : String(err),
         timestamp: new Date().toISOString(),
-        inputTokens: tokenEstimate,
       })
     } finally {
       setLoading(false)
@@ -191,8 +191,11 @@ export function ContextReviewPanel({
         <div className="flex flex-wrap items-center justify-between gap-2">
           <div className="flex items-center gap-3 text-xs">
             <span className="font-semibold text-foreground">Payload Size:</span>
-            <span className="rounded bg-background px-2 py-0.5 font-mono text-[11px] font-medium border border-border">
-              ~{tokenEstimate.toLocaleString()} tokens
+            <span
+              data-testid="review-payload-token-size"
+              className="rounded bg-background px-2 py-0.5 font-mono text-[11px] font-medium border border-border"
+            >
+              token count not measured
             </span>
             <span className="text-muted-foreground">
               ({charCount.toLocaleString()} chars)
@@ -239,8 +242,11 @@ export function ContextReviewPanel({
                     className="inline-flex items-center gap-1 rounded bg-background px-1.5 py-0.5 text-[10px] font-mono border border-border text-muted-foreground"
                   >
                     <span>{b.label || b.key || `Block ${i + 1}`}</span>
-                    <span className="text-primary font-semibold">
-                      ~{estimateTokens(b.text || '').toLocaleString()} t
+                    <span
+                      data-testid={`review-block-token-${b.key ?? i}`}
+                      className="text-primary font-semibold"
+                    >
+                      {b.tokens != null ? `${fmtTokens(b.tokens)} t` : 'not measured'}
                     </span>
                   </span>
                 ))}

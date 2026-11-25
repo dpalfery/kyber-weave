@@ -791,6 +791,18 @@ public static partial class CanonPricing
     /// <summary>Display-level family for a harness ID (collapses split surfaces onto their family).</summary>
     public static string HarnessFamily(string harness) => SurveyFamily(harness);
 
+    /// <summary>
+    /// True when the published rate of <paramref name="model"/> changes with each request's prompt
+    /// size (GPT-6 Luna and Grok 4.6), so a figure that sums many requests cannot be priced exactly.
+    /// </summary>
+    public static bool IsPromptTieredModel(string model)
+    {
+        ArgumentNullException.ThrowIfNull(model);
+        string canonical = ResolveCanonicalModelId(model);
+        return string.Equals(canonical, "gpt-6-luna", StringComparison.Ordinal) ||
+            string.Equals(canonical, "grok-4.6", StringComparison.Ordinal);
+    }
+
     /// <summary>True for every GitHub Copilot surface (<c>copilot</c>, <c>copilot-cli</c>, <c>copilot-vscode</c>, ...).</summary>
     public static bool IsCopilotHarness(string? harness) =>
         string.Equals(CopilotFamily(harness), "copilot", StringComparison.Ordinal);
@@ -1415,8 +1427,8 @@ public static partial class CanonPricing
 
     private static string PrettyHarness(string raw)
     {
-        string cleaned = raw.StartsWith("codeburn/", StringComparison.Ordinal)
-            ? raw["codeburn/".Length..]
+        string cleaned = raw.StartsWith(CanonSynth.FileSourcePrefix, StringComparison.Ordinal)
+            ? raw[CanonSynth.FileSourcePrefix.Length..]
             : raw;
 
         if (string.Equals(ToAsciiLower(cleaned), "opencode", StringComparison.Ordinal))
