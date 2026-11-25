@@ -803,7 +803,7 @@ describe('costBasisText: the cost basis wording', () => {
       />,
     )
     expect(html).toContain(`(${basis})</span>`)
-    expect(html).toMatch(new RegExp(`title="Cost: [^"]*\\(${basis.replace(/[()]/g, '\\$&')}\\)"`))
+    expect(html).toMatch(new RegExp(`title="Cost: [^"]*\\(${basis.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\)"`))
     expect(html).not.toContain('calculated from published rates')
   })
 })
