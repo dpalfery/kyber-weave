@@ -31,7 +31,9 @@ public interface IHarnessSqliteDatabase : IDisposable
 public record HarnessSqliteQuery(string Name, string Sql, IReadOnlyList<object?> Parameters);
 
 /// <summary>Size and time limits for reading a harness database.</summary>
-/// <param name="ExportCapBytes">Most bytes one export may read (64 MiB) before a recorded problem.</param>
+/// <param name="ExportCapBytes">
+/// Most bytes (64 MiB) one export may read, and one companion file may hold, before a recorded problem.
+/// </param>
 /// <param name="CopyCapBytes">Most database-plus-WAL bytes the cache-copy fallback may copy (4 GiB).</param>
 /// <param name="CommandTimeoutSeconds">Per-command timeout.</param>
 /// <param name="BusyTimeoutMilliseconds">SQLite <c>busy_timeout</c>.</param>
