@@ -1327,13 +1327,16 @@ coverage, `CanonPricing.NormalizeHarnessName` alias folding (`claude-desktop -> 
 `aider`), and the `SOURCE_FORMAT_UNEVIDENCED` verdict for `zcode` and other unevidenced formats.
 `IRelationalStoreWriter.WriteBatch` persists one batch (`source`, `session`, `record`,
 `ingest_problem` rows and children) atomically; `DeleteSource` cascades by `ON DELETE CASCADE`;
-`WriteProblem` persists a single diagnostic and `DeleteProblem` removes one by key.
+`WriteProblem` persists a single diagnostic and `DeleteProblem` removes one by key. A file re-import uses
+`ReplaceSource`, which deletes the file's stored source and writes its new batch in one transaction, so a
+refused write keeps the rows it had, spans shared with another file included.
 
 - **One span, more than one source.** A forked or resumed Claude Code transcript copies its parent's lines,
   the parent's session id and message ids included, so the parent file and the fork map to the same span ids.
   `WriteBatch` deletes a record already stored under a span id before inserting it, so the latest write owns
   the span and its child rows go with the delete; a span id repeated inside one batch is still refused with
-  `STORE_CONSTRAINT_VIOLATED`. A token or cost figure is never counted once per copy.
+  `STORE_CONSTRAINT_VIOLATED`. A token or cost figure is never counted once per copy. A file that later
+  re-imports successfully without a span it owned removes that span until the other file re-imports.
 - **A failure clears on the next success.** A unit whose import fails records the problem
   `source-unreadable:<harness>:<source key>` (`CanonRefreshEngine.SourceUnreadableProblemKey`). The unit's next
   import attempt deletes it before writing, in both `CanonRefreshEngine` and `TranscriptIngestionService`, and a
@@ -1938,7 +1941,7 @@ via bounded `ProcessRunner` calls to the system `sqlite3` CLI, avoiding the nati
 dependency (`GHSA-2m69-gcr7-jv3q`). The schema is the relational catalog at `SqliteRelationalStore.SchemaVersion`
 (`25`): `RelationalSchemaCatalog` (`dash/server/KyberDash.Domain/Schema/RelationalSchemaCatalog.cs`) is the
 single static source of every table, column, key, and index, and `SchemaDdlGenerator` emits the deterministic
-DDL. The store implements `IRelationalStoreWriter` (`WriteBatch`, `DeleteSource`, `WriteProblem`, `DeleteProblem`),
+DDL. The store implements `IRelationalStoreWriter` (`WriteBatch`, `ReplaceSource`, `DeleteSource`, `WriteProblem`, `DeleteProblem`),
 `IRelationalStoreReader` (`SessionListFigures`, `SessionSummaryFigures`, `SessionTurnFigures`,
 `TurnFigures`, `SessionRequestFigures`, `SessionToolFigures`, `SessionSkillFigures`,
 `SessionRecordsContentFree`, `RecordContentFree`, `TurnContentParts`, `StoredFieldsInventory`,

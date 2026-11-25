@@ -418,10 +418,13 @@ public class CanonRefreshEngine
                 .FirstOrDefault(s => string.Equals(s.Source.Locator, unit.SourceKey, StringComparison.Ordinal))?.SourceId;
             if (existingSourceId is not null)
             {
-                activeWriter.DeleteSource(existingSourceId);
+                // One transaction: a refused write keeps the stored rows, including spans shared with another source.
+                activeWriter.ReplaceSource(batch);
             }
-
-            activeWriter.WriteBatch(batch);
+            else
+            {
+                activeWriter.WriteBatch(batch);
+            }
             foreach (CollectedProblem batchProblem in batch.Problems)
             {
                 activeWriter.WriteProblem(batchProblem);

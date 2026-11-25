@@ -244,7 +244,12 @@ public class InMemoryRelationalStore :
     }
 
     /// <inheritdoc />
-    public void WriteBatch(CollectedBatch batch)
+    public void WriteBatch(CollectedBatch batch) => WriteBatchCore(batch, replaceSource: false);
+
+    /// <inheritdoc />
+    public void ReplaceSource(CollectedBatch batch) => WriteBatchCore(batch, replaceSource: true);
+
+    private void WriteBatchCore(CollectedBatch batch, bool replaceSource)
     {
         ArgumentNullException.ThrowIfNull(batch);
         ArgumentNullException.ThrowIfNull(batch.Source);
@@ -257,6 +262,14 @@ public class InMemoryRelationalStore :
             StoreState working = state.Clone();
             string harnessId = batch.Source.HarnessId;
             EnsureHarness(working, harnessId);
+            if (replaceSource)
+            {
+                _ = DeleteRowsCore(
+                    working,
+                    "source",
+                    [("harness_id", batch.Source.HarnessId), ("source_kind", FormatSourceKind(batch.Source.Kind)), ("locator", batch.Source.Locator)]);
+            }
+
             string sourceId = EnsureSource(working, batch.Source);
 
             HashSet<string> seenSessions = new(StringComparer.Ordinal);
@@ -301,7 +314,11 @@ public class InMemoryRelationalStore :
                 UpsertProblemCore(working, problem);
             }
 
-            if (batch.Sessions.Count > 0 || batch.Records.Count > 0)
+            if (replaceSource)
+            {
+                AdvanceWriteMarker(working, dirtyKeys: null);
+            }
+            else if (batch.Sessions.Count > 0 || batch.Records.Count > 0)
             {
                 AdvanceWriteMarker(working, DirtySessionKeysOf(batch));
             }

@@ -18,6 +18,7 @@ public class SharedSpanWriteParityTests : IDisposable
 {
     private const string SpanId = "synth:claude-code:parent-session:msg_1";
     private const string SessionKey = "parent-session";
+    private const string ForkLocator = "/home/dev/.claude/projects/repo/fork-session.jsonl";
 
     private readonly TempDirectory directory = new();
 
@@ -70,6 +71,56 @@ public class SharedSpanWriteParityTests : IDisposable
 
         Assert.Equal(SqliteRelationalStore.ConstraintViolatedCode, refused.Code);
         AssertSingleRecordWithInputTokens(store, 10);
+    }
+
+    /// <summary>
+    /// <see cref="IRelationalStoreWriter.ReplaceSource"/> whose write is refused leaves the source's stored
+    /// records as they were, so a span it shares with another source is not lost to a failed re-import.
+    /// </summary>
+    /// <param name="kind">Store under test.</param>
+    [Theory]
+    [InlineData("sqlite")]
+    [InlineData("memory")]
+    public void ReplaceSource_WhoseWriteIsRefused_KeepsTheStoredRecords(string kind)
+    {
+        StoreUnderTest store = Create(kind);
+        store.Writer.WriteBatch(Batch(ForkLocator, inputTokens: 20));
+        long markerBefore = store.Operational.GetWriteMarker();
+
+        CollectedBatch refused = new(
+            Source: new CollectedSource("claude-code", SourceKind.File, ForkLocator),
+            Sessions: [],
+            Records: [Record(30), Record(40)],
+            Problems: []);
+
+        Assert.Throws<DashValidationException>(() => store.Writer.ReplaceSource(refused));
+
+        AssertSingleRecordWithInputTokens(store, 20);
+        Assert.Equal(markerBefore, store.Operational.GetWriteMarker());
+    }
+
+    /// <summary>
+    /// <see cref="IRelationalStoreWriter.ReplaceSource"/> drops the records the source no longer has, keeps one
+    /// source row, and marks every session dirty, as <see cref="IRelationalStoreWriter.DeleteSource"/> does.
+    /// </summary>
+    /// <param name="kind">Store under test.</param>
+    [Theory]
+    [InlineData("sqlite")]
+    [InlineData("memory")]
+    public void ReplaceSource_DropsRecordsTheSourceNoLongerHas_AndMarksEverySessionDirty(string kind)
+    {
+        StoreUnderTest store = Create(kind);
+        CollectedRecord extra = Record(5) with { RecordId = SpanId + "-extra" };
+        store.Writer.WriteBatch(Batch(ForkLocator, inputTokens: 20) with { Records = [Record(20), extra] });
+        Assert.Equal(2, store.Reader.CountRecords("claude-code"));
+
+        store.Writer.ReplaceSource(Batch(ForkLocator, inputTokens: 25));
+
+        AssertSingleRecordWithInputTokens(store, 25);
+        Assert.Single(store.Reader.Sources("claude-code"));
+        DirtyProjectionState? dirty = store.Operational.GetProjectionDirtyState();
+        Assert.NotNull(dirty);
+        Assert.True(dirty.IsWildcard);
     }
 
     /// <summary><see cref="IRelationalStoreWriter.DeleteProblem"/> removes the keyed problem and ignores a missing key.</summary>

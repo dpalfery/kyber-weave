@@ -586,7 +586,7 @@ public class RelationalIngestTests
 
         Assert.Equal(0, third.ExitCode);
         Assert.Equal(3, mapper.InvocationCount);
-        Assert.Single(spyWriter.DeleteSourceCalls);
+        Assert.Single(spyWriter.ReplaceSourceCalls);
         Assert.Equal(3, spyWriter.WriteBatchCalls.Count);
         Assert.Contains(third.Rows, r => r.SourceKey == unitOnePath && r.Status == "committed");
         Assert.Contains(third.Rows, r => r.SourceKey == unitTwoPath && r.Status == "skipped");
@@ -1044,6 +1044,8 @@ public class RelationalIngestTests
 
         public List<string> DeleteSourceCalls { get; } = [];
 
+        public List<CollectedBatch> ReplaceSourceCalls { get; } = [];
+
         public List<CollectedProblem> WriteProblemCalls { get; } = [];
 
         public void WriteBatch(CollectedBatch batch)
@@ -1056,6 +1058,19 @@ public class RelationalIngestTests
 
             WriteBatchCalls.Add(batch);
             inner.WriteBatch(batch);
+        }
+
+        public void ReplaceSource(CollectedBatch batch)
+        {
+            Exception? failure = WriteBatchFailure?.Invoke(batch);
+            if (failure is not null)
+            {
+                throw failure;
+            }
+
+            WriteBatchCalls.Add(batch);
+            ReplaceSourceCalls.Add(batch);
+            inner.ReplaceSource(batch);
         }
 
         public void DeleteSource(string sourceId)

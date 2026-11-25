@@ -195,7 +195,12 @@ public partial class SqliteRelationalStore : BaseSqliteRepository, IRelationalSt
     }
 
     /// <inheritdoc />
-    public void WriteBatch(CollectedBatch batch)
+    public void WriteBatch(CollectedBatch batch) => WriteBatchCore(batch, replaceSource: false);
+
+    /// <inheritdoc />
+    public void ReplaceSource(CollectedBatch batch) => WriteBatchCore(batch, replaceSource: true);
+
+    private void WriteBatchCore(CollectedBatch batch, bool replaceSource)
     {
         ArgumentNullException.ThrowIfNull(batch);
         ArgumentNullException.ThrowIfNull(batch.Source);
@@ -217,6 +222,11 @@ public partial class SqliteRelationalStore : BaseSqliteRepository, IRelationalSt
         {
             ArgumentNullException.ThrowIfNull(record);
             AppendHarnessInsert(body, harnesses, record.HarnessId);
+        }
+
+        if (replaceSource)
+        {
+            AppendSourceDelete(body, batch.Source);
         }
 
         string sourceIdExpr = AppendSourceInsert(body, batch.Source);
@@ -261,7 +271,12 @@ public partial class SqliteRelationalStore : BaseSqliteRepository, IRelationalSt
             AppendProblemUpsert(body, problem);
         }
 
-        if (batch.Sessions.Count > 0 || batch.Records.Count > 0)
+        if (replaceSource)
+        {
+            // As DeleteSource: the cascade removes records of sessions this batch may not name.
+            AppendWriteMarkerAdvance(body, dirtyKeys: null);
+        }
+        else if (batch.Sessions.Count > 0 || batch.Records.Count > 0)
         {
             AppendWriteMarkerAdvance(body, DirtySessionKeysOf(batch));
         }
@@ -818,6 +833,16 @@ public partial class SqliteRelationalStore : BaseSqliteRepository, IRelationalSt
         {
             sql.Append(CultureInfo.InvariantCulture, $"INSERT OR IGNORE INTO harness (harness_id) VALUES ({harnessExpr});\n");
         }
+    }
+
+    private static void AppendSourceDelete(StringBuilder sql, CollectedSource source)
+    {
+        string harnessExpr = GuardedTextExpr("source", "harness_id", source.HarnessId);
+        string kindExpr = GuardedTextExpr("source", "source_kind", FormatSourceKind(source.Kind));
+        string locatorExpr = GuardedTextExpr("source", "locator", source.Locator);
+        sql.Append(
+            CultureInfo.InvariantCulture,
+            $"DELETE FROM source WHERE harness_id = {harnessExpr} AND source_kind = {kindExpr} AND locator = {locatorExpr};\n");
     }
 
     private static string AppendSourceInsert(StringBuilder sql, CollectedSource source)

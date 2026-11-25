@@ -1,6 +1,4 @@
 using System.Globalization;
-using System.Security.Cryptography;
-using System.Text;
 using System.Text.Json;
 using KyberDash.Contracts.Repositories;
 using KyberDash.Contracts.Services;
@@ -508,10 +506,13 @@ public class TranscriptIngestionService : ITranscriptIngestionService
             writer!.DeleteProblem(CanonRefreshEngine.SourceUnreadableProblemKey(unit.HarnessId, unit.SourceKey));
             if (existing?.LastSuccessUtc is not null)
             {
-                writer.DeleteSource(ComputeSourceId(batch.Source));
+                // One transaction: a refused write keeps the stored rows, including spans shared with another source.
+                writer.ReplaceSource(batch);
             }
-
-            writer.WriteBatch(batch);
+            else
+            {
+                writer.WriteBatch(batch);
+            }
 
             foreach (CollectedSession session in batch.Sessions)
             {
@@ -583,19 +584,6 @@ public class TranscriptIngestionService : ITranscriptIngestionService
             operationalStore.UpsertSourceCheckpoint(failedCheckpoint);
             return new RefreshSourceStatusRow(unit.HarnessId, unit.SourceKey, "failed", 0, safeMessage);
         }
-    }
-
-    private static string ComputeSourceId(CollectedSource source)
-    {
-        string kindText = source.Kind switch
-        {
-            SourceKind.File => "file",
-            SourceKind.Otlp => "otlp",
-            _ => throw new ArgumentOutOfRangeException(nameof(source), source.Kind, "Unsupported source kind."),
-        };
-
-        byte[] digest = SHA256.HashData(Encoding.UTF8.GetBytes($"{source.HarnessId}\0{kindText}\0{source.Locator}"));
-        return $"src-{Convert.ToHexStringLower(digest)[..16]}";
     }
 
     private static string FormatUtc(DateTimeOffset instant) =>

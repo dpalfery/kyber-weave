@@ -98,7 +98,7 @@ public class FullReingestTests
 
         Assert.Equal(0, first.ExitCode);
         Assert.Equal(0, second.ExitCode);
-        Assert.Single(spyWriter.DeleteSourceCalls);
+        Assert.Single(spyWriter.ReplaceSourceCalls);
         Assert.Equal(2, spyWriter.WriteBatchCalls.Count);
         Assert.Equal(1, store.CountRecords("commandcode"));
 
@@ -214,10 +214,19 @@ public class FullReingestTests
 
         public List<string> DeleteSourceCalls { get; } = [];
 
+        public List<CollectedBatch> ReplaceSourceCalls { get; } = [];
+
         public void WriteBatch(CollectedBatch batch)
         {
             WriteBatchCalls.Add(batch);
             inner.WriteBatch(batch);
+        }
+
+        public void ReplaceSource(CollectedBatch batch)
+        {
+            WriteBatchCalls.Add(batch);
+            ReplaceSourceCalls.Add(batch);
+            inner.ReplaceSource(batch);
         }
 
         public void DeleteSource(string sourceId)

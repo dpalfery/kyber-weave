@@ -4,6 +4,7 @@ using KyberDash.Application.Tests;
 using KyberDash.Application.Tests.Fakes;
 using KyberDash.Contracts.Repositories;
 using KyberDash.Contracts.Services;
+using KyberDash.Core.Exceptions;
 using KyberDash.Data.Collector;
 using KyberDash.Data.Collector.Sources;
 using KyberDash.Data.Harnesses.Claude;
@@ -101,7 +102,46 @@ public class ForkedTranscriptImportTests
         Assert.NotNull(store.FindRecord(ParentSpanId));
     }
 
+    /// <summary>
+    /// A fork that owns a span shared with its parent, re-imported after it changed, whose new write the
+    /// store refuses, leaves the shared span in place: the parent's checkpoint is unchanged, so nothing
+    /// else would write it back.
+    /// </summary>
+    [Fact]
+    public void Refresh_ForkOwningASharedSpan_WhoseRewriteIsRefused_KeepsTheSpan()
+    {
+        InMemoryRelationalStore store = new();
+        RefusingWriter writer = new(store);
+        FakeHarnessFileSystem fs = new();
+        fs.AddFile(ParentPath, ParentTranscript(), BaselineUtc.AddMinutes(-20));
+        fs.AddFile(LateForkPath, ForkTranscript(), BaselineUtc.AddMinutes(-10));
+        TranscriptIngestionService service = new(
+            writer,
+            store,
+            new HarnessSourceRegistry(),
+            [new ClaudeTranscriptMapper()],
+            fs,
+            new DashOptions { StateDirectory = StateRoot },
+            homeDirectory: HomeRoot,
+            clock: () => BaselineUtc);
+
+        RefreshReport first = service.RefreshHarnessSources(CanonRefreshEngine.DefaultHistoryWeeks);
+        Assert.All(first.Rows, static r => Assert.Equal("committed", r.Status));
+        Assert.NotNull(store.FindRecord(ParentSpanId));
+
+        fs.AddFile(LateForkPath, ForkTranscript() + "\n", BaselineUtc.AddMinutes(-5));
+        writer.RefuseLocator = LateForkPath;
+
+        RefreshReport second = service.RefreshHarnessSources(CanonRefreshEngine.DefaultHistoryWeeks);
+
+        Assert.Equal("failed", Assert.Single(second.Rows, static r => r.SourceKey == LateForkPath).Status);
+        Assert.NotNull(store.FindRecord(ParentSpanId));
+    }
+
     private static string ParentPath => Combine(HomeRoot, $".claude/projects/-repo/{ParentSessionId}.jsonl");
+
+    /// <summary>A fork whose path sorts after the parent's, so it imports second and owns the shared spans.</summary>
+    private static string LateForkPath => Combine(HomeRoot, $".claude/projects/-repo/z-{ForkSessionId}.jsonl");
 
     private static string ForkPath => Combine(HomeRoot, $".claude/projects/-repo/{ForkSessionId}.jsonl");
 
@@ -138,6 +178,45 @@ public class ForkedTranscriptImportTests
 
     private static string Combine(string root, string relative) =>
         Path.Combine(root, relative.Replace('/', Path.DirectorySeparatorChar));
+
+    /// <summary>Delegates to the store, and refuses a batch from <see cref="RefuseLocator"/> as the store refuses JSON text.</summary>
+    private sealed class RefusingWriter(IRelationalStoreWriter inner) : IRelationalStoreWriter
+    {
+        public string? RefuseLocator { get; set; }
+
+        public void WriteBatch(CollectedBatch batch)
+        {
+            if (string.Equals(batch.Source.Locator, RefuseLocator, StringComparison.Ordinal))
+            {
+                throw new DashValidationException(
+                    SqliteRelationalStore.JsonTextRefusedCode,
+                    "Refused JSON object or array text in 'content_part_text.part_text'.");
+            }
+
+            inner.WriteBatch(batch);
+        }
+
+        public void ReplaceSource(CollectedBatch batch)
+        {
+            if (string.Equals(batch.Source.Locator, RefuseLocator, StringComparison.Ordinal))
+            {
+                throw new DashValidationException(
+                    SqliteRelationalStore.JsonTextRefusedCode,
+                    "Refused JSON object or array text in 'content_part_text.part_text'.");
+            }
+
+            inner.ReplaceSource(batch);
+        }
+
+        public void DeleteSource(string sourceId) => inner.DeleteSource(sourceId);
+
+        public void ClearEstimatedRecordTokens(string harnessId, string sourceLocator, EstimatedRecordTokens estimated) =>
+            inner.ClearEstimatedRecordTokens(harnessId, sourceLocator, estimated);
+
+        public void WriteProblem(CollectedProblem problem) => inner.WriteProblem(problem);
+
+        public void DeleteProblem(string problemKey) => inner.DeleteProblem(problemKey);
+    }
 
     private sealed class FakeHarnessFileSystem : IHarnessFileSystem
     {
