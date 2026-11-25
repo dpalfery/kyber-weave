@@ -792,8 +792,11 @@ Two more figures follow the same split. The **cost** is one figure over the unio
 records and the counter records — disjoint sets, so nothing is priced twice — and the cost-basis
 verdict is computed over that same union. The **context analysis** reads the turn records, and
 where no turn record carries a measured input — a paired Factory session's plugin turns report
-no counter at all — it falls back to the counter records, so the session keeps the context
-figure the file source gave it before the plugin arrived.
+no counter at all — it falls back to the counter records. Those carry the session usage the
+companion file reported, once per session, so the session's totals come from reported session
+usage while per-turn context is not measured: Factory records usage at session level and no
+per-call or per-turn figure exists to keep (see
+[the Factory file source](telemetry-inventory.md#what-the-file-source-measures)).
 
 The session's **model** follows the same split: the turn records' model where a turn record
 names one, the counter record's model where none does. See

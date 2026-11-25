@@ -78,6 +78,10 @@ These rules hold for every test under `dash/`
 - **Playwright runs only with the isolated config**, from the repository root:
   `npx --prefix dash playwright test --config dash/playwright.isolated.config.ts <spec>`.
   Never run `dash/playwright.config.ts` by hand, and never omit `--config`.
+- **Build the engine before any e2e spec.** The isolated boots use only the worktree's own Release
+  build and fail loudly when it is missing (never a `kyberdash-api` from `PATH`, which would test an
+  old engine). From the repository root run `dotnet build dash/server/KyberDash.Api -c Release`,
+  `dotnet build dash/server/KyberDash.Cli -c Release`, and `npm --prefix dash run build:web`.
 - **Never start the dashboard manually to run a test** (`kyberdash web`, `npm run dev`). The isolated
   e2e boots seed an isolated state directory via `E2eSeederService` in `dash/server/KyberDash.Application/Services/` and launch
   a loopback-bound `kyberdash-api` server over ephemeral ports, torn down in `finally`.

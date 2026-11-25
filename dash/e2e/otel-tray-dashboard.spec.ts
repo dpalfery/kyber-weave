@@ -312,7 +312,13 @@ test('updates SettingsView ?days= window and shared server settings over same-or
   await windowDaysInput.fill('1')
   await page.getByTestId('settings-back').click()
 
-  await expect(page.getByTestId('empty-state')).toBeVisible()
+  // The fixtures are dated from the run's clock (about an hour old), so they sit inside a
+  // 1-day window: the window must keep showing them, not the empty state.
+  await expect
+    .poll(async () => ((await bridge!.getState()).viewState.report as { scope?: { days?: number } } | null)?.scope?.days)
+    .toBe(1)
+  await expect(page.getByTestId('session-panel')).toBeVisible()
+  await expect(page.getByTestId('empty-state')).toHaveCount(0)
   const narrowed = await bridge!.getState()
   expect(narrowed.viewState.settings.windowDays).toBe(1)
   expect((narrowed.viewState.report as { scope?: { days?: number } } | null)?.scope?.days).toBe(1)

@@ -152,6 +152,25 @@ export function createTempRoot(baseTmpDir: string = tmpdir()): string {
   return root
 }
 
+/**
+ * Returns the worktree's own Release `kyberdash-api`, or throws. The e2e boot never falls back to
+ * a `kyberdash-api` on `PATH` (an installed engine of another schema), so a missing build fails
+ * the suite instead of silently testing an old engine.
+ */
+export function assertKyberdashApiBuilt(repoRoot: string): string {
+  const exeName = process.platform === 'win32' ? 'kyberdash-api.exe' : 'kyberdash-api'
+  const releaseDir = join(repoRoot, 'dash', 'server', 'KyberDash.Api', 'bin', 'Release', 'net10.0')
+  const candidate = join(releaseDir, exeName)
+  if (!existsSync(candidate)) {
+    throw new Error(
+      `kyberdash-api is not built: expected ${candidate}. The e2e boot never uses a kyberdash-api from PATH ` +
+        '(it would test an old engine). Build it from the repository root with: ' +
+        'dotnet build dash/server/KyberDash.Api -c Release (and dotnet build dash/server/KyberDash.Cli -c Release).',
+    )
+  }
+  return candidate
+}
+
 export function resolveKyberdashCommand(): {
   readonly command: string
   readonly prefixArgs: readonly string[]
@@ -161,13 +180,14 @@ export function resolveKyberdashCommand(): {
   const e2eDir = dirname(fileURLToPath(import.meta.url))
   const dashRoot = resolve(e2eDir, '..')
   const repoRoot = resolve(dashRoot, '..')
+  assertKyberdashApiBuilt(repoRoot)
   const explicit = process.env['KYBERDASH_BIN']?.trim()
   if (explicit) {
     return { command: explicit, prefixArgs: [], repoRoot, dashRoot }
   }
 
   const exeName = process.platform === 'win32' ? 'kyberdash.exe' : 'kyberdash'
-  for (const config of ['Release', 'Debug']) {
+  for (const config of ['Release']) {
     const candidate = join(repoRoot, 'dash', 'server', 'KyberDash.Cli', 'bin', config, 'net10.0', exeName)
     if (existsSync(candidate)) {
       return { command: candidate, prefixArgs: [], repoRoot, dashRoot }

@@ -23,6 +23,7 @@ vi.mock('node:fs', async (importOriginal) => {
 })
 
 import {
+  assertKyberdashApiBuilt,
   cleanupIsolatedTempRoot,
   createTempRoot,
   isIsolatedTempRoot,
@@ -379,7 +380,7 @@ describe('startIsolatedServer temp root cleanup on failure (Finding 4)', () => {
     process.env['KYBERDASH_BIN'] = join(sandboxRoot, 'missing-kyberdash-binary')
     try {
       mkdtempHook.recordedDirs.length = 0
-      await expect(startIsolatedServer({ startupTimeoutMs: 5_000 })).rejects.toThrow(/spawn failed|exited/)
+      await expect(startIsolatedServer({ startupTimeoutMs: 5_000 })).rejects.toThrow(/spawn failed|exited|kyberdash-api is not built/)
       expect(mkdtempHook.recordedDirs).toHaveLength(1)
       const tempDir = mkdtempHook.recordedDirs[0]
       expect(tempDir).toBeDefined()
@@ -397,6 +398,36 @@ describe('startIsolatedServer temp root cleanup on failure (Finding 4)', () => {
       else process.env['TMP'] = prevTmp
       if (prevBin === undefined) delete process.env['KYBERDASH_BIN']
       else process.env['KYBERDASH_BIN'] = prevBin
+    }
+  })
+})
+
+describe('assertKyberdashApiBuilt stale-engine guard', () => {
+  it('fails loudly, naming the missing path and the build command, when the worktree api is not built', () => {
+    const repoRoot = mkdtempSync(join(tmpdir(), 'kyber-api-guard-'))
+    try {
+      expect(() => assertKyberdashApiBuilt(repoRoot)).toThrow(/kyberdash-api/)
+      expect(() => assertKyberdashApiBuilt(repoRoot)).toThrow(
+        /dotnet build dash\/server\/KyberDash\.Api -c Release/,
+      )
+      expect(() => assertKyberdashApiBuilt(repoRoot)).toThrow(
+        new RegExp(join(repoRoot, 'dash', 'server', 'KyberDash.Api', 'bin', 'Release').replace(/[\\^$.*+?()[\]{}|]/g, '\\$&')),
+      )
+    } finally {
+      rmSync(repoRoot, { recursive: true, force: true })
+    }
+  })
+
+  it('returns the worktree Release path when it exists, whatever PATH holds', () => {
+    const repoRoot = mkdtempSync(join(tmpdir(), 'kyber-api-guard-'))
+    try {
+      const exeName = process.platform === 'win32' ? 'kyberdash-api.exe' : 'kyberdash-api'
+      const dir = join(repoRoot, 'dash', 'server', 'KyberDash.Api', 'bin', 'Release', 'net10.0')
+      mkdirSync(dir, { recursive: true })
+      writeFileSync(join(dir, exeName), '')
+      expect(assertKyberdashApiBuilt(repoRoot)).toBe(join(dir, exeName))
+    } finally {
+      rmSync(repoRoot, { recursive: true, force: true })
     }
   })
 })
