@@ -219,20 +219,23 @@ public class TranscriptIngestionService : ITranscriptIngestionService
                     continue;
                 }
 
-                rows.Add(ProcessRelationalSourceUnit(
+                RefreshSourceStatusRow row = ProcessRelationalSourceUnit(
                     unit,
                     commandStarted,
                     coveredFromUtc,
                     coveredThroughUtc,
                     coveredThroughUtc,
-                    sessionKeysRead));
+                    sessionKeysRead);
+                rows.Add(row);
+                clearedAny |= string.Equals(row.Status, "committed", StringComparison.Ordinal);
             }
 
             clearedAny |= ClearEstimatesOfVanishedUnits(harnessId, discoveredKeys, rows);
         }
 
-        // Deleting rows does not move the records write marker, so the projection pass would
-        // short-circuit on the cleared sessions: invalidate the watermarks as the clean path does.
+        // Replacing or deleting rows does not move the records write marker, so the projection pass
+        // would short-circuit on the re-read or cleared sessions: invalidate the watermarks as the
+        // clean path does.
         if (clearedAny)
         {
             operationalStore!.SetWriteMarker(operationalStore.GetWriteMarker() + 1);

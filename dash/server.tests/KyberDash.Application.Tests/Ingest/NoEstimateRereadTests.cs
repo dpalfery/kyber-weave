@@ -59,6 +59,30 @@ public class NoEstimateRereadTests
         Assert.Empty(harness.Store.ListRefreshRuns());
     }
 
+    /// <summary>
+    /// A re-read that replaces rows moves the store's write marker, so the projection pass does not
+    /// short-circuit on the re-read sessions; a re-read that writes nothing leaves it alone.
+    /// </summary>
+    [Fact]
+    public void Reread_MovesTheWriteMarker_OnlyWhenItWritesRows()
+    {
+        Harness written = CheckpointedHarness();
+        long writtenBefore = written.Store.GetWriteMarker();
+
+        RefreshReport report = written.Ingestion.RereadCheckpointedSources(["droid"]);
+
+        Assert.Equal("committed", Assert.Single(report.Rows).Status);
+        Assert.True(written.Store.GetWriteMarker() > writtenBefore);
+
+        Harness idle = new();
+        long idleBefore = idle.Store.GetWriteMarker();
+
+        RefreshReport idleReport = idle.Ingestion.RereadCheckpointedSources(["droid"]);
+
+        Assert.Empty(idleReport.Rows);
+        Assert.Equal(idleBefore, idle.Store.GetWriteMarker());
+    }
+
     /// <summary>The first unpaused maintenance pass re-reads the checkpointed units and records the marker.</summary>
     [Fact]
     public void MaintenancePass_RereadsCheckpointedUnitsOnce_AndRecordsTheMarker()
