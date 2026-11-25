@@ -193,6 +193,36 @@ public class SqliteHarnessSourceReaderTests
             Encoding.UTF8.GetString(stream.ToArray()));
     }
 
+    [Fact]
+    public void WriteJsonColumn_WritesNullForNonFiniteReals()
+    {
+        using MemoryStream stream = new();
+        using (Utf8JsonWriter writer = new(stream))
+        {
+            writer.WriteStartObject();
+            SqliteHarnessSourceReader.WriteJsonColumn(writer, "nan", double.NaN);
+            SqliteHarnessSourceReader.WriteJsonColumn(writer, "pos", double.PositiveInfinity);
+            SqliteHarnessSourceReader.WriteJsonColumn(writer, "neg", double.NegativeInfinity);
+            writer.WriteEndObject();
+        }
+
+        Assert.Equal("{\"nan\":null,\"pos\":null,\"neg\":null}", Encoding.UTF8.GetString(stream.ToArray()));
+    }
+
+    [Fact]
+    public void WriteJsonColumn_WritesByteArrayAsBase64String()
+    {
+        using MemoryStream stream = new();
+        using (Utf8JsonWriter writer = new(stream))
+        {
+            writer.WriteStartObject();
+            SqliteHarnessSourceReader.WriteJsonColumn(writer, "blob", new byte[] { 1, 2, 3, 250 });
+            writer.WriteEndObject();
+        }
+
+        Assert.Equal("{\"blob\":\"" + Convert.ToBase64String(new byte[] { 1, 2, 3, 250 }) + "\"}", Encoding.UTF8.GetString(stream.ToArray()));
+    }
+
     private sealed class Rig
     {
         public Rig(HarnessSqliteLimits? limits = null)
