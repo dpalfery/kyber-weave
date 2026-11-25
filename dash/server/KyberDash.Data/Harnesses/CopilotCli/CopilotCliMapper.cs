@@ -516,6 +516,8 @@ public class CopilotCliMapper : IHarnessMapper
     /// fresh input stored is that count less both cache classes. The legacy provider did the same
     /// (copilot.ts:959-986 at fc80ddf9^). A negative cache class, or a result below zero, means the
     /// snapshot does not hold together: the fresh input is not measured and no input row is stored.
+    /// The cache classes are compared with what is left before each is taken away, so no reported
+    /// value, however large, can wrap the subtraction round to a positive count.
     /// </summary>
     private static long? FreshInputTokens(CopilotCliModelUsage metric)
     {
@@ -531,8 +533,12 @@ public class CopilotCliMapper : IHarnessMapper
             return null;
         }
 
-        long fresh = input - cacheRead - cacheWrite;
-        return fresh >= 0 ? fresh : null;
+        if (cacheRead > input || cacheWrite > input - cacheRead)
+        {
+            return null;
+        }
+
+        return input - cacheRead - cacheWrite;
     }
 
     private static void AddModelUsageRow(

@@ -120,6 +120,27 @@ public class CopilotCliSessionUsageTests
         Assert.Contains(new CollectedModelUsage(0, "gpt-5", TokenClass.Output, 5L), session.ReportedUsage);
     }
 
+    // Two cache classes each larger than half the long range make input minus both of them pass below
+    // long.MinValue; the subtraction must not wrap round to a large positive fresh input.
+    [Fact]
+    public void Map_ShutdownCachesFarAboveInput_StoresNoWrappedFreshInput()
+    {
+        string jsonl = string.Join('\n',
+        [
+            "{\"type\":\"session.start\",\"id\":\"e1\",\"timestamp\":\"2026-11-19T10:00:00.000Z\",\"data\":{\"sessionId\":\"sess-wrap\",\"selectedModel\":\"gpt-5\"}}",
+            "{\"type\":\"session.shutdown\",\"id\":\"e2\",\"timestamp\":\"2026-11-19T10:05:00.000Z\",\"data\":{\"sessionId\":\"sess-wrap\",\"modelMetrics\":[{\"model\":\"gpt-5\",\"inputTokens\":1,\"outputTokens\":5,\"cacheReadTokens\":6000000000000000000,\"cacheWriteTokens\":6000000000000000000}]}}",
+        ]) + "\n";
+
+        NativeSourceUnit unit = MakeNativeUnit(
+            CombineHome(".copilot/session-state/sess-wrap/events.jsonl"),
+            jsonl);
+        CollectedBatch batch = new CopilotCliMapper().Map(unit, BaselineUtc);
+
+        CollectedSession session = Assert.Single(batch.Sessions);
+        Assert.DoesNotContain(session.ReportedUsage, static u => u.TokenClass == TokenClass.Input);
+        Assert.Contains(new CollectedModelUsage(0, "gpt-5", TokenClass.Output, 5L), session.ReportedUsage);
+    }
+
     [Fact]
     public void Map_NoShutdown_YieldsNoSessionModelUsage()
     {
