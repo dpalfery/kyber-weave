@@ -16,7 +16,8 @@ namespace KyberDash.Application;
 /// <remarks>
 /// <para>
 /// The primary constructor projects sessions typed: it reads records only through
-/// <see cref="IRelationalStoreReader"/>, counts tokens through <see cref="IOperationalStore"/>
+/// <see cref="IRelationalStoreReader"/>, counts tokens through the local
+/// <see cref="ITextTokenizer"/> seam memoized via <see cref="IOperationalStore"/>
 /// (decision D16), and writes <see cref="StoredSessionProjection"/> rows, typed context and
 /// schema children (with exclusive <c>_unmeasurable</c> rows), and timeline marks through
 /// <see cref="IProjectionStore"/> — no JSON payload column anywhere.
@@ -88,6 +89,7 @@ public partial class CanonSessionProjectorEngine
     private readonly IProjectionStore? projections;
     private readonly IOperationalStore? operationalStore;
     private readonly IPricingRepository pricing;
+    private readonly ITextTokenizer tokenizer;
     private readonly int readPathSessionRecordBudget;
     private readonly int readPathPassRecordBudget;
     private int projectionPassInFlight;
@@ -100,6 +102,7 @@ public partial class CanonSessionProjectorEngine
     /// <param name="projections">Typed projection store receiving session, context, schema, timeline, and finding rows.</param>
     /// <param name="operationalStore">Operational store backing the token counter and projection watermarks.</param>
     /// <param name="pricing">Model rate-table repository used when resolving context windows.</param>
+    /// <param name="tokenizer">Local tokenizer that counts each text under the model it was sent to (D17).</param>
     /// <param name="readPathSessionRecordBudget">Per-session record count a read-path pass may rebuild before deferring the session.</param>
     /// <param name="readPathPassRecordBudget">Total record count one read-path pass may rebuild before deferring every later session.</param>
     public CanonSessionProjectorEngine(
@@ -107,6 +110,7 @@ public partial class CanonSessionProjectorEngine
         IProjectionStore projections,
         IOperationalStore operationalStore,
         IPricingRepository pricing,
+        ITextTokenizer tokenizer,
         int readPathSessionRecordBudget = DefaultReadPathSessionRecordBudget,
         int readPathPassRecordBudget = DefaultReadPathPassRecordBudget)
     {
@@ -114,6 +118,7 @@ public partial class CanonSessionProjectorEngine
         ArgumentNullException.ThrowIfNull(projections);
         ArgumentNullException.ThrowIfNull(operationalStore);
         ArgumentNullException.ThrowIfNull(pricing);
+        ArgumentNullException.ThrowIfNull(tokenizer);
         ArgumentOutOfRangeException.ThrowIfLessThan(readPathSessionRecordBudget, 1);
         ArgumentOutOfRangeException.ThrowIfLessThan(readPathPassRecordBudget, 1);
 
@@ -121,6 +126,7 @@ public partial class CanonSessionProjectorEngine
         this.projections = projections;
         this.operationalStore = operationalStore;
         this.pricing = pricing;
+        this.tokenizer = tokenizer;
         this.readPathSessionRecordBudget = readPathSessionRecordBudget;
         this.readPathPassRecordBudget = readPathPassRecordBudget;
     }
@@ -266,19 +272,24 @@ public partial class CanonSessionProjectorEngine
     {
         _ = pricing.LoadPricingTables();
         CachedTokenCounter counter = CreateTokenCounter();
-        SessionSummaryRow row = BuildSessionSummary(sessionId, records, counter.Count);
+
+        // The static builder hands bare text to the analysis, which cannot see a model, so every
+        // text in one session build counts under that session's first observed model; a session
+        // that names no model counts under the tokenizer's labelled stand-in.
+        string? model = PrimaryModelOf(records);
+        SessionSummaryRow row = BuildSessionSummary(sessionId, records, text => counter.Count(text, model).Count);
         counter.Flush();
         return row;
     }
 
     /// <summary>
     /// Builds the engine's cached token counter over <see cref="IOperationalStore"/> on the
-    /// relational path (decision D16). The legacy path, which has no operational store, counts
-    /// without persisting now that the transitional counter constructor is gone.
+    /// relational path (decision D16), counting through the constructor's tokenizer. The legacy
+    /// path, which has no operational store, counts without persisting now that the transitional
+    /// counter constructor is gone.
     /// </summary>
-    /// <returns>Cached token counter bound to the engine's operational store, or a counting-only counter.</returns>
-    private CachedTokenCounter CreateTokenCounter() =>
-        new(operationalStore, CanonTokenCache.ApproximateTokenizerName);
+    /// <returns>Cached token counter bound to the engine's tokenizer and operational store, or a counting-only counter.</returns>
+    private CachedTokenCounter CreateTokenCounter() => new(operationalStore, tokenizer);
 
     /// <summary>
     /// Derives a complete <see cref="SessionSummaryRow"/> (including the summary totals,
@@ -2076,6 +2087,14 @@ public partial class CanonSessionProjectorEngine
         return list;
     }
 
+    /// <summary>
+    /// The first observed model of <paramref name="records"/> in timestamp order, or
+    /// <see langword="null"/> when the records name no model — the model whose tokenizer counts
+    /// the session's text, per the one-model-per-build rule on the counting callback paths.
+    /// </summary>
+    private static string? PrimaryModelOf(IReadOnlyList<CanonicalRecord> records) =>
+        ModelsOf(records).FirstOrDefault();
+
     private static (string Started, string Ended) TimestampBounds(IReadOnlyList<CanonicalRecord> records)
     {
         string? minTs = null;
@@ -2677,7 +2696,7 @@ public partial class CanonSessionProjectorEngine
             }
         }
 
-        CachedTokenCounter counter = new(operationalStore, CanonTokenCache.ApproximateTokenizerName);
+        CachedTokenCounter counter = new(operationalStore, tokenizer);
 
         int builtCount = 0;
         int skippedCount = skippedKeys.Count;
@@ -2719,10 +2738,13 @@ public partial class CanonSessionProjectorEngine
                     continue;
                 }
 
+                // Same rule as the summary path: one session build counts under the session's
+                // first observed model, and a session naming no model uses the stand-in.
+                string? sessionModel = PrimaryModelOf(merged);
                 StoredSessionProjection projection = BuildStoredSessionProjection(
                     sessionId,
                     merged,
-                    counter.Count,
+                    text => counter.Count(text, sessionModel).Count,
                     sessionsByKey[sessionId].Title);
                 projections.ReplaceSessionProjection(projection);
                 builtCount++;

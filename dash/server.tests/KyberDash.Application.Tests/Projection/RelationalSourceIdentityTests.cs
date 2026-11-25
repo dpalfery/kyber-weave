@@ -212,7 +212,7 @@ public class RelationalSourceIdentityTests
     private const double ClaudeOtlpOnlyPublishedCost = 0.01242;
 
     private static CanonSessionProjectorEngine NewEngine(InMemoryRelationalStore store) =>
-        new(store, store, store, new FakePricingRepository());
+        new(store, store, store, new FakePricingRepository(), new FakeTextTokenizer());
 
     private static void WriteDroidPluginTurns(InMemoryRelationalStore store, string sessionKey, int count)
     {

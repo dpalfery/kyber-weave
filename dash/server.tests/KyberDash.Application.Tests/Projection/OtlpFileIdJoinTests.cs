@@ -206,7 +206,7 @@ public class OtlpFileIdJoinTests
     }
 
     private static CanonSessionProjectorEngine NewEngine(InMemoryRelationalStore store) =>
-        new(store, store, store, new FakePricingRepository());
+        new(store, store, store, new FakePricingRepository(), new FakeTextTokenizer());
 
     /// <summary>
     /// A Claude Code <c>api_request</c> OTLP log shaped like the vendor's monitoring-usage

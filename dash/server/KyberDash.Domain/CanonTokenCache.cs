@@ -36,15 +36,34 @@ public static class CanonTokenCache
     /// <summary>Tokenizer name reported when using the 4-char heuristic fallback.</summary>
     public const string ApproximateTokenizerName = "approximate/chars-per-4";
 
-    /// <summary>Computes the deterministic <c>&lt;model&gt;:&lt;sha256&gt;</c> memo key.</summary>
-    public static string CacheKey(string text, string model)
+    /// <summary>
+    /// Computes the deterministic <c>&lt;tokenizer&gt;:&lt;model&gt;:&lt;sha256&gt;</c> memo key.
+    /// </summary>
+    /// <remarks>
+    /// The tokenizer slot scopes the cache to the exact vocabulary that produced the count, so a
+    /// tokenizer change misses every earlier entry instead of serving another vocabulary's counts.
+    /// A blank model is legal and takes an empty slot: such counts run under the tokenizer's
+    /// labelled stand-in (D19), never an exception.
+    /// </remarks>
+    /// <param name="text">Text the count was computed from.</param>
+    /// <param name="model">Model the text was counted for; <see langword="null"/> or blank when unknown.</param>
+    /// <param name="tokenizer">Name of the tokenizer that produced the count, such as <c>o200k_base</c>.</param>
+    public static string CacheKey(string text, string? model, string tokenizer)
     {
         ArgumentNullException.ThrowIfNull(text);
-        ArgumentException.ThrowIfNullOrWhiteSpace(model);
+        ArgumentException.ThrowIfNullOrWhiteSpace(tokenizer);
 
         byte[] digest = SHA256.HashData(Encoding.UTF8.GetBytes(text));
-        return $"{model}:{Convert.ToHexStringLower(digest)}";
+        return $"{tokenizer}:{ModelSlot(model)}:{Convert.ToHexStringLower(digest)}";
     }
+
+    /// <summary>
+    /// Normalizes the model slot of a cache key: surrounding whitespace is trimmed and a blank
+    /// model becomes the empty slot, so one model's entries never split across two keys.
+    /// </summary>
+    /// <param name="model">Model the text was counted for; <see langword="null"/> or blank when unknown.</param>
+    public static string ModelSlot(string? model) =>
+        string.IsNullOrWhiteSpace(model) ? string.Empty : model.Trim();
 
     /// <summary>Character-count approximation (<c>ceil(length / 4)</c>) matching <c>approximateO200kBase</c>.</summary>
     public static long ApproximateO200kBase(string text)

@@ -133,7 +133,7 @@ public class AnalyticsServiceOperationsTests
             projections,
             operational,
             pricing,
-            new CanonSessionProjectorEngine(reader, projections, operational, pricing),
+            new CanonSessionProjectorEngine(reader, projections, operational, pricing, new FakeTextTokenizer()),
             new CanonRollupsEngine(reader, projections, pricing),
             clock: () => DateTimeOffset.Parse("2026-11-19T00:00:00.000Z", CultureInfo.InvariantCulture),
             instanceId: "test-engine");

@@ -1913,7 +1913,7 @@ public sealed class AnalyticsReadPathTests
             store,
             store,
             store,
-            new CanonSessionProjectorEngine(store, store, store, pricing),
+            new CanonSessionProjectorEngine(store, store, store, pricing, new FakeTextTokenizer()),
             new CanonRollupsEngine(store, store, pricing));
 
     private static KyberBridgeEngine CreateBridge(
@@ -1927,7 +1927,7 @@ public sealed class AnalyticsReadPathTests
             store,
             store,
             resolvedPricing,
-            new CanonSessionProjectorEngine(readerOverride ?? store, store, store, resolvedPricing),
+            new CanonSessionProjectorEngine(readerOverride ?? store, store, store, resolvedPricing, new FakeTextTokenizer()),
             new CanonRollupsEngine(readerOverride ?? store, store, resolvedPricing),
             clock: () => FixedTimestamp,
             instanceId: "test-instance");

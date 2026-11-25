@@ -1147,7 +1147,7 @@ public static class SettingsCleanDoctorReportTests
                     Store,
                     Store,
                     Pricing,
-                    new CanonSessionProjectorEngine(Store, Store, Store, Pricing),
+                    new CanonSessionProjectorEngine(Store, Store, Store, Pricing, new FakeTextTokenizer()),
                     new CanonRollupsEngine(Store, Store, Pricing));
                 Analytics = new AnalyticsService(bridge);
             }
@@ -1178,7 +1178,7 @@ public static class SettingsCleanDoctorReportTests
                 store,
                 store,
                 pricing,
-                new CanonSessionProjectorEngine(store, store, store, pricing),
+                new CanonSessionProjectorEngine(store, store, store, pricing, new FakeTextTokenizer()),
                 new CanonRollupsEngine(store, store, pricing),
                 clock: () => FixedNow);
 
@@ -1192,7 +1192,7 @@ public static class SettingsCleanDoctorReportTests
                 store,
                 store,
                 pricing,
-                new CanonSessionProjectorEngine(store, store, store, pricing),
+                new CanonSessionProjectorEngine(store, store, store, pricing, new FakeTextTokenizer()),
                 new CanonRollupsEngine(store, store, pricing),
                 version: "1.9.0",
                 clock: () => FixedNow,
@@ -1292,7 +1292,7 @@ public static class SettingsCleanDoctorReportTests
                 store,
                 store,
                 store,
-                new CanonSessionProjectorEngine(store, store, store, pricing),
+                new CanonSessionProjectorEngine(store, store, store, pricing, new FakeTextTokenizer()),
                 new CanonRollupsEngine(store, store, pricing)).ProjectAll();
 
             KyberBridgeEngine bridge = CreateBridge(store, pricing: pricing);
@@ -1391,7 +1391,7 @@ public static class SettingsCleanDoctorReportTests
                 store,
                 store,
                 store,
-                new CanonSessionProjectorEngine(store, store, store, pricing),
+                new CanonSessionProjectorEngine(store, store, store, pricing, new FakeTextTokenizer()),
                 new CanonRollupsEngine(store, store, pricing)).ProjectAll();
 
             KyberBridgeEngine bridge = CreateBridge(store, pricing: pricing);
@@ -1461,7 +1461,7 @@ public static class SettingsCleanDoctorReportTests
                 store,
                 store,
                 store,
-                new CanonSessionProjectorEngine(store, store, store, pricing),
+                new CanonSessionProjectorEngine(store, store, store, pricing, new FakeTextTokenizer()),
                 new CanonRollupsEngine(store, store, pricing)).ProjectAll();
 
             KyberBridgeEngine bridge = new(
@@ -1469,7 +1469,7 @@ public static class SettingsCleanDoctorReportTests
                 store,
                 store,
                 pricing,
-                new CanonSessionProjectorEngine(store, store, store, pricing),
+                new CanonSessionProjectorEngine(store, store, store, pricing, new FakeTextTokenizer()),
                 new CanonRollupsEngine(store, store, pricing),
                 clock: () => FixedNow,
                 storePath: "/tmp/multi.db");
@@ -1556,7 +1556,7 @@ public static class SettingsCleanDoctorReportTests
                 store,
                 store,
                 store,
-                new CanonSessionProjectorEngine(store, store, store, pricing),
+                new CanonSessionProjectorEngine(store, store, store, pricing, new FakeTextTokenizer()),
                 new CanonRollupsEngine(store, store, pricing)).ProjectAll();
 
             // Inject a stale excluded rollup and run to verify GetReport rejects excluded projections directly too.
@@ -1638,7 +1638,7 @@ public static class SettingsCleanDoctorReportTests
                 store,
                 store,
                 store,
-                new CanonSessionProjectorEngine(store, store, store, pricing),
+                new CanonSessionProjectorEngine(store, store, store, pricing, new FakeTextTokenizer()),
                 new CanonRollupsEngine(store, store, pricing));
             _ = projection.ProjectAll();
 
@@ -1729,7 +1729,7 @@ public static class SettingsCleanDoctorReportTests
                 store,
                 store,
                 store,
-                new CanonSessionProjectorEngine(store, store, store, pricing),
+                new CanonSessionProjectorEngine(store, store, store, pricing, new FakeTextTokenizer()),
                 new CanonRollupsEngine(store, store, pricing)).ProjectAll();
 
             // Force a projected session row with unparseable timestamps to verify window checks fail closed.
@@ -1781,7 +1781,7 @@ public static class SettingsCleanDoctorReportTests
                 store,
                 store,
                 resolvedPricing,
-                new CanonSessionProjectorEngine(store, store, store, resolvedPricing),
+                new CanonSessionProjectorEngine(store, store, store, resolvedPricing, new FakeTextTokenizer()),
                 new CanonRollupsEngine(store, store, resolvedPricing),
                 version: version,
                 clock: () => FixedNow,

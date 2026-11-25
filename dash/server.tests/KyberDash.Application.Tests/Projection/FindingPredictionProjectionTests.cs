@@ -209,7 +209,7 @@ public class FindingPredictionProjectionTests
     }
 
     private static CanonSessionProjectorEngine NewProjector(InMemoryRelationalStore store) =>
-        new(store, store, store, new FakePricingRepository());
+        new(store, store, store, new FakePricingRepository(), new FakeTextTokenizer());
 
     private static KyberBridgeEngine NewBridge(InMemoryRelationalStore projections) =>
         new(
@@ -217,7 +217,7 @@ public class FindingPredictionProjectionTests
             projections,
             projections,
             new FakePricingRepository(),
-            new CanonSessionProjectorEngine(projections, projections, projections, new FakePricingRepository()),
+            new CanonSessionProjectorEngine(projections, projections, projections, new FakePricingRepository(), new FakeTextTokenizer()),
             new CanonRollupsEngine(projections, projections, new FakePricingRepository()),
             clock: () => FixedTimestamp,
             instanceId: "test-instance");

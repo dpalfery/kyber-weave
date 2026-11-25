@@ -155,8 +155,9 @@ public class SessionProjectionTests
         CanonSessionProjectorEngine engine = NewEngine(store);
         _ = engine.ProjectIncremental();
 
-        long expected = CanonTokenCache.ApproximateO200kBase(prompt);
-        Assert.Equal(expected, store.GetCachedTokenCount(CanonTokenCache.CacheKey(prompt, CanonTokenCache.ApproximateTokenizerName)));
+        // The pass counted the prompt through the engine's tokenizer for the model the records
+        // named, so the entry is stored under that tokenizer's label and that model.
+        Assert.Equal(1L, store.GetCachedTokenCount(CanonTokenCache.CacheKey(prompt, "claude-sonnet-4-6", "fake_tokenizer")));
         Assert.True(store.CountRows("token_cache") > 0, "the pass must persist token cache rows through IOperationalStore");
     }
 
@@ -265,7 +266,7 @@ public class SessionProjectionTests
     }
 
     private static CanonSessionProjectorEngine NewEngine(InMemoryRelationalStore store) =>
-        new(store, store, store, new FakePricingRepository());
+        new(store, store, store, new FakePricingRepository(), new FakeTextTokenizer());
 
     private static void WriteSession(
         InMemoryRelationalStore store,

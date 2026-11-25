@@ -61,7 +61,8 @@ public static class ServiceCollectionExtensions
             provider.GetRequiredService<IRelationalStoreReader>(),
             provider.GetRequiredService<IProjectionStore>(),
             provider.GetRequiredService<IOperationalStore>(),
-            provider.GetRequiredService<IPricingRepository>()));
+            provider.GetRequiredService<IPricingRepository>(),
+            provider.GetRequiredService<ITextTokenizer>()));
 
         services.TryAddSingleton(provider => new CanonRollupsEngine(
             provider.GetRequiredService<IRelationalStoreReader>(),

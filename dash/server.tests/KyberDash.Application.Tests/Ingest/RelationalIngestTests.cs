@@ -192,7 +192,7 @@ public class RelationalIngestTests
         Assert.Equal(0, outcome.Quarantined);
         Assert.Equal(0, outcome.Rejected);
 
-        ProjectionPassReport report = new CanonSessionProjectorEngine(store, store, store, pricing).ProjectIncremental();
+        ProjectionPassReport report = new CanonSessionProjectorEngine(store, store, store, pricing, new FakeTextTokenizer()).ProjectIncremental();
         Assert.Equal(1, report.Built);
 
         StoredSessionProjection? projection = store.GetSessionProjection(sessionId);
@@ -214,7 +214,7 @@ public class RelationalIngestTests
             store,
             store,
             pricing,
-            new CanonSessionProjectorEngine(store, store, store, pricing),
+            new CanonSessionProjectorEngine(store, store, store, pricing, new FakeTextTokenizer()),
             new CanonRollupsEngine(store, store, pricing));
         JsonElement tools = bridge.GetSessionTools(sessionId)!.Value;
         Assert.Contains(
@@ -256,7 +256,7 @@ public class RelationalIngestTests
         Assert.DoesNotContain(stored.Tokens, static token => token.TokenClass == TokenClass.Input);
         Assert.Null(stored.ReportedInputTokens);
 
-        _ = new CanonSessionProjectorEngine(store, store, store, pricing).ProjectIncremental();
+        _ = new CanonSessionProjectorEngine(store, store, store, pricing, new FakeTextTokenizer()).ProjectIncremental();
         SessionSummaryFigure? turnTotals = store.SessionSummaryFigures(sessionId, pricing.LoadPricingTables());
         Assert.NotNull(turnTotals);
         Assert.Null(turnTotals.TotalInput);
@@ -266,7 +266,7 @@ public class RelationalIngestTests
             store,
             store,
             pricing,
-            new CanonSessionProjectorEngine(store, store, store, pricing),
+            new CanonSessionProjectorEngine(store, store, store, pricing, new FakeTextTokenizer()),
             new CanonRollupsEngine(store, store, pricing));
         JsonElement summary = bridge.GetSessionSummary(sessionId)!.Value.GetProperty("summary");
         Assert.Equal(JsonValueKind.Null, summary.GetProperty("total_input").ValueKind);
@@ -314,14 +314,14 @@ public class RelationalIngestTests
 
         IngestOutcome outcome = CanonIngestPipeline.IngestBatch([turn], store, store);
         Assert.Equal(new IngestOutcome(1, 0, 0), outcome);
-        _ = new CanonSessionProjectorEngine(store, store, store, pricing).ProjectIncremental();
+        _ = new CanonSessionProjectorEngine(store, store, store, pricing, new FakeTextTokenizer()).ProjectIncremental();
 
         KyberBridgeEngine bridge = new(
             store,
             store,
             store,
             pricing,
-            new CanonSessionProjectorEngine(store, store, store, pricing),
+            new CanonSessionProjectorEngine(store, store, store, pricing, new FakeTextTokenizer()),
             new CanonRollupsEngine(store, store, pricing));
         store.ClearReadLog();
         JsonElement timeline = bridge.GetSessionTimeline(sessionId)!.Value.GetProperty("nodes");

@@ -1,3 +1,5 @@
+using KyberDash.Application;
+using KyberDash.Application.Tests.Fakes;
 using KyberDash.Data.Tokenization;
 using KyberDash.Domain;
 using Xunit;
@@ -78,6 +80,30 @@ public class LocalTextTokenizerTests
     public void EmptyText_CountsZero(string model)
     {
         Assert.Equal(0, Tokenizer.Count(string.Empty, model).Count);
+    }
+
+    /// <summary>
+    /// A blank model through the cached counter still counts under the labelled stand-in: the
+    /// counter must never throw on a blank model, the label says stand-in, and the entry
+    /// persists under the stand-in's name with an empty model slot.
+    /// </summary>
+    [Theory]
+    [InlineData(null)]
+    [InlineData("")]
+    [InlineData("   ")]
+    public void BlankModels_CountUnderTheLabelledStandInThroughTheCachedCounter(string? model)
+    {
+        InMemoryRelationalStore store = new();
+        CachedTokenCounter counter = new(store, Tokenizer);
+        string text = string.Join(" ", Enumerable.Repeat("token", 200));
+
+        TokenCount count = counter.Count(text, model);
+
+        Assert.Equal(LocalTextTokenizer.StandardTokenizerName, count.Tokenizer);
+        Assert.Equal(LocalTextTokenizer.O200kBaseName, count.Tokenizer);
+        Assert.False(count.IsModelOwn);
+        counter.Flush();
+        Assert.Equal(count.Count, store.GetCachedTokenCount(CanonTokenCache.CacheKey(text, model, LocalTextTokenizer.O200kBaseName)));
     }
 
     [Fact]
