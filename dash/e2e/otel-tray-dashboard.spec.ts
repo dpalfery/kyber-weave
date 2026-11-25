@@ -131,15 +131,15 @@ test('ingests all 7 stored harnesses, excludes gemini, and renders initial Tray 
   await expect(page.getByTestId('harness-selector')).toBeVisible()
   await expect(select).toHaveValue('all')
 
-  const optionsText = await select.locator('option').allInnerTexts()
   const optionValues = await select.locator('option').evaluateAll((nodes) =>
     nodes.map((node) => (node as HTMLOptionElement).value),
   )
   for (const contract of TRAY_SESSION_CONTRACTS) {
     expect(optionValues).toContain(contract.harness)
-    expect(
-      optionsText.some((text) => text.includes(contract.harness) && text.includes(`(${sessionCountForHarness(contract.harness)})`)),
-    ).toBe(true)
+    // Locate the one option whose value is this harness, so a count shown for another harness cannot satisfy it.
+    const option = select.locator(`option[value="${contract.harness}"]`)
+    await expect(option).toHaveCount(1)
+    await expect(option).toContainText(`(${sessionCountForHarness(contract.harness)})`)
   }
   expect(optionValues).not.toContain('gemini')
 

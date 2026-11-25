@@ -105,7 +105,7 @@ for (const [harness, contracts] of CONTRACTS_BY_HARNESS) {
     ).toEqual([])
 
     await navigateToHarnessDetail(page, baseUrl, harness)
-    await expect(page.getByTestId('page-harness')).toContainText(String(contracts.length))
+    await expect(page.getByTestId('harness-session-count')).toHaveText(String(contracts.length))
 
     for (const contract of contracts) {
       await test.step(`${harness} session ${contract.sessionId}`, async () => {
