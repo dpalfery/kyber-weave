@@ -588,7 +588,10 @@ child, and neither holds clean logic.
 `VACUUM`, and checkpoints again. SQLite keeps pages freed by a clean inside the file, so the file only
 shrinks after a vacuum, and a vacuum frees nothing the clean kept (quarantine and problems stay). It runs
 under the store's bounded runner; a very large file can hit the store's batch timeout and surfaces as the
-store's normal error.
+store's normal error. On a store that is not a SQLite file the command says vacuum does not apply instead of
+reporting a compaction. A `kyberdash web` server writing to the same store while the vacuum runs waits on
+SQLite's busy timeout and retries; if the vacuum outlasts those retries, that write fails with the store's normal
+busy error. Run it while the server is idle.
 
 To start from an empty database (a clean does not remove the quarantine and problem rows): stop the
 engine, delete `canon.db` and its `canon.db-wal` and `canon.db-shm` files (`KYBER_CANON_DB` overrides the
