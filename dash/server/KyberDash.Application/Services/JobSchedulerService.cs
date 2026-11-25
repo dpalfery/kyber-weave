@@ -30,6 +30,15 @@ public class JobSchedulerService : IJobSchedulerService
     /// <summary>Maximum characters of a failure message kept in the status snapshot.</summary>
     public const int MaxFailureSummaryLength = 200;
 
+    /// <summary>Harness whose plugin-captured sessions the counter pass tops up.</summary>
+    private const string PluginCapturedHarnessId = "droid";
+
+    /// <summary>OTLP source locator naming the Factory plugin's captured records.</summary>
+    private const string PluginCapturedSourceName = "kyberdash-factory-plugin";
+
+    /// <summary>Maximum plugin-captured sessions one pass reads files for.</summary>
+    private const int PluginCapturedLimit = 80;
+
     private readonly IRelationalStoreReader reader;
     private readonly IOperationalStore operationalStore;
     private readonly ICanonProjectionService projection;
@@ -327,6 +336,20 @@ public class JobSchedulerService : IJobSchedulerService
 
         try
         {
+            // A paused host reads no files: neither the scheduled folder import nor the
+            // plugin-captured counter pass. The purge and the projection still run so display
+            // layers keep moving and content retention stays stamped.
+            SettingsView settingsView = settings.ReadSettings();
+            if (!settingsView.JobsPaused)
+            {
+                if (settingsView.FolderImportScheduled)
+                {
+                    _ = ingestion.RefreshHarnessSources(CanonRefreshEngine.DefaultHistoryWeeks);
+                }
+
+                RefreshPluginCapturedCounters();
+            }
+
             _ = ingestion.PurgeExpiredContent(clock());
             _ = projection.ProjectAll();
 
@@ -429,6 +452,7 @@ public class JobSchedulerService : IJobSchedulerService
         try
         {
             work?.Invoke();
+            RefreshPluginCapturedCounters();
             _ = ingestion.PurgeExpiredContent(clock());
             _ = projection.ProjectAll();
 
@@ -463,8 +487,22 @@ public class JobSchedulerService : IJobSchedulerService
 
     private void ImportHistory()
     {
-        _ = settings.ReadSettings();
         _ = ingestion.RefreshHarnessSources(CanonRefreshEngine.DefaultHistoryWeeks);
+    }
+
+    /// <summary>
+    /// The plugin-captured counter pass: asks the store which Droid sessions the Factory plugin
+    /// captured, then reads only those sessions' transcript files so their counters and models
+    /// land on every refresh and every maintenance tick. Runs under the caller's job guard, so
+    /// it never overlaps a folder import; a failure here fails the caller's job.
+    /// </summary>
+    private void RefreshPluginCapturedCounters()
+    {
+        IReadOnlyList<string> sessionKeys = reader.SessionKeysWithRecordSource(
+            PluginCapturedHarnessId,
+            PluginCapturedSourceName,
+            PluginCapturedLimit);
+        _ = ingestion.RefreshPluginSessionFiles(PluginCapturedHarnessId, sessionKeys);
     }
 
     private bool TryEnsureLeaseLocked()

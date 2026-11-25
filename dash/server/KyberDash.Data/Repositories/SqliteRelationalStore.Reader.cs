@@ -160,6 +160,36 @@ public partial class SqliteRelationalStore : IRelationalStoreReader
     }
 
     /// <inheritdoc />
+    public IReadOnlyList<string> SessionKeysWithRecordSource(string harnessId, string sourceName, int limit)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(harnessId);
+        ArgumentException.ThrowIfNullOrWhiteSpace(sourceName);
+        ArgumentOutOfRangeException.ThrowIfLessThan(limit, 1);
+
+        // Grouped by session key so each key appears once, with its newest record timestamp
+        // driving the order. Started-at values are written in one fixed ISO-8601 format, so the
+        // textual MAX orders chronologically.
+        string sql = TabReadScriptHeader +
+                     "SELECT hex(CAST(rsl.session_key AS BLOB)) FROM record r " +
+                     "JOIN record_session_link rsl ON rsl.span_id = r.span_id " +
+                     "JOIN source src ON src.source_id = r.source_id " +
+                     $"WHERE src.harness_id = {TextExpr(harnessId)} AND src.locator = {TextExpr(sourceName)} " +
+                     "GROUP BY rsl.session_key " +
+                     "ORDER BY MAX(r.started_at_utc) DESC, rsl.session_key ASC " +
+                     $"LIMIT {IntSql(limit)};\n";
+
+        string output = ExecuteSqlite(sql);
+        List<string> results = [];
+        foreach (string line in TabLines(output))
+        {
+            string[] cols = SplitTabLine(line, 1, "session keys with record source");
+            results.Add(ParseHexRequired(cols[0], "record_session_link.session_key"));
+        }
+
+        return results;
+    }
+
+    /// <inheritdoc />
     public CollectedRecord? RecordContentFree(string spanId)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(spanId);

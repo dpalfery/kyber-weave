@@ -99,6 +99,86 @@ public class TranscriptIngestionService : ITranscriptIngestionService
     }
 
     /// <inheritdoc />
+    public RefreshReport RefreshPluginSessionFiles(string harnessId, IReadOnlyCollection<string> sessionKeys)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(harnessId);
+        ArgumentNullException.ThrowIfNull(sessionKeys);
+
+        DateTimeOffset commandStarted = clock();
+        if (sessionKeys.Count == 0)
+        {
+            return PluginSessionReport([], commandStarted);
+        }
+
+        IHarnessSourceReader? reader = sourceRegistry!.GetReader(harnessId);
+        if (reader is null || HarnessMapperLookup.Resolve(mappersByHarness, harnessId) is null)
+        {
+            return PluginSessionReport([], commandStarted);
+        }
+
+        DateTimeOffset windowStart = commandStarted.AddDays(-7.0 * CanonRefreshEngine.DefaultHistoryWeeks);
+        string coveredFromUtc = FormatUtc(windowStart);
+        string coveredThroughUtc = FormatUtc(commandStarted);
+        SourceDiscoveryContext context = new(
+            HomeDirectory: homeDirectory,
+            StateDirectory: stateDirectory,
+            FileSystem: fileSystem,
+            SinceUtc: windowStart);
+        SourceDiscoveryResult discovery = reader.Discover(context);
+        foreach (CollectedProblem discoveryProblem in discovery.Problems)
+        {
+            writer!.WriteProblem(discoveryProblem);
+        }
+
+        HashSet<string> wantedStems = new(sessionKeys, StringComparer.Ordinal);
+        List<RefreshSourceStatusRow> rows = [];
+        HashSet<string> sessionKeysRead = new(StringComparer.Ordinal);
+        foreach (SourceUnit unit in discovery.Sources)
+        {
+            // A session id arrives as data, so the file is matched by comparing its stem against
+            // discovery results — never by joining the id into a path, which a crafted id could
+            // aim outside the sessions root.
+            if (!wantedStems.Contains(Path.GetFileNameWithoutExtension(unit.SourceKey)))
+            {
+                continue;
+            }
+
+            rows.Add(ProcessRelationalSourceUnit(
+                unit,
+                commandStarted,
+                coveredFromUtc,
+                coveredThroughUtc,
+                coveredThroughUtc,
+                sessionKeysRead));
+        }
+
+        return PluginSessionReport(rows, commandStarted, sessionKeysRead.Count);
+    }
+
+    /// <summary>
+    /// Builds the pass report for <see cref="RefreshPluginSessionFiles"/>: no run id and no
+    /// history claim, because the pass writes no <c>refresh_run</c> row.
+    /// </summary>
+    private RefreshReport PluginSessionReport(
+        List<RefreshSourceStatusRow> rows,
+        DateTimeOffset commandStarted,
+        int sessions = 0)
+    {
+        int failedCount = rows.Count(static r => string.Equals(r.Status, "failed", StringComparison.Ordinal));
+        return new RefreshReport(
+            RunId: string.Empty,
+            HistoryWeeks: 0,
+            CommandStartedAt: FormatUtc(commandStarted),
+            Rows: rows,
+            PurgedContentCount: 0,
+            Sessions: sessions,
+            Runs: 0,
+            Executions: 0,
+            Rollups: 0,
+            ExitCode: failedCount > 0 ? 1 : 0);
+    }
+
+    /// <inheritdoc />
     public PurgeExpiredContentResult PurgeExpiredContent(DateTimeOffset? now = null)
     {
         DateTimeOffset instant = now ?? clock();

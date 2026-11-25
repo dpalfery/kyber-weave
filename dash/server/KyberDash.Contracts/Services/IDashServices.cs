@@ -135,6 +135,24 @@ public interface ITranscriptIngestionService
     /// <summary>Refreshes local harness transcript sources within <paramref name="historyWeeks"/> using checkpoints.</summary>
     RefreshReport RefreshHarnessSources(int historyWeeks = 2);
 
+    /// <summary>
+    /// Reads the transcript files of the sessions a plugin-captured OTLP source already recorded
+    /// for <paramref name="harnessId"/>, so those sessions gain their file rows, models, and
+    /// companion usage without a folder import.
+    /// </summary>
+    /// <remarks>
+    /// Discovery runs through the harness's registered reader only, keeping the units whose
+    /// transcript file stem is one of <paramref name="sessionKeys"/>; each kept unit then goes
+    /// through the standard checkpoint check, so an unchanged file writes nothing and a later
+    /// full refresh replaces the rows under the same source id. No <c>refresh_run</c> row is
+    /// written and no history coverage is claimed. A session id is data: files are matched by
+    /// comparing stems against discovery results, never by joining the id into a path.
+    /// </remarks>
+    /// <param name="harnessId">Harness whose registered reader discovers the files.</param>
+    /// <param name="sessionKeys">Candidate session keys, as recorded by the plugin-captured source.</param>
+    /// <returns>Per-unit status rows with no run id and no history claim.</returns>
+    RefreshReport RefreshPluginSessionFiles(string harnessId, IReadOnlyCollection<string> sessionKeys);
+
     /// <summary>Applies rolling 14-day content retention without dropping token or cost counters.</summary>
     PurgeExpiredContentResult PurgeExpiredContent(DateTimeOffset? now = null);
 }

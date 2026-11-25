@@ -407,6 +407,67 @@ public class InMemoryRelationalStore :
     }
 
     /// <inheritdoc />
+    public IReadOnlyList<string> SessionKeysWithRecordSource(string harnessId, string sourceName, int limit)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(harnessId);
+        ArgumentException.ThrowIfNullOrWhiteSpace(sourceName);
+        ArgumentOutOfRangeException.ThrowIfLessThan(limit, 1);
+
+        lock (syncRoot)
+        {
+            NoteRead(nameof(SessionKeysWithRecordSource));
+            TableMetadata recordMeta = GetTableMetadata("record");
+            TableMetadata sourceMeta = GetTableMetadata("source");
+            Dictionary<string, string> newestStartedAtBySession = new(StringComparer.Ordinal);
+
+            foreach (object?[] row in state.GetRows("record"))
+            {
+                if (!string.Equals(GetString(recordMeta, row, "harness_id"), harnessId, StringComparison.Ordinal)
+                    || row[recordMeta.ColumnIndices["source_id"]] is not string sourceId)
+                {
+                    continue;
+                }
+
+                object?[]? sourceRow = FindRowByKey(state, "source", [("source_id", sourceId)]);
+                if (sourceRow is null
+                    || !string.Equals(GetString(sourceMeta, sourceRow, "locator"), sourceName, StringComparison.Ordinal))
+                {
+                    continue;
+                }
+
+                string? sessionKey = ReadOptionalSingleString(
+                    state,
+                    "record_session_link",
+                    "span_id",
+                    GetString(recordMeta, row, "span_id"),
+                    "session_key");
+                if (sessionKey is null)
+                {
+                    continue;
+                }
+
+                // Started-at values are stored in one fixed ISO-8601 format, so the ordinal
+                // comparison orders chronologically, matching the SQLite MAX() the adapter runs.
+                string startedAt = GetString(recordMeta, row, "started_at_utc");
+                if (!newestStartedAtBySession.TryGetValue(sessionKey, out string? current)
+                    || string.CompareOrdinal(startedAt, current) > 0)
+                {
+                    newestStartedAtBySession[sessionKey] = startedAt;
+                }
+            }
+
+            return
+            [
+                .. newestStartedAtBySession
+                    .OrderByDescending(static pair => pair.Value, StringComparer.Ordinal)
+                    .ThenBy(static pair => pair.Key, StringComparer.Ordinal)
+                    .Take(limit)
+                    .Select(static pair => pair.Key),
+            ];
+        }
+    }
+
+    /// <inheritdoc />
     public CollectedRecord? RecordContentFree(string spanId)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(spanId);

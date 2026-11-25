@@ -2100,6 +2100,9 @@ public sealed class AnalyticsReadPathTests
         /// <inheritdoc />
         public IReadOnlyList<StoredSourceCount> SourceRecordCounts() => inner.SourceRecordCounts();
 
+        public IReadOnlyList<string> SessionKeysWithRecordSource(string harnessId, string sourceName, int limit) =>
+            inner.SessionKeysWithRecordSource(harnessId, sourceName, limit);
+
         public CollectedRecord? RecordContentFree(string spanId) => inner.RecordContentFree(spanId);
 
         public string? SpanPromptText(string spanId) => inner.SpanPromptText(spanId);

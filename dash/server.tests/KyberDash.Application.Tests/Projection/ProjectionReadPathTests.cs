@@ -601,6 +601,9 @@ public class ProjectionReadPathTests
         /// <inheritdoc />
         public IReadOnlyList<StoredSourceCount> SourceRecordCounts() => inner.SourceRecordCounts();
 
+        public IReadOnlyList<string> SessionKeysWithRecordSource(string harnessId, string sourceName, int limit) =>
+            inner.SessionKeysWithRecordSource(harnessId, sourceName, limit);
+
         /// <inheritdoc />
         public CollectedRecord? RecordContentFree(string spanId) => inner.RecordContentFree(spanId);
 

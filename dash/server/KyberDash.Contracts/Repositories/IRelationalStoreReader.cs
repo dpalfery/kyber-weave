@@ -648,6 +648,24 @@ public interface IRelationalStoreReader
     IReadOnlyList<StoredSourceCount> SourceRecordCounts();
 
     /// <summary>
+    /// Lists the distinct session keys of <paramref name="harnessId"/> that hold at least one
+    /// record whose stored source is named <paramref name="sourceName"/> — for an OTLP source,
+    /// its locator (the service name).
+    /// </summary>
+    /// <remarks>
+    /// The plugin-captured counter pass asks this once per scheduler tick for the sessions the
+    /// Factory plugin captured, then reads only those sessions' transcript files. Ordering is
+    /// newest record timestamp first, then session key, so the limit keeps the sessions a user
+    /// most recently worked in. Existing indexes serve the query; the limit bounds every pass.
+    /// </remarks>
+    /// <param name="harnessId">Harness whose records are matched.</param>
+    /// <param name="sourceName">Stored source locator to match.</param>
+    /// <param name="limit">Positive maximum number of session keys returned.</param>
+    /// <returns>Distinct session keys, newest record first, at most <paramref name="limit"/> rows.</returns>
+    /// <exception cref="ArgumentOutOfRangeException">Thrown when <paramref name="limit"/> is below 1.</exception>
+    IReadOnlyList<string> SessionKeysWithRecordSource(string harnessId, string sourceName, int limit);
+
+    /// <summary>
     /// Gets one record's metadata with no content-text column, the shape the span inspector reads.
     /// </summary>
     /// <param name="spanId">Record span identifier.</param>
