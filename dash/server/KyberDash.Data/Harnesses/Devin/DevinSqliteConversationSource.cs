@@ -106,7 +106,7 @@ public class DevinSqliteConversationSource : ISqliteConversationSource
             ?? throw new InvalidDataException($"Devin session '{conversationId}' no longer exists.");
 
         writer.WriteStartObject();
-        writer.WriteString("session_id", conversationId);
+        SqliteHarnessSourceReader.WriteJsonString(writer, "session_id", conversationId);
         WriteText(writer, "model", session["model"]);
         WriteText(writer, "title", session["title"]);
         WriteText(writer, "working_directory", session["working_directory"]);
@@ -169,7 +169,7 @@ public class DevinSqliteConversationSource : ISqliteConversationSource
         }
         else
         {
-            writer.WriteString(propertyName, Convert.ToString(value, CultureInfo.InvariantCulture));
+            SqliteHarnessSourceReader.WriteJsonString(writer, propertyName, Convert.ToString(value, CultureInfo.InvariantCulture));
         }
     }
 

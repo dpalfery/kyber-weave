@@ -269,7 +269,7 @@ public class CursorSqliteConversationSource : ISqliteConversationSource
     {
         if (value is string text)
         {
-            writer.WriteString(propertyName, text);
+            SqliteHarnessSourceReader.WriteJsonString(writer, propertyName, text);
             return;
         }
 

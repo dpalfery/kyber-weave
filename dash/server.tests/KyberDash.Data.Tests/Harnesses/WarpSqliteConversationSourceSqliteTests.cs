@@ -154,6 +154,61 @@ public class WarpSqliteConversationSourceSqliteTests : IDisposable
         Assert.Contains("2 Warp block", problem.Message, StringComparison.Ordinal);
     }
 
+    [Fact]
+    public void WriteExport_ManyBlocks_AreFetchedInBoundedPagesAndStayInStartOrder()
+    {
+        const int BlockCount = 1201;
+        string path = directory.Combine("many.sqlite");
+        List<SqliteFixtureStatement> statements =
+        [
+            new SqliteFixtureStatement("INSERT INTO agent_conversations VALUES (?1, ?2, ?3)", ["conv-1", ConversationData, "2026-05-18 10:10:00"]),
+            Query("ex-a", "conv-1", "2026-05-18 10:00:00"),
+        ];
+        // Inserted newest first, so the table order is the reverse of the start order.
+        for (int i = BlockCount - 1; i >= 0; i--)
+        {
+            statements.Add(new SqliteFixtureStatement(
+                "INSERT INTO blocks VALUES (?1, ?2, ?3, ?4)",
+                [$"blk-{i:D5}", $"2026-05-18 10:{i / 60:D2}:{i % 60:D2}.{i:D5}", "ls", "{\"conversation_id\":\"conv-1\"}"]));
+        }
+
+        SqliteFixtureDatabase.Create(path, SchemaDdl, statements);
+        using IHarnessSqliteDatabase opened = Source().Open(path);
+        using RecordingDatabase database = new(opened);
+
+        JsonElement export = Export(new WarpSqliteConversationSource(), database, "conv-1");
+
+        Assert.Equal(
+            Enumerable.Range(0, BlockCount).Select(static i => $"blk-{i:D5}"),
+            export.GetProperty("blocks").EnumerateArray().Select(static block => block.GetProperty("block_id").GetString()));
+        List<int> pageSizes =
+        [
+            .. database.Queries
+                .Where(static query => query.Sql.Contains("json_each", StringComparison.Ordinal))
+                .Select(static query => JsonDocument.Parse((string)query.Parameters[0]!).RootElement.GetArrayLength()),
+        ];
+        Assert.True(pageSizes.Count > 1, "The block ids should be fetched in more than one page.");
+        Assert.All(pageSizes, static size => Assert.InRange(size, 1, 500));
+    }
+
+    /// <summary>Passes every query through to a real database and keeps the queries it was asked.</summary>
+    private sealed class RecordingDatabase(IHarnessSqliteDatabase inner) : IHarnessSqliteDatabase
+    {
+        public List<HarnessSqliteQuery> Queries { get; } = [];
+
+        public IEnumerable<IReadOnlyDictionary<string, object?>> Query(HarnessSqliteQuery query)
+        {
+            Queries.Add(query);
+            return inner.Query(query);
+        }
+
+        public IReadOnlySet<string> GetColumns(string table) => inner.GetColumns(table);
+
+        public void Dispose()
+        {
+        }
+    }
+
     private static JsonElement Export(WarpSqliteConversationSource source, IHarnessSqliteDatabase database, string conversationId) =>
         JsonDocument.Parse(ExportText(source, database, conversationId)).RootElement.Clone();
 

@@ -216,6 +216,45 @@ public class SqliteHarnessSourceReaderTests
     }
 
     [Fact]
+    public void Read_ValueWhoseWriteHintPassesTheCap_IsRefusedWithoutGrowingTheBufferToTheHint()
+    {
+        Rig rig = new(new HarnessSqliteLimits(ExportCapBytes: 16 * 1024));
+        rig.Sqlite.AddDatabase(DbPath);
+        string large = new('x', 4_000_000);
+        rig.Source.Export = writer =>
+        {
+            writer.WriteStartArray();
+            writer.WriteStringValue(large);
+            writer.WriteEndArray();
+        };
+
+        long before = GC.GetAllocatedBytesForCurrentThread();
+        InvalidDataException error = Assert.Throws<InvalidDataException>(() => rig.Reader.Read(rig.Unit(DbPath + "#a"), rig.Files));
+        long allocated = GC.GetAllocatedBytesForCurrentThread() - before;
+
+        Assert.StartsWith("SQLITE_EXPORT_CAP_EXCEEDED", error.Message, StringComparison.Ordinal);
+        Assert.InRange(allocated, 0, 4_000_000);
+    }
+
+    [Fact]
+    public void Read_TextColumnWellUnderTheCap_IsAcceptedThoughItsWorstCaseHintIsNot()
+    {
+        Rig rig = new(new HarnessSqliteLimits(ExportCapBytes: 128 * 1024));
+        rig.Sqlite.AddDatabase(DbPath);
+        string text = new('x', 100_000);
+        rig.Source.Export = writer =>
+        {
+            writer.WriteStartObject();
+            SqliteHarnessSourceReader.WriteJsonColumn(writer, "t", text);
+            writer.WriteEndObject();
+        };
+
+        NativeSourceUnit? native = rig.Reader.Read(rig.Unit(DbPath + "#a"), rig.Files);
+
+        Assert.Equal(100_008, native?.SizeBytes);
+    }
+
+    [Fact]
     public void Read_ExportExactlyAtCap_IsAccepted()
     {
         Rig rig = new(new HarnessSqliteLimits(ExportCapBytes: 10));

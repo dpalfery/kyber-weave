@@ -117,10 +117,11 @@ public class SqliteHarnessSourceReader : IHarnessSourceReader
 
                 break;
             case byte[] bytes:
-                writer.WriteBase64String(propertyName, bytes);
+                writer.WritePropertyName(propertyName);
+                WriteBase64InSegments(writer, bytes);
                 break;
             default:
-                writer.WriteString(propertyName, Convert.ToString(value, CultureInfo.InvariantCulture));
+                WriteJsonString(writer, propertyName, Convert.ToString(value, CultureInfo.InvariantCulture));
                 break;
         }
     }
@@ -206,6 +207,69 @@ public class SqliteHarnessSourceReader : IHarnessSourceReader
             companionText);
     }
 
+    /// <summary>
+    /// Writes <paramref name="text"/> as the JSON string property <paramref name="propertyName"/> in bounded
+    /// segments, so the writer never asks the capped export buffer for room for the whole value at once.
+    /// </summary>
+    /// <param name="writer">The export writer.</param>
+    /// <param name="propertyName">The property to write.</param>
+    /// <param name="text">The text, or null for a JSON null.</param>
+    public static void WriteJsonString(Utf8JsonWriter writer, string propertyName, string? text)
+    {
+        ArgumentNullException.ThrowIfNull(writer);
+        writer.WritePropertyName(propertyName);
+        WriteStringInSegments(writer, text);
+    }
+
+    /// <summary>Characters per text segment: a value's write hint is then at most six bytes per character of one segment.</summary>
+    private const int TextSegmentChars = 8192;
+
+    private static void WriteStringInSegments(Utf8JsonWriter writer, string? text)
+    {
+        if (text is null)
+        {
+            writer.WriteNullValue();
+            return;
+        }
+
+        if (text.Length <= TextSegmentChars)
+        {
+            writer.WriteStringValue(text);
+            return;
+        }
+
+        ReadOnlySpan<char> rest = text;
+        while (rest.Length > TextSegmentChars)
+        {
+            int take = char.IsHighSurrogate(rest[TextSegmentChars - 1]) ? TextSegmentChars - 1 : TextSegmentChars;
+            writer.WriteStringValueSegment(rest[..take], isFinalSegment: false);
+            rest = rest[take..];
+        }
+
+        writer.WriteStringValueSegment(rest, isFinalSegment: true);
+    }
+
+    /// <summary>Bytes per base64 segment, a multiple of three so no segment ends in padding.</summary>
+    private const int Base64SegmentBytes = 6144;
+
+    private static void WriteBase64InSegments(Utf8JsonWriter writer, byte[] bytes)
+    {
+        if (bytes.Length <= Base64SegmentBytes)
+        {
+            writer.WriteBase64StringValue(bytes);
+            return;
+        }
+
+        ReadOnlySpan<byte> rest = bytes;
+        while (rest.Length > Base64SegmentBytes)
+        {
+            writer.WriteBase64StringSegment(rest[..Base64SegmentBytes], isFinalSegment: false);
+            rest = rest[Base64SegmentBytes..];
+        }
+
+        writer.WriteBase64StringSegment(rest, isFinalSegment: true);
+    }
+
     private static void WriteTextValue(Utf8JsonWriter writer, string text)
     {
         if (LooksLikeJsonContainer(text))
@@ -218,7 +282,7 @@ public class SqliteHarnessSourceReader : IHarnessSourceReader
             }
         }
 
-        writer.WriteStringValue(text);
+        WriteStringInSegments(writer, text);
     }
 
     private static bool LooksLikeJsonContainer(string text)
@@ -420,6 +484,9 @@ public class SqliteHarnessSourceReader : IHarnessSourceReader
     {
         private const int MinimumGrowth = 4096;
 
+        /// <summary>Most a write hint may pass the cap by: the escaping worst case of one text segment, with room for its delimiters.</summary>
+        private const long HintSlackBytes = (TextSegmentChars * 6L) + 64;
+
         private byte[] buffer = [];
         private int written;
 
@@ -461,8 +528,16 @@ public class SqliteHarnessSourceReader : IHarnessSourceReader
                 return;
             }
 
-            // Doubling stops at the cap; only a hint larger than what is left goes past it, because a hint is a
-            // worst case and the bytes actually committed are checked in Advance.
+            // Doubling stops at the cap. A hint is the writer's worst case for one value, so a hint may pass what
+            // is left by at most HintSlackBytes, the worst case of one text segment; Advance checks the bytes
+            // actually committed. A larger hint is refused before anything is allocated for it.
+            long limit = capBytes + HintSlackBytes;
+            if ((long)written + wanted > limit)
+            {
+                throw new InvalidDataException(
+                    $"{SqliteSourceOpenPolicy.ExportCapExceededCode}: export is larger than {capBytes} bytes.");
+            }
+
             long grown = Math.Min(Math.Max((long)written + Math.Max(wanted, MinimumGrowth), buffer.Length * 2L), capBytes);
             long size = Math.Max(grown, (long)written + wanted);
             if (size > Array.MaxLength)

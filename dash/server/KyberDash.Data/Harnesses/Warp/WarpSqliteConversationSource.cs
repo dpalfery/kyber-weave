@@ -31,6 +31,9 @@ public class WarpSqliteConversationSource : ISqliteConversationSource
     private const string QueriesQueryName = "warp.queries";
     private const string BlocksQueryName = "warp.blocks";
     private const string BlockRowsQueryName = "warp.block-rows";
+
+    /// <summary>Most block ids one export query carries.</summary>
+    private const int BlockIdPageSize = 500;
     private const string DatabaseFileQueryName = "warp.database-file";
     private const string UnattributedBlocksQueryName = "warp.unattributed-blocks";
 
@@ -225,7 +228,10 @@ public class WarpSqliteConversationSource : ISqliteConversationSource
     /// <summary>
     /// The scan keeps only each conversation's block ids for the pass, not the block text, so memory does
     /// not grow with the size of the commands; an export then fetches just its own conversation's rows.
-    /// The rows stream straight into the writer, so the export cap stops the read while rows are still coming.
+    /// The scan lists the ids in start order, so fetching them in pages of <see cref="BlockIdPageSize"/>,
+    /// each page in the same order, keeps the whole export in start order. The rows stream straight into
+    /// the writer page by page, so the export cap stops the read while pages are still coming, and no
+    /// query carries more than one page of ids.
     /// </summary>
     private IEnumerable<IReadOnlyDictionary<string, object?>> BlocksFor(IHarnessSqliteDatabase database, string conversationId)
     {
@@ -247,12 +253,23 @@ public class WarpSqliteConversationSource : ISqliteConversationSource
             return [];
         }
 
-        string idArray = JsonSerializer.Serialize(blockIds);
-        return database.Query(new HarnessSqliteQuery(
-            BlockRowsQueryName,
-            "SELECT block_id, start_ts, stylized_command FROM blocks "
-                + "WHERE block_id IN (SELECT value FROM json_each(?)) ORDER BY start_ts ASC, block_id ASC",
-            [idArray]));
+        return BlockPages(database, blockIds);
+    }
+
+    private static IEnumerable<IReadOnlyDictionary<string, object?>> BlockPages(IHarnessSqliteDatabase database, List<string> blockIds)
+    {
+        for (int start = 0; start < blockIds.Count; start += BlockIdPageSize)
+        {
+            string idArray = JsonSerializer.Serialize(blockIds.GetRange(start, Math.Min(BlockIdPageSize, blockIds.Count - start)));
+            foreach (IReadOnlyDictionary<string, object?> row in database.Query(new HarnessSqliteQuery(
+                BlockRowsQueryName,
+                "SELECT block_id, start_ts, stylized_command FROM blocks "
+                    + "WHERE block_id IN (SELECT value FROM json_each(?)) ORDER BY start_ts ASC, block_id ASC",
+                [idArray])))
+            {
+                yield return row;
+            }
+        }
     }
 
     /// <summary>
@@ -277,7 +294,7 @@ public class WarpSqliteConversationSource : ISqliteConversationSource
         foreach (IReadOnlyDictionary<string, object?> row in database.Query(new HarnessSqliteQuery(
             BlocksQueryName,
             "SELECT json_extract(ai_metadata, '$.conversation_id') AS conversation_id, block_id "
-                + "FROM blocks WHERE ai_metadata IS NOT NULL AND ai_metadata <> ''",
+                + "FROM blocks WHERE ai_metadata IS NOT NULL AND ai_metadata <> '' ORDER BY start_ts ASC, block_id ASC",
             [])))
         {
             if (row.GetValueOrDefault("conversation_id") is not string owner
@@ -307,13 +324,13 @@ public class WarpSqliteConversationSource : ISqliteConversationSource
                 writer.WriteNull(propertyName);
                 break;
             case string text:
-                writer.WriteString(propertyName, text);
+                SqliteHarnessSourceReader.WriteJsonString(writer, propertyName, text);
                 break;
             case byte[] bytes:
-                writer.WriteString(propertyName, Convert.ToBase64String(bytes));
+                SqliteHarnessSourceReader.WriteJsonString(writer, propertyName, Convert.ToBase64String(bytes));
                 break;
             default:
-                writer.WriteString(propertyName, Convert.ToString(value, CultureInfo.InvariantCulture));
+                SqliteHarnessSourceReader.WriteJsonString(writer, propertyName, Convert.ToString(value, CultureInfo.InvariantCulture));
                 break;
         }
     }

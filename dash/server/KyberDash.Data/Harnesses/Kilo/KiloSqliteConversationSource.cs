@@ -138,7 +138,7 @@ public class KiloSqliteConversationSource : ISqliteConversationSource
         }
 
         writer.WriteStartObject();
-        writer.WriteString("session_id", TextOf(root["id"]));
+        SqliteHarnessSourceReader.WriteJsonString(writer, "session_id", TextOf(root["id"]));
         WriteText(writer, "title", root["title"]);
 
         // Each query streams straight into the writer, so the export cap stops the read while rows are still
@@ -148,8 +148,8 @@ public class KiloSqliteConversationSource : ISqliteConversationSource
                      new HarnessSqliteQuery(MessagesQuery, MessagesSql, [conversationId])))
         {
             writer.WriteStartObject();
-            writer.WriteString("id", TextOf(message["id"]));
-            writer.WriteString("session_id", TextOf(message["session_id"]));
+            SqliteHarnessSourceReader.WriteJsonString(writer, "id", TextOf(message["id"]));
+            SqliteHarnessSourceReader.WriteJsonString(writer, "session_id", TextOf(message["session_id"]));
             SqliteHarnessSourceReader.WriteJsonColumn(writer, "time_created", message["time_created"]);
             SqliteHarnessSourceReader.WriteJsonColumn(writer, "data", message["data"]);
             writer.WriteEndObject();
@@ -162,9 +162,9 @@ public class KiloSqliteConversationSource : ISqliteConversationSource
                      new HarnessSqliteQuery(PartsQuery, PartsSql, [conversationId])))
         {
             writer.WriteStartObject();
-            writer.WriteString("id", TextOf(part["id"]));
-            writer.WriteString("message_id", TextOf(part["message_id"]));
-            writer.WriteString("session_id", TextOf(part["session_id"]));
+            SqliteHarnessSourceReader.WriteJsonString(writer, "id", TextOf(part["id"]));
+            SqliteHarnessSourceReader.WriteJsonString(writer, "message_id", TextOf(part["message_id"]));
+            SqliteHarnessSourceReader.WriteJsonString(writer, "session_id", TextOf(part["session_id"]));
             SqliteHarnessSourceReader.WriteJsonColumn(writer, "time_created", part["time_created"]);
             SqliteHarnessSourceReader.WriteJsonColumn(writer, "data", part["data"]);
             writer.WriteEndObject();
@@ -182,7 +182,7 @@ public class KiloSqliteConversationSource : ISqliteConversationSource
         }
         else
         {
-            writer.WriteString(propertyName, TextOf(value));
+            SqliteHarnessSourceReader.WriteJsonString(writer, propertyName, TextOf(value));
         }
     }
 
