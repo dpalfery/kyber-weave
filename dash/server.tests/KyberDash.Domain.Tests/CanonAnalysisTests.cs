@@ -665,7 +665,6 @@ public class CanonAnalysisTests
                     model: "gpt-5.3-codex",
                     declaredContextWindow: 200_000),
             ]);
-        store.SetWriteMarker(1);
         Assert.False(projector.IsProjectionCurrent());
 
         ProjectionPassReport firstPass = projector.ProjectIncremental();
@@ -699,8 +698,13 @@ public class CanonAnalysisTests
                     model: "gpt-5.3-codex",
                     declaredContextWindow: 200_000),
             ]);
-        store.SetWriteMarker(2);
-        store.SetProjectionDirtyState(new DirtyProjectionState(FromSeq: 1, ToSeq: 2, Keys: ["sess-b"], IsWildcard: false));
+        ProjectionStateView? watermark = store.GetProjectionState();
+        Assert.NotNull(watermark);
+        store.SetProjectionDirtyState(new DirtyProjectionState(
+            FromSeq: watermark.RecordsMarker,
+            ToSeq: store.GetWriteMarker(),
+            Keys: ["sess-b"],
+            IsWildcard: false));
         Assert.False(projector.IsProjectionCurrent());
 
         ProjectionPassReport secondPass = projector.ProjectIncremental();
@@ -725,7 +729,6 @@ public class CanonAnalysisTests
             IncludedInParent: false,
             RequestSpanIds: [],
             Turns: []));
-        store.SetWriteMarker(3);
 
         ProjectionPassReport thirdPass = projector.ProjectIncremental();
         Assert.Equal(1, thirdPass.Pruned);

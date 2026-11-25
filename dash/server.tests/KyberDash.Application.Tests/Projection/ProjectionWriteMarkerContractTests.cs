@@ -1,5 +1,3 @@
-using System.Reflection;
-using System.Runtime.ExceptionServices;
 using KyberDash.Application.Tests.Fakes;
 using KyberDash.Contracts.Repositories;
 using KyberDash.Core.Resilience;
@@ -119,7 +117,7 @@ public class ProjectionWriteMarkerContractTests : IDisposable
         WriteSession(store.Writer, "sess-a", [Turn("turn-2", "sess-a", minuteOffset: 1)]);
 
         long passStartMarker = store.Operational.GetWriteMarker();
-        IRelationalStoreReader midPassReader = MidPassWriteReader.Create(
+        IRelationalStoreReader midPassReader = new MidPassWriteReader(
             store.Reader,
             "sess-a",
             () => WriteSession(store.Writer, "sess-a", [Turn("turn-3", "sess-a", minuteOffset: 2)]));
@@ -158,7 +156,7 @@ public class ProjectionWriteMarkerContractTests : IDisposable
         WriteSession(store.Writer, "sess-big", [Turn("big-3", "sess-big", minuteOffset: 2, harnessId: "codex")], harnessId: "codex");
 
         long passStartMarker = store.Operational.GetWriteMarker();
-        IRelationalStoreReader midPassReader = MidPassWriteReader.Create(
+        IRelationalStoreReader midPassReader = new MidPassWriteReader(
             store.Reader,
             "sess-small",
             () => WriteSession(store.Writer, "sess-small", [Turn("small-3", "sess-small", minuteOffset: 2)]));
@@ -286,60 +284,22 @@ public class ProjectionWriteMarkerContractTests : IDisposable
     /// before the pass stamps its watermark: the mid-pass window. The write moves the marker
     /// itself, as every record-changing write does.
     /// </summary>
-    /// <remarks>
-    /// Built on <see cref="DispatchProxy"/> so every other reader member delegates to the store
-    /// under test without a hand-written forwarder per member; <see cref="DispatchProxy"/>
-    /// requires an unsealed proxy type with a public parameterless constructor.
-    /// </remarks>
-#pragma warning disable CA1852 // DispatchProxy derives a generated type from this one.
-    public class MidPassWriteReader : DispatchProxy
-#pragma warning restore CA1852
+    private sealed class MidPassWriteReader(IRelationalStoreReader delegateTo, string triggerSessionKey, Action midPassWrite)
+        : DelegatingRelationalStoreReader(delegateTo)
     {
-        private IRelationalStoreReader inner = null!;
-        private string sessionKey = string.Empty;
-        private Action? write;
-
-        /// <summary>Wraps <paramref name="inner"/> so <paramref name="write"/> runs once after <paramref name="sessionKey"/>'s records are read.</summary>
-        /// <param name="inner">The store under test.</param>
-        /// <param name="sessionKey">Session whose record read triggers the write.</param>
-        /// <param name="write">The mid-pass write.</param>
-        /// <returns>The decorated reader.</returns>
-        public static IRelationalStoreReader Create(IRelationalStoreReader inner, string sessionKey, Action write)
-        {
-            IRelationalStoreReader proxy = Create<IRelationalStoreReader, MidPassWriteReader>();
-            MidPassWriteReader self = (MidPassWriteReader)proxy;
-            self.inner = inner;
-            self.sessionKey = sessionKey;
-            self.write = write;
-            return proxy;
-        }
+        private Action? write = midPassWrite;
 
         /// <inheritdoc />
-        protected override object? Invoke(MethodInfo? targetMethod, object?[]? args)
+        public override IReadOnlyList<CollectedRecord> SessionRecordsForRebuild(string sessionKey)
         {
-            ArgumentNullException.ThrowIfNull(targetMethod);
-            object? result;
-            try
+            IReadOnlyList<CollectedRecord> records = inner.SessionRecordsForRebuild(sessionKey);
+            if (write is Action pendingWrite && string.Equals(sessionKey, triggerSessionKey, StringComparison.Ordinal))
             {
-                result = targetMethod.Invoke(inner, args);
-            }
-            catch (TargetInvocationException ex) when (ex.InnerException is not null)
-            {
-                ExceptionDispatchInfo.Throw(ex.InnerException);
-                throw;
-            }
-
-            if (write is not null
-                && string.Equals(targetMethod.Name, nameof(IRelationalStoreReader.SessionRecordsForRebuild), StringComparison.Ordinal)
-                && args is [string key]
-                && string.Equals(key, sessionKey, StringComparison.Ordinal))
-            {
-                Action pending = write;
                 write = null;
-                pending();
+                pendingWrite();
             }
 
-            return result;
+            return records;
         }
     }
 

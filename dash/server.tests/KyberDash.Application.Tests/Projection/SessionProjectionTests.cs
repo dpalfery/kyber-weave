@@ -231,7 +231,7 @@ public class SessionProjectionTests
         Assert.Equal(0, second.Built);
         Assert.Equal(1, second.Skipped);
 
-        store.SetWriteMarker(store.GetWriteMarker() + 1);
+        WriteSession(store, "sess-current", [Turn("turn-2", sessionKey: "sess-current", minuteOffset: 1, inputTokens: 300, outputTokens: 30)]);
         Assert.False(engine.IsProjectionCurrent());
         ProjectionPassReport third = service.ProjectIncremental();
         Assert.Equal(1, third.Built);
