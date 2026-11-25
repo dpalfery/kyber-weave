@@ -88,7 +88,7 @@ export function formatSessionTime(started?: string | number | null): string {
 export const SESSION_LIST_COLUMNS = {
   id: 'w-36 shrink-0 truncate',
   title: 'min-w-0 flex-1',
-  harness: 'w-32 shrink-0',
+  harness: 'w-32 shrink-0 truncate',
   turns: 'w-16 shrink-0 text-right',
   cost: 'w-28 shrink-0 whitespace-nowrap text-right',
   started: 'w-16 shrink-0 text-right',
@@ -242,7 +242,7 @@ export function AgentSessionRow({
           <span className={SESSION_LIST_COLUMNS.harness}>
             <span
               className={cn(
-                'shrink-0 rounded px-1.5 py-0.5 text-[11px] font-medium border capitalize',
+                'inline-block max-w-full truncate rounded px-1.5 py-0.5 text-[11px] font-medium border capitalize',
                 s.harness === 'copilot'
                   ? 'bg-blue-500/10 text-blue-500 border-blue-500/20'
                   : s.harness === 'gemini'
@@ -252,6 +252,7 @@ export function AgentSessionRow({
                       : 'bg-interactive-secondary text-foreground border-border'
               )}
               data-testid="agent-harness-badge"
+              title={s.harness}
             >
               {s.harness}
             </span>
