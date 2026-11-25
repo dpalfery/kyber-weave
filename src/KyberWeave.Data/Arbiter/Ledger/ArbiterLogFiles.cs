@@ -2,7 +2,6 @@ using System.Diagnostics;
 using System.Text;
 using KyberWeave.Contracts.Repositories;
 using KyberWeave.Core.FileSystem;
-using KyberWeave.Data.FileSystem;
 
 namespace KyberWeave.Core.Arbiter.Facts;
 
@@ -59,7 +58,7 @@ public sealed class ArbiterLogFiles : IArbiterLogStore
         ArgumentException.ThrowIfNullOrWhiteSpace(path);
         try
         {
-            return File.Exists(path) ? new FileInfo(SymbolicLinks.FinalTarget(path)).Length : 0;
+            return File.Exists(path) ? new FileInfo(AtomicFile.ResolveLinks(path)).Length : 0;
         }
         catch (Exception exception) when (FileFailure.Is(exception))
         {

@@ -1,5 +1,5 @@
 using KyberWeave.Contracts.Repositories;
-using KyberWeave.Data.FileSystem;
+using KyberWeave.Core.FileSystem;
 
 namespace KyberWeave.Data.Arbiter;
 
@@ -7,8 +7,8 @@ namespace KyberWeave.Data.Arbiter;
 public sealed class FileStatReader : IFileStatReader
 {
     /// <inheritdoc />
-    public long GetLength(string path) => new FileInfo(SymbolicLinks.FinalTarget(path)).Length;
+    public long GetLength(string path) => new FileInfo(AtomicFile.ResolveLinks(path)).Length;
 
     /// <inheritdoc />
-    public DateTime GetLastWriteTimeUtc(string path) => File.GetLastWriteTimeUtc(SymbolicLinks.FinalTarget(path));
+    public DateTime GetLastWriteTimeUtc(string path) => File.GetLastWriteTimeUtc(AtomicFile.ResolveLinks(path));
 }
