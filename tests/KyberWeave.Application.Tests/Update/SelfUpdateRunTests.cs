@@ -967,10 +967,16 @@ public sealed class SelfUpdateRunTests : IDisposable
         int trayExitCode = 0)
     {
         Func<string, string?> readEnvironment = HomeWithTrayRecord(trayRecorded);
-        Func<string, IReadOnlyList<string>, int> runProcess = (file, args) =>
+        Func<string, IReadOnlyList<string>, int> runProcess = (_, _) => 0;
+        Func<string, IReadOnlyList<string>, ProcessResult> captureProcess = (file, args) =>
         {
-            spawned.Add((file, args));
-            return trayExitCode;
+            if (args.Count > 1 && args[0] == "menubar" && args[1] == "--update")
+            {
+                spawned.Add((file, args));
+                return trayExitCode == 0 ? QuietSuccess : Exit(trayExitCode, "kyberdash menubar: tray refused to start");
+            }
+
+            return QuietSuccess;
         };
         LoopbackFinishingProcess loopback = _world.Loopback(
             handler,
@@ -978,14 +984,14 @@ public sealed class SelfUpdateRunTests : IDisposable
             log.Add,
             readEnvironment,
             runProcess,
-            captureProcess: (_, _) => QuietSuccess);
+            captureProcess: captureProcess);
         using SelfUpdater updater = _world.CreateUpdater(
             handler,
             host,
             readEnvironment,
             log.Add,
             runProcess: runProcess,
-            captureProcess: (_, _) => QuietSuccess,
+            captureProcess: captureProcess,
             finishingProcess: loopback.Invoke);
         return updater.Run(options);
     }
@@ -1038,7 +1044,7 @@ public sealed class SelfUpdateRunTests : IDisposable
         SelfUpdateOutcome? child = _world.LastChild?.LastChildOutcome;
         Assert.NotNull(child);
         Assert.Contains("KyberDash tray step", child.Message, StringComparison.Ordinal);
-        Assert.Contains("exited 3", child.Message, StringComparison.Ordinal);
+        Assert.Contains("exited 3: kyberdash menubar: tray refused to start", child.Message, StringComparison.Ordinal);
     }
 
     /// <summary>
@@ -1110,8 +1116,6 @@ public sealed class SelfUpdateRunTests : IDisposable
         Func<string, IReadOnlyList<string>, int> runProcess = (file, args) =>
         {
             steps.Add(new ReconcileStep("tray", file, args));
-            if (trayException is not null)
-                throw trayException;
             return 0;
         };
         Func<string, IReadOnlyList<string>, ProcessResult> captureProcess = (file, args) =>
@@ -1119,6 +1123,8 @@ public sealed class SelfUpdateRunTests : IDisposable
             bool engineCall = args.Count > 0 && args[0] == "engine";
             bool trayCall = args.Count > 0 && args[0] == "menubar";
             steps.Add(new ReconcileStep(engineCall ? "engine" : trayCall ? "menubar" : "plugin", file, args));
+            if (trayException is not null && trayCall && args.Count > 1 && args[1] == "--update")
+                throw trayException;
             ProcessResult? scripted = script?.Invoke(args);
             if (scripted is { } answer)
                 return answer;
@@ -1535,6 +1541,23 @@ public sealed class SelfUpdateRunTests : IDisposable
         Assert.Contains("tray and engine are stopped", message, StringComparison.Ordinal);
     }
 
+    /// <summary>A failed tray update names the verb's first output line, stderr first, with the text the update loop greps for.</summary>
+    [Fact]
+    public void RunNamesTheTrayUpdateOutputLineWhenItFailsAfterTheQuit()
+    {
+        List<string> log = [];
+        List<ReconcileStep> steps = [];
+
+        (SelfUpdateOutcome outcome, string message) = RunChanged(
+            log,
+            steps,
+            Scripted(("menubar --update --version 0.10.0", Exit(4, "kyberdash menubar: platform: not supported"))));
+
+        Assert.Equal(1, outcome.ExitCode);
+        Assert.Contains("the KyberDash tray step failed:", message, StringComparison.Ordinal);
+        Assert.Contains("exited 4: kyberdash menubar: platform: not supported", message, StringComparison.Ordinal);
+    }
+
     /// <summary>A failed tray update after the quit names the update command as the way back.</summary>
     [Fact]
     public void RunNamesTheUpdateCommandWhenTheTrayUpdateFailsAfterTheQuit()
@@ -1544,8 +1567,9 @@ public sealed class SelfUpdateRunTests : IDisposable
         SelfUpdateHost host = CreateHost("0.1.0", "osx-arm64");
         List<string> log = [];
         Func<string, string?> readEnvironment = HomeWithTrayVersion("0.9.23");
-        Func<string, IReadOnlyList<string>, int> runProcess = (_, _) => 5;
-        Func<string, IReadOnlyList<string>, ProcessResult> captureProcess = (_, _) => QuietSuccess;
+        Func<string, IReadOnlyList<string>, int> runProcess = (_, _) => 0;
+        Func<string, IReadOnlyList<string>, ProcessResult> captureProcess = (_, args) =>
+            args.Count > 1 && args[1] == "--update" ? Exit(5, "kyberdash menubar: update failed") : QuietSuccess;
         LoopbackFinishingProcess loopback = _world.Loopback(
             handler, host, log.Add, readEnvironment, runProcess, captureProcess: captureProcess);
         using SelfUpdater updater = _world.CreateUpdater(
@@ -1583,7 +1607,7 @@ public sealed class SelfUpdateRunTests : IDisposable
             handler, host, new SelfUpdateOptions(), log, steps, "0.9.23");
 
         Assert.Equal(0, outcome.ExitCode);
-        ReconcileStep tray = Assert.Single(steps, step => step.Name == "tray");
+        ReconcileStep tray = Assert.Single(steps, step => step.Args.Contains("--update"));
         Assert.Equal(["menubar", "--update", "--version", "0.10.0"], tray.Args);
         Assert.Equal<string>(RestartWithUpdate("0.10.0"), steps.Select(Describe));
     }

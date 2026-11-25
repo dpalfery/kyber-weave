@@ -691,28 +691,17 @@ internal sealed class SelfUpdater : IDisposable
         _log(line.Length == 0 ? $"{step}: done" : $"{step}: {line}");
     }
 
-    /// <summary>Runs <c>menubar --update</c> as the tray update does, after the tray was quit.</summary>
+    /// <summary>
+    /// Runs <c>menubar --update</c> after the tray was quit, through the capture seam so a failure names the verb's
+    /// first output line like every other restart step.
+    /// </summary>
     private void RunTrayUpdate(string kyberdash, string version)
     {
         string[] args = ["menubar", "--update", "--version", version];
         _log("updating the KyberDash tray…");
-        int exitCode;
-        try
-        {
-            exitCode = _runProcess(kyberdash, args);
-        }
-        catch (TimeoutException ex)
-        {
-            throw StepFailed(kyberdash, args, version, true, $"did not finish and was stopped. {ex.Message}");
-        }
-        catch (Exception ex) when (ex is Win32Exception or IOException or InvalidOperationException
-                                       or UnauthorizedAccessException)
-        {
-            throw StepFailed(kyberdash, args, version, true, $"could not start: {ex.Message}");
-        }
-
-        if (exitCode != 0)
-            throw StepFailed(kyberdash, args, version, true, $"exited {exitCode}");
+        ProcessResult result = CaptureVerb(kyberdash, args, version, true);
+        if (result.ExitCode != 0)
+            throw StepFailed(kyberdash, args, version, true, $"exited {result.ExitCode}{Reason(result)}");
 
         _log("updated the KyberDash tray");
     }
