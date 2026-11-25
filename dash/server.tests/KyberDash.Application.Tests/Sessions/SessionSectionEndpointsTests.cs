@@ -132,7 +132,7 @@ public sealed class SessionSectionEndpointsTests
 
         SessionTurnFigureSet turnSet = store.SessionTurnFigures(sessionKey, pricing.LoadPricingTables())!;
         store.ClearReadLog();
-        JsonElement charts = bridge.GetSessionCharts(sessionKey)!.Value;
+        JsonElement charts = bridge.GetSessionCharts(sessionKey, page: 1, limit: turnSet.Turns.Count, order: "asc")!.Value;
 
         // The charts read is the turn figures pass alone; the projection reads are the 404 header
         // check and the stored context projection. The filtered names are EnsureProjected's
@@ -193,7 +193,7 @@ public sealed class SessionSectionEndpointsTests
         KyberBridgeEngine bridge = CreateBridge(store, pricing);
         bridge.EnsureProjected();
 
-        JsonElement charts = bridge.GetSessionCharts(sessionKey)!.Value;
+        JsonElement charts = bridge.GetSessionCharts(sessionKey, order: "asc")!.Value;
         store.ClearReadLog();
         JsonElement figures = bridge.GetTurnFigures(sessionKey, 1)!.Value;
 
@@ -944,7 +944,7 @@ public sealed class SessionSectionEndpointsTests
         Assert.Equal(32, today.Length);
 
         store.ClearReadLog();
-        JsonElement page = bridge.GetSessionTimeline(sessionKey)!.Value;
+        JsonElement page = bridge.GetSessionTimeline(sessionKey, order: "asc")!.Value;
 
         Assert.Equal(sessionKey, page.GetProperty("sessionId").GetString());
         Assert.Equal(JsonValueKind.Null, page.GetProperty("parent").ValueKind);
@@ -981,7 +981,7 @@ public sealed class SessionSectionEndpointsTests
         // Page 2 carries the remaining seven top-level nodes; a page past the end answers empty
         // with the true total.
         store.ClearReadLog();
-        JsonElement second = bridge.GetSessionTimeline(sessionKey, page: 2)!.Value;
+        JsonElement second = bridge.GetSessionTimeline(sessionKey, page: 2, order: "asc")!.Value;
         JsonElement[] secondRows = [.. second.GetProperty("nodes").EnumerateArray()];
         Assert.Equal(7, secondRows.Length);
         Assert.Equal(32, second.GetProperty("total").GetInt32());
@@ -990,7 +990,7 @@ public sealed class SessionSectionEndpointsTests
             AssertTimelineRowCarriesTodaysFields(secondRows[index], today[25 + index]);
         }
 
-        JsonElement past = bridge.GetSessionTimeline(sessionKey, page: 3)!.Value;
+        JsonElement past = bridge.GetSessionTimeline(sessionKey, page: 3, order: "asc")!.Value;
         Assert.Empty(past.GetProperty("nodes").EnumerateArray().ToList());
         Assert.Equal(32, past.GetProperty("total").GetInt32());
     }
@@ -1120,7 +1120,7 @@ public sealed class SessionSectionEndpointsTests
             string? parent = pending.Dequeue();
             for (int page = 1; ; page++)
             {
-                JsonElement payload = bridge.GetSessionTimeline(sessionKey, parent, page: page)!.Value;
+                JsonElement payload = bridge.GetSessionTimeline(sessionKey, parent, page: page, order: "asc")!.Value;
                 JsonElement[] pageRows = [.. payload.GetProperty("nodes").EnumerateArray()];
                 foreach (JsonElement row in pageRows)
                 {
@@ -1237,6 +1237,221 @@ public sealed class SessionSectionEndpointsTests
         Assert.Contains(nameof(InMemoryRelationalStore.SessionHeadersByKeys), store.SessionProjectionReadLog);
         Assert.DoesNotContain(nameof(InMemoryRelationalStore.GetSessionProjection), store.SessionProjectionReadLog);
         Assert.DoesNotContain(store.ReadLog, static read => ContentBearingReads.Contains(read));
+    }
+
+    /// <summary>
+    /// All section routes default to <c>order: "desc"</c>, include the top-level paging window
+    /// on both measurable and unmeasurable <c>/charts</c>, and compute whole-session context
+    /// aggregates before slicing <c>context.turns</c> with preserved 1-based <c>index</c>.
+    /// </summary>
+    [Fact]
+    public void SectionPayloadsDefaultToDescAndEmitChartsPagingWindowAndWholeSessionAggregates()
+    {
+        InMemoryRelationalStore store = new();
+        FakePricingRepository pricing = new();
+        const string sessionKey = "sess-sections-desc";
+        WriteSectionSession(store, sessionKey);
+        WriteProblems(store, sessionKey, count: 30);
+        WriteSession(
+            store,
+            "sess-unmeasurable-charts",
+            [Turn("turn-unmeas-0", "sess-unmeasurable-charts", 0, inputTokens: 100, outputTokens: 20)]);
+        _ = CreateProjection(store, pricing).ProjectAll();
+        KyberBridgeEngine bridge = CreateBridge(store, pricing);
+        bridge.EnsureProjected();
+
+        JsonElement charts = bridge.GetSessionCharts(sessionKey)!.Value;
+        Assert.Equal(128, charts.GetProperty("total").GetInt32());
+        Assert.Equal(1, charts.GetProperty("page").GetInt32());
+        Assert.Equal(25, charts.GetProperty("limit").GetInt32());
+        Assert.Equal(0, charts.GetProperty("offset").GetInt32());
+        Assert.Equal("desc", charts.GetProperty("order").GetString());
+        Assert.Equal(128, charts.GetProperty("turns").GetArrayLength());
+
+        JsonElement context = charts.GetProperty("context");
+        Assert.True(context.GetProperty("measurable").GetBoolean());
+        Assert.True(context.GetProperty("measuredInputTotal").GetInt64() > 0);
+        Assert.True(context.GetProperty("maxBucketTokens").GetInt64() > 0);
+        Assert.Equal(JsonValueKind.Array, context.GetProperty("observedServers").ValueKind);
+        JsonElement[] contextTurns = [.. context.GetProperty("turns").EnumerateArray()];
+        Assert.Equal(25, contextTurns.Length);
+        Assert.Equal(128, contextTurns[0].GetProperty("index").GetInt32());
+        Assert.Equal(104, contextTurns[^1].GetProperty("index").GetInt32());
+        Assert.Equal(1, context.GetProperty("first").GetProperty("turn").GetInt32());
+        Assert.Equal(128, context.GetProperty("last").GetProperty("turn").GetInt32());
+
+        JsonElement unmeasurableCharts = bridge.GetSessionCharts("sess-unmeasurable-charts")!.Value;
+        Assert.False(unmeasurableCharts.GetProperty("context").GetProperty("measurable").GetBoolean());
+        Assert.Equal(0, unmeasurableCharts.GetProperty("total").GetInt32());
+        Assert.Equal(1, unmeasurableCharts.GetProperty("page").GetInt32());
+        Assert.Equal(25, unmeasurableCharts.GetProperty("limit").GetInt32());
+        Assert.Equal(0, unmeasurableCharts.GetProperty("offset").GetInt32());
+        Assert.Equal("desc", unmeasurableCharts.GetProperty("order").GetString());
+
+        Assert.Equal("desc", bridge.GetSessionRequests(sessionKey)!.Value.GetProperty("order").GetString());
+        Assert.Equal("desc", bridge.GetSessionReconciliation(sessionKey)!.Value.GetProperty("order").GetString());
+        Assert.Equal("desc", bridge.GetSessionProblems(sessionKey)!.Value.GetProperty("order").GetString());
+        Assert.Equal("desc", bridge.GetSessionTools(sessionKey)!.Value.GetProperty("order").GetString());
+        Assert.Equal("desc", bridge.GetSessionServers(sessionKey)!.Value.GetProperty("order").GetString());
+        Assert.Equal("desc", bridge.GetSessionSkills(sessionKey)!.Value.GetProperty("order").GetString());
+        Assert.Equal("desc", bridge.GetSessionTimeline(sessionKey)!.Value.GetProperty("order").GetString());
+    }
+
+    /// <summary>
+    /// Problems with non-null timestamps sort ahead of null-timestamp rows in both <c>desc</c>
+    /// and <c>asc</c> order.
+    /// </summary>
+    [Fact]
+    public void TheProblemsSectionOrdersNonNullTimestampsFirstInDescOrder()
+    {
+        InMemoryRelationalStore store = new();
+        FakePricingRepository pricing = new();
+        const string sessionKey = "sess-problems-ts";
+        WriteSession(store, sessionKey, [Turn("span-p-0", sessionKey, 0, inputTokens: 100)]);
+        store.WriteBatch(new CollectedBatch(
+            Source: new CollectedSource("claude-code", SourceKind.Otlp, "otlp:claude-code"),
+            Sessions: [],
+            Records: [],
+            Problems:
+            [
+                new CollectedProblem("p-null-1", "error", "C1", "null older", null, null, sessionKey, "claude-code", null, null),
+                new CollectedProblem("p-ts-old", "error", "C2", "ts older", null, null, sessionKey, "claude-code", "2026-11-19T10:00:00.000Z", null),
+                new CollectedProblem("p-null-2", "error", "C3", "null newer", null, null, sessionKey, "claude-code", null, null),
+                new CollectedProblem("p-ts-new", "error", "C4", "ts newer", null, null, sessionKey, "claude-code", "2026-11-19T10:05:00.000Z", null),
+            ]));
+        _ = CreateProjection(store, pricing).ProjectAll();
+        KyberBridgeEngine bridge = CreateBridge(store, pricing);
+        bridge.EnsureProjected();
+
+        JsonElement descPage = bridge.GetSessionProblems(sessionKey)!.Value;
+        string[] codes = [.. descPage.GetProperty("problems").EnumerateArray().Select(static p => p.GetProperty("code").GetString()!)];
+        Assert.Equal(["C4", "C2", "C3", "C1"], codes);
+
+        JsonElement ascPage = bridge.GetSessionProblems(sessionKey, order: "asc")!.Value;
+        string[] ascCodes = [.. ascPage.GetProperty("problems").EnumerateArray().Select(static p => p.GetProperty("code").GetString()!)];
+        Assert.Equal(["C2", "C4", "C1", "C3"], ascCodes);
+        Assert.Equal("asc", ascPage.GetProperty("order").GetString());
+    }
+
+    /// <summary>
+    /// All section routes reverse cleanly between <c>desc</c> and <c>asc</c>, slice at limits 25,
+    /// 50, and 100, preserve whole-session context and schema aggregates, order timeline levels and
+    /// ranked tool/server/skill keys deterministically, and reject invalid <c>order</c> values.
+    /// </summary>
+    [Fact]
+    public void SectionPayloadsSortDescAndAscSlice25And50And100AndRejectInvalidOrder()
+    {
+        InMemoryRelationalStore store = new();
+        FakePricingRepository pricing = new();
+
+        const string chartsKey = "sess-charts-paging";
+        WriteSectionSession(store, chartsKey);
+
+        const string timelineKey = "sess-tl-paging";
+        WriteTimelineSession(store, timelineKey);
+
+        const string toolsKey = "sess-tools-paging";
+        WriteManyToolSession(store, toolsKey);
+
+        const string skillsKey = "sess-skills-rank";
+        WriteSession(
+            store,
+            skillsKey,
+            [
+                Turn("turn-sk-0", skillsKey, 0, inputTokens: 200) with { SkillsInvoked = ["beta", "alpha"] },
+                Turn("turn-sk-1", skillsKey, 1, inputTokens: 200) with { SkillsInvoked = ["alpha", "gamma"] },
+                Turn("turn-sk-2", skillsKey, 2, inputTokens: 200) with { SkillsInvoked = ["alpha"] },
+            ]);
+
+        _ = CreateProjection(store, pricing).ProjectAll();
+        KyberBridgeEngine bridge = CreateBridge(store, pricing);
+        bridge.EnsureProjected();
+
+        // /charts supports limits 25, 50, 100 and keeps whole-session aggregates constant across pages and orders.
+        JsonElement desc25 = bridge.GetSessionCharts(chartsKey, page: 1, limit: 25, order: "desc")!.Value;
+        JsonElement desc50 = bridge.GetSessionCharts(chartsKey, page: 1, limit: 50, order: "desc")!.Value;
+        JsonElement desc100 = bridge.GetSessionCharts(chartsKey, page: 1, limit: 100, order: "desc")!.Value;
+        JsonElement asc50 = bridge.GetSessionCharts(chartsKey, page: 1, limit: 50, order: "asc")!.Value;
+
+        Assert.Equal(25, desc25.GetProperty("context").GetProperty("turns").GetArrayLength());
+        Assert.Equal(50, desc50.GetProperty("context").GetProperty("turns").GetArrayLength());
+        Assert.Equal(100, desc100.GetProperty("context").GetProperty("turns").GetArrayLength());
+        Assert.Equal(128, asc50.GetProperty("turns").GetArrayLength());
+        Assert.Equal(1, asc50.GetProperty("context").GetProperty("turns")[0].GetProperty("index").GetInt32());
+        Assert.Equal(128, desc50.GetProperty("context").GetProperty("turns")[0].GetProperty("index").GetInt32());
+        Assert.Equal(79, desc50.GetProperty("context").GetProperty("turns")[49].GetProperty("index").GetInt32());
+        Assert.Equal(
+            desc25.GetProperty("context").GetProperty("measuredInputTotal").GetInt64(),
+            asc50.GetProperty("context").GetProperty("measuredInputTotal").GetInt64());
+        Assert.Equal(
+            desc25.GetProperty("context").GetProperty("maxBucketTokens").GetInt64(),
+            asc50.GetProperty("context").GetProperty("maxBucketTokens").GetInt64());
+        Assert.Equal(
+            desc25.GetProperty("context").GetProperty("residualTotal").GetInt64(),
+            asc50.GetProperty("context").GetProperty("residualTotal").GetInt64());
+        Assert.Equal(
+            desc25.GetProperty("context").GetProperty("first").GetRawText(),
+            asc50.GetProperty("context").GetProperty("first").GetRawText());
+        Assert.Equal(
+            desc25.GetProperty("context").GetProperty("last").GetRawText(),
+            asc50.GetProperty("context").GetProperty("last").GetRawText());
+
+        // Requests and reconciliation reverse between desc and asc while keeping whole-session total.
+        JsonElement reqAsc = bridge.GetSessionRequests(chartsKey, page: 1, limit: 50, order: "asc")!.Value;
+        JsonElement reqDesc = bridge.GetSessionRequests(chartsKey, page: 1, limit: 50, order: "desc")!.Value;
+        Assert.Equal(50, reqAsc.GetProperty("requests").GetArrayLength());
+        Assert.Equal("turn-sec-000", reqAsc.GetProperty("requests")[0].GetProperty("request").GetString());
+        Assert.Equal("turn-sec-127", reqDesc.GetProperty("requests")[0].GetProperty("request").GetString());
+
+        JsonElement reconAsc = bridge.GetSessionReconciliation(chartsKey, page: 1, limit: 50, order: "asc")!.Value;
+        JsonElement reconDesc = bridge.GetSessionReconciliation(chartsKey, page: 1, limit: 50, order: "desc")!.Value;
+        Assert.Equal("turn-sec-000", reconAsc.GetProperty("reconciliation")[0].GetProperty("request").GetString());
+        Assert.Equal("turn-sec-127", reconDesc.GetProperty("reconciliation")[0].GetProperty("request").GetString());
+
+        // Ranked tools sort by total_schema_cost, then invocations, then name ASC; aggregate stays invariant.
+        JsonElement toolsDesc = bridge.GetSessionTools(toolsKey, order: "desc")!.Value;
+        JsonElement toolsAsc = bridge.GetSessionTools(toolsKey, order: "asc")!.Value;
+        Assert.Equal("tool-29", toolsDesc.GetProperty("tools")[0].GetProperty("name").GetString());
+        Assert.Equal("tool-00", toolsAsc.GetProperty("tools")[0].GetProperty("name").GetString());
+        Assert.Equal(
+            toolsDesc.GetProperty("aggregate").GetProperty("residentCostTotal").GetInt64(),
+            toolsAsc.GetProperty("aggregate").GetProperty("residentCostTotal").GetInt64());
+
+        // Ranked servers sort by unused_cost then total_schema_cost then invocations then server ASC.
+        JsonElement serversDesc = bridge.GetSessionServers(toolsKey, order: "desc")!.Value;
+        JsonElement serversAsc = bridge.GetSessionServers(toolsKey, order: "asc")!.Value;
+        string[] descServers = [.. serversDesc.GetProperty("servers").EnumerateArray().Select(static s => s.GetProperty("server").GetString()!)];
+        string[] ascServers = [.. serversAsc.GetProperty("servers").EnumerateArray().Select(static s => s.GetProperty("server").GetString()!)];
+        Assert.Equal("mcp-beta", descServers[0]);
+        Assert.Equal("mcp-alpha", ascServers[0]);
+
+        // Ranked skills sort by invocations with name ASC tiebreak.
+        JsonElement skillsDesc = bridge.GetSessionSkills(skillsKey, order: "desc")!.Value;
+        JsonElement skillsAsc = bridge.GetSessionSkills(skillsKey, order: "asc")!.Value;
+        Assert.Equal(["alpha", "beta", "gamma"], [.. skillsDesc.GetProperty("rows").EnumerateArray().Select(static s => s.GetProperty("name").GetString()!)]);
+        Assert.Equal(["beta", "gamma", "alpha"], [.. skillsAsc.GetProperty("rows").EnumerateArray().Select(static s => s.GetProperty("name").GetString()!)]);
+
+        // Timeline sorts root and child levels by StartMs DESC/ASC then SpanId ASC.
+        JsonElement tlDesc = bridge.GetSessionTimeline(timelineKey, order: "desc")!.Value;
+        JsonElement tlAsc = bridge.GetSessionTimeline(timelineKey, order: "asc")!.Value;
+        Assert.Equal("turn-tl-029", tlDesc.GetProperty("nodes")[0].GetProperty("spanId").GetString());
+        Assert.Equal("(auxiliary)", tlAsc.GetProperty("nodes")[0].GetProperty("spanId").GetString());
+
+        JsonElement auxDesc = bridge.GetSessionTimeline(timelineKey, parentNodeId: "(auxiliary)", page: 1, limit: 25, order: "desc")!.Value;
+        JsonElement auxAsc = bridge.GetSessionTimeline(timelineKey, parentNodeId: "(auxiliary)", page: 1, limit: 25, order: "asc")!.Value;
+        Assert.Equal("aux-000", auxDesc.GetProperty("nodes")[0].GetProperty("spanId").GetString());
+        Assert.Equal("aux-000", auxAsc.GetProperty("nodes")[0].GetProperty("spanId").GetString());
+
+        // Invalid order throws ArgumentException across every section route.
+        Assert.Throws<ArgumentException>(() => bridge.GetSessionCharts(chartsKey, order: "bad"));
+        Assert.Throws<ArgumentException>(() => bridge.GetSessionRequests(chartsKey, order: "bad"));
+        Assert.Throws<ArgumentException>(() => bridge.GetSessionReconciliation(chartsKey, order: "bad"));
+        Assert.Throws<ArgumentException>(() => bridge.GetSessionProblems(chartsKey, order: "bad"));
+        Assert.Throws<ArgumentException>(() => bridge.GetSessionTools(toolsKey, order: "bad"));
+        Assert.Throws<ArgumentException>(() => bridge.GetSessionServers(toolsKey, order: "bad"));
+        Assert.Throws<ArgumentException>(() => bridge.GetSessionSkills(skillsKey, order: "bad"));
+        Assert.Throws<ArgumentException>(() => bridge.GetSessionKwSkills(chartsKey, order: "bad"));
+        Assert.Throws<ArgumentException>(() => bridge.GetSessionTimeline(timelineKey, order: "bad"));
     }
 
     /// <summary>

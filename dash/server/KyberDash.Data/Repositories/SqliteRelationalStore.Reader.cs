@@ -1516,11 +1516,12 @@ public partial class SqliteRelationalStore : IRelationalStoreReader
     }
 
     /// <inheritdoc />
-    public SessionRequestFigurePageResult SessionRequestFigures(string sessionKey, int page, int limit)
+    public SessionRequestFigurePageResult SessionRequestFigures(string sessionKey, int page, int limit, string order = "desc")
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(sessionKey);
         ArgumentOutOfRangeException.ThrowIfLessThan(page, 1);
         ArgumentOutOfRangeException.ThrowIfLessThan(limit, 1);
+        string sqlOrder = NormalizeSortOrderSql(order);
 
         StringBuilder ctes = new("WITH RECURSIVE ");
         AppendSessionSectionCtes(ctes, TextExpr(sessionKey));
@@ -1534,7 +1535,7 @@ public partial class SqliteRelationalStore : IRelationalStoreReader
 
         StringBuilder sql = new(TabReadScriptHeader);
         sql.Append(ctes);
-        sql.Append(CultureInfo.InvariantCulture, $", page(position, request_span_id) AS (SELECT position, request_span_id FROM all_requests ORDER BY position ASC LIMIT {IntSql(limit)} OFFSET {LongSql(((long)page - 1) * limit)}), ");
+        sql.Append(CultureInfo.InvariantCulture, $", page(position, request_span_id) AS (SELECT position, request_span_id FROM all_requests ORDER BY position {sqlOrder} LIMIT {IntSql(limit)} OFFSET {LongSql(((long)page - 1) * limit)}), ");
         sql.Append("subtree(root, span) AS (SELECT request_span_id, request_span_id FROM page UNION SELECT s.root, ch.span_id FROM subtree s JOIN record_parent ch ON ch.parent_span_id = s.span AND ch.span_id IN (SELECT span_id FROM spans)), ");
         sql.Append("owned(root, turn_position, turn_span) AS (SELECT s.root, t.position, t.span_id FROM subtree s JOIN turn_entries t ON t.span_id = s.span), ");
         sql.Append("ranked(root, turn_position, turn_span, turn_rank, turn_total) AS (SELECT root, turn_position, turn_span, ROW_NUMBER() OVER (PARTITION BY root ORDER BY turn_position ASC), COUNT(*) OVER (PARTITION BY root) FROM owned), ");
@@ -1553,7 +1554,7 @@ public partial class SqliteRelationalStore : IRelationalStoreReader
         sql.Append("LEFT JOIN (SELECT root, turn_span FROM ranked WHERE turn_rank = 1) ft ON ft.root = p.request_span_id ");
         sql.Append("LEFT JOIN record fts ON fts.span_id = ft.turn_span ");
         sql.Append("LEFT JOIN first_model fmm ON fmm.root = p.request_span_id ");
-        sql.Append("ORDER BY p.position ASC;\n");
+        sql.Append(CultureInfo.InvariantCulture, $"ORDER BY p.position {sqlOrder};\n");
 
         string output = ExecuteSqlite(sql.ToString());
         List<ReadTimeSessionRequestSummary> rows = [];
@@ -1589,12 +1590,30 @@ public partial class SqliteRelationalStore : IRelationalStoreReader
         return new SessionRequestFigurePageResult(rows, total);
     }
 
+    private static string NormalizeSortOrderSql(string order)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(order);
+        string trimmed = order.Trim();
+        if (string.Equals(trimmed, "desc", StringComparison.OrdinalIgnoreCase))
+        {
+            return "DESC";
+        }
+
+        if (string.Equals(trimmed, "asc", StringComparison.OrdinalIgnoreCase))
+        {
+            return "ASC";
+        }
+
+        throw new ArgumentException($"Sort order '{order}' must be 'desc' or 'asc'.", nameof(order));
+    }
+
     /// <inheritdoc />
-    public SessionReconciliationFigurePageResult SessionReconciliationFigures(string sessionKey, int page, int limit)
+    public SessionReconciliationFigurePageResult SessionReconciliationFigures(string sessionKey, int page, int limit, string order = "desc")
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(sessionKey);
         ArgumentOutOfRangeException.ThrowIfLessThan(page, 1);
         ArgumentOutOfRangeException.ThrowIfLessThan(limit, 1);
+        string sqlOrder = NormalizeSortOrderSql(order);
 
         StringBuilder ctes = new("WITH RECURSIVE ");
         AppendSessionSectionCtes(ctes, TextExpr(sessionKey));
@@ -1625,7 +1644,7 @@ public partial class SqliteRelationalStore : IRelationalStoreReader
         sql.Append("sum_chat_input, input_match, ");
         sql.Append("typeof(reported_output), COALESCE(CAST(reported_output AS TEXT), ''), ");
         sql.Append("sum_chat_output, output_match ");
-        sql.Append(CultureInfo.InvariantCulture, $"FROM measurable ORDER BY position ASC LIMIT {IntSql(limit)} OFFSET {LongSql(((long)page - 1) * limit)};\n");
+        sql.Append(CultureInfo.InvariantCulture, $"FROM measurable ORDER BY position {sqlOrder} LIMIT {IntSql(limit)} OFFSET {LongSql(((long)page - 1) * limit)};\n");
 
         string output = ExecuteSqlite(sql.ToString());
         List<ReadTimeTurnReconciliation> rows = [];
@@ -1653,11 +1672,12 @@ public partial class SqliteRelationalStore : IRelationalStoreReader
     }
 
     /// <inheritdoc />
-    public SessionProblemPageResult SessionProblems(string sessionKey, int page, int limit)
+    public SessionProblemPageResult SessionProblems(string sessionKey, int page, int limit, string order = "desc")
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(sessionKey);
         ArgumentOutOfRangeException.ThrowIfLessThan(page, 1);
         ArgumentOutOfRangeException.ThrowIfLessThan(limit, 1);
+        string sqlOrder = NormalizeSortOrderSql(order);
 
         StringBuilder sql = new(TabReadScriptHeader);
         sql.Append("SELECT 'PROBLEM', (SELECT COUNT(*) FROM (SELECT DISTINCT problem_id FROM (");
@@ -1671,10 +1691,11 @@ public partial class SqliteRelationalStore : IRelationalStoreReader
         sql.Append("LEFT JOIN ingest_problem_location ipl ON ipl.problem_id = ip.problem_id ");
         sql.Append("LEFT JOIN ingest_problem_span ips ON ips.problem_id = ip.problem_id ");
         sql.Append("LEFT JOIN ingest_problem_stack ipst ON ipst.problem_id = ip.problem_id ");
+        sql.Append("LEFT JOIN ingest_problem_timestamp ipt ON ipt.problem_id = ip.problem_id ");
         sql.Append("WHERE ip.problem_id IN (SELECT DISTINCT problem_id FROM (");
         AppendSessionProblemAttachment(sql, sessionKey);
         sql.Append(")) ");
-        sql.Append(CultureInfo.InvariantCulture, $"ORDER BY ip.problem_id ASC LIMIT {IntSql(limit)} OFFSET {LongSql(((long)page - 1) * limit)};\n");
+        sql.Append(CultureInfo.InvariantCulture, $"ORDER BY CASE WHEN ipt.timestamp_utc IS NULL THEN 1 ELSE 0 END ASC, ipt.timestamp_utc {sqlOrder}, ip.problem_id {sqlOrder} LIMIT {IntSql(limit)} OFFSET {LongSql(((long)page - 1) * limit)};\n");
 
         string output = ExecuteSqlite(sql.ToString());
         List<Problem> rows = [];
@@ -2011,11 +2032,12 @@ public partial class SqliteRelationalStore : IRelationalStoreReader
     ];
 
     /// <inheritdoc />
-    public SessionKwSkillLoadPageResult SessionKwSkillLoads(string sessionKey, int page, int limit)
+    public SessionKwSkillLoadPageResult SessionKwSkillLoads(string sessionKey, int page, int limit, string order = "desc")
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(sessionKey);
         ArgumentOutOfRangeException.ThrowIfLessThan(page, 1);
         ArgumentOutOfRangeException.ThrowIfLessThan(limit, 1);
+        string sqlOrder = NormalizeSortOrderSql(order);
         // The statement reads the tool-call header, its MCP split, the first 1024 characters of
         // its reply and its record's start time for the session's load rows on the page only: the
         // D17 load rule is the statement's filter and the page answers from LIMIT/OFFSET, so a
@@ -2037,7 +2059,7 @@ public partial class SqliteRelationalStore : IRelationalStoreReader
         sql.Append("LEFT JOIN tool_call_mcp tcm ON tcm.span_id = tc.span_id ");
         sql.Append("LEFT JOIN tool_call_result_text tcrt ON tcrt.span_id = tc.span_id ");
         AppendSessionKwLoadPredicate(sql, sessionKey);
-        sql.Append(CultureInfo.InvariantCulture, $" ORDER BY tc.rowid ASC LIMIT {IntSql(limit)} OFFSET {LongSql(((long)page - 1) * limit)};\n");
+        sql.Append(CultureInfo.InvariantCulture, $" ORDER BY r.started_at_utc {sqlOrder}, tc.rowid {sqlOrder} LIMIT {IntSql(limit)} OFFSET {LongSql(((long)page - 1) * limit)};\n");
 
         string output = ExecuteSqlite(sql.ToString());
         List<StoredKwSkillLoad> results = [];

@@ -1392,11 +1392,12 @@ public class InMemoryRelationalStore :
     }
 
     /// <inheritdoc />
-    public virtual SessionRequestFigurePageResult SessionRequestFigures(string sessionKey, int page, int limit)
+    public virtual SessionRequestFigurePageResult SessionRequestFigures(string sessionKey, int page, int limit, string order = "desc")
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(sessionKey);
         ArgumentOutOfRangeException.ThrowIfLessThan(page, 1);
         ArgumentOutOfRangeException.ThrowIfLessThan(limit, 1);
+        bool descending = ParseDescendingOrder(order);
 
         lock (syncRoot)
         {
@@ -1405,16 +1406,22 @@ public class InMemoryRelationalStore :
             [
                 .. BuildSessionFigures(state, sessionKey, CollectSessionRecordsContentFree(state, sessionKey), null)?.Requests ?? [],
             ];
+            if (descending)
+            {
+                rows.Reverse();
+            }
+
             return new SessionRequestFigurePageResult(PageOf(rows, page, limit), rows.Count);
         }
     }
 
     /// <inheritdoc />
-    public virtual SessionReconciliationFigurePageResult SessionReconciliationFigures(string sessionKey, int page, int limit)
+    public virtual SessionReconciliationFigurePageResult SessionReconciliationFigures(string sessionKey, int page, int limit, string order = "desc")
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(sessionKey);
         ArgumentOutOfRangeException.ThrowIfLessThan(page, 1);
         ArgumentOutOfRangeException.ThrowIfLessThan(limit, 1);
+        bool descending = ParseDescendingOrder(order);
 
         lock (syncRoot)
         {
@@ -1426,21 +1433,27 @@ public class InMemoryRelationalStore :
                 .. (BuildSessionFigures(state, sessionKey, CollectSessionRecordsContentFree(state, sessionKey), null)?.Reconciliation ?? [])
                     .Where(static row => row.InputMatch.HasValue && row.OutputMatch.HasValue),
             ];
+            if (descending)
+            {
+                rows.Reverse();
+            }
+
             return new SessionReconciliationFigurePageResult(PageOf(rows, page, limit), rows.Count);
         }
     }
 
     /// <inheritdoc />
-    public virtual SessionProblemPageResult SessionProblems(string sessionKey, int page, int limit)
+    public virtual SessionProblemPageResult SessionProblems(string sessionKey, int page, int limit, string order = "desc")
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(sessionKey);
         ArgumentOutOfRangeException.ThrowIfLessThan(page, 1);
         ArgumentOutOfRangeException.ThrowIfLessThan(limit, 1);
+        bool descending = ParseDescendingOrder(order);
 
         lock (syncRoot)
         {
             NoteRead(nameof(SessionProblems));
-            List<Problem> rows = CollectSessionProblems(state, sessionKey, ResolveSessionSpanIds(state, sessionKey));
+            List<Problem> rows = CollectOrderedSessionProblems(state, sessionKey, ResolveSessionSpanIds(state, sessionKey), descending);
             return new SessionProblemPageResult(PageOf(rows, page, limit), rows.Count);
         }
     }
@@ -1666,11 +1679,12 @@ public class InMemoryRelationalStore :
     ];
 
     /// <inheritdoc />
-    public SessionKwSkillLoadPageResult SessionKwSkillLoads(string sessionKey, int page, int limit)
+    public SessionKwSkillLoadPageResult SessionKwSkillLoads(string sessionKey, int page, int limit, string order = "desc")
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(sessionKey);
         ArgumentOutOfRangeException.ThrowIfLessThan(page, 1);
         ArgumentOutOfRangeException.ThrowIfLessThan(limit, 1);
+        bool descending = ParseDescendingOrder(order);
 
         lock (syncRoot)
         {
@@ -1679,9 +1693,11 @@ public class InMemoryRelationalStore :
             TableMetadata callMeta = GetTableMetadata("tool_call");
             TableMetadata mcpMeta = GetTableMetadata("tool_call_mcp");
             TableMetadata recordMeta = GetTableMetadata("record");
-            List<StoredKwSkillLoad> rows = [];
+            List<(string StartedAtRaw, long RowIndex, StoredKwSkillLoad Load)> entries = [];
+            long rowIndex = 0;
             foreach (object?[] row in state.GetRows("tool_call"))
             {
+                rowIndex++;
                 string spanId = GetString(callMeta, row, "span_id");
                 if (!sessionSpans.Contains(spanId))
                 {
@@ -1712,10 +1728,26 @@ public class InMemoryRelationalStore :
                 string? replyHead = replyText is null ? null : string.Concat(replyText.EnumerateRunes().Take(1024));
                 object?[] recordRow = FindRowByKey(state, "record", [("span_id", spanId)])
                     ?? throw new InvalidOperationException($"tool_call {spanId} has no record row.");
-                DateTimeOffset startedAt = ParseTimestamp(GetString(recordMeta, recordRow, "started_at_utc"));
-                rows.Add(new StoredKwSkillLoad(spanId, toolName, serverName, serverToolName, replyHead, startedAt));
+                string startedAtRaw = GetString(recordMeta, recordRow, "started_at_utc");
+                DateTimeOffset startedAt = ParseTimestamp(startedAtRaw);
+                entries.Add((startedAtRaw, rowIndex, new StoredKwSkillLoad(spanId, toolName, serverName, serverToolName, replyHead, startedAt)));
             }
 
+            entries.Sort((left, right) =>
+            {
+                int cmp = descending
+                    ? string.Compare(right.StartedAtRaw, left.StartedAtRaw, StringComparison.Ordinal)
+                    : string.Compare(left.StartedAtRaw, right.StartedAtRaw, StringComparison.Ordinal);
+                if (cmp != 0)
+                {
+                    return cmp;
+                }
+
+                return descending
+                    ? right.RowIndex.CompareTo(left.RowIndex)
+                    : left.RowIndex.CompareTo(right.RowIndex);
+            });
+            List<StoredKwSkillLoad> rows = [.. entries.Select(static e => e.Load)];
             return new SessionKwSkillLoadPageResult(PageOf(rows, page, limit), rows.Count);
         }
     }
@@ -7684,7 +7716,105 @@ public class InMemoryRelationalStore :
         return text[..cut];
     }
 
+    private static bool ParseDescendingOrder(string order)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(order);
+        string trimmed = order.Trim();
+        if (string.Equals(trimmed, "desc", StringComparison.OrdinalIgnoreCase))
+        {
+            return true;
+        }
+
+        if (string.Equals(trimmed, "asc", StringComparison.OrdinalIgnoreCase))
+        {
+            return false;
+        }
+
+        throw new ArgumentException($"Sort order '{order}' must be 'desc' or 'asc'.", nameof(order));
+    }
+
+    private static List<Problem> CollectOrderedSessionProblems(
+        StoreState currentState,
+        string sessionKey,
+        HashSet<string> sessionSpanIds,
+        bool descending)
+    {
+        HashSet<long> problemIds = CollectSessionProblemIds(currentState, sessionKey, sessionSpanIds);
+        if (problemIds.Count == 0)
+        {
+            return [];
+        }
+
+        TableMetadata probMeta = GetTableMetadata("ingest_problem");
+        List<(long ProblemId, string? TimestampUtc, Problem Problem)> entries = [];
+        foreach (object?[] row in currentState.GetRows("ingest_problem"))
+        {
+            long problemId = GetInt64(probMeta, row, "problem_id");
+            if (!problemIds.Contains(problemId))
+            {
+                continue;
+            }
+
+            string? timestampUtc = ReadOptionalSingleString(currentState, "ingest_problem_timestamp", "problem_id", problemId, "timestamp_utc");
+            entries.Add((problemId, timestampUtc, ReadProblemRow(currentState, probMeta, row, problemId)));
+        }
+
+        entries.Sort((left, right) =>
+        {
+            int nullCmp = (left.TimestampUtc is null ? 1 : 0).CompareTo(right.TimestampUtc is null ? 1 : 0);
+            if (nullCmp != 0)
+            {
+                return nullCmp;
+            }
+
+            if (left.TimestampUtc is not null && right.TimestampUtc is not null)
+            {
+                int tsCmp = descending
+                    ? string.Compare(right.TimestampUtc, left.TimestampUtc, StringComparison.Ordinal)
+                    : string.Compare(left.TimestampUtc, right.TimestampUtc, StringComparison.Ordinal);
+                if (tsCmp != 0)
+                {
+                    return tsCmp;
+                }
+            }
+
+            return descending
+                ? right.ProblemId.CompareTo(left.ProblemId)
+                : left.ProblemId.CompareTo(right.ProblemId);
+        });
+
+        return [.. entries.Select(static e => e.Problem)];
+    }
+
     private static List<Problem> CollectSessionProblems(
+        StoreState currentState,
+        string sessionKey,
+        HashSet<string> sessionSpanIds)
+    {
+        HashSet<long> problemIds = CollectSessionProblemIds(currentState, sessionKey, sessionSpanIds);
+        if (problemIds.Count == 0)
+        {
+            return [];
+        }
+
+        TableMetadata probMeta = GetTableMetadata("ingest_problem");
+        List<Problem> problems = [];
+        foreach (object?[] row in currentState.GetRows("ingest_problem")
+            .OrderBy(r => GetInt64(probMeta, r, "problem_id")))
+        {
+            long problemId = GetInt64(probMeta, row, "problem_id");
+            if (!problemIds.Contains(problemId))
+            {
+                continue;
+            }
+
+            problems.Add(ReadProblemRow(currentState, probMeta, row, problemId));
+        }
+
+        return problems;
+    }
+
+    private static HashSet<long> CollectSessionProblemIds(
         StoreState currentState,
         string sessionKey,
         HashSet<string> sessionSpanIds)
@@ -7709,34 +7839,24 @@ public class InMemoryRelationalStore :
             }
         }
 
-        if (problemIds.Count == 0)
-        {
-            return [];
-        }
+        return problemIds;
+    }
 
-        TableMetadata probMeta = GetTableMetadata("ingest_problem");
-        List<Problem> problems = [];
-        foreach (object?[] row in currentState.GetRows("ingest_problem")
-            .OrderBy(r => GetInt64(probMeta, r, "problem_id")))
-        {
-            long problemId = GetInt64(probMeta, row, "problem_id");
-            if (!problemIds.Contains(problemId))
-            {
-                continue;
-            }
+    private static Problem ReadProblemRow(
+        StoreState currentState,
+        TableMetadata probMeta,
+        object?[] row,
+        long problemId)
+    {
+        string severityRaw = GetString(probMeta, row, "severity");
+        ProblemSeverity severity = ParseAggregateProblemSeverity(severityRaw);
+        string code = GetString(probMeta, row, "code");
+        string message = GetString(probMeta, row, "message");
+        string? location = ReadOptionalSingleString(currentState, "ingest_problem_location", "problem_id", problemId, "location")
+            ?? ReadOptionalSingleString(currentState, "ingest_problem_span", "problem_id", problemId, "span_id");
+        string? stack = ReadOptionalSingleString(currentState, "ingest_problem_stack", "problem_id", problemId, "stack");
 
-            string severityRaw = GetString(probMeta, row, "severity");
-            ProblemSeverity severity = ParseAggregateProblemSeverity(severityRaw);
-            string code = GetString(probMeta, row, "code");
-            string message = GetString(probMeta, row, "message");
-            string? location = ReadOptionalSingleString(currentState, "ingest_problem_location", "problem_id", problemId, "location")
-                ?? ReadOptionalSingleString(currentState, "ingest_problem_span", "problem_id", problemId, "span_id");
-            string? stack = ReadOptionalSingleString(currentState, "ingest_problem_stack", "problem_id", problemId, "stack");
-
-            problems.Add(new Problem(severity, code, message, location, stack));
-        }
-
-        return problems;
+        return new Problem(severity, code, message, location, stack);
     }
 
     private static ProblemSeverity ParseAggregateProblemSeverity(string value)

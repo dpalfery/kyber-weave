@@ -139,8 +139,13 @@ public sealed class SessionKwSkillLoadsTests
         JsonElement page = bridge.GetSessionKwSkills(SessionKey)!.Value;
 
         JsonElement[] rows = [.. page.GetProperty("rows").EnumerateArray()];
-        Assert.Equal(JsonValueKind.Null, rows[0].GetProperty("skill").ValueKind);
-        Assert.Equal("csharp-dev", rows[1].GetProperty("skill").GetString());
+        Assert.Equal("csharp-dev", rows[0].GetProperty("skill").GetString());
+        Assert.Equal(JsonValueKind.Null, rows[1].GetProperty("skill").ValueKind);
+
+        JsonElement ascPage = bridge.GetSessionKwSkills(SessionKey, order: "asc")!.Value;
+        JsonElement[] ascRows = [.. ascPage.GetProperty("rows").EnumerateArray()];
+        Assert.Equal(JsonValueKind.Null, ascRows[0].GetProperty("skill").ValueKind);
+        Assert.Equal("csharp-dev", ascRows[1].GetProperty("skill").GetString());
     }
 
     /// <summary>A session with no KW loads answers an empty page with a zero total.</summary>
@@ -186,20 +191,29 @@ public sealed class SessionKwSkillLoadsTests
         Assert.Equal(25, firstRows.Length);
         for (int index = 0; index < firstRows.Length; index++)
         {
-            Assert.Equal($"skill-{index:D2}", firstRows[index].GetProperty("skill").GetString());
+            Assert.Equal($"skill-{29 - index:D2}", firstRows[index].GetProperty("skill").GetString());
         }
 
         Assert.Equal(30, first.GetProperty("total").GetInt32());
         Assert.Equal(1, first.GetProperty("page").GetInt32());
         Assert.Equal(0, first.GetProperty("offset").GetInt32());
+        Assert.Equal("desc", first.GetProperty("order").GetString());
 
         JsonElement second = bridge.GetSessionKwSkills(SessionKey, page: 2)!.Value;
         JsonElement[] secondRows = [.. second.GetProperty("rows").EnumerateArray()];
         Assert.Equal(5, secondRows.Length);
-        Assert.Equal("skill-25", secondRows[0].GetProperty("skill").GetString());
+        Assert.Equal("skill-04", secondRows[0].GetProperty("skill").GetString());
         Assert.Equal(30, second.GetProperty("total").GetInt32());
         Assert.Equal(2, second.GetProperty("page").GetInt32());
         Assert.Equal(25, second.GetProperty("offset").GetInt32());
+        Assert.Equal("desc", second.GetProperty("order").GetString());
+
+        JsonElement asc = bridge.GetSessionKwSkills(SessionKey, page: 1, order: "asc")!.Value;
+        JsonElement[] ascRows = [.. asc.GetProperty("rows").EnumerateArray()];
+        Assert.Equal(25, ascRows.Length);
+        Assert.Equal("skill-00", ascRows[0].GetProperty("skill").GetString());
+        Assert.Equal("skill-24", ascRows[^1].GetProperty("skill").GetString());
+        Assert.Equal("asc", asc.GetProperty("order").GetString());
     }
 
     /// <summary>An unknown session answers no page, so the route answers 404.</summary>

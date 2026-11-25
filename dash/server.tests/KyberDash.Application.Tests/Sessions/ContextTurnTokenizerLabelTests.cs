@@ -181,7 +181,7 @@ public sealed class ContextTurnTokenizerLabelTests
             instanceId: "test-instance");
         bridge.EnsureProjected();
 
-        JsonElement charts = bridge.GetSessionCharts(sessionKey)!.Value;
+        JsonElement charts = bridge.GetSessionCharts(sessionKey, order: "asc")!.Value;
         return charts.GetProperty("context");
     }
 

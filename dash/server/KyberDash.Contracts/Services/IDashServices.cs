@@ -215,57 +215,69 @@ public interface IDashboardQueryService
     /// <summary>Returns lightweight session summary payload.</summary>
     JsonElement? GetSessionSummary(string sessionId);
 
-    /// <summary>Returns the charts section payload: the session's turn list and context object.</summary>
-    JsonElement? GetSessionCharts(string sessionId);
+    /// <summary>Returns the charts section payload: the session's turn list and one page of its context turns.</summary>
+    /// <param name="sessionId">Canonical session identifier.</param>
+    /// <param name="page">One-based page number.</param>
+    /// <param name="limit">Context turns on the page; 25 unless given (25, 50, or 100).</param>
+    /// <param name="order">Sort order (<c>desc</c> or <c>asc</c>); <c>desc</c> unless given.</param>
+    JsonElement? GetSessionCharts(string sessionId, int page = 1, int limit = 25, string order = "desc");
 
     /// <summary>Returns one page of the session's request rows, each with the prompt preview its page read carries.</summary>
     /// <param name="sessionId">Canonical session identifier.</param>
     /// <param name="page">One-based page number.</param>
-    /// <param name="limit">Rows on the page; 25 unless given.</param>
-    JsonElement? GetSessionRequests(string sessionId, int page = 1, int limit = 25);
+    /// <param name="limit">Rows on the page; 25 unless given (25, 50, or 100).</param>
+    /// <param name="order">Sort order (<c>desc</c> or <c>asc</c>); <c>desc</c> unless given.</param>
+    JsonElement? GetSessionRequests(string sessionId, int page = 1, int limit = 25, string order = "desc");
 
     /// <summary>Returns one page of the session's measurable reconciliation rows.</summary>
     /// <param name="sessionId">Canonical session identifier.</param>
     /// <param name="page">One-based page number.</param>
-    /// <param name="limit">Rows on the page; 25 unless given.</param>
-    JsonElement? GetSessionReconciliation(string sessionId, int page = 1, int limit = 25);
+    /// <param name="limit">Rows on the page; 25 unless given (25, 50, or 100).</param>
+    /// <param name="order">Sort order (<c>desc</c> or <c>asc</c>); <c>desc</c> unless given.</param>
+    JsonElement? GetSessionReconciliation(string sessionId, int page = 1, int limit = 25, string order = "desc");
 
     /// <summary>Returns one page of the session's stored ingest problems.</summary>
     /// <param name="sessionId">Canonical session identifier.</param>
     /// <param name="page">One-based page number.</param>
-    /// <param name="limit">Rows on the page; 25 unless given.</param>
-    JsonElement? GetSessionProblems(string sessionId, int page = 1, int limit = 25);
+    /// <param name="limit">Rows on the page; 25 unless given (25, 50, or 100).</param>
+    /// <param name="order">Sort order (<c>desc</c> or <c>asc</c>); <c>desc</c> unless given.</param>
+    JsonElement? GetSessionProblems(string sessionId, int page = 1, int limit = 25, string order = "desc");
 
     /// <summary>Returns one page of the session's ranked tool rows with the section's page-independent aggregate.</summary>
     /// <param name="sessionId">Canonical session identifier.</param>
     /// <param name="page">One-based page number.</param>
-    /// <param name="limit">Rows on the page; 25 unless given.</param>
-    JsonElement? GetSessionTools(string sessionId, int page = 1, int limit = 25);
+    /// <param name="limit">Rows on the page; 25 unless given (25, 50, or 100).</param>
+    /// <param name="order">Sort order (<c>desc</c> or <c>asc</c>); <c>desc</c> unless given.</param>
+    JsonElement? GetSessionTools(string sessionId, int page = 1, int limit = 25, string order = "desc");
 
     /// <summary>Returns one page of the session's per-server schema rollup rows.</summary>
     /// <param name="sessionId">Canonical session identifier.</param>
     /// <param name="page">One-based page number.</param>
-    /// <param name="limit">Rows on the page; 25 unless given.</param>
-    JsonElement? GetSessionServers(string sessionId, int page = 1, int limit = 25);
+    /// <param name="limit">Rows on the page; 25 unless given (25, 50, or 100).</param>
+    /// <param name="order">Sort order (<c>desc</c> or <c>asc</c>); <c>desc</c> unless given.</param>
+    JsonElement? GetSessionServers(string sessionId, int page = 1, int limit = 25, string order = "desc");
 
     /// <summary>Returns one page of the session's distinct skill rows.</summary>
     /// <param name="sessionId">Canonical session identifier.</param>
     /// <param name="page">One-based page number.</param>
-    /// <param name="limit">Rows on the page; 25 unless given.</param>
-    JsonElement? GetSessionSkills(string sessionId, int page = 1, int limit = 25);
+    /// <param name="limit">Rows on the page; 25 unless given (25, 50, or 100).</param>
+    /// <param name="order">Sort order (<c>desc</c> or <c>asc</c>); <c>desc</c> unless given.</param>
+    JsonElement? GetSessionSkills(string sessionId, int page = 1, int limit = 25, string order = "desc");
 
     /// <summary>Returns one page of the session's KW skill loads (D17), in call order, apart from the harness skills section.</summary>
     /// <param name="sessionId">Canonical session identifier.</param>
     /// <param name="page">One-based page number.</param>
-    /// <param name="limit">Rows on the page; 25 unless given.</param>
-    JsonElement? GetSessionKwSkills(string sessionId, int page = 1, int limit = 25);
+    /// <param name="limit">Rows on the page; 25 unless given (25, 50, or 100).</param>
+    /// <param name="order">Sort order (<c>desc</c> or <c>asc</c>); <c>desc</c> unless given.</param>
+    JsonElement? GetSessionKwSkills(string sessionId, int page = 1, int limit = 25, string order = "desc");
 
     /// <summary>Returns one page of one level of the session's timeline tree, with each node's child count and the tree's bounds.</summary>
     /// <param name="sessionId">Canonical session identifier.</param>
     /// <param name="parentNodeId">Span id whose children the page lists; the top level when null or empty.</param>
     /// <param name="page">One-based page number.</param>
-    /// <param name="limit">Nodes on the page; 25 unless given.</param>
-    JsonElement? GetSessionTimeline(string sessionId, string? parentNodeId = null, int page = 1, int limit = 25);
+    /// <param name="limit">Nodes on the page; 25 unless given (25, 50, or 100).</param>
+    /// <param name="order">Sort order (<c>desc</c> or <c>asc</c>); <c>desc</c> unless given.</param>
+    JsonElement? GetSessionTimeline(string sessionId, string? parentNodeId = null, int page = 1, int limit = 25, string order = "desc");
 
     /// <summary>Returns metrics and bucket figures for a specific turn.</summary>
     JsonElement? GetTurnFigures(string sessionId, int turnIndex);

@@ -491,7 +491,7 @@ public sealed class ClaudeContextCompositionTests : IDisposable
         Assert.Equal(0, ingest.ExitCode);
 
         KyberBridgeEngine bridge = CreateBridge(store, pricing, projector, rollups);
-        JsonElement charts = bridge.GetSessionCharts("sess-e2e")!.Value;
+        JsonElement charts = bridge.GetSessionCharts("sess-e2e", order: "asc")!.Value;
         JsonElement context = charts.GetProperty("context");
 
         Assert.True(context.GetProperty("measurable").GetBoolean());

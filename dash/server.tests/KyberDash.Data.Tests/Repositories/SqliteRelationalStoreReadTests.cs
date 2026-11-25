@@ -760,19 +760,129 @@ public class SqliteRelationalStoreReadTests : IDisposable
         }
 
         SessionKwSkillLoadPageResult sessionA = sqlite.SessionKwSkillLoads("sess-kw-a", 1, 25);
-        string[] expectedSpans = ["span-kw-a-1", "span-kw-a-2"];
+        string[] expectedSpans = ["span-kw-a-2", "span-kw-a-1"];
         Assert.Equal(expectedSpans, sessionA.Items.Select(static row => row.SpanId).ToArray());
         Assert.Equal(expectedSpans.Length, sessionA.Total);
         Assert.DoesNotContain(sessionA.Items, static row => row.ToolName == "read_file");
-        Assert.Equal("skill: csharp-dev\n\nGuidance.", sessionA.Items[0].ReplyHead);
-        Assert.Equal(new DateTimeOffset(2026, 11, 19, 12, 0, 0, TimeSpan.Zero), sessionA.Items[0].StartedAtUtc);
+        Assert.Equal("skill: dal-dev\n\nGuidance.", sessionA.Items[0].ReplyHead);
+        Assert.Equal(new DateTimeOffset(2026, 11, 19, 12, 1, 0, TimeSpan.Zero), sessionA.Items[0].StartedAtUtc);
         Assert.Single(sqlite.SessionKwSkillLoads("sess-kw-b", 1, 25).Items);
 
-        // The second page continues the call order in both stores, so the offset answers from SQL.
+        // The second page continues the desc order in both stores, so the offset answers from SQL.
         SessionKwSkillLoadPageResult secondPage = sqlite.SessionKwSkillLoads("sess-kw-a", 2, 1);
         Assert.Equivalent(memory.SessionKwSkillLoads("sess-kw-a", 2, 1), secondPage, strict: true);
-        Assert.Equal(["span-kw-a-2"], secondPage.Items.Select(static row => row.SpanId).ToArray());
+        Assert.Equal(["span-kw-a-1"], secondPage.Items.Select(static row => row.SpanId).ToArray());
         Assert.Equal(expectedSpans.Length, secondPage.Total);
+    }
+
+    /// <summary>
+    /// Section store reads default to <c>desc</c>, order <c>ingest_problem_timestamp</c> with
+    /// non-null timestamps ahead of null timestamps, and round-trip <c>AgentInstanceId =
+    /// "claude:compact_boundary"</c> with full SQLite / in-memory parity.
+    /// </summary>
+    [Fact]
+    public void SessionSectionReadsDefaultToDescWithNullsLastProblemsAndCompactBoundaryParity()
+    {
+        string dbPath = Path.Combine(directory.Path, "section-desc-parity", "canon.db");
+        SeamSqliteRelationalStore sqlite = new(dbPath, new SqliteCircuitBreaker());
+        InMemoryRelationalStore memory = new();
+
+        DateTimeOffset t0 = new(2026, 11, 19, 10, 0, 0, TimeSpan.Zero);
+        CollectedBatch batch = new(
+            new CollectedSource("claude-code", SourceKind.File, "/logs/claude-boundary.jsonl"),
+            [new CollectedSession("sess-boundary", "claude-code", "native-boundary", null, "Boundary", [])],
+            [
+                new CollectedRecord(
+                    RecordId: "span-b-1",
+                    HarnessId: "claude-code",
+                    Op: RecordOp.LlmInvoke,
+                    Kind: RecordKind.Client,
+                    Name: "turn_0",
+                    StartedAt: t0,
+                    Status: RecordStatus.Ok,
+                    SessionKey: "sess-boundary",
+                    ParentRecordId: null,
+                    TraceId: null,
+                    Model: "claude-sonnet-4-6",
+                    EndedAt: null,
+                    ReportedDurationMs: 100,
+                    Tokens: [new CollectedTokenCount(TokenClass.Input, 100), new CollectedTokenCount(TokenClass.Output, 10)],
+                    ReportedCost: null,
+                    Parts: [],
+                    Tool: null,
+                    Agent: null,
+                    SkillsInvoked: [],
+                    AgentInstanceId: "claude:compact_boundary",
+                    ToolDefinitions: [],
+                    Signals: new CollectedRecordSignals(null, null, null, null),
+                    ReportedInputTokens: 100,
+                    ReportedOutputTokens: 10),
+                new CollectedRecord(
+                    RecordId: "span-b-2",
+                    HarnessId: "claude-code",
+                    Op: RecordOp.LlmInvoke,
+                    Kind: RecordKind.Client,
+                    Name: "turn_1",
+                    StartedAt: t0.AddMinutes(1),
+                    Status: RecordStatus.Ok,
+                    SessionKey: "sess-boundary",
+                    ParentRecordId: null,
+                    TraceId: null,
+                    Model: "claude-sonnet-4-6",
+                    EndedAt: null,
+                    ReportedDurationMs: 100,
+                    Tokens: [new CollectedTokenCount(TokenClass.Input, 200), new CollectedTokenCount(TokenClass.Output, 20)],
+                    ReportedCost: null,
+                    Parts: [],
+                    Tool: null,
+                    Agent: null,
+                    SkillsInvoked: [],
+                    AgentInstanceId: null,
+                    ToolDefinitions: [],
+                    Signals: new CollectedRecordSignals(null, null, null, null),
+                    ReportedInputTokens: 200,
+                    ReportedOutputTokens: 20),
+            ],
+            [
+                new CollectedProblem("pb-null-1", "error", "P_N1", "null 1", "span-b-1", null, "sess-boundary", "claude-code", null, null),
+                new CollectedProblem("pb-ts-1", "error", "P_T1", "ts older", "span-b-1", null, "sess-boundary", "claude-code", "2026-11-19T10:00:00.000Z", null),
+                new CollectedProblem("pb-null-2", "error", "P_N2", "null 2", "span-b-2", null, "sess-boundary", "claude-code", null, null),
+                new CollectedProblem("pb-ts-2", "error", "P_T2", "ts newer", "span-b-2", null, "sess-boundary", "claude-code", "2026-11-19T10:02:00.000Z", null),
+            ]);
+
+        sqlite.WriteBatch(batch);
+        memory.WriteBatch(batch);
+
+        Assert.Equal("claude:compact_boundary", sqlite.RecordContentFree("span-b-1")!.AgentInstanceId);
+        Assert.Equal("claude:compact_boundary", memory.RecordContentFree("span-b-1")!.AgentInstanceId);
+        Assert.Equivalent(memory.SessionRecordsContentFree("sess-boundary"), sqlite.SessionRecordsContentFree("sess-boundary"), strict: true);
+        Assert.Equivalent(memory.SessionRecordsForRebuild("sess-boundary"), sqlite.SessionRecordsForRebuild("sess-boundary"), strict: true);
+
+        SessionRequestFigurePageResult reqs = sqlite.SessionRequestFigures("sess-boundary", 1, 25);
+        Assert.Equal(["span-b-2", "span-b-1"], reqs.Items.Select(static r => r.RequestSpanId).ToArray());
+        Assert.Equivalent(memory.SessionRequestFigures("sess-boundary", 1, 25), reqs, strict: true);
+        SessionRequestFigurePageResult reqsAsc = sqlite.SessionRequestFigures("sess-boundary", 1, 25, "asc");
+        Assert.Equal(["span-b-1", "span-b-2"], reqsAsc.Items.Select(static r => r.RequestSpanId).ToArray());
+        Assert.Equivalent(memory.SessionRequestFigures("sess-boundary", 1, 25, "asc"), reqsAsc, strict: true);
+
+        SessionReconciliationFigurePageResult recons = sqlite.SessionReconciliationFigures("sess-boundary", 1, 25);
+        Assert.Equal(["span-b-2", "span-b-1"], recons.Items.Select(static r => r.RequestSpanId).ToArray());
+        Assert.Equivalent(memory.SessionReconciliationFigures("sess-boundary", 1, 25), recons, strict: true);
+        SessionReconciliationFigurePageResult reconsAsc = sqlite.SessionReconciliationFigures("sess-boundary", 1, 25, "asc");
+        Assert.Equal(["span-b-1", "span-b-2"], reconsAsc.Items.Select(static r => r.RequestSpanId).ToArray());
+        Assert.Equivalent(memory.SessionReconciliationFigures("sess-boundary", 1, 25, "asc"), reconsAsc, strict: true);
+
+        SessionProblemPageResult problems = sqlite.SessionProblems("sess-boundary", 1, 25);
+        Assert.Equal(["P_T2", "P_T1", "P_N2", "P_N1"], problems.Items.Select(static p => p.Code).ToArray());
+        Assert.Equivalent(memory.SessionProblems("sess-boundary", 1, 25), problems, strict: true);
+        SessionProblemPageResult problemsAsc = sqlite.SessionProblems("sess-boundary", 1, 25, "asc");
+        Assert.Equal(["P_T1", "P_T2", "P_N1", "P_N2"], problemsAsc.Items.Select(static p => p.Code).ToArray());
+        Assert.Equivalent(memory.SessionProblems("sess-boundary", 1, 25, "asc"), problemsAsc, strict: true);
+
+        Assert.Throws<ArgumentException>(() => sqlite.SessionRequestFigures("sess-boundary", 1, 25, "bad"));
+        Assert.Throws<ArgumentException>(() => sqlite.SessionReconciliationFigures("sess-boundary", 1, 25, "bad"));
+        Assert.Throws<ArgumentException>(() => sqlite.SessionProblems("sess-boundary", 1, 25, "bad"));
+        Assert.Throws<ArgumentException>(() => sqlite.SessionKwSkillLoads("sess-boundary", 1, 25, "bad"));
     }
 
     /// <summary>
@@ -794,11 +904,16 @@ public class SqliteRelationalStoreReadTests : IDisposable
 
         SessionKwSkillLoadPageResult rows = sqlite.SessionKwSkillLoads("sess-kw-long", 1, 25);
 
-        Assert.Equal(longReply[..1024], rows.Items[0].ReplyHead);
-        Assert.Equal(1024, rows.Items[0].ReplyHead!.Length);
-        Assert.Equal("skill: dal-dev", rows.Items[1].ReplyHead);
+        Assert.Equal("skill: dal-dev", rows.Items[0].ReplyHead);
+        Assert.Equal(longReply[..1024], rows.Items[1].ReplyHead);
+        Assert.Equal(1024, rows.Items[1].ReplyHead!.Length);
         Assert.Equal(2, rows.Total);
         Assert.Equivalent(memory.SessionKwSkillLoads("sess-kw-long", 1, 25), rows, strict: true);
+
+        SessionKwSkillLoadPageResult rowsAsc = sqlite.SessionKwSkillLoads("sess-kw-long", 1, 25, "asc");
+        Assert.Equal(longReply[..1024], rowsAsc.Items[0].ReplyHead);
+        Assert.Equal("skill: dal-dev", rowsAsc.Items[1].ReplyHead);
+        Assert.Equivalent(memory.SessionKwSkillLoads("sess-kw-long", 1, 25, "asc"), rowsAsc, strict: true);
     }
 
     private static readonly string[] SessionKwSkillLoadTables =
