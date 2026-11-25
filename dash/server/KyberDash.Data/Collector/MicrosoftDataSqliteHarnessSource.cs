@@ -256,7 +256,7 @@ public class MicrosoftDataSqliteHarnessSource : IHarnessSqliteSource
                 SqliteException.ThrowExceptionForRC(busyResult, connection.Handle);
             }
 
-            OpenDatabase database = new(connection, sourcePath, limits.CommandTimeoutSeconds, timestamp);
+            OpenDatabase database = new(connection, sourcePath, limits.CommandTimeoutSeconds, limits.ExportCapBytes, timestamp);
             database.ProbeSchema();
             handedOver = true;
             return database;
@@ -567,16 +567,18 @@ public class MicrosoftDataSqliteHarnessSource : IHarnessSqliteSource
         private readonly SqliteConnection connection;
         private readonly string sourcePath;
         private readonly int commandTimeoutSeconds;
+        private readonly long cellCapBytes;
         private readonly long timeoutTicks;
         private readonly Func<long> timestamp;
         private readonly delegate_progress progress;
         private long deadline = long.MaxValue;
 
-        public OpenDatabase(SqliteConnection connection, string sourcePath, int commandTimeoutSeconds, Func<long> timestamp)
+        public OpenDatabase(SqliteConnection connection, string sourcePath, int commandTimeoutSeconds, long cellCapBytes, Func<long> timestamp)
         {
             this.connection = connection;
             this.sourcePath = sourcePath;
             this.commandTimeoutSeconds = commandTimeoutSeconds;
+            this.cellCapBytes = cellCapBytes;
             this.timestamp = timestamp;
             timeoutTicks = commandTimeoutSeconds * Stopwatch.Frequency;
             progress = _ => timestamp() > Volatile.Read(ref deadline) ? 1 : 0;
@@ -656,7 +658,7 @@ public class MicrosoftDataSqliteHarnessSource : IHarnessSqliteSource
                     for (int i = 0; i < reader.FieldCount; i++)
                     {
                         string name = reader.GetName(i);
-                        if (!row.TryAdd(name, reader.IsDBNull(i) ? null : reader.GetValue(i)))
+                        if (!row.TryAdd(name, reader.IsDBNull(i) ? null : CellValue(query, reader, i, name)))
                         {
                             throw new InvalidDataException($"Query '{query.Name}' on '{sourcePath}' returns column '{name}' more than once.");
                         }
@@ -665,6 +667,28 @@ public class MicrosoftDataSqliteHarnessSource : IHarnessSqliteSource
                     yield return row;
                 }
             }
+        }
+
+        /// <summary>
+        /// Reads one cell, sizing a TEXT or BLOB cell inside SQLite first, so a cell that alone is larger than
+        /// the export cap is refused before any of it is copied into managed memory.
+        /// </summary>
+        /// <exception cref="InvalidDataException">The cell is larger than the export cap; the message carries the problem code.</exception>
+        private object CellValue(HarnessSqliteQuery query, SqliteDataReader reader, int ordinal, string name)
+        {
+            // Only TEXT and BLOB are sized: sqlite3_column_bytes on a number converts it to text in place.
+            int type = raw.sqlite3_column_type(reader.Handle, ordinal);
+            if (type is raw.SQLITE_TEXT or raw.SQLITE_BLOB)
+            {
+                long bytes = raw.sqlite3_column_bytes(reader.Handle, ordinal);
+                if (bytes > cellCapBytes)
+                {
+                    throw new InvalidDataException(
+                        $"{SqliteSourceOpenPolicy.ExportCapExceededCode}: column '{name}' of query '{query.Name}' on '{sourcePath}' holds {bytes} bytes, larger than the export cap of {cellCapBytes} bytes.");
+                }
+            }
+
+            return reader.GetValue(ordinal);
         }
 
         /// <summary>

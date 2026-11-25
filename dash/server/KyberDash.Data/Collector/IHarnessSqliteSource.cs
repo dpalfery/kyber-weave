@@ -18,6 +18,7 @@ public interface IHarnessSqliteSource
 public interface IHarnessSqliteDatabase : IDisposable
 {
     /// <summary>Runs <paramref name="query"/> and yields its rows one at a time, keyed by column name.</summary>
+    /// <exception cref="InvalidDataException">A single cell is larger than the export cap; the message carries the problem code.</exception>
     IEnumerable<IReadOnlyDictionary<string, object?>> Query(HarnessSqliteQuery query);
 
     /// <summary>Returns the column names of <paramref name="table"/>, or an empty set when the table is absent.</summary>

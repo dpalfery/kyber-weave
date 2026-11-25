@@ -60,6 +60,35 @@ public class MicrosoftDataSqliteHarnessSourceSqliteTests : IDisposable
         Assert.Null(rows[1]["body"]);
     }
 
+    [Theory]
+    [InlineData("SELECT ? AS cell", "text")]
+    [InlineData("SELECT CAST(? AS BLOB) AS cell", "blob")]
+    [InlineData("SELECT zeroblob(17) AS cell", "zeroblob")]
+    public void Query_CellLargerThanTheExportCap_IsRefusedWithTheExportCapCode(string sql, string kind)
+    {
+        string path = CreateSource(directory.Path, 1, SqliteFixtureJournal.Rollback);
+        using IHarnessSqliteDatabase database = Source(new HarnessSqliteLimits(ExportCapBytes: 16)).Open(path);
+        object?[] parameters = kind == "zeroblob" ? [] : [new string('x', 17)];
+
+        InvalidDataException error = Assert.Throws<InvalidDataException>(
+            () => database.Query(new HarnessSqliteQuery("big-cell", sql, parameters)).ToList());
+
+        Assert.StartsWith("SQLITE_EXPORT_CAP_EXCEEDED", error.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Query_CellExactlyAtTheExportCap_IsRead()
+    {
+        string path = CreateSource(directory.Path, 1, SqliteFixtureJournal.Rollback);
+        using IHarnessSqliteDatabase database = Source(new HarnessSqliteLimits(ExportCapBytes: 16)).Open(path);
+
+        IReadOnlyDictionary<string, object?> row = Assert.Single(
+            database.Query(new HarnessSqliteQuery("cap-cell", "SELECT ? AS cell, 12345678901234567 AS number", [new string('x', 16)])));
+
+        Assert.Equal(new string('x', 16), row["cell"]);
+        Assert.Equal(12345678901234567L, row["number"]);
+    }
+
     [Fact]
     public void Query_ParameterCountThatDoesNotMatchTheMarkers_IsRefused()
     {
