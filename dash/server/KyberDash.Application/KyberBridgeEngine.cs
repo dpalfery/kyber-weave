@@ -530,12 +530,17 @@ public class KyberBridgeEngine
         IModelPricingLookup lookup = pricing.LoadPricingTables();
         (SessionTurnFigureSet? figures, string? projectionStatus) = TrySessionTurnFigures(sessionId, lookup);
         IReadOnlyList<ReadTimeTurnSummary> turns = figures?.Turns ?? [];
+        string? harness = projections.GetExecution($"exec:{sessionId}")?.HarnessId;
+        if (string.IsNullOrWhiteSpace(harness))
+        {
+            harness = reader.GetSession(sessionId)?.HarnessId;
+        }
 
         Dictionary<string, object?> payload = new(StringComparer.Ordinal)
         {
             ["sessionId"] = sessionId,
             ["turns"] = turns.Select(ToTurnDto).ToList(),
-            ["context"] = BuildContextPayload(projection, figures?.FirstContextBucket, figures?.LastContextBucket, turns),
+            ["context"] = BuildContextPayload(projection, figures?.FirstContextBucket, figures?.LastContextBucket, turns, harness),
         };
 
         if (projectionStatus is not null)
@@ -3138,7 +3143,8 @@ public class KyberBridgeEngine
         StoredSessionProjection projection,
         ReadTimeContextBucketSummary? firstBucket,
         ReadTimeContextBucketSummary? lastBucket,
-        IReadOnlyList<ReadTimeTurnSummary> turns)
+        IReadOnlyList<ReadTimeTurnSummary> turns,
+        string? harness)
     {
         int unmeasuredTurns = turns.Count(static t => !t.InputTokens.HasValue);
 
@@ -3202,7 +3208,98 @@ public class KyberBridgeEngine
             ["last"] = BuildContextEdge(lastBucket, lastStored),
         };
         AddTokenizerLabels(payload, TokenizerLabel.Ordered(ctx.Turns.SelectMany(static turn => turn.Tokenizers)));
+        AddTranscriptOmissionTelemetry(payload, harness, ctx.ObservedBuckets, projection.Schema is not null);
         return payload;
+    }
+
+    private static void AddTranscriptOmissionTelemetry(
+        Dictionary<string, object?> payload,
+        string? harness,
+        IReadOnlyList<string> observedBuckets,
+        bool hasSchema)
+    {
+        if (string.IsNullOrWhiteSpace(harness))
+        {
+            return;
+        }
+
+        string normalizedHarness = CanonPricing.NormalizeHarnessName(harness);
+        IReadOnlyDictionary<string, JsonElement> measurability = CanonSynth.MeasurabilityFor(normalizedHarness);
+        if (IsGenericFallbackMeasurability(normalizedHarness, measurability))
+        {
+            return;
+        }
+
+        HashSet<string> observed = new(observedBuckets, StringComparer.Ordinal);
+        List<string> missingBuckets = [];
+        List<string> residualReasons = [];
+
+        foreach (string bucket in CanonValidation.CanonicalContentKeys)
+        {
+            if (observed.Contains(bucket))
+            {
+                continue;
+            }
+
+            if (string.Equals(bucket, "tool_definitions", StringComparison.Ordinal) && hasSchema)
+            {
+                continue;
+            }
+
+            if (!measurability.TryGetValue(bucket, out JsonElement entry)
+                || entry.ValueKind != JsonValueKind.Object
+                || !entry.TryGetProperty("availability", out JsonElement availability)
+                || !string.Equals(availability.GetString(), "not_measurable", StringComparison.Ordinal))
+            {
+                continue;
+            }
+
+            missingBuckets.Add(bucket);
+            if (entry.TryGetProperty("reason", out JsonElement reasonElement)
+                && reasonElement.ValueKind == JsonValueKind.String)
+            {
+                string? reason = reasonElement.GetString();
+                if (!string.IsNullOrWhiteSpace(reason))
+                {
+                    residualReasons.Add(reason);
+                }
+            }
+        }
+
+        if (missingBuckets.Count == 0)
+        {
+            return;
+        }
+
+        payload["missingBuckets"] = missingBuckets;
+        if (residualReasons.Count > 0)
+        {
+            payload["residualReasons"] = residualReasons;
+        }
+    }
+
+    private static bool IsGenericFallbackMeasurability(
+        string normalizedHarness,
+        IReadOnlyDictionary<string, JsonElement> measurability)
+    {
+        foreach (string bucket in CanonValidation.CanonicalContentKeys)
+        {
+            if (!measurability.TryGetValue(bucket, out JsonElement entry)
+                || entry.ValueKind != JsonValueKind.Object
+                || !entry.TryGetProperty("reason", out JsonElement reasonElement)
+                || reasonElement.ValueKind != JsonValueKind.String)
+            {
+                return false;
+            }
+
+            string expectedFallback = $"Session files for {normalizedHarness} do not include {bucket} data.";
+            if (!string.Equals(reasonElement.GetString(), expectedFallback, StringComparison.Ordinal))
+            {
+                return false;
+            }
+        }
+
+        return true;
     }
 
     /// <summary>

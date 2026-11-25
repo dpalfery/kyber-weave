@@ -52,6 +52,15 @@ public partial class CanonSessionProjectorEngine
     private const string NoMessageStructureReason = "no_message_structure";
     private const string NoToolDefinitionSchemaReason = "The source did not provide tool-definition schema data.";
     private const string DefaultContextLimitSource = "default";
+    private const string SubagentSessionKeyMarker = "#agent-";
+
+    private static readonly HashSet<string> ClaudeCumulativeBuckets = new(StringComparer.Ordinal)
+    {
+        "system_prompt",
+        "instruction_context",
+        "conversation_history",
+        "tool_result_content",
+    };
 
     private static readonly string[] AgentNameKeys = ["gen_ai.agent.name", "agent.name"];
     private static readonly string[] RepoKeys = ["vcs.repository.name", "repo"];
@@ -3266,27 +3275,23 @@ public partial class CanonSessionProjectorEngine
         CanonicalRecord first = records[0];
         string harness = CanonPricing.NormalizeHarnessName(first.Harness);
 
-        List<CanonicalRecord> mainThreadRecords = turnRecords.Where(static record => !IsSideAgentTurn(record)).ToList();
+        string? resolvedAgentName = AttributeOf(first, AgentNameKeys);
+        string resolvedLabel = SessionLabelOf(records, title ?? first.Name, harness, sessionId);
+        string? parentAttr = AttributeOf(first, ParentSessionKeys);
+        string? subagentKeyParent = TryExtractSubagentParentId(sessionId);
+        string? resolvedParent = parentAttr ?? subagentKeyParent;
+        bool resolvedIsSubagent = resolvedParent is not null
+            || AttributeOf(first, ["gen_ai.is_subagent", "is_subagent"]) is not null;
+
+        List<CanonicalRecord> mainThreadRecords = turnRecords
+            .Where(record => !IsSideAgentTurn(record) && (resolvedIsSubagent || TryExtractSubagentParentId(record.SessionId) is null))
+            .ToList();
         List<CanonicalRecord> contextRecords = mainThreadRecords.Count > 0 ? mainThreadRecords : turnRecords;
         List<CanonicalRecord> measuredTurns = contextRecords.Where(static record => CanonPricing.MeasuredInput(record.Tokens) > 0).ToList();
 
-        List<ContextTurn> contextTurns = new(measuredTurns.Count);
-        List<ContextPart> lastSystem = [];
-        foreach (CanonicalRecord record in measuredTurns)
-        {
-            List<ContextPart> parts = PartsOf(record);
-            List<ContextPart> ownSystem = parts.Where(static part => string.Equals(part.Part, "system_prompt", StringComparison.Ordinal)).ToList();
-            if (ownSystem.Count > 0)
-            {
-                lastSystem = ownSystem;
-            }
-
-            IReadOnlyList<ContextPart> effective = ownSystem.Count > 0 ? parts : [.. CarriedTo(lastSystem, record), .. parts];
-            contextTurns.Add(new ContextTurn(
-                Parts: effective,
-                InputTokens: CanonPricing.MeasuredInput(record.Tokens),
-                FreshInput: MeasuredFreshInput(record.Tokens)));
-        }
+        List<ContextTurn> contextTurns = IsClaudeHarness(harness)
+            ? BuildClaudeContextTurns(measuredTurns, countTokens)
+            : BuildStandardContextTurns(measuredTurns);
 
         IReadOnlyList<CanonicalRecord> windowRecords = contextRecords.Count > 0 ? contextRecords : records;
         ContextWindowResult window = CanonPricing.ContextLimitOf(windowRecords);
@@ -3316,11 +3321,6 @@ public partial class CanonSessionProjectorEngine
         List<CanonicalRecord> requestRoots = structureRecords.Where(static record => record.ParentSpanId is null).ToList();
         (string started, string ended) = TimestampBounds(records);
 
-        string? resolvedAgentName = AttributeOf(first, AgentNameKeys);
-        string resolvedLabel = SessionLabelOf(records, title ?? first.Name, harness, sessionId);
-        string? parentAttr = AttributeOf(first, ParentSessionKeys);
-        bool resolvedIsSubagent = parentAttr is not null || AttributeOf(first, ["gen_ai.is_subagent", "is_subagent"]) is not null;
-
         List<StoredSessionTurn> turns = new(turnRecords.Count);
         for (int position = 0; position < turnRecords.Count; position++)
         {
@@ -3334,7 +3334,7 @@ public partial class CanonSessionProjectorEngine
             SpanCount: records.Count,
             StartedAtUtc: started,
             EndedAtUtc: ended,
-            ParentSessionId: parentAttr,
+            ParentSessionId: resolvedParent,
             AgentName: resolvedAgentName,
             IncludedInParent: false,
             RequestSpanIds: [.. requestRoots.Select(static record => record.SpanId)],
@@ -3345,6 +3345,212 @@ public partial class CanonSessionProjectorEngine
             SchemaUnmeasurableReason: schema.Measurable ? null : schema.Reason ?? NoToolDefinitionSchemaReason,
             TimelineSubagentSpanIds: TimelineSubagentSpanIdsOf(timeline),
             TimelineAuxiliarySpanIds: TimelineAuxiliarySpanIdsOf(timeline));
+    }
+
+    private static List<ContextTurn> BuildStandardContextTurns(IReadOnlyList<CanonicalRecord> measuredTurns)
+    {
+        List<ContextTurn> contextTurns = new(measuredTurns.Count);
+        List<ContextPart> lastSystem = [];
+        foreach (CanonicalRecord record in measuredTurns)
+        {
+            List<ContextPart> parts = PartsOf(record);
+            List<ContextPart> ownSystem = parts.Where(static part => string.Equals(part.Part, "system_prompt", StringComparison.Ordinal)).ToList();
+            if (ownSystem.Count > 0)
+            {
+                lastSystem = ownSystem;
+            }
+
+            IReadOnlyList<ContextPart> effective = ownSystem.Count > 0 ? parts : [.. CarriedTo(lastSystem, record), .. parts];
+            contextTurns.Add(new ContextTurn(
+                Parts: effective,
+                InputTokens: CanonPricing.MeasuredInput(record.Tokens),
+                FreshInput: MeasuredFreshInput(record.Tokens)));
+        }
+
+        return contextTurns;
+    }
+
+    private static List<ContextTurn> BuildClaudeContextTurns(
+        IReadOnlyList<CanonicalRecord> measuredTurns,
+        TextTokenCounter countTokens)
+    {
+        List<ContextTurn> contextTurns = new(measuredTurns.Count);
+        Dictionary<CumulativeSummaryKey, CumulativeBucketEntry> cumulative = [];
+
+        foreach (CanonicalRecord record in measuredTurns)
+        {
+            if (HasCompactBoundary(record))
+            {
+                cumulative.Clear();
+            }
+
+            (List<ContextPart> ownInputParts, List<ContextPart> ownAssistantParts) = SplitClaudeTurnParts(record);
+            IReadOnlyList<ContextPart> reducedInput = ownInputParts.Count > 0
+                ? CanonContextAnalysis.ReduceContextParts(ownInputParts, countTokens)
+                : [];
+            IReadOnlyList<ContextPart> reducedAssistant = ownAssistantParts.Count > 0
+                ? CanonContextAnalysis.ReduceContextParts(ownAssistantParts, countTokens)
+                : [];
+
+            bool hasOwnSystemPrompt = reducedInput.Any(
+                static part => string.Equals(part.Part, "system_prompt", StringComparison.Ordinal) && part.Resident != false);
+            if (hasOwnSystemPrompt && cumulative.Count > 0)
+            {
+                List<CumulativeSummaryKey> systemKeys = [.. cumulative.Keys.Where(static key => string.Equals(key.Part, "system_prompt", StringComparison.Ordinal))];
+                foreach (CumulativeSummaryKey systemKey in systemKeys)
+                {
+                    cumulative.Remove(systemKey);
+                }
+            }
+
+            List<ContextPart> effective = new(cumulative.Count + reducedInput.Count);
+            foreach (KeyValuePair<CumulativeSummaryKey, CumulativeBucketEntry> entry in cumulative)
+            {
+                CumulativeSummaryKey key = entry.Key;
+                CumulativeBucketEntry summary = entry.Value;
+                effective.Add(new ContextPart(
+                    Part: key.Part,
+                    Text: string.Empty,
+                    Tokens: summary.Tokens,
+                    Derived: summary.Derived,
+                    InstructionTokens: summary.HasInstructionTokens ? summary.InstructionTokens : null,
+                    StrippedCount: summary.HasStrippedCount ? summary.StrippedCount : null,
+                    Tokenizer: key.Tokenizer,
+                    TokenizerIsModelOwn: key.TokenizerIsModelOwn));
+            }
+
+            effective.AddRange(reducedInput);
+            contextTurns.Add(new ContextTurn(
+                Parts: effective,
+                InputTokens: CanonPricing.MeasuredInput(record.Tokens),
+                FreshInput: MeasuredFreshInput(record.Tokens)));
+
+            AccumulateClaudeSummaryParts(cumulative, reducedInput);
+            AccumulateClaudeSummaryParts(cumulative, reducedAssistant);
+        }
+
+        return contextTurns;
+    }
+
+    private static (List<ContextPart> OwnInputParts, List<ContextPart> OwnAssistantParts) SplitClaudeTurnParts(CanonicalRecord record)
+    {
+        string? model = ModelOf(record);
+        List<ContextPart> ownInputParts = [];
+        List<ContextPart> ownAssistantParts = [];
+
+        if (record.Parts is { Count: > 0 })
+        {
+            foreach (ContentPart part in record.Parts)
+            {
+                ContextPart contextPart = ContextPart.FromContentPart(part, model);
+                if (string.Equals(part.Role, "assistant", StringComparison.OrdinalIgnoreCase))
+                {
+                    if (part.Resident != false && ClaudeCumulativeBuckets.Contains(part.Part))
+                    {
+                        ownAssistantParts.Add(contextPart);
+                    }
+                }
+                else
+                {
+                    ownInputParts.Add(contextPart);
+                }
+            }
+
+            return (ownInputParts, ownAssistantParts);
+        }
+
+        foreach (KeyValuePair<string, string> kv in record.Content)
+        {
+            ownInputParts.Add(new ContextPart(kv.Key, kv.Value, Model: model));
+        }
+
+        return (ownInputParts, ownAssistantParts);
+    }
+
+    private static void AccumulateClaudeSummaryParts(
+        Dictionary<CumulativeSummaryKey, CumulativeBucketEntry> cumulative,
+        IReadOnlyList<ContextPart> parts)
+    {
+        foreach (ContextPart part in parts)
+        {
+            if (part.Resident == false || !ClaudeCumulativeBuckets.Contains(part.Part))
+            {
+                continue;
+            }
+
+            long? tokens = CanonPricing.MeasuredCount(part.Tokens);
+            if (!tokens.HasValue && !part.InstructionTokens.HasValue)
+            {
+                continue;
+            }
+
+            CumulativeSummaryKey key = new(part.Part, part.Tokenizer, part.TokenizerIsModelOwn);
+            if (!cumulative.TryGetValue(key, out CumulativeBucketEntry? entry))
+            {
+                entry = new CumulativeBucketEntry();
+                cumulative[key] = entry;
+            }
+
+            entry.Tokens += tokens ?? 0L;
+            if (part.Derived || part.Tokenizer is not null)
+            {
+                entry.Derived = true;
+            }
+
+            if (part.InstructionTokens.HasValue)
+            {
+                entry.InstructionTokens += part.InstructionTokens.Value;
+                entry.HasInstructionTokens = true;
+            }
+
+            if (part.StrippedCount.HasValue)
+            {
+                entry.StrippedCount += part.StrippedCount.Value;
+                entry.HasStrippedCount = true;
+            }
+        }
+    }
+
+    private static bool HasCompactBoundary(CanonicalRecord record) =>
+        record.Raw is not null
+        && record.Raw.TryGetValue(CanonRecordHydration.CompactBoundaryRawKey, out JsonElement element)
+        && element.ValueKind == JsonValueKind.True;
+
+    private static string? TryExtractSubagentParentId(string? sessionKey)
+    {
+        if (string.IsNullOrWhiteSpace(sessionKey))
+        {
+            return null;
+        }
+
+        int markerIndex = sessionKey.IndexOf(SubagentSessionKeyMarker, StringComparison.Ordinal);
+        if (markerIndex <= 0 || markerIndex + SubagentSessionKeyMarker.Length >= sessionKey.Length)
+        {
+            return null;
+        }
+
+        string parent = sessionKey[..markerIndex];
+        return string.IsNullOrWhiteSpace(parent) ? null : parent;
+    }
+
+    private readonly record struct CumulativeSummaryKey(
+        string Part,
+        string? Tokenizer,
+        bool? TokenizerIsModelOwn);
+
+    private sealed class CumulativeBucketEntry
+    {
+        public long Tokens { get; set; }
+
+        public bool Derived { get; set; }
+
+        public long InstructionTokens { get; set; }
+
+        public bool HasInstructionTokens { get; set; }
+
+        public int StrippedCount { get; set; }
+
+        public bool HasStrippedCount { get; set; }
     }
 
     private static StoredSessionContext ToStoredContext(ContextAnalysis context)
