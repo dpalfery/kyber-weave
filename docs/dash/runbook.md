@@ -6,7 +6,7 @@ status: current
 component: KyberDash
 source-root: dash
 owner: dpalfery
-last-reviewed: 2026-11-23
+last-reviewed: 2026-11-25
 decided-by:
   - adr/0084-kyberdash-csharp-engine
   - adr/0031-kyberdash-capture-command-owns-harness-telemetry-keys
@@ -1647,6 +1647,8 @@ removed and the tests must pass.
 plugin-session pass and the one-time no-estimate re-read) reports `partial` with the number of `failedUnits` instead of
 `succeeded`; `failedUnits` is the count from the last pass that read sources, and the maintenance panel shows it. A store
 constraint failure on one unit fails only that unit.
+
+**One-time re-read of estimated tokens.** A droid, cursor or warp checkpoint at contract "1" whose source key discovery no longer returns (a deleted file, a folder that cannot be listed, or a unit re-keyed to a new key) cannot be re-read, so the re-read instead clears only the token values that version stored as estimates; they read "not measured". Sessions, records, text and harness-reported values stay.
 
 **Leftovers from an earlier run.** With no watchdog and no ledger, a process a killed run left behind
 is yours to find and stop:
