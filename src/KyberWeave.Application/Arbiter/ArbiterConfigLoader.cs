@@ -85,8 +85,6 @@ public static class ArbiterConfigLoader
 
     private static readonly string[] ModelTargetingModes = ["off", "shadow", "enforce"];
 
-    private static readonly string[] DifficultyKeys = ["easy", "standard", "hard"];
-
     /// <summary>Shipped rules whose shadow state <c>arbiter.model-targeting.mode</c> owns.</summary>
     private static readonly HashSet<string> ModelTargetingRuleIds = new(StringComparer.Ordinal)
     {
@@ -1465,24 +1463,12 @@ public static class ArbiterConfigLoader
         Dictionary<string, string> difficulty = new(defaults.DifficultyProfiles, StringComparer.Ordinal);
         if (section.DifficultyProfiles is not null)
         {
-            foreach ((string key, string profile) in section.DifficultyProfiles)
-            {
-                if (!DifficultyKeys.Contains(key, StringComparer.Ordinal))
-                {
-                    throw new YamlException(
-                        $"[{RuleValidator.ModelTargetingInvalid}] arbiter.model-targeting.difficulty-profiles names '{key}', which is not a difficulty. " +
-                        $"Use one of: {string.Join(", ", DifficultyKeys)}.");
-                }
-
-                if (!ArbiterSemanticProfiles.All.Contains(profile, StringComparer.Ordinal))
-                {
-                    throw new YamlException(
-                        $"[{RuleValidator.ModelTargetingInvalid}] arbiter.model-targeting.difficulty-profiles.{key} is '{profile}', which is not a profile name. " +
-                        $"Use one of: {string.Join(", ", ArbiterSemanticProfiles.All)}.");
-                }
-
-                difficulty[key] = profile;
-            }
+            throw new YamlException(
+                $"[{RuleValidator.ModelTargetingInvalid}] arbiter.model-targeting.difficulty-profiles is not read: " +
+                "the shipped developer tiers fix the table. Remove the key. " +
+                $"The shipped table is easy: {TierProfiles.Default.DifficultyProfiles["easy"]}, " +
+                $"standard: {TierProfiles.Default.DifficultyProfiles["standard"]}, " +
+                $"hard: {TierProfiles.Default.DifficultyProfiles["hard"]}.");
         }
 
         IReadOnlyList<string> ladder = section.Ladder is null ? defaults.Ladder : ValidateLadder(section.Ladder);
@@ -1492,11 +1478,11 @@ public static class ArbiterConfigLoader
     /// <summary>Checks a ladder is non-empty, repeats no profile, and names only semantic profiles.</summary>
     private static IReadOnlyList<string> ValidateLadder(List<string> ladder)
     {
-        const string Example = "[fast, general, deep-planning]";
+        string example = $"[{string.Join(", ", TierProfiles.Default.Ladder)}]";
         if (ladder.Count == 0)
         {
             throw new YamlException(
-                $"[{RuleValidator.LadderInvalid}] arbiter.model-targeting.ladder is empty. List the profiles cheapest first, e.g. {Example}.");
+                $"[{RuleValidator.LadderInvalid}] arbiter.model-targeting.ladder is empty. List the profiles cheapest first, e.g. {example}.");
         }
 
         HashSet<string> seen = new(StringComparer.Ordinal);
@@ -1508,13 +1494,13 @@ public static class ArbiterConfigLoader
                 string hint = nearest is null ? string.Empty : $" Did you mean '{nearest}'?";
                 throw new YamlException(
                     $"[{RuleValidator.LadderInvalid}] arbiter.model-targeting.ladder names '{profile}', which is not a profile name. " +
-                    $"List profile names, not model tokens, e.g. {Example}.{hint}");
+                    $"List profile names, not model tokens, e.g. {example}.{hint}");
             }
 
             if (!seen.Add(profile))
             {
                 throw new YamlException(
-                    $"[{RuleValidator.LadderInvalid}] arbiter.model-targeting.ladder names '{profile}' more than once. Each profile appears once, e.g. {Example}.");
+                    $"[{RuleValidator.LadderInvalid}] arbiter.model-targeting.ladder names '{profile}' more than once. Each profile appears once, e.g. {example}.");
             }
         }
 

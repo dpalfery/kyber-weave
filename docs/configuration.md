@@ -650,8 +650,9 @@ user config at `arbiter.global.targets`.
 ### Savings keys
 
 These keys sit beside `provider`, `rules` and `stores`. The first four keys are read and
-validated in phase 1. Model targeting uses `mode`, and the difficulty and ladder keys take effect
-with the phase 2 rules. In `shadow` (the default) the two model rules are logged and nothing is
+validated in phase 1. Model targeting uses `mode`; the shipped developer tiers fix the difficulty
+table and ladder, so `difficulty-profiles` is refused and a host `ladder` is validated but the run
+uses the shipped ladder. In `shadow` (the default) the two model rules are logged and nothing is
 delivered; `enforce` writes the chosen model onto the dispatch; `off` disables both rules. The store
 and bot-login keys are validated now. The store keys are read by the run stores in phase 3. The
 bot logins are validated (a blank entry is refused) and read by the comment triage: a summary
@@ -664,8 +665,8 @@ arbiter:
     difficulty-profiles:
       easy: fast
       standard: general
-      hard: deep-planning
-    ladder: [fast, general, deep-planning]
+      hard: dev-hard
+    ladder: [fast, general, dev-hard]
   stores:
     max-item-bytes: 16384        # 1 to 1048576
     retain-days: 14              # at least 1
@@ -683,8 +684,8 @@ arbiter:
 | Key | Default | Accepted values | Refused with |
 |---|---|---|---|
 | `model-targeting.mode` | `shadow` | `off`, `shadow`, `enforce` | `KW-ARB-CONFIG-012` |
-| `model-targeting.difficulty-profiles.easy` / `standard` / `hard` | `fast` / `general` / `deep-planning` | A semantic profile: `architect`, `deep-planning`, `fast`, `general`, `orchestration` or `reviewer` | `KW-ARB-CONFIG-012` |
-| `model-targeting.ladder` | `[fast, general, deep-planning]` | A non-empty list of semantic profiles, each once, cheapest first | `KW-ARB-CONFIG-013` |
+| `model-targeting.difficulty-profiles.easy` / `standard` / `hard` | `fast` / `general` / `dev-hard` | None: the shipped developer tiers fix the table, so remove the key | `KW-ARB-CONFIG-012` |
+| `model-targeting.ladder` | `[fast, general, dev-hard]` | A non-empty list of semantic profiles, each once, cheapest first. The run uses the shipped ladder regardless | `KW-ARB-CONFIG-013` |
 | `stores.max-item-bytes` | `16384` | 1 to 1048576 | `KW-ARB-CONFIG-015` |
 | `stores.retain-days` | `14` | At least 1 (values above 3650 are clamped to 3650 when swept) | `KW-ARB-CONFIG-015` |
 | `comment-triage.bot-logins` | `[]` | Non-blank login names | `KW-ARB-CONFIG-015` |
@@ -694,7 +695,8 @@ arbiter:
 | `rules[].shadow` | Per rule | `true` or `false`, on a step-1 shipped rule | `KW-ARB-CONFIG-014` on `KW-ARB-DIFFICULTY-001` and `KW-ARB-LADDER-001`, which take their state from `mode` |
 
 `KW-ARB-CONFIG-015` also refuses a host rule that uses `for-each`, or an effect only a shipped rule
-may use. The profile keys accept only the six semantic profiles above, never a concrete model id.
+may use. A semantic profile is one of `architect`, `deep-planning`, `dev-hard`, `fast`, `general` or
+`reviewer`, never a concrete model id.
 
 Limits: `mode` also drives the `KW-ARB-MODEL-001` doctor check, and it is the only switch for the two
 model rules. A bad value in any of these keys makes the config loader throw, so the hook allows the dispatch

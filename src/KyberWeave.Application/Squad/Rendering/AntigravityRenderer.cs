@@ -111,6 +111,18 @@ public sealed class AntigravityRenderer : SquadHarnessRenderer
         SquadModelPolicy.NotRendered,
         SquadLineBreaks.LineFeedOnly);
 
+    /// <summary>The reasoning effort Antigravity renders for each semantic model profile.</summary>
+    internal static IReadOnlyDictionary<string, string> ReasoningEffortByProfile { get; } =
+        new Dictionary<string, string>(StringComparer.Ordinal)
+        {
+            ["architect"] = "high",
+            ["deep-planning"] = "high",
+            ["dev-hard"] = "high",
+            ["fast"] = "low",
+            ["general"] = "medium",
+            ["reviewer"] = "high",
+        };
+
     public AntigravityRenderer()
         : base(HarnessSpec)
     {
@@ -508,20 +520,8 @@ public sealed class AntigravityRenderer : SquadHarnessRenderer
         return tools.OrderBy(t => t, StringComparer.Ordinal).ToArray();
     }
 
-    private static string? ResolveReasoningEffort(string modelProfile)
-    {
-        return modelProfile switch
-        {
-            "architect" => "high",
-            "deep-planning" => "high",
-            "reviewer" => "high",
-            "general" => "medium",
-            "fast" => "low",
-            "dev-hard" => "high",
-            "orchestration" => "minimal",
-            _ => null
-        };
-    }
+    private static string? ResolveReasoningEffort(string modelProfile) =>
+        ReasoningEffortByProfile.TryGetValue(modelProfile, out string? effort) ? effort : null;
 
     private static SquadDegradationRecord? BuildPermissionDegradation(
         SquadAgent agent,
