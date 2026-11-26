@@ -4,6 +4,7 @@ import { readFileSync } from 'node:fs'
 
 import {
   ContextCompositionChart,
+  MCP_SERVER_COLORS,
   SessionSpendCharts,
   TurnSpendChart,
   contextSegments,
@@ -1058,6 +1059,33 @@ describe('contextSegments — per-MCP-server bands', () => {
 
     expect(ids).not.toContain('tool_result_content')
     expect(ids).toContain('residual')
+  })
+
+  it('uses a whole-session server colour map so legend and row agree (dbId 4704550866)', () => {
+    // observedServers is ordinal (alphabetical); row order is token-descending.
+    // Without a shared map, alpha is legend [0] but drawn [1].
+    const observedServers = ['alpha', 'beta']
+    const serverColors = Object.fromEntries(
+      observedServers.map((server, index) => [server, MCP_SERVER_COLORS[index % MCP_SERVER_COLORS.length]!]),
+    )
+    const row = {
+      buckets: {
+        system_prompt: 0,
+        instruction_context: 0,
+        tool_definitions: 6000,
+        conversation_history: 0,
+        tool_result_content: 0,
+        residual: 0,
+      },
+      servers: { beta: 5000, alpha: 1000 },
+    }
+
+    const segments = contextSegments(row, serverColors)
+    const alpha = segments.find((s) => s.id === 'mcp:alpha')
+    const beta = segments.find((s) => s.id === 'mcp:beta')
+
+    expect(alpha?.color).toBe(MCP_SERVER_COLORS[0])
+    expect(beta?.color).toBe(MCP_SERVER_COLORS[1])
   })
 })
 

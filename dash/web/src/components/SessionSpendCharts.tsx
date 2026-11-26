@@ -204,12 +204,20 @@ export type ContextSegment = {
  * expensive, while a stack of per-server bands says WHICH server to
  * disconnect. Servers with no attribution are never invented - a tool whose
  * definition named no server is counted as built-in.
+ *
+ * When `serverColors` is provided, it is the whole-session server-to-colour
+ * map (keyed by server name). This keeps legend and row colours aligned when
+ * a row's token-descending server order differs from the session's ordinal
+ * observed-server order.
  */
-export function contextSegments(row: {
-  buckets: Record<ContextBucketKey, number>
-  servers?: Record<string, number>
-  builtinToolTokens?: number
-}): ContextSegment[] {
+export function contextSegments(
+  row: {
+    buckets: Record<ContextBucketKey, number>
+    servers?: Record<string, number>
+    builtinToolTokens?: number
+  },
+  serverColors?: Record<string, string>,
+): ContextSegment[] {
   const segments: ContextSegment[] = []
 
   for (const key of CONTEXT_BUCKET_KEYS) {
@@ -227,7 +235,7 @@ export function contextSegments(row: {
             id: `mcp:${server}`,
             label: `mcp: ${server}`,
             tokens,
-            color: MCP_SERVER_COLORS[index % MCP_SERVER_COLORS.length]!,
+            color: serverColors?.[server] ?? MCP_SERVER_COLORS[index % MCP_SERVER_COLORS.length]!,
             server,
           })
         })
@@ -1434,6 +1442,14 @@ export function ContextCompositionChart({
   // servers when present so the key stays invariant across pages.
   const hasObservedBuckets = Array.isArray(context.observedBuckets)
   const hasObservedServers = Array.isArray(context.observedServers)
+  const serverColorMap: Record<string, string> | undefined = hasObservedServers
+    ? Object.fromEntries(
+        context.observedServers!.map((server, index) => [
+          server,
+          MCP_SERVER_COLORS[index % MCP_SERVER_COLORS.length]!,
+        ]),
+      )
+    : undefined
   const legendSegments: ContextSegment[] = []
   const seenSegments = new Set<string>()
   const pushLegendSegment = (segment: ContextSegment) => {
@@ -1448,7 +1464,7 @@ export function ContextCompositionChart({
       const normalized = normalizeObservedBucketKey(rawKey)
       if (normalized) observedBucketSet.add(normalized)
     }
-    const pageSegments = rows.flatMap((row) => contextSegments(row))
+    const pageSegments = rows.flatMap((row) => contextSegments(row, serverColorMap))
     const hasResidual =
       observedBucketSet.has('residual') ||
       (typeof context.residualTotal === 'number' && context.residualTotal > 0) ||
@@ -1458,13 +1474,13 @@ export function ContextCompositionChart({
       if (key === 'tool_definitions') {
         if (hasObservedServers) {
           if (context.observedServers!.length > 0) {
-            context.observedServers!.forEach((server, index) => {
+            context.observedServers!.forEach((server) => {
               pushLegendSegment({
                 key,
                 id: `mcp:${server}`,
                 label: `mcp: ${server}`,
                 tokens: 0,
-                color: MCP_SERVER_COLORS[index % MCP_SERVER_COLORS.length]!,
+                color: serverColorMap![server]!,
                 server,
               })
             })
@@ -1528,18 +1544,18 @@ export function ContextCompositionChart({
     }
   } else {
     for (const row of rows) {
-      for (const segment of contextSegments(row)) {
+      for (const segment of contextSegments(row, serverColorMap)) {
         pushLegendSegment(segment)
       }
     }
     if (hasObservedServers && context.observedServers!.length > 0) {
-      context.observedServers!.forEach((server, index) => {
+      context.observedServers!.forEach((server) => {
         pushLegendSegment({
           key: 'tool_definitions',
           id: `mcp:${server}`,
           label: `mcp: ${server}`,
           tokens: 0,
-          color: MCP_SERVER_COLORS[index % MCP_SERVER_COLORS.length]!,
+          color: serverColorMap![server]!,
           server,
         })
       })
@@ -1728,7 +1744,7 @@ export function ContextCompositionChart({
 
                 {/* Horizontal Stacked Bar */}
                 <div className="mt-2 flex h-6 w-full overflow-hidden rounded-sm bg-muted">
-                  {contextSegments(row).map((segment) => {
+                  {contextSegments(row, serverColorMap).map((segment) => {
                     const k = segment.key
                     const val = segment.tokens
                     const pct = (val / row.total) * 100
@@ -1773,7 +1789,7 @@ export function ContextCompositionChart({
 
                 {/* Subtitle breakdown */}
                 <div className="mt-1.5 flex flex-wrap items-center gap-x-3 gap-y-1 text-[11px] text-tertiary-foreground">
-                  {contextSegments(row).map((segment) => (
+                  {contextSegments(row, serverColorMap).map((segment) => (
                     <span key={segment.id} className="tabular-nums">
                       <span className="text-muted-foreground">{segment.label}:</span>{' '}
                       {fmtTokens(segment.tokens)}
