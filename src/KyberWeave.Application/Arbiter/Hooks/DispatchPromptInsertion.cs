@@ -64,40 +64,18 @@ public static partial class DispatchPromptInsertion
     /// </summary>
     /// <remarks>
     /// From the per-harness table in <c>docs/kyber-arbiter/architecture.md</c>, which records a harness as a rewrite
-    /// only where a live dispatch showed the worker received the replaced text. Every other harness, and any token
-    /// this list does not know, takes the prompt file instead.
+    /// only where a live dispatch showed the worker received the replaced text. The flag lives on
+    /// <see cref="HarnessRegistry"/>; every other harness, and any token the registry does not know, takes the prompt
+    /// file instead.
     /// </remarks>
     /// <param name="harness">The harness token, such as <c>claude</c> or <c>antigravity</c>.</param>
-    public static bool CanRewriteDispatch(string? harness)
-    {
-        if (string.IsNullOrWhiteSpace(harness))
-        {
-            return false;
-        }
-
-        return RewriteHarnesses.Contains(harness.Trim());
-    }
+    public static bool CanRewriteDispatch(string? harness) => HarnessRegistry.RewritesDispatch(harness);
 
     /// <summary>
     /// Every harness token recorded as rewriting the dispatch. Each one must be served by an adapter that inserts
     /// the prompt: a token listed here and served by nothing would leave the worker with no prompt and no file.
     /// </summary>
-    public static IReadOnlySet<string> RewriteHarnessTokens => RewriteHarnesses;
-
-    private static readonly IReadOnlySet<string> RewriteHarnesses = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
-    {
-        "claude",
-        "copilot-vscode",
-        "copilot-cli",
-        "codex",
-        "cursor",
-        "opencode",
-        "pi",
-        "kilo",
-        "antigravity",
-        "factory",
-        "devin",
-    };
+    public static IReadOnlySet<string> RewriteHarnessTokens => HarnessRegistry.RewriteTokens;
 
     /// <summary>Expands the dispatch's identity line into the full prompt, or says why it cannot.</summary>
     /// <param name="prompt">The dispatch text as the harness sent it.</param>

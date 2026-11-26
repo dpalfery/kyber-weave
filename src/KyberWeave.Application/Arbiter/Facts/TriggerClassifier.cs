@@ -1,4 +1,5 @@
 using System.Text.RegularExpressions;
+using KyberWeave.Arbiter.Hooks;
 using KyberWeave.Core.Configuration;
 
 namespace KyberWeave.Core.Arbiter.Facts;
@@ -18,13 +19,6 @@ namespace KyberWeave.Core.Arbiter.Facts;
 /// </remarks>
 public static partial class TriggerClassifier
 {
-    private static readonly IReadOnlySet<string> TrustedHarnesses = new HashSet<string>(
-        StringComparer.OrdinalIgnoreCase)
-    {
-        "claude",
-        "copilot-vscode",
-    };
-
     private static readonly IReadOnlySet<string> SpecPhases = new HashSet<string>(StringComparer.Ordinal)
     {
         "requirements",
@@ -40,9 +34,6 @@ public static partial class TriggerClassifier
     /// </summary>
     private const string RunStartMarker = "RUN-START";
 
-    /// <summary>The harness whose hook payload names the calling agent for every sub-agent, so no name means the root.</summary>
-    private const string RootNamesNoCallerHarness = "copilot-cli";
-
     /// <summary>
     /// The marker a conductor writes first on a rework dispatch, naming the failure cluster the worker is
     /// reworking. Its <c>FAILURE:</c> section carries the failing output the same-failure rule compares.
@@ -53,7 +44,7 @@ public static partial class TriggerClassifier
     public static bool IsProjectWideHarness(string harness)
     {
         ArgumentNullException.ThrowIfNull(harness);
-        return !TrustedHarnesses.Contains(harness);
+        return !HarnessRegistry.IsTrusted(harness);
     }
 
     /// <summary>Derives the target class from the embedded catalog's capability profile.</summary>
@@ -278,7 +269,7 @@ public static partial class TriggerClassifier
     private static bool IsRootSession(ArbiterEvent ev, string? resolvedCaller) =>
         resolvedCaller is null
         && ev.AssertedCaller is null
-        && string.Equals(ev.Harness, RootNamesNoCallerHarness, StringComparison.OrdinalIgnoreCase);
+        && HarnessRegistry.UnnamedCallerIsRoot(ev.Harness);
 
     private static string? ClassifyTrigger(
         string? caller,

@@ -1,5 +1,6 @@
 using System.Security.Cryptography;
 using System.Text;
+using KyberWeave.Arbiter.Hooks;
 using KyberWeave.Contracts.Repositories;
 using KyberWeave.Contracts.Services;
 using KyberWeave.Core.Arbiter;
@@ -544,9 +545,9 @@ public sealed class ArbiterDoctorService(
 
     private static readonly (string Label, string Target, string Channel)[] AdvisoryPostDispatchTargets =
     [
-        ("Copilot CLI", "copilot-cli", "additionalContext"),
-        ("Codex", "codex", "additionalContext"),
-        ("Cursor", "cursor", "additional_context"),
+        .. HarnessRegistry.Rows
+            .Where(row => row.PostDispatchAdvisoryChannel is not null)
+            .Select(row => (row.DisplayName, row.Token, row.PostDispatchAdvisoryChannel!)),
     ];
 
     private bool IndexExists(string root, string path)

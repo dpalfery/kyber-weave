@@ -1,3 +1,4 @@
+using KyberWeave.Arbiter.Hooks;
 using KyberWeave.Core.Arbiter;
 using KyberWeave.Core.Squad.Deployment;
 using KyberWeave.Core.Squad.Model;
@@ -465,7 +466,7 @@ public static class ArbiterHookWiring
                 return DispatchUnconfirmedReason;
             }
 
-            if (token is "copilot-vscode")
+            if (token == HarnessRegistry.CopilotVsCode.Token)
             {
                 return HooksDisabledByHarnessReason;
             }

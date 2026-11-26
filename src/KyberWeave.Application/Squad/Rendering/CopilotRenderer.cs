@@ -2,6 +2,7 @@ using System.Collections.ObjectModel;
 using System.Globalization;
 using System.Text;
 using System.Text.Json;
+using KyberWeave.Arbiter.Hooks;
 using KyberWeave.Core.Squad.Deployment;
 using KyberWeave.Core.Squad.Model;
 using YamlDotNet.Core;
@@ -65,8 +66,6 @@ public sealed class CopilotRenderer : SquadHarnessRenderer
     /// subagent's call, which the CLI marks with the subagent's type at the top level of the event.
     /// </summary>
     private const string WorkerGuardCliMatcher = ".*";
-    private const string VsCodeHarnessToken = "copilot-vscode";
-    private const string CliHarnessToken = "copilot-cli";
     private const int MaxAgentBodyCharacters = 30_000;
 
     // VS Code limits a worker's built-in tools to those of the selected agent. The conductor
@@ -419,7 +418,7 @@ public sealed class CopilotRenderer : SquadHarnessRenderer
         ["type"] = "command",
         // The shared helper, not a second interpolation: Copilot runs this through a shell,
         // so the caller has to pass the same validation every other hook surface applies.
-        ["command"] = ArbiterHookWiring.HookCommandLine(VsCodeHarnessToken, hook.Caller, scope),
+        ["command"] = ArbiterHookWiring.HookCommandLine(HarnessRegistry.CopilotVsCode.Token, hook.Caller, scope),
         ["timeout"] = hook.TimeoutSeconds
     };
 
@@ -446,28 +445,28 @@ public sealed class CopilotRenderer : SquadHarnessRenderer
             writer.WriteNumber("version", 1);
             writer.WriteStartObject("hooks");
             writer.WriteStartArray("preToolUse");
-            WriteCliHookEntry(writer, "task", ArbiterHookWiring.HookCommandLine(CliHarnessToken, scope), timeoutSeconds);
+            WriteCliHookEntry(writer, "task", ArbiterHookWiring.HookCommandLine(HarnessRegistry.CopilotCli.Token, scope), timeoutSeconds);
             if (scope == SquadDeploymentScope.Global)
             {
                 // The CLI runs the project and the user file both, so the guard lives in one of them: a call
                 // counted twice would spend the budget twice as fast.
-                WriteCliHookEntry(writer, WorkerGuardCliMatcher, ArbiterHookWiring.WorkerGuardCommandLine(CliHarnessToken), timeoutSeconds);
+                WriteCliHookEntry(writer, WorkerGuardCliMatcher, ArbiterHookWiring.WorkerGuardCommandLine(HarnessRegistry.CopilotCli.Token), timeoutSeconds);
             }
 
             writer.WriteEndArray();
             writer.WriteStartArray("postToolUse");
-            WriteCliHookEntry(writer, "task", ArbiterHookWiring.HookCommandLine(CliHarnessToken, scope), timeoutSeconds);
+            WriteCliHookEntry(writer, "task", ArbiterHookWiring.HookCommandLine(HarnessRegistry.CopilotCli.Token, scope), timeoutSeconds);
             writer.WriteEndArray();
 
             // A background task returns at once with only the agent's id, so the agent's real return is the end
             // of each of its turns. The event has no tool to match on.
             writer.WriteStartArray("subagentStop");
-            WriteCliHookEntry(writer, matcher: null, ArbiterHookWiring.HookCommandLine(CliHarnessToken, scope), timeoutSeconds);
+            WriteCliHookEntry(writer, matcher: null, ArbiterHookWiring.HookCommandLine(HarnessRegistry.CopilotCli.Token, scope), timeoutSeconds);
             if (scope == SquadDeploymentScope.Global)
             {
                 // The end of a turn closes the worker's budget window, so idle time and a later rework turn on the
                 // same agent are not charged to it.
-                WriteCliHookEntry(writer, matcher: null, ArbiterHookWiring.WorkerGuardCommandLine(CliHarnessToken), timeoutSeconds);
+                WriteCliHookEntry(writer, matcher: null, ArbiterHookWiring.WorkerGuardCommandLine(HarnessRegistry.CopilotCli.Token), timeoutSeconds);
             }
 
             writer.WriteEndArray();

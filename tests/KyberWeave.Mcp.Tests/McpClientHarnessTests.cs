@@ -1,4 +1,5 @@
 using KyberWeave.Arbiter.Hooks;
+using KyberWeave.Core.Docs.Mcp;
 using Xunit;
 
 namespace KyberWeave.Mcp.Tests;
@@ -59,4 +60,77 @@ public sealed class McpClientHarnessTests
     [Fact]
     public void TheUnverifiedTokenIsNeverARewritingHarness() =>
         Assert.False(DispatchPromptInsertion.CanRewriteDispatch(McpClientHarness.UnverifiedToken));
+
+    /// <summary>Each registry row's client names resolve to that row's token, prefix rule included.</summary>
+    [Fact]
+    public void EveryRegistryClientNameMapsToItsHarnessToken()
+    {
+        foreach (HarnessDescriptor row in HarnessRegistry.Rows)
+        {
+            foreach (string name in row.McpClientNames)
+            {
+                Assert.Equal(row.Token, McpClientHarness.TokenFor(name));
+            }
+
+            if (row.McpClientPrefix is { } prefix)
+            {
+                Assert.Equal(row.Token, McpClientHarness.TokenFor(prefix + "any-server-key"));
+            }
+        }
+    }
+
+    /// <summary>Every token the mapper can return is a registry row, so no name buys a token the registry does not hold.</summary>
+    [Fact]
+    public void EveryTokenTheMapperReturnsIsARegistryHarness()
+    {
+        foreach (HarnessDescriptor row in HarnessRegistry.Rows)
+        {
+            foreach (string name in row.McpClientNames)
+            {
+                string? token = McpClientHarness.TokenFor(name);
+                Assert.NotNull(token);
+                Assert.NotNull(HarnessRegistry.ByToken(token));
+            }
+        }
+
+        Assert.Null(HarnessRegistry.ByToken(McpClientHarness.UnverifiedToken));
+    }
+
+    /// <summary>
+    /// Devin rewrites its dispatch but has no verified client name, so its dispatches take the prompt file. The empty
+    /// list is the deliberate decision, not a missing row.
+    /// </summary>
+    [Fact]
+    public void DevinRewritesWithoutAVerifiedClientName()
+    {
+        Assert.True(HarnessRegistry.Devin.RewritesDispatch);
+        Assert.Empty(HarnessRegistry.Devin.McpClientNames);
+        Assert.Null(HarnessRegistry.Devin.McpClientPrefix);
+    }
+
+    /// <summary>Every MCP catalog row names a registry harness, and every registry catalog name has a row.</summary>
+    [Fact]
+    public void TheMcpCatalogAndTheRegistryAgreeOnHarnessNames()
+    {
+        HashSet<string> registryNames = HarnessRegistry.Rows
+            .Where(row => row.McpCatalogName is not null)
+            .Select(row => row.McpCatalogName!)
+            .ToHashSet(StringComparer.Ordinal);
+
+        foreach (HarnessMcpEntry row in HarnessMcpCatalog.Rows)
+        {
+            // The Copilot coding agent is repository settings, not a hook harness: it has no token or adapter.
+            if (row.Harness == "copilot-coding-agent")
+            {
+                continue;
+            }
+
+            Assert.Contains(row.Harness, registryNames);
+        }
+
+        foreach (string name in registryNames)
+        {
+            Assert.Contains(HarnessMcpCatalog.Rows, row => row.Harness == name);
+        }
+    }
 }
