@@ -168,6 +168,19 @@ public sealed class PlanInventoryValidatorTests
         Assert.Contains(report.Items, i => i.Code == PlanInventoryValidator.StaleOpenEntry && i.Message.Contains("2026-11-13-cards.md", StringComparison.Ordinal));
     }
 
+    [Theory]
+    [InlineData("Review required")]
+    [InlineData("In-progress")]
+    public void AnOpenRowInEveryOpenStatusWhosePlanFileIsGoneIsKWDOCLIFECYCLE006(string status)
+    {
+        using DocFixture fixture = DocFixture.CreateInMemory().WithCatalog()
+            .Write(PlanIndex, Index(Columns + $"| [Cards](2026-11-13-cards.md) | {status} | Add cards. |"));
+
+        DiagnosticReport report = Validate(fixture);
+
+        Assert.Contains(report.Items, i => i.Code == PlanInventoryValidator.StaleOpenEntry && i.Message.Contains("2026-11-13-cards.md", StringComparison.Ordinal));
+    }
+
     [Fact]
     public void AProseSentenceRestatingAPlansStatusIsKWDOCLIFECYCLE006()
     {

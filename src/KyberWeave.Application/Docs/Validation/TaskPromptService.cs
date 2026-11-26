@@ -166,8 +166,8 @@ public sealed class TaskPromptService(
                 if (active.Count != 1)
                 {
                     return TaskPromptResult.NotBuilt(active.Count == 0
-                        ? "No prompt: no plan is Ready or In progress in this checkout. Approve a plan, or name the plan."
-                        : $"No prompt: {active.Count} plans are Ready or In progress ({string.Join(", ", active)}). Name one plan.");
+                        ? $"No prompt: no plan is {PlanStatus.ActiveWords} in this checkout. Approve a plan, or name the plan."
+                        : $"No prompt: {active.Count} plans are {PlanStatus.ActiveWords} ({string.Join(", ", active)}). Name one plan.");
                 }
 
                 plan = active[0];

@@ -2,6 +2,7 @@ using KyberWeave.Contracts.Repositories;
 using System.Text.RegularExpressions;
 using KyberWeave.Core.Arbiter.Facts;
 using KyberWeave.Core.Arbiter.Rules;
+using KyberWeave.Core.Docs.Model;
 using KyberWeave.Core.FileSystem;
 
 namespace KyberWeave.Core.Arbiter.Plans;
@@ -181,7 +182,7 @@ public sealed partial class PlanFacts(IPlanFileResolver planPaths, IFileSystem f
                         .Where(files.FileExists));
                 foreach (string file in candidates)
                 {
-                    if (ActiveStatusRegex().IsMatch(files.ReadAllText(file)))
+                    if (PlanStatus.IsActive(PlanStatus.ParseBodyStatus(files.ReadAllText(file))))
                         active.Add(Path.GetRelativePath(repositoryRoot, file).Replace('\\', '/'));
                 }
             }
@@ -235,9 +236,6 @@ public sealed partial class PlanFacts(IPlanFileResolver planPaths, IFileSystem f
 
         return named.Count == 1 ? named[0] : null;
     }
-
-    [GeneratedRegex(@"\*\*Status:(?:\*\*)?\s*(?:Ready|In[ -]progress)(?![\w-])", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant)]
-    private static partial Regex ActiveStatusRegex();
 
     [GeneratedRegex(@"^[ \t]*(?:TASK_ID|TASK|Task)[ \t]*[:#]?[ \t]*(?<id>[A-Za-z]{0,4}-?\d+[A-Za-z0-9.]*)\b", RegexOptions.Multiline | RegexOptions.CultureInvariant)]
     private static partial Regex TaskLabelRegex();

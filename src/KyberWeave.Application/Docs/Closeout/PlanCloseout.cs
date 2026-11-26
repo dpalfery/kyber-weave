@@ -329,8 +329,8 @@ public sealed partial class PlanCloseout
 
         front = FrontmatterStatus().Replace(front, "status: archived", 1);
         body = BodyStatusValue().IsMatch(body)
-            ? BodyStatusValue().Replace(body, $"**Status:** Archived, {stamp}", 1)
-            : BodyStatusBold().Replace(body, $"**Status: Archived, {stamp}.**", 1);
+            ? BodyStatusValue().Replace(body, $"**Status:** {PlanStatus.Archived}, {stamp}", 1)
+            : BodyStatusBold().Replace(body, $"**Status: {PlanStatus.Archived}, {stamp}.**", 1);
         return front + body;
     }
 

@@ -835,9 +835,10 @@ public sealed partial class PlanTaskFileValidator
     /// Read from the body rather than the frontmatter, because this repository's vocabulary has no Ready
     /// status: an approved plan stays <c>status: current</c> and says <c>**Status: Ready**</c> in its
     /// opening paragraph, and an approved specification's <c>tasks.md</c> says <c>**Status:** Ready</c>
-    /// with the colon inside the bold label. <see cref="ReadyStatusRegex"/> accepts both forms.
+    /// with the colon inside the bold label. <see cref="PlanStatus.ParseBodyStatus"/> accepts both forms.
     /// </remarks>
-    private static bool IsReady(DocumentModel artifact) => ReadyStatusRegex().IsMatch(artifact.Body);
+    private static bool IsReady(DocumentModel artifact) =>
+        PlanStatus.IsReady(PlanStatus.ParseBodyStatus(artifact.Body));
 
     private string FullPath(string relativePath) =>
         Path.Combine(_repoRoot, relativePath.Replace('/', Path.DirectorySeparatorChar));
@@ -869,9 +870,4 @@ public sealed partial class PlanTaskFileValidator
 
     private static string Describe(IReadOnlyList<string> values) =>
         values.Count == 0 ? "none" : string.Join(", ", values);
-
-    // The plan form puts the colon inside the bold, `**Status: Ready**`; the spec form closes the
-    // bold after the colon, `**Status:** Ready`. Both name the same state.
-    [GeneratedRegex(@"\*\*Status:(?:\*\*)?\s*Ready(?![\w-])", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant)]
-    private static partial Regex ReadyStatusRegex();
 }

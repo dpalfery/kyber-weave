@@ -110,7 +110,7 @@ public sealed partial class PlanInventoryValidator
             if (!line.StartsWith('|'))
             {
                 statusColumn = -1;
-                if (RestatedStatus().Match(line) is { Success: true } prose)
+                if (RestatedStatus.Match(line) is { Success: true } prose)
                 {
                     report.Add(new Diagnostic(
                         StaleOpenEntry, Severity.Error,
@@ -130,7 +130,7 @@ public sealed partial class PlanInventoryValidator
                 continue;
             }
 
-            if (statusColumn >= cells.Length || !OpenStatus().IsMatch(cells[statusColumn])
+            if (statusColumn >= cells.Length || !OpenStatus.IsMatch(cells[statusColumn])
                 || RowLink().Match(line) is not { Success: true } link)
             {
                 continue;
@@ -148,12 +148,14 @@ public sealed partial class PlanInventoryValidator
         }
     }
 
-    [GeneratedRegex(@"^(?:Draft|Ready|In progress|Blocked)\b", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant)]
-    private static partial Regex OpenStatus();
-
     [GeneratedRegex(@"\]\(([^)#\s]+\.md)(?:#[^)]*)?\)", RegexOptions.CultureInvariant)]
     private static partial Regex RowLink();
 
-    [GeneratedRegex(@"(?:`[^`]+`|\])\s*\((?:Draft|Ready|In progress|Blocked)\)", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant)]
-    private static partial Regex RestatedStatus();
+    private static readonly Regex OpenStatus = new(
+        $@"^(?:{PlanStatus.OpenPattern})\b",
+        RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
+
+    private static readonly Regex RestatedStatus = new(
+        $@"(?:`[^`]+`|\])\s*\((?:{PlanStatus.OpenPattern})\)",
+        RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
 }

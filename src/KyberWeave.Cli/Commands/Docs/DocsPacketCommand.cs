@@ -9,6 +9,7 @@ using KyberWeave.Core.Arbiter.Facts;
 using KyberWeave.Core.Arbiter.Plans;
 using KyberWeave.Core.Configuration;
 using KyberWeave.Core.Diagnostics;
+using KyberWeave.Core.Docs.Model;
 using KyberWeave.Core.Docs.Parsing;
 using KyberWeave.Core.Docs.Search;
 using KyberWeave.Core.Docs.Validation;
@@ -227,7 +228,7 @@ public sealed class DocsPacketCommand(
         report.Add(new Diagnostic(
             PlanNotChosen,
             Severity.Error,
-            $"{active.Count} plans are Ready or In progress: {string.Join(", ", active)}.",
+            $"{active.Count} plans are {PlanStatus.ActiveWords}: {string.Join(", ", active)}.",
             "docs packet",
             Hint: "Run this command again with --plan <one of those plans>."));
         return null;
@@ -261,7 +262,7 @@ public sealed class DocsPacketCommand(
             return matches[0].Plan;
         }
 
-        string searched = $"No plan is Ready or In progress under the planning folders of {here} (the directory searched was {current}).";
+        string searched = $"No plan is {PlanStatus.ActiveWords} under the planning folders of {here} (the directory searched was {current}).";
         if (matches.Count == 0)
         {
             report.Add(new Diagnostic(

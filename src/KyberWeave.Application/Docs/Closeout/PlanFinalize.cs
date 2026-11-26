@@ -6,6 +6,7 @@ using KyberWeave.Contracts.Repositories;
 using KyberWeave.Contracts.Services;
 using KyberWeave.Core.Configuration;
 using KyberWeave.Core.Diagnostics;
+using KyberWeave.Core.Docs.Model;
 using KyberWeave.Core.Docs.Parsing;
 using KyberWeave.Core.Docs.Validation;
 using KyberWeave.Core.FileSystem;
@@ -153,10 +154,11 @@ public sealed partial class PlanFinalize
             return Refused();
         }
 
-        if (ReadyStatus().IsMatch(planText))
+        string? planStatus = PlanStatus.ParseBodyStatus(planText);
+        if (PlanStatus.IsReady(planStatus))
             return AlreadyReady(plan, report, taskFile);
 
-        if (!DraftStatus().IsMatch(planText))
+        if (!PlanStatus.IsDraft(planStatus))
         {
             report.Add(new Diagnostic(NotDraft, Severity.Error,
                 $"'{plan}' is not a Draft plan: its body has no '**Status: Draft**' line.", plan, plan,
@@ -203,7 +205,7 @@ public sealed partial class PlanFinalize
 
         string? newIndex = indexText is null ? null : WithReadyIndexRow(indexText, Path.GetFileName(plan));
         string newPlan = WithReadyStatus(withApproval, date);
-        if (!ReadyStatus().IsMatch(newPlan))
+        if (!PlanStatus.IsReady(PlanStatus.ParseBodyStatus(newPlan)))
         {
             report.Add(new Diagnostic(NotDraft, Severity.Error,
                 $"The Draft status line of '{plan}' is not in a form this step can rewrite. Nothing was changed.", plan, plan,
@@ -524,8 +526,8 @@ public sealed partial class PlanFinalize
         string body = text[front.Length..];
         front = FrontmatterStatus().Replace(front, "status: current", 1);
         body = DraftValueLine().IsMatch(body)
-            ? DraftValueLine().Replace(body, $"**Status:** Ready, {stamp}", 1)
-            : DraftBold().Replace(body, $"**Status: Ready, {stamp}.**", 1);
+            ? DraftValueLine().Replace(body, $"**Status:** {PlanStatus.Ready}, {stamp}", 1)
+            : DraftBold().Replace(body, $"**Status: {PlanStatus.Ready}, {stamp}.**", 1);
         return front + body;
     }
 
@@ -546,10 +548,10 @@ public sealed partial class PlanFinalize
                 header--;
             int column = Array.FindIndex(Cells(lines[header]), cell => string.Equals(cell, "Status", StringComparison.OrdinalIgnoreCase));
             string[] cells = Cells(lines[index]);
-            if (column < 0 || column >= cells.Length || !cells[column].StartsWith("Draft", StringComparison.OrdinalIgnoreCase))
+            if (column < 0 || column >= cells.Length || !cells[column].StartsWith(PlanStatus.Draft, StringComparison.OrdinalIgnoreCase))
                 continue;
 
-            cells[column] = "Ready";
+            cells[column] = PlanStatus.Ready;
             lines[index] = "| " + string.Join(" | ", cells) + " |";
         }
 
@@ -674,16 +676,10 @@ public sealed partial class PlanFinalize
     private static void Say(DiagnosticReport report, string plan, string message) =>
         report.Add(new Diagnostic(Step, Severity.Info, message, plan, plan));
 
-    [GeneratedRegex(@"^\*\*Status:(?:\*\*)?[ \t]*Ready(?![\w-])", RegexOptions.Multiline | RegexOptions.IgnoreCase | RegexOptions.CultureInvariant)]
-    private static partial Regex ReadyStatus();
-
-    [GeneratedRegex(@"^\*\*Status:(?:\*\*)?[ \t]*Draft(?![\w-])", RegexOptions.Multiline | RegexOptions.IgnoreCase | RegexOptions.CultureInvariant)]
-    private static partial Regex DraftStatus();
-
-    [GeneratedRegex(@"^\*\*Status:\*\*[ \t]*Draft[^\r\n]*", RegexOptions.Multiline | RegexOptions.IgnoreCase | RegexOptions.CultureInvariant)]
+    [GeneratedRegex(@"^\*\*Status:\*\*[ \t]*" + PlanStatus.Draft + @"[^\r\n]*", RegexOptions.Multiline | RegexOptions.IgnoreCase | RegexOptions.CultureInvariant)]
     private static partial Regex DraftValueLine();
 
-    [GeneratedRegex(@"^\*\*Status:[ \t]*Draft[^*\r\n]*\*\*", RegexOptions.Multiline | RegexOptions.IgnoreCase | RegexOptions.CultureInvariant)]
+    [GeneratedRegex(@"^\*\*Status:[ \t]*" + PlanStatus.Draft + @"[^*\r\n]*\*\*", RegexOptions.Multiline | RegexOptions.IgnoreCase | RegexOptions.CultureInvariant)]
     private static partial Regex DraftBold();
 
     [GeneratedRegex(@"^status:[^\r\n]*", RegexOptions.Multiline | RegexOptions.CultureInvariant)]

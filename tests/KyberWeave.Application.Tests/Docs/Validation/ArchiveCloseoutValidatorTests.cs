@@ -54,6 +54,28 @@ public sealed class ArchiveCloseoutValidatorTests
         return fixture.WithCatalog().Write(TargetPath, target);
     }
 
+    /// <summary>
+    /// C2 reads every body form a plan writes, not just the specification form: the skeleton and the closeout
+    /// write <c>**Status: In progress.**</c>, and finalize writes <c>Ready, 2026-11-26</c> after the word.
+    /// </summary>
+    [Theory]
+    [InlineData("**Status:** Ready, 2026-11-26")]
+    [InlineData("**Status: In progress.**")]
+    [InlineData("**Status**: Blocked")]
+    public void ALiveBodyStatusInAnyPlanFormFailsCloseoutAsC2(string statusLine)
+    {
+        string plan = CloseoutCorpus.PlanDocument(bodyStatus: "Complete")
+            .Replace("**Status:** Complete", statusLine, StringComparison.Ordinal);
+        using DocFixture fixture = WithTarget(DocFixture.CreateInMemory())
+            .Write(PlanPath, plan);
+
+        Diagnostic finding = Assert.Single(
+            Validate(fixture, KyberWeaveConfigDefaults.Product, new ChangedPath(PlanPath, ChangeKind.Added)).Items);
+
+        Assert.Equal(ArchiveCloseoutValidator.MissingCloseoutEvidence, finding.Code);
+        Assert.Contains("C2", FindingText(finding), StringComparison.Ordinal);
+    }
+
     /// <summary>A draft in the archive is not closed work, so its status fails C1.</summary>
     [Fact]
     public void DraftFrontmatterStatusFailsCloseoutAsC1()
