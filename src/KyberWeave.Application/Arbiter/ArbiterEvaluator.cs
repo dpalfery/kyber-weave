@@ -285,7 +285,7 @@ public sealed class ArbiterEvaluator : IArbiterEvaluator
 
         // The review's REVIEW_RUN names the store its findings sit in. A lens return's first finding is the
         // one the nitpick filter reads; a refutation reads whether the filter dropped the finding it refutes.
-        string? reviewRun = HeaderBlock.Parse(prompt).Headers.TryGetValue("REVIEW_RUN", out string? run) ? run : null;
+        string? reviewRun = HeaderBlock.Parse(prompt).Headers.TryGetValue(DispatchHeaders.ReviewRun, out string? run) ? run : null;
         IReadOnlyList<ReturnedFinding> returned = string.Equals(trigger, "lens.returned", StringComparison.Ordinal)
             ? ReturnedFinding.ParseAll(ev.ToolOutput)
             : [];
@@ -323,7 +323,7 @@ public sealed class ArbiterEvaluator : IArbiterEvaluator
             && FailureFacts.ClusterOf(prompt) is { } cluster
             && FailureFacts.CurrentTextOf(prompt) is { } currentFailure)
         {
-            classification.Headers.TryGetValue("PLAN_FILE", out string? failurePlan);
+            classification.Headers.TryGetValue(DispatchHeaders.PlanFile, out string? failurePlan);
             IArbiterRunStore failures = ReviewStore(config);
             FailureRecord? prior = FailureFacts.LastFor(failures.ReadFailures(failurePlan, planDigest, ev.Session), cluster);
             facts = facts
@@ -464,7 +464,7 @@ public sealed class ArbiterEvaluator : IArbiterEvaluator
         // A return that states no recognised verdict records unknown; it never drops the finding it refutes.
         if (!effective.DryRun && reviewRun is not null
             && string.Equals(trigger, "refute.returned", StringComparison.Ordinal)
-            && HeaderBlock.Parse(prompt).Headers.TryGetValue("REFUTE", out string? refuteHeader))
+            && HeaderBlock.Parse(prompt).Headers.TryGetValue(DispatchHeaders.Refute, out string? refuteHeader))
         {
             await ReviewStore(config)
                 .AppendRefutationOutcomeAsync(reviewRun, ReturnedFinding.IdKey(refuteHeader), RefutationOutcome.Parse(ev.ToolOutput), cancellationToken)
@@ -497,7 +497,7 @@ public sealed class ArbiterEvaluator : IArbiterEvaluator
 
     /// <summary>The parent technology of the dispatch's TECHNOLOGY header, resolved as the gate run does; null when the host has no file system or the dispatch names none.</summary>
     private string? ParentTechnologyOf(KyberWeaveConfig config, TriggerClassification classification, string? repoRoot) =>
-        _files is not null && repoRoot is not null && classification.Headers.TryGetValue("TECHNOLOGY", out string? technology)
+        _files is not null && repoRoot is not null && classification.Headers.TryGetValue(DispatchHeaders.Technology, out string? technology)
             ? TaskGateResolver.ParentTechnologyOrNone(_files, repoRoot, config, technology)
             : null;
 
@@ -519,7 +519,7 @@ public sealed class ArbiterEvaluator : IArbiterEvaluator
             return taskTechnology.Trim();
         }
 
-        return classification.Headers.TryGetValue("TECHNOLOGY", out string? header)
+        return classification.Headers.TryGetValue(DispatchHeaders.Technology, out string? header)
                && !string.IsNullOrWhiteSpace(header)
             ? header.Trim()
             : null;
@@ -1310,8 +1310,8 @@ public sealed class ArbiterEvaluator : IArbiterEvaluator
         string? recordId = null)
     {
         DateTimeOffset now = _clock.GetUtcNow();
-        classification.Headers.TryGetValue("PLAN_FILE", out string? planFile);
-        classification.Headers.TryGetValue("TASK", out string? task);
+        classification.Headers.TryGetValue(DispatchHeaders.PlanFile, out string? planFile);
+        classification.Headers.TryGetValue(DispatchHeaders.Task, out string? task);
         string repeatKey = rules.Count > 0 ? rules[0].Id : trigger;
         int repeat = _decisionLog.Repeat(repeatKey, planFile, planDigest, task, ev.Session);
         ArbiterDecisionRecord record = new(
@@ -1544,11 +1544,11 @@ public sealed class ArbiterEvaluator : IArbiterEvaluator
 
     private static ArbiterLedgerHeaders? BuildHeaders(TriggerClassification classification, string prompt)
     {
-        classification.Headers.TryGetValue("PLAN_FILE", out string? planFile);
-        classification.Headers.TryGetValue("TASK", out string? task);
-        classification.Headers.TryGetValue("LENS", out string? lens);
-        classification.Headers.TryGetValue("REFUTE", out string? refute);
-        classification.Headers.TryGetValue("TECHNOLOGY", out string? technology);
+        classification.Headers.TryGetValue(DispatchHeaders.PlanFile, out string? planFile);
+        classification.Headers.TryGetValue(DispatchHeaders.Task, out string? task);
+        classification.Headers.TryGetValue(DispatchHeaders.Lens, out string? lens);
+        classification.Headers.TryGetValue(DispatchHeaders.Refute, out string? refute);
+        classification.Headers.TryGetValue(DispatchHeaders.Technology, out string? technology);
         // An escalation dispatch answers a ledger event and opens with STATUS: ARBITER_ESCALATION, so it has no
         // routing header block; the plan it serves is the PLAN_FILE line inside the envelope. Without it the
         // planner's attestation of that plan's tasks could not be scoped to it (see the architecture's return pairing).

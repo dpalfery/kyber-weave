@@ -30,7 +30,7 @@ internal static class FailureFacts
     public static string? ClusterOf(string prompt)
     {
         ArgumentNullException.ThrowIfNull(prompt);
-        string prefix = TriggerClassifier.FailureClusterMarker + ":";
+        string prefix = DispatchHeaders.FailureCluster + ":";
         string? first = BodyLines(prompt).FirstOrDefault();
         if (first is null || !first.StartsWith(prefix, StringComparison.Ordinal))
         {

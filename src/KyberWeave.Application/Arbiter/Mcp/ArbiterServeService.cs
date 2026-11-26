@@ -642,7 +642,7 @@ public sealed class ArbiterServeService(
                     "for example `id: security/key-in-argv`.";
             }
 
-            if (!HeaderBlock.Parse("REFUTE: " + block.Id).TryGet("REFUTE", out _))
+            if (!HeaderBlock.Parse("REFUTE: " + block.Id).TryGet(DispatchHeaders.Refute, out _))
             {
                 return $"The finding id '{block.Id}' is not lens/slug: use one lens name, a slash and a lowercase slug, " +
                     "for example `id: security/key-in-argv`.";

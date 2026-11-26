@@ -29,18 +29,6 @@ public static partial class TriggerClassifier
         "finalization",
     };
 
-    /// <summary>
-    /// The marker the conductor writes when it hands the run-start step to a worker, because it has no
-    /// shell of its own to run the tool with.
-    /// </summary>
-    private const string RunStartMarker = "RUN-START";
-
-    /// <summary>
-    /// The marker a conductor writes first on a rework dispatch, naming the failure cluster the worker is
-    /// reworking. Its <c>FAILURE:</c> section carries the failing output the same-failure rule compares.
-    /// </summary>
-    internal const string FailureClusterMarker = "FAILURE-CLUSTER";
-
     /// <summary>Whether <paramref name="harness"/> hooks project-wide rather than per agent.</summary>
     public static bool IsProjectWideHarness(string harness)
     {
@@ -84,7 +72,7 @@ public static partial class TriggerClassifier
             .Split('\n')
             .Select(line => line.Trim())
             .Where(line => line.Length > 0)];
-        bool hasPlanFile = headers.ContainsKey("PLAN_FILE");
+        bool hasPlanFile = headers.ContainsKey(DispatchHeaders.PlanFile);
         string? first = body.Count > 0 ? body[0] : null;
         string? second = body.Count > 1 ? body[1] : null;
 
@@ -93,11 +81,11 @@ public static partial class TriggerClassifier
             if (first.StartsWith("INTAKE:", StringComparison.Ordinal))
                 return "INTAKE";
             if (IsRunStartMarker(first))
-                return RunStartMarker;
+                return DispatchHeaders.RunStart;
             if (first.StartsWith("FINDINGS:", StringComparison.Ordinal))
                 return "FINDINGS";
-            if (first.StartsWith(FailureClusterMarker + ":", StringComparison.Ordinal))
-                return FailureClusterMarker;
+            if (first.StartsWith(DispatchHeaders.FailureCluster + ":", StringComparison.Ordinal))
+                return DispatchHeaders.FailureCluster;
             if (first.StartsWith("STATUS: ARBITER_ESCALATION", StringComparison.Ordinal))
                 return "STATUS: ARBITER_ESCALATION";
             if (string.Equals(first, "FINALIZE", StringComparison.Ordinal) && hasPlanFile)
@@ -107,7 +95,7 @@ public static partial class TriggerClassifier
         }
 
         if (hasPlanFile)
-            return "PLAN_FILE";
+            return DispatchHeaders.PlanFile;
 
         return null;
     }
@@ -119,7 +107,7 @@ public static partial class TriggerClassifier
     /// </summary>
     private static bool IsRunStartMarker(string line)
     {
-        string prefix = RunStartMarker + ":";
+        string prefix = DispatchHeaders.RunStart + ":";
         return line.StartsWith(prefix, StringComparison.Ordinal)
                && string.Equals(line[prefix.Length..].Trim(), "true", StringComparison.OrdinalIgnoreCase);
     }
@@ -182,7 +170,7 @@ public static partial class TriggerClassifier
             return new TriggerClassification(null, null, ArbiterCallerSources.None, target, targetClass, headers, marker, true);
 
         (string? resolved, string resolvedSource) = ResolveCaller(ev, target, block, targetClass);
-        bool marked = headers.ContainsKey("KYBER-ARBITER");
+        bool marked = headers.ContainsKey(DispatchHeaders.Marker);
         bool unidentified = resolved is null;
 
         // A project-wide hook fires for every agent, so an unmarked dispatch from a caller nobody names passes,
@@ -255,9 +243,9 @@ public static partial class TriggerClassifier
     {
         bool lensTarget = string.Equals(target, "review-lens", StringComparison.Ordinal)
             || string.Equals(target, "review-triage", StringComparison.Ordinal);
-        if (lensTarget && headers.ContainsKey("LENS"))
+        if (lensTarget && headers.ContainsKey(DispatchHeaders.Lens))
             return "lens.spawn";
-        if (string.Equals(target, "review-lens", StringComparison.Ordinal) && headers.ContainsKey("REFUTE"))
+        if (string.Equals(target, "review-lens", StringComparison.Ordinal) && headers.ContainsKey(DispatchHeaders.Refute))
             return "refute.spawn";
         return null;
     }
@@ -284,7 +272,7 @@ public static partial class TriggerClassifier
         // of its own, so the dispatch carries no PLAN_FILE. KW-ARB-PLAN-001 asks whether a delegate names a
         // plan, and a confident no would refuse the very route the marker exists for; investigate keeps the roster check
         // and KW-ARB-READONLY-001 doing their work over the dispatch instead.
-        if (string.Equals(marker, RunStartMarker, StringComparison.Ordinal))
+        if (string.Equals(marker, DispatchHeaders.RunStart, StringComparison.Ordinal))
             return "investigate";
 
         // Where a sub-agent cannot dispatch, the review-council skill has the session a human started (the
@@ -316,10 +304,10 @@ public static partial class TriggerClassifier
             return "investigate";
 
         if (caller is null
-            && headers.ContainsKey("KYBER-ARBITER")
+            && headers.ContainsKey(DispatchHeaders.Marker)
             && string.Equals(targetClass, CapabilityProfiles.ReadOnlyClass, StringComparison.Ordinal)
-            && !headers.ContainsKey("PLAN_FILE")
-            && !headers.ContainsKey("TASK"))
+            && !headers.ContainsKey(DispatchHeaders.PlanFile)
+            && !headers.ContainsKey(DispatchHeaders.Task))
             return "investigate";
 
         // An identified caller outside its roster still classifies as investigate;
@@ -327,7 +315,7 @@ public static partial class TriggerClassifier
         if (caller is not null)
             return "investigate";
 
-        if (headers.ContainsKey("KYBER-ARBITER"))
+        if (headers.ContainsKey(DispatchHeaders.Marker))
             return "investigate";
 
         // The root session handing a Squad writer work is a delegation whether or not it wrote headers: the

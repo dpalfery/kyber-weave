@@ -42,7 +42,7 @@ public sealed partial class ReviewSeatRecorder(IWritableFileSystem files, IPathR
         }
 
         string lens = shape.Groups["lens"].Value;
-        if (HeaderBlock.Parse(prompt).Headers.TryGetValue("LENS", out string? declared)
+        if (HeaderBlock.Parse(prompt).Headers.TryGetValue(DispatchHeaders.Lens, out string? declared)
             && !string.Equals(declared, lens, StringComparison.Ordinal))
         {
             context.Log.WriteLine(

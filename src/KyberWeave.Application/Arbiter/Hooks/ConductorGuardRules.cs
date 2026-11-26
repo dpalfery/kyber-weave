@@ -96,7 +96,7 @@ internal static partial class ConductorGuardRules
         string prompt = call.Prompt ?? string.Empty;
         return string.Equals(
                 TriggerClassifier.PlannerMarkerFor(prompt, HeaderBlock.Parse(prompt).Headers),
-                "RUN-START",
+                DispatchHeaders.RunStart,
                 StringComparison.Ordinal)
             ? null
             : target;

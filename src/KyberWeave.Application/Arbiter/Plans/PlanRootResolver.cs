@@ -38,9 +38,9 @@ public sealed class PlanRootResolver(
         ArgumentNullException.ThrowIfNull(prompt);
 
         HeaderBlock block = HeaderBlock.Parse(prompt);
-        string? planFile = block.Headers.TryGetValue("PLAN_FILE", out string? valid)
+        string? planFile = block.Headers.TryGetValue(DispatchHeaders.PlanFile, out string? valid)
             ? valid
-            : block.RawValues.TryGetValue("PLAN_FILE", out string? raw) ? raw : null;
+            : block.RawValues.TryGetValue(DispatchHeaders.PlanFile, out string? raw) ? raw : null;
         return ResolvePlanRoot(hookRoot, planFile, prompt, listWorktrees);
     }
 

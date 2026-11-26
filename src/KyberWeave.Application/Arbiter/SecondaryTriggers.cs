@@ -28,7 +28,7 @@ internal static class SecondaryTriggers
     private const string BugCrusherInvestigator = AgentRoles.BugCrusherInvestigator;
     private const string DocsDev = AgentRoles.DocsDev;
     private const string IntakeMarker = "INTAKE";
-    private const string DocsImpactMarker = "DOCS-IMPACT: true";
+    private const string DocsImpactMarker = DispatchHeaders.DocsImpact + ": true";
 
     /// <summary>Returns the secondary triggers for <paramref name="primaryTrigger"/>, in evaluation order.</summary>
     /// <param name="primaryTrigger">The primary trigger the dispatch classified as.</param>

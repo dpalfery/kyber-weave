@@ -19,18 +19,7 @@ namespace KyberWeave.Core.Arbiter.Facts;
 public sealed partial class HeaderBlock
 {
     /// <summary>The closed header set.</summary>
-    public static IReadOnlySet<string> ClosedNames { get; } = new HashSet<string>(StringComparer.Ordinal)
-    {
-        "KYBER-ARBITER",
-        "PLAN_FILE",
-        "TASK",
-        "LENS",
-        "REFUTE",
-        "REVIEW_RUN",
-        "TECHNOLOGY",
-        "PRIOR_RESULTS",
-        "FAILED_ATTEMPTS",
-    };
+    public static IReadOnlySet<string> ClosedNames => DispatchHeaders.ClosedNames;
 
     /// <summary>The lens names a <c>LENS</c> header or <c>REFUTE</c> lens may name: the review lens catalogue, so a new lens is routable the day it is added.</summary>
     public static IReadOnlySet<string> LensNames { get; } =
@@ -59,7 +48,7 @@ public sealed partial class HeaderBlock
     public IReadOnlyDictionary<string, string> RawValues { get; }
 
     /// <summary>Whether the block carries the routing marker.</summary>
-    public bool IsMarked => Headers.ContainsKey("KYBER-ARBITER");
+    public bool IsMarked => Headers.ContainsKey(DispatchHeaders.Marker);
 
     /// <summary>How many leading lines the raw tier reads. Headers sit at the top of a dispatch.</summary>
     private const int RawScanLines = 40;
@@ -208,27 +197,27 @@ public sealed partial class HeaderBlock
 
     private static bool IsValidValue(string name, string value) => name switch
     {
-        "KYBER-ARBITER" => string.Equals(value, "true", StringComparison.Ordinal),
-        "PLAN_FILE" => IsValidPlanFile(value),
-        "TASK" => IsTaskId(value),
-        "LENS" => LensNames.Contains(value),
-        "REFUTE" => IsValidRefute(value),
+        DispatchHeaders.Marker => string.Equals(value, "true", StringComparison.Ordinal),
+        DispatchHeaders.PlanFile => IsValidPlanFile(value),
+        DispatchHeaders.Task => IsTaskId(value),
+        DispatchHeaders.Lens => LensNames.Contains(value),
+        DispatchHeaders.Refute => IsValidRefute(value),
         // The retry's scratch file: any non-empty path. The prompt service is what confines it to the scratch area.
-        "PRIOR_RESULTS" => value.Length > 0,
-        "FAILED_ATTEMPTS" => int.TryParse(
+        DispatchHeaders.PriorResults => value.Length > 0,
+        DispatchHeaders.FailedAttempts => int.TryParse(
             value,
             System.Globalization.NumberStyles.None,
             System.Globalization.CultureInfo.InvariantCulture,
             out _),
         // A technology is the name of one standards folder: no path separator, no space, no parent hop.
-        "TECHNOLOGY" => value.Length > 0
+        DispatchHeaders.Technology => value.Length > 0
             && !value.Contains('/', StringComparison.Ordinal)
             && !value.Contains('\\', StringComparison.Ordinal)
             && !string.Equals(value, ".", StringComparison.Ordinal)
             && !string.Equals(value, "..", StringComparison.Ordinal)
             && value.AsSpan().IndexOfAny(' ', '\t') < 0,
         // Any non-empty value: the store keys it by digest, so its characters and length name no path.
-        "REVIEW_RUN" => value.Length > 0,
+        DispatchHeaders.ReviewRun => value.Length > 0,
         _ => false,
     };
 
@@ -261,7 +250,7 @@ public sealed partial class HeaderBlock
     }
 
     [GeneratedRegex(
-        @"^(?<name>KYBER-ARBITER|PLAN_FILE|TASK|LENS|REFUTE|REVIEW_RUN|TECHNOLOGY|PRIOR_RESULTS|FAILED_ATTEMPTS):[ \t]*(?<value>\S.*?)[ \t]*$",
+        @"^(?<name>" + DispatchHeaders.NamesPattern + @"):[ \t]*(?<value>\S.*?)[ \t]*$",
         RegexOptions.CultureInvariant)]
     private static partial Regex HeaderLineRegex();
 

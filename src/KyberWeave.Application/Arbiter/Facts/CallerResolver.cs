@@ -57,9 +57,9 @@ public static class CallerResolver
 
     private static string? InferFromHeaders(IReadOnlyDictionary<string, string?> headers)
     {
-        if (Header(headers, "PLAN_FILE") is not null || Header(headers, "TASK") is not null)
+        if (Header(headers, DispatchHeaders.PlanFile) is not null || Header(headers, DispatchHeaders.Task) is not null)
             return AgentRoles.Conductor;
-        if (Header(headers, "LENS") is not null || Header(headers, "REFUTE") is not null)
+        if (Header(headers, DispatchHeaders.Lens) is not null || Header(headers, DispatchHeaders.Refute) is not null)
             return AgentRoles.CodeReviewer;
         string? target = Header(headers, "TARGET") ?? Header(headers, "DELEGATION_TARGET");
         if (target is not null && IsPlannerTarget(target))
