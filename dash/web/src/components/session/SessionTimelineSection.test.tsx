@@ -157,6 +157,32 @@ describe('SessionTimelineSection states', () => {
     expect(empty.textContent).toMatch(/no timeline spans recorded/i)
   })
 
+  it('keeps pager when a later page is empty but total remains (dbId 4704550871)', async () => {
+    const topRows = Array.from({ length: 25 }, (_, i) => ({
+      ...ROOT_NODE,
+      spanId: `top-${i}`,
+      childCount: 0,
+    }))
+    const fetchMock = vi.fn((input: unknown) => {
+      const url = String(input)
+      const page = Number(new URL(url, 'http://localhost').searchParams.get('page') ?? '1')
+      if (page === 2) {
+        return Promise.resolve(jsonResponse({ ...timelinePage([], 38400), total: 30, page: 2, offset: 25 }))
+      }
+      return Promise.resolve(jsonResponse({ ...timelinePage(topRows, 38400), total: 30, page: 1, offset: 0 }))
+    })
+    vi.stubGlobal('fetch', fetchMock)
+    mount(() => {})
+    const section = await screen.findByTestId('execution-timeline-section')
+    fireEvent.click(within(section).getByTestId('pager-next'))
+
+    await waitFor(() => expect(within(section).queryByTestId('timeline-node')).toBeNull())
+    expect(within(section).getByTestId('list-pager')).toBeTruthy()
+    expect(within(section).queryByTestId('timeline-empty')).toBeNull()
+    expect(screen.queryByText(/No timeline spans recorded/i)).toBeNull()
+    expect(within(section).getByText(/No spans on this page/i)).toBeTruthy()
+  })
+
   it('styles status badges by their failure and success classes', async () => {
     const failing = { ...ROOT_NODE, spanId: 'span-bad', name: 'Read', status: 'error' }
     const succeeding = { ...ROOT_NODE, spanId: 'span-good', name: 'Bash', status: 'ok' }

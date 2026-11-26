@@ -341,10 +341,20 @@ export function SessionTimelineSection({
         ))}
       </div>
 
-      {topNodes.length === 0 ? (
+      {data.total === 0 ? (
         <p data-testid="timeline-empty" className="py-6 text-center text-xs text-tertiary-foreground italic">
           No timeline spans recorded.
         </p>
+      ) : topNodes.length === 0 ? (
+        <>
+          <p
+            data-testid="timeline-empty-page"
+            className="py-6 text-center text-xs text-tertiary-foreground italic"
+          >
+            No spans on this page. Use the page controls to return to a populated page.
+          </p>
+          <Pager {...timeline.pagerProps} ariaLabel="Timeline pages" />
+        </>
       ) : (
         <>
           {activeTimelineTab === 'tree' ? (
