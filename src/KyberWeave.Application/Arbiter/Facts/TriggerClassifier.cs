@@ -86,8 +86,8 @@ public static partial class TriggerClassifier
                 return "FINDINGS";
             if (first.StartsWith(DispatchHeaders.FailureCluster + ":", StringComparison.Ordinal))
                 return DispatchHeaders.FailureCluster;
-            if (first.StartsWith("STATUS: ARBITER_ESCALATION", StringComparison.Ordinal))
-                return "STATUS: ARBITER_ESCALATION";
+            if (first.StartsWith(ReturnStatus.EscalationLine, StringComparison.Ordinal))
+                return ReturnStatus.EscalationLine;
             if (string.Equals(first, "FINALIZE", StringComparison.Ordinal) && hasPlanFile)
                 return "FINALIZE";
             if (IsSpecPhasePair(first, second))

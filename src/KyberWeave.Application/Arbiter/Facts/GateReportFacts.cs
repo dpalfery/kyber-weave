@@ -55,7 +55,7 @@ public sealed class GateReportFacts(
     public const string RedAcceptedSummaryPrefix = "RED accepted";
 
     /// <summary>The digest line whose claim the rule checks.</summary>
-    private const string DigestMarker = "TASK_GATE:";
+    private const string DigestMarker = ReturnStatus.TaskGate;
 
     /// <summary>The digest field naming the report the claimed gate run wrote.</summary>
     private const string ReportField = "report=";
@@ -65,7 +65,7 @@ public sealed class GateReportFacts(
     /// that something went wrong or that nothing ran, so it is not a claim of a clean run
     /// and the report cannot back it.
     /// </summary>
-    private const string PassedStatus = "PASS";
+    private const string PassedStatus = ReturnStatus.Pass;
 
     /// <summary>Reads the gate report for a repository root.</summary>
     /// <returns>The report, or <c>null</c> when it is missing or unreadable.</returns>
@@ -283,7 +283,7 @@ public sealed class GateReportFacts(
             claims.Any(c => string.Equals(CanonicalReportPath(c.ReportPath, readBase), finalCanonical, pathComparison) &&
                             !string.Equals(c.Claimed, PassedStatus, StringComparison.Ordinal)))
         {
-            return finalClaim with { Claimed = "FAIL" };
+            return finalClaim with { Claimed = ReturnStatus.Fail };
         }
 
         return finalClaim;

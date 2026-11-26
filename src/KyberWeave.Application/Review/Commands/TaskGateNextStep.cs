@@ -1,3 +1,4 @@
+using KyberWeave.Core.Arbiter;
 using KyberWeave.Core.Processes;
 using KyberWeave.Core.Review;
 
@@ -104,17 +105,17 @@ public static class TaskGateNextStep
     {
         int skipped = report.Gates.Count(gate => gate.NotApplicable);
         string status = report.Gates.Count == 0
-            ? "NONE_DECLARED"
-            : skipped == report.Gates.Count ? "NONE_APPLICABLE" : "PASS";
+            ? ReturnStatus.NoneDeclared
+            : skipped == report.Gates.Count ? ReturnStatus.NoneApplicable : ReturnStatus.Pass;
         return
         [
             NextPrefix + "commit your task's files and tests, then return this completion digest with that commit's sha; fill in the <...> fields:",
-            "STATUS: PASS",
+            ReturnStatus.Prefix + " " + ReturnStatus.Pass,
             "FILES: " + (paths.Count > 0 ? string.Join(", ", paths) : "<comma-separated paths>"),
             "TESTS: total=<N> failed=<N> passed=<N>",
             "COMMIT: <commit-sha>",
             "REMOTE_HEAD: <remote-head-sha | UNPUSHED>",
-            $"TASK_GATE: {status} — agent={agent} gates={report.Gates.Count} failed=none skipped={skipped} " +
+            $"{ReturnStatus.TaskGate} {status} — agent={agent} gates={report.Gates.Count} failed=none skipped={skipped} " +
             $"report={reportPath ?? "<none>"} runs={runCount}",
         ];
     }

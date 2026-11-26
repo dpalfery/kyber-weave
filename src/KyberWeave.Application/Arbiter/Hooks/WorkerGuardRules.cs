@@ -61,7 +61,7 @@ internal static class WorkerGuardRules
     internal const string PlatformReaderProfile = "platform-reader";
 
     /// <summary>The status line a worker whose budget ran out returns.</summary>
-    internal const string BudgetExceededStatus = "STATUS: BUDGET_EXCEEDED";
+    internal const string BudgetExceededStatus = ReturnStatus.Prefix + " " + ReturnStatus.BudgetExceeded;
 
     /// <summary>The Copilot CLI harness token.</summary>
     internal const string CopilotCliHarness = HarnessRegistry.CopilotCliToken;

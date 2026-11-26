@@ -2,6 +2,7 @@ using System.ComponentModel;
 using System.Text;
 using KyberWeave.Arbiter.Hooks;
 using KyberWeave.Contracts.Repositories;
+using KyberWeave.Core.Arbiter;
 using KyberWeave.Contracts.Services;
 using KyberWeave.Core.Configuration;
 using KyberWeave.Core.Diagnostics;
@@ -174,7 +175,9 @@ public sealed partial class DocsTools
     [Description("""
         Use when you need the same schema conformance gate as kyber-weave docs validate after
         editing governed documentation — especially after writing or revising a plan under
-        docs/plans — and before claiming PLAN_READY or PLAN_FINALIZED. Pass
+        docs/plans — and before claiming
+        """ + ReturnStatus.PlanReady + " " + """
+        or PLAN_FINALIZED. Pass
         projectPath when you work in a linked worktree; compare the provenance root to your checkout
         before trusting the verdict. Default mergeReady false is the planning gate while a plan stays in the
         active plans folder. Returns provenance, pass or fail with counts, then findings.
@@ -205,7 +208,9 @@ public sealed partial class DocsTools
     [Description("""
         Use when you need the same entity-drift gate as kyber-weave docs drift after
         documentation edits that cite code symbols or API routes, alongside docs_validate_governed_document_schema
-        before PLAN_READY or PLAN_FINALIZED. Pass projectPath when you work in
+        before
+        """ + ReturnStatus.PlanReady + " " + """
+        or PLAN_FINALIZED. Pass projectPath when you work in
         a linked worktree; compare the provenance root to your checkout. A missing CodeGraph index fails rather than
         passing silently. Warnings such as KW-DOC-DRIFT-003 do not fail the gate but still
         appear. Returns provenance, pass or fail with counts, then findings.
