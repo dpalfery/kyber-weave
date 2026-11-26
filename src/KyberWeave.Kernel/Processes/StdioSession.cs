@@ -87,8 +87,7 @@ public sealed class StdioSession : IDisposable
         _time = time;
         _budget = budget;
         _started = time.GetTimestamp();
-        _process = Process.Start(ProcessRunner.CreateSafeStartInfo(startInfo))
-                   ?? throw new InvalidOperationException("The child process could not be started.");
+        _process = ProcessRunner.StartRetryingTextFileBusy(ProcessRunner.CreateSafeStartInfo(startInfo));
         _processId = _process.Id;
 
         // Stderr is drained for the life of the child, not left to fill its pipe and block it. Only the first
