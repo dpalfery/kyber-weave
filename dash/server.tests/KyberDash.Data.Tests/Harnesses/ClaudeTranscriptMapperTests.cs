@@ -697,6 +697,13 @@ public class ClaudeTranscriptMapperTests
         Assert.Equal("claude:compact_boundary", batch.Records[1].AgentInstanceId);
         Assert.Equal("claude:compact_boundary", batch.Records[2].AgentInstanceId);
 
+        string?[] secondTurnTexts = [.. batch.Records[1].Parts.Select(static p => p.PlainText)];
+        string?[] thirdTurnTexts = [.. batch.Records[2].Parts.Select(static p => p.PlainText)];
+        Assert.DoesNotContain("Second summary", secondTurnTexts);
+        Assert.Contains("Answer 2", secondTurnTexts);
+        Assert.Contains("Second summary", thirdTurnTexts);
+        Assert.Contains("Answer 3", thirdTurnTexts);
+
         InMemoryRelationalStore store = new();
         store.WriteBatch(batch);
         CollectedRecord? roundTripped = store.FindRecord(batch.Records[1].RecordId);

@@ -789,6 +789,7 @@ public class ClaudeTranscriptMapper : IHarnessMapper
     {
         List<ParsedTurnGroup> turns = [];
         HashSet<string> pendingCompactionSessions = new(StringComparer.Ordinal);
+        Dictionary<string, ParsedTurnGroup> deferredCompactionTails = new(StringComparer.Ordinal);
 
         foreach (MergedLineGroup mergedGroup in mergedGroups)
         {
@@ -817,10 +818,16 @@ public class ClaudeTranscriptMapper : IHarnessMapper
 
                 if (turns.Count > 0 && HasTurnContent(parsed))
                 {
-                    int targetIndex = FindLastTurnIndexForSession(turns, parsed.SessionId);
-                    if (targetIndex >= 0)
+                    if (groupHasCompaction && sessionBucketKey is not null)
                     {
-                        turns[targetIndex] = MergeTailTurn(turns[targetIndex], parsed);
+                        // The summary belongs to the request the next kept turn sends, so it rides on that turn.
+                        deferredCompactionTails[sessionBucketKey] = deferredCompactionTails.TryGetValue(sessionBucketKey, out ParsedTurnGroup? earlier)
+                            ? MergeTailTurn(earlier, parsed)
+                            : parsed;
+                    }
+                    else
+                    {
+                        AttachUsageLessTurn(turns, parsed);
                     }
                 }
 
@@ -833,10 +840,29 @@ public class ClaudeTranscriptMapper : IHarnessMapper
                 parsed = parsed with { AgentInstanceId = CompactBoundaryAgentInstanceId };
             }
 
+            if (sessionBucketKey is not null && deferredCompactionTails.Remove(sessionBucketKey, out ParsedTurnGroup? deferred))
+            {
+                parsed = MergeHeadTurn(deferred, parsed);
+            }
+
             turns.Add(parsed);
         }
 
+        foreach (ParsedTurnGroup leftover in deferredCompactionTails.Values)
+        {
+            AttachUsageLessTurn(turns, leftover);
+        }
+
         return turns;
+    }
+
+    private static void AttachUsageLessTurn(List<ParsedTurnGroup> turns, ParsedTurnGroup tail)
+    {
+        int targetIndex = FindLastTurnIndexForSession(turns, tail.SessionId);
+        if (targetIndex >= 0)
+        {
+            turns[targetIndex] = MergeTailTurn(turns[targetIndex], tail);
+        }
     }
 
     private static int FindLastTurnIndexForSession(IReadOnlyList<ParsedTurnGroup> turns, string? sessionId)
@@ -1177,6 +1203,24 @@ public class ClaudeTranscriptMapper : IHarnessMapper
             SkillsInvoked = skillsInvoked,
             SkillsListed = skillsListed,
             RequestShapeHash = head.RequestShapeHash ?? tail.RequestShapeHash,
+        };
+    }
+
+    private static ParsedTurnGroup MergeHeadTurn(ParsedTurnGroup head, ParsedTurnGroup turn)
+    {
+        List<string> skillsInvoked = [.. head.SkillsInvoked];
+        AddDistinct(skillsInvoked, turn.SkillsInvoked);
+        List<string> skillsListed = [.. head.SkillsListed];
+        AddDistinct(skillsListed, turn.SkillsListed);
+        return turn with
+        {
+            Parts = [.. head.Parts, .. turn.Parts],
+            ToolCalls = [.. head.ToolCalls, .. turn.ToolCalls],
+            ToolResults = [.. head.ToolResults, .. turn.ToolResults],
+            SessionTitle = head.SessionTitle ?? turn.SessionTitle,
+            SkillsInvoked = skillsInvoked,
+            SkillsListed = skillsListed,
+            RequestShapeHash = turn.RequestShapeHash ?? head.RequestShapeHash,
         };
     }
 
