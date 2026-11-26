@@ -118,6 +118,28 @@ kyber-weave squad: error: Unknown preset 'architect'. Available presets: bench-a
 
 There were no dry-run agent lines and no changed model line. `architect` is a profile category in `models.yml`. `squad preset show` and `squad preset use` load a user preset file under `~/.kyber-weave/squad/presets/`, and no file there is named `architect`. `squad preset clear <scratch> --target opencode` exited 0. The scratch directory was then deleted. Missing tokens are not a finding.
 
+##### Spike S1 result
+
+PROPOSE: HomeReplace
+
+`opencode v2.4.1` on Darwin 27.3.0 arm64 (macOS 27.3), 2026-11-25 EST. `XDG_CONFIG_HOME` was unset, so the global root is `~/.config/opencode`. `opencode auth list` names OpenCode Go, GitHub Copilot, Google, LM Studio, OpenCode, Wafer, and Z.AI Coding Plan, and `opencode models` returned ids. `~/.config/opencode/agents/` already existed. `agents/probe-global.md` and `agents/probe-conflict.md` did not, and no existing file was edited.
+
+The scratch directory was `/tmp/kw-opencode-s1-layer.zmsgemxd`, outside the repository and outside `~/.config/opencode`. `OPENCODE_CONFIG_DIR` was that path. The listing command was `opencode debug agents --standalone` (`opencode debug agents` is the non-interactive "List all agents" verb; `--standalone` makes this process load config instead of the background service). It does not call a model.
+
+- B3. With `OPENCODE_CONFIG_DIR` set, the listing contained `probe-layer` (`description` `instance-layer probe`) and `probe-conflict`. It did not contain `probe-global`.
+- B4. The loaded `probe-conflict` description was `instance-layer conflict probe`.
+- B5. `opencode models --standalone` with `OPENCODE_CONFIG_DIR` set exited 0 and returned ids (146 lines). `opencode debug paths` kept `data` at `~/.local/share/opencode` and `db` at `~/.local/share/opencode/opencode.db` while `config` moved to the scratch directory. Auth state stayed in the data directory.
+- B6. With `OPENCODE_CONFIG_DIR` unset and `XDG_CONFIG_HOME` set to `/tmp/kw-opencode-s1-xdg.88mqc7ri`, `opencode debug paths` reported `config` as that tree's `opencode` directory, and `opencode debug agents --standalone` listed `probe-layer` (`instance-layer probe`) and did not list `probe-global`. The agent placed under the XDG config home loaded.
+
+`OPENCODE_CONFIG_DIR` replaces the config root rather than merging it with `~/.config/opencode`, credentials still resolve from the data directory, and the XDG fallback is the same kind of replacement and does load an agent placed there. That is HomeReplace, not a layered config. The catalog source was not edited. The same replacement means the user-global Arbiter plugin is not on the config path an instance points at `OPENCODE_CONFIG_DIR`: the A3 verdict above is that an instance install writes no plugin of its own.
+
+Removed, then confirmed absent:
+
+- `~/.config/opencode/agents/probe-global.md`
+- `~/.config/opencode/agents/probe-conflict.md`
+
+The scratch directory and the XDG temporary tree were removed as well.
+
 - **S2. Kilo override (`KILO_CONFIG_DIR`)**:
   - Repeat the S1 layered override test using `KILO_CONFIG_DIR` and `~/.config/kilo/agents/`.
 - **S3. Cursor override (`CURSOR_CONFIG_DIR`)**:
