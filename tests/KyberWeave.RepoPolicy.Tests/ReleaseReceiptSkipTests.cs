@@ -27,10 +27,21 @@ namespace KyberWeave.Tests;
 ///   (e) the publish jobs never gate their verification, and their hit paths
 ///       name concrete fail-closed commands, and
 ///   (f) <c>attest-sbom</c> mints SLSA build provenance for every archive
-///       beside the SBOM attestations, under the existing permission block.
+///       beside the SBOM attestations, under the existing permission block,
+///   (g) the verdict rejects a future-dated <c>saved_at_epoch</c> (a negative
+///       age) as a miss before comparing against the ceiling, matching the
+///       guard <c>ci.yml</c>'s verdicts carry,
+///   (h) the attestation verify retry loops start their flag unverified, so
+///       a persistent miss reaches the exit-1 check instead of passing
+///       vacuously, and
+///   (i) a chain hit names the proving run even when verification fails: the
+///       verdict's fresh echo carries <c>run_url</c>, and the report step runs
+///       under <c>if: always()</c>.
 ///
 /// The fail-closed exit behaviour of those shell commands is not statically
-/// observable; it is review scope, not test scope.
+/// observable; it is review scope, not test scope. The structures above —
+/// the guard's position, the flag's initialization, the step's condition —
+/// are statically observable and pinned here.
 /// </summary>
 public sealed class ReleaseReceiptSkipTests
 {
@@ -91,6 +102,42 @@ public sealed class ReleaseReceiptSkipTests
         Assert.True(
             keyLines >= 9,
             $"expected at least nine chain-key lines (one restore per job plus the save), found {keyLines}.");
+    }
+
+    [Fact]
+    public void TheChainVerdictRejectsAFutureDatedReceiptAsAMiss()
+    {
+        // A receipt whose saved_at_epoch lies in the future computes a
+        // negative age, which satisfies `age <= RECEIPT_MAX_AGE_SECONDS`; the
+        // verdict must reject it as a miss before the ceiling compare, the
+        // same guard every ci.yml verdict carries.
+        string[] chainAndPublishJobs =
+        {
+            "build", "build-kyberdash", "pack-squad", "build-tray", "sbom",
+            "artifact-sboms", "attest-sbom", "release", "gh-packages",
+        };
+
+        foreach (string job in chainAndPublishJobs)
+        {
+            string verdict = RequiredStep(StepBlocks(ReadJob(job)), "Decide whether the release chain can skip");
+
+            int futureGuard = verdict.IndexOf("(( age < 0 ))", StringComparison.Ordinal);
+            Assert.True(
+                futureGuard >= 0,
+                $"the '{job}' verdict has no negative-age guard; a future-dated receipt would skip the chain.");
+
+            int ceilingCompare = verdict.IndexOf("age <= RECEIPT_MAX_AGE_SECONDS", StringComparison.Ordinal);
+            Assert.True(
+                ceilingCompare > futureGuard,
+                $"the '{job}' verdict must reject a negative age before comparing against the ceiling.");
+
+            // The guard names why it rebuilt, so the log carries the same
+            // evidence the other miss paths do.
+            Assert.Contains(
+                "chain receipt is dated in the future",
+                verdict,
+                StringComparison.Ordinal);
+        }
     }
 
     [Fact]
@@ -230,6 +277,70 @@ public sealed class ReleaseReceiptSkipTests
         Assert.Contains("packages/nuget/", verify, StringComparison.Ordinal);
         Assert.Contains(".package_versions", verify, StringComparison.Ordinal);
         Assert.Contains("exit 1", verify, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void AttestationVerifyRetryLoopsStartUnverifiedSoAPersistentMissFails()
+    {
+        // The retry loops close with `[[ "${verified}" != "true" ]] && exit 1`;
+        // a flag initialized to true before the loop makes that check
+        // unreachable, so three failed attempts still exit 0. The flag must be
+        // false before the first attempt, and only the successful verify
+        // inside the loop raises it.
+        string release = ReadJob("release");
+        List<string> blocks = StepBlocks(release);
+
+        foreach (string stepName in new[] { "Verify SBOM attestations", "Verify provenance attestations" })
+        {
+            string step = RequiredStep(blocks, stepName);
+
+            int startsFalse = step.IndexOf("verified=false", StringComparison.Ordinal);
+            Assert.True(
+                startsFalse >= 0,
+                $"'{stepName}' must initialize its verified flag to false before the retry loop.");
+
+            int retryLoop = step.IndexOf("for attempt in 1 2 3", StringComparison.Ordinal);
+            Assert.True(
+                retryLoop > startsFalse,
+                $"'{stepName}' must initialize verified=false before the first retry attempt.");
+
+            int exitCheck = step.IndexOf("\"${verified}\" != \"true\"", StringComparison.Ordinal);
+            Assert.True(
+                exitCheck > retryLoop,
+                $"'{stepName}' must check the flag after the retry loop so a persistent miss exits 1.");
+        }
+    }
+
+    [Fact]
+    public void AChainHitNamesTheProvingRunEvenWhenVerificationFails()
+    {
+        // On a hit the proving run's URL is the only lead an operator has when
+        // verification fails: the report step must still run after a failed
+        // verify (`if: always()`), and the verdict's fresh echo must carry the
+        // run_url so the log names it even then.
+        string[] chainAndPublishJobs =
+        {
+            "build", "build-kyberdash", "pack-squad", "build-tray", "sbom",
+            "artifact-sboms", "attest-sbom", "release", "gh-packages",
+        };
+
+        foreach (string job in chainAndPublishJobs)
+        {
+            string verdict = RequiredStep(StepBlocks(ReadJob(job)), "Decide whether the release chain can skip");
+            Match freshEcho = Regex.Match(verdict, @"echo ""chain receipt is fresh[^\n]*""");
+            Assert.True(
+                freshEcho.Success,
+                $"the '{job}' verdict has no fresh-receipt echo line.");
+            Assert.Contains(
+                "${run_url",
+                freshEcho.Value,
+                StringComparison.Ordinal);
+        }
+
+        string release = ReadJob("release");
+        string report = RequiredStep(StepBlocks(release), "Report the run that published this release");
+        Assert.Contains("if: always()", report, StringComparison.Ordinal);
+        Assert.Contains("steps.verdict.outputs.run_url", report, StringComparison.Ordinal);
     }
 
     [Fact]

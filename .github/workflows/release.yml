@@ -287,10 +287,12 @@ jobs:
             saved_at_epoch="$(jq -r '.saved_at_epoch // ""' "${receipt}" 2>/dev/null || true)"
             if [[ "${saved_at_epoch}" =~ ^[0-9]+$ ]]; then
               age=$(( $(date +%s) - saved_at_epoch ))
-              if (( age <= RECEIPT_MAX_AGE_SECONDS )); then
+              if (( age < 0 )); then
+                echo "chain receipt is dated in the future (age ${age}s); rebuilding the chain"
+              elif (( age <= RECEIPT_MAX_AGE_SECONDS )); then
                 skip=true
                 run_url="$(jq -r '.run_url // ""' "${receipt}" 2>/dev/null || true)"
-                echo "chain receipt is fresh (age ${age}s of the ${RECEIPT_MAX_AGE_SECONDS}s ceiling); skipping the build chain"
+                echo "chain receipt is fresh (age ${age}s of the ${RECEIPT_MAX_AGE_SECONDS}s ceiling, published by ${run_url:-an unrecorded run}); skipping the build chain"
               else
                 echo "chain receipt is stale (age ${age}s of the ${RECEIPT_MAX_AGE_SECONDS}s ceiling); rebuilding the chain"
               fi
@@ -435,10 +437,12 @@ jobs:
             saved_at_epoch="$(jq -r '.saved_at_epoch // ""' "${receipt}" 2>/dev/null || true)"
             if [[ "${saved_at_epoch}" =~ ^[0-9]+$ ]]; then
               age=$(( $(date +%s) - saved_at_epoch ))
-              if (( age <= RECEIPT_MAX_AGE_SECONDS )); then
+              if (( age < 0 )); then
+                echo "chain receipt is dated in the future (age ${age}s); rebuilding the chain"
+              elif (( age <= RECEIPT_MAX_AGE_SECONDS )); then
                 skip=true
                 run_url="$(jq -r '.run_url // ""' "${receipt}" 2>/dev/null || true)"
-                echo "chain receipt is fresh (age ${age}s of the ${RECEIPT_MAX_AGE_SECONDS}s ceiling); skipping the build chain"
+                echo "chain receipt is fresh (age ${age}s of the ${RECEIPT_MAX_AGE_SECONDS}s ceiling, published by ${run_url:-an unrecorded run}); skipping the build chain"
               else
                 echo "chain receipt is stale (age ${age}s of the ${RECEIPT_MAX_AGE_SECONDS}s ceiling); rebuilding the chain"
               fi
@@ -607,10 +611,12 @@ jobs:
             saved_at_epoch="$(jq -r '.saved_at_epoch // ""' "${receipt}" 2>/dev/null || true)"
             if [[ "${saved_at_epoch}" =~ ^[0-9]+$ ]]; then
               age=$(( $(date +%s) - saved_at_epoch ))
-              if (( age <= RECEIPT_MAX_AGE_SECONDS )); then
+              if (( age < 0 )); then
+                echo "chain receipt is dated in the future (age ${age}s); rebuilding the chain"
+              elif (( age <= RECEIPT_MAX_AGE_SECONDS )); then
                 skip=true
                 run_url="$(jq -r '.run_url // ""' "${receipt}" 2>/dev/null || true)"
-                echo "chain receipt is fresh (age ${age}s of the ${RECEIPT_MAX_AGE_SECONDS}s ceiling); skipping the build chain"
+                echo "chain receipt is fresh (age ${age}s of the ${RECEIPT_MAX_AGE_SECONDS}s ceiling, published by ${run_url:-an unrecorded run}); skipping the build chain"
               else
                 echo "chain receipt is stale (age ${age}s of the ${RECEIPT_MAX_AGE_SECONDS}s ceiling); rebuilding the chain"
               fi
@@ -706,10 +712,12 @@ jobs:
             saved_at_epoch="$(jq -r '.saved_at_epoch // ""' "${receipt}" 2>/dev/null || true)"
             if [[ "${saved_at_epoch}" =~ ^[0-9]+$ ]]; then
               age=$(( $(date +%s) - saved_at_epoch ))
-              if (( age <= RECEIPT_MAX_AGE_SECONDS )); then
+              if (( age < 0 )); then
+                echo "chain receipt is dated in the future (age ${age}s); rebuilding the chain"
+              elif (( age <= RECEIPT_MAX_AGE_SECONDS )); then
                 skip=true
                 run_url="$(jq -r '.run_url // ""' "${receipt}" 2>/dev/null || true)"
-                echo "chain receipt is fresh (age ${age}s of the ${RECEIPT_MAX_AGE_SECONDS}s ceiling); skipping the build chain"
+                echo "chain receipt is fresh (age ${age}s of the ${RECEIPT_MAX_AGE_SECONDS}s ceiling, published by ${run_url:-an unrecorded run}); skipping the build chain"
               else
                 echo "chain receipt is stale (age ${age}s of the ${RECEIPT_MAX_AGE_SECONDS}s ceiling); rebuilding the chain"
               fi
@@ -958,10 +966,12 @@ jobs:
             saved_at_epoch="$(jq -r '.saved_at_epoch // ""' "${receipt}" 2>/dev/null || true)"
             if [[ "${saved_at_epoch}" =~ ^[0-9]+$ ]]; then
               age=$(( $(date +%s) - saved_at_epoch ))
-              if (( age <= RECEIPT_MAX_AGE_SECONDS )); then
+              if (( age < 0 )); then
+                echo "chain receipt is dated in the future (age ${age}s); rebuilding the chain"
+              elif (( age <= RECEIPT_MAX_AGE_SECONDS )); then
                 skip=true
                 run_url="$(jq -r '.run_url // ""' "${receipt}" 2>/dev/null || true)"
-                echo "chain receipt is fresh (age ${age}s of the ${RECEIPT_MAX_AGE_SECONDS}s ceiling); skipping the build chain"
+                echo "chain receipt is fresh (age ${age}s of the ${RECEIPT_MAX_AGE_SECONDS}s ceiling, published by ${run_url:-an unrecorded run}); skipping the build chain"
               else
                 echo "chain receipt is stale (age ${age}s of the ${RECEIPT_MAX_AGE_SECONDS}s ceiling); rebuilding the chain"
               fi
@@ -1060,10 +1070,12 @@ jobs:
             saved_at_epoch="$(jq -r '.saved_at_epoch // ""' "${receipt}" 2>/dev/null || true)"
             if [[ "${saved_at_epoch}" =~ ^[0-9]+$ ]]; then
               age=$(( $(date +%s) - saved_at_epoch ))
-              if (( age <= RECEIPT_MAX_AGE_SECONDS )); then
+              if (( age < 0 )); then
+                echo "chain receipt is dated in the future (age ${age}s); rebuilding the chain"
+              elif (( age <= RECEIPT_MAX_AGE_SECONDS )); then
                 skip=true
                 run_url="$(jq -r '.run_url // ""' "${receipt}" 2>/dev/null || true)"
-                echo "chain receipt is fresh (age ${age}s of the ${RECEIPT_MAX_AGE_SECONDS}s ceiling); skipping the build chain"
+                echo "chain receipt is fresh (age ${age}s of the ${RECEIPT_MAX_AGE_SECONDS}s ceiling, published by ${run_url:-an unrecorded run}); skipping the build chain"
               else
                 echo "chain receipt is stale (age ${age}s of the ${RECEIPT_MAX_AGE_SECONDS}s ceiling); rebuilding the chain"
               fi
@@ -1172,10 +1184,12 @@ jobs:
             saved_at_epoch="$(jq -r '.saved_at_epoch // ""' "${receipt}" 2>/dev/null || true)"
             if [[ "${saved_at_epoch}" =~ ^[0-9]+$ ]]; then
               age=$(( $(date +%s) - saved_at_epoch ))
-              if (( age <= RECEIPT_MAX_AGE_SECONDS )); then
+              if (( age < 0 )); then
+                echo "chain receipt is dated in the future (age ${age}s); rebuilding the chain"
+              elif (( age <= RECEIPT_MAX_AGE_SECONDS )); then
                 skip=true
                 run_url="$(jq -r '.run_url // ""' "${receipt}" 2>/dev/null || true)"
-                echo "chain receipt is fresh (age ${age}s of the ${RECEIPT_MAX_AGE_SECONDS}s ceiling); skipping the build chain"
+                echo "chain receipt is fresh (age ${age}s of the ${RECEIPT_MAX_AGE_SECONDS}s ceiling, published by ${run_url:-an unrecorded run}); skipping the build chain"
               else
                 echo "chain receipt is stale (age ${age}s of the ${RECEIPT_MAX_AGE_SECONDS}s ceiling); rebuilding the chain"
               fi
@@ -1426,10 +1440,12 @@ jobs:
             saved_at_epoch="$(jq -r '.saved_at_epoch // ""' "${receipt}" 2>/dev/null || true)"
             if [[ "${saved_at_epoch}" =~ ^[0-9]+$ ]]; then
               age=$(( $(date +%s) - saved_at_epoch ))
-              if (( age <= RECEIPT_MAX_AGE_SECONDS )); then
+              if (( age < 0 )); then
+                echo "chain receipt is dated in the future (age ${age}s); rebuilding the chain"
+              elif (( age <= RECEIPT_MAX_AGE_SECONDS )); then
                 skip=true
                 run_url="$(jq -r '.run_url // ""' "${receipt}" 2>/dev/null || true)"
-                echo "chain receipt is fresh (age ${age}s of the ${RECEIPT_MAX_AGE_SECONDS}s ceiling); skipping the build chain"
+                echo "chain receipt is fresh (age ${age}s of the ${RECEIPT_MAX_AGE_SECONDS}s ceiling, published by ${run_url:-an unrecorded run}); skipping the build chain"
               else
                 echo "chain receipt is stale (age ${age}s of the ${RECEIPT_MAX_AGE_SECONDS}s ceiling); rebuilding the chain"
               fi
@@ -1760,7 +1776,10 @@ jobs:
           for archive in "${ARCHIVES_DIR}"/*.tar.gz "${ARCHIVES_DIR}"/*.zip "${ARCHIVES_DIR}"/*.exe; do
             [[ -f "$archive" ]] || continue
             echo "Verifying SBOM attestation for ${archive}"
-            verified=true
+            # WHY starts false: only a successful verify inside the retry loop
+            # raises it, so a persistent miss reaches the exit 1 below instead
+            # of passing vacuously.
+            verified=false
             for attempt in 1 2 3; do
               if gh attestation verify "${archive}" --repo "${REPO}" --predicate-type "https://cyclonedx.org/bom"; then
                 verified=true
@@ -1806,7 +1825,10 @@ jobs:
           for archive in "${ARCHIVES_DIR}"/*.tar.gz "${ARCHIVES_DIR}"/*.zip "${ARCHIVES_DIR}"/*.exe; do
             [[ -f "$archive" ]] || continue
             echo "Verifying provenance attestation for ${archive}"
-            verified=true
+            # Same shape as the SBOM loop above: the flag starts false so a
+            # persistent miss reaches the exit 1 below instead of passing
+            # vacuously.
+            verified=false
             for attempt in 1 2 3; do
               if gh attestation verify "${archive}" --repo "${REPO}" --predicate-type "https://slsa.dev/provenance/v1"; then
                 verified=true
@@ -1829,7 +1851,11 @@ jobs:
           fi
           echo "All ${verified_count} published archives carry a verified SLSA provenance attestation"
 
+      # Runs even when a verify step above failed: on a chain hit the proving
+      # run's URL is the only lead an operator has for what published the
+      # release that mismatched, and a skipped report would take it with it.
       - name: Report the run that published this release
+        if: always()
         env:
           PRIOR_RUN_URL: ${{ steps.verdict.outputs.run_url }}
         run: |
@@ -1922,10 +1948,12 @@ jobs:
             saved_at_epoch="$(jq -r '.saved_at_epoch // ""' "${receipt}" 2>/dev/null || true)"
             if [[ "${saved_at_epoch}" =~ ^[0-9]+$ ]]; then
               age=$(( $(date +%s) - saved_at_epoch ))
-              if (( age <= RECEIPT_MAX_AGE_SECONDS )); then
+              if (( age < 0 )); then
+                echo "chain receipt is dated in the future (age ${age}s); rebuilding the chain"
+              elif (( age <= RECEIPT_MAX_AGE_SECONDS )); then
                 skip=true
                 run_url="$(jq -r '.run_url // ""' "${receipt}" 2>/dev/null || true)"
-                echo "chain receipt is fresh (age ${age}s of the ${RECEIPT_MAX_AGE_SECONDS}s ceiling); skipping the build chain"
+                echo "chain receipt is fresh (age ${age}s of the ${RECEIPT_MAX_AGE_SECONDS}s ceiling, published by ${run_url:-an unrecorded run}); skipping the build chain"
               else
                 echo "chain receipt is stale (age ${age}s of the ${RECEIPT_MAX_AGE_SECONDS}s ceiling); rebuilding the chain"
               fi
