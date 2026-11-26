@@ -57,7 +57,7 @@ public sealed class ArbiterHostConfig(IHostConfigLoader loader, IFileSystem file
 
         // Mirrors the lookup in the configuration loader: the default directory path, then the legacy root path.
         // TryLoad alone cannot report "missing" because it answers ProductDefaults when no file exists.
-        string defaultPath = Path.Combine(repoRoot, ".kyber-weave", "kyber-weave.yml");
+        string defaultPath = Path.Combine(repoRoot, UserStatePaths.DirectoryName, "kyber-weave.yml");
         string legacyPath = Path.Combine(repoRoot, "kyber-weave.yml");
         if (!files.FileExists(defaultPath) && !files.FileExists(legacyPath))
         {

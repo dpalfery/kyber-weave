@@ -324,7 +324,7 @@ public sealed class ConductorGuard(
         }
 
         if (Path.IsPathRooted(home)
-            && fullPath.StartsWith(Prefix(Path.Combine(home, ".kyber-weave", "runs")), StringComparison.OrdinalIgnoreCase))
+            && fullPath.StartsWith(Prefix(UserStatePaths.RunsDirectory(home)), StringComparison.OrdinalIgnoreCase))
         {
             return !links.HasLinkBelow(Prefix(home), fullPath);
         }

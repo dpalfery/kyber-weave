@@ -1003,10 +1003,7 @@ public sealed class SquadLifecycleService : ISquadLifecycleService
                 {
                     string targetToken = SquadTargetCatalog.GetToken(target);
                     string presetPath = Path.Combine(
-                        _stateStore.UserPaths.HomeDirectory,
-                        ".kyber-weave",
-                        "squad",
-                        "presets",
+                        UserStatePaths.SquadPresetsDirectory(_stateStore.UserPaths.HomeDirectory),
                         $"{presetName}.yml");
                     throw new SquadDeploymentConflictException(
                         $"Model preset '{presetName}' for target '{targetToken}' was not found at '{presetPath}'. " +

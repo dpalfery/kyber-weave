@@ -428,7 +428,7 @@ internal sealed class HookGitFacts(
     private string ResolveArbiterDirectory(string cwd) =>
         !string.IsNullOrWhiteSpace(arbiterDirectory)
             ? arbiterDirectory
-            : Path.Combine(cwd, "artifacts", "arbiter");
+            : ArbiterStateDirectory.ForProject(cwd);
 
     private void RecordPreSnapshot(
         string directory,

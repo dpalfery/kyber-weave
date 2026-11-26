@@ -1040,7 +1040,7 @@ public sealed class ReviewGatesService(
             string gitPath = Path.Combine(dir, ".git");
             if (files.DirectoryExists(gitPath)
                 || files.FileExists(gitPath)
-                || files.DirectoryExists(Path.Combine(dir, ".kyber-weave")))
+                || files.DirectoryExists(Path.Combine(dir, UserStatePaths.DirectoryName)))
                 return dir;
         }
 

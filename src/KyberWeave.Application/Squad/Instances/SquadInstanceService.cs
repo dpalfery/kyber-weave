@@ -1,3 +1,4 @@
+using KyberWeave.Core.FileSystem;
 using System.Reflection;
 using System.Text.RegularExpressions;
 using KyberWeave.Contracts.Paths;
@@ -96,9 +97,9 @@ public sealed partial class SquadInstanceService : ISquadInstanceService
         string targetToken = SquadTargetCatalog.GetToken(target);
         string home = stateStore.UserPaths.HomeDirectory;
 
-        string instanceRoot = Path.Combine(home, ".kyber-weave", "squad", "instances", targetToken, presetName);
+        string instanceRoot = Path.Combine(UserStatePaths.SquadInstancesDirectory(home), targetToken, presetName);
         string instanceStateDir =
-            Path.Combine(home, ".kyber-weave", "squad", "instance-state", targetToken, presetName);
+            Path.Combine(UserStatePaths.SquadInstanceStateDirectory(home), targetToken, presetName);
 
         VerifyPathContainment(home, targetToken, instanceRoot);
         string receiptPath = Path.Combine(instanceStateDir, ReceiptFileName);
@@ -229,9 +230,9 @@ public sealed partial class SquadInstanceService : ISquadInstanceService
         string targetToken = SquadTargetCatalog.GetToken(target);
         string home = stateStore.UserPaths.HomeDirectory;
 
-        string instanceRoot = Path.Combine(home, ".kyber-weave", "squad", "instances", targetToken, presetName);
+        string instanceRoot = Path.Combine(UserStatePaths.SquadInstancesDirectory(home), targetToken, presetName);
         string instanceStateDir =
-            Path.Combine(home, ".kyber-weave", "squad", "instance-state", targetToken, presetName);
+            Path.Combine(UserStatePaths.SquadInstanceStateDirectory(home), targetToken, presetName);
 
         VerifyPathContainment(home, targetToken, instanceRoot);
 
@@ -252,7 +253,7 @@ public sealed partial class SquadInstanceService : ISquadInstanceService
     {
         ISquadStateStore stateStore = _stateStore;
         string home = stateStore.UserPaths.HomeDirectory;
-        string instanceStateBase = Path.Combine(home, ".kyber-weave", "squad", "instance-state");
+        string instanceStateBase = UserStatePaths.SquadInstanceStateDirectory(home);
 
         if (!_files.DirectoryExists(instanceStateBase)) return;
 
@@ -285,7 +286,7 @@ public sealed partial class SquadInstanceService : ISquadInstanceService
     private void VerifyPathContainment(string home, string targetToken, string instanceRoot)
     {
         string expectedBase = _paths.GetFullPath(
-            Path.Combine(home, ".kyber-weave", "squad", "instances", targetToken),
+            Path.Combine(UserStatePaths.SquadInstancesDirectory(home), targetToken),
             _environment.CurrentDirectory);
         string fullInstanceRoot = _paths.GetFullPath(instanceRoot, _environment.CurrentDirectory);
         string prefix = expectedBase.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar) + Path.DirectorySeparatorChar;

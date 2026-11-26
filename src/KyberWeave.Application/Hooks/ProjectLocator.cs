@@ -1,3 +1,4 @@
+using KyberWeave.Core.FileSystem;
 using KyberWeave.Contracts.Paths;
 using KyberWeave.Contracts.Repositories;
 using KyberWeave.Domain.Hooks;
@@ -20,7 +21,7 @@ internal static class ProjectLocator
                 return directory;
             }
 
-            if (fallback is null && fileSystem.DirectoryExists(Path.Combine(directory, ".kyber-weave")))
+            if (fallback is null && fileSystem.DirectoryExists(Path.Combine(directory, UserStatePaths.DirectoryName)))
             {
                 fallback = directory;
             }

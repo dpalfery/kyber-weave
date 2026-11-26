@@ -1,3 +1,5 @@
+using KyberWeave.Core.FileSystem;
+
 namespace KyberWeave.Core.Configuration;
 
 /// <summary>Where the per-user host config lives.</summary>
@@ -9,6 +11,6 @@ public static class UserHostConfigPath
     public static string Of(string home)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(home);
-        return Path.Combine(home, ".kyber-weave", "kyber-weave.yml");
+        return UserStatePaths.HostConfigFile(home);
     }
 }

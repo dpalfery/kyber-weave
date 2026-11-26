@@ -1,3 +1,5 @@
+using KyberWeave.Core.FileSystem;
+
 namespace KyberWeave.Core.Docs.Mcp;
 
 /// <summary>How the repair wrote a file, which is what decides how removal undoes it.</summary>
@@ -76,7 +78,7 @@ public sealed class McpWiringReceipt
 
         return Path.Combine(
             repositoryRoot,
-            ".kyber-weave",
+            UserStatePaths.DirectoryName,
             "receipts",
             "mcp-wiring.json");
     }

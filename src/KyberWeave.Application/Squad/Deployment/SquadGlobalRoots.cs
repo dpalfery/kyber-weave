@@ -1,3 +1,4 @@
+using KyberWeave.Core.FileSystem;
 using System.Text.Json;
 
 namespace KyberWeave.Core.Squad.Deployment;
@@ -94,7 +95,7 @@ public sealed class SquadGlobalRoots : ISquadGlobalRootResolver
         _readFileText = readFileText ?? (_ => null);
         _homeDirectory = RequireFullyQualified(homeDirectory, nameof(homeDirectory));
         _isWindows = isWindows ?? OperatingSystem.IsWindows();
-        _instancesDirectory = Path.GetFullPath(Path.Combine(_homeDirectory, ".kyber-weave", "squad", "instances"));
+        _instancesDirectory = Path.GetFullPath(UserStatePaths.SquadInstancesDirectory(_homeDirectory));
     }
 
     /// <inheritdoc />

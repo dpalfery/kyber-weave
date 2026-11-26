@@ -126,7 +126,7 @@ public sealed class ArbiterDoctorService(
         }
 
         SquadReceipt? receipt = TryReadGlobalReceipt(home);
-        string lockPath = Path.Combine(home, ".kyber-weave", "squad", "global", "squad.lock.yml");
+        string lockPath = UserStatePaths.SquadLockFile(home);
         foreach (string token in globalTargets)
         {
             if (!IsHooked(token) || GlobalArbiterDirectory(token, home) is not { } arbiterDirectory)
@@ -233,7 +233,7 @@ public sealed class ArbiterDoctorService(
         try
         {
             string root = new SquadGlobalRoots(environment.GetVariable, home).ResolveGlobalRoot(target);
-            return Path.Combine(root, ".kyber-weave", "arbiter");
+            return UserStatePaths.ArbiterDirectory(root);
         }
         catch (ArgumentException)
         {
@@ -420,7 +420,7 @@ public sealed class ArbiterDoctorService(
                 ArbiterDoctorStatus.Ok,
                 "Log",
                 null,
-                "artifacts/arbiter/ is ignored by git."));
+                $"{ArbiterStateDirectory.ProjectRelativeDirectory}/ is ignored by git."));
             return;
         }
 
@@ -428,20 +428,20 @@ public sealed class ArbiterDoctorService(
             ArbiterDoctorStatus.Warn,
             "Log",
             IArbiterDoctorService.LogNotIgnored,
-            "artifacts/arbiter/ is not ignored by git."));
+            $"{ArbiterStateDirectory.ProjectRelativeDirectory}/ is not ignored by git."));
         report.Add(new Diagnostic(
             IArbiterDoctorService.LogNotIgnored,
             Severity.Warning,
-            "artifacts/arbiter/ is not ignored by git; the ledger and decision log must not be committed.",
-            "artifacts/arbiter",
-            Hint: "Add artifacts/arbiter/ to .gitignore."));
+            $"{ArbiterStateDirectory.ProjectRelativeDirectory}/ is not ignored by git; the ledger and decision log must not be committed.",
+            ArbiterStateDirectory.ProjectRelativeDirectory,
+            Hint: $"Add {ArbiterStateDirectory.ProjectRelativeDirectory}/ to .gitignore."));
     }
 
     private bool IsIgnoredByGit(string root)
     {
         try
         {
-            GitOutcome result = git.Run(root, ["check-ignore", "-q", "artifacts/arbiter"]);
+            GitOutcome result = git.Run(root, ["check-ignore", "-q", ArbiterStateDirectory.ProjectRelativeDirectory]);
             return result.ExitCode == 0;
         }
         catch (Exception exception) when (FileFailure.Is(exception) || exception is InvalidOperationException or System.ComponentModel.Win32Exception or TimeoutException)

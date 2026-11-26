@@ -1,3 +1,4 @@
+using KyberWeave.Core.FileSystem;
 using System.ComponentModel;
 using System.Diagnostics;
 using System.IO.Enumeration;
@@ -35,7 +36,7 @@ public sealed class AnalysisCacheSafety(
 
         string ignorePath = Path.Combine(
             paths.GetFullPath(repositoryRoot, environment.CurrentDirectory),
-            ".kyber-weave",
+            UserStatePaths.DirectoryName,
             ".gitignore");
         try
         {

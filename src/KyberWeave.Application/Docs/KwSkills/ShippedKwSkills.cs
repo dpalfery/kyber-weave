@@ -1,3 +1,4 @@
+using KyberWeave.Core.FileSystem;
 using System.Security.Cryptography;
 using System.Text;
 using KyberWeave.Contracts.Host;
@@ -61,7 +62,7 @@ internal sealed class ShippedKwSkills(
         string digest = Convert.ToHexStringLower(hash.Hash!)[..12];
 
         string home = environment.HomeDirectory;
-        string root = paths.GetFullPath(Path.Combine(home, ".kyber-weave", "kw-skills"), home);
+        string root = paths.GetFullPath(UserStatePaths.KwSkillsDirectory(home), home);
         string folder = paths.GetFullPath(Path.Combine(root, $"{name}-{digest}"), root);
         if (!paths.IsWithin(root, folder))
         {

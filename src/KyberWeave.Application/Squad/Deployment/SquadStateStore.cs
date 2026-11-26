@@ -1,3 +1,4 @@
+using KyberWeave.Core.FileSystem;
 using KyberWeave.Contracts.Host;
 using KyberWeave.Contracts.Paths;
 using KyberWeave.Contracts.Repositories;
@@ -855,7 +856,7 @@ public sealed class SquadStateStore : ISquadStateStore
     private string ResolveInstanceStateDirectory(string targetRoot)
     {
         (string target, string preset) = ValidateInstanceRoot(targetRoot);
-        return Path.Combine(ResolveHomeStateRoot(), ".kyber-weave", "squad", "instance-state", target, preset);
+        return Path.Combine(UserStatePaths.SquadInstanceStateDirectory(ResolveHomeStateRoot()), target, preset);
     }
 
     private (string Target, string Preset) ValidateInstanceRoot(string targetRoot)
@@ -869,7 +870,7 @@ public sealed class SquadStateStore : ISquadStateStore
 
         string normalizedTargetRoot = Path.TrimEndingDirectorySeparator(FullPath(targetRoot));
         string instancesBase = Path.TrimEndingDirectorySeparator(
-            FullPath(Path.Combine(ResolveHomeStateRoot(), ".kyber-weave", "squad", "instances")));
+            FullPath(UserStatePaths.SquadInstancesDirectory(ResolveHomeStateRoot())));
 
         string relative = Path.GetRelativePath(instancesBase, normalizedTargetRoot);
         if (relative.StartsWith("..", StringComparison.Ordinal) ||
@@ -877,7 +878,7 @@ public sealed class SquadStateStore : ISquadStateStore
             Path.IsPathFullyQualified(relative))
         {
             string canonicalInstancesBase = Path.TrimEndingDirectorySeparator(
-                FullPath(Path.Combine(ResolveHomeRoot(), ".kyber-weave", "squad", "instances")));
+                FullPath(UserStatePaths.SquadInstancesDirectory(ResolveHomeRoot())));
             if (!string.Equals(canonicalInstancesBase, instancesBase, StringComparison.Ordinal))
                 relative = Path.GetRelativePath(canonicalInstancesBase, normalizedTargetRoot);
         }
