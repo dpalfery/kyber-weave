@@ -11,6 +11,7 @@ public interface IFileStatReader
     /// <param name="path">The absolute path.</param>
     /// <returns>The length in bytes.</returns>
     /// <exception cref="FileNotFoundException">The file, or the final target of a link, does not exist.</exception>
+    /// <exception cref="UnauthorizedAccessException">The process may not read the file's metadata.</exception>
     /// <exception cref="IOException">A symbolic link chain loops or is too deep.</exception>
     long GetLength(string path);
 
