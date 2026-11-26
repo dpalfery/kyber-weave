@@ -52,12 +52,14 @@ Task 18 specifies the live verification scenario on a Windows machine logged in 
 Each spike tests whether a candidate environment variable safely redirects agent configuration
 without breaking sign-in credentials or altering unrelated system tools.
 
-- **S1. OpenCode override (`OPENCODE_CONFIG_DIR`)**:
-  - Deploy a probe agent into the global configuration directory and a different probe into the
-    instance layer folder.
-  - Run OpenCode with `OPENCODE_CONFIG_DIR` pointing to the layer.
-  - If the layered agent overrides the global definition, mark row as `Ready`. If not, test whether
-    the `XDG_CONFIG_HOME` fallback works or mark as `Unsupported`.
+- **S1. OpenCode override (`OPENCODE_CONFIG_DIR`)** — done:
+  - OpenCode `v2.4.1` on Darwin 27.3.0 arm64 (macOS 27.3), 2026-11-25.
+  - Verdict: `PROPOSE: HomeReplace`. `OPENCODE_CONFIG_DIR` replaces the config root rather than
+    merging it with `~/.config/opencode`; credentials still resolve from the data directory, and
+    `XDG_CONFIG_HOME` does the same replacement and does load an agent placed there.
+  - `SquadInstanceCatalog` was not changed. Kind stays `ConfigLayer`, the environment variable
+    stays `OPENCODE_CONFIG_DIR`, and status stays `SpikePending`. The probe record is under
+    Spike S1 result below.
 
 #### OpenCode instance support: audit evidence (2026-11-26)
 
@@ -173,8 +175,10 @@ The scratch directory and the XDG temporary tree were removed as well.
 
 ## Next steps and resolution criteria
 
-1. Run spikes S1, S2, S3, S4 on macOS and Windows to promote their `SquadInstanceCatalog` rows from
-   `SpikePending` to `Ready` or `Unsupported`.
+1. S1 is settled: `PROPOSE: HomeReplace` (OpenCode `v2.4.1`, Darwin 27.3.0, 2026-11-25). That
+   proposal does not change the OpenCode `SquadInstanceCatalog` row, which stays `SpikePending`.
+   Run spikes S2, S3, and S4 on macOS and Windows to promote their rows from `SpikePending` to
+   `Ready` or `Unsupported`.
 2. Settle the S4 variable discrepancy (`ZCODE_STORAGE_DIR` vs `ZCODE_DATA_BASE_DIR`) and align
    `SquadGlobalRoots` if necessary.
 3. Complete E-win on a physical Windows test machine and document findings in the catalog.

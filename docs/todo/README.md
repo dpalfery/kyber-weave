@@ -4,7 +4,7 @@ title: Todos
 doc-type: index
 status: current
 owner: dpalfery
-last-reviewed: 2026-11-15
+last-reviewed: 2026-11-25
 ---
 
 # Todos
@@ -55,7 +55,7 @@ last-reviewed: YYYY-MM-DD
 | [arbiter-served-containment-console-folding.md](arbiter-served-containment-console-folding.md) | KyberArbiter | draft | `ArbiterServedContainmentTests.TheCommentCommandRefusesAFileOutsideTheRoot` fails locally because console output is folded at the terminal width; the product refuses correctly. |
 | [task-gate-tests-gate-misses-repopolicy-project.md](task-gate-tests-gate-misses-repopolicy-project.md) | ReviewCouncil | draft | The `tests` task gate always runs `tests/KyberWeave.Tests`, so a change whose tests live in `tests/KyberWeave.RepoPolicy.Tests` matches zero tests and exits 8. |
 | [factory-prompt-not-projected-to-session-payload.md](../archive/todo/factory-prompt-not-projected-to-session-payload.md) | KyberDash | archived | The Factory plugin's consented prompt text reaches the record's raw payload but no content part, so the canonical session payload shows no prompt (delivered: the `droid` adapter files the consented prompt as the record's `conversation_history` part, so the session payload carries it; the prompt turn whose prompt the consent withheld declares it `not_measurable` with a reason naming the consent, and the completion turn says nothing about a prompt it never carried; [ADR 0055](../adr/0055-factory-capture-is-a-hooks-plugin-pipeline.md)). |
-| [squad-model-presets-windows-e2e-and-spikes.md](squad-model-presets-windows-e2e-and-spikes.md) | KyberSquad | draft | Windows end-to-end verification (E-win) and harness spikes S1–S8 (including S4 ZCODE_STORAGE_DIR vs ZCODE_DATA_BASE_DIR) deferred from the squad-model-presets specification closeout. |
+| [squad-model-presets-windows-e2e-and-spikes.md](squad-model-presets-windows-e2e-and-spikes.md) | KyberSquad | draft | S1 (OpenCode) recorded `PROPOSE: HomeReplace` on OpenCode 2.4.1 and the catalog row stays `SpikePending`; Windows end-to-end verification (E-win) and harness spikes S2–S8 (including S4 ZCODE_STORAGE_DIR vs ZCODE_DATA_BASE_DIR) remain deferred from the squad-model-presets specification closeout. |
 | [kyberdash-lightsaber-status-icon.md](kyberdash-lightsaber-status-icon.md) | KyberDash | draft | Restore the lightsaber status icon with a red or green blade glow matching status, instead of a colored circle. |
 | [tauri-glib-upstream-removal.md](tauri-glib-upstream-removal.md) | KyberDash | draft | Remove the patched GLib 0.18.5 source after a released Tauri GTK migration resolves the Linux tray graph to `glib >= 0.20.0` and the Linux gates pass. |
 | [claude-conductor-live-verification.md](claude-conductor-live-verification.md) | KyberSquad | draft | Verify PR #136's `/conductor` skill in a live Claude Code session, and that the conductor loads the shared `delivery-execution` skill and the widened `bug-crusher` roster starts a specialist; the corpus tests do not establish runtime behaviour. |
