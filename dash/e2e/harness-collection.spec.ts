@@ -550,13 +550,31 @@ test.describe('the Factory (Droid) replay', () => {
 /**
  * Open the dashboard's span inspector for the session's prompt turn.
  *
- * The timeline lists one node per captured span, and the prompt turn is the first
- * `factory.turn` node: the recorded prompt was submitted before the turn finished. The
- * inspector is where the dashboard renders what the plugin actually emitted, so it is
- * where the model and the captured prompt text are read.
+ * The timeline defaults to newest-first (`desc`), so the later turn-completion span
+ * precedes the prompt turn. Switching the timeline pager to oldest-first (`asc`) and
+ * waiting for that response puts the prompt turn's `factory.turn` node first — before
+ * `keepPreviousData` could otherwise leave descending rows in place. The inspector is
+ * where the dashboard renders what the plugin actually emitted, so it is where the
+ * model and the captured prompt text are read.
  */
 async function openPromptTurnInspector(page: Page): Promise<void> {
-  const node = page.getByTestId('timeline-node').filter({ hasText: 'factory.turn' }).first()
+  const timeline = page.getByTestId('execution-timeline-section')
+  const orderToggle = timeline.getByTestId('pager-order')
+  await expect(orderToggle).toBeVisible()
+  if ((await orderToggle.textContent())?.trim() === 'Newest first') {
+    await Promise.all([
+      page.waitForResponse(
+        (response) =>
+          response.url().includes('/timeline') &&
+          response.url().includes('order=asc') &&
+          response.status() === 200,
+      ),
+      orderToggle.click(),
+    ])
+    await expect(orderToggle).toHaveText('Oldest first')
+    await expect(orderToggle).toBeEnabled()
+  }
+  const node = timeline.getByTestId('timeline-node').filter({ hasText: 'factory.turn' }).first()
   await expect(node, 'the replayed session must list its prompt turn in the timeline').toBeVisible()
   await node.click()
   await expect(page.getByTestId('span-inspector')).toBeVisible()
