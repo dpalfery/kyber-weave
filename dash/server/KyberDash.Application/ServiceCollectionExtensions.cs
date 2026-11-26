@@ -1,5 +1,6 @@
 using KyberDash.Contracts.Repositories;
 using KyberDash.Contracts.Services;
+using KyberDash.Core;
 using KyberDash.Data.Collector;
 using KyberDash.Data.Collector.Sources;
 using KyberDash.Data.Harnesses.Antigravity;
@@ -90,7 +91,7 @@ public static class ServiceCollectionExtensions
             provider.GetRequiredService<IPricingRepository>(),
             provider.GetRequiredService<CanonSessionProjectorEngine>(),
             provider.GetRequiredService<CanonRollupsEngine>(),
-            string.IsNullOrWhiteSpace(options.Version) ? KyberBridgeEngine.DefaultVersion : options.Version,
+            string.IsNullOrWhiteSpace(options.Version) ? DashVersion.Current : options.Version,
             storePath: options.DatabasePath,
             options: provider.GetRequiredService<DashOptions>(),
             collector: provider.GetService<IOtlpCollectorService>(),

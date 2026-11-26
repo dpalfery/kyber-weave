@@ -41,10 +41,10 @@ public sealed partial class DocsTools
         [Description("The documentation-impact outcome as docs-dev returned it (its DOCS_REVIEW line and recommendations). Optional.")] string? documentationImpact = null,
         [Description("The archived plan's file name, only when the branch archived more than one. Optional.")] string? planFile = null)
     {
-        if (string.IsNullOrWhiteSpace(projectPath))
-            return _query.Provenance() + "\nresult: refused\nprojectPath is required: pass the absolute path of the run's worktree.";
-        if (Redirect(projectPath, tools => tools._delivery.DeliverRun(summary, notes, title, draft, documentationImpact, planFile)) is { } redirected)
+        if (Redirect(projectPath, tools => tools.Bound.Delivery.DeliverRun(summary, notes, title, draft, documentationImpact, planFile)) is { } redirected)
             return redirected;
-        return _delivery.DeliverRun(summary, notes, title, draft, documentationImpact, planFile);
+        if (string.IsNullOrWhiteSpace(projectPath))
+            return ProvenanceLine() + "\nresult: refused\nprojectPath is required: pass the absolute path of the run's worktree.";
+        return Bound.Delivery.DeliverRun(summary, notes, title, draft, documentationImpact, planFile);
     }
 }

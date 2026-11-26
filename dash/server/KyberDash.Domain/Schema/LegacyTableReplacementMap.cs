@@ -90,6 +90,7 @@ public static class LegacyTableReplacementMap
                 [
                     "harness",
                     "source",
+                    "record_source_claim",
                     "record",
                     "record_session_link",
                     "record_parent",
@@ -103,6 +104,7 @@ public static class LegacyTableReplacementMap
                     "record_reported_total",
                     "record_reported_cost",
                     "record_skill_invocation",
+                    "record_skill_listing",
                     "record_agent_instance",
                     "record_error",
                     "record_edit_failure",

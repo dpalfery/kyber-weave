@@ -433,11 +433,29 @@ public record EngineDescriptor(
     [property: JsonPropertyName("url"), JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] Uri? Url = null);
 
 /// <summary>Outcome of ensuring the running KyberDash API engine matches the active version.</summary>
+/// <param name="Outcome">What <c>engine verify</c> found; <see langword="null"/> for every other engine verb.</param>
 public record EngineEnsureReport(
     bool Succeeded,
     string Message,
     bool Replaced = false,
-    EngineDescriptor? ActiveEngine = null);
+    EngineDescriptor? ActiveEngine = null,
+    EngineVerifyOutcome? Outcome = null);
+
+/// <summary>What <c>kyberdash engine verify</c> found the engine answering as.</summary>
+public enum EngineVerifyOutcome
+{
+    /// <summary>An engine answered on the expected version.</summary>
+    Running,
+
+    /// <summary>No engine holds the endpoint.</summary>
+    NotRunning,
+
+    /// <summary>An engine answered on a different version.</summary>
+    OtherVersion,
+
+    /// <summary>The endpoint is held by a process that does not answer.</summary>
+    Unresponsive,
+}
 
 /// <summary>Outcome of installing, updating, or checking the desktop tray binary.</summary>
 public record MenubarInstallOutcome(

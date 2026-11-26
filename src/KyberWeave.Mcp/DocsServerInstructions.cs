@@ -62,10 +62,22 @@ public static class DocsServerInstructions
         back.
         """;
 
+    /// <summary>
+    /// The paragraph an any-repo server appends: it holds no root of its own, so the model has to be told before its
+    /// first call that every tool needs <c>projectPath</c>.
+    /// </summary>
+    public const string AnyRepoParagraph = """
+        This server runs in any-repo mode: it is bound to no repository, so every tool requires projectPath,
+        the absolute path of a directory inside the repository you are working on. A call that omits it
+        returns a refusal instead of an answer.
+        """;
+
     /// <summary>Applies the instructions to the server options.</summary>
-    public static void Configure(McpServerOptions options)
+    /// <param name="options">The server options to set the instructions on.</param>
+    /// <param name="anyRepo">True when the server runs with <c>--any-repo</c>, which appends <see cref="AnyRepoParagraph"/>.</param>
+    public static void Configure(McpServerOptions options, bool anyRepo)
     {
         ArgumentNullException.ThrowIfNull(options);
-        options.ServerInstructions = Text;
+        options.ServerInstructions = anyRepo ? Text + "\n\n" + AnyRepoParagraph : Text;
     }
 }

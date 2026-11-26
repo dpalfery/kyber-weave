@@ -8,7 +8,6 @@
     <LangVersion>latest</LangVersion>
     <RootNamespace>KyberDash.Mcp</RootNamespace>
     <AssemblyName>kyberdash-mcp</AssemblyName>
-    <Version>0.21.0</Version>
     <Authors>KyberWeave</Authors>
     <PackageLicenseExpression>MIT</PackageLicenseExpression>
   </PropertyGroup>

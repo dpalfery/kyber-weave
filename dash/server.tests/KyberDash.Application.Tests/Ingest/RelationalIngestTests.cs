@@ -586,7 +586,7 @@ public class RelationalIngestTests
 
         Assert.Equal(0, third.ExitCode);
         Assert.Equal(3, mapper.InvocationCount);
-        Assert.Single(spyWriter.DeleteSourceCalls);
+        Assert.Single(spyWriter.ReplaceSourceCalls);
         Assert.Equal(3, spyWriter.WriteBatchCalls.Count);
         Assert.Contains(third.Rows, r => r.SourceKey == unitOnePath && r.Status == "committed");
         Assert.Contains(third.Rows, r => r.SourceKey == unitTwoPath && r.Status == "skipped");
@@ -674,8 +674,33 @@ public class RelationalIngestTests
     }
 
     /// <summary>
-    /// A store that is itself unusable (locked, broken file, or an open circuit breaker) is not a
-    /// per-unit problem: the exception escapes and the job fails.
+    /// A store write the store's own row validation refuses for one unit (here, JSON document text in a
+    /// text column) is recorded as that unit's source-unreadable problem and the rest still import,
+    /// rather than aborting the whole pass.
+    /// </summary>
+    [Fact]
+    public async Task ImportHistory_WhenOneUnitWriteFailsStoreValidation_RecordsAProblemAndImportsTheRest()
+    {
+        UnitWriteHarness harness = new();
+        harness.Writer.WriteBatchFailure = static batch => batch.Records.Any(static r => r.RecordId == "rec-bad")
+            ? new DashValidationException("STORE_JSON_TEXT_REFUSED", "Refused JSON object or array text in 'content_part_text.part_text'.")
+            : null;
+
+        JobOutcome outcome = await harness.Jobs.TriggerImportHistoryAsync(TestContext.Current.CancellationToken);
+
+        Assert.Equal("partial", outcome.Outcome);
+        Assert.Equal(1, outcome.FailedUnits);
+        Assert.NotNull(harness.Store.FindRecord("rec-good"));
+        Assert.Null(harness.Store.FindRecord("rec-bad"));
+        CollectedProblem problem = Assert.Single(harness.Writer.WriteProblemCalls);
+        Assert.Equal("SOURCE_UNREADABLE", problem.Code);
+        Assert.Equal("failed", harness.Store.GetSourceCheckpoint("commandcode", harness.BadPath)?.LastStatus);
+    }
+
+    /// <summary>
+    /// A store that is itself unusable (locked, broken file, or an open circuit breaker), or a validation
+    /// failure that is not the store refusing a unit's rows, is not a per-unit problem: the exception
+    /// escapes and the job fails.
     /// </summary>
     [Fact]
     public async Task ImportHistory_WhenTheStoreIsUnusable_FailsTheJob()
@@ -685,6 +710,7 @@ public class RelationalIngestTests
             new SqliteExecutionException("sqlite3 error 5: database is locked", 5, "database is locked"),
             new SqliteExecutionException("sqlite3 error 11: database disk image is malformed", 11, "database disk image is malformed"),
             new CircuitBreakerOpenException("sqlite circuit open"),
+            new DashValidationException("VALIDATION_ERROR", "a defect, not one unit's rows"),
         ];
 
         foreach (Exception failure in unusable)
@@ -1018,6 +1044,8 @@ public class RelationalIngestTests
 
         public List<string> DeleteSourceCalls { get; } = [];
 
+        public List<CollectedBatch> ReplaceSourceCalls { get; } = [];
+
         public List<CollectedProblem> WriteProblemCalls { get; } = [];
 
         public void WriteBatch(CollectedBatch batch)
@@ -1030,6 +1058,19 @@ public class RelationalIngestTests
 
             WriteBatchCalls.Add(batch);
             inner.WriteBatch(batch);
+        }
+
+        public void ReplaceSource(CollectedBatch batch)
+        {
+            Exception? failure = WriteBatchFailure?.Invoke(batch);
+            if (failure is not null)
+            {
+                throw failure;
+            }
+
+            WriteBatchCalls.Add(batch);
+            ReplaceSourceCalls.Add(batch);
+            inner.ReplaceSource(batch);
         }
 
         public void DeleteSource(string sourceId)
@@ -1046,6 +1087,8 @@ public class RelationalIngestTests
             WriteProblemCalls.Add(problem);
             inner.WriteProblem(problem);
         }
+
+        public void DeleteProblem(string problemKey) => inner.DeleteProblem(problemKey);
     }
 
     private sealed class CountingCommandCodeMapper : IHarnessMapper

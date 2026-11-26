@@ -40,11 +40,11 @@ public sealed partial class DocsTools
         [Description("'autonomous' when the conductor accepted the recommendation, 'supervised' when the owner approved.")] string approvalMode,
         [Description("One line saying what approved it, such as 'AUTONOMOUS_APPROVAL: approve-and-execute' or the owner's answer.")] string approval)
     {
-        if (string.IsNullOrWhiteSpace(projectPath))
-            return _query.Provenance() + "\nresult: refused\nprojectPath is required: pass the absolute path of the run's worktree.";
-        if (Redirect(projectPath, tools => tools._planLifecycle.FinalizePlan(planFile, approvalMode, approval)) is { } redirected)
+        if (Redirect(projectPath, tools => tools.Bound.PlanLifecycle.FinalizePlan(planFile, approvalMode, approval)) is { } redirected)
             return redirected;
-        return _planLifecycle.FinalizePlan(planFile, approvalMode, approval);
+        if (string.IsNullOrWhiteSpace(projectPath))
+            return ProvenanceLine() + "\nresult: refused\nprojectPath is required: pass the absolute path of the run's worktree.";
+        return Bound.PlanLifecycle.FinalizePlan(planFile, approvalMode, approval);
     }
 
     /// <summary>
@@ -65,10 +65,10 @@ public sealed partial class DocsTools
         [Description("Absolute path of the run's worktree that holds the plan. Required.")] string projectPath,
         [Description("The plan file, as a path or its file name under the plans folder.")] string planFile)
     {
-        if (string.IsNullOrWhiteSpace(projectPath))
-            return _query.Provenance() + "\nresult: refused\nprojectPath is required: pass the absolute path of the run's worktree.";
-        if (Redirect(projectPath, tools => tools._planLifecycle.ArchivePlan(planFile)) is { } redirected)
+        if (Redirect(projectPath, tools => tools.Bound.PlanLifecycle.ArchivePlan(planFile)) is { } redirected)
             return redirected;
-        return _planLifecycle.ArchivePlan(planFile);
+        if (string.IsNullOrWhiteSpace(projectPath))
+            return ProvenanceLine() + "\nresult: refused\nprojectPath is required: pass the absolute path of the run's worktree.";
+        return Bound.PlanLifecycle.ArchivePlan(planFile);
     }
 }

@@ -70,8 +70,33 @@ pub struct Listening {
 /// URL is refused outright: Requirement 6.10 opens no connection except to
 /// loopback, and this is where a hijacked or confused server would try.
 pub fn parse_listening_line(line: &str) -> Option<Listening> {
+    parse_server_announcement(line, "kyberdash.web.listening")
+}
+
+/// Reads the attached line, and only that line: a server another engine
+/// already runs, which the launch found holding the lease.
+///
+/// It has the same shape and the same loopback refusal as
+/// [`parse_listening_line`]; only the event name differs.
+pub fn parse_attached_line(line: &str) -> Option<Listening> {
+    parse_server_announcement(line, "kyberdash.web.attached")
+}
+
+/// Whether the line is a JSON server announcement, listening or attached,
+/// whatever its fields hold. Lines that are not one are not refused here.
+fn is_server_announcement(line: &str) -> bool {
+    let Ok(value) = serde_json::from_str::<serde_json::Value>(line.trim()) else {
+        return false;
+    };
+    matches!(
+        value.get("event").and_then(serde_json::Value::as_str),
+        Some("kyberdash.web.listening" | "kyberdash.web.attached")
+    )
+}
+
+fn parse_server_announcement(line: &str, event: &str) -> Option<Listening> {
     let value: serde_json::Value = serde_json::from_str(line.trim()).ok()?;
-    if value.get("event")?.as_str()? != "kyberdash.web.listening" {
+    if value.get("event")?.as_str()? != event {
         return None;
     }
 
@@ -319,6 +344,21 @@ impl Supervisor {
                 Some(line) => {
                     if let Some(listening) = parse_listening_line(&line) {
                         break listening;
+                    }
+                    if let Some(listening) = parse_attached_line(&line) {
+                        // Another engine holds the lease. Reap the child this attempt
+                        // started, then attach exactly as `attach` does.
+                        process.kill_tree();
+                        self.attach(listening.clone());
+                        return Attempt::Listening(listening);
+                    }
+                    if is_server_announcement(&line) {
+                        // A recognised announcement that fails validation (an address
+                        // off loopback, or a missing field) is refused outright, so a
+                        // good line after it cannot rescue the launch.
+                        process.kill_tree();
+                        return self
+                            .record_failure("server announced an unusable address".to_string());
                     }
                 }
                 None => {
@@ -950,5 +990,117 @@ mod tests {
         assert!(supervisor.owns_server());
         supervisor.stop();
         assert!(*killed.lock().unwrap());
+    }
+
+    fn attached_line(url: &str, pid: u32) -> String {
+        format!(
+            r#"{{"event":"kyberdash.web.attached","url":"{url}","pid":{pid},"version":"0.21.0","apiVersion":1}}"#
+        )
+    }
+
+    #[test]
+    fn parse_attached_line_reads_only_the_attached_event() {
+        let parsed = parse_attached_line(&attached_line("http://127.0.0.1:4747", 4242))
+            .expect("the attached event parses");
+        assert_eq!(parsed.url, "http://127.0.0.1:4747");
+        assert_eq!(parsed.pid, 4242);
+        assert_eq!(parsed.version, "0.21.0");
+        assert_eq!(parsed.api_version, 1);
+
+        assert_eq!(parse_attached_line(&listening_line(4747)), None);
+        assert_eq!(parse_attached_line("  KyberDash dashboard at ..."), None);
+        assert_eq!(parse_attached_line(""), None);
+    }
+
+    #[test]
+    fn parse_attached_line_refuses_a_missing_pid_or_url() {
+        let no_pid = r#"{"event":"kyberdash.web.attached","url":"http://127.0.0.1:4747","version":"0.21.0","apiVersion":1}"#;
+        let no_url =
+            r#"{"event":"kyberdash.web.attached","pid":4242,"version":"0.21.0","apiVersion":1}"#;
+        assert_eq!(parse_attached_line(no_pid), None);
+        assert_eq!(parse_attached_line(no_url), None);
+    }
+
+    #[test]
+    fn parse_attached_line_refuses_a_url_off_loopback() {
+        for url in [
+            "http://10.0.0.5:4747",
+            "http://localhost:4747",
+            "http://127.0.0.1.evil.test/",
+            "http://127.0.0.1:1@evil.test",
+        ] {
+            assert_eq!(parse_attached_line(&attached_line(url, 1)), None, "{url}");
+        }
+    }
+
+    /// Another engine holds the lease: the launch reports it, the child this
+    /// supervisor started is reaped, and the attached server is used as attach does.
+    #[test]
+    fn a_launch_reporting_an_attached_server_attaches_to_it() {
+        let killed = Arc::new(Mutex::new(false));
+        let mut spawner = FakeSpawner {
+            scripted: vec![vec![attached_line("http://127.0.0.1:4747", 4242)]],
+            killed: Arc::clone(&killed),
+            ..Default::default()
+        };
+        let mut clock = FakeClock::default();
+        let mut supervisor = Supervisor::new("kyberdash");
+
+        let attempt = supervisor.attempt(&mut spawner, &mut clock);
+
+        assert!(matches!(attempt, Attempt::Listening(_)), "got {attempt:?}");
+        assert_eq!(supervisor.phase(), ServerPhase::Ready);
+        assert_eq!(supervisor.consecutive_failures(), 0);
+        assert_eq!(supervisor.url(), Some("http://127.0.0.1:4747"));
+        assert!(
+            !supervisor.owns_server(),
+            "the attached server is not owned"
+        );
+        assert!(*killed.lock().unwrap(), "the launched child is reaped");
+    }
+
+    /// A recognised attached line that fails loopback validation ends the
+    /// launch; a good listening line after it must not rescue the attempt.
+    #[test]
+    fn a_bad_attached_line_before_a_good_one_fails_the_launch() {
+        let killed = Arc::new(Mutex::new(false));
+        let mut spawner = FakeSpawner {
+            scripted: vec![vec![
+                attached_line("http://10.0.0.5:4747", 4242),
+                listening_line(4747),
+            ]],
+            killed: Arc::clone(&killed),
+            ..Default::default()
+        };
+        let mut clock = FakeClock::default();
+        let mut supervisor = Supervisor::new("kyberdash");
+
+        match supervisor.attempt(&mut spawner, &mut clock) {
+            Attempt::Failed { .. } => {}
+            other => panic!("expected a failure, got {other:?}"),
+        }
+        assert_eq!(supervisor.url(), None);
+        assert!(*killed.lock().unwrap(), "the launched child is reaped");
+    }
+
+    /// An attached line naming a non-loopback URL is refused, so the attempt
+    /// fails and the child it started is reaped.
+    #[test]
+    fn an_attached_line_off_loopback_fails_the_attempt() {
+        let killed = Arc::new(Mutex::new(false));
+        let mut spawner = FakeSpawner {
+            scripted: vec![vec![attached_line("http://10.0.0.5:4747", 4242)]],
+            killed: Arc::clone(&killed),
+            ..Default::default()
+        };
+        let mut clock = FakeClock::default();
+        let mut supervisor = Supervisor::new("kyberdash");
+
+        match supervisor.attempt(&mut spawner, &mut clock) {
+            Attempt::Failed { .. } => {}
+            other => panic!("expected a failure, got {other:?}"),
+        }
+        assert_eq!(supervisor.url(), None);
+        assert!(*killed.lock().unwrap(), "the launched child is reaped");
     }
 }

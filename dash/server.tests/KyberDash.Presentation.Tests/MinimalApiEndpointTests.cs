@@ -3,6 +3,7 @@ using System.Text;
 using System.Text.Json;
 using KyberDash.Api;
 using KyberDash.Contracts.Services;
+using KyberDash.Core;
 using KyberDash.Core.Exceptions;
 using KyberDash.Domain;
 using Microsoft.AspNetCore.Builder;
@@ -41,7 +42,7 @@ public class MinimalApiEndpointTests
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
         Assert.Equal("no-store", response.Headers.CacheControl?.ToString());
         using JsonDocument body = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
-        Assert.Equal("0.21.0", body.RunProperty("version").GetString());
+        Assert.Equal(DashVersion.Current, body.RunProperty("version").GetString());
         Assert.Equal(1, body.RootElement.GetProperty("apiVersion").GetInt32());
     }
 

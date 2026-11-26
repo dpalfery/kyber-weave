@@ -514,6 +514,8 @@ public sealed class AnalyticsOperationsDetailTests
             return inner.SessionSkillFigures(sessionKey);
         }
 
+        public IReadOnlyList<StoredSkillListing> SessionSkillListings(string sessionKey) => inner.SessionSkillListings(sessionKey);
+
         public SessionKwSkillLoadPageResult SessionKwSkillLoads(string sessionKey, int page, int limit, string order = "desc") =>
             inner.SessionKwSkillLoads(sessionKey, page, limit, order);
 

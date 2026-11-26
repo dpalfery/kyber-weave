@@ -39,6 +39,18 @@ these tools answer for travels as `DocsHostRoot`, which `AddDocsHostServices` re
 `McpCompositionRootTests` constructs every tool type from the container the server builds, so a
 new parameter with no registration fails the build rather than the first tool call.
 
+**`--any-repo` starts the server with no bound root** (`McpServeMode.Parse`, branched on in `Program.cs`).
+Combined with `--repo-root` or `--expect-root` it is a conflict: `KW-MCP-ROOT-003` on stderr, exit 1. In this mode
+`KYBER_WEAVE_REPO_ROOT` and `KYBER_WEAVE_EXPECT_ROOT` are ignored and `AddAnyRepoDocsHostServices` registers only
+`DocsRootRegistry.ForAnyRepo`, none of the root-bound services. `DocsTools` therefore has two public constructors
+and the SDK's `ActivatorUtilities` picks the longest one the container can satisfy: the root-bound one in bound
+mode, `DocsTools(DocsRootRegistry)` in any-repo mode. The root-bound fields live in a private `BoundRoot` read
+through `Bound`, which throws in any-repo mode; in that mode `Redirect` never returns null, so a tool body after
+its `Redirect` line only runs bound. Provenance for refusals goes through `ProvenanceLine()`, which prints
+`provenance: root=(none) mode=any-repo` with no root. `DocsServerInstructions.Configure(options, anyRepo)` adds
+the paragraph telling agents `projectPath` is required. A new tool needs no extra work here as long as it starts
+with `Redirect`. `McpCompositionRootTests` builds both containers and calls a tool in each.
+
 After resolution, an optional client assertion is checked: `--expect-root <path>`, or
 `KYBER_WEAVE_EXPECT_ROOT` when the flag is absent, must name the resolved root or the server
 refuses to serve — `KW-MCP-ROOT-002` on stderr, exit 1. The flag wins over the environment.
@@ -85,7 +97,11 @@ regex the same field, or `mcp.root` starts failing on a healthy server.
 Every tool takes an optional `projectPath`. `DocsRootRegistry` resolves it with git to a worktree
 of the same repository as the server root (equal common git directory) and refuses anything else;
 the per-root objects (document host, analysis reader, CodeGraph schedule) live in a `DocsTools`
-built per root, kept in a four-entry least-recently-used set. Omitted means the server root.
+built per root, kept in a four-entry least-recently-used set. Omitted means the server root. In any-repo mode there is no server root: `projectPath` must name a directory
+inside a git repository whose top level has a host configuration, the registry holds four roots in total, and a
+path already resolved is cached (64 entries) so repeated calls spawn no git. A root's tools are built outside the
+registry lock, and two racing first calls end with one shared instance; an evicted entry is only unlinked, since
+nothing in `DocsTools` is disposable, so a call holding it finishes on it.
 A new tool must take `projectPath` and start with `Redirect(projectPath, ...)`.
 
 ## Three tools change files: two plan lifecycle tools and the deliver tool

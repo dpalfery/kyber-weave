@@ -244,7 +244,12 @@ public class InMemoryRelationalStore :
     }
 
     /// <inheritdoc />
-    public void WriteBatch(CollectedBatch batch)
+    public void WriteBatch(CollectedBatch batch) => WriteBatchCore(batch, replaceSource: false);
+
+    /// <inheritdoc />
+    public void ReplaceSource(CollectedBatch batch) => WriteBatchCore(batch, replaceSource: true);
+
+    private void WriteBatchCore(CollectedBatch batch, bool replaceSource)
     {
         ArgumentNullException.ThrowIfNull(batch);
         ArgumentNullException.ThrowIfNull(batch.Source);
@@ -257,6 +262,18 @@ public class InMemoryRelationalStore :
             StoreState working = state.Clone();
             string harnessId = batch.Source.HarnessId;
             EnsureHarness(working, harnessId);
+            if (replaceSource)
+            {
+                object?[]? stored = FindRowByKey(
+                    working,
+                    "source",
+                    [("harness_id", batch.Source.HarnessId), ("source_kind", FormatSourceKind(batch.Source.Kind)), ("locator", batch.Source.Locator)]);
+                if (stored is not null)
+                {
+                    DeleteSourceCore(working, GetString(GetTableMetadata("source"), stored, "source_id"));
+                }
+            }
+
             string sourceId = EnsureSource(working, batch.Source);
 
             HashSet<string> seenSessions = new(StringComparer.Ordinal);
@@ -273,9 +290,17 @@ public class InMemoryRelationalStore :
                 UpsertSessionCore(working, session);
             }
 
+            HashSet<string> seenRecords = new(StringComparer.Ordinal);
             foreach (CollectedRecord record in batch.Records)
             {
                 ArgumentNullException.ThrowIfNull(record);
+                if (!seenRecords.Add(record.RecordId))
+                {
+                    throw new DashValidationException(
+                        ConstraintViolatedCode,
+                        $"Duplicate span_id '{record.RecordId}' in CollectedBatch.Records.");
+                }
+
                 InsertRecordCore(working, sourceId, record);
             }
 
@@ -293,7 +318,11 @@ public class InMemoryRelationalStore :
                 UpsertProblemCore(working, problem);
             }
 
-            if (batch.Sessions.Count > 0 || batch.Records.Count > 0)
+            if (replaceSource)
+            {
+                AdvanceWriteMarker(working, dirtyKeys: null);
+            }
+            else if (batch.Sessions.Count > 0 || batch.Records.Count > 0)
             {
                 AdvanceWriteMarker(working, DirtySessionKeysOf(batch));
             }
@@ -310,7 +339,7 @@ public class InMemoryRelationalStore :
         lock (syncRoot)
         {
             StoreState working = state.Clone();
-            _ = DeleteRowsCore(working, "source", [("source_id", sourceId)]);
+            DeleteSourceCore(working, sourceId);
 
             // The cascade removes records of sessions this call does not know: always wildcard.
             AdvanceWriteMarker(working, dirtyKeys: null);
@@ -380,6 +409,19 @@ public class InMemoryRelationalStore :
         {
             StoreState working = state.Clone();
             UpsertProblemCore(working, problem);
+            state = working;
+        }
+    }
+
+    /// <inheritdoc />
+    public void DeleteProblem(string problemKey)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(problemKey);
+
+        lock (syncRoot)
+        {
+            StoreState working = state.Clone();
+            _ = DeleteRowsCore(working, "ingest_problem", [("problem_key", problemKey)]);
             state = working;
         }
     }
@@ -1668,6 +1710,43 @@ public class InMemoryRelationalStore :
         }
     }
 
+    /// <inheritdoc />
+    public virtual IReadOnlyList<StoredSkillListing> SessionSkillListings(string sessionKey)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(sessionKey);
+
+        lock (syncRoot)
+        {
+            NoteRead(nameof(SessionSkillListings));
+            HashSet<string> sessionSpans = ResolveSessionSpanIds(state, sessionKey);
+            TableMetadata turnMeta = GetTableMetadata("session_turn");
+            Dictionary<string, int> turnBySpan = new(StringComparer.Ordinal);
+            foreach (object?[] row in state.GetRows("session_turn"))
+            {
+                if (string.Equals(GetString(turnMeta, row, "session_id"), sessionKey, StringComparison.Ordinal))
+                {
+                    turnBySpan.TryAdd(GetString(turnMeta, row, "span_id"), (int)GetInt64(turnMeta, row, "position"));
+                }
+            }
+
+            TableMetadata meta = GetTableMetadata("record_skill_listing");
+            List<StoredSkillListing> rows = [];
+            foreach (object?[] row in state.GetRows("record_skill_listing"))
+            {
+                string spanId = GetString(meta, row, "span_id");
+                if (sessionSpans.Contains(spanId))
+                {
+                    rows.Add(new StoredSkillListing(
+                        spanId,
+                        GetString(meta, row, "skill_name"),
+                        turnBySpan.TryGetValue(spanId, out int turn) ? turn : null));
+                }
+            }
+
+            return rows;
+        }
+    }
+
     /// <summary>The unsplit tool names a KW skill load is recorded under (D17); mirrors the SQLite reader's spellings.</summary>
     private static readonly string[] KwSkillLoadToolNames =
     [
@@ -1676,6 +1755,8 @@ public class InMemoryRelationalStore :
         "kw-docs_load_skill",
         "kw-docs__load_skill",
         "kw-docs/load_skill",
+        "mcp__kyber-weave__load_skill",
+        "mcp__kyber_weave__load_skill",
     ];
 
     /// <inheritdoc />
@@ -1709,12 +1790,14 @@ public class InMemoryRelationalStore :
                 string? serverName = mcpRow is null ? null : GetString(mcpMeta, mcpRow, "server_name");
                 string? serverToolName = mcpRow is null ? null : GetString(mcpMeta, mcpRow, "server_tool_name");
                 // The D17 load rule, as the application recognizer decides it: with an MCP split,
-                // the server name normalized (lower case, '_' to '-') is kw-docs and the split tool
-                // is load_skill; without one, the tool name is one of the unsplit spellings. The
-                // rule is quoted here because this file also compiles without the Application
-                // assembly; the SQLite parity tests prove the two stores decide alike.
+                // the server name normalized (lower case, '_' to '-') is kw-docs or kyber-weave and
+                // the split tool is load_skill; without one, the tool name is one of the unsplit
+                // spellings. The rule is quoted here because this file also compiles without the
+                // Application assembly; the SQLite parity tests prove the two stores decide alike.
+                string? normalizedServer = serverName?.Replace('_', '-');
                 bool load = serverName is not null || serverToolName is not null
-                    ? string.Equals(serverName?.Replace('_', '-'), "kw-docs", StringComparison.OrdinalIgnoreCase)
+                    ? (string.Equals(normalizedServer, "kw-docs", StringComparison.OrdinalIgnoreCase)
+                        || string.Equals(normalizedServer, "kyber-weave", StringComparison.OrdinalIgnoreCase))
                         && string.Equals(serverToolName, "load_skill", StringComparison.Ordinal)
                     : KwSkillLoadToolNames.Contains(toolName, StringComparer.Ordinal);
                 if (!load)
@@ -4055,8 +4138,50 @@ public class InMemoryRelationalStore :
         }
     }
 
+    /// <summary>
+    /// As the SQLite store: hands each record of <paramref name="sourceId"/> that another source still claims
+    /// to that source, then deletes the source, cascading to its remaining records and its claims.
+    /// </summary>
+    private static void DeleteSourceCore(StoreState working, string sourceId)
+    {
+        TableMetadata recordMeta = GetTableMetadata("record");
+        TableMetadata claimMeta = GetTableMetadata("record_source_claim");
+        int recordSpan = recordMeta.ColumnIndices["span_id"];
+        int recordSource = recordMeta.ColumnIndices["source_id"];
+        int claimSpan = claimMeta.ColumnIndices["span_id"];
+        int claimSource = claimMeta.ColumnIndices["source_id"];
+        List<object?[]> claims = working.GetRows("record_source_claim");
+        foreach (object?[] row in working.GetRows("record"))
+        {
+            if (!string.Equals(row[recordSource] as string, sourceId, StringComparison.Ordinal))
+            {
+                continue;
+            }
+
+            string? heir = claims
+                .Where(c => string.Equals(c[claimSpan] as string, row[recordSpan] as string, StringComparison.Ordinal)
+                    && !string.Equals(c[claimSource] as string, sourceId, StringComparison.Ordinal))
+                .Select(c => (string)c[claimSource]!)
+                .Order(StringComparer.Ordinal)
+                .FirstOrDefault();
+            if (heir is not null)
+            {
+                row[recordSource] = heir;
+            }
+        }
+
+        _ = DeleteRowsCore(working, "source", [("source_id", sourceId)]);
+    }
+
     private static void InsertRecordCore(StoreState working, string sourceId, CollectedRecord record)
     {
+        // As the SQLite store: a span already written by another source is replaced, children included,
+        // and every writer's claim is kept.
+        _ = DeleteRowsCore(working, "record", [("span_id", record.RecordId)]);
+        if (FindRowByKey(working, "record_source_claim", [("span_id", record.RecordId), ("source_id", sourceId)]) is null)
+        {
+            InsertRowCore(working, "record_source_claim", [("span_id", record.RecordId), ("source_id", sourceId)]);
+        }
         InsertRowCore(
             working,
             "record",
@@ -4166,6 +4291,17 @@ public class InMemoryRelationalStore :
                     working,
                     "record_skill_invocation",
                     [("span_id", record.RecordId), ("skill_name", skillName)]);
+            }
+        }
+
+        if (record.SkillsListed is not null)
+        {
+            for (int position = 0; position < record.SkillsListed.Count; position++)
+            {
+                InsertRowCore(
+                    working,
+                    "record_skill_listing",
+                    [("span_id", record.RecordId), ("position", position), ("skill_name", record.SkillsListed[position])]);
             }
         }
 
@@ -5587,6 +5723,16 @@ public class InMemoryRelationalStore :
                 .Select(r => GetString(skillMeta, r, "skill_name")),
         ];
 
+        // A record with no listing rows reads back as null, the shape the SQLite reader returns.
+        TableMetadata listingMeta = GetTableMetadata("record_skill_listing");
+        List<string> listed =
+        [
+            .. currentState.GetRows("record_skill_listing")
+                .Where(r => string.Equals(GetString(listingMeta, r, "span_id"), spanId, StringComparison.Ordinal))
+                .OrderBy(r => (int)GetInt64(listingMeta, r, "position"))
+                .Select(r => GetString(listingMeta, r, "skill_name")),
+        ];
+
         TableMetadata partMeta = GetTableMetadata("content_part");
         List<CollectedContentPart> parts =
         [
@@ -5639,7 +5785,8 @@ public class InMemoryRelationalStore :
             reportedOutput,
             ReadRecordSourceName(currentState, recordRow),
             responseId,
-            requestId);
+            requestId,
+            listed.Count > 0 ? listed : null);
     }
 
     private static long? ReadOptionalReportedTotal(StoreState currentState, string spanId, string direction)

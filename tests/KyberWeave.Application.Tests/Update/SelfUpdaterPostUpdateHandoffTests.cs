@@ -324,8 +324,10 @@ public sealed class SelfUpdaterPostUpdateHandoffTests : IDisposable
         Assert.Empty(handler.Uris);
         Assert.Empty(record.SeamCalls);
         Assert.Contains(record.Verbs, verb => verb.Arguments.Count > 0 && verb.Arguments[0] == "engine");
-        SpawnedCall tray = Assert.Single(record.Spawned);
-        Assert.Equal<string>(["menubar", "--update", "--version", "0.2.0"], tray.Arguments);
+        Assert.Empty(record.Spawned);
+        Assert.Contains(
+            record.Verbs,
+            verb => verb.Arguments.SequenceEqual(["menubar", "--update", "--version", "0.2.0"]));
         Assert.Single(record.Refreshes);
         Assert.Equal(0, outcome.ExitCode);
         Assert.Equal(string.Empty, outcome.Message);

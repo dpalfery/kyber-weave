@@ -69,6 +69,7 @@ public static class CanonRecordHydration
         }
 
         AddJoinIds(raw, record);
+        AddSkills(raw, record);
 
         long freshInput = 0;
         long cacheRead = 0;
@@ -186,6 +187,28 @@ public static class CanonRecordHydration
         if (!string.IsNullOrWhiteSpace(record.RequestId))
         {
             raw[fileSource ? "requestId" : "request_id"] = JsonSerializer.SerializeToElement(record.RequestId);
+        }
+    }
+
+    /// <summary>
+    /// Puts the record's stored skill invocations and skill listing under the attributes the
+    /// inactive-skill-reference detector reads: <c>kyber.skills.invoked</c> (a string array) and
+    /// <c>kyber.skills.listed</c> (<c>{ skills: [{ name }] }</c>, in listing order). Each key is
+    /// written only when the record carries at least one name, as <see cref="CanonSynth"/> does, so a
+    /// record with neither leaves the detector's measurability unchanged. The store keeps neither the
+    /// listing's <c>isInitial</c> flag nor skill descriptions, so both are left out.
+    /// </summary>
+    private static void AddSkills(Dictionary<string, JsonElement> raw, CollectedRecord record)
+    {
+        if (record.SkillsInvoked is { Count: > 0 } invoked)
+        {
+            raw[CanonSynth.SkillsInvokedKey] = JsonSerializer.SerializeToElement(invoked.Distinct(StringComparer.Ordinal).ToArray());
+        }
+
+        if (record.SkillsListed is { Count: > 0 } listed)
+        {
+            ListedSkillsPayload payload = new(IsInitial: null, [.. listed.Select(static name => new ListedSkillItem(name))]);
+            raw[CanonSynth.SkillsListedKey] = JsonSerializer.SerializeToElement(payload);
         }
     }
 

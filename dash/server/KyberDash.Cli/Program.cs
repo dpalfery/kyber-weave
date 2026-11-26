@@ -1,8 +1,10 @@
 using System.Globalization;
+using System.Security;
 using System.Runtime.InteropServices;
 using System.Text.Json;
 using KyberDash.Application;
 using KyberDash.Contracts.Services;
+using KyberDash.Core;
 using KyberDash.Core.Exceptions;
 using KyberDash.Domain;
 using Microsoft.Extensions.DependencyInjection;
@@ -69,8 +71,21 @@ public static partial class Program
         ArgumentNullException.ThrowIfNull(output);
         ArgumentNullException.ThrowIfNull(error);
 
-        await using ServiceProvider provider = BuildProvider(args);
-        return await RunAsync(args, output, error, provider, null, cancellationToken).ConfigureAwait(false);
+        DashOptions options;
+        try
+        {
+            options = ResolveOptions(args);
+        }
+        catch (Exception exception) when (exception is ArgumentException or NotSupportedException or PathTooLongException or SecurityException)
+        {
+            // --db and --state-dir come from the operator; a path the platform cannot resolve is a usage error.
+            // Only the path resolution is inside this handler, so a failure while building the container is not misreported.
+            await TryWriteErrorAsync(error, $"kyberdash: --db or --state-dir is not a usable path ({exception.Message})").ConfigureAwait(false);
+            return 2;
+        }
+
+        await using ServiceProvider owned = BuildProvider(options);
+        return await RunAsync(args, output, error, owned, null, cancellationToken).ConfigureAwait(false);
     }
 
     /// <summary>
@@ -102,7 +117,26 @@ public static partial class Program
         string first = args[0];
         if (first is "--version" or "-v" or "-V")
         {
-            await output.WriteLineAsync(ResolveVersion()).ConfigureAwait(false);
+            string version;
+            try
+            {
+                version = ResolveVersion();
+            }
+            catch (InvalidOperationException exception)
+            {
+                await TryWriteErrorAsync(error, $"kyberdash --version: {exception.Message}").ConfigureAwait(false);
+                return 1;
+            }
+
+            try
+            {
+                await output.WriteLineAsync(version).ConfigureAwait(false);
+            }
+            catch (IOException)
+            {
+                // A closed pipe (for example `| head`) is the reader's choice, not a failure of the version lookup.
+            }
+
             return 0;
         }
 
@@ -133,7 +167,19 @@ public static partial class Program
     /// <returns>The service provider; the caller disposes it.</returns>
     public static ServiceProvider BuildProvider(string[]? args = null)
     {
+        return BuildProvider(ResolveOptions(args));
+    }
+
+    private static ServiceProvider BuildProvider(DashOptions options)
+    {
         ServiceCollection services = new();
+        services.AddDashApplication(options);
+        return services.BuildServiceProvider();
+    }
+
+    /// <summary>Resolves <c>--db</c> and <c>--state-dir</c> to full paths; throws the platform's path exceptions.</summary>
+    private static DashOptions ResolveOptions(string[]? args)
+    {
         DashOptions options = new();
 
         foreach (string[] pair in ReadGlobalOptions(args))
@@ -144,26 +190,26 @@ public static partial class Program
                 options.StateDirectory = Path.GetFullPath(pair[1]);
         }
 
-        services.AddDashApplication(options);
-        return services.BuildServiceProvider();
+        return options;
+    }
+
+    /// <summary>Writes a diagnostic; a broken error stream must not change the exit code the caller returns.</summary>
+    private static async Task TryWriteErrorAsync(TextWriter error, string message)
+    {
+        try
+        {
+            await error.WriteLineAsync(message).ConfigureAwait(false);
+        }
+        catch (IOException)
+        {
+            // The diagnostic has nowhere to go; the exit code still reports the failure.
+        }
     }
 
     /// <summary>Resolves the reported version from the assembly's informational version.</summary>
     public static string ResolveVersion()
     {
-        string? informational = typeof(Program).Assembly
-            .GetCustomAttributes(typeof(System.Reflection.AssemblyInformationalVersionAttribute), inherit: false)
-            .OfType<System.Reflection.AssemblyInformationalVersionAttribute>()
-            .FirstOrDefault()
-            ?.InformationalVersion;
-
-        if (!string.IsNullOrWhiteSpace(informational))
-        {
-            int plus = informational.IndexOf('+', StringComparison.Ordinal);
-            return plus >= 0 ? informational[..plus] : informational;
-        }
-
-        return "0.21.0";
+        return DashVersion.Current;
     }
 
     private static IEnumerable<string[]> ReadGlobalOptions(string[]? args)
@@ -191,8 +237,8 @@ public static partial class Program
             + "  web                      Start the local dashboard and engine (spawns kyberdash-api)\n"
             + "  mcp                      Serve read-only analytics over MCP stdio (spawns kyberdash-mcp)\n"
             + "  otel                     Start the standalone OTLP/HTTP receiver\n"
-            + "  menubar                  Install or update the desktop tray app (macOS / Windows)\n"
-            + "  engine ensure            Replace a running engine of another version (--if-running)\n"
+            + "  menubar                  Install, update, quit, launch, or count the desktop tray app (--quit, --launch, --running)\n"
+            + "  engine ensure|stop|verify  Replace, stop, or check the running engine\n"
             + "  e2e-seed                 Seed an isolated store for Playwright E2E worlds\n"
             + "  kyber <subcommand>       Store, capture, and statusline utilities\n\n"
             + "Options:\n"
@@ -292,6 +338,10 @@ public static partial class Program
         return 0;
     }
 
+    /// <summary>Usage line for <c>kyberdash menubar</c>; the tray verbs the update orchestrates are part of it.</summary>
+    private const string MenubarUsage =
+        "Usage: kyberdash menubar [--force] [--update] [--version <v>] | --quit | --launch | --running";
+
     private static async Task<int> RunMenubarAsync(
         IServiceProvider provider,
         TextWriter output,
@@ -301,22 +351,64 @@ public static partial class Program
     {
         bool force = args.Contains("--force", StringComparer.Ordinal);
         bool update = args.Contains("--update", StringComparer.Ordinal);
+        bool quit = args.Contains("--quit", StringComparer.Ordinal);
+        bool launch = args.Contains("--launch", StringComparer.Ordinal);
+        bool running = args.Contains("--running", StringComparer.Ordinal);
         string? requestedVersion = null;
+        bool unknown = false;
         for (int index = 0; index < args.Length; index++)
         {
-            if (args[index] == "--version" && index + 1 < args.Length)
+            string arg = args[index];
+            if (arg == "--version" && index + 1 < args.Length)
+            {
                 requestedVersion = args[++index];
+            }
+            else if (arg is "--db" or "--state-dir" && index + 1 < args.Length)
+            {
+                // Global options are read by the container builder; they are skipped here with their value.
+                index++;
+            }
+            else if (arg is not ("--force" or "--update" or "--quit" or "--launch" or "--running"))
+            {
+                unknown = true;
+            }
+        }
+
+        int verbs = (quit ? 1 : 0) + (launch ? 1 : 0) + (running ? 1 : 0);
+        bool mixed = verbs > 1 || (verbs == 1 && (force || update || requestedVersion is not null));
+        if (unknown || mixed)
+        {
+            await error.WriteLineAsync(MenubarUsage).ConfigureAwait(false);
+            return 2;
         }
 
         IMenubarService menubar = provider.GetRequiredService<IMenubarService>();
-        MenubarInstallOutcome outcome = await menubar
-            .InstallOrUpdateAsync(force, update, requestedVersion, ResolveVersion(), cancellationToken)
-            .ConfigureAwait(false);
+        MenubarInstallOutcome outcome = quit
+            ? await menubar.QuitAsync(cancellationToken).ConfigureAwait(false)
+            : launch
+                ? await menubar.LaunchAsync(cancellationToken).ConfigureAwait(false)
+                : running
+                    ? await menubar.CountRunningAsync(cancellationToken).ConfigureAwait(false)
+                    : await menubar
+                        .InstallOrUpdateAsync(force, update, requestedVersion, ResolveVersion(), cancellationToken)
+                        .ConfigureAwait(false);
 
         TextWriter destination = outcome.ExitCode == 0 ? output : error;
         await destination.WriteLineAsync(outcome.Message).ConfigureAwait(false);
         return outcome.ExitCode;
     }
+
+    /// <summary>Usage line for <c>kyberdash engine</c>. Its wording is part of the contract: T3 reads it.</summary>
+    private const string EngineUsage =
+        "Usage: kyberdash engine ensure --if-running / stop / verify --version <v> [--wait <seconds>] [--state-dir <dir>]";
+
+    /// <summary>
+    /// Longest <c>--wait</c> accepted. An unbounded wait would clamp to <see cref="int.MaxValue"/> probes and
+    /// hold the caller for years; the updater asks for 60 seconds, so ten minutes is generous.
+    /// </summary>
+    private const int MaxEngineWaitSeconds = 600;
+
+    private sealed record EngineOptions(string? StateDir, string? Version, int WaitSeconds);
 
     private static async Task<int> RunEngineAsync(
         IServiceProvider provider,
@@ -325,12 +417,62 @@ public static partial class Program
         string[] args,
         CancellationToken cancellationToken)
     {
-        if (args.Length == 0 || args[0] != "ensure")
+        string verb = args.Length > 0 ? args[0] : string.Empty;
+        if (verb is not ("ensure" or "stop" or "verify"))
         {
-            await error.WriteLineAsync("Usage: kyberdash engine ensure --if-running [--state-dir <dir>]").ConfigureAwait(false);
+            await error.WriteLineAsync(EngineUsage).ConfigureAwait(false);
             return 2;
         }
 
+        IEngineLifecycleService lifecycle = provider.GetRequiredService<IEngineLifecycleService>();
+        if (verb == "ensure")
+        {
+            return await RunEngineEnsureAsync(lifecycle, output, error, args, cancellationToken).ConfigureAwait(false);
+        }
+
+        if (!TryReadEngineOptions(verb, args, out EngineOptions options, out string problem))
+        {
+            await error.WriteLineAsync(problem).ConfigureAwait(false);
+            return 2;
+        }
+
+        if (verb == "stop")
+        {
+            EngineEnsureReport stop = await lifecycle
+                .StopRunningEngineAsync(options.StateDir, cancellationToken)
+                .ConfigureAwait(false);
+            return await WriteEngineReportAsync(stop, output, error, stop.Succeeded ? 0 : 1).ConfigureAwait(false);
+        }
+
+        if (string.IsNullOrWhiteSpace(options.Version))
+        {
+            await error.WriteLineAsync("kyberdash engine verify: --version <v> is required.").ConfigureAwait(false);
+            return 2;
+        }
+
+        // Probes are PollInterval apart, so the wait in seconds becomes whole probes; at least one probe always runs.
+        double probes = Math.Ceiling(options.WaitSeconds / EngineLifecycleService.PollInterval.TotalSeconds);
+        int attempts = (int)Math.Clamp(probes, 1, int.MaxValue);
+        EngineEnsureReport verify = await lifecycle
+            .VerifyRunningEngineVersionAsync(options.Version, attempts, options.StateDir, cancellationToken)
+            .ConfigureAwait(false);
+        int exitCode = verify.Outcome switch
+        {
+            EngineVerifyOutcome.Running => 0,
+            EngineVerifyOutcome.OtherVersion => 3,
+            EngineVerifyOutcome.Unresponsive => 4,
+            _ => 1,
+        };
+        return await WriteEngineReportAsync(verify, output, error, exitCode).ConfigureAwait(false);
+    }
+
+    private static async Task<int> RunEngineEnsureAsync(
+        IEngineLifecycleService lifecycle,
+        TextWriter output,
+        TextWriter error,
+        string[] args,
+        CancellationToken cancellationToken)
+    {
         if (!args.Contains("--if-running", StringComparer.Ordinal))
         {
             await error.WriteLineAsync(
@@ -342,10 +484,15 @@ public static partial class Program
         for (int index = 1; index < args.Length; index++)
         {
             if (args[index] == "--state-dir" && index + 1 < args.Length)
-                stateDir = Path.GetFullPath(args[++index]);
+            {
+                if (!TryFullPath(args[++index], out stateDir, out string stateDirProblem))
+                {
+                    await TryWriteErrorAsync(error, $"kyberdash engine ensure: {stateDirProblem}").ConfigureAwait(false);
+                    return 2;
+                }
+            }
         }
 
-        IEngineLifecycleService lifecycle = provider.GetRequiredService<IEngineLifecycleService>();
         EngineEnsureReport report = await lifecycle
             .EnsureRunningEngineMatchesVersionAsync(
                 ResolveVersion(),
@@ -354,9 +501,77 @@ public static partial class Program
                 cancellationToken)
             .ConfigureAwait(false);
 
+        return await WriteEngineReportAsync(report, output, error, report.Succeeded ? 0 : 1).ConfigureAwait(false);
+    }
+
+    /// <summary>Reads the options of <c>engine stop</c> and <c>engine verify</c>; any other token is a usage error.</summary>
+    private static bool TryReadEngineOptions(string verb, string[] args, out EngineOptions options, out string problem)
+    {
+        string? stateDir = null;
+        string? version = null;
+        int waitSeconds = 20;
+        for (int index = 1; index < args.Length; index++)
+        {
+            bool hasValue = index + 1 < args.Length;
+            if (args[index] == "--state-dir" && hasValue)
+            {
+                if (!TryFullPath(args[++index], out stateDir, out string pathProblem))
+                {
+                    options = new EngineOptions(null, null, 0);
+                    problem = $"kyberdash engine {verb}: {pathProblem}";
+                    return false;
+                }
+            }
+            else if (args[index] == "--version" && hasValue)
+            {
+                version = args[++index];
+            }
+            else if (args[index] == "--wait" && hasValue
+                && int.TryParse(args[index + 1], NumberStyles.None, CultureInfo.InvariantCulture, out int seconds)
+                && seconds is >= 0 and <= MaxEngineWaitSeconds)
+            {
+                waitSeconds = seconds;
+                index++;
+            }
+            else
+            {
+                options = new EngineOptions(null, null, 0);
+                problem = $"kyberdash engine {verb}: unknown, incomplete or out-of-range option '{args[index]}' (--wait accepts 0 to {MaxEngineWaitSeconds}).{Environment.NewLine}{EngineUsage}";
+                return false;
+            }
+        }
+
+        options = new EngineOptions(stateDir, version, waitSeconds);
+        problem = string.Empty;
+        return true;
+    }
+
+    /// <summary>Resolves an operator-supplied <c>--state-dir</c>; a path the platform cannot resolve is a usage error, not a crash.</summary>
+    private static bool TryFullPath(string raw, out string? fullPath, out string problem)
+    {
+        try
+        {
+            fullPath = Path.GetFullPath(raw);
+            problem = string.Empty;
+            return true;
+        }
+        catch (Exception exception) when (exception is ArgumentException or NotSupportedException or PathTooLongException or SecurityException)
+        {
+            fullPath = null;
+            problem = $"--state-dir is not a usable path ({exception.Message})";
+            return false;
+        }
+    }
+
+    private static async Task<int> WriteEngineReportAsync(
+        EngineEnsureReport report,
+        TextWriter output,
+        TextWriter error,
+        int exitCode)
+    {
         TextWriter destination = report.Succeeded ? output : error;
         await destination.WriteLineAsync(report.Message).ConfigureAwait(false);
-        return report.Succeeded ? 0 : 1;
+        return exitCode;
     }
 
     private static int RunE2eSeed(IServiceProvider provider, TextWriter output, TextWriter error, string[] args)

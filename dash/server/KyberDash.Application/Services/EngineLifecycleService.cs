@@ -37,21 +37,32 @@ public class EngineLifecycleService : IEngineLifecycleService
     /// <summary>Number of polls allowed while waiting for the replacement engine to answer (40 × 150 ms).</summary>
     public const int StartupPollAttempts = 40;
 
+    private const string UnresponsiveMessage =
+        "engine: unresponsive the engine endpoint is held by a process that does not answer; stop it and retry";
+
+    private const string RefusedShutdownMessage = "engine: failed the live engine refused the shutdown request";
+
     private readonly IServerStateRepository serverState;
     private readonly DashOptions options;
+    private readonly Func<string, string, bool> spawnEngine;
 
     /// <summary>
     /// Initializes a new <see cref="EngineLifecycleService"/>.
     /// </summary>
     /// <param name="serverState">Server-state repository owning the engine lease and descriptors.</param>
     /// <param name="options">Composition options naming the state directory and reported version.</param>
-    public EngineLifecycleService(IServerStateRepository serverState, DashOptions options)
+    /// <param name="spawnEngine">
+    /// Starts the replacement engine from its binary path and state directory and reports whether it started;
+    /// the detached <c>/bin/sh</c> launch when <see langword="null"/>. The seam lets a test see which binary is launched.
+    /// </param>
+    public EngineLifecycleService(IServerStateRepository serverState, DashOptions options, Func<string, string, bool>? spawnEngine = null)
     {
         ArgumentNullException.ThrowIfNull(serverState);
         ArgumentNullException.ThrowIfNull(options);
 
         this.serverState = serverState;
         this.options = options;
+        this.spawnEngine = spawnEngine ?? TrySpawnDetachedEngine;
     }
 
     /// <inheritdoc />
@@ -80,9 +91,7 @@ public class EngineLifecycleService : IEngineLifecycleService
 
         if (status == EngineProbeState.Unresponsive || holder is null)
         {
-            return new EngineEnsureReport(
-                false,
-                "engine: unresponsive the engine endpoint is held by a process that does not answer; stop it and retry");
+            return new EngineEnsureReport(false, UnresponsiveMessage);
         }
 
         if (string.Equals(holder.Version, version, StringComparison.Ordinal))
@@ -95,7 +104,7 @@ public class EngineLifecycleService : IEngineLifecycleService
             .ConfigureAwait(false);
         if (!stopped)
         {
-            return new EngineEnsureReport(false, "engine: failed the live engine refused the shutdown request");
+            return new EngineEnsureReport(false, RefusedShutdownMessage);
         }
 
         for (int attempt = 0; attempt < ShutdownPollAttempts; attempt++)
@@ -111,7 +120,7 @@ public class EngineLifecycleService : IEngineLifecycleService
         }
 
         string exePath = ResolveApiBinary(apiBinaryPath);
-        if (!TrySpawnDetachedEngine(exePath, resolvedStateDir))
+        if (!spawnEngine(exePath, resolvedStateDir))
         {
             return new EngineEnsureReport(false, $"engine: failed could not start {exePath} {NoOpenArgument}");
         }
@@ -124,6 +133,14 @@ public class EngineLifecycleService : IEngineLifecycleService
                 .ConfigureAwait(false);
             if (restarted == EngineProbeState.Running && nextHolder is not null)
             {
+                if (!string.Equals(nextHolder.Version, version, StringComparison.Ordinal))
+                {
+                    return new EngineEnsureReport(
+                        false,
+                        $"engine: failed replacement reports {nextHolder.Version}, expected {version}",
+                        ActiveEngine: nextHolder);
+                }
+
                 return new EngineEnsureReport(
                     true,
                     $"engine: replaced {holder.Version} -> {nextHolder.Version}",
@@ -133,6 +150,112 @@ public class EngineLifecycleService : IEngineLifecycleService
         }
 
         return new EngineEnsureReport(false, "engine: failed replacement engine did not publish ready status in time");
+    }
+
+    /// <inheritdoc />
+    public async Task<EngineEnsureReport> StopRunningEngineAsync(
+        string? stateDir = null,
+        CancellationToken cancellationToken = default)
+    {
+        string resolvedStateDir = ResolveStateDirectory(stateDir);
+
+        (EngineProbeState status, EngineDescriptor? holder) = await serverState
+            .ProbeEngineAsync(resolvedStateDir, cancellationToken)
+            .ConfigureAwait(false);
+
+        if (status == EngineProbeState.NotRunning)
+        {
+            return new EngineEnsureReport(true, "engine: not-running");
+        }
+
+        if (status == EngineProbeState.Unresponsive || holder is null)
+        {
+            return new EngineEnsureReport(false, UnresponsiveMessage);
+        }
+
+        bool accepted = await serverState
+            .RequestEngineShutdownAsync(resolvedStateDir, cancellationToken)
+            .ConfigureAwait(false);
+        if (!accepted)
+        {
+            return new EngineEnsureReport(false, RefusedShutdownMessage);
+        }
+
+        for (int attempt = 0; attempt < ShutdownPollAttempts; attempt++)
+        {
+            await Task.Delay(PollInterval, cancellationToken).ConfigureAwait(false);
+            (EngineProbeState next, _) = await serverState
+                .ProbeEngineAsync(resolvedStateDir, cancellationToken)
+                .ConfigureAwait(false);
+            if (next == EngineProbeState.NotRunning)
+            {
+                return new EngineEnsureReport(true, $"engine: stopped {holder.Version}");
+            }
+        }
+
+        return new EngineEnsureReport(false, "engine: failed the engine did not stop in time");
+    }
+
+    /// <inheritdoc />
+    public async Task<EngineEnsureReport> VerifyRunningEngineVersionAsync(
+        string expectedVersion,
+        int attempts,
+        string? stateDir = null,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(expectedVersion);
+        ArgumentOutOfRangeException.ThrowIfLessThan(attempts, 1);
+
+        string resolvedStateDir = ResolveStateDirectory(stateDir);
+        string version = expectedVersion.Trim();
+        EngineEnsureReport report = new(false, "engine: not-running", Outcome: EngineVerifyOutcome.NotRunning);
+
+        for (int attempt = 0; attempt < attempts; attempt++)
+        {
+            if (attempt > 0)
+            {
+                await Task.Delay(PollInterval, cancellationToken).ConfigureAwait(false);
+            }
+
+            (EngineProbeState status, EngineDescriptor? holder) = await serverState
+                .ProbeEngineAsync(resolvedStateDir, cancellationToken)
+                .ConfigureAwait(false);
+            report = ClassifyEngine(status, holder, version);
+            if (report.Outcome == EngineVerifyOutcome.Running)
+            {
+                break;
+            }
+        }
+
+        return report;
+    }
+
+    private static EngineEnsureReport ClassifyEngine(EngineProbeState status, EngineDescriptor? holder, string version)
+    {
+        if (status == EngineProbeState.NotRunning)
+        {
+            return new EngineEnsureReport(false, "engine: not-running", Outcome: EngineVerifyOutcome.NotRunning);
+        }
+
+        if (status == EngineProbeState.Unresponsive || holder is null)
+        {
+            return new EngineEnsureReport(false, UnresponsiveMessage, Outcome: EngineVerifyOutcome.Unresponsive);
+        }
+
+        if (string.Equals(holder.Version, version, StringComparison.Ordinal))
+        {
+            return new EngineEnsureReport(
+                true,
+                $"engine: running {version} (pid {holder.Pid})",
+                ActiveEngine: holder,
+                Outcome: EngineVerifyOutcome.Running);
+        }
+
+        return new EngineEnsureReport(
+            false,
+            $"engine: running {holder.Version}, expected {version}",
+            ActiveEngine: holder,
+            Outcome: EngineVerifyOutcome.OtherVersion);
     }
 
     /// <inheritdoc />

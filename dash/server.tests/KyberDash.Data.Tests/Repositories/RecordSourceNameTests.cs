@@ -78,9 +78,13 @@ public class RecordSourceNameTests : IDisposable
         Assert.Empty(store.SessionTimelineRecords(SessionKey));
     }
 
-    /// <summary>The detector generation moves to 7 so no projection built under older hydration survives.</summary>
+    /// <summary>
+    /// The detector generation is past 6, the one that restored record source names, and past 7, the one
+    /// that hydrated the stored skill listing, so no projection built under either older hydration survives.
+    /// </summary>
     [Fact]
-    public void DetectorVersion_IsSeven() => Assert.Equal(7, SqliteRelationalStore.DetectorVersion);
+    public void DetectorVersion_IsPastTheSourceNameAndSkillListingGenerations() =>
+        Assert.True(SqliteRelationalStore.DetectorVersion >= 8);
 
     private static void AssertEveryReadNames(SqliteRelationalStore store, string spanId, string expected)
     {

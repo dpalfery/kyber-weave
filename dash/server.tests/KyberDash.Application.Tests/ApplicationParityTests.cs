@@ -3,6 +3,7 @@ using System.Text.Json;
 using KyberDash.Application.Tests.Fakes;
 using KyberDash.Contracts.Repositories;
 using KyberDash.Contracts.Services;
+using KyberDash.Core;
 using KyberDash.Core.Exceptions;
 using KyberDash.Data.Collector;
 using KyberDash.Data.Collector.Sources;
@@ -176,7 +177,7 @@ public class ApplicationParityTests
         string runsPayload = query.GetRuns().GetRawText();
         Assert.Contains("derived:copilot:", runsPayload, StringComparison.Ordinal);
         Assert.Equal(1, query.GetMeta().GetProperty("apiVersion").GetInt32());
-        Assert.Equal(KyberBridgeEngine.DefaultVersion, query.GetVersion().GetProperty("version").GetString());
+        Assert.Equal(DashVersion.Current, query.GetVersion().GetProperty("version").GetString());
         Assert.True(query.GetCoverage().TryGetProperty("harnesses", out _));
         Assert.True(query.GetQuarantinePage(null, 10, 0, 1).TryGetProperty("total", out _));
         Assert.Equal(0, query.GetProblemsPage(null, 10, 0, 1).GetProperty("total").GetInt32());
@@ -504,6 +505,199 @@ public class ApplicationParityTests
         Assert.False(report.Succeeded);
         Assert.Equal("engine: failed the live engine refused the shutdown request", report.Message);
         Assert.Equal(1, serverState.ShutdownRequests);
+    }
+
+    [Fact]
+    public async Task EngineEnsureReportsAReplacementOnAnotherVersionAsAFailure()
+    {
+        FakeServerStateRepository serverState = new()
+        {
+            ProbeResult = (EngineProbeState.Running, new EngineDescriptor(43, "kyberdash-api", "1.0.0", "2026-11-15T00:00:01.000Z")),
+        };
+        serverState.ProbeSequence.Enqueue((EngineProbeState.Running, new EngineDescriptor(42, "kyberdash-api", "0.20.0", "2026-11-15T00:00:00.000Z")));
+        serverState.ProbeSequence.Enqueue((EngineProbeState.NotRunning, null));
+        List<(string Binary, string StateDir)> spawned = [];
+        EngineLifecycleService lifecycle = new(
+            serverState,
+            new DashOptions(),
+            (binary, stateDir) =>
+            {
+                spawned.Add((binary, stateDir));
+                return true;
+            });
+
+        EngineEnsureReport report = await lifecycle.EnsureRunningEngineMatchesVersionAsync(
+            "2.0.0",
+            apiBinaryPath: "/opt/kyberdash/kyberdash-api",
+            cancellationToken: TestContext.Current.CancellationToken);
+
+        Assert.False(report.Succeeded);
+        Assert.False(report.Replaced);
+        Assert.Equal("engine: failed replacement reports 1.0.0, expected 2.0.0", report.Message);
+        Assert.Equal(1, serverState.ShutdownRequests);
+        Assert.Equal("/opt/kyberdash/kyberdash-api", Assert.Single(spawned).Binary);
+    }
+
+    [Fact]
+    public async Task EngineStopReportsAnAbsentEngineAsSuccess()
+    {
+        FakeServerStateRepository serverState = new();
+        EngineLifecycleService lifecycle = new(serverState, new DashOptions());
+
+        EngineEnsureReport report = await lifecycle.StopRunningEngineAsync(cancellationToken: TestContext.Current.CancellationToken);
+
+        Assert.True(report.Succeeded);
+        Assert.Equal("engine: not-running", report.Message);
+        Assert.Equal(0, serverState.ShutdownRequests);
+    }
+
+    [Fact]
+    public async Task EngineStopReportsAnEngineThatExitsAsStopped()
+    {
+        FakeServerStateRepository serverState = new()
+        {
+            ProbeResult = (EngineProbeState.NotRunning, null),
+        };
+        serverState.ProbeSequence.Enqueue((EngineProbeState.Running, new EngineDescriptor(42, "kyberdash-api", "0.21.0", "2026-11-15T00:00:00.000Z")));
+        EngineLifecycleService lifecycle = new(serverState, new DashOptions());
+
+        EngineEnsureReport report = await lifecycle.StopRunningEngineAsync(cancellationToken: TestContext.Current.CancellationToken);
+
+        Assert.True(report.Succeeded);
+        Assert.Equal("engine: stopped 0.21.0", report.Message);
+        Assert.Equal(1, serverState.ShutdownRequests);
+    }
+
+    [Fact]
+    public async Task EngineStopReportsARefusedShutdownAsAFailure()
+    {
+        FakeServerStateRepository serverState = new()
+        {
+            ProbeResult = (EngineProbeState.Running, new EngineDescriptor(42, "kyberdash-api", "0.21.0", "2026-11-15T00:00:00.000Z")),
+            ShutdownAccepted = false,
+        };
+        EngineLifecycleService lifecycle = new(serverState, new DashOptions());
+
+        EngineEnsureReport report = await lifecycle.StopRunningEngineAsync(cancellationToken: TestContext.Current.CancellationToken);
+
+        Assert.False(report.Succeeded);
+        Assert.Equal("engine: failed the live engine refused the shutdown request", report.Message);
+    }
+
+    [Fact]
+    public async Task EngineStopReportsAnEngineThatNeverExitsAsAFailure()
+    {
+        FakeServerStateRepository serverState = new()
+        {
+            ProbeResult = (EngineProbeState.Running, new EngineDescriptor(42, "kyberdash-api", "0.21.0", "2026-11-15T00:00:00.000Z")),
+        };
+        EngineLifecycleService lifecycle = new(serverState, new DashOptions());
+
+        EngineEnsureReport report = await lifecycle.StopRunningEngineAsync(cancellationToken: TestContext.Current.CancellationToken);
+
+        Assert.False(report.Succeeded);
+        Assert.Equal("engine: failed the engine did not stop in time", report.Message);
+        Assert.Equal(1, serverState.ShutdownRequests);
+    }
+
+    [Fact]
+    public async Task EngineStopReportsAnUnresponsiveEndpointAsAFailure()
+    {
+        FakeServerStateRepository serverState = new()
+        {
+            ProbeResult = (EngineProbeState.Unresponsive, null),
+        };
+        EngineLifecycleService lifecycle = new(serverState, new DashOptions());
+
+        EngineEnsureReport report = await lifecycle.StopRunningEngineAsync(cancellationToken: TestContext.Current.CancellationToken);
+
+        Assert.False(report.Succeeded);
+        Assert.StartsWith("engine: unresponsive", report.Message, StringComparison.Ordinal);
+        Assert.Equal(0, serverState.ShutdownRequests);
+    }
+
+    [Fact]
+    public async Task EngineVerifyReportsAMatchingEngineWithItsProcessId()
+    {
+        FakeServerStateRepository serverState = new()
+        {
+            ProbeResult = (EngineProbeState.Running, new EngineDescriptor(42, "kyberdash-api", "2.0.0", "2026-11-15T00:00:00.000Z")),
+        };
+        EngineLifecycleService lifecycle = new(serverState, new DashOptions());
+
+        EngineEnsureReport report = await lifecycle.VerifyRunningEngineVersionAsync(
+            "2.0.0", 1, cancellationToken: TestContext.Current.CancellationToken);
+
+        Assert.True(report.Succeeded);
+        Assert.Equal("engine: running 2.0.0 (pid 42)", report.Message);
+        Assert.Equal(EngineVerifyOutcome.Running, report.Outcome);
+    }
+
+    [Fact]
+    public async Task EngineVerifyReportsAnotherVersionAsAMismatch()
+    {
+        FakeServerStateRepository serverState = new()
+        {
+            ProbeResult = (EngineProbeState.Running, new EngineDescriptor(42, "kyberdash-api", "1.0.0", "2026-11-15T00:00:00.000Z")),
+        };
+        EngineLifecycleService lifecycle = new(serverState, new DashOptions());
+
+        EngineEnsureReport report = await lifecycle.VerifyRunningEngineVersionAsync(
+            "2.0.0", 1, cancellationToken: TestContext.Current.CancellationToken);
+
+        Assert.False(report.Succeeded);
+        Assert.Equal("engine: running 1.0.0, expected 2.0.0", report.Message);
+        Assert.Equal(EngineVerifyOutcome.OtherVersion, report.Outcome);
+    }
+
+    [Fact]
+    public async Task EngineVerifyReportsAnAbsentEngine()
+    {
+        FakeServerStateRepository serverState = new();
+        EngineLifecycleService lifecycle = new(serverState, new DashOptions());
+
+        EngineEnsureReport report = await lifecycle.VerifyRunningEngineVersionAsync(
+            "2.0.0", 1, cancellationToken: TestContext.Current.CancellationToken);
+
+        Assert.False(report.Succeeded);
+        Assert.Equal("engine: not-running", report.Message);
+        Assert.Equal(EngineVerifyOutcome.NotRunning, report.Outcome);
+    }
+
+    [Fact]
+    public async Task EngineVerifyReportsAnUnresponsiveEndpoint()
+    {
+        FakeServerStateRepository serverState = new()
+        {
+            ProbeResult = (EngineProbeState.Unresponsive, null),
+        };
+        EngineLifecycleService lifecycle = new(serverState, new DashOptions());
+
+        EngineEnsureReport report = await lifecycle.VerifyRunningEngineVersionAsync(
+            "2.0.0", 1, cancellationToken: TestContext.Current.CancellationToken);
+
+        Assert.False(report.Succeeded);
+        Assert.StartsWith("engine: unresponsive", report.Message, StringComparison.Ordinal);
+        Assert.Equal(EngineVerifyOutcome.Unresponsive, report.Outcome);
+    }
+
+    [Fact]
+    public async Task EngineVerifySucceedsWhenTheEngineAnswersOnALaterProbe()
+    {
+        FakeServerStateRepository serverState = new()
+        {
+            ProbeResult = (EngineProbeState.Running, new EngineDescriptor(42, "kyberdash-api", "2.0.0", "2026-11-15T00:00:00.000Z")),
+        };
+        serverState.ProbeSequence.Enqueue((EngineProbeState.Unresponsive, null));
+        serverState.ProbeSequence.Enqueue((EngineProbeState.NotRunning, null));
+        EngineLifecycleService lifecycle = new(serverState, new DashOptions());
+
+        EngineEnsureReport report = await lifecycle.VerifyRunningEngineVersionAsync(
+            "2.0.0", 3, cancellationToken: TestContext.Current.CancellationToken);
+
+        Assert.True(report.Succeeded);
+        Assert.Equal("engine: running 2.0.0 (pid 42)", report.Message);
+        Assert.Equal(EngineVerifyOutcome.Running, report.Outcome);
     }
 
     [Fact]
