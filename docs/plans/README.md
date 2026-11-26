@@ -64,7 +64,9 @@ its `tasks.yml` is caught rather than carried as dead weight.
 
 ## Active Plans
 
-No plans are open.
+| Plan | Status | Date | Goal |
+|---|---|---|---|
+| [2026-11-26-opencode-instance-audit-and-spike.md](2026-11-26-opencode-instance-audit-and-spike.md) | Ready | 2026-11-26 | Audit OpenCode's Arbiter and model-profile paths against the installed version, run the deferred `OPENCODE_CONFIG_DIR` spike with recorded evidence, and promote the `squad run` catalog row only in the direction the evidence supports, with the contract tests and four documentation surfaces updated in the same change. |
 
 ## Archived Plans
 
