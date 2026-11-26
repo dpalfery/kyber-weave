@@ -5,7 +5,7 @@ doc-type: todo
 component: KyberSquad
 status: draft
 owner: dpalfery
-last-reviewed: 2026-10-25
+last-reviewed: 2026-11-26
 ---
 
 # Windows E2E Verification and Harness Spikes for Squad Model Presets
@@ -52,12 +52,14 @@ Task 18 specifies the live verification scenario on a Windows machine logged in 
 Each spike tests whether a candidate environment variable safely redirects agent configuration
 without breaking sign-in credentials or altering unrelated system tools.
 
-- **S1. OpenCode override (`OPENCODE_CONFIG_DIR`)**:
-  - Deploy a probe agent into the global configuration directory and a different probe into the
-    instance layer folder.
-  - Run OpenCode with `OPENCODE_CONFIG_DIR` pointing to the layer.
-  - If the layered agent overrides the global definition, mark row as `Ready`. If not, test whether
-    the `XDG_CONFIG_HOME` fallback works or mark as `Unsupported`.
+- **S1. OpenCode override (`OPENCODE_CONFIG_DIR`)** — done:
+  - OpenCode `v2.4.1` on Darwin 27.3.0 arm64 (macOS 27.3), 2026-11-25.
+  - Verdict: `PROPOSE: HomeReplace`. `OPENCODE_CONFIG_DIR` replaces the config root rather than
+    merging it with `~/.config/opencode`; credentials still resolve from the data directory, and
+    `XDG_CONFIG_HOME` does the same replacement and does load an agent placed there.
+  - `SquadInstanceCatalog` was not changed. Kind stays `ConfigLayer`, the environment variable
+    stays `OPENCODE_CONFIG_DIR`, and status stays `SpikePending`. The probe record is in OpenCode instance support: audit evidence (2026-11-26), after S8.
+
 - **S2. Kilo override (`KILO_CONFIG_DIR`)**:
   - Repeat the S1 layered override test using `KILO_CONFIG_DIR` and `~/.config/kilo/agents/`.
 - **S3. Cursor override (`CURSOR_CONFIG_DIR`)**:
@@ -89,10 +91,94 @@ without breaking sign-in credentials or altering unrelated system tools.
     interfere with hard-linked access. If contention occurs, apply the R7.4a exception (never link
     `auth.json`, require one sign-in per instance).
 
+
+#### OpenCode instance support: audit evidence (2026-11-26)
+
+Recorded against `opencode v2.4.1` (`opencode --version`) after `kyber-weave doctor --ensure .` passed in the task worktree. No file under `src/` or `tests/` was changed.
+
+##### A1 — plugin API
+
+Verdict: correct as designed
+
+`ArbiterPluginShim.Render` for the `opencode` token emits `OpenCodeDefaultExport`, which is a default export of `{ id, setup }`:
+
+```text
+export default {
+  id: "kyber-arbiter",
+  setup: KyberArbiter,
+};
+```
+
+`OpenCodePluginBody` assumes `setup` registers both hooks through `ctx.tool.hook` (`execute.before` and `execute.after`), that a block decision is a thrown `Error`, and that `event.input` is writable (`event.input = decision.args`). `RunArbiterHook` assumes a spawn or a non-zero hook exit is also a thrown `Error`. `tests/KyberWeave.Application.Tests/Squad/ArbiterOpenCodeRenderingTests.cs` pins that shape (`Render_Opencode_EmitsDefaultExportObjectWithSetup`, `RenderAsync_Shim_RegistersBothHooksThroughThePluginContext`, `RenderAsync_Shim_AssignsDecisionArgsToTheWritableEventInput`).
+
+OpenCode 2.4.1 matches it. The Homebrew binary is `/opt/homebrew/Cellar/opencode/2.4.1/bin/opencode`. Its plugin loader accepts a default export of `{ id, setup }` or `{ id, effect }` and refuses anything else with `Plugin must export a default definition with an id and an effect or setup function.` `setup` is called with a context whose `tool.hook` wraps `execute.before` and `execute.after`. The before wrapper copies the callback's `input` back (`n.input=t.input`). A thrown `Error` is wrapped as `Tool.Error` (`a instanceof Error ? a.message : String(a)`), which is the rejection the tool runner treats as a failed call. The same hook names are in the v2.4.1 changelog (`execute.before` and `execute.after`; reject with `Tool.Error`). The installed user plugin `~/.config/opencode/plugins/kyber-arbiter.ts` (2026-11-22) ends with `id: "kyber-arbiter"` and `setup: KyberArbiter`.
+
+##### A2 — scope contract
+
+Verdict: correct as designed
+
+Project scope and global scope both render the owned plugin file. `OpenCodeRenderer.RenderArbiter` always calls `AddArbiterPluginShim(".opencode/plugins/kyber-arbiter.ts", "plugins/kyber-arbiter.ts")`. `AddArbiterPluginShim` writes the project path at project scope and the global path when `Scope` is global, whenever `EnabledArbiter` is set or `DispatchHooks` is true. `DispatchHooks` is true only at project scope when the request carries an Arbiter wiring, including a disabled one (`Enabled: false`), so a disabled wiring still renders the dispatch-hook shim at project scope. `ArbiterEnforced` is the MCP grant, and it is true only for an enabled wiring at project scope; it does not decide whether the file is written.
+
+[ADR 0026](../adr/0026-kyber-utilities-owned-files-not-settings.md) (amendment 2026-11-05) allows Squad to write its owned file in an auto-loaded plugin directory, including OpenCode `~/.config/opencode/plugins/`, when the user runs the install. [ADR 0054](../adr/0054-squad-owned-blocks-in-shared-hook-files.md) decision 4 writes a v3 receipt at project scope and at global scope. The Arbiter hooks passage in [onboarding](../kyber-squad/onboarding.md) hooks `opencode` in user/global scope and says the hook on `pi`, `kilo`, and `opencode` is an owned extension or plugin file. `RenderAsync_GlobalScope_OpenCode_EmitsOwnedAutoLoadedPluginFileUnderGlobalRoot` in `tests/KyberWeave.Application.Tests/Squad/ArbiterGlobalPluginDirRenderingTests.cs` pins the global file at `plugins/kyber-arbiter.ts` under `~/.config/opencode`. The phrase "project scope only" describes neither scope.
+
+##### A3 — instance render
+
+Verdict: gap with a decision needed
+
+`SquadLifecycleService.InstallAfterRecoveryAsync` maps instance scope onto a global render against the instance root: when `request.Scope` is `Instance`, `renderScope` is `Global` and the global-root resolver is a `SquadInstanceRootResolver` bound to that root. `SquadInstanceService.EnsureAsync` builds `SquadInstallRequest` with the instance root, `SquadDeploymentScope.Instance`, the one target, and the preset name. `Arbiter` is left at its default, `null` (`SquadInstallRequest` in `src/KyberWeave.Domain/Squad/Deployment/SquadDeploymentModels.cs`). With no wiring, `EnabledArbiter` is null and `DispatchHooks` is false, so `AddArbiterPluginShim` writes no shim.
+
+Consequence: `squad run opencode` would launch a session with no Arbiter plugin in the instance, while a global install on this machine has already written `~/.config/opencode/plugins/kyber-arbiter.ts`. Whether that user-global plugin is discovered when the config root is the instance is the next spike; this record is only the omission. The bullet is in [the Arbiter hook todo](arbiter-global-hook-dispatch-coverage.md). Changing it would amend decision 4 of [ADR 0044](../adr/0044-squad-lock-v2-and-instance-deployment-scope.md) and [ADR 0054](../adr/0054-squad-owned-blocks-in-shared-hook-files.md). The renderer, the install request, and both ADRs were left as they are.
+
+##### A4 — model profiles
+
+Verdict: correct as designed
+
+`opencode auth list` shows providers OpenCode Go, GitHub Copilot, Google, LM Studio, OpenCode, Wafer, and Z.AI Coding Plan. `opencode models` returned ids, including the three tokens copied from `products/kyber-squad/profiles/models.yml`:
+
+- `zai-coding-plan/glm-5.3` — Verified present (`architect`, `deep-planning`, and `dev-hard`)
+- `opencode-go/muse-spark-1.3-contributor` — Verified present (`fast` and `general`)
+- `opencode-go/kimi-k2.7-code` — Verified present (`reviewer`)
+
+`zai-coding-plan/glm-5.4` is in the live list and is not a bundled token. `models.yml` was not edited.
+
+`kyber-weave` 0.1.8-rc.31 installed OpenCode Squad into a scratch directory outside the repository (`squad install <scratch> --target opencode --yes`, exit 0). That install rendered the bundled assignment itself. One agent file, `.opencode/agents/architect.md`, contained `model: zai-coding-plan/glm-5.3`.
+
+`squad preset show architect --target opencode`, the dry-run `squad preset use architect <scratch> --target opencode --dry-run`, and the same `use` without `--dry-run` each exited 2:
+
+```text
+kyber-weave squad: error: Unknown preset 'architect'. Available presets: bench-arch-deepseek-v4-pro, bench-arch-glm-5-3, bench-arch-gpt-6-1-sol-copilot, bench-arch-gpt-6-1-sol-zen, bench-arch-kimi-k3-1-pro, bench-arch-muse-spark-1-3, kilo-opencode-go, kilo-override, kyber-weave, kyber-weave-factory.
+```
+
+There were no dry-run agent lines and no changed model line. `architect` is a profile category in `models.yml`. `squad preset show` and `squad preset use` load a user preset file under `~/.kyber-weave/squad/presets/`, and no file there is named `architect`. `squad preset clear <scratch> --target opencode` exited 0. The scratch directory was then deleted. Missing tokens are not a finding.
+
+##### Spike S1 result
+
+PROPOSE: HomeReplace
+
+`opencode v2.4.1` on Darwin 27.3.0 arm64 (macOS 27.3), 2026-11-25 EST. `XDG_CONFIG_HOME` was unset, so the global root is `~/.config/opencode`. `opencode auth list` names OpenCode Go, GitHub Copilot, Google, LM Studio, OpenCode, Wafer, and Z.AI Coding Plan, and `opencode models` returned ids. `~/.config/opencode/agents/` already existed. `agents/probe-global.md` and `agents/probe-conflict.md` did not, and no existing file was edited.
+
+The scratch directory was `/tmp/kw-opencode-s1-layer.zmsgemxd`, outside the repository and outside `~/.config/opencode`. `OPENCODE_CONFIG_DIR` was that path. The listing command was `opencode debug agents --standalone` (`opencode debug agents` is the non-interactive "List all agents" verb; `--standalone` makes this process load config instead of the background service). It does not call a model.
+
+- B3. With `OPENCODE_CONFIG_DIR` set, the listing contained `probe-layer` (`description` `instance-layer probe`) and `probe-conflict`. It did not contain `probe-global`.
+- B4. The loaded `probe-conflict` description was `instance-layer conflict probe`.
+- B5. `opencode models --standalone` with `OPENCODE_CONFIG_DIR` set exited 0 and returned ids (146 lines). `opencode debug paths` kept `data` at `~/.local/share/opencode` and `db` at `~/.local/share/opencode/opencode.db` while `config` moved to the scratch directory. Auth state stayed in the data directory.
+- B6. With `OPENCODE_CONFIG_DIR` unset and `XDG_CONFIG_HOME` set to `/tmp/kw-opencode-s1-xdg.88mqc7ri`, `opencode debug paths` reported `config` as that tree's `opencode` directory, and `opencode debug agents --standalone` listed `probe-layer` (`instance-layer probe`) and did not list `probe-global`. The agent placed under the XDG config home loaded.
+
+`OPENCODE_CONFIG_DIR` replaces the config root rather than merging it with `~/.config/opencode`, credentials still resolve from the data directory, and the XDG fallback is the same kind of replacement and does load an agent placed there. That is HomeReplace, not a layered config. The catalog source was not edited. The same replacement means the user-global Arbiter plugin is not on the config path an instance points at `OPENCODE_CONFIG_DIR`: the A3 verdict above is that an instance install writes no plugin of its own.
+
+Removed, then confirmed absent:
+
+- `~/.config/opencode/agents/probe-global.md`
+- `~/.config/opencode/agents/probe-conflict.md`
+
+The scratch directory and the XDG temporary tree were removed as well.
+
 ## Next steps and resolution criteria
 
-1. Run spikes S1, S2, S3, S4 on macOS and Windows to promote their `SquadInstanceCatalog` rows from
-   `SpikePending` to `Ready` or `Unsupported`.
+1. S1 is settled: `PROPOSE: HomeReplace` (OpenCode `v2.4.1`, Darwin 27.3.0, 2026-11-25). That
+   proposal does not change the OpenCode `SquadInstanceCatalog` row, which stays `SpikePending`.
+   Run spikes S2, S3, and S4 on macOS and Windows to promote their rows from `SpikePending` to
+   `Ready` or `Unsupported`.
 2. Settle the S4 variable discrepancy (`ZCODE_STORAGE_DIR` vs `ZCODE_DATA_BASE_DIR`) and align
    `SquadGlobalRoots` if necessary.
 3. Complete E-win on a physical Windows test machine and document findings in the catalog.
