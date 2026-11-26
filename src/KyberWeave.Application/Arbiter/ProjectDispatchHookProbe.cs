@@ -18,7 +18,8 @@ namespace KyberWeave.Core.Arbiter;
 /// <c>.cursor/hooks.json</c>, also dispatching on <c>Task</c>. A JSON harness is covered when a matching
 /// entry's command runs the project-scope hook. The JSON files are read as JSONC: a comment or a trailing
 /// comma must not hide a hook the file declares. OpenCode keeps the plugin shim at
-/// <c>.opencode/plugins/kyber-arbiter.ts</c> and Pi at <c>.pi/extensions/kyber-arbiter.ts</c>. Every other
+/// <c>.opencode/plugins/kyber-arbiter.ts</c>, Pi at <c>.pi/extensions/kyber-arbiter.ts</c>, and Command
+/// Code its project mod at <c>.commandcode/mods/kyber-arbiter.ts</c>. Every other
 /// harness reports true, which keeps today's deferral. A missing or malformed file is not a project hook.
 /// A file that is present but cannot be read throws. The hook host logs that failure and still inserts the
 /// task prompt, because it could not prove a project hook and a bare allow would leave only the header lines.
@@ -31,6 +32,7 @@ public sealed class ProjectDispatchHookProbe(IFileSystem files) : IProjectDispat
     private const string CursorToken = "cursor";
     private const string OpenCodeToken = "opencode";
     private const string PiToken = "pi";
+    private const string CommandCodeToken = "commandcode";
     private const string AntigravityHookPath = ".agents/hooks.json";
     private const string FactoryHookPath = ".factory/hooks.json";
     private const string FactorySettingsPath = ".factory/settings.json";
@@ -38,6 +40,7 @@ public sealed class ProjectDispatchHookProbe(IFileSystem files) : IProjectDispat
     private const string CursorHookPath = ".cursor/hooks.json";
     private const string OpenCodeShimPath = ".opencode/plugins/kyber-arbiter.ts";
     private const string PiShimPath = ".pi/extensions/kyber-arbiter.ts";
+    private const string CommandCodeModPath = ".commandcode/mods/kyber-arbiter.ts";
     private const string AntigravityDispatchTool = "invoke_subagent";
     private const string FactoryDispatchTool = "Task";
     private const string CursorDispatchTool = "Task";
@@ -99,6 +102,11 @@ public sealed class ProjectDispatchHookProbe(IFileSystem files) : IProjectDispat
         if (string.Equals(harnessToken, PiToken, StringComparison.Ordinal))
         {
             return ShimCovers(projectRoot, PiShimPath);
+        }
+
+        if (string.Equals(harnessToken, CommandCodeToken, StringComparison.Ordinal))
+        {
+            return ShimCovers(projectRoot, CommandCodeModPath);
         }
 
         return true;

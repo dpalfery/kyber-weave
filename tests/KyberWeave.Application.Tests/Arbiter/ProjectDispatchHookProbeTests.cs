@@ -7,8 +7,8 @@ namespace KyberWeave.Tests.Arbiter;
 /// <summary>
 /// Which project-scope hook a project actually declares for one harness. The user-level hook asks this
 /// before deferring a dispatch: a project with no hook of its own must not be deferred to, or the worker
-/// starts with only the header lines. Antigravity, Factory, Cursor, OpenCode and Pi are read; every other
-/// harness keeps today's deferral.
+/// starts with only the header lines. Antigravity, Factory, Cursor, OpenCode, Pi and Command Code are
+/// read; every other harness keeps today's deferral.
 /// </summary>
 public sealed class ProjectDispatchHookProbeTests
 {
@@ -18,6 +18,7 @@ public sealed class ProjectDispatchHookProbeTests
     private const string CursorHookPath = ".cursor/hooks.json";
     private const string OpenCodeShimPath = ".opencode/plugins/kyber-arbiter.ts";
     private const string PiShimPath = ".pi/extensions/kyber-arbiter.ts";
+    private const string CommandCodeModPath = ".commandcode/mods/kyber-arbiter.ts";
 
     private readonly InMemoryFileSystem _files = new();
     private readonly ProjectDispatchHookProbe _probe;
@@ -477,6 +478,36 @@ public sealed class ProjectDispatchHookProbeTests
     [Fact]
     public void Pi_WhenTheExtensionIsAbsent_DoesNotCover() =>
         Assert.False(_probe.CoversHarness(Root, "pi"));
+
+    [Fact]
+    public void CommandCode_WhenTheProjectModCarriesTheProjectHook_Covers()
+    {
+        Write(
+            CommandCodeModPath,
+            """
+            const command = "kyber-weave-arbiter";
+            export default function (cmd) { cmd.hooks({}); }
+            """);
+
+        Assert.True(_probe.CoversHarness(Root, "commandcode"));
+    }
+
+    [Fact]
+    public void CommandCode_WhenTheProjectModIsTheUserLevelHook_DoesNotCover()
+    {
+        Write(
+            CommandCodeModPath,
+            """
+            const command = ["kyber-weave-arbiter", "--scope", "global"];
+            export default function (cmd) { cmd.hooks({}); }
+            """);
+
+        Assert.False(_probe.CoversHarness(Root, "commandcode"));
+    }
+
+    [Fact]
+    public void CommandCode_WhenTheProjectModIsAbsent_DoesNotCover() =>
+        Assert.False(_probe.CoversHarness(Root, "commandcode"));
 
     [Theory]
     [InlineData("claude")]
