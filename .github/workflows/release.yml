@@ -1854,17 +1854,26 @@ jobs:
       # Runs even when a verify step above failed: on a chain hit the proving
       # run's URL is the only lead an operator has for what published the
       # release that mismatched, and a skipped report would take it with it.
+      # Each branch claims only what actually happened: a hit whose receipt
+      # recorded no run_url points at the verdict log, and a miss that is not
+      # green published nothing.
       - name: Report the run that published this release
         if: always()
         env:
           PRIOR_RUN_URL: ${{ steps.verdict.outputs.run_url }}
+          CHAIN_HIT: ${{ steps.verdict.outputs.skip }}
+          JOB_STATUS: ${{ job.status }}
         run: |
           set -euo pipefail
           if [[ -n "${PRIOR_RUN_URL}" ]]; then
             echo "Chain hit: this release was published by ${PRIOR_RUN_URL}"
             echo "Published by ${PRIOR_RUN_URL}" >> "${GITHUB_STEP_SUMMARY}"
-          else
+          elif [[ "${CHAIN_HIT}" == "true" ]]; then
+            echo "Chain hit: the run that published this release is unrecorded (the receipt carries no run_url); see the 'Decide whether the release chain can skip' step log for the verdict."
+          elif [[ "${JOB_STATUS}" == "success" ]]; then
             echo "This run published the release: ${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}"
+          else
+            echo "This run published nothing (${JOB_STATUS}): publishing or verification did not complete; see the failed steps above."
           fi
 
       # Miss-only, and only after the verification above: a hit must never
