@@ -65,7 +65,7 @@ public sealed class DevHardModelUpgradeTests
         ["devin"] = "deepseek-v4-1-flash-high",
         ["factory"] = "deepseek-v4.1-flash[reasoningEffort=high]",
         ["kilo"] = "opencode-go/muse-spark-1.3-contributor",
-        ["opencode"] = "opencode-go/muse-spark-1.3-contributor",
+        ["opencode"] = "opencode-go/deepseek-v4.1-flash-1017",
         ["pi"] = "opencode-go/muse-spark-1.3-contributor[thinking=low]",
         ["zcode"] = "glm-5.3-flash",
     };
@@ -81,7 +81,7 @@ public sealed class DevHardModelUpgradeTests
         ["devin"] = "swe-2-high",
         ["factory"] = "deepseek-v4.1-flash[reasoningEffort=high]",
         ["kilo"] = "opencode-go/muse-spark-1.3-contributor",
-        ["opencode"] = "opencode-go/muse-spark-1.3-contributor",
+        ["opencode"] = "opencode-go/deepseek-v4.1-flash-1017",
         ["pi"] = "opencode-go/muse-spark-1.3-contributor[thinking=medium]",
         ["zcode"] = "glm-5.3-flash",
     };
