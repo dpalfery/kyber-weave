@@ -265,7 +265,7 @@ public interface IDashboardQueryService
     /// <param name="order">Sort order (<c>desc</c> or <c>asc</c>); <c>desc</c> unless given.</param>
     JsonElement? GetSessionSkills(string sessionId, int page = 1, int limit = 25, string order = "desc");
 
-    /// <summary>Returns one page of the session's KW skill loads (D17), in call order, apart from the harness skills section.</summary>
+    /// <summary>Returns one page of the session's KW skill loads (D17), in the requested call order, apart from the harness skills section.</summary>
     /// <param name="sessionId">Canonical session identifier.</param>
     /// <param name="page">One-based page number.</param>
     /// <param name="limit">Rows on the page; 25 unless given (25, 50, or 100).</param>

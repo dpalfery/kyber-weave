@@ -563,7 +563,7 @@ public record SessionTurnFigureSet(
     ReadTimeContextBucketSummary? LastContextBucket);
 
 /// <summary>One page of a session's request rows, read over <c>session_request</c> and turn ownership only.</summary>
-/// <param name="Items">The page's request rows, in request order. Prompt previews are always <see langword="null"/> here; the scoped <see cref="IRelationalStoreReader.RequestPromptPreviews"/> read supplies them.</param>
+/// <param name="Items">The page's request rows, in the requested request order. Prompt previews are always <see langword="null"/> here; the scoped <see cref="IRelationalStoreReader.RequestPromptPreviews"/> read supplies them.</param>
 /// <param name="Total">Number of request rows the session holds, before paging.</param>
 public record SessionRequestFigurePageResult(IReadOnlyList<ReadTimeSessionRequestSummary> Items, int Total);
 

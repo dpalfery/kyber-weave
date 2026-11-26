@@ -654,8 +654,6 @@ public class KyberBridgeEngine
     /// <param name="sessionId">Canonical session identifier.</param>
     /// <param name="page">One-based page number.</param>
     /// <param name="limit">Rows on the page.</param>
-    /// <returns>Paging envelope JSON element, or <see langword="null"/>.</returns>
-    /// <exception cref="ArgumentException"><paramref name="sessionId"/> is null, empty, or whitespace.</exception>
     /// <param name="order">Sort direction (<c>"desc"</c> or <c>"asc"</c>).</param>
     /// <returns>Paging envelope JSON element, or <see langword="null"/>.</returns>
     /// <exception cref="ArgumentException"><paramref name="sessionId"/> is null, empty, or whitespace, or <paramref name="order"/> is not <c>"desc"</c> or <c>"asc"</c>.</exception>
@@ -751,6 +749,7 @@ public class KyberBridgeEngine
     /// <param name="sessionId">Canonical session identifier.</param>
     /// <param name="page">One-based page number.</param>
     /// <param name="limit">Rows on the page.</param>
+    /// <param name="order">Sort direction (<c>"desc"</c> or <c>"asc"</c>).</param>
     /// <returns>Paging envelope JSON element with the section's <c>aggregate</c>, or <see langword="null"/>.</returns>
     /// <remarks>
     /// The aggregate is priced over every row the tool figures read returns, before paging, so a
@@ -758,9 +757,6 @@ public class KyberBridgeEngine
     /// count, the unused count, the unused range, the per-server rollup, the span that carries
     /// the session's tool definitions, and the schema measurability verdict with its reason.
     /// </remarks>
-    /// <exception cref="ArgumentException"><paramref name="sessionId"/> is null, empty, or whitespace.</exception>
-    /// <param name="order">Sort direction (<c>"desc"</c> or <c>"asc"</c>).</param>
-    /// <returns>Paging envelope JSON element, or <see langword="null"/>.</returns>
     /// <exception cref="ArgumentException"><paramref name="sessionId"/> is null, empty, or whitespace, or <paramref name="order"/> is not <c>"desc"</c> or <c>"asc"</c>.</exception>
     /// <exception cref="ArgumentOutOfRangeException"><paramref name="page"/> or <paramref name="limit"/> is less than 1.</exception>
     public JsonElement? GetSessionTools(
@@ -946,13 +942,14 @@ public class KyberBridgeEngine
     /// <param name="sessionId">Canonical session identifier.</param>
     /// <param name="page">One-based page number.</param>
     /// <param name="limit">Rows on the page.</param>
+    /// <param name="order">Sort direction (<c>"desc"</c> or <c>"asc"</c>).</param>
     /// <returns>The skills payload the detail route carries, with its rows paged, or <see langword="null"/>.</returns>
     /// <remarks>
     /// The rows answer from the stored skill invocations alone; the session's harness identity
     /// names the not-measurable block the rows carry, the one read past the skill table the
     /// section pays.
     /// </remarks>
-    /// <exception cref="ArgumentException"><paramref name="sessionId"/> is null, empty, or whitespace.</exception>
+    /// <exception cref="ArgumentException"><paramref name="sessionId"/> is null, empty, or whitespace, or <paramref name="order"/> is not <c>"desc"</c> or <c>"asc"</c>.</exception>
     /// <exception cref="ArgumentOutOfRangeException"><paramref name="page"/> or <paramref name="limit"/> is less than 1.</exception>
     public JsonElement? GetSessionSkills(
         string sessionId,
@@ -1014,7 +1011,7 @@ public class KyberBridgeEngine
         return JsonSerializer.SerializeToElement(payload, CamelCaseJsonOptions);
     }
 
-    /// <summary>Returns one page of the session's KW skill loads (D17), in call order, apart from the harness skills section.</summary>
+    /// <summary>Returns one page of the session's KW skill loads (D17), in the requested call order, apart from the harness skills section.</summary>
     /// <param name="sessionId">Canonical session identifier.</param>
     /// <param name="page">One-based page number.</param>
     /// <param name="limit">Rows per page; <see cref="DefaultSectionPageLimit"/> unless given.</param>
@@ -1090,7 +1087,8 @@ public class KyberBridgeEngine
     /// <param name="sessionId">Canonical session identifier.</param>
     /// <param name="parentNodeId">Span id of the node whose children the page lists; the top level when null or empty.</param>
     /// <param name="page">One-based page number.</param>
-    /// <param name="limit">Nodes on the page; 25 unless given.</param>
+    /// <param name="limit">Nodes on the page; <see cref="DefaultSectionPageLimit"/> unless given.</param>
+    /// <param name="order">Sort direction (<c>"desc"</c> or <c>"asc"</c>).</param>
     /// <returns>
     /// The page's nodes — today's timeline node fields minus <c>children</c>, plus each node's
     /// <c>childCount</c> — with the level's total and the whole tree's bounds, or
@@ -1105,16 +1103,11 @@ public class KyberBridgeEngine
     /// (decision D17).
     /// </para>
     /// <para>
-    /// Siblings keep <c>BuildTimeline</c>'s order across pages, so walking every parent's pages
-    /// yields today's tree with no node lost or duplicated.
+    /// Siblings at each level are ordered by start time in the requested <paramref name="order"/>
+    /// (with <c>spanId</c> ascending as tiebreak) before paging, so walking every parent's pages
+    /// yields the complete tree with no node lost or duplicated.
     /// </para>
     /// </remarks>
-    /// <param name="sessionId">Canonical session identifier.</param>
-    /// <param name="parentNodeId">Optional parent node span id whose children are returned, or <see langword="null"/>/empty for top-level roots.</param>
-    /// <param name="page">One-based page number.</param>
-    /// <param name="limit">Rows per page.</param>
-    /// <param name="order">Sort direction (<c>"desc"</c> or <c>"asc"</c>).</param>
-    /// <returns>Timeline level envelope JSON element, or <see langword="null"/> when the session or parent node is unknown.</returns>
     /// <exception cref="ArgumentException"><paramref name="sessionId"/> is null, empty, or whitespace, or <paramref name="order"/> is not <c>"desc"</c> or <c>"asc"</c>.</exception>
     /// <exception cref="ArgumentOutOfRangeException"><paramref name="page"/> or <paramref name="limit"/> is less than 1.</exception>
     public JsonElement? GetSessionTimeline(
