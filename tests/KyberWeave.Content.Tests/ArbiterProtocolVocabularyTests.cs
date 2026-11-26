@@ -33,14 +33,12 @@ public sealed partial class ArbiterProtocolVocabularyTests
 
         foreach (string path in MarkdownFiles())
         {
-            foreach (string line in ReadLines(path))
+            foreach (string line in DispatchHeaderLines(ReadLines(path)))
             {
-                if (!line.Contains(DispatchHeaders.Marker, StringComparison.Ordinal))
-                    continue;
-
-                foreach (Match match in BacktickedHeaderRegex().Matches(line))
+                foreach (string name in HeaderNames(line))
                 {
-                    string name = match.Groups["name"].Value;
+                    if (string.Equals(name, DispatchHeaders.Marker, StringComparison.Ordinal))
+                        continue;
                     if (NonHeaderRoutingMarkers.Contains(name, StringComparer.Ordinal))
                         continue;
                     if (!declared.Contains(name))
@@ -52,6 +50,63 @@ public sealed partial class ArbiterProtocolVocabularyTests
         Assert.True(
             undeclared.Count == 0,
             "Prompts write dispatch headers the Arbiter does not declare: " + string.Join(", ", undeclared));
+    }
+
+    /// <summary>
+    /// Every header name a line writes: a backticked <c>NAME:</c> token anywhere on it, plus the name that
+    /// opens the line when the line is itself written as a header.
+    /// </summary>
+    private static IEnumerable<string> HeaderNames(string line)
+    {
+        HashSet<string> seen = new(StringComparer.Ordinal);
+        foreach (Match match in BacktickedHeaderRegex().Matches(line))
+        {
+            string name = match.Groups["name"].Value;
+            if (seen.Add(name))
+                yield return name;
+        }
+
+        if (LeadingHeaderName(line) is { } leading && seen.Add(leading))
+            yield return leading;
+    }
+
+    /// <summary>
+    /// Every line inside a dispatch header block. A block opens on a line carrying the marker and continues
+    /// through each following line written as a header, so a header placed under the marker is checked too.
+    /// </summary>
+    private static IEnumerable<string> DispatchHeaderLines(string[] lines)
+    {
+        for (int index = 0; index < lines.Length; index++)
+        {
+            if (!lines[index].Contains(DispatchHeaders.Marker, StringComparison.Ordinal))
+                continue;
+
+            yield return lines[index];
+            for (int next = index + 1; next < lines.Length; next++)
+            {
+                if (LeadingHeaderName(lines[next]) is null)
+                    break;
+                yield return lines[next];
+            }
+        }
+    }
+
+    /// <summary>The name before the colon when a line is written as a header, or null when it is prose.</summary>
+    private static string? LeadingHeaderName(string line)
+    {
+        string trimmed = line.TrimStart().TrimStart('-', '*', '>', ' ');
+        if (trimmed.Length == 0 || trimmed.StartsWith("```", StringComparison.Ordinal))
+            return null;
+
+        trimmed = trimmed.TrimStart('`');
+        int colon = trimmed.IndexOf(':', StringComparison.Ordinal);
+        if (colon <= 0)
+            return null;
+
+        string name = trimmed[..colon];
+        return name.Length > 0 && name.All(c => c is >= 'A' and <= 'Z' or >= '0' and <= '9' or '_' or '-')
+            ? name
+            : null;
     }
 
     [Fact]
