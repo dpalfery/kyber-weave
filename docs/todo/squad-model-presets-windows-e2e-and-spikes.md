@@ -58,8 +58,39 @@ without breaking sign-in credentials or altering unrelated system tools.
     merging it with `~/.config/opencode`; credentials still resolve from the data directory, and
     `XDG_CONFIG_HOME` does the same replacement and does load an agent placed there.
   - `SquadInstanceCatalog` was not changed. Kind stays `ConfigLayer`, the environment variable
-    stays `OPENCODE_CONFIG_DIR`, and status stays `SpikePending`. The probe record is under
-    Spike S1 result below.
+    stays `OPENCODE_CONFIG_DIR`, and status stays `SpikePending`. The probe record is in OpenCode instance support: audit evidence (2026-11-26), after S8.
+
+- **S2. Kilo override (`KILO_CONFIG_DIR`)**:
+  - Repeat the S1 layered override test using `KILO_CONFIG_DIR` and `~/.config/kilo/agents/`.
+- **S3. Cursor override (`CURSOR_CONFIG_DIR`)**:
+  - Test the Cursor CLI with `CURSOR_CONFIG_DIR` pointing to an instance folder holding `agents/probe.md`.
+  - Record the executable name. If agents and settings both move, row is `HomeReplace` and `Ready`.
+  - If only agents move and sign-in stays global, row is `ConfigLayer` and `Ready`.
+  - If no custom agent loads, mark `Unsupported`.
+- **S4. ZCode storage variable (`ZCODE_STORAGE_DIR` vs `ZCODE_DATA_BASE_DIR`)**:
+  - Apply the S3 check to `ZCODE_STORAGE_DIR`, and then to `ZCODE_DATA_BASE_DIR`.
+  - **Discrepancy note**: `SquadGlobalRoots` currently resolves ZCode's global root using
+    `ZCODE_STORAGE_DIR`, but ZCode's upstream documentation references `ZCODE_DATA_BASE_DIR`.
+  - Determine which variable is respected by current releases. If `ZCODE_STORAGE_DIR` is ignored by
+    the CLI, update `SquadGlobalRoots` and `SquadInstanceCatalog` accordingly.
+- **S5. Copilot (`COPILOT_HOME`)**:
+  - Verify whether setting `COPILOT_HOME` requires a fresh login or reads the system keychain (`copilot-cli`).
+  - Run the rename check (`stat -f %i` or `fsutil file queryfileid`) across authentication to confirm
+    credentials are not rewritten by atomic rename (which would split hard links). Any rewritten file
+    must be added to the catalog row's `NeverLinked` roster.
+- **S6. Claude (`CLAUDE_CONFIG_DIR`)**:
+  - Verify whether `<temp>/.claude.json` is created when running under `CLAUDE_CONFIG_DIR`. If created,
+    add an explicit link to `~/.claude.json`.
+  - On Windows, run the rename check on `.credentials.json` across `/login` and token refresh.
+- **S7. Codex (`CODEX_HOME`)**:
+  - In file mode, perform the rename check on `auth.json` across token refreshes.
+  - In keyring mode, confirm that independent `CODEX_HOME` paths share or partition credentials as documented.
+- **S8. Pi on Windows (`PI_CODING_AGENT_DIR`)**:
+  - Hard-link `auth.json` into a temporary `PI_CODING_AGENT_DIR` on Windows.
+  - Run concurrent `pi` sessions across token refreshes to verify whether file locks on `auth.json`
+    interfere with hard-linked access. If contention occurs, apply the R7.4a exception (never link
+    `auth.json`, require one sign-in per instance).
+
 
 #### OpenCode instance support: audit evidence (2026-11-26)
 
@@ -141,37 +172,6 @@ Removed, then confirmed absent:
 - `~/.config/opencode/agents/probe-conflict.md`
 
 The scratch directory and the XDG temporary tree were removed as well.
-
-- **S2. Kilo override (`KILO_CONFIG_DIR`)**:
-  - Repeat the S1 layered override test using `KILO_CONFIG_DIR` and `~/.config/kilo/agents/`.
-- **S3. Cursor override (`CURSOR_CONFIG_DIR`)**:
-  - Test the Cursor CLI with `CURSOR_CONFIG_DIR` pointing to an instance folder holding `agents/probe.md`.
-  - Record the executable name. If agents and settings both move, row is `HomeReplace` and `Ready`.
-  - If only agents move and sign-in stays global, row is `ConfigLayer` and `Ready`.
-  - If no custom agent loads, mark `Unsupported`.
-- **S4. ZCode storage variable (`ZCODE_STORAGE_DIR` vs `ZCODE_DATA_BASE_DIR`)**:
-  - Apply the S3 check to `ZCODE_STORAGE_DIR`, and then to `ZCODE_DATA_BASE_DIR`.
-  - **Discrepancy note**: `SquadGlobalRoots` currently resolves ZCode's global root using
-    `ZCODE_STORAGE_DIR`, but ZCode's upstream documentation references `ZCODE_DATA_BASE_DIR`.
-  - Determine which variable is respected by current releases. If `ZCODE_STORAGE_DIR` is ignored by
-    the CLI, update `SquadGlobalRoots` and `SquadInstanceCatalog` accordingly.
-- **S5. Copilot (`COPILOT_HOME`)**:
-  - Verify whether setting `COPILOT_HOME` requires a fresh login or reads the system keychain (`copilot-cli`).
-  - Run the rename check (`stat -f %i` or `fsutil file queryfileid`) across authentication to confirm
-    credentials are not rewritten by atomic rename (which would split hard links). Any rewritten file
-    must be added to the catalog row's `NeverLinked` roster.
-- **S6. Claude (`CLAUDE_CONFIG_DIR`)**:
-  - Verify whether `<temp>/.claude.json` is created when running under `CLAUDE_CONFIG_DIR`. If created,
-    add an explicit link to `~/.claude.json`.
-  - On Windows, run the rename check on `.credentials.json` across `/login` and token refresh.
-- **S7. Codex (`CODEX_HOME`)**:
-  - In file mode, perform the rename check on `auth.json` across token refreshes.
-  - In keyring mode, confirm that independent `CODEX_HOME` paths share or partition credentials as documented.
-- **S8. Pi on Windows (`PI_CODING_AGENT_DIR`)**:
-  - Hard-link `auth.json` into a temporary `PI_CODING_AGENT_DIR` on Windows.
-  - Run concurrent `pi` sessions across token refreshes to verify whether file locks on `auth.json`
-    interfere with hard-linked access. If contention occurs, apply the R7.4a exception (never link
-    `auth.json`, require one sign-in per instance).
 
 ## Next steps and resolution criteria
 
