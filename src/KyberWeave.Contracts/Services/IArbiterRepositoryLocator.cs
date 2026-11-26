@@ -11,7 +11,15 @@ public interface IArbiterRepositoryLocator
     /// <returns>The root, or the full path when none is found.</returns>
     string ResolveRepositoryRoot(string path);
 
-    /// <summary>Resolves the directory holding the ledger and the decision log: <c>artifacts/arbiter/</c> under the repository root.</summary>
+    /// <summary>
+    /// Resolves the directory the hook recorded the repository's ledger and decision log in: the user-level store under
+    /// the home directory while it holds either file for the repository, and otherwise <c>artifacts/arbiter/</c> under
+    /// the repository root, where a project hook records.
+    /// </summary>
+    /// <remarks>
+    /// A linked worktree is keyed as its main checkout, the directory holding the common git directory, because that is
+    /// the root the user-level hook keyed the store by when the run was dispatched.
+    /// </remarks>
     /// <param name="path">The working path.</param>
     /// <returns>The arbiter state directory.</returns>
     string ResolveArbiterDirectory(string path);
