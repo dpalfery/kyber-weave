@@ -74,6 +74,71 @@ public sealed class ClaudeContextCompositionTests
     }
 
     /// <summary>
+    /// When the first post-compaction turn is observed by both the transcript file and OTLP under one
+    /// request id, twin dedupe keeps the OTLP record; it must still carry the compaction boundary so the
+    /// cumulative prefix resets instead of leaking pre-compaction context into later turns.
+    /// </summary>
+    [Fact]
+    public void ProjectIncremental_ResetsCompactionBoundaryWhenBoundaryTurnJoinsAnOtlpTwin()
+    {
+        CollectedRecord pre = Turn(
+            "turn-0",
+            sessionKey: "sess-twin-compact",
+            minuteOffset: 0,
+            inputTokens: 400,
+            outputTokens: 50,
+            parts: [TextPart(0, ContentBucket.ConversationHistory, "Pre-compaction alpha beta gamma", role: "user")]);
+        CollectedRecord boundaryFile = Turn(
+            "turn-file",
+            sessionKey: "sess-twin-compact",
+            minuteOffset: 1,
+            inputTokens: 250,
+            outputTokens: 30,
+            agentInstanceId: "claude:compact_boundary",
+            parts: [TextPart(0, ContentBucket.ConversationHistory, "Post-compaction summary only", role: "user")]) with
+        {
+            RequestId = "req_boundary",
+        };
+        CollectedRecord boundaryOtlp = Turn(
+            "turn-otlp",
+            sessionKey: "sess-twin-compact",
+            minuteOffset: 1,
+            inputTokens: 250,
+            outputTokens: 30) with
+        {
+            RequestId = "req_boundary",
+        };
+        CollectedRecord post = Turn(
+            "turn-2",
+            sessionKey: "sess-twin-compact",
+            minuteOffset: 2,
+            inputTokens: 300,
+            outputTokens: 30,
+            parts: [TextPart(0, ContentBucket.ConversationHistory, "Fresh prompt", role: "user")]);
+
+        InMemoryRelationalStore store = new();
+        WriteSession(store, "sess-twin-compact", [pre, boundaryFile, post]);
+        WriteSession(store, "sess-twin-compact", [boundaryOtlp], sourceKind: SourceKind.Otlp, locator: "otlp:claude-code");
+
+        CanonicalRecord kept = Assert.Single(
+            CanonSessionProjectorEngine.DedupeTwinTurns(
+                [.. ((IRelationalStoreReader)store).SessionRecordsForRebuild("sess-twin-compact").Select(CanonRecordHydration.Hydrate)],
+                "sess-twin-compact"),
+            static r => r.SpanId == "turn-otlp");
+        Assert.True(kept.Raw!.ContainsKey("claude.compact_boundary"));
+
+        CanonSessionProjectorEngine engine = new(store, store, store, new FakePricingRepository(), new FakeTextTokenizer());
+        _ = engine.ProjectIncremental();
+
+        StoredSessionProjection projection = ((IProjectionStore)store).GetSessionProjection("sess-twin-compact")!;
+        Assert.NotNull(projection.Context);
+        Assert.Equal(3, projection.Context!.Turns.Count);
+        Assert.Equal(4L, BucketTokens(projection.Context.Turns[0], "conversation_history"));
+        Assert.Equal(3L, BucketTokens(projection.Context.Turns[1], "conversation_history"));
+        Assert.Equal(5L, BucketTokens(projection.Context.Turns[2], "conversation_history"));
+    }
+
+    /// <summary>
     /// A compaction boundary stamped on an output-only or aborted turn with zero measured input
     /// tokens still clears the cumulative prefix before subsequent post-compaction turns are projected.
     /// </summary>
@@ -670,10 +735,12 @@ public sealed class ClaudeContextCompositionTests
         IRelationalStoreWriter writer,
         string sessionKey,
         IReadOnlyList<CollectedRecord> records,
-        string harnessId = "claude-code")
+        string harnessId = "claude-code",
+        SourceKind sourceKind = SourceKind.File,
+        string? locator = null)
     {
         writer.WriteBatch(new CollectedBatch(
-            Source: new CollectedSource(harnessId, SourceKind.File, $"file:{harnessId}:{sessionKey}"),
+            Source: new CollectedSource(harnessId, sourceKind, locator ?? $"file:{harnessId}:{sessionKey}"),
             Sessions:
             [
                 new CollectedSession(

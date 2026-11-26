@@ -1611,11 +1611,15 @@ public partial class CanonSessionProjectorEngine
     /// <summary>Raw attributes a twin keeps from the observation it absorbed when it has none of its own.</summary>
     private static readonly string[] DonorSkillKeys = [CanonSynth.SkillsListedKey, CanonSynth.SkillsInvokedKey];
 
+    /// <summary>Raw attributes a kept twin must inherit from an absorbed twin: skills and the compaction boundary.</summary>
+    private static readonly string[] DonorKeys = [.. DonorSkillKeys, CanonRecordHydration.CompactBoundaryRawKey];
+
     /// <summary>
     /// Carries the skill listing and skill invocations of an absorbed twin onto the kept record: a
     /// Claude Code listing is stored only on the transcript turn, so an OTLP keeper would otherwise drop
     /// it and the inactive-skill-reference detector would not see it. The keeper's own listing wins;
-    /// invoked names are unioned, keeper's first.
+    /// invoked names are unioned, keeper's first. The compaction boundary marker is carried too, so the
+    /// projection still resets its cumulative context when the post-compaction turn joins an OTLP twin.
     /// </summary>
     private static CanonicalRecord WithDonorSkills(CanonicalRecord keeper, CanonicalRecord donor)
     {
@@ -1627,6 +1631,12 @@ public partial class CanonSessionProjectorEngine
         Dictionary<string, JsonElement>? raw = null;
         Dictionary<string, JsonElement> Writable() =>
             raw ??= keeper.Raw is null ? new(StringComparer.Ordinal) : new(keeper.Raw, StringComparer.Ordinal);
+
+        if (donor.Raw.TryGetValue(CanonRecordHydration.CompactBoundaryRawKey, out JsonElement boundary)
+            && (keeper.Raw is null || !keeper.Raw.ContainsKey(CanonRecordHydration.CompactBoundaryRawKey)))
+        {
+            Writable()[CanonRecordHydration.CompactBoundaryRawKey] = boundary;
+        }
 
         if (donor.Raw.TryGetValue(CanonSynth.SkillsListedKey, out JsonElement listed)
             && (keeper.Raw is null || !keeper.Raw.ContainsKey(CanonSynth.SkillsListedKey)))
@@ -1862,10 +1872,10 @@ public partial class CanonSessionProjectorEngine
 
     /// <summary>
     /// Whether an absorbed twin has anything to hand its keeper: content, or a skill listing or skill
-    /// invocations the keeper would otherwise lose (<see cref="WithDonorSkills"/>).
+    /// invocations or compaction boundary the keeper would otherwise lose (<see cref="WithDonorSkills"/>).
     /// </summary>
     private static bool IsDonor(CanonicalRecord record) =>
-        HasParts(record) || (record.Raw is not null && DonorSkillKeys.Any(record.Raw.ContainsKey));
+        HasParts(record) || (record.Raw is not null && DonorKeys.Any(record.Raw.ContainsKey));
 
     private static bool HasParts(CanonicalRecord record) =>
         (record.Parts is { Count: > 0 }) || record.Content.Count > 0;
