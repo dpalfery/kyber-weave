@@ -146,16 +146,15 @@ export function useSectionPage<T extends KyberSectionWindow>(
     // or page-size change must not show rows in the old order/size under the
     // new controls (dbId 4704550908).
     placeholderData: (previousData, previousQuery) => {
-      const prevKey = previousQuery?.queryKey as readonly unknown[] | undefined
       if (
-        prevKey?.[1] !== sessionId ||
-        prevKey?.[2] !== section ||
-        prevKey?.[4] !== limit ||
-        prevKey?.[5] !== order
+        previousQuery?.queryKey[1] !== sessionId ||
+        previousQuery?.queryKey[2] !== section ||
+        previousQuery?.queryKey[4] !== limit ||
+        previousQuery?.queryKey[5] !== order
       ) {
         return undefined
       }
-      return keepPreviousData(previousData, previousQuery as never)
+      return keepPreviousData(previousData)
     },
   })
   const failure =
