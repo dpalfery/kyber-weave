@@ -6,7 +6,7 @@ status: current
 component: DocGraph
 source-root: src/KyberWeave.Mcp
 owner: dpalfery
-last-reviewed: 2026-11-25
+last-reviewed: 2026-11-26
 decided-by:
   - adr/0051-dotnet-cli-spawns-stdio-children-through-one-bounded-session
   - adr/0052-docs-branch-writes-repository-scope-mcp-configuration
@@ -468,9 +468,9 @@ namespace first, so `kw-docs` is reached as `kw_docs`. An entry spelled
 `mcp__kw-docs__<tool>` names no registered Pi tool. This differs from Claude, ZCode, Devin, and
 Command Code on purpose: those pass the server name through verbatim, and Pi does not.
 
-**Version floor: `pi-mcp-adapter` 6.0.0, current release 7.0.0.** The deferred-tool surface this
+**Version floor: `pi-mcp-adapter` 6.0.0, current release 7.0.1.** The deferred-tool surface this
 naming belongs to arrived in 6.0.0, whose changelog first records tools becoming a deferred tool
-named `mcp__<server>__<tool>`; 7.0.0 is the supported target. On 5.x there is no per-tool deferred
+named `mcp__<server>__<tool>`; 7.0.1 is the supported target. On 5.x there is no per-tool deferred
 registration at all — the tools would be named
 `kw-docs_docs_get_coding_standard_for_technology` — so the proxy
 entry `ext:pi-mcp-adapter/mcp` still works and only the enumerable per-tool names resolve to
@@ -1682,14 +1682,14 @@ such as a research request: the reply then describes the parts from the shared r
 
 The tool never asks for the harness: it reads the name the MCP client sent in its `initialize`
 request (`clientInfo.name`), because a harness name the model types is a guess. A name that a live
-probe or the client's own source has verified maps to that harness's hook token: Copilot CLI,
-Claude Code, opencode, Factory Droid (`factory-cli`), Cursor and Kilo by probe; VS Code, Codex
-(`codex-mcp-client`) and Pi (`pi-mcp-<server key>`) by source. The reply
+probe, the client's own logs or its own source has verified maps to that harness's hook token:
+Copilot CLI, Claude Code, opencode, Cursor and Kilo by probe; Factory Droid (`factory-cli`) by its
+logs; VS Code, Codex (`codex-mcp-client`) and Pi (`pi-mcp-<server key>`) by source. The reply
 says `harness: <token> (from MCP client '<name>')`. On a harness whose dispatch hook can rewrite
 the call, no file is written and the reply says `prompt file: none`. On ZCode, CommandCode and
 Warp the hook cannot rewrite the dispatch — the rows in the
 [dispatch delivery path](../kyber-arbiter/architecture.md#dispatch-delivery-path) — and a client
-name neither has verified is treated the same way, so the prompt is written to
+name that none of these has verified is treated the same way, so the prompt is written to
 `.agent_scratchpad/<task>/prompt.md` (untracked) and the reply carries that path, after
 `harness: unknown MCP client '<name>'; the prompt file was written`. Name the path in the dispatch
 and tell the worker to read it first; that line means a new harness can be added to the register

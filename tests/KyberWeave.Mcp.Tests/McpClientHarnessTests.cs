@@ -4,8 +4,8 @@ using Xunit;
 namespace KyberWeave.Mcp.Tests;
 
 /// <summary>
-/// The registry from a verified MCP client name to the hook's harness token. Each row is a probe's result, so a
-/// name no probe saw has no token and the tool writes the prompt file instead of claiming a hook inserts it.
+/// The registry from a verified MCP client name to the hook's harness token. Each row rests on a live probe, the
+/// client's own logs or its own source, so a name none of them showed has no token and the tool writes the prompt file instead of claiming a hook inserts it.
 /// </summary>
 public sealed class McpClientHarnessTests
 {

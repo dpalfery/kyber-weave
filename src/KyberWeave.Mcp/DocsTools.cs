@@ -329,7 +329,7 @@ public sealed partial class DocsTools
     /// agent's name, not the prompt, and this tool answers with exactly that: who to dispatch, the
     /// difficulty in use and who rated it, the technology, and anything the prompt budget left out.
     /// The harness is the calling client's own name, so the caller never names it and cannot get it wrong.
-    /// On a harness whose hook cannot rewrite the dispatch, and on a client name no probe has verified, it
+    /// On a harness whose hook cannot rewrite the dispatch, and on a client name no probe, log or source has verified, it
     /// also writes the prompt file and answers with its path, so this tool is not read-only.
     /// </remarks>
     [McpServerTool(Name = "docs_build_task_prompt_for_agent_dispatch", ReadOnly = false, OpenWorld = false)]
@@ -405,7 +405,7 @@ public sealed partial class DocsTools
                 PriorResultsPath: priorResults,
                 Technology: technology,
                 FailedAttempts: failedAttempts,
-                // A client no probe has verified is built for no rewriting harness, so the prompt goes to the file
+                // A client no probe, log or source has verified is built for no rewriting harness, so the prompt goes to the file
                 // the reply names instead of being read as a dispatch some hook already carries.
                 Harness: harness ?? McpClientHarness.UnverifiedToken),
             config);
