@@ -1392,6 +1392,26 @@ export function ContextCompositionChart({
 
   // Check if context is completely empty
   if (!context || rows.length === 0) {
+    if (context && contextPager && contextPager.total > 0) {
+      return (
+        <div
+          data-testid="context-composition-empty-page"
+          className={cn(
+            'rounded-lg border border-border bg-card p-4 text-card-foreground shadow-xs',
+            className,
+          )}
+        >
+          <div className="py-4 text-center">
+            <p className="text-sm font-medium text-foreground">No turns on this page.</p>
+            <p className="mt-1 text-xs text-muted-foreground">
+              Use the page controls below to return to a populated page.
+            </p>
+          </div>
+          <Pager {...contextPager} ariaLabel={contextPager.ariaLabel ?? 'Context composition pages'} />
+        </div>
+      )
+    }
+
     return (
       <div
         data-testid="context-composition-empty"
@@ -1541,20 +1561,22 @@ export function ContextCompositionChart({
   const measuredRows = rows.filter((r) => r.hasMeasuredInput)
   const pageResidual = measuredRows.reduce((s, r) => s + r.buckets.residual, 0)
   const pageAllTokens = measuredRows.reduce((s, r) => s + r.total, 0)
-  const hasWholeSessionInput = context.measuredInputTotal !== undefined
   const wholeMeasuredInput =
     typeof context.measuredInputTotal === 'number' && Number.isFinite(context.measuredInputTotal)
       ? context.measuredInputTotal
-      : 0
+      : null
   const wholeResidual =
     typeof context.residualTotal === 'number' && Number.isFinite(context.residualTotal)
       ? context.residualTotal
       : pageResidual
-  const residualMeasurable = hasWholeSessionInput
-    ? wholeMeasuredInput > 0
-    : measuredRows.length > 0 && pageAllTokens > 0
+  const residualMeasurable =
+    wholeMeasuredInput !== null
+      ? wholeMeasuredInput > 0
+      : measuredRows.length > 0 && pageAllTokens > 0
   const avgResidualPct = residualMeasurable
-    ? ((hasWholeSessionInput ? wholeResidual : pageResidual) / (hasWholeSessionInput ? wholeMeasuredInput : pageAllTokens)) * 100
+    ? ((wholeMeasuredInput !== null ? wholeResidual : pageResidual) /
+        (wholeMeasuredInput !== null ? wholeMeasuredInput : pageAllTokens)) *
+      100
     : 0
   const omissionSummary = buildOmissionSummary(context.missingBuckets, context.residualReasons)
 

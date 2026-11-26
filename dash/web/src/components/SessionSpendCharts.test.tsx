@@ -1337,4 +1337,97 @@ describe('ContextCompositionChart whole-session scaling, legend attribution, and
     expect(findAllElements(innerHeatmap, (el) => el.props['data-testid'] === 'context-heatmap')).toHaveLength(1)
     expect(findAllElements(innerHeatmap, (el) => el.props['data-testid'] === 'list-pager')).toHaveLength(1)
   })
+
+  it('keeps Pager rendered with an empty-page message when turns is empty on a past-end page with total > 0', () => {
+    const context: ContextCompositionData = {
+      measurable: true,
+      contextLimit: 200000,
+      turns: [],
+    }
+    const contextPager = {
+      page: 4,
+      limit: 50 as const,
+      total: 128,
+      onPageChange: vi.fn(),
+      limitOptions: [25, 50, 100] as const,
+      onLimitChange: vi.fn(),
+      order: 'desc' as const,
+      onOrderChange: vi.fn(),
+    }
+
+    const element = React.createElement(ContextCompositionChart, { context, contextPager })
+    const text = normalizedRenderText(element)
+    expect(text).toContain('No turns on this page.')
+    expect(text).not.toContain('Context composition telemetry was not captured for this session.')
+    expect(findAllElements(element, (el) => el.props['data-testid'] === 'list-pager')).toHaveLength(1)
+    expect(findAllElements(element, (el) => el.props['data-testid'] === 'pager-prev')).toHaveLength(1)
+  })
+
+  it('preserves heavyDrift warning and standard drift footer when residualReasons only contains tokenizer_drift', () => {
+    const context: ContextCompositionData = {
+      measurable: true,
+      derivedCounts: true,
+      tokenizer: 'o200k_base',
+      tokenizers: [{ name: 'o200k_base', isModelOwn: false }],
+      tokenizerIsModelOwn: false,
+      measuredInputTotal: 10000,
+      residualTotal: 4500,
+      residualReasons: ['tokenizer_drift'],
+      turns: [
+        {
+          index: 1,
+          reported_input: 10000,
+          buckets: { conversation_history: 5500, residual: 4500 },
+        },
+      ],
+    }
+
+    const element = React.createElement(ContextCompositionChart, { context })
+    const caveat = findAllElements(element, (el) => el.props['data-testid'] === 'context-caveat')[0]!
+    const footer = findAllElements(element, (el) => el.props['data-testid'] === 'context-composition-footer')[0]!
+    const caveatText = normalizedRenderText(caveat)
+    const footerText = normalizedRenderText(footer)
+
+    expect(String(caveat.props.className)).toContain('border-amber-500/40')
+    expect(caveatText).toContain('proxy is a poor fit')
+    expect(caveatText).toContain("Treat this session's bucket sizes as a lower bound.")
+    expect(findAllElements(element, (el) => el.props['data-testid'] === 'context-caveat-omissions')).toHaveLength(0)
+    expect(footerText).toContain('Residual accounts for tokenizer drift, role delimiters, and unmeasured chat framing.')
+    expect(footerText).toContain('Lower residual values indicate higher precision message token tracking.')
+  })
+
+  it('handles measuredInputTotal null by falling back to page measured rows and 0 as not measurable', () => {
+    const nullTotalContext: ContextCompositionData = {
+      measurable: true,
+      measuredInputTotal: null,
+      residualTotal: null as unknown as undefined,
+      turns: [
+        {
+          index: 1,
+          reported_input: 5000,
+          buckets: { system_prompt: 4500, residual: 500 },
+        },
+      ],
+    }
+    const nullTotalText = normalizedRenderText(React.createElement(ContextCompositionChart, { context: nullTotalContext }))
+    expect(nullTotalText).toMatch(/Residual: 10\.0\s*%/)
+    expect(nullTotalText).not.toContain('not measurable')
+
+    const zeroTotalContext: ContextCompositionData = {
+      measurable: true,
+      measuredInputTotal: 0,
+      residualTotal: 0,
+      turns: [
+        {
+          index: 1,
+          buckets: { system_prompt: 1200 },
+        },
+      ],
+    }
+    const zeroTotalElement = React.createElement(ContextCompositionChart, { context: zeroTotalContext })
+    const zeroTotalText = normalizedRenderText(zeroTotalElement)
+    expect(zeroTotalText).toContain('not measurable')
+    expect(zeroTotalText).not.toContain('0.0%')
+    expect(findAllElements(zeroTotalElement, (el) => el.props['data-testid'] === 'context-caveat-unmeasured-residual')).toHaveLength(1)
+  })
 })
