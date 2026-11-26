@@ -267,7 +267,7 @@ describe('SessionChartsSection paging and sorting', () => {
   it('pages and sorts Context Composition in Stacked Bars and Heatmap Matrix views, resetting to page 1 on limit/order changes', async () => {
     const fetchMock = stubFetch((url) => jsonResponse(pagedChartsResponse(url)))
     mount(() => {})
-    const section = await screen.findByTestId('spend-composition-section')
+    let section = await screen.findByTestId('spend-composition-section')
     expect(within(section).getByTestId('context-stacked-bars')).toBeTruthy()
     expect(within(section).getByTestId('context-turn-26')).toBeTruthy()
     expect(fetchMock.mock.calls.some(([url]) => String(url).includes('/charts?page=1&limit=25&order=desc'))).toBe(true)
@@ -284,12 +284,18 @@ describe('SessionChartsSection paging and sorting', () => {
     await waitFor(() =>
       expect(fetchMock.mock.calls.some(([url]) => String(url).includes('/charts?page=1&limit=50&order=desc'))).toBe(true),
     )
+    await screen.findByTestId('pager-limit')
+    section = screen.getByTestId('spend-composition-section')
+    expect((within(section).getByTestId('pager-limit') as HTMLSelectElement).value).toBe('50')
     expect(window.sessionStorage.getItem('kyberdash:session-section:limit:charts')).toBe('50')
 
     fireEvent.change(within(section).getByTestId('pager-limit'), { target: { value: '100' } })
     await waitFor(() =>
       expect(fetchMock.mock.calls.some(([url]) => String(url).includes('/charts?page=1&limit=100&order=desc'))).toBe(true),
     )
+    await screen.findByTestId('pager-limit')
+    section = screen.getByTestId('spend-composition-section')
+    expect((within(section).getByTestId('pager-limit') as HTMLSelectElement).value).toBe('100')
     expect(window.sessionStorage.getItem('kyberdash:session-section:limit:charts')).toBe('100')
 
     // Switch to Heatmap Matrix and verify paging + order toggle reset to page 1
@@ -305,6 +311,8 @@ describe('SessionChartsSection paging and sorting', () => {
     await waitFor(() =>
       expect(fetchMock.mock.calls.some(([url]) => String(url).includes('/charts?page=1&limit=100&order=asc'))).toBe(true),
     )
+    await screen.findByTestId('pager-order')
+    section = screen.getByTestId('spend-composition-section')
     expect(within(section).getByTestId('pager-order').textContent).toBe('Oldest first')
     expect(within(section).getByTestId('context-heatmap').textContent).toContain('Turn #1')
   })

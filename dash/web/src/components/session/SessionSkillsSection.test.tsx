@@ -181,7 +181,7 @@ describe('SessionSkillsSection inspector wiring', () => {
       return jsonResponse({ ...SKILLS_PAGE, total: 120, page, limit, order })
     })
     mount(() => {})
-    const section = await screen.findByTestId('skills-section')
+    let section = await screen.findByTestId('skills-section')
 
     fireEvent.click(within(section).getByTestId('pager-next'))
     await waitFor(() =>
@@ -192,24 +192,38 @@ describe('SessionSkillsSection inspector wiring', () => {
     await waitFor(() =>
       expect(fetchMock.mock.calls.some(([url]) => String(url).includes('skills?page=1&limit=50&order=desc'))).toBe(true),
     )
+    await screen.findByTestId('pager-limit')
+    section = screen.getByTestId('skills-section')
+    expect((within(section).getByTestId('pager-limit') as HTMLSelectElement).value).toBe('50')
     expect(window.sessionStorage.getItem('kyberdash:session-section:limit:skills')).toBe('50')
 
     fireEvent.change(within(section).getByTestId('pager-limit'), { target: { value: '100' } })
     await waitFor(() =>
       expect(fetchMock.mock.calls.some(([url]) => String(url).includes('skills?page=1&limit=100&order=desc'))).toBe(true),
     )
+    await screen.findByTestId('pager-limit')
+    section = screen.getByTestId('skills-section')
+    expect((within(section).getByTestId('pager-limit') as HTMLSelectElement).value).toBe('100')
     expect(window.sessionStorage.getItem('kyberdash:session-section:limit:skills')).toBe('100')
 
     fireEvent.click(within(section).getByTestId('pager-next'))
     await waitFor(() =>
       expect(fetchMock.mock.calls.some(([url]) => String(url).includes('skills?page=2&limit=100&order=desc'))).toBe(true),
     )
+    await waitFor(() =>
+      expect((within(section).getByTestId('pager-order') as HTMLButtonElement).disabled).toBe(false),
+    )
 
     fireEvent.click(within(section).getByTestId('pager-order'))
     await waitFor(() =>
       expect(fetchMock.mock.calls.some(([url]) => String(url).includes('skills?page=1&limit=100&order=asc'))).toBe(true),
     )
+    await screen.findByTestId('pager-order')
+    section = screen.getByTestId('skills-section')
     expect(within(section).getByTestId('pager-order').textContent).toBe('Oldest first')
+    await waitFor(() =>
+      expect((within(section).getByTestId('pager-order') as HTMLButtonElement).disabled).toBe(false),
+    )
 
     fireEvent.click(within(section).getByTestId('pager-order'))
     await waitFor(() =>
