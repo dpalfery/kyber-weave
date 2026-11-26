@@ -2,7 +2,7 @@
 id: plans/2026-11-26-opencode-instance-audit-and-spike
 title: OpenCode harness support — audit the Arbiter and model-profile paths, run the OPENCODE_CONFIG_DIR spike, promote the instance row only on evidence
 doc-type: plan
-status: current
+status: archived
 component: KyberSquad
 owner: dpalfery
 last-reviewed: 2026-11-26
@@ -14,7 +14,7 @@ impact-components:
 
 # OpenCode harness support — audit, spike, conditional promotion
 
-**Status: Ready, 2026-11-26.**
+**Status: Archived, 2026-11-26.**
 
 Autonomy: autonomous. Development mode: test-first. Base: `main` at `c603a303b`, branch
 `commandcode/feat/opencode-harness-support`, worktree
@@ -599,11 +599,11 @@ cleared there with `kyber-weave docs standards migrate`, committed with the clos
 
 | ID | Destination | Documentation-impact |
 |---|---|---|
-| H1, D3, D12, D16, D18 | [Kyber-Squad adoption and usage guide](../kyber-squad/onboarding.md#3-harness-instance-support-matrix) | extends-component; impact-components: KyberSquad; last-reviewed 2026-11-26; status archived. The OpenCode row records the 2.4.1 observation on Darwin 27.3.0, `PROPOSE: HomeReplace`, kind `ConfigLayer`, variable `OPENCODE_CONFIG_DIR`, and status `SpikePending`. `squad run` for that status still exits 2. Kilo, Cursor, ZCode, and the Unsupported rows are unchanged. `docs/cli-command-surface.md` has no `squad run` row; the runnable-target contract stays on this page. |
-| H2 | [Model profiles and model presets](../kyber-squad/model-profiles.md#multiple-profiles-at-once) | extends-component; impact-components: KyberSquad; last-reviewed 2026-11-26; status archived. Ready isolated instances are `claude`, `codex`, `copilot`, and `pi`. OpenCode stays `SpikePending` for the same observed replacement. |
-| H3, H4, D2, D8, D9, D10, D11, D14, D20, D21, D22 | [Windows E2E and harness spikes](../todo/squad-model-presets-windows-e2e-and-spikes.md) and [Todos](../todo/README.md) | extends-component; impact-components: KyberSquad; last-reviewed 2026-11-26; status archived. S1 records the probe method, OpenCode 2.4.1, Darwin 27.3.0, 2026-11-25, `PROPOSE: HomeReplace`, and that the catalog row was not edited. The index row says the same. No ADR amendment. |
-| D15 | [ADR 0044: Squad Lock v2 and Instance Deployment Scope](../adr/0044-squad-lock-v2-and-instance-deployment-scope.md) | extends-component; impact-components: KyberSquad; the ADR's own last-reviewed stays 2026-10-25 because this outcome does not amend it. ConfigLayer remains the decision the catalog implements. |
-| H5, D17 | [Confirm that sub-agent dispatch fires the global Arbiter before-hook](../todo/arbiter-global-hook-dispatch-coverage.md) | Component KyberArbiter; last-reviewed 2026-11-26; status archived. An instance install passes no Arbiter wiring, so it writes no `plugins/kyber-arbiter.ts`. A later change would amend ADR 0044 decision 4 and ADR 0054. |
+| H1, D3, D12, D16, D18 | [Kyber-Squad adoption and usage guide](../../kyber-squad/onboarding.md#3-harness-instance-support-matrix) | extends-component; impact-components: KyberSquad; last-reviewed 2026-11-26; status archived. The OpenCode row records the 2.4.1 observation on Darwin 27.3.0, `PROPOSE: HomeReplace`, kind `ConfigLayer`, variable `OPENCODE_CONFIG_DIR`, and status `SpikePending`. `squad run` for that status still exits 2. Kilo, Cursor, ZCode, and the Unsupported rows are unchanged. `docs/cli-command-surface.md` has no `squad run` row; the runnable-target contract stays on this page. |
+| H2 | [Model profiles and model presets](../../kyber-squad/model-profiles.md#multiple-profiles-at-once) | extends-component; impact-components: KyberSquad; last-reviewed 2026-11-26; status archived. Ready isolated instances are `claude`, `codex`, `copilot`, and `pi`. OpenCode stays `SpikePending` for the same observed replacement. |
+| H3, H4, D2, D8, D9, D10, D11, D14, D20, D21, D22 | [Windows E2E and harness spikes](../../todo/squad-model-presets-windows-e2e-and-spikes.md) and [Todos](../../todo/README.md) | extends-component; impact-components: KyberSquad; last-reviewed 2026-11-26; status archived. S1 records the probe method, OpenCode 2.4.1, Darwin 27.3.0, 2026-11-25, `PROPOSE: HomeReplace`, and that the catalog row was not edited. The index row says the same. No ADR amendment. |
+| D15 | [ADR 0044: Squad Lock v2 and Instance Deployment Scope](../../adr/0044-squad-lock-v2-and-instance-deployment-scope.md) | extends-component; impact-components: KyberSquad; the ADR's own last-reviewed stays 2026-10-25 because this outcome does not amend it. ConfigLayer remains the decision the catalog implements. |
+| H5, D17 | [Confirm that sub-agent dispatch fires the global Arbiter before-hook](../../todo/arbiter-global-hook-dispatch-coverage.md) | Component KyberArbiter; last-reviewed 2026-11-26; status archived. An instance install passes no Arbiter wiring, so it writes no `plugins/kyber-arbiter.ts`. A later change would amend ADR 0044 decision 4 and ADR 0054. |
 | D1, D4, D5, D6, D7, D13, D19, D23, AP1 | Documentation waiver — these decide how this run was planned and checked: plan versus specification, no Technology line on documentation tasks, commands run with no process wrapper, fast-loop never cited as evidence, `docs validate` without `--merge-ready` while the plan is open, difficulty ratings, which backtick paths are file scope, `doctor --ensure` before the corpus gates, and the approval to execute. None of them adds a contract an operator or a later change consults. | extends-component; impact-components: KyberSquad; last-reviewed 2026-11-26; status archived |
 
 no ADR — ADR waiver: `PROPOSE: HomeReplace` leaves `SquadInstanceKind.ConfigLayer` in the catalog, so ADR 0044 stays the decision in force and is not amended (D15, H4).
