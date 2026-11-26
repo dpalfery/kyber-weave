@@ -1527,6 +1527,9 @@ jobs:
           exit 1
 
       - name: Create tag and GitHub Release
+        # id: the always-on report step reads this step's outcome to tell a
+        # published-but-unverified release from one that never published.
+        id: publish
         if: steps.verdict.outputs.skip != 'true'
         env:
           GH_TOKEN: ${{ github.token }}
@@ -1855,14 +1858,18 @@ jobs:
       # run's URL is the only lead an operator has for what published the
       # release that mismatched, and a skipped report would take it with it.
       # Each branch claims only what actually happened: a hit whose receipt
-      # recorded no run_url points at the verdict log, and a miss that is not
-      # green published nothing.
+      # recorded no run_url points at the verdict log; a green miss names
+      # this run as the publisher; a miss whose publish step completed but
+      # whose verification failed reports a live, unverified release; and
+      # only a miss whose publishing never completed says it published
+      # nothing.
       - name: Report the run that published this release
         if: always()
         env:
           PRIOR_RUN_URL: ${{ steps.verdict.outputs.run_url }}
           CHAIN_HIT: ${{ steps.verdict.outputs.skip }}
           JOB_STATUS: ${{ job.status }}
+          PUBLISH_OUTCOME: ${{ steps.publish.outcome }}
         run: |
           set -euo pipefail
           if [[ -n "${PRIOR_RUN_URL}" ]]; then
@@ -1872,8 +1879,11 @@ jobs:
             echo "Chain hit: the run that published this release is unrecorded (the receipt carries no run_url); see the 'Decide whether the release chain can skip' step log for the verdict."
           elif [[ "${JOB_STATUS}" == "success" ]]; then
             echo "This run published the release: ${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}"
+          elif [[ "${PUBLISH_OUTCOME}" == "success" ]]; then
+            echo "This run published the release but verification failed (${JOB_STATUS}); the release is live and unverified: ${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}"
+            echo "Published but unverified by this run: ${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}" >> "${GITHUB_STEP_SUMMARY}"
           else
-            echo "This run published nothing (${JOB_STATUS}): publishing or verification did not complete; see the failed steps above."
+            echo "This run published nothing (${JOB_STATUS}): the 'Create tag and GitHub Release' step ended '${PUBLISH_OUTCOME}', so publishing never completed; see the failed steps above."
           fi
 
       # Miss-only, and only after the verification above: a hit must never

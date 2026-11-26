@@ -36,7 +36,11 @@ namespace KyberWeave.Tests;
 ///       vacuously, and
 ///   (i) a chain hit names the proving run even when verification fails: the
 ///       verdict's fresh echo carries <c>run_url</c>, and the report step runs
-///       under <c>if: always()</c>.
+///       under <c>if: always()</c>, and
+///   (j) the report step claims only what happened on every path: a miss
+///       whose publish step completed but whose verification failed reports
+///       a live, unverified release, and only a miss whose publishing never
+///       completed says it published nothing.
 ///
 /// The fail-closed exit behaviour of those shell commands is not statically
 /// observable; it is review scope, not test scope. The structures above —
@@ -341,6 +345,64 @@ public sealed class ReleaseReceiptSkipTests
         string report = RequiredStep(StepBlocks(release), "Report the run that published this release");
         Assert.Contains("if: always()", report, StringComparison.Ordinal);
         Assert.Contains("steps.verdict.outputs.run_url", report, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void TheReportStepClaimsOnlyWhatHappenedOnEveryBranch()
+    {
+        // A failure after the publish steps leaves a live, unverified release;
+        // a blanket "published nothing" line denies it exists. The step must
+        // split its failure branch on what the publish step actually did, and
+        // the branch order is pinned so one claim cannot shadow another.
+        string release = ReadJob("release");
+        List<string> blocks = StepBlocks(release);
+
+        // The publish step records the outcome the report step reads.
+        Assert.Contains(
+            "id: publish",
+            RequiredStep(blocks, "Create tag and GitHub Release"),
+            StringComparison.Ordinal);
+
+        string report = RequiredStep(blocks, "Report the run that published this release");
+
+        // Every branch input arrives through env, never interpolated into
+        // the script.
+        Assert.Contains("PRIOR_RUN_URL: ${{ steps.verdict.outputs.run_url }}", report, StringComparison.Ordinal);
+        Assert.Contains("CHAIN_HIT: ${{ steps.verdict.outputs.skip }}", report, StringComparison.Ordinal);
+        Assert.Contains("JOB_STATUS: ${{ job.status }}", report, StringComparison.Ordinal);
+        Assert.Contains("PUBLISH_OUTCOME: ${{ steps.publish.outcome }}", report, StringComparison.Ordinal);
+
+        // Order: the recorded proving run leads (the strongest lead), then
+        // the hit without one, then the green miss, then the failure branch
+        // split by what the publish step did.
+        int priorRunUrl = report.IndexOf("-n \"${PRIOR_RUN_URL}\"", StringComparison.Ordinal);
+        int chainHit = report.IndexOf("\"${CHAIN_HIT}\" == \"true\"", StringComparison.Ordinal);
+        int jobStatus = report.IndexOf("\"${JOB_STATUS}\" == \"success\"", StringComparison.Ordinal);
+        int publishOutcome = report.IndexOf("\"${PUBLISH_OUTCOME}\" == \"success\"", StringComparison.Ordinal);
+        Assert.True(
+            priorRunUrl >= 0,
+            "the report step must test PRIOR_RUN_URL first: the recorded proving run is the strongest lead.");
+        Assert.True(
+            chainHit > priorRunUrl,
+            "the report step must test CHAIN_HIT only after PRIOR_RUN_URL.");
+        Assert.True(
+            jobStatus > chainHit,
+            "the report step must test JOB_STATUS only after CHAIN_HIT.");
+        Assert.True(
+            publishOutcome > jobStatus,
+            "the report step must split its failure branch on PUBLISH_OUTCOME after the JOB_STATUS check.");
+
+        // A failed run whose publish completed reports the live, unverified
+        // release and names this run, instead of claiming nothing shipped.
+        Assert.Contains("verification failed", report, StringComparison.Ordinal);
+        Assert.Contains("unverified", report, StringComparison.Ordinal);
+
+        // Only a run whose publishing never completed claims it published
+        // nothing, and that claim is the final fail-safe branch.
+        int publishedNothing = report.IndexOf("published nothing", StringComparison.Ordinal);
+        Assert.True(
+            publishedNothing > publishOutcome,
+            "'published nothing' must be the final, fail-safe branch after the PUBLISH_OUTCOME check.");
     }
 
     [Fact]
