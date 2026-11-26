@@ -112,7 +112,7 @@ A token is only valid on the harness it was written for. Do not carry an id acro
 | `zcode` | bare model id | `glm-5.3` | |
 | `devin` | id with effort suffix | `claude-opus-5-5-high` | Omitting the key leaves the router-chosen default |
 | `warp` | — | — | Warp renders no model key; a preset entry has no effect |
-| `commandcode` | bare model id | — | No bundled column; a preset supplies the first value |
+| `commandcode` | model id, optional `[reasoningEffort=<level>]` | `gpt-6.2-sol[reasoningEffort=high]` | The suffix is split onto a `reasoningEffort` key. Bundled: `gpt-6.2-sol[reasoningEffort=high]` for `architect`, `deep-planning` and `dev-hard`; `gpt-6-luna[reasoningEffort=low]` for `fast`; `gpt-6.1-terra[reasoningEffort=medium]` for `general`; `google/gemini-3.8-flash[reasoningEffort=high]` for `reviewer`. `cmd --list-models` (Command Code 1.88.2) accepts the full id or the name after the last `/`, so `google/gemini-3.8-flash` and `gemini-3.8-flash` name one model |
 
 ## Create a profile
 

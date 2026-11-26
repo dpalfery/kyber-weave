@@ -371,9 +371,15 @@ renders as an entry-point skill, the same shape as Factory. Invoke it as `/condu
 list. Subagents never get the `agent` tool, so `delegate` is not expressible, and MCP tools are
 not granted.
 
-**Models:** a `commandcode:` value in `models.yml` may end in `[reasoningEffort=<level>]`, where
-the level is `off`, `low`, `medium`, `high`, `xhigh`, or `max`. No profile pins one yet, so every
-agent inherits the session model.
+**Models:** every profile pins one, and a value may end in `[reasoningEffort=<level>]`, where the
+level is `off`, `low`, `medium`, `high`, `xhigh`, or `max`; the suffix renders as its own
+`reasoningEffort` key beside `model`. The bundled matrix pins `gpt-6.2-sol[reasoningEffort=high]`
+for `architect`, `deep-planning` and `dev-hard`, `gpt-6-luna[reasoningEffort=low]` for `fast`,
+`gpt-6.1-terra[reasoningEffort=medium]` for `general`, and
+`google/gemini-3.8-flash[reasoningEffort=high]` for `reviewer`. Every id was read back from
+`cmd --list-models`, which accepts the full id or the name after the last `/`. `conductor` names no
+profile, so it renders no model key and runs on the session model; a preset value of `inherit`
+does the same for any agent.
 
 ### Devin notes
 
