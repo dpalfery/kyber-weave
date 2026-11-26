@@ -11,7 +11,8 @@ namespace KyberWeave.Arbiter.Hooks.Adapters;
 /// The Claude Code hook dialect ([F1] of the task packet): <c>PreToolUse</c> on
 /// <c>Agent</c> (alias <c>Task</c>) for dispatch gating, the planning-path Read guard
 /// on <c>Read</c>/<c>Grep</c>/<c>Glob</c>/<c>Bash</c> for implementation specialists,
-/// <c>PostToolUse</c> on <c>Agent</c> for return events, and <c>PreToolUse</c> on
+/// <c>PostToolUse</c> on <c>Agent</c> for return events, <c>PostToolUse</c> on <c>TaskStop</c> to close a stopped
+/// background agent's dispatch, and <c>PreToolUse</c> on
 /// <c>SubagentHandback</c> for background-dispatch returns (Q15 decision, option (a)), and the
 /// architect shell guard (<c>KW-ARB-SHELL-001</c>) on <c>Bash</c>/<c>PowerShell</c>.
 /// </summary>
@@ -82,7 +83,7 @@ public sealed class ClaudeHookAdapter : IHarnessHookAdapter
 
         if (string.Equals(eventName, "PostToolUse", StringComparison.Ordinal))
         {
-            return !IsDispatchTool(tool);
+            return !IsDispatchTool(tool) && !IsStopTool(tool);
         }
 
         if (!string.Equals(eventName, "PreToolUse", StringComparison.Ordinal))
@@ -199,6 +200,36 @@ public sealed class ClaudeHookAdapter : IHarnessHookAdapter
             string.IsNullOrWhiteSpace(agent) ? [] : [agent],
             context,
             GetString(payload, "agent_id"));
+    }
+
+    /// <summary>
+    /// A background agent the dispatching agent stopped with <c>TaskStop</c>: its turn never ends, so no
+    /// <c>SubagentStop</c> or hand-back arrives, and its dispatch would hold its task's files for the whole
+    /// unreturned horizon. The stopped task's id is the agent's id, so a followed agent's own dispatch is closed with
+    /// a recovered row. A task the Arbiter does not follow, such as a background shell, is left alone.
+    /// </summary>
+    private void HandleTaskStop(JsonElement payload, HookContext context)
+    {
+        string? sessionId = GetString(payload, "session_id");
+        JsonElement input = payload.TryGetProperty("tool_input", out JsonElement found) ? found : default;
+        string? taskId = GetString(input, "task_id") ?? GetString(input, "shell_id");
+        if (_engine is not ILostReturnRecovery recovery
+            || _engine is not IBackgroundDispatchEngine background
+            || string.IsNullOrWhiteSpace(sessionId)
+            || string.IsNullOrWhiteSpace(taskId)
+            || background.FindBackgroundDispatch(sessionId, taskId, context) is not { } followed)
+        {
+            return;
+        }
+
+        string? target = followed.Dispatch.Target;
+        recovery.RecoverLostReturn(
+            Token,
+            sessionId,
+            string.IsNullOrWhiteSpace(target) ? [] : [target],
+            context,
+            taskId,
+            StopTool);
     }
 
     /// <summary>
@@ -387,6 +418,12 @@ public sealed class ClaudeHookAdapter : IHarnessHookAdapter
 
     private string HandlePost(JsonElement payload, string? tool, string caller, KyberWeaveConfig config, HookContext context)
     {
+        if (IsStopTool(tool))
+        {
+            HandleTaskStop(payload, context);
+            return string.Empty;
+        }
+
         if (!IsDispatchTool(tool))
         {
             return string.Empty;
@@ -714,6 +751,11 @@ public sealed class ClaudeHookAdapter : IHarnessHookAdapter
         && value.ValueKind == JsonValueKind.String
             ? value.GetString()
             : null;
+
+    /// <summary>The tool a dispatching agent stops a background agent with.</summary>
+    private const string StopTool = "TaskStop";
+
+    private static bool IsStopTool(string? tool) => string.Equals(tool, StopTool, StringComparison.Ordinal);
 
     private static bool IsDispatchTool(string? tool) =>
         string.Equals(tool, "Agent", StringComparison.Ordinal)

@@ -129,6 +129,12 @@ public sealed class ClaudeRenderer : SquadHarnessRenderer
     public const string WorkerGuardMatcher = "*";
 
     /// <summary>
+    /// The user-level matcher for the tool a dispatching agent stops a background agent with. A stopped agent's turn
+    /// never ends, so this <c>PostToolUse</c> entry is what closes its dispatch.
+    /// </summary>
+    public const string StopMatcher = "^TaskStop$";
+
+    /// <summary>
     /// The architect shell guard's matcher (<c>KW-ARB-SHELL-001</c>): the two shell tools a shell-guarded
     /// agent may call, anchored like the others.
     /// </summary>
@@ -261,6 +267,19 @@ public sealed class ClaudeRenderer : SquadHarnessRenderer
                     new JsonObject
                     {
                         ["matcher"] = "^(Agent|Task)$",
+                        ["hooks"] = new JsonArray(
+                            new JsonObject
+                            {
+                                ["type"] = "command",
+                                ["command"] = ArbiterHookWiring.HookCommandLine(SquadTarget.Claude, context.Scope),
+                                ["timeout"] = arbiter.HookTimeoutSeconds
+                            })
+                    }),
+                new SquadRenderedBlockEntry(
+                    "PostToolUse",
+                    new JsonObject
+                    {
+                        ["matcher"] = StopMatcher,
                         ["hooks"] = new JsonArray(
                             new JsonObject
                             {

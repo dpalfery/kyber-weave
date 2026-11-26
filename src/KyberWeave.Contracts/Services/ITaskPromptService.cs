@@ -27,6 +27,10 @@ namespace KyberWeave.Contracts.Services;
 /// The role agent whose role skills the prompt lists, or null to use <paramref name="Agent"/>. It is the only input a
 /// role-only dispatch carries, and it selects no task and no agent.
 /// </param>
+/// <param name="ScratchRoots">
+/// Other worktrees of the same repository whose scratch folders also hold this run's files, so a prior-results file
+/// there is readable; null for none. The dispatch hook passes the run's validated worktrees.
+/// </param>
 public sealed record TaskPromptRequest(
     string RepoRoot,
     string? TaskId = null,
@@ -37,7 +41,8 @@ public sealed record TaskPromptRequest(
     int FailedAttempts = 0,
     string? Harness = null,
     string? RetryText = null,
-    string? RoleAgent = null);
+    string? RoleAgent = null,
+    IReadOnlyList<string>? ScratchRoots = null);
 
 /// <summary>Why a task prompt was not built, which decides whether the dispatch may continue.</summary>
 public enum TaskPromptRefusalKind

@@ -534,7 +534,23 @@ public sealed class HookCommand : IArbiterHookHost
 
         Dictionary<string, ITaskPromptService> services = new(StringComparer.Ordinal);
         Dictionary<string, KyberWeaveConfig> configurations = new(StringComparer.Ordinal);
+
+        // The decision engine builds the prompt to learn whether a dispatch it allowed will be stopped, and the
+        // adapter builds it again to insert it; one build per query serves both and logs its warning once.
+        Dictionary<DispatchPromptQuery, DispatchPromptExpansion> built = [];
         return query =>
+        {
+            if (built.TryGetValue(query, out DispatchPromptExpansion? known))
+            {
+                return known;
+            }
+
+            DispatchPromptExpansion expansion = Build(query);
+            built[query] = expansion;
+            return expansion;
+        };
+
+        DispatchPromptExpansion Build(DispatchPromptQuery query)
         {
             string root = runContext is null || _runContexts is null
                 ? repoRoot
@@ -559,7 +575,8 @@ public sealed class HookCommand : IArbiterHookHost
                     Technology: query.Technology,
                     query.FailedAttempts,
                     RetryText: query.RetryText,
-                    RoleAgent: query.Target),
+                    RoleAgent: query.Target,
+                    ScratchRoots: runContext?.Worktrees),
                 repositoryConfig);
 
             bool missingInput = result.RefusalKind == TaskPromptRefusalKind.MissingInput;
@@ -571,7 +588,7 @@ public sealed class HookCommand : IArbiterHookHost
             }
 
             return new DispatchPromptExpansion(result.Built, result.Prompt, result.Refusal, missingInput);
-        };
+        }
     }
 
     /// <summary>

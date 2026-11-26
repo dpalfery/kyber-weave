@@ -120,7 +120,7 @@ public sealed class DocsPacketCommand(
                     PriorResultsUnreadable,
                     Severity.Error,
                     $"The prior-results file '{settings.PriorResults}' is outside this run's scratch area. " +
-                    $"Write it under {TaskPromptService.ScratchFolder} in the checkout, name it relative to that folder, or leave it out.",
+                    TaskPromptService.ScratchAreaHint(root),
                     "docs packet",
                     Hint: $"Keep the file under {TaskPromptService.ScratchFolder} in this checkout."));
                 return Fail(report);
