@@ -828,13 +828,19 @@ KyberDash maintains dual spend visibility across the delegation tree:
 - **Direct unaggregated metrics**: The parent session row in SQLite (`canon.db`) preserves its own
   unaggregated `turn_count`, `request_count`, `total_input`, `total_output`, and `cost_usd`. This
   ensures direct parent execution work is not overwritten or inflated in the raw store.
-- **Read-time rollup object**: When parent sessions are queried over `/api/kyber/sessions`,
-  `/api/kyber/session/:id/subagents`, or `/api/kyber/session/:id/summary` (and the per-section
-  session routes; the monolithic `/api/kyber/session/:id` route is retired), the API dynamically
-  calculates a `rollup` summary aggregating turns, requests, token counts, and cost USD across
-  the parent and all nested subagent children.
-- Both surfaces (Web and Tray) display the rolled-up totals alongside direct metrics without
-  double-counting.
+- **Session and subagent API payloads**: None of the C# session routes emit a `rollup` key:
+  - `/api/kyber/sessions` returns paged root sessions where each root carries its own direct
+    session figures (`turn_count`, `request_count`, `total_input`, `total_output`, `cost_usd`,
+    `cost`), `subagents` (up to the first 25 child rows, each with its own direct figures), and
+    `subagent_total`.
+  - `/api/kyber/session/:id/subagents` returns paged child rows for that parent, each carrying
+    its own direct session figures (`subagents: []`).
+  - `/api/kyber/session/:id/summary` and the per-section session routes (the monolithic
+    `/api/kyber/session/:id` route is retired) return direct session figures for that single
+    session.
+- The web dashboard (`ContextExplorer`) displays each parent and nested child row using its served
+  direct figures (falling back from `rollup` only if a wire `rollup` object were present), so
+  neither parent nor child metrics are double-counted.
 
 #### Honest title formatting (`CanonPricing.FormatSessionTitle`)
 
@@ -1380,20 +1386,26 @@ filters, so narrowing one page's scope never touches the A/B selectors.
 - **Sessions**: Session explorer (`page-sessions`) wrapping the Agent Session Analysis
   Dashboard from `canon.db` — not a restored Context tab:
   - *Overview Strip*: Spans, turns, total tokens, cache hit ratio, cost USD/credits, exact reconciliation status, and subagent links.
-  - *Subagent Session Hierarchy*: Nested tree display of child subagent sessions underneath parent sessions, with dual spend visibility (rolled-up totals across the delegation tree alongside unaggregated direct parent metrics; see [§2h](#2h-subagent-session-hierarchy-and-post-run-transcript-synchronization) and [ADR 0038](../adr/0038-post-run-transcript-sync-subagent-hierarchy.md)).
+  - *Subagent Session Hierarchy*: Nested tree display of child subagent sessions underneath parent sessions, where each parent and child row displays its served direct metrics alongside `subagents` / `subagent_total` (no `rollup` key is emitted by the C# routes; see [§2h](#2h-subagent-session-hierarchy-and-post-run-transcript-synchronization) and [ADR 0038](../adr/0038-post-run-transcript-sync-subagent-hierarchy.md)).
   - *Per-Turn Spend Chart (`SessionSpendCharts`)*: Stacked token breakdown per turn (fresh input, cache read, cache creation, output), kept unpaged across the whole session.
   - *Context Composition Heatmap & Chart*: Semantic token distribution by part type (`system_prompt`, `instruction_context`, `tool_definitions`, `conversation_history`, `tool_result_content`, `residual`). Both Stacked Bars and Heatmap Matrix views page and sort `context.turns` on the server (`25 / 50 / 100`, default `25`, `Newest first` / `Oldest first`, default `Newest first`), while scaling, legends (`observedBuckets`, `observedServers`), and `Residual %` reflect the whole session. When a harness transcript omits `system_prompt` or tool definitions (such as Claude Code), the caveat explains why those tokens stay in `residual`.
   - *Session List Sections & Paging (`Pager` / `useSectionPage`)*: Every list section on the session detail view (Context Composition, Tools, Servers, Skills, KW skills, Execution Timeline / Call Tree, Requests, Reconciliation, and Problems) shares the `Pager` control bar whenever items exist (`total > 0`): `25 / 50 / 100` page-size selector (persisted per section in browser `sessionStorage`), page navigation, and a `Newest first` / `Oldest first` sort toggle (`desc` default; changing page size or sort resets to page `1`). Non-list summary/cost cards (`SessionSummarySection`, `SessionCostSection`) do not page.
   - *Tool & Schema Cost Table*: Ranked tool schema sizes, resident turns, invocations, and unused schema waste range.
   - *Skills (`4 · Skills`)*: Two tiles (skills listed, skills invoked) read the summary's
     `skills_listed` / `skills_invoked` arrays and the headline reads `listed_uninvoked_count` /
-    `listed_count`. Because `/api/kyber/session/:id/summary` currently carries `skills_count` only
-    and `/api/kyber/session/:id/skills` forwards the page's `rows` alone without `derived_tokens`
-    or whole-list listing aggregates, the tiles and headline render "not measurable" (with the
-    headline hidden when there are no skill rows) and rows show listed and invoked badges and the
-    turns listed (1-based) without per-row derived token counts. A "Not measurable" card shows the
-    reason when a side is unmeasured. Clicking a row opens a drawer with the listed and invoked
-    state and the listing text for the first turn listed (via the turn-content route). Per-harness
+    `listed_count`. Because `/api/kyber/session/:id/summary` omits `summary.skills_listed` while
+    emitting `summary.skills_invoked` when skills were invoked (`distinctSkills.Count > 0`), and
+    `parseSessionSummarySection` preserves `raw.summary`, the **Skills listed** tile renders
+    `"not measurable"` while the **Skills invoked** tile displays the invoked count whenever
+    skills were invoked (and `"not measurable"` when none were). Because
+    `/api/kyber/session/:id/skills` forwards the page's `rows` alone without `derived_tokens` or
+    whole-list listing aggregates (`listed_uninvoked_count`, `listed_count`), the headline renders
+    `"not measurable"` (hidden when there are no skill rows) and rows show name, listed/invoked
+    badges, and any unmeasured reason without `turns_listed` or per-row `derived_tokens`
+    (`turns_listed` in the wire payload holds 0-based turn indices). A "Not measurable" card shows
+    the reason when neither side is measured. Clicking a row opens an inspector drawer showing the
+    listed-turn count (`Listed turns: N`), invocation count, raw skill payload, and the listing
+    text for the first listed turn (via the turn-content route). Per-harness
     availability is in the
     [telemetry inventory](telemetry-inventory.md#skill-availability-by-harness); the payload is in
     the [skills view contract](architecture.md#skills-view-contract).
