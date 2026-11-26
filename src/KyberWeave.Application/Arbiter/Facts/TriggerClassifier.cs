@@ -78,20 +78,20 @@ public static partial class TriggerClassifier
 
         if (first is not null)
         {
-            if (first.StartsWith("INTAKE:", StringComparison.Ordinal))
-                return "INTAKE";
+            if (first.StartsWith(DispatchHeaders.Intake + ":", StringComparison.Ordinal))
+                return DispatchHeaders.Intake;
             if (IsRunStartMarker(first))
                 return DispatchHeaders.RunStart;
-            if (first.StartsWith("FINDINGS:", StringComparison.Ordinal))
-                return "FINDINGS";
+            if (first.StartsWith(DispatchHeaders.Findings + ":", StringComparison.Ordinal))
+                return DispatchHeaders.Findings;
             if (first.StartsWith(DispatchHeaders.FailureCluster + ":", StringComparison.Ordinal))
                 return DispatchHeaders.FailureCluster;
             if (first.StartsWith(ReturnStatus.EscalationLine, StringComparison.Ordinal))
                 return ReturnStatus.EscalationLine;
-            if (string.Equals(first, "FINALIZE", StringComparison.Ordinal) && hasPlanFile)
-                return "FINALIZE";
+            if (string.Equals(first, DispatchHeaders.Finalize, StringComparison.Ordinal) && hasPlanFile)
+                return DispatchHeaders.Finalize;
             if (IsSpecPhasePair(first, second))
-                return "FEATURE/PHASE";
+                return DispatchHeaders.Feature + "/" + DispatchHeaders.Phase;
         }
 
         if (hasPlanFile)
@@ -357,11 +357,11 @@ public static partial class TriggerClassifier
         if (second is null)
             return false;
 
-        bool firstFeature = first.StartsWith("FEATURE:", StringComparison.Ordinal);
-        bool firstPhase = first.StartsWith("PHASE:", StringComparison.Ordinal)
+        bool firstFeature = first.StartsWith(DispatchHeaders.Feature + ":", StringComparison.Ordinal);
+        bool firstPhase = first.StartsWith(DispatchHeaders.Phase + ":", StringComparison.Ordinal)
             && SpecPhases.Contains(PhaseValue(first));
-        bool secondFeature = second.StartsWith("FEATURE:", StringComparison.Ordinal);
-        bool secondPhase = second.StartsWith("PHASE:", StringComparison.Ordinal)
+        bool secondFeature = second.StartsWith(DispatchHeaders.Feature + ":", StringComparison.Ordinal);
+        bool secondPhase = second.StartsWith(DispatchHeaders.Phase + ":", StringComparison.Ordinal)
             && SpecPhases.Contains(PhaseValue(second));
 
         return (firstFeature && secondPhase) || (firstPhase && secondFeature);
@@ -373,6 +373,6 @@ public static partial class TriggerClassifier
         return match.Success ? match.Groups["phase"].Value.Trim() : string.Empty;
     }
 
-    [GeneratedRegex(@"^PHASE:[ \t]*(?<phase>\S.*?)[ \t]*$", RegexOptions.CultureInvariant)]
+    [GeneratedRegex(@"^" + DispatchHeaders.Phase + @":[ \t]*(?<phase>\S.*?)[ \t]*$", RegexOptions.CultureInvariant)]
     private static partial Regex PhaseLineRegex();
 }

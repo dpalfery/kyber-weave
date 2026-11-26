@@ -39,6 +39,21 @@ public static class DispatchHeaders
     /// <summary>The marker naming the failure cluster a rework dispatch answers.</summary>
     public const string FailureCluster = "FAILURE-CLUSTER";
 
+    /// <summary>The marker opening a planner dispatch that assesses an intake.</summary>
+    public const string Intake = "INTAKE";
+
+    /// <summary>The marker opening a specification phase dispatch.</summary>
+    public const string Feature = "FEATURE";
+
+    /// <summary>The marker naming the specification phase a dispatch runs.</summary>
+    public const string Phase = "PHASE";
+
+    /// <summary>The marker opening a dispatch that drains review findings.</summary>
+    public const string Findings = "FINDINGS";
+
+    /// <summary>The marker opening a plan's finalization dispatch.</summary>
+    public const string Finalize = "FINALIZE";
+
     /// <summary>The closed set of header names as one alternation, for the line grammar.</summary>
     public const string NamesPattern =
         Marker + "|" + PlanFile + "|" + Task + "|" + Lens + "|" + Refute + "|" + ReviewRun + "|" + Technology + "|" + PriorResults + "|" + FailedAttempts;
@@ -67,5 +82,10 @@ public static class DispatchHeaders
         RunStart,
         DocsImpact,
         FailureCluster,
+        Intake,
+        Feature,
+        Phase,
+        Findings,
+        Finalize,
     ];
 }

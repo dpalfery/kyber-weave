@@ -76,7 +76,7 @@ public static class TaskGateNextStep
             [
                 NextPrefix + "fix what the failing gate names, then run this command with --fix; run it once more " +
                 "without --fix only when that run says its fixes changed a task file. " +
-                "Stop after 2 such cycles; if a gate still fails, return STATUS: ESCALATION, " +
+                "Stop after 2 such cycles; if a gate still fails, return " + ReturnStatus.EscalationStatusLine + ", " +
                 "CIRCUIT_BREAKER_TRIGGER: ITERATION_CAP_EXCEEDED and FAILURE_CLUSTER: task-gate/" + failed[0].Id +
                 " (the task-gate skill's Escalation section).",
             ];

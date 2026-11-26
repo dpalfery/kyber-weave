@@ -17,16 +17,11 @@ public sealed partial class ArbiterProtocolVocabularyTests
     private const string SquadRoot = "products/kyber-squad";
 
     /// <summary>
-    /// The routing markers prompts describe beside the header block that are not header names. The classifier
-    /// reads them, but they are not part of the closed header set the block parser accepts.
+    /// Tokens prompts write beside the header block that are not routing markers and not header names.
+    /// <c>STATUS</c> opens a return status line, which <see cref="ReturnStatus"/> owns, not a dispatch marker.
     /// </summary>
     private static readonly string[] NonHeaderRoutingMarkers =
     [
-        "INTAKE",
-        "FEATURE",
-        "PHASE",
-        "FINDINGS",
-        "FINALIZE",
         "STATUS",
     ];
 
@@ -113,6 +108,43 @@ public sealed partial class ArbiterProtocolVocabularyTests
         Assert.True(
             mismatched.Count == 0,
             "Prompts spell a parsed return status differently from the code: " + string.Join(", ", mismatched));
+    }
+
+    /// <summary>
+    /// The routing markers a conductor prompt writes in addition to the header names, each declared on
+    /// <see cref="DispatchHeaders"/> so the classifier and the prompts share one spelling. Every marker is
+    /// written both with its value (<c>INTAKE:</c>) and as a bare token (<c>FINALIZE</c>).
+    /// </summary>
+    [Theory]
+    [InlineData(DispatchHeaders.Intake)]
+    [InlineData(DispatchHeaders.Feature)]
+    [InlineData(DispatchHeaders.Phase)]
+    [InlineData(DispatchHeaders.Findings)]
+    [InlineData(DispatchHeaders.Finalize)]
+    public void EveryRoutingMarkerAPromptWritesIsADeclaredMarker(string marker)
+    {
+        Assert.Contains(marker, DispatchHeaders.Markers, StringComparer.Ordinal);
+        Assert.Contains(
+            MarkdownFiles().SelectMany(ReadLines),
+            line => line.Contains("`" + marker + ":", StringComparison.Ordinal)
+                || line.Contains("`" + marker + "`", StringComparison.Ordinal));
+    }
+
+    /// <summary>
+    /// The statuses the Arbiter writes for a tool failure and a circuit-breaker escalation, which prompts route on.
+    /// Declaring each one extends the spelling check above to every place a prompt writes it.
+    /// </summary>
+    [Theory]
+    [InlineData(ReturnStatus.ToolFailure)]
+    [InlineData(ReturnStatus.Escalation)]
+    public void EveryRoutingStatusAPromptWritesIsDeclared(string word)
+    {
+        string line = ReturnStatus.Prefix + " " + word;
+
+        Assert.Contains(word, ReturnStatus.All, StringComparer.Ordinal);
+        Assert.Contains(
+            MarkdownFiles().SelectMany(ReadLines),
+            text => text.Contains(line, StringComparison.Ordinal));
     }
 
     private static IEnumerable<string> TriggerNames(string value)

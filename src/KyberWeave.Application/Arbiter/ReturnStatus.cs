@@ -39,6 +39,18 @@ public static class ReturnStatus
     /// <summary>The task gate found every declared gate not applicable.</summary>
     public const string NoneApplicable = "NONE_APPLICABLE";
 
+    /// <summary>A tool that cannot answer because its own check failed.</summary>
+    public const string ToolFailure = "TOOL_FAILURE";
+
+    /// <summary>The status a worker returns when its iteration circuit-breaker trips.</summary>
+    public const string Escalation = "ESCALATION";
+
+    /// <summary>The status a planner shortcut returns in place of an architect's assessment.</summary>
+    public const string IntakeRecommendation = "INTAKE_RECOMMENDATION";
+
+    /// <summary>The status an agent returns when a finding is outside its authority.</summary>
+    public const string Blocked = "BLOCKED";
+
     /// <summary>The marker that opens a task-gate digest line.</summary>
     public const string TaskGate = "TASK_GATE:";
 
@@ -54,6 +66,12 @@ public static class ReturnStatus
     /// <summary>A post-dispatch annotation note's opening line.</summary>
     public const string AnnotationLine = Prefix + " " + ArbiterAnnotation;
 
+    /// <summary>A tool failure's opening line.</summary>
+    public const string ToolFailureLine = Prefix + " " + ToolFailure;
+
+    /// <summary>A circuit-breaker escalation's opening line.</summary>
+    public const string EscalationStatusLine = Prefix + " " + Escalation;
+
     /// <summary>Every status word a return carries and the code parses.</summary>
     public static IReadOnlyList<string> All { get; } =
     [
@@ -68,5 +86,9 @@ public static class ReturnStatus
         ReadyForReview,
         NoneDeclared,
         NoneApplicable,
+        ToolFailure,
+        Escalation,
+        IntakeRecommendation,
+        Blocked,
     ];
 }

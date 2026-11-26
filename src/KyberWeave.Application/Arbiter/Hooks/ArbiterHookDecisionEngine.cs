@@ -38,7 +38,7 @@ namespace KyberWeave.Arbiter.Hooks;
 /// </remarks>
 public sealed class ArbiterHookDecisionEngine : IContextualHookDecisionEngine, IBackgroundDispatchEngine, IArbiterProviderSource, ILostReturnRecovery
 {
-    private const string IntakeMarkerPrefix = "INTAKE:";
+    private const string IntakeMarkerPrefix = DispatchHeaders.Intake + ":";
     private const string ModelTargetingOff = "off";
 
     private readonly Func<KyberWeaveConfig, IArbiterProvider> _providerFactory;

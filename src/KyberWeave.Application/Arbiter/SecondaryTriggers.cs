@@ -20,7 +20,6 @@ internal static class SecondaryTriggers
     private const string BugCrusher = AgentRoles.BugCrusher;
     private const string BugCrusherInvestigator = AgentRoles.BugCrusherInvestigator;
     private const string DocsDev = AgentRoles.DocsDev;
-    private const string IntakeMarker = "INTAKE";
     private const string DocsImpactMarker = DispatchHeaders.DocsImpact + ": true";
 
     /// <summary>Returns the secondary triggers for <paramref name="primaryTrigger"/>, in evaluation order.</summary>
@@ -53,7 +52,7 @@ internal static class SecondaryTriggers
         }
 
         if (string.Equals(primaryTrigger, ArbiterTriggers.DelegatePlanner, StringComparison.Ordinal)
-            && string.Equals(TriggerClassifier.PlannerMarkerFor(ev.Prompt, HeaderBlock.Parse(ev.Prompt).Headers), IntakeMarker, StringComparison.Ordinal))
+            && string.Equals(TriggerClassifier.PlannerMarkerFor(ev.Prompt, HeaderBlock.Parse(ev.Prompt).Headers), DispatchHeaders.Intake, StringComparison.Ordinal))
         {
             triggers.Add(ArbiterTriggers.IntakeShortcut);
         }
