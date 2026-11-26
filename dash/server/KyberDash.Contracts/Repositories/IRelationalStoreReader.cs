@@ -563,22 +563,22 @@ public record SessionTurnFigureSet(
     ReadTimeContextBucketSummary? LastContextBucket);
 
 /// <summary>One page of a session's request rows, read over <c>session_request</c> and turn ownership only.</summary>
-/// <param name="Items">The page's request rows, in request order. Prompt previews are always <see langword="null"/> here; the scoped <see cref="IRelationalStoreReader.RequestPromptPreviews"/> read supplies them.</param>
+/// <param name="Items">The page's request rows, in the requested request order. Prompt previews are always <see langword="null"/> here; the scoped <see cref="IRelationalStoreReader.RequestPromptPreviews"/> read supplies them.</param>
 /// <param name="Total">Number of request rows the session holds, before paging.</param>
 public record SessionRequestFigurePageResult(IReadOnlyList<ReadTimeSessionRequestSummary> Items, int Total);
 
 /// <summary>One page of a session's reconciliation rows, read over the turns' reported and tokenized totals only.</summary>
-/// <param name="Items">The page's measurable rows — both matches present — in turn order.</param>
+/// <param name="Items">The page's measurable rows — both matches present — in the requested turn order.</param>
 /// <param name="Total">Number of measurable reconciliation rows the session holds, before paging.</param>
 public record SessionReconciliationFigurePageResult(IReadOnlyList<ReadTimeTurnReconciliation> Items, int Total);
 
-/// <summary>One page of a session's stored ingest problems (<c>ingest_problem</c>), in problem-id order.</summary>
-/// <param name="Items">The page's problems, in problem-id order.</param>
+/// <summary>One page of a session's stored ingest problems (<c>ingest_problem</c>), in the requested order with timestamped problems first.</summary>
+/// <param name="Items">The page's problems, in the requested order.</param>
 /// <param name="Total">Number of stored ingest problems attached to the session, before paging.</param>
 public record SessionProblemPageResult(IReadOnlyList<Problem> Items, int Total);
 
-/// <summary>One page of a session's KW skill loads (D17), in call order.</summary>
-/// <param name="Items">The page's load rows, in call order.</param>
+/// <summary>One page of a session's KW skill loads (D17), in the requested call order.</summary>
+/// <param name="Items">The page's load rows, in the requested order.</param>
 /// <param name="Total">Number of KW skill loads the session holds, before paging.</param>
 public record SessionKwSkillLoadPageResult(IReadOnlyList<StoredKwSkillLoad> Items, int Total);
 
@@ -955,12 +955,14 @@ public interface IRelationalStoreReader
     SessionTurnFigureSet? SessionTurnFigures(string sessionKey, IModelPricingLookup? pricing = null);
 
     /// <summary>
-    /// Pages one session's request rows — the <c>session_request</c> rows when the session has
-    /// them, else its root records — over request metadata and turn ownership only (<c>DD-13</c>).
+    /// Pages one session's request rows in the requested order — the <c>session_request</c> rows
+    /// when the session has them, else its root records — over request metadata and turn ownership
+    /// only (<c>DD-13</c>).
     /// </summary>
     /// <param name="sessionKey">Canonical session key.</param>
     /// <param name="page">One-based page number.</param>
     /// <param name="limit">Rows on the page.</param>
+    /// <param name="order">Sort order (<c>desc</c> newest first or <c>asc</c> oldest first).</param>
     /// <returns>The page's request rows and the session's request-row total.</returns>
     /// <remarks>
     /// The requests section answers its rows from this read plus
@@ -970,16 +972,18 @@ public interface IRelationalStoreReader
     /// payload builds from do.
     /// </remarks>
     /// <exception cref="ArgumentOutOfRangeException"><paramref name="page"/> or <paramref name="limit"/> is less than 1.</exception>
-    SessionRequestFigurePageResult SessionRequestFigures(string sessionKey, int page, int limit);
+    /// <exception cref="ArgumentException"><paramref name="order"/> is not <c>desc</c> or <c>asc</c>.</exception>
+    SessionRequestFigurePageResult SessionRequestFigures(string sessionKey, int page, int limit, string order = "desc");
 
     /// <summary>
     /// Pages one session's measurable reconciliation rows — the turns whose reported and tokenized
     /// input and output totals are both present — over the turns' reported and tokenized totals
-    /// only (<c>DD-13</c>), in turn order.
+    /// only (<c>DD-13</c>), in requested turn order.
     /// </summary>
     /// <param name="sessionKey">Canonical session key.</param>
     /// <param name="page">One-based page number.</param>
     /// <param name="limit">Rows on the page.</param>
+    /// <param name="order">Sort order (<c>desc</c> newest first or <c>asc</c> oldest first).</param>
     /// <returns>The page's reconciliation rows and the session's measurable-row total.</returns>
     /// <remarks>
     /// The reconciliation section answers its rows from this read alone, so it never reads the
@@ -987,22 +991,25 @@ public interface IRelationalStoreReader
     /// are not part of the set, as today's section payload omits them.
     /// </remarks>
     /// <exception cref="ArgumentOutOfRangeException"><paramref name="page"/> or <paramref name="limit"/> is less than 1.</exception>
-    SessionReconciliationFigurePageResult SessionReconciliationFigures(string sessionKey, int page, int limit);
+    /// <exception cref="ArgumentException"><paramref name="order"/> is not <c>desc</c> or <c>asc</c>.</exception>
+    SessionReconciliationFigurePageResult SessionReconciliationFigures(string sessionKey, int page, int limit, string order = "desc");
 
     /// <summary>
     /// Pages one session's stored ingest problems (<c>DD-13</c>), attached by session or by one of
-    /// the session's spans, in problem-id order.
+    /// the session's spans, ordering non-null timestamps first then null timestamps.
     /// </summary>
     /// <param name="sessionKey">Canonical session key.</param>
     /// <param name="page">One-based page number.</param>
     /// <param name="limit">Rows on the page.</param>
+    /// <param name="order">Sort order (<c>desc</c> newest first or <c>asc</c> oldest first).</param>
     /// <returns>The page's problems and the session's stored-problem total.</returns>
     /// <remarks>
     /// The problems section answers its rows from this read alone. A problem attached both by
     /// session and by span appears once, as today's figures deduplicate it.
     /// </remarks>
     /// <exception cref="ArgumentOutOfRangeException"><paramref name="page"/> or <paramref name="limit"/> is less than 1.</exception>
-    SessionProblemPageResult SessionProblems(string sessionKey, int page, int limit);
+    /// <exception cref="ArgumentException"><paramref name="order"/> is not <c>desc</c> or <c>asc</c>.</exception>
+    SessionProblemPageResult SessionProblems(string sessionKey, int page, int limit, string order = "desc");
 
     /// <summary>
     /// Reads one session's tool and server section figures with the tools section's
@@ -1048,11 +1055,12 @@ public interface IRelationalStoreReader
     IReadOnlyList<StoredSkillListing> SessionSkillListings(string sessionKey);
 
     /// <summary>
-    /// Reads one page of the session's KW skill loads (D17), in call order, with the total.
+    /// Reads one page of the session's KW skill loads (D17), in requested timestamp/call order, with the total.
     /// </summary>
     /// <param name="sessionKey">Canonical session key.</param>
     /// <param name="page">One-based page number.</param>
     /// <param name="limit">Rows on the page.</param>
+    /// <param name="order">Sort order (<c>desc</c> newest first or <c>asc</c> oldest first).</param>
     /// <returns>
     /// The page's load rows — every tool call of the session whose MCP server, normalized (lower
     /// case, <c>_</c> to <c>-</c>), is <c>kw-docs</c> and whose MCP tool is <c>load_skill</c>, or
@@ -1065,7 +1073,8 @@ public interface IRelationalStoreReader
     /// it. The recognizer in the application layer stays the final authority on the load and its
     /// skill; this read stays a plain row shape.
     /// </remarks>
-    SessionKwSkillLoadPageResult SessionKwSkillLoads(string sessionKey, int page, int limit);
+    /// <exception cref="ArgumentException"><paramref name="order"/> is not <c>desc</c> or <c>asc</c>.</exception>
+    SessionKwSkillLoadPageResult SessionKwSkillLoads(string sessionKey, int page, int limit, string order = "desc");
 
     /// <summary>
     /// Reads the prompt previews of exactly the named request spans, and no other span's parts.

@@ -2,6 +2,7 @@ import { useMemo, useState } from 'react'
 
 import { cn, fmtNum, fmtTokens } from '../lib/utils.js'
 import { tokenizerLabel, type KyberTokenizerFigure } from '../lib/kyberApi.js'
+import { Pager, type PagerProps } from './ui/Pager.js'
 
 // ---------------------------------------------------------------------------
 // Types & Contracts
@@ -80,6 +81,13 @@ export interface ContextCompositionData extends KyberTokenizerFigure {
   freshJumpFactor?: number
   flaggedTurns?: number[]
   sessionAccumulationRate?: number
+  unmeasuredTurns?: number
+  measuredInputTotal?: number | null
+  maxBucketTokens?: number | null
+  observedBuckets?: string[]
+  observedServers?: string[]
+  missingBuckets?: string[] | Record<string, number>
+  residualReasons?: string[] | Record<string, number>
 }
 
 export interface TurnSpendChartProps {
@@ -92,6 +100,7 @@ export interface TurnSpendChartProps {
 export interface ContextCompositionChartProps {
   context?: ContextCompositionData | null
   turns?: TurnSpendItem[]
+  contextPager?: PagerProps
   selectedTurnIndex?: number | null
   selectedBucket?: ContextBucketKey | string | null
   onSelectTurn?: (turnIndex: number, bucketName?: ContextBucketKey | string) => void
@@ -103,6 +112,7 @@ export interface SessionSpendChartsProps {
   turns?: TurnSpendItem[]
   /** The `/charts` section's context document. */
   context?: ContextCompositionData | null
+  contextPager?: PagerProps
   selectedTurnIndex?: number | null
   selectedBucket?: ContextBucketKey | string | null
   onSelectTurn?: (turnIndex: number, bucketName?: ContextBucketKey | string) => void
@@ -194,12 +204,20 @@ export type ContextSegment = {
  * expensive, while a stack of per-server bands says WHICH server to
  * disconnect. Servers with no attribution are never invented - a tool whose
  * definition named no server is counted as built-in.
+ *
+ * When `serverColors` is provided, it is the whole-session server-to-colour
+ * map (keyed by server name). This keeps legend and row colours aligned when
+ * a row's token-descending server order differs from the session's ordinal
+ * observed-server order.
  */
-export function contextSegments(row: {
-  buckets: Record<ContextBucketKey, number>
-  servers?: Record<string, number>
-  builtinToolTokens?: number
-}): ContextSegment[] {
+export function contextSegments(
+  row: {
+    buckets: Record<ContextBucketKey, number>
+    servers?: Record<string, number>
+    builtinToolTokens?: number
+  },
+  serverColors?: Record<string, string>,
+): ContextSegment[] {
   const segments: ContextSegment[] = []
 
   for (const key of CONTEXT_BUCKET_KEYS) {
@@ -217,7 +235,7 @@ export function contextSegments(row: {
             id: `mcp:${server}`,
             label: `mcp: ${server}`,
             tokens,
-            color: MCP_SERVER_COLORS[index % MCP_SERVER_COLORS.length]!,
+            color: serverColors?.[server] ?? MCP_SERVER_COLORS[index % MCP_SERVER_COLORS.length]!,
             server,
           })
         })
@@ -1115,6 +1133,116 @@ export function TurnSpendChart({
  * even on harnesses reporting their own per-bucket totals, where it is simply
  * false.
  */
+function extractTelemetryItems(
+  value?: string[] | Record<string, number> | null,
+): Array<{ key: string; count?: number }> {
+  if (Array.isArray(value)) {
+    return value
+      .filter((item): item is string => typeof item === 'string' && item.trim().length > 0)
+      .map((item) => ({ key: item.trim() }))
+  }
+  if (value && typeof value === 'object') {
+    return Object.entries(value)
+      .filter(([key, count]) => key.trim().length > 0 && typeof count === 'number' && Number.isFinite(count) && count > 0)
+      .map(([key, count]) => ({ key: key.trim(), count }))
+  }
+  return []
+}
+
+function formatMissingBucketLabel(key: string): string {
+  switch (key) {
+    case 'system_prompt':
+      return 'System prompt'
+    case 'instruction_context':
+      return 'Instruction context'
+    case 'tool_definitions':
+      return 'Tool definitions (tool schemas)'
+    case 'conversation_history':
+      return 'Conversation history'
+    case 'tool_result_content':
+      return 'Tool results'
+    case 'residual':
+      return 'Residual'
+    default:
+      return key.includes(' ') ? key : key.replace(/_/g, ' ')
+  }
+}
+
+function formatResidualReasonLabel(key: string): string {
+  if (key.includes(' ')) return key
+  if (key === 'omitted_tool_definitions' || key === 'tool_definitions_omitted' || key === 'omitted_tool_schemas') {
+    return 'omitted tool definitions (tool schemas)'
+  }
+  if (key === 'omitted_system_prompt' || key === 'system_prompt_omitted') {
+    return 'omitted system prompt'
+  }
+  return key.replace(/_/g, ' ')
+}
+
+function buildOmissionSummary(
+  missingBuckets?: string[] | Record<string, number>,
+  residualReasons?: string[] | Record<string, number>,
+): {
+  hasOmissionTelemetry: boolean
+  missingLabels: string[]
+  reasonLabels: string[]
+} {
+  const missingItems = extractTelemetryItems(missingBuckets)
+  const reasonItems = extractTelemetryItems(residualReasons)
+  const hasOmissionTelemetry =
+    missingItems.length > 0 || reasonItems.some((item) => item.key !== 'tokenizer_drift')
+  return {
+    hasOmissionTelemetry,
+    missingLabels: missingItems.map((item) =>
+      item.count !== undefined ? `${formatMissingBucketLabel(item.key)} (${item.count})` : formatMissingBucketLabel(item.key),
+    ),
+    reasonLabels: reasonItems.map((item) =>
+      item.count !== undefined
+        ? `${formatResidualReasonLabel(item.key)} (${fmtTokens(item.count)} tok)`
+        : formatResidualReasonLabel(item.key),
+    ),
+  }
+}
+
+function normalizeObservedBucketKey(rawKey: string): ContextBucketKey | null {
+  const key = rawKey.toLowerCase().trim()
+  if (key === 'system_prompt' || key.includes('system prompt') || key.includes('system instructions')) {
+    return 'system_prompt'
+  }
+  if (
+    key === 'instruction_context' ||
+    key.includes('instruction') ||
+    key.includes('workspace') ||
+    key.includes('skill')
+  ) {
+    return 'instruction_context'
+  }
+  if (
+    key === 'tool_definitions' ||
+    key.includes('tool def') ||
+    key.includes('built-in tools') ||
+    key.startsWith('mcp:') ||
+    key === 'tools'
+  ) {
+    return 'tool_definitions'
+  }
+  if (key === 'conversation_history' || key.includes('conversation') || key.includes('history')) {
+    return 'conversation_history'
+  }
+  if (
+    key === 'tool_result_content' ||
+    key.includes('tool result') ||
+    key.includes('tool_result') ||
+    key.includes('file contents')
+  ) {
+    return 'tool_result_content'
+  }
+  if (key === 'residual' || key.includes('unattributed') || key.includes('drift')) {
+    return 'residual'
+  }
+  return null
+}
+
 export function ContextCaveat({
   derivedCounts,
   derivedTokenizerLabel,
@@ -1124,6 +1252,8 @@ export function ContextCaveat({
   residualMeasurable = true,
   unmeasuredTurns,
   hasServerAttribution,
+  missingBuckets,
+  residualReasons,
 }: {
   derivedCounts?: boolean
   derivedTokenizerLabel?: string
@@ -1131,8 +1261,11 @@ export function ContextCaveat({
   residualMeasurable?: boolean
   unmeasuredTurns?: number
   hasServerAttribution: boolean
+  missingBuckets?: string[] | Record<string, number>
+  residualReasons?: string[] | Record<string, number>
 }) {
-  const heavyDrift = derivedCounts === true && residualMeasurable && residualPct > 15
+  const { hasOmissionTelemetry, missingLabels, reasonLabels } = buildOmissionSummary(missingBuckets, residualReasons)
+  const heavyDrift = derivedCounts === true && residualMeasurable && residualPct > 15 && !hasOmissionTelemetry
 
   return (
     <div
@@ -1174,6 +1307,25 @@ export function ContextCaveat({
         </span>
       )}
 
+      {hasOmissionTelemetry && (
+        <span data-testid="context-caveat-omissions" className="mt-1 block">
+          {missingLabels.length > 0 && (
+            <>
+              Omitted from harness transcript: <strong>{missingLabels.join(', ')}</strong>. Those tokens are
+              still counted in the model&apos;s reported input, so they appear in the residual rather than
+              separate buckets.
+            </>
+          )}
+          {reasonLabels.length > 0 && (
+            <>
+              {missingLabels.length > 0 ? ' ' : ''}
+              {reasonLabels.join('; ')}
+              {reasonLabels[reasonLabels.length - 1]!.endsWith('.') ? '' : '.'}
+            </>
+          )}
+        </span>
+      )}
+
       {!hasServerAttribution && (
         <span data-testid="context-caveat-no-servers" className="mt-1 block">
           Tool definitions are not attributed to MCP servers for this session: the harness exported tool
@@ -1194,6 +1346,7 @@ export function ContextCaveat({
 export function ContextCompositionChart({
   context,
   turns: _turns,
+  contextPager,
   selectedTurnIndex,
   selectedBucket,
   onSelectTurn,
@@ -1247,6 +1400,26 @@ export function ContextCompositionChart({
 
   // Check if context is completely empty
   if (!context || rows.length === 0) {
+    if (context && contextPager && contextPager.total > 0) {
+      return (
+        <div
+          data-testid="context-composition-empty-page"
+          className={cn(
+            'rounded-lg border border-border bg-card p-4 text-card-foreground shadow-xs',
+            className,
+          )}
+        >
+          <div className="py-4 text-center">
+            <p className="text-sm font-medium text-foreground">No turns on this page.</p>
+            <p className="mt-1 text-xs text-muted-foreground">
+              Use the page controls below to return to a populated page.
+            </p>
+          </div>
+          <Pager {...contextPager} ariaLabel={contextPager.ariaLabel ?? 'Context composition pages'} />
+        </div>
+      )
+    }
+
     return (
       <div
         data-testid="context-composition-empty"
@@ -1265,31 +1438,163 @@ export function ContextCompositionChart({
 
   // The legend names the bands actually drawn, so a per-server split shows
   // which servers are present rather than a single "Tool definitions" swatch
-  // that the bars then contradict. Union across turns: a server that appears
-  // only in the last turn still belongs in the key.
+  // that the bars then contradict. Prefer whole-session observed buckets and
+  // servers when present so the key stays invariant across pages.
+  const hasObservedBuckets = Array.isArray(context.observedBuckets)
+  const hasObservedServers = Array.isArray(context.observedServers)
+  const serverColorMap: Record<string, string> | undefined = hasObservedServers
+    ? Object.fromEntries(
+        context.observedServers!.map((server, index) => [
+          server,
+          MCP_SERVER_COLORS[index % MCP_SERVER_COLORS.length]!,
+        ]),
+      )
+    : undefined
   const legendSegments: ContextSegment[] = []
   const seenSegments = new Set<string>()
-  for (const row of rows) {
-    for (const segment of contextSegments(row)) {
-      if (seenSegments.has(segment.id)) continue
-      seenSegments.add(segment.id)
-      legendSegments.push(segment)
+  const pushLegendSegment = (segment: ContextSegment) => {
+    if (seenSegments.has(segment.id)) return
+    seenSegments.add(segment.id)
+    legendSegments.push(segment)
+  }
+
+  if (hasObservedBuckets) {
+    const observedBucketSet = new Set<ContextBucketKey>()
+    for (const rawKey of context.observedBuckets!) {
+      const normalized = normalizeObservedBucketKey(rawKey)
+      if (normalized) observedBucketSet.add(normalized)
+    }
+    const pageSegments = rows.flatMap((row) => contextSegments(row, serverColorMap))
+    const hasResidual =
+      observedBucketSet.has('residual') ||
+      (typeof context.residualTotal === 'number' && context.residualTotal > 0) ||
+      rows.some((row) => row.buckets.residual > 0)
+
+    for (const key of CONTEXT_BUCKET_KEYS) {
+      if (key === 'tool_definitions') {
+        if (hasObservedServers) {
+          if (context.observedServers!.length > 0) {
+            context.observedServers!.forEach((server) => {
+              pushLegendSegment({
+                key,
+                id: `mcp:${server}`,
+                label: `mcp: ${server}`,
+                tokens: 0,
+                color: serverColorMap![server]!,
+                server,
+              })
+            })
+            if (pageSegments.some((segment) => segment.id === 'tool_definitions:builtin')) {
+              pushLegendSegment({
+                key,
+                id: 'tool_definitions:builtin',
+                label: 'Built-in tools',
+                tokens: 0,
+                color: CONTEXT_BUCKET_COLORS[key],
+              })
+            }
+          } else if (observedBucketSet.has(key)) {
+            pushLegendSegment({
+              key,
+              id: key,
+              label: CONTEXT_BUCKET_LABELS[key],
+              tokens: 0,
+              color: CONTEXT_BUCKET_COLORS[key],
+            })
+          }
+        } else {
+          const pageToolSegments = pageSegments.filter((segment) => segment.key === 'tool_definitions')
+          if (pageToolSegments.length > 0) {
+            pageToolSegments.forEach(pushLegendSegment)
+          } else if (observedBucketSet.has(key)) {
+            pushLegendSegment({
+              key,
+              id: key,
+              label: CONTEXT_BUCKET_LABELS[key],
+              tokens: 0,
+              color: CONTEXT_BUCKET_COLORS[key],
+            })
+          }
+        }
+        continue
+      }
+
+      if (key === 'residual') {
+        if (hasResidual) {
+          pushLegendSegment({
+            key,
+            id: key,
+            label: CONTEXT_BUCKET_LABELS[key],
+            tokens: 0,
+            color: CONTEXT_BUCKET_COLORS[key],
+          })
+        }
+        continue
+      }
+
+      if (observedBucketSet.has(key)) {
+        pushLegendSegment({
+          key,
+          id: key,
+          label: CONTEXT_BUCKET_LABELS[key],
+          tokens: 0,
+          color: CONTEXT_BUCKET_COLORS[key],
+        })
+      }
+    }
+  } else {
+    for (const row of rows) {
+      for (const segment of contextSegments(row, serverColorMap)) {
+        pushLegendSegment(segment)
+      }
+    }
+    if (hasObservedServers && context.observedServers!.length > 0) {
+      context.observedServers!.forEach((server) => {
+        pushLegendSegment({
+          key: 'tool_definitions',
+          id: `mcp:${server}`,
+          label: `mcp: ${server}`,
+          tokens: 0,
+          color: serverColorMap![server]!,
+          server,
+        })
+      })
     }
   }
 
-  const maxBucketValue = Math.max(
-    1,
-    ...rows.flatMap((r) => CONTEXT_BUCKET_KEYS.map((k) => r.buckets[k])),
-  )
+  const hasServerAttribution = hasObservedServers
+    ? context.observedServers!.length > 0
+    : legendSegments.some((segment) => segment.server !== undefined)
 
-  // Residual percentage calculations (issue #187): only over rows standing on
-  // a measured input basis. Without one the header renders not-measurable —
-  // never a 0.0% that reads as fully attributed.
+  const maxBucketValue =
+    typeof context.maxBucketTokens === 'number' && Number.isFinite(context.maxBucketTokens)
+      ? Math.max(1, context.maxBucketTokens)
+      : Math.max(1, ...rows.flatMap((r) => CONTEXT_BUCKET_KEYS.map((k) => r.buckets[k])))
+
+  // Residual percentage calculations (issue #187): prefer whole-session totals
+  // when the server provides them so the header does not drift across pages;
+  // otherwise compute over the current page's measured rows.
   const measuredRows = rows.filter((r) => r.hasMeasuredInput)
-  const totalResidual = measuredRows.reduce((s, r) => s + r.buckets.residual, 0)
-  const totalAllTokens = measuredRows.reduce((s, r) => s + r.total, 0)
-  const residualMeasurable = measuredRows.length > 0 && totalAllTokens > 0
-  const avgResidualPct = residualMeasurable ? (totalResidual / totalAllTokens) * 100 : 0
+  const pageResidual = measuredRows.reduce((s, r) => s + r.buckets.residual, 0)
+  const pageAllTokens = measuredRows.reduce((s, r) => s + r.total, 0)
+  const wholeMeasuredInput =
+    typeof context.measuredInputTotal === 'number' && Number.isFinite(context.measuredInputTotal)
+      ? context.measuredInputTotal
+      : null
+  const wholeResidual =
+    typeof context.residualTotal === 'number' && Number.isFinite(context.residualTotal)
+      ? context.residualTotal
+      : pageResidual
+  const residualMeasurable =
+    wholeMeasuredInput !== null
+      ? wholeMeasuredInput > 0
+      : measuredRows.length > 0 && pageAllTokens > 0
+  const avgResidualPct = residualMeasurable
+    ? ((wholeMeasuredInput !== null ? wholeResidual : pageResidual) /
+        (wholeMeasuredInput !== null ? wholeMeasuredInput : pageAllTokens)) *
+      100
+    : 0
+  const omissionSummary = buildOmissionSummary(context.missingBuckets, context.residualReasons)
 
   return (
     <div
@@ -1395,8 +1700,10 @@ export function ContextCompositionChart({
         derivedTokenizerLabel={derivedTokenizerLabel}
         residualPct={avgResidualPct}
         residualMeasurable={residualMeasurable}
-        unmeasuredTurns={(context as { unmeasuredTurns?: number }).unmeasuredTurns}
-        hasServerAttribution={legendSegments.some((segment) => segment.server !== undefined)}
+        unmeasuredTurns={context.unmeasuredTurns}
+        hasServerAttribution={hasServerAttribution}
+        missingBuckets={context.missingBuckets}
+        residualReasons={context.residualReasons}
       />
 
       {/* View 1: Stacked Horizontal Bars */}
@@ -1437,7 +1744,7 @@ export function ContextCompositionChart({
 
                 {/* Horizontal Stacked Bar */}
                 <div className="mt-2 flex h-6 w-full overflow-hidden rounded-sm bg-muted">
-                  {contextSegments(row).map((segment) => {
+                  {contextSegments(row, serverColorMap).map((segment) => {
                     const k = segment.key
                     const val = segment.tokens
                     const pct = (val / row.total) * 100
@@ -1482,7 +1789,7 @@ export function ContextCompositionChart({
 
                 {/* Subtitle breakdown */}
                 <div className="mt-1.5 flex flex-wrap items-center gap-x-3 gap-y-1 text-[11px] text-tertiary-foreground">
-                  {contextSegments(row).map((segment) => (
+                  {contextSegments(row, serverColorMap).map((segment) => (
                     <span key={segment.id} className="tabular-nums">
                       <span className="text-muted-foreground">{segment.label}:</span>{' '}
                       {fmtTokens(segment.tokens)}
@@ -1591,10 +1898,27 @@ export function ContextCompositionChart({
       )}
 
       {/* Explanatory caveat note */}
-      <div className="mt-3 text-xs text-tertiary-foreground">
-        Residual accounts for tokenizer drift, role delimiters, and unmeasured chat framing. Lower residual values indicate
-        higher precision message token tracking.
+      <div data-testid="context-composition-footer" className="mt-3 text-xs text-tertiary-foreground">
+        {omissionSummary.hasOmissionTelemetry ? (
+          <>
+            Residual reflects{' '}
+            {omissionSummary.missingLabels.length > 0
+              ? `harness-omitted telemetry (${omissionSummary.missingLabels.join(', ')})`
+              : 'harness-omitted telemetry'}
+            {omissionSummary.reasonLabels.length > 0
+              ? ` — ${omissionSummary.reasonLabels.join('; ')}${omissionSummary.reasonLabels[omissionSummary.reasonLabels.length - 1]!.endsWith('.') ? '' : '.'}`
+              : '.'}{' '}
+            Role delimiters, unmeasured chat framing, and any tokenizer drift remain in the residual alongside those omitted parts.
+          </>
+        ) : (
+          <>
+            Residual accounts for tokenizer drift, role delimiters, and unmeasured chat framing. Lower residual values
+            indicate higher precision message token tracking.
+          </>
+        )}
       </div>
+
+      {contextPager && <Pager {...contextPager} ariaLabel={contextPager.ariaLabel ?? 'Context composition pages'} />}
     </div>
   )
 }
@@ -1606,6 +1930,7 @@ export function ContextCompositionChart({
 export function SessionSpendCharts({
   turns,
   context,
+  contextPager,
   selectedTurnIndex,
   selectedBucket,
   onSelectTurn,
@@ -1626,6 +1951,7 @@ export function SessionSpendCharts({
       <ContextCompositionChart
         context={composition}
         turns={rows}
+        contextPager={contextPager}
         selectedTurnIndex={selectedTurnIndex}
         selectedBucket={selectedBucket}
         onSelectTurn={(idx, bucket) => onSelectTurn?.(idx, bucket)}

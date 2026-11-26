@@ -506,14 +506,26 @@ public class KyberBridgeEngine
     }
 
     /// <summary>
-    /// Returns the charts section payload — the detail payload's turn list and context object —
-    /// from the per-session turn figures and the stored context projection, or
-    /// <see langword="null"/> when the session has no projection.
+    /// Returns the charts section payload — turn series, context composition, and paging metadata —
+    /// or <see langword="null"/> when the session has no projection.
     /// </summary>
     /// <param name="sessionId">Canonical session identifier.</param>
+    /// <param name="page">One-based context-turn page number.</param>
+    /// <param name="limit">Context turns per page.</param>
+    /// <param name="order">Sort direction (<c>"desc"</c> or <c>"asc"</c>) for <c>context.turns</c>.</param>
     /// <returns>Charts JSON element, or <see langword="null"/>.</returns>
-    public JsonElement? GetSessionCharts(string sessionId)
+    /// <exception cref="ArgumentException"><paramref name="sessionId"/> is null, empty, or whitespace, or <paramref name="order"/> is not <c>"desc"</c> or <c>"asc"</c>.</exception>
+    /// <exception cref="ArgumentOutOfRangeException"><paramref name="page"/> or <paramref name="limit"/> is less than 1.</exception>
+    public JsonElement? GetSessionCharts(
+        string sessionId,
+        int page = 1,
+        int limit = DefaultSectionPageLimit,
+        string order = "desc")
     {
+        ArgumentException.ThrowIfNullOrWhiteSpace(sessionId);
+        ArgumentOutOfRangeException.ThrowIfLessThan(page, 1);
+        ArgumentOutOfRangeException.ThrowIfLessThan(limit, 1);
+        string normalizedOrder = NormalizeSectionOrder(order);
         EnsureProjected();
         // The section 404 check reads the projection header row, not the whole projection the
         // charts payload's context needs below.
@@ -531,12 +543,31 @@ public class KyberBridgeEngine
         IModelPricingLookup lookup = pricing.LoadPricingTables();
         (SessionTurnFigureSet? figures, string? projectionStatus) = TrySessionTurnFigures(sessionId, lookup);
         IReadOnlyList<ReadTimeTurnSummary> turns = figures?.Turns ?? [];
+        string? harness = projections.GetExecution($"exec:{sessionId}")?.HarnessId;
+        if (string.IsNullOrWhiteSpace(harness))
+        {
+            harness = reader.GetSession(sessionId)?.HarnessId;
+        }
 
+        int total = projection.Context?.Turns.Count ?? 0;
         Dictionary<string, object?> payload = new(StringComparer.Ordinal)
         {
             ["sessionId"] = sessionId,
             ["turns"] = turns.Select(ToTurnDto).ToList(),
-            ["context"] = BuildContextPayload(projection, figures?.FirstContextBucket, figures?.LastContextBucket, turns),
+            ["context"] = BuildContextPayload(
+                projection,
+                figures?.FirstContextBucket,
+                figures?.LastContextBucket,
+                turns,
+                harness,
+                page,
+                limit,
+                normalizedOrder),
+            ["total"] = total,
+            ["limit"] = limit,
+            ["offset"] = PageOffset(page, limit),
+            ["page"] = page,
+            ["order"] = normalizedOrder,
         };
 
         if (projectionStatus is not null)
@@ -555,19 +586,25 @@ public class KyberBridgeEngine
     /// <param name="sessionId">Canonical session identifier.</param>
     /// <param name="page">One-based page number.</param>
     /// <param name="limit">Rows on the page.</param>
+    /// <param name="order">Sort direction (<c>"desc"</c> or <c>"asc"</c>).</param>
     /// <returns>Paging envelope JSON element, or <see langword="null"/>.</returns>
     /// <remarks>
     /// The rows answer from the content-free request figures plus one prompt-preview read scoped
     /// to exactly the page's request spans — the section's sanctioned content read — so the
     /// previews never cost the session's whole conversation.
     /// </remarks>
-    /// <exception cref="ArgumentException"><paramref name="sessionId"/> is null, empty, or whitespace.</exception>
+    /// <exception cref="ArgumentException"><paramref name="sessionId"/> is null, empty, or whitespace, or <paramref name="order"/> is not <c>"desc"</c> or <c>"asc"</c>.</exception>
     /// <exception cref="ArgumentOutOfRangeException"><paramref name="page"/> or <paramref name="limit"/> is less than 1.</exception>
-    public JsonElement? GetSessionRequests(string sessionId, int page = 1, int limit = DefaultSectionPageLimit)
+    public JsonElement? GetSessionRequests(
+        string sessionId,
+        int page = 1,
+        int limit = DefaultSectionPageLimit,
+        string order = "desc")
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(sessionId);
         ArgumentOutOfRangeException.ThrowIfLessThan(page, 1);
         ArgumentOutOfRangeException.ThrowIfLessThan(limit, 1);
+        string normalizedOrder = NormalizeSectionOrder(order);
         EnsureProjected();
         // The section 404 check reads the projection header row, not the whole projection the
         // detail route loads.
@@ -576,7 +613,7 @@ public class KyberBridgeEngine
             return null;
         }
 
-        (SessionRequestFigurePageResult? pageResult, string? projectionStatus) = TrySessionRequestFigures(sessionId, page, limit);
+        (SessionRequestFigurePageResult? pageResult, string? projectionStatus) = TrySessionRequestFigures(sessionId, page, limit, normalizedOrder);
         IReadOnlyList<ReadTimeSessionRequestSummary> items = pageResult?.Items ?? [];
         Dictionary<string, string?> previews = items.Count == 0
             ? new Dictionary<string, string?>(StringComparer.Ordinal)
@@ -593,7 +630,8 @@ public class KyberBridgeEngine
             pageResult?.Total ?? 0,
             limit,
             PageOffset(page, limit),
-            page);
+            page,
+            normalizedOrder);
         if (projectionStatus is not null)
         {
             payload["projection_status"] = projectionStatus;
@@ -609,14 +647,20 @@ public class KyberBridgeEngine
     /// <param name="sessionId">Canonical session identifier.</param>
     /// <param name="page">One-based page number.</param>
     /// <param name="limit">Rows on the page.</param>
+    /// <param name="order">Sort direction (<c>"desc"</c> or <c>"asc"</c>).</param>
     /// <returns>Paging envelope JSON element, or <see langword="null"/>.</returns>
-    /// <exception cref="ArgumentException"><paramref name="sessionId"/> is null, empty, or whitespace.</exception>
+    /// <exception cref="ArgumentException"><paramref name="sessionId"/> is null, empty, or whitespace, or <paramref name="order"/> is not <c>"desc"</c> or <c>"asc"</c>.</exception>
     /// <exception cref="ArgumentOutOfRangeException"><paramref name="page"/> or <paramref name="limit"/> is less than 1.</exception>
-    public JsonElement? GetSessionReconciliation(string sessionId, int page = 1, int limit = DefaultSectionPageLimit)
+    public JsonElement? GetSessionReconciliation(
+        string sessionId,
+        int page = 1,
+        int limit = DefaultSectionPageLimit,
+        string order = "desc")
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(sessionId);
         ArgumentOutOfRangeException.ThrowIfLessThan(page, 1);
         ArgumentOutOfRangeException.ThrowIfLessThan(limit, 1);
+        string normalizedOrder = NormalizeSectionOrder(order);
         EnsureProjected();
         // The section 404 check reads the projection header row, not the whole projection the
         // detail route loads.
@@ -625,7 +669,7 @@ public class KyberBridgeEngine
             return null;
         }
 
-        (SessionReconciliationFigurePageResult? pageResult, string? projectionStatus) = TrySessionReconciliationFigures(sessionId, page, limit);
+        (SessionReconciliationFigurePageResult? pageResult, string? projectionStatus) = TrySessionReconciliationFigures(sessionId, page, limit, normalizedOrder);
         List<Dictionary<string, object?>> rows = ReconciliationRows(pageResult?.Items ?? []);
 
         Dictionary<string, object?> payload = PagingEnvelope(
@@ -634,7 +678,8 @@ public class KyberBridgeEngine
             pageResult?.Total ?? 0,
             limit,
             PageOffset(page, limit),
-            page);
+            page,
+            normalizedOrder);
         if (projectionStatus is not null)
         {
             payload["projection_status"] = projectionStatus;
@@ -650,14 +695,20 @@ public class KyberBridgeEngine
     /// <param name="sessionId">Canonical session identifier.</param>
     /// <param name="page">One-based page number.</param>
     /// <param name="limit">Rows on the page.</param>
+    /// <param name="order">Sort direction (<c>"desc"</c> or <c>"asc"</c>).</param>
     /// <returns>Paging envelope JSON element, or <see langword="null"/>.</returns>
-    /// <exception cref="ArgumentException"><paramref name="sessionId"/> is null, empty, or whitespace.</exception>
+    /// <exception cref="ArgumentException"><paramref name="sessionId"/> is null, empty, or whitespace, or <paramref name="order"/> is not <c>"desc"</c> or <c>"asc"</c>.</exception>
     /// <exception cref="ArgumentOutOfRangeException"><paramref name="page"/> or <paramref name="limit"/> is less than 1.</exception>
-    public JsonElement? GetSessionProblems(string sessionId, int page = 1, int limit = DefaultSectionPageLimit)
+    public JsonElement? GetSessionProblems(
+        string sessionId,
+        int page = 1,
+        int limit = DefaultSectionPageLimit,
+        string order = "desc")
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(sessionId);
         ArgumentOutOfRangeException.ThrowIfLessThan(page, 1);
         ArgumentOutOfRangeException.ThrowIfLessThan(limit, 1);
+        string normalizedOrder = NormalizeSectionOrder(order);
         EnsureProjected();
         // The section 404 check reads the projection header row, not the whole projection the
         // detail route loads.
@@ -666,14 +717,15 @@ public class KyberBridgeEngine
             return null;
         }
 
-        (SessionProblemPageResult? pageResult, string? projectionStatus) = TrySessionProblems(sessionId, page, limit);
+        (SessionProblemPageResult? pageResult, string? projectionStatus) = TrySessionProblems(sessionId, page, limit, normalizedOrder);
         Dictionary<string, object?> payload = PagingEnvelope(
             "problems",
             [.. (pageResult?.Items ?? []).Select(static problem => (object)problem)],
             pageResult?.Total ?? 0,
             limit,
             PageOffset(page, limit),
-            page);
+            page,
+            normalizedOrder);
         if (projectionStatus is not null)
         {
             payload["projection_status"] = projectionStatus;
@@ -690,6 +742,7 @@ public class KyberBridgeEngine
     /// <param name="sessionId">Canonical session identifier.</param>
     /// <param name="page">One-based page number.</param>
     /// <param name="limit">Rows on the page.</param>
+    /// <param name="order">Sort direction (<c>"desc"</c> or <c>"asc"</c>).</param>
     /// <returns>Paging envelope JSON element with the section's <c>aggregate</c>, or <see langword="null"/>.</returns>
     /// <remarks>
     /// The aggregate is priced over every row the tool figures read returns, before paging, so a
@@ -697,13 +750,18 @@ public class KyberBridgeEngine
     /// count, the unused count, the unused range, the per-server rollup, the span that carries
     /// the session's tool definitions, and the schema measurability verdict with its reason.
     /// </remarks>
-    /// <exception cref="ArgumentException"><paramref name="sessionId"/> is null, empty, or whitespace.</exception>
+    /// <exception cref="ArgumentException"><paramref name="sessionId"/> is null, empty, or whitespace, or <paramref name="order"/> is not <c>"desc"</c> or <c>"asc"</c>.</exception>
     /// <exception cref="ArgumentOutOfRangeException"><paramref name="page"/> or <paramref name="limit"/> is less than 1.</exception>
-    public JsonElement? GetSessionTools(string sessionId, int page = 1, int limit = DefaultSectionPageLimit)
+    public JsonElement? GetSessionTools(
+        string sessionId,
+        int page = 1,
+        int limit = DefaultSectionPageLimit,
+        string order = "desc")
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(sessionId);
         ArgumentOutOfRangeException.ThrowIfLessThan(page, 1);
         ArgumentOutOfRangeException.ThrowIfLessThan(limit, 1);
+        string normalizedOrder = NormalizeSectionOrder(order);
         EnsureProjected();
         // The section 404 check reads the projection header row, not the whole projection the
         // detail route loads.
@@ -713,9 +771,21 @@ public class KyberBridgeEngine
         }
 
         (SessionToolFigureSet? figures, string? projectionStatus) = TrySessionToolFigures(sessionId, pricing.LoadPricingTables());
+        bool descending = string.Equals(normalizedOrder, "desc", StringComparison.Ordinal);
+        IReadOnlyList<ReadTimeSessionToolSummary> orderedTools = figures is null
+            ? []
+            : descending
+                ? [.. figures.Tools
+                    .OrderByDescending(static t => t.TotalSchemaCost)
+                    .ThenByDescending(static t => t.Invocations)
+                    .ThenBy(static t => t.Name, StringComparer.Ordinal)]
+                : [.. figures.Tools
+                    .OrderBy(static t => t.TotalSchemaCost)
+                    .ThenBy(static t => t.Invocations)
+                    .ThenBy(static t => t.Name, StringComparer.Ordinal)];
         List<Dictionary<string, object?>> rows = figures is null
             ? []
-            : ToolRows(figures.Tools, figures.ToolsOffered);
+            : ToolRows(orderedTools, figures.ToolsOffered);
         Dictionary<string, long> byServer = new(StringComparer.Ordinal);
         if (figures is not null)
         {
@@ -762,7 +832,8 @@ public class KyberBridgeEngine
             rows.Count,
             limit,
             PageOffset(page, limit),
-            page);
+            page,
+            normalizedOrder);
         payload["aggregate"] = aggregate;
         if (projectionStatus is not null)
         {
@@ -779,14 +850,20 @@ public class KyberBridgeEngine
     /// <param name="sessionId">Canonical session identifier.</param>
     /// <param name="page">One-based page number.</param>
     /// <param name="limit">Rows on the page.</param>
+    /// <param name="order">Sort direction (<c>"desc"</c> or <c>"asc"</c>).</param>
     /// <returns>Paging envelope JSON element, or <see langword="null"/>.</returns>
-    /// <exception cref="ArgumentException"><paramref name="sessionId"/> is null, empty, or whitespace.</exception>
+    /// <exception cref="ArgumentException"><paramref name="sessionId"/> is null, empty, or whitespace, or <paramref name="order"/> is not <c>"desc"</c> or <c>"asc"</c>.</exception>
     /// <exception cref="ArgumentOutOfRangeException"><paramref name="page"/> or <paramref name="limit"/> is less than 1.</exception>
-    public JsonElement? GetSessionServers(string sessionId, int page = 1, int limit = DefaultSectionPageLimit)
+    public JsonElement? GetSessionServers(
+        string sessionId,
+        int page = 1,
+        int limit = DefaultSectionPageLimit,
+        string order = "desc")
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(sessionId);
         ArgumentOutOfRangeException.ThrowIfLessThan(page, 1);
         ArgumentOutOfRangeException.ThrowIfLessThan(limit, 1);
+        string normalizedOrder = NormalizeSectionOrder(order);
         EnsureProjected();
         // The section 404 check reads the projection header row, not the whole projection the
         // detail route loads.
@@ -799,6 +876,41 @@ public class KyberBridgeEngine
         List<Dictionary<string, object?>> rows = figures is null
             ? []
             : ServerRows(figures.Tools, figures.Servers);
+        bool descending = string.Equals(normalizedOrder, "desc", StringComparison.Ordinal);
+        rows.Sort((left, right) =>
+        {
+            int cmp = descending
+                ? Convert.ToInt64(right["unused_cost"], CultureInfo.InvariantCulture)
+                    .CompareTo(Convert.ToInt64(left["unused_cost"], CultureInfo.InvariantCulture))
+                : Convert.ToInt64(left["unused_cost"], CultureInfo.InvariantCulture)
+                    .CompareTo(Convert.ToInt64(right["unused_cost"], CultureInfo.InvariantCulture));
+            if (cmp != 0)
+            {
+                return cmp;
+            }
+
+            cmp = descending
+                ? Convert.ToInt64(right["total_schema_cost"], CultureInfo.InvariantCulture)
+                    .CompareTo(Convert.ToInt64(left["total_schema_cost"], CultureInfo.InvariantCulture))
+                : Convert.ToInt64(left["total_schema_cost"], CultureInfo.InvariantCulture)
+                    .CompareTo(Convert.ToInt64(right["total_schema_cost"], CultureInfo.InvariantCulture));
+            if (cmp != 0)
+            {
+                return cmp;
+            }
+
+            cmp = descending
+                ? Convert.ToInt32(right["invocations"], CultureInfo.InvariantCulture)
+                    .CompareTo(Convert.ToInt32(left["invocations"], CultureInfo.InvariantCulture))
+                : Convert.ToInt32(left["invocations"], CultureInfo.InvariantCulture)
+                    .CompareTo(Convert.ToInt32(right["invocations"], CultureInfo.InvariantCulture));
+            if (cmp != 0)
+            {
+                return cmp;
+            }
+
+            return string.Compare((string?)left["server"], (string?)right["server"], StringComparison.Ordinal);
+        });
 
         Dictionary<string, object?> payload = PagingEnvelope(
             "servers",
@@ -806,7 +918,8 @@ public class KyberBridgeEngine
             rows.Count,
             limit,
             PageOffset(page, limit),
-            page);
+            page,
+            normalizedOrder);
         if (projectionStatus is not null)
         {
             payload["projection_status"] = projectionStatus;
@@ -822,19 +935,26 @@ public class KyberBridgeEngine
     /// <param name="sessionId">Canonical session identifier.</param>
     /// <param name="page">One-based page number.</param>
     /// <param name="limit">Rows on the page.</param>
+    /// <param name="order">Sort direction (<c>"desc"</c> or <c>"asc"</c>).</param>
     /// <returns>The skills payload the detail route carries, with its rows paged, or <see langword="null"/>.</returns>
     /// <remarks>
-    /// The rows answer from the stored skill invocations alone; the session's harness identity
-    /// names the not-measurable block the rows carry, the one read past the skill table the
-    /// section pays.
+    /// The rows answer from both <see cref="IRelationalStoreReader.SessionSkillFigures"/> (invoked
+    /// skills) and <see cref="IRelationalStoreReader.SessionSkillListings"/> (listed skills and
+    /// their turns), alongside <see cref="IRelationalStoreReader.GetSession"/> for the harness
+    /// identity used in not-measurable blocks.
     /// </remarks>
-    /// <exception cref="ArgumentException"><paramref name="sessionId"/> is null, empty, or whitespace.</exception>
+    /// <exception cref="ArgumentException"><paramref name="sessionId"/> is null, empty, or whitespace, or <paramref name="order"/> is not <c>"desc"</c> or <c>"asc"</c>.</exception>
     /// <exception cref="ArgumentOutOfRangeException"><paramref name="page"/> or <paramref name="limit"/> is less than 1.</exception>
-    public JsonElement? GetSessionSkills(string sessionId, int page = 1, int limit = DefaultSectionPageLimit)
+    public JsonElement? GetSessionSkills(
+        string sessionId,
+        int page = 1,
+        int limit = DefaultSectionPageLimit,
+        string order = "desc")
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(sessionId);
         ArgumentOutOfRangeException.ThrowIfLessThan(page, 1);
         ArgumentOutOfRangeException.ThrowIfLessThan(limit, 1);
+        string normalizedOrder = NormalizeSectionOrder(order);
         EnsureProjected();
         // The section 404 check reads the projection header row, not the whole projection the
         // detail route loads.
@@ -852,6 +972,18 @@ public class KyberBridgeEngine
         Dictionary<string, object?> payload = BuildSkillsPayload(distinctSkills, skillCounts, listingRows, harness);
         if (payload.TryGetValue("rows", out object? rowsValue) && rowsValue is List<Dictionary<string, object?>> allRows)
         {
+            bool descending = string.Equals(normalizedOrder, "desc", StringComparison.Ordinal);
+            allRows.Sort((left, right) =>
+            {
+                int cmp = descending
+                    ? Convert.ToInt32(right["invocations"], CultureInfo.InvariantCulture)
+                        .CompareTo(Convert.ToInt32(left["invocations"], CultureInfo.InvariantCulture))
+                    : Convert.ToInt32(left["invocations"], CultureInfo.InvariantCulture)
+                        .CompareTo(Convert.ToInt32(right["invocations"], CultureInfo.InvariantCulture));
+                return cmp != 0
+                    ? cmp
+                    : string.Compare((string?)left["name"], (string?)right["name"], StringComparison.Ordinal);
+            });
             payload["rows"] = PageOf(allRows, page, limit);
             payload["total"] = allRows.Count;
         }
@@ -864,6 +996,7 @@ public class KyberBridgeEngine
         payload["limit"] = limit;
         payload["offset"] = PageOffset(page, limit);
         payload["page"] = page;
+        payload["order"] = normalizedOrder;
         if (projectionStatus is not null)
         {
             payload["projection_status"] = projectionStatus;
@@ -872,12 +1005,13 @@ public class KyberBridgeEngine
         return JsonSerializer.SerializeToElement(payload, CamelCaseJsonOptions);
     }
 
-    /// <summary>Returns one page of the session's KW skill loads (D17), in call order, apart from the harness skills section.</summary>
+    /// <summary>Returns one page of the session's KW skill loads (D17), in the requested call order, apart from the harness skills section.</summary>
     /// <param name="sessionId">Canonical session identifier.</param>
     /// <param name="page">One-based page number.</param>
     /// <param name="limit">Rows per page; <see cref="DefaultSectionPageLimit"/> unless given.</param>
+    /// <param name="order">Sort direction (<c>"desc"</c> or <c>"asc"</c>).</param>
     /// <returns>
-    /// The page payload with <c>rows</c>, <c>total</c>, <c>limit</c>, <c>offset</c> and <c>page</c>,
+    /// The page payload with <c>rows</c>, <c>total</c>, <c>limit</c>, <c>offset</c>, <c>page</c> and <c>order</c>,
     /// or <see langword="null"/> when the session is unknown.
     /// </returns>
     /// <remarks>
@@ -885,13 +1019,18 @@ public class KyberBridgeEngine
     /// agent, the session id, the load's span and its record's start time. The 404 check reads the
     /// projection header row only, as the section routes do.
     /// </remarks>
-    /// <exception cref="ArgumentException"><paramref name="sessionId"/> is null, empty, or whitespace.</exception>
+    /// <exception cref="ArgumentException"><paramref name="sessionId"/> is null, empty, or whitespace, or <paramref name="order"/> is not <c>"desc"</c> or <c>"asc"</c>.</exception>
     /// <exception cref="ArgumentOutOfRangeException"><paramref name="page"/> or <paramref name="limit"/> is less than 1.</exception>
-    public JsonElement? GetSessionKwSkills(string sessionId, int page = 1, int limit = DefaultSectionPageLimit)
+    public JsonElement? GetSessionKwSkills(
+        string sessionId,
+        int page = 1,
+        int limit = DefaultSectionPageLimit,
+        string order = "desc")
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(sessionId);
         ArgumentOutOfRangeException.ThrowIfLessThan(page, 1);
         ArgumentOutOfRangeException.ThrowIfLessThan(limit, 1);
+        string normalizedOrder = NormalizeSectionOrder(order);
         EnsureProjected();
         IReadOnlyList<StoredSessionHeader> headers = projections.SessionHeadersByKeys([sessionId]);
         if (headers.Count == 0)
@@ -900,7 +1039,7 @@ public class KyberBridgeEngine
         }
 
         string? agent = headers[0].AgentName;
-        (SessionKwSkillLoadPageResult? pageResult, string? projectionStatus) = TrySessionKwSkillLoads(sessionId, page, limit);
+        (SessionKwSkillLoadPageResult? pageResult, string? projectionStatus) = TrySessionKwSkillLoads(sessionId, page, limit, normalizedOrder);
         List<Dictionary<string, object?>> rows = [];
         if (pageResult is not null)
         {
@@ -924,6 +1063,7 @@ public class KyberBridgeEngine
             ["limit"] = limit,
             ["offset"] = PageOffset(page, limit),
             ["page"] = page,
+            ["order"] = normalizedOrder,
         };
         if (projectionStatus is not null)
         {
@@ -941,7 +1081,8 @@ public class KyberBridgeEngine
     /// <param name="sessionId">Canonical session identifier.</param>
     /// <param name="parentNodeId">Span id of the node whose children the page lists; the top level when null or empty.</param>
     /// <param name="page">One-based page number.</param>
-    /// <param name="limit">Nodes on the page; 25 unless given.</param>
+    /// <param name="limit">Nodes on the page; <see cref="DefaultSectionPageLimit"/> unless given.</param>
+    /// <param name="order">Sort direction (<c>"desc"</c> or <c>"asc"</c>).</param>
     /// <returns>
     /// The page's nodes — today's timeline node fields minus <c>children</c>, plus each node's
     /// <c>childCount</c> — with the level's total and the whole tree's bounds, or
@@ -956,21 +1097,24 @@ public class KyberBridgeEngine
     /// (decision D17).
     /// </para>
     /// <para>
-    /// Siblings keep <c>BuildTimeline</c>'s order across pages, so walking every parent's pages
-    /// yields today's tree with no node lost or duplicated.
+    /// Siblings at each level are ordered by start time in the requested <paramref name="order"/>
+    /// (with <c>spanId</c> ascending as tiebreak) before paging, so walking every parent's pages
+    /// yields the complete tree with no node lost or duplicated.
     /// </para>
     /// </remarks>
-    /// <exception cref="ArgumentException"><paramref name="sessionId"/> is null, empty, or whitespace.</exception>
+    /// <exception cref="ArgumentException"><paramref name="sessionId"/> is null, empty, or whitespace, or <paramref name="order"/> is not <c>"desc"</c> or <c>"asc"</c>.</exception>
     /// <exception cref="ArgumentOutOfRangeException"><paramref name="page"/> or <paramref name="limit"/> is less than 1.</exception>
     public JsonElement? GetSessionTimeline(
         string sessionId,
         string? parentNodeId = null,
         int page = 1,
-        int limit = DefaultSectionPageLimit)
+        int limit = DefaultSectionPageLimit,
+        string order = "desc")
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(sessionId);
         ArgumentOutOfRangeException.ThrowIfLessThan(page, 1);
         ArgumentOutOfRangeException.ThrowIfLessThan(limit, 1);
+        string normalizedOrder = NormalizeSectionOrder(order);
         EnsureProjected();
         // The section 404 check reads the projection header row, not the whole projection the
         // detail route loads.
@@ -1001,7 +1145,11 @@ public class KyberBridgeEngine
             }
         }
 
-        List<Dictionary<string, object?>> rows = [.. level.Select(TimelineRow)];
+        bool descending = string.Equals(normalizedOrder, "desc", StringComparison.Ordinal);
+        IEnumerable<TimelineNode> orderedLevel = descending
+            ? level.OrderByDescending(static n => n.StartMs).ThenBy(static n => n.SpanId, StringComparer.Ordinal)
+            : level.OrderBy(static n => n.StartMs).ThenBy(static n => n.SpanId, StringComparer.Ordinal);
+        List<Dictionary<string, object?>> rows = [.. orderedLevel.Select(TimelineRow)];
         (long startMs, long endMs) = root is null ? (0, 0) : TimelineTreeBounds(root);
         Dictionary<string, object?> payload = new(StringComparer.Ordinal)
         {
@@ -1012,6 +1160,7 @@ public class KyberBridgeEngine
             ["limit"] = limit,
             ["offset"] = PageOffset(page, limit),
             ["page"] = page,
+            ["order"] = normalizedOrder,
             ["bounds"] = new { startMs, endMs },
         };
 
@@ -1417,12 +1566,20 @@ public class KyberBridgeEngine
     /// <param name="limit">Rows per page.</param>
     /// <param name="offset">Zero-based offset of the page's first row.</param>
     /// <param name="page">One-based page number.</param>
+    /// <param name="order">Optional sort order emitted for section envelopes.</param>
     /// <returns>The envelope's members, in serialization order.</returns>
-    private static Dictionary<string, object?> PagingEnvelope(string itemsKey, IReadOnlyList<object> items, int total, int limit, int offset, int page)
+    private static Dictionary<string, object?> PagingEnvelope(
+        string itemsKey,
+        IReadOnlyList<object> items,
+        int total,
+        int limit,
+        int offset,
+        int page,
+        string? order = null)
     {
         ArgumentNullException.ThrowIfNull(itemsKey);
         ArgumentNullException.ThrowIfNull(items);
-        return new Dictionary<string, object?>(StringComparer.Ordinal)
+        Dictionary<string, object?> envelope = new(StringComparer.Ordinal)
         {
             [itemsKey] = items,
             ["data"] = items,
@@ -1431,6 +1588,12 @@ public class KyberBridgeEngine
             ["offset"] = offset,
             ["page"] = page,
         };
+        if (order is not null)
+        {
+            envelope["order"] = order;
+        }
+
+        return envelope;
     }
 
     /// <summary>
@@ -2673,15 +2836,17 @@ public class KyberBridgeEngine
     /// <param name="sessionKey">Canonical session key.</param>
     /// <param name="page">One-based page number.</param>
     /// <param name="limit">Rows on the page.</param>
+    /// <param name="order">Sort direction (<c>"desc"</c> or <c>"asc"</c>).</param>
     /// <returns>The request page when readable, and the isolation marker when the read failed.</returns>
     private (SessionRequestFigurePageResult? Page, string? ProjectionStatus) TrySessionRequestFigures(
         string sessionKey,
         int page,
-        int limit)
+        int limit,
+        string order)
     {
         try
         {
-            return (reader.SessionRequestFigures(sessionKey, page, limit), null);
+            return (reader.SessionRequestFigures(sessionKey, page, limit, order), null);
         }
         catch (Exception ex) when (IsSessionReadFault(ex))
         {
@@ -2694,15 +2859,17 @@ public class KyberBridgeEngine
     /// <param name="sessionKey">Canonical session key.</param>
     /// <param name="page">One-based page number.</param>
     /// <param name="limit">Rows on the page.</param>
+    /// <param name="order">Sort direction (<c>"desc"</c> or <c>"asc"</c>).</param>
     /// <returns>The reconciliation page when readable, and the isolation marker when the read failed.</returns>
     private (SessionReconciliationFigurePageResult? Page, string? ProjectionStatus) TrySessionReconciliationFigures(
         string sessionKey,
         int page,
-        int limit)
+        int limit,
+        string order)
     {
         try
         {
-            return (reader.SessionReconciliationFigures(sessionKey, page, limit), null);
+            return (reader.SessionReconciliationFigures(sessionKey, page, limit, order), null);
         }
         catch (Exception ex) when (IsSessionReadFault(ex))
         {
@@ -2715,15 +2882,17 @@ public class KyberBridgeEngine
     /// <param name="sessionKey">Canonical session key.</param>
     /// <param name="page">One-based page number.</param>
     /// <param name="limit">Rows on the page.</param>
+    /// <param name="order">Sort direction (<c>"desc"</c> or <c>"asc"</c>).</param>
     /// <returns>The problem page when readable, and the isolation marker when the read failed.</returns>
     private (SessionProblemPageResult? Page, string? ProjectionStatus) TrySessionProblems(
         string sessionKey,
         int page,
-        int limit)
+        int limit,
+        string order)
     {
         try
         {
-            return (reader.SessionProblems(sessionKey, page, limit), null);
+            return (reader.SessionProblems(sessionKey, page, limit, order), null);
         }
         catch (Exception ex) when (IsSessionReadFault(ex))
         {
@@ -2787,12 +2956,13 @@ public class KyberBridgeEngine
     /// <param name="sessionKey">Canonical session key.</param>
     /// <param name="page">One-based page number.</param>
     /// <param name="limit">Rows on the page.</param>
+    /// <param name="order">Sort direction (<c>"desc"</c> or <c>"asc"</c>).</param>
     /// <returns>The load page when readable, and the isolation marker when the read failed.</returns>
-    private (SessionKwSkillLoadPageResult? Page, string? ProjectionStatus) TrySessionKwSkillLoads(string sessionKey, int page, int limit)
+    private (SessionKwSkillLoadPageResult? Page, string? ProjectionStatus) TrySessionKwSkillLoads(string sessionKey, int page, int limit, string order)
     {
         try
         {
-            return (reader.SessionKwSkillLoads(sessionKey, page, limit), null);
+            return (reader.SessionKwSkillLoads(sessionKey, page, limit, order), null);
         }
         catch (Exception ex) when (IsSessionReadFault(ex))
         {
@@ -3189,11 +3359,17 @@ public class KyberBridgeEngine
         };
     }
 
+    private static string NormalizeSectionOrder(string order) => SectionSortOrder.Normalize(order);
+
     private static Dictionary<string, object?> BuildContextPayload(
         StoredSessionProjection projection,
         ReadTimeContextBucketSummary? firstBucket,
         ReadTimeContextBucketSummary? lastBucket,
-        IReadOnlyList<ReadTimeTurnSummary> turns)
+        IReadOnlyList<ReadTimeTurnSummary> turns,
+        string? harness,
+        int page,
+        int limit,
+        string order)
     {
         int unmeasuredTurns = turns.Count(static t => !t.InputTokens.HasValue);
 
@@ -3231,14 +3407,43 @@ public class KyberBridgeEngine
             flaggedTurns.Add(zeroBasedIdx + 1);
         }
 
-        List<Dictionary<string, object?>> contextTurns = new(ctx.Turns.Count);
-        foreach (StoredSessionContextTurn turn in ctx.Turns)
+        List<StoredSessionContextTurn> orderedAsc = [.. ctx.Turns.OrderBy(static t => t.Position)];
+        StoredSessionContextTurn? firstStored = orderedAsc.Count > 0 ? orderedAsc[0] : null;
+        StoredSessionContextTurn? lastStored = orderedAsc.Count > 0 ? orderedAsc[^1] : null;
+
+        long measuredInputTotal = orderedAsc.Sum(static t => t.InputTokens);
+        long maxBucketTokens = 0L;
+        foreach (StoredSessionContextTurn turn in orderedAsc)
         {
-            contextTurns.Add(BuildStoredContextTurn(turn));
+            if (turn.ResidualTokens > maxBucketTokens)
+            {
+                maxBucketTokens = turn.ResidualTokens;
+            }
+
+            foreach (StoredTurnBucketTokens bucket in turn.Buckets)
+            {
+                if (bucket.Tokens > maxBucketTokens)
+                {
+                    maxBucketTokens = bucket.Tokens;
+                }
+            }
         }
 
-        StoredSessionContextTurn? firstStored = ctx.Turns.Count > 0 ? ctx.Turns[0] : null;
-        StoredSessionContextTurn? lastStored = ctx.Turns.Count > 0 ? ctx.Turns[^1] : null;
+        List<string> observedServers =
+        [
+            .. orderedAsc
+                .SelectMany(static t => t.ServerDefinitions)
+                .Select(static s => s.Server)
+                .Where(static s => !string.IsNullOrWhiteSpace(s))
+                .Distinct(StringComparer.Ordinal)
+                .Order(StringComparer.Ordinal),
+        ];
+
+        int offset = PageOffset(page, limit);
+        IEnumerable<StoredSessionContextTurn> orderedForPaging = string.Equals(order, "desc", StringComparison.Ordinal)
+            ? orderedAsc.AsEnumerable().Reverse()
+            : orderedAsc;
+        List<Dictionary<string, object?>> contextTurns = [.. orderedForPaging.Skip(offset).Take(limit).Select(BuildStoredContextTurn)];
 
         Dictionary<string, object?> payload = new(StringComparer.Ordinal)
         {
@@ -3246,9 +3451,12 @@ public class KyberBridgeEngine
             ["contextLimit"] = ctx.ContextLimit,
             ["contextLimitSource"] = ctx.ContextLimitSource,
             ["residualTotal"] = ctx.ResidualTotal,
+            ["measuredInputTotal"] = measuredInputTotal,
+            ["maxBucketTokens"] = maxBucketTokens,
             ["freshJumpFactor"] = ctx.FreshJumpFactor,
             ["accumulationRate"] = ctx.AccumulationRate,
             ["observedBuckets"] = ctx.ObservedBuckets,
+            ["observedServers"] = observedServers,
             ["derivedCounts"] = derivedCounts,
             ["flaggedTurns"] = flaggedTurns,
             ["unmeasuredTurns"] = unmeasuredTurns,
@@ -3256,8 +3464,99 @@ public class KyberBridgeEngine
             ["first"] = BuildContextEdge(firstBucket, firstStored),
             ["last"] = BuildContextEdge(lastBucket, lastStored),
         };
-        AddTokenizerLabels(payload, TokenizerLabel.Ordered(ctx.Turns.SelectMany(static turn => turn.Tokenizers)));
+        AddTokenizerLabels(payload, TokenizerLabel.Ordered(orderedAsc.SelectMany(static turn => turn.Tokenizers)));
+        AddTranscriptOmissionTelemetry(payload, harness, ctx.ObservedBuckets, projection.Schema is not null);
         return payload;
+    }
+
+    private static void AddTranscriptOmissionTelemetry(
+        Dictionary<string, object?> payload,
+        string? harness,
+        IReadOnlyList<string> observedBuckets,
+        bool hasSchema)
+    {
+        if (string.IsNullOrWhiteSpace(harness))
+        {
+            return;
+        }
+
+        string normalizedHarness = CanonPricing.NormalizeHarnessName(harness);
+        IReadOnlyDictionary<string, JsonElement> measurability = CanonSynth.MeasurabilityFor(normalizedHarness);
+        if (IsGenericFallbackMeasurability(normalizedHarness, measurability))
+        {
+            return;
+        }
+
+        HashSet<string> observed = new(observedBuckets, StringComparer.Ordinal);
+        List<string> missingBuckets = [];
+        List<string> residualReasons = [];
+
+        foreach (string bucket in CanonValidation.CanonicalContentKeys)
+        {
+            if (observed.Contains(bucket))
+            {
+                continue;
+            }
+
+            if (string.Equals(bucket, "tool_definitions", StringComparison.Ordinal) && hasSchema)
+            {
+                continue;
+            }
+
+            if (!measurability.TryGetValue(bucket, out JsonElement entry)
+                || entry.ValueKind != JsonValueKind.Object
+                || !entry.TryGetProperty("availability", out JsonElement availability)
+                || !string.Equals(availability.GetString(), "not_measurable", StringComparison.Ordinal))
+            {
+                continue;
+            }
+
+            missingBuckets.Add(bucket);
+            if (entry.TryGetProperty("reason", out JsonElement reasonElement)
+                && reasonElement.ValueKind == JsonValueKind.String)
+            {
+                string? reason = reasonElement.GetString();
+                if (!string.IsNullOrWhiteSpace(reason))
+                {
+                    residualReasons.Add(reason);
+                }
+            }
+        }
+
+        if (missingBuckets.Count == 0)
+        {
+            return;
+        }
+
+        payload["missingBuckets"] = missingBuckets;
+        if (residualReasons.Count > 0)
+        {
+            payload["residualReasons"] = residualReasons;
+        }
+    }
+
+    private static bool IsGenericFallbackMeasurability(
+        string normalizedHarness,
+        IReadOnlyDictionary<string, JsonElement> measurability)
+    {
+        foreach (string bucket in CanonValidation.CanonicalContentKeys)
+        {
+            if (!measurability.TryGetValue(bucket, out JsonElement entry)
+                || entry.ValueKind != JsonValueKind.Object
+                || !entry.TryGetProperty("reason", out JsonElement reasonElement)
+                || reasonElement.ValueKind != JsonValueKind.String)
+            {
+                return false;
+            }
+
+            string expectedFallback = $"Session files for {normalizedHarness} do not include {bucket} data.";
+            if (!string.Equals(reasonElement.GetString(), expectedFallback, StringComparison.Ordinal))
+            {
+                return false;
+            }
+        }
+
+        return true;
     }
 
     /// <summary>

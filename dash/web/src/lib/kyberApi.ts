@@ -598,6 +598,12 @@ export type KyberSessionContext = ({
   first: KyberContextBucket
   last: KyberContextBucket
   unmeasuredTurns: number
+  measuredInputTotal?: number | null
+  maxBucketTokens?: number | null
+  observedBuckets?: string[]
+  observedServers?: string[]
+  missingBuckets?: string[] | Record<string, number>
+  residualReasons?: string[] | Record<string, number>
 } & KyberTokenizerFigure) | {
   measurable: false
   reason: string
@@ -606,6 +612,12 @@ export type KyberSessionContext = ({
   first: KyberContextBucket
   last: KyberContextBucket
   unmeasuredTurns: number
+  measuredInputTotal?: number | null
+  maxBucketTokens?: number | null
+  observedBuckets?: string[]
+  observedServers?: string[]
+  missingBuckets?: string[] | Record<string, number>
+  residualReasons?: string[] | Record<string, number>
 }
 
 /**
@@ -2554,8 +2566,20 @@ export async function fetchStoredTableRowsPage(sessionKey: string, table: string
 // charts, skills, timeline, turn and stored-fields carry their own members
 // beside the shared window.
 
+/** Allowed page sizes every session section list route accepts. */
+export type KyberSectionPageLimit = 25 | 50 | 100
+
+/** Allowed page-size choices in display order. */
+export const KYBER_SECTION_PAGE_LIMITS: readonly KyberSectionPageLimit[] = [25, 50, 100]
+
 /** Rows per page every session section list route serves when the caller names none. */
-export const KYBER_SECTION_PAGE_LIMIT = 25
+export const KYBER_SECTION_PAGE_LIMIT: KyberSectionPageLimit = 25
+
+/** Sort direction every session section route accepts. */
+export type KyberSectionPageOrder = 'desc' | 'asc'
+
+/** Default sort direction every session section route serves when the caller names none. */
+export const KYBER_SECTION_PAGE_ORDER: KyberSectionPageOrder = 'desc'
 
 /** The sections a session view can request; the query key's third member. */
 export type KyberSessionSection =
@@ -2573,7 +2597,8 @@ export type KyberSessionSection =
   | 'turn'
 
 /**
- * The query key one session section is cached under: `['kyber-session', id, section, page]`.
+ * The query key one session section is cached under:
+ * `['kyber-session', id, section, page, limit, order]`.
  * The whole-session key `['kyber-session', id]` is its prefix, so invalidating the
  * session invalidates every section read with it.
  */
@@ -2581,8 +2606,10 @@ export function kyberSessionSectionQueryKey(
   sessionId: string,
   section: KyberSessionSection,
   page = 1,
-): readonly ['kyber-session', string, KyberSessionSection, number] {
-  return ['kyber-session', sessionId, section, page]
+  limit: KyberSectionPageLimit = KYBER_SECTION_PAGE_LIMIT,
+  order: KyberSectionPageOrder = KYBER_SECTION_PAGE_ORDER,
+): readonly ['kyber-session', string, KyberSessionSection, number, KyberSectionPageLimit, KyberSectionPageOrder] {
+  return ['kyber-session', sessionId, section, page, limit, order]
 }
 
 /** The one-based page window every section list route answers. */
@@ -2595,6 +2622,8 @@ export interface KyberSectionWindow {
   limit: number
   /** Zero-based offset of this page's first row. */
   offset: number
+  /** Sort direction the server answered under when supplied. */
+  order?: KyberSectionPageOrder
   /**
    * The session's projection fault, when the section's projection read faulted;
    * absent when it did not. A payload carrying a fault is an error state, never data.
@@ -2759,6 +2788,14 @@ function readNullableNumberMap(
   return out
 }
 
+function readOptionalSectionOrder(value: unknown, path: string): KyberSectionPageOrder | undefined {
+  if (value === undefined) return undefined
+  if (value !== 'desc' && value !== 'asc') {
+    throw malformedSection(path, `order is not 'desc' or 'asc'`)
+  }
+  return value
+}
+
 function readSectionWindow(raw: Raw, path: string): KyberSectionWindow {
   const window: KyberSectionWindow = {
     total: requireIntegerField(raw, 'total', path, 0),
@@ -2766,6 +2803,8 @@ function readSectionWindow(raw: Raw, path: string): KyberSectionWindow {
     limit: requireIntegerField(raw, 'limit', path, 1),
     offset: requireIntegerField(raw, 'offset', path, 0),
   }
+  const order = readOptionalSectionOrder(raw.order, path)
+  if (order !== undefined) window.order = order
   if (typeof raw.projection_status === 'string') window.projection_status = raw.projection_status
   return window
 }
@@ -2780,6 +2819,8 @@ function parseSectionPage<T>(
   const page = parseKyberPage<T>(raw, path, (row) => readRow(row as Raw, path), itemsKey)
   if (!isRaw(raw)) throw malformedSection(path, 'body is not an object')
   const section: KyberSectionPage<T> = { ...page, offset: requireIntegerField(raw, 'offset', path, 0) }
+  const order = readOptionalSectionOrder(raw.order, path)
+  if (order !== undefined) section.order = order
   if (typeof raw.projection_status === 'string') section.projection_status = raw.projection_status
   return section
 }
@@ -2881,12 +2922,11 @@ function parseSessionSummarySection(raw: unknown, path: string): KyberSessionSum
 
 // ── Charts ──────────────────────────────────────────────────────────────────
 
-/** The charts section: the detail payload's turns and context, without its other reads. */
-export interface KyberSessionChartsSection {
+/** The charts section: the detail payload's turns and context, paged with its window. */
+export interface KyberSessionChartsSection extends KyberSectionWindow {
   sessionId: string
   turns: KyberSessionTurnRow[]
   context: KyberSessionContext
-  projection_status?: string
 }
 
 function readChartTurn(value: unknown, path: string): KyberSessionTurnRow {
@@ -2898,6 +2938,7 @@ function readChartTurn(value: unknown, path: string): KyberSessionTurnRow {
 function parseSessionChartsSection(raw: unknown, path: string): KyberSessionChartsSection {
   if (!isRaw(raw)) throw malformedSection(path, 'body is not an object')
   if (!Array.isArray(raw.turns)) throw malformedSection(path, 'turns is not an array')
+  const window = readSectionWindow(raw, path)
   const context = raw.context
   if (!isRaw(context) || typeof context.measurable !== 'boolean') {
     throw malformedSection(path, 'context is not a context document')
@@ -2910,25 +2951,23 @@ function parseSessionChartsSection(raw: unknown, path: string): KyberSessionChar
       if (!isRaw(turn)) throw malformedSection(path, 'context.turns holds a non-object')
       readTokenizerFigure(turn, path, 'a context turn')
     }
-    const section: KyberSessionChartsSection = {
+    return {
       sessionId: requireStringField(raw, 'sessionId', path),
       turns: raw.turns.map((turn) => readChartTurn(turn, path)),
       context: { ...(context as unknown as KyberSessionContext), ...labels },
+      ...window,
     }
-    if (typeof raw.projection_status === 'string') section.projection_status = raw.projection_status
-    return section
   }
   if (typeof context.reason !== 'string') {
     throw malformedSection(path, 'context.reason is not a string')
   }
 
-  const section: KyberSessionChartsSection = {
+  return {
     sessionId: requireStringField(raw, 'sessionId', path),
     turns: raw.turns.map((turn) => readChartTurn(turn, path)),
     context: context as unknown as KyberSessionContext,
+    ...window,
   }
-  if (typeof raw.projection_status === 'string') section.projection_status = raw.projection_status
-  return section
 }
 
 // ── Tools ───────────────────────────────────────────────────────────────────
@@ -3421,10 +3460,17 @@ function parseSessionTurnSection(raw: unknown, path: string): KyberSessionTurnSe
 
 // ── Section fetchers ────────────────────────────────────────────────────────
 
-function sectionPath(sessionId: string, section: string, page: number): string {
+function sectionPath(
+  sessionId: string,
+  section: string,
+  page: number,
+  limit: KyberSectionPageLimit = KYBER_SECTION_PAGE_LIMIT,
+  order: KyberSectionPageOrder = KYBER_SECTION_PAGE_ORDER,
+): string {
   const params = new URLSearchParams()
   params.set('page', String(page))
-  params.set('limit', String(KYBER_SECTION_PAGE_LIMIT))
+  params.set('limit', String(limit))
+  params.set('order', order)
   return `/api/kyber/session/${encodeURIComponent(sessionId)}/${section}?${params.toString()}`
 }
 
@@ -3434,9 +3480,14 @@ export async function fetchKyberSessionSummary(sessionId: string): Promise<Kyber
   return parseSessionSummarySection(await fetchJson<unknown>(path), path)
 }
 
-/** Reads the charts section: the session's turns and context only. */
-export async function fetchKyberSessionCharts(sessionId: string): Promise<KyberSessionChartsSection> {
-  const path = `/api/kyber/session/${encodeURIComponent(sessionId)}/charts`
+/** Reads the charts section: one page of the session's turns and whole-session context. */
+export async function fetchKyberSessionCharts(
+  sessionId: string,
+  page = 1,
+  limit: KyberSectionPageLimit = KYBER_SECTION_PAGE_LIMIT,
+  order: KyberSectionPageOrder = KYBER_SECTION_PAGE_ORDER,
+): Promise<KyberSessionChartsSection> {
+  const path = sectionPath(sessionId, 'charts', page, limit, order)
   return parseSessionChartsSection(await fetchJson<unknown>(path), path)
 }
 
@@ -3444,8 +3495,10 @@ export async function fetchKyberSessionCharts(sessionId: string): Promise<KyberS
 export async function fetchKyberSessionTools(
   sessionId: string,
   page = 1,
+  limit: KyberSectionPageLimit = KYBER_SECTION_PAGE_LIMIT,
+  order: KyberSectionPageOrder = KYBER_SECTION_PAGE_ORDER,
 ): Promise<KyberSessionToolsPage> {
-  const path = sectionPath(sessionId, 'tools', page)
+  const path = sectionPath(sessionId, 'tools', page, limit, order)
   return parseSessionToolsPage(await fetchJson<unknown>(path), path)
 }
 
@@ -3453,8 +3506,10 @@ export async function fetchKyberSessionTools(
 export async function fetchKyberSessionServers(
   sessionId: string,
   page = 1,
+  limit: KyberSectionPageLimit = KYBER_SECTION_PAGE_LIMIT,
+  order: KyberSectionPageOrder = KYBER_SECTION_PAGE_ORDER,
 ): Promise<KyberSectionPage<KyberSessionServerRow>> {
-  const path = sectionPath(sessionId, 'servers', page)
+  const path = sectionPath(sessionId, 'servers', page, limit, order)
   return parseSectionPage(await fetchJson<unknown>(path), path, 'servers', readServerRow)
 }
 
@@ -3462,8 +3517,10 @@ export async function fetchKyberSessionServers(
 export async function fetchKyberSessionSkills(
   sessionId: string,
   page = 1,
+  limit: KyberSectionPageLimit = KYBER_SECTION_PAGE_LIMIT,
+  order: KyberSectionPageOrder = KYBER_SECTION_PAGE_ORDER,
 ): Promise<KyberSessionSkillsPage> {
-  const path = sectionPath(sessionId, 'skills', page)
+  const path = sectionPath(sessionId, 'skills', page, limit, order)
   return parseSessionSkillsPage(await fetchJson<unknown>(path), path)
 }
 
@@ -3471,20 +3528,30 @@ export async function fetchKyberSessionSkills(
 export async function fetchKyberSessionKwSkills(
   sessionId: string,
   page = 1,
+  limit: KyberSectionPageLimit = KYBER_SECTION_PAGE_LIMIT,
+  order: KyberSectionPageOrder = KYBER_SECTION_PAGE_ORDER,
 ): Promise<KyberSessionKwSkillsPage> {
-  const path = sectionPath(sessionId, 'kw-skills', page)
+  const path = sectionPath(sessionId, 'kw-skills', page, limit, order)
   return parseSessionKwSkillsPage(await fetchJson<unknown>(path), path)
 }
 
 /** Reads one level of the session's timeline tree, page by page. */
 export async function fetchKyberSessionTimeline(
   sessionId: string,
-  opts?: { parent?: string | null; page?: number },
+  opts?: {
+    parent?: string | null
+    page?: number
+    limit?: KyberSectionPageLimit
+    order?: KyberSectionPageOrder
+  },
 ): Promise<KyberSessionTimelinePage> {
   const page = opts?.page ?? 1
+  const limit = opts?.limit ?? KYBER_SECTION_PAGE_LIMIT
+  const order = opts?.order ?? KYBER_SECTION_PAGE_ORDER
   const params = new URLSearchParams()
   params.set('page', String(page))
-  params.set('limit', String(KYBER_SECTION_PAGE_LIMIT))
+  params.set('limit', String(limit))
+  params.set('order', order)
   if (opts?.parent !== undefined && opts.parent !== null && opts.parent !== '') {
     params.set('parent', opts.parent)
   }
@@ -3496,8 +3563,10 @@ export async function fetchKyberSessionTimeline(
 export async function fetchKyberSessionRequests(
   sessionId: string,
   page = 1,
+  limit: KyberSectionPageLimit = KYBER_SECTION_PAGE_LIMIT,
+  order: KyberSectionPageOrder = KYBER_SECTION_PAGE_ORDER,
 ): Promise<KyberSectionPage<KyberSessionRequestRow>> {
-  const path = sectionPath(sessionId, 'requests', page)
+  const path = sectionPath(sessionId, 'requests', page, limit, order)
   return parseSectionPage(await fetchJson<unknown>(path), path, 'requests', readRequestRow)
 }
 
@@ -3505,8 +3574,10 @@ export async function fetchKyberSessionRequests(
 export async function fetchKyberSessionReconciliation(
   sessionId: string,
   page = 1,
+  limit: KyberSectionPageLimit = KYBER_SECTION_PAGE_LIMIT,
+  order: KyberSectionPageOrder = KYBER_SECTION_PAGE_ORDER,
 ): Promise<KyberSectionPage<KyberSessionReconciliationRow>> {
-  const path = sectionPath(sessionId, 'reconciliation', page)
+  const path = sectionPath(sessionId, 'reconciliation', page, limit, order)
   return parseSectionPage(
     await fetchJson<unknown>(path),
     path,
@@ -3519,8 +3590,10 @@ export async function fetchKyberSessionReconciliation(
 export async function fetchKyberSessionProblems(
   sessionId: string,
   page = 1,
+  limit: KyberSectionPageLimit = KYBER_SECTION_PAGE_LIMIT,
+  order: KyberSectionPageOrder = KYBER_SECTION_PAGE_ORDER,
 ): Promise<KyberSectionPage<KyberIngestProblemRow>> {
-  const path = sectionPath(sessionId, 'problems', page)
+  const path = sectionPath(sessionId, 'problems', page, limit, order)
   return parseSectionPage(await fetchJson<unknown>(path), path, 'problems', readIngestProblemRow)
 }
 

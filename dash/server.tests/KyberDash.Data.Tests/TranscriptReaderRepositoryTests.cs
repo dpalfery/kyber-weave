@@ -1,6 +1,8 @@
-using Xunit;
+using KyberDash.Data.Collector;
+using KyberDash.Data.Collector.Sources;
 using KyberDash.Data.Repositories;
 using KyberDash.Domain;
+using Xunit;
 
 namespace KyberDash.Data.Tests;
 
@@ -82,6 +84,7 @@ public class TranscriptReaderRepositoryTests : IDisposable
         Assert.Equal("rev-1", envelope.SourceRevision);
         Assert.Equal("2026-01-01T00:00:00.000Z", envelope.ImportedAt);
         Assert.Equal("claude-jsonl", envelope.Format);
+        Assert.Equal(HarnessSourceRegistry.ClaudeTranscriptV2ParserContractVersion, envelope.ParserContractVersion);
         Assert.Equal("claude", envelope.Call.Provider);
         Assert.Equal("claude:session-a:msg-1", envelope.Call.DeduplicationKey);
         Assert.Same(envelope.Call, envelope.Call);
@@ -189,7 +192,7 @@ public class TranscriptReaderRepositoryTests : IDisposable
         RefreshSourceInput source = Assert.Single(new TranscriptReaderRepository(home).DiscoverLocalSources());
 
         Assert.Equal("claude-jsonl", source.Format);
-        Assert.Equal(TranscriptReaderRepository.ParserContractVersion, source.ParserContractVersion);
+        Assert.Equal(HarnessSourceRegistry.ClaudeTranscriptV2ParserContractVersion, source.ParserContractVersion);
         Assert.Equal(Path.GetFullPath(Path.Combine(home, ".claude/projects/repo/abcd.jsonl")), source.SourceKey);
         Assert.Single(source.LoadEnvelopes());
     }

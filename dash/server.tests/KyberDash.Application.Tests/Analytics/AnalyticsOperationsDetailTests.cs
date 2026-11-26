@@ -451,34 +451,34 @@ public sealed class AnalyticsOperationsDetailTests
             return inner.SessionTurnFigures(sessionKey, pricing);
         }
 
-        public SessionRequestFigurePageResult SessionRequestFigures(string sessionKey, int page, int limit)
+        public SessionRequestFigurePageResult SessionRequestFigures(string sessionKey, int page, int limit, string order = "desc")
         {
             if (string.Equals(sessionKey, failingSessionKey, StringComparison.Ordinal))
             {
                 throw new StoredDataException("projection exploded");
             }
 
-            return inner.SessionRequestFigures(sessionKey, page, limit);
+            return inner.SessionRequestFigures(sessionKey, page, limit, order);
         }
 
-        public SessionReconciliationFigurePageResult SessionReconciliationFigures(string sessionKey, int page, int limit)
+        public SessionReconciliationFigurePageResult SessionReconciliationFigures(string sessionKey, int page, int limit, string order = "desc")
         {
             if (string.Equals(sessionKey, failingSessionKey, StringComparison.Ordinal))
             {
                 throw new StoredDataException("projection exploded");
             }
 
-            return inner.SessionReconciliationFigures(sessionKey, page, limit);
+            return inner.SessionReconciliationFigures(sessionKey, page, limit, order);
         }
 
-        public SessionProblemPageResult SessionProblems(string sessionKey, int page, int limit)
+        public SessionProblemPageResult SessionProblems(string sessionKey, int page, int limit, string order = "desc")
         {
             if (string.Equals(sessionKey, failingSessionKey, StringComparison.Ordinal))
             {
                 throw new StoredDataException("projection exploded");
             }
 
-            return inner.SessionProblems(sessionKey, page, limit);
+            return inner.SessionProblems(sessionKey, page, limit, order);
         }
 
         public IReadOnlyList<StoredRequestPromptPreview> RequestPromptPreviews(string sessionKey, IReadOnlyCollection<string> requestSpanIds) =>
@@ -516,7 +516,8 @@ public sealed class AnalyticsOperationsDetailTests
 
         public IReadOnlyList<StoredSkillListing> SessionSkillListings(string sessionKey) => inner.SessionSkillListings(sessionKey);
 
-        public SessionKwSkillLoadPageResult SessionKwSkillLoads(string sessionKey, int page, int limit) => inner.SessionKwSkillLoads(sessionKey, page, limit);
+        public SessionKwSkillLoadPageResult SessionKwSkillLoads(string sessionKey, int page, int limit, string order = "desc") =>
+            inner.SessionKwSkillLoads(sessionKey, page, limit, order);
 
         public IReadOnlyList<CollectedRecord> SessionTimelineRecords(string sessionKey)
         {

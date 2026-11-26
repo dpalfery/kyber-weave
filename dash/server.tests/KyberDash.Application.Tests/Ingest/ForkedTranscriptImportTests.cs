@@ -8,6 +8,7 @@ using KyberDash.Core.Exceptions;
 using KyberDash.Data.Collector;
 using KyberDash.Data.Collector.Sources;
 using KyberDash.Data.Harnesses.Claude;
+using KyberDash.Data.Tokenization;
 using KyberDash.Data.Repositories;
 using KyberDash.Domain;
 using Xunit;
@@ -87,7 +88,7 @@ public class ForkedTranscriptImportTests
             store,
             store,
             new HarnessSourceRegistry(),
-            [new ClaudeTranscriptMapper()],
+            [new ClaudeTranscriptMapper(LocalTextTokenizer.Shared)],
             fs,
             new DashOptions { StateDirectory = StateRoot },
             homeDirectory: HomeRoot,
@@ -119,7 +120,7 @@ public class ForkedTranscriptImportTests
             writer,
             store,
             new HarnessSourceRegistry(),
-            [new ClaudeTranscriptMapper()],
+            [new ClaudeTranscriptMapper(LocalTextTokenizer.Shared)],
             fs,
             new DashOptions { StateDirectory = StateRoot },
             homeDirectory: HomeRoot,
@@ -153,7 +154,7 @@ public class ForkedTranscriptImportTests
             store,
             store,
             new HarnessSourceRegistry(),
-            [new ClaudeTranscriptMapper()],
+            [new ClaudeTranscriptMapper(LocalTextTokenizer.Shared)],
             fs,
             new DashOptions { StateDirectory = StateRoot },
             homeDirectory: HomeRoot,
@@ -191,7 +192,7 @@ public class ForkedTranscriptImportTests
         + "\"usage\":{\"input_tokens\":100,\"output_tokens\":20}}}";
 
     private static CollectedBatch Map(string sourceKey, string jsonl) =>
-        new ClaudeTranscriptMapper().Map(
+        new ClaudeTranscriptMapper(LocalTextTokenizer.Shared).Map(
             new NativeSourceUnit(
                 Unit: new SourceUnit(
                     HarnessId: TranscriptReaderRepository.ClaudeHarnessId,

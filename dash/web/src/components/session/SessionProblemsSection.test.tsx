@@ -10,8 +10,8 @@ import type { ReactElement } from 'react'
 import { SessionProblemsSection } from './SessionProblemsSection.js'
 
 const SESSION_ID = 'sess-1'
-const ROUTE_PAGE_1 = `/api/kyber/session/${SESSION_ID}/problems?page=1&limit=25`
-const ROUTE_PAGE_2 = `/api/kyber/session/${SESSION_ID}/problems?page=2&limit=25`
+const ROUTE_PAGE_1 = `/api/kyber/session/${SESSION_ID}/problems?page=1&limit=25&order=desc`
+const ROUTE_PAGE_2 = `/api/kyber/session/${SESSION_ID}/problems?page=2&limit=25&order=desc`
 
 function queryClient() {
   return new QueryClient({ defaultOptions: { queries: { retry: false, gcTime: 0 } } })
@@ -38,6 +38,7 @@ function mount(): ReturnType<typeof render> {
 
 afterEach(() => {
   cleanup()
+  window.sessionStorage.clear()
   vi.unstubAllGlobals()
 })
 
@@ -91,18 +92,23 @@ describe('SessionProblemsSection states', () => {
     expect(row.textContent).toContain('turn 3')
   })
 
-  it('states the empty page honestly', async () => {
+  it('states the empty page honestly and hides the pager when total is 0', async () => {
     stubFetch(() => jsonResponse({ problems: [], data: [], total: 0, limit: 25, offset: 0, page: 1 }))
     mount()
     const empty = await screen.findByTestId('problems-empty')
     expect(empty.textContent).toMatch(/no stored ingest problems/i)
+    expect(screen.queryByTestId('list-pager')).toBeNull()
   })
 
-  it('shows no pager while one page holds every problem', async () => {
+  it('shows limit and order controls on a single non-empty page and hides page buttons', async () => {
     stubFetch(() => jsonResponse({ problems: [PROBLEM_ROW], data: [PROBLEM_ROW], total: 1, limit: 25, offset: 0, page: 1 }))
     mount()
     await screen.findByTestId('problem-row-7')
-    expect(screen.queryByTestId('list-pager')).toBeNull()
+    const pager = screen.getByTestId('list-pager')
+    expect(within(pager).getByTestId('pager-limit')).toBeTruthy()
+    expect(within(pager).getByTestId('pager-order').textContent).toBe('Newest first')
+    expect(within(pager).queryByTestId('pager-prev')).toBeNull()
+    expect(within(pager).queryByTestId('pager-next')).toBeNull()
   })
 })
 
@@ -161,5 +167,58 @@ describe('SessionProblemsSection paging', () => {
     )
     await screen.findByTestId('problem-row-26')
     expect(screen.queryByTestId('problem-row-7')).toBeNull()
+  })
+
+  it('changes page size (25 -> 50 -> 100), persists per section, toggles sort order, and resets to page 1', async () => {
+    const fetchMock = stubFetch((url: string) => {
+      const parsed = new URL(url, 'http://localhost')
+      const page = Number(parsed.searchParams.get('page') ?? '1')
+      const limit = Number(parsed.searchParams.get('limit') ?? '25')
+      const order = parsed.searchParams.get('order') ?? 'desc'
+      return jsonResponse({
+        problems: FIRST_PAGE.problems,
+        data: FIRST_PAGE.data,
+        total: 120,
+        limit,
+        offset: (page - 1) * limit,
+        page,
+        order,
+      })
+    })
+    mount()
+    await screen.findByTestId('problems-section')
+
+    fireEvent.click(screen.getByTestId('pager-next'))
+    await waitFor(() =>
+      expect(fetchMock.mock.calls.some(([url]) => String(url).includes('problems?page=2&limit=25&order=desc'))).toBe(true),
+    )
+
+    fireEvent.change(screen.getByTestId('pager-limit'), { target: { value: '50' } })
+    await waitFor(() =>
+      expect(fetchMock.mock.calls.some(([url]) => String(url).includes('problems?page=1&limit=50&order=desc'))).toBe(true),
+    )
+    expect(window.sessionStorage.getItem('kyberdash:session-section:limit:problems')).toBe('50')
+
+    fireEvent.change(screen.getByTestId('pager-limit'), { target: { value: '100' } })
+    await waitFor(() =>
+      expect(fetchMock.mock.calls.some(([url]) => String(url).includes('problems?page=1&limit=100&order=desc'))).toBe(true),
+    )
+    expect(window.sessionStorage.getItem('kyberdash:session-section:limit:problems')).toBe('100')
+
+    fireEvent.click(screen.getByTestId('pager-next'))
+    await waitFor(() =>
+      expect(fetchMock.mock.calls.some(([url]) => String(url).includes('problems?page=2&limit=100&order=desc'))).toBe(true),
+    )
+
+    fireEvent.click(screen.getByTestId('pager-order'))
+    await waitFor(() =>
+      expect(fetchMock.mock.calls.some(([url]) => String(url).includes('problems?page=1&limit=100&order=asc'))).toBe(true),
+    )
+    expect(screen.getByTestId('pager-order').textContent).toBe('Oldest first')
+
+    fireEvent.click(screen.getByTestId('pager-order'))
+    await waitFor(() =>
+      expect(fetchMock.mock.calls.filter(([url]) => String(url).includes('problems?page=1&limit=100&order=desc')).length).toBeGreaterThanOrEqual(2),
+    )
   })
 })

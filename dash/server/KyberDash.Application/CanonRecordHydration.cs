@@ -30,6 +30,12 @@ public static class CanonRecordHydration
     /// <summary>Order base placing typed tool definitions after captured content parts.</summary>
     private const int TypedDefinitionOrderBase = 1_000;
 
+    /// <summary>Agent-instance marker emitted on the first kept turn after a Claude compaction boundary.</summary>
+    internal const string CompactBoundaryAgentInstanceId = "claude:compact_boundary";
+
+    /// <summary>Canonical raw attribute key surfacing <see cref="CompactBoundaryAgentInstanceId"/> for projection reset.</summary>
+    internal const string CompactBoundaryRawKey = "claude.compact_boundary";
+
     /// <summary>
     /// Hydrates one relational <see cref="CollectedRecord"/> into the canonical analysis record:
     /// typed token, part, tool-definition, agent, and declared-window columns become the token
@@ -55,6 +61,11 @@ public static class CanonRecordHydration
         if (!string.IsNullOrWhiteSpace(record.Agent?.AgentName))
         {
             raw["gen_ai.agent.name"] = JsonSerializer.SerializeToElement(record.Agent.AgentName);
+        }
+
+        if (string.Equals(record.AgentInstanceId, CompactBoundaryAgentInstanceId, StringComparison.Ordinal))
+        {
+            raw[CompactBoundaryRawKey] = JsonSerializer.SerializeToElement(true);
         }
 
         AddJoinIds(raw, record);

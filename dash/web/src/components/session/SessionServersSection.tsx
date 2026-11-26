@@ -91,11 +91,7 @@ export function SessionServersSection({ sessionId, className }: SessionServersSe
             </tbody>
           </table>
           <Pager
-            page={servers.page}
-            limit={data.limit}
-            total={data.total}
-            onPageChange={servers.setPage}
-            loading={servers.isFetching}
+            {...servers.pagerProps}
             ariaLabel="Server pages"
           />
         </div>

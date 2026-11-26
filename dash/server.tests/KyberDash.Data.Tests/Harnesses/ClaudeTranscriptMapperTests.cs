@@ -9,6 +9,7 @@ using KyberDash.Data.Harnesses.Otlp;
 using KyberDash.Data.Repositories;
 using KyberDash.Data.Tokenization;
 using KyberDash.Domain;
+using Microsoft.Extensions.DependencyInjection;
 using Xunit;
 
 namespace KyberDash.Data.Tests.Harnesses;
@@ -25,7 +26,7 @@ public class ClaudeTranscriptMapperTests
     [Fact]
     public void Map_ThrowsArgumentNullException_WhenUnitIsNull()
     {
-        ClaudeTranscriptMapper mapper = new();
+        ClaudeTranscriptMapper mapper = CreateMapper();
 
         Assert.Throws<ArgumentNullException>(() => mapper.Map(null!, ImportedAt));
     }
@@ -38,7 +39,7 @@ public class ClaudeTranscriptMapperTests
     [InlineData("{\"type\":\"user\",\"sessionId\":\"sess-no-usage\",\"timestamp\":\"2026-11-19T10:00:00Z\",\"message\":{\"role\":\"user\",\"content\":\"hello\"}}")]
     public void Map_ReturnsEmptyCollections_WhenRawTextIsEmptyMalformedOrWithoutUsage(string? rawText)
     {
-        ClaudeTranscriptMapper mapper = new();
+        ClaudeTranscriptMapper mapper = CreateMapper();
         NativeSourceUnit unit = CreateUnit("/home/dev/.claude/projects/repo/empty-session.jsonl", rawText);
 
         CollectedBatch batch = mapper.Map(unit, ImportedAt);
@@ -61,7 +62,7 @@ public class ClaudeTranscriptMapperTests
             "{\"type\":\"assistant\",\"sessionId\":\"sess-all\",\"timestamp\":\"2026-11-19T10:00:01.000Z\",\"terminationReason\":\"task_complete\",\"message\":{\"id\":\"msg-all-1\",\"role\":\"assistant\",\"model\":\"claude-sonnet-4-5\",\"content\":[{\"type\":\"thinking\",\"thinking\":\"Checking files\"},{\"type\":\"text\",\"text\":\"Build looks clean.\"}],\"usage\":{\"input_tokens\":120,\"output_tokens\":80,\"cache_read_input_tokens\":500,\"cache_creation_input_tokens\":40,\"reasoning_tokens\":15}}}",
         ]);
 
-        ClaudeTranscriptMapper mapper = new();
+        ClaudeTranscriptMapper mapper = CreateMapper();
         CollectedBatch batch = mapper.Map(CreateUnit("/tmp/.claude/projects/repo/sess-all.jsonl", jsonl), ImportedAt);
 
         Assert.Equal("claude-code", batch.Source.HarnessId);
@@ -145,7 +146,7 @@ public class ClaudeTranscriptMapperTests
         string jsonl =
             "{\"type\":\"assistant\",\"timestamp\":\"2026-11-19T10:05:00.000Z\",\"message\":{\"role\":\"assistant\",\"content\":\"Done\",\"usage\":{\"input_tokens\":10,\"output_tokens\":5}}}";
 
-        ClaudeTranscriptMapper mapper = new();
+        ClaudeTranscriptMapper mapper = CreateMapper();
         CollectedBatch batch = mapper.Map(CreateUnit("/tmp/.claude/projects/repo/stem-session.jsonl", jsonl), ImportedAt);
 
         CollectedSession session = Assert.Single(batch.Sessions);
@@ -199,7 +200,7 @@ public class ClaudeTranscriptMapperTests
             "{\"type\":\"assistant\",\"sessionId\":\"sess-tools\",\"timestamp\":\"2026-11-19T11:00:02.000Z\",\"message\":{\"id\":\"msg-t2\",\"role\":\"assistant\",\"model\":\"claude-opus-4-6\",\"content\":[{\"type\":\"text\",\"text\":\"Handled tool errors\"}],\"usage\":{\"input_tokens\":60,\"output_tokens\":10}}}",
         ]);
 
-        ClaudeTranscriptMapper mapper = new();
+        ClaudeTranscriptMapper mapper = CreateMapper();
         CollectedBatch batch = mapper.Map(CreateUnit("/tmp/.claude/projects/repo/sess-tools.jsonl", jsonl), ImportedAt);
 
         Assert.Single(batch.Sessions);
@@ -287,7 +288,7 @@ public class ClaudeTranscriptMapperTests
             $"{{\"type\":\"user\",\"sessionId\":\"sess-json\",\"timestamp\":\"2026-11-19T11:10:01.000Z\",\"message\":{{\"role\":\"user\",\"content\":[{{\"type\":\"tool_result\",\"tool_use_id\":\"tc-doc\",\"content\":{System.Text.Json.JsonSerializer.Serialize(jsonDocResult)}}},{{\"type\":\"tool_result\",\"tool_use_id\":\"tc-nested\",\"content\":{System.Text.Json.JsonSerializer.Serialize(nestedJsonString)}}},{{\"type\":\"tool_result\",\"tool_use_id\":\"tc-prose\",\"content\":{System.Text.Json.JsonSerializer.Serialize(proseWithJson)}}}]}}}}",
         ]);
 
-        ClaudeTranscriptMapper mapper = new();
+        ClaudeTranscriptMapper mapper = CreateMapper(LocalTextTokenizer.Shared);
         CollectedBatch batch = mapper.Map(CreateUnit("/tmp/.claude/projects/repo/sess-json.jsonl", jsonl), ImportedAt);
 
         Assert.Equal(4, batch.Records.Count);
@@ -335,7 +336,7 @@ public class ClaudeTranscriptMapperTests
             $"{{\"type\":\"user\",\"sessionId\":\"sess-model-own\",\"timestamp\":\"2026-11-19T11:30:01.000Z\",\"message\":{{\"role\":\"user\",\"content\":[{{\"type\":\"tool_result\",\"tool_use_id\":\"tc-own\",\"content\":{System.Text.Json.JsonSerializer.Serialize(jsonDocResult)}}}]}}}}",
         ]);
 
-        ClaudeTranscriptMapper mapper = new();
+        ClaudeTranscriptMapper mapper = CreateMapper(LocalTextTokenizer.Shared);
         CollectedBatch batch = mapper.Map(CreateUnit("/tmp/.claude/projects/repo/sess-model-own.jsonl", jsonl), ImportedAt);
 
         CollectedRecord toolRecord = batch.Records[1];
@@ -357,7 +358,7 @@ public class ClaudeTranscriptMapperTests
             $"{{\"type\":\"user\",\"sessionId\":\"sess-kw-load\",\"timestamp\":\"2026-11-19T11:20:01.000Z\",\"message\":{{\"role\":\"user\",\"content\":[{{\"type\":\"tool_result\",\"tool_use_id\":\"tc-kw\",\"content\":{System.Text.Json.JsonSerializer.Serialize(reply)}}}]}}}}",
         ]);
 
-        ClaudeTranscriptMapper mapper = new();
+        ClaudeTranscriptMapper mapper = CreateMapper();
         CollectedBatch batch = mapper.Map(CreateUnit("/tmp/.claude/projects/repo/sess-kw-load.jsonl", jsonl), ImportedAt);
 
         CollectedRecord loadTool = batch.Records[1];
@@ -381,7 +382,7 @@ public class ClaudeTranscriptMapperTests
             "{\"type\":\"assistant\",\"sessionId\":\"sess-scalars\",\"timestamp\":\"2026-11-19T11:20:01.000Z\",\"message\":{\"id\":\"msg-sc\",\"role\":\"assistant\",\"model\":\"claude-sonnet-4-5\",\"content\":[{\"type\":\"thinking\",\"thinking\":false},{\"type\":\"text\",\"text\":99.5},{\"type\":\"tool_use\",\"id\":\"tc-num\",\"name\":\"calc\",\"input\":7},{\"type\":\"tool_result\",\"tool_use_id\":\"tc-num\",\"content\":true}],\"usage\":{\"input_tokens\":25,\"output_tokens\":5}}}",
         ]);
 
-        ClaudeTranscriptMapper mapper = new();
+        ClaudeTranscriptMapper mapper = CreateMapper();
         CollectedBatch batch = mapper.Map(CreateUnit("/tmp/.claude/projects/repo/sess-scalars.jsonl", jsonl), ImportedAt);
 
         CollectedSession session = Assert.Single(batch.Sessions);
@@ -389,13 +390,17 @@ public class ClaudeTranscriptMapperTests
 
         Assert.Equal(2, batch.Records.Count);
         CollectedRecord parent = batch.Records[0];
-        Assert.Equal(5, parent.Parts.Count);
+        Assert.Equal(6, parent.Parts.Count);
         Assert.Equal("42", parent.Parts[0].PlainText);
         Assert.Equal("true", parent.Parts[1].PlainText);
         Assert.Equal("false", parent.Parts[2].PlainText);
         Assert.Equal("99.5", parent.Parts[3].PlainText);
-        Assert.Equal("true", parent.Parts[4].PlainText);
-        Assert.Equal(ContentBucket.ToolResultContent, parent.Parts[4].Bucket);
+        Assert.Equal(ContentBucket.ConversationHistory, parent.Parts[4].Bucket);
+        Assert.Contains("calc", parent.Parts[4].PlainText, StringComparison.Ordinal);
+        Assert.Contains("7", parent.Parts[4].PlainText, StringComparison.Ordinal);
+        Assert.Equal("assistant", parent.Parts[4].Role);
+        Assert.Equal("true", parent.Parts[5].PlainText);
+        Assert.Equal(ContentBucket.ToolResultContent, parent.Parts[5].Bucket);
         Assert.All(parent.Parts, static part => Assert.Null(part.Withheld));
 
         CollectedRecord tool = batch.Records[1];
@@ -414,7 +419,7 @@ public class ClaudeTranscriptMapperTests
             "{\"type\":\"user\",\"sessionId\":\"sess-corr\",\"timestamp\":\"2026-11-19T11:30:03.000Z\",\"message\":{\"role\":\"user\",\"content\":[{\"type\":\"tool_result\",\"tool_use_id\":\"tc-fix\",\"content\":\"Written\"}]}}",
         ]);
 
-        ClaudeTranscriptMapper mapper = new();
+        ClaudeTranscriptMapper mapper = CreateMapper();
         CollectedBatch batch = mapper.Map(CreateUnit("/tmp/.claude/projects/repo/sess-corr.jsonl", jsonl), ImportedAt);
 
         Assert.Single(batch.Sessions);
@@ -423,11 +428,14 @@ public class ClaudeTranscriptMapperTests
         CollectedRecord parent = batch.Records[0];
         Assert.Equal(RecordStatus.Error, parent.Status);
         Assert.Equal("prefix_negation", parent.Signals.CorrectionRule);
-        Assert.Equal(3, parent.Parts.Count);
+        Assert.Equal(4, parent.Parts.Count);
         Assert.Equal(ContentBucket.ConversationHistory, parent.Parts[0].Bucket);
         Assert.Equal(ContentBucket.ConversationHistory, parent.Parts[1].Bucket);
-        Assert.Equal(ContentBucket.ToolResultContent, parent.Parts[2].Bucket);
-        Assert.Equal("Written", parent.Parts[2].PlainText);
+        Assert.Equal(ContentBucket.ConversationHistory, parent.Parts[2].Bucket);
+        Assert.Contains("write_file", parent.Parts[2].PlainText, StringComparison.Ordinal);
+        Assert.Contains("a.cs", parent.Parts[2].PlainText, StringComparison.Ordinal);
+        Assert.Equal(ContentBucket.ToolResultContent, parent.Parts[3].Bucket);
+        Assert.Equal("Written", parent.Parts[3].PlainText);
         Assert.Equal(ContentBucket.ToolResultContent, batch.Records[1].Parts[0].Bucket);
 
         InMemoryRelationalStore store = new();
@@ -448,7 +456,7 @@ public class ClaudeTranscriptMapperTests
     {
         string jsonl = "{\"type\":\"assistant\",\"sessionId\":\"sess-ids\",\"requestId\":\"req_011CXYZ\",\"timestamp\":\"2026-11-19T10:00:01.000Z\",\"message\":{\"id\":\"msg_01ABC\",\"role\":\"assistant\",\"model\":\"claude-sonnet-4-5\",\"content\":[{\"type\":\"text\",\"text\":\"done\"}],\"usage\":{\"input_tokens\":10,\"output_tokens\":5}}}";
 
-        CollectedBatch batch = new ClaudeTranscriptMapper().Map(CreateUnit("/tmp/.claude/projects/repo/sess-ids.jsonl", jsonl), ImportedAt);
+        CollectedBatch batch = CreateMapper().Map(CreateUnit("/tmp/.claude/projects/repo/sess-ids.jsonl", jsonl), ImportedAt);
 
         CollectedRecord turn = Assert.Single(batch.Records, static r => r.Op == RecordOp.LlmInvoke);
         Assert.Equal("msg_01ABC", turn.ResponseId);
@@ -464,7 +472,7 @@ public class ClaudeTranscriptMapperTests
     {
         string jsonl = "{\"type\":\"assistant\",\"sessionId\":\"sess-noid\",\"timestamp\":\"2026-11-19T10:00:01.000Z\",\"message\":{\"role\":\"assistant\",\"model\":\"claude-sonnet-4-5\",\"content\":[{\"type\":\"text\",\"text\":\"done\"}],\"usage\":{\"input_tokens\":10,\"output_tokens\":5}}}";
 
-        CollectedBatch batch = new ClaudeTranscriptMapper().Map(CreateUnit("/tmp/.claude/projects/repo/sess-noid.jsonl", jsonl), ImportedAt);
+        CollectedBatch batch = CreateMapper().Map(CreateUnit("/tmp/.claude/projects/repo/sess-noid.jsonl", jsonl), ImportedAt);
 
         CollectedRecord turn = Assert.Single(batch.Records, static r => r.Op == RecordOp.LlmInvoke);
         Assert.Null(turn.ResponseId);
@@ -482,11 +490,503 @@ public class ClaudeTranscriptMapperTests
         string atBoundRequestId = new('r', OtlpJoinIds.MaxIdCharacters);
         string jsonl = "{\"type\":\"assistant\",\"sessionId\":\"sess-longid\",\"requestId\":\"" + atBoundRequestId + "\",\"timestamp\":\"2026-11-19T10:00:01.000Z\",\"message\":{\"id\":\"" + tooLongMessageId + "\",\"role\":\"assistant\",\"model\":\"claude-sonnet-4-5\",\"content\":[{\"type\":\"text\",\"text\":\"done\"}],\"usage\":{\"input_tokens\":10,\"output_tokens\":5}}}";
 
-        CollectedBatch batch = new ClaudeTranscriptMapper().Map(CreateUnit("/tmp/.claude/projects/repo/sess-longid.jsonl", jsonl), ImportedAt);
+        CollectedBatch batch = CreateMapper().Map(CreateUnit("/tmp/.claude/projects/repo/sess-longid.jsonl", jsonl), ImportedAt);
 
         CollectedRecord turn = Assert.Single(batch.Records, static r => r.Op == RecordOp.LlmInvoke);
         Assert.Null(turn.ResponseId);
         Assert.Equal(atBoundRequestId, turn.RequestId);
+    }
+
+    [Fact]
+    public void Map_CoalescesStreamedAssistantEntriesSharingMessageIdAcrossGrowingUsage()
+    {
+        string jsonl = string.Join('\n',
+        [
+            "{\"type\":\"user\",\"sessionId\":\"sess-stream\",\"timestamp\":\"2026-11-19T12:00:00.000Z\",\"message\":{\"role\":\"user\",\"content\":\"Inspect the module\"}}",
+            "{\"type\":\"assistant\",\"sessionId\":\"sess-stream\",\"requestId\":\"req-s1\",\"timestamp\":\"2026-11-19T12:00:01.000Z\",\"message\":{\"id\":\"msg-stream-1\",\"role\":\"assistant\",\"content\":[{\"type\":\"thinking\",\"thinking\":\"Planning\"}],\"usage\":{\"input_tokens\":100,\"output_tokens\":1}}}",
+            "{\"type\":\"assistant\",\"sessionId\":\"sess-stream\",\"requestId\":\"req-s1\",\"timestamp\":\"2026-11-19T12:00:02.000Z\",\"message\":{\"id\":\"msg-stream-1\",\"role\":\"assistant\",\"model\":\"claude-sonnet-4-5\",\"content\":[{\"type\":\"text\",\"text\":\"Running read_file\"}],\"usage\":{\"input_tokens\":100,\"output_tokens\":22,\"cache_read_input_tokens\":40}}}",
+            "{\"type\":\"assistant\",\"sessionId\":\"sess-stream\",\"requestId\":\"req-s1\",\"timestamp\":\"2026-11-19T12:00:03.000Z\",\"terminationReason\":\"task_complete\",\"message\":{\"id\":\"msg-stream-1\",\"role\":\"assistant\",\"model\":\"claude-sonnet-4-5\",\"content\":[{\"type\":\"tool_use\",\"id\":\"tc-s1\",\"name\":\"Skill\",\"input\":{\"skill\":\"deploy\"}}],\"usage\":{\"input_tokens\":100,\"output_tokens\":65,\"cache_read_input_tokens\":40,\"cache_creation_input_tokens\":10}}}",
+            "{\"type\":\"user\",\"sessionId\":\"sess-stream\",\"timestamp\":\"2026-11-19T12:00:04.000Z\",\"message\":{\"role\":\"user\",\"content\":[{\"type\":\"tool_result\",\"tool_use_id\":\"tc-s1\",\"content\":\"Deployed\"}]}}",
+            "{\"type\":\"assistant\",\"sessionId\":\"sess-stream\",\"timestamp\":\"2026-11-19T12:00:05.000Z\",\"message\":{\"id\":\"msg-stream-2\",\"role\":\"assistant\",\"model\":\"claude-sonnet-4-5\",\"content\":[{\"type\":\"text\",\"text\":\"All done.\"}],\"usage\":{\"input_tokens\":100,\"output_tokens\":65,\"cache_read_input_tokens\":40,\"cache_creation_input_tokens\":10}}}",
+        ]);
+
+        CollectedBatch batch = CreateMapper().Map(CreateUnit("/tmp/.claude/projects/repo/sess-stream.jsonl", jsonl), ImportedAt);
+
+        Assert.Single(batch.Sessions);
+        Assert.Equal(3, batch.Records.Count);
+
+        CollectedRecord firstTurn = batch.Records[0];
+        Assert.Equal(RecordOp.LlmInvoke, firstTurn.Op);
+        Assert.Equal("synth:claude-code:sess-stream:msg-stream-1", firstTurn.RecordId);
+        Assert.Equal(new DateTimeOffset(2026, 11, 19, 12, 0, 1, TimeSpan.Zero), firstTurn.StartedAt);
+        Assert.Equal("claude-sonnet-4-5", firstTurn.Model);
+        Assert.Equal(RecordStatus.Ok, firstTurn.Status);
+        Assert.Equal(150L, firstTurn.ReportedInputTokens);
+        Assert.Equal(65L, firstTurn.ReportedOutputTokens);
+        Assert.Contains(new CollectedTokenCount(TokenClass.Input, 100L), firstTurn.Tokens);
+        Assert.Contains(new CollectedTokenCount(TokenClass.Output, 65L), firstTurn.Tokens);
+        Assert.Contains(new CollectedTokenCount(TokenClass.CacheRead, 40L), firstTurn.Tokens);
+        Assert.Contains(new CollectedTokenCount(TokenClass.CacheWrite, 10L), firstTurn.Tokens);
+
+        Assert.Equal(4, firstTurn.Parts.Count);
+        Assert.Equal(ContentBucket.ConversationHistory, firstTurn.Parts[0].Bucket);
+        Assert.Equal("Inspect the module", firstTurn.Parts[0].PlainText);
+        Assert.Equal(ContentBucket.ConversationHistory, firstTurn.Parts[1].Bucket);
+        Assert.Equal("Planning", firstTurn.Parts[1].PlainText);
+        Assert.Equal(ContentBucket.ConversationHistory, firstTurn.Parts[2].Bucket);
+        Assert.Equal("Running read_file", firstTurn.Parts[2].PlainText);
+        Assert.Equal(ContentBucket.ConversationHistory, firstTurn.Parts[3].Bucket);
+        Assert.Contains("Skill", firstTurn.Parts[3].PlainText, StringComparison.Ordinal);
+        Assert.Contains("deploy", firstTurn.Parts[3].PlainText, StringComparison.Ordinal);
+
+        CollectedRecord toolRecord = batch.Records[1];
+        Assert.Equal(RecordOp.ToolInvoke, toolRecord.Op);
+        Assert.Equal(firstTurn.RecordId, toolRecord.ParentRecordId);
+        Assert.Equal("Deployed", toolRecord.Tool!.Result!.PlainText);
+
+        CollectedRecord secondTurn = batch.Records[2];
+        Assert.Equal("synth:claude-code:sess-stream:msg-stream-2", secondTurn.RecordId);
+        Assert.Equal(2, secondTurn.Parts.Count);
+        Assert.Equal(ContentBucket.ToolResultContent, secondTurn.Parts[0].Bucket);
+        Assert.Equal("Deployed", secondTurn.Parts[0].PlainText);
+        Assert.Equal(ContentBucket.ConversationHistory, secondTurn.Parts[1].Bucket);
+        Assert.Equal("All done.", secondTurn.Parts[1].PlainText);
+    }
+
+    [Fact]
+    public void Map_SplitsOversizedPlainTextOnIntactSystemReminderBoundariesWithTailOnlyWithheldPart()
+    {
+        string beforeReminder = new('a', 63_000);
+        string reminderBody = new('b', 4_000);
+        string afterReminder = new('c', 5_000);
+        string fullText = $"{beforeReminder}<system-reminder>{reminderBody}</system-reminder>{afterReminder}";
+        string expectedTail = $"<system-reminder>{reminderBody}</system-reminder>{afterReminder}";
+        ToolContentMeasurement expectedTailMeasurement = ToolContentMeasurer.Measure(expectedTail, CanonSynth.MaxToolResultBytes, "claude-sonnet-4-5");
+        ToolContentMeasurement expectedFullMeasurement = ToolContentMeasurer.Measure(fullText, CanonSynth.MaxToolResultBytes, "claude-sonnet-4-5");
+
+        string jsonl =
+            $"{{\"type\":\"assistant\",\"sessionId\":\"sess-over\",\"timestamp\":\"2026-11-19T12:10:00.000Z\",\"message\":{{\"id\":\"msg-over\",\"role\":\"assistant\",\"model\":\"claude-sonnet-4-5\",\"content\":[{{\"type\":\"text\",\"text\":{System.Text.Json.JsonSerializer.Serialize(fullText)}}}],\"usage\":{{\"input_tokens\":10,\"output_tokens\":5}}}}}}";
+
+        CollectedBatch batch = CreateMapper(LocalTextTokenizer.Shared).Map(CreateUnit("/tmp/.claude/projects/repo/sess-over.jsonl", jsonl), ImportedAt);
+
+        CollectedRecord turn = Assert.Single(batch.Records);
+        Assert.Equal(2, turn.Parts.Count);
+
+        CollectedContentPart keptPart = turn.Parts[0];
+        Assert.Equal(0, keptPart.Position);
+        Assert.Equal(ContentBucket.ConversationHistory, keptPart.Bucket);
+        Assert.Equal(beforeReminder, keptPart.PlainText);
+        Assert.Null(keptPart.Withheld);
+        Assert.Equal(Encoding.UTF8.GetByteCount(fullText), keptPart.OriginalUtf8BytesWhenTruncated);
+        Assert.DoesNotContain("<system-reminder>", keptPart.PlainText, StringComparison.Ordinal);
+
+        CollectedContentPart tailPart = turn.Parts[1];
+        Assert.Equal(1, tailPart.Position);
+        Assert.Equal(ContentBucket.ConversationHistory, tailPart.Bucket);
+        Assert.Null(tailPart.PlainText);
+        Assert.NotNull(tailPart.Withheld);
+        Assert.Null(tailPart.OriginalUtf8BytesWhenTruncated);
+        Assert.Equal(expectedTailMeasurement.Utf8Bytes, tailPart.Withheld!.Utf8Bytes);
+        Assert.Equal(expectedTailMeasurement.Characters, tailPart.Withheld.Characters);
+        Assert.Equal(expectedTailMeasurement.MeasuredTokens, tailPart.Withheld.MeasuredTokens);
+        Assert.True(tailPart.Withheld.MeasuredTokens < expectedFullMeasurement.MeasuredTokens);
+
+        List<ContextPart> contextParts =
+        [
+            new ContextPart("conversation_history", keptPart.PlainText!, Model: "claude-sonnet-4-5"),
+            new ContextPart(
+                "conversation_history",
+                string.Empty,
+                Tokens: tailPart.Withheld.MeasuredTokens,
+                Model: "claude-sonnet-4-5",
+                Tokenizer: tailPart.Withheld.Tokenizer,
+                TokenizerIsModelOwn: tailPart.Withheld.TokenizerIsModelOwn),
+        ];
+        ContextAnalysis analysis = CanonContextAnalysis.AnalyzeContext(
+            [new ContextTurn(contextParts, InputTokens: 50_000, FreshInput: 50_000)],
+            new ContextCountOptions(ContextLimit: 200_000),
+            static (text, model) => LocalTextTokenizer.Shared.Count(text, model));
+        long expectedPrefixTokens = LocalTextTokenizer.Shared.Count(beforeReminder, "claude-sonnet-4-5").Count;
+        Assert.Equal(expectedPrefixTokens + expectedTailMeasurement.MeasuredTokens, analysis.Turns[0].Buckets["conversation_history"]);
+    }
+
+    [Fact]
+    public void Map_KeepsIntactLeadingSystemReminderAndBacksUpMidOpeningTagSplit()
+    {
+        string intactReminder = "<system-reminder>Keep this instruction intact</system-reminder>";
+        string padding = new('x', 65_530 - intactReminder.Length);
+        string trailingReminder = "<system-reminder>Split opening tag</system-reminder>";
+        string fullText = $"{intactReminder}{padding}{trailingReminder}";
+        string expectedPrefix = $"{intactReminder}{padding}";
+        ToolContentMeasurement expectedTailMeasurement = ToolContentMeasurer.Measure(trailingReminder, CanonSynth.MaxToolResultBytes, "claude-sonnet-4-5");
+
+        string jsonl =
+            $"{{\"type\":\"assistant\",\"sessionId\":\"sess-midtag\",\"timestamp\":\"2026-11-19T12:15:00.000Z\",\"message\":{{\"id\":\"msg-midtag\",\"role\":\"assistant\",\"model\":\"claude-sonnet-4-5\",\"content\":[{{\"type\":\"text\",\"text\":{System.Text.Json.JsonSerializer.Serialize(fullText)}}}],\"usage\":{{\"input_tokens\":10,\"output_tokens\":5}}}}}}";
+
+        CollectedBatch batch = CreateMapper(LocalTextTokenizer.Shared).Map(CreateUnit("/tmp/.claude/projects/repo/sess-midtag.jsonl", jsonl), ImportedAt);
+
+        CollectedRecord turn = Assert.Single(batch.Records);
+        Assert.Equal(2, turn.Parts.Count);
+        Assert.Equal(expectedPrefix, turn.Parts[0].PlainText);
+        Assert.Null(turn.Parts[0].Withheld);
+        Assert.Equal(Encoding.UTF8.GetByteCount(fullText), turn.Parts[0].OriginalUtf8BytesWhenTruncated);
+        Assert.Null(turn.Parts[1].PlainText);
+        Assert.NotNull(turn.Parts[1].Withheld);
+        Assert.Equal(expectedTailMeasurement.Utf8Bytes, turn.Parts[1].Withheld!.Utf8Bytes);
+        Assert.Equal(expectedTailMeasurement.MeasuredTokens, turn.Parts[1].Withheld!.MeasuredTokens);
+    }
+
+    [Theory]
+    [InlineData("<system-reminder>", "</system-reminder>")]
+    [InlineData("<not-a-tag>", "</not-a-tag>")]
+    public void Map_RetainsMeasuredPrefixWhenUnclosedSystemReminderOrAngleBracketPrefixStartsAtOffsetZero(
+        string openPrefix,
+        string closeSuffix)
+    {
+        string body = new('b', 70_000);
+        string fullText = $"{openPrefix}{body}{closeSuffix}";
+        string expectedPrefix = fullText[..CanonSynth.MaxToolResultBytes];
+        string expectedTail = fullText[CanonSynth.MaxToolResultBytes..];
+        ToolContentMeasurement expectedTailMeasurement = ToolContentMeasurer.Measure(expectedTail, CanonSynth.MaxToolResultBytes, "claude-sonnet-4-5");
+
+        string jsonl =
+            $"{{\"type\":\"assistant\",\"sessionId\":\"sess-offset0\",\"timestamp\":\"2026-11-19T12:17:00.000Z\",\"message\":{{\"id\":\"msg-offset0\",\"role\":\"assistant\",\"model\":\"claude-sonnet-4-5\",\"content\":[{{\"type\":\"text\",\"text\":{System.Text.Json.JsonSerializer.Serialize(fullText)}}}],\"usage\":{{\"input_tokens\":10,\"output_tokens\":5}}}}}}";
+
+        CollectedBatch batch = CreateMapper(LocalTextTokenizer.Shared).Map(CreateUnit("/tmp/.claude/projects/repo/sess-offset0.jsonl", jsonl), ImportedAt);
+
+        CollectedRecord turn = Assert.Single(batch.Records);
+        Assert.Equal(2, turn.Parts.Count);
+
+        CollectedContentPart keptPart = turn.Parts[0];
+        Assert.Equal(0, keptPart.Position);
+        Assert.Equal(ContentBucket.ConversationHistory, keptPart.Bucket);
+        Assert.Equal(expectedPrefix, keptPart.PlainText);
+        Assert.Null(keptPart.Withheld);
+        Assert.Equal(Encoding.UTF8.GetByteCount(fullText), keptPart.OriginalUtf8BytesWhenTruncated);
+
+        CollectedContentPart tailPart = turn.Parts[1];
+        Assert.Equal(1, tailPart.Position);
+        Assert.Equal(ContentBucket.ConversationHistory, tailPart.Bucket);
+        Assert.Null(tailPart.PlainText);
+        Assert.NotNull(tailPart.Withheld);
+        Assert.Null(tailPart.OriginalUtf8BytesWhenTruncated);
+        Assert.Equal(expectedTailMeasurement.Utf8Bytes, tailPart.Withheld!.Utf8Bytes);
+        Assert.Equal(expectedTailMeasurement.Characters, tailPart.Withheld.Characters);
+        Assert.Equal(expectedTailMeasurement.MeasuredTokens, tailPart.Withheld.MeasuredTokens);
+    }
+
+    [Fact]
+    public void Map_KeepsToolResultDtoPlainTextAlignedWithSystemReminderSafePrefix()
+    {
+        string prefix = new('x', 65_530);
+        string fullText = $"{prefix}<system-reminder>{new string('r', 40_000)}</system-reminder>";
+        string jsonl = string.Join('\n',
+        [
+            "{\"type\":\"assistant\",\"sessionId\":\"sess-tr-cut\",\"timestamp\":\"2026-11-19T12:16:00.000Z\",\"message\":{\"id\":\"msg-tr-cut\",\"role\":\"assistant\",\"model\":\"claude-sonnet-4-5\",\"content\":[{\"type\":\"tool_use\",\"id\":\"tc-cut\",\"name\":\"bash\",\"input\":\"cat big\"}],\"usage\":{\"input_tokens\":10,\"output_tokens\":5}}}",
+            $"{{\"type\":\"user\",\"sessionId\":\"sess-tr-cut\",\"timestamp\":\"2026-11-19T12:16:01.000Z\",\"message\":{{\"role\":\"user\",\"content\":[{{\"type\":\"tool_result\",\"tool_use_id\":\"tc-cut\",\"content\":{System.Text.Json.JsonSerializer.Serialize(fullText)}}}]}}}}",
+            "{\"type\":\"assistant\",\"sessionId\":\"sess-tr-cut\",\"timestamp\":\"2026-11-19T12:16:02.000Z\",\"message\":{\"id\":\"msg-tr-cut2\",\"role\":\"assistant\",\"model\":\"claude-sonnet-4-5\",\"content\":[{\"type\":\"text\",\"text\":\"done\"}],\"usage\":{\"input_tokens\":20,\"output_tokens\":5}}}",
+        ]);
+
+        CollectedBatch batch = CreateMapper(LocalTextTokenizer.Shared).Map(CreateUnit("/tmp/.claude/projects/repo/sess-tr-cut.jsonl", jsonl), ImportedAt);
+
+        CollectedRecord tool = Assert.Single(batch.Records, static r => r.Op == RecordOp.ToolInvoke);
+        Assert.Equal(2, tool.Parts.Count);
+        Assert.Equal(prefix, tool.Parts[0].PlainText);
+        Assert.NotNull(tool.Parts[1].Withheld);
+        Assert.NotNull(tool.Tool?.Result);
+        Assert.Equal(prefix, tool.Tool!.Result!.PlainText);
+        Assert.Equal(Encoding.UTF8.GetByteCount(fullText), tool.Tool.Result.OriginalUtf8BytesWhenTruncated);
+    }
+
+    [Fact]
+    public void Map_FoldsCompactBoundaryAndCompactSummaryOntoNextKeptLlmInvokeTurnAndRoundTrips()
+    {
+        string jsonl = string.Join('\n',
+        [
+            "{\"type\":\"user\",\"sessionId\":\"sess-compact\",\"timestamp\":\"2026-11-19T12:20:00.000Z\",\"message\":{\"role\":\"user\",\"content\":\"First turn\"}}",
+            "{\"type\":\"assistant\",\"sessionId\":\"sess-compact\",\"timestamp\":\"2026-11-19T12:20:01.000Z\",\"message\":{\"id\":\"msg-c1\",\"role\":\"assistant\",\"model\":\"claude-sonnet-4-5\",\"content\":[{\"type\":\"text\",\"text\":\"Answer 1\"}],\"usage\":{\"input_tokens\":50,\"output_tokens\":10}}}",
+            "{\"type\":\"system\",\"subtype\":\"compact_boundary\",\"sessionId\":\"sess-compact\",\"timestamp\":\"2026-11-19T12:20:02.000Z\",\"content\":\"Conversation compacted\"}",
+            "{\"type\":\"user\",\"isCompactSummary\":true,\"sessionId\":\"sess-compact\",\"timestamp\":\"2026-11-19T12:20:02.100Z\",\"message\":{\"role\":\"user\",\"content\":\"Summary of prior turns\"}}",
+            "{\"type\":\"assistant\",\"sessionId\":\"sess-compact\",\"timestamp\":\"2026-11-19T12:20:03.000Z\",\"message\":{\"id\":\"msg-c2\",\"role\":\"assistant\",\"model\":\"claude-sonnet-4-5\",\"content\":[{\"type\":\"text\",\"text\":\"Answer 2\"}],\"usage\":{\"input_tokens\":20,\"output_tokens\":8}}}",
+            "{\"type\":\"user\",\"isCompactSummary\":true,\"sessionId\":\"sess-compact\",\"timestamp\":\"2026-11-19T12:20:04.000Z\",\"message\":{\"role\":\"user\",\"content\":\"Second summary\"}}",
+            "{\"type\":\"assistant\",\"sessionId\":\"sess-compact\",\"timestamp\":\"2026-11-19T12:20:04.500Z\",\"message\":{\"id\":\"msg-c-zero\",\"role\":\"assistant\",\"model\":\"claude-sonnet-4-5\",\"content\":[],\"usage\":{\"input_tokens\":0,\"output_tokens\":0}}}",
+            "{\"type\":\"assistant\",\"sessionId\":\"sess-compact\",\"timestamp\":\"2026-11-19T12:20:05.000Z\",\"message\":{\"id\":\"msg-c3\",\"role\":\"assistant\",\"model\":\"claude-sonnet-4-5\",\"content\":[{\"type\":\"text\",\"text\":\"Answer 3\"}],\"usage\":{\"input_tokens\":30,\"output_tokens\":12}}}",
+        ]);
+
+        CollectedBatch batch = CreateMapper().Map(CreateUnit("/tmp/.claude/projects/repo/sess-compact.jsonl", jsonl), ImportedAt);
+
+        Assert.Equal(3, batch.Records.Count);
+        Assert.Null(batch.Records[0].AgentInstanceId);
+        Assert.Equal("claude:compact_boundary", batch.Records[1].AgentInstanceId);
+        Assert.Equal("claude:compact_boundary", batch.Records[2].AgentInstanceId);
+
+        string?[] secondTurnTexts = [.. batch.Records[1].Parts.Select(static p => p.PlainText)];
+        string?[] thirdTurnTexts = [.. batch.Records[2].Parts.Select(static p => p.PlainText)];
+        Assert.DoesNotContain("Second summary", secondTurnTexts);
+        Assert.Contains("Answer 2", secondTurnTexts);
+        Assert.Contains("Second summary", thirdTurnTexts);
+        Assert.Contains("Answer 3", thirdTurnTexts);
+
+        InMemoryRelationalStore store = new();
+        store.WriteBatch(batch);
+        CollectedRecord? roundTripped = store.FindRecord(batch.Records[1].RecordId);
+        Assert.NotNull(roundTripped);
+        Assert.Equal("claude:compact_boundary", roundTripped!.AgentInstanceId);
+    }
+
+    [Fact]
+    public void Map_KeepsTrailingCompactSummaryAsItsOwnTurnInsteadOfMergingItIntoThePreCompactionTurn()
+    {
+        string summaryText = "Second summary " + string.Join(' ', Enumerable.Repeat("the conversation so far covered many distinct topics", 20));
+        string jsonl = string.Join('\n',
+        [
+            "{\"type\":\"user\",\"sessionId\":\"sess-trail\",\"timestamp\":\"2026-11-19T12:20:00.000Z\",\"message\":{\"role\":\"user\",\"content\":\"First turn\"}}",
+            "{\"type\":\"assistant\",\"sessionId\":\"sess-trail\",\"timestamp\":\"2026-11-19T12:20:01.000Z\",\"message\":{\"id\":\"msg-c1\",\"role\":\"assistant\",\"model\":\"claude-sonnet-4-5\",\"content\":[{\"type\":\"text\",\"text\":\"Answer 1\"}],\"usage\":{\"input_tokens\":50,\"output_tokens\":10}}}",
+            "{\"type\":\"assistant\",\"sessionId\":\"sess-trail\",\"timestamp\":\"2026-11-19T12:20:03.000Z\",\"message\":{\"id\":\"msg-c2\",\"role\":\"assistant\",\"model\":\"claude-sonnet-4-5\",\"content\":[{\"type\":\"text\",\"text\":\"Answer 2\"}],\"usage\":{\"input_tokens\":20,\"output_tokens\":8}}}",
+            "{\"type\":\"system\",\"subtype\":\"compact_boundary\",\"sessionId\":\"sess-trail\",\"timestamp\":\"2026-11-19T12:20:03.500Z\",\"content\":\"Conversation compacted\"}",
+            $"{{\"type\":\"user\",\"isCompactSummary\":true,\"sessionId\":\"sess-trail\",\"timestamp\":\"2026-11-19T12:20:04.000Z\",\"message\":{{\"role\":\"user\",\"content\":\"{summaryText}\"}}}}",
+        ]);
+
+        CollectedBatch batch = CreateMapper(LocalTextTokenizer.Shared).Map(CreateUnit("/tmp/.claude/projects/repo/sess-trail.jsonl", jsonl), ImportedAt);
+
+        Assert.Equal(3, batch.Records.Count);
+        CollectedRecord preCompaction = batch.Records[1];
+        Assert.Equal("synth:claude-code:sess-trail:msg-c2", preCompaction.RecordId);
+        Assert.DoesNotContain(
+            preCompaction.Parts,
+            static p => p.PlainText is not null && p.PlainText.Contains("Second summary", StringComparison.Ordinal));
+
+        CollectedRecord summaryTurn = batch.Records[2];
+        Assert.Equal(preCompaction.SessionKey, summaryTurn.SessionKey);
+        Assert.Contains(
+            summaryTurn.Parts,
+            static p => p.PlainText is not null && p.PlainText.StartsWith("Second summary", StringComparison.Ordinal));
+
+        List<ContextPart> preCompactionContext =
+        [
+            .. preCompaction.Parts
+                .Where(static p => p.Bucket == ContentBucket.ConversationHistory && p.PlainText is not null)
+                .Select(static p => new ContextPart("conversation_history", p.PlainText!, Model: "claude-sonnet-4-5")),
+        ];
+        ContextAnalysis analysis = CanonContextAnalysis.AnalyzeContext(
+            [new ContextTurn(preCompactionContext, InputTokens: 20, FreshInput: 20)],
+            new ContextCountOptions(ContextLimit: 200_000),
+            static (text, model) => LocalTextTokenizer.Shared.Count(text, model));
+        Assert.True(analysis.Turns[0].BucketedTokens <= 20, $"bucketed {analysis.Turns[0].BucketedTokens} exceeds measured input 20");
+        Assert.True(analysis.Turns[0].Residual.Tokens >= 0);
+    }
+
+    [Fact]
+    public void Map_IsolatesSidechainAndSubagentTranscriptsUnderParentSessionAndAgentId()
+    {
+        string sidechainJsonl =
+            "{\"type\":\"assistant\",\"sessionId\":\"sess-main\",\"isSidechain\":true,\"agentId\":\"a1b2c3\",\"timestamp\":\"2026-11-19T12:30:00.000Z\",\"message\":{\"id\":\"msg-sub-1\",\"role\":\"assistant\",\"model\":\"claude-sonnet-4-5\",\"content\":[{\"type\":\"text\",\"text\":\"Subagent output\"}],\"usage\":{\"input_tokens\":15,\"output_tokens\":5}}}";
+
+        CollectedBatch sidechainBatch = CreateMapper().Map(
+            CreateUnit("/tmp/.claude/projects/repo/sess-main.jsonl", sidechainJsonl),
+            ImportedAt);
+
+        CollectedSession sidechainSession = Assert.Single(sidechainBatch.Sessions);
+        Assert.Equal("sess-main#agent-a1b2c3", sidechainSession.SessionKey);
+        Assert.Equal("sess-main#agent-a1b2c3", sidechainSession.NativeSessionId);
+        CollectedRecord sidechainRecord = Assert.Single(sidechainBatch.Records);
+        Assert.Equal("sess-main#agent-a1b2c3", sidechainRecord.SessionKey);
+        Assert.Equal("synth:claude-code:sess-main#agent-a1b2c3:msg-sub-1", sidechainRecord.RecordId);
+
+        string nestedFallbackJsonl =
+            "{\"type\":\"assistant\",\"timestamp\":\"2026-11-19T12:31:00.000Z\",\"message\":{\"id\":\"msg-sub-2\",\"role\":\"assistant\",\"model\":\"claude-sonnet-4-5\",\"content\":[{\"type\":\"text\",\"text\":\"Nested subagent\"}],\"usage\":{\"input_tokens\":12,\"output_tokens\":4}}}";
+
+        CollectedBatch nestedBatch = CreateMapper().Map(
+            CreateUnit("/tmp/.claude/projects/repo/sess-dir-parent/subagents/agent-xyz999.jsonl", nestedFallbackJsonl),
+            ImportedAt);
+
+        CollectedSession nestedSession = Assert.Single(nestedBatch.Sessions);
+        Assert.Equal("sess-dir-parent#agent-xyz999", nestedSession.SessionKey);
+        Assert.Equal("sess-dir-parent#agent-xyz999", nestedSession.NativeSessionId);
+        CollectedRecord nestedRecord = Assert.Single(nestedBatch.Records);
+        Assert.Equal("sess-dir-parent#agent-xyz999", nestedRecord.SessionKey);
+        Assert.Equal("synth:claude-code:sess-dir-parent#agent-xyz999:msg-sub-2", nestedRecord.RecordId);
+
+        string normalJsonl =
+            "{\"type\":\"assistant\",\"sessionId\":\"sess-regular\",\"isSidechain\":false,\"timestamp\":\"2026-11-19T12:32:00.000Z\",\"message\":{\"id\":\"msg-norm\",\"role\":\"assistant\",\"model\":\"claude-sonnet-4-5\",\"content\":[{\"type\":\"text\",\"text\":\"Main output\"}],\"usage\":{\"input_tokens\":10,\"output_tokens\":3}}}";
+
+        CollectedBatch normalBatch = CreateMapper().Map(
+            CreateUnit("/tmp/.claude/projects/repo/sess-regular.jsonl", normalJsonl),
+            ImportedAt);
+
+        CollectedSession normalSession = Assert.Single(normalBatch.Sessions);
+        Assert.Equal("sess-regular", normalSession.SessionKey);
+    }
+
+    [Fact]
+    public void Map_SeparatesConcurrentAgentLessSidechainRunsByTheirFirstRecordId()
+    {
+        static string Line(string uuid, string? parentUuid, string messageId, string timestamp, string text, int input)
+        {
+            string parent = parentUuid is null ? "null" : $"\"{parentUuid}\"";
+            return $"{{\"type\":\"assistant\",\"uuid\":\"{uuid}\",\"parentUuid\":{parent},\"sessionId\":\"sess-main\",\"isSidechain\":true,\"timestamp\":\"{timestamp}\",\"message\":{{\"id\":\"{messageId}\",\"role\":\"assistant\",\"model\":\"claude-sonnet-4-5\",\"content\":[{{\"type\":\"text\",\"text\":\"{text}\"}}],\"usage\":{{\"input_tokens\":{input},\"output_tokens\":2}}}}}}";
+        }
+
+        string jsonl = string.Join('\n',
+        [
+            Line("ua1", null, "msg-a1", "2026-11-19T12:50:00.000Z", "Run A first", 5),
+            Line("ub1", null, "msg-b1", "2026-11-19T12:50:01.000Z", "Run B first", 6),
+            Line("ua2", "ua1", "msg-a2", "2026-11-19T12:50:02.000Z", "Run A second", 7),
+            Line("ub2", "ub1", "msg-b2", "2026-11-19T12:50:03.000Z", "Run B second", 8),
+        ]);
+
+        CollectedBatch batch = CreateMapper().Map(CreateUnit("/tmp/.claude/projects/repo/sess-main.jsonl", jsonl), ImportedAt);
+
+        Assert.Equal(2, batch.Sessions.Count);
+        Assert.Equal(4, batch.Records.Count);
+        string[] keys = [.. batch.Sessions.Select(static s => s.SessionKey).Order(StringComparer.Ordinal)];
+        Assert.Equal(["sess-main#agent-sidechain-ua1", "sess-main#agent-sidechain-ub1"], keys);
+
+        string?[] runATexts = [.. batch.Records
+            .Where(static r => string.Equals(r.SessionKey, "sess-main#agent-sidechain-ua1", StringComparison.Ordinal))
+            .SelectMany(static r => r.Parts.Select(static p => p.PlainText))];
+        Assert.Equal(["Run A first", "Run A second"], runATexts);
+        string?[] runBTexts = [.. batch.Records
+            .Where(static r => string.Equals(r.SessionKey, "sess-main#agent-sidechain-ub1", StringComparison.Ordinal))
+            .SelectMany(static r => r.Parts.Select(static p => p.PlainText))];
+        Assert.Equal(["Run B first", "Run B second"], runBTexts);
+    }
+
+    [Fact]
+    public void Map_ResolvesLongAgentLessSidechainChainsToTheirFirstLineAndKeepsDistinctChainsApart()
+    {
+        const int chainLength = 4_000;
+        static string Line(string uuid, string? parentUuid, int sequence)
+        {
+            string parent = parentUuid is null ? "null" : $"\"{parentUuid}\"";
+            string timestamp = new DateTimeOffset(2026, 11, 19, 13, 0, 0, TimeSpan.Zero).AddSeconds(sequence).ToString("yyyy-MM-ddTHH:mm:ss.fffZ", System.Globalization.CultureInfo.InvariantCulture);
+            return $"{{\"type\":\"assistant\",\"uuid\":\"{uuid}\",\"parentUuid\":{parent},\"sessionId\":\"sess-long\",\"isSidechain\":true,\"timestamp\":\"{timestamp}\",\"message\":{{\"id\":\"msg-{uuid}\",\"role\":\"assistant\",\"model\":\"claude-sonnet-4-5\",\"content\":[{{\"type\":\"text\",\"text\":\"line {uuid}\"}}],\"usage\":{{\"input_tokens\":5,\"output_tokens\":2}}}}}}";
+        }
+
+        List<string> lines = [];
+        for (int i = 0; i < chainLength; i++)
+        {
+            lines.Add(Line($"long-{i}", i == 0 ? null : $"long-{i - 1}", lines.Count));
+            if (i < 3)
+            {
+                lines.Add(Line($"short-{i}", i == 0 ? null : $"short-{i - 1}", lines.Count));
+            }
+        }
+
+        CollectedBatch batch = CreateMapper().Map(
+            CreateUnit("/tmp/.claude/projects/repo/sess-long.jsonl", string.Join('\n', lines)),
+            ImportedAt);
+
+        Assert.Equal(chainLength + 3, batch.Records.Count);
+        string[] keys = [.. batch.Sessions.Select(static s => s.SessionKey).Order(StringComparer.Ordinal)];
+        Assert.Equal(["sess-long#agent-sidechain-long-0", "sess-long#agent-sidechain-short-0"], keys);
+        Assert.Equal(chainLength, batch.Records.Count(static r => string.Equals(r.SessionKey, "sess-long#agent-sidechain-long-0", StringComparison.Ordinal)));
+        Assert.Equal(3, batch.Records.Count(static r => string.Equals(r.SessionKey, "sess-long#agent-sidechain-short-0", StringComparison.Ordinal)));
+    }
+
+    [Fact]
+    public void Map_DoesNotMergeUsageLessSidechainTailIntoParentSessionTurn()
+    {
+        string sidechainTailJsonl = string.Join('\n',
+        [
+            "{\"type\":\"assistant\",\"sessionId\":\"sess-parent\",\"timestamp\":\"2026-11-19T12:40:00.000Z\",\"message\":{\"id\":\"msg-p1\",\"role\":\"assistant\",\"model\":\"claude-sonnet-4-5\",\"content\":[{\"type\":\"text\",\"text\":\"Parent reply\"}],\"usage\":{\"input_tokens\":10,\"output_tokens\":4}}}",
+            "{\"type\":\"assistant\",\"sessionId\":\"sess-parent\",\"isSidechain\":true,\"agentId\":\"sub1\",\"timestamp\":\"2026-11-19T12:40:01.000Z\",\"message\":{\"id\":\"msg-sub-tail\",\"role\":\"assistant\",\"model\":\"claude-sonnet-4-5\",\"content\":[{\"type\":\"text\",\"text\":\"Sidechain tail only\"}]}}",
+        ]);
+
+        CollectedBatch sidechainTailBatch = CreateMapper().Map(
+            CreateUnit("/tmp/.claude/projects/repo/sess-parent.jsonl", sidechainTailJsonl),
+            ImportedAt);
+
+        Assert.Equal(2, sidechainTailBatch.Records.Count);
+        CollectedRecord onlyParentRecord = Assert.Single(sidechainTailBatch.Records, static r => string.Equals(r.SessionKey, "sess-parent", StringComparison.Ordinal));
+        CollectedContentPart onlyParentPart = Assert.Single(onlyParentRecord.Parts);
+        Assert.Equal("Parent reply", onlyParentPart.PlainText);
+
+        CollectedRecord sidechainTailRecord = Assert.Single(sidechainTailBatch.Records, static r => string.Equals(r.SessionKey, "sess-parent#agent-sub1", StringComparison.Ordinal));
+        CollectedContentPart sidechainTailPart = Assert.Single(sidechainTailRecord.Parts);
+        Assert.Equal("Sidechain tail only", sidechainTailPart.PlainText);
+        Assert.Equal("synth:claude-code:sess-parent#agent-sub1:msg-sub-tail", sidechainTailRecord.RecordId);
+        Assert.Equal(new DateTimeOffset(2026, 11, 19, 12, 40, 1, TimeSpan.Zero), sidechainTailRecord.StartedAt);
+        Assert.Contains(sidechainTailBatch.Sessions, static s => string.Equals(s.SessionKey, "sess-parent#agent-sub1", StringComparison.Ordinal));
+
+        string interleavedJsonl = string.Join('\n',
+        [
+            "{\"type\":\"assistant\",\"sessionId\":\"sess-parent\",\"timestamp\":\"2026-11-19T12:40:00.000Z\",\"message\":{\"id\":\"msg-p1\",\"role\":\"assistant\",\"model\":\"claude-sonnet-4-5\",\"content\":[{\"type\":\"text\",\"text\":\"Parent reply\"}],\"usage\":{\"input_tokens\":10,\"output_tokens\":4}}}",
+            "{\"type\":\"assistant\",\"sessionId\":\"sess-parent\",\"isSidechain\":true,\"agentId\":\"sub1\",\"timestamp\":\"2026-11-19T12:40:02.000Z\",\"message\":{\"id\":\"msg-sub-kept\",\"role\":\"assistant\",\"model\":\"claude-sonnet-4-5\",\"content\":[{\"type\":\"text\",\"text\":\"Subagent kept\"}],\"usage\":{\"input_tokens\":5,\"output_tokens\":2}}}",
+            "{\"type\":\"assistant\",\"sessionId\":\"sess-parent\",\"timestamp\":\"2026-11-19T12:40:03.000Z\",\"message\":{\"id\":\"msg-p-tail\",\"role\":\"assistant\",\"model\":\"claude-sonnet-4-5\",\"content\":[{\"type\":\"text\",\"text\":\"Parent tail\"}]}}",
+        ]);
+
+        CollectedBatch interleavedBatch = CreateMapper().Map(
+            CreateUnit("/tmp/.claude/projects/repo/sess-parent.jsonl", interleavedJsonl),
+            ImportedAt);
+
+        Assert.Equal(2, interleavedBatch.Records.Count);
+        CollectedRecord parentRecord = Assert.Single(interleavedBatch.Records, static r => string.Equals(r.SessionKey, "sess-parent", StringComparison.Ordinal));
+        CollectedRecord subagentRecord = Assert.Single(interleavedBatch.Records, static r => string.Equals(r.SessionKey, "sess-parent#agent-sub1", StringComparison.Ordinal));
+
+        Assert.Equal(2, parentRecord.Parts.Count);
+        Assert.Equal("Parent reply", parentRecord.Parts[0].PlainText);
+        Assert.Equal("Parent tail", parentRecord.Parts[1].PlainText);
+
+        CollectedContentPart subPart = Assert.Single(subagentRecord.Parts);
+        Assert.Equal("Subagent kept", subPart.PlainText);
+    }
+
+    [Fact]
+    public void Map_UsesInjectedTextTokenizer_ForToolUseAndOverflowAndDocumentParts()
+    {
+        StubTextTokenizer customTokenizer = new(tokenizer: "custom_fake_tokenizer", isModelOwn: true);
+        ClaudeTranscriptMapper mapper = new(customTokenizer);
+        string oversizedTail = "tail one two three";
+        string oversizedText = new string('a', 66_000) + "<system-reminder>" + oversizedTail + "</system-reminder>";
+        string jsonl = string.Join('\n',
+        [
+            $"{{\"type\":\"assistant\",\"sessionId\":\"sess-tok\",\"timestamp\":\"2026-11-19T12:45:00.000Z\",\"message\":{{\"id\":\"msg-tok\",\"role\":\"assistant\",\"model\":\"claude-sonnet-4-5\",\"content\":[{{\"type\":\"text\",\"text\":{System.Text.Json.JsonSerializer.Serialize(oversizedText)}}},{{\"type\":\"tool_use\",\"id\":\"toolu_tok\",\"name\":\"Read\",\"input\":{{\"path\":\"/tmp/example.txt\"}}}}],\"usage\":{{\"input_tokens\":10,\"output_tokens\":5}}}}}}",
+            "{\"type\":\"user\",\"sessionId\":\"sess-tok\",\"timestamp\":\"2026-11-19T12:45:01.000Z\",\"message\":{\"role\":\"user\",\"content\":[{\"type\":\"tool_result\",\"tool_use_id\":\"toolu_tok\",\"content\":\"{\\\"ok\\\":true,\\\"count\\\":3}\"}]}}",
+        ]);
+
+        CollectedBatch batch = mapper.Map(CreateUnit("/tmp/.claude/projects/repo/sess-tok.jsonl", jsonl), ImportedAt);
+
+        Assert.Equal(2, batch.Records.Count);
+        CollectedRecord llmRecord = Assert.Single(batch.Records, static r => r.Op == RecordOp.LlmInvoke);
+        CollectedContentPart withheldTailPart = Assert.Single(
+            llmRecord.Parts,
+            static p => p.Bucket == ContentBucket.ConversationHistory && p.Withheld is not null);
+        Assert.Equal("custom_fake_tokenizer", withheldTailPart.Withheld!.Tokenizer);
+        Assert.True(withheldTailPart.Withheld.TokenizerIsModelOwn);
+        Assert.Equal(
+            customTokenizer.Count("<system-reminder>" + oversizedTail + "</system-reminder>", "claude-sonnet-4-5").Count,
+            withheldTailPart.Withheld.MeasuredTokens);
+
+        CollectedRecord toolRecord = Assert.Single(batch.Records, static r => r.Op == RecordOp.ToolInvoke);
+        CollectedContentPart docResultPart = Assert.Single(toolRecord.Parts);
+        Assert.NotNull(docResultPart.Withheld);
+        Assert.Equal("custom_fake_tokenizer", docResultPart.Withheld!.Tokenizer);
+        Assert.True(docResultPart.Withheld.TokenizerIsModelOwn);
+    }
+
+    [Fact]
+    public void AddDashDataServices_InjectsRegisteredTextTokenizerIntoClaudeTranscriptMapper()
+    {
+        StubTextTokenizer customTokenizer = new(tokenizer: "di_registered_tokenizer", isModelOwn: false);
+        ServiceCollection services = new();
+        services.AddSingleton<ITextTokenizer>(customTokenizer);
+        _ = services.AddDashDataServices(new KyberDash.Contracts.Services.DashOptions());
+
+        using ServiceProvider provider = services.BuildServiceProvider();
+        ClaudeTranscriptMapper claudeMapper = Assert.Single(
+            provider.GetServices<IHarnessMapper>().OfType<ClaudeTranscriptMapper>());
+
+        string oversizedText = new string('x', 66_000) + "<system-reminder>alpha beta gamma</system-reminder>";
+        string jsonl =
+            $"{{\"type\":\"assistant\",\"sessionId\":\"sess-di\",\"timestamp\":\"2026-11-19T12:50:00.000Z\",\"message\":{{\"id\":\"msg-di\",\"role\":\"assistant\",\"model\":\"claude-sonnet-4-5\",\"content\":[{{\"type\":\"text\",\"text\":{System.Text.Json.JsonSerializer.Serialize(oversizedText)}}}],\"usage\":{{\"input_tokens\":10,\"output_tokens\":5}}}}}}";
+
+        CollectedBatch batch = claudeMapper.Map(CreateUnit("/tmp/.claude/projects/repo/sess-di.jsonl", jsonl), ImportedAt);
+
+        CollectedRecord record = Assert.Single(batch.Records);
+        CollectedContentPart withheldPart = Assert.Single(record.Parts, static p => p.Withheld is not null);
+        Assert.Equal("di_registered_tokenizer", withheldPart.Withheld!.Tokenizer);
+        Assert.False(withheldPart.Withheld.TokenizerIsModelOwn);
     }
 
     /// <summary>
@@ -510,7 +1010,7 @@ public class ClaudeTranscriptMapperTests
             "{\"type\":\"assistant\",\"sessionId\":\"sess-skills\",\"timestamp\":\"2026-11-19T12:00:04.000Z\",\"message\":{\"id\":\"msg-s2\",\"role\":\"assistant\",\"model\":\"claude-sonnet-4-5\",\"content\":[{\"type\":\"text\",\"text\":\"Done.\"}],\"usage\":{\"input_tokens\":60,\"output_tokens\":5}}}",
         ]);
 
-        ClaudeTranscriptMapper mapper = new();
+        ClaudeTranscriptMapper mapper = CreateMapper(LocalTextTokenizer.Shared);
         CollectedBatch batch = mapper.Map(CreateUnit("/tmp/.claude/projects/repo/sess-skills.jsonl", jsonl), ImportedAt);
 
         CollectedRecord[] turns = [.. batch.Records.Where(static r => r.Op == RecordOp.LlmInvoke)];
@@ -561,7 +1061,7 @@ public class ClaudeTranscriptMapperTests
             "{\"type\":\"assistant\",\"sessionId\":\"sess-old\",\"timestamp\":\"2026-11-19T12:00:02.000Z\",\"message\":{\"id\":\"msg-o1\",\"role\":\"assistant\",\"model\":\"claude-sonnet-4-5\",\"content\":[{\"type\":\"text\",\"text\":\"Hi.\"}],\"usage\":{\"input_tokens\":50,\"output_tokens\":10}}}",
         ]);
 
-        ClaudeTranscriptMapper mapper = new();
+        ClaudeTranscriptMapper mapper = CreateMapper(LocalTextTokenizer.Shared);
         CollectedBatch batch = mapper.Map(CreateUnit("/tmp/.claude/projects/repo/sess-old.jsonl", jsonl), ImportedAt);
 
         CollectedRecord turn = Assert.Single(batch.Records);
@@ -585,7 +1085,7 @@ public class ClaudeTranscriptMapperTests
             "{\"type\":\"assistant\",\"sessionId\":\"sess-slash\",\"timestamp\":\"2026-11-19T12:00:04.000Z\",\"message\":{\"id\":\"msg-sl2\",\"role\":\"assistant\",\"model\":\"claude-sonnet-4-5\",\"content\":[{\"type\":\"text\",\"text\":\"Model set.\"}],\"usage\":{\"input_tokens\":60,\"output_tokens\":5}}}",
         ]);
 
-        CollectedBatch batch = new ClaudeTranscriptMapper().Map(CreateUnit("/tmp/.claude/projects/repo/sess-slash.jsonl", jsonl), ImportedAt);
+        CollectedBatch batch = CreateMapper(LocalTextTokenizer.Shared).Map(CreateUnit("/tmp/.claude/projects/repo/sess-slash.jsonl", jsonl), ImportedAt);
 
         CollectedRecord[] turns = [.. batch.Records.Where(static r => r.Op == RecordOp.LlmInvoke)];
         Assert.Equal(2, turns.Length);
@@ -609,7 +1109,7 @@ public class ClaudeTranscriptMapperTests
             "{\"type\":\"assistant\",\"sessionId\":\"sess-img\",\"timestamp\":\"2026-11-19T12:00:03.000Z\",\"message\":{\"id\":\"msg-i2\",\"role\":\"assistant\",\"model\":\"claude-sonnet-4-5\",\"content\":[{\"type\":\"text\",\"text\":\"Seen.\"}],\"usage\":{\"input_tokens\":60,\"output_tokens\":5}}}",
         ]);
 
-        CollectedBatch batch = new ClaudeTranscriptMapper().Map(CreateUnit("/tmp/.claude/projects/repo/sess-img.jsonl", jsonl), ImportedAt);
+        CollectedBatch batch = CreateMapper(LocalTextTokenizer.Shared).Map(CreateUnit("/tmp/.claude/projects/repo/sess-img.jsonl", jsonl), ImportedAt);
 
         CollectedRecord shot = Assert.Single(batch.Records, static r => r.Tool?.CallId == "tc-shot");
         Assert.Null(shot.Tool!.Result);
@@ -641,7 +1141,7 @@ public class ClaudeTranscriptMapperTests
             "{\"type\":\"assistant\",\"sessionId\":\"sess-cap\",\"timestamp\":\"2026-11-19T12:00:03.000Z\",\"message\":{\"id\":\"msg-c2\",\"role\":\"assistant\",\"model\":\"claude-sonnet-4-5\",\"content\":[{\"type\":\"text\",\"text\":\"Seen.\"}],\"usage\":{\"input_tokens\":60,\"output_tokens\":5}}}",
         ]);
 
-        CollectedBatch batch = new ClaudeTranscriptMapper().Map(CreateUnit("/tmp/.claude/projects/repo/sess-cap.jsonl", jsonl), ImportedAt);
+        CollectedBatch batch = CreateMapper(LocalTextTokenizer.Shared).Map(CreateUnit("/tmp/.claude/projects/repo/sess-cap.jsonl", jsonl), ImportedAt);
 
         Assert.All(batch.Records.SelectMany(static r => r.Parts), static p => Assert.False(JsonDocumentText.IsDocument(p.PlainText)));
         CollectedRecord shot = Assert.Single(batch.Records, static r => r.Tool?.CallId == "tc-shot");
@@ -667,7 +1167,7 @@ public class ClaudeTranscriptMapperTests
             "{\"type\":\"user\",\"sessionId\":\"sess-edge\",\"timestamp\":\"2026-11-19T12:00:02.000Z\",\"message\":{\"role\":\"user\",\"content\":[{\"type\":\"tool_result\",\"tool_use_id\":\"tc-img\",\"content\":{\"type\":\"image\",\"source\":{\"type\":\"base64\",\"media_type\":\"image/png\",\"data\":\"AAAA\"}}}]}}",
         ]);
 
-        CollectedBatch batch = new ClaudeTranscriptMapper().Map(CreateUnit("/tmp/.claude/projects/repo/sess-edge.jsonl", jsonl), ImportedAt);
+        CollectedBatch batch = CreateMapper(LocalTextTokenizer.Shared).Map(CreateUnit("/tmp/.claude/projects/repo/sess-edge.jsonl", jsonl), ImportedAt);
 
         CollectedRecord turn = Assert.Single(batch.Records, static r => r.Op == RecordOp.LlmInvoke);
         Assert.Equal(["my-skill", "other"], turn.SkillsListed);
@@ -678,6 +1178,21 @@ public class ClaudeTranscriptMapperTests
         Assert.Empty(shot.Parts);
     }
 
+    private static ClaudeTranscriptMapper CreateMapper(ITextTokenizer? tokenizer = null) =>
+        new(tokenizer ?? new StubTextTokenizer("fake_tokenizer", isModelOwn: false));
+
+    private sealed class StubTextTokenizer(string tokenizer, bool isModelOwn) : ITextTokenizer
+    {
+        public TokenCount Count(string text, string? model)
+        {
+            _ = model;
+            int count = string.IsNullOrWhiteSpace(text)
+                ? 0
+                : text.Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries).Length;
+            return new TokenCount(count, tokenizer, isModelOwn);
+        }
+    }
+
     private static NativeSourceUnit CreateUnit(string sourceKey, string? rawText) =>
         new(
             Unit: new SourceUnit(
@@ -685,7 +1200,7 @@ public class ClaudeTranscriptMapperTests
                 SourceKey: sourceKey,
                 ProviderId: TranscriptReaderRepository.ClaudeProviderId,
                 ParserId: TranscriptReaderRepository.ClaudeParserId,
-                ParserContractVersion: TranscriptReaderRepository.ParserContractVersion,
+                ParserContractVersion: HarnessSourceRegistry.ClaudeTranscriptV2ParserContractVersion,
                 Format: TranscriptReaderRepository.ClaudeFormat,
                 SourceRootLabel: "~/.claude/projects",
                 RevisionToken: "1:100"),

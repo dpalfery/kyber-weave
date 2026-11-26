@@ -110,11 +110,7 @@ export function SessionReconciliationSection({ sessionId, className }: SessionRe
             </tbody>
           </table>
           <Pager
-            page={reconciliation.page}
-            limit={data.limit}
-            total={data.total}
-            onPageChange={reconciliation.setPage}
-            loading={reconciliation.isFetching}
+            {...reconciliation.pagerProps}
             ariaLabel="Reconciliation pages"
           />
         </div>

@@ -253,12 +253,8 @@ export function SkillsPanel({ skills, summary, aggregate, pager, onSelectSkill, 
         )}
         {pager != null && (
           <Pager
-            page={pager.page}
-            limit={pager.limit}
-            total={pager.total}
-            onPageChange={pager.onPageChange}
-            loading={pager.loading}
-            ariaLabel="Skill pages"
+            {...pager}
+            ariaLabel={pager.ariaLabel ?? 'Skill pages'}
           />
         )}
       </div>

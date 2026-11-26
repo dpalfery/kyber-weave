@@ -91,11 +91,7 @@ export function SessionProblemsSection({ sessionId, className }: SessionProblems
             </tbody>
           </table>
           <Pager
-            page={problems.page}
-            limit={data.limit}
-            total={data.total}
-            onPageChange={problems.setPage}
-            loading={problems.isFetching}
+            {...problems.pagerProps}
             ariaLabel="Stored problem pages"
           />
         </div>

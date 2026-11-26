@@ -765,7 +765,8 @@ The quarantine **list** stays light and never serves payloads.
 The Sessions **4 · Skills** section reads the `skills` block of the session payload. That block
 is built on projection and stored in the derived `session` row
 ([skills view contract](architecture.md#skills-view-contract)). The skills work set
-`SqliteRelationalStore.DetectorVersion` to **5** (`dash/server/KyberDash.Data/Repositories/SqliteRelationalStore.cs`).
+`SqliteRelationalStore.DetectorVersion` to **5**, and it is **8** today
+(`dash/server/KyberDash.Data/Repositories/SqliteRelationalStore.cs`), beside `SchemaVersion` **30**.
 A store stamped with an older generation keeps serving its existing rows until the next maintenance
 pass, which rebuilds every session and restamps the store. A session row stored before the change
 has no `skills` key, so it renders "not yet projected" until then.
@@ -827,11 +828,19 @@ KyberDash maintains dual spend visibility across the delegation tree:
 - **Direct unaggregated metrics**: The parent session row in SQLite (`canon.db`) preserves its own
   unaggregated `turn_count`, `request_count`, `total_input`, `total_output`, and `cost_usd`. This
   ensures direct parent execution work is not overwritten or inflated in the raw store.
-- **Read-time rollup object**: When parent sessions are queried over `/api/kyber/sessions` or
-  `/api/kyber/session/:sessionId`, the API dynamically calculates a `rollup` summary aggregating
-  turns, requests, token counts, and cost USD across the parent and all nested subagent children.
-- Both surfaces (Web and Tray) display the rolled-up totals alongside direct metrics without
-  double-counting.
+- **Session and subagent API payloads**: None of the C# session routes emit a `rollup` key:
+  - `/api/kyber/sessions` returns paged root sessions where each root carries its own direct
+    session figures (`turn_count`, `request_count`, `total_input`, `total_output`, `cost_usd`,
+    `cost`), `subagents` (up to the first 25 child rows, each with its own direct figures), and
+    `subagent_total`.
+  - `/api/kyber/session/:id/subagents` returns paged child rows for that parent, each carrying
+    its own direct session figures (`subagents: []`).
+  - `/api/kyber/session/:id/summary` and the per-section session routes (the monolithic
+    `/api/kyber/session/:id` route is retired) return direct session figures for that single
+    session.
+- The web dashboard (`ContextExplorer`) displays each parent and nested child row using its served
+  direct figures (falling back from `rollup` only if a wire `rollup` object were present), so
+  neither parent nor child metrics are double-counted.
 
 #### Honest title formatting (`CanonPricing.FormatSessionTitle`)
 
@@ -1377,25 +1386,36 @@ filters, so narrowing one page's scope never touches the A/B selectors.
 - **Sessions**: Session explorer (`page-sessions`) wrapping the Agent Session Analysis
   Dashboard from `canon.db` — not a restored Context tab:
   - *Overview Strip*: Spans, turns, total tokens, cache hit ratio, cost USD/credits, exact reconciliation status, and subagent links.
-  - *Subagent Session Hierarchy*: Nested tree display of child subagent sessions underneath parent sessions, with dual spend visibility (rolled-up totals across the delegation tree alongside unaggregated direct parent metrics; see [§2h](#2h-subagent-session-hierarchy-and-post-run-transcript-synchronization) and [ADR 0038](../adr/0038-post-run-transcript-sync-subagent-hierarchy.md)).
-  - *Per-Turn Spend Chart (`SessionSpendCharts`)*: Stacked token breakdown per turn (fresh input, cache read, cache creation, output).
-  - *Context Composition Heatmap & Chart*: Semantic token distribution by part type (`system_prompt`, `instruction_context`, `tool_definitions`, `conversation_history`, `tool_result_content`, `residual`).
+  - *Subagent Session Hierarchy*: Nested tree display of child subagent sessions underneath parent sessions, where each parent and child row displays its served direct metrics alongside `subagents` / `subagent_total` (no `rollup` key is emitted by the C# routes; see [§2h](#2h-subagent-session-hierarchy-and-post-run-transcript-synchronization) and [ADR 0038](../adr/0038-post-run-transcript-sync-subagent-hierarchy.md)).
+  - *Per-Turn Spend Chart (`SessionSpendCharts`)*: Stacked token breakdown per turn (fresh input, cache read, cache creation, output), kept unpaged across the whole session.
+  - *Context Composition Heatmap & Chart*: Semantic token distribution by part type (`system_prompt`, `instruction_context`, `tool_definitions`, `conversation_history`, `tool_result_content`, `residual`). Both Stacked Bars and Heatmap Matrix views page and sort `context.turns` on the server (`25 / 50 / 100`, default `25`, `Newest first` / `Oldest first`, default `Newest first`), while scaling, legends (`observedBuckets`, `observedServers`), and `Residual %` reflect the whole session. When a harness transcript omits `system_prompt` or tool definitions (such as Claude Code), the caveat explains why those tokens stay in `residual`.
+  - *Session List Sections & Paging (`Pager` / `useSectionPage`)*: Every list section on the session detail view (Context Composition, Tools, Servers, Skills, KW skills, Execution Timeline / Call Tree, Requests, Reconciliation, and Problems) shares the `Pager` control bar whenever items exist (`total > 0`): `25 / 50 / 100` page-size selector (persisted per section in browser `sessionStorage`), page navigation, and a `Newest first` / `Oldest first` sort toggle (`desc` default; changing page size or sort resets to page `1`). Non-list summary/cost cards (`SessionSummarySection`, `SessionCostSection`) do not page.
   - *Tool & Schema Cost Table*: Ranked tool schema sizes, resident turns, invocations, and unused schema waste range.
-  - *Skills (`4 · Skills`)*: Two tiles (skills listed, skills invoked) and a headline,
-    "X of Y listed skills had no observed invocation", rendered from the served counts. The
-    headline reads "not measurable" when either count is absent and is hidden when there are
-    no skill rows. Each row shows listed and invoked badges, the turns listed (1-based), and
-    derived tokens labelled as derived. A "Not measurable" card shows the reason when a side is
-    unmeasured. Clicking a row opens a drawer with the listed and invoked state and the listing
-    text for the first turn listed. Per-harness availability is in the
+  - *Skills (`4 · Skills`)*: Two tiles (skills listed, skills invoked) read the summary's
+    `skills_listed` / `skills_invoked` arrays and the headline reads `listed_uninvoked_count` /
+    `listed_count`. Because `/api/kyber/session/:id/summary` omits `summary.skills_listed` while
+    emitting `summary.skills_invoked` when skills were invoked (`distinctSkills.Count > 0`), and
+    `parseSessionSummarySection` preserves `raw.summary`, the **Skills listed** tile renders
+    `"not measurable"` while the **Skills invoked** tile displays the invoked count whenever
+    skills were invoked (and `"not measurable"` when none were). Because
+    `/api/kyber/session/:id/skills` forwards the page's `rows` alone without `derived_tokens` or
+    whole-list listing aggregates (`listed_uninvoked_count`, `listed_count`), the headline renders
+    `"not measurable"` (hidden when there are no skill rows) and rows show name, listed/invoked
+    badges, and any unmeasured reason without `turns_listed` or per-row `derived_tokens`
+    (`turns_listed` in the wire payload holds 0-based turn indices). A "Not measurable" card shows
+    the reason when neither side is measured. Clicking a row opens an inspector drawer showing the
+    listed-turn count (`Listed turns: N`), invocation count, raw skill payload, and the listing
+    text for the first listed turn (via the turn-content route). Per-harness
+    availability is in the
     [telemetry inventory](telemetry-inventory.md#skill-availability-by-harness); the payload is in
     the [skills view contract](architecture.md#skills-view-contract).
-    - *Antigravity and Copilot CLI.* Antigravity shows the listed names, and each skill's description
-      and derived tokens when its `SKILL.md` is on this machine. Its invoked counts are the `SKILL.md`
-      reads the conversation transcript recorded; a read is not proof the skill was followed. Copilot
-      CLI shows the listed names, descriptions and derived tokens from the `<available_skills>` block
-      of the system prompt in its journal, which `dash refresh` reads. Its invoked counts come from the
+    - *Antigravity and Copilot CLI.* Antigravity shows the listed names and invoked counts from
+      the `SKILL.md` reads the conversation transcript recorded; a read is not proof the skill was
+      followed. Copilot CLI shows the listed names from the `<available_skills>` block of the
+      system prompt in its journal, which `dash refresh` reads. Its invoked counts come from the
       `skill` tool requests the parser reads on each message; a session with none shows not measurable.
+      (`KyberBridgeEngine.BuildSkillsPayload` does not currently emit `description` or
+      `derived_tokens` on `/skills`, so per-row token counts are not shown.)
       Copilot CLI tool invocations are not ingested yet (todo
       [copilot-cli-tool-invocations-per-message](../todo/copilot-cli-tool-invocations-per-message.md)).
     - *Not measurable or empty.* A "Not measurable" card means the source was not read: no transcript
@@ -1532,9 +1552,12 @@ curl -s http://127.0.0.1:3000/api/kyber/harnesses | jq .
 curl -s http://127.0.0.1:3000/api/kyber/runs | jq .
 curl -s http://127.0.0.1:3000/api/kyber/run/run-copilot-001 | jq .
 
-# List available sessions and inspect a specific session
+# List available sessions and inspect a specific session by section and subagents
 curl -s http://127.0.0.1:3000/api/kyber/sessions | jq .
-curl -s http://127.0.0.1:3000/api/kyber/session/sess-copilot-001 | jq .
+curl -s http://127.0.0.1:3000/api/kyber/session/sess-copilot-001/summary | jq .
+curl -s "http://127.0.0.1:3000/api/kyber/session/sess-copilot-001/charts?page=1&limit=25&order=desc" | jq .
+curl -s "http://127.0.0.1:3000/api/kyber/session/sess-copilot-001/skills?page=1&limit=25&order=desc" | jq .
+curl -s "http://127.0.0.1:3000/api/kyber/session/sess-copilot-001/subagents?page=1&limit=25" | jq .
 
 # Inspect unclipped assembled turn context (ADR 0014, issue #184; 0-based turn index)
 curl -s "http://127.0.0.1:3000/api/kyber/session/sess-copilot-001/turn/0/content" | jq .
@@ -2160,24 +2183,34 @@ Applies to Kilo (`kilo.db`), Warp (`warp.sqlite`), Cursor (`state.vscdb`) and De
   section, turn, timeline, coverage and analytics paths answer from figures computed over
   content-free record scalars ([the read-model register](architecture.md#the-read-model-register)).
   The sessions list resolves, filters, searches and pages in SQL and prices only the page it
-  returns; the session view is ten section queries issued at mount in page order, each paging
-  its own list at 25 (sessions at 100). Content text is read by one view, one turn or one request
-  at a time, from `TurnContentParts(sessionKey, turnIndex, spanId, part, budget, full)` and the
-  two section-scoped content reads (the shown requests page's prompt previews, the inspected
-  span's consent-allowed prompt). The projection pass reads only the dirty sessions it rebuilds
-  and defers oversized ones to the maintenance tick, and a second concurrent pass returns instead
-  of stacking.
+  returns; at mount in page order, the session view issues `/summary`, the nine server-paged and
+  server-sorted list section queries (`charts` `context.turns`, `tools`, `servers`, `skills`,
+  `kw-skills`, `timeline`, `requests`, `reconciliation`, and `problems`, each at `25`, `50`, or
+  `100` rows with default `25` and newest-first `desc` default, and selected page size persisted
+  per section in browser `sessionStorage`; the sessions list defaults to `100`), and the
+  unpaged `/stored-fields` inventory. `/api/kyber/session/{id}/charts` also keeps the
+  whole-session `turns` spend curve and context summary aggregates unpaged while paging and
+  sorting `context.turns` on the server. Content text is read by one view,
+  one turn or one request at a time, from
+  `TurnContentParts(sessionKey, turnIndex, spanId, part, budget, full)` and the two
+  section-scoped content reads (the shown requests page's prompt previews, the inspected span's
+  consent-allowed prompt). The projection pass reads only the dirty sessions it rebuilds and
+  defers oversized ones to the maintenance tick, and a second concurrent pass returns instead of
+  stacking.
 - **What to expect on an oversized store.** The Sessions list, the context report, coverage and
   findings answer from figures regardless of how much text a session holds. Opening a session
   paints the header first from `/summary` while the sections fill in below in page order; only
-  the first page of each list is fetched, and the next page is fetched when the viewer presses
-  the page button. Nothing on the list, summary or section paths reads that session's content.
-  The charts section is the one heavy section by design: it carries the whole session's turns
-  and context object (content-free, but per-turn tool-definition maps grow with servers ×
-  turns), so on a session with tens of thousands of turns it is the last section to arrive —
-  still a fraction of the retired whole-payload response. The timeline section rebuilds the
-  session's metadata tree (never its content) once per page. Under live capture a new session
-  can shift the sessions list by one row between pages.
+  the first page (`limit=25`, `order=desc` unless the viewer changed page size in this browser
+  session) of each list is fetched, and the next page, size, or sort order is fetched when the
+  viewer changes the shared `Pager` control (which stays visible whenever a section has items).
+  Nothing on the list, summary or section paths reads that session's content.
+  On `/charts`, `context.turns` is sliced to the active page and sort order on the server, while
+  the whole-session `turns` spend curve and per-turn context aggregates (`first`, `last`,
+  `measuredInputTotal`, `maxBucketTokens`, `observedBuckets`, `observedServers`) still cover the
+  whole session so spend curves, chart scale, legends, and `Residual %` stay exact across pages.
+  The timeline section rebuilds the session's metadata tree (never its content) once per page
+  and resets expanded branches and child pages when the viewer changes page, page size, or sort
+  order. Under live capture a new session can shift the sessions list by one row between pages.
 - **Deferred sessions.** A dirty session whose record count exceeds the read-path budget (default
   2,000 records) is deferred rather than rebuilt inside a GET: its stored projection stays as it
   was and its key stays dirty, so its figures can lag capture by up to the refresh cadence
@@ -2189,10 +2222,11 @@ Applies to Kilo (`kilo.db`), Warp (`warp.sqlite`), Cursor (`state.vscdb`) and De
   the maintenance pass never defers and rebuilds them.
 - **What stays heavy by design.** A stored-fields table holding hundreds of megabytes of captured
   text no longer stalls the view: the inventory is content-free and a table's rows page in SQL
-  at 25. The costs that remain are the ones the design names: the charts payload on a very long
-  session, the per-page timeline metadata tree, a maintenance rebuild (`kyber build`, a projection
-  tick), which reads the sessions it rebuilds because token counting and findings consume the
-  part text. Neither the rebuild nor any content read is on a dashboard page read.
+  at 25. The costs that remain are the ones the design names: the whole-session `turns` spend
+  curve on `/charts` for a very long session, the per-page timeline metadata tree, and a
+  maintenance rebuild (`kyber build`, a projection tick), which reads the sessions it rebuilds
+  because token counting and findings consume the part text. Neither the rebuild nor any content
+  read is on a dashboard page read.
 - **Not a remedy.** `kyberdash dash clean` discards captured data, and these docs do not prescribe
   it. Removing data is the owner's decision, taken with the loss in view; this entry documents how
   the dashboard behaves on an oversized store, not how to shrink one. The content-retention window

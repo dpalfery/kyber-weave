@@ -90,13 +90,7 @@ export function SessionSkillsSection({
         summary={summaryRecord ?? undefined}
         model={model}
         onSelectSkill={openSkillInspector}
-        pager={{
-          page: skills.page,
-          total: data.total,
-          limit: data.limit,
-          loading: skills.isFetching,
-          onPageChange: skills.setPage,
-        }}
+        pager={skills.pagerProps}
       />
     </div>
   )

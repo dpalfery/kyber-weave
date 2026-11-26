@@ -19,6 +19,7 @@ using KyberDash.Data.Harnesses.Pi;
 using KyberDash.Data.Harnesses.RooCode;
 using KyberDash.Data.Harnesses.Warp;
 using KyberDash.Data.Repositories;
+using KyberDash.Data.Tokenization;
 using KyberDash.Domain;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
@@ -87,6 +88,8 @@ public static class ServiceCollectionExtensions
 
         services.TryAddSingleton<IWebAssetRepository>(provider =>
             new WebAssetRepository(provider.GetService<DashOptions>()?.DashboardDir));
+
+        services.TryAddSingleton<ITextTokenizer>(_ => LocalTextTokenizer.Shared);
 
         RegisterHarnessMappers(services);
 

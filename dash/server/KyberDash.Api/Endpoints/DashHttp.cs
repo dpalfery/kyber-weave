@@ -1,6 +1,7 @@
 using System.Globalization;
 using System.Net;
 using System.Text.Json;
+using KyberDash.Contracts.Repositories;
 using KyberDash.Domain;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Http;
@@ -173,6 +174,62 @@ internal static class DashHttp
             : rawOffset ?? 0;
         long page = ((long)offset / limit) + 1;
         return (limit, offset, (int)Math.Min(page, int.MaxValue));
+    }
+
+    /// <summary>
+    /// Reads a section page <c>limit</c> query parameter, accepting only <c>25</c>, <c>50</c>, or
+    /// <c>100</c> (or <paramref name="defaultLimit"/> when absent), or sets <paramref name="refusal"/>
+    /// to an HTTP 400 <see cref="Error"/> response.
+    /// </summary>
+    public static bool TrySectionLimit(IQueryCollection query, int defaultLimit, out int limit, out IResult? refusal)
+    {
+        ArgumentNullException.ThrowIfNull(query);
+        int? requested = OptionalPositiveInt(query, "limit", out bool invalid);
+        if (invalid)
+        {
+            limit = defaultLimit;
+            refusal = Error(
+                StatusCodes.Status400BadRequest,
+                "limit and page must be positive whole numbers and offset a non-negative whole number");
+            return false;
+        }
+
+        if (requested is int value && value is not (25 or 50 or 100))
+        {
+            limit = defaultLimit;
+            refusal = Error(StatusCodes.Status400BadRequest, "limit must be 25, 50, or 100");
+            return false;
+        }
+
+        limit = requested ?? defaultLimit;
+        refusal = null;
+        return true;
+    }
+
+    /// <summary>
+    /// Reads a section <c>order</c> query parameter (<c>"desc"</c> by default, or trimmed
+    /// case-insensitive <c>"desc"</c> / <c>"asc"</c>), or sets <paramref name="refusal"/> to an
+    /// HTTP 400 <see cref="Error"/> response on blank or unknown values.
+    /// </summary>
+    public static bool TrySortOrder(IQueryCollection query, out string order, out IResult? refusal)
+    {
+        ArgumentNullException.ThrowIfNull(query);
+        if (!query.TryGetValue("order", out Microsoft.Extensions.Primitives.StringValues values))
+        {
+            order = SectionSortOrder.Default;
+            refusal = null;
+            return true;
+        }
+
+        if (SectionSortOrder.TryNormalize(values.ToString(), out order))
+        {
+            refusal = null;
+            return true;
+        }
+
+        order = SectionSortOrder.Default;
+        refusal = Error(StatusCodes.Status400BadRequest, "order must be 'desc' or 'asc'");
+        return false;
     }
 
     /// <summary>Reads a boolean query value written as <c>true</c> or <c>1</c>.</summary>

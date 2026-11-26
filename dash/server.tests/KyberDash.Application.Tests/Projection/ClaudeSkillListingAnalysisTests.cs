@@ -5,6 +5,7 @@ using KyberDash.Contracts.Repositories;
 using KyberDash.Data.Collector;
 using KyberDash.Data.Collector.Sources;
 using KyberDash.Data.Harnesses.Claude;
+using KyberDash.Data.Tokenization;
 using KyberDash.Data.Harnesses.Otlp;
 using KyberDash.Data.Repositories;
 using KyberDash.Domain;
@@ -180,7 +181,7 @@ public class ClaudeSkillListingAnalysisTests
     }
 
     private static CollectedBatch MapTranscript(string sessionKey, string jsonl) =>
-        new ClaudeTranscriptMapper().Map(
+        new ClaudeTranscriptMapper(LocalTextTokenizer.Shared).Map(
             new NativeSourceUnit(
                 Unit: new SourceUnit(
                     HarnessId: TranscriptReaderRepository.ClaudeHarnessId,

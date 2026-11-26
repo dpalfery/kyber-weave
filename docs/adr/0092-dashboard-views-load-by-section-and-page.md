@@ -4,7 +4,7 @@ title: Dashboard views load by section and by page
 doc-type: adr
 status: current
 owner: dpalfery
-last-reviewed: 2026-11-23
+last-reviewed: 2026-11-25
 component: KyberDash
 decided-by: []
 supersedes:
@@ -31,12 +31,18 @@ code-refs:
 
 ## Status
 
-Accepted, 2026-11-23. Records owner decisions D1, D2, D4, D10, D11, D19 and D20 of
+Accepted, 2026-11-23; amended 2026-11-25. Records owner decisions D1, D2, D4, D10, D11, D19 and D20 of
 the lazy sectioned session-views plan: the recommended per-section calls with paged lists, 100
 rows on the sessions list, 25 rows per list section, parallel section loading in page order,
 PR 666, opencode execution under Claude authorship, and the two approved parallel starts.
 It builds on [ADR 0091](0091-store-reads-are-shaped-by-their-consumer.md): reads were already
 shaped by their consumer; now views are split so each shape has its own endpoint.
+
+**2026-11-25 amendment (Decision D5 of the session detail paging, sorting, and Claude composition plan):**
+Session list sections and `/api/kyber/session/{id}/charts` `context.turns` accept server-side page sizes
+`25`, `50`, or `100` (default `25`) and sort order `desc` (newest/highest first, default) or `asc`
+(oldest/lowest first). `/charts` now pages and sorts `context.turns` on the server while keeping
+whole-session `turns` and context summary aggregates unpaged.
 
 This record supersedes, in part, the clauses that served the whole session through one payload:
 [ADR 0007](0007-kyberdash-agent-session-analysis-integration.md) decision D3 (the
@@ -70,10 +76,21 @@ every list pages, and conversation text is fetched only when it is shown.
    `SessionReportFigures` read and the run page reads `SessionTurnFigures` per execution.
 2. **Every list pages on the server.** The sessions list pages at 100 roots (filtered and
    searched in SQL, priced only for the page) with the first 25 subagents inline per root;
-   every list section pages at 25 rows with a total through the one shared `Pager`, reusing the
-   existing `DashHttp.Pagination` parameters and the `{ entries, data, total, page, limit }`
-   envelope. Charts are not paged by design: the spend and context-composition charts need the
-   whole session to be correct.
+   every session list section (`tools`, `servers`, `skills`, `kw-skills`, `requests`,
+   `reconciliation`, `problems`, `timeline`, and `/charts` `context.turns`) pages at `25`, `50`,
+   or `100` rows (default `25`, persisted per section in `sessionStorage`) and sorts `desc`
+   (default) or `asc` on the server through the one shared `Pager`, reusing `DashHttp.Pagination`
+   alongside strict `TrySectionLimit` / `TrySortOrder` validation (`400` `{"error": "..."}` on
+   invalid values) and returning `{ total, page, limit, offset, order }` (alongside the
+   section-named list key and `data`, or section-specific keys `rows`, `nodes`, or `turns` +
+   `context` on `/charts`). On `/api/kyber/session/{id}/charts` (amended 2026-11-25),
+   `context.turns` is paged and sorted on the server (`total`, `page`, `limit`, `offset`, `order`
+   emitted on both measurable and unmeasurable responses, preserving 1-based `index = turn.Position + 1`),
+   while whole-session `turns` (for the spend curve) and context summary aggregates (`first`, `last`,
+   `flaggedTurns`, `residualTotal`, `measuredInputTotal`, `maxBucketTokens`, `observedBuckets`,
+   `observedServers`, `missingBuckets`, `residualReasons`, and tokenizer labels) are computed over
+   unpaged `ctx.Turns` before slicing so chart scaling, legends, and residual percentages stay exact
+   across pages.
 3. **Sections load at once, in page order; no scroll gating.** Every section query is enabled
    when the view mounts and issued in the order the sections appear, so the top of the page
    arrives first. Verified against SQLite: WAL journal mode, a fresh connection per read, and no
@@ -120,12 +137,13 @@ every list pages, and conversation text is fetched only when it is shown.
   request paths over an instrumented fake and fails on the first materialized content byte; the
   two sanctioned prompt reads are pinned to the span-attributes and requests paths, and every
   section route carries its own zero-content pin in `SessionSectionEndpointsTests`.
-- **The web contract** is one query per section in page order with paged lists at 25
-  ([web dashboard data loading](../dash/architecture.md#web-dashboard-data-loading-by-section-and-page)),
+- **The web contract** is one query per section in page order with paged lists at 25/50/100
+  (default 25, sorted `desc` by default;
+  [web dashboard data loading](../dash/architecture.md#web-dashboard-data-loading-by-section-and-page)),
   pinned in Vitest (request order before any response resolves; no content route at mount) and
   typechecked end-to-end specs that run in CI's `Dash harness-collection e2e` job.
 - **Known follow-ups, not blockers:** the skills section serves no whole-list aggregate yet
-  (headline, harness aggregate and bar scale stay page-scoped), the chart series has no
+  (headline, harness aggregate and bar scale stay page-scoped), the spend `turns` series has no
   server-side downsampling, and the run page renders its turn list unpaged.
 - Changing a section to read content outside its sanctioned scope, or widening a read beyond
   its section, is a change to this record, not a local decision.

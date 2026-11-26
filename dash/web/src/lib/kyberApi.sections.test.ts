@@ -8,6 +8,10 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 
 import {
   KYBER_SECTION_PAGE_LIMIT,
+  type KyberSectionPageLimit,
+  type KyberSectionPageOrder,
+  type KyberSectionWindow,
+  type KyberSessionChartsSection,
   fetchKyberSessionCharts,
   fetchKyberSessionProblems,
   fetchKyberSessionReconciliation,
@@ -73,6 +77,10 @@ const SUMMARY_BODY = {
 
 const CHARTS_BODY = {
   sessionId: 'sess-1',
+  total: 2,
+  page: 1,
+  limit: 25,
+  offset: 0,
   turns: [
     { index: 0, spanId: 'span-1', input: 900, output: 130, fresh: 50, cache_read: 860 },
     { index: 1, spanId: 'span-2' },
@@ -303,12 +311,37 @@ describe('session section fetchers', () => {
     await expect(fetchKyberSessionSummary('sess-1')).rejects.toThrow(/malformed/i)
   })
 
-  it('GETs the charts route and returns the validated turns and context', async () => {
+  it('GETs the charts route with paging and sort params and returns the validated turns, window and context', async () => {
+    const bodyWithContextSummary = {
+      ...CHARTS_BODY,
+      order: 'asc' as KyberSectionPageOrder,
+      context: {
+        ...CHARTS_BODY.context,
+        measuredInputTotal: 2_700,
+        maxBucketTokens: 1_800,
+        observedBuckets: ['system_prompt'],
+        observedServers: ['mcp-a'],
+        missingBuckets: ['tool_definitions'],
+        residualReasons: ['unattributed_framing'],
+      },
+    }
+    const calls = stubFetch(200, bodyWithContextSummary)
+
+    const charts: KyberSessionChartsSection = await fetchKyberSessionCharts('sess-1', 2, 50, 'asc')
+
+    expect(calls[0]!.url).toBe('/api/kyber/session/sess-1/charts?page=2&limit=50&order=asc')
+    const windowCheck: KyberSectionWindow = charts
+    expect(windowCheck.total).toBe(2)
+    expect(windowCheck.order).toBe('asc')
+    expect(charts).toEqual(bodyWithContextSummary)
+  })
+
+  it('defaults charts route paging to page=1, limit=25 and order=desc', async () => {
     const calls = stubFetch(200, CHARTS_BODY)
 
     const charts = await fetchKyberSessionCharts('sess-1')
 
-    expect(calls[0]!.url).toBe('/api/kyber/session/sess-1/charts')
+    expect(calls[0]!.url).toBe('/api/kyber/session/sess-1/charts?page=1&limit=25&order=desc')
     expect(charts).toEqual(CHARTS_BODY)
   })
 
@@ -395,9 +428,25 @@ describe('session section fetchers', () => {
 
     const page = await fetchKyberSessionTools('sess-1', 2)
 
-    expect(calls[0]!.url).toBe('/api/kyber/session/sess-1/tools?page=2&limit=25')
+    expect(calls[0]!.url).toBe('/api/kyber/session/sess-1/tools?page=2&limit=25&order=desc')
     expect(page).toMatchObject({ total: 30, page: 2, limit: 25, offset: 25, aggregate: TOOLS_BODY.aggregate })
     expect(page.entries).toEqual([TOOL_ROW])
+  })
+
+  it('threads custom limit and order across section fetchers', async () => {
+    const customLimit: KyberSectionPageLimit = 50
+    const customOrder: KyberSectionPageOrder = 'asc'
+    const calls = stubFetch(200, { ...TOOLS_BODY, limit: customLimit, order: customOrder })
+
+    const page = await fetchKyberSessionTools('sess-1', 2, customLimit, customOrder)
+
+    expect(calls[0]!.url).toBe('/api/kyber/session/sess-1/tools?page=2&limit=50&order=asc')
+    expect(page.order).toBe('asc')
+  })
+
+  it('rejects a tools page whose order is not desc or asc', async () => {
+    stubFetch(200, { ...TOOLS_BODY, order: 'sideways' })
+    await expect(fetchKyberSessionTools('sess-1', 1)).rejects.toThrow(/malformed/i)
   })
 
   it('rejects a tools page whose aggregate is missing', async () => {
@@ -410,7 +459,7 @@ describe('session section fetchers', () => {
 
     const page = await fetchKyberSessionServers('sess-1', 1)
 
-    expect(calls[0]!.url).toBe('/api/kyber/session/sess-1/servers?page=1&limit=25')
+    expect(calls[0]!.url).toBe('/api/kyber/session/sess-1/servers?page=1&limit=25&order=desc')
     expect(page.entries).toEqual([SERVER_ROW])
     expect(page.total).toBe(2)
   })
@@ -425,7 +474,7 @@ describe('session section fetchers', () => {
 
     const page = await fetchKyberSessionSkills('sess-1', 1)
 
-    expect(calls[0]!.url).toBe('/api/kyber/session/sess-1/skills?page=1&limit=25')
+    expect(calls[0]!.url).toBe('/api/kyber/session/sess-1/skills?page=1&limit=25&order=desc')
     expect(page).toEqual(SKILL_BODY)
   })
 
@@ -455,7 +504,7 @@ describe('session section fetchers', () => {
 
     const page = await fetchKyberSessionKwSkills('sess-1', 1)
 
-    expect(calls[0]!.url).toBe('/api/kyber/session/sess-1/kw-skills?page=1&limit=25')
+    expect(calls[0]!.url).toBe('/api/kyber/session/sess-1/kw-skills?page=1&limit=25&order=desc')
     expect(page).toEqual(body)
   })
 
@@ -482,15 +531,25 @@ describe('session section fetchers', () => {
     await expect(fetchKyberSessionKwSkills('sess-1', 1)).rejects.toThrow(/malformed/i)
   })
 
-  it('GETs one timeline level with the parent and page', async () => {
+  it('GETs one timeline level with the parent, page, limit and order', async () => {
     const calls = stubFetch(200, TIMELINE_BODY)
 
     const page = await fetchKyberSessionTimeline('sess-1', { parent: '(auxiliary)', page: 2 })
 
     expect(calls[0]!.url).toBe(
-      '/api/kyber/session/sess-1/timeline?page=2&limit=25&parent=%28auxiliary%29',
+      '/api/kyber/session/sess-1/timeline?page=2&limit=25&order=desc&parent=%28auxiliary%29',
     )
     expect(page).toEqual(TIMELINE_BODY)
+  })
+
+  it('GETs one timeline level with custom limit and order', async () => {
+    const calls = stubFetch(200, TIMELINE_BODY)
+
+    await fetchKyberSessionTimeline('sess-1', { parent: '(auxiliary)', page: 2, limit: 50, order: 'asc' })
+
+    expect(calls[0]!.url).toBe(
+      '/api/kyber/session/sess-1/timeline?page=2&limit=50&order=asc&parent=%28auxiliary%29',
+    )
   })
 
   it('rejects a timeline body without the tree bounds', async () => {
@@ -501,9 +560,9 @@ describe('session section fetchers', () => {
   it('GETs the requests route with the page and encodes the session id', async () => {
     const calls = stubFetch(200, REQUESTS_BODY)
 
-    const page = await fetchKyberSessionRequests('sess/a b', 3)
+    const page = await fetchKyberSessionRequests('sess/a b', 3, 100, 'asc')
 
-    expect(calls[0]!.url).toBe('/api/kyber/session/sess%2Fa%20b/requests?page=3&limit=25')
+    expect(calls[0]!.url).toBe('/api/kyber/session/sess%2Fa%20b/requests?page=3&limit=100&order=asc')
     expect(page.entries).toEqual([REQUEST_ROW])
     expect(page.total).toBe(128)
   })
@@ -526,7 +585,7 @@ describe('session section fetchers', () => {
 
     const page = await fetchKyberSessionReconciliation('sess-1', 1)
 
-    expect(calls[0]!.url).toBe('/api/kyber/session/sess-1/reconciliation?page=1&limit=25')
+    expect(calls[0]!.url).toBe('/api/kyber/session/sess-1/reconciliation?page=1&limit=25&order=desc')
     expect(page.entries).toEqual([RECONCILIATION_ROW])
   })
 
@@ -540,7 +599,7 @@ describe('session section fetchers', () => {
 
     const page = await fetchKyberSessionProblems('sess-1', 1)
 
-    expect(calls[0]!.url).toBe('/api/kyber/session/sess-1/problems?page=1&limit=25')
+    expect(calls[0]!.url).toBe('/api/kyber/session/sess-1/problems?page=1&limit=25&order=desc')
     expect(page.entries).toEqual([PROBLEM_ROW])
   })
 
@@ -611,12 +670,34 @@ describe('session section fetchers', () => {
 })
 
 describe('kyberSessionSectionQueryKey', () => {
-  it('keys a section under the session with its page', () => {
-    expect(kyberSessionSectionQueryKey('sess-1', 'tools', 2)).toEqual(['kyber-session', 'sess-1', 'tools', 2])
+  it('keys a section under the session with its page, limit and order', () => {
+    expect(kyberSessionSectionQueryKey('sess-1', 'tools', 2)).toEqual([
+      'kyber-session',
+      'sess-1',
+      'tools',
+      2,
+      25,
+      'desc',
+    ])
+    expect(kyberSessionSectionQueryKey('sess-1', 'tools', 2, 50, 'asc')).toEqual([
+      'kyber-session',
+      'sess-1',
+      'tools',
+      2,
+      50,
+      'asc',
+    ])
   })
 
-  it('defaults the page to one and keeps the section name', () => {
-    expect(kyberSessionSectionQueryKey('sess-1', 'summary')).toEqual(['kyber-session', 'sess-1', 'summary', 1])
+  it('defaults the page to one, limit to 25 and order to desc', () => {
+    expect(kyberSessionSectionQueryKey('sess-1', 'summary')).toEqual([
+      'kyber-session',
+      'sess-1',
+      'summary',
+      1,
+      25,
+      'desc',
+    ])
     expect(KYBER_SECTION_PAGE_LIMIT).toBe(25)
   })
 })

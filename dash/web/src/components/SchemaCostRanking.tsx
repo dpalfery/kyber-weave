@@ -165,31 +165,22 @@ function displayToolsOf(schema: SchemaCostAnalysis | null | undefined, tools: Sc
 
   if (tools === undefined || tools.length === 0) return []
 
-  return [...tools]
-    .map((tool) => {
-      const server = serverOf(tool)
-      const invoked = tool.invoked ?? (typeof tool.invocations === 'number' ? tool.invocations > 0 : false)
-      const row: DisplayTool = {
-        name: tool.name,
-        invoked,
-        ...(server !== undefined ? { server } : {}),
-      }
-      // A missing cost is left off the object. Assigning 0 would rank an
-      // unmeasured tool as the cheapest, which is the lie this surface exists
-      // to refuse.
-      if (tool.total_schema_cost != null && Number.isFinite(tool.total_schema_cost)) {
-        row.cost = tool.total_schema_cost
-      }
-      return row
-    })
-    .sort((a, b) => {
-      const aN = a.cost !== undefined
-      const bN = b.cost !== undefined
-      if (aN && bN) return b.cost! - a.cost! || (a.name < b.name ? -1 : a.name > b.name ? 1 : 0)
-      if (aN) return -1
-      if (bN) return 1
-      return a.name < b.name ? -1 : a.name > b.name ? 1 : 0
-    })
+  return tools.map((tool) => {
+    const server = serverOf(tool)
+    const invoked = tool.invoked ?? (typeof tool.invocations === 'number' ? tool.invocations > 0 : false)
+    const row: DisplayTool = {
+      name: tool.name,
+      invoked,
+      ...(server !== undefined ? { server } : {}),
+    }
+    // A missing cost is left off the object. Assigning 0 would rank an
+    // unmeasured tool as the cheapest, which is the lie this surface exists
+    // to refuse.
+    if (tool.total_schema_cost != null && Number.isFinite(tool.total_schema_cost)) {
+      row.cost = tool.total_schema_cost
+    }
+    return row
+  })
 }
 
 function neverInvokedOf(
@@ -557,12 +548,8 @@ export function SchemaCostRanking({ schema, tools, aggregate, pager, onSelectToo
 
       {pager != null && (
         <Pager
-          page={pager.page}
-          limit={pager.limit}
-          total={pager.total}
-          onPageChange={pager.onPageChange}
-          loading={pager.loading}
-          ariaLabel="Tool ranking pages"
+          {...pager}
+          ariaLabel={pager.ariaLabel ?? 'Tool ranking pages'}
         />
       )}
     </div>

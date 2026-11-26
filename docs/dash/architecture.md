@@ -143,6 +143,8 @@ code-refs:
   - RecordContentFree
   - TurnContentParts
   - SourceRecordCounts
+  - ClaudeTranscriptMapper
+  - CanonRecordHydration
 ---
 
 # KyberDash architecture
@@ -191,7 +193,10 @@ which is what the source rules in `CanonSessionProjectorEngine` key on: `SplitDr
 [Factory source-precedence rule](#the-factory-source-precedence-rule)), `IsFileSource`, the twin-turn collapse
 (`DedupeTwinTurns`, `CollapseCluster`) and `CollapseOverlapFileJoins` (Cursor). These rules are documented for every
 harness; they were silently inert for every session read back from the relational store until the source was restored.
-That change is why `SqliteRelationalStore.DetectorVersion` became `6`; generation `7` is described under [Skills view contract](#skills-view-contract).
+That change is why `SqliteRelationalStore.DetectorVersion` became `6`; it is `8` today, beside
+`SqliteRelationalStore.SchemaVersion` `30`. Generation `7` is described under
+[Skills view contract](#skills-view-contract), and generation `8` (Claude Code v2 transcript hydration) under
+[Collector attribution and read-side API projection](#collector-attribution-and-read-side-api-projection).
 
 ### Twin turns join on a vendor id, or on the session
 
@@ -460,7 +465,7 @@ OpenCode plugin bundler under `dash/src/capture/` was retired in the C# cutover
 **Engine and projection.** `kyberdash engine ensure --if-running` (`dash/server/KyberDash.Cli/Program.cs`) attaches
 only when a live engine holds the endpoint (ADR 0039) and starts nothing when none runs. `kyber-weave update`
 runs it after the binaries commit when no tray is installed; with a tray, the update quits the tray, runs `engine stop`, relaunches the tray so it owns the engine, then checks `engine verify` and `menubar --running`. The detector generation is `SqliteRelationalStore.DetectorVersion`
-`6` (`dash/server/KyberDash.Data/Repositories/SqliteRelationalStore.cs`). `CanonSessionProjectorEngine.IsProjectionCurrent`
+`8` (`dash/server/KyberDash.Data/Repositories/SqliteRelationalStore.cs`). `CanonSessionProjectorEngine.IsProjectionCurrent`
 (`dash/server/KyberDash.Application/CanonSessionProjectorEngine.cs`) treats a store stamped with any other value as stale,
 so derived findings are rebuilt with the current rules rather than kept. Under `kyberdash web`, `JobSchedulerService`
 runs maintenance ticks that invoke `TranscriptIngestionService.PurgeExpiredContent` and call
@@ -1185,7 +1190,7 @@ full; unchanged session/run/execution rows also avoid redundant writes.
   clears), so the next pass rebuilds them. Every race in this path degrades to a full pass, never to a
   skipped session.
 
-The C# canonical engine under `dash/server/` owns the schema-25 relational SQLite layout:
+The C# canonical engine under `dash/server/` owns the relational SQLite layout:
 - **Storage & transport (`CanonDbPath`, `RelationalSchemaCatalog`, `SchemaDdlGenerator`, `SqliteRelationalStore`)**:
   reads and writes `canon.db` through bounded `ProcessRunner` batches to `sqlite3` (avoiding the
   native `SQLitePCLRaw.lib.e_sqlite3` package) under `CanonDbPath.Resolve`.
@@ -1243,9 +1248,9 @@ it is in
 
 Session projection (`CanonSessionProjectorEngine.ProjectIncremental`) collapses duplicate twin turns per session and writes normalized `session` and compressed `session_turn` rows.
 
-## Relational store and schema catalog (schema 25)
+## Relational store and schema catalog (schema 30)
 
-The live store is the normalized relational schema at schema 25.
+The live store is the normalized relational schema at schema 30.
 `RelationalSchemaCatalog` (`dash/server/KyberDash.Domain/Schema/RelationalSchemaCatalog.cs`) is the
 single static source of every table, column, key, foreign key, check, and index;
 `SchemaDdlGenerator` emits the deterministic `CREATE TABLE` DDL from it, and the stored-fields
@@ -1266,7 +1271,7 @@ flowchart LR
     DDL["SchemaDdlGenerator<br/>deterministic DDL"]
     COL["Collector DTOs<br/>CollectedBatch"]
     W["IRelationalStoreWriter<br/>WriteBatch"]
-    DB[("canon.db<br/>schema 25")]
+    DB[("canon.db<br/>schema 30")]
     R["IRelationalStoreReader<br/>read-time aggregates"]
     P["IProjectionStore<br/>sessions / runs / findings"]
     O["IOperationalStore<br/>settings / quarantine / problems"]
@@ -1457,19 +1462,19 @@ back.
 |---|---|---|
 | `GET /api/kyber/sessions` (and the `/session` alias) | `SessionHeaderPage(harness?, search?, page, limit)` — projection header columns only, with root resolution, the harness filter, the `q` substring match and `LIMIT/OFFSET` in SQL plus a `COUNT(*)` total — then `SessionChildPreview(pageKeys, 25)` (one window-function statement for the page's first-25 subagent rows plus each root's child total) and the keyed `SessionListFigures(keys)` for the page's figures only. `limit` defaults to 100 roots (clamp 1..100); roots carry their first 25 subagents and a `subagentTotal` | No |
 | `GET /api/kyber/session/{id}` | **Retired** — answers 404. One route per section below replaced the monolithic payload; the report moved to `SessionReportFigures` and the run page to `SessionTurnFigures` ([ADR 0092](../adr/0092-dashboard-views-load-by-section-and-page.md)) | — |
-| `GET /api/kyber/session/{id}/summary` | `SessionSummaryFigures(sessionKey)` — the widened summary the header strip, banners and overview strip render: `span_count`, `request_count`, cost blocks by basis and model, reconciliation totals, `problems_count`, tool counts (`offered`, `invoked`, `unused`), `skills_count`, aux-call fields and schema waste fields | No |
-| `GET /api/kyber/session/{id}/charts` | `SessionTurnFigures(sessionKey)` plus the stored context projection — today's detail `turns` and `context` for the whole session. Not paged by design: charts need the session's shape | No |
-| `GET /api/kyber/session/{id}/tools` | `SessionToolFigures(sessionKey)` — ranked rows (never-invoked included) plus the `aggregate` priced over every row before paging (`measurable`/`reason`, `maxCost`, `residentCostTotal`, `invocationCount`, `unusedCount`, `unusedRange`, `byServer`, `definitionsSpanId`) | No |
-| `GET /api/kyber/session/{id}/servers` | `SessionToolFigures(sessionKey)` — the same read's server rollups, paged at 25 | No |
-| `GET /api/kyber/session/{id}/skills` | `SessionSkillFigures(sessionKey)` — skill rows paged at 25 with the session total; whole-session counts come from the summary's `skills_listed`/`skills_invoked` | No |
-| `GET /api/kyber/session/{id}/kw-skills` | `SessionKwSkillLoads(sessionKey)` — the session's candidate `load_skill` tool calls, read from `tool_call`, its MCP split, the first 1,024 characters of its reply and its record's start time, in call order; paging is applied over the recognized loads. The call's input is never joined ([KW skill loads](#kw-skill-loads)) | No — only a reply's first 1,024 characters |
-| `GET /api/kyber/session/{id}/requests` | `SessionRequestFigures(sessionKey, page, limit)` plus `RequestPromptPreviews(sessionKey, requestSpanIds)` — the page's request rows, with prompt previews for the page's spans only | **Yes — the page's prompt previews only, fetched because the rows on screen show them** |
-| `GET /api/kyber/session/{id}/reconciliation` | `SessionReconciliationFigures(sessionKey, page, limit)` — reconciliation rows paged at 25 | No |
-| `GET /api/kyber/session/{id}/problems` | `SessionProblems(sessionKey, page, limit)` — problem rows paged at 25 | No |
+| `GET /api/kyber/session/{id}/summary` | `SessionSummaryFigures(sessionKey)` — the widened summary the header strip, banners and overview strip render: `span_count`, `request_count`, cost blocks by basis and model, reconciliation totals, `problems_count`, tool counts (`offered`, `invoked`, `unused`), `skills_count` (plus `summary.skills_invoked` when skills were invoked; `summary.skills_listed` is omitted), aux-call fields and schema waste fields | No |
+| `GET /api/kyber/session/{id}/charts` | `SessionTurnFigures(sessionKey)` plus the stored context projection — returns whole-session `turns` for the spend curve alongside `context`, where `context.turns` is paged (`25`/`50`/`100`, default `25`) and sorted (`desc`/`asc`, default `desc`) on the server (`total`, `page`, `limit`, `offset`, `order` emitted at top level on both measurable and unmeasurable responses; 1-based `index = turn.Position + 1` preserved) while whole-session context aggregates (`first`, `last`, `flaggedTurns`, `residualTotal`, `measuredInputTotal`, `maxBucketTokens`, `observedBuckets`, `observedServers`, `missingBuckets`, `residualReasons`, and tokenizer labels) are computed over unpaged `ctx.Turns` before slicing ([ADR 0092](../adr/0092-dashboard-views-load-by-section-and-page.md)) | No |
+| `GET /api/kyber/session/{id}/tools` | `SessionToolFigures(sessionKey)` — ranked rows (never-invoked included) sorted server-side (`TotalSchemaCost` then `Invocations` `DESC`/`ASC`, tiebreak `name ASC`) and paged (`25`/`50`/`100`, default `25`, `order` `desc`/`asc`), plus the page-independent `aggregate` priced over every row before paging (`measurable`/`reason`, `maxCost`, `residentCostTotal`, `invocationCount`, `unusedCount`, `unusedRange`, `byServer`, `definitionsSpanId`) | No |
+| `GET /api/kyber/session/{id}/servers` | `SessionToolFigures(sessionKey)` — the same read's server rollups, sorted (`UnusedCost`, `total_schema_cost`, `invocations` `DESC`/`ASC`, tiebreak `server ASC`) and paged (`25`/`50`/`100`, default `25`) | No |
+| `GET /api/kyber/session/{id}/skills` | `SessionSkillFigures(sessionKey)` and `SessionSkillListings(sessionKey)` — skill rows sorted (`invocations` `DESC`/`ASC`, tiebreak `name ASC`) and paged (`25`/`50`/`100`, default `25`) with the session total; whole-list listing aggregates are not served yet (the summary omits `skills_listed` while emitting `skills_count` and, when skills were invoked, `summary.skills_invoked`) | No |
+| `GET /api/kyber/session/{id}/kw-skills` | `SessionKwSkillLoads(sessionKey, page, limit, order)` — the session's candidate `load_skill` tool calls, read from `tool_call`, its MCP split, the first 1,024 characters of its reply and its record's start time (`started_at_utc, tc.rowid` `DESC`/`ASC`, default `desc`); paging (`25`/`50`/`100`, default `25`) is applied over the recognized loads. The call's input is never joined ([KW skill loads](#kw-skill-loads)) | No — only a reply's first 1,024 characters |
+| `GET /api/kyber/session/{id}/requests` | `SessionRequestFigures(sessionKey, page, limit, order)` plus `RequestPromptPreviews(sessionKey, requestSpanIds)` — the page's request rows (`position` `DESC`/`ASC`, default `desc`, `limit` `25`/`50`/`100`), with prompt previews for the page's spans only | **Yes — the page's prompt previews only, fetched because the rows on screen show them** |
+| `GET /api/kyber/session/{id}/reconciliation` | `SessionReconciliationFigures(sessionKey, page, limit, order)` — reconciliation rows sorted by `position` (`DESC`/`ASC`, default `desc`) and paged (`25`/`50`/`100`, default `25`) | No |
+| `GET /api/kyber/session/{id}/problems` | `SessionProblems(sessionKey, page, limit, order)` — problem rows joining `ingest_problem_timestamp` (non-null timestamps first ordered `DESC`/`ASC`, then null timestamps, tiebreak `problem_id DESC`/`ASC`) and paged (`25`/`50`/`100`, default `25`) | No |
 | `GET /api/kyber/session/{id}/subagents` | `SessionChildHeaderPage(parentId, page, limit)` plus the keyed `SessionListFigures(keys)` — one root's subagent rows, 25 per page | No |
 | `GET /api/kyber/session/{id}/turn/{index}` | `TurnFigures(sessionKey, turnIndex)` plus the stored context turn — one turn's spans, tool calls, token and cost facts with that turn's `context` buckets | No |
 | `GET /api/kyber/timeline` | `SessionRecordsContentFree(sessionKey)` — linked records with token counts, models, timestamps, signals, tool-call metadata and tool definitions, and no content part, tool input text or tool result text. The global timeline is unchanged; the session view reads its own paged level route above | No |
-| `GET /api/kyber/session/{id}/timeline` | `SessionTimelineRecords(sessionKey)` — the record-header columns the timeline tree's nodes read (span, parent, harness, timestamp, duration, kind, name, status, cost, model, declared window), hydrated into the `BuildTimeline` tree once per page; the per-request cost is the session's metadata tree, never its content | No |
+| `GET /api/kyber/session/{id}/timeline` | `SessionTimelineRecords(sessionKey)` — the record-header columns the timeline tree's nodes read (span, parent, harness, timestamp, duration, kind, name, status, cost, model, declared window), hydrated into the `BuildTimeline` tree once per page with each level sorted by `StartMs DESC/ASC, SpanId ASC` and paged (`25`/`50`/`100`, default `25`); the per-request cost is the session's metadata tree, never its content | No |
 | `GET /api/kyber/span/{id}/attributes` | `RecordContentFree(spanId)` — one record's metadata — plus `SpanPromptText(spanId)`: the one span's consent-allowed captured prompt, so the inspector the viewer opened shows what the stall fix lost | **Yes — one span's prompt, only for the inspector the viewer opened** |
 | `GET /api/kyber/session/{id}/turn/{index}/content`, `GET /api/kyber/session/{id}/content` | `TurnContentParts(sessionKey, turnIndex?, spanId?, part?, budget, full)` — parts by `(session_key, span, position)`, honouring the response budget and the `full` flag; the turn route adds `TurnContentPartCount(sessionKey, turnIndex?, spanId?, part?)`, a content-free `COUNT(*)` that decides its `truncated` flag | **Yes — the one request-path content read, scoped to that turn or request** |
 | `GET /api/kyber/session/{sessionKey}/stored-fields` | `StoredFieldsInventory(sessionKey)` — catalog-driven inventory of the named session's stored columns, row counts and missing parent keys. No row values, no content read | No |
@@ -1781,34 +1786,41 @@ In the C# engine, `CanonIngestPipeline.ToCollectedRecord` (`dash/server/KyberDas
 **Measurability.** Listing and invocation are measured separately, and an unmeasured side is
 never reported as zero. It is declared in one of two ways: a key is absent (the summary's
 `skills_invoked` array), or it carries `{availability: 'not_measurable', reason}` (the whole
-`skills` view, and each row's `invocations`). `[]` is a measured none. Per-harness sources are in the [telemetry inventory](telemetry-inventory.md#skill-availability-by-harness).
+`skills` view, and each row's `listed`). `[]` is a measured none. Per-harness sources are in the [telemetry inventory](telemetry-inventory.md#skill-availability-by-harness).
 
 **Skills section** (`GET /api/kyber/session/:id/skills`, additive). The route serves one page of
-the session's skill rows with the page envelope (`rows`, `total`, `page`, `limit`), or the
-whole-block `{availability: 'not_measurable', reason}` verdict when the harness measured neither
-side. The whole-session counts live on the summary: `skills_count`, always served. (The engine
-also emits the `skills_invoked` name array, which the summary validator does not carry; the
-panel tiles that read the arrays therefore render "not measurable" — see the known limit below.)
+the session's skill rows with the page envelope (`{ rows, total, page, limit, offset, order }`),
+retaining that envelope (with `rows: []`, `total: 0`) alongside the whole-block
+`{availability: 'not_measurable', reason}` verdict when the harness measured neither side. The
+summary carries `skills_count` (always served) and `summary.skills_invoked` (emitted when
+`distinctSkills.Count > 0`), while omitting `summary.skills_listed`. Because
+`parseSessionSummarySection` preserves `raw.summary`, `summary.skills_invoked` reaches
+`SkillsPanel` and populates the **Skills invoked** tile when skills were invoked (rendering
+`"not measurable"` when none were invoked), whereas `skills_listed` and whole-list listing
+aggregates (`listed_uninvoked_count`, `listed_count`) are absent so the **Skills listed** tile
+and the headline render `"not measurable"` — see the known limit below.
 
-- `skills.rows` is sorted by name. Each row is `{name, listed, invocations, turns_listed,
-  description?, derived_tokens?}`.
-    - `listed` is always a boolean. It is `true` when a measured listing named the skill on at
-      least one turn, and `false` for a skill that was only invoked.
-    - `invocations` is a number when invocation is measured, and `0` is a measured none. For
-      Copilot CLI and Antigravity it is that
-      object when no record of the session carries `kyber.skills.invoked`, and a number otherwise.
-      Antigravity counts over the measured turns (see `invocationsCoverage`).
-      An unmeasured side is never omitted from the row and never reported as `0`.
-    - `turns_listed` holds 0-based transport indices (the issue #184 numbering), and is `[]` when
-      the skill was listed on no turn.
-    - `description` is the first listing text observed for that skill in the session, stored
-      once. `derived_tokens` is a local-tokenizer count of the description, labelled with the tokenizer used and whether it is the model's own (the `o200k_base` stand-in when the model publishes none). Both are
-      absent when no listing carried a description.
-- `measurability.skills` is set only when the whole `skills` view is `not_measurable`, and then
-  carries that same reason. A partly measured view (Antigravity when no
-  record of the session carries the invoked key, or Copilot CLI when a listing is measured but no
-  record carries the invoked key) leaves `measurability.skills` unset. Its unmeasured side shows per row (the
-  `invocations` object) and by the absent `summary.skills_invoked` key.
+- Top-level `rows` (`measurable: true`) is built by `KyberBridgeEngine.BuildSkillsPayload` (invoked
+  skills in invocation order, then listed-never-invoked skills in listing order) and then sorted
+  (`invocations` `DESC` by default, or `ASC`, tiebreak `name` ascending) and paged (`page`, `limit`,
+  `offset`, `total`, `order`) by `KyberBridgeEngine.GetSessionSkills`. Each row emitted by
+  `KyberBridgeEngine.BuildSkillsPayload` is `{ name, listed, invocations, turns_listed }`:
+    - `listed` is a boolean when the session recorded at least one `record_skill_listing` row
+      (`true` when the listing named the skill on at least one turn, `false` for a skill that was
+      only invoked), or a `NotMeasurableBlock` (`{ availability: 'not_measurable', reason }`) when
+      the session has no stored listing.
+    - `invocations` is always an integer (`skillCounts.GetValueOrDefault(skillName)`, with `0`
+      representing a listed skill with no observed invocation). Object-valued `invocations` and
+      `invocationsCoverage` from the retired monolithic payload are not emitted by the C# route.
+    - `turns_listed` holds 0-based turn indices (`[]` when the skill was listed on no turn).
+    - `description` and `derived_tokens` from the retired monolithic payload are not emitted by
+      `KyberBridgeEngine.BuildSkillsPayload` (the listing's descriptions are not stored or served
+      by the C# route; the web type keeps them optional only for compatibility).
+- When neither invocations nor listed skills were recorded for the session,
+  `KyberBridgeEngine.BuildSkillsPayload` returns `NotMeasurableBlock`
+  (`{ availability: 'not_measurable', reason }`), and `KyberBridgeEngine.GetSessionSkills` attaches
+  the empty page envelope (`{ rows: [], total: 0, page, limit, offset, order }`) alongside that
+  top-level `NotMeasurableBlock` instead of a nested `measurability.skills` property (retired).
 
 **Turn content** (`GET /api/kyber/session/:id/turn/:index/content`). The restored C# route serves
 the byte-budgeted parts alone and carries no `skills` entry: `skills` stays optional in the web
@@ -1819,11 +1831,11 @@ type and the views render without it. The narrow turn-content route never walks 
 - A listing read from a Claude request body (`system`-role message) is used only when the record has no
   transcript listing, and never from a body cut at the sender's size limit, which does not parse. Records
   enriched before the role field existed carry no role and show no body listing until re-enriched.
-- If a later listing in the same session changes a skill's description, earlier turns still show
-  the first text observed.
-- After the 14-day content purge ([ADR 0018](../adr/0018-kyberdash-content-retention-purge.md)),
-  Claude descriptions survive because they are kept in raw attributes. Copilot descriptions that
-  came from stored system-prompt parts are absent, while the skill names remain.
+- Claude skill listing descriptions are not stored in `record_skill_listing` or served by
+  `KyberBridgeEngine.BuildSkillsPayload` (and do not survive in raw attributes after the
+  14-day content purge, [ADR 0018](../adr/0018-kyberdash-content-retention-purge.md)). Copilot
+  descriptions from stored system-prompt parts are likewise absent after the purge, while the
+  skill names remain.
 - Antigravity descriptions are read from each skill's `SKILL.md` when the session payload is built.
   The cache is keyed by file path and valid while the file's mtime and size are unchanged, so an
   edited description shows at the next payload build without a restart, and an absent file is never
@@ -1856,29 +1868,36 @@ since an uncovered turn carries no key. The finding does not state that coverage
 Finding detail follows ADR 0013 D15/D16: the wording is "listed with N recorded turns and 0
 invocations", with no deletion or waste claim.
 
-**Detector version.** `SqliteRelationalStore.DetectorVersion` is `7` (`dash/server/KyberDash.Data/Repositories/SqliteRelationalStore.cs`). Stores stamped with
-an older generation (for example `5` or `6`) report their findings as outdated; `CanonSessionProjectorEngine`
+**Detector version.** `SqliteRelationalStore.DetectorVersion` is `8` (`dash/server/KyberDash.Data/Repositories/SqliteRelationalStore.cs`). Stores stamped with
+an older generation (for example `5`, `6` or `7`) report their findings as outdated; `CanonSessionProjectorEngine`
 re-projects them to the current generation on maintenance/build. Generation 6 restored record source identity
 (see [Records keep their source](#records-keep-their-source)); generation 7 hydrates the stored skill listing and
-invocations into the detector's inputs (see **Analysis inputs** above). Every projection built under an older
-generation is rebuilt on the first start or tick after the upgrade, so no stale projection survives.
+invocations into the detector's inputs (see **Analysis inputs** above); generation 8 rebuilds projections for Claude
+Code v2 transcript hydration (streaming `message.id` coalescence, `tool_use` parts, tail-only overflow measurement,
+`claude:compact_boundary` hydration, and `#agent-` subagent isolation). Every projection built under an older
+generation is rebuilt on the first start or tick after the upgrade, so no stale projection survives, and v2
+projections are invalidated cleanly on rollback to generation 7.
 
 **Web.** The Sessions page section **4 · Skills** renders one page of skill rows with the
 shared pager (`SessionSkillsSection`, one query per the
-[data-loading contract](#web-dashboard-data-loading-by-section-and-page)). Each row shows
-listed and invoked badges and the turns listed (displayed 1-based), with derived tokens labelled
-as derived. The tiles and headline read whole-list figures: the tiles read the summary's
-`skills_listed` / `skills_invoked` arrays and the headline reads the block's
-`listed_uninvoked_count` / `listed_count`. The section route serves neither — the summary
-carries `skills_count` only, and the section forwards the page's `rows` alone — so the tiles
-and the headline render "not measurable" and the harness-reported aggregate stays hidden until
-the route serves them (known limit below). Token bars scale to the loaded page for the same
-reason: `SkillsPanel` accepts the whole-list `aggregate.maxTokens`, but no caller passes one
-yet. Clicking a row opens a skill drawer with the listed and invoked state, the turns listed,
-and the listing text for the first turn listed, fetched through the turn route and then the
-turn-content route — never from a session-wide payload. The unit tests render these states in a
-simulated DOM and the bundle builds. The states have not yet been checked against a live
-dashboard session.
+[data-loading contract](#web-dashboard-data-loading-by-section-and-page)). Each row shows the
+skill name, listed and invoked badges, and any unmeasured reason without `turns_listed` or
+per-row `derived_tokens` (`KyberBridgeEngine.BuildSkillsPayload` omits `derived_tokens` and
+`description`, and `turns_listed` on the wire holds 0-based turn indices). The tiles and
+headline read whole-list figures: the tiles read the summary's `skills_listed` / `skills_invoked`
+arrays and the headline reads the block's `listed_uninvoked_count` / `listed_count`. Because
+`parseSessionSummarySection` preserves `raw.summary`, `summary.skills_invoked` populates the
+**Skills invoked** tile whenever skills were invoked (and renders `"not measurable"` when none
+were), while `summary.skills_listed` and whole-list listing aggregates are not served — so the
+**Skills listed** tile, the headline, and the harness-reported aggregate stay `"not measurable"`
+or hidden until the route serves them (known limit below). Token bars do not render for C#
+`/skills` rows because `derived_tokens` is omitted (if `derived_tokens` were present without
+`aggregate.maxTokens`, bars would scale to the loaded page). Clicking a row opens an inspector
+drawer showing the listed-turn count (`Listed turns: N`), invocation count, raw skill payload,
+and the listing text for the first listed turn, fetched through the turn-content route
+(`/api/kyber/session/:id/turn/:index/content?full=true` using the 0-based `turns_listed[0]`) —
+never from a session-wide payload. The unit tests render these states in a simulated DOM and the
+bundle builds. The states have not yet been checked against a live dashboard session.
 
 ### KW skill loads
 
@@ -1963,7 +1982,7 @@ measured independently from whether individual composition buckets are available
 `SqliteRelationalStore` (`dash/server/KyberDash.Data/Repositories/SqliteRelationalStore*.cs`) persists `canon.db`
 via bounded `ProcessRunner` calls to the system `sqlite3` CLI, avoiding the native `SQLitePCLRaw.lib.e_sqlite3`
 dependency (`GHSA-2m69-gcr7-jv3q`). The schema is the relational catalog at `SqliteRelationalStore.SchemaVersion`
-(`25`): `RelationalSchemaCatalog` (`dash/server/KyberDash.Domain/Schema/RelationalSchemaCatalog.cs`) is the
+(`30`): `RelationalSchemaCatalog` (`dash/server/KyberDash.Domain/Schema/RelationalSchemaCatalog.cs`) is the
 single static source of every table, column, key, and index, and `SchemaDdlGenerator` emits the deterministic
 DDL. The store implements `IRelationalStoreWriter` (`WriteBatch`, `ReplaceSource`, `DeleteSource`, `WriteProblem`, `DeleteProblem`),
 `IRelationalStoreReader` (`SessionListFigures`, `SessionSummaryFigures`, `SessionTurnFigures`,
@@ -1991,10 +2010,7 @@ a parallel document.
 Subagent executions dispatched by orchestrators are projected during session build (`CanonSessionProjectorEngine` in `dash/server/KyberDash.Application/CanonSessionProjectorEngine.cs`) into first-class derived session rows with stable, deterministic identities ([ADR 0038](../adr/0038-post-run-transcript-sync-subagent-hierarchy.md)):
 - **Identity format**: Claude Code subagents are assigned the deterministic session ID `<parentSessionId>#agent-<agentId>` (e.g. `claude-sess-001#agent-researcher-001`, not doubling an `agent-` prefix already on attributes such as `agent_id` or `subagent_id`), scoped by the parent so two parents reusing an agent id keep separate rows. Copilot subagent invocations receive `<parentSessionId>#<invoke_agent_span_id>` (e.g. `copilot-sess-001#invoke-agent-span-1`).
 - **Database representation**: Subagent rows in `session` record `is_subagent = 1`, `parent_session = <parentSessionId>` (pointing to the root session), and `agent_name = <agentName>`. Subagent records are reparented under the root invoke span (`parentSpanId = null` for the root invoke span, child spans reparented beneath it), ensuring a clean single-root execution tree in the ASAD payload.
-- **Dual spend accounting and read-time rollups**: Stored session rows persist only their own granular, unaggregated counters (`turn_count`, `request_count`, `total_input`, `total_output`, `cost_usd`) in `payload.summary`. On read (`KyberBridgeEngine.GetSessionPage` in `dash/server/KyberDash.Application/KyberBridgeEngine.cs`), child subagent sessions whose parent exists in the store are omitted from the top-level list and nested into their parent's `subagents` array. The parent session carries a read-time `rollup` object aggregating spend across the orchestrator and all nested children:
-  $$\text{rollup.metric} = \text{parent.metric} + \sum_{c \in \text{subagents}} c\text{.metric}$$
-  The sum is recursive and leaf-first (a chain A ← B ← C nests two deep, and B's rollup is B + C). A projected subagent row is built from a subset of the records its parent row is built from, so the parent's own counters already include it; the projection marks such a row `payload.summary.included_in_parent`, and the rollup adds neither it nor anything beneath it. Only an independent child (one whose records are not in the parent) is summed. A parent cycle in stored ancestry is never attached, so no session drops out of the list.
-  Both parent and child sessions preserve their own granular counters unaggregated at their respective levels. Orphan subagent sessions (whose parent session is absent from the store) remain visible at the top level with self-derived rollups.
+- **Dual spend accounting and read-time payloads**: Stored session rows persist only their own granular, unaggregated counters (`turn_count`, `request_count`, `total_input`, `total_output`, `cost_usd`) in `payload.summary`, and a projected subagent row built from a subset of its parent's records is marked `payload.summary.included_in_parent` (`session_projection_included_in_parent`). On read (`KyberBridgeEngine.GetSessionPage` in `dash/server/KyberDash.Application/KyberBridgeEngine.cs`), child subagent sessions whose parent exists in the store are omitted from the top-level list, and each root carries up to its first 25 child rows in `subagents` alongside `subagent_total` (while `KyberBridgeEngine.GetSubagentPage` pages all children for a root on `/api/kyber/session/:id/subagents`). Neither `/api/kyber/sessions`, `/api/kyber/session/:id/subagents`, `/api/kyber/session/:id/summary`, nor the per-section session routes emit a `rollup` key: each parent and child row carries its own direct session figures. Orphan subagent sessions (whose parent session is absent from the store) remain visible at the top level with their own direct figures.
 - **Honest session title synthesis (`CanonPricing.FormatSessionTitle`)**: Titles follow a deterministic precedence ladder: `<agent name> · <task summary>`, `<agent name> · <human label>`, `<agent name> · session`, `<task summary>`, `<human label>`, falling back to `<harness> session` or a shortened session ID. Machine labels (`CanonPricing.IsMachineLabel`) are rejected so synthetic span labels never clutter user-facing titles.
 
 ### Canonical Run and AgentExecution Entities (ADR 0012)
@@ -2117,26 +2133,38 @@ flowchart LR
 ```
 
 - **One section, one query.** Every paged section of the session view reads through the shared
-  `useSectionPage` hook (`dash/web/src/components/session/useSectionPage.ts`): the page the
-  viewer is on, and the one query that reads it, with the previous page held on screen while the
-  next loads. Each section component owns its query and renders its own loading, error, empty
-  and data states, so a slow section never blanks another. The header, subagent notice,
-  reconciliation badge, harness notes, requests banner, aux banner and overview strip render
-  from `/summary` alone.
+  `useSectionPage` hook (`dash/web/src/components/session/useSectionPage.ts`): the active `page`,
+  `limit` (`25 | 50 | 100`, persisted per section in browser `sessionStorage` under
+  `kyberdash:session-section:limit:${section}` with default `25`), and `order` (`'desc' | 'asc'`,
+  default `'desc'`) included in `kyberSessionSectionQueryKey`, with the previous page held on
+  screen while the next loads. Changing `limit` or `order` resets `page` to `1`. Each section
+  component owns its query and renders its own loading, error, empty and data states, so a slow
+  section never blanks another. The header, subagent notice, reconciliation badge, harness notes,
+  requests banner, aux banner, overview strip (`SessionSummarySection`), and cost breakdown
+  (`SessionCostSection`) contain no pageable lists and render from `/summary` alone.
 - **Issued in page order, served in parallel.** All section queries mount with the view and are
-  issued in the order the sections appear — summary, charts, tools, servers, skills, timeline
-  top level, cost (from the summary, no query), requests, reconciliation, problems,
+  issued in the order the sections appear — summary, charts, tools, servers, skills, kw-skills,
+  timeline top level, cost (from the summary, no query), requests, reconciliation, problems,
   stored-fields inventory — so the top of the page arrives first. The store serves the reads in
   parallel (WAL journal mode, a fresh connection per read, no read lock); the browser's
   per-origin connection limit queues the overflow in issue order, which is page order.
-- **Every list pages.** The sessions list pages at 100 roots (`page`, `limit`, `harness`, `q`
-  on the query string; roots carry their first 25 subagents and a `subagentTotal`, further
-  pages through `/session/:id/subagents`). Every list section pages at 25 rows through the one
-  shared `Pager` (`dash/web/src/components/ui/Pager.tsx`): tools, servers, skills, requests,
-  reconciliation, problems, timeline levels (by level, with `childCount` and `bounds`; node ids
-  URL-encoded, synthetic `(auxiliary)` and `(orphan:…)` ids included) and stored-fields rows
-  per table. Cost blocks are not lists and never page. Charts are not paged by design: the
-  spend and composition charts need the whole session to be correct.
+- **Every list pages and sorts on the server.** The sessions list pages at 100 roots (`page`,
+  `limit`, `harness`, `q` on the query string; roots carry their first 25 subagents and a
+  `subagentTotal`, further pages through `/session/:id/subagents`). Every session detail list
+  section — `charts` (`context.turns` in both Stacked Bars and Heatmap Matrix views via
+  `SessionChartsSection` / `SessionSpendCharts`), `tools` (`SchemaCostRanking` renders server
+  order directly without client `.sort`), `servers`, `skills` (`SkillsPanel`), `kw-skills`,
+  `requests`, `reconciliation`, `problems`, and `timeline` (shared across Call Tree and Duration
+  Timeline, passing `limit`/`order` to child level `useQueries` and resetting both `levelPages`
+  and `expandedIds` on `sessionId`, root `page`, `limit`, or `order` changes) — pages at `25`,
+  `50`, or `100` rows and sorts `Newest first` (`desc`) / `Oldest first` (`asc`) through the
+  shared `Pager` (`dash/web/src/components/ui/Pager.tsx`). `Pager` stays visible (`list-pager`)
+  whenever `total > 0` and `onLimitChange` or `onOrderChange` is provided so the page-size
+  selector and sort toggle remain reachable on single-page lists, while bare legacy callers keep
+  hiding single-page lists. On `/charts`, `ContextCompositionChart` builds legends and scale from
+  whole-session `observedBuckets`, `observedServers`, `measuredInputTotal`, and
+  `maxBucketTokens` so switching pages or sort order preserves chart scale and attribution.
+  `StoredFieldsPanel` retains 25-row SQL paging per opened table.
 - **Content only on display.** Opening a session issues no content route and no stored-fields
   rows request. Conversation text arrives when the viewer asks for it: the inspector drawer
   resolves a turn through `/turn/:index` (widened with that turn's context) and only then its
@@ -2144,11 +2172,18 @@ flowchart LR
   skill through its row's `turns_listed`; a span from the loaded timeline node or
   `/span/:id/attributes` (with the consent-allowed prompt). Request rows carry the prompt
   previews of the shown page only; a stored-fields table's rows load when the viewer opens it.
-- **Paging envelope.** Paged routes reuse the existing `{ entries, data, total, page, limit }`
-  envelope (`data` is the existing alias of `entries`); section routes default and clamp
-  `limit` to 25, and a page past the end answers empty `entries` with the true `total`. A 404
-  check reads the projection header row only, never turns or content. Under live capture a new
-  session can shift the sessions list by one row between pages; accepted for a monitoring view.
+- **Paging envelope.** Session section routes validate parameters strictly in
+  `DashEndpointMappings.ReadSectionPageWindow` (`DashHttp.TrySectionLimit` and
+  `DashHttp.TrySortOrder`): `limit` must be `25`, `50`, or `100` (default `25`), `order` must be
+  trimmed case-insensitive `"desc"` or `"asc"` (default `"desc"`), and invalid values return HTTP
+  `400` (`DashHttp.Error` `{"error": "..."}`) rather than silently clamping. Responses carry
+  `{ total, page, limit, offset, order }` alongside the section-named list key and `data`
+  (`{ tools, data }`, `{ servers, data }`, `{ requests, data }`, `{ reconciliation, data }`,
+  `{ problems, data }`) or section-specific payload keys (`rows`, `nodes`, or `turns` + `context`
+  on `/charts`). A page past the end answers an empty list with the true `total`. A 404 check
+  reads the projection header row only,
+  never turns or content. Under live capture a new session can shift the sessions list by one
+  row between pages; accepted for a monitoring view.
 
 ### Independent Dimension Vectors — No Composite Score (Decision D3)
 
@@ -2610,17 +2645,17 @@ The web dashboard server wires HTTP requests directly to `KyberBridgeEngine`:
 | `/api/kyber/run/:id` | `GET` | `{ run, executionTree, executions, findings, turns, scorecard }` | Complete run detail with parent/child execution tree, executions enriched with `turnCount` and `costUsd`, `turns` list (`RunTurnRow[]` with model, tokens, pressure, `cacheHitRatio`, timestamp, and per-turn `costUsd`), and run-scoped `scorecard` (`RunScorecard`). |
 | `/api/kyber/sessions` | `GET` | `{ sessions: SessionSummary[], total, page, limit }` | Paged roots, 100 per page by default (`limit` clamp 1..100); supports `?page=`, `?limit=`, `?harness=` and `?q=` (case-insensitive substring over label and session id, with `%`, `_` and `\` matched literally). Each root carries its first 25 subagents and a `subagentTotal`. Root resolution, filtering, search, ordering (`started_at_utc` descending, then session id) and the `COUNT(*)` total run in SQL; only the page is priced. |
 | `/api/kyber/session/:id` | `GET` | 404 | **Retired.** The monolithic session payload is gone; the session view reads one route per section (below). The report prices its window with one keyed batched read and the run page reads turn figures. |
-| `/api/kyber/session/:id/summary` | `GET` | Widened bounded session summary | The header strip, banners and overview strip source: identity fields plus `span_count`, `request_count`, cost blocks by basis and model, `costBasisMismatch`, reconciliation totals, `problems_count`, tool counts (`tools_offered_count`, `tools_invoked_count`, `unused_tools_count`), `skills_count`, aux-call fields and schema waste fields. 404 for an unknown id; no run or execution linkage, deliberately. |
-| `/api/kyber/session/:id/charts` | `GET` | Whole-session `turns` and `context` | Exactly the retired payload's `turns` array shape and `context` object (flagged turns, accumulation rate, derived counts, fresh-jump factor, residual total, unmeasured turns, context limit, per-turn tool definitions, residual, headroom, first, last). Not paged by design. |
-| `/api/kyber/session/:id/tools` | `GET` | `{ entries, data, total, page, limit, aggregate }` | Ranked tool rows (never-invoked included and flagged), 25 per page, with the page-independent `aggregate` (`measurable` / `reason`, `maxCost`, `residualCostTotal`, `invocationCount`, `unusedCount`, `unusedRange`, `byServer`, `definitionsSpanId`) priced over every row before paging. |
-| `/api/kyber/session/:id/servers` | `GET` | `{ entries, data, total, page, limit }` | Server rollup rows, 25 per page. |
-| `/api/kyber/session/:id/skills` | `GET` | `{ rows, total, page, limit }` or the not-measurable verdict | Skill rows, 25 per page; the whole-block `{availability: 'not_measurable', reason}` verdict when neither side is measured. Whole-list aggregates are not served yet ([skills view contract](#skills-view-contract)). |
-| `/api/kyber/session/:id/kw-skills` | `GET` | `{ rows, total, limit, offset, page }` | KW skill loads, 25 per page (`?page=&limit=`), in call order; 404 for an unknown session. A row is `{ skill: string\|null, agent: string\|null, session_id, span_id, loaded_at: string\|null }`. The web shows it as its own `KW skills` section right after Skills, apart from harness skills ([KW skill loads](#kw-skill-loads)). |
-| `/api/kyber/session/:id/requests` | `GET` | `{ entries, data, total, page, limit }` | Request rows (`request`, `timestamp`, `turns`, `model`, `prompt` preview), 25 per page. Prompt previews are read for the page's spans only. |
-| `/api/kyber/session/:id/reconciliation` | `GET` | `{ entries, data, total, page, limit }` | Reconciliation rows (today's snake-case fields, null-match rows omitted as before), 25 per page. |
-| `/api/kyber/session/:id/problems` | `GET` | `{ entries, data, total, page, limit }` | Problem rows, 25 per page. |
-| `/api/kyber/session/:id/subagents` | `GET` | `{ entries, data, total, page, limit }` | One root's subagent rows, 25 per page. |
-| `/api/kyber/session/:id/timeline` | `GET` | `{ entries, data, total, page, limit, bounds }` | One tree level's nodes (today's node fields without `children`, plus `childCount`), 25 per page, with the whole tree's `bounds`. `parent` omitted answers the top level; otherwise the URL-decoded node id — synthetic `(auxiliary)` and `(orphan:…)` ids included. |
+| `/api/kyber/session/:id/summary` | `GET` | Widened bounded session summary | The header strip, banners and overview strip source: identity fields plus `span_count`, `request_count`, cost blocks by basis and model, `costBasisMismatch`, reconciliation totals, `problems_count`, tool counts (`tools_offered_count`, `tools_invoked_count`, `unused_tools_count`), `skills_count` (plus `summary.skills_invoked` when skills were invoked; `summary.skills_listed` is omitted), aux-call fields and schema waste fields. 404 for an unknown id; no run or execution linkage, deliberately. |
+| `/api/kyber/session/:id/charts` | `GET` | `{ sessionId, turns, context, total, limit, offset, page, order }` | Whole-session `turns` array for the spend curve plus `context` (`measurable`, `contextLimit`, `contextLimitSource`, `residualTotal`, `measuredInputTotal`, `maxBucketTokens`, `freshJumpFactor`, `accumulationRate`, `observedBuckets`, `observedServers`, `derivedCounts`, `flaggedTurns`, `unmeasuredTurns`, `first`, `last`, tokenizer labels, `missingBuckets`/`residualReasons` from `CanonSynth.MeasurabilityFor`, and server-paged/sorted `context.turns` preserving 1-based `index = turn.Position + 1`). Accepts `?page=&limit=&order=` (`25`/`50`/`100`, `desc`/`asc`, defaults `25`, `desc`; HTTP `400` `{"error": "..."}` on invalid values) and emits top-level `total`, `limit`, `offset`, `page`, `order` on both measurable and unmeasurable responses. |
+| `/api/kyber/session/:id/tools` | `GET` | `{ tools, data, total, page, limit, offset, order, aggregate }` | Ranked tool rows (never-invoked included and flagged), sorted by `TotalSchemaCost` then `Invocations` (`DESC`/`ASC`, tiebreak `name ASC`) and paged (`limit` `25`/`50`/`100`, default `25`; `order` `desc`/`asc`, default `desc`), with the page-independent `aggregate` (`measurable` / `reason`, `maxCost`, `residentCostTotal`, `invocationCount`, `unusedCount`, `unusedRange`, `byServer`, `definitionsSpanId`) priced over every row before paging. |
+| `/api/kyber/session/:id/servers` | `GET` | `{ servers, data, total, page, limit, offset, order }` | Server rollup rows, sorted by `UnusedCost` then `total_schema_cost` then `invocations` (`DESC`/`ASC`, tiebreak `server ASC`) and paged (`25`/`50`/`100`, default `25`; `order` `desc`/`asc`, default `desc`). |
+| `/api/kyber/session/:id/skills` | `GET` | `{ rows, total, page, limit, offset, order }` (plus `{ availability: 'not_measurable', reason }` when unmeasured, with `rows: []`, `total: 0`) | Skill rows, sorted by `invocations` (`DESC`/`ASC`, tiebreak `name ASC`) and paged (`25`/`50`/`100`, default `25`; `order` `desc`/`asc`, default `desc`); adds the whole-block `{availability: 'not_measurable', reason}` verdict with `rows: []`, `total: 0` when neither side is measured. Whole-list aggregates are not served yet ([skills view contract](#skills-view-contract)). |
+| `/api/kyber/session/:id/kw-skills` | `GET` | `{ rows, total, limit, offset, page, order }` | KW skill loads, sorted by `started_at_utc, tc.rowid` (`DESC`/`ASC`, default `desc`) and paged (`25`/`50`/`100`, default `25`); 404 for an unknown session. A row is `{ skill: string\|null, agent: string\|null, session_id, span_id, loaded_at: string\|null }`. The web shows it as its own `KW skills` section right after Skills, apart from harness skills ([KW skill loads](#kw-skill-loads)). |
+| `/api/kyber/session/:id/requests` | `GET` | `{ requests, data, total, page, limit, offset, order }` | Request rows (`request`, `timestamp`, `turns`, `model`, `prompt` preview), sorted by `position` (`DESC`/`ASC`, default `desc`) and paged (`25`/`50`/`100`, default `25`). Prompt previews are read for the page's spans only. |
+| `/api/kyber/session/:id/reconciliation` | `GET` | `{ reconciliation, data, total, page, limit, offset, order }` | Reconciliation rows (today's snake-case fields, null-match rows omitted as before), sorted by `position` (`DESC`/`ASC`, default `desc`) and paged (`25`/`50`/`100`, default `25`). |
+| `/api/kyber/session/:id/problems` | `GET` | `{ problems, data, total, page, limit, offset, order }` | Problem rows joining `ingest_problem_timestamp`, sorting non-null timestamps first (`DESC`/`ASC`, default `desc`) then null timestamps (`problem_id` tiebreak) identically in SQLite and `InMemoryRelationalStore`, paged (`25`/`50`/`100`, default `25`). |
+| `/api/kyber/session/:id/subagents` | `GET` | `{ subagents, data, total, page, limit, offset }` | One root's subagent rows, 25 per page. |
+| `/api/kyber/session/:id/timeline` | `GET` | `{ nodes, total, page, limit, offset, order, bounds }` | One tree level's nodes (today's node fields without `children`, plus `childCount`), sorted by `StartMs DESC/ASC, SpanId ASC` (default `desc`) and paged (`25`/`50`/`100`, default `25`), with the whole tree's `bounds`. `parent` omitted answers the top level; otherwise the URL-decoded node id — synthetic `(auxiliary)` and `(orphan:…)` ids included. |
 | `/api/kyber/session/:id/turn/:index` | `GET` | Bounded per-turn figures with context | One turn's figures served from a single `session_turn` row — 404 for an unknown turn under the strict 0-based identity lookup — plus that turn's `context` buckets. The turn page's counters and the drawer drill-down read kilobytes here instead of the whole payload (up to 10,933 turns) they once fetched for one row's counters. |
 | `/api/kyber/timeline` | `GET` | Session timeline | The global timeline, built from the session's content-free record metadata; unchanged by the section split. |
 | `/api/kyber/session/:id/content` | `GET` | `SessionContent` | Full canonical content for an inspected session part. |
@@ -2842,7 +2877,18 @@ The OTLP ingest seam and read-side query engine align raw harness telemetry with
 
 - **Pi session correlation (`PiAdapter` and `PiSpanMapper`):** Both `PiAdapter.Normalize` (`dash/server/KyberDash.Domain/CanonAdapters.cs`) and `PiSpanMapper.Parse` (`dash/server/KyberDash.Data/Harnesses/Otlp/PiSpanMapper.cs`) fall back to a trimmed non-whitespace `pi.session.id` attribute when standard session keys (`CanonicalSessionId` / `OtlpSpanNative.SessionId`) are absent; whitespace-only values resolve to `null`.
 - **OTLP `SkillsInvoked` ingest (`CanonIngestPipeline` and `OtlpLogMapper`):** `CanonIngestPipeline.ToCollectedRecord` and `OtlpLogMapper.ToCollectedRecord` populate `CollectedRecord.SkillsInvoked` from `gen_ai.skill.name`, `skill.name`, `skill_name`, and `kyber.skills.invoked` (scalar string, JSON array string, or string array) plus `Skill`/`skill` tool call argument properties (`skill`, `skill_name`, `name` across `ToolArgumentKeys`) instead of leaving `SkillsInvoked` empty.
-- **Web Dashboard session section projections (one route per section):** the retired `GET /api/kyber/session/:id` payload is gone; each section endpoint serves the fields the payload used to carry, from its own purpose-named read ([the read-model register](#the-read-model-register), [ADR 0092](../adr/0092-dashboard-views-load-by-section-and-page.md)). `KyberBridgeEngine.GetSessionSummary` emits the header strip, banners and overview strip; `GetSessionCharts` the whole-session `turns` and `context`; `GetSessionTools` / `GetSessionServers` the ranked tool rows, server rollups and the page-independent aggregate; `GetSessionSkills` the paged skill rows; `GetSessionTimeline` one tree level with `childCount` and `bounds`; `GetSessionRequests` / `GetSessionReconciliation` / `GetSessionProblems` the paged rows (requests with the page's prompt previews); `GetSessionSubagents` the subagent pages; and `GetStoredFieldsInventory` / `GetStoredFieldsRows` the inventory and the opened table's page. Field names and shapes are unchanged from the retired payload; only the route that serves them moved.
+- **Web Dashboard session section projections (one route per section):** the retired `GET /api/kyber/session/:id` payload is gone; each section endpoint serves the fields the payload used to carry, from its own purpose-named read ([the read-model register](#the-read-model-register), [ADR 0092](../adr/0092-dashboard-views-load-by-section-and-page.md)). All nine session section routes (`requests`, `reconciliation`, `problems`, `tools`, `servers`, `skills`, `kw-skills`, `timeline`, `charts`) validate `limit` (`25`, `50`, or `100`, default `25`) and `order` (`"desc"` default or `"asc"`) through `DashEndpointMappings.ReadSectionPageWindow` (HTTP `400` `{"error": "..."}` on invalid values). `KyberBridgeEngine.GetSessionSummary` emits the header strip, banners and overview strip; `GetSessionCharts` serves whole-session `turns` alongside `context` whose `context.turns` is paged/sorted on the server while whole-session context aggregates (`first`, `last`, `flaggedTurns`, `residualTotal`, `measuredInputTotal`, `maxBucketTokens`, `observedBuckets`, `observedServers`, `missingBuckets`, `residualReasons`, and tokenizer labels) stay unpaged; `GetSessionTools` / `GetSessionServers` serve sorted/paged ranked tool rows, server rollups and the page-independent aggregate; `GetSessionSkills` / `GetSessionKwSkills` serve sorted/paged skill rows; `GetSessionTimeline` serves one sorted/paged tree level with `childCount` and `bounds`; `GetSessionRequests` / `GetSessionReconciliation` / `GetSessionProblems` serve sorted/paged rows (requests with the page's prompt previews); `GetSessionSubagents` serves subagent pages; and `GetStoredFieldsInventory` / `GetStoredFieldsRows` serve the inventory and the opened table's page.
+- **Claude Code transcript parsing (`ClaudeTranscriptMapper`, `ParserContractVersion = "2"`):**
+  - `ClaudeTranscriptMapper` (`dash/server/KyberDash.Data/Harnesses/Claude/ClaudeTranscriptMapper.cs`) coalesces streamed assistant lines sharing a non-empty `message.id` across growing usage snapshots (`MergeClaudeGroups` / `IsMatchingClaudeUsage`), retaining the earliest deterministic `RecordId` (keeping `record.span_id` uniqueness and skill extraction intact), accumulating ordered content blocks, keeping the non-empty `Model`, and taking the latest usage counters.
+  - `tool_use` blocks emit `ContentBucket.ConversationHistory` `CollectedContentPart` items (`<toolName>` + serialized JSON input measured via `ToolContentMeasurer`) alongside child `tool.invoke` spans.
+  - Non-document plain text exceeding `CanonSynth.MaxToolResultBytes` (64 KiB) splits on intact `<system-reminder>...</system-reminder>` boundaries (`ComputeSystemReminderSafeCut` backing up before any unclosed tag) into a `PlainText` prefix plus one `Withheld` (`CollectedWithheldText`) continuation part measuring **only the unretained remainder tail** via `ToolContentMeasurer.Measure` so `AnalyzeContext` never double-counts the first 64 KiB.
+  - `compact_boundary` (`type == "system" && subtype == "compact_boundary"`) and `isCompactSummary == true` transitions fold onto the next kept `llm.invoke` turn via `CollectedRecord.AgentInstanceId = "claude:compact_boundary"` (persisted in `record_agent_instance` with zero SQLite schema change).
+  - `isSidechain == true`, non-empty `agentId`, or nested `subagents/agent-*.jsonl` files isolate to `${parentSessionId}#agent-{bareId}` (`ResolveSessionId` resolving `parentSessionId` from `line.SessionId` or the directory immediately above `subagents/`).
+  - `HarnessSourceRegistry` bumps Claude's `ParserContractVersion` (`ClaudeTranscriptV2ParserContractVersion = "2"`) so stale `canon.db` checkpoints re-ingest automatically on refresh, and `SqliteRelationalStore.DetectorVersion` is `8` at `SqliteRelationalStore.SchemaVersion` `30` (`dash/server/KyberDash.Data/Repositories/SqliteRelationalStore.cs`) so projections built under generation 7 and earlier rebuild on upgrade for Claude v2 hydration ([Skills view contract, Detector version](#skills-view-contract)).
+- **Cumulative Claude context projection and honest omission telemetry (`CanonRecordHydration`, `CanonSessionProjectorEngine`, `KyberBridgeEngine`):**
+  - `CanonRecordHydration.Hydrate` surfaces `AgentInstanceId == "claude:compact_boundary"` onto `CanonicalRecord.Raw["claude.compact_boundary"] = true` without emitting synthetic `ContentPart` text.
+  - `CanonSessionProjectorEngine.BuildStoredSessionProjection` parses `#agent-` subagent session keys (`IsSubagent = true`, `ParentSessionId` before `#agent-`) while excluding subagent turns from parent context turns, clears cumulative state on `claude.compact_boundary`, and reconstructs multi-turn Claude context (`BuildClaudeContextTurns`) in a linear `O(T)` pass using pre-reduced/pre-counted summary `ContextPart`s (`Derived = true`, `Text = string.Empty`) across `system_prompt`, `instruction_context`, `conversation_history`, and `tool_result_content`, excluding Turn `k`'s own assistant output and thinking from Turn `k`'s input buckets.
+  - `KyberBridgeEngine.BuildContextPayload` derives `missingBuckets` and plain-language `residualReasons` from `CanonSynth.MeasurabilityFor(harness)` when transcript-unmeasurable buckets (`system_prompt`, and `tool_definitions` when no schema exists) apply; `ContextCaveat` (`dash/web/src/components/SessionSpendCharts.tsx`) renders those omission explanations and suppresses `heavyDrift` ("proxy is a poor fit") warning copy when omission telemetry explains the residual share.
 - **Tray `ContextReport` alignment and windowing (`GET /api/kyber/report`):**
   - `IDashboardQueryService` (`dash/server/KyberDash.Contracts/Services/IDashServices.cs`) and `DashboardQueryService` preserve the 4-argument `GetReport(harness, sessionId, runId, limit)` signature (defaulting `days: 7`) for CLI `ReportService` and test mock compatibility while adding a 5-argument overload `GetReport(harness, sessionId, runId, limit, days)`.
   - `DashEndpointMappings.ReportAsync` (`dash/server/KyberDash.Api/Endpoints/DashEndpointMappings.cs`) trims `harness`/`session`/`run` (normalizing `harness`), clamps `limit` to `1..200` (default `50` when omitted), defaults `?days=` to `7` when omitted entirely, and returns HTTP 400 Bad Request (`"days must be a positive whole number"` / `"limit must be a positive whole number"`) via `DashHttp.OptionalPositiveInt` when `?days=` (or `?limit=`) is provided as blank, whitespace, zero, negative, or non-numeric.

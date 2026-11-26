@@ -132,13 +132,16 @@ internal abstract class DelegatingRelationalStoreReader : IRelationalStoreReader
     public virtual SessionTurnFigureSet? SessionTurnFigures(string sessionKey, IModelPricingLookup? pricing = null) => inner.SessionTurnFigures(sessionKey, pricing);
 
     /// <inheritdoc />
-    public virtual SessionRequestFigurePageResult SessionRequestFigures(string sessionKey, int page, int limit) => inner.SessionRequestFigures(sessionKey, page, limit);
+    public virtual SessionRequestFigurePageResult SessionRequestFigures(string sessionKey, int page, int limit, string order = "desc") =>
+        inner.SessionRequestFigures(sessionKey, page, limit, order);
 
     /// <inheritdoc />
-    public virtual SessionReconciliationFigurePageResult SessionReconciliationFigures(string sessionKey, int page, int limit) => inner.SessionReconciliationFigures(sessionKey, page, limit);
+    public virtual SessionReconciliationFigurePageResult SessionReconciliationFigures(string sessionKey, int page, int limit, string order = "desc") =>
+        inner.SessionReconciliationFigures(sessionKey, page, limit, order);
 
     /// <inheritdoc />
-    public virtual SessionProblemPageResult SessionProblems(string sessionKey, int page, int limit) => inner.SessionProblems(sessionKey, page, limit);
+    public virtual SessionProblemPageResult SessionProblems(string sessionKey, int page, int limit, string order = "desc") =>
+        inner.SessionProblems(sessionKey, page, limit, order);
 
     /// <inheritdoc />
     public virtual IReadOnlyList<StoredRequestPromptPreview> RequestPromptPreviews(string sessionKey, IReadOnlyCollection<string> requestSpanIds) => inner.RequestPromptPreviews(sessionKey, requestSpanIds);
@@ -159,5 +162,6 @@ internal abstract class DelegatingRelationalStoreReader : IRelationalStoreReader
     public virtual IReadOnlyList<StoredSkillListing> SessionSkillListings(string sessionKey) => inner.SessionSkillListings(sessionKey);
 
     /// <inheritdoc />
-    public virtual SessionKwSkillLoadPageResult SessionKwSkillLoads(string sessionKey, int page, int limit) => inner.SessionKwSkillLoads(sessionKey, page, limit);
+    public virtual SessionKwSkillLoadPageResult SessionKwSkillLoads(string sessionKey, int page, int limit, string order = "desc") =>
+        inner.SessionKwSkillLoads(sessionKey, page, limit, order);
 }

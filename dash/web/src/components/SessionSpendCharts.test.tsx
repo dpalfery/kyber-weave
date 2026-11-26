@@ -4,6 +4,7 @@ import { readFileSync } from 'node:fs'
 
 import {
   ContextCompositionChart,
+  MCP_SERVER_COLORS,
   SessionSpendCharts,
   TurnSpendChart,
   contextSegments,
@@ -1059,6 +1060,33 @@ describe('contextSegments — per-MCP-server bands', () => {
     expect(ids).not.toContain('tool_result_content')
     expect(ids).toContain('residual')
   })
+
+  it('uses a whole-session server colour map so legend and row agree (dbId 4704550866)', () => {
+    // observedServers is ordinal (alphabetical); row order is token-descending.
+    // Without a shared map, alpha is legend [0] but drawn [1].
+    const observedServers = ['alpha', 'beta']
+    const serverColors = Object.fromEntries(
+      observedServers.map((server, index) => [server, MCP_SERVER_COLORS[index % MCP_SERVER_COLORS.length]!]),
+    )
+    const row = {
+      buckets: {
+        system_prompt: 0,
+        instruction_context: 0,
+        tool_definitions: 6000,
+        conversation_history: 0,
+        tool_result_content: 0,
+        residual: 0,
+      },
+      servers: { beta: 5000, alpha: 1000 },
+    }
+
+    const segments = contextSegments(row, serverColors)
+    const alpha = segments.find((s) => s.id === 'mcp:alpha')
+    const beta = segments.find((s) => s.id === 'mcp:beta')
+
+    expect(alpha?.color).toBe(MCP_SERVER_COLORS[0])
+    expect(beta?.color).toBe(MCP_SERVER_COLORS[1])
+  })
 })
 
 describe('extractNormalizedContextTurns — server attribution', () => {
@@ -1159,5 +1187,275 @@ describe('SessionSpendCharts residual honesty (issue #187)', () => {
     const text = normalizedRenderText(React.createElement(ContextCompositionChart, { context: data }))
     expect(text).toContain('Residual: 0.0')
     expect(text).not.toContain('not measurable')
+  })
+})
+
+describe('ContextCompositionChart whole-session scaling, legend attribution, and Claude residual copy', () => {
+  it('builds legendSegments and hasServerAttribution from observedBuckets and observedServers when present', () => {
+    const context: ContextCompositionData = {
+      measurable: true,
+      contextLimit: 200000,
+      observedBuckets: ['system_prompt', 'instruction_context', 'tool_definitions', 'conversation_history'],
+      observedServers: ['context7', 'codegraph'],
+      residualTotal: 500,
+      measuredInputTotal: 5000,
+      turns: [
+        {
+          index: 1,
+          reported_input: 5000,
+          buckets: { conversation_history: 4500, residual: 500 },
+        },
+      ],
+    }
+
+    const element = React.createElement(ContextCompositionChart, { context })
+    const legendIds = findAllElements(
+      element,
+      (el) => typeof el.props['data-testid'] === 'string' && el.props['data-testid'].startsWith('context-legend-'),
+    ).map((el) => el.props['data-testid'])
+
+    expect(legendIds).toContain('context-legend-system_prompt')
+    expect(legendIds).toContain('context-legend-instruction_context')
+    expect(legendIds).toContain('context-legend-mcp:context7')
+    expect(legendIds).toContain('context-legend-mcp:codegraph')
+    expect(legendIds).toContain('context-legend-conversation_history')
+    expect(legendIds).toContain('context-legend-residual')
+    // Whole-session observedServers suppresses the missing-server-attribution caveat
+    expect(findAllElements(element, (el) => el.props['data-testid'] === 'context-caveat-no-servers')).toHaveLength(0)
+  })
+
+  it('shows no-server-attribution caveat when observedServers is explicitly empty', () => {
+    const context: ContextCompositionData = {
+      measurable: true,
+      observedBuckets: ['system_prompt', 'tool_definitions'],
+      observedServers: [],
+      turns: [
+        {
+          index: 1,
+          reported_input: 2000,
+          buckets: { system_prompt: 1000, tool_definitions: 1000 },
+        },
+      ],
+    }
+
+    const element = React.createElement(ContextCompositionChart, { context })
+    expect(findAllElements(element, (el) => el.props['data-testid'] === 'context-caveat-no-servers')).toHaveLength(1)
+  })
+
+  it('sizes Residual % from whole-session measuredInputTotal and residualTotal across different pages', () => {
+    const page1Context: ContextCompositionData = {
+      measurable: true,
+      measuredInputTotal: 10000,
+      residualTotal: 3000,
+      turns: [{ index: 1, reported_input: 5000, buckets: { system_prompt: 4500, residual: 500 } }],
+    }
+    const page2Context: ContextCompositionData = {
+      measurable: true,
+      measuredInputTotal: 10000,
+      residualTotal: 3000,
+      turns: [{ index: 2, reported_input: 5000, buckets: { system_prompt: 2500, residual: 2500 } }],
+    }
+
+    const page1Text = normalizedRenderText(React.createElement(ContextCompositionChart, { context: page1Context }))
+    const page2Text = normalizedRenderText(React.createElement(ContextCompositionChart, { context: page2Context }))
+    expect(page1Text).toMatch(/Residual: 30\.0\s*%/)
+    expect(page2Text).toMatch(/Residual: 30\.0\s*%/)
+  })
+
+  it('scales heatmap cell intensity by whole-session maxBucketTokens when present', () => {
+    clearHooks()
+    hookIndex = 0
+    const context: ContextCompositionData = {
+      measurable: true,
+      maxBucketTokens: 10000,
+      turns: [{ index: 1, reported_input: 2000, buckets: { system_prompt: 2000 } }],
+    }
+    const barsTree = (ContextCompositionChart as (p: Record<string, unknown>) => React.ReactElement)({ context })
+    const heatmapTab = findAllElements(barsTree, (el) => el.props['data-testid'] === 'tab-heatmap')[0]!
+    if (typeof heatmapTab.props.onClick === 'function') {
+      heatmapTab.props.onClick({ stopPropagation: vi.fn() } as { stopPropagation: () => void })
+    }
+    hookIndex = 0
+    const heatmapTree = (ContextCompositionChart as (p: Record<string, unknown>) => React.ReactElement)({ context })
+    const heatmapCells = findAllElements(
+      heatmapTree,
+      (el) =>
+        el.type === 'span' &&
+        typeof el.props.style === 'object' &&
+        el.props.style !== null &&
+        typeof (el.props.style as { backgroundColor?: string }).backgroundColor === 'string' &&
+        (el.props.style as { backgroundColor: string }).backgroundColor.includes('color-mix'),
+    )
+    // 2000 / 10000 = 0.2 -> Math.round(0.2 * 75 + 10) = 25%
+    expect(heatmapCells.length).toBeGreaterThan(0)
+    expect((heatmapCells[0]!.props.style as { backgroundColor: string }).backgroundColor).toContain('25%')
+  })
+
+  it('suppresses heavyDrift warning and explains omitted Claude system prompt & tool schemas in caveat and footer', () => {
+    const context: ContextCompositionData = {
+      measurable: true,
+      derivedCounts: true,
+      tokenizer: 'o200k_base',
+      tokenizers: [{ name: 'o200k_base', isModelOwn: false }],
+      tokenizerIsModelOwn: false,
+      measuredInputTotal: 10000,
+      residualTotal: 4500,
+      missingBuckets: ['system_prompt', 'tool_definitions'],
+      residualReasons: ['Claude Code transcripts omit the runtime system prompt and tool schemas.'],
+      turns: [
+        {
+          index: 1,
+          reported_input: 10000,
+          buckets: { conversation_history: 5500, residual: 4500 },
+        },
+      ],
+    }
+
+    const element = React.createElement(ContextCompositionChart, { context })
+    const caveat = findAllElements(element, (el) => el.props['data-testid'] === 'context-caveat')[0]!
+    const footer = findAllElements(element, (el) => el.props['data-testid'] === 'context-composition-footer')[0]!
+    const caveatText = normalizedRenderText(caveat)
+    const footerText = normalizedRenderText(footer)
+
+    expect(String(caveat.props.className)).not.toContain('border-amber-500/40')
+    expect(caveatText).not.toContain('proxy is a poor fit')
+    expect(caveatText).not.toContain("Treat this session's bucket sizes as a lower bound.")
+    expect(caveatText).toContain('Claude Code transcripts omit the runtime system prompt and tool schemas.')
+    expect(caveatText).toMatch(/system prompt/i)
+    expect(caveatText).toMatch(/tool definitions|tool schemas/i)
+    expect(footerText).toMatch(/system prompt/i)
+    expect(footerText).toMatch(/tool schemas|tool definitions/i)
+    expect(footerText).not.toContain('Lower residual values indicate higher precision message token tracking.')
+  })
+
+  it('renders shared contextPager across both Stacked Bars and Heatmap Matrix views', () => {
+    clearHooks()
+    hookIndex = 0
+    const context: ContextCompositionData = {
+      measurable: true,
+      turns: [{ index: 1, reported_input: 1000, buckets: { system_prompt: 900, residual: 100 } }],
+    }
+    const contextPager = {
+      page: 1,
+      limit: 25 as const,
+      total: 50,
+      onPageChange: vi.fn(),
+      limitOptions: [25, 50, 100] as const,
+      onLimitChange: vi.fn(),
+      order: 'desc' as const,
+      onOrderChange: vi.fn(),
+    }
+
+    const barsTree = (SessionSpendCharts as (p: Record<string, unknown>) => React.ReactElement)({
+      turns: [{ index: 0, fresh_input: 900, output: 100 }],
+      context,
+      contextPager,
+    })
+    expect(findAllElements(barsTree, (el) => el.props['data-testid'] === 'list-pager')).toHaveLength(1)
+
+    const contextEl = findAllElements(barsTree, (el) => el.type === ContextCompositionChart)[0]!
+    hookIndex = 0
+    const innerBars = (ContextCompositionChart as (p: Record<string, unknown>) => React.ReactElement)(contextEl.props)
+    const heatmapTab = findAllElements(innerBars, (el) => el.props['data-testid'] === 'tab-heatmap')[0]!
+    if (typeof heatmapTab.props.onClick === 'function') {
+      heatmapTab.props.onClick({ stopPropagation: vi.fn() } as { stopPropagation: () => void })
+    }
+    hookIndex = 0
+    const innerHeatmap = (ContextCompositionChart as (p: Record<string, unknown>) => React.ReactElement)(contextEl.props)
+    expect(findAllElements(innerHeatmap, (el) => el.props['data-testid'] === 'context-heatmap')).toHaveLength(1)
+    expect(findAllElements(innerHeatmap, (el) => el.props['data-testid'] === 'list-pager')).toHaveLength(1)
+  })
+
+  it('keeps Pager rendered with an empty-page message when turns is empty on a past-end page with total > 0', () => {
+    const context: ContextCompositionData = {
+      measurable: true,
+      contextLimit: 200000,
+      turns: [],
+    }
+    const contextPager = {
+      page: 4,
+      limit: 50 as const,
+      total: 128,
+      onPageChange: vi.fn(),
+      limitOptions: [25, 50, 100] as const,
+      onLimitChange: vi.fn(),
+      order: 'desc' as const,
+      onOrderChange: vi.fn(),
+    }
+
+    const element = React.createElement(ContextCompositionChart, { context, contextPager })
+    const text = normalizedRenderText(element)
+    expect(text).toContain('No turns on this page.')
+    expect(text).not.toContain('Context composition telemetry was not captured for this session.')
+    expect(findAllElements(element, (el) => el.props['data-testid'] === 'list-pager')).toHaveLength(1)
+    expect(findAllElements(element, (el) => el.props['data-testid'] === 'pager-prev')).toHaveLength(1)
+  })
+
+  it('preserves heavyDrift warning and standard drift footer when residualReasons only contains tokenizer_drift', () => {
+    const context: ContextCompositionData = {
+      measurable: true,
+      derivedCounts: true,
+      tokenizer: 'o200k_base',
+      tokenizers: [{ name: 'o200k_base', isModelOwn: false }],
+      tokenizerIsModelOwn: false,
+      measuredInputTotal: 10000,
+      residualTotal: 4500,
+      residualReasons: ['tokenizer_drift'],
+      turns: [
+        {
+          index: 1,
+          reported_input: 10000,
+          buckets: { conversation_history: 5500, residual: 4500 },
+        },
+      ],
+    }
+
+    const element = React.createElement(ContextCompositionChart, { context })
+    const caveat = findAllElements(element, (el) => el.props['data-testid'] === 'context-caveat')[0]!
+    const footer = findAllElements(element, (el) => el.props['data-testid'] === 'context-composition-footer')[0]!
+    const caveatText = normalizedRenderText(caveat)
+    const footerText = normalizedRenderText(footer)
+
+    expect(String(caveat.props.className)).toContain('border-amber-500/40')
+    expect(caveatText).toContain('proxy is a poor fit')
+    expect(caveatText).toContain("Treat this session's bucket sizes as a lower bound.")
+    expect(findAllElements(element, (el) => el.props['data-testid'] === 'context-caveat-omissions')).toHaveLength(0)
+    expect(footerText).toContain('Residual accounts for tokenizer drift, role delimiters, and unmeasured chat framing.')
+    expect(footerText).toContain('Lower residual values indicate higher precision message token tracking.')
+  })
+
+  it('handles measuredInputTotal null by falling back to page measured rows and 0 as not measurable', () => {
+    const nullTotalContext: ContextCompositionData = {
+      measurable: true,
+      measuredInputTotal: null,
+      residualTotal: null as unknown as undefined,
+      turns: [
+        {
+          index: 1,
+          reported_input: 5000,
+          buckets: { system_prompt: 4500, residual: 500 },
+        },
+      ],
+    }
+    const nullTotalText = normalizedRenderText(React.createElement(ContextCompositionChart, { context: nullTotalContext }))
+    expect(nullTotalText).toMatch(/Residual: 10\.0\s*%/)
+    expect(nullTotalText).not.toContain('not measurable')
+
+    const zeroTotalContext: ContextCompositionData = {
+      measurable: true,
+      measuredInputTotal: 0,
+      residualTotal: 0,
+      turns: [
+        {
+          index: 1,
+          buckets: { system_prompt: 1200 },
+        },
+      ],
+    }
+    const zeroTotalElement = React.createElement(ContextCompositionChart, { context: zeroTotalContext })
+    const zeroTotalText = normalizedRenderText(zeroTotalElement)
+    expect(zeroTotalText).toContain('not measurable')
+    expect(zeroTotalText).not.toContain('0.0%')
+    expect(findAllElements(zeroTotalElement, (el) => el.props['data-testid'] === 'context-caveat-unmeasured-residual')).toHaveLength(1)
   })
 })

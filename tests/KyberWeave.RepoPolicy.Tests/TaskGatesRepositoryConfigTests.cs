@@ -163,18 +163,23 @@ public sealed class TaskGatesRepositoryConfigTests
     }
 
     /// <summary>
-    /// A C# change under KyberDash builds and tests KyberDash.
+    /// A C# change under KyberDash builds and tests KyberDash and never triggers KyberWeave solution or policy gates.
     /// </summary>
     /// <remarks>
     /// KyberDash's server is its own solution under <c>dash/server</c>. The KyberWeave gates cannot check it: the
     /// solution they build does not contain it, and narrowing their globs off <c>dash/</c> is exactly what stops
-    /// a dash change from running ten minutes of KyberWeave tests. Without these gates a dash C# change is built
-    /// and tested by nothing before the council runs.
+    /// a dash change from running ten minutes of KyberWeave tests or running <c>test-policy</c> without building
+    /// <c>KyberWeave.sln</c>. Without these gates a dash C# change is built and tested by nothing before the council runs.
     /// </remarks>
     [Fact]
     public void CsharpRunsTheKyberDashGatesForAKyberDashChange()
     {
-        IReadOnlyList<ReviewTaskGate> gates = TechnologyGatesFor(TechnologyCsharp);
+        KyberWeaveConfig config = Load();
+        (string Key, IReadOnlyList<ReviewTaskGate> Gates)[] gateSets =
+        [
+            (TechnologyCsharp, TechnologyGatesFor(TechnologyCsharp)),
+            .. DeveloperTiers.Select(tier => (tier, TaskGatesFor(config, tier)))
+        ];
 
         string[] changes =
         [
@@ -182,28 +187,36 @@ public sealed class TaskGatesRepositoryConfigTests
             "dash/server.tests/KyberDash.Domain.Tests/XTests.cs"
         ];
 
-        foreach (string changed in changes)
+        foreach ((string key, IReadOnlyList<ReviewTaskGate> gates) in gateSets)
         {
-            ReviewTaskGate[] selected = gates
-                .Where(gate => gate.Include.Any(pattern => PathGlob.IsMatch(pattern, changed)))
-                .ToArray();
-            string[] selectedIds = selected.Select(gate => gate.Id).ToArray();
+            foreach (string changed in changes)
+            {
+                ReviewTaskGate[] selected = gates
+                    .Where(gate => gate.Include.Any(pattern => PathGlob.IsMatch(pattern, changed)))
+                    .ToArray();
+                string[] selectedIds = selected.Select(gate => gate.Id).ToArray();
 
-            foreach (string id in KyberDashGateIds)
+                foreach (string id in KyberDashGateIds)
+                    Assert.True(
+                        selectedIds.Contains(id, StringComparer.Ordinal),
+                        $"'{key}' does not select the KyberDash gate '{id}' for '{changed}', so a dash C# change " +
+                        "is not built and tested before review.");
+
+                string[] solutionGates = selected
+                    .Where(gate => gate.Run.Any(argument => string.Equals(argument, "KyberWeave.sln", StringComparison.Ordinal)))
+                    .Select(gate => gate.Id)
+                    .ToArray();
+
                 Assert.True(
-                    selectedIds.Contains(id, StringComparer.Ordinal),
-                    $"'{changed}' does not select the KyberDash gate '{id}', so a dash C# change is not built and " +
-                    "tested before review.");
+                    solutionGates.Length == 0,
+                    $"'{key}' selects the KyberWeave solution gates {string.Join(", ", solutionGates)} for " +
+                    $"'{changed}'. A dash change must not run the KyberWeave solution's build, format or test gates.");
 
-            string[] solutionGates = selected
-                .Where(gate => gate.Run.Any(argument => string.Equals(argument, "KyberWeave.sln", StringComparison.Ordinal)))
-                .Select(gate => gate.Id)
-                .ToArray();
-
-            Assert.True(
-                solutionGates.Length == 0,
-                $"'{changed}' selects the KyberWeave solution gates {string.Join(", ", solutionGates)}. A dash change " +
-                "must not run the KyberWeave solution's build, format or test gates.");
+                Assert.False(
+                    selectedIds.Contains("test-policy", StringComparer.Ordinal),
+                    $"'{key}' selects 'test-policy' for '{changed}', which would run KyberWeave policy tests without " +
+                    "building KyberWeave.sln.");
+            }
         }
     }
 
@@ -231,17 +244,34 @@ public sealed class TaskGatesRepositoryConfigTests
         Assert.Contains("format-whitespace", selected, StringComparer.Ordinal);
     }
 
-    /// <summary>The <c>csharp</c> technology runs the repository-policy tests for a policy-test change.</summary>
+    /// <summary>The <c>csharp</c> technology runs the repository-policy tests for policy-related changes without <c>--no-build</c>.</summary>
     /// <remarks>
-    /// The review configuration and its tests are repository policy. Without this gate a C# task that edits them
-    /// resolves no test that reads them, so a broken expectation reaches review with no RED or GREEN evidence.
+    /// The review configuration, shell scripts, and policy tests are repository policy. Without this gate a C# task
+    /// that edits them resolves no test that reads them, and omitting <c>--no-build</c> lets policy-only edits build
+    /// <c>KyberWeave.RepoPolicy.Tests</c> when <c>dotnet-build</c> is skipped.
     /// </remarks>
     [Fact]
     public void CsharpRunsThePolicyTestsForAPolicyTestChange()
     {
-        string[] selected = SelectedIds(TechnologyGatesFor(TechnologyCsharp), "tests/KyberWeave.RepoPolicy.Tests/X.cs");
+        IReadOnlyList<ReviewTaskGate> gates = TechnologyGatesFor(TechnologyCsharp);
+        string[] policyChanges =
+        [
+            "tests/KyberWeave.RepoPolicy.Tests/X.cs",
+            ".kyber-weave/kyber-weave.yml",
+            "scripts/fast-loop.sh"
+        ];
 
-        Assert.Contains("test-policy", selected, StringComparer.Ordinal);
+        foreach (string changed in policyChanges)
+        {
+            string[] selected = SelectedIds(gates, changed);
+
+            Assert.Contains("test-policy", selected, StringComparer.Ordinal);
+        }
+
+        ReviewTaskGate policyGate = Assert.Single(
+            gates,
+            gate => string.Equals(gate.Id, "test-policy", StringComparison.Ordinal));
+        Assert.DoesNotContain("--no-build", policyGate.Run, StringComparer.Ordinal);
     }
 
     private static IReadOnlyList<ReviewTaskGate> TechnologyGatesFor(string technology)

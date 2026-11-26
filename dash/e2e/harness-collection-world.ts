@@ -22,9 +22,9 @@ export const OPENCODE_REPLAY_SESSION_ID = 'ses_e74c398c7ffeVajzhRWZNgfR2n'
 export const SESSION_PAGE_LIMIT = 100
 
 /**
- * The widest page a session section route serves: `KyberBridgeEngine.DefaultSectionPageLimit`,
- * which every `/api/kyber/session/{id}/<section>` route clamps `limit` to. A read that must see
- * a whole section walks its pages.
+ * The page size a session section route accepts. Routes serve `25`, `50` or `100` and reject any
+ * other `limit` with 400 rather than clamping it, so a caller that walks a section asks for this
+ * one explicitly.
  */
 export const SECTION_PAGE_LIMIT = 25
 

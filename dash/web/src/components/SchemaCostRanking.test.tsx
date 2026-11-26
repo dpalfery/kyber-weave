@@ -323,6 +323,26 @@ describe('SchemaCostRanking: on the section page and its aggregate', () => {
     expect(html).toContain('not measurable')
   })
 
+  it('preserves server-provided tools order without client-side re-sorting', () => {
+    const html = renderHtml(
+      <SchemaCostRanking
+        tools={[
+          { name: 'alpha_low', server: 'fs', total_schema_cost: 100, invoked: true },
+          { name: 'zeta_high', server: 'git', total_schema_cost: 900, invoked: false },
+          { name: 'unmeasured_mid', server: 'fs', total_schema_cost: null, invoked: true },
+        ]}
+      />,
+    )
+    const alphaIdx = html.indexOf('data-testid="tool-row-alpha_low"')
+    const zetaIdx = html.indexOf('data-testid="tool-row-zeta_high"')
+    const unmeasuredIdx = html.indexOf('data-testid="tool-row-unmeasured_mid"')
+    expect(alphaIdx).toBeGreaterThan(-1)
+    expect(zetaIdx).toBeGreaterThan(-1)
+    expect(unmeasuredIdx).toBeGreaterThan(-1)
+    expect(alphaIdx).toBeLessThan(zetaIdx)
+    expect(zetaIdx).toBeLessThan(unmeasuredIdx)
+  })
+
   it('pages the ranking at 25 rows and reports the page the viewer turned to', () => {
     const onPageChange = vi.fn()
     const props: SectionRankingProps = {
@@ -339,13 +359,66 @@ describe('SchemaCostRanking: on the section page and its aggregate', () => {
     expect(onPageChange).toHaveBeenCalledWith(2)
   })
 
-  it('renders no pager while the whole list fits one page', () => {
+  it('forwards page-size and sort-order controls even on a single non-empty page', () => {
+    const onLimitChange = vi.fn()
+    const onOrderChange = vi.fn()
     const props: SectionRankingProps = {
       tools: pageRows,
       aggregate: wholeRanking,
-      pager: { page: 1, total: 2, limit: 25, onPageChange: () => {} },
+      pager: {
+        page: 1,
+        total: 2,
+        limit: 25,
+        limitOptions: [25, 50, 100],
+        onLimitChange,
+        order: 'desc',
+        onOrderChange,
+        onPageChange: () => {},
+      },
     }
-    const html = renderHtml(<SchemaCostRanking {...props} />)
-    expect(html).not.toContain('data-testid="list-pager"')
+    const tree = SchemaCostRanking(props)
+    expect(findElementByTestId(tree, 'list-pager')).not.toBeNull()
+    expect(findElementByTestId(tree, 'pager-next')).toBeNull()
+    expect(findElementByTestId(tree, 'pager-prev')).toBeNull()
+
+    const limitSelect = findElementByTestId(tree, 'pager-limit')
+    expect(limitSelect).not.toBeNull()
+    ;(limitSelect?.props.onChange as (e: { target: { value: string } }) => void)({ target: { value: '50' } })
+    ;(limitSelect?.props.onChange as (e: { target: { value: string } }) => void)({ target: { value: '100' } })
+    expect(onLimitChange.mock.calls).toEqual([[50], [100]])
+
+    const orderButton = findElementByTestId(tree, 'pager-order')
+    expect(orderButton).not.toBeNull()
+    expect(orderButton?.props.children).toBe('Newest first')
+    ;(orderButton?.props.onClick as () => void)()
+    expect(onOrderChange).toHaveBeenCalledWith('asc')
+
+    const ascTree = SchemaCostRanking({
+      ...props,
+      pager: { ...props.pager!, order: 'asc' },
+    })
+    const ascButton = findElementByTestId(ascTree, 'pager-order')
+    expect(ascButton?.props.children).toBe('Oldest first')
+    ;(ascButton?.props.onClick as () => void)()
+    expect(onOrderChange).toHaveBeenCalledWith('desc')
+  })
+
+  it('hides the pager cleanly when total is 0 or tools are empty', () => {
+    const emptyHtml = renderHtml(
+      <SchemaCostRanking
+        tools={[]}
+        pager={{
+          page: 1,
+          total: 0,
+          limit: 25,
+          limitOptions: [25, 50, 100],
+          onLimitChange: () => {},
+          order: 'desc',
+          onOrderChange: () => {},
+          onPageChange: () => {},
+        }}
+      />,
+    )
+    expect(emptyHtml).not.toContain('data-testid="list-pager"')
   })
 })

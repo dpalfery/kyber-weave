@@ -67,11 +67,7 @@ export function SessionRequestsSection({ sessionId, className }: SessionRequests
             })}
           </div>
           <Pager
-            page={requests.page}
-            limit={data.limit}
-            total={data.total}
-            onPageChange={requests.setPage}
-            loading={requests.isFetching}
+            {...requests.pagerProps}
             ariaLabel="User request pages"
           />
         </>

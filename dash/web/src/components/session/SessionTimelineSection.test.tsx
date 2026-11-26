@@ -66,6 +66,7 @@ function mount(
 
 afterEach(() => {
   cleanup()
+  window.sessionStorage.clear()
   vi.unstubAllGlobals()
 })
 
@@ -156,6 +157,32 @@ describe('SessionTimelineSection states', () => {
     expect(empty.textContent).toMatch(/no timeline spans recorded/i)
   })
 
+  it('keeps pager when a later page is empty but total remains (dbId 4704550871)', async () => {
+    const topRows = Array.from({ length: 25 }, (_, i) => ({
+      ...ROOT_NODE,
+      spanId: `top-${i}`,
+      childCount: 0,
+    }))
+    const fetchMock = vi.fn((input: unknown) => {
+      const url = String(input)
+      const page = Number(new URL(url, 'http://localhost').searchParams.get('page') ?? '1')
+      if (page === 2) {
+        return Promise.resolve(jsonResponse({ ...timelinePage([], 38400), total: 30, page: 2, offset: 25 }))
+      }
+      return Promise.resolve(jsonResponse({ ...timelinePage(topRows, 38400), total: 30, page: 1, offset: 0 }))
+    })
+    vi.stubGlobal('fetch', fetchMock)
+    mount(() => {})
+    const section = await screen.findByTestId('execution-timeline-section')
+    fireEvent.click(within(section).getByTestId('pager-next'))
+
+    await waitFor(() => expect(within(section).queryByTestId('timeline-node')).toBeNull())
+    expect(within(section).getByTestId('list-pager')).toBeTruthy()
+    expect(within(section).queryByTestId('timeline-empty')).toBeNull()
+    expect(screen.queryByText(/No timeline spans recorded/i)).toBeNull()
+    expect(within(section).getByText(/No spans on this page/i)).toBeTruthy()
+  })
+
   it('styles status badges by their failure and success classes', async () => {
     const failing = { ...ROOT_NODE, spanId: 'span-bad', name: 'Read', status: 'error' }
     const succeeding = { ...ROOT_NODE, spanId: 'span-good', name: 'Bash', status: 'ok' }
@@ -228,16 +255,18 @@ describe('SessionTimelineSection: levels load on expand and page', () => {
 
   function levelPage(
     nodes: unknown[],
-    opts: { total?: number; page?: number; parent?: string | null; endMs?: number } = {},
+    opts: { total?: number; page?: number; limit?: number; order?: string; parent?: string | null; endMs?: number } = {},
   ) {
+    const limit = opts.limit ?? 25
     return {
       sessionId: SESSION_ID,
       parent: opts.parent ?? null,
       nodes,
       total: opts.total ?? nodes.length,
-      limit: 25,
-      offset: ((opts.page ?? 1) - 1) * 25,
+      limit,
+      offset: ((opts.page ?? 1) - 1) * limit,
       page: opts.page ?? 1,
+      ...(opts.order ? { order: opts.order } : {}),
       bounds: { startMs: 0, endMs: opts.endMs ?? 38400 },
     }
   }
@@ -259,10 +288,10 @@ describe('SessionTimelineSection: levels load on expand and page', () => {
     fireEvent.click(within(section).getByTestId('timeline-node-expand'))
     await within(section).findAllByTestId('timeline-node')
     const urls = fetchMock.mock.calls.map((call) => String(call[0]))
-    expect(urls.some((url) => url.endsWith('/timeline?page=1&limit=25&parent=span%2Fone'))).toBe(true)
+    expect(urls.some((url) => url.endsWith('/timeline?page=1&limit=25&order=desc&parent=span%2Fone'))).toBe(true)
   })
 
-  it('pages a level past its first 25 rows on demand', async () => {
+  it('pages the top level through the shared pager instead of a root load-more button', async () => {
     const topRows = Array.from({ length: 25 }, (_, i) => ({
       ...ROOT_NODE,
       spanId: `top-${i}`,
@@ -281,11 +310,42 @@ describe('SessionTimelineSection: levels load on expand and page', () => {
     mount(() => {})
     const section = await screen.findByTestId('execution-timeline-section')
     expect(within(section).getAllByTestId('timeline-node').length).toBe(25)
+    expect(within(section).queryByTestId('timeline-level-more')).toBeNull()
     expect(fetchMock.mock.calls.length).toBe(1)
-    fireEvent.click(within(section).getByTestId('timeline-level-more'))
-    await waitFor(() => expect(within(section).getAllByTestId('timeline-node').length).toBe(30))
+    const pager = within(section).getByTestId('list-pager')
+    fireEvent.click(within(pager).getByTestId('pager-next'))
+    await waitFor(() => expect(within(section).getAllByTestId('timeline-node').length).toBe(5))
     const urls = fetchMock.mock.calls.map((call) => String(call[0]))
-    expect(urls.some((url) => url.endsWith('/timeline?page=2&limit=25'))).toBe(true)
+    expect(urls.some((url) => url.endsWith('/timeline?page=2&limit=25&order=desc'))).toBe(true)
+  })
+
+  it('preserves child timeline-level-more to page expanded child levels past 25', async () => {
+    const nested = { ...ROOT_NODE, spanId: 'span/one', childCount: 30 }
+    const childPage1 = Array.from({ length: 25 }, (_, i) => ({
+      ...CHILD_NODE,
+      spanId: `child-${i}`,
+    }))
+    const childPage2 = Array.from({ length: 5 }, (_, i) => ({
+      ...CHILD_NODE,
+      spanId: `child-${25 + i}`,
+    }))
+    const fetchMock = stubTimelineRoutes((url) => {
+      if (url.includes('parent=span%2Fone')) {
+        return url.includes('page=2')
+          ? levelPage(childPage2, { total: 30, page: 2, parent: 'span/one' })
+          : levelPage(childPage1, { total: 30, page: 1, parent: 'span/one' })
+      }
+      return levelPage([nested], { total: 1 })
+    })
+    mount(() => {})
+    const section = await screen.findByTestId('execution-timeline-section')
+    fireEvent.click(within(section).getByTestId('timeline-node-expand'))
+    await waitFor(() => expect(within(section).getAllByTestId('timeline-node').length).toBe(26))
+
+    fireEvent.click(within(section).getByTestId('timeline-level-more'))
+    await waitFor(() => expect(within(section).getAllByTestId('timeline-node').length).toBe(31))
+    const urls = fetchMock.mock.calls.map((call) => String(call[0]))
+    expect(urls.some((url) => url.endsWith('/timeline?page=2&limit=25&order=desc&parent=span%2Fone'))).toBe(true)
   })
 
   it('lists every loaded node in the duration view, scaled to the bounds', async () => {
@@ -335,8 +395,8 @@ describe('SessionTimelineSection: levels load on expand and page', () => {
     )
     const section = await screen.findByTestId('execution-timeline-section')
     expect(within(section).getAllByTestId('timeline-node').length).toBe(25)
-    fireEvent.click(within(section).getByTestId('timeline-level-more'))
-    await waitFor(() => expect(within(section).getAllByTestId('timeline-node').length).toBe(30))
+    fireEvent.click(within(section).getByTestId('pager-next'))
+    await waitFor(() => expect(within(section).getAllByTestId('timeline-node').length).toBe(5))
     expect(fetchMock.mock.calls.some(([url]) => String(url).includes('page=2'))).toBe(true)
     expect(fetchMock.mock.calls.some(([url]) => String(url).includes(SESSION_B))).toBe(false)
 
@@ -354,7 +414,7 @@ describe('SessionTimelineSection: levels load on expand and page', () => {
     await waitFor(() => {
       const urlsForB = fetchMock.mock.calls.map((call) => String(call[0])).filter((url) => url.includes(SESSION_B))
       expect(urlsForB.length).toBeGreaterThan(0)
-      expect(urlsForB.every((url) => url.endsWith('/timeline?page=1&limit=25'))).toBe(true)
+      expect(urlsForB.every((url) => url.endsWith('/timeline?page=1&limit=25&order=desc'))).toBe(true)
     })
   })
 
@@ -395,8 +455,233 @@ describe('SessionTimelineSection: levels load on expand and page', () => {
     )
     // The new session's tree is unexpanded: only its own top level, page 1.
     await waitFor(() => expect(urlsForB().length).toBeGreaterThan(0))
-    expect(urlsForB().every((url) => url.endsWith('/timeline?page=1&limit=25'))).toBe(true)
+    expect(urlsForB().every((url) => url.endsWith('/timeline?page=1&limit=25&order=desc'))).toBe(true)
     section = await screen.findByTestId('execution-timeline-section')
     expect(within(section).getAllByTestId('timeline-node').length).toBe(1)
+  })
+})
+
+describe('SessionTimelineSection shared pager, child propagation, and state resets', () => {
+  const CHILD_NODE = {
+    spanId: 'child-1',
+    parentId: 'root-span-1',
+    startMs: 10000,
+    durationMs: 5000,
+    kind: 'tool',
+    name: 'Read',
+    status: 'ok',
+    attributes: {},
+    isSubagent: false,
+    isAuxiliary: false,
+    cost: { basis: 'none', status: '—' },
+    childCount: 0,
+  }
+
+  function stubDynamicRoutes(): ReturnType<typeof vi.fn> {
+    const fetchMock = vi.fn((input: unknown) => {
+      const url = String(input)
+      const parsed = new URL(url, 'http://localhost')
+      const page = Number(parsed.searchParams.get('page') ?? '1')
+      const limit = Number(parsed.searchParams.get('limit') ?? '25')
+      const order = parsed.searchParams.get('order') ?? 'desc'
+      const parent = parsed.searchParams.get('parent')
+
+      if (parent === 'root-span-1') {
+        const count = page === 1 ? limit : 5
+        const nodes = Array.from({ length: count }, (_, i) => ({
+          ...CHILD_NODE,
+          spanId: `child-${order}-p${page}-${i}`,
+          name: `Child-${order}-p${page}-${i}`,
+        }))
+        return Promise.resolve(
+          jsonResponse({
+            sessionId: SESSION_ID,
+            parent,
+            nodes,
+            total: limit + 5,
+            limit,
+            offset: (page - 1) * limit,
+            page,
+            order,
+            bounds: { startMs: 0, endMs: 38400 },
+          }),
+        )
+      }
+
+      const nodes = [
+        {
+          ...ROOT_NODE,
+          spanId: 'root-span-1',
+          name: `Root-${order}-p${page}-limit${limit}`,
+          childCount: limit + 5,
+        },
+      ]
+      return Promise.resolve(
+        jsonResponse({
+          sessionId: SESSION_ID,
+          parent: null,
+          nodes,
+          total: 120,
+          limit,
+          offset: (page - 1) * limit,
+          page,
+          order,
+          bounds: { startMs: 0, endMs: 38400 },
+        }),
+      )
+    })
+    vi.stubGlobal('fetch', fetchMock)
+    return fetchMock
+  }
+
+  it('shows limit and order controls on a single non-empty page and hides pager when empty', async () => {
+    stubFetch(() => jsonResponse(timelinePage([ROOT_NODE], 38400)))
+    const view = mount(() => {})
+    const section = await screen.findByTestId('execution-timeline-section')
+    const pager = within(section).getByTestId('list-pager')
+    expect(within(pager).getByTestId('pager-limit')).toBeTruthy()
+    expect(within(pager).getByTestId('pager-order').textContent).toBe('Newest first')
+    expect(within(pager).queryByTestId('pager-prev')).toBeNull()
+
+    fireEvent.click(within(section).getByTestId('timeline-tab-bars'))
+    expect(within(section).getByTestId('list-pager')).toBeTruthy()
+
+    view.unmount()
+    stubFetch(() => jsonResponse(timelinePage([], 0)))
+    mount(() => {})
+    await screen.findByTestId('timeline-empty')
+    expect(screen.queryByTestId('list-pager')).toBeNull()
+  })
+
+  it('shares <Pager> across Call Tree and Duration Timeline and supports 25/50/100 + order toggle resetting to page 1', async () => {
+    const fetchMock = stubDynamicRoutes()
+    mount(() => {})
+    let section = await screen.findByTestId('execution-timeline-section')
+
+    // Page size 25 -> 50 -> 100 resets to page 1 and persists
+    fireEvent.click(within(section).getByTestId('pager-next'))
+    await waitFor(() =>
+      expect(fetchMock.mock.calls.some(([url]) => String(url).includes('/timeline?page=2&limit=25&order=desc'))).toBe(true),
+    )
+
+    fireEvent.change(within(section).getByTestId('pager-limit'), { target: { value: '50' } })
+    await waitFor(() =>
+      expect(fetchMock.mock.calls.some(([url]) => String(url).includes('/timeline?page=1&limit=50&order=desc'))).toBe(true),
+    )
+    // Scope changes intentionally remove placeholder rows. Reacquire the
+    // section after its loading branch has settled; the old DOM node is stale.
+    await screen.findByText('Root-desc-p1-limit50')
+    section = screen.getByTestId('execution-timeline-section')
+    expect((within(section).getByTestId('pager-limit') as HTMLSelectElement).value).toBe('50')
+    expect(window.sessionStorage.getItem('kyberdash:session-section:limit:timeline')).toBe('50')
+
+    fireEvent.change(within(section).getByTestId('pager-limit'), { target: { value: '100' } })
+    await waitFor(() =>
+      expect(fetchMock.mock.calls.some(([url]) => String(url).includes('/timeline?page=1&limit=100&order=desc'))).toBe(true),
+    )
+    await screen.findByText('Root-desc-p1-limit100')
+    section = screen.getByTestId('execution-timeline-section')
+    expect((within(section).getByTestId('pager-limit') as HTMLSelectElement).value).toBe('100')
+    expect(window.sessionStorage.getItem('kyberdash:session-section:limit:timeline')).toBe('100')
+
+    // Switch to Duration Timeline and verify paging + order toggle reset to page 1
+    fireEvent.click(within(section).getByTestId('timeline-tab-bars'))
+    expect(within(section).getByTestId('timeline-bars-view')).toBeTruthy()
+    fireEvent.click(within(section).getByTestId('pager-next'))
+    await waitFor(() =>
+      expect(fetchMock.mock.calls.some(([url]) => String(url).includes('/timeline?page=2&limit=100&order=desc'))).toBe(true),
+    )
+    await waitFor(() =>
+      expect(within(section).getByTestId('timeline-bars-view').textContent).toContain('Root-desc-p2'),
+    )
+
+    fireEvent.click(within(section).getByTestId('pager-order'))
+    await waitFor(() =>
+      expect(fetchMock.mock.calls.some(([url]) => String(url).includes('/timeline?page=1&limit=100&order=asc'))).toBe(true),
+    )
+    await screen.findByText('Root-asc-p1-limit100')
+    section = screen.getByTestId('execution-timeline-section')
+    expect(within(section).getByTestId('pager-order').textContent).toBe('Oldest first')
+    expect(within(section).getByTestId('timeline-bars-view').textContent).toContain('Root-asc-p1-limit100')
+  })
+
+  it('forwards active limit and order to child queries and resets expandedIds and levelPages on limit, order, and page changes', async () => {
+    const fetchMock = stubDynamicRoutes()
+    mount(() => {})
+    let section = await screen.findByTestId('execution-timeline-section')
+
+    // Change limit=50 and order=asc first
+    fireEvent.change(within(section).getByTestId('pager-limit'), { target: { value: '50' } })
+    await waitFor(() =>
+      expect(fetchMock.mock.calls.some(([url]) => String(url).includes('/timeline?page=1&limit=50&order=desc'))).toBe(true),
+    )
+    await screen.findByText('Root-desc-p1-limit50')
+    section = screen.getByTestId('execution-timeline-section')
+    expect((within(section).getByTestId('pager-limit') as HTMLSelectElement).value).toBe('50')
+    await waitFor(() => expect((within(section).getByTestId('pager-order') as HTMLButtonElement).disabled).toBe(false))
+    fireEvent.click(within(section).getByTestId('pager-order'))
+    await waitFor(() =>
+      expect(fetchMock.mock.calls.some(([url]) => String(url).includes('/timeline?page=1&limit=50&order=asc'))).toBe(true),
+    )
+    await screen.findByText('Root-asc-p1-limit50')
+    section = screen.getByTestId('execution-timeline-section')
+    expect(within(section).getByTestId('pager-order').textContent).toBe('Oldest first')
+    await waitFor(() => expect((within(section).getByTestId('pager-order') as HTMLButtonElement).disabled).toBe(false))
+
+    // Expand root-span-1 and load child page 2
+    fireEvent.click(within(section).getByTestId('timeline-node-expand'))
+    await waitFor(() => expect(within(section).getAllByTestId('timeline-node').length).toBe(51))
+    expect(
+      fetchMock.mock.calls.some(([url]) => String(url).includes('/timeline?page=1&limit=50&order=asc&parent=root-span-1')),
+    ).toBe(true)
+
+    fireEvent.click(within(section).getByTestId('timeline-level-more'))
+    await waitFor(() => expect(within(section).getAllByTestId('timeline-node').length).toBe(56))
+    expect(
+      fetchMock.mock.calls.some(([url]) => String(url).includes('/timeline?page=2&limit=50&order=asc&parent=root-span-1')),
+    ).toBe(true)
+
+    // Root page change resets BOTH expandedIds and levelPages
+    fireEvent.click(within(section).getByTestId('pager-next'))
+    await waitFor(() =>
+      expect(fetchMock.mock.calls.some(([url]) => String(url).includes('/timeline?page=2&limit=50&order=asc'))).toBe(true),
+    )
+    await screen.findByText('Root-asc-p2-limit50')
+    section = screen.getByTestId('execution-timeline-section')
+    await waitFor(() => expect(within(section).getAllByTestId('timeline-node').length).toBe(1))
+    expect(within(section).getByTestId('timeline-node-expand').getAttribute('aria-expanded')).toBe('false')
+
+    // Re-expand on page 2 -> only child page 1 is requested (levelPages was reset)
+    const childPage2CallsBeforeReexpand = fetchMock.mock.calls.filter(([url]) =>
+      String(url).includes('page=2&limit=50&order=asc&parent=root-span-1'),
+    ).length
+    fireEvent.click(within(section).getByTestId('timeline-node-expand'))
+    await waitFor(() => expect(within(section).getAllByTestId('timeline-node').length).toBe(51))
+    const childPage2CallsAfterReexpand = fetchMock.mock.calls.filter(([url]) =>
+      String(url).includes('page=2&limit=50&order=asc&parent=root-span-1'),
+    ).length
+    expect(childPage2CallsAfterReexpand).toBe(childPage2CallsBeforeReexpand)
+
+    // Limit change resets expandedIds
+    fireEvent.change(within(section).getByTestId('pager-limit'), { target: { value: '25' } })
+    await waitFor(() =>
+      expect(fetchMock.mock.calls.some(([url]) => String(url).includes('/timeline?page=1&limit=25&order=asc'))).toBe(true),
+    )
+    await screen.findByText('Root-asc-p1-limit25')
+    section = screen.getByTestId('execution-timeline-section')
+    await waitFor(() => expect(within(section).getAllByTestId('timeline-node').length).toBe(1))
+    expect(within(section).getByTestId('timeline-node-expand').getAttribute('aria-expanded')).toBe('false')
+
+    // Expand again, then order change resets expandedIds
+    fireEvent.click(within(section).getByTestId('timeline-node-expand'))
+    await waitFor(() => expect(within(section).getAllByTestId('timeline-node').length).toBe(26))
+    fireEvent.click(within(section).getByTestId('pager-order'))
+    await waitFor(() =>
+      expect(fetchMock.mock.calls.some(([url]) => String(url).includes('/timeline?page=1&limit=25&order=desc'))).toBe(true),
+    )
+    await screen.findByText('Root-desc-p1-limit25')
+    section = screen.getByTestId('execution-timeline-section')
+    await waitFor(() => expect(within(section).getAllByTestId('timeline-node').length).toBe(1))
+    expect(within(section).getByTestId('timeline-node-expand').getAttribute('aria-expanded')).toBe('false')
   })
 })

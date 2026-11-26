@@ -121,19 +121,29 @@ public class MinimalApiEndpointTests
         host.Builder.Query.Verify(q => q.GetSessionPage(1, 100, null, null), Times.Once);
     }
 
-    [Fact]
-    public async Task SectionRoutesClampTheLimitToTwentyFive()
+    [Theory]
+    [InlineData("/api/kyber/session/sess-1/requests?limit=500&page=3")]
+    [InlineData("/api/kyber/session/sess-1/requests?limit=10")]
+    [InlineData("/api/kyber/session/sess-1/charts?limit=500")]
+    [InlineData("/api/kyber/session/sess-1/charts?limit=10")]
+    [InlineData("/api/kyber/session/sess-1/requests?order=bad")]
+    [InlineData("/api/kyber/session/sess-1/requests?order=%20")]
+    [InlineData("/api/kyber/session/sess-1/charts?order=sideways")]
+    public async Task SectionRoutesRejectInvalidLimitAndOrderWithBadRequest(string requestPath)
     {
         await using Host host = await Host.StartAsync();
 
-        HttpResponseMessage response = await host.Client.GetAsync(new Uri("/api/kyber/session/sess-1/requests?limit=500&page=3", UriKind.Relative));
+        HttpResponseMessage response = await host.Client.GetAsync(new Uri(requestPath, UriKind.Relative));
 
-        Assert.Equal(HttpStatusCode.NotFound, response.StatusCode);
-        host.Builder.Query.Verify(q => q.GetSessionRequests("sess-1", 3, 25), Times.Once);
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+        using JsonDocument body = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
+        Assert.False(string.IsNullOrWhiteSpace(body.RootElement.GetProperty("error").GetString()));
+        Assert.Empty(host.Builder.Query.Invocations);
     }
 
     [Theory]
     [InlineData("/api/kyber/session/%20/subagents")]
+    [InlineData("/api/kyber/session/%20/charts")]
     [InlineData("/api/kyber/session/%20/requests")]
     [InlineData("/api/kyber/session/%20/reconciliation")]
     [InlineData("/api/kyber/session/%20/problems")]
@@ -214,8 +224,17 @@ public class MinimalApiEndpointTests
         await using Host host = await Host.StartAsync(builder =>
         {
             builder.Query
-                .Setup(q => q.GetSessionCharts("sess-1"))
-                .Returns(JsonSerializer.SerializeToElement(new { turns = Array.Empty<object>(), context = new { measurable = false } }));
+                .Setup(q => q.GetSessionCharts("sess-1", 1, 25, "desc"))
+                .Returns(JsonSerializer.SerializeToElement(new
+                {
+                    turns = Array.Empty<object>(),
+                    context = new { measurable = false },
+                    total = 0,
+                    limit = 25,
+                    offset = 0,
+                    page = 1,
+                    order = "desc",
+                }));
         });
 
         HttpResponseMessage response = await host.Client.GetAsync(new Uri("/api/kyber/session/sess-1/charts", UriKind.Relative));
@@ -225,7 +244,12 @@ public class MinimalApiEndpointTests
         using JsonDocument body = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
         Assert.Equal(JsonValueKind.Array, body.RootElement.GetProperty("turns").ValueKind);
         Assert.Equal(JsonValueKind.Object, body.RootElement.GetProperty("context").ValueKind);
-        host.Builder.Query.Verify(q => q.GetSessionCharts("sess-1"), Times.Once);
+        Assert.Equal(0, body.RootElement.GetProperty("total").GetInt32());
+        Assert.Equal(25, body.RootElement.GetProperty("limit").GetInt32());
+        Assert.Equal(0, body.RootElement.GetProperty("offset").GetInt32());
+        Assert.Equal(1, body.RootElement.GetProperty("page").GetInt32());
+        Assert.Equal("desc", body.RootElement.GetProperty("order").GetString());
+        host.Builder.Query.Verify(q => q.GetSessionCharts("sess-1", 1, 25, "desc"), Times.Once);
     }
 
     [Fact]
@@ -244,7 +268,7 @@ public class MinimalApiEndpointTests
         await using Host host = await Host.StartAsync(builder =>
         {
             builder.Query
-                .Setup(q => q.GetSessionRequests("sess-1", 1, 25))
+                .Setup(q => q.GetSessionRequests("sess-1", 1, 25, "desc"))
                 .Returns(JsonSerializer.SerializeToElement(new
                 {
                     requests = Array.Empty<object>(),
@@ -253,6 +277,7 @@ public class MinimalApiEndpointTests
                     limit = 25,
                     offset = 0,
                     page = 1,
+                    order = "desc",
                 }));
         });
 
@@ -264,7 +289,7 @@ public class MinimalApiEndpointTests
         Assert.Equal(JsonValueKind.Array, body.RootElement.GetProperty("requests").ValueKind);
         Assert.Equal(JsonValueKind.Array, body.RootElement.GetProperty("data").ValueKind);
         Assert.Equal(0, body.RootElement.GetProperty("total").GetInt32());
-        host.Builder.Query.Verify(q => q.GetSessionRequests("sess-1", 1, 25), Times.Once);
+        host.Builder.Query.Verify(q => q.GetSessionRequests("sess-1", 1, 25, "desc"), Times.Once);
     }
 
     [Fact]
@@ -283,7 +308,7 @@ public class MinimalApiEndpointTests
         await using Host host = await Host.StartAsync(builder =>
         {
             builder.Query
-                .Setup(q => q.GetSessionReconciliation("sess-1", 1, 25))
+                .Setup(q => q.GetSessionReconciliation("sess-1", 1, 25, "desc"))
                 .Returns(JsonSerializer.SerializeToElement(new
                 {
                     reconciliation = Array.Empty<object>(),
@@ -292,6 +317,7 @@ public class MinimalApiEndpointTests
                     limit = 25,
                     offset = 0,
                     page = 1,
+                    order = "desc",
                 }));
         });
 
@@ -302,7 +328,7 @@ public class MinimalApiEndpointTests
         using JsonDocument body = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
         Assert.Equal(JsonValueKind.Array, body.RootElement.GetProperty("reconciliation").ValueKind);
         Assert.Equal(0, body.RootElement.GetProperty("total").GetInt32());
-        host.Builder.Query.Verify(q => q.GetSessionReconciliation("sess-1", 1, 25), Times.Once);
+        host.Builder.Query.Verify(q => q.GetSessionReconciliation("sess-1", 1, 25, "desc"), Times.Once);
     }
 
     [Fact]
@@ -321,7 +347,7 @@ public class MinimalApiEndpointTests
         await using Host host = await Host.StartAsync(builder =>
         {
             builder.Query
-                .Setup(q => q.GetSessionProblems("sess-1", 1, 25))
+                .Setup(q => q.GetSessionProblems("sess-1", 1, 25, "desc"))
                 .Returns(JsonSerializer.SerializeToElement(new
                 {
                     problems = Array.Empty<object>(),
@@ -330,6 +356,7 @@ public class MinimalApiEndpointTests
                     limit = 25,
                     offset = 0,
                     page = 1,
+                    order = "desc",
                 }));
         });
 
@@ -340,7 +367,7 @@ public class MinimalApiEndpointTests
         using JsonDocument body = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
         Assert.Equal(JsonValueKind.Array, body.RootElement.GetProperty("problems").ValueKind);
         Assert.Equal(0, body.RootElement.GetProperty("total").GetInt32());
-        host.Builder.Query.Verify(q => q.GetSessionProblems("sess-1", 1, 25), Times.Once);
+        host.Builder.Query.Verify(q => q.GetSessionProblems("sess-1", 1, 25, "desc"), Times.Once);
     }
 
     [Fact]
@@ -359,7 +386,7 @@ public class MinimalApiEndpointTests
         await using Host host = await Host.StartAsync(builder =>
         {
             builder.Query
-                .Setup(q => q.GetSessionTools("sess-1", 1, 25))
+                .Setup(q => q.GetSessionTools("sess-1", 1, 25, "desc"))
                 .Returns(JsonSerializer.SerializeToElement(new
                 {
                     tools = Array.Empty<object>(),
@@ -368,6 +395,7 @@ public class MinimalApiEndpointTests
                     limit = 25,
                     offset = 0,
                     page = 1,
+                    order = "desc",
                     aggregate = new { maxCost = (long?)null },
                 }));
         });
@@ -380,7 +408,7 @@ public class MinimalApiEndpointTests
         Assert.Equal(JsonValueKind.Array, body.RootElement.GetProperty("tools").ValueKind);
         Assert.Equal(0, body.RootElement.GetProperty("total").GetInt32());
         Assert.Equal(JsonValueKind.Object, body.RootElement.GetProperty("aggregate").ValueKind);
-        host.Builder.Query.Verify(q => q.GetSessionTools("sess-1", 1, 25), Times.Once);
+        host.Builder.Query.Verify(q => q.GetSessionTools("sess-1", 1, 25, "desc"), Times.Once);
     }
 
     [Fact]
@@ -399,7 +427,7 @@ public class MinimalApiEndpointTests
         await using Host host = await Host.StartAsync(builder =>
         {
             builder.Query
-                .Setup(q => q.GetSessionServers("sess-1", 1, 25))
+                .Setup(q => q.GetSessionServers("sess-1", 1, 25, "desc"))
                 .Returns(JsonSerializer.SerializeToElement(new
                 {
                     servers = Array.Empty<object>(),
@@ -408,6 +436,7 @@ public class MinimalApiEndpointTests
                     limit = 25,
                     offset = 0,
                     page = 1,
+                    order = "desc",
                 }));
         });
 
@@ -418,7 +447,7 @@ public class MinimalApiEndpointTests
         using JsonDocument body = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
         Assert.Equal(JsonValueKind.Array, body.RootElement.GetProperty("servers").ValueKind);
         Assert.Equal(0, body.RootElement.GetProperty("total").GetInt32());
-        host.Builder.Query.Verify(q => q.GetSessionServers("sess-1", 1, 25), Times.Once);
+        host.Builder.Query.Verify(q => q.GetSessionServers("sess-1", 1, 25, "desc"), Times.Once);
     }
 
     [Fact]
@@ -437,7 +466,7 @@ public class MinimalApiEndpointTests
         await using Host host = await Host.StartAsync(builder =>
         {
             builder.Query
-                .Setup(q => q.GetSessionSkills("sess-1", 1, 25))
+                .Setup(q => q.GetSessionSkills("sess-1", 1, 25, "desc"))
                 .Returns(JsonSerializer.SerializeToElement(new
                 {
                     measurable = true,
@@ -446,6 +475,7 @@ public class MinimalApiEndpointTests
                     limit = 25,
                     offset = 0,
                     page = 1,
+                    order = "desc",
                 }));
         });
 
@@ -457,7 +487,7 @@ public class MinimalApiEndpointTests
         Assert.True(body.RootElement.GetProperty("measurable").GetBoolean());
         Assert.Equal(JsonValueKind.Array, body.RootElement.GetProperty("rows").ValueKind);
         Assert.Equal(0, body.RootElement.GetProperty("total").GetInt32());
-        host.Builder.Query.Verify(q => q.GetSessionSkills("sess-1", 1, 25), Times.Once);
+        host.Builder.Query.Verify(q => q.GetSessionSkills("sess-1", 1, 25, "desc"), Times.Once);
     }
 
     [Fact]
@@ -476,7 +506,7 @@ public class MinimalApiEndpointTests
         await using Host host = await Host.StartAsync(builder =>
         {
             builder.Query
-                .Setup(q => q.GetSessionKwSkills("sess-1", 1, 25))
+                .Setup(q => q.GetSessionKwSkills("sess-1", 1, 25, "desc"))
                 .Returns(JsonSerializer.SerializeToElement(new
                 {
                     rows = new[]
@@ -494,6 +524,7 @@ public class MinimalApiEndpointTests
                     limit = 25,
                     offset = 0,
                     page = 1,
+                    order = "desc",
                 }));
         });
 
@@ -511,7 +542,7 @@ public class MinimalApiEndpointTests
         Assert.Equal("2026-11-19T10:03:00.000Z", row.GetProperty("loaded_at").GetString());
         Assert.Equal(1, body.RootElement.GetProperty("total").GetInt32());
         Assert.Equal(1, body.RootElement.GetProperty("page").GetInt32());
-        host.Builder.Query.Verify(q => q.GetSessionKwSkills("sess-1", 1, 25), Times.Once);
+        host.Builder.Query.Verify(q => q.GetSessionKwSkills("sess-1", 1, 25, "desc"), Times.Once);
     }
 
     [Fact]
@@ -530,7 +561,7 @@ public class MinimalApiEndpointTests
         await using Host host = await Host.StartAsync(builder =>
         {
             builder.Query
-                .Setup(q => q.GetSessionTimeline("sess-1", null, 1, 25))
+                .Setup(q => q.GetSessionTimeline("sess-1", null, 1, 25, "desc"))
                 .Returns(JsonSerializer.SerializeToElement(new
                 {
                     nodes = Array.Empty<object>(),
@@ -538,6 +569,7 @@ public class MinimalApiEndpointTests
                     limit = 25,
                     offset = 0,
                     page = 1,
+                    order = "desc",
                     parent = (string?)null,
                     bounds = new { startMs = 0L, endMs = 0L },
                 }));
@@ -551,7 +583,7 @@ public class MinimalApiEndpointTests
         Assert.Equal(JsonValueKind.Array, body.RootElement.GetProperty("nodes").ValueKind);
         Assert.Equal(0, body.RootElement.GetProperty("total").GetInt32());
         Assert.Equal(JsonValueKind.Object, body.RootElement.GetProperty("bounds").ValueKind);
-        host.Builder.Query.Verify(q => q.GetSessionTimeline("sess-1", null, 1, 25), Times.Once);
+        host.Builder.Query.Verify(q => q.GetSessionTimeline("sess-1", null, 1, 25, "desc"), Times.Once);
     }
 
     [Fact]
@@ -560,7 +592,7 @@ public class MinimalApiEndpointTests
         await using Host host = await Host.StartAsync(builder =>
         {
             builder.Query
-                .Setup(q => q.GetSessionTimeline("sess-1", "(auxiliary)", 2, 25))
+                .Setup(q => q.GetSessionTimeline("sess-1", "(auxiliary)", 2, 25, "desc"))
                 .Returns(JsonSerializer.SerializeToElement(new
                 {
                     nodes = Array.Empty<object>(),
@@ -568,6 +600,7 @@ public class MinimalApiEndpointTests
                     limit = 25,
                     offset = 25,
                     page = 2,
+                    order = "desc",
                     parent = "(auxiliary)",
                     bounds = new { startMs = 0L, endMs = 0L },
                 }));
@@ -579,7 +612,7 @@ public class MinimalApiEndpointTests
             new Uri("/api/kyber/session/sess-1/timeline?parent=%28auxiliary%29&page=2", UriKind.Relative));
 
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
-        host.Builder.Query.Verify(q => q.GetSessionTimeline("sess-1", "(auxiliary)", 2, 25), Times.Once);
+        host.Builder.Query.Verify(q => q.GetSessionTimeline("sess-1", "(auxiliary)", 2, 25, "desc"), Times.Once);
     }
 
     [Fact]
@@ -590,6 +623,111 @@ public class MinimalApiEndpointTests
         HttpResponseMessage response = await host.Client.GetAsync(new Uri("/api/kyber/session/absent/timeline", UriKind.Relative));
 
         Assert.Equal(HttpStatusCode.NotFound, response.StatusCode);
+    }
+
+    [Theory]
+    [InlineData("/api/kyber/session/sess-1/charts", 25, "desc")]
+    [InlineData("/api/kyber/session/sess-1/charts?limit=50&order=%20ASC%20", 50, "asc")]
+    [InlineData("/api/kyber/session/sess-1/charts?limit=100&order=DESC", 100, "desc")]
+    public async Task ChartsRouteAcceptsStrictLimitsAndNormalizesOrder(string requestPath, int expectedLimit, string expectedOrder)
+    {
+        await using Host host = await Host.StartAsync(builder =>
+        {
+            builder.Query
+                .Setup(q => q.GetSessionCharts("sess-1", 1, expectedLimit, expectedOrder))
+                .Returns(JsonSerializer.SerializeToElement(new
+                {
+                    sessionId = "sess-1",
+                    turns = Array.Empty<object>(),
+                    context = new { measurable = true, turns = Array.Empty<object>() },
+                    total = 128,
+                    limit = expectedLimit,
+                    offset = 0,
+                    page = 1,
+                    order = expectedOrder,
+                }));
+        });
+
+        HttpResponseMessage response = await host.Client.GetAsync(new Uri(requestPath, UriKind.Relative));
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        using JsonDocument body = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
+        Assert.Equal(128, body.RootElement.GetProperty("total").GetInt32());
+        Assert.Equal(expectedLimit, body.RootElement.GetProperty("limit").GetInt32());
+        Assert.Equal(expectedOrder, body.RootElement.GetProperty("order").GetString());
+        host.Builder.Query.Verify(q => q.GetSessionCharts("sess-1", 1, expectedLimit, expectedOrder), Times.Once);
+    }
+
+    [Theory]
+    [InlineData("requests", 50, "asc", "?limit=50&order=%20ASC%20")]
+    [InlineData("reconciliation", 100, "asc", "?limit=100&order=asc")]
+    [InlineData("problems", 25, "asc", "?limit=25&order=Asc")]
+    [InlineData("tools", 50, "desc", "?limit=50&order=DESC")]
+    [InlineData("servers", 100, "desc", "?limit=100&order=desc")]
+    [InlineData("skills", 50, "asc", "?limit=50&order=asc")]
+    [InlineData("kw-skills", 100, "asc", "?limit=100&order=asc")]
+    [InlineData("timeline", 50, "asc", "?limit=50&order=asc")]
+    public async Task SectionRoutesAcceptAllowedLimitsAndTrimmedCaseInsensitiveOrder(
+        string section,
+        int expectedLimit,
+        string expectedOrder,
+        string queryString)
+    {
+        JsonElement okPayload = JsonSerializer.SerializeToElement(new
+        {
+            total = 0,
+            limit = expectedLimit,
+            offset = 0,
+            page = 1,
+            order = expectedOrder,
+        });
+        await using Host host = await Host.StartAsync(builder =>
+        {
+            builder.Query.Setup(q => q.GetSessionRequests("sess-1", 1, expectedLimit, expectedOrder)).Returns(okPayload);
+            builder.Query.Setup(q => q.GetSessionReconciliation("sess-1", 1, expectedLimit, expectedOrder)).Returns(okPayload);
+            builder.Query.Setup(q => q.GetSessionProblems("sess-1", 1, expectedLimit, expectedOrder)).Returns(okPayload);
+            builder.Query.Setup(q => q.GetSessionTools("sess-1", 1, expectedLimit, expectedOrder)).Returns(okPayload);
+            builder.Query.Setup(q => q.GetSessionServers("sess-1", 1, expectedLimit, expectedOrder)).Returns(okPayload);
+            builder.Query.Setup(q => q.GetSessionSkills("sess-1", 1, expectedLimit, expectedOrder)).Returns(okPayload);
+            builder.Query.Setup(q => q.GetSessionKwSkills("sess-1", 1, expectedLimit, expectedOrder)).Returns(okPayload);
+            builder.Query.Setup(q => q.GetSessionTimeline("sess-1", null, 1, expectedLimit, expectedOrder)).Returns(okPayload);
+        });
+
+        HttpResponseMessage response = await host.Client.GetAsync(
+            new Uri($"/api/kyber/session/sess-1/{section}{queryString}", UriKind.Relative));
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        using JsonDocument body = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
+        Assert.Equal(expectedLimit, body.RootElement.GetProperty("limit").GetInt32());
+        Assert.Equal(expectedOrder, body.RootElement.GetProperty("order").GetString());
+    }
+
+    [Theory]
+    [InlineData("/api/kyber/session/sess-1/charts?limit=10")]
+    [InlineData("/api/kyber/session/sess-1/charts?limit=500")]
+    [InlineData("/api/kyber/session/sess-1/charts?order=bad")]
+    [InlineData("/api/kyber/session/sess-1/charts?order=")]
+    [InlineData("/api/kyber/session/sess-1/requests?limit=10")]
+    [InlineData("/api/kyber/session/sess-1/reconciliation?limit=500")]
+    [InlineData("/api/kyber/session/sess-1/problems?order=bad")]
+    [InlineData("/api/kyber/session/sess-1/tools?limit=0")]
+    [InlineData("/api/kyber/session/sess-1/servers?order=%20")]
+    [InlineData("/api/kyber/session/sess-1/skills?limit=abc")]
+    [InlineData("/api/kyber/session/sess-1/kw-skills?offset=1")]
+    [InlineData("/api/kyber/session/sess-1/timeline?order=sideways")]
+    public async Task SectionRoutesRejectInvalidLimitOffsetAndOrderWithDashHttpError(string requestPath)
+    {
+        await using Host host = await Host.StartAsync();
+
+        HttpResponseMessage response = await host.Client.GetAsync(new Uri(requestPath, UriKind.Relative));
+
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+        using JsonDocument body = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
+        Assert.True(body.RootElement.TryGetProperty("error", out JsonElement error));
+        Assert.False(string.IsNullOrWhiteSpace(error.GetString()));
+        Assert.False(body.RootElement.TryGetProperty("title", out _));
+        Assert.False(body.RootElement.TryGetProperty("status", out _));
+        Assert.Empty(host.Builder.Query.Invocations);
     }
 
     [Fact]

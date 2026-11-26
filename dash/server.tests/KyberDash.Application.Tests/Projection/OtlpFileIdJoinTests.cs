@@ -599,7 +599,7 @@ public class OtlpFileIdJoinTests
 
     private static void WriteClaudeTranscript(InMemoryRelationalStore store, string sessionKey, string jsonl)
     {
-        CollectedBatch batch = new ClaudeTranscriptMapper().Map(
+        CollectedBatch batch = new ClaudeTranscriptMapper(new FakeTextTokenizer()).Map(
             new NativeSourceUnit(
                 Unit: new SourceUnit(
                     HarnessId: TranscriptReaderRepository.ClaudeHarnessId,

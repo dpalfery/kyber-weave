@@ -102,7 +102,8 @@ public class HarnessSourceRegistryTests
         SourceDiscoveryResult result = registry.DiscoverAll(new SourceDiscoveryContext(HomeRoot, StateRoot, fs));
 
         Assert.Empty(result.Problems);
-        Assert.Contains(result.Sources, static s => s.HarnessId == "claude-code" && s.SourceKey.EndsWith("session-1.jsonl", StringComparison.Ordinal));
+        SourceUnit claudeUnit = Assert.Single(result.Sources, static s => s.HarnessId == "claude-code" && s.SourceKey.EndsWith("session-1.jsonl", StringComparison.Ordinal));
+        Assert.Equal("2", claudeUnit.ParserContractVersion);
         Assert.Contains(result.Sources, static s => s.HarnessId == "codex-cli" && s.SourceKey.EndsWith("rollout-1.jsonl", StringComparison.Ordinal));
         Assert.Contains(result.Sources, static s => s.HarnessId == "copilot-cli" && s.SourceKey.EndsWith("events.jsonl", StringComparison.Ordinal));
         Assert.Contains(result.Sources, static s => s.HarnessId == "antigravity" && s.SourceKey.EndsWith("conv-1.pb", StringComparison.Ordinal));

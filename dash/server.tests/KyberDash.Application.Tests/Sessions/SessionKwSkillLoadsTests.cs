@@ -23,6 +23,18 @@ public sealed class SessionKwSkillLoadsTests
     private const string SessionKey = "sess-kw";
     private const string AgentName = "kw-dev";
 
+    /// <summary>Reader methods that materialize conversation text, so the KW skills path may not issue them.</summary>
+    private static readonly string[] ContentBearingReads =
+    [
+        nameof(InMemoryRelationalStore.SessionRecordsForRebuild),
+        nameof(InMemoryRelationalStore.AllSessionRecordsForMaintenance),
+        nameof(InMemoryRelationalStore.ToolCalls),
+        nameof(InMemoryRelationalStore.ToolDefinitions),
+        nameof(InMemoryRelationalStore.AgentInvocations),
+        nameof(InMemoryRelationalStore.SkillsInvoked),
+        nameof(InMemoryRelationalStore.TurnContentParts),
+    ];
+
     /// <summary>
     /// The unsplit tool-name spellings of a kw-docs load: the five D17 names, and the two a harness
     /// writes when the same server is still registered under its retired key <c>kyber-weave</c>.
@@ -165,8 +177,13 @@ public sealed class SessionKwSkillLoadsTests
         JsonElement page = bridge.GetSessionKwSkills(SessionKey)!.Value;
 
         JsonElement[] rows = [.. page.GetProperty("rows").EnumerateArray()];
-        Assert.Equal(JsonValueKind.Null, rows[0].GetProperty("skill").ValueKind);
-        Assert.Equal("csharp-dev", rows[1].GetProperty("skill").GetString());
+        Assert.Equal("csharp-dev", rows[0].GetProperty("skill").GetString());
+        Assert.Equal(JsonValueKind.Null, rows[1].GetProperty("skill").ValueKind);
+
+        JsonElement ascPage = bridge.GetSessionKwSkills(SessionKey, order: "asc")!.Value;
+        JsonElement[] ascRows = [.. ascPage.GetProperty("rows").EnumerateArray()];
+        Assert.Equal(JsonValueKind.Null, ascRows[0].GetProperty("skill").ValueKind);
+        Assert.Equal("csharp-dev", ascRows[1].GetProperty("skill").GetString());
     }
 
     /// <summary>A session with no KW loads answers an empty page with a zero total.</summary>
@@ -206,26 +223,120 @@ public sealed class SessionKwSkillLoadsTests
         WriteSession(store, SessionKey, records);
         ProjectWithAgent(store, pricing, SessionKey, AgentName);
         KyberBridgeEngine bridge = CreateBridge(store, pricing);
+        bridge.EnsureProjected();
+        store.ClearReadLog();
 
         JsonElement first = bridge.GetSessionKwSkills(SessionKey)!.Value;
         JsonElement[] firstRows = [.. first.GetProperty("rows").EnumerateArray()];
         Assert.Equal(25, firstRows.Length);
         for (int index = 0; index < firstRows.Length; index++)
         {
-            Assert.Equal($"skill-{index:D2}", firstRows[index].GetProperty("skill").GetString());
+            Assert.Equal($"skill-{29 - index:D2}", firstRows[index].GetProperty("skill").GetString());
         }
 
         Assert.Equal(30, first.GetProperty("total").GetInt32());
         Assert.Equal(1, first.GetProperty("page").GetInt32());
         Assert.Equal(0, first.GetProperty("offset").GetInt32());
+        Assert.Equal("desc", first.GetProperty("order").GetString());
+
+        Assert.Equal(0, store.MaterializedContentBytes);
+        Assert.Equal(
+            (IReadOnlyList<string>)[nameof(InMemoryRelationalStore.SessionKwSkillLoads)],
+            store.ReadLog.Where(static read => read != "CountRecords").ToList());
+        Assert.Equal(
+            (IReadOnlyList<string>)[nameof(InMemoryRelationalStore.SessionHeadersByKeys)],
+            store.SessionProjectionReadLog
+                .Where(static read => read is not ("ListSessionProjections" or "ListHarnessRollups"))
+                .ToList());
+        Assert.DoesNotContain(store.ReadLog, static read => ContentBearingReads.Contains(read));
 
         JsonElement second = bridge.GetSessionKwSkills(SessionKey, page: 2)!.Value;
         JsonElement[] secondRows = [.. second.GetProperty("rows").EnumerateArray()];
         Assert.Equal(5, secondRows.Length);
-        Assert.Equal("skill-25", secondRows[0].GetProperty("skill").GetString());
+        Assert.Equal("skill-04", secondRows[0].GetProperty("skill").GetString());
         Assert.Equal(30, second.GetProperty("total").GetInt32());
         Assert.Equal(2, second.GetProperty("page").GetInt32());
         Assert.Equal(25, second.GetProperty("offset").GetInt32());
+        Assert.Equal("desc", second.GetProperty("order").GetString());
+
+        JsonElement asc = bridge.GetSessionKwSkills(SessionKey, page: 1, order: "asc")!.Value;
+        JsonElement[] ascRows = [.. asc.GetProperty("rows").EnumerateArray()];
+        Assert.Equal(25, ascRows.Length);
+        Assert.Equal("skill-00", ascRows[0].GetProperty("skill").GetString());
+        Assert.Equal("skill-24", ascRows[^1].GetProperty("skill").GetString());
+        Assert.Equal("asc", asc.GetProperty("order").GetString());
+    }
+
+    /// <summary>Pages support limits 50 and 100 in both sort orders without materializing content.</summary>
+    [Fact]
+    public void PagesSupportLimits50And100()
+    {
+        InMemoryRelationalStore store = new();
+        FakePricingRepository pricing = new();
+        List<CollectedRecord> records = [];
+        for (int index = 0; index < 120; index++)
+        {
+            records.Add(LoadRecord(
+                $"span-load-{index:D3}",
+                index,
+                Call($"call-{index:D3}", "load_skill", "kw-docs", "load_skill", $"skill: skill-{index:D3}\n\nGuidance.")));
+        }
+
+        WriteSession(store, SessionKey, records);
+        ProjectWithAgent(store, pricing, SessionKey, AgentName);
+        KyberBridgeEngine bridge = CreateBridge(store, pricing);
+        bridge.EnsureProjected();
+        store.ClearReadLog();
+
+        JsonElement desc50Page1 = bridge.GetSessionKwSkills(SessionKey, page: 1, limit: 50, order: "desc")!.Value;
+        JsonElement[] desc50Page1Rows = [.. desc50Page1.GetProperty("rows").EnumerateArray()];
+        Assert.Equal(50, desc50Page1Rows.Length);
+        Assert.Equal("skill-119", desc50Page1Rows[0].GetProperty("skill").GetString());
+        Assert.Equal("skill-070", desc50Page1Rows[^1].GetProperty("skill").GetString());
+        Assert.Equal(120, desc50Page1.GetProperty("total").GetInt32());
+        Assert.Equal(50, desc50Page1.GetProperty("limit").GetInt32());
+        Assert.Equal(0, desc50Page1.GetProperty("offset").GetInt32());
+        Assert.Equal(1, desc50Page1.GetProperty("page").GetInt32());
+        Assert.Equal("desc", desc50Page1.GetProperty("order").GetString());
+
+        JsonElement desc50Page3 = bridge.GetSessionKwSkills(SessionKey, page: 3, limit: 50, order: "desc")!.Value;
+        JsonElement[] desc50Page3Rows = [.. desc50Page3.GetProperty("rows").EnumerateArray()];
+        Assert.Equal(20, desc50Page3Rows.Length);
+        Assert.Equal("skill-019", desc50Page3Rows[0].GetProperty("skill").GetString());
+        Assert.Equal("skill-000", desc50Page3Rows[^1].GetProperty("skill").GetString());
+        Assert.Equal(120, desc50Page3.GetProperty("total").GetInt32());
+        Assert.Equal(50, desc50Page3.GetProperty("limit").GetInt32());
+        Assert.Equal(100, desc50Page3.GetProperty("offset").GetInt32());
+        Assert.Equal(3, desc50Page3.GetProperty("page").GetInt32());
+
+        JsonElement desc100Page1 = bridge.GetSessionKwSkills(SessionKey, page: 1, limit: 100, order: "desc")!.Value;
+        JsonElement[] desc100Page1Rows = [.. desc100Page1.GetProperty("rows").EnumerateArray()];
+        Assert.Equal(100, desc100Page1Rows.Length);
+        Assert.Equal("skill-119", desc100Page1Rows[0].GetProperty("skill").GetString());
+        Assert.Equal("skill-020", desc100Page1Rows[^1].GetProperty("skill").GetString());
+        Assert.Equal(120, desc100Page1.GetProperty("total").GetInt32());
+        Assert.Equal(100, desc100Page1.GetProperty("limit").GetInt32());
+        Assert.Equal(0, desc100Page1.GetProperty("offset").GetInt32());
+        Assert.Equal(1, desc100Page1.GetProperty("page").GetInt32());
+
+        JsonElement asc100Page2 = bridge.GetSessionKwSkills(SessionKey, page: 2, limit: 100, order: "asc")!.Value;
+        JsonElement[] asc100Page2Rows = [.. asc100Page2.GetProperty("rows").EnumerateArray()];
+        Assert.Equal(20, asc100Page2Rows.Length);
+        Assert.Equal("skill-100", asc100Page2Rows[0].GetProperty("skill").GetString());
+        Assert.Equal("skill-119", asc100Page2Rows[^1].GetProperty("skill").GetString());
+        Assert.Equal(120, asc100Page2.GetProperty("total").GetInt32());
+        Assert.Equal(100, asc100Page2.GetProperty("limit").GetInt32());
+        Assert.Equal(100, asc100Page2.GetProperty("offset").GetInt32());
+        Assert.Equal(2, asc100Page2.GetProperty("page").GetInt32());
+        Assert.Equal("asc", asc100Page2.GetProperty("order").GetString());
+
+        Assert.Equal(0, store.MaterializedContentBytes);
+        Assert.All(
+            store.ReadLog.Where(static read => read != "CountRecords"),
+            static read => Assert.Equal(nameof(InMemoryRelationalStore.SessionKwSkillLoads), read));
+        Assert.Equal(4, store.ReadLog.Count(static read => read == nameof(InMemoryRelationalStore.SessionKwSkillLoads)));
+        Assert.DoesNotContain(store.ReadLog, static read => ContentBearingReads.Contains(read));
+        Assert.DoesNotContain(nameof(InMemoryRelationalStore.GetSessionProjection), store.SessionProjectionReadLog);
     }
 
     /// <summary>An unknown session answers no page, so the route answers 404.</summary>

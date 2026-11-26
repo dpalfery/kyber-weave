@@ -41,39 +41,40 @@ public class DashboardQueryService : IDashboardQueryService
     public JsonElement? GetSessionSummary(string sessionId) => bridge.GetSessionSummary(sessionId);
 
     /// <inheritdoc />
-    public JsonElement? GetSessionCharts(string sessionId) => bridge.GetSessionCharts(sessionId);
+    public JsonElement? GetSessionCharts(string sessionId, int page = 1, int limit = 25, string order = "desc") =>
+        bridge.GetSessionCharts(sessionId, page, limit, order);
 
     /// <inheritdoc />
-    public JsonElement? GetSessionRequests(string sessionId, int page = 1, int limit = 25) =>
-        bridge.GetSessionRequests(sessionId, page, limit);
+    public JsonElement? GetSessionRequests(string sessionId, int page = 1, int limit = 25, string order = "desc") =>
+        bridge.GetSessionRequests(sessionId, page, limit, order);
 
     /// <inheritdoc />
-    public JsonElement? GetSessionReconciliation(string sessionId, int page = 1, int limit = 25) =>
-        bridge.GetSessionReconciliation(sessionId, page, limit);
+    public JsonElement? GetSessionReconciliation(string sessionId, int page = 1, int limit = 25, string order = "desc") =>
+        bridge.GetSessionReconciliation(sessionId, page, limit, order);
 
     /// <inheritdoc />
-    public JsonElement? GetSessionProblems(string sessionId, int page = 1, int limit = 25) =>
-        bridge.GetSessionProblems(sessionId, page, limit);
+    public JsonElement? GetSessionProblems(string sessionId, int page = 1, int limit = 25, string order = "desc") =>
+        bridge.GetSessionProblems(sessionId, page, limit, order);
 
     /// <inheritdoc />
-    public JsonElement? GetSessionTools(string sessionId, int page = 1, int limit = 25) =>
-        bridge.GetSessionTools(sessionId, page, limit);
+    public JsonElement? GetSessionTools(string sessionId, int page = 1, int limit = 25, string order = "desc") =>
+        bridge.GetSessionTools(sessionId, page, limit, order);
 
     /// <inheritdoc />
-    public JsonElement? GetSessionServers(string sessionId, int page = 1, int limit = 25) =>
-        bridge.GetSessionServers(sessionId, page, limit);
+    public JsonElement? GetSessionServers(string sessionId, int page = 1, int limit = 25, string order = "desc") =>
+        bridge.GetSessionServers(sessionId, page, limit, order);
 
     /// <inheritdoc />
-    public JsonElement? GetSessionSkills(string sessionId, int page = 1, int limit = 25) =>
-        bridge.GetSessionSkills(sessionId, page, limit);
+    public JsonElement? GetSessionSkills(string sessionId, int page = 1, int limit = 25, string order = "desc") =>
+        bridge.GetSessionSkills(sessionId, page, limit, order);
 
     /// <inheritdoc />
-    public JsonElement? GetSessionKwSkills(string sessionId, int page = 1, int limit = 25) =>
-        bridge.GetSessionKwSkills(sessionId, page, limit);
+    public JsonElement? GetSessionKwSkills(string sessionId, int page = 1, int limit = 25, string order = "desc") =>
+        bridge.GetSessionKwSkills(sessionId, page, limit, order);
 
     /// <inheritdoc />
-    public JsonElement? GetSessionTimeline(string sessionId, string? parentNodeId = null, int page = 1, int limit = 25) =>
-        bridge.GetSessionTimeline(sessionId, parentNodeId, page, limit);
+    public JsonElement? GetSessionTimeline(string sessionId, string? parentNodeId = null, int page = 1, int limit = 25, string order = "desc") =>
+        bridge.GetSessionTimeline(sessionId, parentNodeId, page, limit, order);
 
     /// <inheritdoc />
     public JsonElement? GetTurnFigures(string sessionId, int turnIndex) => bridge.GetTurnFigures(sessionId, turnIndex);

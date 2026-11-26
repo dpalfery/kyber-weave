@@ -54,20 +54,22 @@ public static class PricingFixture
         string? current = AppContext.BaseDirectory;
         while (current is not null)
         {
-            string candidate = Path.Combine(current, "server", "KyberDash.Data", "Pricing", "litellm-snapshot.json");
-            if (File.Exists(candidate))
+            string[] candidates =
+            [
+                Path.Combine(current, "server", "KyberDash.Data", "Pricing"),
+                Path.Combine(current, "dash", "server", "KyberDash.Data", "Pricing")
+            ];
+
+            foreach (string candidate in candidates)
             {
-                return Path.Combine(current, "server", "KyberDash.Data", "Pricing");
+                if (File.Exists(Path.Combine(candidate, "litellm-snapshot.json")))
+                {
+                    return candidate;
+                }
             }
 
-            // A gate builds into .agent_scratchpad/<task>/artifacts, whose ancestors never include dash/.
-            // The repository root above it does, so accept the dash/ layout as well.
-            string dashCandidate = Path.Combine(current, "dash", "server", "KyberDash.Data", "Pricing", "litellm-snapshot.json");
-            if (File.Exists(dashCandidate))
-            {
-                return Path.Combine(current, "dash", "server", "KyberDash.Data", "Pricing");
-            }
-
+            // A gate builds into .agent_scratchpad/<task>/artifacts, whose ancestors include the
+            // repository root, so the dash/ layout in the candidate list above resolves there too.
             current = Path.GetDirectoryName(current);
         }
 

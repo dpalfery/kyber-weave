@@ -1,5 +1,7 @@
 import type {
   KyberContextTurn,
+  KyberSectionPageLimit,
+  KyberSectionPageOrder,
   KyberSessionContext,
   KyberSessionTurnRow,
   KyberSkillRow,
@@ -8,6 +10,10 @@ import type {
 } from '../../lib/kyberApi.js'
 import type { DrawerContentRequest } from '../SessionInspectorDrawer.js'
 import type { CostBlock } from '../analysis/TimelineView.js'
+
+export type { KyberSectionPageLimit, KyberSectionPageOrder }
+export type SectionPageLimit = KyberSectionPageLimit
+export type SectionPageOrder = KyberSectionPageOrder
 
 /**
  * The session view's shared shapes. They were the payload-era dashboard's own
@@ -248,8 +254,20 @@ export interface PagedWindow {
   total: number
   /** Rows per page the server answered under. */
   limit: number
+  /** Available page-size options when the pager exposes a size selector. */
+  limitOptions?: readonly number[]
+  /** Reports a newly chosen page size. */
+  onLimitChange?: (limit: KyberSectionPageLimit) => void
+  /** Current sort order when the pager exposes a sort toggle. */
+  order?: KyberSectionPageOrder
+  /** Reports a newly chosen sort order. */
+  onOrderChange?: (order: KyberSectionPageOrder) => void
+  /** Custom labels for the sort toggle button (`desc` and `asc`). */
+  orderLabels?: { desc: string; asc: string }
   /** True while the page being turned to is in flight. */
   loading?: boolean
+  /** Accessible label for the pager navigation landmark. */
+  ariaLabel?: string
   /** Reports the page the viewer navigated to. */
   onPageChange: (page: number) => void
 }
