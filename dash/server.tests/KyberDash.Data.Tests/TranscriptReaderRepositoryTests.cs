@@ -1,3 +1,4 @@
+using KyberDash.Data.Collector;
 using KyberDash.Data.Collector.Sources;
 using KyberDash.Data.Repositories;
 using KyberDash.Domain;
@@ -83,6 +84,7 @@ public class TranscriptReaderRepositoryTests : IDisposable
         Assert.Equal("rev-1", envelope.SourceRevision);
         Assert.Equal("2026-01-01T00:00:00.000Z", envelope.ImportedAt);
         Assert.Equal("claude-jsonl", envelope.Format);
+        Assert.Equal(HarnessSourceRegistry.ClaudeTranscriptV2ParserContractVersion, envelope.ParserContractVersion);
         Assert.Equal("claude", envelope.Call.Provider);
         Assert.Equal("claude:session-a:msg-1", envelope.Call.DeduplicationKey);
         Assert.Same(envelope.Call, envelope.Call);

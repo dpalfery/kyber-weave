@@ -636,6 +636,45 @@ public class ClaudeTranscriptMapperTests
         Assert.Equal(expectedTailMeasurement.MeasuredTokens, turn.Parts[1].Withheld!.MeasuredTokens);
     }
 
+    [Theory]
+    [InlineData("<system-reminder>", "</system-reminder>")]
+    [InlineData("<not-a-tag>", "</not-a-tag>")]
+    public void Map_RetainsMeasuredPrefixWhenUnclosedSystemReminderOrAngleBracketPrefixStartsAtOffsetZero(
+        string openPrefix,
+        string closeSuffix)
+    {
+        string body = new('b', 70_000);
+        string fullText = $"{openPrefix}{body}{closeSuffix}";
+        string expectedPrefix = fullText[..CanonSynth.MaxToolResultBytes];
+        string expectedTail = fullText[CanonSynth.MaxToolResultBytes..];
+        ToolContentMeasurement expectedTailMeasurement = ToolContentMeasurer.Measure(expectedTail, CanonSynth.MaxToolResultBytes, "claude-sonnet-4-5");
+
+        string jsonl =
+            $"{{\"type\":\"assistant\",\"sessionId\":\"sess-offset0\",\"timestamp\":\"2026-11-19T12:17:00.000Z\",\"message\":{{\"id\":\"msg-offset0\",\"role\":\"assistant\",\"model\":\"claude-sonnet-4-5\",\"content\":[{{\"type\":\"text\",\"text\":{System.Text.Json.JsonSerializer.Serialize(fullText)}}}],\"usage\":{{\"input_tokens\":10,\"output_tokens\":5}}}}}}";
+
+        CollectedBatch batch = CreateMapper(LocalTextTokenizer.Shared).Map(CreateUnit("/tmp/.claude/projects/repo/sess-offset0.jsonl", jsonl), ImportedAt);
+
+        CollectedRecord turn = Assert.Single(batch.Records);
+        Assert.Equal(2, turn.Parts.Count);
+
+        CollectedContentPart keptPart = turn.Parts[0];
+        Assert.Equal(0, keptPart.Position);
+        Assert.Equal(ContentBucket.ConversationHistory, keptPart.Bucket);
+        Assert.Equal(expectedPrefix, keptPart.PlainText);
+        Assert.Null(keptPart.Withheld);
+        Assert.Equal(Encoding.UTF8.GetByteCount(fullText), keptPart.OriginalUtf8BytesWhenTruncated);
+
+        CollectedContentPart tailPart = turn.Parts[1];
+        Assert.Equal(1, tailPart.Position);
+        Assert.Equal(ContentBucket.ConversationHistory, tailPart.Bucket);
+        Assert.Null(tailPart.PlainText);
+        Assert.NotNull(tailPart.Withheld);
+        Assert.Null(tailPart.OriginalUtf8BytesWhenTruncated);
+        Assert.Equal(expectedTailMeasurement.Utf8Bytes, tailPart.Withheld!.Utf8Bytes);
+        Assert.Equal(expectedTailMeasurement.Characters, tailPart.Withheld.Characters);
+        Assert.Equal(expectedTailMeasurement.MeasuredTokens, tailPart.Withheld.MeasuredTokens);
+    }
+
     [Fact]
     public void Map_FoldsCompactBoundaryAndCompactSummaryOntoNextKeptLlmInvokeTurnAndRoundTrips()
     {
