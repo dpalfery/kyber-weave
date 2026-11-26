@@ -77,7 +77,7 @@ as "calculated from published rates" (`costIsCalculated`) when a published rate 
 | Copilot Chat | Content-enabled OTLP capture maps observed system instructions, messages, rules, skills, tool definitions, tool results, and session identity into canonical buckets. Input-message normalization separates input text from response envelopes without negative residuals. | Observed per-server schema availability remains source-dependent. |
 | Copilot CLI | SQLite ingest preserves its reported ASAD taxonomy, including `context_*_tokens` and `context_tier`. Persisted harness id is `copilot-cli`, not collapsed into `copilot`. | Omitted reported buckets remain unavailable rather than zero. The `events.jsonl` journal supplies the system prompt per agent; tool definitions are not measurable. |
 | Copilot VS Code | Native journal request replay into input-side `ReaderTurn` snapshots keyed by native request id via `copilotVscodeReader`. Reconstructs instructions and user message while excluding current model output from input context. | Window and pressure measured; unobserved buckets explicit `null` with reason. |
-| Claude Code (`claude-cli`, `claude-desktop`, `claude-code`) | Enhanced-telemetry counters; live OTLP content from the interaction span's `user_prompt` and the `api_request_body` log (see [Claude Code OTLP content (live)](#claude-code-otlp-content-live)); plus JSONL conversation and tool-result parts on file-synth (`synth:`) records when the Claude content reader is paired at ingest ([issue #216](https://github.com/dpalfery/kyber-weave/issues/216)). | `instruction_context` and `schema_cost` stay not measurable. Session files never carry `system_prompt` or `tool_definitions`; only the OTLP request body supplies those two, and it supplies `tool_definitions` only when the sender exported a `tools` array (sub-agent calls in Desktop). See [Claude Code OTLP content (live)](#claude-code-otlp-content-live) and [Claude Desktop and CLI file-synth parts](#claude-desktop-and-cli-file-synth-parts-issue-216). |
+| Claude Code (`claude-cli`, `claude-desktop`, `claude-code`) | Enhanced-telemetry counters; live OTLP content from the interaction span's `user_prompt` and the `api_request_body` log (see [Claude Code OTLP content (live)](#claude-code-otlp-content-live)); plus JSONL conversation, tool-result parts, and `tool_definitions` (from `api-request-shape` entries when present) mapped by `ClaudeTranscriptMapper` (`dash/server/KyberDash.Data/Harnesses/Claude/ClaudeTranscriptMapper.cs`) onto file-synth (`synth:`) records ([issue #216](https://github.com/dpalfery/kyber-weave/issues/216)). | `instruction_context` and `schema_cost` stay not measurable. All transcripts remain unmeasured for `system_prompt`, and older transcripts without `api-request-shape` entries remain unmeasured for `tool_definitions`; the OTLP request body supplies `system_prompt` and supplies `tool_definitions` when the sender exported a `tools` array. See [Claude Code OTLP content (live)](#claude-code-otlp-content-live) and [Claude Desktop and CLI file-synth parts](#claude-desktop-and-cli-file-synth-parts-issue-216). |
 | Codex | Dot-folder ingestion supplies the system prompt, instructions, conversation, tool results, and context window contained in rollout data. | Availability is limited to fields the source actually supplies. |
 | Codex OTLP (collector path) | Codex exports logs and spans only when the owner points its exporters at the collector. `codexAdapter` claims spans by fingerprint (`codex.*` namespace plus `gen_ai.usage.*`), never by `service.name` (`codex_cli_rs`, `codex_exec`, `codex-app-server`), so records are harness `codex` without a CLI/exec/app-server split. Sessions correlate on `conversation.id`. Only an allowlist (`model`, `slug`, `conversation.id`, `event.timestamp`, `gen_ai.usage.*`, `codex.usage.*`) is persisted; prompts, tool arguments/output, `user.email` and account ids are dropped. The adapter assumes cache-inclusive input; an exclusive payload fails validation with a negative fresh input instead of being miscounted. `model` is absent on the `handle_responses` span, so such a record has no model until log enrichment is built. | Owner-capture gates before production use of this path: (1) the exported span name of `handle_responses`, (2) whether log records carry `trace_id`/`span_id`, (3) the token convention. |
 | pi | Reader support is implemented and respects OTLP/file source precedence. | No current live collection claim is made. |
@@ -463,10 +463,7 @@ batch carried.
 
 **[VERIFIED]** `claude-desktop` and `claude-cli` enter the store through `dash refresh`
 as file-synthesized `synth:` spans (wire source `codeburn/claude-desktop` /
-Claude CLI equivalents). When ingest pairs counter calls with
-`ClaudeContentReader` turns, those records carry structured parts the transcript
-actually supplies — the turn inspector is not inherently empty for conversation
-content. Closeout of [#216](https://github.com/dpalfery/kyber-weave/issues/216)
+Claude CLI equivalents). `ClaudeTranscriptMapper` (`dash/server/KyberDash.Data/Harnesses/Claude/ClaudeTranscriptMapper.cs`, superseding the retired TypeScript `ClaudeContentReader`) maps JSONL entries into `CollectedBatch` records carrying the structured parts and tool schemas the transcript actually supplies — the turn inspector is not inherently empty for conversation content. Closeout of [#216](https://github.com/dpalfery/kyber-weave/issues/216)
 is to keep that capture path durable and documented; content is never fabricated.
 
 | Content bucket | From Claude session JSONL? | Notes |
@@ -474,22 +471,17 @@ is to keep that capture path durable and documented; content is never fabricated
 | `conversation_history` | Yes | Message text and thinking blocks from the transcript. |
 | `tool_result_content` | Yes | When `tool_result` blocks are present. |
 | `system_prompt` | No | Honest `not_measurable` — session files omit the runtime system prompt. |
-| `tool_definitions` | No | Honest `not_measurable` — files record invocations, not definition schemas. |
+| `tool_definitions` | Conditional | Extracted by `ClaudeTranscriptMapper` from `api-request-shape` entries (`shape.tools`) on turns whose `api-request` names that `shapeHash`. Older transcripts without request-shape entries remain unmeasured (`not_measurable`). |
 
-Prefix-byte reconstruction for those two omitted buckets still requires
+Prefix-byte reconstruction for `system_prompt` (and `tool_definitions` on older transcripts without `api-request-shape` entries) still requires
 `OTEL_LOG_RAW_API_BODIES=1` (same gate as the Claude Code survey row above).
 Success for Desktop/CLI file synth is non-empty conversation (and tool results
 when present), not a full five-block inspector.
 
-Pairing that attaches parts (shipped with the #216 capture fix):
+Mapping and coalescence in `ClaudeTranscriptMapper` (shipped after the #216 capture fix):
 
-- `ClaudeContentReader` emits `nativeRecordId` from Claude `message.id` so
-  `matchingTurns` can join to the call's `turnId`. Id-less calls and id-map
-  misses fall back to `turns[index]` unless the reader declares
-  `positionalPairingUnsafe`. A positional fallback whose turn carries its own
-  `nativeRecordId` still requires that id to equal the call's `turnId`, so
-  readers that stamp ids only reach the positional arm for id-less calls.
-  Cursor is never paired positionally.
+- `ClaudeTranscriptMapper` resolves `nativeRecordId` from Claude `message.id` (coalescing streamed assistant entries sharing the same non-empty `message.id` in `MergeClaudeGroups`, falling back to equal-usage 60 s merging when absent) and pairs `tool_result` blocks across turns by `tool_use_id`.
+- `ClaudeTranscriptMapper` extracts `tool_definitions` from `api-request-shape` entries when present, leaving older transcripts without request shapes unmeasured for `tool_definitions` and all transcripts unmeasured for `system_prompt`.
 - The reader honors the same UTC `dateRange` as refresh window-sliced calls, so
   a partial history window cannot attach an out-of-window turn's text.
 - When a unit's first ingest returns zero records, the refresh orchestrator
@@ -684,10 +676,13 @@ database. Set them only when you accept that exposure.
 
 ### The import-history alternative (issue #216)
 
-A one-off owner run of `kyberdash dash import-history` fills `conversation_history` and
-`tool_result_content` from the session's JSONL transcript. It never fills `system_prompt` or
-`tool_definitions` — transcripts do not carry them — so the OTLP request body above is the only
-route to those two buckets. Folder import is off by default on a schedule since
+A one-off owner run of `kyberdash dash import-history` fills `conversation_history`,
+`tool_result_content`, and (when `api-request-shape` entries are present) `tool_definitions` via
+`ClaudeTranscriptMapper` (`dash/server/KyberDash.Data/Harnesses/Claude/ClaudeTranscriptMapper.cs`)
+from the session's JSONL transcript. Transcripts never carry `system_prompt`, and older transcripts
+without request shapes remain unmeasured for `tool_definitions`, so the OTLP request body above
+remains the only route to `system_prompt` and to `tool_definitions` on shape-less sessions. Folder
+import is off by default on a schedule since
 [issue #319](https://github.com/dpalfery/kyber-weave/issues/319)
 ([ADR 0033](../adr/0033-kyberdash-surfaces-are-display-layers.md) decision 6); the OTLP
 receiver path is the import-free route to live content. This plan neither runs nor changes the
@@ -697,7 +692,7 @@ import path.
 
 | Harness | Tool Extraction Status | Implementation / Scope |
 |---|---|---|
-| Claude Code / Desktop | **Implemented** | Extracted by Claude reader (`dash/src/synth/readers/claude.ts`) and synthesized into child `tool.invoke` spans; results bounded at 64KiB with `truncated: true` and original byte count recorded in `gen_ai.tool.result_bytes`. Structured error status preserved. |
+| Claude Code / Desktop | **Implemented** | Extracted by `ClaudeTranscriptMapper` (`dash/server/KyberDash.Data/Harnesses/Claude/ClaudeTranscriptMapper.cs`) into child `tool.invoke` spans (and `tool_definition` rows from `api-request-shape` entries when present, leaving older transcripts without request shapes unmeasured for `tool_definitions` and all transcripts unmeasured for `system_prompt`); non-document plain-text results bounded at 64 KiB with `content_part_truncation.original_utf8_bytes` and a `Withheld` continuation part. Structured error status preserved. |
 | Codex | Deferred | Tracked in follow-up issue [#210](https://github.com/dpalfery/kyber-weave/issues/210). |
 | Copilot CLI | **Not ingested** (follow-up) | The `events.jsonl` journal's `toolRequests` are not yet child `tool.invoke` records. Joining them to `tool.execution_complete` on `toolCallId`, on the per-message turns, is the follow-up [copilot-cli-tool-invocations-per-message](../todo/copilot-cli-tool-invocations-per-message.md). Copilot CLI sessions carry no tool records until it lands (see [Copilot CLI journal and system prompt](#copilot-cli-journal-and-system-prompt)). |
 | Copilot VS Code | Deferred | Tracked in follow-up issue [#211](https://github.com/dpalfery/kyber-weave/issues/211). |
@@ -715,7 +710,7 @@ payload contract are in the [skills view contract](architecture.md#skills-view-c
 
 | Harness | Listed | Invoked | Enabling settings and sources | G0 verification (2026-10-13) |
 |---|---|---|---|---|
-| Claude Code (`claude-code`, `claude-cli`) | **Measured.** An `attachment` entry of type `skill_listing` in the session transcript JSONL (`~/.claude/projects/*/*.jsonl`) with `content` (`- name: description` lines), `skillCount`, `isInitial`, and `names[]`. The C# `ClaudeTranscriptMapper` stores the names (from `names[]`, or the content lines when that array is absent) in `record_skill_listing` on the turn the listing precedes; descriptions are not stored. Tool definitions come from the same transcript: each `api-request-shape` line carries the request's `tools`, and every turn whose `api-request` names that shape stores them as `tool_definition` rows. Transcripts written before Claude Code recorded request shapes carry no tool definitions, so their schema ranking stays not measurable. | **Measured.** Assistant `tool_use` blocks named `Skill`, from `input.skill`, and user slash commands (`<command-name>`) that name a listed skill, plus the stored `kyber.skills.invoked` attribute. | No sender setting. The data is read from the transcript by `dash refresh`, a file source. The Claude parser contract is `7` (`CLAUDE_PARSER_CONTRACT_VERSION` in `dash/src/refresh/registry.ts`). Descriptions survive the 14-day content purge because they are kept in raw attributes. | **Verified** from real transcripts on the owner's machine. Fixture: `dash/src/canon/fixtures/skills/claude-code/`. |
+| Claude Code (`claude-code`, `claude-cli`) | **Measured.** An `attachment` entry of type `skill_listing` in the session transcript JSONL (`~/.claude/projects/*/*.jsonl`) with `content` (`- name: description` lines), `skillCount`, `isInitial`, and `names[]`. The C# `ClaudeTranscriptMapper` stores the names (from `names[]`, or the content lines when that array is absent) in `record_skill_listing` on the turn the listing precedes; descriptions are not stored. Tool definitions come from the same transcript: each `api-request-shape` line carries the request's `tools`, and every turn whose `api-request` names that shape stores them as `tool_definition` rows. Transcripts written before Claude Code recorded request shapes carry no tool definitions, so their schema ranking stays not measurable. | **Measured.** Assistant `tool_use` blocks named `Skill`, from `input.skill`, and user slash commands (`<command-name>`) that name a listed skill, plus the stored `kyber.skills.invoked` attribute. | No sender setting. The data is read from the transcript by `dash refresh`, a file source. Claude's `ParserContractVersion` is `"2"` (`HarnessSourceRegistry.ClaudeTranscriptV2ParserContractVersion` in `dash/server/KyberDash.Data/Collector/HarnessSourceRegistry.cs`). Descriptions survive the 14-day content purge because they are kept in raw attributes. | **Verified** from real transcripts on the owner's machine. Fixture: `dash/src/canon/fixtures/skills/claude-code/`. |
 | Claude Desktop (`claude-desktop`) | **Measured from the OTLP request body** when the body carries the listing, and from the transcript when one is recorded (the transcript wins). Desktop model-call records are harness `claude-code`, so the body path applies to those records. The `claude-desktop` transcript path was not separately checked for a `skill_listing`. | Same extraction as Claude Code, if the transcript carries `Skill` calls (not separately verified). | As Claude Code: the transcript, or the request body. | **Body-sourced listing verified** on the 2026-10-19 store snapshot (308 bodies carry it). Not yet confirmed on a live turn (owner gate 1). Transcript listing still unverified. |
 | GitHub Copilot (`copilot`, source `github-copilot`) | **Measured** on `invoke_agent` spans from `github.copilot.context.skills`, a JSON-array string of names. This key is not `gen_ai.skills`. Descriptions come from the `<available_skills>` block in the system-prompt part, when that part is stored. A listing on a rollup `invoke_agent` applies to the turns directly under it. VS Code Copilot records no listing key; its listing is read from the `<skills>` block in the system-prompt part instead, and a prompt with no such block stays not measurable. | **Not measurable** unless a `skill` tool record exists. None exists in the owner's store, which holds only `view`, `task`, `bash`, and `edit` tool spans. | OTLP capture from Copilot ([in-app enablement](#in-app-collection-enablement)). Descriptions need the system-prompt part stored, which the content-enabled capture described in the Copilot Chat row provides. | **Verified** for the listing (one real `invoke_agent` span). Invocation is not measurable in the owner's store. Fixture: `dash/src/canon/fixtures/skills/copilot-chat/`. |
 | Copilot CLI (`copilot-cli`) | **Measured** from `system.message` events in `~/.copilot/session-state/<id>/events.jsonl`. The reader attaches the prompt of the same agent (root events carry no `agentId`, subagent events name theirs) to each `assistant.message` turn as a `system_prompt` part, and the skills engine parses the `<available_skills>` block for names, descriptions and derived tokens. Root turns lead, so calls without a message id (rollup legs) that pair by position stay within the root agent's turns; a call past the turn list gets no prompt. | **Not separately verified.** It follows the Copilot rule above: not measurable unless a `skill` tool record exists. | Reads the journal by `dash refresh`, a file source. No sender setting. | **Verified** on a real session on the owner's machine (2026-10-21). Tool definitions are **not measurable**: the journal holds no tool schemas, and the prompt's `<tools>` section is guidance for a subset of tools, not the offered set. |
@@ -737,11 +732,12 @@ means not measured, and `[]` on the payload is the measured none described in th
 effective list for the session. A later non-initial listing is unioned into it. A skill's
 description is the first one observed in the session. A listing read from a request body is used only when the record has no transcript listing.
 
-**Parser contracts.** The Claude family, Codex, Pi, Copilot, Kilo, OpenCode, Cline CLI,
-CodeWhale, OpenClaude, and DSH were bumped for the skill extraction. The current values are in
-`dash/src/refresh/registry.ts`. Advancing a contract makes existing checkpoints stale, so the
-next `dash refresh` re-reads them under the refresh window rules. Whether sessions older than
-that window gain a listing after a bump is **unverified**. See the [runbook](runbook.md#2a-local-harness-source-refresh-dash-refresh).
+**Parser contracts.** `HarnessSourceRegistry` (`dash/server/KyberDash.Data/Collector/HarnessSourceRegistry.cs`)
+holds the parser contract versions for the file-ingested harnesses (for Claude Code,
+`ClaudeTranscriptV2ParserContractVersion = "2"`). Advancing a contract makes existing checkpoints
+stale, so the next `dash refresh` re-reads them under the refresh window rules. Whether sessions
+older than that window gain a listing after a bump is **unverified**. See the
+[runbook](runbook.md#2a-local-harness-source-refresh-dash-refresh).
 
 **Fixtures.** The G0 captures are sanitized, real-shape records under
 `dash/src/canon/fixtures/skills/<harness>/`. Each folder has a README that states what was found
@@ -995,7 +991,7 @@ Absent signals are never rendered as zero spend or zero cache hit rate.
 | Harness | Cache counters | Cache confidence | Prefix bytes | Prefix confidence | Fallback | Observed signal & rationale |
 |---|---|---|---|---|---|---|
 | Copilot | `supported` (`cache_read` + `cache_creation`) | `verified` | `supported` | `verified` | `detect-but-cannot-locate` | OTLP capture provides cache-inclusive usage (`gen_ai.usage.cache_read.input_tokens`, `cache_creation.input_tokens`) and maps message/instruction parts. When content capture is disabled, falls back to `cache_read ÷ input`. |
-| Claude Code | `supported` (`cache_read` + `cache_creation`) | `verified` | `not_measurable` | `documented` | `detect-but-cannot-locate` | Enhanced telemetry exports cache-exclusive counters (`cache_read_tokens`, `cache_creation_tokens`). Transcripts omit runtime system prompt and tool definitions; full prefix byte reconstruction requires `OTEL_LOG_RAW_API_BODIES=1`. |
+| Claude Code | `supported` (`cache_read` + `cache_creation`) | `verified` | `not_measurable` | `documented` | `detect-but-cannot-locate` | Enhanced telemetry exports cache-exclusive counters (`cache_read_tokens`, `cache_creation_tokens`). `ClaudeTranscriptMapper` (`dash/server/KyberDash.Data/Harnesses/Claude/ClaudeTranscriptMapper.cs`) extracts `tool_definitions` from `api-request-shape` entries when present, while older transcripts without request shapes stay unmeasured for `tool_definitions` and all transcripts omit runtime `system_prompt`; full prefix byte reconstruction requires `OTEL_LOG_RAW_API_BODIES=1`. |
 | Cursor | `unsupported` | `verified` | `not_measurable` | `verified` | `none` | `cursor-hook` and enterprise OTel export emit token totals (`promptTokens`, `outputTokens`, `schemaTokens`) without cache read/write counters. Prompt text is isolated; prefix stability cannot be computed. |
 | Windsurf | `unsupported` | `documented` | `not_measurable` | `documented` | `none` | Cascade transcripts and telemetry export non-model attributes under `windsurf.*` without cache read/creation counters or request-prefix boundaries. |
 | Roo Code | `supported` (`cache_read` + `cache_creation`) | `verified` | `not_measurable` | `verified` | `detect-but-cannot-locate` | Cline-family transcripts (`tasks/<id>/ui_messages.json` on `api_req_started`) record `cacheReads` and `cacheWrites`. Turn history is stored, but template system prompts are omitted on disk. |

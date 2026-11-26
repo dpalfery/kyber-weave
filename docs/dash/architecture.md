@@ -1786,7 +1786,7 @@ In the C# engine, `CanonIngestPipeline.ToCollectedRecord` (`dash/server/KyberDas
 **Measurability.** Listing and invocation are measured separately, and an unmeasured side is
 never reported as zero. It is declared in one of two ways: a key is absent (the summary's
 `skills_invoked` array), or it carries `{availability: 'not_measurable', reason}` (the whole
-`skills` view, and each row's `invocations`). `[]` is a measured none. Per-harness sources are in the [telemetry inventory](telemetry-inventory.md#skill-availability-by-harness).
+`skills` view, and each row's `listed`). `[]` is a measured none. Per-harness sources are in the [telemetry inventory](telemetry-inventory.md#skill-availability-by-harness).
 
 **Skills section** (`GET /api/kyber/session/:id/skills`, additive). The route serves one page of
 the session's skill rows with the page envelope (`{ rows, total, page, limit, offset, order }`),
@@ -1796,26 +1796,25 @@ whole-session counts live on the summary: `skills_count`, always served. (The en
 the `skills_invoked` name array, which the summary validator does not carry; the panel tiles that
 read the arrays therefore render "not measurable" — see the known limit below.)
 
-- `skills.rows` is sorted by `invocations` (`DESC` by default, or `ASC`, tiebreak `name`
-  ascending). Each row is `{name, listed, invocations, turns_listed,
-  description?, derived_tokens?}`.
-    - `listed` is always a boolean. It is `true` when a measured listing named the skill on at
-      least one turn, and `false` for a skill that was only invoked.
-    - `invocations` is a number when invocation is measured, and `0` is a measured none. For
-      Copilot CLI and Antigravity it is that
-      object when no record of the session carries `kyber.skills.invoked`, and a number otherwise.
-      Antigravity counts over the measured turns (see `invocationsCoverage`).
-      An unmeasured side is never omitted from the row and never reported as `0`.
-    - `turns_listed` holds 0-based transport indices (the issue #184 numbering), and is `[]` when
-      the skill was listed on no turn.
-    - `description` is the first listing text observed for that skill in the session, stored
-      once. `derived_tokens` is a local-tokenizer count of the description, labelled with the tokenizer used and whether it is the model's own (the `o200k_base` stand-in when the model publishes none). Both are
-      absent when no listing carried a description.
-- `measurability.skills` is set only when the whole `skills` view is `not_measurable`, and then
-  carries that same reason. A partly measured view (Antigravity when no
-  record of the session carries the invoked key, or Copilot CLI when a listing is measured but no
-  record carries the invoked key) leaves `measurability.skills` unset. Its unmeasured side shows per row (the
-  `invocations` object) and by the absent `summary.skills_invoked` key.
+- `skills.rows` (`measurable: true`) is sorted by `invocations` (`DESC` by default, or `ASC`,
+  tiebreak `name` ascending). Each row served by `KyberBridgeEngine.BuildSkillsPayload` is
+  `{ name, listed, invocations, turns_listed }`:
+    - `listed` is a boolean when the session recorded at least one `record_skill_listing` row
+      (`true` when the listing named the skill on at least one turn, `false` for a skill that was
+      only invoked), or a `NotMeasurableBlock` (`{ availability: 'not_measurable', reason }`) when
+      the session has no stored listing.
+    - `invocations` is always an integer (`skillCounts.GetValueOrDefault(skillName)`, with `0`
+      representing a listed skill with no observed invocation). Object-valued `invocations` and
+      `invocationsCoverage` from the retired monolithic payload are not emitted by the C# route.
+    - `turns_listed` holds 0-based turn indices (`[]` when the skill was listed on no turn).
+    - `description` and `derived_tokens` from the retired monolithic payload are not emitted by
+      `KyberBridgeEngine.BuildSkillsPayload` (the listing's descriptions are not stored or served
+      by the C# route; the web type keeps them optional only for compatibility).
+- When neither invocations nor listed skills were recorded for the session,
+  `KyberBridgeEngine.BuildSkillsPayload` returns the top-level `NotMeasurableBlock` envelope
+  (`{ availability: 'not_measurable', reason }`) alongside the empty page envelope
+  (`{ rows: [], total: 0, page, limit, offset, order }`) instead of a nested `measurability.skills`
+  property (retired).
 
 **Turn content** (`GET /api/kyber/session/:id/turn/:index/content`). The restored C# route serves
 the byte-budgeted parts alone and carries no `skills` entry: `skills` stays optional in the web
