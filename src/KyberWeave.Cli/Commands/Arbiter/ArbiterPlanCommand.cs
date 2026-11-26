@@ -24,8 +24,8 @@ public sealed class ArbiterPlanCommand(
     /// the table, so a task file can record the digest it was written from. An unknown dependency token
     /// (<c>KW-ARB-PARSE-001</c>) withholds it, since the parser drops that token; a task with no Files
     /// line (<c>KW-ARB-PARSE-002</c>) does not. A plan with no parsed task reports
-    /// <c>KW-ARB-PLAN-001</c>; a missing or unreadable file reports
-    /// <c>KW-ARB-PLAN-002</c> and exits 1.
+    /// <c>KW-ARB-PARSE-004</c>; a missing or unreadable file reports
+    /// <c>KW-ARB-PARSE-005</c> and exits 1.
     /// </summary>
     public override int Execute(CommandContext context, ArbiterSettings settings, CancellationToken cancellationToken)
     {

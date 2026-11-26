@@ -1,11 +1,12 @@
 using System.Net;
 using System.Security.Cryptography;
 using System.Text;
-using KyberWeave.Cli.Update;
 using KyberWeave.Contracts.Repositories;
 using KyberWeave.Tests.Fakes;
 using KyberWeave.Tests.FileSystem;
 using Xunit;
+using KyberWeave.Application.Update;
+using KyberWeave.Domain.Update;
 
 namespace KyberWeave.Application.Tests.Update;
 

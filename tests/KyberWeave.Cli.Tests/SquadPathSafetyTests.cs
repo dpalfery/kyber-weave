@@ -11,6 +11,7 @@ using KyberWeave.Tests.Fakes;
 using Spectre.Console;
 using Spectre.Console.Cli;
 using Xunit;
+using KyberWeave.Data.Squad.Packaging;
 
 namespace KyberWeave.Tests;
 

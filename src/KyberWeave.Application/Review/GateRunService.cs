@@ -35,7 +35,7 @@ public sealed class GateRunService(
     private const string DeadlineKey = "review.council-deadline-seconds";
 
     private static readonly ArbiterRule GateSelectRule =
-        ArbiterConfigDefaults.Product.Rules.Single(rule => rule.Id == "KW-ARB-GATE-001");
+        ArbiterConfigDefaults.Product.Rules.Single(rule => rule.Id == ArbiterRuleIds.GateSelect);
 
     /// <summary>Runs every declared gate and returns the normalized report.</summary>
     /// <remarks>

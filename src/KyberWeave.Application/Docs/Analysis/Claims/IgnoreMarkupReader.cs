@@ -11,8 +11,6 @@ namespace KyberWeave.Core.Docs.Analysis.Claims;
 /// </summary>
 internal static partial class IgnoreMarkupReader
 {
-    private const string DiagnosticCode = "KW-DOC-ANALYSIS-004";
-
     internal static IgnoreMarkupReadResult Read(DocumentModel document)
     {
         string body = NormalizeLineEndings(document.Body);
@@ -155,7 +153,7 @@ internal static partial class IgnoreMarkupReader
             string.Empty,
             [],
             new Diagnostic(
-                DiagnosticCode,
+                DocumentationAnalysisRuleIds.IgnoreMarkupRuleCode,
                 Severity.Error,
                 message,
                 document.Subject,

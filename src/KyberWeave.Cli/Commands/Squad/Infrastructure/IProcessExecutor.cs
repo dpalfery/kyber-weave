@@ -1,5 +1,6 @@
 using System.Diagnostics;
 using KyberWeave.Core.Processes;
+using KyberWeave.Contracts.Repositories;
 
 namespace KyberWeave.Cli.Commands.Squad.Infrastructure;
 

@@ -1,8 +1,8 @@
 using KyberWeave.Cli.Commands.Update;
-using KyberWeave.Cli.Update;
 using KyberWeave.Contracts.Services;
 using Spectre.Console.Testing;
 using Xunit;
+using KyberWeave.Domain.Update;
 
 namespace KyberWeave.Tests;
 

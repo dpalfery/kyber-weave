@@ -4,6 +4,7 @@ using KyberWeave.Core.Squad.Validation;
 using KyberWeave.Tests.Fakes;
 using KyberWeave.Tests.FileSystem;
 using Xunit;
+using KyberWeave.Data.Squad.Packaging;
 
 namespace KyberWeave.Tests.Squad;
 

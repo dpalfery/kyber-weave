@@ -1,4 +1,4 @@
-namespace KyberWeave.Cli.Update;
+namespace KyberWeave.Application.Update;
 
 /// <summary>The names a Release archive and its installed binary carry.</summary>
 public static class BinaryInstaller

@@ -1,4 +1,4 @@
-namespace KyberWeave.Cli.Update;
+namespace KyberWeave.Data.Update;
 
 /// <summary>The adapter over the operating system's permission bits.</summary>
 internal sealed class UnixUpdateFileModes : IUpdateFileModes

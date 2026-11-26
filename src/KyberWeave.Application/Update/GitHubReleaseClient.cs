@@ -3,8 +3,9 @@ using System.Net;
 using System.Net.Http.Headers;
 using System.Text.Json;
 using System.Text.Json.Serialization;
+using KyberWeave.Domain.Update;
 
-namespace KyberWeave.Cli.Update;
+namespace KyberWeave.Application.Update;
 
 /// <summary>Reads Release metadata and assets over HTTPS, or from a loopback stand-in.</summary>
 /// <remarks>

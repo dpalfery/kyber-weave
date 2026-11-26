@@ -9,7 +9,7 @@ using KyberWeave.Core.Configuration;
 using KyberWeave.Core.Squad.Deployment;
 using KyberWeave.Core.Squad.Rendering;
 
-namespace KyberWeave.Cli.Commands.Arbiter;
+namespace KyberWeave.Application.Arbiter;
 
 /// <summary>
 /// Works out how each installed harness is gated for one project, for <c>arbiter doctor</c> and

@@ -1,6 +1,5 @@
 using KyberWeave.Core.FileSystem;
 using KyberWeave.Cli.Commands.Squad.Infrastructure;
-using KyberWeave.Cli.Update;
 using KyberWeave.Contracts.Repositories;
 using KyberWeave.Contracts.Services;
 using KyberWeave.Core.Configuration;
@@ -9,6 +8,7 @@ using KyberWeave.Core.Squad.Release;
 using KyberWeave.Core.Squad.Rendering;
 using Spectre.Console;
 using Spectre.Console.Cli;
+using KyberWeave.Domain.Update;
 
 namespace KyberWeave.Cli.Commands.Squad;
 

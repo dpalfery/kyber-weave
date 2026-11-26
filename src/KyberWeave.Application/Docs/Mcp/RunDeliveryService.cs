@@ -5,7 +5,6 @@ using KyberWeave.Contracts.Services;
 using KyberWeave.Core.Configuration;
 using KyberWeave.Core.Diagnostics;
 using KyberWeave.Core.Docs.Delivery;
-using KyberWeave.Cli.Commands.Squad.Infrastructure;
 
 namespace KyberWeave.Mcp;
 

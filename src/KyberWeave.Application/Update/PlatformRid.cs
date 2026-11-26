@@ -1,7 +1,8 @@
 using System.Runtime.InteropServices;
 using KyberWeave.Contracts.Repositories;
+using KyberWeave.Domain.Update;
 
-namespace KyberWeave.Cli.Update;
+namespace KyberWeave.Application.Update;
 
 /// <summary>Maps the running OS and CPU to a published Release RID.</summary>
 public static class PlatformRid

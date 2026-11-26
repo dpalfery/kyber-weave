@@ -1,6 +1,7 @@
 using System.Reflection;
-using KyberWeave.Cli.Update;
 using KyberWeave.Contracts.Repositories;
+using KyberWeave.Application.Update;
+using KyberWeave.Domain.Update;
 
 namespace KyberWeave.Cli.Composition;
 

@@ -6,6 +6,7 @@ using KyberWeave.Core.Squad.Rendering;
 using KyberWeave.Tests.Fakes;
 using Xunit;
 using KyberWeave.Tests.Corpus;
+using KyberWeave.Application.Arbiter;
 
 namespace KyberWeave.Integration.Tests;
 

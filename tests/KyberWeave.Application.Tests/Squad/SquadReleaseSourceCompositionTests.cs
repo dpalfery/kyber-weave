@@ -3,6 +3,7 @@ using KyberWeave.Contracts.Repositories;
 using KyberWeave.Core.Squad.Release;
 using Microsoft.Extensions.DependencyInjection;
 using Xunit;
+using KyberWeave.Application.Squad.Release;
 
 namespace KyberWeave.Application.Tests.Squad;
 

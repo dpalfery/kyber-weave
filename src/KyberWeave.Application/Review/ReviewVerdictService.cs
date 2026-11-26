@@ -68,19 +68,14 @@ public sealed partial class ReviewVerdictService(
     /// <summary>The drop reasons whose findings become <c>follow-up:</c> lines instead of a fix round.</summary>
     private static readonly string[] FollowUpReasons = [PreExistingDebt, PullRequestNote];
 
-    private const string UnreadableInput = "KW-REVIEW-023";
     private const string Verdict = "KW-REVIEW-024";
-    private const string ReportWriteFailed = "KW-REVIEW-025";
     private const string SeatUnreadable = "KW-REVIEW-040";
     private const string LensCoverageCode = "KW-REVIEW-041";
     private const string FindingDropped = "KW-REVIEW-042";
     private const string CitedLine = "KW-REVIEW-043";
-    private const string DiscoveryGap = "KW-REVIEW-044";
     private const string HandBuiltFindings = "KW-REVIEW-045";
-    private const string RefutationCandidates = "KW-REVIEW-046";
     private const string InputSitesMissing = "KW-REVIEW-047";
     private const string SeatBudgetReached = "KW-REVIEW-054";
-    private const string GateCarried = "KW-REVIEW-048";
     private const string GateNotRerun = "KW-REVIEW-049";
     private const string PriorNotThisChange = "KW-REVIEW-050";
     private const string FixRoundCode = "KW-REVIEW-056";
@@ -406,7 +401,7 @@ public sealed partial class ReviewVerdictService(
             {
                 effective.Add(carried with { Summary = $"carried from cycle {decision.FromCycle}: {carried.Summary}" });
                 report.Add(new Diagnostic(
-                    GateCarried,
+                    ReviewDiagnosticCodes.GateCarried,
                     Severity.Info,
                     $"{decision.GateId}: carried from cycle {decision.FromCycle} ({decision.Reason}).",
                     decision.GateId));
@@ -525,7 +520,7 @@ public sealed partial class ReviewVerdictService(
         {
             refused = true;
             report.Add(new Diagnostic(
-                UnreadableInput,
+                ReviewDiagnosticCodes.UnreadableInput,
                 Severity.Error,
                 $"{option} was given an empty value. Name a path, or leave the option out.",
                 Subject));
@@ -547,7 +542,7 @@ public sealed partial class ReviewVerdictService(
         if (request.Seats is not null && request.Findings is not null)
         {
             report.Add(new Diagnostic(
-                UnreadableInput,
+                ReviewDiagnosticCodes.UnreadableInput,
                 Severity.Error,
                 "--seats and --findings name two sources for the same findings. Pass one of them.",
                 Subject,
@@ -618,7 +613,7 @@ public sealed partial class ReviewVerdictService(
         if (!seatFolder.Exists(full))
         {
             report.Add(new Diagnostic(
-                UnreadableInput,
+                ReviewDiagnosticCodes.UnreadableInput,
                 Severity.Error,
                 $"Seat folder not found: {full}",
                 Subject,
@@ -724,7 +719,7 @@ public sealed partial class ReviewVerdictService(
         if (fallbacks.Length > 1)
         {
             report.Add(new Diagnostic(
-                DiscoveryGap,
+                ReviewDiagnosticCodes.DiscoveryGap,
                 Severity.Warning,
                 $"{seat.Lens}.md wrote {fallbacks.Length} different 'Index fallback:' lines " +
                 $"({string.Join("; ", fallbacks.Select(value => $"'{value}'"))}); the first is kept. " +
@@ -737,7 +732,7 @@ public sealed partial class ReviewVerdictService(
                 mode.StartsWith(known, StringComparison.Ordinal)))
         {
             report.Add(new Diagnostic(
-                DiscoveryGap,
+                ReviewDiagnosticCodes.DiscoveryGap,
                 Severity.Warning,
                 $"{seat.Lens}.md names index fallback mode '{mode}', which the seat contract does not define. " +
                 "The verdict does not depend on it.",
@@ -759,7 +754,7 @@ public sealed partial class ReviewVerdictService(
             return;
 
         report.Add(new Diagnostic(
-            DiscoveryGap,
+            ReviewDiagnosticCodes.DiscoveryGap,
             Severity.Warning,
             $"{seat.Lens}.md {gap}. The verdict does not depend on it.",
             seat.Lens,
@@ -1027,7 +1022,7 @@ public sealed partial class ReviewVerdictService(
         if (cycle is null)
         {
             report.Add(new Diagnostic(
-                UnreadableInput,
+                ReviewDiagnosticCodes.UnreadableInput,
                 Severity.Error,
                 $"No findings were given and no review cycle was found: {problem}.",
                 Subject,
@@ -1407,7 +1402,7 @@ public sealed partial class ReviewVerdictService(
             return;
 
         report.Add(new Diagnostic(
-            RefutationCandidates,
+            ReviewDiagnosticCodes.RefutationCandidates,
             Severity.Info,
             $"Accepted critical and major findings: {string.Join(", ", ids)}.",
             Subject,
@@ -1435,7 +1430,7 @@ public sealed partial class ReviewVerdictService(
         if (string.IsNullOrWhiteSpace(path))
         {
             report.Add(new Diagnostic(
-                UnreadableInput,
+                ReviewDiagnosticCodes.UnreadableInput,
                 Severity.Error,
                 option == "--findings"
                     ? "No findings were given. Pass --seats <DIR>, the folder of seat output files."
@@ -1448,7 +1443,7 @@ public sealed partial class ReviewVerdictService(
         if (!files.FileExists(full))
         {
             report.Add(new Diagnostic(
-                UnreadableInput,
+                ReviewDiagnosticCodes.UnreadableInput,
                 Severity.Error,
                 $"Input document not found: {full}",
                 Subject,
@@ -1466,7 +1461,7 @@ public sealed partial class ReviewVerdictService(
         catch (Exception ex) when (FileFailure.Is(ex) || ex is JsonException or InvalidOperationException)
         {
             report.Add(new Diagnostic(
-                UnreadableInput,
+                ReviewDiagnosticCodes.UnreadableInput,
                 Severity.Error,
                 $"Could not read '{full}': {ex.Message}",
                 Subject,
@@ -1481,7 +1476,7 @@ public sealed partial class ReviewVerdictService(
     /// </summary>
     private void TryWriteReport(string? path, string content, DiagnosticReport report)
     {
-        ReviewReportWriter.TryWrite(files, paths, environment, path, content, ReportWriteFailed, report);
+        ReviewReportWriter.TryWrite(files, paths, environment, path, content, ReviewDiagnosticCodes.ReportWriteFailed, report);
     }
 
     /// <summary>Resolves a path the caller spelled, a relative one against the working directory.</summary>

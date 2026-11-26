@@ -5,7 +5,6 @@ using System.Text.Json.Nodes;
 using KyberWeave.Arbiter.Hooks;
 using KyberWeave.Contracts.Repositories;
 using KyberWeave.Core.Squad.Model;
-using KyberWeave.Cli.Commands.Squad;
 using KyberWeave.Core.Arbiter;
 using KyberWeave.Contracts.Services;
 using KyberWeave.Core.Configuration;
@@ -14,7 +13,7 @@ using KyberWeave.Core.FileSystem;
 using KyberWeave.Core.Squad.Deployment;
 using KyberWeave.Core.Squad.Rendering;
 
-namespace KyberWeave.Cli.Update;
+namespace KyberWeave.Application.Update;
 
 /// <summary>
 /// Default arbiter-hook refresh: re-renders hooks for each enabled project through the Squad

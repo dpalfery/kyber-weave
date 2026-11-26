@@ -2,13 +2,13 @@ using KyberWeave.Arbiter.Hooks;
 using KyberWeave.Cli.Commands.Squad.Infrastructure;
 using KyberWeave.Contracts.Repositories;
 using KyberWeave.Contracts.Services;
-using KyberWeave.Cli.Update;
 using KyberWeave.Core.Configuration;
 using KyberWeave.Core.Squad.Deployment;
 using KyberWeave.Core.Squad.Release;
 using KyberWeave.Core.Squad.Rendering;
 using Spectre.Console;
 using Spectre.Console.Cli;
+using KyberWeave.Domain.Update;
 
 namespace KyberWeave.Cli.Commands.Squad;
 

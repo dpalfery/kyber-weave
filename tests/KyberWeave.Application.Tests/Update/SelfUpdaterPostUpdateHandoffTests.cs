@@ -1,5 +1,4 @@
 using System.ComponentModel;
-using KyberWeave.Cli.Update;
 using KyberWeave.Contracts.Repositories;
 using KyberWeave.Core.Configuration;
 using KyberWeave.Core.Processes;
@@ -9,6 +8,8 @@ using KyberWeave.Testing.Update;
 using KyberWeave.Tests.Fakes;
 using KyberWeave.Tests.FileSystem;
 using Xunit;
+using KyberWeave.Domain.Update;
+using KyberWeave.Application.Update;
 
 namespace KyberWeave.Application.Tests.Update;
 

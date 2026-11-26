@@ -14,6 +14,7 @@ using Xunit;
 using Xunit.Sdk;
 using KyberWeave.Tests.Corpus;
 using KyberWeave.Testing.Squad;
+using KyberWeave.Data.Squad.Release;
 
 namespace KyberWeave.Integration.Tests.Squad;
 

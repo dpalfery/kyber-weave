@@ -1,9 +1,10 @@
 using System.ComponentModel;
 using System.Diagnostics;
-using KyberWeave.Cli.Update;
 using KyberWeave.Core.Processes;
 using KyberWeave.Core.Squad.Deployment;
 using Spectre.Console;
+using KyberWeave.Application.Update;
+using KyberWeave.Contracts.Repositories;
 
 namespace KyberWeave.Cli.Commands.Squad.Infrastructure;
 

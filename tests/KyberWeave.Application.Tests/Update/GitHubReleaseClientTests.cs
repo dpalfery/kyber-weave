@@ -1,8 +1,9 @@
 using System.Net;
 using System.Text;
-using KyberWeave.Cli.Update;
 using KyberWeave.Tests.Fakes;
 using Xunit;
+using KyberWeave.Application.Update;
+using KyberWeave.Domain.Update;
 
 namespace KyberWeave.Application.Tests.Update;
 

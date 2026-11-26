@@ -1,4 +1,4 @@
-using KyberWeave.Cli.Update;
+using KyberWeave.Contracts.Repositories;
 
 namespace KyberWeave.Contracts.Services;
 

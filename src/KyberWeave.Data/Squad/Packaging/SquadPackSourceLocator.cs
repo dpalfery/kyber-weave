@@ -1,7 +1,7 @@
 using KyberWeave.Contracts.Paths;
 using KyberWeave.Contracts.Repositories;
 
-namespace KyberWeave.Cli.Commands.Squad;
+namespace KyberWeave.Data.Squad.Packaging;
 
 /// <summary>
 /// Locates the canonical Kyber-Squad product source tree within the current repository checkout.

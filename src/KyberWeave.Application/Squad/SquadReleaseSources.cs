@@ -1,6 +1,6 @@
-using KyberWeave.Cli.Commands.Squad.Infrastructure;
 using KyberWeave.Contracts.Repositories;
 using KyberWeave.Core.Squad.Release;
+using KyberWeave.Data.Squad.Release;
 
 namespace KyberWeave.Application.Squad;
 

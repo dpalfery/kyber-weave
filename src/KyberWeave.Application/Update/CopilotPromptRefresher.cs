@@ -2,7 +2,7 @@ using KyberWeave.Contracts.Host;
 using KyberWeave.Contracts.Repositories;
 using KyberWeave.Domain.CopilotPrompt;
 
-namespace KyberWeave.Cli.Update;
+namespace KyberWeave.Application.Update;
 
 /// <summary>
 /// Rewrites the installed Copilot system-prompt file during an update, so the file tracks the
