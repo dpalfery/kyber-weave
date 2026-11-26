@@ -1,6 +1,5 @@
 using KyberWeave.Core;
 using System.ComponentModel;
-using KyberWeave.Cli.Commands.Review;
 using KyberWeave.Cli.Commands.Squad.Infrastructure;
 using KyberWeave.Contracts.Paths;
 using KyberWeave.Contracts.Repositories;
@@ -48,9 +47,6 @@ public sealed class ReviewSeatsService(
     IReviewDecisionSteps decisionSteps,
     IPathResolver paths) : IReviewSeatsService
 {
-    private const string UnreadableInput = "KW-REVIEW-023";
-    private const string ReportWriteFailed = "KW-REVIEW-025";
-    private const string IndexState = "KW-REVIEW-038";
     private const string DefaultBase = "origin/HEAD";
 
     /// <inheritdoc />
@@ -90,7 +86,7 @@ public sealed class ReviewSeatsService(
         if (plan.Prior is { } priorCycle)
         {
             (bool ok, IReadOnlyList<ReviewFinding> found) = selector.ReadRecheck(
-                priorCycle, config.Review.Policy, report, UnreadableInput, Severity.Error, "review seats");
+                priorCycle, config.Review.Policy, report, ReviewDiagnosticCodes.UnreadableInput, Severity.Error, "review seats");
             if (!ok)
                 return ReviewCommandResultFactory.Reported(1, report);
 
@@ -140,7 +136,7 @@ public sealed class ReviewSeatsService(
         catch (Exception ex) when (FileFailure.Is(ex))
         {
             report.Add(new Diagnostic(
-                ReportWriteFailed,
+                ReviewDiagnosticCodes.ReportWriteFailed,
                 Severity.Error,
                 $"Could not write the evidence or packets to '{folder}': {ex.Message}",
                 "review seats"));
@@ -155,7 +151,7 @@ public sealed class ReviewSeatsService(
         {
             WorktreeIndexStatus.Ready => $"index: {tree} ready",
             WorktreeIndexStatus.NotGoverned => $"index: {tree} not checked (no governed docs here)",
-            _ => $"index: {tree} unavailable ({IndexState}: {index.Checks.FirstOrDefault(check => !check.Passed)?.Reason ?? "no reason reported"}); fix: kyber-weave doctor --ensure {tree}",
+            _ => $"index: {tree} unavailable ({ReviewDiagnosticCodes.IndexState}: {index.Checks.FirstOrDefault(check => !check.Passed)?.Reason ?? "no reason reported"}); fix: kyber-weave doctor --ensure {tree}",
         });
         if (plan.Prior is not null)
         {

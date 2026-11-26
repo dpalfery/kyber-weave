@@ -1,4 +1,5 @@
 using KyberWeave.Contracts.Repositories;
+using KyberWeave.Contracts.Services;
 using System.Globalization;
 using System.Text;
 using System.Text.Json;
@@ -33,10 +34,10 @@ namespace KyberWeave.Core.Docs.Validation;
 public sealed partial class PlanTaskFileGenerator
 {
     /// <summary>The plan carries no Tasks section, or none of its tasks parsed.</summary>
-    public const string NoTasks = "KW-ARB-PLAN-001";
+    public const string NoTasks = IArbiterPlanService.NoTasks;
 
     /// <summary>The plan file is missing, unreadable, or not a file this command writes beside.</summary>
-    public const string PlanNotReadable = "KW-ARB-PLAN-002";
+    public const string PlanNotReadable = IArbiterPlanService.PlanNotReadable;
 
     private static readonly HashSet<string> Runners = new(StringComparer.Ordinal)
     {

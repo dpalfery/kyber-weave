@@ -1,7 +1,6 @@
 using KyberWeave.Core;
 using System.Text.Json;
 using System.Text.Json.Nodes;
-using KyberWeave.Cli.Commands.Review;
 using KyberWeave.Contracts.Paths;
 using KyberWeave.Contracts.Repositories;
 using KyberWeave.Contracts.Services;
@@ -32,8 +31,6 @@ public sealed class ReviewCycleService(
     IPathResolver paths,
     IProcessEnvironment environment) : IReviewCycleService
 {
-    private const string UnreadableInput = "KW-REVIEW-023";
-
     /// <inheritdoc />
     public ReviewCommandResult Run(
         ReviewCycleRequest request,
@@ -76,7 +73,7 @@ public sealed class ReviewCycleService(
         if (plan.Prior is { } priorCycle)
         {
             (bool ok, IReadOnlyList<ReviewFinding> found) = selector.ReadRecheck(
-                priorCycle, config.Review.Policy, report, UnreadableInput, Severity.Error, "review cycle");
+                priorCycle, config.Review.Policy, report, ReviewDiagnosticCodes.UnreadableInput, Severity.Error, "review cycle");
             if (!ok)
                 return ReviewCommandResultFactory.Reported(1, report);
 

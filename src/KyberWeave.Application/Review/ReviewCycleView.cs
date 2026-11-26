@@ -16,7 +16,6 @@ namespace KyberWeave.Application.Review;
 /// </summary>
 public static class ReviewCycleView
 {
-    private const string InvalidInput = "KW-REVIEW-028";
 
     /// <summary>
     ///     The task folder name: the given id normalised and matched to an existing folder without regard to case; with
@@ -40,7 +39,7 @@ public static class ReviewCycleView
             if (task.Length > 0)
                 return true;
 
-            error = $"{InvalidInput}: --task '{given}' has no letters or digits to name a folder with.";
+            error = $"{ReviewDiagnosticCodes.InvalidInput}: --task '{given}' has no letters or digits to name a folder with.";
             return false;
         }
 
@@ -62,7 +61,7 @@ public static class ReviewCycleView
         }
 
         task = string.Empty;
-        error = $"{InvalidInput}: --task is needed: " + (folders.Count == 0
+        error = $"{ReviewDiagnosticCodes.InvalidInput}: --task is needed: " + (folders.Count == 0
             ? "there is no review folder and no current branch."
             : $"several review folders exist ({string.Join(", ", folders)}).");
         return false;

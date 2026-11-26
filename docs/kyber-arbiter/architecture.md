@@ -480,7 +480,7 @@ technology rule file), `KW-ARB-MODEL-001` for a missing or stale
 model targets file, `KW-ARB-KEY-001` for a missing key,
 `KW-ARB-LOG-001` for an un-ignored log directory,
 `KW-ARB-BIN-001` for a missing binary, `KW-ARB-GUARD-001` for undeclared planning indexes,
-`KW-ARB-PARSE-001`/`-002` for plan parsing, `KW-ARB-AUDIT-001`…`-004` for the ledger audit,
+`KW-ARB-PARSE-001`…`-005` for plan parsing and reading, `KW-ARB-AUDIT-001`…`-004` for the ledger audit,
 and `KW-ARB-HOOK-001` for a hook or evaluator error, which allows and is logged.
 `KW-ARB-CONFIG-016` warns when the provider timeout in force cannot fit the rendered hook timeout. See the
 [rule reference](../ci-pipelines/rule-reference.md).

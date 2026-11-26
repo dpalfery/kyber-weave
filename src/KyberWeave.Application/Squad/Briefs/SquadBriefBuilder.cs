@@ -4,6 +4,7 @@ using KyberWeave.Contracts.Services;
 using KyberWeave.Core.Arbiter.Plans;
 using KyberWeave.Core.Configuration;
 using KyberWeave.Core.Diagnostics;
+using KyberWeave.Core.Docs;
 using KyberWeave.Core.Docs.Closeout;
 using KyberWeave.Core.FileSystem;
 using KyberWeave.Core.Squad.Deployment;
@@ -27,8 +28,6 @@ public sealed class SquadBriefBuilder(
     IProcessEnvironment environment,
     IPathResolver paths) : ISquadBriefBuilder
 {
-    private const string AmbiguousPlan = "KW-DOC-PLANREF-001";
-
     /// <inheritdoc />
     public string? ResolveAutonomy(string repositoryRoot, string? given, KyberWeaveConfig config)
     {
@@ -188,7 +187,7 @@ public sealed class SquadBriefBuilder(
         if (resolution.Ambiguous)
         {
             report.Add(new Diagnostic(
-                AmbiguousPlan,
+                PlanReferenceRuleIds.Ambiguous,
                 Severity.Error,
                 $"'{argument}' matches {resolution.Candidates.Count} plans: {string.Join(", ", resolution.Candidates)}.",
                 "squad brief",

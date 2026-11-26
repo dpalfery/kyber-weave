@@ -318,7 +318,7 @@ public sealed class FastLoopScriptTests
             .Select(match => match.Groups[1].Value)
             .ToArray();
 
-        Assert.Equal(3, classes.Length);
+        Assert.Equal(4, classes.Length);
         Assert.All(classes, name => Assert.NotNull(typeof(FastLoopScriptTests).Assembly.GetType(name)));
     }
 

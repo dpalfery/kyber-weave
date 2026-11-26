@@ -72,7 +72,7 @@ TOUCHED_TEST_ROOTS=(
 # The policy tests that read source text. A C#-only edit can trip them (an unlisted process
 # spawn, a banned upstream name, ambient I/O in Domain), and they only read files, so they run
 # on every .NET loop.
-POLICY_SOURCE_SCANS=(-class KyberWeave.Tests.ProcessSpawnSitesTests -class KyberWeave.Tests.UpstreamSeveranceTests -class KyberWeave.Tests.DomainPurityTests)
+POLICY_SOURCE_SCANS=(-class KyberWeave.Tests.ProcessSpawnSitesTests -class KyberWeave.Tests.UpstreamSeveranceTests -class KyberWeave.Tests.DomainPurityTests -class KyberWeave.Tests.ReviewDiagnosticCodeUniquenessTests)
 
 step() { printf '\n=== %s ===\n' "$1"; }
 

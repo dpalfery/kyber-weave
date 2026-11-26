@@ -58,8 +58,6 @@ public sealed class ReviewGatesService(
     ITaskGateSelectionService taskGates,
     IPlanTaskTargetService targets) : IReviewGatesService
 {
-    private const string UnreadableInput = "KW-REVIEW-023";
-
     /// <inheritdoc />
     public ReviewCommandResult Run(
         ReviewGatesRequest request,
@@ -281,7 +279,7 @@ public sealed class ReviewGatesService(
             report.AddMetric("not-run", gates.Gates.Count(VerdictEngine.IsStoppedForTime));
 
         ReviewReportWriter.TryWrite(
-            files, pathResolver, environment, request.Out, ReviewJson.Write(written), ReviewGateReporting.ReportWriteFailed, report);
+            files, pathResolver, environment, request.Out, ReviewJson.Write(written), ReviewDiagnosticCodes.ReportWriteFailed, report);
         string? evidence = cycle is { WritesIdentity: true } && request.Out is not null
             ? WriteEvidence(cycle, root, request, written, config, report)
             : null;
@@ -329,7 +327,7 @@ public sealed class ReviewGatesService(
             environment,
             request.Out,
             ReviewJson.Write(new GateReport(GateReport.CurrentSchema, [])),
-            ReviewGateReporting.ReportWriteFailed,
+            ReviewDiagnosticCodes.ReportWriteFailed,
             report);
         return ReviewCommandResultFactory.Reported(1, report);
     }
@@ -411,7 +409,7 @@ public sealed class ReviewGatesService(
         if (plan.Prior is { } priorCycle)
         {
             (_, IReadOnlyList<ReviewFinding> found) = selector.ReadRecheck(
-                priorCycle, config.Review.Policy, report, UnreadableInput, Severity.Warning, "review gates");
+                priorCycle, config.Review.Policy, report, ReviewDiagnosticCodes.UnreadableInput, Severity.Warning, "review gates");
             recheck = found;
         }
 
@@ -457,7 +455,7 @@ public sealed class ReviewGatesService(
         catch (Exception ex) when (FileFailure.Is(ex))
         {
             report.Add(new Diagnostic(
-                ReviewGateReporting.ReportWriteFailed,
+                ReviewDiagnosticCodes.ReportWriteFailed,
                 Severity.Warning,
                 $"Could not write the review evidence to '{cycle.Folder}': {ex.Message}",
                 "review gates",
@@ -487,7 +485,7 @@ public sealed class ReviewGatesService(
             environment,
             Path.Combine(cycle.Folder!, "duplicates.json"),
             ReviewJson.Write(duplicates),
-            ReviewGateReporting.ReportWriteFailed,
+            ReviewDiagnosticCodes.ReportWriteFailed,
             report);
         (IReadOnlyList<string>? changed, _) = ResolveCouncilChangedSet(root, request);
         IReadOnlyDictionary<string, string> skips = CouncilSeating.GateProvenSkips(written, duplicates, changed);
@@ -516,7 +514,7 @@ public sealed class ReviewGatesService(
         catch (Exception ex) when (FileFailure.Is(ex))
         {
             report.Add(new Diagnostic(
-                ReviewGateReporting.ReportWriteFailed,
+                ReviewDiagnosticCodes.ReportWriteFailed,
                 Severity.Warning,
                 $"Could not record the change in '{cycle.Folder}': {ex.Message}",
                 "review gates",
@@ -744,7 +742,7 @@ public sealed class ReviewGatesService(
                 environment,
                 outPath,
                 ReviewJson.Write(new GateReport(GateReport.CurrentSchema, [])),
-                ReviewGateReporting.ReportWriteFailed,
+                ReviewDiagnosticCodes.ReportWriteFailed,
                 report);
             return ReviewCommandResultFactory.Reported(
                 report.HasErrors ? 1 : 0,
@@ -866,10 +864,10 @@ public sealed class ReviewGatesService(
         string content = ReviewJson.Write(finalReport);
         if (!withheldEvidence)
             ReviewReportWriter.TryWrite(
-                files, pathResolver, environment, outPath, content, ReviewGateReporting.ReportWriteFailed, report);
+                files, pathResolver, environment, outPath, content, ReviewDiagnosticCodes.ReportWriteFailed, report);
         if (countingReport is not null && !SamePath(outPath, countingReport))
             ReviewReportWriter.TryWrite(
-                files, pathResolver, environment, countingReport, content, ReviewGateReporting.ReportWriteFailed, report);
+                files, pathResolver, environment, countingReport, content, ReviewDiagnosticCodes.ReportWriteFailed, report);
 
         // The run as it happened, not as --red re-judged it: an accepted compile failure is still a failed build to read.
         IReadOnlyList<string> digest = TestDigest(root, taskSlug, request.Red, plan.Gates, run.Report, outputs);

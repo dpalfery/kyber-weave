@@ -14,10 +14,10 @@ public sealed record ArbiterPlanRead(string ResolvedPath, PlanDocument Document,
 public interface IArbiterPlanService
 {
     /// <summary>The plan file is missing or unreadable.</summary>
-    public const string PlanNotReadable = "KW-ARB-PLAN-002";
+    public const string PlanNotReadable = "KW-ARB-PARSE-005";
 
     /// <summary>A plan with no Tasks section, or no task that parsed: downstream readiness answers <c>no-tasks</c>.</summary>
-    public const string NoTasks = "KW-ARB-PLAN-001";
+    public const string NoTasks = "KW-ARB-PARSE-004";
 
     /// <summary>
     /// Reads the plan at <paramref name="relative"/> under <paramref name="root"/> and parses it, adding the parse

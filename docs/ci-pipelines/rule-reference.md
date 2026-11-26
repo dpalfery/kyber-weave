@@ -461,6 +461,9 @@ Hook guards are not rules: hosts cannot tune a guard by id, but `arbiter.enabled
 | `KW-ARB-GUARD-001` | Warning | No plan, spec, or todo index declared, so the Read guard protects nothing |
 | `KW-ARB-PARSE-001` | Warning | A dependency names no task in the artifact |
 | `KW-ARB-PARSE-002` | Info | A task lists no files, so its file-scope checks are skipped |
+| `KW-ARB-PARSE-003` | Warning | A task's difficulty is not one the roster recognises |
+| `KW-ARB-PARSE-004` | Warning | A plan has no Tasks section, or no task in it parsed, so readiness answers `no-tasks` |
+| `KW-ARB-PARSE-005` | Error | The plan file is missing, unreadable, or not a file the command reads (a symbolic link, or outside the documentation roots) |
 | `KW-ARB-AUDIT-001` | Warning | Ledger event with no decision: the hook was killed, timed out, or crashed after recording the event |
 | `KW-ARB-AUDIT-002` | Warning | Unmarked dispatch to a Squad agent with an unidentified caller |
 | `KW-ARB-AUDIT-003` | Warning | Unpaired event: a `pre` with no `post`, or a `post` with no `pre` |

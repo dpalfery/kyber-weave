@@ -3,7 +3,9 @@ using KyberWeave.Contracts.Paths;
 using KyberWeave.Contracts.Repositories;
 using KyberWeave.Contracts.Services;
 using KyberWeave.Core.Configuration;
+
 using KyberWeave.Core.Docs.Model;
+using KyberWeave.Core.Docs.Validation;
 using KyberWeave.Core.Docs.Scaffolding;
 using KyberWeave.Core.Parsing;
 using KyberWeave.Core.Skills.Model;
@@ -33,7 +35,6 @@ namespace KyberWeave.Core.Docs.KwSkills;
 public sealed class KwSkillCatalog : IKwSkillCatalog
 {
     private const string SkillFile = "SKILL.md";
-    private const string MalformedListRule = "KW-DOC-SKILL-001";
 
     private readonly IWritableFileSystem _files;
     private readonly IPathResolver _paths;
@@ -325,7 +326,7 @@ public sealed class KwSkillCatalog : IKwSkillCatalog
             string? text = SafeRead(file);
             if (text is null)
             {
-                problems.Add(new KwSkillProblem(relative, $"{MalformedListRule}: the list could not be read."));
+                problems.Add(new KwSkillProblem(relative, $"{DocSpecValidator.SkillListMalformed}: the list could not be read."));
                 return [];
             }
 
@@ -344,7 +345,7 @@ public sealed class KwSkillCatalog : IKwSkillCatalog
 
         problems.Add(new KwSkillProblem(
             relative,
-            $"{MalformedListRule}: a skills list is a YAML sequence of skill names and nothing else; this file lists nothing."));
+            $"{DocSpecValidator.SkillListMalformed}: a skills list is a YAML sequence of skill names and nothing else; this file lists nothing."));
         return [];
     }
 
@@ -353,7 +354,7 @@ public sealed class KwSkillCatalog : IKwSkillCatalog
         string listFile = $"the {scope} skills list";
         if (!KwSkillNames.IsValid(name) || !Names().Contains(name, StringComparer.Ordinal))
         {
-            problems.Add(new KwSkillProblem(listFile, $"{MalformedListRule}: '{name}' is not a skill in either pool."));
+            problems.Add(new KwSkillProblem(listFile, $"{DocSpecValidator.SkillListMalformed}: '{name}' is not a skill in either pool."));
             return;
         }
 
