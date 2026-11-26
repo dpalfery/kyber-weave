@@ -384,14 +384,16 @@ public sealed class GateReportFacts(
             string checkPath = resolved;
             while (checkPath.Length >= fullRepo.Length)
             {
-                if (store.GetLinkTarget(checkPath) is { } linkTarget)
+                if (store.GetLinkTarget(checkPath) is not null)
                 {
-                    string target = paths.GetFullPath(
-                        linkTarget,
-                        Path.GetDirectoryName(checkPath) ?? fullRepo);
-
-                    if (!target.StartsWith(normalizedRepo, comparison) && !string.Equals(target, fullRepo, comparison))
+                    // The final target is what matters: an intermediate link can sit inside the repository and
+                    // point at a second link that leaves it, so a one-hop read would miss the escape.
+                    string? target = store.GetFinalLinkTarget(checkPath);
+                    if (target is null
+                        || (!target.StartsWith(normalizedRepo, comparison) && !string.Equals(target, fullRepo, comparison)))
+                    {
                         return null;
+                    }
                 }
 
                 string? parent = Path.GetDirectoryName(checkPath);
