@@ -142,10 +142,21 @@ export function useSectionPage<T extends KyberSectionWindow>(
   const query = useQuery({
     queryKey: kyberSessionSectionQueryKey(sessionId, section, page, limit, order),
     queryFn: () => fetchPage(sessionId, page, limit, order),
-    // The previous page stays on screen while the next one loads: the pager
-    // disables instead, so a page turn never blanks a list the viewer was
-    // reading.
-    placeholderData: keepPreviousData,
+    // Hold the previous page only while paging within the same scope. A sort
+    // or page-size change must not show rows in the old order/size under the
+    // new controls (dbId 4704550908).
+    placeholderData: (previousData, previousQuery) => {
+      const prevKey = previousQuery?.queryKey as readonly unknown[] | undefined
+      if (
+        prevKey?.[1] !== sessionId ||
+        prevKey?.[2] !== section ||
+        prevKey?.[4] !== limit ||
+        prevKey?.[5] !== order
+      ) {
+        return undefined
+      }
+      return keepPreviousData(previousData, previousQuery as never)
+    },
   })
   const failure =
     projectionFailureMessage(query.data) ??

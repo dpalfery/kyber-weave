@@ -177,6 +177,36 @@ describe('useSectionPage', () => {
     expect(throwingHook.result.current.limit).toBe(25)
   })
 
+  it('does not hold the previous page across sort or limit changes (dbId 4704550908)', async () => {
+    let resolveDesc: (value: Page) => void = () => {}
+    let resolveAsc: (value: Page) => void = () => {}
+    const fetchPage = vi.fn((sessionId: string, page: number, limit: KyberSectionPageLimit, order: KyberSectionPageOrder) => {
+      if (order === 'desc') {
+        return new Promise<Page>((resolve) => {
+          resolveDesc = resolve
+        })
+      }
+      if (order === 'asc') {
+        return new Promise<Page>((resolve) => {
+          resolveAsc = resolve
+        })
+      }
+      return Promise.resolve(pageOf(sessionId, page, limit, order))
+    })
+    const { result } = mountHook(fetchPage, { sessionId: SESSION })
+
+    act(() => resolveDesc(pageOf(SESSION, 1, 25, 'desc')))
+    await waitFor(() => expect(result.current.data?.order).toBe('desc'))
+
+    act(() => result.current.setOrder('asc'))
+    expect(result.current.order).toBe('asc')
+    expect(result.current.data).toBeUndefined()
+    expect(result.current.isFetching).toBe(true)
+
+    act(() => resolveAsc(pageOf(SESSION, 1, 25, 'asc')))
+    await waitFor(() => expect(result.current.data?.order).toBe('asc'))
+  })
+
   it('resets page to 1 when limit or order changes and updates query key', async () => {
     const fetchPage = vi.fn(
       async (sessionId: string, page: number, limit: KyberSectionPageLimit, order: KyberSectionPageOrder) =>
