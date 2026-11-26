@@ -1590,22 +1590,7 @@ public partial class SqliteRelationalStore : IRelationalStoreReader
         return new SessionRequestFigurePageResult(rows, total);
     }
 
-    private static string NormalizeSortOrderSql(string order)
-    {
-        ArgumentException.ThrowIfNullOrWhiteSpace(order);
-        string trimmed = order.Trim();
-        if (string.Equals(trimmed, "desc", StringComparison.OrdinalIgnoreCase))
-        {
-            return "DESC";
-        }
-
-        if (string.Equals(trimmed, "asc", StringComparison.OrdinalIgnoreCase))
-        {
-            return "ASC";
-        }
-
-        throw new ArgumentException($"Sort order '{order}' must be 'desc' or 'asc'.", nameof(order));
-    }
+    private static string NormalizeSortOrderSql(string order) => SectionSortOrder.ToSqlDirection(order);
 
     /// <inheritdoc />
     public SessionReconciliationFigurePageResult SessionReconciliationFigures(string sessionKey, int page, int limit, string order = "desc")

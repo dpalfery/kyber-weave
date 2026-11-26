@@ -1,6 +1,7 @@
 using System.Globalization;
 using System.Net;
 using System.Text.Json;
+using KyberDash.Contracts.Repositories;
 using KyberDash.Domain;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Http;
@@ -215,27 +216,18 @@ internal static class DashHttp
         ArgumentNullException.ThrowIfNull(query);
         if (!query.TryGetValue("order", out Microsoft.Extensions.Primitives.StringValues values))
         {
-            order = "desc";
+            order = SectionSortOrder.Default;
             refusal = null;
             return true;
         }
 
-        string trimmed = values.ToString().Trim();
-        if (string.Equals(trimmed, "desc", StringComparison.OrdinalIgnoreCase))
+        if (SectionSortOrder.TryNormalize(values.ToString(), out order))
         {
-            order = "desc";
             refusal = null;
             return true;
         }
 
-        if (string.Equals(trimmed, "asc", StringComparison.OrdinalIgnoreCase))
-        {
-            order = "asc";
-            refusal = null;
-            return true;
-        }
-
-        order = "desc";
+        order = SectionSortOrder.Default;
         refusal = Error(StatusCodes.Status400BadRequest, "order must be 'desc' or 'asc'");
         return false;
     }

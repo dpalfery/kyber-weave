@@ -3372,22 +3372,7 @@ public class KyberBridgeEngine
         };
     }
 
-    private static string NormalizeSectionOrder(string order)
-    {
-        ArgumentException.ThrowIfNullOrWhiteSpace(order);
-        string trimmed = order.Trim();
-        if (string.Equals(trimmed, "desc", StringComparison.OrdinalIgnoreCase))
-        {
-            return "desc";
-        }
-
-        if (string.Equals(trimmed, "asc", StringComparison.OrdinalIgnoreCase))
-        {
-            return "asc";
-        }
-
-        throw new ArgumentException($"Sort order '{order}' must be 'desc' or 'asc'.", nameof(order));
-    }
+    private static string NormalizeSectionOrder(string order) => SectionSortOrder.Normalize(order);
 
     private static Dictionary<string, object?> BuildContextPayload(
         StoredSessionProjection projection,

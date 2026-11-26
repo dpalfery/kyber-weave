@@ -1054,6 +1054,8 @@ public sealed class SessionSectionEndpointsTests
             static node => node.GetProperty("spanId").GetString() == "(auxiliary)");
         JsonElement[] todayAuxiliaryChildren = [.. todayAuxiliary.GetProperty("children").EnumerateArray()];
         Assert.Equal(30, todayAuxiliaryChildren.Length);
+        // The default order is newest first; today's tree lists children oldest first.
+        JsonElement[] todayNewestFirst = [.. todayAuxiliaryChildren.Reverse()];
 
         store.ClearReadLog();
         JsonElement auxiliary = bridge.GetSessionTimeline(sessionKey, parentNodeId: "(auxiliary)")!.Value;
@@ -1064,7 +1066,7 @@ public sealed class SessionSectionEndpointsTests
         Assert.Equal(25, rows.Length);
         for (int index = 0; index < rows.Length; index++)
         {
-            AssertTimelineRowCarriesTodaysFields(rows[index], todayAuxiliaryChildren[index]);
+            AssertTimelineRowCarriesTodaysFields(rows[index], todayNewestFirst[index]);
             Assert.True(rows[index].GetProperty("isAuxiliary").GetBoolean());
         }
 
@@ -1076,7 +1078,7 @@ public sealed class SessionSectionEndpointsTests
         JsonElement[] secondRows = [.. second.GetProperty("nodes").EnumerateArray()];
         Assert.Equal(5, secondRows.Length);
         Assert.Equal(30, second.GetProperty("total").GetInt32());
-        AssertTimelineRowCarriesTodaysFields(secondRows[0], todayAuxiliaryChildren[25]);
+        AssertTimelineRowCarriesTodaysFields(secondRows[0], todayNewestFirst[25]);
 
         // The orphan container's id names a level too: its children's declared parent is
         // missing, so the group is the only place they hang.
@@ -1476,7 +1478,7 @@ public sealed class SessionSectionEndpointsTests
 
         JsonElement auxDesc = bridge.GetSessionTimeline(timelineKey, parentNodeId: "(auxiliary)", page: 1, limit: 25, order: "desc")!.Value;
         JsonElement auxAsc = bridge.GetSessionTimeline(timelineKey, parentNodeId: "(auxiliary)", page: 1, limit: 25, order: "asc")!.Value;
-        Assert.Equal("aux-000", auxDesc.GetProperty("nodes")[0].GetProperty("spanId").GetString());
+        Assert.Equal("aux-029", auxDesc.GetProperty("nodes")[0].GetProperty("spanId").GetString());
         Assert.Equal("aux-000", auxAsc.GetProperty("nodes")[0].GetProperty("spanId").GetString());
 
         // Invalid order throws ArgumentException across every section route.
@@ -1518,7 +1520,7 @@ public sealed class SessionSectionEndpointsTests
         records.Add(TimelineSpan("child-sub-agent", sessionKey, "turn-tl-001", 1, "invoke_agent subagent"));
         for (int index = 0; index < 30; index++)
         {
-            records.Add(TimelineSpan($"aux-{index:D3}", sessionKey, null, 0, $"chat.title {index}"));
+            records.Add(TimelineSpan($"aux-{index:D3}", sessionKey, null, index, $"chat.title {index}"));
         }
 
         records.Add(TimelineSpan("orphan-1", sessionKey, "missing-parent", 0, "orphan.tool"));

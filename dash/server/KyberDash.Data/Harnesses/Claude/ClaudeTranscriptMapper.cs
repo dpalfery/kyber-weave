@@ -1666,7 +1666,7 @@ public class ClaudeTranscriptMapper : IHarnessMapper
 
         // Avoid tearing an opening <system-reminder> tag across the 64 KiB byte boundary.
         int lastLt = truncatedPrefix.LastIndexOf('<');
-        if (lastLt >= 0)
+        if (lastLt > 0)
         {
             ReadOnlySpan<char> trailingSlice = truncatedPrefix.AsSpan(lastLt);
             if (SystemReminderOpenTag.AsSpan().StartsWith(trailingSlice, StringComparison.Ordinal)
@@ -1676,14 +1676,9 @@ public class ClaudeTranscriptMapper : IHarnessMapper
             }
         }
 
-        if (cut <= 0)
-        {
-            return 0;
-        }
-
-        // Back up before any unclosed <system-reminder> so StripInstructionBlocks never sees a broken block.
+        // Back up before any unclosed <system-reminder> so a retained prefix never holds half a block.
         int lastOpen = fullText.LastIndexOf(SystemReminderOpenTag, cut - 1, cut, StringComparison.Ordinal);
-        if (lastOpen >= 0)
+        if (lastOpen > 0)
         {
             int searchStart = lastOpen + SystemReminderOpenTag.Length;
             int closeCount = cut - searchStart;
@@ -1696,7 +1691,10 @@ public class ClaudeTranscriptMapper : IHarnessMapper
             }
         }
 
-        return cut;
+        // A boundary at offset 0 would withhold the whole payload instead of retaining a prefix, so
+        // keep the measured prefix and let the tail carry the rest. Only a prefix that measured
+        // nothing is left to withhold entirely.
+        return cut > 0 ? cut : truncatedPrefix.Length;
     }
 
     private static (string? ServerName, string? ToolName) ParseMcpToolNames(string toolName)

@@ -568,17 +568,17 @@ public record SessionTurnFigureSet(
 public record SessionRequestFigurePageResult(IReadOnlyList<ReadTimeSessionRequestSummary> Items, int Total);
 
 /// <summary>One page of a session's reconciliation rows, read over the turns' reported and tokenized totals only.</summary>
-/// <param name="Items">The page's measurable rows — both matches present — in turn order.</param>
+/// <param name="Items">The page's measurable rows — both matches present — in the requested turn order.</param>
 /// <param name="Total">Number of measurable reconciliation rows the session holds, before paging.</param>
 public record SessionReconciliationFigurePageResult(IReadOnlyList<ReadTimeTurnReconciliation> Items, int Total);
 
-/// <summary>One page of a session's stored ingest problems (<c>ingest_problem</c>), in problem-id order.</summary>
-/// <param name="Items">The page's problems, in problem-id order.</param>
+/// <summary>One page of a session's stored ingest problems (<c>ingest_problem</c>), in the requested order with timestamped problems first.</summary>
+/// <param name="Items">The page's problems, in the requested order.</param>
 /// <param name="Total">Number of stored ingest problems attached to the session, before paging.</param>
 public record SessionProblemPageResult(IReadOnlyList<Problem> Items, int Total);
 
-/// <summary>One page of a session's KW skill loads (D17), in call order.</summary>
-/// <param name="Items">The page's load rows, in call order.</param>
+/// <summary>One page of a session's KW skill loads (D17), in the requested call order.</summary>
+/// <param name="Items">The page's load rows, in the requested order.</param>
 /// <param name="Total">Number of KW skill loads the session holds, before paging.</param>
 public record SessionKwSkillLoadPageResult(IReadOnlyList<StoredKwSkillLoad> Items, int Total);
 
@@ -955,14 +955,9 @@ public interface IRelationalStoreReader
     SessionTurnFigureSet? SessionTurnFigures(string sessionKey, IModelPricingLookup? pricing = null);
 
     /// <summary>
-    /// Pages one session's request rows — the <c>session_request</c> rows when the session has
-    /// them, else its root records — over request metadata and turn ownership only (<c>DD-13</c>).
-    /// </summary>
-    /// <param name="sessionKey">Canonical session key.</param>
-    /// <param name="page">One-based page number.</param>
-    /// <param name="limit">Rows on the page.</param>
-    /// <summary>
-    /// Pages one session's request rows in requested order over <c>session_request</c> and turn ownership only.
+    /// Pages one session's request rows in the requested order — the <c>session_request</c> rows
+    /// when the session has them, else its root records — over request metadata and turn ownership
+    /// only (<c>DD-13</c>).
     /// </summary>
     /// <param name="sessionKey">Canonical session key.</param>
     /// <param name="page">One-based page number.</param>

@@ -211,7 +211,7 @@ public class TranscriptReaderRepository : ITranscriptReaderRepository
                 SourceRevision = sourceRevision,
                 Format = ClaudeFormat,
                 ParserId = ClaudeParserId,
-                ParserContractVersion = ParserContractVersion,
+                ParserContractVersion = HarnessSourceRegistry.ClaudeTranscriptV2ParserContractVersion,
                 ImportedAt = resolvedImportedAt,
                 Call = call,
                 ReaderTurn = group.Turn,
