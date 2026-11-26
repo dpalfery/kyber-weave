@@ -41,6 +41,7 @@ public static class ArbiterGlobalHookPaths
             SquadTarget.OpenCode => Path.Combine(root, "plugins", "kyber-arbiter.ts"),
             SquadTarget.Pi => Path.Combine(root, "extensions", "kyber-arbiter.ts"),
             SquadTarget.Copilot => Path.Combine(root, "hooks", "kyber-arbiter.json"),
+            SquadTarget.CommandCode => Path.Combine(root, "mods", "kyber-arbiter.ts"),
             _ => null,
         };
     }
