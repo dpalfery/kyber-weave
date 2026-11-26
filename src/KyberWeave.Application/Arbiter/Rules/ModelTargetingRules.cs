@@ -1,3 +1,4 @@
+using KyberWeave.Core.Arbiter.ModelTargets;
 using KyberWeave.Core.Configuration;
 
 namespace KyberWeave.Core.Arbiter.Rules;
@@ -35,15 +36,6 @@ internal static class ModelTargetingRules
     private const string Off = "off";
     private const string Enforce = "enforce";
 
-    // Each developer tier's model profile, from products/kyber-squad/profiles/models.yml: dev-easy runs on
-    // `fast`, dev-medium on `general`, and dev-hard on the `dev-hard` profile of its own (Requirement 1.12).
-    private const string EasyProfile = "fast";
-    private const string MediumProfile = "general";
-    private const string HardProfile = "dev-hard";
-
-    /// <summary>The tiered roster's ladder, cheapest first: the three developer tiers' model profiles.</summary>
-    public static IReadOnlyList<string> TierLadder { get; } = [EasyProfile, MediumProfile, HardProfile];
-
     /// <summary>Returns <paramref name="rules"/> with the model-targeting rules set for <paramref name="mode"/>.</summary>
     /// <param name="rules">The effective rule set.</param>
     /// <param name="mode"><c>off</c> disables both rules, <c>shadow</c> records them without effect, and <c>enforce</c> lets them gate.
@@ -77,9 +69,8 @@ internal static class ModelTargetingRules
     }
 
     /// <summary>
-    /// The model-targeting block in use: its difficulty map and ladder name the three developer tiers' profiles,
-    /// and they do so whether or not the host set its own. The removal left one roster, so this is the block for
-    /// every run.
+    /// The model-targeting block in use: its difficulty map and ladder are the shipped developer tiers' profiles,
+    /// whether or not the host set its own. The removal left one roster, so this is the block for every run.
     /// </summary>
     /// <param name="targeting">The host's model-targeting block.</param>
     public static ArbiterModelTargetingConfig Targeting(ArbiterModelTargetingConfig targeting)
@@ -87,13 +78,8 @@ internal static class ModelTargetingRules
         ArgumentNullException.ThrowIfNull(targeting);
         return targeting with
         {
-            DifficultyProfiles = new Dictionary<string, string>(StringComparer.Ordinal)
-            {
-                ["easy"] = EasyProfile,
-                [StandardAnswer] = MediumProfile,
-                ["hard"] = HardProfile,
-            },
-            Ladder = TierLadder,
+            DifficultyProfiles = TierProfiles.Default.DifficultyProfiles,
+            Ladder = TierProfiles.Default.Ladder,
         };
     }
 
