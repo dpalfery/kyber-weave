@@ -1,3 +1,5 @@
+using KyberWeave.Core.Agents.Roster;
+
 namespace KyberWeave.Core.Arbiter.ModelTargets;
 
 /// <summary>
@@ -12,12 +14,5 @@ public sealed record TierProfiles(
     IReadOnlyList<string> Ladder)
 {
     /// <summary>The shipped table and ladder: easy to fast, standard to general, hard to dev-hard.</summary>
-    public static TierProfiles Default { get; } = new(
-        new Dictionary<string, string>(StringComparer.Ordinal)
-        {
-            ["easy"] = "fast",
-            ["standard"] = "general",
-            ["hard"] = "dev-hard",
-        },
-        ["fast", "general", "dev-hard"]);
+    public static TierProfiles Default { get; } = new(DeveloperTiers.Profiles, DeveloperTiers.Ladder);
 }

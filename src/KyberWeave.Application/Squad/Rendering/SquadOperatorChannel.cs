@@ -1,4 +1,5 @@
 using System.Text;
+using KyberWeave.Core.Agents.Roster;
 
 namespace KyberWeave.Core.Squad.Rendering;
 
@@ -26,10 +27,10 @@ public static class SquadOperatorChannel
     /// <summary>The longest server name the renderer accepts.</summary>
     public const int MaxServerNameLength = 64;
 
-    public const string ConductorAgentName = "conductor";
+    public const string ConductorAgentName = AgentRoles.Conductor;
 
     /// <summary>The review council's root agent, the second Arbiter fallback caller.</summary>
-    public const string CodeReviewerAgentName = "code-reviewer";
+    public const string CodeReviewerAgentName = AgentRoles.CodeReviewer;
 
     /// <summary>The file in the Copilot root that declares the user's MCP servers.</summary>
     public const string CopilotMcpConfigFileName = "mcp-config.json";

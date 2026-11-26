@@ -3,6 +3,7 @@ using System.Text;
 using KyberWeave.Arbiter.Hooks;
 using KyberWeave.Contracts.Repositories;
 using KyberWeave.Contracts.Services;
+using KyberWeave.Core.Agents.Roster;
 using KyberWeave.Core.Arbiter;
 using KyberWeave.Core.Configuration;
 using KyberWeave.Core.Docs.KwSkills;
@@ -59,9 +60,7 @@ public sealed class TaskPromptService(
     /// <param name="difficulty">The rating in use: <c>easy</c>, <c>medium</c> or <c>hard</c>, or null when none is recorded.</param>
     /// <param name="failedAttempts">How many attempts at this task already failed.</param>
     public static string DeveloperTier(string? difficulty, int failedAttempts) =>
-        PlanTaskAgentPick.DeveloperTier(difficulty, failedAttempts);
-
-    private static IReadOnlyList<string> DeveloperTiers => PlanTaskAgentPick.DeveloperTiers;
+        DeveloperTiers.For(difficulty, failedAttempts);
 
     /// <summary>
     /// The agent a tiered-roster dispatch goes to. The developer kind, which a task file written before the tier
@@ -85,10 +84,10 @@ public sealed class TaskPromptService(
 
         int tier = TierIndexOf(DeveloperTier(entry?.Difficulty, failedAttempts));
         if ((requested ?? recorded) is not { } named)
-            return entry is null || technology is not null ? DeveloperTiers[tier] : null;
+            return entry is null || technology is not null ? DeveloperTiers.All[tier] : null;
 
-        if (string.Equals(named, PlanTaskAgentPick.DeveloperKind, StringComparison.Ordinal))
-            return DeveloperTiers[tier];
+        if (string.Equals(named, DeveloperTiers.Medium, StringComparison.Ordinal))
+            return DeveloperTiers.All[tier];
 
         if (Raised(named, tier) is { } raised)
             return raised;
@@ -101,14 +100,14 @@ public sealed class TaskPromptService(
             return named;
         }
 
-        return entry is null || technology is not null ? DeveloperTiers[tier] : null;
+        return entry is null || technology is not null ? DeveloperTiers.All[tier] : null;
     }
 
     /// <summary>The higher of a named tier and the computed one, or null when the name is not a developer tier.</summary>
     private static string? Raised(string name, int computed)
     {
         int named = TierIndexOf(name);
-        return named < 0 ? null : DeveloperTiers[Math.Max(named, computed)];
+        return named < 0 ? null : DeveloperTiers.All[Math.Max(named, computed)];
     }
 
     /// <summary>
@@ -124,7 +123,7 @@ public sealed class TaskPromptService(
     {
         if (named is null || technology is null
             || !PlanTaskAgentPick.RemovedAgents.TryGetValue(named, out string? replacement)
-            || !string.Equals(replacement, PlanTaskAgentPick.DeveloperKind, StringComparison.Ordinal))
+            || !string.Equals(replacement, DeveloperTiers.Medium, StringComparison.Ordinal))
         {
             return null;
         }
@@ -137,9 +136,9 @@ public sealed class TaskPromptService(
     /// <summary>The tier's position on the ladder, or -1 when the name is not a developer tier.</summary>
     private static int TierIndexOf(string name)
     {
-        for (int index = 0; index < DeveloperTiers.Count; index++)
+        for (int index = 0; index < DeveloperTiers.All.Count; index++)
         {
-            if (string.Equals(DeveloperTiers[index], name, StringComparison.Ordinal))
+            if (string.Equals(DeveloperTiers.All[index], name, StringComparison.Ordinal))
                 return index;
         }
 

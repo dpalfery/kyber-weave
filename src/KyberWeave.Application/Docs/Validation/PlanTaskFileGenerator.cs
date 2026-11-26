@@ -3,6 +3,7 @@ using System.Globalization;
 using System.Text;
 using System.Text.Json;
 using System.Text.RegularExpressions;
+using KyberWeave.Core.Agents.Roster;
 using KyberWeave.Core.Arbiter;
 using KyberWeave.Core.Arbiter.Plans;
 using KyberWeave.Core.Configuration;
@@ -234,7 +235,7 @@ public sealed partial class PlanTaskFileGenerator
 
         // A task that names no difficulty is medium by default; the plan's own line is the architect's rating.
         bool rated = !string.IsNullOrWhiteSpace(task.Difficulty);
-        string difficulty = rated ? task.Difficulty! : "medium";
+        string difficulty = rated ? task.Difficulty! : DeveloperTiers.MediumDifficulty;
         string difficultySource = rated ? "architect" : "default";
         string? technology = string.IsNullOrWhiteSpace(task.Technology) ? null : task.Technology;
 
@@ -636,9 +637,9 @@ public sealed partial class PlanTaskFileGenerator
             if (entry.Role is null
                 && entry.Technology is not null
                 && (entry.Agent is null
-                    || string.Equals(entry.Agent, PlanTaskAgentPick.DeveloperKind, StringComparison.Ordinal)))
+                    || string.Equals(entry.Agent, DeveloperTiers.Medium, StringComparison.Ordinal)))
             {
-                entries[index] = entry with { Agent = PlanTaskAgentPick.DeveloperTier(entry.Difficulty, 0) };
+                entries[index] = entry with { Agent = DeveloperTiers.For(entry.Difficulty, 0) };
             }
         }
 
@@ -674,7 +675,7 @@ public sealed partial class PlanTaskFileGenerator
                 PlanTaskFileRules.DifficultyDisagreed,
                 Severity.Error,
                 $"{id}: the decision model did not agree with the difficulty `{entry.Difficulty}` " +
-                $"({PlanTaskAgentPick.TierNameOf(entry.Difficulty)}) by the rubric.",
+                $"({DeveloperTiers.NameFor(entry.Difficulty)}) by the rubric.",
                 id,
                 artifact,
                 Hint: $"Re-rate the task by the rubric in shared/difficulty-rubric.md, or keep the rating and add a " +

@@ -1223,14 +1223,15 @@ internal sealed record CatalogueRepository(string Path, GateCatalogueFacts Facts
 /// scripts those workflows call and the review configuration both read — rather than a language.
 /// <c>github-actions</c> is the declared technology that covers those files, so a host that declares it receives
 /// their gates and a host that does not is left alone. <c>devops</c> replaces <c>github-devops</c> and names no
-/// platform, so it carries the same gates until the old agent leaves in phase 5 of the roster work.
+/// platform, so it carries the same gates. The shipped name comes first in <see cref="Agents"/>, so a technology's
+/// lookup reaches it before the retired name that stays only for a host still holding that entry.
 /// </remarks>
 public static class TechnologyAgentMap
 {
     /// <summary>The agents the map names, in the order the catalogue renders their blocks.</summary>
     public static IReadOnlyList<string> Agents { get; } =
     [
-        "csharp-dev", "dal-dev", "maui-dev", "pulumi-dev", "github-devops", "devops",
+        "csharp-dev", "dal-dev", "maui-dev", "pulumi-dev", "devops", "github-devops",
         "typescript-dev", "react-dev", "rust-dev", "tauri-dev",
         "go-dev", "python-dev", "test-dev", "docs-dev"
     ];
@@ -1261,7 +1262,7 @@ public static class TechnologyAgentMap
     /// </summary>
     /// <remarks>
     /// Several agents may share one technology — <c>csharp</c> covers four — so the first in
-    /// <see cref="Agents"/> order answers. A technology no agent declares, such as <c>sql-server</c>, has none:
+    /// <see cref="Agents"/> order answers, which prefers a shipped name over a retired one. A technology no agent declares, such as <c>sql-server</c>, has none:
     /// a host that wants gates for it declares <c>review.technology-gates</c>.
     /// </remarks>
     public static string? AgentFor(string? technology)

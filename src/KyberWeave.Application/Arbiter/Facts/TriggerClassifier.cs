@@ -1,4 +1,5 @@
 using System.Text.RegularExpressions;
+using KyberWeave.Core.Agents.Roster;
 using KyberWeave.Core.Configuration;
 
 namespace KyberWeave.Core.Arbiter.Facts;
@@ -60,13 +61,13 @@ public static partial class TriggerClassifier
     public static string TargetClassFor(string? target)
     {
         if (string.IsNullOrWhiteSpace(target))
-            return "not-squad";
+            return CapabilityProfiles.NotSquad;
 
         ArbiterSquadCatalog catalog = ArbiterSquadCatalog.LoadEmbedded();
         if (catalog.Agents.TryGetValue(target, out ArbiterSquadAgent? agent))
             return agent.TargetClass;
 
-        return "not-squad";
+        return CapabilityProfiles.NotSquad;
     }
 
     /// <summary>
@@ -197,7 +198,7 @@ public static partial class TriggerClassifier
         // unless its target is a Squad agent: the catalog is a machine fact, and routing must not depend on the
         // orchestrator volunteering headers.
         if (!marked && unidentified && IsProjectWideHarness(ev.Harness)
-            && string.Equals(targetClass, "not-squad", StringComparison.Ordinal))
+            && string.Equals(targetClass, CapabilityProfiles.NotSquad, StringComparison.Ordinal))
             return new TriggerClassification(null, null, ArbiterCallerSources.None, target, targetClass, headers, marker, true);
 
         string? trigger = ClassifyTrigger(resolved, target, targetClass, headers, marker, IsRootSession(ev, resolved));
@@ -252,8 +253,8 @@ public static partial class TriggerClassifier
 
         // Header inference keys on the catalog class, not on a name substring: only
         // the conductor's roster holds planners.
-        if (targetInfers && string.Equals(targetClass, "planner", StringComparison.Ordinal))
-            return ("conductor", ArbiterCallerSources.Header);
+        if (targetInfers && string.Equals(targetClass, CapabilityProfiles.Planner, StringComparison.Ordinal))
+            return (AgentRoles.Conductor, ArbiterCallerSources.Header);
 
         return (null, ArbiterCallerSources.None);
     }
@@ -298,21 +299,21 @@ public static partial class TriggerClassifier
         // Where a sub-agent cannot dispatch, the review-council skill has the session a human started (the
         // conductor, or bug-crusher) seat the council for code-reviewer (ADR 0079); a council seat is the same
         // lens or refutation spawn whichever of them dispatches it.
-        bool reviewer = string.Equals(caller, "code-reviewer", StringComparison.Ordinal);
-        if ((reviewer || string.Equals(caller, "conductor", StringComparison.Ordinal)
-                      || string.Equals(caller, "bug-crusher", StringComparison.Ordinal))
+        bool reviewer = AgentRoles.IsReviewer(caller);
+        if ((reviewer || string.Equals(caller, AgentRoles.Conductor, StringComparison.Ordinal)
+                      || string.Equals(caller, AgentRoles.BugCrusher, StringComparison.Ordinal))
             && CouncilSeat(target, headers) is { } seat)
             return seat;
 
         // A rework dispatch (FAILURE-CLUSTER marker) is classified as the ordinary delegation: its failure rule
         // rides as a secondary trigger, derived by SecondaryTriggers.For.
-        if (string.Equals(caller, "conductor", StringComparison.Ordinal))
+        if (string.Equals(caller, AgentRoles.Conductor, StringComparison.Ordinal))
         {
-            if (string.Equals(targetClass, "implementation", StringComparison.Ordinal))
+            if (string.Equals(targetClass, CapabilityProfiles.Implementation, StringComparison.Ordinal))
                 return "delegate";
-            if (string.Equals(targetClass, "planner", StringComparison.Ordinal))
+            if (string.Equals(targetClass, CapabilityProfiles.Planner, StringComparison.Ordinal))
                 return "delegate.planner";
-            if (string.Equals(targetClass, "read-only", StringComparison.Ordinal))
+            if (string.Equals(targetClass, CapabilityProfiles.ReadOnlyClass, StringComparison.Ordinal))
                 return "investigate";
             return "investigate";
         }
@@ -320,13 +321,12 @@ public static partial class TriggerClassifier
         if (reviewer)
             return "investigate";
 
-        if (string.Equals(caller, "architect", StringComparison.Ordinal)
-            || string.Equals(caller, "product-owner", StringComparison.Ordinal))
+        if (AgentRoles.IsPlanner(caller))
             return "investigate";
 
         if (caller is null
             && headers.ContainsKey("KYBER-ARBITER")
-            && string.Equals(targetClass, "read-only", StringComparison.Ordinal)
+            && string.Equals(targetClass, CapabilityProfiles.ReadOnlyClass, StringComparison.Ordinal)
             && !headers.ContainsKey("PLAN_FILE")
             && !headers.ContainsKey("TASK"))
             return "investigate";
@@ -342,12 +342,12 @@ public static partial class TriggerClassifier
         // The root session handing a Squad writer work is a delegation whether or not it wrote headers: the
         // conductor's headers are optional (ADR 0082), so plan and task identity are resolved from machine facts
         // (the run's worktree, its active plan, a task id the plan holds) and every judgement allows what it cannot name.
-        if (rootSession && string.Equals(targetClass, "implementation", StringComparison.Ordinal))
+        if (rootSession && string.Equals(targetClass, CapabilityProfiles.Implementation, StringComparison.Ordinal))
             return "delegate";
 
         // Any other Squad target with no caller and no headers: only the machine-fact rules have anything to judge,
         // and each of them allows a caller it cannot name.
-        if (!string.Equals(targetClass, "not-squad", StringComparison.Ordinal))
+        if (!string.Equals(targetClass, CapabilityProfiles.NotSquad, StringComparison.Ordinal))
             return "investigate";
 
         return null;

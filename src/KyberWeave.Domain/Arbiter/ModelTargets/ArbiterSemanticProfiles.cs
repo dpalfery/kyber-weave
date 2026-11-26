@@ -1,3 +1,5 @@
+using KyberWeave.Core.Agents.Roster;
+
 namespace KyberWeave.Core.Arbiter.ModelTargets;
 
 /// <summary>
@@ -11,7 +13,7 @@ public static class ArbiterSemanticProfiles
     [
         "architect",
         "deep-planning",
-        "dev-hard",
+        DeveloperTiers.Hard,
         "fast",
         "general",
         "reviewer",
