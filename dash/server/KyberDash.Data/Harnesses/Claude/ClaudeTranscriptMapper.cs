@@ -818,6 +818,7 @@ public class ClaudeTranscriptMapper : IHarnessMapper
 
                 if (turns.Count > 0 && HasTurnContent(parsed))
                 {
+                    parsed = WithStandaloneIdentity(parsed, mergedGroup.Lines);
                     if (groupHasCompaction && sessionBucketKey is not null)
                     {
                         // The summary belongs to the request the next kept turn sends, so it rides on that turn.
@@ -863,6 +864,36 @@ public class ClaudeTranscriptMapper : IHarnessMapper
         {
             turns[targetIndex] = MergeTailTurn(turns[targetIndex], tail);
         }
+        else
+        {
+            // No kept turn of this session to extend: keep it under its own session rather than lose it or
+            // fold it into another session's turn.
+            turns.Add(tail);
+        }
+    }
+
+    /// <summary>
+    /// The identity a usage-less group needs when it ends up a turn of its own: the first timestamp, message
+    /// id and model its lines carry, since there is no usage line to supply them.
+    /// </summary>
+    private static ParsedTurnGroup WithStandaloneIdentity(ParsedTurnGroup turn, List<ClaudeTranscriptLine> lines)
+    {
+        string? timestamp = null;
+        string? messageId = null;
+        string? model = null;
+        foreach (ClaudeTranscriptLine line in lines)
+        {
+            timestamp ??= line.Timestamp;
+            messageId ??= line.Message?.Id;
+            model ??= line.Message?.Model;
+        }
+
+        return turn with
+        {
+            Timestamp = timestamp ?? turn.Timestamp,
+            NativeRecordId = turn.NativeRecordId ?? messageId,
+            Model = turn.Model ?? model,
+        };
     }
 
     private static int FindLastTurnIndexForSession(IReadOnlyList<ParsedTurnGroup> turns, string? sessionId)

@@ -789,10 +789,17 @@ public class ClaudeTranscriptMapperTests
             CreateUnit("/tmp/.claude/projects/repo/sess-parent.jsonl", sidechainTailJsonl),
             ImportedAt);
 
-        CollectedRecord onlyParentRecord = Assert.Single(sidechainTailBatch.Records);
-        Assert.Equal("sess-parent", onlyParentRecord.SessionKey);
+        Assert.Equal(2, sidechainTailBatch.Records.Count);
+        CollectedRecord onlyParentRecord = Assert.Single(sidechainTailBatch.Records, static r => string.Equals(r.SessionKey, "sess-parent", StringComparison.Ordinal));
         CollectedContentPart onlyParentPart = Assert.Single(onlyParentRecord.Parts);
         Assert.Equal("Parent reply", onlyParentPart.PlainText);
+
+        CollectedRecord sidechainTailRecord = Assert.Single(sidechainTailBatch.Records, static r => string.Equals(r.SessionKey, "sess-parent#agent-sub1", StringComparison.Ordinal));
+        CollectedContentPart sidechainTailPart = Assert.Single(sidechainTailRecord.Parts);
+        Assert.Equal("Sidechain tail only", sidechainTailPart.PlainText);
+        Assert.Equal("synth:claude-code:sess-parent#agent-sub1:msg-sub-tail", sidechainTailRecord.RecordId);
+        Assert.Equal(new DateTimeOffset(2026, 11, 19, 12, 40, 1, TimeSpan.Zero), sidechainTailRecord.StartedAt);
+        Assert.Contains(sidechainTailBatch.Sessions, static s => string.Equals(s.SessionKey, "sess-parent#agent-sub1", StringComparison.Ordinal));
 
         string interleavedJsonl = string.Join('\n',
         [
