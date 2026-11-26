@@ -193,9 +193,10 @@ which is what the source rules in `CanonSessionProjectorEngine` key on: `SplitDr
 [Factory source-precedence rule](#the-factory-source-precedence-rule)), `IsFileSource`, the twin-turn collapse
 (`DedupeTwinTurns`, `CollapseCluster`) and `CollapseOverlapFileJoins` (Cursor). These rules are documented for every
 harness; they were silently inert for every session read back from the relational store until the source was restored.
-That change is why `SqliteRelationalStore.DetectorVersion` became `6`; generation `7` is described under
-[Skills view contract](#skills-view-contract), and generation `8` (Claude Code v2 transcript hydration) is described
-under [Claude Code v2 transcript hydration](#claude-code-v2-transcript-hydration).
+That change is why `SqliteRelationalStore.DetectorVersion` became `6`; it is `8` today, beside
+`SqliteRelationalStore.SchemaVersion` `30`. Generation `7` is described under
+[Skills view contract](#skills-view-contract), and generation `8` (Claude Code v2 transcript hydration) under
+[Collector attribution and read-side API projection](#collector-attribution-and-read-side-api-projection).
 
 ### Twin turns join on a vendor id, or on the session
 
@@ -1189,7 +1190,7 @@ full; unchanged session/run/execution rows also avoid redundant writes.
   clears), so the next pass rebuilds them. Every race in this path degrades to a full pass, never to a
   skipped session.
 
-The C# canonical engine under `dash/server/` owns the schema-25 relational SQLite layout:
+The C# canonical engine under `dash/server/` owns the relational SQLite layout:
 - **Storage & transport (`CanonDbPath`, `RelationalSchemaCatalog`, `SchemaDdlGenerator`, `SqliteRelationalStore`)**:
   reads and writes `canon.db` through bounded `ProcessRunner` batches to `sqlite3` (avoiding the
   native `SQLitePCLRaw.lib.e_sqlite3` package) under `CanonDbPath.Resolve`.
@@ -1247,9 +1248,9 @@ it is in
 
 Session projection (`CanonSessionProjectorEngine.ProjectIncremental`) collapses duplicate twin turns per session and writes normalized `session` and compressed `session_turn` rows.
 
-## Relational store and schema catalog (schema 25)
+## Relational store and schema catalog (schema 30)
 
-The live store is the normalized relational schema at schema 25.
+The live store is the normalized relational schema at schema 30.
 `RelationalSchemaCatalog` (`dash/server/KyberDash.Domain/Schema/RelationalSchemaCatalog.cs`) is the
 single static source of every table, column, key, foreign key, check, and index;
 `SchemaDdlGenerator` emits the deterministic `CREATE TABLE` DDL from it, and the stored-fields
@@ -1270,7 +1271,7 @@ flowchart LR
     DDL["SchemaDdlGenerator<br/>deterministic DDL"]
     COL["Collector DTOs<br/>CollectedBatch"]
     W["IRelationalStoreWriter<br/>WriteBatch"]
-    DB[("canon.db<br/>schema 25")]
+    DB[("canon.db<br/>schema 30")]
     R["IRelationalStoreReader<br/>read-time aggregates"]
     P["IProjectionStore<br/>sessions / runs / findings"]
     O["IOperationalStore<br/>settings / quarantine / problems"]
@@ -1972,7 +1973,7 @@ measured independently from whether individual composition buckets are available
 `SqliteRelationalStore` (`dash/server/KyberDash.Data/Repositories/SqliteRelationalStore*.cs`) persists `canon.db`
 via bounded `ProcessRunner` calls to the system `sqlite3` CLI, avoiding the native `SQLitePCLRaw.lib.e_sqlite3`
 dependency (`GHSA-2m69-gcr7-jv3q`). The schema is the relational catalog at `SqliteRelationalStore.SchemaVersion`
-(`25`): `RelationalSchemaCatalog` (`dash/server/KyberDash.Domain/Schema/RelationalSchemaCatalog.cs`) is the
+(`30`): `RelationalSchemaCatalog` (`dash/server/KyberDash.Domain/Schema/RelationalSchemaCatalog.cs`) is the
 single static source of every table, column, key, and index, and `SchemaDdlGenerator` emits the deterministic
 DDL. The store implements `IRelationalStoreWriter` (`WriteBatch`, `ReplaceSource`, `DeleteSource`, `WriteProblem`, `DeleteProblem`),
 `IRelationalStoreReader` (`SessionListFigures`, `SessionSummaryFigures`, `SessionTurnFigures`,
@@ -2877,7 +2878,7 @@ The OTLP ingest seam and read-side query engine align raw harness telemetry with
   - Non-document plain text exceeding `CanonSynth.MaxToolResultBytes` (64 KiB) splits on intact `<system-reminder>...</system-reminder>` boundaries (`ComputeSystemReminderSafeCut` backing up before any unclosed tag) into a `PlainText` prefix plus one `Withheld` (`CollectedWithheldText`) continuation part measuring **only the unretained remainder tail** via `ToolContentMeasurer.Measure` so `AnalyzeContext` never double-counts the first 64 KiB.
   - `compact_boundary` (`type == "system" && subtype == "compact_boundary"`) and `isCompactSummary == true` transitions fold onto the next kept `llm.invoke` turn via `CollectedRecord.AgentInstanceId = "claude:compact_boundary"` (persisted in `record_agent_instance` with zero SQLite schema change).
   - `isSidechain == true`, non-empty `agentId`, or nested `subagents/agent-*.jsonl` files isolate to `${parentSessionId}#agent-{bareId}` (`ResolveSessionId` resolving `parentSessionId` from `line.SessionId` or the directory immediately above `subagents/`).
-  - `HarnessSourceRegistry` bumps Claude's `ParserContractVersion` (`ClaudeTranscriptV2ParserContractVersion = "2"`) so stale `canon.db` checkpoints re-ingest automatically on refresh, and `SqliteRelationalStore.DetectorVersion` bumps from `6` to `7` (`SchemaVersion` remains unchanged at `29`) so projections built under generation 6 and earlier rebuild on upgrade for Claude v2 hydration ([Skills view contract](#skills-view-contract)).
+  - `HarnessSourceRegistry` bumps Claude's `ParserContractVersion` (`ClaudeTranscriptV2ParserContractVersion = "2"`) so stale `canon.db` checkpoints re-ingest automatically on refresh, and `SqliteRelationalStore.DetectorVersion` is `8` at `SqliteRelationalStore.SchemaVersion` `30` (`dash/server/KyberDash.Data/Repositories/SqliteRelationalStore.cs`) so projections built under generation 7 and earlier rebuild on upgrade for Claude v2 hydration ([Skills view contract, Detector version](#skills-view-contract)).
 - **Cumulative Claude context projection and honest omission telemetry (`CanonRecordHydration`, `CanonSessionProjectorEngine`, `KyberBridgeEngine`):**
   - `CanonRecordHydration.Hydrate` surfaces `AgentInstanceId == "claude:compact_boundary"` onto `CanonicalRecord.Raw["claude.compact_boundary"] = true` without emitting synthetic `ContentPart` text.
   - `CanonSessionProjectorEngine.BuildStoredSessionProjection` parses `#agent-` subagent session keys (`IsSubagent = true`, `ParentSessionId` before `#agent-`) while excluding subagent turns from parent context turns, clears cumulative state on `claude.compact_boundary`, and reconstructs multi-turn Claude context (`BuildClaudeContextTurns`) in a linear `O(T)` pass using pre-reduced/pre-counted summary `ContextPart`s (`Derived = true`, `Text = string.Empty`) across `system_prompt`, `instruction_context`, `conversation_history`, and `tool_result_content`, excluding Turn `k`'s own assistant output and thinking from Turn `k`'s input buckets.

@@ -765,7 +765,8 @@ The quarantine **list** stays light and never serves payloads.
 The Sessions **4 · Skills** section reads the `skills` block of the session payload. That block
 is built on projection and stored in the derived `session` row
 ([skills view contract](architecture.md#skills-view-contract)). The skills work set
-`SqliteRelationalStore.DetectorVersion` to **5** (`dash/server/KyberDash.Data/Repositories/SqliteRelationalStore.cs`).
+`SqliteRelationalStore.DetectorVersion` to **5**, and it is **8** today
+(`dash/server/KyberDash.Data/Repositories/SqliteRelationalStore.cs`), beside `SchemaVersion` **30**.
 A store stamped with an older generation keeps serving its existing rows until the next maintenance
 pass, which rebuilds every session and restamps the store. A session row stored before the change
 has no `skills` key, so it renders "not yet projected" until then.
