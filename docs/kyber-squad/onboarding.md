@@ -1262,7 +1262,7 @@ The `SquadInstanceCatalog` defines the redirection mechanism and support status 
 | `zcode` | `zcode` | `ConfigLayer` | `ZCODE_STORAGE_DIR` | `SpikePending` | Config layer; `ZCODE_STORAGE_DIR` vs `ZCODE_DATA_BASE_DIR` pending verification. |
 | `antigravity` | `antigravity` | `None` | *None* | `Unsupported` | Antigravity does not support configuration or home directory redirection via environment variable. |
 | `factory` | `factory` | `None` | *None* | `Unsupported` | Factory does not support configuration or home directory redirection via environment variable. |
-| `commandcode` | `commandcode` | `None` | *None* | `Unsupported` | CommandCode only supports global `HOME` redirection, which affects all system tools. |
+| `commandcode` | `commandcode` | `None` | *None* | `Unsupported` | CommandCode has no config-directory variable and no XDG base directory: only whole-`HOME` redirection can move it, which also moves authentication and system-tool state. Its global root is `~/.commandcode`, not the home directory a link sync would copy. |
 | `devin` | `devin` | `None` | *None* | `Unsupported` | Devin stores configuration in system app data and does not support instance directory redirection. |
 | `warp` | `warp` | `None` | *None* | `Unsupported` | Warp deploys skills only and does not support agent directory redirection. |
 
