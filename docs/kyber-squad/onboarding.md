@@ -1270,9 +1270,12 @@ The `SquadInstanceCatalog` defines the redirection mechanism and support status 
   Rendered agents exist directly in the instance, while all other top-level directories and files
   from the main home are linked.
 - **`ConfigLayer`**: The harness supports a secondary configuration folder loaded after global config.
-  Only rendered agents reside in the instance folder.
+  Only rendered agents reside in the instance folder. A `SpikePending` row may carry observed
+  behaviour that the proposed kind would change; Kind stays the catalog value until that proposal
+  is accepted.
 - **`Ready`**: Verified and supported for concurrent execution via `squad run`.
 - **`SpikePending`**: Candidate configuration variables identified; awaiting live platform verification.
+  A `SpikePending` row may carry observed behaviour that the proposed kind would change.
   Attempting `squad run` exits 2 with guidance.
 - **`Unsupported`**: Harness cannot isolate configuration per instance without global side effects.
   Attempting `squad run` exits 2 with explanation.
