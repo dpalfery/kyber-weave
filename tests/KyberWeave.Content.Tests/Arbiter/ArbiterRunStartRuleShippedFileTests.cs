@@ -1,6 +1,7 @@
 using KyberWeave.Core.Agents.Roster;
 using KyberWeave.Core.Arbiter;
 using KyberWeave.Core.Arbiter.Rules;
+using KyberWeave.Tests.Corpus;
 using Xunit;
 
 namespace KyberWeave.Tests.Arbiter;
@@ -47,5 +48,22 @@ public sealed class ArbiterRunStartRuleShippedFileTests
 
             Assert.Equal(expected, listed.Order(StringComparer.Ordinal));
         }
+    }
+
+    /// <summary>
+    /// The two reference pages that describe <c>KW-ARB-RUN-001</c> name the same writer set as the rule and the code:
+    /// a profile missing from either page reads as exempt when the rule refuses its dispatch.
+    /// </summary>
+    [Theory]
+    [InlineData("docs/ci-pipelines/rule-reference.md")]
+    [InlineData("docs/kyber-arbiter/architecture.md")]
+    public void EveryRunRuleReferencePageNamesEveryCapabilityWriter(string page)
+    {
+        string row = Assert.Single(
+            CheckoutCorpusSource.Checkout.ReadText(page).Split('\n'),
+            line => line.StartsWith("| `KW-ARB-RUN-001`", StringComparison.Ordinal));
+
+        foreach (string writer in CapabilityProfiles.Writers.Order(StringComparer.Ordinal))
+            Assert.Contains($"`{writer}`", row, StringComparison.Ordinal);
     }
 }
