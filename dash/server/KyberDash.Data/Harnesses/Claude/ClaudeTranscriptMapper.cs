@@ -94,6 +94,8 @@ public record ClaudeTranscriptMessage(
 /// <param name="RequestShapeTools">
 /// The tool schemas an <c>api-request-shape</c> line carries (<c>shape.tools</c>), in request order.
 /// </param>
+/// <param name="Uuid">The line's own record id (<c>uuid</c>), when present.</param>
+/// <param name="ParentUuid">The record id of the line this one follows (<c>parentUuid</c>), when present.</param>
 public record ClaudeTranscriptLine(
     string? RecordType,
     string? SessionId,
@@ -110,7 +112,9 @@ public record ClaudeTranscriptLine(
     string? AgentId = null,
     IReadOnlyList<string>? ListedSkills = null,
     string? RequestShapeHash = null,
-    IReadOnlyList<ClaudeTranscriptToolSchema>? RequestShapeTools = null);
+    IReadOnlyList<ClaudeTranscriptToolSchema>? RequestShapeTools = null,
+    string? Uuid = null,
+    string? ParentUuid = null);
 
 /// <summary>One tool schema a Claude Code request shape advertised to the model.</summary>
 /// <param name="Name">The tool name (<c>shape.tools[].name</c>).</param>
@@ -171,6 +175,7 @@ public class ClaudeTranscriptMapper : IHarnessMapper
             return new CollectedBatch(source, [], [], []);
         }
 
+        NameAgentLessSidechainRuns(rawGroups, pathInfo);
         Dictionary<string, IReadOnlyList<ClaudeTranscriptToolSchema>> requestShapes = IndexRequestShapes(rawGroups);
         HashSet<string> listedSkills = IndexListedSkills(rawGroups);
         List<MergedLineGroup> mergedGroups = MergeClaudeGroups(rawGroups, pathInfo);
@@ -216,6 +221,64 @@ public class ClaudeTranscriptMapper : IHarnessMapper
 
         return new SourcePathInfo(fileStem, isNestedSubagentFile, subagentParentSessionId);
     }
+
+    /// <summary>
+    /// Gives each run of sidechain lines that names no agent its own id, so two such runs in one transcript do not
+    /// share a session. A run is a chain of lines linked by <c>parentUuid</c>; its id is the <c>uuid</c> of the
+    /// chain's first line. A line whose chain has no <c>uuid</c> keeps the shared fallback id.
+    /// </summary>
+    private static void NameAgentLessSidechainRuns(List<List<ClaudeTranscriptLine>> rawGroups, SourcePathInfo pathInfo)
+    {
+        if (pathInfo.IsNestedSubagentFile || pathInfo.FileStem.StartsWith(AgentStemPrefix, StringComparison.Ordinal))
+        {
+            return;
+        }
+
+        Dictionary<string, ClaudeTranscriptLine> byUuid = new(StringComparer.Ordinal);
+        foreach (List<ClaudeTranscriptLine> group in rawGroups)
+        {
+            foreach (ClaudeTranscriptLine line in group)
+            {
+                if (IsAgentLessSidechain(line) && line.Uuid is not null)
+                {
+                    byUuid[line.Uuid] = line;
+                }
+            }
+        }
+
+        if (byUuid.Count == 0)
+        {
+            return;
+        }
+
+        foreach (List<ClaudeTranscriptLine> group in rawGroups)
+        {
+            for (int i = 0; i < group.Count; i++)
+            {
+                ClaudeTranscriptLine line = group[i];
+                if (!IsAgentLessSidechain(line) || line.Uuid is null)
+                {
+                    continue;
+                }
+
+                string runId = line.Uuid;
+                ClaudeTranscriptLine current = line;
+                int hops = 0;
+                while (current.ParentUuid is { } parentUuid
+                    && byUuid.TryGetValue(parentUuid, out ClaudeTranscriptLine? parent)
+                    && hops++ < byUuid.Count)
+                {
+                    runId = parent.Uuid!;
+                    current = parent;
+                }
+
+                group[i] = line with { AgentId = $"{FallbackSidechainBareId}-{runId}" };
+            }
+        }
+    }
+
+    private static bool IsAgentLessSidechain(ClaudeTranscriptLine line) =>
+        line.IsSidechain && string.IsNullOrEmpty(line.AgentId);
 
     /// <summary>
     /// Indexes the tool schemas of every request shape the transcript carries by its hash. Claude Code writes
@@ -370,7 +433,9 @@ public class ClaudeTranscriptMapper : IHarnessMapper
                 AgentId: agentId,
                 ListedSkills: listedSkills,
                 RequestShapeHash: shapeHash,
-                RequestShapeTools: shapeTools);
+                RequestShapeTools: shapeTools,
+                Uuid: ReadSafeMetadataText(root, "uuid"),
+                ParentUuid: ReadSafeMetadataText(root, "parentUuid"));
         }
     }
 

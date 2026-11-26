@@ -777,6 +777,40 @@ public class ClaudeTranscriptMapperTests
     }
 
     [Fact]
+    public void Map_SeparatesConcurrentAgentLessSidechainRunsByTheirFirstRecordId()
+    {
+        static string Line(string uuid, string? parentUuid, string messageId, string timestamp, string text, int input)
+        {
+            string parent = parentUuid is null ? "null" : $"\"{parentUuid}\"";
+            return $"{{\"type\":\"assistant\",\"uuid\":\"{uuid}\",\"parentUuid\":{parent},\"sessionId\":\"sess-main\",\"isSidechain\":true,\"timestamp\":\"{timestamp}\",\"message\":{{\"id\":\"{messageId}\",\"role\":\"assistant\",\"model\":\"claude-sonnet-4-5\",\"content\":[{{\"type\":\"text\",\"text\":\"{text}\"}}],\"usage\":{{\"input_tokens\":{input},\"output_tokens\":2}}}}}}";
+        }
+
+        string jsonl = string.Join('\n',
+        [
+            Line("ua1", null, "msg-a1", "2026-11-19T12:50:00.000Z", "Run A first", 5),
+            Line("ub1", null, "msg-b1", "2026-11-19T12:50:01.000Z", "Run B first", 6),
+            Line("ua2", "ua1", "msg-a2", "2026-11-19T12:50:02.000Z", "Run A second", 7),
+            Line("ub2", "ub1", "msg-b2", "2026-11-19T12:50:03.000Z", "Run B second", 8),
+        ]);
+
+        CollectedBatch batch = CreateMapper().Map(CreateUnit("/tmp/.claude/projects/repo/sess-main.jsonl", jsonl), ImportedAt);
+
+        Assert.Equal(2, batch.Sessions.Count);
+        Assert.Equal(4, batch.Records.Count);
+        string[] keys = [.. batch.Sessions.Select(static s => s.SessionKey).Order(StringComparer.Ordinal)];
+        Assert.Equal(["sess-main#agent-sidechain-ua1", "sess-main#agent-sidechain-ub1"], keys);
+
+        string?[] runATexts = [.. batch.Records
+            .Where(static r => string.Equals(r.SessionKey, "sess-main#agent-sidechain-ua1", StringComparison.Ordinal))
+            .SelectMany(static r => r.Parts.Select(static p => p.PlainText))];
+        Assert.Equal(["Run A first", "Run A second"], runATexts);
+        string?[] runBTexts = [.. batch.Records
+            .Where(static r => string.Equals(r.SessionKey, "sess-main#agent-sidechain-ub1", StringComparison.Ordinal))
+            .SelectMany(static r => r.Parts.Select(static p => p.PlainText))];
+        Assert.Equal(["Run B first", "Run B second"], runBTexts);
+    }
+
+    [Fact]
     public void Map_DoesNotMergeUsageLessSidechainTailIntoParentSessionTurn()
     {
         string sidechainTailJsonl = string.Join('\n',
