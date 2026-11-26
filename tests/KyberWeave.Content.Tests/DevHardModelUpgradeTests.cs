@@ -28,9 +28,6 @@ public sealed class DevHardModelUpgradeTests
     {
         [SquadTarget.Warp] =
             "Warp has no agent primitive: it lowers agents to role skills and renders no model key.",
-        [SquadTarget.CommandCode] =
-            "models.yml names no commandcode column for any profile, so both tiers take " +
-            "'default: inherit' and the harness chooses the model.",
     };
 
     /// <summary>
@@ -44,6 +41,7 @@ public sealed class DevHardModelUpgradeTests
         ["antigravity"] = "pro",
         ["claude"] = "opus",
         ["codex"] = "gpt-6.1-sol",
+        ["commandcode"] = "gpt-6.2-sol[reasoningEffort=high]",
         ["copilot"] = "Gemini 4 Hydrogen (copilot)",
         ["cursor"] = "claude-sonnet-5-5[effort=high]",
         ["devin"] = "claude-opus-5-5-high",
@@ -60,6 +58,7 @@ public sealed class DevHardModelUpgradeTests
         ["antigravity"] = "flash",
         ["claude"] = "claude-haiku-5-5",
         ["codex"] = "gpt-6-luna",
+        ["commandcode"] = "gpt-6-luna[reasoningEffort=low]",
         ["copilot"] = "MAI Code 2 Flash (copilot)",
         ["cursor"] = "composer-2.5[]",
         ["devin"] = "deepseek-v4-1-flash-high",
@@ -76,6 +75,7 @@ public sealed class DevHardModelUpgradeTests
         ["antigravity"] = "flash",
         ["claude"] = "claude-sonnet-5-5",
         ["codex"] = "gpt-6.1-terra",
+        ["commandcode"] = "gpt-6.1-terra[reasoningEffort=medium]",
         ["copilot"] = "MAI Code 2 (copilot)",
         ["cursor"] = "grok-4.7[]",
         ["devin"] = "swe-2-high",
@@ -88,8 +88,8 @@ public sealed class DevHardModelUpgradeTests
 
     /// <summary>
     /// The model each harness actually emits for <c>dev-hard</c> after its renderer has lowered the
-    /// profile — the level the step-up runs at. Warp has no agent file, and Command Code emits no
-    /// model key because no profile names a <c>commandcode</c> row.
+    /// profile — the level the step-up runs at. Warp has no agent file. Command Code moves the
+    /// <c>[reasoningEffort=high]</c> suffix onto its own key, so its <c>model</c> key is the bare id.
     /// </summary>
     private static readonly Dictionary<SquadTarget, string> RenderedDevHardModels = new()
     {
@@ -97,6 +97,7 @@ public sealed class DevHardModelUpgradeTests
         [SquadTarget.Copilot] = "Gemini 4 Hydrogen (copilot)",
         [SquadTarget.Cursor] = "claude-sonnet-5-5[effort=high]",
         [SquadTarget.Codex] = "gpt-6.1-sol",
+        [SquadTarget.CommandCode] = "gpt-6.2-sol",
         [SquadTarget.OpenCode] = "zai-coding-plan/glm-5.3",
         [SquadTarget.Kilo] = "zai-coding-plan/glm-5.3",
         [SquadTarget.Antigravity] = "pro",
@@ -226,6 +227,7 @@ public sealed class DevHardModelUpgradeTests
         SquadTarget.Copilot => $".github/agents/{agent}.agent.md",
         SquadTarget.Cursor => $".cursor/agents/{agent}.md",
         SquadTarget.Codex => $".codex/agents/{agent}.toml",
+        SquadTarget.CommandCode => $".commandcode/agents/{agent}.md",
         SquadTarget.OpenCode => $".opencode/agents/{agent}.md",
         SquadTarget.Kilo => $".kilo/agents/{agent}.md",
         SquadTarget.Antigravity => $".agents/agents/{agent}/agent.md",
