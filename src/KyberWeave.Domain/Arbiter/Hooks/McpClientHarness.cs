@@ -11,9 +11,9 @@ namespace KyberWeave.Arbiter.Hooks;
 /// verified source.
 /// </para>
 /// <para>
-/// A row is added only after a probe showed that client sending that name, and the comment on the row records the
-/// probe: the client version and the date. A name with no row, or no name at all, has no token, and the caller
-/// treats it as a dispatch no hook rewrites.
+/// A row is added only after evidence showed that client sending that name: a live probe, or the client's own source
+/// where no probe could run. The comment on the row records which, with the client version and the date. A name with
+/// no row, or no name at all, has no token, and the caller treats it as a dispatch no hook rewrites.
 /// </para>
 /// </remarks>
 public static class McpClientHarness
@@ -59,7 +59,7 @@ public static class McpClientHarness
     /// </summary>
     private const string PiAdapterPrefix = "pi-mcp-";
 
-    /// <summary>The hook's harness token for an MCP client name, or null when no probe has verified the name.</summary>
+    /// <summary>The hook's harness token for an MCP client name, or null when neither a probe nor the client's source has verified the name.</summary>
     /// <param name="clientName">The <c>clientInfo.name</c> a client sent in its MCP <c>initialize</c> request.</param>
     public static string? TokenFor(string? clientName)
     {

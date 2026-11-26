@@ -1681,13 +1681,15 @@ same question. Name `technology` instead of a task id for a dispatch that belong
 such as a research request: the reply then describes the parts from the shared rules on.
 
 The tool never asks for the harness: it reads the name the MCP client sent in its `initialize`
-request (`clientInfo.name`), because a harness name the model types is a guess. A name a probe has
-verified — Copilot CLI, Claude Code, opencode, Factory Droid (`factory-cli`), Cursor, Kilo, VS Code, Codex (`codex-mcp-client`) and Pi (`pi-mcp-<server key>`) — maps to that harness's hook token, and the reply
+request (`clientInfo.name`), because a harness name the model types is a guess. A name that a live
+probe or the client's own source has verified maps to that harness's hook token: Copilot CLI,
+Claude Code, opencode, Factory Droid (`factory-cli`), Cursor and Kilo by probe; VS Code, Codex
+(`codex-mcp-client`) and Pi (`pi-mcp-<server key>`) by source. The reply
 says `harness: <token> (from MCP client '<name>')`. On a harness whose dispatch hook can rewrite
 the call, no file is written and the reply says `prompt file: none`. On ZCode, CommandCode and
 Warp the hook cannot rewrite the dispatch — the rows in the
 [dispatch delivery path](../kyber-arbiter/architecture.md#dispatch-delivery-path) — and a client
-name no probe has verified is treated the same way, so the prompt is written to
+name neither has verified is treated the same way, so the prompt is written to
 `.agent_scratchpad/<task>/prompt.md` (untracked) and the reply carries that path, after
 `harness: unknown MCP client '<name>'; the prompt file was written`. Name the path in the dispatch
 and tell the worker to read it first; that line means a new harness can be added to the register
