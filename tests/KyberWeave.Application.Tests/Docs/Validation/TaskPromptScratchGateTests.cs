@@ -1,3 +1,4 @@
+using KyberWeave.Core;
 using KyberWeave.Core.Docs.Validation;
 using KyberWeave.Tests.FileSystem;
 using Xunit;
@@ -16,16 +17,16 @@ public sealed class TaskPromptScratchGateTests
 
     public TaskPromptScratchGateTests()
     {
-        _disk.CreateDirectory(Root + "/" + TaskPromptService.ScratchFolder);
+        _disk.CreateDirectory(Root + "/" + ScratchLayout.Root);
         _disk.CreateDirectory(Root + "/src");
     }
 
     [Fact]
     public void AFileInsideTheScratchFolderPasses()
     {
-        _disk.WriteAllText(Root + "/" + TaskPromptService.ScratchFolder + "/prior.md", "results");
+        _disk.WriteAllText(Root + "/" + ScratchLayout.Root + "/prior.md", "results");
 
-        Assert.True(TaskPromptService.IsScratchFile(_disk, Root, TaskPromptService.ScratchFolder + "/prior.md"));
+        Assert.True(TaskPromptService.IsScratchFile(_disk, Root, ScratchLayout.Root + "/prior.md"));
     }
 
     [Fact]
@@ -40,17 +41,17 @@ public sealed class TaskPromptScratchGateTests
     public void AFileLinkInsideScratchPointingOutsideIsRefused()
     {
         _disk.WriteAllText(Root + "/src/secret.md", "secret");
-        _disk.CreateFileLink(Root + "/" + TaskPromptService.ScratchFolder + "/prior.md", Root + "/src/secret.md");
+        _disk.CreateFileLink(Root + "/" + ScratchLayout.Root + "/prior.md", Root + "/src/secret.md");
 
-        Assert.False(TaskPromptService.IsScratchFile(_disk, Root, TaskPromptService.ScratchFolder + "/prior.md"));
+        Assert.False(TaskPromptService.IsScratchFile(_disk, Root, ScratchLayout.Root + "/prior.md"));
     }
 
     [Fact]
     public void ADirectoryLinkInsideScratchPointingOutsideIsRefused()
     {
         _disk.WriteAllText(Root + "/src/secret.md", "secret");
-        _disk.CreateDirectoryLink(Root + "/" + TaskPromptService.ScratchFolder + "/out", Root + "/src");
+        _disk.CreateDirectoryLink(Root + "/" + ScratchLayout.Root + "/out", Root + "/src");
 
-        Assert.False(TaskPromptService.IsScratchFile(_disk, Root, TaskPromptService.ScratchFolder + "/out/secret.md"));
+        Assert.False(TaskPromptService.IsScratchFile(_disk, Root, ScratchLayout.Root + "/out/secret.md"));
     }
 }

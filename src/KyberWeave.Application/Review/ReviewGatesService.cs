@@ -1,3 +1,4 @@
+using KyberWeave.Core;
 using System.ComponentModel;
 using System.Globalization;
 using KyberWeave.Cli.Commands.Review;
@@ -390,7 +391,7 @@ public sealed class ReviewGatesService(
         }
         else if (choice.Chosen)
         {
-            reviewFolder = Path.Combine(scratchpad, choice.Task, "review");
+            reviewFolder = Path.Combine(scratchpad, choice.Task, ScratchLayout.ReviewFolderName);
         }
         else
         {
@@ -405,7 +406,7 @@ public sealed class ReviewGatesService(
 
         ReviewCyclePlan plan = ReviewCyclePlanning.Plan(
             finished, config.Review.Gates, ReviewGateReporting.CurrentOs(environment), commit => selector.ChangedSince(tree, commit));
-        folder ??= Path.Combine(reviewFolder, $"cycle-{plan.Number}");
+        folder ??= Path.Combine(reviewFolder, ScratchLayout.CycleFolder(plan.Number));
         IReadOnlyList<ReviewFinding> recheck = [];
         if (plan.Prior is { } priorCycle)
         {
@@ -918,7 +919,7 @@ public sealed class ReviewGatesService(
                 || (gate.Passed && !RedClassifier.IsTestGate(gate.Id, string.Join(' ', plannedGate.Run))))
                 continue;
 
-            string? log = taskSlug is null ? null : $".agent_scratchpad/{taskSlug}/logs/{gate.Id}{(red ? "-red" : string.Empty)}.log";
+            string? log = taskSlug is null ? null : $"{ScratchLayout.LogsDir(taskSlug)}/{gate.Id}{(red ? "-red" : string.Empty)}.log";
             if (log is not null)
             {
                 try
@@ -940,7 +941,7 @@ public sealed class ReviewGatesService(
     }
 
     private static string RunCountPath(string root, string taskSlug) =>
-        Path.Combine(root, ".agent_scratchpad", taskSlug, "task-gate-runs");
+        Path.Combine(root, ScratchLayout.TaskGateRuns(taskSlug));
 
     /// <summary>
     ///     The ordinal the next task-gate run gets without advancing or writing the counter, so a no-gate run neither

@@ -88,7 +88,7 @@ public sealed class GateReportFactsOverSeamsTests
         _ = Write("/kw/work/repo/artifacts/gates.json", Failing());
 
         Assert.NotNull(Facts().TryRead("repo"));
-        Assert.True(Facts().FailedGateCorroborates("repo"));
+        Assert.True(Facts().FailedGateCorroborates("repo", null));
     }
 
     [Fact]
@@ -120,7 +120,28 @@ public sealed class GateReportFactsOverSeamsTests
     {
         _ = Write("/repo/artifacts/gates.json", Failing());
 
-        Assert.True(Facts().FailedGateCorroborates(Root));
+        Assert.True(Facts().FailedGateCorroborates(Root, null));
+    }
+
+    /// <summary>
+    /// A council dispatch names its cycle in <c>REVIEW_RUN</c>, and the cycle's report lives under the scratch folder,
+    /// not under <c>artifacts/</c>. A finding must be corroborated by the gate run the council actually made.
+    /// </summary>
+    [Fact]
+    public void ACouncilDispatchReadsTheNamedCyclesGateReport()
+    {
+        _ = Write("/repo/.agent_scratchpad/t7/review/cycle-2/gates.json", Failing());
+
+        Assert.True(Facts().FailedGateCorroborates(Root, "t7-cycle-2"));
+    }
+
+    /// <summary>A dispatch that names no cycle keeps reading the repository's default report.</summary>
+    [Fact]
+    public void ADispatchWithNoReviewRunStillReadsTheDefaultReport()
+    {
+        _ = Write("/repo/artifacts/gates.json", Failing());
+
+        Assert.True(Facts().FailedGateCorroborates(Root, null));
     }
 
     [Fact]

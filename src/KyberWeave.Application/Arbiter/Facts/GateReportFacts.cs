@@ -1,3 +1,4 @@
+using KyberWeave.Core;
 using KyberWeave.Contracts.Paths;
 using KyberWeave.Contracts.Repositories;
 using System.Text;
@@ -139,15 +140,40 @@ public sealed class GateReportFacts(
     }
 
     /// <summary>
-    /// Whether the repository's gate report shows a failed gate, which corroborates a lens finding. The same
+    /// Whether the gate report behind a finding shows a failed gate, which corroborates a lens finding. The same
     /// report reader <see cref="Agrees(string?, string?)"/> uses, so a finding and a digest are checked against one source.
+    /// A council dispatch reads the cycle its <c>REVIEW_RUN</c> names; every other dispatch reads the repository's
+    /// default report.
     /// </summary>
+    /// <param name="repositoryRoot">The root a relative report path resolves against.</param>
+    /// <param name="reviewRun">The cycle the dispatch names, or null when it names none.</param>
     /// <returns><c>true</c> when a gate ran and failed; <c>false</c> when the report is missing or shows none failed.</returns>
-    public bool FailedGateCorroborates(string? repositoryRoot)
+    public bool FailedGateCorroborates(string? repositoryRoot, string? reviewRun)
     {
-        GateReport? report = string.IsNullOrWhiteSpace(repositoryRoot) ? null : TryRead(repositoryRoot);
+        GateReport? report = string.IsNullOrWhiteSpace(repositoryRoot) ? null : TryReadForDispatch(repositoryRoot, reviewRun);
         return report?.Gates is not null
             && report.Gates.Any(gate => gate is not null && !gate.Passed && !gate.NotApplicable);
+    }
+
+    /// <summary>
+    /// The report the dispatch's gate run wrote: the named cycle's report for a council dispatch, else the
+    /// repository's default report. A cycle report that is absent falls back to the default.
+    /// </summary>
+    /// <param name="repositoryRoot">The root a relative path resolves against.</param>
+    /// <param name="reviewRun">The cycle the dispatch names, or null when it names none.</param>
+    private GateReport? TryReadForDispatch(string repositoryRoot, string? reviewRun)
+    {
+        string? fullRoot = FullRoot(repositoryRoot);
+        if (fullRoot is null)
+            return null;
+
+        if (ScratchLayout.TryParseReviewRun(reviewRun, out string task, out int cycle)
+            && TryReadFile(Path.Combine(fullRoot, ScratchLayout.CycleGates(task, cycle))) is { } cycleReport)
+        {
+            return cycleReport;
+        }
+
+        return TryReadFile(Path.Combine(fullRoot, "artifacts", "gates.json"));
     }
 
     /// <summary>Whether a returned digest's gate report corroborates its claimed status.</summary>

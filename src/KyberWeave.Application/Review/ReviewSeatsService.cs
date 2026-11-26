@@ -1,3 +1,4 @@
+using KyberWeave.Core;
 using System.ComponentModel;
 using KyberWeave.Cli.Commands.Review;
 using KyberWeave.Cli.Commands.Squad.Infrastructure;
@@ -78,7 +79,7 @@ public sealed class ReviewSeatsService(
 
         string task = choice.Task;
 
-        string reviewFolder = Path.Combine(scratchpad, task, "review");
+        string reviewFolder = Path.Combine(scratchpad, task, ScratchLayout.ReviewFolderName);
         PriorCycles prior = trees.Prior(tree, request.BaseRef, cycles.ReadFinished(reviewFolder));
         ReviewCyclePlan plan = ReviewCyclePlanning.Plan(
             prior.Valid,
@@ -104,8 +105,8 @@ public sealed class ReviewSeatsService(
             environment.TempDirectory);
         bool indexReady = index.Status is WorktreeIndexStatus.Ready or WorktreeIndexStatus.NotGoverned;
 
-        string folder = Path.Combine(reviewFolder, $"cycle-{plan.Number}");
-        string gatesPath = Path.Combine(folder, "gates.json");
+        string folder = Path.Combine(reviewFolder, ScratchLayout.CycleFolder(plan.Number));
+        string gatesPath = Path.Combine(folder, ScratchLayout.GatesFileName);
         string baseRef = request.BaseRef ?? DefaultBase;
         IReadOnlyList<string>? changed = ChangedPaths(root, baseRef);
 
@@ -146,7 +147,7 @@ public sealed class ReviewSeatsService(
             return ReviewCommandResultFactory.Reported(1, report);
         }
 
-        string reviewRun = $"{task}-cycle-{plan.Number}";
+        string reviewRun = ScratchLayout.ReviewRun(task, plan.Number);
         output.WriteLine($"cycle: {plan.Number} mode: {ReviewCycleView.Mode(plan)}");
         output.WriteLine($"folder: {folder}");
         output.WriteLine($"evidence: {evidence}");

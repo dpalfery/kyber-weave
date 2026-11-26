@@ -1,3 +1,4 @@
+using KyberWeave.Core;
 using System.Globalization;
 using System.Text.Json;
 using System.Text.RegularExpressions;
@@ -1019,8 +1020,8 @@ public sealed partial class ReviewVerdictService(
         string? problem = null;
         if (ReviewCycleView.TryChooseTask(cycles, git, tree, scratchpad, request.Task, out string task, out _, out problem))
         {
-            cycle = notSeatedStore.LatestCycle(Path.Combine(scratchpad, task, "review"));
-            problem = cycle is null ? $"no cycle folder with seats under {Path.Combine(scratchpad, task, "review")}" : null;
+            cycle = notSeatedStore.LatestCycle(Path.Combine(scratchpad, task, ScratchLayout.ReviewFolderName));
+            problem = cycle is null ? $"no cycle folder with seats under {Path.Combine(scratchpad, task, ScratchLayout.ReviewFolderName)}" : null;
         }
 
         if (cycle is null)
@@ -1035,7 +1036,7 @@ public sealed partial class ReviewVerdictService(
         }
 
         effective = effective with { Seats = Path.Combine(cycle, "seats") };
-        string gates = Path.Combine(cycle, "gates.json");
+        string gates = Path.Combine(cycle, ScratchLayout.GatesFileName);
         if (request.Gates is null && files.FileExists(gates))
             effective = effective with { Gates = gates };
         if (!request.Candidates)

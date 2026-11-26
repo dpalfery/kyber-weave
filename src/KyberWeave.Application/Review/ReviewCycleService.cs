@@ -1,3 +1,4 @@
+using KyberWeave.Core;
 using System.Text.Json;
 using System.Text.Json.Nodes;
 using KyberWeave.Cli.Commands.Review;
@@ -63,7 +64,7 @@ public sealed class ReviewCycleService(
         if (liveRun is not null && !request.Json)
             output.WriteLine(liveRun);
 
-        string reviewFolder = Path.Combine(scratchpad, task, "review");
+        string reviewFolder = Path.Combine(scratchpad, task, ScratchLayout.ReviewFolderName);
         PriorCycles prior = trees.Prior(tree, request.BaseRef, cycles.ReadFinished(reviewFolder));
         ReviewCyclePlan plan = ReviewCyclePlanning.Plan(
             prior.Valid,
@@ -82,8 +83,8 @@ public sealed class ReviewCycleService(
             recheck = found;
         }
 
-        string folder = Path.Combine(reviewFolder, $"cycle-{plan.Number}");
-        string command = ReviewCycleView.GatesCommand(root, Path.Combine(folder, "gates.json"), request.BaseRef);
+        string folder = Path.Combine(reviewFolder, ScratchLayout.CycleFolder(plan.Number));
+        string command = ReviewCycleView.GatesCommand(root, ScratchLayout.CycleGates(task, plan.Number), request.BaseRef);
         if (request.Json)
             output.WriteLine(ToJson(tree, plan, folder, recheck, prior.Ignored, liveRun, command));
         else

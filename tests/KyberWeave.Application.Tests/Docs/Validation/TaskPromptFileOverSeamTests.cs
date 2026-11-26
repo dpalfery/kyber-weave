@@ -1,3 +1,4 @@
+using KyberWeave.Core;
 using KyberWeave.Contracts.Services;
 using KyberWeave.Core.Configuration;
 using KyberWeave.Core.Docs.Validation;
@@ -24,7 +25,7 @@ public sealed class TaskPromptFileOverSeamTests
         TaskPromptResult result = Build("warp");
 
         Assert.True(result.Built, result.Refusal);
-        string expected = $"{TaskPromptService.ScratchFolder}/csharp/{TaskPromptService.PromptFileName}";
+        string expected = $"{ScratchLayout.Root}/csharp/{TaskPromptService.PromptFileName}";
         Assert.Equal(expected, result.PromptFile);
         Assert.Equal(result.Prompt, _disk.ReadAllText(Root + "/" + expected));
     }
@@ -36,7 +37,7 @@ public sealed class TaskPromptFileOverSeamTests
 
         Assert.True(result.Built, result.Refusal);
         Assert.Null(result.PromptFile);
-        Assert.False(_disk.PathExists(Root + "/" + TaskPromptService.ScratchFolder));
+        Assert.False(_disk.PathExists(Root + "/" + ScratchLayout.Root));
     }
 
     [Fact]
@@ -49,7 +50,7 @@ public sealed class TaskPromptFileOverSeamTests
         Assert.False(result.Built);
         Assert.Equal(TaskPromptRefusalKind.Finding, result.RefusalKind);
         Assert.Contains("could not be written", result.Refusal, StringComparison.Ordinal);
-        Assert.Contains($"{TaskPromptService.ScratchFolder}/csharp/{TaskPromptService.PromptFileName}", result.Refusal, StringComparison.Ordinal);
+        Assert.Contains($"{ScratchLayout.Root}/csharp/{TaskPromptService.PromptFileName}", result.Refusal, StringComparison.Ordinal);
         Assert.Null(result.PromptFile);
     }
 

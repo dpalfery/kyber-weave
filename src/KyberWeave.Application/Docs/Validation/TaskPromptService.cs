@@ -1,3 +1,4 @@
+using KyberWeave.Core;
 using System.Globalization;
 using System.Text;
 using KyberWeave.Arbiter.Hooks;
@@ -39,9 +40,6 @@ public sealed class TaskPromptService(
 {
     /// <summary>What the last part says when the budget cut nothing.</summary>
     public const string NothingLeftOut = "Nothing was left out.";
-
-    /// <summary>The folder, relative to the repository root, a fallback harness's prompt file is written under.</summary>
-    public const string ScratchFolder = ".agent_scratchpad";
 
     /// <summary>The prompt file's name inside the task's scratch folder.</summary>
     public const string PromptFileName = "prompt.md";
@@ -344,10 +342,10 @@ public sealed class TaskPromptService(
     {
         IEnumerable<string> folders = new[] { root }
             .Concat(otherRoots ?? [])
-            .Select(folder => Path.Combine(folder, ScratchFolder))
+            .Select(folder => Path.Combine(folder, ScratchLayout.Root))
             .Distinct(StringComparer.Ordinal);
         return $"Write it under {string.Join(" or ", folders.Select(folder => $"'{folder}'"))}, and name it by that " +
-            $"absolute path or relative to the checkout (for example {ScratchFolder}/T1/prior-results.md), or leave it out.";
+            $"absolute path or relative to the checkout (for example {ScratchLayout.PriorResults("T1")}), or leave it out.";
     }
 
     /// <summary>
@@ -373,7 +371,7 @@ public sealed class TaskPromptService(
         absolute = resolved;
         return new[] { root }.Concat(otherRoots ?? []).Any(folder => IsInside(
             resolved,
-            Path.TrimEndingDirectorySeparator(RealPath(files, Path.GetFullPath(ScratchFolder, folder)))));
+            Path.TrimEndingDirectorySeparator(RealPath(files, Path.GetFullPath(ScratchLayout.Root, folder)))));
     }
 
     private static bool IsInside(string absolute, string scratch) =>
@@ -427,12 +425,12 @@ public sealed class TaskPromptService(
         if (slug.Length == 0)
         {
             return TaskPromptResult.NotBuilt(
-                $"No prompt: '{taskId}' does not make a task folder under {ScratchFolder}. Dispatch a task id with a " +
+                $"No prompt: '{taskId}' does not make a task folder under {ScratchLayout.Root}. Dispatch a task id with a " +
                 "letter or digit in it.",
                 TaskPromptRefusalKind.Finding);
         }
 
-        string relative = $"{ScratchFolder}/{slug}/{PromptFileName}";
+        string relative = $"{ScratchLayout.Root}/{slug}/{PromptFileName}";
         string path = Path.Combine(root, relative.Replace('/', Path.DirectorySeparatorChar));
         try
         {
@@ -452,7 +450,7 @@ public sealed class TaskPromptService(
             // is a positive finding about the dispatch: the worker would otherwise start with only the short line.
             return TaskPromptResult.NotBuilt(
                 $"No prompt: the prompt file '{relative}' could not be written ({ex.Message}). Check that " +
-                $"{ScratchFolder} is writable, then build the prompt again.",
+                $"{ScratchLayout.Root} is writable, then build the prompt again.",
                 TaskPromptRefusalKind.Finding);
         }
     }

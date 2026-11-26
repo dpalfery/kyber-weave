@@ -291,7 +291,7 @@ public sealed class ArbiterEvaluator : IArbiterEvaluator
             : [];
         // Each finding is judged on its own bag: the static facts plus that finding's own id, text and severity.
         ArbiterFactSet baseFacts = facts;
-        bool gateCorroborated = _gateReports.FailedGateCorroborates(ev.Cwd);
+        bool gateCorroborated = _gateReports.FailedGateCorroborates(ev.Cwd, reviewRun);
         if (returned.Count > 0)
         {
             facts = TriggerFactBuilder.WithReturnedFinding(baseFacts, returned[0], gateCorroborated);

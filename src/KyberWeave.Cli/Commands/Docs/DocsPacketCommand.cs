@@ -5,6 +5,7 @@ using KyberWeave.Contracts.Repositories;
 using KyberWeave.Contracts.Services;
 using KyberWeave.Cli.Commands.Arbiter;
 using KyberWeave.Cli.Rendering;
+using KyberWeave.Core;
 using KyberWeave.Core.Arbiter.Facts;
 using KyberWeave.Core.Arbiter.Plans;
 using KyberWeave.Core.Configuration;
@@ -123,7 +124,7 @@ public sealed class DocsPacketCommand(
                     $"The prior-results file '{settings.PriorResults}' is outside this run's scratch area. " +
                     TaskPromptService.ScratchAreaHint(root),
                     "docs packet",
-                    Hint: $"Keep the file under {TaskPromptService.ScratchFolder} in this checkout."));
+                    Hint: $"Keep the file under {ScratchLayout.Root} in this checkout."));
                 return Fail(report);
             }
 

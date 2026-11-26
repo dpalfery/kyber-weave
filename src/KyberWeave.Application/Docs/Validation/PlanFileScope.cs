@@ -1,3 +1,4 @@
+using KyberWeave.Core;
 using System.Text.RegularExpressions;
 
 namespace KyberWeave.Core.Docs.Validation;
@@ -14,9 +15,6 @@ namespace KyberWeave.Core.Docs.Validation;
 /// </remarks>
 internal static partial class PlanFileScope
 {
-    /// <summary>The run's scratch folder: git-ignored, never part of a diff, and open to every worker.</summary>
-    private const string ScratchFolder = ".agent_scratchpad";
-
     /// <summary>
     /// Splits <paramref name="entries"/> into the kept repository paths, the scratch paths and the dropped text. Neither
     /// the scratch paths nor the dropped text belong in a task file.
@@ -71,8 +69,8 @@ internal static partial class PlanFileScope
 
     // Case is ignored so the answer is the same on a file system that folds case and on one that does not.
     private static bool IsScratch(string relative) =>
-        relative.Equals(ScratchFolder, StringComparison.OrdinalIgnoreCase)
-        || relative.StartsWith(ScratchFolder + "/", StringComparison.OrdinalIgnoreCase);
+        relative.Equals(ScratchLayout.Root, StringComparison.OrdinalIgnoreCase)
+        || relative.StartsWith(ScratchLayout.Root + "/", StringComparison.OrdinalIgnoreCase);
 
     [GeneratedRegex(@"^[A-Za-z][A-Za-z0-9+.-]*:(?!\\|/)", RegexOptions.CultureInvariant)]
     private static partial Regex SchemeRegex();

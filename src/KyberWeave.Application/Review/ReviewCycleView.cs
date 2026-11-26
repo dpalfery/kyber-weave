@@ -1,3 +1,4 @@
+using KyberWeave.Core;
 using System.Text.Json;
 using KyberWeave.Contracts.Paths;
 using KyberWeave.Contracts.Repositories;
@@ -16,7 +17,6 @@ namespace KyberWeave.Application.Review;
 public static class ReviewCycleView
 {
     private const string InvalidInput = "KW-REVIEW-028";
-    private const string FolderPrefix = "cycle-";
 
     /// <summary>
     ///     The task folder name: the given id normalised and matched to an existing folder without regard to case; with
@@ -107,10 +107,10 @@ public static class ReviewCycleView
         string? name = cycleFolder is null ? null : Path.GetFileName(cycleFolder);
         string? parent = cycleFolder is null ? null : Path.GetDirectoryName(cycleFolder);
         if (name is null || parent is null
-            || !name.StartsWith(FolderPrefix, StringComparison.Ordinal)
-            || !int.TryParse(name.AsSpan(FolderPrefix.Length), System.Globalization.NumberStyles.None, System.Globalization.CultureInfo.InvariantCulture, out cycle)
+            || !name.StartsWith(ScratchLayout.CycleFolderPrefix, StringComparison.Ordinal)
+            || !int.TryParse(name.AsSpan(ScratchLayout.CycleFolderPrefix.Length), System.Globalization.NumberStyles.None, System.Globalization.CultureInfo.InvariantCulture, out cycle)
             || cycle <= 0
-            || !string.Equals(Path.GetFileName(parent), "review", StringComparison.Ordinal))
+            || !string.Equals(Path.GetFileName(parent), ScratchLayout.ReviewFolderName, StringComparison.Ordinal))
         {
             return false;
         }

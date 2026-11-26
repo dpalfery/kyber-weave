@@ -1,3 +1,4 @@
+using KyberWeave.Core;
 using KyberWeave.Core.Processes;
 using KyberWeave.Core.Review;
 
@@ -21,12 +22,12 @@ public static class TaskGateNextStep
     /// <summary>The scratch path a task's passing report is written to.</summary>
     /// <param name="task">The task id, normalised so a path-like or multi-line value cannot name another folder.</param>
     /// <exception cref="ArgumentException">The task id leaves nothing a folder can be named with.</exception>
-    public static string PassingReportPath(string task) => $".agent_scratchpad/{Slug(task)}/task-gate.json";
+    public static string PassingReportPath(string task) => ScratchLayout.TaskGateReport(Slug(task), red: false);
 
     /// <summary>The scratch path a task's failing-run (<c>--red</c>) report is written to.</summary>
     /// <param name="task">The task id, normalised so a path-like or multi-line value cannot name another folder.</param>
     /// <exception cref="ArgumentException">The task id leaves nothing a folder can be named with.</exception>
-    public static string FailingReportPath(string task) => $".agent_scratchpad/{Slug(task)}/task-gate-red.json";
+    public static string FailingReportPath(string task) => ScratchLayout.TaskGateReport(Slug(task), red: true);
 
     /// <summary>The lines after a <c>--red</c> run.</summary>
     /// <param name="accepted">Whether the run was accepted as the failing run.</param>

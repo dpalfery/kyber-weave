@@ -3,6 +3,7 @@ using System.Text;
 using KyberWeave.Contracts.Paths;
 using KyberWeave.Contracts.Repositories;
 using KyberWeave.Contracts.Services;
+using KyberWeave.Core;
 using KyberWeave.Core.Processes;
 using KyberWeave.Core.RunStart;
 
@@ -34,7 +35,6 @@ public sealed class RunIntegrateService : IRunIntegrateService
     /// </summary>
     public const string LockFileName = "kyber-weave-run-integrate.lock";
 
-    private const string ScratchpadFolder = ".agent_scratchpad";
     private const string GitDirectoryOption = "--absolute-git-dir";
     private const string CommonDirectoryOption = "--git-common-dir";
     private const string UnmergedFiles = "--diff-filter=U";
@@ -289,7 +289,7 @@ public sealed class RunIntegrateService : IRunIntegrateService
             return new RunIntegrateOutcome(
                 RunIntegrateStatus.IntegratedWithoutEvidence,
                 head,
-                Message: $"the task's commits are integrated at {head}, but copying '{ScratchpadFolder}/{taskId}/' " +
+                Message: $"the task's commits are integrated at {head}, but copying '{ScratchLayout.Root}/{taskId}/' " +
                     $"into '{runWorktree}' failed: {evidenceFailure}. The task worktree '{taskWorktree}' is left " +
                     "in place; remove it once its scratchpad has been saved.",
                 Notes: notes);
@@ -647,13 +647,13 @@ public sealed class RunIntegrateService : IRunIntegrateService
     {
         try
         {
-            string source = Path.Combine(taskWorktree, ScratchpadFolder, taskId);
+            string source = Path.Combine(taskWorktree, ScratchLayout.Root, taskId);
             if (!_files.DirectoryExists(source))
             {
                 return null;
             }
 
-            string destination = Path.Combine(runWorktree, ScratchpadFolder, taskId);
+            string destination = Path.Combine(runWorktree, ScratchLayout.Root, taskId);
             _files.CreateDirectory(destination);
             foreach (string file in _files.EnumerateFiles(source, "*", recursive: true, followLinks: false))
             {

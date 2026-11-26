@@ -1,3 +1,4 @@
+using KyberWeave.Core;
 using System.Text.Json;
 
 namespace KyberWeave.Core.Review;
@@ -11,9 +12,6 @@ public static class NotSeatedRecord
 {
     /// <summary>The record's file name inside a cycle folder.</summary>
     public const string FileName = "not-seated.json";
-
-    /// <summary>The prefix of a cycle folder's name.</summary>
-    public const string CycleFolderPrefix = "cycle-";
 
     private static readonly JsonSerializerOptions Indented = new() { WriteIndented = true };
 
@@ -45,8 +43,8 @@ public static class NotSeatedRecord
 
     /// <summary>The cycle number in a <c>cycle-&lt;n&gt;</c> folder name, or zero when the name is not one.</summary>
     public static int CycleNumber(string folderName) =>
-        folderName.StartsWith(CycleFolderPrefix, StringComparison.Ordinal)
-        && int.TryParse(folderName.AsSpan(CycleFolderPrefix.Length), System.Globalization.NumberStyles.None, System.Globalization.CultureInfo.InvariantCulture, out int n)
+        folderName.StartsWith(ScratchLayout.CycleFolderPrefix, StringComparison.Ordinal)
+        && int.TryParse(folderName.AsSpan(ScratchLayout.CycleFolderPrefix.Length), System.Globalization.NumberStyles.None, System.Globalization.CultureInfo.InvariantCulture, out int n)
             ? n
             : 0;
 }

@@ -2,6 +2,7 @@ using KyberWeave.Contracts.Paths;
 using KyberWeave.Contracts.Repositories;
 using System.Text.Json;
 using KyberWeave.Contracts.Services;
+using KyberWeave.Core;
 using KyberWeave.Core.Arbiter;
 using KyberWeave.Core.Arbiter.Facts;
 using KyberWeave.Core.Arbiter.Plans;
@@ -266,7 +267,7 @@ internal sealed class HookGitFacts(
     }
 
     private static bool IsScratchpad(string path) =>
-        path.StartsWith(".agent_scratchpad/", StringComparison.Ordinal);
+        path.StartsWith(ScratchLayout.Root + "/", StringComparison.Ordinal);
 
     private static bool IsRunBranchWriter(ArbiterFactSet facts) =>
         facts.TryGet("delegation.target-profile", out ArbiterFact? profile)
