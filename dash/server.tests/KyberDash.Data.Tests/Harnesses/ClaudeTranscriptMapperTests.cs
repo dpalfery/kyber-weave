@@ -676,6 +676,29 @@ public class ClaudeTranscriptMapperTests
     }
 
     [Fact]
+    public void Map_KeepsToolResultDtoPlainTextAlignedWithSystemReminderSafePrefix()
+    {
+        string prefix = new('x', 65_530);
+        string fullText = $"{prefix}<system-reminder>{new string('r', 40_000)}</system-reminder>";
+        string jsonl = string.Join('\n',
+        [
+            "{\"type\":\"assistant\",\"sessionId\":\"sess-tr-cut\",\"timestamp\":\"2026-11-19T12:16:00.000Z\",\"message\":{\"id\":\"msg-tr-cut\",\"role\":\"assistant\",\"model\":\"claude-sonnet-4-5\",\"content\":[{\"type\":\"tool_use\",\"id\":\"tc-cut\",\"name\":\"bash\",\"input\":\"cat big\"}],\"usage\":{\"input_tokens\":10,\"output_tokens\":5}}}",
+            $"{{\"type\":\"user\",\"sessionId\":\"sess-tr-cut\",\"timestamp\":\"2026-11-19T12:16:01.000Z\",\"message\":{{\"role\":\"user\",\"content\":[{{\"type\":\"tool_result\",\"tool_use_id\":\"tc-cut\",\"content\":{System.Text.Json.JsonSerializer.Serialize(fullText)}}}]}}}}",
+            "{\"type\":\"assistant\",\"sessionId\":\"sess-tr-cut\",\"timestamp\":\"2026-11-19T12:16:02.000Z\",\"message\":{\"id\":\"msg-tr-cut2\",\"role\":\"assistant\",\"model\":\"claude-sonnet-4-5\",\"content\":[{\"type\":\"text\",\"text\":\"done\"}],\"usage\":{\"input_tokens\":20,\"output_tokens\":5}}}",
+        ]);
+
+        CollectedBatch batch = CreateMapper(LocalTextTokenizer.Shared).Map(CreateUnit("/tmp/.claude/projects/repo/sess-tr-cut.jsonl", jsonl), ImportedAt);
+
+        CollectedRecord tool = Assert.Single(batch.Records, static r => r.Op == RecordOp.ToolInvoke);
+        Assert.Equal(2, tool.Parts.Count);
+        Assert.Equal(prefix, tool.Parts[0].PlainText);
+        Assert.NotNull(tool.Parts[1].Withheld);
+        Assert.NotNull(tool.Tool?.Result);
+        Assert.Equal(prefix, tool.Tool!.Result!.PlainText);
+        Assert.Equal(Encoding.UTF8.GetByteCount(fullText), tool.Tool.Result.OriginalUtf8BytesWhenTruncated);
+    }
+
+    [Fact]
     public void Map_FoldsCompactBoundaryAndCompactSummaryOntoNextKeptLlmInvokeTurnAndRoundTrips()
     {
         string jsonl = string.Join('\n',

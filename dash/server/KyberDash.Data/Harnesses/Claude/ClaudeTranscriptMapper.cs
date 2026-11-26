@@ -1662,9 +1662,11 @@ public class ClaudeTranscriptMapper : IHarnessMapper
         }
 
         int safeCut = ComputeSystemReminderSafeCut(text, measurement.PlainText ?? string.Empty);
+        ToolContentMeasurement retained = measurement;
         if (safeCut > 0)
         {
             string retainedPrefix = text[..safeCut];
+            retained = measurement with { PlainText = retainedPrefix };
             collected.Add(new CollectedContentPart(
                 Position: position++,
                 Bucket: bucket,
@@ -1697,7 +1699,7 @@ public class ClaudeTranscriptMapper : IHarnessMapper
                 OriginalUtf8BytesWhenTruncated: null));
         }
 
-        return measurement;
+        return retained;
     }
 
     private static int ComputeSystemReminderSafeCut(string fullText, string truncatedPrefix)
