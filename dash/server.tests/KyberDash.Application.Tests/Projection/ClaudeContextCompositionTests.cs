@@ -195,6 +195,69 @@ public sealed class ClaudeContextCompositionTests
     }
 
     /// <summary>
+    /// When a subsequent Claude turn carries its own resident <c>system_prompt</c> part after an
+    /// earlier turn seeded cumulative state, prior <c>system_prompt</c> entries are evicted so later
+    /// turns report only the latest <c>system_prompt</c> token count rather than summing across turns.
+    /// </summary>
+    [Fact]
+    public void ProjectIncremental_ReplacesPriorSystemPromptWhenSubsequentTurnCarriesResidentSystemPrompt()
+    {
+        InMemoryRelationalStore store = new();
+        FakeTextTokenizer tokenizer = new();
+
+        CollectedRecord turn0 = Turn(
+            "turn-0",
+            sessionKey: "sess-sys-replace",
+            minuteOffset: 0,
+            inputTokens: 1_000,
+            outputTokens: 100,
+            parts:
+            [
+                TextPart(0, ContentBucket.SystemPrompt, "sys zero one two three", role: "system", resident: true),
+                TextPart(1, ContentBucket.ConversationHistory, "user zero four", role: "user"),
+            ]);
+        CollectedRecord turn1 = Turn(
+            "turn-1",
+            sessionKey: "sess-sys-replace",
+            minuteOffset: 1,
+            inputTokens: 1_500,
+            outputTokens: 100,
+            parts:
+            [
+                TextPart(0, ContentBucket.SystemPrompt, "sys one updated", role: "system", resident: true),
+                TextPart(1, ContentBucket.ConversationHistory, "user one five", role: "user"),
+            ]);
+        CollectedRecord turn2 = Turn(
+            "turn-2",
+            sessionKey: "sess-sys-replace",
+            minuteOffset: 2,
+            inputTokens: 2_000,
+            outputTokens: 100,
+            parts:
+            [
+                TextPart(0, ContentBucket.ConversationHistory, "user two six", role: "user"),
+            ]);
+
+        WriteSession(store, "sess-sys-replace", [turn0, turn1, turn2]);
+        CanonSessionProjectorEngine engine = new(store, store, store, new FakePricingRepository(), tokenizer);
+        ProjectionPassReport report = engine.ProjectIncremental();
+
+        Assert.Equal(1, report.Built);
+        StoredSessionProjection projection = ((IProjectionStore)store).GetSessionProjection("sess-sys-replace")!;
+        Assert.NotNull(projection.Context);
+        Assert.Equal(3, projection.Context!.Turns.Count);
+
+        Assert.Equal(5L, BucketTokens(projection.Context.Turns[0], "system_prompt"));
+        Assert.Equal(3L, BucketTokens(projection.Context.Turns[0], "conversation_history"));
+
+        Assert.Equal(3L, BucketTokens(projection.Context.Turns[1], "system_prompt"));
+        Assert.Equal(6L, BucketTokens(projection.Context.Turns[1], "conversation_history"));
+
+        Assert.Equal(3L, BucketTokens(projection.Context.Turns[2], "system_prompt"));
+        Assert.Equal(9L, BucketTokens(projection.Context.Turns[2], "conversation_history"));
+    }
+
+    /// <summary>
     /// Turn <c>k</c>'s own assistant output, thinking, and <c>tool_use</c> parts are excluded from
     /// Turn <c>k</c>'s own input buckets, then carried into Turn <c>k + 1</c>'s conversation history.
     /// </summary>
@@ -669,7 +732,8 @@ public sealed class ClaudeContextCompositionTests
         int position,
         ContentBucket bucket,
         string text,
-        string? role = null) =>
+        string? role = null,
+        bool? resident = null) =>
         new(
             Position: position,
             Bucket: bucket,
@@ -678,7 +742,7 @@ public sealed class ClaudeContextCompositionTests
             ReportedTokens: null,
             Server: null,
             Role: role,
-            Resident: null,
+            Resident: resident,
             OriginalUtf8BytesWhenTruncated: null);
 
     private static NativeSourceUnit CreateClaudeUnit(string sourceKey, string rawText) =>
