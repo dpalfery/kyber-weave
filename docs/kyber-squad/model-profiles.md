@@ -5,7 +5,7 @@ doc-type: onboarding
 component: KyberSquad
 source-root: src/KyberWeave.Domain/Squad
 owner: dpalfery
-last-reviewed: 2026-11-25
+last-reviewed: 2026-11-26
 status: current
 decided-by:
   - adr/0037-squad-state-in-user-home
@@ -199,10 +199,11 @@ release version of the deployed agents.
   deleting any preset file.
 - **`squad run` uses the active project preset**, not the global one. Only `claude`, `codex`,
   `copilot`, and `pi` are `Ready` for isolated instances. `opencode` stays `SpikePending`:
-  OpenCode 2.4.1 replaces the config root when `OPENCODE_CONFIG_DIR` is set, rather than merging
-  it with `~/.config/opencode` (`PROPOSE: HomeReplace`), and the catalog kind stays `ConfigLayer`,
-  so `squad run opencode` exits `2`. `kilo`, `cursor`, and `zcode` are `SpikePending` and exit
-  `2`, and `antigravity`, `factory`, `commandcode`, `devin`, and `warp` are `Unsupported`. See
+  on OpenCode 2.4.1 (Darwin 27.3.0, 2026-11-25), `OPENCODE_CONFIG_DIR` replaces the config root
+  rather than merging it with `~/.config/opencode` (`PROPOSE: HomeReplace`), and the catalog kind
+  stays `ConfigLayer`, so `squad run opencode` exits `2`. `kilo`, `cursor`, and `zcode` are
+  `SpikePending` and exit `2`, and `antigravity`, `factory`, `commandcode`, `devin`, and `warp`
+  are `Unsupported`. See
   [the instance support matrix](onboarding.md#3-harness-instance-support-matrix).
 
 ## After you apply it
