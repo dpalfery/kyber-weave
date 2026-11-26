@@ -380,8 +380,9 @@ public sealed class CiContentHashSkipTests
     }
 
     /// <summary>
-    ///     Every receipt script runs under <c>bash</c>. Three eligible jobs have a Windows leg whose
-    ///     <c>pwsh</c> default breaks <c>date +%s</c> and the verdict's arithmetic.
+    ///     Every receipt script runs under <c>bash</c>. Two eligible jobs — <c>squad-filesystem-contract</c>
+    ///     and <c>tray-rust</c> — have a Windows leg whose <c>pwsh</c> default breaks <c>date +%s</c> and
+    ///     the verdict's arithmetic.
     /// </summary>
     [Fact]
     public void EveryReceiptScriptRunsUnderBash()
