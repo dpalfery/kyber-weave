@@ -68,7 +68,7 @@ public static class ArbiterHookWiring
     /// <summary>The hooked targets in stable derivation order for <see cref="BuildHooks"/>.</summary>
     private static readonly IReadOnlyList<SquadTarget> HookedSquadTargets =
         [SquadTarget.Claude, SquadTarget.Codex, SquadTarget.Copilot, SquadTarget.Cursor, SquadTarget.OpenCode, SquadTarget.Pi,
-         SquadTarget.Kilo, SquadTarget.Antigravity, SquadTarget.Factory, SquadTarget.Devin];
+         SquadTarget.Kilo, SquadTarget.Antigravity, SquadTarget.Factory, SquadTarget.Devin, SquadTarget.CommandCode];
 
     /// <summary>The fallback-only targets in stable derivation order for <see cref="FallbackTargets"/>.</summary>
     private static readonly IReadOnlyList<SquadTarget> FallbackSquadTargets =
@@ -90,7 +90,9 @@ public static class ArbiterHookWiring
     /// Claude and Copilot in VS Code take per-agent hooks; OpenCode is gated through the
     /// single project-level marker (D24) because it has no per-agent hook primitive. Pi,
     /// Codex and Cursor joined the hooked roster once their hook primitives landed, and
-    /// Kilo, Antigravity, Factory and Devin joined in Phase 3. Which form each target takes
+    /// Kilo, Antigravity, Factory and Devin joined in Phase 3. Command Code joined through
+    /// its mod: <c>beforeToolCall</c> fires for every tool call, so the mod is the one seam
+    /// that can gate an <c>agent</c> dispatch there. Which form each target takes
     /// is a renderer decision; membership here only means the target is enforced, so
     /// <see cref="TargetDegradations(IEnumerable{SquadTarget}, SquadDeploymentScope)"/> records nothing for it.
     /// </remarks>
@@ -125,7 +127,9 @@ public static class ArbiterHookWiring
     /// (R17). Warp and ZCode carry no trust gate — they have no hooks to trust — but their
     /// setup step appears here too (Req 6.5) so that <c>squad install</c> and
     /// <c>squad update</c> print it, the same mitigation §10.7 prescribes. OpenCode's
-    /// marker and Cursor's hooks carry no trust gate today.
+    /// marker and Cursor's hooks carry no trust gate today. Command Code gates a
+    /// project's <c>.commandcode/mods/</c> behind the workspace trust prompt while
+    /// user-scope mods load without one.
     /// </remarks>
     public static IReadOnlyDictionary<SquadTarget, string> TrustSteps { get; } =
         new Dictionary<SquadTarget, string>
@@ -151,7 +155,11 @@ public static class ArbiterHookWiring
             [SquadTarget.ZCode] =
                 "Squad writes no MCP configuration for ZCode, so register the `kyber-weave-arbiter " +
                 "serve --repo-root <root>` server in ZCode's own MCP configuration at `~/.zcode/.mcp.json`. " +
-                "Until it is registered only the advisory marker fallback enforces there."
+                "Until it is registered only the advisory marker fallback enforces there.",
+            [SquadTarget.CommandCode] =
+                "Accept the workspace trust prompt so `.commandcode/mods/` loads: a project's mods are " +
+                "trust-gated on first load, and until trust is granted the mod never loads and dispatches " +
+                "stay ungated. User-scope mods under `~/.commandcode/mods/` load without a prompt."
         };
 
     /// <summary>Names the dispatcher agents: those with a non-empty <c>delegates-to</c> roster.</summary>
@@ -446,7 +454,13 @@ public static class ArbiterHookWiring
                 return PartialReason;
             }
 
-            if (token is "commandcode" or "opencode" or "kilo")
+            // Command Code's global tier is superseded with the project one: the user-scope
+            // mod was shown live to block an agent dispatch (tool_hook_blocked,
+            // KW-ARB-RUN-001, evaluated with the user config) in a repository with no
+            // project configuration, and to defer to the project's own mod where the
+            // project enables the Arbiter — the same one-evaluation split the other
+            // user-level hooks take.
+            if (token is "opencode" or "kilo")
             {
                 return DispatchUnconfirmedReason;
             }
@@ -464,10 +478,10 @@ public static class ArbiterHookWiring
             return FallbackOnlyReason;
         }
 
-        if (token == "commandcode")
-        {
-            return DispatchUnconfirmedReason;
-        }
+        // Command Code's 2026-11-04 dispatch-unconfirmed classification is superseded: the
+        // rendered mod's beforeToolCall was shown live to block an agent dispatch at project
+        // scope (tool_hook_blocked, KW-ARB-RUN-001), so the target is enforced like the rest
+        // of the hooked roster rather than degraded.
 
         return hookedTargets.Contains(token) ? null : ProjectOnlyReason;
     }

@@ -34,9 +34,9 @@ public sealed class ArbiterHookRefresherTests
         _configs.WriteRepositoryConfig(DisabledProject, "arbiter:\n  enabled: false\n  provider:\n    kind: none\n");
     }
 
-    private ArbiterHookRefresher Refresher() => new(
-        new FakeProcessEnvironment(homeDirectory: "/kw/home", readVariable: _ => null),
-        new NoUserConfig(),
+    private ArbiterHookRefresher Refresher(IUserHostConfigStore? userConfig = null, string? home = null) => new(
+        new FakeProcessEnvironment(homeDirectory: home ?? "/kw/home", readVariable: _ => null),
+        userConfig ?? new NoUserConfig(),
         _configs,
         _lifecycle,
         _state,
@@ -52,6 +52,24 @@ public sealed class ArbiterHookRefresherTests
         SquadUpdateRequest update = Assert.Single(_lifecycle.Updates);
         Assert.Equal(EnabledProject, update.TargetRoot);
         Assert.Equal(1, result.Refreshed);
+        Assert.Equal(0, result.Failed);
+    }
+
+    [Fact]
+    public void AGlobalCommandCodeModIsRewrittenToTheCurrentBody()
+    {
+        string home = Path.Combine(_files.Root, "home");
+        string modPath = Path.Combine(home, ".commandcode", "mods", "kyber-arbiter.ts");
+        _files.CreateDirectory(Path.GetDirectoryName(modPath)!);
+        _files.WriteAllText(modPath, "// stale");
+
+        ArbiterHookRefreshResult result = Refresher(new StaticUserConfig(["commandcode"]), home)
+            .Refresh([EnabledProject]);
+
+        string refreshed = _files.ReadAllText(modPath);
+        Assert.NotEqual("// stale", refreshed);
+        Assert.Contains("kyber-weave-arbiter", refreshed, StringComparison.Ordinal);
+        Assert.Contains("\"--scope\", \"global\"", refreshed, StringComparison.Ordinal);
         Assert.Equal(0, result.Failed);
     }
 
@@ -121,6 +139,22 @@ public sealed class ArbiterHookRefresherTests
         }
 
         public IReadOnlyList<string> ReadGlobalTargets(string home) => [];
+    }
+
+    /// <summary>A user config whose global-target list is fixed, so the refresh sees the harness under test.</summary>
+    internal sealed class StaticUserConfig(IReadOnlyList<string> targets) : IUserHostConfigStore
+    {
+        public string EnsureUserConfig(string home) => string.Empty;
+
+        public void WriteGlobalTargets(string home, IReadOnlyList<string> targets)
+        {
+        }
+
+        public void RemoveGlobalTarget(string home, string target)
+        {
+        }
+
+        public IReadOnlyList<string> ReadGlobalTargets(string home) => targets;
     }
 
     /// <summary>A lifecycle whose every call throws, so the refresh's fault answer is what the test sees.</summary>

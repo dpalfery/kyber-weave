@@ -306,7 +306,8 @@ internal sealed class ArbiterHookRefresher(
         if (!SquadTargetCatalog.TryResolve(targetToken, out SquadTarget target))
             return false;
 
-        if (target is SquadTarget.Kilo or SquadTarget.OpenCode or SquadTarget.Pi or SquadTarget.Copilot)
+        if (target is SquadTarget.Kilo or SquadTarget.OpenCode or SquadTarget.Pi or SquadTarget.Copilot
+            or SquadTarget.CommandCode)
         {
             string rendered = target switch
             {
@@ -315,6 +316,7 @@ internal sealed class ArbiterHookRefresher(
                 SquadTarget.Pi => PiRenderer.RenderArbiterExtension(timeoutSeconds, SquadDeploymentScope.Global),
                 SquadTarget.Copilot => Encoding.UTF8.GetString(
                     CopilotRenderer.RenderCliHooksFile(timeoutSeconds, SquadDeploymentScope.Global, "hooks/kyber-arbiter.json").Content.Span),
+                SquadTarget.CommandCode => CommandCodeRenderer.RenderArbiterMod(timeoutSeconds, SquadDeploymentScope.Global),
                 _ => string.Empty
             };
 

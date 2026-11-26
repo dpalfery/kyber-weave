@@ -83,6 +83,7 @@ public sealed class ArbiterGlobalWiringTests : IDisposable
     [InlineData(SquadTarget.OpenCode, "dispatch-unconfirmed")]
     [InlineData(SquadTarget.Pi, "partial")]
     [InlineData(SquadTarget.Warp, "fallback-only")]
+    [InlineData(SquadTarget.CommandCode, "enforced-global")]
     public void TargetDegradations_GlobalScope_UsesTieredReasonCodes(SquadTarget target, string expectedReason)
     {
         SquadDegradationRecord record = Assert.Single(

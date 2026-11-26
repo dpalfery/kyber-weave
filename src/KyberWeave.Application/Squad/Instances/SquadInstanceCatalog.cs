@@ -108,7 +108,7 @@ public static class SquadInstanceCatalog
             [],
             [],
             SquadInstanceStatus.Unsupported,
-            "CommandCode does not support configuration or home directory redirection via environment variable."),
+            "CommandCode has no config-directory variable and no XDG base directory: only whole-HOME redirection can move it, which also moves authentication and system-tool state. Its global root is ~/.commandcode, not the home directory a link sync would copy."),
         new(
             SquadTarget.Devin,
             "devin",
