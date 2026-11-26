@@ -34,7 +34,30 @@ public static class McpClientHarness
 
         // opencode 2.3.0, probed 2026-11-19.
         ["opencode"] = "opencode",
+
+        // Factory Droid 1.6.0, seen 2026-11-26: 27 task-prompt replies in ~/.factory logs read
+        // "unknown MCP client 'factory-cli'", so Droid runs wrote prompt files its rewriting hook never needed.
+        ["factory-cli"] = "factory",
+
+        // Cursor CLI 2026.11.19, probed 2026-11-26.
+        ["Cursor"] = "cursor",
+
+        // Kilo CLI 7.8.27, probed 2026-11-26.
+        ["kilo"] = "kilo",
+
+        // VS Code 1.130.0 and Insiders 1.149.0, read 2026-11-26: the workbench sends product.json's nameLong.
+        ["Visual Studio Code"] = "copilot-vscode",
+        ["Visual Studio Code - Insiders"] = "copilot-vscode",
+
+        // Codex, read 2026-11-26 from openai/codex main, codex-rs/codex-mcp/src/rmcp_client.rs; not installed here.
+        ["codex-mcp-client"] = "codex",
     };
+
+    /// <summary>
+    /// pi-mcp-adapter 7.0.1 (read 2026-11-26, server-manager.ts) names its client <c>pi-mcp-&lt;server key&gt;</c>,
+    /// so the name carries whatever key the user gave the server in their Pi config.
+    /// </summary>
+    private const string PiAdapterPrefix = "pi-mcp-";
 
     /// <summary>The hook's harness token for an MCP client name, or null when no probe has verified the name.</summary>
     /// <param name="clientName">The <c>clientInfo.name</c> a client sent in its MCP <c>initialize</c> request.</param>
@@ -45,6 +68,14 @@ public static class McpClientHarness
             return null;
         }
 
-        return Verified.TryGetValue(clientName.Trim(), out string? token) ? token : null;
+        string name = clientName.Trim();
+        if (Verified.TryGetValue(name, out string? token))
+        {
+            return token;
+        }
+
+        return name.Length > PiAdapterPrefix.Length && name.StartsWith(PiAdapterPrefix, StringComparison.OrdinalIgnoreCase)
+            ? "pi"
+            : null;
     }
 }
