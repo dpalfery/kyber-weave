@@ -1323,17 +1323,11 @@ public sealed class ArbiterHookDecisionEngine : IContextualHookDecisionEngine, I
             ? "unknown error"
             : message.Replace("\r\n", " ", StringComparison.Ordinal).Replace('\n', ' ').Replace('\r', ' ');
 
-    private string ResolveArbiterDirectory(string repoRoot, HookScope scope, string? homeDirectory)
-    {
-        if (scope == HookScope.Global)
-        {
-            string effectiveHome = _hostConfig.ResolveHomeDirectory(homeDirectory);
-            string rootKey = ProjectRootKey(repoRoot, _process.CurrentDirectory);
-            return Path.Combine(effectiveHome, ".kyber-weave", "arbiter", "projects", rootKey);
-        }
-
-        return Path.Combine(repoRoot, "artifacts", "arbiter");
-    }
+    /// <summary>The directory the evaluation records in: the user-level store for the user-level hook, the project's otherwise.</summary>
+    private string ResolveArbiterDirectory(string repoRoot, HookScope scope, string? homeDirectory) =>
+        scope == HookScope.Global
+            ? ArbiterStateDirectory.ForGlobal(_hostConfig.ResolveHomeDirectory(homeDirectory), repoRoot, _process.CurrentDirectory)
+            : ArbiterStateDirectory.ForProject(repoRoot);
 
     /// <summary>
     /// The directory holding the harness's model targets table, or null when the state directory already
@@ -1363,16 +1357,6 @@ public sealed class ArbiterHookDecisionEngine : IContextualHookDecisionEngine, I
             // A target with no verified global root cannot be installed at user scope, so it has no table.
             return null;
         }
-    }
-
-    /// <summary>The per-project key a global ledger directory is named by: the hash of the root's full path.</summary>
-    /// <param name="projectRoot">The project root, relative or fully qualified.</param>
-    /// <param name="baseDirectory">The fully qualified directory a relative root is resolved against.</param>
-    internal static string ProjectRootKey(string projectRoot, string baseDirectory)
-    {
-        string canonical = Path.TrimEndingDirectorySeparator(Path.GetFullPath(projectRoot, baseDirectory));
-        byte[] hash = System.Security.Cryptography.SHA256.HashData(System.Text.Encoding.UTF8.GetBytes(canonical));
-        return Convert.ToHexStringLower(hash);
     }
 
     /// <summary>

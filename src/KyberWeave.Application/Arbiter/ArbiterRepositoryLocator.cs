@@ -10,7 +10,9 @@ namespace KyberWeave.Core.Arbiter;
 /// <param name="git">Runs git.</param>
 /// <param name="files">Probes the file system.</param>
 /// <param name="paths">Turns the caller's spelling into a full path.</param>
-/// <param name="environment">Names the directory a relative path is resolved against.</param>
+/// <param name="environment">
+/// Names the directory a relative path is resolved against, and the home directory the user-level store lives under.
+/// </param>
 public sealed class ArbiterRepositoryLocator(
     IGitCommandRunner git,
     IWritableFileSystem files,
@@ -24,7 +26,7 @@ public sealed class ArbiterRepositoryLocator(
         string working = paths.GetFullPath(path, environment.CurrentDirectory);
         try
         {
-            string workingDirectory = files.DirectoryExists(working) ? working : Path.GetDirectoryName(working) ?? working;
+            string workingDirectory = GitWorkingDirectory(working);
             GitOutcome result = git.Run(workingDirectory, ["rev-parse", "--show-toplevel"]);
             string root = result.ExitCode == 0 ? result.StandardOutput.Trim() : string.Empty;
             if (!string.IsNullOrWhiteSpace(root))
@@ -39,8 +41,58 @@ public sealed class ArbiterRepositoryLocator(
     }
 
     /// <inheritdoc />
-    public string ResolveArbiterDirectory(string path) =>
-        Path.Combine(ResolveRepositoryRoot(path), "artifacts", "arbiter");
+    public string ResolveArbiterDirectory(string path)
+    {
+        string root = ResolveRepositoryRoot(path);
+        string home = environment.HomeDirectory;
+        if (string.IsNullOrWhiteSpace(home))
+        {
+            return ArbiterStateDirectory.ForProject(root);
+        }
+
+        string working = paths.GetFullPath(path, environment.CurrentDirectory);
+        string userLevel = ArbiterStateDirectory.ForGlobal(home, MainCheckoutOf(working, root), environment.CurrentDirectory);
+        return ArbiterStateDirectory.HasLedgerOrDecisionLog(userLevel, files)
+            ? userLevel
+            : ArbiterStateDirectory.ForProject(root);
+    }
+
+    /// <summary>
+    /// The main checkout of the repository at <paramref name="working" />: the parent of the common git directory,
+    /// which every worktree of one repository shares, so a linked worktree answers with the checkout it was added from.
+    /// <paramref name="root" /> when git names none, or names one that is not a <c>.git</c> directory.
+    /// </summary>
+    /// <remarks>
+    /// The user-level hook keys its store by the directory the dispatching session works in, which for a run is the
+    /// main checkout: a command run inside the run's linked worktree has to reach that same key from where it stands.
+    /// </remarks>
+    private string MainCheckoutOf(string working, string root)
+    {
+        try
+        {
+            string workingDirectory = GitWorkingDirectory(working);
+            GitOutcome result = git.Run(workingDirectory, ["rev-parse", "--path-format=absolute", "--git-common-dir"]);
+            string common = result.ExitCode == 0 ? result.StandardOutput.Trim() : string.Empty;
+            if (string.IsNullOrWhiteSpace(common))
+            {
+                return root;
+            }
+
+            string commonDirectory = paths.GetFullPath(common, workingDirectory);
+            return string.Equals(Path.GetFileName(commonDirectory), ".git", StringComparison.Ordinal)
+                ? Path.GetDirectoryName(commonDirectory) ?? root
+                : root;
+        }
+        catch (Exception exception) when (FileFailure.Is(exception) || exception is InvalidOperationException or System.ComponentModel.Win32Exception or TimeoutException)
+        {
+            // No common directory, no main checkout: the key falls back to the root.
+            return root;
+        }
+    }
+
+    /// <summary>The directory git runs in for a path: the path itself, or its parent when it is not a directory.</summary>
+    private string GitWorkingDirectory(string fullPath) =>
+        files.DirectoryExists(fullPath) ? fullPath : Path.GetDirectoryName(fullPath) ?? fullPath;
 
     /// <inheritdoc />
     public string FindGitRoot(string start)
