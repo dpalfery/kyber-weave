@@ -1466,7 +1466,7 @@ back.
 | `GET /api/kyber/session/{id}/charts` | `SessionTurnFigures(sessionKey)` plus the stored context projection — returns whole-session `turns` for the spend curve alongside `context`, where `context.turns` is paged (`25`/`50`/`100`, default `25`) and sorted (`desc`/`asc`, default `desc`) on the server (`total`, `page`, `limit`, `offset`, `order` emitted at top level on both measurable and unmeasurable responses; 1-based `index = turn.Position + 1` preserved) while whole-session context aggregates (`first`, `last`, `flaggedTurns`, `residualTotal`, `measuredInputTotal`, `maxBucketTokens`, `observedBuckets`, `observedServers`, `missingBuckets`, `residualReasons`, and tokenizer labels) are computed over unpaged `ctx.Turns` before slicing ([ADR 0092](../adr/0092-dashboard-views-load-by-section-and-page.md)) | No |
 | `GET /api/kyber/session/{id}/tools` | `SessionToolFigures(sessionKey)` — ranked rows (never-invoked included) sorted server-side (`TotalSchemaCost` then `Invocations` `DESC`/`ASC`, tiebreak `name ASC`) and paged (`25`/`50`/`100`, default `25`, `order` `desc`/`asc`), plus the page-independent `aggregate` priced over every row before paging (`measurable`/`reason`, `maxCost`, `residentCostTotal`, `invocationCount`, `unusedCount`, `unusedRange`, `byServer`, `definitionsSpanId`) | No |
 | `GET /api/kyber/session/{id}/servers` | `SessionToolFigures(sessionKey)` — the same read's server rollups, sorted (`UnusedCost`, `total_schema_cost`, `invocations` `DESC`/`ASC`, tiebreak `server ASC`) and paged (`25`/`50`/`100`, default `25`) | No |
-| `GET /api/kyber/session/{id}/skills` | `SessionSkillFigures(sessionKey)` — skill rows sorted (`invocations` `DESC`/`ASC`, tiebreak `name ASC`) and paged (`25`/`50`/`100`, default `25`) with the session total; whole-session counts come from the summary's `skills_listed`/`skills_invoked` | No |
+| `GET /api/kyber/session/{id}/skills` | `SessionSkillFigures(sessionKey)` and `SessionSkillListings(sessionKey)` — skill rows sorted (`invocations` `DESC`/`ASC`, tiebreak `name ASC`) and paged (`25`/`50`/`100`, default `25`) with the session total; whole-list aggregates are not served yet (the summary carries `skills_count` only) | No |
 | `GET /api/kyber/session/{id}/kw-skills` | `SessionKwSkillLoads(sessionKey, page, limit, order)` — the session's candidate `load_skill` tool calls, read from `tool_call`, its MCP split, the first 1,024 characters of its reply and its record's start time (`started_at_utc, tc.rowid` `DESC`/`ASC`, default `desc`); paging (`25`/`50`/`100`, default `25`) is applied over the recognized loads. The call's input is never joined ([KW skill loads](#kw-skill-loads)) | No — only a reply's first 1,024 characters |
 | `GET /api/kyber/session/{id}/requests` | `SessionRequestFigures(sessionKey, page, limit, order)` plus `RequestPromptPreviews(sessionKey, requestSpanIds)` — the page's request rows (`position` `DESC`/`ASC`, default `desc`, `limit` `25`/`50`/`100`), with prompt previews for the page's spans only | **Yes — the page's prompt previews only, fetched because the rows on screen show them** |
 | `GET /api/kyber/session/{id}/reconciliation` | `SessionReconciliationFigures(sessionKey, page, limit, order)` — reconciliation rows sorted by `position` (`DESC`/`ASC`, default `desc`) and paged (`25`/`50`/`100`, default `25`) | No |
@@ -1796,9 +1796,11 @@ whole-session counts live on the summary: `skills_count`, always served. (The en
 the `skills_invoked` name array, which the summary validator does not carry; the panel tiles that
 read the arrays therefore render "not measurable" — see the known limit below.)
 
-- `skills.rows` (`measurable: true`) is sorted by `invocations` (`DESC` by default, or `ASC`,
-  tiebreak `name` ascending). Each row served by `KyberBridgeEngine.BuildSkillsPayload` is
-  `{ name, listed, invocations, turns_listed }`:
+- Top-level `rows` (`measurable: true`) is built by `KyberBridgeEngine.BuildSkillsPayload` (invoked
+  skills in invocation order, then listed-never-invoked skills in listing order) and then sorted
+  (`invocations` `DESC` by default, or `ASC`, tiebreak `name` ascending) and paged (`page`, `limit`,
+  `offset`, `total`, `order`) by `KyberBridgeEngine.GetSessionSkills`. Each row emitted by
+  `KyberBridgeEngine.BuildSkillsPayload` is `{ name, listed, invocations, turns_listed }`:
     - `listed` is a boolean when the session recorded at least one `record_skill_listing` row
       (`true` when the listing named the skill on at least one turn, `false` for a skill that was
       only invoked), or a `NotMeasurableBlock` (`{ availability: 'not_measurable', reason }`) when
@@ -1811,10 +1813,10 @@ read the arrays therefore render "not measurable" — see the known limit below.
       `KyberBridgeEngine.BuildSkillsPayload` (the listing's descriptions are not stored or served
       by the C# route; the web type keeps them optional only for compatibility).
 - When neither invocations nor listed skills were recorded for the session,
-  `KyberBridgeEngine.BuildSkillsPayload` returns the top-level `NotMeasurableBlock` envelope
-  (`{ availability: 'not_measurable', reason }`) alongside the empty page envelope
-  (`{ rows: [], total: 0, page, limit, offset, order }`) instead of a nested `measurability.skills`
-  property (retired).
+  `KyberBridgeEngine.BuildSkillsPayload` returns `NotMeasurableBlock`
+  (`{ availability: 'not_measurable', reason }`), and `KyberBridgeEngine.GetSessionSkills` attaches
+  the empty page envelope (`{ rows: [], total: 0, page, limit, offset, order }`) alongside that
+  top-level `NotMeasurableBlock` instead of a nested `measurability.skills` property (retired).
 
 **Turn content** (`GET /api/kyber/session/:id/turn/:index/content`). The restored C# route serves
 the byte-budgeted parts alone and carries no `skills` entry: `skills` stays optional in the web
@@ -1825,11 +1827,11 @@ type and the views render without it. The narrow turn-content route never walks 
 - A listing read from a Claude request body (`system`-role message) is used only when the record has no
   transcript listing, and never from a body cut at the sender's size limit, which does not parse. Records
   enriched before the role field existed carry no role and show no body listing until re-enriched.
-- If a later listing in the same session changes a skill's description, earlier turns still show
-  the first text observed.
-- After the 14-day content purge ([ADR 0018](../adr/0018-kyberdash-content-retention-purge.md)),
-  Claude descriptions survive because they are kept in raw attributes. Copilot descriptions that
-  came from stored system-prompt parts are absent, while the skill names remain.
+- Claude skill listing descriptions are not stored in `record_skill_listing` or served by
+  `KyberBridgeEngine.BuildSkillsPayload` (and do not survive in raw attributes after the
+  14-day content purge, [ADR 0018](../adr/0018-kyberdash-content-retention-purge.md)). Copilot
+  descriptions from stored system-prompt parts are likewise absent after the purge, while the
+  skill names remain.
 - Antigravity descriptions are read from each skill's `SKILL.md` when the session payload is built.
   The cache is keyed by file path and valid while the file's mtime and size are unchanged, so an
   edited description shows at the next payload build without a restart, and an absent file is never

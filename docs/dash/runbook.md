@@ -828,9 +828,11 @@ KyberDash maintains dual spend visibility across the delegation tree:
 - **Direct unaggregated metrics**: The parent session row in SQLite (`canon.db`) preserves its own
   unaggregated `turn_count`, `request_count`, `total_input`, `total_output`, and `cost_usd`. This
   ensures direct parent execution work is not overwritten or inflated in the raw store.
-- **Read-time rollup object**: When parent sessions are queried over `/api/kyber/sessions` or
-  `/api/kyber/session/:sessionId`, the API dynamically calculates a `rollup` summary aggregating
-  turns, requests, token counts, and cost USD across the parent and all nested subagent children.
+- **Read-time rollup object**: When parent sessions are queried over `/api/kyber/sessions`,
+  `/api/kyber/session/:id/subagents`, or `/api/kyber/session/:id/summary` (and the per-section
+  session routes; the monolithic `/api/kyber/session/:id` route is retired), the API dynamically
+  calculates a `rollup` summary aggregating turns, requests, token counts, and cost USD across
+  the parent and all nested subagent children.
 - Both surfaces (Web and Tray) display the rolled-up totals alongside direct metrics without
   double-counting.
 
@@ -1383,21 +1385,25 @@ filters, so narrowing one page's scope never touches the A/B selectors.
   - *Context Composition Heatmap & Chart*: Semantic token distribution by part type (`system_prompt`, `instruction_context`, `tool_definitions`, `conversation_history`, `tool_result_content`, `residual`). Both Stacked Bars and Heatmap Matrix views page and sort `context.turns` on the server (`25 / 50 / 100`, default `25`, `Newest first` / `Oldest first`, default `Newest first`), while scaling, legends (`observedBuckets`, `observedServers`), and `Residual %` reflect the whole session. When a harness transcript omits `system_prompt` or tool definitions (such as Claude Code), the caveat explains why those tokens stay in `residual`.
   - *Session List Sections & Paging (`Pager` / `useSectionPage`)*: Every list section on the session detail view (Context Composition, Tools, Servers, Skills, KW skills, Execution Timeline / Call Tree, Requests, Reconciliation, and Problems) shares the `Pager` control bar whenever items exist (`total > 0`): `25 / 50 / 100` page-size selector (persisted per section in browser `sessionStorage`), page navigation, and a `Newest first` / `Oldest first` sort toggle (`desc` default; changing page size or sort resets to page `1`). Non-list summary/cost cards (`SessionSummarySection`, `SessionCostSection`) do not page.
   - *Tool & Schema Cost Table*: Ranked tool schema sizes, resident turns, invocations, and unused schema waste range.
-  - *Skills (`4 · Skills`)*: Two tiles (skills listed, skills invoked) and a headline,
-    "X of Y listed skills had no observed invocation", rendered from the served counts. The
-    headline reads "not measurable" when either count is absent and is hidden when there are
-    no skill rows. Each row shows listed and invoked badges, the turns listed (1-based), and
-    derived tokens labelled as derived. A "Not measurable" card shows the reason when a side is
-    unmeasured. Clicking a row opens a drawer with the listed and invoked state and the listing
-    text for the first turn listed. Per-harness availability is in the
+  - *Skills (`4 · Skills`)*: Two tiles (skills listed, skills invoked) read the summary's
+    `skills_listed` / `skills_invoked` arrays and the headline reads `listed_uninvoked_count` /
+    `listed_count`. Because `/api/kyber/session/:id/summary` currently carries `skills_count` only
+    and `/api/kyber/session/:id/skills` forwards the page's `rows` alone without `derived_tokens`
+    or whole-list listing aggregates, the tiles and headline render "not measurable" (with the
+    headline hidden when there are no skill rows) and rows show listed and invoked badges and the
+    turns listed (1-based) without per-row derived token counts. A "Not measurable" card shows the
+    reason when a side is unmeasured. Clicking a row opens a drawer with the listed and invoked
+    state and the listing text for the first turn listed (via the turn-content route). Per-harness
+    availability is in the
     [telemetry inventory](telemetry-inventory.md#skill-availability-by-harness); the payload is in
     the [skills view contract](architecture.md#skills-view-contract).
-    - *Antigravity and Copilot CLI.* Antigravity shows the listed names, and each skill's description
-      and derived tokens when its `SKILL.md` is on this machine. Its invoked counts are the `SKILL.md`
-      reads the conversation transcript recorded; a read is not proof the skill was followed. Copilot
-      CLI shows the listed names, descriptions and derived tokens from the `<available_skills>` block
-      of the system prompt in its journal, which `dash refresh` reads. Its invoked counts come from the
+    - *Antigravity and Copilot CLI.* Antigravity shows the listed names and invoked counts from
+      the `SKILL.md` reads the conversation transcript recorded; a read is not proof the skill was
+      followed. Copilot CLI shows the listed names from the `<available_skills>` block of the
+      system prompt in its journal, which `dash refresh` reads. Its invoked counts come from the
       `skill` tool requests the parser reads on each message; a session with none shows not measurable.
+      (`KyberBridgeEngine.BuildSkillsPayload` does not currently emit `description` or
+      `derived_tokens` on `/skills`, so per-row token counts are not shown.)
       Copilot CLI tool invocations are not ingested yet (todo
       [copilot-cli-tool-invocations-per-message](../todo/copilot-cli-tool-invocations-per-message.md)).
     - *Not measurable or empty.* A "Not measurable" card means the source was not read: no transcript
@@ -1534,9 +1540,12 @@ curl -s http://127.0.0.1:3000/api/kyber/harnesses | jq .
 curl -s http://127.0.0.1:3000/api/kyber/runs | jq .
 curl -s http://127.0.0.1:3000/api/kyber/run/run-copilot-001 | jq .
 
-# List available sessions and inspect a specific session
+# List available sessions and inspect a specific session by section and subagents
 curl -s http://127.0.0.1:3000/api/kyber/sessions | jq .
-curl -s http://127.0.0.1:3000/api/kyber/session/sess-copilot-001 | jq .
+curl -s http://127.0.0.1:3000/api/kyber/session/sess-copilot-001/summary | jq .
+curl -s "http://127.0.0.1:3000/api/kyber/session/sess-copilot-001/charts?page=1&limit=25&order=desc" | jq .
+curl -s "http://127.0.0.1:3000/api/kyber/session/sess-copilot-001/skills?page=1&limit=25&order=desc" | jq .
+curl -s "http://127.0.0.1:3000/api/kyber/session/sess-copilot-001/subagents?page=1&limit=25" | jq .
 
 # Inspect unclipped assembled turn context (ADR 0014, issue #184; 0-based turn index)
 curl -s "http://127.0.0.1:3000/api/kyber/session/sess-copilot-001/turn/0/content" | jq .
