@@ -60,6 +60,26 @@ public sealed class ArbiterHookRenderScopeTests : IDisposable
         Assert.Equal("hooks-disabled-by-harness", hypotheticalReason);
     }
 
+    /// <summary>
+    /// Command Code's mod gates the <c>agent</c> dispatch tool at both scopes: the project mod is
+    /// trust-gated on first load and the user-scope mod loads without a prompt, so neither scope
+    /// carries the <c>dispatch-unconfirmed</c> classification the 2026-11-04 tier held.
+    /// </summary>
+    [Fact]
+    public void CommandCode_ReportsNoProjectDegradationAndEnforcedGlobal()
+    {
+        Assert.Empty(ArbiterHookWiring.TargetDegradations(
+            [SquadTarget.CommandCode],
+            SquadDeploymentScope.Project));
+
+        string? globalReason = ArbiterHookWiring.DegradationReason(
+            "commandcode",
+            SquadDeploymentScope.Global,
+            ArbiterHookWiring.HookedTargets,
+            ArbiterHookWiring.FallbackTargets);
+        Assert.Equal("enforced-global", globalReason);
+    }
+
     [Fact]
     public async Task Item3_CopilotRenderer_ProjectScope_OmitsCliHooksWhenNoAgentsWired()
     {

@@ -18,7 +18,7 @@ public sealed class ArbiterDoctorCommandTests : IDisposable
     [Fact]
     public void Doctor_ReportsScopeSummary_AndWarnsWhenProjectEnabledWithoutHooks()
     {
-        _host.Get<IUserHostConfigStore>().WriteGlobalTargets(_host.HomeDirectory, ["warp", "opencode", "pi"]);
+        _host.Get<IUserHostConfigStore>().WriteGlobalTargets(_host.HomeDirectory, ["warp", "opencode", "pi", "commandcode"]);
         WriteProjectConfig(
             """
             arbiter:
@@ -42,6 +42,11 @@ public sealed class ArbiterDoctorCommandTests : IDisposable
         Assert.Contains("fallback-only", execution.Output, StringComparison.Ordinal);
         Assert.Contains("OpenCode", execution.Output, StringComparison.Ordinal);
         Assert.Contains("dispatch-unconfirmed", execution.Output, StringComparison.Ordinal);
+
+        // Command Code enforces through its mod, so the global tier no longer holds the
+        // dispatch-unconfirmed classification and the ungated project row names its fix.
+        AssertHarnessLine(execution.Output, "CommandCode", "enforced-global");
+        AssertHarnessLine(execution.Output, "CommandCode", "ungated", "kyber-weave arbiter install --project --target commandcode");
     }
 
     /// <summary>

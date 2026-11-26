@@ -77,6 +77,11 @@ public sealed class CommandCodeRendererContractTests
         CanonicalSquadTree.Shared.Registry([new CommandCodeRenderer()]).RenderAsync(
             new SquadRenderRequest(ProductRoot, [SquadTarget.CommandCode], scope).Prepared(CanonicalSquadTree.Shared));
 
+    private static Task<SquadRenderResult> RenderAsync(SquadDeploymentScope scope, SquadArbiterWiring? arbiter) =>
+        CanonicalSquadTree.Shared.Registry([new CommandCodeRenderer()]).RenderAsync(
+            new SquadRenderRequest(ProductRoot, [SquadTarget.CommandCode], scope, Arbiter: arbiter)
+                .Prepared(CanonicalSquadTree.Shared));
+
     /// <summary>
     /// The <c>tools</c> value an agent must render: the allow-only built-in lowering followed by
     /// the MCP tool names the agent is entitled to, in server-then-tool order.
@@ -371,5 +376,202 @@ public sealed class CommandCodeRendererContractTests
     {
         Assert.Throws<SquadRenderValidationException>(
             () => CommandCodeRenderer.ParseReasoningEffortSuffix("m[reasoningEffort=extreme]"));
+    }
+
+    /// <summary>The owned Arbiter mod's project path: under the project's <c>.commandcode/</c> tree.</summary>
+    private const string ArbiterModPath = ".commandcode/mods/kyber-arbiter.ts";
+
+    private const int ArbiterHookTimeoutSeconds = 30;
+
+    /// <summary>The mod body the render must emit byte for byte, pinned independently of the render.</summary>
+    private static string ModBody =>
+        CommandCodeRenderer.RenderArbiterMod(ArbiterHookTimeoutSeconds, SquadDeploymentScope.Project);
+
+    [Fact]
+    public async Task ArbiterEnabled_EmitsTheOwnedModAtTheProjectModsPath()
+    {
+        SquadRenderResult result = await RenderAsync(
+            SquadDeploymentScope.Project,
+            new SquadArbiterWiring(Enabled: true, HookTimeoutSeconds: ArbiterHookTimeoutSeconds));
+
+        Assert.True(result.Success, string.Join("; ", result.Errors));
+        SquadDeploymentFile mod = Assert.Single(result.Files, f => f.RelativePath == ArbiterModPath);
+        Assert.Equal("commandcode", mod.Target);
+        Assert.Equal(
+            CommandCodeRenderer.RenderArbiterMod(ArbiterHookTimeoutSeconds, SquadDeploymentScope.Project),
+            Encoding.UTF8.GetString(mod.Content.Span));
+    }
+
+    [Fact]
+    public async Task ArbiterOmitted_EmitsNoModFile()
+    {
+        SquadRenderResult result = await RenderAsync(SquadDeploymentScope.Project, arbiter: null);
+
+        Assert.True(result.Success, string.Join("; ", result.Errors));
+        Assert.DoesNotContain(result.Files, f => f.RelativePath == ArbiterModPath);
+        Assert.DoesNotContain(result.Files, f => f.RelativePath.EndsWith("kyber-arbiter.ts", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public async Task ArbiterDisabled_StillEmitsTheModForTheDispatchHookSurface()
+    {
+        // The dispatch hook that expands a task id into the worker's prompt runs with the
+        // Arbiter off, and the mod is the only surface that can carry it on Command Code.
+        SquadRenderResult result = await RenderAsync(
+            SquadDeploymentScope.Project,
+            new SquadArbiterWiring(Enabled: false, HookTimeoutSeconds: ArbiterHookTimeoutSeconds));
+
+        Assert.True(result.Success, string.Join("; ", result.Errors));
+        Assert.Contains(result.Files, f => f.RelativePath == ArbiterModPath);
+    }
+
+    [Fact]
+    public async Task InstanceScope_EmitsNoModFileEvenWhenTheArbiterIsEnabled()
+    {
+        // Command Code has no instance support, so the mod claims no instance scope: the
+        // install paths that exist are the project mod and the user-scope mod.
+        SquadRenderResult result = await RenderAsync(
+            SquadDeploymentScope.Instance,
+            new SquadArbiterWiring(Enabled: true, HookTimeoutSeconds: ArbiterHookTimeoutSeconds));
+
+        Assert.True(result.Success, string.Join("; ", result.Errors));
+        Assert.DoesNotContain(result.Files, f => f.RelativePath == ArbiterModPath);
+        Assert.DoesNotContain(result.Files, f => f.RelativePath.EndsWith("kyber-arbiter.ts", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public void RenderArbiterMod_DefaultExportsOneFactoryRegisteringBothHookPhases()
+    {
+        string body = ModBody;
+
+        int defaultExport = body.IndexOf("export default", StringComparison.Ordinal);
+        Assert.True(defaultExport >= 0, "the mod must default-export its factory");
+        Assert.Equal(-1, body.IndexOf("export default", defaultExport + 1, StringComparison.Ordinal));
+        Assert.Contains("cmd.hooks({", body, StringComparison.Ordinal);
+        Assert.Contains("beforeToolCall:", body, StringComparison.Ordinal);
+        Assert.Contains("afterToolCall:", body, StringComparison.Ordinal);
+        // The mod host jiti-loads the file against no resolvable package, so a host type
+        // import would fail the load; the ModApi surface is declared locally instead.
+        Assert.DoesNotContain("@commandcode/harness", body, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void RenderArbiterMod_FiltersOnTheAgentToolAndPassesEveryOtherToolThrough()
+    {
+        string body = ModBody;
+
+        Assert.Contains("toolName !== \"agent\"", body, StringComparison.Ordinal);
+        Assert.Contains("return undefined", body, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void RenderArbiterMod_BuildsThePluginEventEnvelopeForBothPhases()
+    {
+        string body = ModBody;
+
+        Assert.Contains("kyber-arbiter.plugin-event/v1", body, StringComparison.Ordinal);
+        Assert.Contains("\"commandcode\"", body, StringComparison.Ordinal);
+        Assert.Contains("\"before\"", body, StringComparison.Ordinal);
+        Assert.Contains("\"after\"", body, StringComparison.Ordinal);
+        Assert.Contains("\"call-id\"", body, StringComparison.Ordinal);
+        Assert.Contains("session", body, StringComparison.Ordinal);
+        Assert.Contains("cwd", body, StringComparison.Ordinal);
+        Assert.Contains("args", body, StringComparison.Ordinal);
+        Assert.Contains("result", body, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void RenderArbiterMod_SpawnsTheArbiterHookThroughNodeChildProcessWithNoShell()
+    {
+        string body = ModBody;
+
+        Assert.Contains("node:child_process", body, StringComparison.Ordinal);
+        Assert.Contains("spawnSync", body, StringComparison.Ordinal);
+        Assert.Contains("\"kyber-weave-arbiter\"", body, StringComparison.Ordinal);
+        Assert.Contains("\"hook\"", body, StringComparison.Ordinal);
+        Assert.Contains("\"--harness\"", body, StringComparison.Ordinal);
+        Assert.Contains("\"commandcode\"", body, StringComparison.Ordinal);
+        Assert.DoesNotContain("shell: true", body, StringComparison.Ordinal);
+        Assert.DoesNotContain("Bun.spawn", body, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void RenderArbiterMod_BoundsTheSpawnByTheClampedTimeout()
+    {
+        Assert.Contains(
+            "timeout: 30000",
+            CommandCodeRenderer.RenderArbiterMod(30, SquadDeploymentScope.Project),
+            StringComparison.Ordinal);
+        Assert.Contains(
+            "timeout: 0",
+            CommandCodeRenderer.RenderArbiterMod(0, SquadDeploymentScope.Project),
+            StringComparison.Ordinal);
+        Assert.Contains(
+            "timeout: 2147483647",
+            CommandCodeRenderer.RenderArbiterMod(int.MaxValue, SquadDeploymentScope.Project),
+            StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void RenderArbiterMod_MapsABlockDecisionToBlockWithAdditionalContext()
+    {
+        string body = ModBody;
+
+        Assert.Contains("block: true", body, StringComparison.Ordinal);
+        Assert.Contains("additionalContext", body, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void RenderArbiterMod_AppliesStrippedArgsOntoTheToolInputSkippingPollutingKeys()
+    {
+        string body = ModBody;
+
+        Assert.Contains("POLLUTING_ARG_KEYS", body, StringComparison.Ordinal);
+        Assert.Contains("\"__proto__\"", body, StringComparison.Ordinal);
+        Assert.Contains("\"constructor\"", body, StringComparison.Ordinal);
+        Assert.Contains("\"prototype\"", body, StringComparison.Ordinal);
+        int pollutingGuard = body.IndexOf("POLLUTING_ARG_KEYS.has(key)", StringComparison.Ordinal);
+        int rewrite = body.IndexOf("input: rewritten", StringComparison.Ordinal);
+        Assert.True(pollutingGuard >= 0, "the mod must guard the polluting keys");
+        Assert.True(rewrite > pollutingGuard, "the input rewrite must apply the args after the polluting-key guard");
+    }
+
+    [Fact]
+    public void RenderArbiterMod_FailsClosedOnSpawnFailureTimeoutNonZeroStatusAndUnparseableOutput()
+    {
+        string body = ModBody;
+
+        Assert.Contains("result.error", body, StringComparison.Ordinal);
+        Assert.Contains("timed out after", body, StringComparison.Ordinal);
+        Assert.Contains("hook exited with status", body, StringComparison.Ordinal);
+        Assert.Contains("malformed arbiter decision", body, StringComparison.Ordinal);
+        Assert.Contains("failed to spawn kyber-weave-arbiter", body, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void RenderArbiterMod_TreatsEmptyStdoutAsTheHostsDeliberateAllow()
+    {
+        string body = ModBody;
+
+        // Exit 0 with empty stdout is the host's allow (arbiter.enabled: false, or a
+        // dispatch with no target). JSON.parse("") would throw and wrongly block.
+        int emptyCheck = body.IndexOf("trim() === \"\"", StringComparison.Ordinal);
+        int parse = body.IndexOf("JSON.parse(", StringComparison.Ordinal);
+        Assert.True(emptyCheck >= 0, "the mod must test for empty stdout");
+        Assert.True(parse > emptyCheck, "the empty-stdout check must precede JSON.parse");
+        Assert.Contains("{ decision: \"allow\" }", body, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void RenderArbiterMod_CarriesTheGlobalScopeFlagOnlyAtGlobalScope()
+    {
+        Assert.DoesNotContain(
+            "--scope global",
+            CommandCodeRenderer.RenderArbiterMod(ArbiterHookTimeoutSeconds, SquadDeploymentScope.Project),
+            StringComparison.Ordinal);
+        Assert.Contains(
+            ", \"--scope\", \"global\"",
+            CommandCodeRenderer.RenderArbiterMod(ArbiterHookTimeoutSeconds, SquadDeploymentScope.Global),
+            StringComparison.Ordinal);
     }
 }

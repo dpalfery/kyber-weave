@@ -14,7 +14,8 @@ namespace KyberWeave.Tests;
 /// only under the harness's real global root, the generated shim blocks on the plugin hook, and the
 /// generated command line carries <c>--scope global</c>. OpenCode is degraded with a recorded
 /// <c>dispatch-unconfirmed</c> reason; Pi keeps the <c>partial</c> tier, and the Kilo path notes that
-/// <c>KILO_PURE=1</c> skips plugin loading.
+/// <c>KILO_PURE=1</c> skips plugin loading. Command Code writes its mod into
+/// <c>~/.commandcode/mods/</c>, which loads without a trust prompt.
 /// </summary>
 public sealed class ArbiterGlobalPluginDirRenderingTests
 {
@@ -81,6 +82,30 @@ public sealed class ArbiterGlobalPluginDirRenderingTests
         Assert.Contains("--scope global", content, StringComparison.Ordinal);
         Assert.Equal("partial", Assert.Single(
             ArbiterHookWiring.TargetDegradations([SquadTarget.Pi], SquadDeploymentScope.Global)).Details);
+    }
+
+    [Fact]
+    public async Task RenderAsync_GlobalScope_CommandCode_EmitsOwnedAutoLoadedModFileUnderGlobalRoot()
+    {
+        string content = await RenderGlobalPluginAsync(
+            new CommandCodeRenderer(),
+            SquadTarget.CommandCode,
+            root => Path.Combine(root, ".commandcode"),
+            "mods/kyber-arbiter.ts");
+
+        Assert.Contains("export default function", content, StringComparison.Ordinal);
+        Assert.Contains("cmd.hooks({", content, StringComparison.Ordinal);
+        Assert.Contains("node:child_process", content, StringComparison.Ordinal);
+        Assert.Contains("kyber-weave-arbiter", content, StringComparison.Ordinal);
+        // The mod spawns through an argv array with no shell, so the global flag lands as
+        // two array elements rather than the "--scope global" command-line form the
+        // plugin shims carry.
+        Assert.Contains("\", \"--scope\", \"global\"", content, StringComparison.Ordinal);
+
+        // A user-scope mod loads without a trust prompt, so the global install enforces the
+        // same gate the project mod does.
+        Assert.Equal("enforced-global", Assert.Single(
+            ArbiterHookWiring.TargetDegradations([SquadTarget.CommandCode], SquadDeploymentScope.Global)).Details);
     }
 
     private async Task<string> RenderGlobalPluginAsync(

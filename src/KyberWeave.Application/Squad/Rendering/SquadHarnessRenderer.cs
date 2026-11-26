@@ -688,7 +688,27 @@ public sealed class SquadHarnessRenderContext
     }
 
     /// <summary>Adds the owned Arbiter plugin shim when the request enables Arbiter or installs the dispatch hook.</summary>
-    public void AddArbiterPluginShim(string projectRelativePath, string? globalRelativePath = null)
+    public void AddArbiterPluginShim(string projectRelativePath, string? globalRelativePath = null) =>
+        AddArbiterPluginFile(projectRelativePath, globalRelativePath, ArbiterPluginShim.Render(Token, Scope));
+
+    /// <summary>
+    /// Adds one owned Arbiter file a harness auto-loads — a plugin shim or a mod — when the
+    /// request enables Arbiter or installs the dispatch hook.
+    /// </summary>
+    /// <remarks>
+    /// The one place the <see cref="EnabledArbiter"/>/<see cref="DispatchHooks"/> gate and the
+    /// scope's path choice live, so a harness's own mod body and the shared shim cannot drift
+    /// apart on either rule. The body is passed in rather than chosen here because the loader
+    /// contract is per-harness: OpenCode and Kilo share the plugin shim, while Command Code's
+    /// mod host and Pi's extension host each need their own default export.
+    /// </remarks>
+    /// <param name="projectRelativePath">The file's repository-relative path at project scope.</param>
+    /// <param name="globalRelativePath">
+    /// The file's path relative to the harness's global root at global scope; the project path
+    /// when null.
+    /// </param>
+    /// <param name="body">The rendered file body.</param>
+    public void AddArbiterPluginFile(string projectRelativePath, string? globalRelativePath, string body)
     {
         if (EnabledArbiter is null && !DispatchHooks)
         {
@@ -699,7 +719,7 @@ public sealed class SquadHarnessRenderContext
             ? globalRelativePath ?? projectRelativePath
             : projectRelativePath;
 
-        Files.Add(CreateFile(relativePath, ArbiterPluginShim.Render(Token, Scope)));
+        Files.Add(CreateFile(relativePath, body));
     }
 
     /// <summary>
