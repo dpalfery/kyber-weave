@@ -74,11 +74,12 @@ public sealed class FastLoopScriptTests
     }
 
     /// <summary>
-    /// A filter that names no unit test fails the loop even when the repository-policy run reports tests:
-    /// the unit total is read from the unit logs, not from a combined log the policy run can satisfy.
+    /// A filter that names no test in either project fails the loop: the unit total and the repository-policy total
+    /// are counted together for an explicit <c>--class</c> / <c>--method</c>, so a run that matched nothing cannot
+    /// read as clean.
     /// </summary>
     [Fact]
-    public void FilterThatMatchesNoUnitTests_FailsEvenWhenPolicyTestsReportATotal()
+    public void FilterThatMatchesNoTestInEitherProject_FailsTheLoop()
     {
         SkipIfBashUnavailable();
         using FastLoopFixture fixture = new();
@@ -91,7 +92,7 @@ public sealed class FastLoopScriptTests
                 echo "Total: 0"
                 ;;
               *tests/KyberWeave.RepoPolicy.Tests/bin/*)
-                echo "Total: 1, Passed: 1"
+                echo "Total: 0"
                 ;;
             esac
             exit 0
@@ -100,9 +101,40 @@ public sealed class FastLoopScriptTests
         ProcessResult result = fixture.RunFastLoop("--class", "KyberWeave.Application.Tests.DoesNotExistTests");
 
         Assert.Equal(1, result.ExitCode);
-        Assert.Contains("no unit tests ran; the filter matched nothing", result.StandardError, StringComparison.Ordinal);
+        Assert.Contains("no unit or repository-policy tests ran; the filter matched nothing", result.StandardError, StringComparison.Ordinal);
         Assert.Contains("KyberWeave.Application.Tests.DoesNotExistTests", result.StandardError, StringComparison.Ordinal);
         Assert.DoesNotContain("Fast tier clean", result.StandardOutput, StringComparison.Ordinal);
+    }
+
+    /// <summary>
+    /// An explicit filter may select only repository-policy tests. The unit projects then report no total, and the
+    /// policy run's total is what proves the filter matched.
+    /// </summary>
+    [Fact]
+    public void FilterThatSelectsOnlyPolicyTests_Passes()
+    {
+        SkipIfBashUnavailable();
+        using FastLoopFixture fixture = new();
+        fixture.ReplaceDotnetStub(
+            """
+            #!/bin/sh
+            echo "dotnet $*" >> "$CALL_LOG"
+            case "$*" in
+              *tests/KyberWeave.RepoPolicy.Tests/bin/*)
+                echo "Total: 1, Passed: 1"
+                ;;
+              *tests/KyberWeave.*.Tests/bin/*)
+                echo "Total: 0"
+                ;;
+            esac
+            exit 0
+            """);
+
+        ProcessResult result = fixture.RunFastLoop("--class", "KyberWeave.Tests.ProcessSpawnSitesTests");
+
+        Assert.Equal(0, result.ExitCode);
+        Assert.Contains("KyberWeave.RepoPolicy.Tests.dll -class KyberWeave.Tests.ProcessSpawnSitesTests", fixture.GetCallLog(), StringComparison.Ordinal);
+        Assert.DoesNotContain("the filter matched nothing", result.StandardError, StringComparison.Ordinal);
     }
 
     /// <summary>
