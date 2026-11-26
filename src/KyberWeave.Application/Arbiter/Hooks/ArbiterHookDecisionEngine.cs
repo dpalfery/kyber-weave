@@ -1,3 +1,4 @@
+using System.Text;
 using KyberWeave.Contracts.Repositories;
 using KyberWeave.Contracts.Services;
 using KyberWeave.Core.Arbiter;
@@ -329,12 +330,78 @@ public sealed class ArbiterHookDecisionEngine : IContextualHookDecisionEngine, I
 
         BackgroundDispatch dispatch = record.Dispatch;
         HookOutcome outcome = Decide(
-            harness, dispatch.Caller, dispatch.Target, dispatch.Prompt, response, isPost: true, config, context,
+            harness, dispatch.Caller, dispatch.Target, ReturnPrompt(dispatch.Prompt, record.PreId, arbiterDirectory, context), response,
+            isPost: true, config, context,
             toolCallId: null, sessionId: dispatch.SessionId, preId: record.PreId);
         _background.Save(
             arbiterDirectory,
             record with { LastResponseDigest = digest, PendingNote = string.IsNullOrWhiteSpace(outcome.Reason) ? null : outcome.Reason });
         return outcome;
+    }
+
+    /// <summary>
+    /// The prompt a background return is judged with. The launch saves the prompt the worker ran, which the hook
+    /// expanded and stripped of its routing headers, so the return could not name its caller or its plan task: a
+    /// worker's return from the main thread classified as an investigation and skipped the delegate return rules. The
+    /// dispatch's pre event kept those headers; they are put back in front of the prompt, so the return is classified
+    /// from the same header facts as its dispatch. The pairing digest ignores the header block, so it is unchanged.
+    /// </summary>
+    private string ReturnPrompt(string prompt, string preId, string arbiterDirectory, HookContext context)
+    {
+        if (HeaderBlock.Parse(prompt).Headers.Count > 0)
+        {
+            return prompt;
+        }
+
+        // The headers only sharpen the classification: a ledger that cannot be read, or whose read window no longer
+        // holds the pre event, leaves the return judged from its prompt as it was saved, and says so once. The log
+        // store reports an unreadable file as data rather than throwing, so the read's own diagnostics are checked.
+        ArbiterLedgerHeaders? headers;
+        string? missing;
+        try
+        {
+            ArbiterLogRead<ArbiterLedgerEvent> read = _state.OpenLedger(arbiterDirectory).ReadAllWithDiagnostics();
+            ArbiterLedgerEvent? pre = read.Records.FirstOrDefault(e =>
+                e.Phase == ArbiterLedgerPhases.Pre && string.Equals(e.Id, preId, StringComparison.Ordinal));
+            headers = pre?.Headers;
+            missing = read.Unreadable is { } unreadable ? OneLine(unreadable)
+                : pre is null && read.Truncated ? "its pre event is older than the ledger window that was read"
+                : pre is null && read.MalformedLines > 0
+                    ? $"{read.MalformedLines} ledger line(s) are not a record, and its pre event may be one of them"
+                : null;
+        }
+        catch (Exception exception) when (FileFailure.Is(exception))
+        {
+            headers = null;
+            missing = OneLine(exception.Message);
+        }
+
+        if (missing is not null)
+        {
+            context.Log.WriteLine($"Arbiter: the routing headers of dispatch {preId} could not be read back for its " +
+                $"return ({missing}); the return is judged from its saved prompt and may be recorded with no caller.");
+        }
+
+        if (headers is null)
+        {
+            return prompt;
+        }
+
+        StringBuilder block = new();
+        AppendHeader(block, "PLAN_FILE", headers.PlanFile);
+        AppendHeader(block, "TASK", headers.Task);
+        AppendHeader(block, "LENS", headers.Lens);
+        AppendHeader(block, "REFUTE", headers.Refute);
+        AppendHeader(block, "TECHNOLOGY", headers.Technology);
+        return block.Length == 0 ? prompt : block.Append('\n').Append(prompt).ToString();
+    }
+
+    private static void AppendHeader(StringBuilder block, string name, string? value)
+    {
+        if (!string.IsNullOrWhiteSpace(value))
+        {
+            block.Append(name).Append(": ").Append(value.Trim()).Append('\n');
+        }
     }
 
     /// <inheritdoc/>
@@ -386,7 +453,8 @@ public sealed class ArbiterHookDecisionEngine : IContextualHookDecisionEngine, I
         string? sessionId,
         IReadOnlyList<string> agentNames,
         HookContext context,
-        string? agentId = null)
+        string? agentId = null,
+        string? stopEvent = null)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(harness);
         ArgumentNullException.ThrowIfNull(agentNames);
@@ -395,7 +463,7 @@ public sealed class ArbiterHookDecisionEngine : IContextualHookDecisionEngine, I
         string arbiterDirectory = ResolveArbiterDirectory(context.RepoRoot, context.Scope, context.HomeDirectory);
         IArbiterLedger ledger = _state.OpenLedger(arbiterDirectory);
         IReadOnlyList<ArbiterLedgerEvent> events = ledger.ReadAll();
-        string stopEvent = StopEventOf(harness);
+        stopEvent ??= StopEventOf(harness);
         string agent = agentNames.Count > 0 ? agentNames[0] : "(unnamed)";
 
         // A pre row written before the hook recorded the session names none, and no stop event can be matched to
@@ -677,7 +745,7 @@ public sealed class ArbiterHookDecisionEngine : IContextualHookDecisionEngine, I
             HookOutcome mapped = MapResult(result, harness, resolved, prompt, effective, arbiterDirectory, context, toolOutput, isPost);
             return isPost
                 ? WithAutonomousPlanNote(mapped, result, target, toolOutput, toolCallId, preId is null, arbiterDirectory, context)
-                : mapped;
+                : StopUnbuildableDispatch(mapped, result, prompt, target, arbiterDirectory, context);
         }
         catch (Exception exception) when (exception is not OperationCanceledException)
         {
@@ -690,6 +758,57 @@ public sealed class ArbiterHookDecisionEngine : IContextualHookDecisionEngine, I
         {
             owned?.Dispose();
         }
+    }
+
+    /// <summary>
+    /// Stops a dispatch the rules let through when its task prompt cannot be built, and closes its pre event.
+    /// </summary>
+    /// <remarks>
+    /// The rules judge the short dispatch first, so a rule's denial still outranks a prompt that cannot be built.
+    /// When they let it run, the adapter would stop it anyway, before any worker starts. Its pre event would then
+    /// stay open with no return ever coming, and hold its task's files against every later dispatch for the whole
+    /// unreturned horizon. The prompt is built here instead, through the same insertion the adapters use, and a
+    /// stop closes the pre with a recovered row and denies with the stop's own text.
+    /// </remarks>
+    private HookOutcome StopUnbuildableDispatch(
+        HookOutcome outcome,
+        ArbiterEvaluationResult result,
+        string prompt,
+        string? target,
+        string arbiterDirectory,
+        HookContext context)
+    {
+        if (outcome.Kind == HookOutcomeKind.Deny || string.IsNullOrEmpty(result.LedgerId))
+        {
+            return outcome;
+        }
+
+        DispatchInsertion insertion = DispatchPromptInsertion.Expand(prompt, context, target);
+        if (insertion.Kind != DispatchInsertionKind.Stopped)
+        {
+            return outcome;
+        }
+
+        // The dispatch is stopped whether or not its close is written: a ledger that cannot be read or appended to
+        // must not turn the stop into the loud allow the caller's failure path would give.
+        try
+        {
+            IArbiterLedger ledger = _state.OpenLedger(arbiterDirectory);
+            ArbiterLedgerEvent? pre = ledger.ReadAll().FirstOrDefault(e =>
+                e.Phase == ArbiterLedgerPhases.Pre && string.Equals(e.Id, result.LedgerId, StringComparison.Ordinal));
+            if (pre is not null)
+            {
+                _ = AppendRecovery(ledger, pre, ArbiterRecoveries.PromptStopped, target ?? "unknown", _clock.GetUtcNow(), context);
+            }
+        }
+        catch (Exception exception) when (FileFailure.Is(exception))
+        {
+            context.Log.WriteLine(
+                $"Arbiter: dispatch {result.LedgerId} was stopped before its worker started, but its close was not " +
+                $"written ({OneLine(exception.Message)}); it still looks in flight until the unreturned horizon.");
+        }
+
+        return new HookOutcome(HookOutcomeKind.Deny, insertion.Reason);
     }
 
     /// <summary>

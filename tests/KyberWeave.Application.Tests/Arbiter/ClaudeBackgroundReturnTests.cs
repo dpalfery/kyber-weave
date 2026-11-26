@@ -1,5 +1,6 @@
 using System.Text.Json;
 using KyberWeave.Arbiter.Hooks;
+using KyberWeave.Arbiter.Hooks.Adapters;
 using KyberWeave.Contracts.Repositories;
 using KyberWeave.Core.Arbiter;
 using KyberWeave.Core.Arbiter.Facts;
@@ -395,6 +396,144 @@ public sealed class ClaudeBackgroundReturnTests : IDisposable
         Assert.Equal("conductor", post.Caller);
         Assert.Equal("dev-easy", post.Target);
         Assert.Equal("delegate.returned", post.Trigger);
+    }
+
+    private (string Stdout, string Log) TaskStop(string taskId) => Send(new
+    {
+        hook_event_name = "PostToolUse",
+        session_id = Session,
+        cwd = _host.RepoRoot,
+        tool_name = "TaskStop",
+        tool_input = new { task_id = taskId },
+        tool_response = new { message = "Successfully stopped task: " + taskId, task_id = taskId, task_type = "local_agent" },
+        tool_use_id = "toolu-stop-" + taskId,
+    });
+
+    /// <summary>
+    /// A stopped background agent's turn never ends, so neither a hand-back nor a stop event closes its dispatch. The
+    /// dispatching agent's <c>TaskStop</c> names it by its agent id, and that closes exactly its dispatch.
+    /// </summary>
+    [Fact]
+    public void TaskStopOfAFollowedAgent_ClosesExactlyThatAgentsDispatch()
+    {
+        Start("T2", "toolu-1", "agent-1");
+        Start("T5", "toolu-2", "agent-2");
+
+        (string stdout, _) = TaskStop("agent-2");
+
+        Assert.Equal(string.Empty, stdout);
+        ArbiterLedgerEvent closed = Assert.Single(Posts());
+        Assert.Equal(PreOf("toolu-2").Id, closed.PreId);
+        Assert.Equal("TaskStop", closed.Recovered);
+    }
+
+    [Fact]
+    public void TaskStopOfAnAgentThatAlreadyReturned_WritesNoRow()
+    {
+        Start("T2", "toolu-1", "agent-1");
+        Handback("agent-1", Report("T2"));
+        Advance();
+
+        TaskStop("agent-1");
+
+        Assert.Null(Assert.Single(Posts()).Recovered);
+    }
+
+    [Fact]
+    public void TaskStopOfATaskTheArbiterDoesNotFollow_WritesNothing()
+    {
+        Start("T2", "toolu-1", "agent-1");
+
+        TaskStop("shell-9");
+
+        Assert.Empty(Posts());
+    }
+
+    /// <summary>
+    /// On the main thread the dispatch and launch events name no agent, and the launch reports the prompt the hook
+    /// expanded, with its routing headers gone. The pre event resolved the conductor from those headers, so the
+    /// return is judged with them too and classifies as a delegate return rather than an investigation.
+    /// </summary>
+    [Fact]
+    public void AMainThreadBackgroundReturn_IsJudgedWithItsDispatchsHeaders()
+    {
+        Send(new
+        {
+            hook_event_name = "PreToolUse",
+            session_id = Session,
+            cwd = _host.RepoRoot,
+            tool_name = "Agent",
+            tool_input = new { description = "T2", prompt = Prompt("T2"), subagent_type = "dev-easy", run_in_background = true },
+            tool_use_id = "toolu-1",
+        });
+        Advance();
+        Send(new
+        {
+            hook_event_name = "PostToolUse",
+            session_id = Session,
+            cwd = _host.RepoRoot,
+            tool_name = "Agent",
+            tool_input = new { description = "T2", prompt = "<task>\nWork on T2.\n</task>", subagent_type = "dev-easy", run_in_background = true },
+            tool_use_id = "toolu-1",
+            tool_response = new { status = "async_launched", agentId = "agent-1", content = Array.Empty<string>() },
+        });
+        Advance();
+        Assert.Equal("conductor", PreOf("toolu-1").Caller);
+
+        Handback("agent-1", Report("T2"));
+
+        ArbiterLedgerEvent post = Assert.Single(Posts());
+        Assert.Equal(PreOf("toolu-1").Id, post.PreId);
+        Assert.Equal("conductor", post.Caller);
+        Assert.Equal("delegate.returned", post.Trigger);
+    }
+
+    /// <summary>
+    /// The log store reports an unreadable ledger as data, not as an exception. A return whose headers cannot be read
+    /// back for that reason is judged from its saved prompt, and the log says why.
+    /// </summary>
+    [Fact]
+    public void ABackgroundReturnWhoseLedgerCannotBeRead_LogsThatItsHeadersWereNotRestored()
+    {
+        Dispatch("T2", "toolu-1");
+        Advance();
+        Send(new
+        {
+            hook_event_name = "PostToolUse",
+            session_id = Session,
+            cwd = _host.RepoRoot,
+            tool_name = "Agent",
+            tool_input = new { description = "T2", prompt = "<task>\nWork on T2.\n</task>", subagent_type = "dev-easy", run_in_background = true },
+            tool_use_id = "toolu-1",
+            tool_response = new { status = "async_launched", agentId = "agent-1", content = Array.Empty<string>() },
+        });
+        Advance();
+        _host.State.Log.UnreadablePaths.Add(_host.Ledger.FilePath);
+
+        (_, string log) = Handback("agent-1", "<task>done</task>");
+
+        Assert.Contains("could not be read back", log, StringComparison.Ordinal);
+    }
+
+    /// <summary>
+    /// A pre event whose line is not a record is dropped from the read. A followed return whose pre event is missing
+    /// while the ledger holds a malformed line is judged from its saved prompt, and the log says why.
+    /// </summary>
+    [Fact]
+    public async Task ABackgroundReturnWhosePreLineIsMalformed_LogsThatItsHeadersWereNotRestored()
+    {
+        string directory = _host.Ledger.DirectoryPath;
+        _host.Get<IBackgroundDispatchStore>().Save(
+            directory,
+            new BackgroundDispatchRecord(
+                new BackgroundDispatch(ClaudeHookAdapter.Token, Session, "agent-1", "unidentified", "dev-easy", "<task>\nWork on T2.\n</task>", "toolu-1"),
+                "pre-lost-to-a-torn-line"));
+        await _host.State.Log.AppendLineAsync(directory, InFlightLedger.FileName, "{\"id\":\"pre-lost-to-a-torn", CancellationToken.None);
+
+        (_, string log) = Handback("agent-1", "<task>done</task>");
+
+        Assert.Contains("could not be read back", log, StringComparison.Ordinal);
+        Assert.Contains("not a record", log, StringComparison.Ordinal);
     }
 
     /// <summary>An engine that follows one agent and answers its return with a note.</summary>

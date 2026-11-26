@@ -744,6 +744,7 @@ public sealed class DispatchPromptInsertionTests
         TaskPromptRequest request = Assert.Single(prompts.Requests);
         Assert.Equal(worktree, request.RepoRoot);
         Assert.Equal([worktree], prompts.Repositories);
+        Assert.Equal([worktree], request.ScratchRoots);
     }
 
     /// <summary>

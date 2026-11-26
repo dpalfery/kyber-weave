@@ -458,7 +458,8 @@ public sealed class CopilotHookAdapterTests
             string? sessionId,
             IReadOnlyList<string> agentNames,
             HookContext context,
-            string? agentId = null)
+            string? agentId = null,
+            string? stopEvent = null)
         {
             RecoveredAgentId = agentId;
             return 0;

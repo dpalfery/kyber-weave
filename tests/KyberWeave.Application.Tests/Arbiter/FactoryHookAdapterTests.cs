@@ -186,7 +186,8 @@ public sealed class FactoryHookAdapterTests
             string? sessionId,
             IReadOnlyList<string> agentNames,
             HookContext context,
-            string? agentId = null)
+            string? agentId = null,
+            string? stopEvent = null)
         {
             RecoveredHarness = harness;
             RecoveredSession = sessionId;
