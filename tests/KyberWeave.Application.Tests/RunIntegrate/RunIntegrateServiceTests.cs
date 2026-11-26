@@ -54,6 +54,7 @@ public sealed class RunIntegrateServiceTests
     private int _commitsAhead = 1;
     private string _dirtyStatus = string.Empty;
     private string _runDirtyStatus = string.Empty;
+    private string _taskChangedPaths = "src/Task.cs";
     private string _taskBranch = TaskBranch;
     private string _runBranch = RunBranch;
     private int? _mergeBaseErrorCode;
@@ -242,6 +243,7 @@ public sealed class RunIntegrateServiceTests
     public void UncommittedTrackedChangesInTheRunWorktreeAreRefusedBeforeAFastForward()
     {
         _runDirtyStatus = " M src/Run.cs\n";
+        _taskChangedPaths = "src/Run.cs";
 
         RunIntegrateOutcome outcome = Integrate(Request());
 
@@ -256,6 +258,7 @@ public sealed class RunIntegrateServiceTests
     {
         _runIsAncestor = false;
         _runDirtyStatus = " M src/Run.cs\n";
+        _taskChangedPaths = "src/Run.cs";
 
         RunIntegrateOutcome outcome = Integrate(Request());
 
@@ -263,6 +266,26 @@ public sealed class RunIntegrateServiceTests
         Assert.Contains("src/Run.cs", outcome.Message, StringComparison.Ordinal);
         Assert.DoesNotContain(_git.Calls, call => call.Arguments.Contains("cherry-pick", StringComparer.Ordinal));
         Assert.True(LockIsFree());
+    }
+
+    [Fact]
+    public void AnUnrelatedUncommittedFileInTheRunWorktreeIsLeftInPlaceAndReported()
+    {
+        _files.CreateDirectory(Run + "/docs/plans");
+        _files.WriteAllText(Run + "/docs/plans/hill-climb-run-04.md", "the architect's revision\n");
+        _runDirtyStatus = " M docs/plans/hill-climb-run-04.md\n";
+        _taskChangedPaths = "src/Task.cs";
+
+        RunIntegrateOutcome outcome = Integrate(Request());
+
+        Assert.True(outcome.Status == RunIntegrateStatus.Integrated, outcome.Message);
+        Assert.Equal(AfterHead, outcome.RunHead);
+        Assert.Equal(
+            "the architect's revision\n",
+            _files.ReadAllText(Run + "/docs/plans/hill-climb-run-04.md"));
+        Assert.Contains(
+            outcome.Notes ?? [],
+            note => note.Contains("docs/plans/hill-climb-run-04.md", StringComparison.Ordinal));
     }
 
     [Fact]
@@ -898,6 +921,11 @@ public sealed class RunIntegrateServiceTests
         if (command == "status --porcelain --untracked-files=no")
         {
             return Ok(workingDirectory == Run ? _runDirtyStatus : _dirtyStatus);
+        }
+
+        if (command == "diff --name-only " + RunBranch + "..." + TaskBranch)
+        {
+            return Ok(_taskChangedPaths);
         }
 
         if (command.StartsWith("rev-list --count ", StringComparison.Ordinal))
