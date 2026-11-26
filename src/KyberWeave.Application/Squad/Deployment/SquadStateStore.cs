@@ -30,21 +30,6 @@ public sealed class SquadStateStore : ISquadStateStore
     private const string RegistryFileName = "registry.json";
     private const string RegistryProjectsProperty = "projects";
 
-    /// <summary>
-    ///     The home-level state directory relative to the home directory. It holds <c>global/</c>,
-    ///     <c>projects/&lt;root-key&gt;/</c> and <c>registry.json</c>.
-    /// </summary>
-    private const string HomeStateRelativeDirectory = ".kyber-weave/squad";
-
-    private const string GlobalStateRelativeDirectory = ".kyber-weave/squad/global";
-    private const string ProjectsRelativeDirectory = ".kyber-weave/squad/projects";
-
-    /// <summary>
-    ///     The journal for a project transaction sits beside its root, and the global journal sits
-    ///     beside the home. Both are <c>.kyber-weave/.squad-transaction</c> under their own anchor.
-    /// </summary>
-    private const string JournalRelativePath = ".kyber-weave/" + TransactionDirectoryName;
-
     private static readonly JsonWriterOptions ReceiptWriterOptions = new()
     {
         Indented = true,
@@ -149,7 +134,7 @@ public sealed class SquadStateStore : ISquadStateStore
     /// </summary>
     public string ResolveHomeStateDirectory()
     {
-        return ResolveDirectoryUnder(ResolveHomeRoot(), HomeStateRelativeDirectory);
+        return ResolveDirectoryUnder(ResolveHomeRoot(), UserStatePaths.SquadRelativeDirectory);
     }
 
     /// <summary>
@@ -723,8 +708,8 @@ public sealed class SquadStateStore : ISquadStateStore
         {
             SquadDeploymentScope.Project => SquadPathPolicy.ResolveFile(
                 SquadPhysicalRootIdentities.Resolve(targetRoot, _semantics).PhysicalPath,
-                JournalRelativePath, _semantics),
-            SquadDeploymentScope.Global => SquadPathPolicy.ResolveFile(ResolveHomeStateRoot(), JournalRelativePath, _semantics),
+                UserStatePaths.SquadTransactionRelativePath, _semantics),
+            SquadDeploymentScope.Global => SquadPathPolicy.ResolveFile(ResolveHomeStateRoot(), UserStatePaths.SquadTransactionRelativePath, _semantics),
             SquadDeploymentScope.Instance => SquadPathPolicy.ResolveFile(
                 ResolveInstanceStateDirectory(targetRoot),
                 TransactionDirectoryName, _semantics),
@@ -834,7 +819,7 @@ public sealed class SquadStateStore : ISquadStateStore
     private string ResolveProjectStateDirectory(string targetRoot)
     {
         string key = SquadPhysicalRootIdentities.Resolve(targetRoot, _semantics).Key;
-        return ResolveDirectoryUnder(ResolveHomeRoot(), $"{ProjectsRelativeDirectory}/{key}");
+        return ResolveDirectoryUnder(ResolveHomeRoot(), $"{UserStatePaths.SquadProjectsRelativeDirectory}/{key}");
     }
 
     private string ResolveGlobalStateDirectory(string? targetRoot = null)
@@ -842,15 +827,15 @@ public sealed class SquadStateStore : ISquadStateStore
         if (!string.IsNullOrWhiteSpace(targetRoot))
         {
             string candidateRoot = Path.TrimEndingDirectorySeparator(FullPath(targetRoot));
-            string candidateDir = Path.Combine(candidateRoot, GlobalStateRelativeDirectory);
+            string candidateDir = Path.Combine(candidateRoot, UserStatePaths.SquadGlobalRelativeDirectory);
             if (_files.FileExists(Path.Combine(candidateDir, ReceiptFileName)) ||
                 _files.FileExists(Path.Combine(candidateDir, LockFileName)))
             {
-                return ResolveDirectoryUnder(candidateRoot, GlobalStateRelativeDirectory);
+                return ResolveDirectoryUnder(candidateRoot, UserStatePaths.SquadGlobalRelativeDirectory);
             }
         }
 
-        return ResolveDirectoryUnder(ResolveHomeStateRoot(), GlobalStateRelativeDirectory);
+        return ResolveDirectoryUnder(ResolveHomeStateRoot(), UserStatePaths.SquadGlobalRelativeDirectory);
     }
 
     private string ResolveInstanceStateDirectory(string targetRoot)
@@ -964,7 +949,7 @@ public sealed class SquadStateStore : ISquadStateStore
     /// </summary>
     private IEnumerable<string> EnumerateProjectStateDirectories()
     {
-        string projectsDirectory = ResolveDirectoryUnder(ResolveHomeRoot(), ProjectsRelativeDirectory);
+        string projectsDirectory = ResolveDirectoryUnder(ResolveHomeRoot(), UserStatePaths.SquadProjectsRelativeDirectory);
         if (!_files.DirectoryExists(projectsDirectory))
             return [];
 
@@ -1000,7 +985,7 @@ public sealed class SquadStateStore : ISquadStateStore
             reasons.Add("registered root key no longer matches the physical key of its path");
 
         if (IsRootKey(key) &&
-            !_files.FileExists(Path.Combine(ResolveDirectoryUnder(ResolveHomeRoot(), $"{ProjectsRelativeDirectory}/{key}"),
+            !_files.FileExists(Path.Combine(ResolveDirectoryUnder(ResolveHomeRoot(), $"{UserStatePaths.SquadProjectsRelativeDirectory}/{key}"),
                 ReceiptFileName)))
             reasons.Add("project receipt is missing");
 

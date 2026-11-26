@@ -13,6 +13,33 @@ public static class UserStatePaths
     /// <summary>The state folder's own name, shared by the user-level and repository-level layouts.</summary>
     public const string DirectoryName = ".kyber-weave";
 
+    /// <summary>The repository configuration file, relative to a repository root.</summary>
+    public const string RepositoryConfigRelativePath = DirectoryName + "/kyber-weave.yml";
+
+    /// <summary>The analysis cache, relative to a repository root.</summary>
+    public const string AnalysisCacheRelativeDirectory = DirectoryName + "/cache";
+
+    /// <summary>The gitignore that keeps the analysis cache out of the index, relative to a repository root.</summary>
+    public const string AnalysisCacheIgnoreRelativePath = DirectoryName + "/.gitignore";
+
+    /// <summary>The MCP wiring receipts, relative to a repository root.</summary>
+    public const string McpReceiptsRelativeDirectory = DirectoryName + "/receipts";
+
+    /// <summary>The MCP wiring receipt file, relative to a repository root.</summary>
+    public const string McpWiringReceiptRelativePath = McpReceiptsRelativeDirectory + "/mcp-wiring.json";
+
+    /// <summary>The Squad state folder, relative to a home directory.</summary>
+    public const string SquadRelativeDirectory = DirectoryName + "/squad";
+
+    /// <summary>The Squad global state folder, relative to a home directory.</summary>
+    public const string SquadGlobalRelativeDirectory = SquadRelativeDirectory + "/global";
+
+    /// <summary>The per-project Squad state, relative to a home directory.</summary>
+    public const string SquadProjectsRelativeDirectory = SquadRelativeDirectory + "/projects";
+
+    /// <summary>The Squad transaction journal, relative to its anchor root.</summary>
+    public const string SquadTransactionRelativePath = DirectoryName + "/.squad-transaction";
+
     /// <summary>The state folder inside <paramref name="containingDirectory" />.</summary>
     /// <param name="containingDirectory">The home directory, repository root, or harness global root that holds it.</param>
     /// <returns>The absolute state directory path.</returns>
@@ -52,6 +79,24 @@ public static class UserStatePaths
     /// <param name="home">The operator's home directory.</param>
     /// <returns>The absolute file path.</returns>
     public static string SquadLockFile(string home) => Path.Combine(SquadGlobalDirectory(home), "squad.lock.yml");
+
+    /// <summary>The Kyber Utilities status-line receipts under a home directory.</summary>
+    /// <param name="home">The operator's home directory.</param>
+    /// <returns>The absolute directory path.</returns>
+    public static string StatusLineDirectory(string home) =>
+        Path.Combine(StateDirectory(home), "utilities", "statusline");
+
+    /// <summary>The MCP wiring receipts under a repository root.</summary>
+    /// <param name="root">The repository root.</param>
+    /// <returns>The absolute directory path.</returns>
+    public static string McpReceiptsDirectory(string root) =>
+        Path.Combine(StateDirectory(root), "receipts");
+
+    /// <summary>The MCP wiring receipt file under a repository root.</summary>
+    /// <param name="root">The repository root.</param>
+    /// <returns>The absolute file path.</returns>
+    public static string McpWiringReceiptFile(string root) =>
+        Path.Combine(McpReceiptsDirectory(root), "mcp-wiring.json");
 
     /// <summary>The user-level Squad profile snapshots.</summary>
     /// <param name="home">The operator's home directory.</param>

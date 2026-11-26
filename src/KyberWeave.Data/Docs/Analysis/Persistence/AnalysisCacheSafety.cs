@@ -123,7 +123,7 @@ public sealed class AnalysisCacheSafety(
         startInfo.ArgumentList.Add("ls-files");
         startInfo.ArgumentList.Add("--cached");
         startInfo.ArgumentList.Add("--");
-        startInfo.ArgumentList.Add(".kyber-weave/cache");
+        startInfo.ArgumentList.Add(UserStatePaths.AnalysisCacheRelativeDirectory);
 
         try
         {
