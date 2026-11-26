@@ -45,6 +45,9 @@ public static class McpClientHarness
         // Kilo CLI 7.8.27, probed 2026-11-26.
         ["kilo"] = "kilo",
 
+        // Antigravity CLI (agy) 1.5.14, probed 2026-11-26.
+        ["antigravity-client"] = "antigravity",
+
         // VS Code 1.130.0 and Insiders 1.149.0, read 2026-11-26: the workbench sends product.json's nameLong.
         ["Visual Studio Code"] = "copilot-vscode",
         ["Visual Studio Code - Insiders"] = "copilot-vscode",

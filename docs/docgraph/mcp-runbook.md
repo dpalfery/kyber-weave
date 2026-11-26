@@ -1683,7 +1683,7 @@ such as a research request: the reply then describes the parts from the shared r
 The tool never asks for the harness: it reads the name the MCP client sent in its `initialize`
 request (`clientInfo.name`), because a harness name the model types is a guess. A name that a live
 probe, the client's own logs or its own source has verified maps to that harness's hook token:
-Copilot CLI, Claude Code, opencode, Cursor and Kilo by probe; Factory Droid (`factory-cli`) by its
+Copilot CLI, Claude Code, opencode, Cursor, Kilo and Antigravity (`antigravity-client`) by probe; Factory Droid (`factory-cli`) by its
 logs; VS Code, Codex (`codex-mcp-client`) and Pi (`pi-mcp-<server key>`) by source. The reply
 says `harness: <token> (from MCP client '<name>')`. On a harness whose dispatch hook can rewrite
 the call, no file is written and the reply says `prompt file: none`. On ZCode, CommandCode and
