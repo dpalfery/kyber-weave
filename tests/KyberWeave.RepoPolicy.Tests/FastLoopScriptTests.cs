@@ -74,6 +74,69 @@ public sealed class FastLoopScriptTests
     }
 
     /// <summary>
+    /// A filter that names no unit test fails the loop even when the repository-policy run reports tests:
+    /// the unit total is read from the unit logs, not from a combined log the policy run can satisfy.
+    /// </summary>
+    [Fact]
+    public void FilterThatMatchesNoUnitTests_FailsEvenWhenPolicyTestsReportATotal()
+    {
+        SkipIfBashUnavailable();
+        using FastLoopFixture fixture = new();
+        fixture.ReplaceDotnetStub(
+            """
+            #!/bin/sh
+            echo "dotnet $*" >> "$CALL_LOG"
+            case "$*" in
+              *tests/KyberWeave.Application.Tests/bin/*)
+                echo "Total: 0"
+                ;;
+              *tests/KyberWeave.RepoPolicy.Tests/bin/*)
+                echo "Total: 1, Passed: 1"
+                ;;
+            esac
+            exit 0
+            """);
+
+        ProcessResult result = fixture.RunFastLoop("--class", "KyberWeave.Application.Tests.DoesNotExistTests");
+
+        Assert.Equal(1, result.ExitCode);
+        Assert.Contains("no unit tests ran; the filter matched nothing", result.StandardError, StringComparison.Ordinal);
+        Assert.Contains("KyberWeave.Application.Tests.DoesNotExistTests", result.StandardError, StringComparison.Ordinal);
+        Assert.DoesNotContain("Fast tier clean", result.StandardOutput, StringComparison.Ordinal);
+    }
+
+    /// <summary>
+    /// The touched routing reads a namespace that starts after leading whitespace, so the class it names is the
+    /// one the runner can match rather than the fallback namespace.
+    /// </summary>
+    [Fact]
+    public void TouchedReadsAnIndentedNamespaceAndNamesTheTestClass()
+    {
+        SkipIfBashUnavailable();
+        using FastLoopFixture fixture = new();
+
+        fixture.WriteProductSource("ReviewCycleService");
+        fixture.WriteChangedTestFile(
+            "KyberWeave.Application.Tests",
+            "Review/ReviewServiceSeamTests.cs",
+            """
+              namespace KyberWeave.Application.Tests.Review;
+
+            public sealed class ReviewServiceSeamTests
+            {
+                private ReviewCycleService? _service;
+            }
+            """);
+
+        ProcessResult result = fixture.RunFastLoop("--touched");
+        string log = fixture.GetCallLog();
+
+        Assert.Equal(0, result.ExitCode);
+        Assert.Contains("-class KyberWeave.Application.Tests.Review.ReviewServiceSeamTests", log, StringComparison.Ordinal);
+        Assert.DoesNotContain("-class KyberWeave.Tests.ReviewServiceSeamTests", log, StringComparison.Ordinal);
+    }
+
+    /// <summary>
     /// Editing markdown inside <c>dash/tray/ui/</c> must trigger documentation validation.
     /// </summary>
     [Fact]
@@ -387,6 +450,24 @@ public sealed class FastLoopScriptTests
             string source = Path.Combine(Root, "src", "KyberWeave.Core", "Example.cs");
             Directory.CreateDirectory(Path.GetDirectoryName(source)!);
             File.WriteAllText(source, "namespace Example;\n");
+        }
+
+        /// <summary>Writes one product C# file declaring <paramref name="typeName"/>, so a test can reference it.</summary>
+        public void WriteProductSource(string typeName)
+        {
+            string source = Path.Combine(Root, "src", "KyberWeave.Core", "Example.cs");
+            Directory.CreateDirectory(Path.GetDirectoryName(source)!);
+            File.WriteAllText(
+                source,
+                $"namespace Example;\n\npublic sealed class {typeName}\n{{\n}}\n");
+        }
+
+        /// <summary>Writes one changed test file at a path relative to its project.</summary>
+        public void WriteChangedTestFile(string project, string relativePath, string content)
+        {
+            string path = Path.Combine(Root, "tests", project, relativePath);
+            Directory.CreateDirectory(Path.GetDirectoryName(path)!);
+            File.WriteAllText(path, content.ReplaceLineEndings("\n") + "\n");
         }
 
         /// <summary>Writes one changed unit-test file declaring <paramref name="className"/>.</summary>
