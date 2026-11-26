@@ -439,8 +439,8 @@ Hook guards are not rules: hosts cannot tune a guard by id, but `arbiter.enabled
 | `KW-ARB-CONFIG-009` | Error | User override holds a key other than `provider` |
 | `KW-ARB-CONFIG-010` | Error | Non-loopback endpoint uses `http` |
 | `KW-ARB-CONFIG-011` | Error | `arbiter.global` is declared in a project config; user-level `arbiter.global.targets` is the only valid global schema |
-| `KW-ARB-CONFIG-012` | Error | `model-targeting.mode` is not `off`, `shadow` or `enforce`, or a `difficulty-profiles` key or value is not a semantic profile. The message lists the valid values |
-| `KW-ARB-CONFIG-013` | Error | `model-targeting.ladder` is empty, repeats a profile, or names a value that is not a semantic profile. The message shows an example ladder |
+| `KW-ARB-CONFIG-012` | Error | `model-targeting.mode` is not `off`, `shadow` or `enforce`, or the host sets `model-targeting.difficulty-profiles` or `model-targeting.ladder`. The shipped developer tiers fix the table (`easy` to `fast`, `standard` to `general`, `hard` to `dev-hard`) and the ladder (`fast`, `general`, `dev-hard`), so both keys are refused and the message names the key |
+| `KW-ARB-CONFIG-013` | Error | Retired: no configuration emits it. A host `model-targeting.ladder` is refused with `KW-ARB-CONFIG-012` |
 | `KW-ARB-CONFIG-014` | Error | `shadow` is set on `KW-ARB-DIFFICULTY-001` or `KW-ARB-LADDER-001`, whose shadow state `model-targeting.mode` owns |
 | `KW-ARB-CONFIG-015` | Error | A savings value is out of range or in a forbidden place: `stores.max-item-bytes` outside 1 to 1048576, `stores.retain-days` below 1 (a value above 3650 is clamped, not refused), a blank `comment-triage.bot-logins` entry, a `dispatch-budget` value below 1, a host rule using `for-each`, or a host rule mapping an answer to an effect only shipped rules may use |
 | `KW-ARB-CONFIG-016` | Warning | The provider timeout in force (after the user override) plus two seconds of evaluation does not fit the hook timeout rendered from the repository's `timeout-ms` |

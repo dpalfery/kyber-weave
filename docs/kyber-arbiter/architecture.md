@@ -919,11 +919,13 @@ rule does.
 **Under the tiered roster both rules follow the developer tiers.** With `worker-roster: tiered`,
 `KW-ARB-DIFFICULTY-001` answers from `plan.task.difficulty`, the rating the agent pick already recorded,
 so no second model call is made and a task with no recorded rating answers undecidable and keeps. The
-ladder is the three tiers' model profiles — `fast` for `dev-easy`, `general` for `dev-medium`, and
-`dev-hard` — and `model-targeting.difficulty-profiles` and `model-targeting.ladder` take those values
-whether or not the host set its own. A dispatch the conductor already put on the next tier targets the
-token it is already rendered with, so `same-as-rendered` stops the write. Under `technology`, and when
-no roster is given, both rules are as they ship.
+shipped developer tiers fix both: the shipped table maps `easy` to `fast`, `standard` to `general`,
+`hard` to `dev-hard`, and the shipped ladder is `fast`, `general`, `dev-hard`. A host
+`model-targeting.difficulty-profiles` or `model-targeting.ladder` is refused with `KW-ARB-CONFIG-012`,
+so the run uses the shipped table and ladder whether or not the host set its own. A dispatch the
+conductor already put on the next tier targets the token it is already rendered with, so
+`same-as-rendered` stops the write. Under `technology`, and when no roster is given, both rules are as
+they ship.
 
 The effective block is resolved at evaluation, not at load, because a loaded configuration does not
 carry the run's roster: `ModelTargetingRules.Targeting` and `ModelTargetingRules.Apply` are called with

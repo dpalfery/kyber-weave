@@ -66,7 +66,8 @@ public sealed class ArbiterSavingsConfigTests
     [InlineData("ladder: []")]
     [InlineData("ladder: [fast, fast, general]")]
     [InlineData("ladder: [fast, claude-sonnet-5-5]")]
-    public void InvalidLadder_RaisesConfig013WithAnExampleLadder(string ladder)
+    [InlineData("ladder: [fast, general, dev-hard]")]
+    public void HostLadder_IsRefusedNamingTheKey(string ladder)
     {
         YamlDotNet.Core.YamlException exception = Assert.ThrowsAny<YamlDotNet.Core.YamlException>(
             () => KyberWeaveConfigAssembler.FromYaml($"""
@@ -75,7 +76,8 @@ public sealed class ArbiterSavingsConfigTests
                     {ladder}
                 """));
 
-        Assert.Contains("[KW-ARB-CONFIG-013]", exception.Message, StringComparison.Ordinal);
+        Assert.Contains("[KW-ARB-CONFIG-012]", exception.Message, StringComparison.Ordinal);
+        Assert.Contains("arbiter.model-targeting.ladder", exception.Message, StringComparison.Ordinal);
         Assert.Contains("dev-hard", exception.Message, StringComparison.Ordinal);
     }
 

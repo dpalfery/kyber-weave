@@ -5,13 +5,18 @@ using Xunit;
 namespace KyberWeave.Tests.Arbiter;
 
 /// <summary>
-/// The savings keys in <c>docs/configuration.md</c> name the same profiles and developer-tier table the code ships.
-/// A profile or default added on one side and not the other would document a key the loader refuses or a profile the
-/// Arbiter cannot route to.
+/// The configuration, architecture and rule-reference pages name the same profiles and developer-tier
+/// table the code ships, and say both host overrides are refused. A profile or default added on one
+/// side and not the other would document a key the loader refuses or a profile the Arbiter cannot
+/// route to.
 /// </summary>
 public sealed class ConfigurationModelTargetingDocsTests
 {
-    private const string Document = "docs/configuration.md";
+    private const string ConfigurationDocument = "docs/configuration.md";
+
+    private const string ArchitectureDocument = "docs/kyber-arbiter/architecture.md";
+
+    private const string RuleReferenceDocument = "docs/ci-pipelines/rule-reference.md";
 
     private static readonly ICorpusSource Corpus = CheckoutCorpusSource.Checkout;
 
@@ -20,7 +25,7 @@ public sealed class ConfigurationModelTargetingDocsTests
     [Fact]
     public void DocumentedSemanticProfileListMatchesArbiterSemanticProfiles()
     {
-        string prose = ParagraphContaining(Corpus.ReadText(Document), "A semantic profile is one of");
+        string prose = ParagraphContaining(Corpus.ReadText(ConfigurationDocument), "A semantic profile is one of");
 
         Assert.Equal(ArbiterSemanticProfiles.All, Backticked(prose));
     }
@@ -28,7 +33,7 @@ public sealed class ConfigurationModelTargetingDocsTests
     [Fact]
     public void DocumentedDifficultyTableAndLadderMatchTierProfiles()
     {
-        string[] lines = Lines();
+        string[] lines = Lines(ConfigurationDocument);
 
         string[] difficulty = Cells(Row(lines, "| `model-targeting.difficulty-profiles.easy`"));
         string expectedDefaults = string.Join(" / ", Difficulties
@@ -40,26 +45,54 @@ public sealed class ConfigurationModelTargetingDocsTests
     }
 
     [Fact]
-    public void DocumentedYamlExampleMatchesTierProfiles()
+    public void BothModelTargetingKeyRowsAreRefusedWithConfig012()
     {
-        string[] lines = Lines();
-        int start = Array.FindIndex(lines, line => line.Trim() == "difficulty-profiles:");
-        Assert.True(start >= 0, "The savings keys example must show difficulty-profiles.");
+        string[] lines = Lines(ConfigurationDocument);
 
-        for (int index = 0; index < Difficulties.Length; index++)
-        {
-            string difficulty = Difficulties[index];
-            Assert.Equal(
-                $"{difficulty}: {TierProfiles.Default.DifficultyProfiles[difficulty]}",
-                lines[start + 1 + index].Trim());
-        }
-
-        Assert.Equal(
-            $"ladder: [{string.Join(", ", TierProfiles.Default.Ladder)}]",
-            lines[start + 1 + Difficulties.Length].Trim());
+        Assert.Equal("`KW-ARB-CONFIG-012`", Cells(Row(lines, "| `model-targeting.difficulty-profiles.easy`"))[4]);
+        Assert.Equal("`KW-ARB-CONFIG-012`", Cells(Row(lines, "| `model-targeting.ladder`"))[4]);
     }
 
-    private static string[] Lines() => Corpus.ReadText(Document).Split('\n');
+    [Fact]
+    public void SavingsKeyExampleLeavesOutTheRefusedTableAndLadder()
+    {
+        string[] lines = Lines(ConfigurationDocument);
+
+        Assert.DoesNotContain(lines, line => line.Trim() == "difficulty-profiles:");
+        Assert.DoesNotContain(lines, line => line.TrimStart().StartsWith("ladder:", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public void ArchitectureStatesTheShippedTableAndRefusesBothHostKeys()
+    {
+        string prose = ParagraphContaining(Corpus.ReadText(ArchitectureDocument), "the shipped table maps");
+
+        Assert.Contains(ShippedTable(), prose, StringComparison.Ordinal);
+        Assert.Contains($"the shipped ladder is {ShippedLadder()}", prose, StringComparison.Ordinal);
+        Assert.Contains("`model-targeting.difficulty-profiles`", prose, StringComparison.Ordinal);
+        Assert.Contains("`model-targeting.ladder`", prose, StringComparison.Ordinal);
+        Assert.Contains("refused", prose, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void RuleReferenceConfig012RowStatesTheShippedTableAndBothRefusedKeys()
+    {
+        string row = Row(Lines(RuleReferenceDocument), "| `KW-ARB-CONFIG-012`");
+
+        Assert.Contains(ShippedTable(), row, StringComparison.Ordinal);
+        Assert.Contains(ShippedLadder(), row, StringComparison.Ordinal);
+        Assert.Contains("`model-targeting.difficulty-profiles`", row, StringComparison.Ordinal);
+        Assert.Contains("`model-targeting.ladder`", row, StringComparison.Ordinal);
+        Assert.Contains("refused", row, StringComparison.Ordinal);
+    }
+
+    private static string ShippedTable() => string.Join(", ", Difficulties
+        .Select(difficulty => $"`{difficulty}` to `{TierProfiles.Default.DifficultyProfiles[difficulty]}`"));
+
+    private static string ShippedLadder() =>
+        $"`{string.Join("`, `", TierProfiles.Default.Ladder)}`";
+
+    private static string[] Lines(string document) => Corpus.ReadText(document).Split('\n');
 
     private static string Row(string[] lines, string prefix) =>
         Assert.Single(lines, line => line.StartsWith(prefix, StringComparison.Ordinal));

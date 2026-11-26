@@ -1471,40 +1471,15 @@ public static class ArbiterConfigLoader
                 $"hard: {TierProfiles.Default.DifficultyProfiles["hard"]}.");
         }
 
-        IReadOnlyList<string> ladder = section.Ladder is null ? defaults.Ladder : ValidateLadder(section.Ladder);
-        return new ArbiterModelTargetingConfig(mode, difficulty, ladder);
-    }
-
-    /// <summary>Checks a ladder is non-empty, repeats no profile, and names only semantic profiles.</summary>
-    private static IReadOnlyList<string> ValidateLadder(List<string> ladder)
-    {
-        string example = $"[{string.Join(", ", TierProfiles.Default.Ladder)}]";
-        if (ladder.Count == 0)
+        if (section.Ladder is not null)
         {
             throw new YamlException(
-                $"[{RuleValidator.LadderInvalid}] arbiter.model-targeting.ladder is empty. List the profiles cheapest first, e.g. {example}.");
+                $"[{RuleValidator.ModelTargetingInvalid}] arbiter.model-targeting.ladder is not read: " +
+                "the shipped developer tiers fix the ladder. Remove the key. " +
+                $"The shipped ladder is {string.Join(", ", TierProfiles.Default.Ladder)}.");
         }
 
-        HashSet<string> seen = new(StringComparer.Ordinal);
-        foreach (string profile in ladder)
-        {
-            if (!ArbiterSemanticProfiles.All.Contains(profile, StringComparer.Ordinal))
-            {
-                string? nearest = StringDistance.Nearest(profile, ArbiterSemanticProfiles.All);
-                string hint = nearest is null ? string.Empty : $" Did you mean '{nearest}'?";
-                throw new YamlException(
-                    $"[{RuleValidator.LadderInvalid}] arbiter.model-targeting.ladder names '{profile}', which is not a profile name. " +
-                    $"List profile names, not model tokens, e.g. {example}.{hint}");
-            }
-
-            if (!seen.Add(profile))
-            {
-                throw new YamlException(
-                    $"[{RuleValidator.LadderInvalid}] arbiter.model-targeting.ladder names '{profile}' more than once. Each profile appears once, e.g. {example}.");
-            }
-        }
-
-        return [.. ladder];
+        return new ArbiterModelTargetingConfig(mode, difficulty, defaults.Ladder);
     }
 
     private static ArbiterStoresConfig MergeStores(ArbiterStoresConfig defaults, ArbiterStoresYaml? section)
