@@ -14,8 +14,10 @@ using Microsoft.Extensions.DependencyInjection.Extensions;
 using Microsoft.Extensions.Time.Testing;
 using Spectre.Console;
 using Spectre.Console.Testing;
-using KyberWeave.Cli.Update;
 using KyberWeave.Contracts.Services;
+using KyberWeave.Application.Update;
+using KyberWeave.Data.Update;
+using KyberWeave.Domain.Update;
 
 namespace KyberWeave.Testing.Update;
 

@@ -1,8 +1,6 @@
 using KyberWeave.Core;
 using System.ComponentModel;
 using System.Globalization;
-using KyberWeave.Cli.Commands.Review;
-using KyberWeave.Cli.Commands.Squad.Infrastructure;
 using KyberWeave.Contracts.Paths;
 using KyberWeave.Contracts.Repositories;
 using KyberWeave.Contracts.Services;

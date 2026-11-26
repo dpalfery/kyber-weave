@@ -1,10 +1,10 @@
 using System.Security.Cryptography;
-using KyberWeave.Cli.Commands.Utilities;
 using KyberWeave.Contracts.Paths;
 using KyberWeave.Contracts.Repositories;
 using KyberWeave.Contracts.Services;
 using KyberWeave.Core.Squad.Deployment;
 using KyberWeave.Domain.StatusLine;
+using KyberWeave.Application.StatusLine;
 
 namespace KyberWeave.Application.Utilities;
 

@@ -1,9 +1,9 @@
 using KyberWeave.Testing.Update;
 using System.Diagnostics;
-using KyberWeave.Cli.Update;
 using KyberWeave.Contracts.Repositories;
 using KyberWeave.Core.Processes;
 using Xunit;
+using KyberWeave.Domain.Update;
 
 namespace KyberWeave.Integration.Tests.Contracts;
 
@@ -73,7 +73,7 @@ public sealed class SelfUpdateSystemContractTests : IDisposable
         string archive = Path.Combine(_root, "hostile.tar.gz");
         _files.WriteAllBytes(archive, ReleaseArchiveBuilder.TarGz(new ReleaseArchiveEntry("../escaped", "pwned")));
 
-        _ = Assert.Throws<KyberWeave.Cli.Update.SelfUpdateException>(
+        _ = Assert.Throws<KyberWeave.Domain.Update.SelfUpdateException>(
             () => _system.ExtractArchive(archive, Path.Combine(_root, "extract"), windows: false));
 
         Assert.False(File.Exists(Path.Combine(_root, "escaped")));

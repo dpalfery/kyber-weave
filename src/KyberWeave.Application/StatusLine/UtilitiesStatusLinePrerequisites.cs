@@ -1,6 +1,6 @@
 using KyberWeave.Domain.StatusLine;
 
-namespace KyberWeave.Cli.Commands.Utilities;
+namespace KyberWeave.Application.StatusLine;
 
 /// <summary>One runtime prerequisite a status-line variant declares, and how to remedy its absence.</summary>
 /// <param name="Executable">The executable name doctor looks for on <c>PATH</c>.</param>

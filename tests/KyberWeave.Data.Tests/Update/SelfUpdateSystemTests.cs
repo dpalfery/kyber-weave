@@ -1,11 +1,12 @@
 using System.Diagnostics;
 using System.Formats.Tar;
-using KyberWeave.Cli.Update;
 using KyberWeave.Core.Processes;
 using KyberWeave.Testing.Update;
 using KyberWeave.Tests.Fakes;
 using KyberWeave.Tests.FileSystem;
 using Xunit;
+using KyberWeave.Data.Update;
+using KyberWeave.Domain.Update;
 
 namespace KyberWeave.Tests;
 

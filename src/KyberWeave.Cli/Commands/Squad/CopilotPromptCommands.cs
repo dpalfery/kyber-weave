@@ -11,6 +11,7 @@ using KyberWeave.Domain.CopilotPrompt;
 using KyberWeave.Kernel.FileSystem;
 using Spectre.Console;
 using Spectre.Console.Cli;
+using KyberWeave.Application.Arbiter;
 
 namespace KyberWeave.Cli.Commands.Squad;
 

@@ -354,7 +354,7 @@ public sealed class KwSkillCatalog : IKwSkillCatalog
         string listFile = $"the {scope} skills list";
         if (!KwSkillNames.IsValid(name) || !Names().Contains(name, StringComparer.Ordinal))
         {
-            problems.Add(new KwSkillProblem(listFile, $"{DocSpecValidator.SkillListMalformed}: '{name}' is not a skill in either pool."));
+            problems.Add(new KwSkillProblem(listFile, $"{DocSpecValidator.SkillListUnknownName}: '{name}' is not a skill in either pool."));
             return;
         }
 

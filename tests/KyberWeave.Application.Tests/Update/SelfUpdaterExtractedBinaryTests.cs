@@ -1,7 +1,7 @@
-using KyberWeave.Cli.Update;
 using KyberWeave.Tests.Fakes;
 using KyberWeave.Tests.FileSystem;
 using Xunit;
+using KyberWeave.Application.Update;
 
 namespace KyberWeave.Application.Tests.Update;
 

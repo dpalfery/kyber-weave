@@ -2,7 +2,7 @@ using KyberWeave.Core;
 using KyberWeave.Core.Processes;
 using KyberWeave.Core.Review;
 
-namespace KyberWeave.Cli.Commands.Review;
+namespace KyberWeave.Application.Review;
 
 /// <summary>
 ///     The lines a developer's task-gate run ends with: the one next step, and on a passing verification run the

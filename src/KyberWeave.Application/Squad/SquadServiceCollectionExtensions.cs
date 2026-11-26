@@ -1,7 +1,5 @@
 using KyberWeave.Application.Squad.Packaging;
 using KyberWeave.Application.Update;
-using KyberWeave.Cli.Commands.Squad.Infrastructure;
-using KyberWeave.Cli.Update;
 using KyberWeave.Contracts.Host;
 using KyberWeave.Contracts.Paths;
 using KyberWeave.Contracts.Repositories;
@@ -17,6 +15,9 @@ using KyberWeave.Data.Host;
 using KyberWeave.Domain.CopilotPrompt;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
+using KyberWeave.Application.Squad.Release;
+using KyberWeave.Data.Squad.Release;
+using KyberWeave.Domain.Update;
 
 namespace KyberWeave.Application.Squad;
 

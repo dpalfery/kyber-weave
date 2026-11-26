@@ -1,5 +1,6 @@
 using KyberWeave.Tests.Corpus;
 using Xunit;
+using KyberWeave.Application.Arbiter;
 
 namespace KyberWeave.Tests;
 

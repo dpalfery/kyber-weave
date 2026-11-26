@@ -8,6 +8,7 @@ using KyberWeave.Core.Squad.Rendering;
 using KyberWeave.Data.Hooks;
 using KyberWeave.Data.Host;
 using KyberWeave.Data.Paths;
+using KyberWeave.Data.Squad.Packaging;
 
 namespace KyberWeave.Testing.Squad;
 

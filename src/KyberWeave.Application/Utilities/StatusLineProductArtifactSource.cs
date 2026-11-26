@@ -1,7 +1,7 @@
-using KyberWeave.Cli.Commands.Utilities;
 using KyberWeave.Contracts.Paths;
 using KyberWeave.Contracts.Repositories;
 using KyberWeave.Domain.StatusLine;
+using KyberWeave.Application.StatusLine;
 
 namespace KyberWeave.Application.Utilities;
 

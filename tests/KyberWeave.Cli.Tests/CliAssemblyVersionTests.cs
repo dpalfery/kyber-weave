@@ -1,7 +1,7 @@
 using KyberWeave.Cli;
 using KyberWeave.Cli.Commands.Squad;
-using KyberWeave.Cli.Update;
 using Xunit;
+using KyberWeave.Application.Update;
 
 namespace KyberWeave.Tests;
 

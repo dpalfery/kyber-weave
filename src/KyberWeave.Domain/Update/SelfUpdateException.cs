@@ -1,4 +1,4 @@
-namespace KyberWeave.Cli.Update;
+namespace KyberWeave.Domain.Update;
 
 /// <summary>An operator-facing failure while resolving or replacing Release binaries.</summary>
 public sealed class SelfUpdateException : Exception

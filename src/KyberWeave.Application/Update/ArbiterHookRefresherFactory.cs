@@ -1,7 +1,7 @@
 using KyberWeave.Contracts.Repositories;
 using KyberWeave.Contracts.Services;
 
-namespace KyberWeave.Cli.Update;
+namespace KyberWeave.Application.Update;
 
 /// <summary>Creates the in-process arbiter hook refresher over the container's ports.</summary>
 /// <param name="environment">Reads the home directory and the variables that locate a harness's global hook file.</param>

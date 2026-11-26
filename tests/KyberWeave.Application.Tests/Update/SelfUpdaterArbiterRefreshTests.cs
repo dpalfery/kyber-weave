@@ -1,7 +1,6 @@
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json.Nodes;
-using KyberWeave.Cli.Update;
 using KyberWeave.Contracts.Repositories;
 using KyberWeave.Core.Processes;
 using KyberWeave.Core.Squad.Deployment;
@@ -10,6 +9,8 @@ using KyberWeave.Data.Configuration;
 using KyberWeave.Testing.Update;
 using KyberWeave.Tests.Fakes;
 using Xunit;
+using KyberWeave.Application.Update;
+using KyberWeave.Domain.Update;
 
 namespace KyberWeave.Application.Tests.Update;
 

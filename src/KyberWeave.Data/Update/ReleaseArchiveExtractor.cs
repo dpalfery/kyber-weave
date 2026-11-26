@@ -1,8 +1,9 @@
 using System.Formats.Tar;
 using System.IO.Compression;
 using KyberWeave.Contracts.Repositories;
+using KyberWeave.Domain.Update;
 
-namespace KyberWeave.Cli.Update;
+namespace KyberWeave.Data.Update;
 
 /// <summary>Extracts a downloaded release archive into a fresh directory, writing only where the planner allows.</summary>
 /// <remarks>

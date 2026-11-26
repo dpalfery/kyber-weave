@@ -3,6 +3,7 @@ using KyberWeave.Cli;
 using KyberWeave.Cli.Commands.Squad;
 using KyberWeave.Cli.Commands.Squad.Infrastructure;
 using KyberWeave.Core.Processes;
+using KyberWeave.Contracts.Repositories;
 
 namespace KyberWeave.Tests.Fakes;
 

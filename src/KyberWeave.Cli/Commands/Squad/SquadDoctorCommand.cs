@@ -16,6 +16,7 @@ using KyberWeave.Core.Squad.Validation;
 using Spectre.Console;
 using Spectre.Console.Cli;
 using KyberWeave.Core.FileSystem;
+using KyberWeave.Application.Arbiter;
 
 namespace KyberWeave.Cli.Commands.Squad;
 

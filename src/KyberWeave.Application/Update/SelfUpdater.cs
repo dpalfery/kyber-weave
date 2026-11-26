@@ -7,8 +7,9 @@ using KyberWeave.Arbiter.Hooks;
 using KyberWeave.Contracts.Paths;
 using KyberWeave.Contracts.Repositories;
 using KyberWeave.Core.Processes;
+using KyberWeave.Domain.Update;
 
-namespace KyberWeave.Cli.Update;
+namespace KyberWeave.Application.Update;
 
 /// <summary>
 /// Resolves a GitHub Release and replaces the running CLI (and sibling MCP) in place.

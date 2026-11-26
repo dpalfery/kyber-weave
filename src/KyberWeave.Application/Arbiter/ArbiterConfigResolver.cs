@@ -8,7 +8,7 @@ using KyberWeave.Core.Diagnostics;
 using KyberWeave.Core.FileSystem;
 using YamlDotNet.Core;
 
-namespace KyberWeave.Cli.Commands.Arbiter;
+namespace KyberWeave.Application.Arbiter;
 
 /// <summary>Resolves the Arbiter configuration over the registered user settings, environment and file system.</summary>
 /// <param name="userSettings">Applies the user override to the repository provider.</param>

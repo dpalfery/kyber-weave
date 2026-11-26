@@ -3,6 +3,7 @@ using KyberWeave.Data.Host;
 using KyberWeave.Data.Hooks;
 using KyberWeave.Data.Paths;
 using KyberWeave.Testing.Squad;
+using KyberWeave.Application.Squad.Release;
 
 namespace KyberWeave.Tests.Fakes;
 

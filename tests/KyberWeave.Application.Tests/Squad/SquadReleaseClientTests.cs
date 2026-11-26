@@ -12,6 +12,7 @@ using KyberWeave.Tests.Fakes;
 using KyberWeave.Tests.FileSystem;
 using Xunit;
 using Xunit.Sdk;
+using KyberWeave.Contracts.Repositories;
 
 namespace KyberWeave.Tests;
 

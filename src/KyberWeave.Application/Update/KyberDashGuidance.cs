@@ -1,6 +1,6 @@
 using KyberWeave.Arbiter.Hooks;
 
-namespace KyberWeave.Cli.Update;
+namespace KyberWeave.Application.Update;
 
 /// <summary>
 ///     Reads the guidance that KyberDash prints from its capture-plugin verb. KyberDash owns the wording

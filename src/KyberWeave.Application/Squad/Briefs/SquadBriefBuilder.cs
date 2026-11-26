@@ -8,6 +8,7 @@ using KyberWeave.Core.Docs;
 using KyberWeave.Core.Docs.Closeout;
 using KyberWeave.Core.FileSystem;
 using KyberWeave.Core.Squad.Deployment;
+using KyberWeave.Application.Arbiter;
 
 namespace KyberWeave.Core.Squad.Briefs;
 

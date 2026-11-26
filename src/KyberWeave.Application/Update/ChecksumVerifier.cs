@@ -1,4 +1,6 @@
-namespace KyberWeave.Cli.Update;
+using KyberWeave.Domain.Update;
+
+namespace KyberWeave.Application.Update;
 
 /// <summary>
 /// Looks up an archive's SHA-256 by exact filename in a <c>sha256sum</c> listing.

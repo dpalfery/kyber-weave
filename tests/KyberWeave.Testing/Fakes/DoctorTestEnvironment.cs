@@ -21,7 +21,7 @@ internal static class DoctorTestEnvironment
     internal static KyberWeave.Cli.Commands.Doctor.DoctorCommand Command(
         bool terminal,
         Func<string, string?> read,
-        KyberWeave.Cli.Commands.Squad.Infrastructure.IProcessExecutor executor,
+        KyberWeave.Contracts.Repositories.IProcessExecutor executor,
         string mcpExecutable) =>
         DoctorTestServices.Command(Create(terminal, read), executor, mcpExecutable);
 }

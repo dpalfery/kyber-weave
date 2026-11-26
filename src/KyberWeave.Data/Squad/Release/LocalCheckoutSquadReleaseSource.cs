@@ -1,7 +1,7 @@
 using KyberWeave.Contracts.Repositories;
 using KyberWeave.Core.Squad.Release;
 
-namespace KyberWeave.Cli.Commands.Squad.Infrastructure;
+namespace KyberWeave.Data.Squad.Release;
 
 /// <summary>Stages a local kyber-squad checkout as the release source in place of a download.</summary>
 /// <remarks>

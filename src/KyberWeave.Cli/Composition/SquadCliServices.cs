@@ -1,6 +1,5 @@
 using KyberWeave.Cli.Commands.Squad;
 using KyberWeave.Cli.Commands.Squad.Infrastructure;
-using KyberWeave.Cli.Update;
 using KyberWeave.Contracts.Host;
 using KyberWeave.Contracts.Paths;
 using KyberWeave.Contracts.Repositories;
@@ -13,6 +12,7 @@ using KyberWeave.Data.Host;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
 using Spectre.Console;
+using KyberWeave.Domain.Update;
 
 namespace KyberWeave.Cli.Composition;
 

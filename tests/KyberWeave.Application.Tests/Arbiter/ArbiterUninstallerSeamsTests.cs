@@ -4,6 +4,7 @@ using KyberWeave.Core.Squad.Deployment;
 using KyberWeave.Tests.Fakes;
 using KyberWeave.Tests.FileSystem;
 using Xunit;
+using KyberWeave.Application.Arbiter;
 
 namespace KyberWeave.Application.Tests.Arbiter;
 

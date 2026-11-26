@@ -1,6 +1,6 @@
 using KyberWeave.Domain.StatusLine;
 
-namespace KyberWeave.Cli.Commands.Utilities;
+namespace KyberWeave.Application.StatusLine;
 
 /// <summary>Maps the CLI's harness tokens to the four status-line targets this slice keeps.</summary>
 /// <remarks>
