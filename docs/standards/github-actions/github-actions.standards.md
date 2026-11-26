@@ -5,7 +5,7 @@ doc-type: coding-standard
 status: current
 technology: github-actions
 owner: dpalfery
-last-reviewed: 2026-11-22
+last-reviewed: 2026-11-26
 ---
 
 # GitHub Actions coding standard
@@ -94,8 +94,10 @@ policy test already enforce are named by the test, not restated as prose.
 
 `trivy`, `semgrep` and `gitleaks` carry `continue-on-error: true`, still upload their SARIF, and
 read as "(advisory)" in the summary table. They are the only jobs that do. **`continue-on-error`
-appears nowhere else**: a blocking step that can fail silently makes the reviewer re-check by hand
-what the workflow was supposed to check. A disabled test or scan needs a linked issue and a date.
+appears nowhere else**, with one stated exception: the receipt save, which is miss-only and whose
+failure mode is the next run re-executing ([Receipts and skips](#receipts-and-skips)). A blocking
+step that can fail silently makes the reviewer re-check by hand what the workflow was supposed to
+check. A disabled test or scan needs a linked issue and a date.
 
 ### Determinism
 
@@ -116,7 +118,8 @@ what the workflow was supposed to check. A disabled test or scan needs a linked 
 The workflow YAML is a test subject in
 [`tests/KyberWeave.RepoPolicy.Tests/`](../../../tests/KyberWeave.RepoPolicy.Tests/AGENTS.md):
 `ReviewGateWorkflowTemplateTests`, `ReviewGateFullSuiteConfigTests`,
-`ReleaseTests`, `ReleaseNotesTests` and `SbomTests` read it. They run as the `test-policy` gate,
+`ReleaseTests`, `ReleaseNotesTests`, `SbomTests`, `CiContentHashSkipTests` and
+`ReleaseReceiptSkipTests` read it. They run as the `test-policy` gate,
 which selects on the same paths as `build`.
 
 - An edit to a workflow that one of them reads runs that class by name before the change is
@@ -139,7 +142,9 @@ which selects on the same paths as `build`.
   creates tags, it does not move them.
 - nuget.org is forbidden, as both workflow headers state. GitHub Release, GitHub Packages and
   Homebrew are the distribution paths.
-- A release job is safe to re-run against the same tag.
+- A release job is safe to re-run against the same tag: a fresh chain receipt makes the build jobs
+  skip and the publish jobs verify the published state instead of publishing again
+  ([Receipts and skips](#receipts-and-skips)).
 
 ### Timeouts, caches and leftovers
 
@@ -151,6 +156,74 @@ which selects on the same paths as `build`.
   workflow itself.** The repository's former watchdog helper for this (`scripts/proc-guard.sh
   check-leftovers`) is retired, so a job that starts a server, a watcher or a browser states its
   bound in the step's own timeout and cleans up in an `if: always()` step.
+
+### Receipts and skips
+
+A **receipt** is a JSON record a job writes after it passes, holding the fingerprint of every input
+it read and the epoch second it was written. A later run restores it under a key that contains that
+fingerprint, validates it, and skips the job's work only when the receipt is this tree's and still
+fresh. `ci.yml` keeps one per job; `release.yml` keeps one for the whole release chain. The
+mechanism is described in
+[the CI runbook](../../ci-pipelines/workflows-runbook.md#content-hash-receipts-and-skips); these
+are the rules a workflow edit has to keep.
+
+- **Three eligibility conditions.** A job may carry a receipt only when all three hold: its result
+  is a function of the tracked tree, so the same tracked inputs give the same verdict; its skip is
+  invisible to the required check, so the skip happens inside the job and `CI Summary` still reads a
+  success; and its work has no external side effect that a repeat would duplicate. A job the
+  `changes` path filter decides never carries one, and no job-level `if:` ever reads a receipt. A
+  job whose work publishes skips the publication and verifies the published state instead — the
+  release chain's two publish jobs are the model.
+- **A receipt's age bounds the skip, and the ceiling is one variable.** `RECEIPT_MAX_AGE_SECONDS`
+  is declared once, at workflow level, and is `14400` — four hours — in both workflows; no job
+  overrides it. A re-run inside the ceiling skips — on the same tracked inputs for a CI job, on the
+  same version for the release chain — and a later one re-executes. Never put an age, a week or a
+  verdict value into a cache key: then the ceiling could only be tightened by invalidating every
+  key.
+- **The fingerprint enumeration names every tracked top-level entry.** Directories as `<dir>/**`,
+  root files by exact name, no bare root glob (`'*'`, `'.*'`, `'**'`, `'**/*'`). A glob hashes the
+  same files without proving the list complete, and a missing entry is a silent skip — the job
+  would reuse a receipt from a run that never read the file. A narrower set belongs only to a job
+  that reads fewer inputs, and it must still cover every alternation of the `changes` filter that
+  selects that job.
+- **The enumeration stays pinned by its policy test.** `CiContentHashSkipTests` compares the
+  whole-tree set against `git ls-tree HEAD`; `ReleaseReceiptSkipTests` pins the chain key, the
+  gated steps, the miss-only save and the fail-closed hit path. A new top-level entry, a new job or
+  a new `changes` alternation fails them until the enumeration or the job list is updated, and the
+  new case is added to the test in the same change that needs it.
+- **The CI verdict validates the receipt before it trusts it.** A cache entry is data, not proof.
+  The verdict requires the file to exist, to parse as JSON, to carry `saved_at_epoch` and
+  `input_hash`, to have an epoch in digits only, not dated in the future, and to carry this run's
+  fingerprint — and only then compares the age against the ceiling. Every failure path runs the job
+  in full and writes its own line to the step summary naming why. The release chain's verdict is
+  simpler because its key is already bound to one version: the file must exist, `saved_at_epoch`
+  must be digits, and the age must be at or under the ceiling.
+- **Every receipt script declares `shell: bash`.** The Windows legs default to `pwsh`, where
+  `date +%s` and integer arithmetic over the epoch do not work as written.
+- **The key is exact, and carries no `restore-keys`.** `receipt-<job>-<leg>-<hash>`, with the leg
+  the matrix dimension the job varies on, or one shared `release-chain-<version>` for a chain. A
+  near-miss restore would let a receipt skip work over input it never fingerprinted.
+- **A save happens only on a miss, and `ci.yml` also requires the same repository.** In `ci.yml`
+  the save and the attestation steps carry `github.event_name != 'pull_request' ||
+  github.event.pull_request.head.repo.full_name == github.repository`, so a fork writes neither a
+  receipt nor an attestation into the base repository. `release.yml` runs only on a tag push or a
+  manual dispatch, so it needs no such guard. In both workflows the save is unreachable on a hit,
+  so a hit never refreshes the age. A pull request's saves are scoped to that pull request; only
+  default-branch runs populate the scope every workflow and branch can read.
+- **A miss-only save is failure-tolerant, and that is the one `continue-on-error` exception.** The
+  receipt-writing step and its `actions/cache/save` both carry `continue-on-error: true` in
+  `ci.yml`, and the release chain's save step carries it too, because two runs can race for one
+  cache key and a save that loses must not fail a job that was green; losing it only means the next
+  run re-executes. The exception is fail-open; an advisory marker is not, and no blocking step
+  gains the flag to hide a failure.
+- **In `ci.yml`, only a build product is attested, in provenance mode, by a job that mints a
+  token.** `actions/attest` there takes `subject-path` and nothing else — no `sbom-path`, no
+  `predicate` — so it binds the product to the workflow's identity. A job that attests declares
+  `id-token: write`, `attestations: write` and `artifact-metadata: write`, with a comment naming
+  why, and a job that mints a token must attest. Test reports and SARIF files are digested into the
+  receipt and never attested. The release workflow has the other shape: `attest-sbom` mints
+  SBOM-predicate attestations with `sbom-path`, plus one provenance attestation over every
+  archive.
 
 ### Build diagnostics
 
@@ -257,7 +330,8 @@ actionlint .github/workflows/<file>.yml
 ```
 
 - **The tests are the policy classes.** `ReviewGateWorkflowTemplateTests`,
-  `ReviewGateFullSuiteConfigTests`, `ReleaseTests`, `ReleaseNotesTests` and `SbomTests` read the
+  `ReviewGateFullSuiteConfigTests`, `ReleaseTests`, `ReleaseNotesTests`, `SbomTests`,
+  `CiContentHashSkipTests` and `ReleaseReceiptSkipTests` read the
   workflow files; a change to one of them runs that class by name, filtered, before the change is
   reported. `test-policy` is the gate that runs the whole class set, and the unfiltered product
   suite stays with the review council and CI.
