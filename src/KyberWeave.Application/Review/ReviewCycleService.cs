@@ -84,7 +84,8 @@ public sealed class ReviewCycleService(
         }
 
         string folder = Path.Combine(reviewFolder, ScratchLayout.CycleFolder(plan.Number));
-        string command = ReviewCycleView.GatesCommand(root, ScratchLayout.CycleGates(task, plan.Number), request.BaseRef);
+        string command = ReviewCycleView.GatesCommand(
+            root, Path.Combine(tree, ScratchLayout.CycleGates(task, plan.Number)), request.BaseRef);
         if (request.Json)
             output.WriteLine(ToJson(tree, plan, folder, recheck, prior.Ignored, liveRun, command));
         else
