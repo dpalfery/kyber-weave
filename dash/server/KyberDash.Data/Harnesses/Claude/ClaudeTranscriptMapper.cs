@@ -251,6 +251,8 @@ public class ClaudeTranscriptMapper : IHarnessMapper
             return;
         }
 
+        Dictionary<string, string> rootByUuid = new(StringComparer.Ordinal);
+        List<string> walked = [];
         foreach (List<ClaudeTranscriptLine> group in rawGroups)
         {
             for (int i = 0; i < group.Count; i++)
@@ -261,20 +263,76 @@ public class ClaudeTranscriptMapper : IHarnessMapper
                     continue;
                 }
 
-                string runId = line.Uuid;
-                ClaudeTranscriptLine current = line;
-                int hops = 0;
-                while (current.ParentUuid is { } parentUuid
-                    && byUuid.TryGetValue(parentUuid, out ClaudeTranscriptLine? parent)
-                    && hops++ < byUuid.Count)
-                {
-                    runId = parent.Uuid!;
-                    current = parent;
-                }
+                string runId = line.ParentUuid is { } parentUuid && byUuid.ContainsKey(parentUuid)
+                    ? ResolveChainRoot(parentUuid, byUuid, rootByUuid, walked) ?? WalkChainRoot(line, byUuid)
+                    : line.Uuid;
 
                 group[i] = line with { AgentId = $"{FallbackSidechainBareId}-{runId}" };
             }
         }
+    }
+
+    /// <summary>
+    /// Finds the root uuid of the chain a line belongs to, caching every uuid it walks past so a run of lines
+    /// costs one walk in total. Returns <see langword="null"/> when the chain loops, which the caller resolves
+    /// with the bounded walk.
+    /// </summary>
+    private static string? ResolveChainRoot(
+        string startUuid,
+        Dictionary<string, ClaudeTranscriptLine> byUuid,
+        Dictionary<string, string> rootByUuid,
+        List<string> walked)
+    {
+        walked.Clear();
+        string uuid = startUuid;
+        string root;
+        while (true)
+        {
+            if (rootByUuid.TryGetValue(uuid, out string? cached))
+            {
+                root = cached;
+                break;
+            }
+
+            if (walked.Count >= byUuid.Count)
+            {
+                return null;
+            }
+
+            walked.Add(uuid);
+            ClaudeTranscriptLine node = byUuid[uuid];
+            if (node.ParentUuid is { } next && byUuid.ContainsKey(next))
+            {
+                uuid = next;
+                continue;
+            }
+
+            root = uuid;
+            break;
+        }
+
+        foreach (string walkedUuid in walked)
+        {
+            rootByUuid[walkedUuid] = root;
+        }
+
+        return root;
+    }
+
+    private static string WalkChainRoot(ClaudeTranscriptLine line, Dictionary<string, ClaudeTranscriptLine> byUuid)
+    {
+        string runId = line.Uuid!;
+        ClaudeTranscriptLine current = line;
+        int hops = 0;
+        while (current.ParentUuid is { } parentUuid
+            && byUuid.TryGetValue(parentUuid, out ClaudeTranscriptLine? parent)
+            && hops++ < byUuid.Count)
+        {
+            runId = parent.Uuid!;
+            current = parent;
+        }
+
+        return runId;
     }
 
     private static bool IsAgentLessSidechain(ClaudeTranscriptLine line) =>

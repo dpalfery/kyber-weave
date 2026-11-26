@@ -853,6 +853,38 @@ public class ClaudeTranscriptMapperTests
     }
 
     [Fact]
+    public void Map_ResolvesLongAgentLessSidechainChainsToTheirFirstLineAndKeepsDistinctChainsApart()
+    {
+        const int chainLength = 4_000;
+        static string Line(string uuid, string? parentUuid, int sequence)
+        {
+            string parent = parentUuid is null ? "null" : $"\"{parentUuid}\"";
+            string timestamp = new DateTimeOffset(2026, 11, 19, 13, 0, 0, TimeSpan.Zero).AddSeconds(sequence).ToString("yyyy-MM-ddTHH:mm:ss.fffZ", System.Globalization.CultureInfo.InvariantCulture);
+            return $"{{\"type\":\"assistant\",\"uuid\":\"{uuid}\",\"parentUuid\":{parent},\"sessionId\":\"sess-long\",\"isSidechain\":true,\"timestamp\":\"{timestamp}\",\"message\":{{\"id\":\"msg-{uuid}\",\"role\":\"assistant\",\"model\":\"claude-sonnet-4-5\",\"content\":[{{\"type\":\"text\",\"text\":\"line {uuid}\"}}],\"usage\":{{\"input_tokens\":5,\"output_tokens\":2}}}}}}";
+        }
+
+        List<string> lines = [];
+        for (int i = 0; i < chainLength; i++)
+        {
+            lines.Add(Line($"long-{i}", i == 0 ? null : $"long-{i - 1}", lines.Count));
+            if (i < 3)
+            {
+                lines.Add(Line($"short-{i}", i == 0 ? null : $"short-{i - 1}", lines.Count));
+            }
+        }
+
+        CollectedBatch batch = CreateMapper().Map(
+            CreateUnit("/tmp/.claude/projects/repo/sess-long.jsonl", string.Join('\n', lines)),
+            ImportedAt);
+
+        Assert.Equal(chainLength + 3, batch.Records.Count);
+        string[] keys = [.. batch.Sessions.Select(static s => s.SessionKey).Order(StringComparer.Ordinal)];
+        Assert.Equal(["sess-long#agent-sidechain-long-0", "sess-long#agent-sidechain-short-0"], keys);
+        Assert.Equal(chainLength, batch.Records.Count(static r => string.Equals(r.SessionKey, "sess-long#agent-sidechain-long-0", StringComparison.Ordinal)));
+        Assert.Equal(3, batch.Records.Count(static r => string.Equals(r.SessionKey, "sess-long#agent-sidechain-short-0", StringComparison.Ordinal)));
+    }
+
+    [Fact]
     public void Map_DoesNotMergeUsageLessSidechainTailIntoParentSessionTurn()
     {
         string sidechainTailJsonl = string.Join('\n',
