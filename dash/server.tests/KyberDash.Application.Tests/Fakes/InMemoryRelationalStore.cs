@@ -7863,22 +7863,8 @@ public class InMemoryRelationalStore :
         return text[..cut];
     }
 
-    private static bool ParseDescendingOrder(string order)
-    {
-        ArgumentException.ThrowIfNullOrWhiteSpace(order);
-        string trimmed = order.Trim();
-        if (string.Equals(trimmed, "desc", StringComparison.OrdinalIgnoreCase))
-        {
-            return true;
-        }
-
-        if (string.Equals(trimmed, "asc", StringComparison.OrdinalIgnoreCase))
-        {
-            return false;
-        }
-
-        throw new ArgumentException($"Sort order '{order}' must be 'desc' or 'asc'.", nameof(order));
-    }
+    private static bool ParseDescendingOrder(string order) =>
+        string.Equals(SectionSortOrder.Normalize(order), SectionSortOrder.Descending, StringComparison.Ordinal);
 
     private static List<Problem> CollectOrderedSessionProblems(
         StoreState currentState,
