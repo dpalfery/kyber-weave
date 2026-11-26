@@ -535,9 +535,34 @@ public sealed class CommandCodeRendererContractTests
     public void RenderArbiterMod_FiltersOnTheAgentToolAndPassesEveryOtherToolThrough()
     {
         string body = ModBody;
+        string flat = string.Concat(body.Split('\n').Select(line => line.Trim()));
 
-        Assert.Contains("toolName !== \"agent\"", body, StringComparison.Ordinal);
-        Assert.Contains("return undefined", body, StringComparison.Ordinal);
+        // The whole guard shape, so a mod that blocked or evaluated a non-agent tool fails here:
+        // the hook opens, the guard tests the tool name, and the guard's body is exactly the
+        // pass-through return.
+        Assert.Contains(
+            "beforeToolCall: ({ toolName, input, toolCallId }, ctx) => {if (toolName !== \"agent\") {return undefined;}",
+            flat,
+            StringComparison.Ordinal);
+        Assert.Contains(
+            "afterToolCall: ({ toolName, input, toolCallId, result, isError }, ctx) => {if (toolName !== \"agent\") {return undefined;}",
+            flat,
+            StringComparison.Ordinal);
+        // The two no-input allow paths return undefined too; only the two guards and those paths may.
+        Assert.Equal(4, CountOccurrences(body, "return undefined"));
+    }
+
+    private static int CountOccurrences(string haystack, string needle)
+    {
+        int count = 0;
+        int index = haystack.IndexOf(needle, StringComparison.Ordinal);
+        while (index >= 0)
+        {
+            count++;
+            index = haystack.IndexOf(needle, index + needle.Length, StringComparison.Ordinal);
+        }
+
+        return count;
     }
 
     [Fact]
