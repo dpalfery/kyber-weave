@@ -147,7 +147,7 @@ public sealed class ArbiterHookDecisionEngine : IContextualHookDecisionEngine, I
     /// <inheritdoc/>
     public HookOutcome DecidePreDispatch(string caller, string? target, string prompt, KyberWeaveConfig config) =>
         DecidePreDispatch(
-            "claude",
+            HarnessRegistry.ClaudeToken,
             caller,
             target,
             prompt,
@@ -157,7 +157,7 @@ public sealed class ArbiterHookDecisionEngine : IContextualHookDecisionEngine, I
     /// <inheritdoc/>
     public HookOutcome DecidePostDispatch(string caller, string? target, string toolOutput, KyberWeaveConfig config) =>
         DecidePostDispatch(
-            "claude",
+            HarnessRegistry.ClaudeToken,
             caller,
             target,
             string.Empty,

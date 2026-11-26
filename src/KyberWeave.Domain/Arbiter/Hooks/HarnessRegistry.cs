@@ -70,6 +70,12 @@ public sealed record HarnessDescriptor
     /// names every sub-agent's caller, so an absent name means the root.
     /// </summary>
     public bool UnnamedCallerIsRoot { get; init; }
+
+    /// <summary>Position in the hooked-target emission order, or null when the harness is not hooked.</summary>
+    public int? HookOrder { get; init; }
+
+    /// <summary>Position in the fallback-only emission order, or null when the harness is not a fallback target.</summary>
+    public int? FallbackOrder { get; init; }
 }
 
 /// <summary>
@@ -91,13 +97,56 @@ public sealed record HarnessDescriptor
 /// </remarks>
 public static class HarnessRegistry
 {
+    /// <summary>The Codex hook token.</summary>
+    public const string CodexToken = "codex";
+
+    /// <summary>The Cursor hook token.</summary>
+    public const string CursorToken = "cursor";
+
+    /// <summary>The Claude Code hook token.</summary>
+    public const string ClaudeToken = "claude";
+
+    /// <summary>The Copilot in VS Code hook token.</summary>
+    public const string CopilotVsCodeToken = "copilot-vscode";
+
+    /// <summary>The Copilot CLI hook token.</summary>
+    public const string CopilotCliToken = "copilot-cli";
+
+    /// <summary>The OpenCode hook token.</summary>
+    public const string OpenCodeToken = "opencode";
+
+    /// <summary>The Kilo hook token.</summary>
+    public const string KiloToken = "kilo";
+
+    /// <summary>The Antigravity hook token.</summary>
+    public const string AntigravityToken = "antigravity";
+
+    /// <summary>The Warp hook token.</summary>
+    public const string WarpToken = "warp";
+
+    /// <summary>The Factory hook token.</summary>
+    public const string FactoryToken = "factory";
+
+    /// <summary>The Pi hook token.</summary>
+    public const string PiToken = "pi";
+
+    /// <summary>The ZCode hook token.</summary>
+    public const string ZCodeToken = "zcode";
+
+    /// <summary>The Devin hook token.</summary>
+    public const string DevinToken = "devin";
+
+    /// <summary>The Command Code hook token.</summary>
+    public const string CommandCodeToken = "commandcode";
+
     /// <summary>Codex, which rewrites its dispatch and takes an advisory post-dispatch result.</summary>
     public static HarnessDescriptor Codex { get; } = new()
     {
-        Token = "codex",
+        Token = CodexToken,
         DisplayName = "Codex",
         SquadTarget = SquadTarget.Codex,
         SquadToken = "codex",
+        HookOrder = 1,
         McpCatalogName = "codex",
         McpClientNames = ["codex-mcp-client"],
         LegacyGlobalPrefix = ".codex/",
@@ -109,10 +158,11 @@ public static class HarnessRegistry
     /// <summary>Cursor CLI, which rewrites its dispatch and takes an advisory post-dispatch result.</summary>
     public static HarnessDescriptor Cursor { get; } = new()
     {
-        Token = "cursor",
+        Token = CursorToken,
         DisplayName = "Cursor",
         SquadTarget = SquadTarget.Cursor,
         SquadToken = "cursor",
+        HookOrder = 3,
         McpCatalogName = "cursor",
         McpClientNames = ["Cursor"],
         LegacyGlobalPrefix = ".cursor/",
@@ -124,10 +174,11 @@ public static class HarnessRegistry
     /// <summary>Claude Code, a trusted harness whose frontmatter hooks render per agent.</summary>
     public static HarnessDescriptor Claude { get; } = new()
     {
-        Token = "claude",
+        Token = ClaudeToken,
         DisplayName = "Claude",
         SquadTarget = SquadTarget.Claude,
         SquadToken = "claude",
+        HookOrder = 0,
         McpCatalogName = "claude-code",
         McpClientNames = ["claude-code"],
         LegacyGlobalPrefix = ".claude/",
@@ -139,11 +190,12 @@ public static class HarnessRegistry
     /// <summary>Copilot in VS Code, the Local-schema harness whose frontmatter hooks render per agent.</summary>
     public static HarnessDescriptor CopilotVsCode { get; } = new()
     {
-        Token = "copilot-vscode",
+        Token = CopilotVsCodeToken,
         DisplayName = "Copilot in VS Code",
         SquadTarget = SquadTarget.Copilot,
         SquadToken = "copilot",
         SquadAliases = ["github-copilot"],
+        HookOrder = 2,
         McpCatalogName = "vscode",
         McpClientNames = ["Visual Studio Code", "Visual Studio Code - Insiders"],
         LegacyGlobalPrefix = ".github/",
@@ -155,11 +207,12 @@ public static class HarnessRegistry
     /// <summary>Copilot CLI, a project-wide harness whose hook payload names every sub-agent's caller.</summary>
     public static HarnessDescriptor CopilotCli { get; } = new()
     {
-        Token = "copilot-cli",
+        Token = CopilotCliToken,
         DisplayName = "Copilot CLI",
         SquadTarget = SquadTarget.Copilot,
         SquadToken = "copilot",
         SquadAliases = ["github-copilot"],
+        HookOrder = 2,
         McpClientNames = ["copilot-cli"],
         LegacyGlobalPrefix = ".github/",
         PostDispatchAdvisoryChannel = "additionalContext",
@@ -171,10 +224,11 @@ public static class HarnessRegistry
     /// <summary>OpenCode, served by a rendered plugin shim.</summary>
     public static HarnessDescriptor OpenCode { get; } = new()
     {
-        Token = "opencode",
+        Token = OpenCodeToken,
         DisplayName = "OpenCode",
         SquadTarget = SquadTarget.OpenCode,
         SquadToken = "opencode",
+        HookOrder = 4,
         McpCatalogName = "opencode",
         McpClientNames = ["opencode"],
         LegacyGlobalPrefix = ".opencode/",
@@ -185,10 +239,11 @@ public static class HarnessRegistry
     /// <summary>Kilo, served by a rendered plugin shim.</summary>
     public static HarnessDescriptor Kilo { get; } = new()
     {
-        Token = "kilo",
+        Token = KiloToken,
         DisplayName = "Kilo",
         SquadTarget = SquadTarget.Kilo,
         SquadToken = "kilo",
+        HookOrder = 6,
         McpClientNames = ["kilo"],
         LegacyGlobalPrefix = ".kilo/",
         ServedByHookAdapter = true,
@@ -198,10 +253,11 @@ public static class HarnessRegistry
     /// <summary>Antigravity, which rewrites through its <c>overwrite</c> field.</summary>
     public static HarnessDescriptor Antigravity { get; } = new()
     {
-        Token = "antigravity",
+        Token = AntigravityToken,
         DisplayName = "Antigravity",
         SquadTarget = SquadTarget.Antigravity,
         SquadToken = "antigravity",
+        HookOrder = 7,
         McpClientNames = ["antigravity-client"],
         LegacyGlobalPrefix = ".agents/",
         ServedByHookAdapter = true,
@@ -211,21 +267,23 @@ public static class HarnessRegistry
     /// <summary>Warp, which has no dispatch hook, so it always takes the prompt file.</summary>
     public static HarnessDescriptor Warp { get; } = new()
     {
-        Token = "warp",
+        Token = WarpToken,
         DisplayName = "Warp",
         SquadTarget = SquadTarget.Warp,
         SquadToken = "warp",
+        FallbackOrder = 0,
         LegacyGlobalPrefix = ".warp/",
     };
 
     /// <summary>Factory Droid, served by an owned command hook.</summary>
     public static HarnessDescriptor Factory { get; } = new()
     {
-        Token = "factory",
+        Token = FactoryToken,
         DisplayName = "Factory",
         SquadTarget = SquadTarget.Factory,
         SquadToken = "factory",
         SquadAliases = ["factory-droids"],
+        HookOrder = 8,
         McpCatalogName = "factory",
         McpClientNames = ["factory-cli"],
         LegacyGlobalPrefix = ".factory/",
@@ -236,10 +294,11 @@ public static class HarnessRegistry
     /// <summary>Pi, whose MCP adapter sends a per-server-key client name.</summary>
     public static HarnessDescriptor Pi { get; } = new()
     {
-        Token = "pi",
+        Token = PiToken,
         DisplayName = "Pi",
         SquadTarget = SquadTarget.Pi,
         SquadToken = "pi",
+        HookOrder = 5,
         McpClientPrefix = "pi-mcp-",
         LegacyGlobalPrefix = ".pi/",
         ServedByHookAdapter = true,
@@ -249,10 +308,11 @@ public static class HarnessRegistry
     /// <summary>ZCode, which takes the prompt file until its rewrite check passes.</summary>
     public static HarnessDescriptor ZCode { get; } = new()
     {
-        Token = "zcode",
+        Token = ZCodeToken,
         DisplayName = "ZCode",
         SquadTarget = SquadTarget.ZCode,
         SquadToken = "zcode",
+        FallbackOrder = 1,
         McpCatalogName = "zcode",
         LegacyGlobalPrefix = ".zcode/",
         ServedByHookAdapter = false,
@@ -262,10 +322,11 @@ public static class HarnessRegistry
     /// <summary>Devin, which rewrites but whose MCP client name is unverified.</summary>
     public static HarnessDescriptor Devin { get; } = new()
     {
-        Token = "devin",
+        Token = DevinToken,
         DisplayName = "Devin",
         SquadTarget = SquadTarget.Devin,
         SquadToken = "devin",
+        HookOrder = 9,
         LegacyGlobalPrefix = ".devin/",
         ServedByHookAdapter = true,
         RewritesDispatch = true,
@@ -274,11 +335,12 @@ public static class HarnessRegistry
     /// <summary>Command Code, which takes the prompt file until its rewrite check passes.</summary>
     public static HarnessDescriptor CommandCode { get; } = new()
     {
-        Token = "commandcode",
+        Token = CommandCodeToken,
         DisplayName = "Command Code",
         SquadTarget = SquadTarget.CommandCode,
         SquadToken = "commandcode",
         SquadAliases = ["command-code"],
+        HookOrder = 10,
         LegacyGlobalPrefix = ".commandcode/",
         ServedByHookAdapter = true,
         RewritesDispatch = false,
@@ -325,6 +387,21 @@ public static class HarnessRegistry
         Rows.Where(row => row.SquadTarget is not null)
             .Select(row => row.SquadTarget!.Value)
             .Distinct()
+            .ToArray();
+
+    /// <summary>The hooked Squad targets, in their stable emission order.</summary>
+    public static IReadOnlyList<SquadTarget> HookedSquadTargets { get; } =
+        Rows.Where(row => row.HookOrder is not null)
+            .OrderBy(row => row.HookOrder)
+            .Select(row => row.SquadTarget!.Value)
+            .Distinct()
+            .ToArray();
+
+    /// <summary>The fallback-only Squad targets, in their stable emission order.</summary>
+    public static IReadOnlyList<SquadTarget> FallbackSquadTargets { get; } =
+        Rows.Where(row => row.FallbackOrder is not null)
+            .OrderBy(row => row.FallbackOrder)
+            .Select(row => row.SquadTarget!.Value)
             .ToArray();
 
     /// <summary>The project-scope prefixes a Global receipt written before rc.11 recorded, by squad token.</summary>

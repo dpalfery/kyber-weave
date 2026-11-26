@@ -46,10 +46,10 @@ namespace KyberWeave.Arbiter.Hooks.Adapters;
 public sealed partial class CopilotHookAdapter : IHarnessHookAdapter
 {
     /// <summary>The VS Code Local-schema harness token.</summary>
-    public static string VsCodeToken => HarnessRegistry.CopilotVsCode.Token;
+    public static string VsCodeToken => HarnessRegistry.CopilotVsCodeToken;
 
     /// <summary>The Copilot CLI-schema harness token.</summary>
-    public static string CliToken => HarnessRegistry.CopilotCli.Token;
+    public static string CliToken => HarnessRegistry.CopilotCliToken;
 
     private readonly IHookDecisionEngine _engine;
     private readonly string _harnessToken;

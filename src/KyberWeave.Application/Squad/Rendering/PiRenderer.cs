@@ -1,4 +1,5 @@
 using System.Text;
+using KyberWeave.Arbiter.Hooks;
 using KyberWeave.Core.Configuration;
 using KyberWeave.Core.Squad.Deployment;
 using KyberWeave.Core.Squad.Model;
@@ -396,7 +397,7 @@ public sealed class PiRenderer : SquadHarnessRenderer
         long timeoutMs = Math.Clamp((long)timeoutSeconds * 1000, 0, int.MaxValue);
         string scopeSuffix = scope == SquadDeploymentScope.Global ? ", \"--scope\", \"global\"" : string.Empty;
         string commandLine = scope == SquadDeploymentScope.Global
-            ? ArbiterHookWiring.HookCommandLine("pi", scope)
+            ? ArbiterHookWiring.HookCommandLine(HarnessRegistry.PiToken, scope)
             : string.Empty;
         string globalCommandLineStatement = scope == SquadDeploymentScope.Global
             ? $"const commandLine = {System.Text.Json.JsonSerializer.Serialize(commandLine)};\n"
@@ -439,7 +440,7 @@ public sealed class PiRenderer : SquadHarnessRenderer
 
             {{globalCommandLineStatement}}function runArbiterHook(envelope: unknown): ArbiterDecision {
               try {
-                const result = spawnSync("kyber-weave-arbiter", ["hook", "--harness", "pi"{{scopeSuffix}}], {
+                const result = spawnSync("kyber-weave-arbiter", ["hook", "--harness", "{{HarnessRegistry.PiToken}}"{{scopeSuffix}}], {
                   input: JSON.stringify(envelope),
                   encoding: "utf8",
                   timeout: {{timeoutMs}},
@@ -467,7 +468,7 @@ public sealed class PiRenderer : SquadHarnessRenderer
                 }
                 const envelope = {
                   schema: "kyber-arbiter.plugin-event/v1",
-                  harness: "pi",
+                  harness: "{{HarnessRegistry.PiToken}}",
                   phase: "before",
                   tool: event.toolName,
                   "call-id": event.toolCallId,
@@ -500,7 +501,7 @@ public sealed class PiRenderer : SquadHarnessRenderer
                 }
                 const envelope = {
                   schema: "kyber-arbiter.plugin-event/v1",
-                  harness: "pi",
+                  harness: "{{HarnessRegistry.PiToken}}",
                   phase: "after",
                   tool: event.toolName,
                   "call-id": event.toolCallId,
@@ -717,7 +718,7 @@ public sealed class PiRenderer : SquadHarnessRenderer
         if (narrowed.Count > 0)
         {
             yield return new SquadDegradationRecord(
-                "pi",
+                HarnessRegistry.PiToken,
                 agent.Name,
                 agent.Name,
                 "safety-narrowed",
@@ -760,7 +761,7 @@ public sealed class PiRenderer : SquadHarnessRenderer
         if (notExpressibleDetails.Count > 0)
         {
             yield return new SquadDegradationRecord(
-                "pi",
+                HarnessRegistry.PiToken,
                 agent.Name,
                 agent.Name,
                 "permission-not-expressible",
@@ -778,7 +779,7 @@ public sealed class PiRenderer : SquadHarnessRenderer
                 : SquadPermissionDecision.Deny;
 
         SquadDegradationRecord? notIsolable = CapabilityDegradations.BuildCapabilityNotIsolable(
-            "pi",
+            HarnessRegistry.PiToken,
             agent.Name,
             agent.Name,
             agent.BodyDigest,
@@ -807,7 +808,7 @@ public sealed class PiRenderer : SquadHarnessRenderer
             : "this agent renders as a top-level Pi skill instead of a '.pi/agents/' file";
 
         yield return new SquadDegradationRecord(
-            "pi",
+            HarnessRegistry.PiToken,
             agent.Name,
             agent.Name,
             "role-skill-fallback",
@@ -828,7 +829,7 @@ public sealed class PiRenderer : SquadHarnessRenderer
             CapabilityDegradations.GrantsUniversalMcpServers(agent.CapabilityProfile, capabilityProfiles);
 
         yield return new SquadDegradationRecord(
-            "pi",
+            HarnessRegistry.PiToken,
             agent.Name,
             agent.Name,
             "permission-not-expressible",

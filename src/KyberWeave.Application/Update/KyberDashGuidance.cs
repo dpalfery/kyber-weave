@@ -1,3 +1,5 @@
+using KyberWeave.Arbiter.Hooks;
+
 namespace KyberWeave.Cli.Update;
 
 /// <summary>
@@ -7,7 +9,7 @@ namespace KyberWeave.Cli.Update;
 public static class KyberDashGuidance
 {
     /// <summary>The marker that starts every guidance line on the verb's stdout.</summary>
-    public const string HarnessOpenCodePrefix = "harness opencode: ";
+    public const string HarnessOpenCodePrefix = $"harness {HarnessRegistry.OpenCodeToken}: ";
 
     /// <summary>
     ///     The guidance lines in a verb's stdout, in printed order, with the marker removed. Any other line, including
@@ -48,14 +50,14 @@ public static class KyberDashGuidance
         string standardOutput,
         string verdict)
     {
-        if (harness == "opencode")
+        if (harness == HarnessRegistry.OpenCodeToken)
             return HarnessOpenCodeLines(standardOutput);
 
         List<string> lines = [];
         foreach (string raw in standardOutput.Split('\n'))
         {
             string line = raw.TrimEnd('\r').Trim();
-            if (line.Length == 0 || line == verdict || !line.StartsWith("factory", StringComparison.Ordinal))
+            if (line.Length == 0 || line == verdict || !line.StartsWith(HarnessRegistry.FactoryToken, StringComparison.Ordinal))
                 continue;
 
             lines.Add(line);

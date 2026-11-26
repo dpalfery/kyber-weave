@@ -2,6 +2,7 @@ using System.Text;
 using System.Text.Json;
 using System.Text.Json.Nodes;
 using System.Text.RegularExpressions;
+using KyberWeave.Arbiter.Hooks;
 using KyberWeave.Contracts.Repositories;
 
 namespace KyberWeave.Core.Arbiter;
@@ -27,12 +28,12 @@ namespace KyberWeave.Core.Arbiter;
 /// <param name="files">The file system the project hook files are read through.</param>
 public sealed class ProjectDispatchHookProbe(IFileSystem files) : IProjectDispatchHookProbe
 {
-    private const string AntigravityToken = "antigravity";
-    private const string FactoryToken = "factory";
-    private const string CursorToken = "cursor";
-    private const string OpenCodeToken = "opencode";
-    private const string PiToken = "pi";
-    private const string CommandCodeToken = "commandcode";
+    private const string AntigravityToken = HarnessRegistry.AntigravityToken;
+    private const string FactoryToken = HarnessRegistry.FactoryToken;
+    private const string CursorToken = HarnessRegistry.CursorToken;
+    private const string OpenCodeToken = HarnessRegistry.OpenCodeToken;
+    private const string PiToken = HarnessRegistry.PiToken;
+    private const string CommandCodeToken = HarnessRegistry.CommandCodeToken;
     private const string AntigravityHookPath = ".agents/hooks.json";
     private const string FactoryHookPath = ".factory/hooks.json";
     private const string FactorySettingsPath = ".factory/settings.json";
@@ -44,9 +45,9 @@ public sealed class ProjectDispatchHookProbe(IFileSystem files) : IProjectDispat
     private const string AntigravityDispatchTool = "invoke_subagent";
     private const string FactoryDispatchTool = "Task";
     private const string CursorDispatchTool = "Task";
-    private const string AntigravityCommandMarker = "kyber-weave-arbiter hook --harness antigravity";
-    private const string FactoryCommandMarker = "kyber-weave-arbiter hook --harness factory";
-    private const string CursorCommandMarker = "kyber-weave-arbiter hook --harness cursor";
+    private const string AntigravityCommandMarker = $"kyber-weave-arbiter hook --harness {HarnessRegistry.AntigravityToken}";
+    private const string FactoryCommandMarker = $"kyber-weave-arbiter hook --harness {HarnessRegistry.FactoryToken}";
+    private const string CursorCommandMarker = $"kyber-weave-arbiter hook --harness {HarnessRegistry.CursorToken}";
     private const string ScopeFlag = "--scope";
     private const string ScopeEqualsGlobal = "--scope=global";
     private const string GlobalScopeValue = "global";

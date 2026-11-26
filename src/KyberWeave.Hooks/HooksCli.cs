@@ -1,6 +1,7 @@
 using System.Reflection;
 using System.Text.Json;
 using KyberWeave.Application;
+using KyberWeave.Arbiter.Hooks;
 using KyberWeave.Contracts.Repositories;
 using KyberWeave.Contracts.Services;
 using KyberWeave.Domain.Hooks;
@@ -35,7 +36,7 @@ internal static class HooksCli
             return 0;
         }
 
-        if (args.Length != 3 || args[0] != "run" || args[1] != "--harness" || args[2] != "claude")
+        if (args.Length != 3 || args[0] != "run" || args[1] != "--harness" || args[2] != HarnessRegistry.ClaudeToken)
         {
             await stderr.WriteLineAsync(Usage).ConfigureAwait(false);
             return 1;

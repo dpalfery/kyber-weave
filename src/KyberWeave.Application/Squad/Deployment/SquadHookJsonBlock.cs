@@ -3,6 +3,7 @@ using System.Text;
 using System.Text.Encodings.Web;
 using System.Text.Json;
 using System.Text.Json.Nodes;
+using KyberWeave.Arbiter.Hooks;
 
 namespace KyberWeave.Core.Squad.Deployment;
 
@@ -954,12 +955,12 @@ public static class SquadHookJsonBlock
     public static string Harness(SquadHookBlockFormat format) =>
         format switch
         {
-            SquadHookBlockFormat.Cursor => "cursor",
-            SquadHookBlockFormat.Claude => "claude",
-            SquadHookBlockFormat.Codex => "codex",
-            SquadHookBlockFormat.Factory => "factory",
-            SquadHookBlockFormat.Devin => "devin",
-            SquadHookBlockFormat.Antigravity => "antigravity",
+            SquadHookBlockFormat.Cursor => HarnessRegistry.CursorToken,
+            SquadHookBlockFormat.Claude => HarnessRegistry.ClaudeToken,
+            SquadHookBlockFormat.Codex => HarnessRegistry.CodexToken,
+            SquadHookBlockFormat.Factory => HarnessRegistry.FactoryToken,
+            SquadHookBlockFormat.Devin => HarnessRegistry.DevinToken,
+            SquadHookBlockFormat.Antigravity => HarnessRegistry.AntigravityToken,
             _ => throw new ArgumentOutOfRangeException(nameof(format), format, "Unknown hook block format."),
         };
 

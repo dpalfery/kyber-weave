@@ -1,4 +1,5 @@
 using System.Text;
+using KyberWeave.Arbiter.Hooks;
 using KyberWeave.Core.Squad.Deployment;
 using KyberWeave.Core.Squad.Model;
 using YamlDotNet.Core;
@@ -263,7 +264,7 @@ public sealed class CommandCodeRenderer : SquadHarnessRenderer
 
             function runArbiterHook(envelope: unknown): ArbiterDecision {
               try {
-                const result = spawnSync("kyber-weave-arbiter", ["hook", "--harness", "commandcode"{{scopeSuffix}}], {
+                const result = spawnSync("kyber-weave-arbiter", ["hook", "--harness", "{{HarnessRegistry.CommandCodeToken}}"{{scopeSuffix}}], {
                   input: JSON.stringify(envelope),
                   encoding: "utf8",
                   timeout: {{timeoutMs}},
@@ -295,7 +296,7 @@ public sealed class CommandCodeRenderer : SquadHarnessRenderer
                   }
                   const envelope = {
                     schema: "kyber-arbiter.plugin-event/v1",
-                    harness: "commandcode",
+                    harness: "{{HarnessRegistry.CommandCodeToken}}",
                     phase: "before",
                     tool: toolName,
                     "call-id": toolCallId,
@@ -334,7 +335,7 @@ public sealed class CommandCodeRenderer : SquadHarnessRenderer
                   }
                   const envelope = {
                     schema: "kyber-arbiter.plugin-event/v1",
-                    harness: "commandcode",
+                    harness: "{{HarnessRegistry.CommandCodeToken}}",
                     phase: "after",
                     tool: toolName,
                     "call-id": toolCallId,

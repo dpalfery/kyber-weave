@@ -33,7 +33,7 @@ public static class HarnessHookEventReader
             return Plugin(harness, payload);
         }
 
-        return string.Equals(harness, "copilot-cli", StringComparison.Ordinal)
+        return string.Equals(harness, HarnessRegistry.CopilotCliToken, StringComparison.Ordinal)
             ? CopilotCli(harness, payload, renderedCaller)
             : ClaudeFamily(harness, payload, renderedCaller);
     }

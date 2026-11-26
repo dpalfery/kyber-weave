@@ -203,7 +203,7 @@ public sealed class ConductorGuard(
         try
         {
             return runContexts.Resolve(new HookRunContextRequest(
-                "copilot-cli",
+                HarnessRegistry.CopilotCliToken,
                 WorkspaceRoot: null,
                 EventCwd: cwd,
                 ProcessDirectory: process.CurrentDirectory,

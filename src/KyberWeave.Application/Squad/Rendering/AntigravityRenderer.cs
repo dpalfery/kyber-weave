@@ -1,6 +1,7 @@
 using System.Text;
 using System.Text.Json;
 using System.Text.Json.Nodes;
+using KyberWeave.Arbiter.Hooks;
 using KyberWeave.Core.Configuration;
 using KyberWeave.Core.Squad.Deployment;
 using KyberWeave.Core.Squad.Model;
@@ -213,7 +214,7 @@ public sealed class AntigravityRenderer : SquadHarnessRenderer
     /// rendered agent and carries its instruction digest.
     /// </summary>
     private static SquadDegradationRecord BuildArbiterDegradation(SquadAgent agent) => new(
-        Target: "antigravity",
+        Target: HarnessRegistry.AntigravityToken,
         CanonicalIdentity: agent.Name,
         OutputIdentity: agent.Name,
         Code: ArbiterNotEnforcedCode,
@@ -238,7 +239,7 @@ public sealed class AntigravityRenderer : SquadHarnessRenderer
         if (!string.IsNullOrWhiteSpace(agent.ModelProfile)
             && modelProfiles.Profiles.TryGetValue(agent.ModelProfile, out SquadModelProfile? modelProfile))
         {
-            modelTier = modelProfile.HarnessModels.TryGetValue("antigravity", out string? antigravityModel)
+            modelTier = modelProfile.HarnessModels.TryGetValue(HarnessRegistry.AntigravityToken, out string? antigravityModel)
                 ? antigravityModel
                 : "inherit";
         }
@@ -551,7 +552,7 @@ public sealed class AntigravityRenderer : SquadHarnessRenderer
                 : SquadPermissionDecision.Deny;
 
         SquadDegradationRecord? notIsolable = CapabilityDegradations.BuildCapabilityNotIsolable(
-            "antigravity",
+            HarnessRegistry.AntigravityToken,
             agent.Name,
             agent.Name,
             agent.BodyDigest,
@@ -620,7 +621,7 @@ public sealed class AntigravityRenderer : SquadHarnessRenderer
         if (details.Count == 0) return null;
 
         return new SquadDegradationRecord(
-            "antigravity",
+            HarnessRegistry.AntigravityToken,
             agent.Name,
             agent.Name,
             "permission-not-expressible",

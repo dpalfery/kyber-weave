@@ -1,3 +1,5 @@
+using KyberWeave.Arbiter.Hooks;
+
 namespace KyberWeave.Core.Arbiter.ModelTargets;
 
 /// <summary>
@@ -6,7 +8,7 @@ namespace KyberWeave.Core.Arbiter.ModelTargets;
 /// </summary>
 public static class ModelTokenAliases
 {
-    private const string Claude = "claude";
+    private const string Claude = HarnessRegistry.ClaudeToken;
 
     /// <summary>
     /// The alias a model token writes as, in the accepted set's own spelling. The token is trimmed and matched

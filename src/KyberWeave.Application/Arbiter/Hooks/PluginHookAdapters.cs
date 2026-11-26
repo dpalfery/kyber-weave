@@ -16,10 +16,10 @@ public static class PluginHookAdapters
     // args.subagent_type, verified against the command-code npm package 1.84.0 on 2026-10-17.
     private static readonly (string Token, string[] DispatchTools, string[] TargetArguments)[] Entries =
     [
-        ("opencode", ["task", "subagent"], ["subagent_type", "agent"]),
-        ("kilo", ["task"], ["subagent_type"]),
-        ("pi", ["Agent"], ["subagent_type"]),
-        ("commandcode", ["agent"], ["subagent_type"]),
+        (HarnessRegistry.OpenCodeToken, ["task", "subagent"], ["subagent_type", "agent"]),
+        (HarnessRegistry.KiloToken, ["task"], ["subagent_type"]),
+        (HarnessRegistry.PiToken, ["Agent"], ["subagent_type"]),
+        (HarnessRegistry.CommandCodeToken, ["agent"], ["subagent_type"]),
     ];
 
     /// <summary>The plugin-hook adapters: OpenCode and Kilo dispatch on <c>task</c>; Pi dispatches on <c>Agent</c>; Command Code dispatches on <c>agent</c>.</summary>
