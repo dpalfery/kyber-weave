@@ -77,6 +77,11 @@ public sealed class CommandCodeRendererContractTests
         CanonicalSquadTree.Shared.Registry([new CommandCodeRenderer()]).RenderAsync(
             new SquadRenderRequest(ProductRoot, [SquadTarget.CommandCode], scope).Prepared(CanonicalSquadTree.Shared));
 
+    private static Task<SquadRenderResult> RenderAsync(SquadDeploymentScope scope, SquadArbiterWiring? arbiter) =>
+        CanonicalSquadTree.Shared.Registry([new CommandCodeRenderer()]).RenderAsync(
+            new SquadRenderRequest(ProductRoot, [SquadTarget.CommandCode], scope, Arbiter: arbiter)
+                .Prepared(CanonicalSquadTree.Shared));
+
     /// <summary>
     /// The <c>tools</c> value an agent must render: the allow-only built-in lowering followed by
     /// the MCP tool names the agent is entitled to, in server-then-tool order.
@@ -366,10 +371,322 @@ public sealed class CommandCodeRendererContractTests
         Assert.Equal((model, effort), CommandCodeRenderer.ParseReasoningEffortSuffix(value));
     }
 
+    /// <summary>
+    /// The bundled matrix pins a <c>commandcode</c> model on all six profiles, so the agent file names
+    /// that model and, because every bundled value carries a suffix, the level it runs at.
+    /// </summary>
+    /// <remarks>
+    /// One agent per profile. Every id was read back from <c>cmd --list-models</c> on Command Code
+    /// 1.88.2, which accepts the full id or the name after the last <c>/</c> as the same model. The
+    /// levels are the renderer's accepted set: Command Code documents the level a model supports as
+    /// varying by model and publishes no per-model list.
+    /// </remarks>
+    [Theory]
+    [InlineData("architect", "gpt-6.2-sol", "high")]
+    [InlineData("bug-crusher-investigator", "gpt-6.2-sol", "high")]
+    [InlineData("dev-hard", "gpt-6.2-sol", "high")]
+    [InlineData("dev-easy", "gpt-6-luna", "low")]
+    [InlineData("dev-medium", "gpt-6.1-terra", "medium")]
+    [InlineData("code-reviewer", "google/gemini-3.8-flash", "high")]
+    public async Task PinnedCommandCodeModelRendersTheModelAndItsReasoningEffort(
+        string agentName,
+        string expectedModel,
+        string expectedReasoningEffort)
+    {
+        SquadRenderResult result = await RenderAsync(SquadDeploymentScope.Project);
+        Assert.True(result.Success, string.Join("; ", result.Errors));
+
+        YamlMappingNode frontmatter = Frontmatter(AgentFile(result, agentName));
+
+        Assert.Equal(expectedModel, Scalar(frontmatter, "model", agentName));
+        Assert.Equal(expectedReasoningEffort, Scalar(frontmatter, "reasoningEffort", agentName));
+    }
+
+    /// <summary>
+    /// A profile whose <c>commandcode</c> row is <c>inherit</c>, or blank, defers to the session model,
+    /// so the agent file names neither key and the harness chooses.
+    /// </summary>
+    /// <param name="token">The <c>commandcode</c> value every profile carries in the probe preset.</param>
+    [Theory]
+    [InlineData("inherit")]
+    [InlineData("")]
+    public async Task InheritedOrBlankCommandCodeModelRendersNeitherModelKey(string token)
+    {
+        SquadSource source = TestSquadCorpus.CanonicalSource;
+        Dictionary<string, SquadModelProfile> profiles = new(StringComparer.Ordinal);
+        foreach (string category in source.ModelProfiles.Profiles.Keys)
+        {
+            profiles[category] = new SquadModelProfile(
+                "inherit",
+                new Dictionary<string, string>(StringComparer.Ordinal) { ["commandcode"] = token });
+        }
+
+        SquadModelPreset preset = new("inherit-all", "presets/inherit-all.yml", "digest", profiles);
+        SquadRenderResult result = await CanonicalSquadTree.Shared.Registry([new CommandCodeRenderer()])
+            .RenderAsync(new SquadRenderRequest(
+                ProductRoot,
+                [SquadTarget.CommandCode],
+                SquadDeploymentScope.Project,
+                ModelPresets: new Dictionary<SquadTarget, SquadModelPreset>
+                {
+                    [SquadTarget.CommandCode] = preset
+                }).Prepared(CanonicalSquadTree.Shared));
+
+        Assert.True(result.Success, string.Join("; ", result.Errors));
+
+        foreach (SquadAgent agent in source.Agents)
+        {
+            YamlMappingNode frontmatter = Frontmatter(AgentFile(result, agent.Name));
+
+            Assert.False(
+                frontmatter.Children.ContainsKey(new YamlScalarNode("model")),
+                $"'{agent.Name}' renders model '{token}', which Command Code must choose itself.");
+            Assert.False(
+                frontmatter.Children.ContainsKey(new YamlScalarNode("reasoningEffort")),
+                $"'{agent.Name}' renders reasoningEffort for the '{token}' model value.");
+        }
+    }
+
     [Fact]
     public void ReasoningEffortOutsideCommandCodeLevelsFailsClosed()
     {
         Assert.Throws<SquadRenderValidationException>(
             () => CommandCodeRenderer.ParseReasoningEffortSuffix("m[reasoningEffort=extreme]"));
+    }
+
+    /// <summary>The owned Arbiter mod's project path: under the project's <c>.commandcode/</c> tree.</summary>
+    private const string ArbiterModPath = ".commandcode/mods/kyber-arbiter.ts";
+
+    private const int ArbiterHookTimeoutSeconds = 30;
+
+    /// <summary>The mod body the render must emit byte for byte, pinned independently of the render.</summary>
+    private static string ModBody =>
+        CommandCodeRenderer.RenderArbiterMod(ArbiterHookTimeoutSeconds, SquadDeploymentScope.Project);
+
+    [Fact]
+    public async Task ArbiterEnabled_EmitsTheOwnedModAtTheProjectModsPath()
+    {
+        SquadRenderResult result = await RenderAsync(
+            SquadDeploymentScope.Project,
+            new SquadArbiterWiring(Enabled: true, HookTimeoutSeconds: ArbiterHookTimeoutSeconds));
+
+        Assert.True(result.Success, string.Join("; ", result.Errors));
+        SquadDeploymentFile mod = Assert.Single(result.Files, f => f.RelativePath == ArbiterModPath);
+        Assert.Equal("commandcode", mod.Target);
+        Assert.Equal(
+            CommandCodeRenderer.RenderArbiterMod(ArbiterHookTimeoutSeconds, SquadDeploymentScope.Project),
+            Encoding.UTF8.GetString(mod.Content.Span));
+    }
+
+    [Fact]
+    public async Task ArbiterOmitted_EmitsNoModFile()
+    {
+        SquadRenderResult result = await RenderAsync(SquadDeploymentScope.Project, arbiter: null);
+
+        Assert.True(result.Success, string.Join("; ", result.Errors));
+        Assert.DoesNotContain(result.Files, f => f.RelativePath == ArbiterModPath);
+        Assert.DoesNotContain(result.Files, f => f.RelativePath.EndsWith("kyber-arbiter.ts", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public async Task ArbiterDisabled_StillEmitsTheModForTheDispatchHookSurface()
+    {
+        // The dispatch hook that expands a task id into the worker's prompt runs with the
+        // Arbiter off, and the mod is the only surface that can carry it on Command Code.
+        SquadRenderResult result = await RenderAsync(
+            SquadDeploymentScope.Project,
+            new SquadArbiterWiring(Enabled: false, HookTimeoutSeconds: ArbiterHookTimeoutSeconds));
+
+        Assert.True(result.Success, string.Join("; ", result.Errors));
+        Assert.Contains(result.Files, f => f.RelativePath == ArbiterModPath);
+    }
+
+    [Fact]
+    public async Task InstanceScope_EmitsNoModFileEvenWhenTheArbiterIsEnabled()
+    {
+        // Command Code has no instance support, so the mod claims no instance scope: the
+        // install paths that exist are the project mod and the user-scope mod.
+        SquadRenderResult result = await RenderAsync(
+            SquadDeploymentScope.Instance,
+            new SquadArbiterWiring(Enabled: true, HookTimeoutSeconds: ArbiterHookTimeoutSeconds));
+
+        Assert.True(result.Success, string.Join("; ", result.Errors));
+        Assert.DoesNotContain(result.Files, f => f.RelativePath == ArbiterModPath);
+        Assert.DoesNotContain(result.Files, f => f.RelativePath.EndsWith("kyber-arbiter.ts", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public void RenderArbiterMod_DefaultExportsOneFactoryRegisteringBothHookPhases()
+    {
+        string body = ModBody;
+
+        int defaultExport = body.IndexOf("export default", StringComparison.Ordinal);
+        Assert.True(defaultExport >= 0, "the mod must default-export its factory");
+        Assert.Equal(-1, body.IndexOf("export default", defaultExport + 1, StringComparison.Ordinal));
+        Assert.Contains("cmd.hooks({", body, StringComparison.Ordinal);
+        Assert.Contains("beforeToolCall:", body, StringComparison.Ordinal);
+        Assert.Contains("afterToolCall:", body, StringComparison.Ordinal);
+        // The mod host jiti-loads the file against no resolvable package, so a host type
+        // import would fail the load; the ModApi surface is declared locally instead.
+        Assert.DoesNotContain("@commandcode/harness", body, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void RenderArbiterMod_FiltersOnTheAgentToolAndPassesEveryOtherToolThrough()
+    {
+        string body = ModBody;
+        string flat = string.Concat(body.Split('\n').Select(line => line.Trim()));
+
+        // The whole guard shape, so a mod that blocked or evaluated a non-agent tool fails here:
+        // the hook opens, the guard tests the tool name, and the guard's body is exactly the
+        // pass-through return.
+        Assert.Contains(
+            "beforeToolCall: ({ toolName, input, toolCallId }, ctx) => {if (toolName !== \"agent\") {return undefined;}",
+            flat,
+            StringComparison.Ordinal);
+        Assert.Contains(
+            "afterToolCall: ({ toolName, input, toolCallId, result, isError }, ctx) => {if (toolName !== \"agent\") {return undefined;}",
+            flat,
+            StringComparison.Ordinal);
+        // The two no-input allow paths return undefined too; only the two guards and those paths may.
+        Assert.Equal(4, CountOccurrences(body, "return undefined"));
+    }
+
+    private static int CountOccurrences(string haystack, string needle)
+    {
+        int count = 0;
+        int index = haystack.IndexOf(needle, StringComparison.Ordinal);
+        while (index >= 0)
+        {
+            count++;
+            index = haystack.IndexOf(needle, index + needle.Length, StringComparison.Ordinal);
+        }
+
+        return count;
+    }
+
+    [Fact]
+    public void RenderArbiterMod_BuildsThePluginEventEnvelopeForBothPhases()
+    {
+        string body = ModBody;
+
+        Assert.Contains("kyber-arbiter.plugin-event/v1", body, StringComparison.Ordinal);
+        Assert.Contains("\"commandcode\"", body, StringComparison.Ordinal);
+        Assert.Contains("\"before\"", body, StringComparison.Ordinal);
+        Assert.Contains("\"after\"", body, StringComparison.Ordinal);
+        Assert.Contains("\"call-id\"", body, StringComparison.Ordinal);
+        Assert.Contains("session", body, StringComparison.Ordinal);
+        Assert.Contains("cwd", body, StringComparison.Ordinal);
+        Assert.Contains("args", body, StringComparison.Ordinal);
+        Assert.Contains("result", body, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void RenderArbiterMod_SpawnsTheArbiterHookThroughNodeChildProcessWithNoShell()
+    {
+        string body = ModBody;
+
+        Assert.Contains("node:child_process", body, StringComparison.Ordinal);
+        Assert.Contains("spawnSync", body, StringComparison.Ordinal);
+        Assert.Contains("\"kyber-weave-arbiter\"", body, StringComparison.Ordinal);
+        Assert.Contains("\"hook\"", body, StringComparison.Ordinal);
+        Assert.Contains("\"--harness\"", body, StringComparison.Ordinal);
+        Assert.Contains("\"commandcode\"", body, StringComparison.Ordinal);
+        Assert.DoesNotContain("shell: true", body, StringComparison.Ordinal);
+        Assert.DoesNotContain("Bun.spawn", body, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void RenderArbiterMod_BoundsTheSpawnByTheClampedTimeout()
+    {
+        Assert.Contains(
+            "timeout: 30000",
+            CommandCodeRenderer.RenderArbiterMod(30, SquadDeploymentScope.Project),
+            StringComparison.Ordinal);
+        Assert.Contains(
+            "timeout: 0",
+            CommandCodeRenderer.RenderArbiterMod(0, SquadDeploymentScope.Project),
+            StringComparison.Ordinal);
+        Assert.Contains(
+            "timeout: 2147483647",
+            CommandCodeRenderer.RenderArbiterMod(int.MaxValue, SquadDeploymentScope.Project),
+            StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void RenderArbiterMod_MapsABlockDecisionToBlockWithAdditionalContext()
+    {
+        string body = ModBody;
+
+        Assert.Contains("block: true", body, StringComparison.Ordinal);
+        Assert.Contains("additionalContext", body, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void RenderArbiterMod_AppliesStrippedArgsOntoTheToolInputSkippingPollutingKeys()
+    {
+        string body = ModBody;
+
+        Assert.Contains("POLLUTING_ARG_KEYS", body, StringComparison.Ordinal);
+        Assert.Contains("\"__proto__\"", body, StringComparison.Ordinal);
+        Assert.Contains("\"constructor\"", body, StringComparison.Ordinal);
+        Assert.Contains("\"prototype\"", body, StringComparison.Ordinal);
+        int pollutingGuard = body.IndexOf("POLLUTING_ARG_KEYS.has(key)", StringComparison.Ordinal);
+        int rewrite = body.IndexOf("input: rewritten", StringComparison.Ordinal);
+        Assert.True(pollutingGuard >= 0, "the mod must guard the polluting keys");
+        Assert.True(rewrite > pollutingGuard, "the input rewrite must apply the args after the polluting-key guard");
+    }
+
+    [Fact]
+    public void RenderArbiterMod_FailsClosedOnSpawnFailureTimeoutNonZeroStatusAndUnparseableOutput()
+    {
+        string body = ModBody;
+
+        Assert.Contains("result.error", body, StringComparison.Ordinal);
+        Assert.Contains("timed out after", body, StringComparison.Ordinal);
+        Assert.Contains("hook exited with status", body, StringComparison.Ordinal);
+        Assert.Contains("malformed arbiter decision", body, StringComparison.Ordinal);
+        Assert.Contains("failed to spawn kyber-weave-arbiter", body, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void RenderArbiterMod_TreatsEmptyStdoutAsTheHostsDeliberateAllow()
+    {
+        string body = ModBody;
+
+        // Exit 0 with empty stdout is the host's allow (arbiter.enabled: false, or a
+        // dispatch with no target). JSON.parse("") would throw and wrongly block.
+        int emptyCheck = body.IndexOf("trim() === \"\"", StringComparison.Ordinal);
+        int parse = body.IndexOf("JSON.parse(", StringComparison.Ordinal);
+        Assert.True(emptyCheck >= 0, "the mod must test for empty stdout");
+        Assert.True(parse > emptyCheck, "the empty-stdout check must precede JSON.parse");
+        Assert.Contains("{ decision: \"allow\" }", body, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void RenderArbiterMod_CarriesTheGlobalScopeFlagOnlyAtGlobalScope()
+    {
+        Assert.DoesNotContain(
+            "--scope global",
+            CommandCodeRenderer.RenderArbiterMod(ArbiterHookTimeoutSeconds, SquadDeploymentScope.Project),
+            StringComparison.Ordinal);
+        Assert.Contains(
+            ", \"--scope\", \"global\"",
+            CommandCodeRenderer.RenderArbiterMod(ArbiterHookTimeoutSeconds, SquadDeploymentScope.Global),
+            StringComparison.Ordinal);
+    }
+
+    private static SquadDeploymentFile AgentFile(SquadRenderResult result, string agentName) =>
+        Assert.Single(result.Files, f => f.RelativePath == $".commandcode/agents/{agentName}.md");
+
+    private static string? Scalar(YamlMappingNode frontmatter, string key, string agentName)
+    {
+        if (frontmatter.Children.TryGetValue(new YamlScalarNode(key), out YamlNode? node))
+        {
+            return node.ToString();
+        }
+
+        Assert.Fail($"'{agentName}' renders no '{key}' key.");
+        return null;
     }
 }

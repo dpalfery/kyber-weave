@@ -19,7 +19,7 @@ public sealed class ArbiterStatusCommandTests : IDisposable
     [Fact]
     public void Status_ReportsGlobalAndProjectScope_WithProjectOverride()
     {
-        _host.Get<IUserHostConfigStore>().WriteGlobalTargets(_host.HomeDirectory, ["warp", "opencode", "pi", "copilot"]);
+        _host.Get<IUserHostConfigStore>().WriteGlobalTargets(_host.HomeDirectory, ["warp", "opencode", "pi", "copilot", "commandcode"]);
         WriteProjectConfig(
             """
             arbiter:
@@ -47,6 +47,10 @@ public sealed class ArbiterStatusCommandTests : IDisposable
         Assert.Contains("dispatch-unconfirmed", execution.Output, StringComparison.Ordinal);
         AssertHarnessLine(execution.Output, "Pi", "ungated", "kyber-weave arbiter install --project --target pi");
         AssertHarnessLine(execution.Output, "OpenCode", "ungated", "kyber-weave arbiter install --project --target opencode");
+
+        // Command Code enforces through its mod, so the global tier reports the enforced
+        // classification rather than the dispatch-unconfirmed one.
+        AssertHarnessLine(execution.Output, "CommandCode", "enforced-global");
     }
 
     /// <summary>

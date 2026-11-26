@@ -42,6 +42,7 @@ public sealed class ArbiterHarnessGating : IArbiterHarnessGating
         SquadTarget.OpenCode,
         SquadTarget.Kilo,
         SquadTarget.Pi,
+        SquadTarget.CommandCode,
     };
 
     private static readonly TimeSpan MatchTimeout = TimeSpan.FromMilliseconds(100);

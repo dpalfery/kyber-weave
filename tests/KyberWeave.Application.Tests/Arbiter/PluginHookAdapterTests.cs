@@ -340,4 +340,57 @@ public sealed class PluginHookAdapterTests
             ArbiterTestServices.Registry(engine).TryGet("opencode", out _),
             "The default registry must serve the opencode harness.");
     }
+
+    /// <summary>Command Code dispatches custom agents with tool <c>agent</c> and the target at <c>args.subagent_type</c>; the Arbiter must gate it and strip the header block.</summary>
+    [Fact]
+    public void CommandCodeAgentDispatchIsGatedAndItsHeaderBlockStripped()
+    {
+        ScriptedEngine engine = new();
+        JsonObject args = new()
+        {
+            ["description"] = "Implement T2",
+            ["prompt"] = "KYBER-ARBITER: true\nPLAN_FILE: docs/plans/x.md\nTASK: 2.1\n\nImplement the mod.",
+            ["subagent_type"] = "dev-medium",
+        };
+
+        (int exit, string stdout) = RunProduction(
+            "commandcode", Envelope("before", "agent", args, harness: "commandcode"), engine);
+
+        Assert.Equal(0, exit);
+        Assert.Equal("dev-medium", engine.SeenPreTarget);
+        using JsonDocument doc = JsonDocument.Parse(stdout);
+        JsonElement returned = doc.RootElement.GetProperty("args");
+        Assert.Equal("dev-medium", returned.GetProperty("subagent_type").GetString());
+        Assert.Equal("Implement the mod.", returned.GetProperty("prompt").GetString());
+        Assert.Equal("Implement T2", returned.GetProperty("description").GetString());
+    }
+
+    [Fact]
+    public void CommandCodeAgentDispatchIsBlockedWhenTheEngineDenies()
+    {
+        ScriptedEngine engine = new() { PreResult = new HookOutcome(HookOutcomeKind.Deny, Reason: "not in plan") };
+        JsonObject args = new() { ["prompt"] = "Do it.", ["subagent_type"] = "dev-medium" };
+
+        (_, string stdout) = RunProduction(
+            "commandcode", Envelope("before", "agent", args, harness: "commandcode"), engine);
+
+        using JsonDocument doc = JsonDocument.Parse(stdout);
+        Assert.Equal("block", doc.RootElement.GetProperty("decision").GetString());
+        Assert.Equal("not in plan", doc.RootElement.GetProperty("reason").GetString());
+    }
+
+    [Fact]
+    public void CommandCodeAdapter_IsRegisteredWithDispatchShape()
+    {
+        ScriptedEngine engine = new();
+        IReadOnlyList<IHarnessHookAdapter> adapters = PluginHookAdapters.All(engine);
+
+        IHarnessHookAdapter adapter = Assert.Single(adapters, a =>
+            string.Equals(a.HarnessToken, "commandcode", StringComparison.Ordinal));
+        Assert.IsType<PluginHookAdapter>(adapter);
+
+        Assert.True(
+            ArbiterTestServices.Registry(engine).TryGet("commandcode", out _),
+            "The default registry must serve the commandcode harness.");
+    }
 }

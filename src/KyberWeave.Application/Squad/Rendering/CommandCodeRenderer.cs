@@ -145,6 +145,218 @@ public sealed class CommandCodeRenderer : SquadHarnessRenderer
         context.EmitCanonicalSkills(skill =>
             context.RenderSkillDocument(skill.Name, skill.Description, skill.InstructionBody, Yaml));
 
+    /// <summary>
+    /// The owned Arbiter mod's path at project scope: under the project's <c>.commandcode/</c> tree,
+    /// which Command Code loads once the workspace is trusted.
+    /// </summary>
+    private const string ArbiterModFileRelativePath = ".commandcode/mods/kyber-arbiter.ts";
+
+    /// <summary>
+    /// Emits the owned Arbiter mod when the request enables Arbiter or installs the dispatch hook:
+    /// the only seam that can gate an <c>agent</c> dispatch on Command Code.
+    /// </summary>
+    /// <remarks>
+    /// Settings hooks cannot gate a dispatch: their matchers cover only <c>SHELL</c>, <c>READ</c>,
+    /// <c>WRITE</c> and <c>EDIT</c>, so the mod's <c>beforeToolCall</c> — which fires for every tool
+    /// call — is the enforcement path ([CM-MOD], commandcode.ai/docs/mods, read 2026-11-16). The mod
+    /// is a project and user-scope artifact only: Command Code has no instance support, and the
+    /// instance-scope render path maps to the global shape anyway, so this override claims no
+    /// instance scope.
+    /// </remarks>
+    private protected override void RenderArbiter(SquadHarnessRenderContext context)
+    {
+        if (context.Scope == SquadDeploymentScope.Instance)
+        {
+            return;
+        }
+
+        int timeoutSeconds = context.EnabledArbiter?.HookTimeoutSeconds ?? context.DispatchHookTimeoutSeconds;
+        context.AddArbiterPluginFile(
+            ArbiterModFileRelativePath,
+            "mods/kyber-arbiter.ts",
+            RenderArbiterMod(timeoutSeconds, context.Scope));
+    }
+
+    /// <summary>
+    /// Renders the owned Arbiter mod: a default-exported factory that registers
+    /// <c>beforeToolCall</c> and <c>afterToolCall</c> on the ModApi, gates the <c>agent</c>
+    /// dispatch tool, and bridges the call to <c>kyber-weave-arbiter hook --harness commandcode</c>
+    /// through <c>node:child_process</c> with no shell.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// The body follows <see cref="PiRenderer.RenderArbiterExtension"/> exactly where the two
+    /// hosts agree: only a plain object whose <c>decision</c> is exactly <c>allow</c> or
+    /// <c>block</c> is a decision, anything else blocks; a spawn failure, a timeout, a non-zero
+    /// exit (naming the status) or unparseable output blocks with a reason naming the failure;
+    /// and empty stdout is an allow only as the host's deliberate allow (the Arbiter disabled, or
+    /// a dispatch with no target), never as a parse result.
+    /// </para>
+    /// <para>
+    /// The Command Code differences are the loader contract: the factory receives the ModApi and
+    /// registers through <c>cmd.hooks</c>; a block is <c>{block: true, additionalContext}</c>,
+    /// whose text becomes the <c>tool_result</c> the model sees; a stripped-args allow rewrites
+    /// the call through the returned <c>input</c>, so the complete arguments the Arbiter returns
+    /// are applied onto the tool input — skipping the polluting keys, which would run an
+    /// inherited setter instead of creating an own property — and the rewritten object is handed
+    /// back rather than mutating the host's display copy; and the post phase annotates through
+    /// <c>additionalContext</c>, because a completed dispatch cannot be un-run. The hook's
+    /// ModContext carries <c>cwd</c> and <c>session</c> as its last argument; the mod reads its
+    /// working directory from there rather than assuming the host's process directory.
+    /// </para>
+    /// </remarks>
+    /// <param name="timeoutSeconds">The hook timeout from the render's Arbiter wiring.</param>
+    /// <param name="scope">The deployment scope, which decides whether the spawn carries the global <c>--scope</c> flag.</param>
+    public static string RenderArbiterMod(int timeoutSeconds, SquadDeploymentScope scope)
+    {
+        long timeoutMs = Math.Clamp((long)timeoutSeconds * 1000, 0, int.MaxValue);
+        string scopeSuffix = scope == SquadDeploymentScope.Global ? ", \"--scope\", \"global\"" : string.Empty;
+
+        return $$"""
+            import { spawnSync } from "node:child_process";
+
+            // Keys that mutate an object's linkage rather than adding a property to it.
+            const POLLUTING_ARG_KEYS = new Set(["__proto__", "constructor", "prototype"]);
+
+            // The host surface this mod registers on — the hooks subset of the ModApi.
+            type ModApi = {
+              hooks: (registered: {
+                beforeToolCall?: (
+                  args: { toolCallId?: string; toolName: string; input: Record<string, unknown> },
+                  ctx?: { cwd?: string; session?: string },
+                ) => { block: true; additionalContext: string } | { input: Record<string, unknown> } | undefined;
+                afterToolCall?: (
+                  args: { toolCallId?: string; toolName: string; input: Record<string, unknown>; result?: unknown; isError?: boolean },
+                  ctx?: { cwd?: string; session?: string },
+                ) => { additionalContext: string } | undefined;
+              }) => void;
+            };
+
+            type ArbiterDecision = {
+              decision: "allow" | "block";
+              reason?: string;
+              args?: Record<string, unknown>;
+            };
+
+            // JSON.parse accepts null, a bare string, an array and an object with no
+            // decision field, and the mod believed whatever came back: a document
+            // whose decision is not "block" is read as an allow. Only a plain object whose
+            // decision is exactly "allow" or "block" is a decision at all; anything else
+            // blocks, because a dispatch the host never approved must not pass.
+            function asDecision(parsed: unknown): ArbiterDecision {
+              if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) {
+                return { decision: "block", reason: "kyber-arbiter: malformed arbiter decision" };
+              }
+              const candidate = parsed as { decision?: unknown; reason?: unknown; args?: unknown };
+              if (candidate.decision !== "allow" && candidate.decision !== "block") {
+                return { decision: "block", reason: "kyber-arbiter: malformed arbiter decision" };
+              }
+              const decision: ArbiterDecision = { decision: candidate.decision };
+              if (typeof candidate.reason === "string") {
+                decision.reason = candidate.reason;
+              }
+              if (typeof candidate.args === "object" && candidate.args !== null && !Array.isArray(candidate.args)) {
+                decision.args = candidate.args as Record<string, unknown>;
+              }
+              return decision;
+            }
+
+            function runArbiterHook(envelope: unknown): ArbiterDecision {
+              try {
+                const result = spawnSync("kyber-weave-arbiter", ["hook", "--harness", "commandcode"{{scopeSuffix}}], {
+                  input: JSON.stringify(envelope),
+                  encoding: "utf8",
+                  timeout: {{timeoutMs}},
+                });
+                if (result.error) {
+                  const failure = (result.error as { code?: string }).code === "ETIMEDOUT"
+                    ? "timed out after {{timeoutMs}}ms"
+                    : "failed to spawn kyber-weave-arbiter: " + String(result.error);
+                  return { decision: "block", reason: "kyber-arbiter: " + failure };
+                }
+                if (result.status !== 0) {
+                  return { decision: "block", reason: "kyber-arbiter: hook exited with status " + String(result.status) };
+                }
+                const out = String(result.stdout ?? "");
+                if (out.trim() === "") {
+                  return { decision: "allow" };
+                }
+                return asDecision(JSON.parse(out));
+              } catch (err) {
+                return { decision: "block", reason: "kyber-arbiter: failed to run arbiter hook: " + String(err) };
+              }
+            }
+
+            export default function (cmd: ModApi): void {
+              cmd.hooks({
+                beforeToolCall: ({ toolName, input, toolCallId }, ctx) => {
+                  if (toolName !== "agent") {
+                    return undefined;
+                  }
+                  const envelope = {
+                    schema: "kyber-arbiter.plugin-event/v1",
+                    harness: "commandcode",
+                    phase: "before",
+                    tool: toolName,
+                    "call-id": toolCallId,
+                    session: ctx?.session ?? "",
+                    cwd: ctx?.cwd ?? process.cwd(),
+                    args: input,
+                  };
+                  const decision = runArbiterHook(envelope);
+                  if (decision.decision === "block") {
+                    const reason = decision.reason ?? "blocked by kyber-arbiter";
+                    return { block: true, additionalContext: reason };
+                  }
+                  if (decision.args !== undefined) {
+                    // The Arbiter returns the complete arguments for the call. Applying them
+                    // onto a copy of the tool input, rather than onto the host's object, keeps
+                    // the display copy the model asked for: only execution sees the rewrite.
+                    const rewritten: Record<string, unknown> = { ...input };
+                    for (const key of Object.keys(decision.args)) {
+                      // These three keys run an inherited setter rather than creating an own
+                      // property: assigning to `__proto__` rebinds the target object's
+                      // prototype, so a decision could hand the host's tool input an object
+                      // it then inherits properties from. Skip them; a decision has no
+                      // legitimate reason to name them.
+                      if (POLLUTING_ARG_KEYS.has(key)) {
+                        continue;
+                      }
+                      rewritten[key] = decision.args[key];
+                    }
+                    return { input: rewritten };
+                  }
+                  return undefined;
+                },
+                afterToolCall: ({ toolName, input, toolCallId, result, isError }, ctx) => {
+                  if (toolName !== "agent") {
+                    return undefined;
+                  }
+                  const envelope = {
+                    schema: "kyber-arbiter.plugin-event/v1",
+                    harness: "commandcode",
+                    phase: "after",
+                    tool: toolName,
+                    "call-id": toolCallId,
+                    session: ctx?.session ?? "",
+                    cwd: ctx?.cwd ?? process.cwd(),
+                    args: input,
+                    result: { content: result, isError },
+                  };
+                  const decision = runArbiterHook(envelope);
+                  if (decision.decision === "block") {
+                    // A completed dispatch cannot be un-run: the reason lands as extra
+                    // text on the tool result, where the model reads it.
+                    const reason = decision.reason ?? "blocked by kyber-arbiter";
+                    return { additionalContext: reason };
+                  }
+                  return undefined;
+                },
+              });
+            }
+            """;
+    }
+
     private static SquadDeploymentFile RenderAgentFile(
         SquadHarnessRenderContext context,
         SquadAgent agent,

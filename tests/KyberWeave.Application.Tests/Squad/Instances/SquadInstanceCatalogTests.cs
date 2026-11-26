@@ -245,6 +245,29 @@ public sealed class SquadInstanceCatalogTests
     }
 
     /// <summary>
+    /// The CommandCode row stays Unsupported, and its reason names the evidence read from the
+    /// installed <c>command-code</c>: no config-directory variable, no XDG base directory, only
+    /// whole-<c>HOME</c> redirection, and a global root of <c>~/.commandcode</c> rather than the
+    /// home directory a link sync would copy.
+    /// </summary>
+    [Fact]
+    public void CommandCodeRowNamesTheEvidenceBehindItsVerdict()
+    {
+        SquadInstanceRow row = SquadInstanceCatalog.GetRow(SquadTarget.CommandCode);
+
+        Assert.Equal(SquadInstanceKind.None, row.Kind);
+        Assert.Null(row.Variable);
+        Assert.Equal(SquadInstanceStatus.Unsupported, row.Status);
+
+        string reason = Assert.IsType<string>(row.Reason);
+        Assert.Contains("no config-directory variable", reason, StringComparison.Ordinal);
+        Assert.Contains("no XDG base directory", reason, StringComparison.Ordinal);
+        Assert.Contains("whole-HOME redirection", reason, StringComparison.Ordinal);
+        Assert.Contains("~/.commandcode", reason, StringComparison.Ordinal);
+        Assert.Contains("not the home directory a link sync would copy", reason, StringComparison.Ordinal);
+    }
+
+    /// <summary>
     /// Verifies that all 13 catalog rows contain non-null link collections and non-empty executables.
     /// </summary>
     [Fact]

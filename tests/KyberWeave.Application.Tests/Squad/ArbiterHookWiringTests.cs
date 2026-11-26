@@ -28,7 +28,7 @@ public sealed class ArbiterHookWiringTests : IDisposable
         [ArbiterSquadFixture.CsharpDev, ArbiterSquadFixture.TestDev, ArbiterSquadFixture.GithubDevops];
 
     private static readonly string[] HookedTargetTokens =
-        ["claude", "codex", "copilot", "cursor", "opencode", "pi", "kilo", "antigravity", "factory", "devin"];
+        ["claude", "codex", "copilot", "cursor", "opencode", "pi", "kilo", "antigravity", "factory", "devin", "commandcode"];
 
     /// <summary>Declared independently of <see cref="ArbiterHookWiring"/> so a change to
     /// either side has to be made deliberately in both.</summary>
@@ -146,11 +146,19 @@ public sealed class ArbiterHookWiringTests : IDisposable
     }
 
     [Fact]
-    public void HookedTargets_AreExactlyTheTenHookedTargets()
+    public void HookedTargets_AreExactlyTheElevenHookedTargets()
     {
         Assert.Equal(
             new HashSet<string>(HookedTargetTokens, StringComparer.Ordinal),
             ArbiterHookWiring.HookedTargets);
+    }
+
+    [Fact]
+    public void HookedTargets_IncludeTheCommandCodeTarget()
+    {
+        // Command Code joined the hooked roster through its mod: `beforeToolCall` fires for
+        // every tool call, so the mod is the one seam that can gate an `agent` dispatch.
+        Assert.Contains("commandcode", ArbiterHookWiring.HookedTargets);
     }
 
     [Fact]
@@ -194,7 +202,8 @@ public sealed class ArbiterHookWiringTests : IDisposable
                 SquadTarget.Codex,
                 SquadTarget.Pi,
                 SquadTarget.Warp,
-                SquadTarget.ZCode
+                SquadTarget.ZCode,
+                SquadTarget.CommandCode
             },
             ArbiterHookWiring.TrustSteps.Keys.ToHashSet());
 
@@ -239,11 +248,24 @@ public sealed class ArbiterHookWiringTests : IDisposable
     }
 
     [Fact]
+    public void TrustSteps_NameTheCommandCodeModTrustGate()
+    {
+        // Command Code loads a project's mods only after the workspace trust prompt, while
+        // user-scope mods load without one: the step states both so the operator knows
+        // which installs enforce without further action.
+        string step = ArbiterHookWiring.TrustSteps[SquadTarget.CommandCode];
+        Assert.Contains("trust", step, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains(".commandcode/mods", step, StringComparison.Ordinal);
+        Assert.Contains("user-scope", step, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("without a prompt", step, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
     public void TargetDegradations_ProjectScope_LeavesHookedTargetsUnrecorded()
     {
         IReadOnlyList<SquadDegradationRecord> records = ArbiterHookWiring.TargetDegradations(
             [SquadTarget.Claude, SquadTarget.Codex, SquadTarget.Copilot, SquadTarget.Cursor, SquadTarget.OpenCode, SquadTarget.Pi,
-             SquadTarget.Kilo, SquadTarget.Antigravity, SquadTarget.Factory, SquadTarget.Devin],
+             SquadTarget.Kilo, SquadTarget.Antigravity, SquadTarget.Factory, SquadTarget.Devin, SquadTarget.CommandCode],
             SquadDeploymentScope.Project);
 
         Assert.Empty(records);
@@ -273,55 +295,47 @@ public sealed class ArbiterHookWiringTests : IDisposable
     [Fact]
     public void TargetDegradations_ProjectScope_ClassifiesEveryApprovedTarget()
     {
-        // Command Code joined the roster after the Arbiter phases and has no hook primitive,
-        // so a project-scope derivation over the whole roster yields the two fallback-only
-        // records plus one dispatch-unconfirmed record for Command Code.
+        // Command Code joined the hooked roster through its live-verified mod (the 2026-11-04
+        // `dispatch-unconfirmed` classification is superseded), so a project-scope derivation
+        // over the whole roster yields only the two fallback-only records.
         List<SquadDegradationRecord> records = ArbiterHookWiring.TargetDegradations(
             SquadTargetCatalog.All,
             SquadDeploymentScope.Project).ToList();
 
-        Assert.Equal(3, records.Count);
+        Assert.Equal(2, records.Count);
         Assert.Equal(
             new HashSet<string>(FallbackTargetTokens, StringComparer.Ordinal),
-            records.Where(record => record.Details == "fallback-only")
-                .Select(record => record.Target)
-                .ToHashSet());
-        Assert.Contains(
-            records,
-            record => record.Target == "commandcode" && record.Details == "dispatch-unconfirmed");
+            records.Select(record => record.Target).ToHashSet());
+        Assert.DoesNotContain(records, record => record.Details == "dispatch-unconfirmed");
     }
 
     [Fact]
-    public void TargetDegradations_ProjectScope_ClassesCommandCodeAsDispatchUnconfirmed()
+    public void TargetDegradations_ProjectScope_LeavesCommandCodeUnrecorded()
     {
-        List<SquadDegradationRecord> records = ArbiterHookWiring.TargetDegradations(
+        // The mod gates the `agent` dispatch tool on this harness, so a project install
+        // records no arbiter-not-enforced degradation for Command Code.
+        IReadOnlyList<SquadDegradationRecord> records = ArbiterHookWiring.TargetDegradations(
             [SquadTarget.CommandCode],
-            SquadDeploymentScope.Project).ToList();
+            SquadDeploymentScope.Project);
 
-        Assert.Collection(records, record =>
-        {
-            Assert.Equal("commandcode", record.Target);
-            Assert.Equal("dispatch-unconfirmed", record.Details);
-        });
+        Assert.Empty(records);
     }
 
     [Fact]
-    public void TargetDegradations_GlobalScope_ClassesCommandCodeAsDispatchUnconfirmed()
+    public void TargetDegradations_GlobalScope_ReportsCommandCodeEnforcedGlobal()
     {
+        // A user-scope mod loads without a trust prompt, so the global install enforces the
+        // same gate the project mod does.
         List<SquadDegradationRecord> records = ArbiterHookWiring.TargetDegradations(
             [SquadTarget.CommandCode],
             SquadDeploymentScope.Global).ToList();
 
-        Assert.Collection(records, record =>
-        {
-            Assert.Equal("commandcode", record.Target);
-            Assert.Equal("dispatch-unconfirmed", record.Details);
-        });
+        SquadDegradationRecord record = Assert.Single(records);
+        Assert.Equal("commandcode", record.Target);
+        Assert.Equal("enforced-global", record.Details);
     }
 
     [Theory]
-    [InlineData(SquadTarget.CommandCode, SquadDeploymentScope.Project)]
-    [InlineData(SquadTarget.CommandCode, SquadDeploymentScope.Global)]
     [InlineData(SquadTarget.Warp, SquadDeploymentScope.Project)]
     [InlineData(SquadTarget.Warp, SquadDeploymentScope.Global)]
     [InlineData(SquadTarget.ZCode, SquadDeploymentScope.Project)]
