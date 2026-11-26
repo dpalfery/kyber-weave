@@ -31,6 +31,7 @@ env:
   DOTNET_NOLOGO: "true"
   DOTNET_CLI_TELEMETRY_OPTOUT: "1"
   CONFIGURATION: Release
+  RECEIPT_MAX_AGE_SECONDS: "14400"
 
 jobs:
   # Decides which jobs a change needs. Skipping is done with job-level `if:` (never a
@@ -168,11 +169,126 @@ jobs:
   build-test:
     name: Build and test
     runs-on: ubuntu-latest
+    # Attesting a build product mints a short-lived Sigstore certificate, so this job asks for exactly
+    # that: id-token mints the OIDC token, attestations persists the attestation, artifact-metadata
+    # creates the storage record, and contents: read is the floor every job keeps.
+    permissions:
+      contents: read
+      id-token: write
+      attestations: write
+      artifact-metadata: write
+
     steps:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
 
+      # Content-hash receipts: this job hashes every input it reads, looks for a receipt under that
+      # fingerprint, and skips its work only when a fresh one proves this exact tree already passed
+      # here. Every way of failing to read a receipt runs the job in full.
+      - name: Compute input fingerprint
+        id: fp
+        shell: bash
+        env:
+          INPUT_HASH: ${{ hashFiles('.agents/**', '.apm/**', '.claude/**', '.codex/**', '.commandcode/**', '.cursor/**', '.devin/**', '.factory/**', '.github/**', '.kilo/**', '.kyber-weave/**', '.opencode/**', '.pi/**', '.playwright-cli/**', '.vscode/**', 'dash/**', 'docs/**', 'homebrew/**', 'npm/**', 'products/**', 'samples/**', 'scripts/**', 'src/**', 'templates/**', 'tests/**', '.editorconfig', '.gitattributes', '.gitignore', '.gitleaks.toml', '.mcp.json', 'AGENTS.md', 'CLAUDE.md', 'CODE_OF_CONDUCT.md', 'CONTRIBUTING.md', 'Directory.Build.props', 'HANDOVER-WAVE4.md', 'HANDOVER.md', 'KyberWeave.Unit.slnf', 'KyberWeave.sln', 'KyberWeave.sln.DotSettings', 'LICENSE', 'NOTICE', 'README.md', 'REFACTOR-LAYERS.md', 'REVIEW.md', 'SECURITY.md', 'apm.yml', 'global.json', 'kilo.json') }}
+        run: |
+          set -euo pipefail
+          hash="${INPUT_HASH:-}"
+          if [ -z "${hash}" ]; then
+            # An empty fingerprint would put every run on one key. A per-run value always misses.
+            hash="empty-${GITHUB_RUN_ID}"
+          fi
+          printf 'hash=%s\n' "${hash}" >> "${GITHUB_OUTPUT}"
+
+      - name: Look up the receipt
+        id: receipt
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: .receipt
+          # Exact key only: a restore-key would let a near-miss receipt skip work over input it never
+          # fingerprinted, while a miss costs one full run, which is the safe direction.
+          key: receipt-build-test-${{ runner.os }}-${{ steps.fp.outputs.hash }}
+
+      # A cache entry is data, not proof. The verdict validates the receipt, then compares its age
+      # against the workflow's ceiling, and sets skip=true only when both hold.
+      - name: Decide the verdict
+        id: verdict
+        shell: bash
+        env:
+          RECEIPT_HIT: ${{ steps.receipt.outputs.cache-hit }}
+          INPUT_HASH: ${{ steps.fp.outputs.hash }}
+          EVENT_NAME: ${{ github.event_name }}
+          HEAD_REPO: ${{ github.event.pull_request.head.repo.full_name }}
+          REPOSITORY: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          receipt=".receipt/receipt.json"
+          summary() { printf '%s\n' "$1" >> "${GITHUB_STEP_SUMMARY}"; }
+          finish() { printf 'skip=%s\n' "$1" >> "${GITHUB_OUTPUT}"; }
+
+          # A miss always runs the job in full. That is the mechanism's safe direction: every way of
+          # failing to read a receipt costs a re-run, never a skip over input nobody fingerprinted.
+          if [ "${RECEIPT_HIT}" != "true" ]; then
+            if [ "${EVENT_NAME}" = "pull_request" ] && [ "${HEAD_REPO}" != "${REPOSITORY}" ]; then
+              summary "- no prior receipt; a fork pull request reads no cache from the base repository (cache isolation), so the job runs in full"
+            else
+              summary "- no prior receipt; running in full"
+            fi
+            finish false
+            exit 0
+          fi
+
+          if [ ! -f "${receipt}" ]; then
+            summary "- the cache hit but held no receipt.json; running in full"
+            finish false
+            exit 0
+          fi
+
+          saved_at_epoch="$(jq -er '.saved_at_epoch' "${receipt}" 2>/dev/null || true)"
+          recorded_hash="$(jq -er '.input_hash' "${receipt}" 2>/dev/null || true)"
+          if [ -z "${saved_at_epoch}" ] || [ -z "${recorded_hash}" ]; then
+            summary "- the receipt is not JSON with saved_at_epoch and input_hash; running in full"
+            finish false
+            exit 0
+          fi
+
+          case "${saved_at_epoch}" in
+            '' | *[!0-9]*)
+              summary "- the receipt's saved_at_epoch '${saved_at_epoch}' is not a number of seconds; running in full"
+              finish false
+              exit 0
+              ;;
+          esac
+
+          now="$(date -u +%s)"
+          age=$((now - saved_at_epoch))
+          if [ "${age}" -lt 0 ]; then
+            summary "- the receipt is dated in the future (age ${age}s); running in full"
+            finish false
+            exit 0
+          fi
+
+          if [ "${recorded_hash}" != "${INPUT_HASH}" ]; then
+            summary "- the receipt's input_hash is not this run's fingerprint; running in full"
+            finish false
+            exit 0
+          fi
+
+          if [ "${age}" -gt "${RECEIPT_MAX_AGE_SECONDS}" ]; then
+            summary "- the receipt is ${age}s old, over the ${RECEIPT_MAX_AGE_SECONDS}s ceiling; running in full"
+            finish false
+            exit 0
+          fi
+
+          {
+            printf '%s\n' "- the receipt is ${age}s old, within the ${RECEIPT_MAX_AGE_SECONDS}s ceiling: this job already passed on these inputs, so its work steps are skipped"
+            printf '\n```json\n'
+            jq '.' "${receipt}"
+            printf '```\n'
+          } >> "${GITHUB_STEP_SUMMARY}"
+          finish true
+
       - name: Setup .NET
+        if: steps.verdict.outputs.skip != 'true'
         uses: actions/setup-dotnet@0f4a354dd5547a28c70b7853dbd95d5b67886e73 # v6.1.0
         with:
           dotnet-version: ${{ env.DOTNET_VERSION }}
@@ -180,6 +296,7 @@ jobs:
       # A cold restore downloads every package on each run; the cache turns that into a
       # version check. The key follows the project files, which is what pins a version.
       - name: Cache NuGet packages
+        if: steps.verdict.outputs.skip != 'true'
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: ~/.nuget/packages
@@ -187,12 +304,14 @@ jobs:
           restore-keys: nuget-${{ runner.os }}-
 
       - name: Restore
+        if: steps.verdict.outputs.skip != 'true'
         run: dotnet restore KyberWeave.sln
 
       # Curated packs only — whitespace + a small style set from .editorconfig. # gitleaks:allow
       # Skip `dotnet format analyzers`: CA quality rules already fail the build via
       # TreatWarningsAsErrors / AnalysisMode=all.
       - name: Format (whitespace)
+        if: steps.verdict.outputs.skip != 'true'
         run: >
           dotnet format KyberWeave.sln whitespace
           --verify-no-changes
@@ -200,6 +319,7 @@ jobs:
           -v minimal
 
       - name: Format (style)
+        if: steps.verdict.outputs.skip != 'true'
         run: >
           dotnet format KyberWeave.sln style
           --verify-no-changes
@@ -208,6 +328,7 @@ jobs:
           -v minimal
 
       - name: List vulnerable NuGet packages
+        if: steps.verdict.outputs.skip != 'true'
         run: |
           set -euo pipefail
           # Belt-and-suspenders for NuGetAudit during restore (NU1903/NU1904 are errors
@@ -221,9 +342,11 @@ jobs:
           fi
 
       - name: Build
+        if: steps.verdict.outputs.skip != 'true'
         run: dotnet build KyberWeave.sln -c ${{ env.CONFIGURATION }} --no-restore
 
       - name: Set up Bun
+        if: steps.verdict.outputs.skip != 'true'
         uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
         with:
           bun-version: "1.3.14"
@@ -236,6 +359,7 @@ jobs:
       # queueing; each writes its own TRX, and one failure still fails the step.
       # KyberWeave.Integration.Tests is not here: it is the "Integration tests" job below.
       - name: Test (unit, content, policy)
+        if: steps.verdict.outputs.skip != 'true'
         run: |
           set -uo pipefail
           status=0
@@ -262,7 +386,7 @@ jobs:
           exit "$status"
 
       - name: Upload test results
-        if: always()
+        if: always() && steps.verdict.outputs.skip != 'true'
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
         with:
           name: test-results
@@ -271,6 +395,7 @@ jobs:
           if-no-files-found: warn
 
       - name: Pack (CI artifacts only — not published)
+        if: steps.verdict.outputs.skip != 'true'
         run: >
           dotnet pack KyberWeave.sln
           -c ${{ env.CONFIGURATION }}
@@ -278,6 +403,7 @@ jobs:
           -o ./artifacts/nupkg
 
       - name: Upload pack artifacts
+        if: steps.verdict.outputs.skip != 'true'
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
         with:
           name: nupkg-artifacts
@@ -285,8 +411,93 @@ jobs:
           retention-days: 14
 
       - name: Shut down .NET build servers
-        if: always()
+        if: always() && steps.verdict.outputs.skip != 'true'
         run: dotnet build-server shutdown
+
+      # The receipt records the SHA-256 digests of what this run produced, so a reader can tie a pass
+      # to the exact bytes. Test reports and SARIF files are digested; only a build product is attested.
+      - name: Digest the build products
+        id: digest
+        if: steps.verdict.outputs.skip != 'true' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository)
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p .receipt
+          digests='{}'
+          for file in artifacts/nupkg/*.nupkg; do
+            [ -f "${file}" ] || continue
+            digest="$(sha256sum "${file}" | cut -d' ' -f1)"
+            digests="$(jq --arg path "${file}" --arg digest "sha256:${digest}" '. + {($path): $digest}' <<<"${digests}")"
+          done
+          printf 'digests=%s\n' "${digests}" >> "${GITHUB_OUTPUT}"
+
+      # Provenance mode: no sbom-path and no predicate, so the attestation binds the product to this
+      # workflow's identity rather than making a claim about its contents.
+      - name: Attest the build products
+        uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4.2.2
+        if: steps.verdict.outputs.skip != 'true' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository)
+        with:
+          subject-path: |
+            artifacts/nupkg/*.nupkg
+
+      # The receipt is written only on the miss path, so a hit never refreshes saved_at_epoch and a job
+      # that keeps hitting ages out on schedule. A cache-reserve race must not fail a green job: the
+      # save is best-effort, and losing it only means the next run re-executes.
+      - name: Save the receipt
+        id: save
+        if: success() && steps.verdict.outputs.skip != 'true' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository)
+        continue-on-error: true
+        shell: bash
+        env:
+          JOB_KEY: build-test
+          INPUT_HASH: ${{ steps.fp.outputs.hash }}
+          ARTIFACT_DIGESTS: ${{ steps.digest.outputs.digests }}
+          ATTESTED: "true"
+          COMMIT_SHA: ${{ github.sha }}
+          RUN_ID: ${{ github.run_id }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          set -euo pipefail
+          mkdir -p .receipt
+          saved_at_epoch="$(date -u +%s)"
+          saved_at="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+          if [ -n "${ARTIFACT_DIGESTS}" ]; then
+            digests="$(printf '%s' "${ARTIFACT_DIGESTS}" | jq -c '.')"
+          else
+            digests="null"
+          fi
+          jq -n \
+            --arg schema "1" \
+            --arg job "${JOB_KEY}" \
+            --arg input_hash "${INPUT_HASH}" \
+            --arg commit_sha "${COMMIT_SHA}" \
+            --arg run_id "${RUN_ID}" \
+            --arg run_url "${RUN_URL}" \
+            --arg attested "${ATTESTED}" \
+            --arg saved_at "${saved_at}" \
+            --argjson saved_at_epoch "${saved_at_epoch}" \
+            --argjson artifact_digests "${digests}" \
+            '{
+              schema: $schema,
+              job: $job,
+              input_hash: $input_hash,
+              commit_sha: $commit_sha,
+              run_id: $run_id,
+              run_url: $run_url,
+              artifact_digests: $artifact_digests,
+              attested: ($attested == "true"),
+              saved_at: $saved_at,
+              saved_at_epoch: $saved_at_epoch
+            }' > .receipt/receipt.json
+          jq '.' .receipt/receipt.json
+
+      - name: Store the receipt
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        if: success() && steps.verdict.outputs.skip != 'true' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository)
+        continue-on-error: true
+        with:
+          path: .receipt
+          key: receipt-build-test-${{ runner.os }}-${{ steps.fp.outputs.hash }}
 
   integration-test:
     # The safety net, in its own job and its own project: real Squad deployments, real child
@@ -303,7 +514,113 @@ jobs:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
 
+      # Content-hash receipts: this job hashes every input it reads, looks for a receipt under that
+      # fingerprint, and skips its work only when a fresh one proves this exact tree already passed
+      # here. Every way of failing to read a receipt runs the job in full.
+      - name: Compute input fingerprint
+        id: fp
+        shell: bash
+        env:
+          INPUT_HASH: ${{ hashFiles('.agents/**', '.apm/**', '.claude/**', '.codex/**', '.commandcode/**', '.cursor/**', '.devin/**', '.factory/**', '.github/**', '.kilo/**', '.kyber-weave/**', '.opencode/**', '.pi/**', '.playwright-cli/**', '.vscode/**', 'dash/**', 'docs/**', 'homebrew/**', 'npm/**', 'products/**', 'samples/**', 'scripts/**', 'src/**', 'templates/**', 'tests/**', '.editorconfig', '.gitattributes', '.gitignore', '.gitleaks.toml', '.mcp.json', 'AGENTS.md', 'CLAUDE.md', 'CODE_OF_CONDUCT.md', 'CONTRIBUTING.md', 'Directory.Build.props', 'HANDOVER-WAVE4.md', 'HANDOVER.md', 'KyberWeave.Unit.slnf', 'KyberWeave.sln', 'KyberWeave.sln.DotSettings', 'LICENSE', 'NOTICE', 'README.md', 'REFACTOR-LAYERS.md', 'REVIEW.md', 'SECURITY.md', 'apm.yml', 'global.json', 'kilo.json') }}
+        run: |
+          set -euo pipefail
+          hash="${INPUT_HASH:-}"
+          if [ -z "${hash}" ]; then
+            # An empty fingerprint would put every run on one key. A per-run value always misses.
+            hash="empty-${GITHUB_RUN_ID}"
+          fi
+          printf 'hash=%s\n' "${hash}" >> "${GITHUB_OUTPUT}"
+
+      - name: Look up the receipt
+        id: receipt
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: .receipt
+          # Exact key only: a restore-key would let a near-miss receipt skip work over input it never
+          # fingerprinted, while a miss costs one full run, which is the safe direction.
+          key: receipt-integration-test-${{ runner.os }}-${{ steps.fp.outputs.hash }}
+
+      # A cache entry is data, not proof. The verdict validates the receipt, then compares its age
+      # against the workflow's ceiling, and sets skip=true only when both hold.
+      - name: Decide the verdict
+        id: verdict
+        shell: bash
+        env:
+          RECEIPT_HIT: ${{ steps.receipt.outputs.cache-hit }}
+          INPUT_HASH: ${{ steps.fp.outputs.hash }}
+          EVENT_NAME: ${{ github.event_name }}
+          HEAD_REPO: ${{ github.event.pull_request.head.repo.full_name }}
+          REPOSITORY: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          receipt=".receipt/receipt.json"
+          summary() { printf '%s\n' "$1" >> "${GITHUB_STEP_SUMMARY}"; }
+          finish() { printf 'skip=%s\n' "$1" >> "${GITHUB_OUTPUT}"; }
+
+          # A miss always runs the job in full. That is the mechanism's safe direction: every way of
+          # failing to read a receipt costs a re-run, never a skip over input nobody fingerprinted.
+          if [ "${RECEIPT_HIT}" != "true" ]; then
+            if [ "${EVENT_NAME}" = "pull_request" ] && [ "${HEAD_REPO}" != "${REPOSITORY}" ]; then
+              summary "- no prior receipt; a fork pull request reads no cache from the base repository (cache isolation), so the job runs in full"
+            else
+              summary "- no prior receipt; running in full"
+            fi
+            finish false
+            exit 0
+          fi
+
+          if [ ! -f "${receipt}" ]; then
+            summary "- the cache hit but held no receipt.json; running in full"
+            finish false
+            exit 0
+          fi
+
+          saved_at_epoch="$(jq -er '.saved_at_epoch' "${receipt}" 2>/dev/null || true)"
+          recorded_hash="$(jq -er '.input_hash' "${receipt}" 2>/dev/null || true)"
+          if [ -z "${saved_at_epoch}" ] || [ -z "${recorded_hash}" ]; then
+            summary "- the receipt is not JSON with saved_at_epoch and input_hash; running in full"
+            finish false
+            exit 0
+          fi
+
+          case "${saved_at_epoch}" in
+            '' | *[!0-9]*)
+              summary "- the receipt's saved_at_epoch '${saved_at_epoch}' is not a number of seconds; running in full"
+              finish false
+              exit 0
+              ;;
+          esac
+
+          now="$(date -u +%s)"
+          age=$((now - saved_at_epoch))
+          if [ "${age}" -lt 0 ]; then
+            summary "- the receipt is dated in the future (age ${age}s); running in full"
+            finish false
+            exit 0
+          fi
+
+          if [ "${recorded_hash}" != "${INPUT_HASH}" ]; then
+            summary "- the receipt's input_hash is not this run's fingerprint; running in full"
+            finish false
+            exit 0
+          fi
+
+          if [ "${age}" -gt "${RECEIPT_MAX_AGE_SECONDS}" ]; then
+            summary "- the receipt is ${age}s old, over the ${RECEIPT_MAX_AGE_SECONDS}s ceiling; running in full"
+            finish false
+            exit 0
+          fi
+
+          {
+            printf '%s\n' "- the receipt is ${age}s old, within the ${RECEIPT_MAX_AGE_SECONDS}s ceiling: this job already passed on these inputs, so its work steps are skipped"
+            printf '\n```json\n'
+            jq '.' "${receipt}"
+            printf '```\n'
+          } >> "${GITHUB_STEP_SUMMARY}"
+          finish true
+
       - name: Setup .NET
+        if: steps.verdict.outputs.skip != 'true'
         uses: actions/setup-dotnet@0f4a354dd5547a28c70b7853dbd95d5b67886e73 # v6.1.0
         with:
           dotnet-version: ${{ env.DOTNET_VERSION }}
@@ -311,6 +628,7 @@ jobs:
       # A cold restore downloads every package on each run; the cache turns that into a
       # version check. The key follows the project files, which is what pins a version.
       - name: Cache NuGet packages
+        if: steps.verdict.outputs.skip != 'true'
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: ~/.nuget/packages
@@ -318,11 +636,13 @@ jobs:
           restore-keys: nuget-${{ runner.os }}-
 
       - name: Restore
+        if: steps.verdict.outputs.skip != 'true'
         run: dotnet restore KyberWeave.sln
 
       # The same build the unit job runs, so the integration project and every project it
       # references are the binaries the tests execute. --no-build on the test step depends on it.
       - name: Build
+        if: steps.verdict.outputs.skip != 'true'
         run: dotnet build KyberWeave.sln -c ${{ env.CONFIGURATION }} --no-restore
 
       # ProseRuleGradingTests asks Jev whether the shipped prose states each catalog rule
@@ -332,6 +652,7 @@ jobs:
       # lands below the confidence floor (it is listed in the report); a confident wrong answer, or
       # a wrong-way answer below the floor, fails.
       - name: Test (integration)
+        if: steps.verdict.outputs.skip != 'true'
         env:
           TYPESAFE_API_KEY: ${{ secrets.TYPESAFE_API_KEY }}
           KW_PROSE_GRADE: ${{ secrets.TYPESAFE_API_KEY != '' && '1' || '' }}
@@ -346,7 +667,7 @@ jobs:
           --results-directory TestResults
 
       - name: Upload test results
-        if: always()
+        if: always() && steps.verdict.outputs.skip != 'true'
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
         with:
           name: integration-test-results
@@ -355,8 +676,67 @@ jobs:
           if-no-files-found: warn
 
       - name: Shut down .NET build servers
-        if: always()
+        if: always() && steps.verdict.outputs.skip != 'true'
         run: dotnet build-server shutdown
+
+      # The receipt is written only on the miss path, so a hit never refreshes saved_at_epoch and a job
+      # that keeps hitting ages out on schedule. A cache-reserve race must not fail a green job: the
+      # save is best-effort, and losing it only means the next run re-executes.
+      - name: Save the receipt
+        id: save
+        if: success() && steps.verdict.outputs.skip != 'true' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository)
+        continue-on-error: true
+        shell: bash
+        env:
+          JOB_KEY: integration-test
+          INPUT_HASH: ${{ steps.fp.outputs.hash }}
+          ARTIFACT_DIGESTS: ""
+          ATTESTED: "false"
+          COMMIT_SHA: ${{ github.sha }}
+          RUN_ID: ${{ github.run_id }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          set -euo pipefail
+          mkdir -p .receipt
+          saved_at_epoch="$(date -u +%s)"
+          saved_at="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+          if [ -n "${ARTIFACT_DIGESTS}" ]; then
+            digests="$(printf '%s' "${ARTIFACT_DIGESTS}" | jq -c '.')"
+          else
+            digests="null"
+          fi
+          jq -n \
+            --arg schema "1" \
+            --arg job "${JOB_KEY}" \
+            --arg input_hash "${INPUT_HASH}" \
+            --arg commit_sha "${COMMIT_SHA}" \
+            --arg run_id "${RUN_ID}" \
+            --arg run_url "${RUN_URL}" \
+            --arg attested "${ATTESTED}" \
+            --arg saved_at "${saved_at}" \
+            --argjson saved_at_epoch "${saved_at_epoch}" \
+            --argjson artifact_digests "${digests}" \
+            '{
+              schema: $schema,
+              job: $job,
+              input_hash: $input_hash,
+              commit_sha: $commit_sha,
+              run_id: $run_id,
+              run_url: $run_url,
+              artifact_digests: $artifact_digests,
+              attested: ($attested == "true"),
+              saved_at: $saved_at,
+              saved_at_epoch: $saved_at_epoch
+            }' > .receipt/receipt.json
+          jq '.' .receipt/receipt.json
+
+      - name: Store the receipt
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        if: success() && steps.verdict.outputs.skip != 'true' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository)
+        continue-on-error: true
+        with:
+          path: .receipt
+          key: receipt-integration-test-${{ runner.os }}-${{ steps.fp.outputs.hash }}
 
   sbom:
     # The release workflow attaches a CycloneDX SBOM to every GitHub Release. This
@@ -372,6 +752,15 @@ jobs:
     needs: changes
     if: needs.changes.outputs.sbom == 'true'
     runs-on: ubuntu-latest
+    # Attesting a build product mints a short-lived Sigstore certificate, so this job asks for exactly
+    # that: id-token mints the OIDC token, attestations persists the attestation, artifact-metadata
+    # creates the storage record, and contents: read is the floor every job keeps.
+    permissions:
+      contents: read
+      id-token: write
+      attestations: write
+      artifact-metadata: write
+
     steps:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
@@ -379,18 +768,126 @@ jobs:
       # The generator caches the pinned Syft tarball under the documented cache root
       # and re-verifies its SHA-256 on every run, so a restored cache is checked
       # before it is used rather than trusted.
+      # Content-hash receipts: this job hashes every input it reads, looks for a receipt under that
+      # fingerprint, and skips its work only when a fresh one proves this exact tree already passed
+      # here. Every way of failing to read a receipt runs the job in full.
+      - name: Compute input fingerprint
+        id: fp
+        shell: bash
+        env:
+          INPUT_HASH: ${{ hashFiles('**/package-lock.json', '**/Cargo.lock', '**/packages.lock.json', '**/*.csproj', '**/Directory.*.props', 'global.json', 'scripts/generate-sbom.sh', 'scripts/validate-sbom.py', 'scripts/syft-bootstrap.sh', 'dash/tray/vendor/**', '.github/workflows/release.yml', '.github/workflows/ci.yml') }}
+        run: |
+          set -euo pipefail
+          hash="${INPUT_HASH:-}"
+          if [ -z "${hash}" ]; then
+            # An empty fingerprint would put every run on one key. A per-run value always misses.
+            hash="empty-${GITHUB_RUN_ID}"
+          fi
+          printf 'hash=%s\n' "${hash}" >> "${GITHUB_OUTPUT}"
+
+      - name: Look up the receipt
+        id: receipt
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: .receipt
+          # Exact key only: a restore-key would let a near-miss receipt skip work over input it never
+          # fingerprinted, while a miss costs one full run, which is the safe direction.
+          key: receipt-sbom-${{ runner.os }}-${{ steps.fp.outputs.hash }}
+
+      # A cache entry is data, not proof. The verdict validates the receipt, then compares its age
+      # against the workflow's ceiling, and sets skip=true only when both hold.
+      - name: Decide the verdict
+        id: verdict
+        shell: bash
+        env:
+          RECEIPT_HIT: ${{ steps.receipt.outputs.cache-hit }}
+          INPUT_HASH: ${{ steps.fp.outputs.hash }}
+          EVENT_NAME: ${{ github.event_name }}
+          HEAD_REPO: ${{ github.event.pull_request.head.repo.full_name }}
+          REPOSITORY: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          receipt=".receipt/receipt.json"
+          summary() { printf '%s\n' "$1" >> "${GITHUB_STEP_SUMMARY}"; }
+          finish() { printf 'skip=%s\n' "$1" >> "${GITHUB_OUTPUT}"; }
+
+          # A miss always runs the job in full. That is the mechanism's safe direction: every way of
+          # failing to read a receipt costs a re-run, never a skip over input nobody fingerprinted.
+          if [ "${RECEIPT_HIT}" != "true" ]; then
+            if [ "${EVENT_NAME}" = "pull_request" ] && [ "${HEAD_REPO}" != "${REPOSITORY}" ]; then
+              summary "- no prior receipt; a fork pull request reads no cache from the base repository (cache isolation), so the job runs in full"
+            else
+              summary "- no prior receipt; running in full"
+            fi
+            finish false
+            exit 0
+          fi
+
+          if [ ! -f "${receipt}" ]; then
+            summary "- the cache hit but held no receipt.json; running in full"
+            finish false
+            exit 0
+          fi
+
+          saved_at_epoch="$(jq -er '.saved_at_epoch' "${receipt}" 2>/dev/null || true)"
+          recorded_hash="$(jq -er '.input_hash' "${receipt}" 2>/dev/null || true)"
+          if [ -z "${saved_at_epoch}" ] || [ -z "${recorded_hash}" ]; then
+            summary "- the receipt is not JSON with saved_at_epoch and input_hash; running in full"
+            finish false
+            exit 0
+          fi
+
+          case "${saved_at_epoch}" in
+            '' | *[!0-9]*)
+              summary "- the receipt's saved_at_epoch '${saved_at_epoch}' is not a number of seconds; running in full"
+              finish false
+              exit 0
+              ;;
+          esac
+
+          now="$(date -u +%s)"
+          age=$((now - saved_at_epoch))
+          if [ "${age}" -lt 0 ]; then
+            summary "- the receipt is dated in the future (age ${age}s); running in full"
+            finish false
+            exit 0
+          fi
+
+          if [ "${recorded_hash}" != "${INPUT_HASH}" ]; then
+            summary "- the receipt's input_hash is not this run's fingerprint; running in full"
+            finish false
+            exit 0
+          fi
+
+          if [ "${age}" -gt "${RECEIPT_MAX_AGE_SECONDS}" ]; then
+            summary "- the receipt is ${age}s old, over the ${RECEIPT_MAX_AGE_SECONDS}s ceiling; running in full"
+            finish false
+            exit 0
+          fi
+
+          {
+            printf '%s\n' "- the receipt is ${age}s old, within the ${RECEIPT_MAX_AGE_SECONDS}s ceiling: this job already passed on these inputs, so its work steps are skipped"
+            printf '\n```json\n'
+            jq '.' "${receipt}"
+            printf '```\n'
+          } >> "${GITHUB_STEP_SUMMARY}"
+          finish true
+
       - name: Cache the pinned Syft tarball
+        if: steps.verdict.outputs.skip != 'true'
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: ~/.cache/kyber-weave
           key: syft-1.55.0-${{ runner.os }}-${{ runner.arch }}
 
       - name: Setup .NET
+        if: steps.verdict.outputs.skip != 'true'
         uses: actions/setup-dotnet@0f4a354dd5547a28c70b7853dbd95d5b67886e73 # v6.1.0
         with:
           dotnet-version: ${{ env.DOTNET_VERSION }}
 
       - name: Generate the SBOM
+        if: steps.verdict.outputs.skip != 'true'
         env:
           SBOM_VERSION: "0.0.0-ci"
         run: |
@@ -399,6 +896,7 @@ jobs:
           bash scripts/generate-sbom.sh sbom-out "${SBOM_VERSION}"
 
       - name: Validate the SBOM against the CycloneDX schema
+        if: steps.verdict.outputs.skip != 'true'
         env:
           SBOM_VERSION: "0.0.0-ci"
         run: |
@@ -411,6 +909,7 @@ jobs:
             --require-ecosystems npm,cargo,nuget
 
       - name: Summarise the SBOM
+        if: steps.verdict.outputs.skip != 'true'
         env:
           SBOM_VERSION: "0.0.0-ci"
         run: |
@@ -431,12 +930,98 @@ jobs:
           } >> "${GITHUB_STEP_SUMMARY}"
 
       - name: Upload the SBOM
+        if: steps.verdict.outputs.skip != 'true'
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
         with:
           name: sbom-ci
           path: sbom-out/kyber-weave-sbom-*.cdx.json
           retention-days: 14
           if-no-files-found: error
+
+      # The receipt records the SHA-256 digests of what this run produced, so a reader can tie a pass
+      # to the exact bytes. Test reports and SARIF files are digested; only a build product is attested.
+      - name: Digest the build products
+        id: digest
+        if: steps.verdict.outputs.skip != 'true' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository)
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p .receipt
+          digests='{}'
+          for file in sbom-out/kyber-weave-sbom-*.cdx.json; do
+            [ -f "${file}" ] || continue
+            digest="$(sha256sum "${file}" | cut -d' ' -f1)"
+            digests="$(jq --arg path "${file}" --arg digest "sha256:${digest}" '. + {($path): $digest}' <<<"${digests}")"
+          done
+          printf 'digests=%s\n' "${digests}" >> "${GITHUB_OUTPUT}"
+
+      # Provenance mode: no sbom-path and no predicate, so the attestation binds the product to this
+      # workflow's identity rather than making a claim about its contents.
+      - name: Attest the build products
+        uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4.2.2
+        if: steps.verdict.outputs.skip != 'true' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository)
+        with:
+          subject-path: |
+            sbom-out/kyber-weave-sbom-*.cdx.json
+
+      # The receipt is written only on the miss path, so a hit never refreshes saved_at_epoch and a job
+      # that keeps hitting ages out on schedule. A cache-reserve race must not fail a green job: the
+      # save is best-effort, and losing it only means the next run re-executes.
+      - name: Save the receipt
+        id: save
+        if: success() && steps.verdict.outputs.skip != 'true' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository)
+        continue-on-error: true
+        shell: bash
+        env:
+          JOB_KEY: sbom
+          INPUT_HASH: ${{ steps.fp.outputs.hash }}
+          ARTIFACT_DIGESTS: ${{ steps.digest.outputs.digests }}
+          ATTESTED: "true"
+          COMMIT_SHA: ${{ github.sha }}
+          RUN_ID: ${{ github.run_id }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          set -euo pipefail
+          mkdir -p .receipt
+          saved_at_epoch="$(date -u +%s)"
+          saved_at="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+          if [ -n "${ARTIFACT_DIGESTS}" ]; then
+            digests="$(printf '%s' "${ARTIFACT_DIGESTS}" | jq -c '.')"
+          else
+            digests="null"
+          fi
+          jq -n \
+            --arg schema "1" \
+            --arg job "${JOB_KEY}" \
+            --arg input_hash "${INPUT_HASH}" \
+            --arg commit_sha "${COMMIT_SHA}" \
+            --arg run_id "${RUN_ID}" \
+            --arg run_url "${RUN_URL}" \
+            --arg attested "${ATTESTED}" \
+            --arg saved_at "${saved_at}" \
+            --argjson saved_at_epoch "${saved_at_epoch}" \
+            --argjson artifact_digests "${digests}" \
+            '{
+              schema: $schema,
+              job: $job,
+              input_hash: $input_hash,
+              commit_sha: $commit_sha,
+              run_id: $run_id,
+              run_url: $run_url,
+              artifact_digests: $artifact_digests,
+              attested: ($attested == "true"),
+              saved_at: $saved_at,
+              saved_at_epoch: $saved_at_epoch
+            }' > .receipt/receipt.json
+          jq '.' .receipt/receipt.json
+
+      - name: Store the receipt
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        if: success() && steps.verdict.outputs.skip != 'true' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository)
+        continue-on-error: true
+        with:
+          path: .receipt
+          key: receipt-sbom-${{ runner.os }}-${{ steps.fp.outputs.hash }}
 
   squad-filesystem-contract:
     name: Squad filesystem contract (${{ matrix.os }})
@@ -452,7 +1037,113 @@ jobs:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
 
+      # Content-hash receipts: this job hashes every input it reads, looks for a receipt under that
+      # fingerprint, and skips its work only when a fresh one proves this exact tree already passed
+      # here. Every way of failing to read a receipt runs the job in full.
+      - name: Compute input fingerprint
+        id: fp
+        shell: bash
+        env:
+          INPUT_HASH: ${{ hashFiles('.agents/**', '.apm/**', '.claude/**', '.codex/**', '.commandcode/**', '.cursor/**', '.devin/**', '.factory/**', '.github/**', '.kilo/**', '.kyber-weave/**', '.opencode/**', '.pi/**', '.playwright-cli/**', '.vscode/**', 'dash/**', 'docs/**', 'homebrew/**', 'npm/**', 'products/**', 'samples/**', 'scripts/**', 'src/**', 'templates/**', 'tests/**', '.editorconfig', '.gitattributes', '.gitignore', '.gitleaks.toml', '.mcp.json', 'AGENTS.md', 'CLAUDE.md', 'CODE_OF_CONDUCT.md', 'CONTRIBUTING.md', 'Directory.Build.props', 'HANDOVER-WAVE4.md', 'HANDOVER.md', 'KyberWeave.Unit.slnf', 'KyberWeave.sln', 'KyberWeave.sln.DotSettings', 'LICENSE', 'NOTICE', 'README.md', 'REFACTOR-LAYERS.md', 'REVIEW.md', 'SECURITY.md', 'apm.yml', 'global.json', 'kilo.json') }}
+        run: |
+          set -euo pipefail
+          hash="${INPUT_HASH:-}"
+          if [ -z "${hash}" ]; then
+            # An empty fingerprint would put every run on one key. A per-run value always misses.
+            hash="empty-${GITHUB_RUN_ID}"
+          fi
+          printf 'hash=%s\n' "${hash}" >> "${GITHUB_OUTPUT}"
+
+      - name: Look up the receipt
+        id: receipt
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: .receipt
+          # Exact key only: a restore-key would let a near-miss receipt skip work over input it never
+          # fingerprinted, while a miss costs one full run, which is the safe direction.
+          key: receipt-squad-filesystem-contract-${{ matrix.os }}-${{ steps.fp.outputs.hash }}
+
+      # A cache entry is data, not proof. The verdict validates the receipt, then compares its age
+      # against the workflow's ceiling, and sets skip=true only when both hold.
+      - name: Decide the verdict
+        id: verdict
+        shell: bash
+        env:
+          RECEIPT_HIT: ${{ steps.receipt.outputs.cache-hit }}
+          INPUT_HASH: ${{ steps.fp.outputs.hash }}
+          EVENT_NAME: ${{ github.event_name }}
+          HEAD_REPO: ${{ github.event.pull_request.head.repo.full_name }}
+          REPOSITORY: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          receipt=".receipt/receipt.json"
+          summary() { printf '%s\n' "$1" >> "${GITHUB_STEP_SUMMARY}"; }
+          finish() { printf 'skip=%s\n' "$1" >> "${GITHUB_OUTPUT}"; }
+
+          # A miss always runs the job in full. That is the mechanism's safe direction: every way of
+          # failing to read a receipt costs a re-run, never a skip over input nobody fingerprinted.
+          if [ "${RECEIPT_HIT}" != "true" ]; then
+            if [ "${EVENT_NAME}" = "pull_request" ] && [ "${HEAD_REPO}" != "${REPOSITORY}" ]; then
+              summary "- no prior receipt; a fork pull request reads no cache from the base repository (cache isolation), so the job runs in full"
+            else
+              summary "- no prior receipt; running in full"
+            fi
+            finish false
+            exit 0
+          fi
+
+          if [ ! -f "${receipt}" ]; then
+            summary "- the cache hit but held no receipt.json; running in full"
+            finish false
+            exit 0
+          fi
+
+          saved_at_epoch="$(jq -er '.saved_at_epoch' "${receipt}" 2>/dev/null || true)"
+          recorded_hash="$(jq -er '.input_hash' "${receipt}" 2>/dev/null || true)"
+          if [ -z "${saved_at_epoch}" ] || [ -z "${recorded_hash}" ]; then
+            summary "- the receipt is not JSON with saved_at_epoch and input_hash; running in full"
+            finish false
+            exit 0
+          fi
+
+          case "${saved_at_epoch}" in
+            '' | *[!0-9]*)
+              summary "- the receipt's saved_at_epoch '${saved_at_epoch}' is not a number of seconds; running in full"
+              finish false
+              exit 0
+              ;;
+          esac
+
+          now="$(date -u +%s)"
+          age=$((now - saved_at_epoch))
+          if [ "${age}" -lt 0 ]; then
+            summary "- the receipt is dated in the future (age ${age}s); running in full"
+            finish false
+            exit 0
+          fi
+
+          if [ "${recorded_hash}" != "${INPUT_HASH}" ]; then
+            summary "- the receipt's input_hash is not this run's fingerprint; running in full"
+            finish false
+            exit 0
+          fi
+
+          if [ "${age}" -gt "${RECEIPT_MAX_AGE_SECONDS}" ]; then
+            summary "- the receipt is ${age}s old, over the ${RECEIPT_MAX_AGE_SECONDS}s ceiling; running in full"
+            finish false
+            exit 0
+          fi
+
+          {
+            printf '%s\n' "- the receipt is ${age}s old, within the ${RECEIPT_MAX_AGE_SECONDS}s ceiling: this job already passed on these inputs, so its work steps are skipped"
+            printf '\n```json\n'
+            jq '.' "${receipt}"
+            printf '```\n'
+          } >> "${GITHUB_STEP_SUMMARY}"
+          finish true
+
       - name: Setup .NET
+        if: steps.verdict.outputs.skip != 'true'
         uses: actions/setup-dotnet@0f4a354dd5547a28c70b7853dbd95d5b67886e73 # v6.1.0
         with:
           dotnet-version: ${{ env.DOTNET_VERSION }}
@@ -460,6 +1151,7 @@ jobs:
       # A cold restore downloads every package on each run; the cache turns that into a
       # version check. The key follows the project files, which is what pins a version.
       - name: Cache NuGet packages
+        if: steps.verdict.outputs.skip != 'true'
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: ~/.nuget/packages
@@ -467,30 +1159,207 @@ jobs:
           restore-keys: nuget-${{ runner.os }}-
 
       - name: Restore
+        if: steps.verdict.outputs.skip != 'true'
         run: dotnet restore KyberWeave.sln
 
       - name: Run Squad filesystem contract
+        if: steps.verdict.outputs.skip != 'true'
         run: >
           dotnet test tests/KyberWeave.Integration.Tests/KyberWeave.Integration.Tests.csproj
           -c ${{ env.CONFIGURATION }}
           --no-restore
           --filter "FullyQualifiedName~SquadDeploymentState|FullyQualifiedName~PhysicalFileSystemContractTests|FullyQualifiedName~SelfUpdate"
 
+      # The receipt is written only on the miss path, so a hit never refreshes saved_at_epoch and a job
+      # that keeps hitting ages out on schedule. A cache-reserve race must not fail a green job: the
+      # save is best-effort, and losing it only means the next run re-executes.
+      - name: Save the receipt
+        id: save
+        if: success() && steps.verdict.outputs.skip != 'true' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository)
+        continue-on-error: true
+        shell: bash
+        env:
+          JOB_KEY: squad-filesystem-contract
+          INPUT_HASH: ${{ steps.fp.outputs.hash }}
+          ARTIFACT_DIGESTS: ""
+          ATTESTED: "false"
+          COMMIT_SHA: ${{ github.sha }}
+          RUN_ID: ${{ github.run_id }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          set -euo pipefail
+          mkdir -p .receipt
+          saved_at_epoch="$(date -u +%s)"
+          saved_at="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+          if [ -n "${ARTIFACT_DIGESTS}" ]; then
+            digests="$(printf '%s' "${ARTIFACT_DIGESTS}" | jq -c '.')"
+          else
+            digests="null"
+          fi
+          jq -n \
+            --arg schema "1" \
+            --arg job "${JOB_KEY}" \
+            --arg input_hash "${INPUT_HASH}" \
+            --arg commit_sha "${COMMIT_SHA}" \
+            --arg run_id "${RUN_ID}" \
+            --arg run_url "${RUN_URL}" \
+            --arg attested "${ATTESTED}" \
+            --arg saved_at "${saved_at}" \
+            --argjson saved_at_epoch "${saved_at_epoch}" \
+            --argjson artifact_digests "${digests}" \
+            '{
+              schema: $schema,
+              job: $job,
+              input_hash: $input_hash,
+              commit_sha: $commit_sha,
+              run_id: $run_id,
+              run_url: $run_url,
+              artifact_digests: $artifact_digests,
+              attested: ($attested == "true"),
+              saved_at: $saved_at,
+              saved_at_epoch: $saved_at_epoch
+            }' > .receipt/receipt.json
+          jq '.' .receipt/receipt.json
+
+      - name: Store the receipt
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        if: success() && steps.verdict.outputs.skip != 'true' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository)
+        continue-on-error: true
+        with:
+          path: .receipt
+          key: receipt-squad-filesystem-contract-${{ matrix.os }}-${{ steps.fp.outputs.hash }}
+
   publish-smoke:
     name: Self-contained publish smoke (linux-x64)
     runs-on: ubuntu-latest
     needs: changes
     if: needs.changes.outputs.dotnet == 'true'
+    # Attesting a build product mints a short-lived Sigstore certificate, so this job asks for exactly
+    # that: id-token mints the OIDC token, attestations persists the attestation, artifact-metadata
+    # creates the storage record, and contents: read is the floor every job keeps.
+    permissions:
+      contents: read
+      id-token: write
+      attestations: write
+      artifact-metadata: write
+
     steps:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
 
+      # Content-hash receipts: this job hashes every input it reads, looks for a receipt under that
+      # fingerprint, and skips its work only when a fresh one proves this exact tree already passed
+      # here. Every way of failing to read a receipt runs the job in full.
+      - name: Compute input fingerprint
+        id: fp
+        shell: bash
+        env:
+          INPUT_HASH: ${{ hashFiles('.agents/**', '.apm/**', '.claude/**', '.codex/**', '.commandcode/**', '.cursor/**', '.devin/**', '.factory/**', '.github/**', '.kilo/**', '.kyber-weave/**', '.opencode/**', '.pi/**', '.playwright-cli/**', '.vscode/**', 'dash/**', 'docs/**', 'homebrew/**', 'npm/**', 'products/**', 'samples/**', 'scripts/**', 'src/**', 'templates/**', 'tests/**', '.editorconfig', '.gitattributes', '.gitignore', '.gitleaks.toml', '.mcp.json', 'AGENTS.md', 'CLAUDE.md', 'CODE_OF_CONDUCT.md', 'CONTRIBUTING.md', 'Directory.Build.props', 'HANDOVER-WAVE4.md', 'HANDOVER.md', 'KyberWeave.Unit.slnf', 'KyberWeave.sln', 'KyberWeave.sln.DotSettings', 'LICENSE', 'NOTICE', 'README.md', 'REFACTOR-LAYERS.md', 'REVIEW.md', 'SECURITY.md', 'apm.yml', 'global.json', 'kilo.json') }}
+        run: |
+          set -euo pipefail
+          hash="${INPUT_HASH:-}"
+          if [ -z "${hash}" ]; then
+            # An empty fingerprint would put every run on one key. A per-run value always misses.
+            hash="empty-${GITHUB_RUN_ID}"
+          fi
+          printf 'hash=%s\n' "${hash}" >> "${GITHUB_OUTPUT}"
+
+      - name: Look up the receipt
+        id: receipt
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: .receipt
+          # Exact key only: a restore-key would let a near-miss receipt skip work over input it never
+          # fingerprinted, while a miss costs one full run, which is the safe direction.
+          key: receipt-publish-smoke-${{ runner.os }}-${{ steps.fp.outputs.hash }}
+
+      # A cache entry is data, not proof. The verdict validates the receipt, then compares its age
+      # against the workflow's ceiling, and sets skip=true only when both hold.
+      - name: Decide the verdict
+        id: verdict
+        shell: bash
+        env:
+          RECEIPT_HIT: ${{ steps.receipt.outputs.cache-hit }}
+          INPUT_HASH: ${{ steps.fp.outputs.hash }}
+          EVENT_NAME: ${{ github.event_name }}
+          HEAD_REPO: ${{ github.event.pull_request.head.repo.full_name }}
+          REPOSITORY: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          receipt=".receipt/receipt.json"
+          summary() { printf '%s\n' "$1" >> "${GITHUB_STEP_SUMMARY}"; }
+          finish() { printf 'skip=%s\n' "$1" >> "${GITHUB_OUTPUT}"; }
+
+          # A miss always runs the job in full. That is the mechanism's safe direction: every way of
+          # failing to read a receipt costs a re-run, never a skip over input nobody fingerprinted.
+          if [ "${RECEIPT_HIT}" != "true" ]; then
+            if [ "${EVENT_NAME}" = "pull_request" ] && [ "${HEAD_REPO}" != "${REPOSITORY}" ]; then
+              summary "- no prior receipt; a fork pull request reads no cache from the base repository (cache isolation), so the job runs in full"
+            else
+              summary "- no prior receipt; running in full"
+            fi
+            finish false
+            exit 0
+          fi
+
+          if [ ! -f "${receipt}" ]; then
+            summary "- the cache hit but held no receipt.json; running in full"
+            finish false
+            exit 0
+          fi
+
+          saved_at_epoch="$(jq -er '.saved_at_epoch' "${receipt}" 2>/dev/null || true)"
+          recorded_hash="$(jq -er '.input_hash' "${receipt}" 2>/dev/null || true)"
+          if [ -z "${saved_at_epoch}" ] || [ -z "${recorded_hash}" ]; then
+            summary "- the receipt is not JSON with saved_at_epoch and input_hash; running in full"
+            finish false
+            exit 0
+          fi
+
+          case "${saved_at_epoch}" in
+            '' | *[!0-9]*)
+              summary "- the receipt's saved_at_epoch '${saved_at_epoch}' is not a number of seconds; running in full"
+              finish false
+              exit 0
+              ;;
+          esac
+
+          now="$(date -u +%s)"
+          age=$((now - saved_at_epoch))
+          if [ "${age}" -lt 0 ]; then
+            summary "- the receipt is dated in the future (age ${age}s); running in full"
+            finish false
+            exit 0
+          fi
+
+          if [ "${recorded_hash}" != "${INPUT_HASH}" ]; then
+            summary "- the receipt's input_hash is not this run's fingerprint; running in full"
+            finish false
+            exit 0
+          fi
+
+          if [ "${age}" -gt "${RECEIPT_MAX_AGE_SECONDS}" ]; then
+            summary "- the receipt is ${age}s old, over the ${RECEIPT_MAX_AGE_SECONDS}s ceiling; running in full"
+            finish false
+            exit 0
+          fi
+
+          {
+            printf '%s\n' "- the receipt is ${age}s old, within the ${RECEIPT_MAX_AGE_SECONDS}s ceiling: this job already passed on these inputs, so its work steps are skipped"
+            printf '\n```json\n'
+            jq '.' "${receipt}"
+            printf '```\n'
+          } >> "${GITHUB_STEP_SUMMARY}"
+          finish true
+
       - name: Setup .NET
+        if: steps.verdict.outputs.skip != 'true'
         uses: actions/setup-dotnet@0f4a354dd5547a28c70b7853dbd95d5b67886e73 # v6.1.0
         with:
           dotnet-version: ${{ env.DOTNET_VERSION }}
 
       - name: Publish CLI (self-contained single-file)
+        if: steps.verdict.outputs.skip != 'true'
         run: >
           dotnet publish src/KyberWeave.Cli/KyberWeave.Cli.csproj
           -c ${{ env.CONFIGURATION }}
@@ -501,6 +1370,7 @@ jobs:
           -o ./artifacts/cli-linux-x64
 
       - name: Publish MCP (self-contained single-file)
+        if: steps.verdict.outputs.skip != 'true'
         run: >
           dotnet publish src/KyberWeave.Mcp/KyberWeave.Mcp.csproj
           -c ${{ env.CONFIGURATION }}
@@ -511,6 +1381,7 @@ jobs:
           -o ./artifacts/mcp-linux-x64
 
       - name: Publish Arbiter (self-contained single-file)
+        if: steps.verdict.outputs.skip != 'true'
         run: >
           dotnet publish src/KyberWeave.Arbiter/KyberWeave.Arbiter.csproj
           -c ${{ env.CONFIGURATION }}
@@ -521,6 +1392,7 @@ jobs:
           -o ./artifacts/arbiter-linux-x64
 
       - name: Smoke --help
+        if: steps.verdict.outputs.skip != 'true'
         run: |
           set -euo pipefail
           ./artifacts/cli-linux-x64/kyber-weave --help
@@ -531,7 +1403,7 @@ jobs:
           ./artifacts/arbiter-linux-x64/kyber-weave-arbiter --version
 
       - name: Upload RID smoke artifacts
-        if: always()
+        if: always() && steps.verdict.outputs.skip != 'true'
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
         with:
           name: rid-smoke-linux-x64
@@ -541,6 +1413,93 @@ jobs:
             artifacts/arbiter-linux-x64/
           retention-days: 7
           if-no-files-found: warn
+
+      # The receipt records the SHA-256 digests of what this run produced, so a reader can tie a pass
+      # to the exact bytes. Test reports and SARIF files are digested; only a build product is attested.
+      - name: Digest the build products
+        id: digest
+        if: steps.verdict.outputs.skip != 'true' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository)
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p .receipt
+          digests='{}'
+          for file in artifacts/cli-linux-x64/kyber-weave artifacts/mcp-linux-x64/kyber-weave-mcp artifacts/arbiter-linux-x64/kyber-weave-arbiter; do
+            [ -f "${file}" ] || continue
+            digest="$(sha256sum "${file}" | cut -d' ' -f1)"
+            digests="$(jq --arg path "${file}" --arg digest "sha256:${digest}" '. + {($path): $digest}' <<<"${digests}")"
+          done
+          printf 'digests=%s\n' "${digests}" >> "${GITHUB_OUTPUT}"
+
+      # Provenance mode: no sbom-path and no predicate, so the attestation binds the product to this
+      # workflow's identity rather than making a claim about its contents.
+      - name: Attest the build products
+        uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4.2.2
+        if: steps.verdict.outputs.skip != 'true' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository)
+        with:
+          subject-path: |
+            artifacts/cli-linux-x64/kyber-weave
+            artifacts/mcp-linux-x64/kyber-weave-mcp
+            artifacts/arbiter-linux-x64/kyber-weave-arbiter
+
+      # The receipt is written only on the miss path, so a hit never refreshes saved_at_epoch and a job
+      # that keeps hitting ages out on schedule. A cache-reserve race must not fail a green job: the
+      # save is best-effort, and losing it only means the next run re-executes.
+      - name: Save the receipt
+        id: save
+        if: success() && steps.verdict.outputs.skip != 'true' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository)
+        continue-on-error: true
+        shell: bash
+        env:
+          JOB_KEY: publish-smoke
+          INPUT_HASH: ${{ steps.fp.outputs.hash }}
+          ARTIFACT_DIGESTS: ${{ steps.digest.outputs.digests }}
+          ATTESTED: "true"
+          COMMIT_SHA: ${{ github.sha }}
+          RUN_ID: ${{ github.run_id }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          set -euo pipefail
+          mkdir -p .receipt
+          saved_at_epoch="$(date -u +%s)"
+          saved_at="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+          if [ -n "${ARTIFACT_DIGESTS}" ]; then
+            digests="$(printf '%s' "${ARTIFACT_DIGESTS}" | jq -c '.')"
+          else
+            digests="null"
+          fi
+          jq -n \
+            --arg schema "1" \
+            --arg job "${JOB_KEY}" \
+            --arg input_hash "${INPUT_HASH}" \
+            --arg commit_sha "${COMMIT_SHA}" \
+            --arg run_id "${RUN_ID}" \
+            --arg run_url "${RUN_URL}" \
+            --arg attested "${ATTESTED}" \
+            --arg saved_at "${saved_at}" \
+            --argjson saved_at_epoch "${saved_at_epoch}" \
+            --argjson artifact_digests "${digests}" \
+            '{
+              schema: $schema,
+              job: $job,
+              input_hash: $input_hash,
+              commit_sha: $commit_sha,
+              run_id: $run_id,
+              run_url: $run_url,
+              artifact_digests: $artifact_digests,
+              attested: ($attested == "true"),
+              saved_at: $saved_at,
+              saved_at_epoch: $saved_at_epoch
+            }' > .receipt/receipt.json
+          jq '.' .receipt/receipt.json
+
+      - name: Store the receipt
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        if: success() && steps.verdict.outputs.skip != 'true' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository)
+        continue-on-error: true
+        with:
+          path: .receipt
+          key: receipt-publish-smoke-${{ runner.os }}-${{ steps.fp.outputs.hash }}
 
   update-loop:
     name: Self-update and Squad install loop (${{ matrix.os }})
@@ -563,7 +1522,113 @@ jobs:
           # more than the default single-commit fetch.
           fetch-depth: 0
 
+      # Content-hash receipts: this job hashes every input it reads, looks for a receipt under that
+      # fingerprint, and skips its work only when a fresh one proves this exact tree already passed
+      # here. Every way of failing to read a receipt runs the job in full.
+      - name: Compute input fingerprint
+        id: fp
+        shell: bash
+        env:
+          INPUT_HASH: ${{ hashFiles('.agents/**', '.apm/**', '.claude/**', '.codex/**', '.commandcode/**', '.cursor/**', '.devin/**', '.factory/**', '.github/**', '.kilo/**', '.kyber-weave/**', '.opencode/**', '.pi/**', '.playwright-cli/**', '.vscode/**', 'dash/**', 'docs/**', 'homebrew/**', 'npm/**', 'products/**', 'samples/**', 'scripts/**', 'src/**', 'templates/**', 'tests/**', '.editorconfig', '.gitattributes', '.gitignore', '.gitleaks.toml', '.mcp.json', 'AGENTS.md', 'CLAUDE.md', 'CODE_OF_CONDUCT.md', 'CONTRIBUTING.md', 'Directory.Build.props', 'HANDOVER-WAVE4.md', 'HANDOVER.md', 'KyberWeave.Unit.slnf', 'KyberWeave.sln', 'KyberWeave.sln.DotSettings', 'LICENSE', 'NOTICE', 'README.md', 'REFACTOR-LAYERS.md', 'REVIEW.md', 'SECURITY.md', 'apm.yml', 'global.json', 'kilo.json') }}
+        run: |
+          set -euo pipefail
+          hash="${INPUT_HASH:-}"
+          if [ -z "${hash}" ]; then
+            # An empty fingerprint would put every run on one key. A per-run value always misses.
+            hash="empty-${GITHUB_RUN_ID}"
+          fi
+          printf 'hash=%s\n' "${hash}" >> "${GITHUB_OUTPUT}"
+
+      - name: Look up the receipt
+        id: receipt
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: .receipt
+          # Exact key only: a restore-key would let a near-miss receipt skip work over input it never
+          # fingerprinted, while a miss costs one full run, which is the safe direction.
+          key: receipt-update-loop-${{ matrix.os }}-${{ steps.fp.outputs.hash }}
+
+      # A cache entry is data, not proof. The verdict validates the receipt, then compares its age
+      # against the workflow's ceiling, and sets skip=true only when both hold.
+      - name: Decide the verdict
+        id: verdict
+        shell: bash
+        env:
+          RECEIPT_HIT: ${{ steps.receipt.outputs.cache-hit }}
+          INPUT_HASH: ${{ steps.fp.outputs.hash }}
+          EVENT_NAME: ${{ github.event_name }}
+          HEAD_REPO: ${{ github.event.pull_request.head.repo.full_name }}
+          REPOSITORY: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          receipt=".receipt/receipt.json"
+          summary() { printf '%s\n' "$1" >> "${GITHUB_STEP_SUMMARY}"; }
+          finish() { printf 'skip=%s\n' "$1" >> "${GITHUB_OUTPUT}"; }
+
+          # A miss always runs the job in full. That is the mechanism's safe direction: every way of
+          # failing to read a receipt costs a re-run, never a skip over input nobody fingerprinted.
+          if [ "${RECEIPT_HIT}" != "true" ]; then
+            if [ "${EVENT_NAME}" = "pull_request" ] && [ "${HEAD_REPO}" != "${REPOSITORY}" ]; then
+              summary "- no prior receipt; a fork pull request reads no cache from the base repository (cache isolation), so the job runs in full"
+            else
+              summary "- no prior receipt; running in full"
+            fi
+            finish false
+            exit 0
+          fi
+
+          if [ ! -f "${receipt}" ]; then
+            summary "- the cache hit but held no receipt.json; running in full"
+            finish false
+            exit 0
+          fi
+
+          saved_at_epoch="$(jq -er '.saved_at_epoch' "${receipt}" 2>/dev/null || true)"
+          recorded_hash="$(jq -er '.input_hash' "${receipt}" 2>/dev/null || true)"
+          if [ -z "${saved_at_epoch}" ] || [ -z "${recorded_hash}" ]; then
+            summary "- the receipt is not JSON with saved_at_epoch and input_hash; running in full"
+            finish false
+            exit 0
+          fi
+
+          case "${saved_at_epoch}" in
+            '' | *[!0-9]*)
+              summary "- the receipt's saved_at_epoch '${saved_at_epoch}' is not a number of seconds; running in full"
+              finish false
+              exit 0
+              ;;
+          esac
+
+          now="$(date -u +%s)"
+          age=$((now - saved_at_epoch))
+          if [ "${age}" -lt 0 ]; then
+            summary "- the receipt is dated in the future (age ${age}s); running in full"
+            finish false
+            exit 0
+          fi
+
+          if [ "${recorded_hash}" != "${INPUT_HASH}" ]; then
+            summary "- the receipt's input_hash is not this run's fingerprint; running in full"
+            finish false
+            exit 0
+          fi
+
+          if [ "${age}" -gt "${RECEIPT_MAX_AGE_SECONDS}" ]; then
+            summary "- the receipt is ${age}s old, over the ${RECEIPT_MAX_AGE_SECONDS}s ceiling; running in full"
+            finish false
+            exit 0
+          fi
+
+          {
+            printf '%s\n' "- the receipt is ${age}s old, within the ${RECEIPT_MAX_AGE_SECONDS}s ceiling: this job already passed on these inputs, so its work steps are skipped"
+            printf '\n```json\n'
+            jq '.' "${receipt}"
+            printf '```\n'
+          } >> "${GITHUB_STEP_SUMMARY}"
+          finish true
+
       - name: Setup .NET
+        if: steps.verdict.outputs.skip != 'true'
         uses: actions/setup-dotnet@0f4a354dd5547a28c70b7853dbd95d5b67886e73 # v6.1.0
         with:
           dotnet-version: ${{ env.DOTNET_VERSION }}
@@ -571,6 +1636,7 @@ jobs:
       # The loop builds the kyberdash single-file binary the way release.yml does, which
       # needs npm/node to build and pack the React dashboard into dist-sea/web.json.
       - name: Setup Node
+        if: steps.verdict.outputs.skip != 'true'
         uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version-file: dash/.nvmrc
@@ -584,7 +1650,67 @@ jobs:
       # in 0.1.6-rc.5 through rc.7. The KyberDash cases are what the install path
       # shipped without, when a release with no kyberdash archive installed nothing.
       - name: Run the update loop
+        if: steps.verdict.outputs.skip != 'true'
         run: ./scripts/update-loop.sh
+
+      # The receipt is written only on the miss path, so a hit never refreshes saved_at_epoch and a job
+      # that keeps hitting ages out on schedule. A cache-reserve race must not fail a green job: the
+      # save is best-effort, and losing it only means the next run re-executes.
+      - name: Save the receipt
+        id: save
+        if: success() && steps.verdict.outputs.skip != 'true' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository)
+        continue-on-error: true
+        shell: bash
+        env:
+          JOB_KEY: update-loop
+          INPUT_HASH: ${{ steps.fp.outputs.hash }}
+          ARTIFACT_DIGESTS: ""
+          ATTESTED: "false"
+          COMMIT_SHA: ${{ github.sha }}
+          RUN_ID: ${{ github.run_id }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          set -euo pipefail
+          mkdir -p .receipt
+          saved_at_epoch="$(date -u +%s)"
+          saved_at="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+          if [ -n "${ARTIFACT_DIGESTS}" ]; then
+            digests="$(printf '%s' "${ARTIFACT_DIGESTS}" | jq -c '.')"
+          else
+            digests="null"
+          fi
+          jq -n \
+            --arg schema "1" \
+            --arg job "${JOB_KEY}" \
+            --arg input_hash "${INPUT_HASH}" \
+            --arg commit_sha "${COMMIT_SHA}" \
+            --arg run_id "${RUN_ID}" \
+            --arg run_url "${RUN_URL}" \
+            --arg attested "${ATTESTED}" \
+            --arg saved_at "${saved_at}" \
+            --argjson saved_at_epoch "${saved_at_epoch}" \
+            --argjson artifact_digests "${digests}" \
+            '{
+              schema: $schema,
+              job: $job,
+              input_hash: $input_hash,
+              commit_sha: $commit_sha,
+              run_id: $run_id,
+              run_url: $run_url,
+              artifact_digests: $artifact_digests,
+              attested: ($attested == "true"),
+              saved_at: $saved_at,
+              saved_at_epoch: $saved_at_epoch
+            }' > .receipt/receipt.json
+          jq '.' .receipt/receipt.json
+
+      - name: Store the receipt
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        if: success() && steps.verdict.outputs.skip != 'true' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository)
+        continue-on-error: true
+        with:
+          path: .receipt
+          key: receipt-update-loop-${{ matrix.os }}-${{ steps.fp.outputs.hash }}
 
   codeql:
     name: CodeQL Analysis (${{ matrix.language }})
@@ -613,7 +1739,113 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
 
       # Intentional github/codeql-action v4 pin (v4.39.3)
+      # Content-hash receipts: this job hashes every input it reads, looks for a receipt under that
+      # fingerprint, and skips its work only when a fresh one proves this exact tree already passed
+      # here. Every way of failing to read a receipt runs the job in full.
+      - name: Compute input fingerprint
+        id: fp
+        shell: bash
+        env:
+          INPUT_HASH: ${{ hashFiles('.agents/**', '.apm/**', '.claude/**', '.codex/**', '.commandcode/**', '.cursor/**', '.devin/**', '.factory/**', '.github/**', '.kilo/**', '.kyber-weave/**', '.opencode/**', '.pi/**', '.playwright-cli/**', '.vscode/**', 'dash/**', 'docs/**', 'homebrew/**', 'npm/**', 'products/**', 'samples/**', 'scripts/**', 'src/**', 'templates/**', 'tests/**', '.editorconfig', '.gitattributes', '.gitignore', '.gitleaks.toml', '.mcp.json', 'AGENTS.md', 'CLAUDE.md', 'CODE_OF_CONDUCT.md', 'CONTRIBUTING.md', 'Directory.Build.props', 'HANDOVER-WAVE4.md', 'HANDOVER.md', 'KyberWeave.Unit.slnf', 'KyberWeave.sln', 'KyberWeave.sln.DotSettings', 'LICENSE', 'NOTICE', 'README.md', 'REFACTOR-LAYERS.md', 'REVIEW.md', 'SECURITY.md', 'apm.yml', 'global.json', 'kilo.json') }}
+        run: |
+          set -euo pipefail
+          hash="${INPUT_HASH:-}"
+          if [ -z "${hash}" ]; then
+            # An empty fingerprint would put every run on one key. A per-run value always misses.
+            hash="empty-${GITHUB_RUN_ID}"
+          fi
+          printf 'hash=%s\n' "${hash}" >> "${GITHUB_OUTPUT}"
+
+      - name: Look up the receipt
+        id: receipt
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: .receipt
+          # Exact key only: a restore-key would let a near-miss receipt skip work over input it never
+          # fingerprinted, while a miss costs one full run, which is the safe direction.
+          key: receipt-codeql-${{ matrix.language }}-${{ steps.fp.outputs.hash }}
+
+      # A cache entry is data, not proof. The verdict validates the receipt, then compares its age
+      # against the workflow's ceiling, and sets skip=true only when both hold.
+      - name: Decide the verdict
+        id: verdict
+        shell: bash
+        env:
+          RECEIPT_HIT: ${{ steps.receipt.outputs.cache-hit }}
+          INPUT_HASH: ${{ steps.fp.outputs.hash }}
+          EVENT_NAME: ${{ github.event_name }}
+          HEAD_REPO: ${{ github.event.pull_request.head.repo.full_name }}
+          REPOSITORY: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          receipt=".receipt/receipt.json"
+          summary() { printf '%s\n' "$1" >> "${GITHUB_STEP_SUMMARY}"; }
+          finish() { printf 'skip=%s\n' "$1" >> "${GITHUB_OUTPUT}"; }
+
+          # A miss always runs the job in full. That is the mechanism's safe direction: every way of
+          # failing to read a receipt costs a re-run, never a skip over input nobody fingerprinted.
+          if [ "${RECEIPT_HIT}" != "true" ]; then
+            if [ "${EVENT_NAME}" = "pull_request" ] && [ "${HEAD_REPO}" != "${REPOSITORY}" ]; then
+              summary "- no prior receipt; a fork pull request reads no cache from the base repository (cache isolation), so the job runs in full"
+            else
+              summary "- no prior receipt; running in full"
+            fi
+            finish false
+            exit 0
+          fi
+
+          if [ ! -f "${receipt}" ]; then
+            summary "- the cache hit but held no receipt.json; running in full"
+            finish false
+            exit 0
+          fi
+
+          saved_at_epoch="$(jq -er '.saved_at_epoch' "${receipt}" 2>/dev/null || true)"
+          recorded_hash="$(jq -er '.input_hash' "${receipt}" 2>/dev/null || true)"
+          if [ -z "${saved_at_epoch}" ] || [ -z "${recorded_hash}" ]; then
+            summary "- the receipt is not JSON with saved_at_epoch and input_hash; running in full"
+            finish false
+            exit 0
+          fi
+
+          case "${saved_at_epoch}" in
+            '' | *[!0-9]*)
+              summary "- the receipt's saved_at_epoch '${saved_at_epoch}' is not a number of seconds; running in full"
+              finish false
+              exit 0
+              ;;
+          esac
+
+          now="$(date -u +%s)"
+          age=$((now - saved_at_epoch))
+          if [ "${age}" -lt 0 ]; then
+            summary "- the receipt is dated in the future (age ${age}s); running in full"
+            finish false
+            exit 0
+          fi
+
+          if [ "${recorded_hash}" != "${INPUT_HASH}" ]; then
+            summary "- the receipt's input_hash is not this run's fingerprint; running in full"
+            finish false
+            exit 0
+          fi
+
+          if [ "${age}" -gt "${RECEIPT_MAX_AGE_SECONDS}" ]; then
+            summary "- the receipt is ${age}s old, over the ${RECEIPT_MAX_AGE_SECONDS}s ceiling; running in full"
+            finish false
+            exit 0
+          fi
+
+          {
+            printf '%s\n' "- the receipt is ${age}s old, within the ${RECEIPT_MAX_AGE_SECONDS}s ceiling: this job already passed on these inputs, so its work steps are skipped"
+            printf '\n```json\n'
+            jq '.' "${receipt}"
+            printf '```\n'
+          } >> "${GITHUB_STEP_SUMMARY}"
+          finish true
+
       - name: Initialize CodeQL
+        if: steps.verdict.outputs.skip != 'true'
         uses: github/codeql-action/init@33d7b85da1a04171e211befe2c739303b9a4c066 # v4.39.3
         with:
           languages: ${{ matrix.language }}
@@ -622,13 +1854,13 @@ jobs:
           config-file: ./.github/codeql/codeql-config.yml
 
       - name: Setup .NET
-        if: matrix.language == 'csharp'
+        if: matrix.language == 'csharp' && steps.verdict.outputs.skip != 'true'
         uses: actions/setup-dotnet@0f4a354dd5547a28c70b7853dbd95d5b67886e73 # v6.1.0
         with:
           dotnet-version: ${{ env.DOTNET_VERSION }}
 
       - name: Build solution
-        if: matrix.language == 'csharp'
+        if: matrix.language == 'csharp' && steps.verdict.outputs.skip != 'true'
         run: |
           set -euo pipefail
           dotnet restore KyberWeave.sln
@@ -636,9 +1868,69 @@ jobs:
 
       # Intentional github/codeql-action v4 pin (v4.39.3)
       - name: Perform CodeQL Analysis
+        if: steps.verdict.outputs.skip != 'true'
         uses: github/codeql-action/analyze@33d7b85da1a04171e211befe2c739303b9a4c066 # v4.39.3
         with:
           category: "/language:${{ matrix.language }}"
+
+      # The receipt is written only on the miss path, so a hit never refreshes saved_at_epoch and a job
+      # that keeps hitting ages out on schedule. A cache-reserve race must not fail a green job: the
+      # save is best-effort, and losing it only means the next run re-executes.
+      - name: Save the receipt
+        id: save
+        if: success() && steps.verdict.outputs.skip != 'true' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository)
+        continue-on-error: true
+        shell: bash
+        env:
+          JOB_KEY: codeql
+          INPUT_HASH: ${{ steps.fp.outputs.hash }}
+          ARTIFACT_DIGESTS: ""
+          ATTESTED: "false"
+          COMMIT_SHA: ${{ github.sha }}
+          RUN_ID: ${{ github.run_id }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          set -euo pipefail
+          mkdir -p .receipt
+          saved_at_epoch="$(date -u +%s)"
+          saved_at="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+          if [ -n "${ARTIFACT_DIGESTS}" ]; then
+            digests="$(printf '%s' "${ARTIFACT_DIGESTS}" | jq -c '.')"
+          else
+            digests="null"
+          fi
+          jq -n \
+            --arg schema "1" \
+            --arg job "${JOB_KEY}" \
+            --arg input_hash "${INPUT_HASH}" \
+            --arg commit_sha "${COMMIT_SHA}" \
+            --arg run_id "${RUN_ID}" \
+            --arg run_url "${RUN_URL}" \
+            --arg attested "${ATTESTED}" \
+            --arg saved_at "${saved_at}" \
+            --argjson saved_at_epoch "${saved_at_epoch}" \
+            --argjson artifact_digests "${digests}" \
+            '{
+              schema: $schema,
+              job: $job,
+              input_hash: $input_hash,
+              commit_sha: $commit_sha,
+              run_id: $run_id,
+              run_url: $run_url,
+              artifact_digests: $artifact_digests,
+              attested: ($attested == "true"),
+              saved_at: $saved_at,
+              saved_at_epoch: $saved_at_epoch
+            }' > .receipt/receipt.json
+          jq '.' .receipt/receipt.json
+
+      - name: Store the receipt
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        if: success() && steps.verdict.outputs.skip != 'true' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository)
+        continue-on-error: true
+        with:
+          path: .receipt
+          key: receipt-codeql-${{ matrix.language }}-${{ steps.fp.outputs.hash }}
 
   trivy:
     name: Trivy OSS Security Scan
@@ -652,7 +1944,113 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
 
+      # Content-hash receipts: this job hashes every input it reads, looks for a receipt under that
+      # fingerprint, and skips its work only when a fresh one proves this exact tree already passed
+      # here. Every way of failing to read a receipt runs the job in full.
+      - name: Compute input fingerprint
+        id: fp
+        shell: bash
+        env:
+          INPUT_HASH: ${{ hashFiles('.agents/**', '.apm/**', '.claude/**', '.codex/**', '.commandcode/**', '.cursor/**', '.devin/**', '.factory/**', '.github/**', '.kilo/**', '.kyber-weave/**', '.opencode/**', '.pi/**', '.playwright-cli/**', '.vscode/**', 'dash/**', 'docs/**', 'homebrew/**', 'npm/**', 'products/**', 'samples/**', 'scripts/**', 'src/**', 'templates/**', 'tests/**', '.editorconfig', '.gitattributes', '.gitignore', '.gitleaks.toml', '.mcp.json', 'AGENTS.md', 'CLAUDE.md', 'CODE_OF_CONDUCT.md', 'CONTRIBUTING.md', 'Directory.Build.props', 'HANDOVER-WAVE4.md', 'HANDOVER.md', 'KyberWeave.Unit.slnf', 'KyberWeave.sln', 'KyberWeave.sln.DotSettings', 'LICENSE', 'NOTICE', 'README.md', 'REFACTOR-LAYERS.md', 'REVIEW.md', 'SECURITY.md', 'apm.yml', 'global.json', 'kilo.json') }}
+        run: |
+          set -euo pipefail
+          hash="${INPUT_HASH:-}"
+          if [ -z "${hash}" ]; then
+            # An empty fingerprint would put every run on one key. A per-run value always misses.
+            hash="empty-${GITHUB_RUN_ID}"
+          fi
+          printf 'hash=%s\n' "${hash}" >> "${GITHUB_OUTPUT}"
+
+      - name: Look up the receipt
+        id: receipt
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: .receipt
+          # Exact key only: a restore-key would let a near-miss receipt skip work over input it never
+          # fingerprinted, while a miss costs one full run, which is the safe direction.
+          key: receipt-trivy-${{ runner.os }}-${{ steps.fp.outputs.hash }}
+
+      # A cache entry is data, not proof. The verdict validates the receipt, then compares its age
+      # against the workflow's ceiling, and sets skip=true only when both hold.
+      - name: Decide the verdict
+        id: verdict
+        shell: bash
+        env:
+          RECEIPT_HIT: ${{ steps.receipt.outputs.cache-hit }}
+          INPUT_HASH: ${{ steps.fp.outputs.hash }}
+          EVENT_NAME: ${{ github.event_name }}
+          HEAD_REPO: ${{ github.event.pull_request.head.repo.full_name }}
+          REPOSITORY: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          receipt=".receipt/receipt.json"
+          summary() { printf '%s\n' "$1" >> "${GITHUB_STEP_SUMMARY}"; }
+          finish() { printf 'skip=%s\n' "$1" >> "${GITHUB_OUTPUT}"; }
+
+          # A miss always runs the job in full. That is the mechanism's safe direction: every way of
+          # failing to read a receipt costs a re-run, never a skip over input nobody fingerprinted.
+          if [ "${RECEIPT_HIT}" != "true" ]; then
+            if [ "${EVENT_NAME}" = "pull_request" ] && [ "${HEAD_REPO}" != "${REPOSITORY}" ]; then
+              summary "- no prior receipt; a fork pull request reads no cache from the base repository (cache isolation), so the job runs in full"
+            else
+              summary "- no prior receipt; running in full"
+            fi
+            finish false
+            exit 0
+          fi
+
+          if [ ! -f "${receipt}" ]; then
+            summary "- the cache hit but held no receipt.json; running in full"
+            finish false
+            exit 0
+          fi
+
+          saved_at_epoch="$(jq -er '.saved_at_epoch' "${receipt}" 2>/dev/null || true)"
+          recorded_hash="$(jq -er '.input_hash' "${receipt}" 2>/dev/null || true)"
+          if [ -z "${saved_at_epoch}" ] || [ -z "${recorded_hash}" ]; then
+            summary "- the receipt is not JSON with saved_at_epoch and input_hash; running in full"
+            finish false
+            exit 0
+          fi
+
+          case "${saved_at_epoch}" in
+            '' | *[!0-9]*)
+              summary "- the receipt's saved_at_epoch '${saved_at_epoch}' is not a number of seconds; running in full"
+              finish false
+              exit 0
+              ;;
+          esac
+
+          now="$(date -u +%s)"
+          age=$((now - saved_at_epoch))
+          if [ "${age}" -lt 0 ]; then
+            summary "- the receipt is dated in the future (age ${age}s); running in full"
+            finish false
+            exit 0
+          fi
+
+          if [ "${recorded_hash}" != "${INPUT_HASH}" ]; then
+            summary "- the receipt's input_hash is not this run's fingerprint; running in full"
+            finish false
+            exit 0
+          fi
+
+          if [ "${age}" -gt "${RECEIPT_MAX_AGE_SECONDS}" ]; then
+            summary "- the receipt is ${age}s old, over the ${RECEIPT_MAX_AGE_SECONDS}s ceiling; running in full"
+            finish false
+            exit 0
+          fi
+
+          {
+            printf '%s\n' "- the receipt is ${age}s old, within the ${RECEIPT_MAX_AGE_SECONDS}s ceiling: this job already passed on these inputs, so its work steps are skipped"
+            printf '\n```json\n'
+            jq '.' "${receipt}"
+            printf '```\n'
+          } >> "${GITHUB_STEP_SUMMARY}"
+          finish true
+
       - name: Install verified Trivy CLI
+        if: steps.verdict.outputs.skip != 'true'
         env:
           TRIVY_VERSION: "0.72.0"
           TRIVY_SHA256: "bbb64b9695866ce4a7a8f5c9592002c5961cab378577fa3f8a040df362b9b2ea"
@@ -672,6 +2070,7 @@ jobs:
       # table (for the job log). Scanning straight to SARIF leaves a failing job
       # with no findings printed anywhere in the log.
       - name: Scan repository with Trivy
+        if: steps.verdict.outputs.skip != 'true'
         run: |
           set -euo pipefail
           trivy fs \
@@ -687,20 +2086,79 @@ jobs:
             .
 
       - name: Convert Trivy report to SARIF
-        if: always() && hashFiles('trivy.json') != ''
+        if: always() && hashFiles('trivy.json') != '' && steps.verdict.outputs.skip != 'true'
         run: trivy convert --format sarif --output trivy.sarif trivy.json
 
       - name: Report Trivy findings
-        if: always() && hashFiles('trivy.json') != ''
+        if: always() && hashFiles('trivy.json') != '' && steps.verdict.outputs.skip != 'true'
         run: trivy convert --format table --exit-code 1 trivy.json
 
       # Intentional github/codeql-action v4 pin
       - name: Upload Trivy SARIF to GitHub Security
         uses: github/codeql-action/upload-sarif@33d7b85da1a04171e211befe2c739303b9a4c066 # v4.39.3
-        if: always() && hashFiles('trivy.sarif') != ''
+        if: always() && hashFiles('trivy.sarif') != '' && steps.verdict.outputs.skip != 'true'
         with:
           sarif_file: trivy.sarif
           category: trivy
+
+      # The receipt is written only on the miss path, so a hit never refreshes saved_at_epoch and a job
+      # that keeps hitting ages out on schedule. A cache-reserve race must not fail a green job: the
+      # save is best-effort, and losing it only means the next run re-executes.
+      - name: Save the receipt
+        id: save
+        if: success() && steps.verdict.outputs.skip != 'true' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository)
+        continue-on-error: true
+        shell: bash
+        env:
+          JOB_KEY: trivy
+          INPUT_HASH: ${{ steps.fp.outputs.hash }}
+          ARTIFACT_DIGESTS: ""
+          ATTESTED: "false"
+          COMMIT_SHA: ${{ github.sha }}
+          RUN_ID: ${{ github.run_id }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          set -euo pipefail
+          mkdir -p .receipt
+          saved_at_epoch="$(date -u +%s)"
+          saved_at="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+          if [ -n "${ARTIFACT_DIGESTS}" ]; then
+            digests="$(printf '%s' "${ARTIFACT_DIGESTS}" | jq -c '.')"
+          else
+            digests="null"
+          fi
+          jq -n \
+            --arg schema "1" \
+            --arg job "${JOB_KEY}" \
+            --arg input_hash "${INPUT_HASH}" \
+            --arg commit_sha "${COMMIT_SHA}" \
+            --arg run_id "${RUN_ID}" \
+            --arg run_url "${RUN_URL}" \
+            --arg attested "${ATTESTED}" \
+            --arg saved_at "${saved_at}" \
+            --argjson saved_at_epoch "${saved_at_epoch}" \
+            --argjson artifact_digests "${digests}" \
+            '{
+              schema: $schema,
+              job: $job,
+              input_hash: $input_hash,
+              commit_sha: $commit_sha,
+              run_id: $run_id,
+              run_url: $run_url,
+              artifact_digests: $artifact_digests,
+              attested: ($attested == "true"),
+              saved_at: $saved_at,
+              saved_at_epoch: $saved_at_epoch
+            }' > .receipt/receipt.json
+          jq '.' .receipt/receipt.json
+
+      - name: Store the receipt
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        if: success() && steps.verdict.outputs.skip != 'true' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository)
+        continue-on-error: true
+        with:
+          path: .receipt
+          key: receipt-trivy-${{ runner.os }}-${{ steps.fp.outputs.hash }}
 
   semgrep:
     name: Semgrep Community SAST
@@ -714,12 +2172,119 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
 
+      # Content-hash receipts: this job hashes every input it reads, looks for a receipt under that
+      # fingerprint, and skips its work only when a fresh one proves this exact tree already passed
+      # here. Every way of failing to read a receipt runs the job in full.
+      - name: Compute input fingerprint
+        id: fp
+        shell: bash
+        env:
+          INPUT_HASH: ${{ hashFiles('.agents/**', '.apm/**', '.claude/**', '.codex/**', '.commandcode/**', '.cursor/**', '.devin/**', '.factory/**', '.github/**', '.kilo/**', '.kyber-weave/**', '.opencode/**', '.pi/**', '.playwright-cli/**', '.vscode/**', 'dash/**', 'docs/**', 'homebrew/**', 'npm/**', 'products/**', 'samples/**', 'scripts/**', 'src/**', 'templates/**', 'tests/**', '.editorconfig', '.gitattributes', '.gitignore', '.gitleaks.toml', '.mcp.json', 'AGENTS.md', 'CLAUDE.md', 'CODE_OF_CONDUCT.md', 'CONTRIBUTING.md', 'Directory.Build.props', 'HANDOVER-WAVE4.md', 'HANDOVER.md', 'KyberWeave.Unit.slnf', 'KyberWeave.sln', 'KyberWeave.sln.DotSettings', 'LICENSE', 'NOTICE', 'README.md', 'REFACTOR-LAYERS.md', 'REVIEW.md', 'SECURITY.md', 'apm.yml', 'global.json', 'kilo.json') }}
+        run: |
+          set -euo pipefail
+          hash="${INPUT_HASH:-}"
+          if [ -z "${hash}" ]; then
+            # An empty fingerprint would put every run on one key. A per-run value always misses.
+            hash="empty-${GITHUB_RUN_ID}"
+          fi
+          printf 'hash=%s\n' "${hash}" >> "${GITHUB_OUTPUT}"
+
+      - name: Look up the receipt
+        id: receipt
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: .receipt
+          # Exact key only: a restore-key would let a near-miss receipt skip work over input it never
+          # fingerprinted, while a miss costs one full run, which is the safe direction.
+          key: receipt-semgrep-${{ runner.os }}-${{ steps.fp.outputs.hash }}
+
+      # A cache entry is data, not proof. The verdict validates the receipt, then compares its age
+      # against the workflow's ceiling, and sets skip=true only when both hold.
+      - name: Decide the verdict
+        id: verdict
+        shell: bash
+        env:
+          RECEIPT_HIT: ${{ steps.receipt.outputs.cache-hit }}
+          INPUT_HASH: ${{ steps.fp.outputs.hash }}
+          EVENT_NAME: ${{ github.event_name }}
+          HEAD_REPO: ${{ github.event.pull_request.head.repo.full_name }}
+          REPOSITORY: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          receipt=".receipt/receipt.json"
+          summary() { printf '%s\n' "$1" >> "${GITHUB_STEP_SUMMARY}"; }
+          finish() { printf 'skip=%s\n' "$1" >> "${GITHUB_OUTPUT}"; }
+
+          # A miss always runs the job in full. That is the mechanism's safe direction: every way of
+          # failing to read a receipt costs a re-run, never a skip over input nobody fingerprinted.
+          if [ "${RECEIPT_HIT}" != "true" ]; then
+            if [ "${EVENT_NAME}" = "pull_request" ] && [ "${HEAD_REPO}" != "${REPOSITORY}" ]; then
+              summary "- no prior receipt; a fork pull request reads no cache from the base repository (cache isolation), so the job runs in full"
+            else
+              summary "- no prior receipt; running in full"
+            fi
+            finish false
+            exit 0
+          fi
+
+          if [ ! -f "${receipt}" ]; then
+            summary "- the cache hit but held no receipt.json; running in full"
+            finish false
+            exit 0
+          fi
+
+          saved_at_epoch="$(jq -er '.saved_at_epoch' "${receipt}" 2>/dev/null || true)"
+          recorded_hash="$(jq -er '.input_hash' "${receipt}" 2>/dev/null || true)"
+          if [ -z "${saved_at_epoch}" ] || [ -z "${recorded_hash}" ]; then
+            summary "- the receipt is not JSON with saved_at_epoch and input_hash; running in full"
+            finish false
+            exit 0
+          fi
+
+          case "${saved_at_epoch}" in
+            '' | *[!0-9]*)
+              summary "- the receipt's saved_at_epoch '${saved_at_epoch}' is not a number of seconds; running in full"
+              finish false
+              exit 0
+              ;;
+          esac
+
+          now="$(date -u +%s)"
+          age=$((now - saved_at_epoch))
+          if [ "${age}" -lt 0 ]; then
+            summary "- the receipt is dated in the future (age ${age}s); running in full"
+            finish false
+            exit 0
+          fi
+
+          if [ "${recorded_hash}" != "${INPUT_HASH}" ]; then
+            summary "- the receipt's input_hash is not this run's fingerprint; running in full"
+            finish false
+            exit 0
+          fi
+
+          if [ "${age}" -gt "${RECEIPT_MAX_AGE_SECONDS}" ]; then
+            summary "- the receipt is ${age}s old, over the ${RECEIPT_MAX_AGE_SECONDS}s ceiling; running in full"
+            finish false
+            exit 0
+          fi
+
+          {
+            printf '%s\n' "- the receipt is ${age}s old, within the ${RECEIPT_MAX_AGE_SECONDS}s ceiling: this job already passed on these inputs, so its work steps are skipped"
+            printf '\n```json\n'
+            jq '.' "${receipt}"
+            printf '```\n'
+          } >> "${GITHUB_STEP_SUMMARY}"
+          finish true
+
       - name: Setup Python
+        if: steps.verdict.outputs.skip != 'true'
         uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
         with:
           python-version: "3.12"
 
       - name: Install Semgrep Community Edition
+        if: steps.verdict.outputs.skip != 'true'
         run: python -m pip install --disable-pip-version-check "setuptools<82" semgrep==1.136.0
 
       # dash/ is first-party UI code since the one-time fork (ADR 0020) and C# engine
@@ -730,6 +2295,7 @@ jobs:
       # does not account for loopback HTTP test/local tooling traffic. dash/web,
       # the actual React surface, talks to its own origin over relative URLs.
       - name: Scan repository with Semgrep
+        if: steps.verdict.outputs.skip != 'true'
         run: |
           set -euo pipefail
           semgrep scan \
@@ -747,10 +2313,69 @@ jobs:
       # Intentional github/codeql-action v4 pin
       - name: Upload Semgrep SARIF to GitHub Security
         uses: github/codeql-action/upload-sarif@33d7b85da1a04171e211befe2c739303b9a4c066 # v4.39.3
-        if: always() && hashFiles('semgrep.sarif') != ''
+        if: always() && hashFiles('semgrep.sarif') != '' && steps.verdict.outputs.skip != 'true'
         with:
           sarif_file: semgrep.sarif
           category: semgrep
+
+      # The receipt is written only on the miss path, so a hit never refreshes saved_at_epoch and a job
+      # that keeps hitting ages out on schedule. A cache-reserve race must not fail a green job: the
+      # save is best-effort, and losing it only means the next run re-executes.
+      - name: Save the receipt
+        id: save
+        if: success() && steps.verdict.outputs.skip != 'true' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository)
+        continue-on-error: true
+        shell: bash
+        env:
+          JOB_KEY: semgrep
+          INPUT_HASH: ${{ steps.fp.outputs.hash }}
+          ARTIFACT_DIGESTS: ""
+          ATTESTED: "false"
+          COMMIT_SHA: ${{ github.sha }}
+          RUN_ID: ${{ github.run_id }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          set -euo pipefail
+          mkdir -p .receipt
+          saved_at_epoch="$(date -u +%s)"
+          saved_at="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+          if [ -n "${ARTIFACT_DIGESTS}" ]; then
+            digests="$(printf '%s' "${ARTIFACT_DIGESTS}" | jq -c '.')"
+          else
+            digests="null"
+          fi
+          jq -n \
+            --arg schema "1" \
+            --arg job "${JOB_KEY}" \
+            --arg input_hash "${INPUT_HASH}" \
+            --arg commit_sha "${COMMIT_SHA}" \
+            --arg run_id "${RUN_ID}" \
+            --arg run_url "${RUN_URL}" \
+            --arg attested "${ATTESTED}" \
+            --arg saved_at "${saved_at}" \
+            --argjson saved_at_epoch "${saved_at_epoch}" \
+            --argjson artifact_digests "${digests}" \
+            '{
+              schema: $schema,
+              job: $job,
+              input_hash: $input_hash,
+              commit_sha: $commit_sha,
+              run_id: $run_id,
+              run_url: $run_url,
+              artifact_digests: $artifact_digests,
+              attested: ($attested == "true"),
+              saved_at: $saved_at,
+              saved_at_epoch: $saved_at_epoch
+            }' > .receipt/receipt.json
+          jq '.' .receipt/receipt.json
+
+      - name: Store the receipt
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        if: success() && steps.verdict.outputs.skip != 'true' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository)
+        continue-on-error: true
+        with:
+          path: .receipt
+          key: receipt-semgrep-${{ runner.os }}-${{ steps.fp.outputs.hash }}
 
   gitleaks:
     name: Secret Scan (gitleaks)
@@ -765,22 +2390,188 @@ jobs:
         with:
           fetch-depth: 0
 
+      # Content-hash receipts: this job hashes every input it reads, looks for a receipt under that
+      # fingerprint, and skips its work only when a fresh one proves this exact tree already passed
+      # here. Every way of failing to read a receipt runs the job in full.
+      - name: Compute input fingerprint
+        id: fp
+        shell: bash
+        env:
+          INPUT_HASH: ${{ hashFiles('.agents/**', '.apm/**', '.claude/**', '.codex/**', '.commandcode/**', '.cursor/**', '.devin/**', '.factory/**', '.github/**', '.kilo/**', '.kyber-weave/**', '.opencode/**', '.pi/**', '.playwright-cli/**', '.vscode/**', 'dash/**', 'docs/**', 'homebrew/**', 'npm/**', 'products/**', 'samples/**', 'scripts/**', 'src/**', 'templates/**', 'tests/**', '.editorconfig', '.gitattributes', '.gitignore', '.gitleaks.toml', '.mcp.json', 'AGENTS.md', 'CLAUDE.md', 'CODE_OF_CONDUCT.md', 'CONTRIBUTING.md', 'Directory.Build.props', 'HANDOVER-WAVE4.md', 'HANDOVER.md', 'KyberWeave.Unit.slnf', 'KyberWeave.sln', 'KyberWeave.sln.DotSettings', 'LICENSE', 'NOTICE', 'README.md', 'REFACTOR-LAYERS.md', 'REVIEW.md', 'SECURITY.md', 'apm.yml', 'global.json', 'kilo.json') }}
+        run: |
+          set -euo pipefail
+          hash="${INPUT_HASH:-}"
+          if [ -z "${hash}" ]; then
+            # An empty fingerprint would put every run on one key. A per-run value always misses.
+            hash="empty-${GITHUB_RUN_ID}"
+          fi
+          printf 'hash=%s\n' "${hash}" >> "${GITHUB_OUTPUT}"
+
+      - name: Look up the receipt
+        id: receipt
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: .receipt
+          # Exact key only: a restore-key would let a near-miss receipt skip work over input it never
+          # fingerprinted, while a miss costs one full run, which is the safe direction.
+          key: receipt-gitleaks-${{ runner.os }}-${{ steps.fp.outputs.hash }}
+
+      # A cache entry is data, not proof. The verdict validates the receipt, then compares its age
+      # against the workflow's ceiling, and sets skip=true only when both hold.
+      - name: Decide the verdict
+        id: verdict
+        shell: bash
+        env:
+          RECEIPT_HIT: ${{ steps.receipt.outputs.cache-hit }}
+          INPUT_HASH: ${{ steps.fp.outputs.hash }}
+          EVENT_NAME: ${{ github.event_name }}
+          HEAD_REPO: ${{ github.event.pull_request.head.repo.full_name }}
+          REPOSITORY: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          receipt=".receipt/receipt.json"
+          summary() { printf '%s\n' "$1" >> "${GITHUB_STEP_SUMMARY}"; }
+          finish() { printf 'skip=%s\n' "$1" >> "${GITHUB_OUTPUT}"; }
+
+          # A miss always runs the job in full. That is the mechanism's safe direction: every way of
+          # failing to read a receipt costs a re-run, never a skip over input nobody fingerprinted.
+          if [ "${RECEIPT_HIT}" != "true" ]; then
+            if [ "${EVENT_NAME}" = "pull_request" ] && [ "${HEAD_REPO}" != "${REPOSITORY}" ]; then
+              summary "- no prior receipt; a fork pull request reads no cache from the base repository (cache isolation), so the job runs in full"
+            else
+              summary "- no prior receipt; running in full"
+            fi
+            finish false
+            exit 0
+          fi
+
+          if [ ! -f "${receipt}" ]; then
+            summary "- the cache hit but held no receipt.json; running in full"
+            finish false
+            exit 0
+          fi
+
+          saved_at_epoch="$(jq -er '.saved_at_epoch' "${receipt}" 2>/dev/null || true)"
+          recorded_hash="$(jq -er '.input_hash' "${receipt}" 2>/dev/null || true)"
+          if [ -z "${saved_at_epoch}" ] || [ -z "${recorded_hash}" ]; then
+            summary "- the receipt is not JSON with saved_at_epoch and input_hash; running in full"
+            finish false
+            exit 0
+          fi
+
+          case "${saved_at_epoch}" in
+            '' | *[!0-9]*)
+              summary "- the receipt's saved_at_epoch '${saved_at_epoch}' is not a number of seconds; running in full"
+              finish false
+              exit 0
+              ;;
+          esac
+
+          now="$(date -u +%s)"
+          age=$((now - saved_at_epoch))
+          if [ "${age}" -lt 0 ]; then
+            summary "- the receipt is dated in the future (age ${age}s); running in full"
+            finish false
+            exit 0
+          fi
+
+          if [ "${recorded_hash}" != "${INPUT_HASH}" ]; then
+            summary "- the receipt's input_hash is not this run's fingerprint; running in full"
+            finish false
+            exit 0
+          fi
+
+          if [ "${age}" -gt "${RECEIPT_MAX_AGE_SECONDS}" ]; then
+            summary "- the receipt is ${age}s old, over the ${RECEIPT_MAX_AGE_SECONDS}s ceiling; running in full"
+            finish false
+            exit 0
+          fi
+
+          {
+            printf '%s\n' "- the receipt is ${age}s old, within the ${RECEIPT_MAX_AGE_SECONDS}s ceiling: this job already passed on these inputs, so its work steps are skipped"
+            printf '\n```json\n'
+            jq '.' "${receipt}"
+            printf '```\n'
+          } >> "${GITHUB_STEP_SUMMARY}"
+          finish true
+
       - name: Install gitleaks
+        if: steps.verdict.outputs.skip != 'true'
         run: |
           set -euo pipefail
           curl -sSfL https://github.com/gitleaks/gitleaks/releases/download/v8.30.1/gitleaks_8.30.1_linux_x64.tar.gz | tar -xz -C /tmp
           sudo mv /tmp/gitleaks /usr/local/bin/gitleaks
           gitleaks version
       - name: Run gitleaks
+        if: steps.verdict.outputs.skip != 'true'
         run: gitleaks detect --source . --no-git --verbose --redact --exit-code 2 --report-format sarif --report-path results.sarif --log-level debug
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       - name: Upload gitleaks SARIF
         uses: github/codeql-action/upload-sarif@33d7b85da1a04171e211befe2c739303b9a4c066 # v4.39.3
-        if: always() && hashFiles('results.sarif') != ''
+        if: always() && hashFiles('results.sarif') != '' && steps.verdict.outputs.skip != 'true'
         with:
           sarif_file: results.sarif
           category: gitleaks
+
+      # The receipt is written only on the miss path, so a hit never refreshes saved_at_epoch and a job
+      # that keeps hitting ages out on schedule. A cache-reserve race must not fail a green job: the
+      # save is best-effort, and losing it only means the next run re-executes.
+      - name: Save the receipt
+        id: save
+        if: success() && steps.verdict.outputs.skip != 'true' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository)
+        continue-on-error: true
+        shell: bash
+        env:
+          JOB_KEY: gitleaks
+          INPUT_HASH: ${{ steps.fp.outputs.hash }}
+          ARTIFACT_DIGESTS: ""
+          ATTESTED: "false"
+          COMMIT_SHA: ${{ github.sha }}
+          RUN_ID: ${{ github.run_id }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          set -euo pipefail
+          mkdir -p .receipt
+          saved_at_epoch="$(date -u +%s)"
+          saved_at="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+          if [ -n "${ARTIFACT_DIGESTS}" ]; then
+            digests="$(printf '%s' "${ARTIFACT_DIGESTS}" | jq -c '.')"
+          else
+            digests="null"
+          fi
+          jq -n \
+            --arg schema "1" \
+            --arg job "${JOB_KEY}" \
+            --arg input_hash "${INPUT_HASH}" \
+            --arg commit_sha "${COMMIT_SHA}" \
+            --arg run_id "${RUN_ID}" \
+            --arg run_url "${RUN_URL}" \
+            --arg attested "${ATTESTED}" \
+            --arg saved_at "${saved_at}" \
+            --argjson saved_at_epoch "${saved_at_epoch}" \
+            --argjson artifact_digests "${digests}" \
+            '{
+              schema: $schema,
+              job: $job,
+              input_hash: $input_hash,
+              commit_sha: $commit_sha,
+              run_id: $run_id,
+              run_url: $run_url,
+              artifact_digests: $artifact_digests,
+              attested: ($attested == "true"),
+              saved_at: $saved_at,
+              saved_at_epoch: $saved_at_epoch
+            }' > .receipt/receipt.json
+          jq '.' .receipt/receipt.json
+
+      - name: Store the receipt
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        if: success() && steps.verdict.outputs.skip != 'true' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository)
+        continue-on-error: true
+        with:
+          path: .receipt
+          key: receipt-gitleaks-${{ runner.os }}-${{ steps.fp.outputs.hash }}
 
   skill-docs-gate:
     name: Skill and docs gate
@@ -796,7 +2587,113 @@ jobs:
           # git merge-base, which a single-commit checkout cannot answer.
           fetch-depth: 0
 
+      # Content-hash receipts: this job hashes every input it reads, looks for a receipt under that
+      # fingerprint, and skips its work only when a fresh one proves this exact tree already passed
+      # here. Every way of failing to read a receipt runs the job in full.
+      - name: Compute input fingerprint
+        id: fp
+        shell: bash
+        env:
+          INPUT_HASH: ${{ hashFiles('.agents/**', '.apm/**', '.claude/**', '.codex/**', '.commandcode/**', '.cursor/**', '.devin/**', '.factory/**', '.github/**', '.kilo/**', '.kyber-weave/**', '.opencode/**', '.pi/**', '.playwright-cli/**', '.vscode/**', 'dash/**', 'docs/**', 'homebrew/**', 'npm/**', 'products/**', 'samples/**', 'scripts/**', 'src/**', 'templates/**', 'tests/**', '.editorconfig', '.gitattributes', '.gitignore', '.gitleaks.toml', '.mcp.json', 'AGENTS.md', 'CLAUDE.md', 'CODE_OF_CONDUCT.md', 'CONTRIBUTING.md', 'Directory.Build.props', 'HANDOVER-WAVE4.md', 'HANDOVER.md', 'KyberWeave.Unit.slnf', 'KyberWeave.sln', 'KyberWeave.sln.DotSettings', 'LICENSE', 'NOTICE', 'README.md', 'REFACTOR-LAYERS.md', 'REVIEW.md', 'SECURITY.md', 'apm.yml', 'global.json', 'kilo.json') }}
+        run: |
+          set -euo pipefail
+          hash="${INPUT_HASH:-}"
+          if [ -z "${hash}" ]; then
+            # An empty fingerprint would put every run on one key. A per-run value always misses.
+            hash="empty-${GITHUB_RUN_ID}"
+          fi
+          printf 'hash=%s\n' "${hash}" >> "${GITHUB_OUTPUT}"
+
+      - name: Look up the receipt
+        id: receipt
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: .receipt
+          # Exact key only: a restore-key would let a near-miss receipt skip work over input it never
+          # fingerprinted, while a miss costs one full run, which is the safe direction.
+          key: receipt-skill-docs-gate-${{ runner.os }}-${{ steps.fp.outputs.hash }}
+
+      # A cache entry is data, not proof. The verdict validates the receipt, then compares its age
+      # against the workflow's ceiling, and sets skip=true only when both hold.
+      - name: Decide the verdict
+        id: verdict
+        shell: bash
+        env:
+          RECEIPT_HIT: ${{ steps.receipt.outputs.cache-hit }}
+          INPUT_HASH: ${{ steps.fp.outputs.hash }}
+          EVENT_NAME: ${{ github.event_name }}
+          HEAD_REPO: ${{ github.event.pull_request.head.repo.full_name }}
+          REPOSITORY: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          receipt=".receipt/receipt.json"
+          summary() { printf '%s\n' "$1" >> "${GITHUB_STEP_SUMMARY}"; }
+          finish() { printf 'skip=%s\n' "$1" >> "${GITHUB_OUTPUT}"; }
+
+          # A miss always runs the job in full. That is the mechanism's safe direction: every way of
+          # failing to read a receipt costs a re-run, never a skip over input nobody fingerprinted.
+          if [ "${RECEIPT_HIT}" != "true" ]; then
+            if [ "${EVENT_NAME}" = "pull_request" ] && [ "${HEAD_REPO}" != "${REPOSITORY}" ]; then
+              summary "- no prior receipt; a fork pull request reads no cache from the base repository (cache isolation), so the job runs in full"
+            else
+              summary "- no prior receipt; running in full"
+            fi
+            finish false
+            exit 0
+          fi
+
+          if [ ! -f "${receipt}" ]; then
+            summary "- the cache hit but held no receipt.json; running in full"
+            finish false
+            exit 0
+          fi
+
+          saved_at_epoch="$(jq -er '.saved_at_epoch' "${receipt}" 2>/dev/null || true)"
+          recorded_hash="$(jq -er '.input_hash' "${receipt}" 2>/dev/null || true)"
+          if [ -z "${saved_at_epoch}" ] || [ -z "${recorded_hash}" ]; then
+            summary "- the receipt is not JSON with saved_at_epoch and input_hash; running in full"
+            finish false
+            exit 0
+          fi
+
+          case "${saved_at_epoch}" in
+            '' | *[!0-9]*)
+              summary "- the receipt's saved_at_epoch '${saved_at_epoch}' is not a number of seconds; running in full"
+              finish false
+              exit 0
+              ;;
+          esac
+
+          now="$(date -u +%s)"
+          age=$((now - saved_at_epoch))
+          if [ "${age}" -lt 0 ]; then
+            summary "- the receipt is dated in the future (age ${age}s); running in full"
+            finish false
+            exit 0
+          fi
+
+          if [ "${recorded_hash}" != "${INPUT_HASH}" ]; then
+            summary "- the receipt's input_hash is not this run's fingerprint; running in full"
+            finish false
+            exit 0
+          fi
+
+          if [ "${age}" -gt "${RECEIPT_MAX_AGE_SECONDS}" ]; then
+            summary "- the receipt is ${age}s old, over the ${RECEIPT_MAX_AGE_SECONDS}s ceiling; running in full"
+            finish false
+            exit 0
+          fi
+
+          {
+            printf '%s\n' "- the receipt is ${age}s old, within the ${RECEIPT_MAX_AGE_SECONDS}s ceiling: this job already passed on these inputs, so its work steps are skipped"
+            printf '\n```json\n'
+            jq '.' "${receipt}"
+            printf '```\n'
+          } >> "${GITHUB_STEP_SUMMARY}"
+          finish true
+
       - name: Setup .NET
+        if: steps.verdict.outputs.skip != 'true'
         uses: actions/setup-dotnet@0f4a354dd5547a28c70b7853dbd95d5b67886e73 # v6.1.0
         with:
           dotnet-version: ${{ env.DOTNET_VERSION }}
@@ -804,11 +2701,13 @@ jobs:
       # Dogfood the PR's CLI rather than installing a release — gate behaviour must match
       # the commit under test.
       - name: Build CLI
+        if: steps.verdict.outputs.skip != 'true'
         run: >
           dotnet build src/KyberWeave.Cli/KyberWeave.Cli.csproj
           -c ${{ env.CONFIGURATION }}
 
       - name: Skill validate / lint / scan
+        if: steps.verdict.outputs.skip != 'true'
         id: skill
         run: |
           set -euo pipefail
@@ -844,7 +2743,7 @@ jobs:
       # file name or the cli category below.
       # Intentional github/codeql-action v4 pin
       - name: Upload skill scan SARIF (kyber-docs-authoring, legacy category)
-        if: always()
+        if: always() && steps.verdict.outputs.skip != 'true'
         uses: github/codeql-action/upload-sarif@33d7b85da1a04171e211befe2c739303b9a4c066 # v4.39.3
         with:
           sarif_file: kyber-weave-sarif/skills-_apm_skills_kyber-docs-authoring.sarif
@@ -857,7 +2756,7 @@ jobs:
       # and refuses two runs that share a category.
       # Intentional github/codeql-action v4 pin
       - name: Upload skill scan SARIF (kyber-docs-integrity-review)
-        if: always()
+        if: always() && steps.verdict.outputs.skip != 'true'
         uses: github/codeql-action/upload-sarif@33d7b85da1a04171e211befe2c739303b9a4c066 # v4.39.3
         with:
           sarif_file: kyber-weave-sarif/skills-_apm_skills_kyber-docs-integrity-review.sarif
@@ -865,7 +2764,7 @@ jobs:
 
       # Intentional github/codeql-action v4 pin
       - name: Upload skill scan SARIF (kyber-docs-onboarding-and-assessment)
-        if: always()
+        if: always() && steps.verdict.outputs.skip != 'true'
         uses: github/codeql-action/upload-sarif@33d7b85da1a04171e211befe2c739303b9a4c066 # v4.39.3
         with:
           sarif_file: kyber-weave-sarif/skills-_apm_skills_kyber-docs-onboarding-and-assessment.sarif
@@ -877,7 +2776,7 @@ jobs:
       # its own, and refuses two runs that share a category.
       # Intentional github/codeql-action v4 pin
       - name: Upload skill scan SARIF (kyber-weave-cli)
-        if: always()
+        if: always() && steps.verdict.outputs.skip != 'true'
         uses: github/codeql-action/upload-sarif@33d7b85da1a04171e211befe2c739303b9a4c066 # v4.39.3
         with:
           sarif_file: kyber-weave-sarif/skills-_apm_skills_kyber-weave-cli.sarif
@@ -885,7 +2784,7 @@ jobs:
 
       # Intentional github/codeql-action v4 pin
       - name: Upload skill scan SARIF (codegraph)
-        if: always()
+        if: always() && steps.verdict.outputs.skip != 'true'
         uses: github/codeql-action/upload-sarif@33d7b85da1a04171e211befe2c739303b9a4c066 # v4.39.3
         with:
           sarif_file: kyber-weave-sarif/skills-_apm_skills_codegraph.sarif
@@ -893,7 +2792,7 @@ jobs:
 
       # Intentional github/codeql-action v4 pin
       - name: Upload skill scan SARIF (kw-onboarding)
-        if: always()
+        if: always() && steps.verdict.outputs.skip != 'true'
         uses: github/codeql-action/upload-sarif@33d7b85da1a04171e211befe2c739303b9a4c066 # v4.39.3
         with:
           sarif_file: kyber-weave-sarif/skills-_apm_skills_kw-onboarding.sarif
@@ -901,7 +2800,7 @@ jobs:
 
       # Intentional github/codeql-action v4 pin
       - name: Upload skill scan SARIF (kyber-weave-model-profile)
-        if: always()
+        if: always() && steps.verdict.outputs.skip != 'true'
         uses: github/codeql-action/upload-sarif@33d7b85da1a04171e211befe2c739303b9a4c066 # v4.39.3
         with:
           sarif_file: kyber-weave-sarif/skills-_apm_skills_kyber-weave-model-profile.sarif
@@ -909,7 +2808,7 @@ jobs:
 
       # Intentional github/codeql-action v4 pin
       - name: Upload skill scan SARIF (spec-conductor)
-        if: always()
+        if: always() && steps.verdict.outputs.skip != 'true'
         uses: github/codeql-action/upload-sarif@33d7b85da1a04171e211befe2c739303b9a4c066 # v4.39.3
         with:
           sarif_file: kyber-weave-sarif/skills-_apm_skills_spec-conductor.sarif
@@ -923,6 +2822,7 @@ jobs:
       # remote default branch elsewhere (schedule, dispatch). Full history
       # (fetch-depth: 0 above) is what lets git merge-base resolve that scope.
       - name: Docs validate
+        if: steps.verdict.outputs.skip != 'true'
         env:
           # Event values travel through env, never interpolated into run:,
           # so a hostile ref cannot reach the shell.
@@ -949,6 +2849,65 @@ jobs:
       # fail closed on KW-DOC-DRIFT-001. Defer drift until an index is provisioned in CI.
       # Local/PR authors still run: docs drift . (see AGENTS.md).
 
+      # The receipt is written only on the miss path, so a hit never refreshes saved_at_epoch and a job
+      # that keeps hitting ages out on schedule. A cache-reserve race must not fail a green job: the
+      # save is best-effort, and losing it only means the next run re-executes.
+      - name: Save the receipt
+        id: save
+        if: success() && steps.verdict.outputs.skip != 'true' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository)
+        continue-on-error: true
+        shell: bash
+        env:
+          JOB_KEY: skill-docs-gate
+          INPUT_HASH: ${{ steps.fp.outputs.hash }}
+          ARTIFACT_DIGESTS: ""
+          ATTESTED: "false"
+          COMMIT_SHA: ${{ github.sha }}
+          RUN_ID: ${{ github.run_id }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          set -euo pipefail
+          mkdir -p .receipt
+          saved_at_epoch="$(date -u +%s)"
+          saved_at="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+          if [ -n "${ARTIFACT_DIGESTS}" ]; then
+            digests="$(printf '%s' "${ARTIFACT_DIGESTS}" | jq -c '.')"
+          else
+            digests="null"
+          fi
+          jq -n \
+            --arg schema "1" \
+            --arg job "${JOB_KEY}" \
+            --arg input_hash "${INPUT_HASH}" \
+            --arg commit_sha "${COMMIT_SHA}" \
+            --arg run_id "${RUN_ID}" \
+            --arg run_url "${RUN_URL}" \
+            --arg attested "${ATTESTED}" \
+            --arg saved_at "${saved_at}" \
+            --argjson saved_at_epoch "${saved_at_epoch}" \
+            --argjson artifact_digests "${digests}" \
+            '{
+              schema: $schema,
+              job: $job,
+              input_hash: $input_hash,
+              commit_sha: $commit_sha,
+              run_id: $run_id,
+              run_url: $run_url,
+              artifact_digests: $artifact_digests,
+              attested: ($attested == "true"),
+              saved_at: $saved_at,
+              saved_at_epoch: $saved_at_epoch
+            }' > .receipt/receipt.json
+          jq '.' .receipt/receipt.json
+
+      - name: Store the receipt
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        if: success() && steps.verdict.outputs.skip != 'true' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository)
+        continue-on-error: true
+        with:
+          path: .receipt
+          key: receipt-skill-docs-gate-${{ runner.os }}-${{ steps.fp.outputs.hash }}
+
   ts-gates:
     name: TypeScript gates (KyberDash)
     runs-on: ubuntu-latest
@@ -972,7 +2931,113 @@ jobs:
       # update when the floor bumps. `cache: npm` reuses actions/setup-node's
       # ~350 MB built-in cache keyed on dash/package-lock.json so a cold
       # runner is the only cold one.
+      # Content-hash receipts: this job hashes every input it reads, looks for a receipt under that
+      # fingerprint, and skips its work only when a fresh one proves this exact tree already passed
+      # here. Every way of failing to read a receipt runs the job in full.
+      - name: Compute input fingerprint
+        id: fp
+        shell: bash
+        env:
+          INPUT_HASH: ${{ hashFiles('dash/**', 'global.json', 'Directory.Build.props', '.github/workflows/ci.yml') }}
+        run: |
+          set -euo pipefail
+          hash="${INPUT_HASH:-}"
+          if [ -z "${hash}" ]; then
+            # An empty fingerprint would put every run on one key. A per-run value always misses.
+            hash="empty-${GITHUB_RUN_ID}"
+          fi
+          printf 'hash=%s\n' "${hash}" >> "${GITHUB_OUTPUT}"
+
+      - name: Look up the receipt
+        id: receipt
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: .receipt
+          # Exact key only: a restore-key would let a near-miss receipt skip work over input it never
+          # fingerprinted, while a miss costs one full run, which is the safe direction.
+          key: receipt-ts-gates-${{ runner.os }}-${{ steps.fp.outputs.hash }}
+
+      # A cache entry is data, not proof. The verdict validates the receipt, then compares its age
+      # against the workflow's ceiling, and sets skip=true only when both hold.
+      - name: Decide the verdict
+        id: verdict
+        shell: bash
+        env:
+          RECEIPT_HIT: ${{ steps.receipt.outputs.cache-hit }}
+          INPUT_HASH: ${{ steps.fp.outputs.hash }}
+          EVENT_NAME: ${{ github.event_name }}
+          HEAD_REPO: ${{ github.event.pull_request.head.repo.full_name }}
+          REPOSITORY: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          receipt=".receipt/receipt.json"
+          summary() { printf '%s\n' "$1" >> "${GITHUB_STEP_SUMMARY}"; }
+          finish() { printf 'skip=%s\n' "$1" >> "${GITHUB_OUTPUT}"; }
+
+          # A miss always runs the job in full. That is the mechanism's safe direction: every way of
+          # failing to read a receipt costs a re-run, never a skip over input nobody fingerprinted.
+          if [ "${RECEIPT_HIT}" != "true" ]; then
+            if [ "${EVENT_NAME}" = "pull_request" ] && [ "${HEAD_REPO}" != "${REPOSITORY}" ]; then
+              summary "- no prior receipt; a fork pull request reads no cache from the base repository (cache isolation), so the job runs in full"
+            else
+              summary "- no prior receipt; running in full"
+            fi
+            finish false
+            exit 0
+          fi
+
+          if [ ! -f "${receipt}" ]; then
+            summary "- the cache hit but held no receipt.json; running in full"
+            finish false
+            exit 0
+          fi
+
+          saved_at_epoch="$(jq -er '.saved_at_epoch' "${receipt}" 2>/dev/null || true)"
+          recorded_hash="$(jq -er '.input_hash' "${receipt}" 2>/dev/null || true)"
+          if [ -z "${saved_at_epoch}" ] || [ -z "${recorded_hash}" ]; then
+            summary "- the receipt is not JSON with saved_at_epoch and input_hash; running in full"
+            finish false
+            exit 0
+          fi
+
+          case "${saved_at_epoch}" in
+            '' | *[!0-9]*)
+              summary "- the receipt's saved_at_epoch '${saved_at_epoch}' is not a number of seconds; running in full"
+              finish false
+              exit 0
+              ;;
+          esac
+
+          now="$(date -u +%s)"
+          age=$((now - saved_at_epoch))
+          if [ "${age}" -lt 0 ]; then
+            summary "- the receipt is dated in the future (age ${age}s); running in full"
+            finish false
+            exit 0
+          fi
+
+          if [ "${recorded_hash}" != "${INPUT_HASH}" ]; then
+            summary "- the receipt's input_hash is not this run's fingerprint; running in full"
+            finish false
+            exit 0
+          fi
+
+          if [ "${age}" -gt "${RECEIPT_MAX_AGE_SECONDS}" ]; then
+            summary "- the receipt is ${age}s old, over the ${RECEIPT_MAX_AGE_SECONDS}s ceiling; running in full"
+            finish false
+            exit 0
+          fi
+
+          {
+            printf '%s\n' "- the receipt is ${age}s old, within the ${RECEIPT_MAX_AGE_SECONDS}s ceiling: this job already passed on these inputs, so its work steps are skipped"
+            printf '\n```json\n'
+            jq '.' "${receipt}"
+            printf '```\n'
+          } >> "${GITHUB_STEP_SUMMARY}"
+          finish true
+
       - name: Setup Node
+        if: steps.verdict.outputs.skip != 'true'
         uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version-file: dash/.nvmrc
@@ -987,6 +3052,7 @@ jobs:
       # install produces. Without this knob, a future PR that bumps an
       # indirect dep silently forks the lint behaviour between dev and CI.
       - name: Install dash dependencies
+        if: steps.verdict.outputs.skip != 'true'
         working-directory: dash
         run: npm ci --no-audit --no-fund
 
@@ -997,14 +3063,17 @@ jobs:
       # the ts-test gate was failing while passing on any machine that had run
       # an install there.
       - name: Install web dashboard dependencies
+        if: steps.verdict.outputs.skip != 'true'
         working-directory: dash/web
         run: npm ci --no-audit --no-fund
 
       - name: Install tray UI dependencies
+        if: steps.verdict.outputs.skip != 'true'
         working-directory: dash/tray/ui
         run: npm ci --no-audit --no-fund
 
       - name: TypeScript type check (ts-typecheck gate)
+        if: steps.verdict.outputs.skip != 'true'
         working-directory: dash
         run: npm run typecheck
 
@@ -1012,24 +3081,29 @@ jobs:
       # default pool forks them concurrently and writes to the same lock
       # file; upstream schedules those under `test:locks` instead.
       - name: TypeScript test (ts-test gate)
+        if: steps.verdict.outputs.skip != 'true'
         working-directory: dash
         run: npm test
 
       - name: TypeScript lint (ts-lint gate)
+        if: steps.verdict.outputs.skip != 'true'
         working-directory: dash
         run: npm run lint
 
       # Every non-test source file under dash/ must be reachable from an entry point, so a
       # deleted command cannot leave its private modules behind (spec task 2.1).
       - name: Unreachable module check
+        if: steps.verdict.outputs.skip != 'true'
         working-directory: dash
         run: npm run check:reachable
 
       - name: Tray UI typecheck
+        if: steps.verdict.outputs.skip != 'true'
         working-directory: dash/tray/ui
         run: npm run typecheck
 
       - name: Tray UI test
+        if: steps.verdict.outputs.skip != 'true'
         working-directory: dash/tray/ui
         run: npm test
 
@@ -1043,6 +3117,66 @@ jobs:
   # no floating npx fetch can move the runner under CI, and so that
   # dash/playwright.config.ts — whose webServer targets the live host — stays
   # unloaded; the spec's own isolated boot is the only server.
+
+      # The receipt is written only on the miss path, so a hit never refreshes saved_at_epoch and a job
+      # that keeps hitting ages out on schedule. A cache-reserve race must not fail a green job: the
+      # save is best-effort, and losing it only means the next run re-executes.
+      - name: Save the receipt
+        id: save
+        if: success() && steps.verdict.outputs.skip != 'true' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository)
+        continue-on-error: true
+        shell: bash
+        env:
+          JOB_KEY: ts-gates
+          INPUT_HASH: ${{ steps.fp.outputs.hash }}
+          ARTIFACT_DIGESTS: ""
+          ATTESTED: "false"
+          COMMIT_SHA: ${{ github.sha }}
+          RUN_ID: ${{ github.run_id }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          set -euo pipefail
+          mkdir -p .receipt
+          saved_at_epoch="$(date -u +%s)"
+          saved_at="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+          if [ -n "${ARTIFACT_DIGESTS}" ]; then
+            digests="$(printf '%s' "${ARTIFACT_DIGESTS}" | jq -c '.')"
+          else
+            digests="null"
+          fi
+          jq -n \
+            --arg schema "1" \
+            --arg job "${JOB_KEY}" \
+            --arg input_hash "${INPUT_HASH}" \
+            --arg commit_sha "${COMMIT_SHA}" \
+            --arg run_id "${RUN_ID}" \
+            --arg run_url "${RUN_URL}" \
+            --arg attested "${ATTESTED}" \
+            --arg saved_at "${saved_at}" \
+            --argjson saved_at_epoch "${saved_at_epoch}" \
+            --argjson artifact_digests "${digests}" \
+            '{
+              schema: $schema,
+              job: $job,
+              input_hash: $input_hash,
+              commit_sha: $commit_sha,
+              run_id: $run_id,
+              run_url: $run_url,
+              artifact_digests: $artifact_digests,
+              attested: ($attested == "true"),
+              saved_at: $saved_at,
+              saved_at_epoch: $saved_at_epoch
+            }' > .receipt/receipt.json
+          jq '.' .receipt/receipt.json
+
+      - name: Store the receipt
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        if: success() && steps.verdict.outputs.skip != 'true' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository)
+        continue-on-error: true
+        with:
+          path: .receipt
+          key: receipt-ts-gates-${{ runner.os }}-${{ steps.fp.outputs.hash }}
+
   dash-e2e:
     name: Dash harness-collection e2e
     runs-on: ubuntu-latest
@@ -1055,12 +3189,119 @@ jobs:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
 
+      # Content-hash receipts: this job hashes every input it reads, looks for a receipt under that
+      # fingerprint, and skips its work only when a fresh one proves this exact tree already passed
+      # here. Every way of failing to read a receipt runs the job in full.
+      - name: Compute input fingerprint
+        id: fp
+        shell: bash
+        env:
+          INPUT_HASH: ${{ hashFiles('dash/**', 'global.json', 'Directory.Build.props', '.github/workflows/ci.yml') }}
+        run: |
+          set -euo pipefail
+          hash="${INPUT_HASH:-}"
+          if [ -z "${hash}" ]; then
+            # An empty fingerprint would put every run on one key. A per-run value always misses.
+            hash="empty-${GITHUB_RUN_ID}"
+          fi
+          printf 'hash=%s\n' "${hash}" >> "${GITHUB_OUTPUT}"
+
+      - name: Look up the receipt
+        id: receipt
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: .receipt
+          # Exact key only: a restore-key would let a near-miss receipt skip work over input it never
+          # fingerprinted, while a miss costs one full run, which is the safe direction.
+          key: receipt-dash-e2e-${{ runner.os }}-${{ steps.fp.outputs.hash }}
+
+      # A cache entry is data, not proof. The verdict validates the receipt, then compares its age
+      # against the workflow's ceiling, and sets skip=true only when both hold.
+      - name: Decide the verdict
+        id: verdict
+        shell: bash
+        env:
+          RECEIPT_HIT: ${{ steps.receipt.outputs.cache-hit }}
+          INPUT_HASH: ${{ steps.fp.outputs.hash }}
+          EVENT_NAME: ${{ github.event_name }}
+          HEAD_REPO: ${{ github.event.pull_request.head.repo.full_name }}
+          REPOSITORY: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          receipt=".receipt/receipt.json"
+          summary() { printf '%s\n' "$1" >> "${GITHUB_STEP_SUMMARY}"; }
+          finish() { printf 'skip=%s\n' "$1" >> "${GITHUB_OUTPUT}"; }
+
+          # A miss always runs the job in full. That is the mechanism's safe direction: every way of
+          # failing to read a receipt costs a re-run, never a skip over input nobody fingerprinted.
+          if [ "${RECEIPT_HIT}" != "true" ]; then
+            if [ "${EVENT_NAME}" = "pull_request" ] && [ "${HEAD_REPO}" != "${REPOSITORY}" ]; then
+              summary "- no prior receipt; a fork pull request reads no cache from the base repository (cache isolation), so the job runs in full"
+            else
+              summary "- no prior receipt; running in full"
+            fi
+            finish false
+            exit 0
+          fi
+
+          if [ ! -f "${receipt}" ]; then
+            summary "- the cache hit but held no receipt.json; running in full"
+            finish false
+            exit 0
+          fi
+
+          saved_at_epoch="$(jq -er '.saved_at_epoch' "${receipt}" 2>/dev/null || true)"
+          recorded_hash="$(jq -er '.input_hash' "${receipt}" 2>/dev/null || true)"
+          if [ -z "${saved_at_epoch}" ] || [ -z "${recorded_hash}" ]; then
+            summary "- the receipt is not JSON with saved_at_epoch and input_hash; running in full"
+            finish false
+            exit 0
+          fi
+
+          case "${saved_at_epoch}" in
+            '' | *[!0-9]*)
+              summary "- the receipt's saved_at_epoch '${saved_at_epoch}' is not a number of seconds; running in full"
+              finish false
+              exit 0
+              ;;
+          esac
+
+          now="$(date -u +%s)"
+          age=$((now - saved_at_epoch))
+          if [ "${age}" -lt 0 ]; then
+            summary "- the receipt is dated in the future (age ${age}s); running in full"
+            finish false
+            exit 0
+          fi
+
+          if [ "${recorded_hash}" != "${INPUT_HASH}" ]; then
+            summary "- the receipt's input_hash is not this run's fingerprint; running in full"
+            finish false
+            exit 0
+          fi
+
+          if [ "${age}" -gt "${RECEIPT_MAX_AGE_SECONDS}" ]; then
+            summary "- the receipt is ${age}s old, over the ${RECEIPT_MAX_AGE_SECONDS}s ceiling; running in full"
+            finish false
+            exit 0
+          fi
+
+          {
+            printf '%s\n' "- the receipt is ${age}s old, within the ${RECEIPT_MAX_AGE_SECONDS}s ceiling: this job already passed on these inputs, so its work steps are skipped"
+            printf '\n```json\n'
+            jq '.' "${receipt}"
+            printf '```\n'
+          } >> "${GITHUB_STEP_SUMMARY}"
+          finish true
+
       - name: Setup .NET
+        if: steps.verdict.outputs.skip != 'true'
         uses: actions/setup-dotnet@0f4a354dd5547a28c70b7853dbd95d5b67886e73 # v6.1.0
         with:
           dotnet-version: ${{ env.DOTNET_VERSION }}
 
       - name: Setup Node
+        if: steps.verdict.outputs.skip != 'true'
         uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version-file: dash/.nvmrc
@@ -1073,6 +3314,7 @@ jobs:
       # run reproduces the same devDependency graph a contributor's local
       # install produces. Mirrors the ts-gates install.
       - name: Install dash and web dependencies and build SPA
+        if: steps.verdict.outputs.skip != 'true'
         working-directory: dash
         run: |
           npm ci --no-audit --no-fund
@@ -1080,12 +3322,14 @@ jobs:
           npm --prefix web run build
 
       - name: Format and build KyberDash C# server
+        if: steps.verdict.outputs.skip != 'true'
         run: |
           dotnet format dash/server/KyberDash.sln whitespace --verify-no-changes -v minimal
           dotnet format dash/server/KyberDash.sln style --verify-no-changes --severity warn -v minimal
           dotnet build dash/server/KyberDash.sln -c ${{ env.CONFIGURATION }}
 
       - name: Test KyberDash C# server
+        if: steps.verdict.outputs.skip != 'true'
         run: >
           dotnet test dash/server/KyberDash.sln
           -c ${{ env.CONFIGURATION }}
@@ -1095,6 +3339,7 @@ jobs:
       # default Chromium. Each attempt is capped at 5 minutes and retried once, so a stalled
       # download fails fast instead of holding CI for GitHub's 360-minute default.
       - name: Install Playwright browsers
+        if: steps.verdict.outputs.skip != 'true'
         working-directory: dash
         timeout-minutes: 12
         run: |
@@ -1114,11 +3359,71 @@ jobs:
           exit 1
 
       - name: Harness-collection conformance spec
+        if: steps.verdict.outputs.skip != 'true'
         run: npx --prefix dash playwright test --config dash/playwright.isolated.config.ts dash/e2e/harness-collection.spec.ts
 
       - name: Shut down .NET build servers
-        if: always()
+        if: always() && steps.verdict.outputs.skip != 'true'
         run: dotnet build-server shutdown
+
+      # The receipt is written only on the miss path, so a hit never refreshes saved_at_epoch and a job
+      # that keeps hitting ages out on schedule. A cache-reserve race must not fail a green job: the
+      # save is best-effort, and losing it only means the next run re-executes.
+      - name: Save the receipt
+        id: save
+        if: success() && steps.verdict.outputs.skip != 'true' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository)
+        continue-on-error: true
+        shell: bash
+        env:
+          JOB_KEY: dash-e2e
+          INPUT_HASH: ${{ steps.fp.outputs.hash }}
+          ARTIFACT_DIGESTS: ""
+          ATTESTED: "false"
+          COMMIT_SHA: ${{ github.sha }}
+          RUN_ID: ${{ github.run_id }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          set -euo pipefail
+          mkdir -p .receipt
+          saved_at_epoch="$(date -u +%s)"
+          saved_at="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+          if [ -n "${ARTIFACT_DIGESTS}" ]; then
+            digests="$(printf '%s' "${ARTIFACT_DIGESTS}" | jq -c '.')"
+          else
+            digests="null"
+          fi
+          jq -n \
+            --arg schema "1" \
+            --arg job "${JOB_KEY}" \
+            --arg input_hash "${INPUT_HASH}" \
+            --arg commit_sha "${COMMIT_SHA}" \
+            --arg run_id "${RUN_ID}" \
+            --arg run_url "${RUN_URL}" \
+            --arg attested "${ATTESTED}" \
+            --arg saved_at "${saved_at}" \
+            --argjson saved_at_epoch "${saved_at_epoch}" \
+            --argjson artifact_digests "${digests}" \
+            '{
+              schema: $schema,
+              job: $job,
+              input_hash: $input_hash,
+              commit_sha: $commit_sha,
+              run_id: $run_id,
+              run_url: $run_url,
+              artifact_digests: $artifact_digests,
+              attested: ($attested == "true"),
+              saved_at: $saved_at,
+              saved_at_epoch: $saved_at_epoch
+            }' > .receipt/receipt.json
+          jq '.' .receipt/receipt.json
+
+      - name: Store the receipt
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        if: success() && steps.verdict.outputs.skip != 'true' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository)
+        continue-on-error: true
+        with:
+          path: .receipt
+          key: receipt-dash-e2e-${{ runner.os }}-${{ steps.fp.outputs.hash }}
 
   tray-rust:
     name: Tray Rust gates (${{ matrix.os }})
@@ -1149,8 +3454,113 @@ jobs:
       # debs still match. actions/cache reads and writes as the runner user, so
       # the root-owned archive is handed over before restore and again after
       # install; a root-owned deb is unreadable to that save.
+      # Content-hash receipts: this job hashes every input it reads, looks for a receipt under that
+      # fingerprint, and skips its work only when a fresh one proves this exact tree already passed
+      # here. Every way of failing to read a receipt runs the job in full.
+      - name: Compute input fingerprint
+        id: fp
+        shell: bash
+        env:
+          INPUT_HASH: ${{ hashFiles('dash/tray/**', 'dash/.nvmrc', '.github/workflows/ci.yml') }}
+        run: |
+          set -euo pipefail
+          hash="${INPUT_HASH:-}"
+          if [ -z "${hash}" ]; then
+            # An empty fingerprint would put every run on one key. A per-run value always misses.
+            hash="empty-${GITHUB_RUN_ID}"
+          fi
+          printf 'hash=%s\n' "${hash}" >> "${GITHUB_OUTPUT}"
+
+      - name: Look up the receipt
+        id: receipt
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: .receipt
+          # Exact key only: a restore-key would let a near-miss receipt skip work over input it never
+          # fingerprinted, while a miss costs one full run, which is the safe direction.
+          key: receipt-tray-rust-${{ matrix.os }}-${{ steps.fp.outputs.hash }}
+
+      # A cache entry is data, not proof. The verdict validates the receipt, then compares its age
+      # against the workflow's ceiling, and sets skip=true only when both hold.
+      - name: Decide the verdict
+        id: verdict
+        shell: bash
+        env:
+          RECEIPT_HIT: ${{ steps.receipt.outputs.cache-hit }}
+          INPUT_HASH: ${{ steps.fp.outputs.hash }}
+          EVENT_NAME: ${{ github.event_name }}
+          HEAD_REPO: ${{ github.event.pull_request.head.repo.full_name }}
+          REPOSITORY: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          receipt=".receipt/receipt.json"
+          summary() { printf '%s\n' "$1" >> "${GITHUB_STEP_SUMMARY}"; }
+          finish() { printf 'skip=%s\n' "$1" >> "${GITHUB_OUTPUT}"; }
+
+          # A miss always runs the job in full. That is the mechanism's safe direction: every way of
+          # failing to read a receipt costs a re-run, never a skip over input nobody fingerprinted.
+          if [ "${RECEIPT_HIT}" != "true" ]; then
+            if [ "${EVENT_NAME}" = "pull_request" ] && [ "${HEAD_REPO}" != "${REPOSITORY}" ]; then
+              summary "- no prior receipt; a fork pull request reads no cache from the base repository (cache isolation), so the job runs in full"
+            else
+              summary "- no prior receipt; running in full"
+            fi
+            finish false
+            exit 0
+          fi
+
+          if [ ! -f "${receipt}" ]; then
+            summary "- the cache hit but held no receipt.json; running in full"
+            finish false
+            exit 0
+          fi
+
+          saved_at_epoch="$(jq -er '.saved_at_epoch' "${receipt}" 2>/dev/null || true)"
+          recorded_hash="$(jq -er '.input_hash' "${receipt}" 2>/dev/null || true)"
+          if [ -z "${saved_at_epoch}" ] || [ -z "${recorded_hash}" ]; then
+            summary "- the receipt is not JSON with saved_at_epoch and input_hash; running in full"
+            finish false
+            exit 0
+          fi
+
+          case "${saved_at_epoch}" in
+            '' | *[!0-9]*)
+              summary "- the receipt's saved_at_epoch '${saved_at_epoch}' is not a number of seconds; running in full"
+              finish false
+              exit 0
+              ;;
+          esac
+
+          now="$(date -u +%s)"
+          age=$((now - saved_at_epoch))
+          if [ "${age}" -lt 0 ]; then
+            summary "- the receipt is dated in the future (age ${age}s); running in full"
+            finish false
+            exit 0
+          fi
+
+          if [ "${recorded_hash}" != "${INPUT_HASH}" ]; then
+            summary "- the receipt's input_hash is not this run's fingerprint; running in full"
+            finish false
+            exit 0
+          fi
+
+          if [ "${age}" -gt "${RECEIPT_MAX_AGE_SECONDS}" ]; then
+            summary "- the receipt is ${age}s old, over the ${RECEIPT_MAX_AGE_SECONDS}s ceiling; running in full"
+            finish false
+            exit 0
+          fi
+
+          {
+            printf '%s\n' "- the receipt is ${age}s old, within the ${RECEIPT_MAX_AGE_SECONDS}s ceiling: this job already passed on these inputs, so its work steps are skipped"
+            printf '\n```json\n'
+            jq '.' "${receipt}"
+            printf '```\n'
+          } >> "${GITHUB_STEP_SUMMARY}"
+          finish true
+
       - name: Resolve Tauri apt cache key
-        if: runner.os == 'Linux'
+        if: runner.os == 'Linux' && steps.verdict.outputs.skip != 'true'
         id: tauri-apt-key
         run: |
           set -euo pipefail
@@ -1158,14 +3568,14 @@ jobs:
           date -u +'week=%G-W%V' >> "$GITHUB_OUTPUT"
 
       - name: Prepare Tauri apt archive ownership
-        if: runner.os == 'Linux'
+        if: runner.os == 'Linux' && steps.verdict.outputs.skip != 'true'
         run: |
           set -euo pipefail
           sudo mkdir -p /var/cache/apt/archives/partial
           sudo chown -R "$(id -un):$(id -gn)" /var/cache/apt/archives
 
       - name: Cache Tauri Linux apt packages
-        if: runner.os == 'Linux'
+        if: runner.os == 'Linux' && steps.verdict.outputs.skip != 'true'
         id: tauri-apt-cache
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
@@ -1175,7 +3585,7 @@ jobs:
             ${{ runner.os }}-tauri-apt-${{ steps.tauri-apt-key.outputs.packages }}-
 
       - name: Install Tauri Linux build dependencies
-        if: runner.os == 'Linux'
+        if: runner.os == 'Linux' && steps.verdict.outputs.skip != 'true'
         # Retry loop handles quick flakes only; a hung apt is killed by the step timeout.
         # Depends on env.retry, the attempt budget this loop reads (no new retry action).
         timeout-minutes: 45
@@ -1186,6 +3596,7 @@ jobs:
           attempt=1
           while [ "$attempt" -le "$retry" ]; do
             # Unquoted on purpose: the job env holds a space-separated list.
+            # shellcheck disable=SC2086
             if sudo apt-get update && sudo apt-get install -y $TAURI_APT_PACKAGES; then
               # Incomplete downloads live in partial/; the lock is root-owned.
               # Neither belongs in the cache, and the save runs as the runner.
@@ -1212,7 +3623,7 @@ jobs:
           exit 1
 
       - name: Setup Node for Linux tray build
-        if: runner.os == 'Linux'
+        if: runner.os == 'Linux' && steps.verdict.outputs.skip != 'true'
         uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version-file: dash/.nvmrc
@@ -1220,7 +3631,7 @@ jobs:
           cache-dependency-path: dash/tray/ui/package-lock.json
 
       - name: Build tray UI for Linux
-        if: runner.os == 'Linux'
+        if: runner.os == 'Linux' && steps.verdict.outputs.skip != 'true'
         working-directory: dash/tray/ui
         run: |
           npm ci --no-audit --no-fund
@@ -1230,18 +3641,20 @@ jobs:
       # not the action rev — dtolnay/rust-toolchain treats @rev as a rustc
       # version unless toolchain is set explicitly.
       - name: Install Rust
+        if: steps.verdict.outputs.skip != 'true'
         uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8 # v1
         with:
           toolchain: stable
           components: rustfmt, clippy
 
       - name: Cache Rust
+        if: steps.verdict.outputs.skip != 'true'
         uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
         with:
           workspaces: dash/tray/src-tauri
 
       - name: Verify patched Linux GLib source
-        if: runner.os == 'Linux'
+        if: runner.os == 'Linux' && steps.verdict.outputs.skip != 'true'
         working-directory: dash/tray/src-tauri
         shell: bash
         run: |
@@ -1258,25 +3671,87 @@ jobs:
           cargo tree --locked -i glib --target x86_64-unknown-linux-gnu
 
       - name: Test patched GLib string iterator
-        if: runner.os == 'Linux'
+        if: runner.os == 'Linux' && steps.verdict.outputs.skip != 'true'
         run: cargo test --release --manifest-path dash/tray/vendor/glib-0.18.5/Cargo.toml test_variant_str_iter
 
       - name: cargo fmt --check
+        if: steps.verdict.outputs.skip != 'true'
         working-directory: dash/tray/src-tauri
         run: cargo fmt --check
 
       - name: cargo clippy
+        if: steps.verdict.outputs.skip != 'true'
         working-directory: dash/tray/src-tauri
         run: cargo clippy -- -D warnings
 
       - name: cargo test
+        if: steps.verdict.outputs.skip != 'true'
         working-directory: dash/tray/src-tauri
         run: cargo test
 
       - name: cargo build --release --locked
-        if: runner.os == 'Linux'
+        if: runner.os == 'Linux' && steps.verdict.outputs.skip != 'true'
         working-directory: dash/tray/src-tauri
         run: cargo build --release --locked
+
+      # The receipt is written only on the miss path, so a hit never refreshes saved_at_epoch and a job
+      # that keeps hitting ages out on schedule. A cache-reserve race must not fail a green job: the
+      # save is best-effort, and losing it only means the next run re-executes.
+      - name: Save the receipt
+        id: save
+        if: success() && steps.verdict.outputs.skip != 'true' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository)
+        continue-on-error: true
+        shell: bash
+        env:
+          JOB_KEY: tray-rust
+          INPUT_HASH: ${{ steps.fp.outputs.hash }}
+          ARTIFACT_DIGESTS: ""
+          ATTESTED: "false"
+          COMMIT_SHA: ${{ github.sha }}
+          RUN_ID: ${{ github.run_id }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          set -euo pipefail
+          mkdir -p .receipt
+          saved_at_epoch="$(date -u +%s)"
+          saved_at="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+          if [ -n "${ARTIFACT_DIGESTS}" ]; then
+            digests="$(printf '%s' "${ARTIFACT_DIGESTS}" | jq -c '.')"
+          else
+            digests="null"
+          fi
+          jq -n \
+            --arg schema "1" \
+            --arg job "${JOB_KEY}" \
+            --arg input_hash "${INPUT_HASH}" \
+            --arg commit_sha "${COMMIT_SHA}" \
+            --arg run_id "${RUN_ID}" \
+            --arg run_url "${RUN_URL}" \
+            --arg attested "${ATTESTED}" \
+            --arg saved_at "${saved_at}" \
+            --argjson saved_at_epoch "${saved_at_epoch}" \
+            --argjson artifact_digests "${digests}" \
+            '{
+              schema: $schema,
+              job: $job,
+              input_hash: $input_hash,
+              commit_sha: $commit_sha,
+              run_id: $run_id,
+              run_url: $run_url,
+              artifact_digests: $artifact_digests,
+              attested: ($attested == "true"),
+              saved_at: $saved_at,
+              saved_at_epoch: $saved_at_epoch
+            }' > .receipt/receipt.json
+          jq '.' .receipt/receipt.json
+
+      - name: Store the receipt
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        if: success() && steps.verdict.outputs.skip != 'true' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository)
+        continue-on-error: true
+        with:
+          path: .receipt
+          key: receipt-tray-rust-${{ matrix.os }}-${{ steps.fp.outputs.hash }}
 
   ci-summary:
     name: CI Summary
@@ -1304,6 +3779,10 @@ jobs:
         run: |
           set -euo pipefail
           echo "## CI Results" > results.md
+          # One redirect per line so the table reads and diffs as the table it renders; shellcheck's
+          # grouped form would bury it. The directive sits on the line above the group's first append
+          # because that is the only placement the workflow linter's shellcheck run honours.
+          # shellcheck disable=SC2129
           echo "" >> results.md
           echo "| Job | Status |" >> results.md
           echo "|-----|--------|" >> results.md
@@ -1348,6 +3827,7 @@ jobs:
           done
 
           if [ "$FAILED" = "true" ]; then
+            # shellcheck disable=SC2129
             echo "## Gate FAILED" >> results.md
             echo "" >> results.md
             echo "One or more required jobs failed or were cancelled." >> results.md
@@ -1355,6 +3835,7 @@ jobs:
             exit 1
           fi
 
+          # shellcheck disable=SC2129
           echo "## Gate PASSED" >> results.md
           echo "" >> results.md
           echo "All required checks passed." >> results.md
