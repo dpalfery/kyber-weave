@@ -14,8 +14,9 @@ impact-components:
 
 # CI content-hash skip receipts and provenance
 
-**Status: Ready, 2026-11-26.** Autonomy: supervised (the dispatch set it; every gate below returns to the
-owner before work starts).
+**Status: Review required, 2026-11-26.** Autonomy: supervised. The owner approved the plan at the
+approve-and-execute gate, all three tasks are committed and integrated, and the closeout harvest is
+complete; the review council runs next and the archive step follows it.
 
 ## Problem and goal
 
@@ -645,6 +646,49 @@ scripts/verify-release-checksums.sh --list` against the expected asset set, and 
 a fixture manifest — so the property is judged in review rather than asserted unobservably. The
 reviewer also confirms the `continue-on-error` flag appears on exactly the receipt save steps and
 nowhere else.
+
+## Completion summary
+
+Verified by docs-dev at closeout against the run branch `factory/feat/ci-content-hash-skip` at
+`a6d372ac` (four commits after the plan-finalization commit `b575dd04`). Each criterion below was
+checked against the shipped workflow and the policy test class that pins it; the workers' own
+summaries were not taken as evidence. The plan's task list carries no `- [ ]` checkboxes, so there
+was nothing to tick.
+
+| Task | Evidence |
+|---|---|
+| T1 | `.github/workflows/ci.yml` declares `RECEIPT_MAX_AGE_SECONDS: "14400"` at workflow level, and its fourteen eligible jobs — the ten build and gate jobs plus `codeql`, `trivy`, `semgrep` and `gitleaks` — each carry `Compute input fingerprint` → `actions/cache/restore` at the `55cc834…` v6.1.0 pin with `path: .receipt` and `receipt-<job>-<leg>-<hash>` → `Decide the verdict` → skip-gated work steps → digest and attest → miss-only save. The verdict enforces the plan's order: a miss (a fork's line names cache isolation), an absent or unparsable receipt, a non-numeric epoch, a future epoch, an `input_hash` mismatch, then the ceiling; a fresh hit writes the receipt JSON and `prior_run_url` to the summary. No receipt restore declares `restore-keys`, no job gained a job-level `if:`, no receipt `run:` block interpolates `${{ github.* }}`, and exactly three jobs attest build products under `id-token: write`. `CiContentHashSkipTests` pins every one of these across 17 tests, including the whole-tree argument list compared against the tracked top-level entries. |
+| T2 | `.github/workflows/release.yml` declares the same `14400`, and its nine chain and publish jobs restore one `release-chain-<version>` key from `.release-chain` and run one verdict step. The seven build and SBOM jobs gate every step on `steps.verdict.outputs.skip != 'true'` except the checkout, the restore, the verdict and `build-tray`'s `if: always()` cleanup. `release` and `gh-packages` gate only their publishing steps; their verify steps always run and fail closed — sorted-set asset comparison, `diff` of the published `SHA256SUMS.txt`, `gh attestation verify` per archive for `https://cyclonedx.org/bom` and `https://slsa.dev/provenance/v1`, and a GitHub Packages API lookup per recorded version. The chain receipt is recorded in `release` only, after every verification, on the miss path only; the save carries `continue-on-error: true`. `ReleaseReceiptSkipTests` pins each of these in seven tests. |
+| T3 | [the runbook's section](../ci-pipelines/workflows-runbook.md#content-hash-receipts-and-skips) and [the standard's rules](../standards/github-actions/github-actions.standards.md#receipts-and-skips) were read line by line against both workflows and state only what the workflows do: the step pattern, the four fingerprint sets, the key and cache-scope rules, the single uniform ceiling, the verdict's validation order, `shell: bash`, fork behaviour, and the chain's verify-on-hit shape with what it carries by byte-identity rather than re-checks. `docs validate` and `docs drift` are clean. |
+| Closeout | [ADR 0095](../adr/0095-ci-jobs-skip-on-content-hash-receipts-only-with-a-complete-fingerprint.md) written and registered in the [ADR index](../adr/README.md); [ADR 0042](../adr/0042-release-sbom-cyclonedx-syft.md) restated to the attestation job as shipped (25 per-artifact SBOM attestations, one aggregate, one provenance step at `actions/attest` v4.2.2, 51 manifest entries); [the install runbook](../install.md#verifying-build-provenance) gained the provenance verification path users need. `kyber-weave docs closeout` reports nothing missing, and both docs gates are clean. |
+
+**Recorded deviation, for the reviewer.** The Problem statement and D10 describe the chain key as
+tree plus version plus tag. What shipped — and what the T2 task contract, the T2 test contract, the
+runbook and the standard all state — is a version-bound key, `release-chain-<version>`, with no tree
+hash. That is sound for the shipped trigger set: the `version` job refuses a dispatch whose tag
+already exists, and a tag push names the version in the ref, so only a re-run of the same run
+reaches a hit, and a re-run reuses the same commit. The residual is an administrator rewriting a
+tag, which the repository's ruleset blocks except for administrators. No document claims a tree
+hash in the chain key.
+
+NOT VERIFIED: a real cache hit (a skip) on a re-run of identical inputs — needs a GitHub Actions
+run; the policy tests are the pre-merge proof of its shape and the plan's own PR note says so.
+NOT VERIFIED: the verify-on-hit path against a published release — needs a live release with its
+attestations and package versions.
+NOT VERIFIED: `actionlint` on both workflow files and `git diff --check` — worker-run evidence,
+not re-run in this closeout.
+
+## Closeout mapping
+
+| ID | Destination | Documentation impact | Impact components | Last reviewed | Status |
+|---|---|---|---|---|---|
+| H1, CI Pipelines, D3, D15, D16, D17, D18 | [CI runbook, Content-hash receipts and skips](../ci-pipelines/workflows-runbook.md#content-hash-receipts-and-skips) — the four receipt steps, the verdict's validation order, the four fingerprint sets and the enumeration-completeness rule, the keys and cache scope, the single uniform ceiling, `shell: bash`, fork behaviour, and the release chain's hit path with what it carries by byte-identity | extends-component | CI Pipelines | 2026-11-26 | harvested |
+| H2, D2, D12, D16, D18 | [GitHub Actions standard, Receipts and skips](../standards/github-actions/github-actions.standards.md#receipts-and-skips) — the three eligibility conditions, the test-ratified workflow-pinning list, the maximum-age rule, the enumeration-completeness rule, the receipt-validation rule, the exact-key rule, the same-repository save guard, the miss-only failure-tolerant save as the one sanctioned `continue-on-error`, and the attestation placement rule | extends-component | CI Pipelines | 2026-11-26 | harvested |
+| H3, D1, D2, D8, D9, D13, D19, D20, AP2 | [ADR 0095](../adr/0095-ci-jobs-skip-on-content-hash-receipts-only-with-a-complete-fingerprint.md), registered in the [ADR index](../adr/README.md) — the decision in twelve clauses, the accepted risks (security scans inside the ceiling, runner and floating-toolchain drift, AI-graded integration tests, the four-hour release ceiling over seven days, rare hits), and every rejected alternative | extends-component | CI Pipelines | 2026-11-26 | harvested |
+| D7 | [ADR 0095](../adr/0095-ci-jobs-skip-on-content-hash-receipts-only-with-a-complete-fingerprint.md) (Decision 10) and [ADR 0042](../adr/0042-release-sbom-cyclonedx-syft.md) (D6–D8, updated to the shipped attestation job) — build products attested in provenance mode under `id-token: write`, test reports and SARIF digested only, and the release job's provenance step beside its SBOM attestations | extends-component | CI Pipelines | 2026-11-26 | harvested |
+| D4, D5, D6, D10, D11, D14 | [CI runbook, The release chain](../ci-pipelines/workflows-runbook.md#the-release-chain-one-receipt-for-the-whole-build) and [distribution, Re-running a release](../distribution.md#re-running-a-release-the-chain-receipt) — the chain key and path, the miss-only save after verification, the publish jobs' verify-on-hit table, and the step-level skip that keeps the required check green | extends-component | CI Pipelines | 2026-11-26 | harvested |
+| D7 (user view) | [Install, Verifying build provenance](../install.md#verifying-build-provenance) — the `gh attestation verify … --predicate-type https://slsa.dev/provenance/v1` command, and why the SBOM and provenance predicates cannot satisfy each other | extends-component | Distribution | 2026-11-26 | harvested |
+| AP1 | Documentation waiver — the approve-and-execute record is run provenance: the owner's approval gate and its date have no surviving architectural, operational or behavioural invariant for a future reader to consult, and the two substantive items it carried are harvested under AP2 and D20 | none | CI Pipelines | 2026-11-26 | waived |
 
 ## docs-dev closeout
 

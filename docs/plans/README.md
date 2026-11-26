@@ -66,7 +66,7 @@ its `tasks.yml` is caught rather than carried as dead weight.
 
 | Plan | Status | Date | Goal |
 |---|---|---|---|
-| [2026-11-26-ci-content-hash-skip-and-provenance.md](2026-11-26-ci-content-hash-skip-and-provenance.md) | Ready | 2026-11-26 | Content-hash receipts skip unchanged CI and release job inputs inside a maximum receipt age, with provenance attestation and prior-run evidence |
+| [2026-11-26-ci-content-hash-skip-and-provenance.md](2026-11-26-ci-content-hash-skip-and-provenance.md) | Review required | 2026-11-26 | Content-hash receipts skip unchanged CI and release job inputs inside a maximum receipt age, with provenance attestation and prior-run evidence |
 
 ## Archived Plans
 

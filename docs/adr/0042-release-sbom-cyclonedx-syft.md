@@ -4,7 +4,7 @@ title: "Every Release Ships an Aggregate CycloneDX SBOM, With the Coverage It Do
 doc-type: adr
 status: current
 owner: dpalfery
-last-reviewed: 2026-10-25
+last-reviewed: 2026-11-26
 ---
 
 # ADR 0042: Every Release Ships an Aggregate CycloneDX SBOM, With the Coverage It Does and Does Not Have
@@ -16,10 +16,15 @@ every GitHub Release, the tool and format chosen, the coverage that SBOM has, an
 part of the same decision — the coverage it demonstrably does not have.
 
 Amended, 2026-10-25 ([issue #417](https://github.com/dpalfery/kyber-weave/issues/417)):
-keep the aggregate and add one SBOM per published archive (20) plus a CycloneDX
+keep the aggregate and add one SBOM per published archive (25) plus a CycloneDX
 SBOM attestation for every SBOM. Decision 1 below records the amendment; the new
 coverage contract D1–D8 records what the per-artifact SBOMs do and do not cover
 and how attestation binds each SBOM to its archive.
+
+Updated, 2026-11-26: the same job also mints one SLSA build-provenance
+attestation over every archive, beside the SBOM attestations and under the same
+permission block ([ADR 0095](0095-ci-jobs-skip-on-content-hash-receipts-only-with-a-complete-fingerprint.md));
+D6–D8 below state that shape and the current asset counts.
 
 ## Context
 
@@ -55,14 +60,15 @@ The .NET cataloger does not read `packages.lock.json` for the full closure. It r
 
 1. **Every release attaches one aggregate SBOM, `kyber-weave-sbom-<version>.cdx.json`,
    in CycloneDX JSON format version 1.6 — and, since 2026-10-25, one per-artifact
-   SBOM per published archive (`<archive-stem>.cdx.json`, 20 in total).**
+   SBOM per published archive (`<archive-stem>.cdx.json`, 25 in total).**
    Keep-aggregate-and-add-per-artifact: the aggregate keeps its versioned name
    and its dependency-closure meaning, and the per-artifact SBOMs sit beside
-   their archives. The release asset inventory grows from 20 archives + 1
-   aggregate (21 manifest entries) to 20 archives + 20 per-artifact SBOMs + 1
-   aggregate (41 manifest entries). Per-artifact SBOMs were a follow-up in the
-   original decision, not a rejection — this amendment is that follow-up
-   landing. The coverage contract D1–D8 below is part of the same amendment.
+   their archives. The release asset inventory is 25 archives + 25 per-artifact
+   SBOMs + 1 aggregate (51 manifest entries), up from 20 archives + 1 aggregate
+   (21 manifest entries) before per-artifact SBOMs landed. Per-artifact SBOMs
+   were a follow-up in the original decision, not a rejection — this amendment
+   is that follow-up landing. The coverage contract D1–D8 below is part of the
+   same amendment.
 
 2. **The generator is Anchore Syft, pinned by version *and* SHA-256, downloaded from
    its GitHub release tarball.** A checksum mismatch aborts the run rather than
@@ -130,8 +136,9 @@ The .NET cataloger does not read `packages.lock.json` for the full closure. It r
 ## Per-artifact SBOMs and attestations — coverage contract D1–D8 (issue #417)
 
 D1. **Keep the aggregate and add one SBOM per published archive.**
-   `scripts/generate-artifact-sboms.sh <assets-dir> <version>` emits 20
-   siblings named by `artifact_sbom_name` in `scripts/syft-bootstrap.sh` as
+   `scripts/generate-artifact-sboms.sh <assets-dir> <version>` emits one
+   sibling per archive (25 today) named by `artifact_sbom_name` in
+   `scripts/syft-bootstrap.sh` as
    `<archive-stem>.cdx.json` (strip `.tar.gz` / `.zip` / `.exe`, append
    `.cdx.json`); `scripts/verify-release-checksums.sh` shares that one function
    so the manifest and the generator cannot drift apart. The aggregate keeps its
@@ -173,30 +180,35 @@ D5. **Per-artifact validation drops the ecosystem requirement and keeps
 D6. **Attest with `actions/attest` in SBOM mode, not the deprecated
    `attest-sbom` action.**
    The `attest-sbom` job in `.github/workflows/release.yml` uses
-   `actions/attest@v4.1.1` with `sbom-path` and `subject-path`. The deprecated
-   `attest-sbom` action is deliberately not used; SBOM mode is what gives the
-   CycloneDX predicate type rather than a provenance claim.
+   `actions/attest@v4.2.2` with `sbom-path` and `subject-path`. The deprecated
+   `attest-sbom` action is deliberately not used; SBOM mode is what gives each
+   SBOM attestation the CycloneDX predicate type rather than a provenance claim.
+   The same job runs one further `actions/attest` step in provenance mode over
+   every archive, with no `sbom-path`; the two predicates are told apart at
+   verification by the pinned predicate type (D7).
 
 D7. **Subject is always the archive; predicate is always the SBOM.**
-   Each per-artifact SBOM is attested against its own archive (20
+   Each per-artifact SBOM is attested against its own archive (25
    attestations, `subject-path: <archive>`, `sbom-path: <stem>.cdx.json`); the
    aggregate SBOM is attested once against every published archive via a glob
    over `*.tar.gz` / `*.zip` / `*.exe` that never matches the `*.cdx.json`
    predicates beside them. Verification pins the predicate type —
    `gh attestation verify <archive> -R dpalfery/kyber-weave --predicate-type
    https://cyclonedx.org/bom` — which rejects a provenance attestation
-   masquerading as an SBOM. Permissions are exactly `id-token: write`
+   masquerading as an SBOM; the provenance step added 2026-11-26 is verified
+   with `https://slsa.dev/provenance/v1` and likewise cannot satisfy the SBOM
+   check. Permissions are exactly `id-token: write`
    (OIDC/Sigstore), `attestations: write`, `artifact-metadata: write`, and
-   `contents: read`.
+   `contents: read`, shared by all three shapes.
 
 D8. **The manifest and the release job gate all of it.**
-   `SHA256SUMS.txt` covers all 41 assets; the pre-publish check fails closed
+   `SHA256SUMS.txt` covers all 51 assets; the pre-publish check fails closed
    before `gh release create` on any missing or unexpected entry. The `release`
    job `needs: version, build, build-kyberdash, build-tray, pack-squad, sbom,
    artifact-sboms, attest-sbom`, so nothing publishes unattested, and its
    post-publish steps verify the asset inventory, byte-compare the manifest,
-   and verify each archive's attestation (detective: the release is already
-   public if they fail).
+   and verify each archive's SBOM and provenance attestations (detective: the
+   release is already public if they fail).
 
 ## Alternatives considered
 
@@ -246,8 +258,8 @@ D8. **The manifest and the release job gate all of it.**
 - **Adding a release asset still requires editing the expected asset list in
   `scripts/verify-release-checksums.sh`**, as [ADR 0027](../adr/0027-release-integrity-checksums-signing-deferred.md)
   records. The aggregate SBOM added one entry to that list; the per-artifact
-  amendment adds twenty more plus twenty attestation bindings, taking the
-  manifest from 21 to 41 entries (42 files published with `SHA256SUMS.txt`).
+  amendment adds twenty-five more plus their attestation bindings, taking the
+  manifest from 21 to 51 entries (52 files published with `SHA256SUMS.txt`).
   The `artifact_sbom_name` mapping in `scripts/syft-bootstrap.sh` is shared so
   the two lists cannot drift apart.
 
