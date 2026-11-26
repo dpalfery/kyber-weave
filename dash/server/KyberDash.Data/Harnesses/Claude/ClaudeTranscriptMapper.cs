@@ -916,7 +916,9 @@ public class ClaudeTranscriptMapper : IHarnessMapper
 
         foreach (ParsedTurnGroup leftover in deferredCompactionTails.Values)
         {
-            AttachUsageLessTurn(turns, leftover);
+            // No later kept turn sends the summary, so it must not land in the pre-compaction turn that
+            // never carried it; it stays a turn of its own under its session.
+            turns.Add(leftover);
         }
 
         return turns;

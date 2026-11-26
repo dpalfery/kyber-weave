@@ -735,6 +735,48 @@ public class ClaudeTranscriptMapperTests
     }
 
     [Fact]
+    public void Map_KeepsTrailingCompactSummaryAsItsOwnTurnInsteadOfMergingItIntoThePreCompactionTurn()
+    {
+        string summaryText = "Second summary " + string.Join(' ', Enumerable.Repeat("the conversation so far covered many distinct topics", 20));
+        string jsonl = string.Join('\n',
+        [
+            "{\"type\":\"user\",\"sessionId\":\"sess-trail\",\"timestamp\":\"2026-11-19T12:20:00.000Z\",\"message\":{\"role\":\"user\",\"content\":\"First turn\"}}",
+            "{\"type\":\"assistant\",\"sessionId\":\"sess-trail\",\"timestamp\":\"2026-11-19T12:20:01.000Z\",\"message\":{\"id\":\"msg-c1\",\"role\":\"assistant\",\"model\":\"claude-sonnet-4-5\",\"content\":[{\"type\":\"text\",\"text\":\"Answer 1\"}],\"usage\":{\"input_tokens\":50,\"output_tokens\":10}}}",
+            "{\"type\":\"assistant\",\"sessionId\":\"sess-trail\",\"timestamp\":\"2026-11-19T12:20:03.000Z\",\"message\":{\"id\":\"msg-c2\",\"role\":\"assistant\",\"model\":\"claude-sonnet-4-5\",\"content\":[{\"type\":\"text\",\"text\":\"Answer 2\"}],\"usage\":{\"input_tokens\":20,\"output_tokens\":8}}}",
+            "{\"type\":\"system\",\"subtype\":\"compact_boundary\",\"sessionId\":\"sess-trail\",\"timestamp\":\"2026-11-19T12:20:03.500Z\",\"content\":\"Conversation compacted\"}",
+            $"{{\"type\":\"user\",\"isCompactSummary\":true,\"sessionId\":\"sess-trail\",\"timestamp\":\"2026-11-19T12:20:04.000Z\",\"message\":{{\"role\":\"user\",\"content\":\"{summaryText}\"}}}}",
+        ]);
+
+        CollectedBatch batch = CreateMapper(LocalTextTokenizer.Shared).Map(CreateUnit("/tmp/.claude/projects/repo/sess-trail.jsonl", jsonl), ImportedAt);
+
+        Assert.Equal(3, batch.Records.Count);
+        CollectedRecord preCompaction = batch.Records[1];
+        Assert.Equal("synth:claude-code:sess-trail:msg-c2", preCompaction.RecordId);
+        Assert.DoesNotContain(
+            preCompaction.Parts,
+            static p => p.PlainText is not null && p.PlainText.Contains("Second summary", StringComparison.Ordinal));
+
+        CollectedRecord summaryTurn = batch.Records[2];
+        Assert.Equal(preCompaction.SessionKey, summaryTurn.SessionKey);
+        Assert.Contains(
+            summaryTurn.Parts,
+            static p => p.PlainText is not null && p.PlainText.StartsWith("Second summary", StringComparison.Ordinal));
+
+        List<ContextPart> preCompactionContext =
+        [
+            .. preCompaction.Parts
+                .Where(static p => p.Bucket == ContentBucket.ConversationHistory && p.PlainText is not null)
+                .Select(static p => new ContextPart("conversation_history", p.PlainText!, Model: "claude-sonnet-4-5")),
+        ];
+        ContextAnalysis analysis = CanonContextAnalysis.AnalyzeContext(
+            [new ContextTurn(preCompactionContext, InputTokens: 20, FreshInput: 20)],
+            new ContextCountOptions(ContextLimit: 200_000),
+            static (text, model) => LocalTextTokenizer.Shared.Count(text, model));
+        Assert.True(analysis.Turns[0].BucketedTokens <= 20, $"bucketed {analysis.Turns[0].BucketedTokens} exceeds measured input 20");
+        Assert.True(analysis.Turns[0].Residual.Tokens >= 0);
+    }
+
+    [Fact]
     public void Map_IsolatesSidechainAndSubagentTranscriptsUnderParentSessionAndAgentId()
     {
         string sidechainJsonl =
