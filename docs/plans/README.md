@@ -64,9 +64,7 @@ its `tasks.yml` is caught rather than carried as dead weight.
 
 ## Active Plans
 
-| Plan | Status | Date | Goal |
-|---|---|---|---|
-| [2026-11-25-commandcode-squad-support.md](2026-11-25-commandcode-squad-support.md) | Ready | 2026-11-26 | Ship a verified `commandcode` model column for the bundled profiles, render a Command Code Arbiter mod that gates `agent` dispatches with live-verified block behaviour, and leave `squad run commandcode` with an evidence-backed verdict. |
+No plans are open.
 
 ## Archived Plans
 
