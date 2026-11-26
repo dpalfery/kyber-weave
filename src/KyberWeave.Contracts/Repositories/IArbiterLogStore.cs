@@ -43,7 +43,10 @@ public interface IArbiterLogStore
         Func<IReadOnlyList<string>, string> lineFactory,
         CancellationToken cancellationToken);
 
-    /// <summary>The log's length in bytes, taken without a lock; 0 when it is absent or cannot be read.</summary>
+    /// <summary>
+    /// The log's length in bytes, taken without a lock; 0 when it is absent or cannot be read. A symbolic link is
+    /// followed, so the length is the target's, the same file the read opens.
+    /// </summary>
     /// <param name="path">The log file.</param>
     /// <returns>The length the caller's next read is taken from.</returns>
     long ByteLength(string path);
