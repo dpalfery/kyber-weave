@@ -300,11 +300,14 @@ describe('SessionChartsSection paging and sorting', () => {
 
     // Switch to Heatmap Matrix and verify paging + order toggle reset to page 1
     fireEvent.click(within(section).getByTestId('tab-heatmap'))
-    expect(within(section).getByTestId('context-heatmap')).toBeTruthy()
+    await within(section).findByTestId('context-heatmap')
 
     fireEvent.click(within(section).getByTestId('pager-next'))
     await waitFor(() =>
       expect(fetchMock.mock.calls.some(([url]) => String(url).includes('/charts?page=2&limit=100&order=desc'))).toBe(true),
+    )
+    await waitFor(() =>
+      expect((within(section).getByTestId('pager-order') as HTMLButtonElement).disabled).toBe(false),
     )
 
     fireEvent.click(within(section).getByTestId('pager-order'))
@@ -314,6 +317,10 @@ describe('SessionChartsSection paging and sorting', () => {
     await screen.findByTestId('pager-order')
     section = screen.getByTestId('spend-composition-section')
     expect(within(section).getByTestId('pager-order').textContent).toBe('Oldest first')
+    // The scope-change loading state remounts the chart; select the heatmap
+    // again on the freshly fetched page before checking its rendered data.
+    fireEvent.click(within(section).getByTestId('tab-heatmap'))
+    await within(section).findByTestId('context-heatmap')
     expect(within(section).getByTestId('context-heatmap').textContent).toContain('Turn #1')
   })
 
