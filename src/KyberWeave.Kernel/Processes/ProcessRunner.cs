@@ -78,8 +78,7 @@ public static class ProcessRunner
         // would re-parse; ArgumentList is argv. A fresh start info carries only the file
         // name, working directory, and argument list, with the shell kept off, so neither
         // a concatenated command string nor UseShellExecute can reach Process.Start.
-        using Process process = Process.Start(CreateSafeStartInfo(startInfo))
-                                ?? throw new InvalidOperationException("The child process could not be started.");
+        using Process process = StartRetryingTextFileBusy(CreateSafeStartInfo(startInfo));
 
         // Reads start before the write because a child may produce more than one pipe
         // buffer of output before it consumes any stdin.
@@ -291,11 +290,50 @@ public static class ProcessRunner
         // concatenated Arguments string is SquadHarnessLauncher.BuildStartInfo, for Windows
         // cmd/bat shims, and it refuses any argument containing a cmd metacharacter
         // (quotes, %, !, ^, &, |, <, >, ;, $, backtick, parentheses, CR, LF) before launch.
-        using Process process = Process.Start(startInfo) // nosemgrep
-                                ?? throw new InvalidOperationException("The child process could not be started.");
+        using Process process = StartRetryingTextFileBusy(startInfo);
 
         process.WaitForExit();
         return process.ExitCode;
+    }
+
+    /// <summary>ETXTBSY, the same value on Linux and macOS.</summary>
+    private const int TextFileBusyErrorCode = 26;
+
+    private const int TextFileBusyAttempts = 5;
+
+    /// <summary>
+    ///     The one place <see cref="ProcessRunner"/> and <see cref="StdioSession"/> start a child:
+    ///     <see cref="Run"/>, <see cref="RunInteractive"/> and the session all start through it, retrying briefly
+    ///     when exec fails with ETXTBSY on Linux or macOS. Up to five attempts, four retries 20, 40, 60 and 80 ms
+    ///     apart, 200 ms in total.
+    /// </summary>
+    /// <remarks>
+    ///     A file that was just written can still be open for writing in a child another thread forked in the
+    ///     moment before its close-on-exec descriptors were closed, and exec refuses a file open for writing. The
+    ///     window lasts only until that child execs, so a short retry starts the file once it is free: an
+    ///     executable a test stub or an install has just written is not reported as one that cannot start. Any
+    ///     other failure, ETXTBSY on the last attempt, and every failure on Windows (where 26 is a different Win32
+    ///     error) surfaces unchanged.
+    /// </remarks>
+    /// <param name="startInfo">The start info, already made safe by the caller.</param>
+    /// <exception cref="Win32Exception">The executable could not be started.</exception>
+    internal static Process StartRetryingTextFileBusy(ProcessStartInfo startInfo)
+    {
+        for (int attempt = 1; ; attempt++)
+        {
+            try
+            {
+                // Callers pass a start info with UseShellExecute off: Run and StdioSession through
+                // CreateSafeStartInfo, RunInteractive by setting it before the call.
+                return Process.Start(startInfo) // nosemgrep
+                       ?? throw new InvalidOperationException("The child process could not be started.");
+            }
+            catch (Win32Exception ex) when (
+                !OperatingSystem.IsWindows() && ex.NativeErrorCode == TextFileBusyErrorCode && attempt < TextFileBusyAttempts)
+            {
+                Thread.Sleep(TimeSpan.FromMilliseconds(20 * attempt));
+            }
+        }
     }
 
     internal static ProcessStartInfo CreateSafeStartInfo(ProcessStartInfo startInfo)
