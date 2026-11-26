@@ -1820,6 +1820,13 @@ question: which surface the harness starts for an `agent` dispatch.
   prints the step. User-scope mods load without a prompt. A headless `cmd -p` run loads no
   project mod at all unless it passes `--dangerously-skip-permissions`, the documented
   non-interactive opt-in.
+- **A dispatch the hook cannot judge is blocked, never allowed.** A `kyber-weave-arbiter` that
+  cannot be started, a hook that outruns the Arbiter's hook timeout, a non-zero exit and
+  unparseable output all block the dispatch with a reason naming what failed, so an
+  installation whose binary is missing stops dispatches loudly instead of passing them
+  silently. Empty output is the one allow — the host's own answer when the Arbiter is
+  switched off or the dispatch carries no marked target — and the mod passes it unchanged. The
+  rendered body's contract tests pin each of these cases.
 
 What this does not claim: that a rewritten prompt reaches the worker (the delivery path row
 above still reads `file`), that the tool name is `task`, or that the caller is known.

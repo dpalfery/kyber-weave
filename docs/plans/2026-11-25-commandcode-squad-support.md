@@ -338,3 +338,84 @@ The end-of-run council derives its review from the `code-review` skill, measured
 ## docs-dev closeout
 
 Complete the Closeout mapping for every Design harvest row above (`kyber-weave docs closeout <this plan>` names what is missing), then archive through the conductor's archive tool or `kyber-weave docs closeout <this plan> --archive`: the plan moves to `docs/archive/plans/`, the task file is removed in the same commit, the Active Plans row is removed, and `docs validate --merge-ready` then passes. The Decisions table is preserved intact through the archive.
+
+## Closeout mapping
+
+Checked on 2026-11-26 by opening each destination and confirming it states what its Design
+harvest row or decision records, and by reading the shipped code each statement describes
+(`CommandCodeRenderer.RenderArbiter` and `RenderArbiterMod`, `PluginHookAdapters.Entries`,
+`ArbiterHookWiring.HookedSquadTargets`/`DegradationReason`/`TrustSteps`, `SquadInstanceCatalog`
+and `products/kyber-squad/profiles/models.yml`). Links are written from this plan's folder before
+the archive; the archive step rebases them. Every destination carries
+`documentation-impact: extends-component` with `impact-components: KyberSquad, KyberArbiter` and a
+`last-reviewed` of 2026-11-26, and this plan's status becomes `archived` on the archive step.
+
+| ID | Destination | Documentation-impact |
+|---|---|---|
+| H1, D2 | [Command Code notes: models](../kyber-squad/onboarding.md#command-code-notes) and [per-harness token shapes](../kyber-squad/model-profiles.md#per-harness-token-shapes) | KyberSquad; last-reviewed 2026-11-26; status archived. Verified: both state the six bundled values (`gpt-6.2-sol[reasoningEffort=high]` for `architect`, `deep-planning` and `dev-hard`; `gpt-6-luna[reasoningEffort=low]` for `fast`; `gpt-6.1-terra[reasoningEffort=medium]` for `general`; `google/gemini-3.8-flash[reasoningEffort=high]` for `reviewer`), the `[reasoningEffort=<level>]` suffix splitting onto its own key, and the id form `cmd --list-models` accepts. They match the six `commandcode:` keys in `models.yml` |
+| H2, D6 | [Harness Instance Support Matrix](../kyber-squad/onboarding.md#3-harness-instance-support-matrix) | KyberSquad; last-reviewed 2026-11-26; status archived. Verified: the `commandcode` row stays `None`/`Unsupported`, and its reason names the evidence — no config-directory variable and no XDG base directory in the installed CLI, only whole-`HOME` redirection (which moves authentication and system-tool state), and a `~/.commandcode` global root a home link sync would not copy — the same rationale `SquadInstanceCatalog` carries |
+| H3 | [Verified global-hook matrix](../kyber-arbiter/architecture.md#verified-global-hook-matrix) | KyberArbiter; last-reviewed 2026-11-26; status archived. Verified: the `CommandCode` row names the owned mod at both paths (`~/.commandcode/mods/kyber-arbiter.ts` user, `.commandcode/mods/kyber-arbiter.ts` project), the trust rules, tier `enforced-global` on the live verification, the `settings.json` matcher limit, and its citations |
+| H4, D3, D4, D5, D8, D10 | [The Command Code design check (2026-11-26)](../kyber-arbiter/architecture.md#the-command-code-design-check-2026-11-26) | KyberArbiter; last-reviewed 2026-11-26; status archived. Verified: the record states that settings hooks match only `shell`, `read`, `write` and `edit` and cannot gate a dispatch, that a mod's `beforeToolCall` can, the live block at both scopes with the caller `unidentified`, that instance scope is not covered, trust gating and the headless limit, that the 2026-11-04 classification is superseded, and — added at closeout — that a dispatch the hook cannot judge is blocked rather than allowed. The renderer-owned mod body, the timeout clamp and the polluting-key guard it also records are pinned by `CommandCodeRendererContractTests` |
+| H5, D3 | [ADR 0026 amendment](../adr/0026-kyber-utilities-owned-files-not-settings.md) | KyberArbiter; last-reviewed 2026-11-26; status archived. Verified: Command Code's `.commandcode/mods/` (project) and `~/.commandcode/mods/` (user) join the Squad owned-file exception with the one owned file `kyber-arbiter.ts`, the install-only write, and the trust gate |
+| H6, D5, D8 | [ADR 0053 amendment](../adr/0053-kyber-arbiter-three-step-decision-gates.md) | KyberArbiter; last-reviewed 2026-11-26; status archived. Verified: Command Code leaves `dispatch-unconfirmed` at both scopes, citing R-D1 of the archived 2026-11-04 plan and the live evidence; the reason-code set is unchanged and the code stays in the vocabulary for OpenCode, Kilo and Copilot in VS Code |
+| H7 | [Arbiter hooks](../kyber-squad/onboarding.md#arbiter-hooks) and the targets statement in [Squad architecture](../kyber-squad/architecture.md) | KyberSquad; last-reviewed 2026-11-26; status archived. Verified: eleven hooked targets are named, the `commandcode` row of "What is rendered" names the mod and both paths, the trust table says a project's mods are trust-gated while user mods load without a prompt, and the requirements row for "The Arbiter sees a dispatch" records the same |
+| D1, D7, D9 | Documentation waiver: run provenance. D1 records which of the request's paths and profile names exist in this tree, D7 that `scripts/proc-guard.sh` is absent here so the tree's direct-command rule governs, and D9 the development mode and autonomy the dispatch set. Each is stated in full in `## Decisions` and leaves no invariant a future reader consults |
+| AP1 | Documentation waiver: the approval gate for execution, recorded in `## Decisions` |
+| KyberSquad, KyberArbiter | [onboarding](../kyber-squad/onboarding.md), [model profiles](../kyber-squad/model-profiles.md), [Squad architecture](../kyber-squad/architecture.md), [Squad requirements](../kyber-squad/requirements.md), [Arbiter architecture](../kyber-arbiter/architecture.md), [Arbiter runbook](../kyber-arbiter/runbook.md) | The two impact components' canonical documents, updated as above. The runbook's hook-invocation list, its trust-steps row and its MCP-fallback section no longer list Command Code as degraded or as an MCP-fallback target |
+
+No new ADR — ADR waiver: the two durable constraints this run creates (an owned Command Code mods
+directory with its trust gate, and Command Code's changed degradation tier) are amendments to
+[ADR 0026](../adr/0026-kyber-utilities-owned-files-not-settings.md) and
+[ADR 0053](../adr/0053-kyber-arbiter-three-step-decision-gates.md), the records that already own
+those boundaries; nothing here sets a new boundary on future work that those two leave open.
+
+## Completion summary
+
+**What shipped.**
+
+- T1 (95b24f72): a `commandcode:` value in all six bundled profiles, each verified against
+  `cmd --list-models`; renderer contract tests prove a pinned value renders `model:` and its
+  `reasoningEffort:`, and that `inherit` renders neither; the `DevHardModelUpgradeTests` pins state
+  the new column without weakening the step-up claim.
+- T2 (62d59145, tests reconciled with T1 in 67813be3): `CommandCodeRenderer.RenderArbiter` writes
+  the owned mod at `.commandcode/mods/kyber-arbiter.ts` (project) and `mods/kyber-arbiter.ts` under
+  the Command Code global root; `PluginHookAdapters.Entries` serves `commandcode` on the `agent`
+  tool with `subagent_type` and `prompt`; Command Code joins `HookedSquadTargets`, both
+  `dispatch-unconfirmed` special cases are deleted on live evidence, and `TrustSteps` carries the
+  trust gate. The project-scope and user-scope mods each blocked a guarded dispatch live, recorded
+  as `tool_hook_blocked` with the caller `unidentified`.
+- T3 (21b87cab): the `commandcode` instance row stays `None`/`Unsupported` with a reason naming
+  what the investigation found, pinned by `SquadInstanceCatalogTests`.
+- T4 (eea77070): the Arbiter design-check record and matrix row, the onboarding sections (models,
+  instance matrix, Arbiter hooks), the Squad architecture and requirements statements, and the
+  ADR 0026 and ADR 0053 amendments.
+
+**Verification at closeout, 2026-11-26 in this worktree.** The test classes the Test contract
+names, run directly: Application `CommandCodeRendererContract|PluginHookAdapter|ArbiterHookWiring|SquadInstanceCatalog`
+114 passed, 0 failed; CLI `Arbiter` 224 passed, 0 failed; Content `DevHardModelUpgrade` 4 passed,
+0 failed. `kyber-weave docs validate .` reports no findings, and
+`kyber-weave docs closeout docs/plans/2026-11-25-commandcode-squad-support.md` reports the
+evidence complete. `docs validate . --merge-ready` and `docs drift .` run after the archive step,
+because this plan and its task file are open until then.
+
+**Closeout documentation change.** One addition beyond T4's coverage: the design-check record now
+states the fail-closed contract an operator depends on — a dispatch the `kyber-weave-arbiter` hook
+cannot judge (binary missing, timeout, non-zero exit, unparseable output) is blocked with a reason
+naming the failure, while empty output stays the host's own allow. That harvests D10's surviving
+invariant; the rest of D10 (the timeout clamp, the polluting-key guard, the shared
+`AddArbiterPluginFile` helper) is implementation pinned by the contract tests.
+
+**Documentation-impact review.** Verdict `update`, delivered in this run: the six canonical
+documents above, both ADR amendments, and the runbook. No governed path touched by the change was
+left undocumented, and no surviving document still classes Command Code `dispatch-unconfirmed` or
+as an MCP-fallback target.
+
+NOT VERIFIED: the live Command Code observations — the blocked dispatch, `input.subagent_type`
+carrying the canonical agent name, `cmd --list-models`, and the CLI's own help and settings schema
+— were made by T1, T2 and T3 in their sessions and recorded in commits 95b24f72, 62d59145 and
+21b87cab; they were not re-performed at closeout, which needs the installed Command Code CLI and a
+live harness session.
+
+NOT VERIFIED: a live `squad run commandcode` launch — the row is `Unsupported`, so no launch is
+possible and none is claimed; T3's verdict rests on the installed CLI's help, settings schema and
+bundled docs, recorded in 21b87cab.
