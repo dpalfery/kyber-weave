@@ -587,9 +587,10 @@ documentation surfaces for claims that outrun the observed behaviour.
 ## docs-dev closeout
 
 `docs-dev` harvests the plan at closeout: the Design harvest table names each destination, the
-`## Decisions` table is preserved intact into the archive, the two `docs/todo/README.md` rows and the
-S1 section keep the evidence a future spike reads, and the completion summary maps every decision to a
-destination or a recorded waiver. The task file `<plan>.tasks.yml` is removed in the same commit that
+`## Decisions` table is preserved intact into the archive, the one `docs/todo/README.md` row for the
+spikes todo and the S1 section keep the evidence a future spike reads, and the completion summary maps
+every decision to a destination or a recorded waiver. The arbiter-hook todo's index row is deliberately
+unchanged: its description is still true after the instance-render bullet. The task file `<plan>.tasks.yml` is removed in the same commit that
 archives the plan. `kyber-weave docs closeout <plan> --archive` performs the move once the evidence is
 complete; `docs validate . --merge-ready` and `docs drift .` are re-run afterwards, and the standards
 warning period (`KW-DOC-SPEC-012`, `KW-DOC-SPEC-013`, `KW-CONFIG-REG-001`, `KW-CONFIG-REG-002`) is
