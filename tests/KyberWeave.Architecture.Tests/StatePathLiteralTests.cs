@@ -65,6 +65,7 @@ public sealed class StatePathLiteralTests
             string text = Corpus.ReadText(path);
             if (text.Contains("\"artifacts\", \"arbiter\"", StringComparison.Ordinal)
                 || text.Contains("\"artifacts\",\"arbiter\"", StringComparison.Ordinal)
+                || text.Contains("\"artifacts/arbiter\"", StringComparison.Ordinal)
                 || text.Contains("\".kyber-weave\"", StringComparison.Ordinal))
             {
                 offenders.Add(path);
