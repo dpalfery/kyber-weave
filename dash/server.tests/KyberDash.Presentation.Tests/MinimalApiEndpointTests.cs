@@ -143,6 +143,7 @@ public class MinimalApiEndpointTests
 
     [Theory]
     [InlineData("/api/kyber/session/%20/subagents")]
+    [InlineData("/api/kyber/session/%20/charts")]
     [InlineData("/api/kyber/session/%20/requests")]
     [InlineData("/api/kyber/session/%20/reconciliation")]
     [InlineData("/api/kyber/session/%20/problems")]
@@ -726,12 +727,7 @@ public class MinimalApiEndpointTests
         Assert.False(string.IsNullOrWhiteSpace(error.GetString()));
         Assert.False(body.RootElement.TryGetProperty("title", out _));
         Assert.False(body.RootElement.TryGetProperty("status", out _));
-        host.Builder.Query.Verify(
-            q => q.GetSessionCharts(It.IsAny<string>(), It.IsAny<int>(), It.IsAny<int>(), It.IsAny<string>()),
-            Times.Never);
-        host.Builder.Query.Verify(
-            q => q.GetSessionRequests(It.IsAny<string>(), It.IsAny<int>(), It.IsAny<int>(), It.IsAny<string>()),
-            Times.Never);
+        Assert.Empty(host.Builder.Query.Invocations);
     }
 
     [Fact]

@@ -907,8 +907,20 @@ public sealed class SessionSectionEndpointsTests
         }
 
         Assert.Equal(0, store.MaterializedContentBytes);
+        Assert.Equal(
+            (IReadOnlyList<string>)
+            [
+                nameof(InMemoryRelationalStore.SessionSkillFigures),
+                nameof(InMemoryRelationalStore.SessionSkillListings),
+                nameof(InMemoryRelationalStore.GetSession),
+            ],
+            store.ReadLog.Where(static read => read != "CountRecords").ToList());
+        Assert.Equal(
+            (IReadOnlyList<string>)[nameof(InMemoryRelationalStore.SessionHeadersByKeys)],
+            store.SessionProjectionReadLog
+                .Where(static read => read is not ("ListSessionProjections" or "ListHarnessRollups"))
+                .ToList());
         Assert.DoesNotContain(store.ReadLog, static read => ContentBearingReads.Contains(read));
-        Assert.Contains(nameof(InMemoryRelationalStore.SessionSkillFigures), store.ReadLog);
 
         JsonElement second = bridge.GetSessionSkills(sessionKey, page: 2)!.Value;
         JsonElement[] secondRows = [.. second.GetProperty("rows").EnumerateArray()];
@@ -949,6 +961,7 @@ public sealed class SessionSectionEndpointsTests
         KyberBridgeEngine bridge = CreateBridge(store, pricing);
         bridge.EnsureProjected();
 
+        store.ClearReadLog();
         JsonElement page = bridge.GetSessionSkills(sessionKey)!.Value;
 
         Assert.True(page.GetProperty("measurable").GetBoolean());
@@ -959,6 +972,35 @@ public sealed class SessionSectionEndpointsTests
         Assert.Equal([1, 1, 0, 0], rows.Select(static r => r.GetProperty("invocations").GetInt32()));
         Assert.Equal([0], rows[0].GetProperty("turns_listed").EnumerateArray().Select(static t => t.GetInt32()));
         Assert.Equal([2], rows[1].GetProperty("turns_listed").EnumerateArray().Select(static t => t.GetInt32()));
+
+        Assert.Equal(0, store.MaterializedContentBytes);
+        Assert.Equal(
+            (IReadOnlyList<string>)
+            [
+                nameof(InMemoryRelationalStore.SessionSkillFigures),
+                nameof(InMemoryRelationalStore.SessionSkillListings),
+                nameof(InMemoryRelationalStore.GetSession),
+            ],
+            store.ReadLog.Where(static read => read != "CountRecords").ToList());
+        Assert.Equal(
+            (IReadOnlyList<string>)[nameof(InMemoryRelationalStore.SessionHeadersByKeys)],
+            store.SessionProjectionReadLog
+                .Where(static read => read is not ("ListSessionProjections" or "ListHarnessRollups"))
+                .ToList());
+        Assert.DoesNotContain(store.ReadLog, static read => ContentBearingReads.Contains(read));
+
+        JsonElement ascPage = bridge.GetSessionSkills(sessionKey, order: "asc")!.Value;
+        Assert.True(ascPage.GetProperty("measurable").GetBoolean());
+        Assert.Equal("asc", ascPage.GetProperty("order").GetString());
+        Assert.Equal(4, ascPage.GetProperty("total").GetInt32());
+        JsonElement[] ascRows = [.. ascPage.GetProperty("rows").EnumerateArray()];
+        Assert.Equal(["alpha", "gamma", "beta", "delta"], ascRows.Select(static r => r.GetProperty("name").GetString()));
+        Assert.All(ascRows, static r => Assert.True(r.GetProperty("listed").GetBoolean()));
+        Assert.Equal([0, 0, 1, 1], ascRows.Select(static r => r.GetProperty("invocations").GetInt32()));
+        Assert.Equal([0], ascRows[0].GetProperty("turns_listed").EnumerateArray().Select(static t => t.GetInt32()));
+        Assert.Equal([0], ascRows[1].GetProperty("turns_listed").EnumerateArray().Select(static t => t.GetInt32()));
+        Assert.Equal([0], ascRows[2].GetProperty("turns_listed").EnumerateArray().Select(static t => t.GetInt32()));
+        Assert.Equal([2], ascRows[3].GetProperty("turns_listed").EnumerateArray().Select(static t => t.GetInt32()));
     }
 
     /// <summary>
