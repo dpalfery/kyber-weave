@@ -16,7 +16,7 @@ namespace KyberWeave.Cli.Commands.Squad;
 /// </summary>
 internal sealed class SquadCommandRoots
 {
-    private const string InRepoStateDirectoryName = ".kyber-weave";
+    private const string InRepoStateDirectoryName = UserStatePaths.DirectoryName;
     private const string ReceiptFileName = "squad.receipt.json";
 
     private readonly IWritableFileSystem _files;

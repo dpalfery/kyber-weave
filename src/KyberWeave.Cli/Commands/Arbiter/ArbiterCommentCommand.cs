@@ -81,7 +81,7 @@ public sealed class ArbiterCommentCommand(
             CommentSummaryResult summary = triageFactory.Create(
                     provider,
                     root,
-                    System.IO.Path.Combine(root, "artifacts", "arbiter"),
+                    ArbiterStateDirectory.ForProject(root),
                     null,
                     BotLoginsFor(configs, root),
                     RulesFor(configs, root))
@@ -103,7 +103,7 @@ public sealed class ArbiterCommentCommand(
         CommentTriageResult result = triageFactory.Create(
                 provider,
                 root,
-                System.IO.Path.Combine(root, "artifacts", "arbiter"),
+                ArbiterStateDirectory.ForProject(root),
                 rules: RulesFor(configs, root))
             .ClassifyAsync(new CommentTriageRequest(settings.Path, settings.Line, settings.Body, settings.CommitSha), cancellationToken)
             .GetAwaiter()

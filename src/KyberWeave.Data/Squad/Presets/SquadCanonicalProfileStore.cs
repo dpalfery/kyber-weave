@@ -1,3 +1,4 @@
+using KyberWeave.Core.FileSystem;
 using KyberWeave.Contracts.Repositories;
 using System.Text;
 using System.Text.Json;
@@ -53,7 +54,7 @@ public sealed class SquadCanonicalProfileStore : ISquadCanonicalProfileStore
         ArgumentNullException.ThrowIfNull(files);
         _files = files;
         ArgumentException.ThrowIfNullOrWhiteSpace(userPaths.HomeDirectory);
-        _profilesDirectory = Path.Combine(userPaths.HomeDirectory, ".kyber-weave", "squad", "profiles");
+        _profilesDirectory = UserStatePaths.SquadProfilesDirectory(userPaths.HomeDirectory);
     }
 
     /// <summary>Persists a snapshot, replacing any snapshot already stored for its Squad version.</summary>

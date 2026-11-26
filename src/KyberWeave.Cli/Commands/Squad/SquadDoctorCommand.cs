@@ -838,7 +838,7 @@ internal sealed class SquadDoctorCommand : Command<SquadDoctorSettings>
                 continue;
             }
 
-            string inRepoState = Path.Combine(project.Path, ".kyber-weave");
+            string inRepoState = Path.Combine(project.Path, UserStatePaths.DirectoryName);
             if (_files.FileExists(Path.Combine(inRepoState, "squad.receipt.json")) ||
                 _files.FileExists(Path.Combine(inRepoState, "squad.lock.yml")))
                 _console.WriteLine(
@@ -969,7 +969,7 @@ internal sealed class SquadDoctorCommand : Command<SquadDoctorSettings>
 
                 List<string> warnings = [];
                 string effectiveGuidance = _guidance.ReadEffective(
-                    Path.Combine(stateStore.UserPaths.HomeDirectory, ".kyber-weave"),
+                    UserStatePaths.StateDirectory(stateStore.UserPaths.HomeDirectory),
                     warnings);
                 if (!SquadResponsePreferencesInjector.HasAnyBlock(render))
                     warnings.Add(SquadResponsePreferencesInjector.NoBlockWarning);

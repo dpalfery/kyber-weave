@@ -150,7 +150,7 @@ public sealed class ArbiterConfigResolver(
                 : Path.Combine(repoRoot, configPath);
         }
 
-        string defaultPath = Path.Combine(repoRoot, ".kyber-weave", "kyber-weave.yml");
+        string defaultPath = Path.Combine(repoRoot, UserStatePaths.DirectoryName, "kyber-weave.yml");
         if (files.FileExists(defaultPath))
         {
             return defaultPath;

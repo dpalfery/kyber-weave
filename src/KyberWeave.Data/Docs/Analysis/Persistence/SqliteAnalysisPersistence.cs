@@ -1,3 +1,4 @@
+using KyberWeave.Core.FileSystem;
 using System.Buffers.Binary;
 using System.ComponentModel;
 using System.Diagnostics;
@@ -81,7 +82,7 @@ public sealed partial class SqliteAnalysisPersistence : IAnalysisPersistence
         _repositoryRoot = fullRoot;
         DatabasePath = Path.Combine(
             fullRoot,
-            ".kyber-weave",
+            UserStatePaths.DirectoryName,
             "cache",
             "docs-analysis.sqlite3");
 
@@ -626,7 +627,7 @@ public sealed partial class SqliteAnalysisPersistence : IAnalysisPersistence
     private void EnsureSafePersistencePath(string repositoryRoot, string databasePath)
     {
         EnsureContained(repositoryRoot, databasePath);
-        string stateDirectory = Path.Combine(repositoryRoot, ".kyber-weave");
+        string stateDirectory = Path.Combine(repositoryRoot, UserStatePaths.DirectoryName);
         string cacheDirectory = Path.GetDirectoryName(databasePath)!;
         RejectLinkOrReparsePoint(stateDirectory);
         RejectLinkOrReparsePoint(cacheDirectory);

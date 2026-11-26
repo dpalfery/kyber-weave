@@ -391,7 +391,7 @@ public sealed class ArbiterServeService(
             return ErrorJson($"The comment is larger than {MaxTextChars} characters.");
         }
 
-        string arbiterDirectory = Path.Combine(context.RepoRoot, "artifacts", "arbiter");
+        string arbiterDirectory = ArbiterStateDirectory.ForProject(context.RepoRoot);
         // The effective rules, so a host override of the comment rule's shadow state is the one the service honours.
         // A root whose configuration cannot be loaded uses the shipped rules and no bot logins: the fail-safe answer.
         (KyberWeaveConfig? config, _) = Load();

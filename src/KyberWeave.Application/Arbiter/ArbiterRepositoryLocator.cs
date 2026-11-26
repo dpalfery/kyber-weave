@@ -1,6 +1,7 @@
 using KyberWeave.Contracts.Paths;
 using KyberWeave.Contracts.Repositories;
 using KyberWeave.Contracts.Services;
+using KyberWeave.Core.Arbiter.Facts;
 using KyberWeave.Core.FileSystem;
 using KyberWeave.Core.RunStart;
 
@@ -52,10 +53,15 @@ public sealed class ArbiterRepositoryLocator(
 
         string working = paths.GetFullPath(path, environment.CurrentDirectory);
         string userLevel = ArbiterStateDirectory.ForGlobal(home, MainCheckoutOf(working, root), environment.CurrentDirectory);
-        return ArbiterStateDirectory.HasLedgerOrDecisionLog(userLevel, files)
+        return HasLedgerOrDecisionLog(userLevel, files)
             ? userLevel
             : ArbiterStateDirectory.ForProject(root);
     }
+
+    /// <summary>Whether a directory holds a ledger or a decision log, the two files a hook records through.</summary>
+    private static bool HasLedgerOrDecisionLog(string directory, IFileSystem files) =>
+        files.FileExists(Path.Combine(directory, InFlightLedger.FileName))
+        || files.FileExists(Path.Combine(directory, DecisionLog.FileName));
 
     /// <summary>
     /// The main checkout of the repository at <paramref name="working" />: the parent of the common git directory,

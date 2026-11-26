@@ -1,3 +1,4 @@
+using KyberWeave.Core.FileSystem;
 using System.Security.Cryptography;
 using System.Text.Json;
 using KyberWeave.Cli.Commands.Squad.Infrastructure;
@@ -460,7 +461,7 @@ internal sealed class SquadStatusCommand : Command<SquadStatusSettings>
     private List<(string TargetPreset, string Version)> GetDeployedInstances(ISquadStateStore stateStore)
     {
         string home = stateStore.UserPaths.HomeDirectory;
-        string instanceStateBase = Path.Combine(home, ".kyber-weave", "squad", "instance-state");
+        string instanceStateBase = UserStatePaths.SquadInstanceStateDirectory(home);
 
         List<(string TargetPreset, string Version)> instances = [];
 

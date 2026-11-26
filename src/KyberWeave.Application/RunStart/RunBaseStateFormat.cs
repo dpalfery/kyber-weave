@@ -1,3 +1,4 @@
+using KyberWeave.Core.FileSystem;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
@@ -17,8 +18,7 @@ public static class RunBaseStateFormat
     /// <summary>The extension every record file carries.</summary>
     public const string StateExtension = ".json";
 
-    private const string StateDirectoryName = ".kyber-weave";
-    private const string RunsDirectoryName = "runs";
+
 
     private static readonly JsonSerializerOptions JsonOptions = new() { WriteIndented = true };
 
@@ -28,7 +28,7 @@ public static class RunBaseStateFormat
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(homeDirectory);
 
-        return Path.Combine(homeDirectory, StateDirectoryName, RunsDirectoryName);
+        return UserStatePaths.RunsDirectory(homeDirectory);
     }
 
     /// <summary>The state file holding <paramref name="branch" />'s recorded base.</summary>
@@ -37,7 +37,7 @@ public static class RunBaseStateFormat
         ArgumentException.ThrowIfNullOrWhiteSpace(homeDirectory);
         ArgumentException.ThrowIfNullOrWhiteSpace(branch);
 
-        return Path.Combine(homeDirectory, StateDirectoryName, RunsDirectoryName, KeyOf(branch) + StateExtension);
+        return Path.Combine(UserStatePaths.RunsDirectory(homeDirectory), KeyOf(branch) + StateExtension);
     }
 
     /// <summary>How two paths are compared: exactly on Linux, ignoring case elsewhere.</summary>

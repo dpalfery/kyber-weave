@@ -508,7 +508,7 @@ public sealed class RunStartService(
     {
         string location = configPath is not null
             ? Path.GetRelativePath(repoRoot, configPath).Replace('\\', '/')
-            : ".kyber-weave/kyber-weave.yml";
+            : UserStatePaths.RepositoryConfigRelativePath;
 
         List<RunStartMessage> messages =
         [

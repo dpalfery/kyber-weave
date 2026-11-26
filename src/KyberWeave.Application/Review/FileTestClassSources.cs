@@ -97,7 +97,7 @@ public sealed class FileTestClassSources(
             // A worktree carries .git as a file and a checkout carries it as a directory.
             if (files.FileExists(Path.Combine(current, ".git")) ||
                 files.DirectoryExists(Path.Combine(current, ".git")) ||
-                files.DirectoryExists(Path.Combine(current, ".kyber-weave")))
+                files.DirectoryExists(Path.Combine(current, UserStatePaths.DirectoryName)))
             {
                 return current;
             }

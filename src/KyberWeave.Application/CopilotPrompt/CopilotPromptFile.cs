@@ -1,3 +1,4 @@
+using KyberWeave.Core.FileSystem;
 using KyberWeave.Contracts.Host;
 using KyberWeave.Contracts.Paths;
 using YamlDotNet.RepresentationModel;
@@ -36,7 +37,7 @@ public static class CopilotPromptFile
     /// <param name="homeDirectory">The user's home directory.</param>
     /// <returns>The absolute path <c>&lt;home&gt;/.kyber-weave/copilot/system-prompt.yaml</c>.</returns>
     public static string InstalledPath(string homeDirectory) =>
-        Path.Combine(homeDirectory, ".kyber-weave", "copilot", "system-prompt.yaml");
+        UserStatePaths.CopilotPromptFile(homeDirectory);
 
     /// <summary>
     /// Checks that YAML text is a usable system-prompt file.

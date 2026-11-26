@@ -1350,7 +1350,7 @@ public sealed class ArbiterHookDecisionEngine : IContextualHookDecisionEngine, I
         {
             string home = _hostConfig.ResolveHomeDirectory(context.HomeDirectory);
             string root = new SquadGlobalRoots(_environment, home).ResolveGlobalRoot(target);
-            return Path.Combine(root, ".kyber-weave", "arbiter");
+            return UserStatePaths.ArbiterDirectory(root);
         }
         catch (ArgumentException)
         {

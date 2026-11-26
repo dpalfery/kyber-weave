@@ -1,3 +1,4 @@
+using KyberWeave.Core.FileSystem;
 using System.IO.Enumeration;
 using System.Text;
 using KyberWeave.Core.Configuration;
@@ -31,7 +32,7 @@ public static class ProjectRootDetection
     public static readonly HashSet<string> ExcludedDirectories = new(StringComparer.Ordinal)
     {
         ".git", "node_modules", "bin", "obj", "target", "vendor", "dist", "build",
-        ".venv", "venv", "__pycache__", ".agent_scratchpad", ".kyber-weave"
+        ".venv", "venv", "__pycache__", ".agent_scratchpad", UserStatePaths.DirectoryName
     };
 
     /// <summary>Finds the roots of one family.</summary>

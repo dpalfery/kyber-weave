@@ -1,7 +1,6 @@
 using System.Security.Cryptography;
 using System.Text;
-using KyberWeave.Contracts.Repositories;
-using KyberWeave.Core.Arbiter.Facts;
+using KyberWeave.Core.FileSystem;
 
 namespace KyberWeave.Core.Arbiter;
 
@@ -28,6 +27,33 @@ public static class ArbiterStateDirectory
     /// <returns>The arbiter state directory a project hook records in.</returns>
     public static string ForProject(string repoRoot) => Path.Combine(repoRoot, "artifacts", "arbiter");
 
+    /// <summary>The project store path relative to the repository root, with forward slashes.</summary>
+    public const string ProjectRelativeDirectory = "artifacts/arbiter";
+
+    /// <summary>The dispatch claims folder inside an arbiter state directory.</summary>
+    /// <param name="arbiterDirectory">An arbiter state directory, such as <see cref="ForProject" />'s answer.</param>
+    /// <returns>The absolute claims directory path.</returns>
+    public static string ClaimsDirectory(string arbiterDirectory) => Path.Combine(arbiterDirectory, "claims");
+
+    /// <summary>The model targets table one harness is recorded in.</summary>
+    /// <param name="arbiterDirectory">An arbiter state directory, such as <see cref="ForProject" />'s answer.</param>
+    /// <param name="harness">The harness token.</param>
+    /// <returns>The absolute file path.</returns>
+    public static string ModelTargetsFile(string arbiterDirectory, string harness) =>
+        Path.Combine(arbiterDirectory, $"model-targets.{harness}.json");
+
+    /// <summary>The project-scope model targets table path relative to the repository root, with forward slashes.</summary>
+    /// <param name="harness">The harness token.</param>
+    /// <returns>The relative file path.</returns>
+    public static string ProjectRelativeModelTargetsPath(string harness) =>
+        $"{ProjectRelativeDirectory}/model-targets.{harness}.json";
+
+    /// <summary>The global-scope model targets table path relative to the harness's global root, with forward slashes.</summary>
+    /// <param name="harness">The harness token.</param>
+    /// <returns>The relative file path.</returns>
+    public static string GlobalRelativeModelTargetsPath(string harness) =>
+        $"{UserStatePaths.DirectoryName}/arbiter/model-targets.{harness}.json";
+
     /// <summary>
     /// The user-level store of one repository: <c>.kyber-weave/arbiter/projects/&lt;key&gt;</c> under the home directory.
     /// </summary>
@@ -36,23 +62,7 @@ public static class ArbiterStateDirectory
     /// <param name="baseDirectory">The fully qualified directory a relative root is resolved against.</param>
     /// <returns>The arbiter state directory the user-level hook records in.</returns>
     public static string ForGlobal(string homeDirectory, string repoRoot, string baseDirectory) =>
-        Path.Combine(homeDirectory, ".kyber-weave", "arbiter", "projects", ProjectRootKey(repoRoot, baseDirectory));
-
-    /// <summary>
-    /// Whether <paramref name="directory" /> holds a ledger or a decision log, the two files a hook records through.
-    /// </summary>
-    /// <param name="directory">An arbiter state directory.</param>
-    /// <param name="files">Probes the file system.</param>
-    /// <returns>
-    /// True when the ledger or the decision log is there, readable or not. False for a directory that holds neither
-    /// and for one that is not there, neither of which is a store a hook has recorded in.
-    /// </returns>
-    public static bool HasLedgerOrDecisionLog(string directory, IFileSystem files)
-    {
-        ArgumentNullException.ThrowIfNull(files);
-        return files.FileExists(Path.Combine(directory, InFlightLedger.FileName))
-            || files.FileExists(Path.Combine(directory, DecisionLog.FileName));
-    }
+        Path.Combine(UserStatePaths.ArbiterProjectsDirectory(homeDirectory), ProjectRootKey(repoRoot, baseDirectory));
 
     /// <summary>The per-project key a user-level store directory is named by: the hash of the root's full path.</summary>
     /// <param name="projectRoot">The project root, relative or fully qualified.</param>
