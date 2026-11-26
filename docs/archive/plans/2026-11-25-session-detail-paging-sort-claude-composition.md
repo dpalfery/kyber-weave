@@ -2,7 +2,7 @@
 id: plans/2026-11-25-session-detail-paging-sort-claude-composition
 title: KyberDash Session Detail Paging, Sorting, Context Composition Paging, and Honest Claude Code Context Attribution
 doc-type: plan
-status: current
+status: archived
 component: KyberDash
 owner: dpalfery
 last-reviewed: 2026-11-25
@@ -15,7 +15,7 @@ impact-components:
 
 # KyberDash Session Detail Paging, Sorting, Context Composition Paging, and Honest Claude Code Context Attribution
 
-**Status: Ready.**
+**Status: Archived, 2026-11-26.**
 
 ## Request
 
@@ -378,15 +378,15 @@ Links are written relative to this plan's current folder (`docs/plans/`); the ar
 
 | ID | Destination |
 |---|---|
-| D1, D2, D3, D4, D6, D7 | [Web dashboard data loading by section and page](../dash/architecture.md#web-dashboard-data-loading-by-section-and-page), [The read-model register](../dash/architecture.md#the-read-model-register), [Backend REST API Contract](../dash/architecture.md#backend-rest-api-contract-dashserverkyberdashapiendpointsdashendpointmappingscs), and [Slow dashboard responses on a large store](../dash/runbook.md#11-slow-dashboard-responses-on-a-large-store) |
-| D5 | [ADR 0092: Dashboard views load by section and by page](../adr/0092-dashboard-views-load-by-section-and-page.md#decision), [The read-model register](../dash/architecture.md#the-read-model-register), [Web dashboard data loading by section and page](../dash/architecture.md#web-dashboard-data-loading-by-section-and-page), and [Slow dashboard responses on a large store](../dash/runbook.md#11-slow-dashboard-responses-on-a-large-store) |
-| D10 | [Web dashboard data loading by section and page](../dash/architecture.md#web-dashboard-data-loading-by-section-and-page) (`SessionSummarySection`, `SessionCostSection`, `/sessions`, `/subagents`, and `StoredFieldsPanel` scope boundaries) and [Navigating the web dashboard](../dash/runbook.md#navigating-the-web-dashboard) |
-| D11, D12 | [Collector attribution and read-side API projection](../dash/architecture.md#collector-attribution-and-read-side-api-projection), [Records keep their source](../dash/architecture.md#records-keep-their-source), [Skills view contract (`Detector version`)](../dash/architecture.md#skills-view-contract), and [Field register — claude-code](../dash/field-register.md#claude-code) (`DetectorVersion` `8` at `SchemaVersion` `30` across `SqliteRelationalStore.cs`, `RecordSourceNameTests.cs`, and `SchemaVersionTests.cs`) |
+| D1, D2, D3, D4, D6, D7 | [Web dashboard data loading by section and page](../../dash/architecture.md#web-dashboard-data-loading-by-section-and-page), [The read-model register](../../dash/architecture.md#the-read-model-register), [Backend REST API Contract](../../dash/architecture.md#backend-rest-api-contract-dashserverkyberdashapiendpointsdashendpointmappingscs), and [Slow dashboard responses on a large store](../../dash/runbook.md#11-slow-dashboard-responses-on-a-large-store) |
+| D5 | [ADR 0092: Dashboard views load by section and by page](../../adr/0092-dashboard-views-load-by-section-and-page.md#decision), [The read-model register](../../dash/architecture.md#the-read-model-register), [Web dashboard data loading by section and page](../../dash/architecture.md#web-dashboard-data-loading-by-section-and-page), and [Slow dashboard responses on a large store](../../dash/runbook.md#11-slow-dashboard-responses-on-a-large-store) |
+| D10 | [Web dashboard data loading by section and page](../../dash/architecture.md#web-dashboard-data-loading-by-section-and-page) (`SessionSummarySection`, `SessionCostSection`, `/sessions`, `/subagents`, and `StoredFieldsPanel` scope boundaries) and [Navigating the web dashboard](../../dash/runbook.md#navigating-the-web-dashboard) |
+| D11, D12 | [Collector attribution and read-side API projection](../../dash/architecture.md#collector-attribution-and-read-side-api-projection), [Records keep their source](../../dash/architecture.md#records-keep-their-source), [Skills view contract (`Detector version`)](../../dash/architecture.md#skills-view-contract), and [Field register — claude-code](../../dash/field-register.md#claude-code) (`DetectorVersion` `8` at `SchemaVersion` `30` across `SqliteRelationalStore.cs`, `RecordSourceNameTests.cs`, and `SchemaVersionTests.cs`) |
 | D8, D9, D13, D14 | Documentation waiver — `D8` captures `SessionTimelineSection` child-level/expansion reset synchronization, `D9` records authorized test-expectation shifts for the new defaults and contract, `D13` records that this plan adds no SQLite schema migration of its own (`SchemaVersion` is `30`, taken from main's PR #723 at the merge, while `DetectorVersion` `8` triggers the projection rebuild documented in the harvested architecture entries), and `D14` captures local task-gate (`test-policy`) and `PricingFixture` path-probing configuration fixes with no new architectural invariant beyond the harvested entries. |
 | AP1 | Documentation waiver — the autonomous approve-and-execute gate is process provenance with no surviving architectural, operational, or behavioral invariant. |
-| KyberDash | Design harvest rows harvested into [ADR 0092](../adr/0092-dashboard-views-load-by-section-and-page.md), [KyberDash architecture](../dash/architecture.md), [KyberDash runbook](../dash/runbook.md), and [Field register](../dash/field-register.md). |
+| KyberDash | Design harvest rows harvested into [ADR 0092](../../adr/0092-dashboard-views-load-by-section-and-page.md), [KyberDash architecture](../../dash/architecture.md), [KyberDash runbook](../../dash/runbook.md), and [Field register](../../dash/field-register.md). |
 
-ADR waiver: `D5` is recorded in [ADR 0092](../adr/0092-dashboard-views-load-by-section-and-page.md). No ADR — ADR waiver for `D1`–`D4`, `D6`–`D14`, and `AP1`: `D1`–`D4`, `D6`–`D7`, and `D11`–`D12` apply established section-paging and collector-attribution patterns without introducing new architectural constraints beyond ADR 0092, while `D8`–`D10`, `D13`–`D14`, and `AP1` capture implementation synchronization, test-expectation updates, local gate/fixture configuration, or process provenance.
+ADR waiver: `D5` is recorded in [ADR 0092](../../adr/0092-dashboard-views-load-by-section-and-page.md). No ADR — ADR waiver for `D1`–`D4`, `D6`–`D14`, and `AP1`: `D1`–`D4`, `D6`–`D7`, and `D11`–`D12` apply established section-paging and collector-attribution patterns without introducing new architectural constraints beyond ADR 0092, while `D8`–`D10`, `D13`–`D14`, and `AP1` capture implementation synchronization, test-expectation updates, local gate/fixture configuration, or process provenance.
 
 ## Completion summary
 
