@@ -196,8 +196,9 @@ are the rules a workflow edit has to keep.
   `input_hash`, to have an epoch in digits only, not dated in the future, and to carry this run's
   fingerprint — and only then compares the age against the ceiling. Every failure path runs the job
   in full and writes its own line to the step summary naming why. The release chain's verdict is
-  simpler because its key is already bound to one version: the file must exist, `saved_at_epoch`
-  must be digits, and the age must be at or under the ceiling.
+  simpler because its key is already bound to one version, so there is no `input_hash` to compare:
+  the file must exist, `saved_at_epoch` must be digits, the receipt must not be dated in the future,
+  and the age must be at or under the ceiling.
 - **Every receipt script declares `shell: bash`.** The Windows legs default to `pwsh`, where
   `date +%s` and integer arithmetic over the epoch do not work as written.
 - **The key is exact, and carries no `restore-keys`.** `receipt-<job>-<leg>-<hash>`, with the leg

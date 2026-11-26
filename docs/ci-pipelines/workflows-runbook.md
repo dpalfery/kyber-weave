@@ -224,7 +224,8 @@ enforces the per-harness completeness predicate continuously:
   isolated C# engine, so the job fails when the run leaves its server behind.
 - **Leftover processes:** no job carries a leftover-process step any more. The
   `scripts/proc-guard.sh check-leftovers` helper and the workflow steps that replaced it went
-  with the Node engine, which was the only thing spawning recursive children. The .NET jobs end
+  with the Node engine, which was the only thing spawning recursive children. The CI jobs that
+  carry the step — `build-test`, `integration-test` and `dash-e2e` — end
   with `dotnet build-server shutdown` (`if: always()`) instead, and the conformance spec tears
   down the isolated engine it booted and fails the job when that server is still running.
 
@@ -238,9 +239,12 @@ npx --prefix dash playwright test --config dash/playwright.isolated.config.ts da
 ### Process cleanup steps in `dash-e2e`, `build-test` and `integration-test`
 
 No job inspects the process table for leftovers: there is no wrapper, no start-epoch marker
-and no `check-leftovers` step in `ci.yml`. Every job that builds .NET ends with the same
-`dotnet build-server shutdown` step, because the MSBuild and `VBCSCompiler` servers outlive every
-build by design. Its condition is `always() && steps.verdict.outputs.skip != 'true'`: it has to run
+and no `check-leftovers` step in `ci.yml`. Three jobs carry the `dotnet build-server shutdown`
+step — `build-test`, `integration-test` and `dash-e2e`, exactly the three in the table below —
+because the MSBuild and `VBCSCompiler` servers outlive every build by design. Only those three
+carry it: the other jobs that build .NET, `squad-filesystem-contract` included, leave the servers
+they start to the runner's own teardown at the end of the job. The step's condition is
+`always() && steps.verdict.outputs.skip != 'true'`: it has to run
 when an earlier step failed, and it must not run when a receipt skipped the build, because then no
 server was ever started. The receipt save follows it in each of the three jobs.
 
@@ -461,9 +465,10 @@ four: the checkout, the cache restore, the verdict itself, and `build-tray`'s `i
 keychain cleanup, which must run even when the build failed. The two publish jobs gate only their
 publishing steps; their verification always runs.
 
-The verdict requires only that the file exist and `saved_at_epoch` be digits — the key is already
-bound to one version — and compares the age against the ceiling. A stale, absent or unparsable
-receipt rebuilds the chain, and the verdict says which. The receipt
+The verdict is slimmer than a CI job's because the key is already bound to one version, so there is
+no `input_hash` to compare: the file must exist, carry a `saved_at_epoch` in digits only and not
+dated in the future, and the age must be at or under the ceiling. An absent, unparsable,
+future-dated or stale receipt rebuilds the chain, and the verdict says which. The receipt
 is recorded only in the `release` job, and only after the release, its asset inventory, its notes,
 its SBOM attestations and its provenance attestations have all verified — a half-published release
 leaves no receipt. It records the version, the tag, the writing run's URL, the published asset
