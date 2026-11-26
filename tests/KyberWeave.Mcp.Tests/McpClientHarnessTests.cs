@@ -52,7 +52,7 @@ public sealed class McpClientHarnessTests
 
     /// <summary>
     /// The token an unverified client is built for must never be one the hook rewrites: under it the service writes the
-    /// prompt file the reply names, and that file is the whole delivery on a client no probe has verified.
+    /// prompt file the reply names, and that file is the whole delivery on a client no probe, log or source has verified.
     /// </summary>
     [Fact]
     public void TheUnverifiedTokenIsNeverARewritingHarness() =>
