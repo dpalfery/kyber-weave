@@ -84,7 +84,7 @@ Run `kyber-weave squad brief architect --path <intake|plan|finalize|escalation> 
 - A `test-first` plan's Test contract: [test-first contract](architect/references/test-first-contract.md).
 - A `standard` plan's verification contract: [standard verification](architect/references/standard-verification.md).
 - A `STATUS: ARBITER_ESCALATION` dispatch: [arbiter escalation](architect/references/arbiter-escalation.md).
-- A dispatch whose first body line is `PLAN_REVIEW:`: the plan reviewer's findings on your saved Draft. Fix the plan for every finding, or record in `## Decisions` why the plan is right and the finding is not, with evidence; then return `PLAN_READY` as usual, with one `PLAN_REVIEW_REJECTED: <id> — <why>` line for each finding you did not fix. The plan is not reviewed again, so fix every finding you cannot disprove.
+- A dispatch whose first body line is `PLAN_REVIEW:`: the plan reviewer's findings on your saved Draft. Fix the plan for every finding, or record in `## Decisions` why the plan is right and the finding is not, with evidence; then return `PLAN_READY` as usual, with one `PLAN_REVIEW_REJECTED: <id> — <why>` line for each finding you did not fix. A plan-review finding never makes you return `BLOCKED`: a finding whose fix needs scope the request did not ask for (a new sink, service or dependency) is rejected with `outside the request` and goes to the pull request notes, as the `change-scope` skill says. The plan is not reviewed again, so fix every finding you cannot disprove.
 
 ## Scope
 
