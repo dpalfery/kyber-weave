@@ -5,7 +5,7 @@ doc-type: architecture
 component: KyberSquad
 source-root: src/KyberWeave.Domain/Squad
 owner: dpalfery
-last-reviewed: 2026-11-25
+last-reviewed: 2026-11-26
 status: current
 decided-by:
   - adr/0093-kw-skills-load-on-demand-through-kw-docs
@@ -1307,7 +1307,7 @@ and validates.
   `ArbiterHookWiring` renders decision-gate hooks for the
   [Kyber Arbiter](../kyber-arbiter/architecture.md) beside the agent deployment, in project
   scope only and only when the project's `arbiter.enabled` is true. The architect shell guard
-  below is the one hook that renders at both scopes. Ten targets are
+  below is the one hook that renders at both scopes. Eleven targets are
   hooked: per-agent frontmatter hooks on `claude` (each dispatching agent plus the
   `/conductor` entry-point skill, with `--caller <agent>`, and a `^SubagentHandback$`
   pre-call hook on every agent a governed dispatcher can target, so a background return is
@@ -1320,7 +1320,11 @@ and validates.
   `.cursor/hooks.json` on `codex` and `cursor`, the top-level matcher groups of
   `.factory/hooks.json` on `factory`, `.devin/hooks.v1.json` on `devin`, and the
   `kyber-arbiter` group of `.agents/hooks.json` on `antigravity` (no `--caller`:
-  shared-file hooks gate project-wide). Only agents with a non-empty
+  shared-file hooks gate project-wide), and the owned mod
+  `.commandcode/mods/kyber-arbiter.ts` on `commandcode` (no `--caller`: its
+  `beforeToolCall` fires for every tool call, which is what makes an `agent` dispatch
+  gateable there, while the hooks in `settings.json` match only `shell`, `read`,
+  `write` and `edit` and never see one). Only agents with a non-empty
   `delegates-to` roster get dispatch-gating hooks, so the caller is trusted without a new
   agent field; implementation specialists in the worker profiles get the planning-path Read
   guard instead. Whole-file outputs (frontmatter hooks, the Copilot CLI hook file, the

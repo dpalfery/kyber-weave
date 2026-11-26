@@ -5,7 +5,7 @@ doc-type: adr
 status: current
 component: KyberUtilities
 owner: dpalfery
-last-reviewed: 2026-09-28
+last-reviewed: 2026-11-26
 ---
 
 # ADR 0026: Kyber Utilities Deploys Owned Files and Never Owns Harness Settings, with Manual Activation
@@ -32,6 +32,18 @@ user explicitly runs the install command. Squad never touches any other content 
 file or file it does not own. The install output names every path written and whether each
 harness is enforced or fallback-only. Kyber Utilities' status-line activation stays manual unless
 this ADR says otherwise.
+
+**Amendment, 2026-11-26.** Command Code's mods directories join the Squad owned-file exception:
+the project directory `.commandcode/mods/` and the user directory `~/.commandcode/mods/`. Squad
+writes the one owned file `kyber-arbiter.ts` in it and nothing else, and only when the user runs
+the install command — the same shape as the OpenCode and Kilo plugin directories above. Command
+Code has no other surface for a decision gate: the hooks in `~/.commandcode/settings.json` match
+only `shell`, `read`, `write` and `edit`, so none of them ever sees an `agent` dispatch. **Trust
+decides whether the file runs.** A project's mods are trust-gated on first load, so until the
+workspace is trusted the mod never loads and dispatches stay ungated; user-scope mods load
+without a prompt. The install prints that step because nothing else can observe whether it was
+granted. The design check and its live evidence are in the
+[Arbiter architecture](../kyber-arbiter/architecture.md#the-command-code-design-check-2026-11-26).
 
 ## Context
 

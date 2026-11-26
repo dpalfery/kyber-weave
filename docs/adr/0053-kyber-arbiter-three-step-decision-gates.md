@@ -4,7 +4,7 @@ title: Kyber Arbiter three-step decision gates
 doc-type: adr
 status: current
 owner: dpalfery
-last-reviewed: 2026-11-12
+last-reviewed: 2026-11-26
 ---
 
 # ADR 0053: Kyber Arbiter three-step decision gates
@@ -43,6 +43,22 @@ Amended 2026-11-11 by the arbiter decision-model savings closeout (decision 39 o
 specification): the rule that an unverified capability is unsupported governs the per-dispatch
 model override only. The hook-capability rule above, that undocumented cells count as supported
 until a defect proves otherwise, is unchanged.
+
+Amended 2026-11-26: **Command Code leaves `dispatch-unconfirmed` at both scopes.** Decision 19's
+tier set and its four reason codes are unchanged; what changes is which reason, if any, Command
+Code records. The 2026-11-04 classification (R-D1 of the
+[arbiter global install plan](../archive/plans/2026-11-04-arbiter-global-install.md)) was chosen
+because block-on-dispatch was unproven and the design check of its two hook surfaces was owed and
+never completed. That check is now recorded: the hooks in `~/.commandcode/settings.json` match
+only `shell`, `read`, `write` and `edit`, so none of them sees an `agent` dispatch, while a mod's
+`beforeToolCall` fires for every tool call and can block. On 2026-11-26 the rendered mod blocked a
+guarded dispatch live at project scope and, under the user config, at user scope, so no scope
+stayed unverified; see
+[the design check](../kyber-arbiter/architecture.md#the-command-code-design-check-2026-11-26).
+Command Code now records no degradation at project scope and `enforced-global` at user scope. Its
+caller is recorded `unidentified` there, as on every project-wide hook, so decision 18's headers
+carry the identity and no `--caller` argument exists to pass. `dispatch-unconfirmed` stays in the
+vocabulary for OpenCode, Kilo and Copilot in VS Code, where a dispatch by name is still unproven.
 
 ## Context
 

@@ -4,7 +4,7 @@ title: Kyber Arbiter runbook
 doc-type: runbook
 component: KyberArbiter
 owner: dpalfery
-last-reviewed: 2026-11-25
+last-reviewed: 2026-11-26
 status: current
 decided-by:
   - adr/0053-kyber-arbiter-three-step-decision-gates
@@ -92,18 +92,21 @@ owned block in the shared `.codex/hooks.json`), and Cursor (owned entries in the
 Antigravity (the owned `kyber-arbiter` group in `.agents/hooks.json`), Factory (the owned
 block in `.factory/hooks.json`, dropped while the user's hooks live in
 `.factory/settings.json` — see failure behaviour below), and Devin (the owned block
-in `.devin/hooks.v1.json`). Warp and ZCode render no hooks at project scope: they are
+in `.devin/hooks.v1.json`). Command Code joined after Phase 3: it is gated through the owned
+mod `.commandcode/mods/kyber-arbiter.ts`, because the hooks in its `settings.json` match only
+`shell`, `read`, `write` and `edit` and never see an `agent` dispatch. Warp and ZCode render
+no hooks at project scope: they are
 fallback-only — see the MCP fallback below. The hook binary is invoked as:
 
 ```bash
-kyber-weave-arbiter hook --harness <claude|copilot-vscode|copilot-cli|opencode|pi|codex|cursor|kilo|antigravity|factory|devin> [--caller <agent>]
+kyber-weave-arbiter hook --harness <claude|copilot-vscode|copilot-cli|opencode|pi|codex|cursor|kilo|antigravity|factory|devin|commandcode> [--caller <agent>]
 ```
 
 Every target except `claude` and `copilot-vscode` is project-wide: it gates only dispatches
 carrying the `KYBER-ARBITER: true` marker and carries no `--caller`. `codex`, `cursor`,
 `factory`, `devin` and `antigravity` are owned entries spliced into a shared hook file;
-`pi` and `kilo` are whole owned files, `.pi/extensions/kyber-arbiter.ts` and
-`.kilo/plugin/kyber-arbiter.ts`.
+`pi`, `kilo` and `commandcode` are whole owned files, `.pi/extensions/kyber-arbiter.ts`,
+`.kilo/plugin/kyber-arbiter.ts` and `.commandcode/mods/kyber-arbiter.ts`.
 It reads the harness event on stdin and writes only the harness's decision document on
 stdout — logging goes to stderr. The exit code is 0.
 
@@ -198,7 +201,8 @@ user-scope copy).
 **Harness matrix.** The guard is enforced on Claude only, for the `Bash` and `PowerShell` tools at project and
 user scope. Every other harness keeps the list as instruction only, and the architect keeps it by its own
 discipline there: Copilot in VS Code (the terminal tool name in its payload is undocumented), Copilot CLI (its
-hooks gate only `task`), Codex, Cursor, OpenCode, Kilo, Pi, Factory, Devin and Antigravity. Warp and ZCode have
+hooks gate only `task`), Codex, Cursor, OpenCode, Kilo, Pi, Factory, Devin, Antigravity and Command Code (whose
+mod gates the `agent` tool alone). Warp and ZCode have
 no hooks. These are follow-ups. The guard is enforced at once, with no shadow mode and no setting of its own, like
 `ReadGuard` and `ConductorGuard`. The only off switch is `arbiter.enabled: false` in the project configuration,
 which turns the whole Arbiter off, and with it this guard.
@@ -226,7 +230,7 @@ observed — so grant trust at install time:
 | Pi | Trust the project so that `.pi/extensions/` loads. Until trust is granted the extension does not load and dispatches stay ungated. |
 | Warp | No trust gate — there are no hooks to trust. Setup instead: Squad writes no MCP configuration for Warp, so register the `kw-arbiter` server — `kyber-weave-arbiter serve --repo-root <root>` — in Warp's own MCP configuration. Until it is registered only the advisory marker fallback enforces there. |
 | ZCode | ZCode requires `hooks.enabled: true` in `~/.zcode/cli/config.json`. Squad never flips this setting; when absent or false, it is reported as `hooks-disabled-by-harness`. At project scope, ZCode ignores project hooks and uses the MCP fallback. |
-| CommandCode | CommandCode block-on-dispatch unconfirmed; register `kyber-weave-arbiter serve --repo-root <root>` through MCP configuration. |
+| CommandCode | Accept the workspace trust prompt so `.commandcode/mods/` loads: a project's mods are trust-gated on first load, and until trust is granted the mod never loads and dispatches stay ungated. User-scope mods under `~/.commandcode/mods/` load without a prompt. A headless `cmd -p` run loads no project mod unless it passes `--dangerously-skip-permissions`. |
 | Cursor, Copilot CLI, OpenCode | No documented trust gate. |
 
 `arbiter install`, `squad install`, and `squad update` print the applicable step for the rendered targets.
@@ -292,13 +296,12 @@ target is absent: a Squad dispatch whose profile the harness did not send is sti
 If Devin renames the arguments, every dispatch goes unmarked until the adapter is updated.
 `arbiter doctor` prints one informational line for each of copilot-cli, codex and cursor.
 
-## The MCP fallback (Warp, CommandCode, and project-scope ZCode)
+## The MCP fallback (Warp and project-scope ZCode)
 
-Warp documents no hooks, CommandCode block-on-dispatch is unconfirmed (`dispatch-unconfirmed`),
-and project-level hooks are not executed in ZCode's current version, so the marker fallback is
-advisory there and the MCP fallback is the enforcement surface. Squad writes no MCP configuration
-for them, so declare the server yourself in the harness's own MCP configuration under the key
-`kw-arbiter`, launched as:
+Warp documents no hooks, and project-level hooks are not executed in ZCode's current version, so
+the marker fallback is advisory there and the MCP fallback is the enforcement surface. Squad
+writes no MCP configuration for them, so declare the server yourself in the harness's own MCP
+configuration under the key `kw-arbiter`, launched as:
 
 ```bash
 kyber-weave-arbiter serve --repo-root <root>

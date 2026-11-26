@@ -5,7 +5,7 @@ doc-type: architecture
 component: KyberArbiter
 source-root: src/KyberWeave.Domain/Arbiter
 owner: dpalfery
-last-reviewed: 2026-11-25
+last-reviewed: 2026-11-26
 status: current
 decided-by:
   - adr/0053-kyber-arbiter-three-step-decision-gates
@@ -575,7 +575,7 @@ A judged command whose event
 names no working directory is refused too, because the technology's list lives under that directory and
 cannot be read; the missing directory is itself a machine fact. Factory's guard reads the same list, using
 the parent session id its ledger recorded to find the dispatch's `technology` header. Where no worker guard
-runs, nothing is refused: on those ten harnesses the same verbs are stated in the technology's `rules.md`,
+runs, nothing is refused: on every other harness the same verbs are stated in the technology's `rules.md`,
 which reaches the prompt's `<technology-rules>` part, and are an instruction only. See Requirement 8.6 and the
 [runbook](runbook.md#reading-a-canonical-checkout-refusal).
 
@@ -1366,6 +1366,8 @@ replies is slow and can alter them. So the hook saves them, and the reviewer nev
 One table covers every harness at project scope. Phase 1 hooks Claude, Copilot in VS Code, Copilot CLI and
 OpenCode; Phase 2 adds Pi, Codex and Cursor; Phase 3 adds Kilo, Antigravity, Factory and
 Devin, and leaves Warp and ZCode fallback-only at project scope, served by [`serve`](#the-mcp-fallback-serve).
+Command Code joined after Phase 3, on 2026-11-26, through its owned mod (see
+[the design check](#the-command-code-design-check-2026-11-26)).
 The degradation records these outcomes produce are listed once, in the
 [degradation taxonomy](../kyber-squad/requirements.md#degradation-taxonomy).
 
@@ -1382,6 +1384,7 @@ The degradation records these outcomes produce are listed once, in the
 | Antigravity | 3 | An owned top-level group `kyber-arbiter` in `.agents/hooks.json`, matching `^invoke_subagent$` | `invoke_subagent`; each element of `Subagents` is one dispatch | Header inference from the marker | `TypeName`, `Prompt`, as one flat `args` object (the shape a real agy call sends) or as the `Subagents` list; see [the Antigravity payload](#the-antigravity-payload-and-caller-rule). Deny writes `{decision: "deny", reason}`; every other answer on a pre-tool event writes `{decision: "allow"}`, never `{}`, which agy reports as a denial with an empty reason. An inserted prompt writes `{decision: "ask", overwrite: {...}}` | Unsupported: `invoke_subagent` has no model field; tier is per custom subagent [AG-SUB], [AG-HOOK] |
 | Factory | 3 | An owned block in `.factory/hooks.json`, matcher groups at the top level with no `hooks` wrapper: the dispatch's `Task` groups, a `SubagentStop` group with no matcher (Factory runs `Task` in the background, so the worker report arrives at stop, not at `PostToolUse`), and the worker guard's `PreToolUse` group matching every tool, second `PostToolUse` on `Task`, and matcher-less `SessionStart` and `SessionEnd` groups; unless shadowed (below) | `Task` | Header inference from the marker | `tool_input.subagent_type`, `tool_input.prompt`; returns pair by `pair-digest` | Unsupported: the docs say the caller cannot choose a model for a single call [FA-DROID], [FA-HOOK] |
 | Devin | 3 | An owned block in `.devin/hooks.v1.json` (the Claude Code format), matching `^run_subagent$` | `run_subagent` | Header inference from the marker | `tool_input.profile`, `tool_input.prompt`; returns pair by `pair-digest` | Unsupported (unverified): the `run_subagent` schema documents no model [DV-HOOK], [DV-LOG] |
+| CommandCode | after 3 | The owned mod `.commandcode/mods/kyber-arbiter.ts` speaking the plugin envelope (`hooks.beforeToolCall`, filtered to `toolName === 'agent'`) | `agent` — the name the live payload carries; the mods reference calls the delegation tool `task` | Header inference from the marker: no caller field exists and no `--caller` is passed, so the ledger records `unidentified` | `args.subagent_type`, `args.prompt` | Unsupported (unverified): `model` is agent-level in `cmd.addAgent`'s definition, not a dispatch input [CM-MOD] |
 | Warp, ZCode | 3 | No hooks: the MCP fallback | — | Asserted by the caller in `arbiter_evaluate_agent_dispatch_or_return` | — | Not applicable: no hooks |
 
 Notes on the table:
@@ -1456,7 +1459,7 @@ neither path.
 | Factory | rewrite | `hookSpecificOutput.updatedInput.prompt`, with every `tool_input` field copied | Passed 2026-11-19 on droid 1.6.0, global `~/.factory/hooks.json`: the hook inserted the T30 prompt, `PostToolUse` showed the `Task` call ran with it, and a stub rewrite's code word came back from the worker. Before this fix the user-level hook deferred to a project hook that did not exist | A missing or disabled hook file leaves the worker with the header lines; it runs `docs packet` | [FA-HOOK] |
 | Devin | rewrite | `hookSpecificOutput.updatedInput.prompt`, merged into the tool call | Shipped header strip | A missing hook file leaves the worker with the header lines; it runs `docs packet` | [DV-HOOK] |
 | ZCode | file until the check passes | `hookSpecificOutput.updatedInput` is a full replacement of the tool input, re-validated against the tool schema | Not yet: project hooks are ignored by the harness and no Kyber-Weave hook is rendered; a user-scope hook also needs `hooks.enabled: true`. The check must show the worker received the replaced prompt and the dispatcher's transcript did not | The hook is absent or disabled: the worker runs `docs packet` | [ZC-HOOK], read 2026-11-16 |
-| CommandCode | file until the check passes | `hooks.beforeToolCall` returns `input`, which rewrites the tool input the call executes with; rewrites chain across mods | Not yet: project mods are trust-gated and no Kyber-Weave mod is rendered. The check must show the worker received the replaced prompt and the dispatcher's transcript did not | The mod is absent, disabled or the workspace untrusted: the worker runs `docs packet` | [CM-MOD], read 2026-11-16 |
+| CommandCode | file until the rewrite check passes | `hooks.beforeToolCall` returns `input`, which rewrites the tool input the call executes with; rewrites chain across mods. The rendered mod maps an allow that carries `args` to `{input: args}` | Block only, shown 2026-11-26 at project and user scope. The rewrite is not yet observed: the check must still show the worker received the replaced prompt and the dispatcher's transcript did not | The mod is absent, disabled or the project untrusted: the worker runs `docs packet`. A headless `cmd -p` run loads no project mod unless it passes `--dangerously-skip-permissions` | [CM-MOD], read 2026-11-16; live check 2026-11-26 |
 | Warp | file | No dispatch hook and no rewrite field in the repository's harness notes | Not applicable | Always the file path; the MCP fallback carries the dispatch | [WP-DOC], checked 2026-11-16 |
 
 ### KW skills in the dispatch prompt
@@ -1585,11 +1588,12 @@ The [dispatch delivery path](#dispatch-delivery-path) rows cite the same pages, 
 - [DV-LOG] Devin CLI changelog: https://docs.devin.ai/cli/changelog
 - [ZC-HOOK] ZCode hooks, including `PreToolUse.updatedInput`: https://zcode.z.ai/en/docs/hooks
 - [CM-MOD] CommandCode mods, including `hooks.beforeToolCall.input`: https://commandcode.ai/docs/mods
+- [CM-HOOKS] CommandCode hooks, the tool matchers and the hook contract: https://commandcode.ai/docs/hooks
 - [WP-DOC] Warp documentation: https://docs.warp.dev
 
 ### Delivery and caller notes
 
-Phase 2 and Phase 3 targets are project-wide hooks with no caller identity. They infer the caller from
+Phase 2 and Phase 3 targets, and Command Code, are project-wide hooks with no caller identity. They infer the caller from
 the headers. An unmarked dispatch whose caller nothing names passes through, logged with
 `caller: unidentified`, unless its target is a Squad agent: the embedded catalog is a machine fact, so the
 dispatch is classified as `investigate` with no caller, and gating does not depend on the orchestrator
@@ -1770,11 +1774,55 @@ Research verified against vendor documentation governs the user-level global hoo
 | Factory | `~/.factory/hooks.json`; project `.factory/hooks.json` | owned block in `~/.factory/hooks.json` | `settings.json` `hooks` key read only if `hooks.json` is absent; existing renderer shadow handling preserved | per existing Factory hook renderer | enforced-global | [Factory hooks guide](https://docs.factory.ai/cli/configuration/hooks-guide) |
 | Devin | `~/.config/devin/config.json` (also reads Claude-compatible config) | owned block in the Devin global config | all sources load | block via decision / exit 2 | enforced-global | [Devin hooks](https://docs.devin.ai/cli/extensibility/hooks/overview) |
 | ZCode | global-only `~/.zcode/cli/config.json` with `hooks.enabled: true`; project hooks ignored | hooks are not rendered at project or global scope without manual harness flag enablement; falls back to `kyber-weave-arbiter serve` | n/a (global only) | `PreToolUse` deny: yes; hooks require manual `hooks.enabled: true` in harness config | fallback-only (degraded with fallback) | [ZCode hooks](https://zcode.z.ai/en/docs/hooks) |
-| CommandCode | `cmd.hooks({ beforeToolCall })` mods vs `~/.commandcode/settings.json` | owned file or owned block only | n/a | design check evaluated mods vs settings; block-on-dispatch unproven, so degraded with recorded reason `dispatch-unconfirmed` at both scopes; next step register `kyber-weave-arbiter serve` in CommandCode's MCP configuration | degraded (`dispatch-unconfirmed`) | [CommandCode settings](https://commandcode.ai/docs/settings) · [CommandCode mods](https://commandcode.ai/docs/mods) |
+| CommandCode | `~/.commandcode/mods/` (auto-loaded, user); `.commandcode/mods/` (project, trust-gated). Hooks in `~/.commandcode/settings.json` match only `shell`, `read`, `write` and `edit`, so they never see an `agent` dispatch | owned mod file `~/.commandcode/mods/kyber-arbiter.ts` (user) or `.commandcode/mods/kyber-arbiter.ts` (project), [ADR 0026 amendment](../adr/0026-kyber-utilities-owned-files-not-settings.md) | user-scope and project mods both load; a project's mods are trust-gated on first load, and the user-scope mod defers to a project that enables the Arbiter and carries its own mod | `beforeToolCall` returns `block`: yes — shown live at both scopes on 2026-11-26 for `toolName: "agent"`, with the caller recorded `unidentified` ([design check](#the-command-code-design-check-2026-11-26)) | enforced-global | [CommandCode settings](https://commandcode.ai/docs/settings) · [CommandCode hooks](https://commandcode.ai/docs/hooks) · [CommandCode mods](https://commandcode.ai/docs/mods) |
 | OpenCode | `~/.config/opencode/plugins/` (auto-loaded) | owned plugin file `~/.config/opencode/plugins/kyber-arbiter.ts` (ADR 0026 amendment) | arrays merge, none replace | before-hook blocks by throwing; `task` dispatch unconfirmed by name → degraded `dispatch-unconfirmed` | enforced-global, degraded | [OpenCode plugins](https://opencode.ai/v2/docs/plugins) |
 | Kilo | `~/.config/kilo/plugin/` (auto-registered) | owned plugin file `~/.config/kilo/plugin/kyber-arbiter.ts` (ADR 0026 amendment) | order: builtins > global config > global plugin dir > project config > project plugin dir | block by throwing; `KILO_PURE=1` skips external plugins; `task` dispatch unconfirmed → degraded `dispatch-unconfirmed` | enforced-global, degraded | [Kilo plugins](https://kilo.ai/docs/automate/extending/plugins) |
 | Pi | `~/.pi/agent/extensions/` | owned extension file `~/.pi/agent/extensions/kyber-arbiter.ts` under `SquadGlobalRoots` (`~/.pi/agent`) rendered only from the Pi body (`spawnSync` + `pi.on`), never `ArbiterPluginShim` | n/a | extension loader (`loader.js:486`) requires bare-function default export; tier partial until block-on-dispatch is proven, MCP fallback otherwise | partial | [Pi coding agent](https://github.com/gotgenes/pi-coding-agent) |
 | Warp | none — no hooks | nothing written; user registers `kyber-weave-arbiter serve` in `~/.warp/.mcp.json` | n/a | MCP fallback only | fallback-only | [Warp documentation](https://docs.warp.dev) |
+
+### The Command Code design check (2026-11-26)
+
+Command Code was classed `dispatch-unconfirmed` at both scopes on 2026-11-04 because
+block-on-dispatch had not been shown and the design check owed for its two hook surfaces — the
+hooks in `settings.json` against the hooks a mod registers — was never completed. This section
+records that check and its outcome, and **supersedes** that classification. The check asks one
+question: which surface the harness starts for an `agent` dispatch.
+
+- **The `settings.json` hooks cannot gate a dispatch.** They are shell scripts selected by a
+  tool matcher, and the documented matchers name four tools: `shell`, `read`, `write` and `edit`
+  ([CM-HOOKS], read 2026-11-26). The `agent` tool is not among them, so no settings hook runs for
+  a dispatch and none can deny or rewrite one. A hook written there would never fire for the one
+  event the Arbiter has to judge.
+- **A mod's `cmd.hooks` can.** `beforeToolCall` fires for every tool call, `agent` included, and
+  its return can carry `block`, an `input` rewrite and `additionalContext` ([CM-MOD], read
+  2026-11-26). That makes a mod — the owned file at `.commandcode/mods/kyber-arbiter.ts` (project)
+  or `~/.commandcode/mods/kyber-arbiter.ts` (user) — the only surface that can gate a dispatch,
+  and it is what `CommandCodeRenderer.RenderArbiterMod` writes.
+- **Shown live on 2026-11-26, `cmd` 1.88.2.** The session recorded `tool_hook_blocked` for
+  `toolName: "agent"` with `input.subagent_type` carrying the canonical agent name, at project
+  scope and, from `~/.commandcode/mods/`, at user scope in a repository with no project
+  configuration. The model received the Arbiter reason as the tool result and the worker never
+  ran. In a repository that enables the Arbiter and carries the project mod, the user-scope mod
+  defers to it — the one-evaluation split every user-level hook takes. The [mods
+  reference](https://commandcode.ai/docs/mods) calls the delegation tool `task`; the live payload
+  names it `agent`, and the mod filters on the observed name.
+- **Caller identity is out of reach.** Neither the `beforeToolCall` arguments nor the payload
+  names the agent that made the call, so the mod spawns the hook without `--caller` and the
+  ledger records `caller: unidentified`. Gating does not depend on it: a dispatch to a Squad
+  agent is classified from the embedded catalogue, which is a machine fact, so the roster and
+  run rules still apply. No per-caller parity — the `--caller <agent>` line Claude's user-level
+  hook carries — is claimed for Command Code.
+- **Instance scope is not covered.** Command Code has no instance support, so its mod is
+  rendered at project and user scope only; see the
+  [Squad instance support matrix](../kyber-squad/onboarding.md#3-harness-instance-support-matrix).
+- **Trust decides whether the mod runs.** A project's mods are trust-gated on first load: until
+  the workspace is trusted the mod never loads and dispatches stay ungated, which is why install
+  prints the step. User-scope mods load without a prompt. A headless `cmd -p` run loads no
+  project mod at all unless it passes `--dangerously-skip-permissions`, the documented
+  non-interactive opt-in.
+
+What this does not claim: that a rewritten prompt reaches the worker (the delivery path row
+above still reads `file`), that the tool name is `task`, or that the caller is known.
 
 ### Install output table
 
@@ -1789,7 +1837,8 @@ Research verified against vendor documentation governs the user-level global hoo
 ## The MCP fallback (`serve`)
 
 `kyber-weave-arbiter serve --repo-root <root>` is a stdio MCP server carrying the fallback
-for harnesses without hooks or with degraded dispatch (such as Warp, CommandCode, or ZCode). Its server key is **`kw-arbiter`**
+for harnesses without hooks or with degraded dispatch (such as Warp, or ZCode at project
+scope). Its server key is **`kw-arbiter`**
 (`McpServerNames.Arbiter`), which is the name a client configuration declares and the name a
 grant is built from; the executable and its argv are unchanged. Five tools:
 
@@ -1820,7 +1869,7 @@ fallback: the
 `decision.query` capability is allowed only for the `orchestrator` and `reviewer` profiles
 and denied for the other ten, and on Warp and ZCode an `allow` lowers to the
 `kw-arbiter` server alone. The setup step — Squad writes no MCP configuration for
-either target — is in the [runbook](runbook.md#the-mcp-fallback-warp-commandcode-and-project-scope-zcode).
+either target — is in the [runbook](runbook.md#the-mcp-fallback-warp-and-project-scope-zcode).
 
 ## Related
 
