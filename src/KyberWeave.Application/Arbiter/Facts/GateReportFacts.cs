@@ -168,13 +168,27 @@ public sealed class GateReportFacts(
             return null;
 
         if (ScratchLayout.TryParseReviewRun(reviewRun, out string task, out int cycle)
-            && TryReadFile(Path.Combine(fullRoot, ScratchLayout.CycleGates(task, cycle))) is { } cycleReport)
+            && IsTaskFolderName(task)
+            && Resolve(ScratchLayout.CycleGates(task, cycle), fullRoot) is { } cyclePath
+            && TryReadFile(cyclePath) is { } cycleReport)
         {
             return cycleReport;
         }
 
         return TryReadFile(Path.Combine(fullRoot, "artifacts", "gates.json"));
     }
+
+    /// <summary>
+    /// Whether the task parsed from <c>REVIEW_RUN</c> is one folder name rather than a path. The header's value is
+    /// not path-checked, so a rooted or parent-relative task would otherwise name a directory outside the scratch root.
+    /// </summary>
+    private static bool IsTaskFolderName(string task) =>
+        task.Length > 0
+        && !Path.IsPathRooted(task)
+        && !task.Contains('/', StringComparison.Ordinal)
+        && !task.Contains('\\', StringComparison.Ordinal)
+        && !string.Equals(task, ".", StringComparison.Ordinal)
+        && !string.Equals(task, "..", StringComparison.Ordinal);
 
     /// <summary>Whether a returned digest's gate report corroborates its claimed status.</summary>
     /// <param name="returnedText">The worker's return text, digest included.</param>
