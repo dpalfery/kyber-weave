@@ -707,7 +707,7 @@
       "file": "src/KyberWeave.Kernel/Processes/ProcessRunner.cs",
       "text": "return Process.Start(startInfo) // nosemgrep",
       "count": 1,
-      "bound": "The one Process.Start in ProcessRunner, inside StartRetryingTextFileBusy, which retries up to five times with a 20-100 ms backoff on ETXTBSY only. Each caller keeps its own bound: ProcessRunner.Run is bounded only when its caller passes a timeout (on expiry the tree is killed and the post-kill wait capped at 5 s); RunInteractive is unbounded by design (user-attended `squad run` session that ends when the user ends it); StdioSession is bounded by its session budget and killed through TryKillTree in Dispose."
+      "bound": "The one Process.Start in ProcessRunner, inside StartRetryingTextFileBusy, which makes up to five attempts (four retries, 20/40/60/80 ms apart, 200 ms in total) when exec fails with ETXTBSY on Linux or macOS, and none on Windows. Each caller keeps its own bound: ProcessRunner.Run is bounded only when its caller passes a timeout (on expiry the tree is killed and the post-kill wait capped at 5 s); RunInteractive is unbounded by design (user-attended `squad run` session that ends when the user ends it); StdioSession is bounded by its session budget and killed through TryKillTree in Dispose."
     },
     {
       "file": "src/KyberWeave.Kernel/Processes/ProcessRunner.cs",

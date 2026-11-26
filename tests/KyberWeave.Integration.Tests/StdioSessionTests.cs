@@ -170,4 +170,97 @@ public sealed class StdioSessionTests
             // No such process: the child is gone.
         }
     }
+
+    /// <summary>
+    /// A file another process still holds open for writing makes exec fail with ETXTBSY. The session retries that
+    /// start, so a file freed within the retry window starts instead of being reported as one that cannot start.
+    /// </summary>
+    /// <remarks>
+    /// This is the race behind the stub server that "could not be started" on Linux CI, made deterministic: a holder
+    /// child opens the stub for writing, says so, and closes it 100 ms later, inside the 200 ms the retries wait.
+    /// </remarks>
+    [Fact]
+    public void StdioSession_ExecutableBrieflyOpenForWriting_StartsOnceItIsFreed()
+    {
+        SkipUnlessLinux();
+        DirectoryInfo directory = Directory.CreateTempSubdirectory("kw-etxtbsy-");
+        try
+        {
+            string stub = WriteExecutable(directory.FullName, "#!/bin/sh\necho started\n");
+            using (StdioSession holder = HoldOpenForWriting(stub, "0.1"))
+            {
+                using StdioSession session = new(stub, [], TimeSpan.FromSeconds(10), TimeProvider.System);
+
+                Assert.Equal("started", session.ReadLine());
+            }
+        }
+        finally
+        {
+            directory.Delete(recursive: true);
+        }
+    }
+
+    /// <summary>
+    /// A file that stays open for writing past every retry still fails with the original ETXTBSY, so the retry never
+    /// hides a start that cannot happen.
+    /// </summary>
+    [Fact]
+    public void StdioSession_ExecutableHeldOpenForWriting_ThrowsTextFileBusy()
+    {
+        SkipUnlessLinux();
+        DirectoryInfo directory = Directory.CreateTempSubdirectory("kw-etxtbsy-");
+        try
+        {
+            string stub = WriteExecutable(directory.FullName, "#!/bin/sh\necho started\n");
+            using StdioSession holder = HoldOpenForWriting(stub, "30");
+
+            System.ComponentModel.Win32Exception failure = Assert.Throws<System.ComponentModel.Win32Exception>(
+                () => new StdioSession(stub, [], TimeSpan.FromSeconds(10), TimeProvider.System));
+
+            Assert.Equal(TextFileBusy, failure.NativeErrorCode);
+        }
+        finally
+        {
+            directory.Delete(recursive: true);
+        }
+    }
+
+    /// <summary>ETXTBSY, the same value on Linux and macOS.</summary>
+    private const int TextFileBusy = 26;
+
+    /// <summary>
+    /// Linux refuses to exec a file open for writing, script or binary. macOS runs a script regardless, so there the
+    /// window these tests force does not exist and the tests would prove nothing.
+    /// </summary>
+    private static void SkipUnlessLinux()
+    {
+        if (!OperatingSystem.IsLinux())
+        {
+            Assert.Skip("Only Linux refuses to exec a script that is open for writing.");
+        }
+    }
+
+    private static string WriteExecutable(string directory, string text)
+    {
+        string path = Path.Combine(directory, "stub");
+        File.WriteAllText(path, text);
+        if (!OperatingSystem.IsWindows())
+        {
+            File.SetUnixFileMode(path, UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute);
+        }
+
+        return path;
+    }
+
+    /// <summary>Starts a child that opens <paramref name="path"/> for writing, then returns once it says it has.</summary>
+    private static StdioSession HoldOpenForWriting(string path, string seconds)
+    {
+        StdioSession holder = new(
+            "/bin/sh",
+            ["-c", "exec 3>>\"$1\"; echo open; sleep \"$2\"", "holder", path, seconds],
+            TimeSpan.FromSeconds(60),
+            TimeProvider.System);
+        Assert.Equal("open", holder.ReadLine());
+        return holder;
+    }
 }

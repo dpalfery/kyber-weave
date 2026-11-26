@@ -302,15 +302,18 @@ public static class ProcessRunner
     private const int TextFileBusyAttempts = 5;
 
     /// <summary>
-    ///     The one place a child process starts: <see cref="Run"/>, <see cref="RunInteractive"/> and
-    ///     <see cref="StdioSession"/> all start through it, retrying briefly when exec fails with ETXTBSY.
+    ///     The one place <see cref="ProcessRunner"/> and <see cref="StdioSession"/> start a child:
+    ///     <see cref="Run"/>, <see cref="RunInteractive"/> and the session all start through it, retrying briefly
+    ///     when exec fails with ETXTBSY on Linux or macOS. Up to five attempts, four retries 20, 40, 60 and 80 ms
+    ///     apart, 200 ms in total.
     /// </summary>
     /// <remarks>
     ///     A file that was just written can still be open for writing in a child another thread forked in the
     ///     moment before its close-on-exec descriptors were closed, and exec refuses a file open for writing. The
     ///     window lasts only until that child execs, so a short retry starts the file once it is free: an
     ///     executable a test stub or an install has just written is not reported as one that cannot start. Any
-    ///     other failure, and ETXTBSY on the last attempt, surfaces unchanged.
+    ///     other failure, ETXTBSY on the last attempt, and every failure on Windows (where 26 is a different Win32
+    ///     error) surfaces unchanged.
     /// </remarks>
     /// <param name="startInfo">The start info, already made safe by the caller.</param>
     /// <exception cref="Win32Exception">The executable could not be started.</exception>
@@ -325,7 +328,8 @@ public static class ProcessRunner
                 return Process.Start(startInfo) // nosemgrep
                        ?? throw new InvalidOperationException("The child process could not be started.");
             }
-            catch (Win32Exception ex) when (ex.NativeErrorCode == TextFileBusyErrorCode && attempt < TextFileBusyAttempts)
+            catch (Win32Exception ex) when (
+                !OperatingSystem.IsWindows() && ex.NativeErrorCode == TextFileBusyErrorCode && attempt < TextFileBusyAttempts)
             {
                 Thread.Sleep(TimeSpan.FromMilliseconds(20 * attempt));
             }
