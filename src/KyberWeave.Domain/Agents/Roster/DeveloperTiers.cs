@@ -39,7 +39,11 @@ public static class DeveloperTiers
     public static IReadOnlyList<string> Difficulties { get; } =
         [EasyDifficulty, MediumDifficulty, HardDifficulty];
 
-    /// <summary>The model profile each difficulty targets, keyed by <see cref="Difficulties"/> and <see cref="Standard"/>.</summary>
+    /// <summary>
+    /// The model profile each tier targets, keyed by <see cref="EasyDifficulty"/>, <see cref="Standard"/> and
+    /// <see cref="HardDifficulty"/>: <c>ModelTargetingRules</c> maps the <see cref="MediumDifficulty"/> rating to
+    /// <see cref="Standard"/> before the lookup.
+    /// </summary>
     public static IReadOnlyDictionary<string, string> Profiles { get; } =
         new Dictionary<string, string>(StringComparer.Ordinal)
         {
