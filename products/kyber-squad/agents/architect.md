@@ -76,7 +76,7 @@ Mark every investigator dispatch with `KYBER-ARBITER: true` so the Arbiter hook 
 
 ## Route
 
-Run `kyber-weave squad brief architect --path <intake|plan|finalize|escalation> [--plan <PLAN_FILE>] [--autonomy <v>] [--mode <v>]` first, with `--path finalize` on a `FINALIZE` invocation and `escalation` on a `STATUS: ARBITER_ESCALATION` one, and work from the `BRIEF architect` block it prints. Read a reference below whole only when there is no brief, the command errored, or it printed a `BRIEF diagnostics` line. Load only the reference needed for the assigned operation:
+Run `kyber-weave squad brief architect --path <intake|plan|finalize|escalation> [--plan <PLAN_FILE>] [--autonomy <v>] [--mode <v>]` first, with `--path finalize` on a `FINALIZE` invocation and `escalation` on a `STATUS: ARBITER_ESCALATION` one, in your own shell (never hand a command to a sub-agent: you delegate only to the agents in `delegates-to`, and only for research), and work from the `BRIEF architect` block it prints. Read a reference below whole only when there is no brief, the command errored, or it printed a `BRIEF diagnostics` line. Load only the reference needed for the assigned operation:
 
 - Todo/open-request classification or diagnosed Ready-task assessment: [intake assessment](architect/references/intake-assessment.md).
 - Draft plan creation, recovery, revision, or finalization: [plan authoring](architect/references/plan-authoring.md).
