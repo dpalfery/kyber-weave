@@ -76,6 +76,38 @@ public sealed class ArchiveCloseoutValidatorTests
         Assert.Contains("C2", FindingText(finding), StringComparison.Ordinal);
     }
 
+    /// <summary>
+    /// C2 fails closed: a status line the vocabulary does not recognise cannot prove the archived work is closed,
+    /// so it fails exactly as a live status word does.
+    /// </summary>
+    [Theory]
+    [InlineData("Approved")]
+    [InlineData("Complet")]
+    public void AnUnrecognisedBodyStatusFailsCloseoutAsC2(string bodyStatus)
+    {
+        string plan = CloseoutCorpus.PlanDocument(bodyStatus: bodyStatus);
+        using DocFixture fixture = WithTarget(DocFixture.CreateInMemory())
+            .Write(PlanPath, plan);
+
+        Diagnostic finding = Assert.Single(
+            Validate(fixture, KyberWeaveConfigDefaults.Product, new ChangedPath(PlanPath, ChangeKind.Added)).Items);
+
+        Assert.Equal(ArchiveCloseoutValidator.MissingCloseoutEvidence, finding.Code);
+        Assert.Contains("C2", FindingText(finding), StringComparison.Ordinal);
+    }
+
+    /// <summary>An archived plan with no body status line is still acceptable: absence is not an unknown word.</summary>
+    [Fact]
+    public void AnArchivedPlanWithNoBodyStatusLinePassesCloseout()
+    {
+        string plan = CloseoutCorpus.PlanDocument()
+            .Replace("**Status:** Complete", string.Empty, StringComparison.Ordinal);
+        using DocFixture fixture = WithTarget(DocFixture.CreateInMemory())
+            .Write(PlanPath, plan);
+
+        Assert.Empty(Validate(fixture, KyberWeaveConfigDefaults.Product, new ChangedPath(PlanPath, ChangeKind.Added)).Items);
+    }
+
     /// <summary>A draft in the archive is not closed work, so its status fails C1.</summary>
     [Fact]
     public void DraftFrontmatterStatusFailsCloseoutAsC1()

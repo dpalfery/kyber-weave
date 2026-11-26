@@ -93,13 +93,32 @@ public static partial class PlanStatus
         return null;
     }
 
+    /// <summary>
+    /// The value written on the body's status line, as written, or null when the body has no status line. A word the
+    /// vocabulary does not recognise is still returned, so a caller that must fail closed can tell it from absence.
+    /// </summary>
+    public static string? ParseBodyStatusLine(string? body)
+    {
+        if (string.IsNullOrEmpty(body))
+            return null;
+
+        foreach (string line in body.Split('\n'))
+        {
+            Match match = StatusLine().Match(line);
+            if (match.Success)
+                return match.Groups["value"].Value.Trim();
+        }
+
+        return null;
+    }
+
     /// <summary>True when the status is <see cref="Ready"/> or <see cref="InProgress"/>.</summary>
     public static bool IsActive(string? status) => Is(status, Ready, InProgress);
 
     /// <summary>True when the status is <see cref="ReviewRequired"/> or <see cref="Blocked"/>.</summary>
     public static bool IsInReview(string? status) => Is(status, ReviewRequired, Blocked);
 
-    /// <summary>True when the status still needs work: any status other than the closed ones.</summary>
+    /// <summary>True when the status is one of <see cref="OpenWords"/>; a word outside the vocabulary is not open.</summary>
     public static bool IsOpen(string? status) => Is(status, [.. OpenWords]);
 
     /// <summary>True when the status is <see cref="Completed"/>, <see cref="Archived"/> or <see cref="Superseded"/>.</summary>
