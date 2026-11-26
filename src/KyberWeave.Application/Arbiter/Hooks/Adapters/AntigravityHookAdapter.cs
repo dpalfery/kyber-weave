@@ -35,7 +35,7 @@ namespace KyberWeave.Arbiter.Hooks.Adapters;
 public sealed class AntigravityHookAdapter : IHarnessHookAdapter
 {
     /// <summary>The harness token this adapter serves.</summary>
-    public const string Token = "antigravity";
+    public const string Token = HarnessRegistry.AntigravityToken;
 
     private const string DispatchTool = "invoke_subagent";
 

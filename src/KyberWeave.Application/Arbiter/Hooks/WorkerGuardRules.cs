@@ -64,13 +64,13 @@ internal static class WorkerGuardRules
     internal const string BudgetExceededStatus = "STATUS: BUDGET_EXCEEDED";
 
     /// <summary>The Copilot CLI harness token.</summary>
-    internal const string CopilotCliHarness = "copilot-cli";
+    internal const string CopilotCliHarness = HarnessRegistry.CopilotCliToken;
 
     /// <summary>The Claude Code harness token.</summary>
-    internal const string ClaudeHarness = "claude";
+    internal const string ClaudeHarness = HarnessRegistry.ClaudeToken;
 
     /// <summary>The Factory Droid harness token.</summary>
-    internal const string FactoryHarness = "factory";
+    internal const string FactoryHarness = HarnessRegistry.FactoryToken;
 
     /// <summary>The tool names a Factory PreToolUse call can carry into the guard.</summary>
     private static readonly HashSet<string> FactoryGuardedTools =

@@ -1,3 +1,4 @@
+using KyberWeave.Arbiter.Hooks;
 using KyberWeave.Cli.Commands.Squad.Infrastructure;
 using KyberWeave.Contracts.Repositories;
 using KyberWeave.Contracts.Services;
@@ -258,8 +259,12 @@ internal sealed class SquadInstallCommand : Command<SquadInstallSettings>
 
                 if (scope == SquadDeploymentScope.Global && (decision.Targets.Contains(SquadTarget.Warp) || decision.Targets.Contains(SquadTarget.ZCode)))
                 {
-                    string targetToken = decision.Targets.Contains(SquadTarget.Warp) ? "warp" : "zcode";
-                    string configPath = targetToken == "warp" ? "~/.warp/.mcp.json" : "~/.zcode/.mcp.json";
+                    string targetToken = decision.Targets.Contains(SquadTarget.Warp)
+                        ? HarnessRegistry.WarpToken
+                        : HarnessRegistry.ZCodeToken;
+                    string configPath = targetToken == HarnessRegistry.WarpToken
+                        ? "~/.warp/.mcp.json"
+                        : "~/.zcode/.mcp.json";
                     _output.Out.WriteLine(RegistrationStepMessage(configPath));
                 }
 

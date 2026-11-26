@@ -43,7 +43,7 @@ namespace KyberWeave.Arbiter.Hooks.Adapters;
 public sealed class FactoryHookAdapter : IHarnessHookAdapter
 {
     /// <summary>The harness token this adapter serves.</summary>
-    public const string Token = "factory";
+    public const string Token = HarnessRegistry.FactoryToken;
 
     private const string DispatchTool = "Task";
 

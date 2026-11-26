@@ -1,3 +1,4 @@
+using KyberWeave.Arbiter.Hooks;
 using KyberWeave.Core.Arbiter;
 using KyberWeave.Core.Squad.Deployment;
 using KyberWeave.Core.Squad.Model;
@@ -65,15 +66,6 @@ public static class ArbiterHookWiring
     private static readonly System.Text.RegularExpressions.Regex CallerPattern =
         new(CallerPatternText, System.Text.RegularExpressions.RegexOptions.CultureInvariant);
 
-    /// <summary>The hooked targets in stable derivation order for <see cref="BuildHooks"/>.</summary>
-    private static readonly IReadOnlyList<SquadTarget> HookedSquadTargets =
-        [SquadTarget.Claude, SquadTarget.Codex, SquadTarget.Copilot, SquadTarget.Cursor, SquadTarget.OpenCode, SquadTarget.Pi,
-         SquadTarget.Kilo, SquadTarget.Antigravity, SquadTarget.Factory, SquadTarget.Devin, SquadTarget.CommandCode];
-
-    /// <summary>The fallback-only targets in stable derivation order for <see cref="FallbackTargets"/>.</summary>
-    private static readonly IReadOnlyList<SquadTarget> FallbackSquadTargets =
-        [SquadTarget.Warp, SquadTarget.ZCode];
-
     /// <summary>The capability profiles whose agents are implementation specialists.</summary>
     private static readonly HashSet<string> GuardedCapabilityProfiles =
         new(StringComparer.Ordinal) { "worker", "publishing-worker" };
@@ -96,7 +88,7 @@ public static class ArbiterHookWiring
     /// is a renderer decision; membership here only means the target is enforced, so
     /// <see cref="TargetDegradations(IEnumerable{SquadTarget}, SquadDeploymentScope)"/> records nothing for it.
     /// </remarks>
-    public static IReadOnlySet<string> HookedTargets { get; } = HookedSquadTargets
+    public static IReadOnlySet<string> HookedTargets { get; } = HarnessRegistry.HookedSquadTargets
         .Select(SquadTargetCatalog.GetToken)
         .ToHashSet(StringComparer.Ordinal);
 
@@ -110,7 +102,7 @@ public static class ArbiterHookWiring
     /// enforcement only begins once the user registers the arbiter server themselves — the
     /// step <see cref="TrustSteps"/> carries for them.
     /// </remarks>
-    public static IReadOnlySet<string> FallbackTargets { get; } = FallbackSquadTargets
+    public static IReadOnlySet<string> FallbackTargets { get; } = HarnessRegistry.FallbackSquadTargets
         .Select(SquadTargetCatalog.GetToken)
         .ToHashSet(StringComparer.Ordinal);
 
@@ -351,7 +343,7 @@ public static class ArbiterHookWiring
             : Dispatchers(source);
 
         List<SquadArbiterHook> hooks = [];
-        foreach (SquadTarget target in HookedSquadTargets)
+        foreach (SquadTarget target in HarnessRegistry.HookedSquadTargets)
         {
             foreach (string caller in callers.Order(StringComparer.Ordinal))
             {
@@ -449,7 +441,7 @@ public static class ArbiterHookWiring
                 return FallbackOnlyReason;
             }
 
-            if (token == "pi")
+            if (token == HarnessRegistry.PiToken)
             {
                 return PartialReason;
             }
@@ -460,12 +452,12 @@ public static class ArbiterHookWiring
             // project configuration, and to defer to the project's own mod where the
             // project enables the Arbiter — the same one-evaluation split the other
             // user-level hooks take.
-            if (token is "opencode" or "kilo")
+            if (token is HarnessRegistry.OpenCodeToken or HarnessRegistry.KiloToken)
             {
                 return DispatchUnconfirmedReason;
             }
 
-            if (token is "copilot-vscode")
+            if (token == HarnessRegistry.CopilotVsCode.Token)
             {
                 return HooksDisabledByHarnessReason;
             }

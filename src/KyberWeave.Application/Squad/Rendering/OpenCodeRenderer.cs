@@ -1,3 +1,4 @@
+using KyberWeave.Arbiter.Hooks;
 using KyberWeave.Core.Configuration;
 using KyberWeave.Core.Squad.Deployment;
 using KyberWeave.Core.Squad.Model;
@@ -339,7 +340,7 @@ public sealed class OpenCodeRenderer : SquadHarnessRenderer
         if (narrowed.Count > 0)
         {
             yield return new SquadDegradationRecord(
-                "opencode",
+                HarnessRegistry.OpenCodeToken,
                 agent.Name,
                 agent.Name,
                 "safety-narrowed",
@@ -373,7 +374,7 @@ public sealed class OpenCodeRenderer : SquadHarnessRenderer
         if (notExpressibleDetails.Count > 0)
         {
             yield return new SquadDegradationRecord(
-                "opencode",
+                HarnessRegistry.OpenCodeToken,
                 agent.Name,
                 agent.Name,
                 "permission-not-expressible",
@@ -391,7 +392,7 @@ public sealed class OpenCodeRenderer : SquadHarnessRenderer
                 : SquadPermissionDecision.Deny;
 
         SquadDegradationRecord? notIsolable = CapabilityDegradations.BuildCapabilityNotIsolable(
-            "opencode",
+            HarnessRegistry.OpenCodeToken,
             agent.Name,
             agent.Name,
             agent.BodyDigest,

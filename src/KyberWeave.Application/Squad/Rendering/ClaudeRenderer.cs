@@ -1,5 +1,6 @@
 using System.Text;
 using System.Text.Json.Nodes;
+using KyberWeave.Arbiter.Hooks;
 using KyberWeave.Core.Configuration;
 using KyberWeave.Core.Squad.Deployment;
 using KyberWeave.Core.Squad.Model;
@@ -219,7 +220,7 @@ public sealed class ClaudeRenderer : SquadHarnessRenderer
         }
 
         context.Blocks.Add(new SquadRenderedBlock(
-            "claude",
+            HarnessRegistry.ClaudeToken,
             "settings.json",
             SquadHookBlockFormat.Claude,
             [
@@ -619,7 +620,7 @@ public sealed class ClaudeRenderer : SquadHarnessRenderer
                   "in the main conversation.";
 
             yield return new SquadDegradationRecord(
-                "claude",
+                HarnessRegistry.ClaudeToken,
                 agent.Name,
                 agent.Name,
                 "role-skill-fallback",
@@ -696,7 +697,7 @@ public sealed class ClaudeRenderer : SquadHarnessRenderer
         if (notExpressibleDetails.Count > 0)
         {
             yield return new SquadDegradationRecord(
-                "claude",
+                HarnessRegistry.ClaudeToken,
                 agent.Name,
                 agent.Name,
                 "permission-not-expressible",
@@ -716,7 +717,7 @@ public sealed class ClaudeRenderer : SquadHarnessRenderer
             : SquadPermissionDecision.Deny;
 
         SquadDegradationRecord? notIsolable = CapabilityDegradations.BuildCapabilityNotIsolable(
-            "claude",
+            HarnessRegistry.ClaudeToken,
             agent.Name,
             agent.Name,
             agent.BodyDigest,
@@ -751,7 +752,7 @@ public sealed class ClaudeRenderer : SquadHarnessRenderer
         if (narrowed.Count > 0)
         {
             yield return new SquadDegradationRecord(
-                "claude",
+                HarnessRegistry.ClaudeToken,
                 agent.Name,
                 agent.Name,
                 "safety-narrowed",
@@ -787,7 +788,7 @@ public sealed class ClaudeRenderer : SquadHarnessRenderer
         if (notExpressibleDetails.Count > 0)
         {
             yield return new SquadDegradationRecord(
-                "claude",
+                HarnessRegistry.ClaudeToken,
                 agent.Name,
                 agent.Name,
                 "permission-not-expressible",
@@ -805,7 +806,7 @@ public sealed class ClaudeRenderer : SquadHarnessRenderer
                 : SquadPermissionDecision.Deny;
 
         SquadDegradationRecord? notIsolable = CapabilityDegradations.BuildCapabilityNotIsolable(
-            "claude",
+            HarnessRegistry.ClaudeToken,
             agent.Name,
             agent.Name,
             agent.BodyDigest,
