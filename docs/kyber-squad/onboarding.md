@@ -1262,7 +1262,7 @@ The `SquadInstanceCatalog` defines the redirection mechanism and support status 
 | `codex` | `codex` | `HomeReplace` | `CODEX_HOME` | `Ready` | Replaces home; `auth.json` linked in file mode; keyring mode per instance. |
 | `copilot` | `copilot` | `HomeReplace` | `COPILOT_HOME` | `Ready` | Replaces entire home; keychain token shared. |
 | `pi` | `pi` | `HomeReplace` | `PI_CODING_AGENT_DIR` | `Ready` | Replaces agent dir; settings, sessions, and auth linked. |
-| `opencode` | `opencode` | `ConfigLayer` | `OPENCODE_CONFIG_DIR` | `SpikePending` | Layers config over global home; override priority pending verification. |
+| `opencode` | `opencode` | `ConfigLayer` | `OPENCODE_CONFIG_DIR` | `SpikePending` | Observed on OpenCode 2.4.1, Darwin 27.3.0 (macOS), 2026-11-25: `OPENCODE_CONFIG_DIR` replaces the config root rather than merging it with `~/.config/opencode`. Credentials still resolve from the data directory, and `XDG_CONFIG_HOME` does the same replacement and does load an agent placed there. Proposal: `PROPOSE: HomeReplace`. The catalog kind stays `ConfigLayer` and the status stays `SpikePending`. |
 | `kilo` | `kilo` | `ConfigLayer` | `KILO_CONFIG_DIR` | `SpikePending` | Layers config over global home; override priority pending verification. |
 | `cursor` | `cursor` | `ConfigLayer` | `CURSOR_CONFIG_DIR` | `SpikePending` | Config layer; CLI config redirection pending verification. |
 | `zcode` | `zcode` | `ConfigLayer` | `ZCODE_STORAGE_DIR` | `SpikePending` | Config layer; `ZCODE_STORAGE_DIR` vs `ZCODE_DATA_BASE_DIR` pending verification. |
@@ -1276,9 +1276,12 @@ The `SquadInstanceCatalog` defines the redirection mechanism and support status 
   Rendered agents exist directly in the instance, while all other top-level directories and files
   from the main home are linked.
 - **`ConfigLayer`**: The harness supports a secondary configuration folder loaded after global config.
-  Only rendered agents reside in the instance folder.
+  Only rendered agents reside in the instance folder. A `SpikePending` row may carry observed
+  behaviour that the proposed kind would change; Kind stays the catalog value until that proposal
+  is accepted.
 - **`Ready`**: Verified and supported for concurrent execution via `squad run`.
 - **`SpikePending`**: Candidate configuration variables identified; awaiting live platform verification.
+  A `SpikePending` row may carry observed behaviour that the proposed kind would change.
   Attempting `squad run` exits 2 with guidance.
 - **`Unsupported`**: Harness cannot isolate configuration per instance without global side effects.
   Attempting `squad run` exits 2 with explanation.
