@@ -118,7 +118,7 @@ public sealed class DocsSchemaGate(
                     ArchiveCloseoutValidator.MissingCloseoutEvidence,
                     Severity.Error,
                     $"Archive closeout scope is unknown (C0): {refusal}",
-                    "archive",
+                    OntologyConfig.ArchiveSegment,
                     Hint: "Name a git ref such as HEAD or origin/main."));
                 return report;
             }

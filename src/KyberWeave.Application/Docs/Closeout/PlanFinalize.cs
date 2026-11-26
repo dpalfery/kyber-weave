@@ -384,7 +384,7 @@ public sealed partial class PlanFinalize
             }
             catch (JsonException)
             {
-                file = PlanTaskFileFormat.Deserialize("tasks.yml", taskFileText);
+                file = PlanTaskFileFormat.Deserialize(PlanTaskFileRules.SpecTaskFileName, taskFileText);
             }
             if (file is not { Tasks: { } tasks }
                 || (file.SchemaVersion != PlanTaskFileRules.SchemaVersion

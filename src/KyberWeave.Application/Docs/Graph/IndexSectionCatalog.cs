@@ -1,4 +1,5 @@
 using System.Globalization;
+using KyberWeave.Core.Configuration;
 
 namespace KyberWeave.Core.Docs.Graph;
 
@@ -11,13 +12,13 @@ internal static class IndexSectionCatalog
 
     private static readonly Entry[] Entries =
     [
-        new("plans/README.md", "Active Plans"),
-        new("plans/README.md", "Archived Plans"),
-        new("archive/plans/README.md", "Archived Plans"),
-        new("adr/README.md", "Inventory"),
-        new("todo/README.md", "Todo inventory"),
+        new($"{DocsLayout.Plans}/README.md", "Active Plans"),
+        new($"{DocsLayout.Plans}/README.md", "Archived Plans"),
+        new($"{OntologyConfig.ArchiveSegment}/{DocsLayout.Plans}/README.md", "Archived Plans"),
+        new($"{DocsLayout.Adr}/README.md", "Inventory"),
+        new($"{DocsLayout.Todos}/README.md", "Todo inventory"),
         new("kyber-squad/skill-resource-dispositions.md", "Policy-line ledger"),
-        new("reference/README.md", "Inventory")
+        new($"{DocsLayout.Reference}/README.md", "Inventory")
     ];
 
     internal static bool IsIndexSection(string relativePath, string? sectionHeading)
