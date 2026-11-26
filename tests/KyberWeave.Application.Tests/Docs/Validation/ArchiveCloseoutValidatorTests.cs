@@ -77,6 +77,23 @@ public sealed class ArchiveCloseoutValidatorTests
     }
 
     /// <summary>
+    /// The archive procedure writes a closed status followed by prose. Only the leading word has to be
+    /// closed; the rest of the line describes the closeout, not a live status.
+    /// </summary>
+    [Theory]
+    [InlineData("Superseded and archived")]
+    [InlineData("Archived after implementation")]
+    [InlineData("Archived, 2026-11-26")]
+    public void AClosedBodyStatusFollowedByProsePassesCloseout(string bodyStatus)
+    {
+        string plan = CloseoutCorpus.PlanDocument(bodyStatus: bodyStatus);
+        using DocFixture fixture = WithTarget(DocFixture.CreateInMemory())
+            .Write(PlanPath, plan);
+
+        Assert.Empty(Validate(fixture, KyberWeaveConfigDefaults.Product, new ChangedPath(PlanPath, ChangeKind.Added)).Items);
+    }
+
+    /// <summary>
     /// C2 fails closed: a status line the vocabulary does not recognise cannot prove the archived work is closed,
     /// so it fails exactly as a live status word does.
     /// </summary>

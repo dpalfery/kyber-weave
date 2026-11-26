@@ -70,6 +70,35 @@ public static partial class PlanStatus
     }
 
     /// <summary>
+    /// The canonical status the value starts with as a whole word, or null when its first word names no
+    /// status. A body status line may carry a closed word followed by prose ("Superseded and archived"), so a
+    /// caller reading one matches the leading word rather than the whole value.
+    /// </summary>
+    public static string? ParseLeading(string? value)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+            return null;
+
+        string text = value.Trim().Trim('*', '_', '`', ' ');
+        string? status = null;
+        int longest = 0;
+        foreach ((string key, string canonical) in Canonical)
+        {
+            string[] spellings = [key, key.Replace(' ', '-')];
+            foreach (string spelling in spellings)
+            {
+                if (spelling.Length > longest && StartsWithWord(text, spelling))
+                {
+                    longest = spelling.Length;
+                    status = canonical;
+                }
+            }
+        }
+
+        return status;
+    }
+
+    /// <summary>
     /// The canonical status the document body declares on its status line, or null when it has none.
     /// Reads only a line whose label is <c>**Status:**</c>, <c>**Status**:</c> or <c>**Status:</c>, so a
     /// status word quoted anywhere else in the body is not mistaken for the plan's own.
@@ -150,6 +179,17 @@ public static partial class PlanStatus
 
     private static string Key(string value) =>
         string.Join(' ', value.Split([' ', '\t', '-'], StringSplitOptions.RemoveEmptyEntries)).ToUpperInvariant();
+
+    private static bool StartsWithWord(string text, string word)
+    {
+        if (text.Length < word.Length
+            || !text.AsSpan(0, word.Length).Equals(word, StringComparison.OrdinalIgnoreCase))
+        {
+            return false;
+        }
+
+        return text.Length == word.Length || (!char.IsLetterOrDigit(text[word.Length]) && text[word.Length] != '-');
+    }
 
     private static string Pattern(IEnumerable<string> words) =>
         string.Join("|", words.Select(word => string.Join("[ -]+", word.Split(' ').Select(Regex.Escape))));

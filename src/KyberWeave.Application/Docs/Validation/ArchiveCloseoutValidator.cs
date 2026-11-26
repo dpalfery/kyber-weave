@@ -415,7 +415,7 @@ public sealed partial class ArchiveCloseoutValidator
         if (written is null)
             return null;
 
-        string? bodyStatus = PlanStatus.Parse(written);
+        string? bodyStatus = PlanStatus.Parse(written) ?? PlanStatus.ParseLeading(written);
         if (PlanStatus.IsClosed(bodyStatus))
             return null;
 
