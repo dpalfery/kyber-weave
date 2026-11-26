@@ -38,11 +38,7 @@ namespace KyberWeave.Arbiter.Hooks;
 /// </remarks>
 public sealed class ArbiterHookDecisionEngine : IContextualHookDecisionEngine, IBackgroundDispatchEngine, IArbiterProviderSource, ILostReturnRecovery
 {
-    private const string ModelTrigger = "delegate.model";
-    private const string TriageShortcutTrigger = "triage.shortcut";
-    private const string IntakeShortcutTrigger = "intake.shortcut";
-    private const string DocsImpactShortcutTrigger = "docs-impact.shortcut";
-    private const string IntakeMarkerPrefix = "INTAKE:";
+    private const string IntakeMarkerPrefix = DispatchHeaders.Intake + ":";
     private const string ModelTargetingOff = "off";
 
     private readonly Func<KyberWeaveConfig, IArbiterProvider> _providerFactory;
@@ -388,11 +384,11 @@ public sealed class ArbiterHookDecisionEngine : IContextualHookDecisionEngine, I
         }
 
         StringBuilder block = new();
-        AppendHeader(block, "PLAN_FILE", headers.PlanFile);
-        AppendHeader(block, "TASK", headers.Task);
-        AppendHeader(block, "LENS", headers.Lens);
-        AppendHeader(block, "REFUTE", headers.Refute);
-        AppendHeader(block, "TECHNOLOGY", headers.Technology);
+        AppendHeader(block, DispatchHeaders.PlanFile, headers.PlanFile);
+        AppendHeader(block, DispatchHeaders.Task, headers.Task);
+        AppendHeader(block, DispatchHeaders.Lens, headers.Lens);
+        AppendHeader(block, DispatchHeaders.Refute, headers.Refute);
+        AppendHeader(block, DispatchHeaders.Technology, headers.Technology);
         return block.Length == 0 ? prompt : block.Append('\n').Append(prompt).ToString();
     }
 
@@ -960,7 +956,7 @@ public sealed class ArbiterHookDecisionEngine : IContextualHookDecisionEngine, I
     /// <summary>The plan a dispatch names: its routing header, else the <c>PLAN_FILE</c> line of an escalation envelope.</summary>
     private static string? PlanFileFor(string prompt)
     {
-        if (HeaderBlock.Parse(prompt).RawValues.TryGetValue("PLAN_FILE", out string? named)
+        if (HeaderBlock.Parse(prompt).RawValues.TryGetValue(DispatchHeaders.PlanFile, out string? named)
             && !string.IsNullOrWhiteSpace(named))
         {
             return named.Trim();
@@ -1154,17 +1150,17 @@ public sealed class ArbiterHookDecisionEngine : IContextualHookDecisionEngine, I
     /// </summary>
     private static string? SubstituteDigestFor(ArbiterDecisionRecord answered, string prompt)
     {
-        if (string.Equals(answered.Trigger, TriageShortcutTrigger, StringComparison.Ordinal))
+        if (string.Equals(answered.Trigger, ArbiterTriggers.TriageShortcut, StringComparison.Ordinal))
         {
             return SubstituteDigests.Triage(answered.Id);
         }
 
-        if (string.Equals(answered.Trigger, DocsImpactShortcutTrigger, StringComparison.Ordinal))
+        if (string.Equals(answered.Trigger, ArbiterTriggers.DocsImpactShortcut, StringComparison.Ordinal))
         {
             return SubstituteDigests.DocsImpact(answered.Id);
         }
 
-        if (!string.Equals(answered.Trigger, IntakeShortcutTrigger, StringComparison.Ordinal))
+        if (!string.Equals(answered.Trigger, ArbiterTriggers.IntakeShortcut, StringComparison.Ordinal))
         {
             return null;
         }
@@ -1196,7 +1192,7 @@ public sealed class ArbiterHookDecisionEngine : IContextualHookDecisionEngine, I
     /// </summary>
     private static ArbiterModelBlock? ModelBlockFor(IReadOnlyList<ArbiterDecisionRecord> decisions, string ledgerId) =>
         decisions.LastOrDefault(decision => string.Equals(decision.LedgerId, ledgerId, StringComparison.Ordinal)
-            && string.Equals(decision.Trigger, ModelTrigger, StringComparison.Ordinal))?.Model;
+            && string.Equals(decision.Trigger, ArbiterTriggers.DelegateModel, StringComparison.Ordinal))?.Model;
 
     private static string RenderReason(
         ArbiterDecisionRecord record,
@@ -1210,7 +1206,7 @@ public sealed class ArbiterHookDecisionEngine : IContextualHookDecisionEngine, I
 
         if (string.Equals(record.Outcome, RuleEffects.Skip, StringComparison.Ordinal))
         {
-            headers.TryGetValue("LENS", out string? lens);
+            headers.TryGetValue(DispatchHeaders.Lens, out string? lens);
             return new ArbiterSkipNote(
                 lens ?? "unknown",
                 RuleIdsOf(record),
@@ -1220,7 +1216,7 @@ public sealed class ArbiterHookDecisionEngine : IContextualHookDecisionEngine, I
 
         if (string.Equals(record.Outcome, RuleEffects.Verify, StringComparison.Ordinal))
         {
-            headers.TryGetValue("REFUTE", out string? refute);
+            headers.TryGetValue(DispatchHeaders.Refute, out string? refute);
             return new ArbiterVerifiedNote(
                 refute ?? "unknown",
                 RuleIdsOf(record),

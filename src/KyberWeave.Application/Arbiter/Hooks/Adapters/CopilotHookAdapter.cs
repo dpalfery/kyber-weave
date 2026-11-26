@@ -747,7 +747,7 @@ public sealed partial class CopilotHookAdapter : IHarnessHookAdapter
         // absent, so the rules answer undecidable. An unmarked one passes through
         // untouched before configuration loads.
         string? prompt = GetNodeString(args, "prompt");
-        return prompt is null || !HeaderBlock.Parse(prompt).Headers.ContainsKey("KYBER-ARBITER");
+        return prompt is null || !HeaderBlock.Parse(prompt).Headers.ContainsKey(DispatchHeaders.Marker);
     }
 
     private enum CopilotSchema

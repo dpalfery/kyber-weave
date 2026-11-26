@@ -113,7 +113,7 @@ public static class ArbiterLedgerQueries
                 && notDispatched?.Contains(e.Id) != true
                 && (session is null || string.Equals(e.Session, session, StringComparison.Ordinal))
                 && run?.Includes(e) != false
-                && string.Equals(e.Trigger, "delegate", StringComparison.Ordinal))
+                && string.Equals(e.Trigger, ArbiterTriggers.Delegate, StringComparison.Ordinal))
             .SelectMany(e => e.TaskFiles ?? [])
             .Distinct(StringComparer.Ordinal)
             .OrderBy(path => path, StringComparer.Ordinal)];
@@ -196,7 +196,7 @@ public static class ArbiterLedgerQueries
     /// <summary>How long a dispatch with no return still counts as in flight for <see cref="ConcurrentWriters"/>.</summary>
     public static TimeSpan UnreturnedDispatchHorizon { get; } = TimeSpan.FromHours(4);
 
-    private static readonly HashSet<string> WriterTriggers = new(StringComparer.Ordinal) { "delegate", "delegate.planner" };
+    private static readonly HashSet<string> WriterTriggers = new(StringComparer.Ordinal) { ArbiterTriggers.Delegate, ArbiterTriggers.DelegatePlanner };
 
     /// <summary>
     /// The headers of the dispatch a return answers: the return's own, or else its paired pre event's, because a
@@ -332,7 +332,7 @@ public static class ArbiterLedgerQueries
         }
 
         string[] lines = prompt.Replace("\r\n", "\n", StringComparison.Ordinal).Split('\n');
-        if (!string.Equals(lines[0].Trim(), "STATUS: ARBITER_ESCALATION", StringComparison.Ordinal))
+        if (!string.Equals(lines[0].Trim(), ReturnStatus.EscalationLine, StringComparison.Ordinal))
         {
             return null;
         }
@@ -363,7 +363,7 @@ public static class ArbiterLedgerQueries
     {
         List<string> tasks = [];
         if (task is not null
-            && (string.Equals(e.Returns?.TaskReview, "PASS", StringComparison.Ordinal) || IsPassingDigest(e.Returns)))
+            && (string.Equals(e.Returns?.TaskReview, ReturnStatus.Pass, StringComparison.Ordinal) || IsPassingDigest(e.Returns)))
         {
             tasks.Add(task);
         }
@@ -372,7 +372,7 @@ public static class ArbiterLedgerQueries
         return tasks;
     }
 
-    private static readonly HashSet<string> FinishedStatuses = new(StringComparer.Ordinal) { "PASS", "READY_FOR_REVIEW" };
+    private static readonly HashSet<string> FinishedStatuses = new(StringComparer.Ordinal) { ReturnStatus.Pass, ReturnStatus.ReadyForReview };
 
     /// <summary>
     /// Whether a worker's completion digest reports a finished task: its own task gate passed and its status is
@@ -380,8 +380,8 @@ public static class ArbiterLedgerQueries
     /// </summary>
     private static bool IsPassingDigest(ArbiterReturnMarkers? returns) =>
         returns is not null
-        && string.Equals(returns.TaskGate, "PASS", StringComparison.Ordinal)
-        && !string.Equals(returns.TaskReview, "FAIL", StringComparison.Ordinal)
+        && string.Equals(returns.TaskGate, ReturnStatus.Pass, StringComparison.Ordinal)
+        && !string.Equals(returns.TaskReview, ReturnStatus.Fail, StringComparison.Ordinal)
         && FinishedStatuses.Contains(returns.PlannerStatus ?? string.Empty);
 
     /// <summary>

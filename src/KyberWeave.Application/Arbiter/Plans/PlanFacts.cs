@@ -59,11 +59,11 @@ public sealed partial class PlanFacts(IPlanFileResolver planPaths, IFileSystem f
         ArgumentNullException.ThrowIfNull(classification);
         ArgumentNullException.ThrowIfNull(repositoryRoot);
 
-        string? planFile = HeaderValue(classification, "PLAN_FILE");
-        string? taskValue = HeaderValue(classification, "TASK");
+        string? planFile = HeaderValue(classification, DispatchHeaders.PlanFile);
+        string? taskValue = HeaderValue(classification, DispatchHeaders.Task);
         // A dispatch that wrote any routing header is judged on its headers; one that wrote none is identified from
         // machine facts instead (ADR 0082).
-        bool marked = classification.Headers.ContainsKey("KYBER-ARBITER") || classification.RawHeaders.ContainsKey("KYBER-ARBITER");
+        bool marked = classification.Headers.ContainsKey(DispatchHeaders.Marker) || classification.RawHeaders.ContainsKey(DispatchHeaders.Marker);
         bool machine = planFile is null && taskValue is null && !marked && IsDelegation(classification.Trigger);
         if (IsDelegation(classification.Trigger))
         {
@@ -152,8 +152,8 @@ public sealed partial class PlanFacts(IPlanFileResolver planPaths, IFileSystem f
     }
 
     private static bool IsDelegation(string? trigger) =>
-        string.Equals(trigger, "delegate", StringComparison.Ordinal)
-        || string.Equals(trigger, "delegate.returned", StringComparison.Ordinal);
+        string.Equals(trigger, ArbiterTriggers.Delegate, StringComparison.Ordinal)
+        || string.Equals(trigger, ArbiterTriggers.DelegateReturned, StringComparison.Ordinal);
 
     /// <summary>
     /// The one Ready or In-progress plan directly in a planning folder of <paramref name="repositoryRoot"/>, or a

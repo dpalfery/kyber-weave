@@ -5,6 +5,7 @@ using System.Text;
 using KyberWeave.Cli.Commands.Squad.Infrastructure;
 using KyberWeave.Contracts.Repositories;
 using KyberWeave.Contracts.Services;
+using KyberWeave.Core.Arbiter;
 using KyberWeave.Core.Processes;
 using KyberWeave.Domain.Doctor;
 
@@ -21,9 +22,6 @@ public sealed class ToolingCheckService(
     IBoundedProcessExecutor process,
     IProcessEnvironment environment) : IToolingCheckService
 {
-    /// <summary>The whole line a caller routes on when the check says stop.</summary>
-    public const string ToolFailureLine = "STATUS: TOOL_FAILURE";
-
     private readonly string _repositoryRoot = repositoryRoot ?? throw new ArgumentNullException(nameof(repositoryRoot));
     private readonly IDocsQueryService _query = query ?? throw new ArgumentNullException(nameof(query));
     private readonly IRepositoryDoctor _doctor = doctor ?? throw new ArgumentNullException(nameof(doctor));
@@ -53,7 +51,7 @@ public sealed class ToolingCheckService(
         catch (Exception exception) when (exception is not OperationCanceledException)
         {
             // The check itself could not run: the caller still gets the shape it reads, with the reason and a stop.
-            return string.Join('\n', provenance, "result: failed", $"FAIL doctor: {OneLine(exception.Message)}", ToolFailureLine, "EXIT: 1");
+            return string.Join('\n', provenance, "result: failed", $"FAIL doctor: {OneLine(exception.Message)}", ReturnStatus.ToolFailureLine, "EXIT: 1");
         }
 
         // The doctor has already applied stop-on-tool-failure to its exit code, so the code alone decides the token.
@@ -64,7 +62,7 @@ public sealed class ToolingCheckService(
         foreach (string line in DoctorReportLines.For(report))
             sb.AppendLine(line);
         if (stop)
-            sb.AppendLine(ToolFailureLine);
+            sb.AppendLine(ReturnStatus.ToolFailureLine);
         sb.Append(CultureInfo.InvariantCulture, $"EXIT: {report.ExitCode}");
         return sb.ToString();
     }
