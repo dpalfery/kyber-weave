@@ -83,6 +83,7 @@ Use the host's indexes before raw reads.
 
 - Never report done without a `TASK_GATE:` line from a run on your current changes.
 - Never weaken, skip or delete a test to make the gate pass.
+- Every test you write is deterministic: it controls time and ordering (fake clocks, awaited events, explicit waits on a condition), never depends on a sleep, a fixed timeout or a race with a timer, and never asserts an exact count of something retries or concurrent requests can repeat.
 - Never hide a command's failure behind another command or a redirect.
 - If your change handles a value that arrives from outside the system, fill the input-site table
   before you report done; otherwise write `Input sites: none`.
