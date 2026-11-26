@@ -1,4 +1,5 @@
 using System.Text.RegularExpressions;
+using KyberWeave.Core.Review;
 
 namespace KyberWeave.Core.Arbiter.Facts;
 
@@ -31,25 +32,9 @@ public sealed partial class HeaderBlock
         "FAILED_ATTEMPTS",
     };
 
-    /// <summary>The fifteen lens names a <c>LENS</c> header or <c>REFUTE</c> lens may name.</summary>
-    public static IReadOnlySet<string> LensNames { get; } = new HashSet<string>(StringComparer.Ordinal)
-    {
-        "authz-tenancy",
-        "blast-radius-revertibility",
-        "correctness",
-        "dependency-supply-chain",
-        "di-composition",
-        "duplicate-implementation",
-        "infra-workflow",
-        "intent-alignment",
-        "model-placement",
-        "performance",
-        "prior-art",
-        "security",
-        "static-analysis-triage",
-        "supportability",
-        "test-adequacy",
-    };
+    /// <summary>The lens names a <c>LENS</c> header or <c>REFUTE</c> lens may name: the review lens catalogue, so a new lens is routable the day it is added.</summary>
+    public static IReadOnlySet<string> LensNames { get; } =
+        new HashSet<string>(ReviewLensCatalogue.Names, StringComparer.Ordinal);
 
     /// <summary>The valid headers, in prompt order.</summary>
     public IReadOnlyDictionary<string, string> Headers { get; }
