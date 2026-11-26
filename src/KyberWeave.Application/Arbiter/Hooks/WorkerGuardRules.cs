@@ -28,7 +28,7 @@ internal static class WorkerGuardRules
     internal const string NoProcessCallMarker = "n";
 
     /// <summary>The trigger a sub-agent's own command call raises, so a technology's rules can allow-list its forms.</summary>
-    internal const string CommandTrigger = "worker.command";
+    internal const string CommandTrigger = ArbiterTriggers.WorkerCommand;
 
     /// <summary>The fact holding the command as the harness reported it.</summary>
     internal const string CommandTextFact = "command.text";

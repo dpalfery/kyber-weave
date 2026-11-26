@@ -152,8 +152,8 @@ public sealed partial class PlanFacts(IPlanFileResolver planPaths, IFileSystem f
     }
 
     private static bool IsDelegation(string? trigger) =>
-        string.Equals(trigger, "delegate", StringComparison.Ordinal)
-        || string.Equals(trigger, "delegate.returned", StringComparison.Ordinal);
+        string.Equals(trigger, ArbiterTriggers.Delegate, StringComparison.Ordinal)
+        || string.Equals(trigger, ArbiterTriggers.DelegateReturned, StringComparison.Ordinal);
 
     /// <summary>
     /// The one Ready or In-progress plan directly in a planning folder of <paramref name="repositoryRoot"/>, or a

@@ -13,7 +13,7 @@ namespace KyberWeave.Arbiter.Hooks;
 internal static class AutonomousPlanNudge
 {
     /// <summary>The trigger of a planner dispatch's return.</summary>
-    internal const string Trigger = "delegate.planner.returned";
+    internal const string Trigger = ArbiterTriggers.DelegatePlannerReturned;
 
     /// <summary>The note, word for word.</summary>
     internal const string Note =

@@ -35,8 +35,6 @@ public sealed class ArbiterEvaluator : IArbiterEvaluator
     /// <summary>The hook error code every evaluator failure carries.</summary>
     public const string HookErrorCode = "KW-ARB-HOOK-001";
 
-    private const string ModelTargetTrigger = "delegate.model";
-
     private readonly IArbiterProvider _provider;
     private readonly Func<Uri, string?> _keyResolver;
     private readonly IArbiterLedger _ledger;
@@ -286,7 +284,7 @@ public sealed class ArbiterEvaluator : IArbiterEvaluator
         // The review's REVIEW_RUN names the store its findings sit in. A lens return's first finding is the
         // one the nitpick filter reads; a refutation reads whether the filter dropped the finding it refutes.
         string? reviewRun = HeaderBlock.Parse(prompt).Headers.TryGetValue(DispatchHeaders.ReviewRun, out string? run) ? run : null;
-        IReadOnlyList<ReturnedFinding> returned = string.Equals(trigger, "lens.returned", StringComparison.Ordinal)
+        IReadOnlyList<ReturnedFinding> returned = string.Equals(trigger, ArbiterTriggers.LensReturned, StringComparison.Ordinal)
             ? ReturnedFinding.ParseAll(ev.ToolOutput)
             : [];
         // Each finding is judged on its own bag: the static facts plus that finding's own id, text and severity.
@@ -300,7 +298,7 @@ public sealed class ArbiterEvaluator : IArbiterEvaluator
         // A refutation names its finding as <lens>/<slug>; the store and the notices carry the bare slug.
         string? refutedSlug = null;
         if (reviewRun is not null
-            && string.Equals(trigger, "refute.spawn", StringComparison.Ordinal)
+            && string.Equals(trigger, ArbiterTriggers.RefuteSpawn, StringComparison.Ordinal)
             && facts.TryGet("finding.id", out ArbiterFact? refuted)
             && refuted.Value is string refutedId)
         {
@@ -420,8 +418,8 @@ public sealed class ArbiterEvaluator : IArbiterEvaluator
         // Log-only notes the record carries: a missing review run, and a return's findings past the question budget.
         List<ArbiterDecisionRule> notes = [];
         string neutralOfTrigger = ArbiterTriggerFamilies.NeutralEffect(ArbiterTriggerFamilies.ForTrigger(trigger));
-        bool lensDispatch = string.Equals(trigger, "lens.returned", StringComparison.Ordinal)
-            || string.Equals(trigger, "lens.spawn", StringComparison.Ordinal);
+        bool lensDispatch = string.Equals(trigger, ArbiterTriggers.LensReturned, StringComparison.Ordinal)
+            || string.Equals(trigger, ArbiterTriggers.LensSpawn, StringComparison.Ordinal);
         if (lensDispatch && reviewRun is null)
         {
             notes.Add(NoteRow("review-run", neutralOfTrigger, ReviewRunMissingNote));
@@ -451,7 +449,7 @@ public sealed class ArbiterEvaluator : IArbiterEvaluator
         // A worker's return keeps its report tail beside the plan, so a later dispatch's model question can read
         // what the worker said rather than only the markers the ledger parsed. Never the ledger: it holds no text.
         if (!effective.DryRun
-            && string.Equals(trigger, "delegate.returned", StringComparison.Ordinal)
+            && string.Equals(trigger, ArbiterTriggers.DelegateReturned, StringComparison.Ordinal)
             && TextExcerpts.ReturnTail(ev.ToolOutput, ReturnTailChars) is { } tail
             && _ledger.DispatchHeadersFor(ledgerId) is { PlanFile: { } returnPlan, Task: { } returnTask })
         {
@@ -463,7 +461,7 @@ public sealed class ArbiterEvaluator : IArbiterEvaluator
         // A refuter's return records its verdict against the finding its REFUTE header names, keyed by the slug.
         // A return that states no recognised verdict records unknown; it never drops the finding it refutes.
         if (!effective.DryRun && reviewRun is not null
-            && string.Equals(trigger, "refute.returned", StringComparison.Ordinal)
+            && string.Equals(trigger, ArbiterTriggers.RefuteReturned, StringComparison.Ordinal)
             && HeaderBlock.Parse(prompt).Headers.TryGetValue(DispatchHeaders.Refute, out string? refuteHeader))
         {
             await ReviewStore(config)
@@ -1105,7 +1103,7 @@ public sealed class ArbiterEvaluator : IArbiterEvaluator
 
         RecordNoCandidates(plan, rules, effects);
         string outcome = CombineGating(plan.Family, effects);
-        ArbiterModelBlock? model = string.Equals(plan.Trigger, ModelTargetTrigger, StringComparison.Ordinal)
+        ArbiterModelBlock? model = string.Equals(plan.Trigger, ArbiterTriggers.DelegateModel, StringComparison.Ordinal)
             ? ModelTargetResolver.Resolve(
                 rules, facts, targeting, table,
                 ev with { RenderedModelToken = RenderedTokenOf(ev, classification.Target, table) },
@@ -1448,7 +1446,7 @@ public sealed class ArbiterEvaluator : IArbiterEvaluator
             Returns = phase == ArbiterLedgerPhases.Post
                 ? ReturnMarkerParser.Parse(
                     ev.ToolOutput,
-                    readAttestations: string.Equals(first.Trigger, "delegate.planner.returned", StringComparison.Ordinal)
+                    readAttestations: string.Equals(first.Trigger, ArbiterTriggers.DelegatePlannerReturned, StringComparison.Ordinal)
                         || string.Equals(first.TargetClass, "planner", StringComparison.Ordinal))
                 : null,
         };
@@ -1463,7 +1461,7 @@ public sealed class ArbiterEvaluator : IArbiterEvaluator
     private IReadOnlyList<string>? TaskFilesFor(ArbiterEvent ev, TriggerClassification first)
     {
         if (MapPhase(ev) != ArbiterLedgerPhases.Pre
-            || !string.Equals(first.Trigger, "delegate", StringComparison.Ordinal))
+            || !string.Equals(first.Trigger, ArbiterTriggers.Delegate, StringComparison.Ordinal))
         {
             return null;
         }
@@ -1520,7 +1518,7 @@ public sealed class ArbiterEvaluator : IArbiterEvaluator
         string phase,
         ArbiterModelTargets? table)
     {
-        if (phase != ArbiterLedgerPhases.Pre || !string.Equals(first.Trigger, "delegate", StringComparison.Ordinal))
+        if (phase != ArbiterLedgerPhases.Pre || !string.Equals(first.Trigger, ArbiterTriggers.Delegate, StringComparison.Ordinal))
         {
             return (null, null, null);
         }

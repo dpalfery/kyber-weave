@@ -421,9 +421,9 @@ internal sealed class HookGitFacts(
     }
 
     private static bool IsDispatchTriggerWithReturn(string? trigger) =>
-        string.Equals(trigger, "delegate", StringComparison.Ordinal)
-        || string.Equals(trigger, "delegate.planner", StringComparison.Ordinal)
-        || string.Equals(trigger, "investigate", StringComparison.Ordinal);
+        string.Equals(trigger, ArbiterTriggers.Delegate, StringComparison.Ordinal)
+        || string.Equals(trigger, ArbiterTriggers.DelegatePlanner, StringComparison.Ordinal)
+        || string.Equals(trigger, ArbiterTriggers.Investigate, StringComparison.Ordinal);
 
     private string ResolveArbiterDirectory(string cwd) =>
         !string.IsNullOrWhiteSpace(arbiterDirectory)

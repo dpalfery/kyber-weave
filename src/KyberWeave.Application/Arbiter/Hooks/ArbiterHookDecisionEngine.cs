@@ -38,10 +38,6 @@ namespace KyberWeave.Arbiter.Hooks;
 /// </remarks>
 public sealed class ArbiterHookDecisionEngine : IContextualHookDecisionEngine, IBackgroundDispatchEngine, IArbiterProviderSource, ILostReturnRecovery
 {
-    private const string ModelTrigger = "delegate.model";
-    private const string TriageShortcutTrigger = "triage.shortcut";
-    private const string IntakeShortcutTrigger = "intake.shortcut";
-    private const string DocsImpactShortcutTrigger = "docs-impact.shortcut";
     private const string IntakeMarkerPrefix = "INTAKE:";
     private const string ModelTargetingOff = "off";
 
@@ -1154,17 +1150,17 @@ public sealed class ArbiterHookDecisionEngine : IContextualHookDecisionEngine, I
     /// </summary>
     private static string? SubstituteDigestFor(ArbiterDecisionRecord answered, string prompt)
     {
-        if (string.Equals(answered.Trigger, TriageShortcutTrigger, StringComparison.Ordinal))
+        if (string.Equals(answered.Trigger, ArbiterTriggers.TriageShortcut, StringComparison.Ordinal))
         {
             return SubstituteDigests.Triage(answered.Id);
         }
 
-        if (string.Equals(answered.Trigger, DocsImpactShortcutTrigger, StringComparison.Ordinal))
+        if (string.Equals(answered.Trigger, ArbiterTriggers.DocsImpactShortcut, StringComparison.Ordinal))
         {
             return SubstituteDigests.DocsImpact(answered.Id);
         }
 
-        if (!string.Equals(answered.Trigger, IntakeShortcutTrigger, StringComparison.Ordinal))
+        if (!string.Equals(answered.Trigger, ArbiterTriggers.IntakeShortcut, StringComparison.Ordinal))
         {
             return null;
         }
@@ -1196,7 +1192,7 @@ public sealed class ArbiterHookDecisionEngine : IContextualHookDecisionEngine, I
     /// </summary>
     private static ArbiterModelBlock? ModelBlockFor(IReadOnlyList<ArbiterDecisionRecord> decisions, string ledgerId) =>
         decisions.LastOrDefault(decision => string.Equals(decision.LedgerId, ledgerId, StringComparison.Ordinal)
-            && string.Equals(decision.Trigger, ModelTrigger, StringComparison.Ordinal))?.Model;
+            && string.Equals(decision.Trigger, ArbiterTriggers.DelegateModel, StringComparison.Ordinal))?.Model;
 
     private static string RenderReason(
         ArbiterDecisionRecord record,

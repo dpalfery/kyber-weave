@@ -113,7 +113,7 @@ public static class ArbiterLedgerQueries
                 && notDispatched?.Contains(e.Id) != true
                 && (session is null || string.Equals(e.Session, session, StringComparison.Ordinal))
                 && run?.Includes(e) != false
-                && string.Equals(e.Trigger, "delegate", StringComparison.Ordinal))
+                && string.Equals(e.Trigger, ArbiterTriggers.Delegate, StringComparison.Ordinal))
             .SelectMany(e => e.TaskFiles ?? [])
             .Distinct(StringComparer.Ordinal)
             .OrderBy(path => path, StringComparer.Ordinal)];
@@ -196,7 +196,7 @@ public static class ArbiterLedgerQueries
     /// <summary>How long a dispatch with no return still counts as in flight for <see cref="ConcurrentWriters"/>.</summary>
     public static TimeSpan UnreturnedDispatchHorizon { get; } = TimeSpan.FromHours(4);
 
-    private static readonly HashSet<string> WriterTriggers = new(StringComparer.Ordinal) { "delegate", "delegate.planner" };
+    private static readonly HashSet<string> WriterTriggers = new(StringComparer.Ordinal) { ArbiterTriggers.Delegate, ArbiterTriggers.DelegatePlanner };
 
     /// <summary>
     /// The headers of the dispatch a return answers: the return's own, or else its paired pre event's, because a

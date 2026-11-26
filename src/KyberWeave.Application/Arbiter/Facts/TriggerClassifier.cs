@@ -163,7 +163,7 @@ public static partial class TriggerClassifier
         {
             (string? caller, string source) = ResolveCaller(ev, target, block, targetClass);
             return new TriggerClassification(
-                "gate.select", caller, source, target, targetClass, headers, marker, true);
+                ArbiterTriggers.GateSelect, caller, source, target, targetClass, headers, marker, true);
         }
 
         if (!ev.IsDispatch)
@@ -244,9 +244,9 @@ public static partial class TriggerClassifier
         bool lensTarget = string.Equals(target, "review-lens", StringComparison.Ordinal)
             || string.Equals(target, "review-triage", StringComparison.Ordinal);
         if (lensTarget && headers.ContainsKey(DispatchHeaders.Lens))
-            return "lens.spawn";
+            return ArbiterTriggers.LensSpawn;
         if (string.Equals(target, "review-lens", StringComparison.Ordinal) && headers.ContainsKey(DispatchHeaders.Refute))
-            return "refute.spawn";
+            return ArbiterTriggers.RefuteSpawn;
         return null;
     }
 
@@ -273,7 +273,7 @@ public static partial class TriggerClassifier
         // plan, and a confident no would refuse the very route the marker exists for; investigate keeps the roster check
         // and KW-ARB-READONLY-001 doing their work over the dispatch instead.
         if (string.Equals(marker, DispatchHeaders.RunStart, StringComparison.Ordinal))
-            return "investigate";
+            return ArbiterTriggers.Investigate;
 
         // Where a sub-agent cannot dispatch, the review-council skill has the session a human started (the
         // conductor, or bug-crusher) seat the council for code-reviewer (ADR 0079); a council seat is the same
@@ -289,45 +289,45 @@ public static partial class TriggerClassifier
         if (string.Equals(caller, AgentRoles.Conductor, StringComparison.Ordinal))
         {
             if (string.Equals(targetClass, CapabilityProfiles.Implementation, StringComparison.Ordinal))
-                return "delegate";
+                return ArbiterTriggers.Delegate;
             if (string.Equals(targetClass, CapabilityProfiles.Planner, StringComparison.Ordinal))
-                return "delegate.planner";
+                return ArbiterTriggers.DelegatePlanner;
             if (string.Equals(targetClass, CapabilityProfiles.ReadOnlyClass, StringComparison.Ordinal))
-                return "investigate";
-            return "investigate";
+                return ArbiterTriggers.Investigate;
+            return ArbiterTriggers.Investigate;
         }
 
         if (reviewer)
-            return "investigate";
+            return ArbiterTriggers.Investigate;
 
         if (AgentRoles.IsPlanner(caller))
-            return "investigate";
+            return ArbiterTriggers.Investigate;
 
         if (caller is null
             && headers.ContainsKey(DispatchHeaders.Marker)
             && string.Equals(targetClass, CapabilityProfiles.ReadOnlyClass, StringComparison.Ordinal)
             && !headers.ContainsKey(DispatchHeaders.PlanFile)
             && !headers.ContainsKey(DispatchHeaders.Task))
-            return "investigate";
+            return ArbiterTriggers.Investigate;
 
         // An identified caller outside its roster still classifies as investigate;
         // ROSTER-001 escalates it.
         if (caller is not null)
-            return "investigate";
+            return ArbiterTriggers.Investigate;
 
         if (headers.ContainsKey(DispatchHeaders.Marker))
-            return "investigate";
+            return ArbiterTriggers.Investigate;
 
         // The root session handing a Squad writer work is a delegation whether or not it wrote headers: the
         // conductor's headers are optional (ADR 0082), so plan and task identity are resolved from machine facts
         // (the run's worktree, its active plan, a task id the plan holds) and every judgement allows what it cannot name.
         if (rootSession && string.Equals(targetClass, CapabilityProfiles.Implementation, StringComparison.Ordinal))
-            return "delegate";
+            return ArbiterTriggers.Delegate;
 
         // Any other Squad target with no caller and no headers: only the machine-fact rules have anything to judge,
         // and each of them allows a caller it cannot name.
         if (!string.Equals(targetClass, CapabilityProfiles.NotSquad, StringComparison.Ordinal))
-            return "investigate";
+            return ArbiterTriggers.Investigate;
 
         return null;
     }
@@ -344,11 +344,11 @@ public static partial class TriggerClassifier
 
     private static string ToReturned(string trigger) => trigger switch
     {
-        "delegate" => "delegate.returned",
-        "delegate.planner" => "delegate.planner.returned",
-        "investigate" => "investigate.returned",
-        "lens.spawn" => "lens.returned",
-        "refute.spawn" => "refute.returned",
+        ArbiterTriggers.Delegate => ArbiterTriggers.DelegateReturned,
+        ArbiterTriggers.DelegatePlanner => ArbiterTriggers.DelegatePlannerReturned,
+        ArbiterTriggers.Investigate => ArbiterTriggers.InvestigateReturned,
+        ArbiterTriggers.LensSpawn => ArbiterTriggers.LensReturned,
+        ArbiterTriggers.RefuteSpawn => ArbiterTriggers.RefuteReturned,
         _ => trigger,
     };
 

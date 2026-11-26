@@ -205,7 +205,7 @@ public static class TriggerFactBuilder
         block.Headers.TryGetValue(DispatchHeaders.Refute, out string? refute);
         // REFUTE names the finding as <lens>/<slug>. The finding block's id line carries either that full value
         // or the bare slug, so the block is read by the full value first and the slug second.
-        RefuteFinding? finding = refute is not null && string.Equals(trigger, "refute.spawn", StringComparison.Ordinal)
+        RefuteFinding? finding = refute is not null && string.Equals(trigger, ArbiterTriggers.RefuteSpawn, StringComparison.Ordinal)
             ? RefuteFinding.Parse(stripped, refute) ?? RefuteFinding.Parse(stripped, refute[(refute.LastIndexOf('/') + 1)..])
             : null;
         string? applicability = lens is not null
