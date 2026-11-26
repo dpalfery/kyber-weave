@@ -419,7 +419,9 @@ internal sealed class ArbiterHookRefresher(
                                 ["command"] = commandLine,
                                 ["timeout"] = timeoutSeconds,
                             })
-                    }
+                    },
+                    // A background agent stopped with TaskStop never ends its turn; this entry closes its dispatch.
+                    CreateMatcherGroup(ClaudeRenderer.StopMatcher, commandLine, timeoutSeconds)
                 ];
                 return true;
 

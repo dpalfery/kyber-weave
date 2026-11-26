@@ -1249,7 +1249,8 @@ session, and marks it:
   finished dispatch's late signal and nothing is closed — the dispatches still open may be different
   workers still running. A post that claims no pre is not that evidence: it can be the unpaired return
   the stop handler itself just recorded, which is the case recovery exists for.
-- `recovered` names the stop event (`subagentStop` or `SubagentStop`), so nothing reads the row as a
+- `recovered` names what closed the dispatch: a stop event (`subagentStop`, `SubagentStop` or `TaskStop`), or
+  `prompt-stopped` for a dispatch stopped before its worker started. Nothing reads the row as a
   worker's report.
 - It carries the pre event's caller, target and headers, pairs by its `pre-id`, and has no
   `returns` markers and no changed paths. The dispatch stops holding its task's files; no task is
@@ -1258,7 +1259,9 @@ session, and marks it:
   steal it. Copilot CLI fires `subagentStop` at the end of a synchronous agent's turn **before** the
   parent's `postToolUse`, so every healthy synchronous dispatch takes this order: the recovered row
   marks the end, and the report that follows is the row that carries the markers and the changed
-  paths. Pairing counts a post as claiming a pre unless that post is a recovered one.
+  paths. Pairing counts a post as claiming a pre unless that post is a recovered one closed by a stop event.
+  A `prompt-stopped` close does claim its pre: no return can ever answer a dispatch that never ran, so a
+  retry's return pairs with the retry.
 - A dispatch the rules refused wrote a pre row but never ran a worker, so it is not a candidate. The
   same set keeps it out of `ledger.in-flight.paths`.
 - When the stop event names the agent id (Claude's `SubagentStop` and Copilot's `subagentStop` do;
@@ -1269,6 +1272,20 @@ session, and marks it:
 - When several dispatches of the agent are still open and the stop event names no followed agent, it
   cannot say which one ended: none is closed, and one line names how many matched. Closing the wrong one would report work as finished
   that never ran.
+- A background agent stopped with Claude's `TaskStop` never ends its turn, so no hand-back and no `SubagentStop`
+  arrives for it. The user-level hook block also matches `PostToolUse` on `^TaskStop$`; the stopped task's id is
+  the agent's id, so the adapter closes exactly that followed agent's dispatch with `recovered: TaskStop`, through
+  the same exact-id rule. A task the Arbiter does not follow, such as a background shell, is left alone.
+- A dispatch the rules allowed but whose task prompt cannot be built is stopped before any worker starts. The
+  engine builds the prompt itself right after the rules decide, closes the pre row with
+  `recovered: prompt-stopped`, and denies with the prompt's refusal, so a dispatch that never ran holds no files.
+  A rule's denial still outranks the prompt refusal and writes no such row. The decision log keeps the rules'
+  `allow`, which is what they decided; that the dispatch was then stopped is recorded only by this ledger row.
+  If the close cannot be written, the dispatch is still denied and one log line says it still looks in flight.
+- A background launch saves the prompt the worker ran, which the hook expanded and stripped of its routing
+  headers. Its return is judged with the header lines its pre row kept (`PLAN_FILE`, `TASK`, `LENS`, `REFUTE`,
+  `TECHNOLOGY`) put back in front, so a main-thread return resolves the same caller as its dispatch and
+  classifies as a `delegate` return, not an investigation with no caller.
 - Factory's `SubagentStop` names the dispatch only by `task_name`, which is a description rather than
   an agent. The target comes from the transcript's `Task` call, the same place the dispatch path reads
   it, so recovery matches the agent the dispatch actually named.

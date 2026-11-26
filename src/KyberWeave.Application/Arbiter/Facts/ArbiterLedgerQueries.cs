@@ -29,11 +29,14 @@ public static class ArbiterLedgerQueries
         // already paired with. Claims by other posts still reserve the pre,
         // except a claim a recovery wrote from a stop event: a stop precedes a
         // synchronous dispatch's own post on Copilot CLI, so the real return
-        // must still be able to claim the dispatch it answers.
+        // must still be able to claim the dispatch it answers. A dispatch
+        // stopped before its worker started has no return to wait for, so its
+        // close keeps the claim and a retry's return pairs with the retry.
         HashSet<string> paired = events
             .Where(e => e.Phase == ArbiterLedgerPhases.Post
                 && e.PreId is not null
-                && e.Recovered is null
+                && (e.Recovered is null
+                    || string.Equals(e.Recovered, ArbiterRecoveries.PromptStopped, StringComparison.Ordinal))
                 && e.Id != post.Id)
             .Select(e => e.PreId!)
             .ToHashSet(StringComparer.Ordinal);
