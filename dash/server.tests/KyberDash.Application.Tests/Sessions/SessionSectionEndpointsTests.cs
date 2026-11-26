@@ -1419,6 +1419,26 @@ public sealed class SessionSectionEndpointsTests
         Assert.Equal(1, asc50.GetProperty("context").GetProperty("turns")[0].GetProperty("index").GetInt32());
         Assert.Equal(128, desc50.GetProperty("context").GetProperty("turns")[0].GetProperty("index").GetInt32());
         Assert.Equal(79, desc50.GetProperty("context").GetProperty("turns")[49].GetProperty("index").GetInt32());
+
+        JsonElement desc50Page2 = bridge.GetSessionCharts(chartsKey, page: 2, limit: 50, order: "desc")!.Value;
+        JsonElement asc50Page2 = bridge.GetSessionCharts(chartsKey, page: 2, limit: 50, order: "asc")!.Value;
+        JsonElement desc50PastEnd = bridge.GetSessionCharts(chartsKey, page: 4, limit: 50, order: "desc")!.Value;
+
+        Assert.Equal(50, desc50Page2.GetProperty("offset").GetInt32());
+        Assert.Equal(128, desc50Page2.GetProperty("total").GetInt32());
+        int[] descPage2Indexes = [.. desc50Page2.GetProperty("context").GetProperty("turns").EnumerateArray().Select(static t => t.GetProperty("index").GetInt32())];
+        Assert.Equal(50, descPage2Indexes.Length);
+        Assert.Equal([.. Enumerable.Range(29, 50).Reverse()], descPage2Indexes);
+
+        Assert.Equal(50, asc50Page2.GetProperty("offset").GetInt32());
+        Assert.Equal(128, asc50Page2.GetProperty("total").GetInt32());
+        int[] ascPage2Indexes = [.. asc50Page2.GetProperty("context").GetProperty("turns").EnumerateArray().Select(static t => t.GetProperty("index").GetInt32())];
+        Assert.Equal(50, ascPage2Indexes.Length);
+        Assert.Equal([.. Enumerable.Range(51, 50)], ascPage2Indexes);
+
+        Assert.Equal(150, desc50PastEnd.GetProperty("offset").GetInt32());
+        Assert.Equal(128, desc50PastEnd.GetProperty("total").GetInt32());
+        Assert.Equal(0, desc50PastEnd.GetProperty("context").GetProperty("turns").GetArrayLength());
         Assert.Equal(
             desc25.GetProperty("context").GetProperty("measuredInputTotal").GetInt64(),
             asc50.GetProperty("context").GetProperty("measuredInputTotal").GetInt64());

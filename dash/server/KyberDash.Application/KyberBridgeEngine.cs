@@ -506,13 +506,6 @@ public class KyberBridgeEngine
     }
 
     /// <summary>
-    /// Returns the charts section payload — the detail payload's turn list and context object —
-    /// from the per-session turn figures and the stored context projection, or
-    /// <see langword="null"/> when the session has no projection.
-    /// </summary>
-    /// <param name="sessionId">Canonical session identifier.</param>
-    /// <returns>Charts JSON element, or <see langword="null"/>.</returns>
-    /// <summary>
     /// Returns the charts section payload — turn series, context composition, and paging metadata —
     /// or <see langword="null"/> when the session has no projection.
     /// </summary>
@@ -945,9 +938,10 @@ public class KyberBridgeEngine
     /// <param name="order">Sort direction (<c>"desc"</c> or <c>"asc"</c>).</param>
     /// <returns>The skills payload the detail route carries, with its rows paged, or <see langword="null"/>.</returns>
     /// <remarks>
-    /// The rows answer from the stored skill invocations alone; the session's harness identity
-    /// names the not-measurable block the rows carry, the one read past the skill table the
-    /// section pays.
+    /// The rows answer from both <see cref="IRelationalStoreReader.SessionSkillFigures"/> (invoked
+    /// skills) and <see cref="IRelationalStoreReader.SessionSkillListings"/> (listed skills and
+    /// their turns), alongside <see cref="IRelationalStoreReader.GetSession"/> for the harness
+    /// identity used in not-measurable blocks.
     /// </remarks>
     /// <exception cref="ArgumentException"><paramref name="sessionId"/> is null, empty, or whitespace, or <paramref name="order"/> is not <c>"desc"</c> or <c>"asc"</c>.</exception>
     /// <exception cref="ArgumentOutOfRangeException"><paramref name="page"/> or <paramref name="limit"/> is less than 1.</exception>
