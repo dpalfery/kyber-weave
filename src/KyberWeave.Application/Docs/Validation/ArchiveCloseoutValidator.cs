@@ -51,7 +51,7 @@ public sealed partial class ArchiveCloseoutValidator
     // The one archive kind that keeps an inventory of its entries directly in its folder. Another
     // kind's README.md at that depth is an ordinary archived entry and still needs its closeout
     // evidence. IndexSectionCatalog registers the same file; the two change together.
-    private const string InventoryKind = "plans";
+    private const string InventoryKind = DocsLayout.Plans;
 
     private readonly string _repoRoot;
     private readonly KyberWeaveConfig _config;
@@ -132,7 +132,7 @@ public sealed partial class ArchiveCloseoutValidator
                     MissingCloseoutEvidence,
                     Severity.Error,
                     exception.Message,
-                    "archive",
+                    OntologyConfig.ArchiveSegment,
                     Hint: "Fix the archived entry path so it is a regular file inside the repository, then call docs_validate_governed_document_schema again."));
                 continue;
             }

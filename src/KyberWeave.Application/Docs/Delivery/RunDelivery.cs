@@ -710,7 +710,7 @@ public sealed partial class RunDelivery
         string index = _files.PlanIndexPath() ?? string.Empty;
         string plans = Path.GetDirectoryName(index)?.Replace('\\', '/') ?? string.Empty;
         string root = _files.DocsRootOf(index);
-        string archive = string.Join('/', new[] { root, OntologyConfig.ArchiveSegment, "plans" }.Where(part => part.Length > 0));
+        string archive = string.Join('/', new[] { root, OntologyConfig.ArchiveSegment, DocsLayout.Plans }.Where(part => part.Length > 0));
         return (plans, archive);
     }
 

@@ -37,7 +37,6 @@ internal static class FixPacketWriter
     private const string PacketsFolder = "fix-packets";
     private const string DefaultBase = "origin/HEAD";
     private const string Markdown = ".md";
-    private const string TaskFileSuffix = ".tasks.yml";
     private const string TaskPrefix = "task-";
 
     private const string Header = """
@@ -153,7 +152,7 @@ internal static class FixPacketWriter
     private static IReadOnlyList<PlanTaskFileEntry> ReadTasks(
         string tree, string plan, IWritableFileSystem files, List<string> notes)
     {
-        string relative = Path.ChangeExtension(plan, TaskFileSuffix);
+        string relative = Path.ChangeExtension(plan, PlanTaskFileRules.TaskFileSuffix);
         string path = Path.Combine(tree, relative.Replace('/', Path.DirectorySeparatorChar));
         string? text;
         try

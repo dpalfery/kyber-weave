@@ -100,28 +100,28 @@ public static class DocsScaffoldTemplates
             + "resolve it through the configuration registry rather than carrying their own. Only\n"
             + "the agent working in a technology reads its standard, so per-technology detail belongs\n"
             + "here, not in a rule (see the documentation ontology's \"Rules and standards\")."),
-        "plans" => ("Plans",
+        DocsLayout.Plans => ("Plans",
             "Sequenced implementation work: what will be done, in what order, and how it will be\n"
             + "verified. A plan is a record of intent rather than current guidance — retrieval\n"
             + "demotes it accordingly. While open it is linked from this index; once closed it is\n"
             + "archived."),
-        "specs" => ("Specifications",
+        DocsLayout.Specifications => ("Specifications",
             "Upfront specification work for a greenfield project or a large feature, written when\n"
             + "requirements and architecture still need defining before a plan can exist."),
-        "todo" => ("Todos",
+        DocsLayout.Todos => ("Todos",
             "Work identified but not done now — a finding, a deferred fix, a declined suggestion.\n"
             + "Capturing it here is what stops it evaporating between sessions."),
-        "adr" => ("Architecture decision records",
+        DocsLayout.Adr => ("Architecture decision records",
             "One record per architectural decision: what was decided, the alternatives, and why.\n"
             + "An ADR is edited in place to state only the current decision; outdated content is\n"
             + "removed, because git holds the history."),
-        "rules" => ("Rules",
+        DocsLayout.Rules => ("Rules",
             "Repository-wide rules that govern how the system is built, independent of any one\n"
             + "technology. Every agent reads them on every task, so a rule applies to every task and\n"
             + "breaking it is never acceptable; anything else, including how one language is\n"
             + "written, belongs in a coding standard (see the documentation ontology's \"Rules and\n"
             + "standards\"). Keep each rule short."),
-        "reference" => ("Reference",
+        DocsLayout.Reference => ("Reference",
             "Reference material with no other home: environment variables, naming standards, the\n"
             + "external systems this repository depends on."),
         _ => throw new InvalidOperationException($"No identity defined for scaffolded folder '{folder}'.")

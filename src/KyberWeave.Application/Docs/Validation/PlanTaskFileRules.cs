@@ -93,18 +93,21 @@ public static partial class PlanTaskFileRules
 
     internal const string PlanExtension = ".md";
 
+    /// <summary>The infix that marks any file named as a plan's task file.</summary>
+    public const string TaskFileNameInfix = ".tasks.";
+
     /// <summary>The YAML task file beside a plan: <c>&lt;plan&gt;.tasks.yml</c>.</summary>
-    internal const string TaskFileSuffix = ".tasks.yml";
+    public const string TaskFileSuffix = ".tasks.yml";
 
     /// <summary>The JSON task file an older release wrote, still read with a warning.</summary>
-    internal const string LegacyTaskFileSuffix = ".tasks.json";
+    public const string LegacyTaskFileSuffix = ".tasks.json";
 
     /// <summary>A specification's task list is the file named <c>tasks.md</c>; its task file is <c>tasks.yml</c> beside it.</summary>
     internal const string SpecTaskListFileName = "tasks.md";
-    internal const string SpecTaskFileName = "tasks.yml";
+    public const string SpecTaskFileName = "tasks.yml";
 
     /// <summary>A specification's JSON task file, still read with a warning.</summary>
-    internal const string LegacySpecTaskFileName = "tasks.json";
+    public const string LegacySpecTaskFileName = "tasks.json";
 
     internal const string PlanKind = "plan";
     internal const string SpecTaskListKind = "specification task list";

@@ -182,7 +182,7 @@ public sealed partial class PlanTaskFileValidator
         // A name that ends in the task file's suffix is the task file itself, or a file
         // KW-DOC-LIFECYCLE-005 already reports; this rule takes only what that one leaves.
         string name = Path.GetFileName(file);
-        if (!name.Contains(".tasks.", StringComparison.OrdinalIgnoreCase)
+        if (!name.Contains(TaskFileNameInfix, StringComparison.OrdinalIgnoreCase)
             || name.EndsWith(TaskFileSuffix, StringComparison.OrdinalIgnoreCase)
             || name.EndsWith(LegacyTaskFileSuffix, StringComparison.OrdinalIgnoreCase)
             || !LooksLikeTaskFile(file))
