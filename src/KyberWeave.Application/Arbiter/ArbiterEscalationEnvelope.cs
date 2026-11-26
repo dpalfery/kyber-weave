@@ -1,4 +1,5 @@
 using System.Globalization;
+using KyberWeave.Core.Agents.Roster;
 using KyberWeave.Core.RunStart;
 
 namespace KyberWeave.Core.Arbiter;
@@ -180,9 +181,8 @@ public sealed record ArbiterEscalationEnvelope(
         if (family == ArbiterTriggerFamily.Investigate)
         {
             if (caller is not null
-                && (string.Equals(caller, "architect", StringComparison.OrdinalIgnoreCase)
-                    || string.Equals(caller, "product-owner", StringComparison.OrdinalIgnoreCase)
-                    || string.Equals(caller, "code-reviewer", StringComparison.OrdinalIgnoreCase)))
+                && (AgentRoles.IsPlanner(caller, StringComparison.OrdinalIgnoreCase)
+                    || AgentRoles.IsReviewer(caller, StringComparison.OrdinalIgnoreCase)))
             {
                 return "report this in your own result; do not retry this dispatch unchanged.";
             }

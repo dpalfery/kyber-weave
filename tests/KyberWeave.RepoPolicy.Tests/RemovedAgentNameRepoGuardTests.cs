@@ -52,7 +52,8 @@ public sealed class RemovedAgentNameRepoGuardTests
         "src/KyberWeave.Application/Docs/Validation/PlanTaskAgentPick.cs",
         "src/KyberWeave.Application/Review/Catalogue/GateCatalogueRenderer.cs",
         "src/KyberWeave.Application/Review/Catalogue/RemovedAgentMap.cs",
-        "src/KyberWeave.Application/Squad/Deployment/SquadRetiredSkills.cs"
+        "src/KyberWeave.Application/Squad/Deployment/SquadRetiredSkills.cs",
+        "src/KyberWeave.Domain/Agents/Roster/AgentRoles.cs"
     ];
 
     [Fact]

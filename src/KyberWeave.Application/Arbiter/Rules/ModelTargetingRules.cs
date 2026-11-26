@@ -1,3 +1,4 @@
+using KyberWeave.Core.Agents.Roster;
 using KyberWeave.Core.Arbiter.ModelTargets;
 using KyberWeave.Core.Configuration;
 
@@ -31,7 +32,7 @@ internal static class ModelTargetingRules
     public const string RecordedDifficultyFact = "plan.task.difficulty";
 
     /// <summary>The answer the recorded <c>medium</c> rating takes; the shipped question spells it <c>standard</c>.</summary>
-    private const string StandardAnswer = "standard";
+    private const string StandardAnswer = DeveloperTiers.Standard;
 
     private const string Off = "off";
     private const string Enforce = "enforce";
@@ -97,9 +98,9 @@ internal static class ModelTargetingRules
     {
         Decide =
         [
-            new RuleDecideClause(RulePredicate.Equals(RecordedDifficultyFact, RuleOperand.Literal("easy")), "easy"),
-            new RuleDecideClause(RulePredicate.Equals(RecordedDifficultyFact, RuleOperand.Literal("medium")), StandardAnswer),
-            new RuleDecideClause(RulePredicate.Equals(RecordedDifficultyFact, RuleOperand.Literal("hard")), "hard"),
+            new RuleDecideClause(RulePredicate.Equals(RecordedDifficultyFact, RuleOperand.Literal(DeveloperTiers.EasyDifficulty)), DeveloperTiers.EasyDifficulty),
+            new RuleDecideClause(RulePredicate.Equals(RecordedDifficultyFact, RuleOperand.Literal(DeveloperTiers.MediumDifficulty)), StandardAnswer),
+            new RuleDecideClause(RulePredicate.Equals(RecordedDifficultyFact, RuleOperand.Literal(DeveloperTiers.HardDifficulty)), DeveloperTiers.HardDifficulty),
         ],
         Ask = null,
     };

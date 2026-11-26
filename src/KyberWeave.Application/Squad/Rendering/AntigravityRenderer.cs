@@ -2,6 +2,7 @@ using System.Text;
 using System.Text.Json;
 using System.Text.Json.Nodes;
 using KyberWeave.Arbiter.Hooks;
+using KyberWeave.Core.Agents.Roster;
 using KyberWeave.Core.Configuration;
 using KyberWeave.Core.Squad.Deployment;
 using KyberWeave.Core.Squad.Model;
@@ -118,7 +119,7 @@ public sealed class AntigravityRenderer : SquadHarnessRenderer
         {
             ["architect"] = "high",
             ["deep-planning"] = "high",
-            ["dev-hard"] = "high",
+            [DeveloperTiers.Hard] = "high",
             ["fast"] = "low",
             ["general"] = "medium",
             ["reviewer"] = "high",

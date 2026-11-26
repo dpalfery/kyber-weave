@@ -1,4 +1,5 @@
 using System.Text.RegularExpressions;
+using KyberWeave.Core.Agents.Roster;
 using KyberWeave.Core.Configuration;
 using KyberWeave.Core.Docs.Model;
 
@@ -82,7 +83,7 @@ public static partial class PlanTaskFileRules
     public const string DifficultyDisagreed = "KW-DOC-TASKS-020";
 
     /// <summary>The three legal difficulty values, in order.</summary>
-    public static IReadOnlyList<string> Difficulties { get; } = ["easy", "medium", "hard"];
+    public static IReadOnlyList<string> Difficulties => DeveloperTiers.Difficulties;
 
     /// <summary>The schema version this build reads.</summary>
     internal const int SchemaVersion = 2;

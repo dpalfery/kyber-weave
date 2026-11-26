@@ -1,6 +1,7 @@
 using System.Text.Json;
 using System.Text.RegularExpressions;
 using KyberWeave.Contracts.Repositories;
+using KyberWeave.Core.Agents.Roster;
 using KyberWeave.Core.Arbiter.Plans;
 using KyberWeave.Core.Configuration;
 using KyberWeave.Core.Diagnostics;
@@ -741,7 +742,7 @@ public sealed partial class PlanTaskFileValidator
         string dispatched = PlanTaskAgentPick.ResolveRemovedAgent(recorded, entry.Difficulty)?.Resolved ?? recorded;
         if (dispatched.Length > 0)
         {
-            return PlanTaskAgentPick.DeveloperTiers.Contains(dispatched, StringComparer.Ordinal);
+            return DeveloperTiers.All.Contains(dispatched, StringComparer.Ordinal);
         }
 
         string capabilities = entry.Capabilities ?? string.Empty;

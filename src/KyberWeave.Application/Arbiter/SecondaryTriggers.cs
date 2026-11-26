@@ -1,3 +1,4 @@
+using KyberWeave.Core.Agents.Roster;
 using KyberWeave.Core.Arbiter.Facts;
 
 namespace KyberWeave.Core.Arbiter;
@@ -17,15 +18,15 @@ internal static class SecondaryTriggers
 {
     private const string Delegate = "delegate";
     private const string DelegateModel = "delegate.model";
-    private const string ImplementationClass = "implementation";
+    private const string ImplementationClass = CapabilityProfiles.Implementation;
     private const string Investigate = "investigate";
     private const string DelegatePlanner = "delegate.planner";
     private const string TriageShortcut = "triage.shortcut";
     private const string IntakeShortcut = "intake.shortcut";
     private const string DocsImpactShortcut = "docs-impact.shortcut";
-    private const string BugCrusher = "bug-crusher";
-    private const string BugCrusherInvestigator = "bug-crusher-investigator";
-    private const string DocsDev = "docs-dev";
+    private const string BugCrusher = AgentRoles.BugCrusher;
+    private const string BugCrusherInvestigator = AgentRoles.BugCrusherInvestigator;
+    private const string DocsDev = AgentRoles.DocsDev;
     private const string IntakeMarker = "INTAKE";
     private const string DocsImpactMarker = "DOCS-IMPACT: true";
 
