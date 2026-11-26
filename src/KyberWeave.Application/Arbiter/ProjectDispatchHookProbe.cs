@@ -11,7 +11,7 @@ namespace KyberWeave.Core.Arbiter;
 /// whether to defer a dispatch or to answer it itself.
 /// </summary>
 /// <remarks>
-/// Five harnesses have a project hook file this probe reads. Antigravity keeps a <c>PreToolUse</c> matcher
+/// Six harnesses have a project hook file this probe reads. Antigravity keeps a <c>PreToolUse</c> matcher
 /// group for <c>invoke_subagent</c> in <c>.agents/hooks.json</c>. Factory keeps its event map in
 /// <c>.factory/hooks.json</c>, falling back to the <c>hooks</c> key of <c>.factory/settings.json</c> when that
 /// file is absent, and dispatches on <c>Task</c>. Cursor keeps a <c>hooks.preToolUse</c> list in
