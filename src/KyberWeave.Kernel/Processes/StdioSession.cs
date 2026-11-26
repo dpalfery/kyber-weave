@@ -87,13 +87,42 @@ public sealed class StdioSession : IDisposable
         _time = time;
         _budget = budget;
         _started = time.GetTimestamp();
-        _process = Process.Start(ProcessRunner.CreateSafeStartInfo(startInfo))
-                   ?? throw new InvalidOperationException("The child process could not be started.");
+        _process = StartRetryingTextFileBusy(ProcessRunner.CreateSafeStartInfo(startInfo));
         _processId = _process.Id;
 
         // Stderr is drained for the life of the child, not left to fill its pipe and block it. Only the first
         // non-empty line is kept: it is the one a failure message may show, and the rest is not disclosed.
         _firstErrorLine = Task.Run(DrainFirstErrorLineAsync);
+    }
+
+    /// <summary>ETXTBSY, the same value on Linux and macOS.</summary>
+    private const int TextFileBusyErrorCode = 26;
+
+    private const int TextFileBusyAttempts = 5;
+
+    /// <summary>
+    ///     Starts the child, retrying briefly when exec fails with ETXTBSY.
+    /// </summary>
+    /// <remarks>
+    ///     A file that was just written can still be open for writing in a child another thread forked in the
+    ///     moment before its close-on-exec descriptors were closed, and exec refuses a file open for writing. The
+    ///     window lasts only until that child execs, so a short retry starts the file once it is free: an
+    ///     executable a test stub or an install has just written is not reported as one that cannot start.
+    /// </remarks>
+    private static Process StartRetryingTextFileBusy(ProcessStartInfo startInfo)
+    {
+        for (int attempt = 1; ; attempt++)
+        {
+            try
+            {
+                return Process.Start(startInfo)
+                       ?? throw new InvalidOperationException("The child process could not be started.");
+            }
+            catch (Win32Exception ex) when (ex.NativeErrorCode == TextFileBusyErrorCode && attempt < TextFileBusyAttempts)
+            {
+                Thread.Sleep(TimeSpan.FromMilliseconds(20 * attempt));
+            }
+        }
     }
 
     /// <summary>The operating-system process id of the child.</summary>
