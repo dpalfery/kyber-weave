@@ -1833,9 +1833,13 @@ public class ClaudeTranscriptMapper : IHarnessMapper
             }
         }
 
-        // A boundary at offset 0 would withhold the whole payload instead of retaining a prefix, so
-        // keep the measured prefix and let the tail carry the rest. Only a prefix that measured
-        // nothing is left to withhold entirely.
+        // Offset-0 exception: an unclosed <system-reminder> that starts at offset 0 is not backed up
+        // past, because a boundary at 0 would withhold the whole payload instead of retaining a prefix.
+        // The measured prefix is kept and the tail carries the rest; only a prefix that measured
+        // nothing is left to withhold entirely. The cost is that the retained prefix can hold an
+        // unclosed block, and ReduceContextParts (CanonContextAnalysis) strips an instruction block
+        // only when both tags are present, so on this rare path that text is attributed to
+        // conversation_history rather than instruction_context.
         return cut > 0 ? cut : truncatedPrefix.Length;
     }
 
