@@ -83,7 +83,6 @@ public sealed partial class ReviewVerdictService(
     private const string GateNotRerun = "KW-REVIEW-049";
     private const string PriorNotThisChange = "KW-REVIEW-050";
     private const string FixRoundCode = "KW-REVIEW-056";
-    private const string CorrectnessLens = "correctness";
     private const string ReviewerSeat = "reviewer";
     private const string PriorFindingsFile = "findings.json";
     private const string Subject = "review";
@@ -777,7 +776,7 @@ public sealed partial class ReviewVerdictService(
     /// </remarks>
     private static void ReportInputSitesGap(SeatOutput seat, DiagnosticReport report)
     {
-        if (!string.Equals(seat.Lens, CorrectnessLens, StringComparison.Ordinal) || seat.InputSites is not null)
+        if (!string.Equals(seat.Lens, ReviewLensCatalogue.Correctness, StringComparison.Ordinal) || seat.InputSites is not null)
             return;
 
         report.Add(new Diagnostic(
