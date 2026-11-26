@@ -481,7 +481,7 @@ On a hit the publish jobs verify instead of re-publishing, and every check fails
 | `Verify published release assets` | Compares the published asset names against the receipt's recorded list as sorted sets, so a missing or an extra asset exits `1`. Downloads the published `SHA256SUMS.txt` and `diff`s it against the manifest the receipt recorded. |
 | `Verify SBOM attestations` and `Verify provenance attestations` | Download the published archives with `gh release download`, then verify each one with `gh attestation verify` — pinning `https://cyclonedx.org/bom` and `https://slsa.dev/provenance/v1`. Both exit `1` when no archive was found, so a hit cannot pass vacuously. |
 | `Verify the published package versions` | Looks each recorded `name@version` up through the GitHub Packages API with `gh api`, and exits `1` when a version is absent. |
-| `Report the run that published this release` | Writes the prior run's URL to the step summary. |
+| `Report the run that published this release` | Always runs, so a hit still names the proving run after a failed verify step, and it claims only what happened: a hit whose receipt recorded the proving run writes `Published by <url>` to the step summary; a hit whose receipt recorded no run points at the verdict step's log; a green miss names this run as the publisher; a miss that did not finish green says it published nothing and to read the failed steps. |
 
 What a hit carries rather than re-checks is the signing work. The publishing run verified the
 macOS Developer ID signature, the team and the notarization assertions on the archives whose
