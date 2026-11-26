@@ -61,7 +61,7 @@ Move the legacy engine (`src/KyberWeave.Core`, `src/KyberWeave.Core.Docs`, `src/
 | Layer | Holds | May reference |
 |---|---|---|
 | `KyberWeave.Kernel` | primitives: processes, file helpers, text, parsing | nothing |
-| `KyberWeave.Domain` | pure logic, models, rules, validators, renderers' pure parts. No I/O | Kernel |
+| `KyberWeave.Domain` | data only: records, DTOs, enums, options, constants (`AGENTS.md`, ADR 0089). Logic goes in Application | Kernel |
 | `KyberWeave.Contracts` | interfaces only. `Repositories/` = I/O ports, `Services/` = what entry apps call | Domain, Kernel |
 | `KyberWeave.Data` | adapters that implement Contracts: file system, processes, sqlite, HTTP, credentials, git | Contracts, Domain, Kernel |
 | `KyberWeave.Application` | use cases and pipelines, `AddWeaveApplication` wiring (it wires Data) | Contracts, Data, Domain, Kernel |
