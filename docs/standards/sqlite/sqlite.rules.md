@@ -49,6 +49,7 @@ last-reviewed: 2026-11-26
   and that generator is the only sanctioned DDL writer.
 - **KW-STD-SQL-006 Named fields.** Read a row by column name (`GetOrdinal`) into a typed record,
   never by position and never by re-parsing text output.
-- **KW-STD-SQL-007 In process.** Every database the product owns, the engine's caches included, is
-  opened through `Microsoft.Data.Sqlite.Core` over the system SQLite. The `sqlite3` CLI is kept
-  only for reading CodeGraph's index.
+- **KW-STD-SQL-007 In process.** Product runtime code opens every database the product owns,
+  the engine's caches included, through `Microsoft.Data.Sqlite.Core` over the system SQLite.
+  The `sqlite3` CLI stays for reading CodeGraph's index, and for an integration test that needs
+  a real `sqlite3` process.
