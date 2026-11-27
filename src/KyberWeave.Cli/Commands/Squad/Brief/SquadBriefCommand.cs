@@ -68,7 +68,9 @@ public sealed class SquadBriefCommand(
             return Refuse(error);
         }
 
-        output.Out.Write(json ? BriefFormatter.ToJson(result!) + "\n" : BriefFormatter.ToText(result!));
+        BriefResult built = result
+            ?? throw new InvalidOperationException("A built brief result must be present.");
+        output.Out.Write(json ? BriefFormatter.ToJson(built) + "\n" : BriefFormatter.ToText(built));
         return Printed;
     }
 
