@@ -794,7 +794,7 @@ public partial class SqliteRelationalStore : BaseSqliteRepository, IRelationalSt
                 }
 
                 script.Append("COMMIT;\n");
-                ExecuteSqlite(script.ToString());
+                CircuitBreaker.Execute(() => ExecuteSqliteCore(script.ToString()));
             }
         }
 
@@ -817,7 +817,7 @@ public partial class SqliteRelationalStore : BaseSqliteRepository, IRelationalSt
     private static string RenderParameterLiteral(object? value) => value switch
     {
         null => "NULL",
-        string text => $"CAST(X'{Convert.ToHexString(Encoding.UTF8.GetBytes(text))}' AS TEXT)",
+        string text => $"X'{Convert.ToHexString(Encoding.UTF8.GetBytes(text))}' || ''",
         byte[] bytes => $"X'{Convert.ToHexString(bytes)}'",
         double real => real.ToString("G17", CultureInfo.InvariantCulture),
         IFormattable formattable => formattable.ToString(null, CultureInfo.InvariantCulture),
@@ -826,6 +826,7 @@ public partial class SqliteRelationalStore : BaseSqliteRepository, IRelationalSt
 
     private void ExecuteTransaction(string bodySql)
     {
+        ArgumentNullException.ThrowIfNull(bodySql);
         Action? rebuildCallback = null;
         lock (writeGate)
         {
@@ -835,12 +836,19 @@ public partial class SqliteRelationalStore : BaseSqliteRepository, IRelationalSt
                 initialized = true;
             }
 
-            StringBuilder script = new(bodySql.Length + 64);
-            script.Append("PRAGMA foreign_keys = ON;\n");
-            script.Append("BEGIN IMMEDIATE;\n");
-            script.Append(bodySql);
-            script.Append("COMMIT;\n");
-            ExecuteSqlite(script.ToString());
+            if (GetType() == typeof(SqliteRelationalStore))
+            {
+                ExecuteStatements([SqlStatement.Of(bodySql)]);
+            }
+            else
+            {
+                StringBuilder script = new(bodySql.Length + 64);
+                script.Append("PRAGMA foreign_keys = ON;\n");
+                script.Append("BEGIN IMMEDIATE;\n");
+                script.Append(bodySql);
+                script.Append("COMMIT;\n");
+                CircuitBreaker.Execute(() => ExecuteSqliteCore(script.ToString()));
+            }
         }
 
         rebuildCallback?.Invoke();
@@ -926,10 +934,9 @@ public partial class SqliteRelationalStore : BaseSqliteRepository, IRelationalSt
         return text;
     }
 
-    /// <summary>Encodes a validated text value for the legacy script builders that still build SQL text.</summary>
+    /// <summary>Keeps the legacy guarded-text validation on the write path while returning the value to bind.</summary>
     private static readonly Func<string, string, string?, string> GuardedTextExpr =
-        static (tableName, columnName, value) =>
-            $"CAST(X'{Convert.ToHexString(Encoding.UTF8.GetBytes(GuardedText(tableName, columnName, value)))}' AS TEXT)";
+        static (tableName, columnName, value) => GuardedText(tableName, columnName, value);
 
     private static string IntSql(int value) => value.ToString(CultureInfo.InvariantCulture);
 

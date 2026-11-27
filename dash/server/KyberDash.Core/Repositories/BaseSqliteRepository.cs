@@ -64,13 +64,6 @@ public abstract class BaseSqliteRepository
         this.busyAttempts = busyAttempts;
     }
 
-    /// <summary>Executes a SQLite batch script through the circuit breaker and returns stdout.</summary>
-    protected string ExecuteSqlite(string sql)
-    {
-        ArgumentNullException.ThrowIfNull(sql);
-        return CircuitBreaker.Execute(() => ExecuteSqliteCore(sql));
-    }
-
     /// <summary>Executes a single SQLite batch run without modifying circuit-breaker state directly.</summary>
     protected virtual string ExecuteSqliteCore(string sql)
     {
@@ -325,40 +318,7 @@ public abstract class BaseSqliteRepository
         return sb.ToString().Trim();
     }
 
-    /// <summary>Encodes a UTF-8 string as an injection-proof SQLite <c>CAST(X'...' AS TEXT)</c> literal.</summary>
-    protected static string TextExpr(string value)
-    {
-        ArgumentNullException.ThrowIfNull(value);
-        return $"CAST(X'{Convert.ToHexString(Encoding.UTF8.GetBytes(value))}' AS TEXT)";
-    }
-
-    /// <summary>Encodes a nullable string as either <c>NULL</c> or <see cref="TextExpr"/>.</summary>
-    protected static string NullableTextExpr(string? value) =>
-        value is null ? "NULL" : TextExpr(value);
-
-    /// <summary>Encodes raw bytes as a SQLite hexadecimal blob literal.</summary>
-    protected static string BlobExpr(byte[] bytes)
-    {
-        ArgumentNullException.ThrowIfNull(bytes);
-        return $"X'{Convert.ToHexString(bytes)}'";
-    }
-
-    /// <summary>Decodes hex-encoded UTF-8 bytes returned by <c>hex(CAST(... AS BLOB))</c>.</summary>
+    /// <summary>Decodes hex-encoded UTF-8 bytes returned by SQLite's hexadecimal text projection.</summary>
     protected static string DecodeHexText(string hex) =>
         Encoding.UTF8.GetString(Convert.FromHexString(hex));
-
-    /// <summary>Splits stdout into trimmed non-empty lines.</summary>
-    protected static IEnumerable<string> Lines(string output)
-    {
-        ArgumentNullException.ThrowIfNull(output);
-        return output.Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
-    }
-
-    /// <summary>Splits stdout into raw non-empty lines preserving tab delimiters.</summary>
-    protected static IEnumerable<string> TabLines(string output)
-    {
-        ArgumentNullException.ThrowIfNull(output);
-        return output.Replace("\r", string.Empty, StringComparison.Ordinal)
-            .Split('\n', StringSplitOptions.RemoveEmptyEntries);
-    }
 }
