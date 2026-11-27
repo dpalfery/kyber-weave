@@ -77,7 +77,7 @@ public static partial class SpecValidator
 
         // ---- compatibility ----
         if (!string.IsNullOrEmpty(skill.Frontmatter.Compatibility) &&
-            skill.Frontmatter.Compatibility!.Length > CompatibilityMaxLength)
+            skill.Frontmatter.Compatibility.Length > CompatibilityMaxLength)
         {
             yield return new Diagnostic("KW-SKILL-SPEC-007", Severity.Warning,
                 $"'compatibility' is {skill.Frontmatter.Compatibility.Length} chars; the spec recommends a max of {CompatibilityMaxLength}.",

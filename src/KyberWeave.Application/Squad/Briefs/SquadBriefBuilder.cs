@@ -69,12 +69,12 @@ public sealed class SquadBriefBuilder(
 
         if (!string.IsNullOrWhiteSpace(request.Plan))
         {
-            if (!TryReadPlan(request, out PlanDocument? plan, out refusal))
+            if (!TryReadPlan(request, out PlanDocument? plan, out refusal) || plan is null)
             {
                 return false;
             }
 
-            planStatus = plan!.Status ?? "none";
+            planStatus = plan.Status ?? "none";
             if (mode is null)
             {
                 mode = plan.DevelopmentMode;
@@ -112,14 +112,14 @@ public sealed class SquadBriefBuilder(
             return false;
         }
 
-        if (!TryFindReferences(request, map, out string? directory, out refusal))
+        if (!TryFindReferences(request, map, out string? directory, out refusal) || directory is null)
         {
             return false;
         }
 
         try
         {
-            result = briefs.Assemble(map, request.Agent, facts, directory!);
+            result = briefs.Assemble(map, request.Agent, facts, directory);
             return true;
         }
         catch (BriefMapException exception)
@@ -156,10 +156,13 @@ public sealed class SquadBriefBuilder(
 
     private bool TryReadPlan(SquadBriefRequest request, out PlanDocument? plan, out string error)
     {
+        ArgumentNullException.ThrowIfNull(request);
+        string planArgument = request.Plan ?? throw new ArgumentException("A plan argument was required but none was supplied.", nameof(request));
+
         plan = null;
         DiagnosticReport report = new();
         KyberWeaveConfig config = request.Config ?? KyberWeaveConfigDefaults.Product;
-        if (!TryResolvePlan(request.RepositoryRoot, config, request.Plan!, report, out string relative))
+        if (!TryResolvePlan(request.RepositoryRoot, config, planArgument, report, out string relative))
         {
             error = string.Join(" ", report.Items.Select(item => item.Message));
             return false;
@@ -181,9 +184,9 @@ public sealed class SquadBriefBuilder(
     {
         string current = paths.GetFullPath(environment.CurrentDirectory, environment.CurrentDirectory);
         PlanPathResolution resolution = new PlanFileResolver(root, config, plans, paths, environment).Resolve(argument, current);
-        if (resolution.Found)
+        if (resolution.Found && resolution.Path is { } path)
         {
-            relative = resolution.Path!;
+            relative = path;
             return true;
         }
 
@@ -221,7 +224,14 @@ public sealed class SquadBriefBuilder(
     {
         directory = null;
         error = string.Empty;
-        string[] mapped = [.. map.FilesOf(request.Agent)!.Select(rule => rule.File)];
+
+        if (map.FilesOf(request.Agent) is not { } rules)
+        {
+            error = $"No brief is defined for agent '{request.Agent}'.";
+            return false;
+        }
+
+        string[] mapped = [.. rules.Select(rule => rule.File)];
 
         if (!string.IsNullOrWhiteSpace(request.From))
         {

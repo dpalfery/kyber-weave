@@ -148,7 +148,7 @@ public static class RunStartPlanner
         ArgumentNullException.ThrowIfNull(type);
         ArgumentNullException.ThrowIfNull(slug);
 
-        branch = $"{canonical}/{type!.Trim()}/{slug!.Trim()}";
+        branch = $"{canonical}/{type.Trim()}/{slug.Trim()}";
         return true;
     }
 
