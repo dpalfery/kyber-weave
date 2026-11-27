@@ -44,6 +44,8 @@ public sealed class SquadBriefBuilder(
     /// <inheritdoc />
     public bool TryBuild(SquadBriefRequest request, out BriefResult? result, out string refusal)
     {
+        ArgumentNullException.ThrowIfNull(request);
+
         result = null;
         Dictionary<string, string> sources = new(StringComparer.Ordinal);
 

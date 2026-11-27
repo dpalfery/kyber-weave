@@ -374,6 +374,8 @@ public static class ArbiterHookWiring
         IEnumerable<SquadTarget> targets,
         SquadDeploymentScope scope)
     {
+        ArgumentNullException.ThrowIfNull(targets);
+
         List<SquadDegradationRecord> records = [];
         foreach (SquadTarget target in targets)
         {
@@ -434,6 +436,9 @@ public static class ArbiterHookWiring
         IReadOnlySet<string> hookedTargets,
         IReadOnlySet<string> fallbackTargets)
     {
+        ArgumentNullException.ThrowIfNull(hookedTargets);
+        ArgumentNullException.ThrowIfNull(fallbackTargets);
+
         if (scope == SquadDeploymentScope.Global)
         {
             if (fallbackTargets.Contains(token))
