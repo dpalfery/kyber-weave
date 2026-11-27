@@ -219,7 +219,8 @@ public sealed class OpenAiCompatibleEmbeddingGenerator : IEmbeddingGenerator, ID
             throw new InvalidDataException("Embedding response index values must be complete.");
 
         return new ParsedBatch(
-            vectors.Select(vector => vector!).ToArray(),
+            vectors.Select(vector => vector
+                ?? throw new InvalidDataException("Embedding response index values must be complete.")).ToArray(),
             ReadUsage(root));
     }
 

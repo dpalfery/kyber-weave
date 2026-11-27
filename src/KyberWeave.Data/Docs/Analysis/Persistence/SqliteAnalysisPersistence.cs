@@ -74,7 +74,9 @@ public sealed partial class SqliteAnalysisPersistence : IAnalysisPersistence
         EnsureSafePersistencePath(fullRoot, DatabasePath);
         if (!safety.IsSafe(fullRoot) || !CanStartSqlite()) return;
 
-        _files.CreateDirectory(Path.GetDirectoryName(DatabasePath)!);
+        string databaseDirectory = Path.GetDirectoryName(DatabasePath)
+            ?? throw new InvalidOperationException("The analysis database path must have a directory.");
+        _files.CreateDirectory(databaseDirectory);
         EnsureSafePersistencePath(fullRoot, DatabasePath);
         InitializeSchema();
         IsAvailable = true;
@@ -814,7 +816,8 @@ public sealed partial class SqliteAnalysisPersistence : IAnalysisPersistence
     {
         EnsureContained(repositoryRoot, databasePath);
         string stateDirectory = Path.Combine(repositoryRoot, UserStatePaths.DirectoryName);
-        string cacheDirectory = Path.GetDirectoryName(databasePath)!;
+        string cacheDirectory = Path.GetDirectoryName(databasePath)
+            ?? throw new InvalidOperationException("The analysis database path must have a directory.");
         RejectLinkOrReparsePoint(stateDirectory);
         RejectLinkOrReparsePoint(cacheDirectory);
         RejectLinkOrReparsePoint(databasePath);

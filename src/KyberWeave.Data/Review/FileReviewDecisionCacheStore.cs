@@ -35,7 +35,10 @@ public sealed class FileReviewDecisionCacheStore(IWritableFileSystem files, IPat
     {
         try
         {
-            files.CreateDirectory(Path.GetDirectoryName(TrailingSeparator.Keep(path, paths.GetFullPath(path, environment.CurrentDirectory)))!);
+            string fullPath = paths.GetFullPath(path, environment.CurrentDirectory);
+            string directory = Path.GetDirectoryName(TrailingSeparator.Keep(path, fullPath))
+                ?? throw new InvalidOperationException("The review decision cache path must have a directory.");
+            files.CreateDirectory(directory);
             files.WriteAllText(path, JsonSerializer.Serialize(answers));
             return true;
         }
