@@ -1,3 +1,4 @@
+using System.Diagnostics.CodeAnalysis;
 using System.Globalization;
 using System.Text.RegularExpressions;
 using KyberWeave.Contracts.Paths;
@@ -135,40 +136,10 @@ public sealed partial class PlanCloseout
         // Every problem is collected before anything is reported: the caller is an agent that fixes what it is
         // told, so a refusal that names one gap per run costs a run per gap. A file that is there but cannot be
         // read is one of those problems, never an exception that skips the report.
-        string? planIndexText = null;
-        try
-        {
-            planIndexText = _store.ReadTextIfPresent(_files.Absolute(planIndex));
-            if (planIndexText is null)
-            {
-                report.Add(new Diagnostic(IndexNotEditable, Severity.Error, $"'{planIndex}' does not exist.", plan, planIndex,
-                    Hint: $"Restore it with 'git checkout -- {planIndex}', then run the closeout again."));
-            }
-        }
-        catch (Exception exception) when (FileFailure.Is(exception))
-        {
-            report.Add(new Diagnostic(IndexNotEditable, Severity.Error, $"'{planIndex}' could not be read: {exception.Message}", plan, planIndex,
-                Hint: "Make the plan index a readable file, then run the closeout again."));
-        }
+        string? planIndexText = ReadPlanIndex(plan, planIndex, report);
 
-        string? planText;
-        try
-        {
-            planText = _store.ReadTextIfPresent(_files.Absolute(plan));
-        }
-        catch (Exception exception) when (FileFailure.Is(exception))
-        {
-            report.Add(new Diagnostic(NotAnActivePlan, Severity.Error, $"'{plan}' could not be read: {exception.Message}", plan, plan,
-                Hint: "Make the plan a readable file, then run the closeout again."));
+        if (!TryReadPlan(plan, report, out string? planText))
             return new PlanCloseoutOutcome(report, false);
-        }
-
-        if (planText is null)
-        {
-            report.Add(new Diagnostic(NotAnActivePlan, Severity.Error, $"'{plan}' does not exist.", plan, plan,
-                Hint: "Name a plan file directly under the plans folder, not its index and not an archived plan."));
-            return new PlanCloseoutOutcome(report, false);
-        }
 
         // A plan's links are written for the folder it is in, and the archive is one folder deeper. Re-expressing them
         // before the copy is written is what keeps the archived plan's links, and the inventory row copied from its
@@ -255,12 +226,7 @@ public sealed partial class PlanCloseout
 
         if (!archive)
         {
-            if (rewrittenLinks > 0)
-                Say(report, plan, $"Would rewrite {rewrittenLinks} relative link{(rewrittenLinks == 1 ? string.Empty : "s")} so they still resolve from {archiveFolder}.");
-            Say(report, plan, $"Closeout evidence is complete. With --archive (and without --dry-run) this would move {plan} to {target}.");
-            Say(report, plan, hasTaskFile ? $"Would remove {taskFile}." : "No task file to remove.");
-            Say(report, plan, planRowRemoved ? $"Would take its row out of {planIndex}." : $"{planIndex} has no row for it.");
-            Say(report, plan, $"Would {inventoryAction} {inventory} with this row: {row}");
+            ReportDryRunSteps(report, plan, archiveFolder, target, rewrittenLinks, hasTaskFile, taskFile, planIndex, planRowRemoved, inventory, inventoryAction, row);
             return new PlanCloseoutOutcome(report, false);
         }
 
@@ -300,6 +266,82 @@ public sealed partial class PlanCloseout
         _files.Stage(touched, report, plan, Step);
         Say(report, plan, "Run 'docs validate . --merge-ready' and 'docs drift .' next.");
         return new PlanCloseoutOutcome(report, true);
+    }
+
+    /// <summary>
+    /// Reads the plan index, naming the problem when it is missing or unreadable. A missing or
+    /// unreadable index is a collected problem, never an exception that skips the report.
+    /// </summary>
+    private string? ReadPlanIndex(string plan, string planIndex, DiagnosticReport report)
+    {
+        try
+        {
+            string? text = _store.ReadTextIfPresent(_files.Absolute(planIndex));
+            if (text is null)
+            {
+                report.Add(new Diagnostic(IndexNotEditable, Severity.Error, $"'{planIndex}' does not exist.", plan, planIndex,
+                    Hint: $"Restore it with 'git checkout -- {planIndex}', then run the closeout again."));
+            }
+
+            return text;
+        }
+        catch (Exception exception) when (FileFailure.Is(exception))
+        {
+            report.Add(new Diagnostic(IndexNotEditable, Severity.Error, $"'{planIndex}' could not be read: {exception.Message}", plan, planIndex,
+                Hint: "Make the plan index a readable file, then run the closeout again."));
+            return null;
+        }
+    }
+
+    /// <summary>
+    /// Reads the plan, naming the problem when it cannot be read or is gone. False refuses the
+    /// closeout: without the plan's text nothing later can be computed.
+    /// </summary>
+    private bool TryReadPlan(string plan, DiagnosticReport report, [NotNullWhen(true)] out string? planText)
+    {
+        try
+        {
+            planText = _store.ReadTextIfPresent(_files.Absolute(plan));
+        }
+        catch (Exception exception) when (FileFailure.Is(exception))
+        {
+            report.Add(new Diagnostic(NotAnActivePlan, Severity.Error, $"'{plan}' could not be read: {exception.Message}", plan, plan,
+                Hint: "Make the plan a readable file, then run the closeout again."));
+            planText = null;
+            return false;
+        }
+
+        if (planText is null)
+        {
+            report.Add(new Diagnostic(NotAnActivePlan, Severity.Error, $"'{plan}' does not exist.", plan, plan,
+                Hint: "Name a plan file directly under the plans folder, not its index and not an archived plan."));
+            return false;
+        }
+
+        return true;
+    }
+
+    /// <summary>The dry-run summary: what the archive would do, without doing it.</summary>
+    private static void ReportDryRunSteps(
+        DiagnosticReport report,
+        string plan,
+        string archiveFolder,
+        string target,
+        int rewrittenLinks,
+        bool hasTaskFile,
+        string taskFile,
+        string planIndex,
+        bool planRowRemoved,
+        string inventory,
+        string inventoryAction,
+        string row)
+    {
+        if (rewrittenLinks > 0)
+            Say(report, plan, $"Would rewrite {rewrittenLinks} relative link{(rewrittenLinks == 1 ? string.Empty : "s")} so they still resolve from {archiveFolder}.");
+        Say(report, plan, $"Closeout evidence is complete. With --archive (and without --dry-run) this would move {plan} to {target}.");
+        Say(report, plan, hasTaskFile ? $"Would remove {taskFile}." : "No task file to remove.");
+        Say(report, plan, planRowRemoved ? $"Would take its row out of {planIndex}." : $"{planIndex} has no row for it.");
+        Say(report, plan, $"Would {inventoryAction} {inventory} with this row: {row}");
     }
 
     /// <summary>The outermost directory on the way to <paramref name="directory"/> that does not exist yet, or null.</summary>

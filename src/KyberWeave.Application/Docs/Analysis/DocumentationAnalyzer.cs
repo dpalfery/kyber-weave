@@ -59,18 +59,49 @@ public sealed partial class DocumentationAnalyzer(
         Dictionary<string, AnalysisCandidate> candidates = new Dictionary<string, AnalysisCandidate>(StringComparer.Ordinal);
 
         AddExactDuplicateClusters(claims, candidates);
+        CandidateTally tally = CollectCandidates(claims, graph, config, glossary, candidates, diagnostics, cancellationToken);
 
-        int graphComparisons = 0;
-        int lexicalComparisons = 0;
-        int embeddingComparisons = 0;
-        int graphCandidates = 0;
-        int lexicalCandidates = 0;
-        int embeddingCandidates = 0;
-        int embeddingCacheHits = 0;
-        int embeddingCacheMisses = 0;
-        int embeddingPromptTokens = 0;
-        int embeddingTotalTokens = 0;
-        bool sourceTruncated = false;
+        cancellationToken.ThrowIfCancellationRequested();
+        IReadOnlyList<AnalysisCandidate> consolidated = ConsolidateTerminology(candidates.Values);
+        IReadOnlyList<AnalysisCandidate> reviewed = ApplyVerdicts(consolidated, config.VerdictConfidence);
+        AnalysisCandidate[] ordered = reviewed
+            .OrderBy(candidate => candidate.Kind)
+            .ThenBy(candidate => candidate.Term, StringComparer.Ordinal)
+            .ThenBy(candidate => candidate.Id, StringComparer.Ordinal)
+            .ToArray();
+        bool truncated = tally.SourceTruncated || ordered.Length > config.Search.MaxCandidates;
+        AnalysisCandidate[] visible = ordered.Take(config.Search.MaxCandidates).ToArray();
+
+        foreach (AnalysisCandidate candidate in visible)
+            diagnostics.Add(ToDiagnostic(candidate, config.VerdictConfidence));
+
+        AnalysisMetrics metrics = new AnalysisMetrics(
+            claims.Count,
+            tally.GraphComparisons,
+            tally.LexicalComparisons,
+            tally.EmbeddingComparisons,
+            tally.GraphCandidates,
+            tally.LexicalCandidates,
+            tally.EmbeddingCandidates,
+            truncated);
+        AddMetrics(diagnostics, metrics);
+        diagnostics.AddMetric("embeddingCacheHits", tally.EmbeddingCacheHits);
+        diagnostics.AddMetric("embeddingCacheMisses", tally.EmbeddingCacheMisses);
+        diagnostics.AddMetric("embeddingPromptTokens", tally.EmbeddingPromptTokens);
+        diagnostics.AddMetric("embeddingTotalTokens", tally.EmbeddingTotalTokens);
+        return new DocumentationAnalysisResult(visible, diagnostics, metrics);
+    }
+
+    private CandidateTally CollectCandidates(
+        IReadOnlyList<Claim> claims,
+        DocGraphProjection graph,
+        DocsAnalysisConfig config,
+        AnalysisGlossary? glossary,
+        Dictionary<string, AnalysisCandidate> candidates,
+        DiagnosticReport diagnostics,
+        CancellationToken cancellationToken)
+    {
+        CandidateTally tally = new CandidateTally();
         List<ClaimPairCandidate> semanticSeedPairs = new List<ClaimPairCandidate>();
 
         ClaimCandidateSourceRequest request = new ClaimCandidateSourceRequest(claims, graph, config.Search);
@@ -79,20 +110,20 @@ public sealed partial class DocumentationAnalyzer(
             cancellationToken.ThrowIfCancellationRequested();
             ClaimCandidateSourceResult result = source.FindCandidates(request)
                 ?? throw new InvalidOperationException("A claim candidate source returned null.");
-            sourceTruncated |= result.Truncated;
+            tally.SourceTruncated |= result.Truncated;
             switch (source.Kind)
             {
                 case CandidateSourceKind.Graph:
-                    graphComparisons += result.ComparisonCount;
-                    graphCandidates += result.Pairs.Count;
+                    tally.GraphComparisons += result.ComparisonCount;
+                    tally.GraphCandidates += result.Pairs.Count;
                     break;
                 case CandidateSourceKind.Lexical:
-                    lexicalComparisons += result.ComparisonCount;
-                    lexicalCandidates += result.Pairs.Count;
+                    tally.LexicalComparisons += result.ComparisonCount;
+                    tally.LexicalCandidates += result.Pairs.Count;
                     break;
                 case CandidateSourceKind.Embedding:
-                    embeddingComparisons += result.ComparisonCount;
-                    embeddingCandidates += result.Pairs.Count;
+                    tally.EmbeddingComparisons += result.ComparisonCount;
+                    tally.EmbeddingCandidates += result.Pairs.Count;
                     break;
                 default:
                     throw new InvalidOperationException($"Unknown candidate source kind '{source.Kind}'.");
@@ -112,10 +143,10 @@ public sealed partial class DocumentationAnalyzer(
             cancellationToken.ThrowIfCancellationRequested();
             EmbeddingResolutionResult resolution = ResolveEmbeddings(claims, config.Embeddings);
             diagnostics.AddRange(resolution.Diagnostics.Items);
-            embeddingCacheHits = resolution.CacheHits;
-            embeddingCacheMisses = resolution.CacheMisses;
-            embeddingPromptTokens = resolution.Usage.PromptTokens;
-            embeddingTotalTokens = resolution.Usage.TotalTokens;
+            tally.EmbeddingCacheHits = resolution.CacheHits;
+            tally.EmbeddingCacheMisses = resolution.CacheMisses;
+            tally.EmbeddingPromptTokens = resolution.Usage.PromptTokens;
+            tally.EmbeddingTotalTokens = resolution.Usage.TotalTokens;
 
             if (resolution.Embeddings.Count == claims.Count)
             {
@@ -125,9 +156,9 @@ public sealed partial class DocumentationAnalyzer(
                     resolution.Embeddings,
                     semanticSeedPairs,
                     config.Search);
-                sourceTruncated |= result.Truncated;
-                embeddingComparisons += result.ComparisonCount;
-                embeddingCandidates += result.Pairs.Count;
+                tally.SourceTruncated |= result.Truncated;
+                tally.EmbeddingComparisons += result.ComparisonCount;
+                tally.EmbeddingCandidates += result.Pairs.Count;
                 foreach (ClaimPairCandidate pair in result.Pairs)
                 {
                     cancellationToken.ThrowIfCancellationRequested();
@@ -136,35 +167,37 @@ public sealed partial class DocumentationAnalyzer(
             }
         }
 
-        cancellationToken.ThrowIfCancellationRequested();
-        IReadOnlyList<AnalysisCandidate> consolidated = ConsolidateTerminology(candidates.Values);
-        IReadOnlyList<AnalysisCandidate> reviewed = ApplyVerdicts(consolidated, config.VerdictConfidence);
-        AnalysisCandidate[] ordered = reviewed
-            .OrderBy(candidate => candidate.Kind)
-            .ThenBy(candidate => candidate.Term, StringComparer.Ordinal)
-            .ThenBy(candidate => candidate.Id, StringComparer.Ordinal)
-            .ToArray();
-        bool truncated = sourceTruncated || ordered.Length > config.Search.MaxCandidates;
-        AnalysisCandidate[] visible = ordered.Take(config.Search.MaxCandidates).ToArray();
+        return tally;
+    }
 
-        foreach (AnalysisCandidate candidate in visible)
-            diagnostics.Add(ToDiagnostic(candidate, config.VerdictConfidence));
+    /// <summary>
+    /// What the candidate-gathering phase counted: the comparisons and candidates each source
+    /// kind contributed, whether any source truncated, and the embedding resolution's cache and
+    /// token usage.
+    /// </summary>
+    private sealed class CandidateTally
+    {
+        public int GraphComparisons { get; set; }
 
-        AnalysisMetrics metrics = new AnalysisMetrics(
-            claims.Count,
-            graphComparisons,
-            lexicalComparisons,
-            embeddingComparisons,
-            graphCandidates,
-            lexicalCandidates,
-            embeddingCandidates,
-            truncated);
-        AddMetrics(diagnostics, metrics);
-        diagnostics.AddMetric("embeddingCacheHits", embeddingCacheHits);
-        diagnostics.AddMetric("embeddingCacheMisses", embeddingCacheMisses);
-        diagnostics.AddMetric("embeddingPromptTokens", embeddingPromptTokens);
-        diagnostics.AddMetric("embeddingTotalTokens", embeddingTotalTokens);
-        return new DocumentationAnalysisResult(visible, diagnostics, metrics);
+        public int LexicalComparisons { get; set; }
+
+        public int EmbeddingComparisons { get; set; }
+
+        public int GraphCandidates { get; set; }
+
+        public int LexicalCandidates { get; set; }
+
+        public int EmbeddingCandidates { get; set; }
+
+        public int EmbeddingCacheHits { get; set; }
+
+        public int EmbeddingCacheMisses { get; set; }
+
+        public int EmbeddingPromptTokens { get; set; }
+
+        public int EmbeddingTotalTokens { get; set; }
+
+        public bool SourceTruncated { get; set; }
     }
 
     private EmbeddingResolutionResult ResolveEmbeddings(
