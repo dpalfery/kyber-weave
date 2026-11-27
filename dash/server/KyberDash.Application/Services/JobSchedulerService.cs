@@ -114,6 +114,7 @@ public class JobSchedulerService : IJobSchedulerService
     /// <param name="options">Composition options naming the state directory.</param>
     /// <param name="clock">Clock used for status timestamps; defaults to UTC now.</param>
     /// <param name="log">Diagnostic logger; defaults to <c>Console.Error.WriteLine</c> when <see langword="null"/>.</param>
+    /// <param name="timeProvider">Clock supplying the default timestamp source; defaults to <see cref="TimeProvider.System"/>.</param>
     public JobSchedulerService(
         IRelationalStoreReader reader,
         IOperationalStore operationalStore,
@@ -123,7 +124,8 @@ public class JobSchedulerService : IJobSchedulerService
         IServerStateRepository serverState,
         DashOptions options,
         Func<DateTimeOffset>? clock,
-        Action<string>? log = null)
+        Action<string>? log = null,
+        TimeProvider? timeProvider = null)
     {
         ArgumentNullException.ThrowIfNull(reader);
         ArgumentNullException.ThrowIfNull(operationalStore);
@@ -139,7 +141,7 @@ public class JobSchedulerService : IJobSchedulerService
         this.ingestion = ingestion;
         this.settings = settings;
         this.serverState = serverState;
-        this.clock = clock ?? (() => DateTimeOffset.UtcNow);
+        this.clock = clock ?? (timeProvider ?? TimeProvider.System).GetUtcNow;
         this.log = log ?? Console.Error.WriteLine;
 
         string configured = !string.IsNullOrWhiteSpace(options.StateDirectory)

@@ -36,6 +36,7 @@ public class OtlpCollectorService : IOtlpCollectorService, IDisposable
     private readonly IRelationalStoreWriter relationalWriter;
     private readonly IOperationalStore operationalStore;
     private readonly long maxBodyBytes;
+    private readonly TimeProvider timeProvider;
     private readonly Lock stateGate = new();
     private readonly CancellationTokenSource flushShutdown = new();
     private readonly SemaphoreSlim flushWake = new(0, 1);
@@ -56,11 +57,13 @@ public class OtlpCollectorService : IOtlpCollectorService, IDisposable
     /// <param name="operationalStore">Operational store receiving quarantined spans, metric points, and ingest audit rows.</param>
     /// <param name="ingestion">Ingestion service receiving admitted spans.</param>
     /// <param name="options">Composition options carrying the payload and backlog ceilings.</param>
+    /// <param name="timeProvider">Clock supplying failure and last-accepted timestamps; defaults to <see cref="TimeProvider.System"/>.</param>
     public OtlpCollectorService(
         IRelationalStoreWriter relationalWriter,
         IOperationalStore operationalStore,
         ITranscriptIngestionService ingestion,
-        DashOptions options)
+        DashOptions options,
+        TimeProvider? timeProvider = null)
     {
         ArgumentNullException.ThrowIfNull(relationalWriter);
         ArgumentNullException.ThrowIfNull(operationalStore);
@@ -70,6 +73,7 @@ public class OtlpCollectorService : IOtlpCollectorService, IDisposable
         this.relationalWriter = relationalWriter;
         this.operationalStore = operationalStore;
         this.ingestion = ingestion;
+        this.timeProvider = timeProvider ?? TimeProvider.System;
         maxBodyBytes = options.MaxOtlpBodyBytes > 0 ? options.MaxOtlpBodyBytes : OtlpCollector.DefaultMaxBodyBytes;
 
         long maxPendingBytes = options.MaxPendingBytes > 0 ? options.MaxPendingBytes : BoundedIngestWriter.DefaultMaxPendingBytes;
@@ -153,7 +157,7 @@ public class OtlpCollectorService : IOtlpCollectorService, IDisposable
     {
         lock (stateGate)
         {
-            PruneFailures(FailureRetentionCutoff(cutoff, DateTimeOffset.UtcNow));
+            PruneFailures(FailureRetentionCutoff(cutoff, timeProvider.GetUtcNow()));
             int count = 0;
             foreach (DateTimeOffset at in failureTimes)
             {
@@ -444,7 +448,7 @@ public class OtlpCollectorService : IOtlpCollectorService, IDisposable
     {
         lock (stateGate)
         {
-            DateTimeOffset now = DateTimeOffset.UtcNow;
+            DateTimeOffset now = timeProvider.GetUtcNow();
             failureTimes.Enqueue(now);
             while (failureTimes.Count > FailureWindowCapacity)
                 _ = failureTimes.Dequeue();
@@ -474,7 +478,7 @@ public class OtlpCollectorService : IOtlpCollectorService, IDisposable
 
         lock (stateGate)
         {
-            lastAcceptedAt = DateTimeOffset.UtcNow.UtcDateTime.ToString("yyyy-MM-dd'T'HH:mm:ss.fff'Z'", CultureInfo.InvariantCulture);
+            lastAcceptedAt = timeProvider.GetUtcNow().UtcDateTime.ToString("yyyy-MM-dd'T'HH:mm:ss.fff'Z'", CultureInfo.InvariantCulture);
         }
 
         StoreUpdated?.Invoke(this, EventArgs.Empty);
