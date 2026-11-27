@@ -1500,33 +1500,11 @@ public static partial class HostConfigYaml
 
         int blockEnd = EndOfBlock(lines, arbiter);
         string blockIndent = BlockIndent(lines, arbiter, blockEnd);
-
-        int provider = -1;
-        string providerIndent = blockIndent;
-        for (int i = arbiter + 1; i < blockEnd; i++)
-        {
-            if (!TrySplitKeyedLine(lines[i], "provider", out string lineIndent, out _, out _)
-                || !string.Equals(lineIndent, blockIndent, StringComparison.Ordinal))
-                continue;
-
-            provider = i;
-            providerIndent = lineIndent;
-            break;
-        }
+        (int provider, string providerIndent) = FindProviderKey(lines, arbiter, blockEnd, blockIndent);
 
         if (provider < 0)
         {
-            int anchor = arbiter;
-            for (int i = arbiter + 1; i < blockEnd; i++)
-            {
-                if (TrySplitKeyedLine(lines[i], "enabled", out string lineIndent, out _, out _)
-                    && string.Equals(lineIndent, blockIndent, StringComparison.Ordinal))
-                {
-                    anchor = i;
-                    break;
-                }
-            }
-
+            int anchor = FindArbiterAnchor(lines, arbiter, blockEnd, blockIndent);
             lines.Insert(anchor + 1, blockIndent + "provider:");
             lines.Insert(anchor + 2, blockIndent + DefaultIndent + "kind: " + kind);
             return lines.ToText();
@@ -1536,7 +1514,7 @@ public static partial class HostConfigYaml
 
         // A hash where the value would start is a comment, not a value: 'provider: # note'
         // is an empty block key and the kind can be inserted beneath it.
-        if (providerValue.Trim().Length > 0 && providerValue.TrimStart()[0] != '#')
+        if (HoldsScalarValue(providerValue))
         {
             throw new InvalidDataException(
                 "arbiter.provider holds a scalar or flow mapping, not a block mapping. " +
@@ -1545,35 +1523,8 @@ public static partial class HostConfigYaml
                 "existing value.");
         }
 
-        int providerEnd = lines.Count;
-        for (int i = provider + 1; i < lines.Count; i++)
-        {
-            string line = lines[i];
-            if (line.Trim().Length == 0 || line.TrimStart()[0] == '#')
-                continue;
-
-            if (LeadingWhitespace(line).Length <= providerIndent.Length)
-            {
-                providerEnd = i;
-                break;
-            }
-        }
-
-        string subIndent = providerIndent + "  ";
-        int shallowest = int.MaxValue;
-        for (int i = provider + 1; i < providerEnd; i++)
-        {
-            string line = lines[i];
-            if (line.Trim().Length == 0 || line.TrimStart()[0] == '#')
-                continue;
-
-            int length = LeadingWhitespace(line).Length;
-            if (length > providerIndent.Length && length < shallowest)
-                shallowest = length;
-        }
-
-        if (shallowest != int.MaxValue)
-            subIndent = new string(' ', shallowest);
+        int providerEnd = EndOfProviderBlock(lines, provider, providerIndent);
+        string subIndent = ProviderChildIndent(lines, provider, providerEnd, providerIndent);
 
         for (int i = provider + 1; i < providerEnd; i++)
         {
@@ -1597,6 +1548,110 @@ public static partial class HostConfigYaml
 
         lines.Insert(provider + 1, subIndent + "kind: " + kind);
         return lines.ToText();
+    }
+
+    /// <summary>
+    /// The <c>provider:</c> key of the arbiter block, or a negative index with the block's own
+    /// indent when the block holds none.
+    /// </summary>
+    private static (int Index, string Indent) FindProviderKey(
+        HostConfigLines lines,
+        int arbiter,
+        int blockEnd,
+        string blockIndent)
+    {
+        for (int i = arbiter + 1; i < blockEnd; i++)
+        {
+            if (!TrySplitKeyedLine(lines[i], "provider", out string lineIndent, out _, out _)
+                || !string.Equals(lineIndent, blockIndent, StringComparison.Ordinal))
+                continue;
+
+            return (i, lineIndent);
+        }
+
+        return (-1, blockIndent);
+    }
+
+    /// <summary>
+    /// The line a new <c>provider:</c> key is inserted after: the block's <c>enabled:</c> key when
+    /// it has one, else the <c>arbiter:</c> key itself.
+    /// </summary>
+    private static int FindArbiterAnchor(
+        HostConfigLines lines,
+        int arbiter,
+        int blockEnd,
+        string blockIndent)
+    {
+        int anchor = arbiter;
+        for (int i = arbiter + 1; i < blockEnd; i++)
+        {
+            if (TrySplitKeyedLine(lines[i], "enabled", out string lineIndent, out _, out _)
+                && string.Equals(lineIndent, blockIndent, StringComparison.Ordinal))
+            {
+                anchor = i;
+                break;
+            }
+        }
+
+        return anchor;
+    }
+
+    /// <summary>
+    /// True when a <c>provider:</c> value carries something this type cannot keep — a scalar or a
+    /// flow mapping — so the edit is refused rather than silently dropped.
+    /// </summary>
+    private static bool HoldsScalarValue(string value) =>
+        value.Trim().Length > 0 && value.TrimStart()[0] != '#';
+
+    /// <summary>
+    /// The first line after the provider block ends, or the end of the file: the block runs until
+    /// a line that is not indented deeper than the provider key.
+    /// </summary>
+    private static int EndOfProviderBlock(
+        HostConfigLines lines,
+        int provider,
+        string providerIndent)
+    {
+        int providerEnd = lines.Count;
+        for (int i = provider + 1; i < lines.Count; i++)
+        {
+            string line = lines[i];
+            if (line.Trim().Length == 0 || line.TrimStart()[0] == '#')
+                continue;
+
+            if (LeadingWhitespace(line).Length <= providerIndent.Length)
+            {
+                providerEnd = i;
+                break;
+            }
+        }
+
+        return providerEnd;
+    }
+
+    /// <summary>
+    /// The indent the provider's children actually use, from the shallowest real line, falling
+    /// back to the provider indent plus two spaces for a block that still holds none.
+    /// </summary>
+    private static string ProviderChildIndent(
+        HostConfigLines lines,
+        int provider,
+        int providerEnd,
+        string providerIndent)
+    {
+        int shallowest = int.MaxValue;
+        for (int i = provider + 1; i < providerEnd; i++)
+        {
+            string line = lines[i];
+            if (line.Trim().Length == 0 || line.TrimStart()[0] == '#')
+                continue;
+
+            int length = LeadingWhitespace(line).Length;
+            if (length > providerIndent.Length && length < shallowest)
+                shallowest = length;
+        }
+
+        return shallowest == int.MaxValue ? providerIndent + "  " : new string(' ', shallowest);
     }
 
     private static string ProviderRest(string providerLine)
