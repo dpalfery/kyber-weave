@@ -13,13 +13,15 @@ namespace KyberWeave.Tests;
 /// The skill commands print markup and tables on the Spectre console they were given and their JSON documents on the
 /// standard-output console they were given, so a unit test reads each stream without a terminal and tells them apart.
 /// </summary>
-public sealed class SkillCommandConsoleSeamTests
+public sealed class SkillCommandConsoleSeamTests : IDisposable
 {
     private readonly TestConsole _ansi = new();
     private readonly FakeConsole _standard = new();
     private readonly ScriptedSkills _skills = new();
 
     public SkillCommandConsoleSeamTests() => _ansi.Profile.Width = 200;
+
+    public void Dispose() => _ansi.Dispose();
 
     private static readonly InMemoryGovernanceReaders Governance = new();
 

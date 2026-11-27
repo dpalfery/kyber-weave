@@ -9,7 +9,7 @@ using Xunit;
 namespace KyberWeave.Tests;
 
 /// <summary>What <c>docs onboarding</c> resolves, records and prints, over the shared file-system, path and console fakes.</summary>
-public sealed class DocsOnboardingCommandTests
+public sealed class DocsOnboardingCommandTests : IDisposable
 {
     private const string WorkingDirectory = "/kw/work";
     private const string Root = "/kw/work/repo";
@@ -21,6 +21,8 @@ public sealed class DocsOnboardingCommandTests
     private readonly TestConsole _console = new() { EmitAnsiSequences = false };
 
     public DocsOnboardingCommandTests() => _console.Profile.Width = 400;
+
+    public void Dispose() => _console.Dispose();
 
     [Fact]
     public void Execute_AnswerThatIsNotOneOfTheTwo_IsRefusedAndWritesNothing()

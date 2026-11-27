@@ -16,7 +16,7 @@ namespace KyberWeave.Tests;
 /// seam against the environment seam's directory, harness presence is answered by the file-system seam, and every
 /// line goes to the console the constructor was given.
 /// </remarks>
-public sealed class DocsMcpCommandSeamTests
+public sealed class DocsMcpCommandSeamTests : IDisposable
 {
     private const string ServerName = "kw-docs";
 
@@ -35,6 +35,8 @@ public sealed class DocsMcpCommandSeamTests
     {
         _configs.WriteRepositoryConfig(Root, Declaration());
     }
+
+    public void Dispose() => _console.Dispose();
 
     /// <summary>
     /// A harness is only as satisfied as its own file: the retired-key check is scoped to the named harness, so a
