@@ -448,6 +448,9 @@ public static class SquadHookJsonBlock
         IReadOnlyList<JsonNode>? sessionStart = null,
         IReadOnlyList<JsonNode>? sessionEnd = null)
     {
+        ArgumentNullException.ThrowIfNull(preToolUse);
+        ArgumentNullException.ThrowIfNull(postToolUse);
+
         RefuseForeignSubagentStop(format, subagentStop);
         RefuseForeignSessionEvents(format, sessionStart, sessionEnd);
         IReadOnlyList<JsonNode> stop = subagentStop ?? [];

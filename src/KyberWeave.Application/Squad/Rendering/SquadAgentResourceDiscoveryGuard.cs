@@ -38,6 +38,8 @@ public static class SquadAgentResourceDiscoveryGuard
     /// </summary>
     public static string MapResourcePath(string relativePath)
     {
+        ArgumentNullException.ThrowIfNull(relativePath);
+
         return relativePath.EndsWith(".md", StringComparison.Ordinal)
             ? string.Concat(relativePath[..^".md".Length], ".markdown")
             : relativePath;
@@ -57,6 +59,8 @@ public static class SquadAgentResourceDiscoveryGuard
     /// </param>
     public static string RewriteBody(SquadAgent agent, string? linkDirectory = null)
     {
+        ArgumentNullException.ThrowIfNull(agent);
+
         if (agent.Resources.Count == 0)
         {
             return agent.InstructionBody;
@@ -90,6 +94,12 @@ public static class SquadAgentResourceDiscoveryGuard
         string targetToken,
         string scannerQuote)
     {
+        ArgumentNullException.ThrowIfNull(files);
+        ArgumentNullException.ThrowIfNull(agent);
+        ArgumentNullException.ThrowIfNull(principal);
+        ArgumentNullException.ThrowIfNull(resources);
+        ArgumentNullException.ThrowIfNull(degradations);
+
         if (resources.Count == 0)
         {
             return;

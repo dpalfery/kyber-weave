@@ -27,6 +27,8 @@ public static partial class SpecValidator
     /// <returns>One diagnostic per violation.</returns>
     public static IEnumerable<Diagnostic> Validate(Skill skill, bool directoryExists)
     {
+        ArgumentNullException.ThrowIfNull(skill);
+
         string? name = skill.Frontmatter.Name;
         string skillId = string.IsNullOrWhiteSpace(name) ? skill.DirectoryName : name;
         string file = skill.SkillFilePath;

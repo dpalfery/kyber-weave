@@ -355,6 +355,8 @@ public sealed class FactoryRenderer : SquadHarnessRenderer
     /// </remarks>
     public static IReadOnlyList<string> DeclaredMcpServerNames(SquadSource source)
     {
+        ArgumentNullException.ThrowIfNull(source);
+
         if (!source.McpConfiguration.TryGetProperty("mcpServers", out JsonElement servers) ||
             servers.ValueKind != JsonValueKind.Object)
             return [];
