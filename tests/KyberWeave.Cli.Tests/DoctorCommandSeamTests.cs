@@ -13,7 +13,7 @@ namespace KyberWeave.Tests;
 /// What <c>doctor</c> resolves, prints and refuses, over the shared console, path and environment fakes and a
 /// recording process runner: nothing here touches the disk, starts a process or reads the host's console.
 /// </summary>
-public sealed class DoctorCommandSeamTests
+public sealed class DoctorCommandSeamTests : IDisposable
 {
     private const string WorkingDirectory = "/kw/work";
 
@@ -23,6 +23,11 @@ public sealed class DoctorCommandSeamTests
     private readonly RecordingBoundedExecutor _processes = new();
     private readonly Dictionary<string, string?> _variables = new(StringComparer.Ordinal);
     private bool _terminal;
+
+    public void Dispose()
+    {
+        _console.Dispose();
+    }
 
     [Fact]
     public void Execute_MoreThanOneMode_RefusesOnTheErrorStreamAndReturnsTwo()

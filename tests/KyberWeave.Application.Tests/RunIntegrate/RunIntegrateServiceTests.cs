@@ -14,7 +14,7 @@ namespace KyberWeave.Application.Tests.RunIntegrate;
 /// Resolving the two worktrees, choosing between a fast-forward and a cherry-pick, refusing what cannot be
 /// integrated, and the integration lock — all over the in-memory file system and a scripted git runner.
 /// </summary>
-public sealed class RunIntegrateServiceTests
+public sealed class RunIntegrateServiceTests : IDisposable
 {
     private const string Canonical = "/work/repo";
     private const string Run = "/work/run";
@@ -81,6 +81,11 @@ public sealed class RunIntegrateServiceTests
         _files.CreateDirectory(Task);
         _files.WriteAllText(Run + "/.git", "gitdir: " + RunGitDirectory + "\n");
         _files.WriteAllText(Task + "/.git", "gitdir: " + TaskGitDirectory + "\n");
+    }
+
+    public void Dispose()
+    {
+        _time.Dispose();
     }
 
     [Fact]
