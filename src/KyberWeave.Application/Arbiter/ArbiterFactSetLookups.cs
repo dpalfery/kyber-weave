@@ -8,6 +8,7 @@ public static class ArbiterFactSetLookups
     /// <summary>Whether the set contains <paramref name="name"/>.</summary>
     public static bool Contains(this ArbiterFactSet set, string name)
     {
+        ArgumentNullException.ThrowIfNull(set);
         ArgumentNullException.ThrowIfNull(name);
         return set.Facts.ContainsKey(name);
     }
@@ -24,6 +25,7 @@ public static class ArbiterFactSetLookups
     /// </remarks>
     public static bool IsPresent(this ArbiterFactSet set, string name)
     {
+        ArgumentNullException.ThrowIfNull(set);
         ArgumentNullException.ThrowIfNull(name);
         return set.Facts.TryGetValue(name, out ArbiterFact? fact) && fact.Value is not null;
     }
@@ -31,6 +33,7 @@ public static class ArbiterFactSetLookups
     /// <summary>Tries to get the fact named <paramref name="name"/>.</summary>
     public static bool TryGet(this ArbiterFactSet set, string name, [NotNullWhen(true)] out ArbiterFact? fact)
     {
+        ArgumentNullException.ThrowIfNull(set);
         ArgumentNullException.ThrowIfNull(name);
         return set.Facts.TryGetValue(name, out fact);
     }
@@ -38,6 +41,7 @@ public static class ArbiterFactSetLookups
     /// <summary>Returns a new set with <paramref name="name"/> set to the given value.</summary>
     public static ArbiterFactSet With(this ArbiterFactSet set, string name, object? value, ArbiterFactLabel label)
     {
+        ArgumentNullException.ThrowIfNull(set);
         ArgumentNullException.ThrowIfNull(name);
         Dictionary<string, ArbiterFact> next = new(set.Facts, StringComparer.Ordinal)
         {

@@ -13,6 +13,8 @@ public static class AgentRoutingEvaluator
 {
     public static AgentRoutingResult Route(string prompt, AgentSet agentSet, double fireThreshold = 0.08)
     {
+        ArgumentNullException.ThrowIfNull(agentSet);
+
         Dictionary<string, double> promptVec = TextVectorizer.Vectorize(prompt);
         IReadOnlyDictionary<string, Dictionary<HarnessKind, AgentModel>> matrix = agentSet.GetRoleHarnessMatrix();
 

@@ -19,6 +19,8 @@ public static class AgentPromptScanner
 
     public static DiagnosticReport Scan(AgentModel agent)
     {
+        ArgumentNullException.ThrowIfNull(agent);
+
         DiagnosticReport report = new DiagnosticReport();
         string text = $"{agent.Description}\n{agent.InstructionsBody}";
         InstructionSurfaceRuleCodes codes = InstructionSurfaceRuleCodes.ForAgents;
