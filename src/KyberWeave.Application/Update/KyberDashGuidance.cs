@@ -17,6 +17,7 @@ public static class KyberDashGuidance
     /// </summary>
     public static IReadOnlyList<string> HarnessOpenCodeLines(string standardOutput)
     {
+        ArgumentNullException.ThrowIfNull(standardOutput);
         List<string> lines = [];
         foreach (string raw in standardOutput.Split('\n'))
         {
@@ -50,6 +51,7 @@ public static class KyberDashGuidance
         string standardOutput,
         string verdict)
     {
+        ArgumentNullException.ThrowIfNull(standardOutput);
         if (harness == HarnessRegistry.OpenCodeToken)
             return HarnessOpenCodeLines(standardOutput);
 

@@ -105,6 +105,7 @@ public static class SquadOperatorChannel
     /// </remarks>
     public static bool IsValidServerName(string candidate)
     {
+        ArgumentNullException.ThrowIfNull(candidate);
         if (candidate.Length is < 1 or > MaxServerNameLength)
         {
             return false;

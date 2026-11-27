@@ -66,6 +66,7 @@ public sealed class StatusLineReceiptFormat
     /// <returns>The JSON text.</returns>
     public static string Serialize(StatusLineReceipt receipt, StatusLineTarget target, string stagingRoot)
     {
+        ArgumentNullException.ThrowIfNull(receipt);
         using MemoryStream stream = new();
         using (Utf8JsonWriter writer = new(stream, WriterOptions))
         {

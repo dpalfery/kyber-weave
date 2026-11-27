@@ -9,6 +9,7 @@ public static class SquadOperatorChannelOverlays
     /// <returns>The tool entry and the body text.</returns>
     public static SquadOperatorChannelOverlay FromFileText(string rawText, string serverName)
     {
+        ArgumentNullException.ThrowIfNull(rawText);
         string text = rawText
             .Replace("\r\n", "\n", StringComparison.Ordinal)
             .Replace(SquadOperatorChannel.ServerPlaceholder, serverName, StringComparison.Ordinal)

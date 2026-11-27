@@ -12,6 +12,7 @@ public static class SquadResourceProjection
         SquadDeploymentFile principal,
         IReadOnlyList<SquadResource> resources)
     {
+        ArgumentNullException.ThrowIfNull(principal);
         Append(files, principal.RelativePath, resources, principal.Target);
     }
 
@@ -21,6 +22,9 @@ public static class SquadResourceProjection
         IReadOnlyList<SquadResource> resources,
         string target)
     {
+        ArgumentNullException.ThrowIfNull(files);
+        ArgumentNullException.ThrowIfNull(principalRelativePath);
+        ArgumentNullException.ThrowIfNull(resources);
         int separator = principalRelativePath.LastIndexOf('/');
         string principalDirectory = separator < 0 ? string.Empty : principalRelativePath[..separator];
         foreach (SquadResource resource in resources)

@@ -58,6 +58,7 @@ public static class SquadResourceLinkRewriter
         Func<string, string> mapPath,
         out bool changed)
     {
+        ArgumentNullException.ThrowIfNull(body);
         bool anyChanged = false;
         var output = new System.Text.StringBuilder(body.Length);
         int position = 0;

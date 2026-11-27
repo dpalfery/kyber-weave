@@ -475,17 +475,23 @@ public sealed class SquadHarnessRenderContext
     }
 
     /// <summary>A degradation record for <paramref name="agent"/> under its own name on this target.</summary>
-    public SquadDegradationRecord Degradation(SquadAgent agent, string code, string details) =>
-        new(Token, agent.Name, agent.Name, code, agent.BodyDigest, details);
+    public SquadDegradationRecord Degradation(SquadAgent agent, string code, string details)
+    {
+        ArgumentNullException.ThrowIfNull(agent);
+        return new(Token, agent.Name, agent.Name, code, agent.BodyDigest, details);
+    }
 
     /// <summary>The fallback profile <paramref name="agent"/> names, failing closed when none is declared.</summary>
-    public SquadFallbackProfile FallbackProfileFor(SquadAgent agent) =>
-        Source.FallbackProfiles.Profiles.TryGetValue(agent.Fallback, out SquadFallbackProfile? profile)
+    public SquadFallbackProfile FallbackProfileFor(SquadAgent agent)
+    {
+        ArgumentNullException.ThrowIfNull(agent);
+        return Source.FallbackProfiles.Profiles.TryGetValue(agent.Fallback, out SquadFallbackProfile? profile)
             ? profile
             : throw new SquadRenderValidationException(
                 $"Agent '{agent.Name}' references fallback profile '{agent.Fallback}', which " +
                 "profiles/fallbacks.yml does not declare. Declared profiles: " +
                 $"{string.Join(", ", Source.FallbackProfiles.Profiles.Keys.Order(StringComparer.Ordinal))}.");
+    }
 
     /// <summary>
     /// Decides how a primary-invocation agent projects on a harness with no primary-agent
@@ -496,6 +502,8 @@ public sealed class SquadHarnessRenderContext
     /// </summary>
     public SquadPrimaryLowering ResolvePrimaryLowering(SquadAgent agent, Func<string> collisionMessage)
     {
+        ArgumentNullException.ThrowIfNull(agent);
+        ArgumentNullException.ThrowIfNull(collisionMessage);
         SquadFallbackProfile fallbackProfile = FallbackProfileFor(agent);
         if (string.Equals(fallbackProfile.NoPrimaryAgent, "skill", StringComparison.Ordinal))
         {
@@ -538,6 +546,9 @@ public sealed class SquadHarnessRenderContext
         Func<SquadDeploymentFile> renderLowered,
         Func<SquadFallbackProfile, bool, IEnumerable<SquadDegradationRecord>> loweredRecords)
     {
+        ArgumentNullException.ThrowIfNull(agent);
+        ArgumentNullException.ThrowIfNull(renderLowered);
+        ArgumentNullException.ThrowIfNull(loweredRecords);
         SquadPrimaryLowering lowering = ResolvePrimaryLowering(agent, collisionMessage);
         SquadFallbackProfile fallbackProfile = FallbackProfileFor(agent);
         switch (lowering)
@@ -584,6 +595,10 @@ public sealed class SquadHarnessRenderContext
         Func<SquadFallbackProfile, string, bool, IEnumerable<SquadDegradationRecord>> entryPointRecords,
         Func<IEnumerable<SquadDegradationRecord>> agentRecords)
     {
+        ArgumentNullException.ThrowIfNull(agent);
+        ArgumentNullException.ThrowIfNull(renderEntryPointSkill);
+        ArgumentNullException.ThrowIfNull(entryPointRecords);
+        ArgumentNullException.ThrowIfNull(agentRecords);
         if (agent.Invocation != SquadInvocation.Primary)
         {
             Degradations.AddRange(agentRecords());
@@ -622,6 +637,8 @@ public sealed class SquadHarnessRenderContext
     /// </summary>
     public IReadOnlyList<string> NonDenyCapabilities(SquadAgent agent)
     {
+        ArgumentNullException.ThrowIfNull(agent);
+
         // An unresolvable profile is a source error, not an absence of constraints: reading it as
         // "nothing constrained" would drop the record that says the harness cannot enforce them.
         if (!CapabilityProfiles.TryGetValue(agent.CapabilityProfile, out SquadCapabilityProfile? profile))
@@ -648,8 +665,11 @@ public sealed class SquadHarnessRenderContext
         SquadAgent agent,
         IReadOnlyList<string> constrained,
         string reason,
-        string artifact = "agent") =>
-        constrained.Count == 0
+        string artifact = "agent")
+    {
+        ArgumentNullException.ThrowIfNull(agent);
+        ArgumentNullException.ThrowIfNull(constrained);
+        return constrained.Count == 0
             ? null
             : Degradation(
                 agent,
@@ -657,6 +677,7 @@ public sealed class SquadHarnessRenderContext
                 $"Capability profile '{agent.CapabilityProfile}' constrains {string.Join(", ", constrained)} " +
                 $"but {reason}; the deployed {artifact}'s behaviour is governed by the harness default, not " +
                 "the canonical profile.");
+    }
 
     /// <summary>
     /// Adds an agent file whose in-closure <c>.md</c> links are rewritten to <c>.markdown</c>, and
@@ -670,6 +691,8 @@ public sealed class SquadHarnessRenderContext
         SquadYamlEmitter emitter,
         string discoveryGlob)
     {
+        ArgumentNullException.ThrowIfNull(agent);
+        ArgumentNullException.ThrowIfNull(emitter);
         string principalPath = $"{AgentsDirectory}/{agent.Name}.md";
         int separator = principalPath.LastIndexOf('/');
         string principalDirectory = separator < 0 ? string.Empty : principalPath[..separator];
@@ -843,6 +866,7 @@ public sealed class SquadHarnessRenderContext
     /// </summary>
     public void EmitCanonicalSkills(Func<SquadSkill, SquadDeploymentFile> render)
     {
+        ArgumentNullException.ThrowIfNull(render);
         foreach (SquadSkill skill in Source.Skills)
         {
             if (SuppressedSkillIdentities.Contains(skill.Name))
@@ -917,6 +941,7 @@ public sealed class SquadHarnessRenderContext
     /// </summary>
     public static void ValidateCanonicalName(string name)
     {
+        ArgumentNullException.ThrowIfNull(name);
         ValidatePathSegment(name);
         if (name.Contains("..", StringComparison.Ordinal))
         {
