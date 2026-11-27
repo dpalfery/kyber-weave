@@ -15,16 +15,6 @@ global_level = 200
 # KW-STD-CS-006 catch discipline: catch named types; bare Exception only to log and rethrow.
 dotnet_diagnostic.CA1031.severity = suggestion
 
-# KW-STD-CS-012 disposal: a type that owns a disposable field is disposable, implemented correctly.
-dotnet_diagnostic.CA1001.severity = suggestion
-dotnet_diagnostic.CA1063.severity = suggestion
-
-# KW-STD-CS-004 nullability: public arguments are guarded with ArgumentNullException.ThrowIfNull.
-dotnet_diagnostic.CA1062.severity = suggestion
-
-# KW-STD-CS-003 immutability: collection properties have no public setter.
-dotnet_diagnostic.CA2227.severity = suggestion
-
 # KW-STD-CS-002 single responsibility: method complexity and class coupling stay under the limits.
 dotnet_diagnostic.CA1502.severity = suggestion
 dotnet_diagnostic.CA1506.severity = suggestion
