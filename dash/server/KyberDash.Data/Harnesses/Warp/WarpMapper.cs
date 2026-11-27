@@ -377,45 +377,13 @@ public class WarpMapper : IHarnessMapper
                 string.Create(CultureInfo.InvariantCulture, $"{traceId}:{anchor}"),
                 index + 1);
 
-            List<CollectedContentPart> parts = [];
-            string? correctionRule = null;
-            if (userMessage.Length > 0)
-            {
-                CorrectionDetectionResult check = CanonFindings.DetectUserCorrection(userMessage);
-                if (check.Matched)
-                {
-                    correctionRule = check.Rule;
-                }
-
-                parts.Add(ToolContentMeasurer.BuildContentPart(0, ContentBucket.UserMessage, userMessage, "user", model));
-            }
-
-            string? projectPath = SafeOptionalText(exchange.Row.WorkingDirectory);
-
-            CollectedRecord parentRecord = new(
-                parentRecordId,
-                WarpHarnessId,
-                RecordOp.LlmInvoke,
-                RecordKind.Internal,
-                string.Create(CultureInfo.InvariantCulture, $"{WarpHarnessId}:{model}"),
-                exchange.StartedAt.ToUniversalTime(),
-                RecordStatus.Ok,
+            CollectedRecord parentRecord = BuildExchangeRecord(
+                exchange,
                 conversationId,
-                null,
                 traceId,
+                parentRecordId,
                 model,
-                null,
-                null,
-                [],
-                null,
-                parts,
-                null,
-                null,
-                [],
-                null,
-                [],
-                new CollectedRecordSignals(null, null, correctionRule, null));
-
+                userMessage);
             records.Add(parentRecord);
 
             if (blocksByExchange.TryGetValue(anchor, out IReadOnlyList<WarpBlockRow>? attributed))
@@ -427,7 +395,62 @@ public class WarpMapper : IHarnessMapper
             }
         }
 
-        List<CollectedSession> sessions =
+        List<CollectedSession> sessions = BuildSessions(conversationId, workspaceDirectory, reportedUsage);
+        return new CollectedBatch(source, sessions, records, problems);
+    }
+
+    private static CollectedRecord BuildExchangeRecord(
+        ParsedExchange exchange,
+        string conversationId,
+        string traceId,
+        string parentRecordId,
+        string model,
+        string userMessage)
+    {
+        List<CollectedContentPart> parts = [];
+        string? correctionRule = null;
+        if (userMessage.Length > 0)
+        {
+            CorrectionDetectionResult check = CanonFindings.DetectUserCorrection(userMessage);
+            if (check.Matched)
+            {
+                correctionRule = check.Rule;
+            }
+
+            parts.Add(ToolContentMeasurer.BuildContentPart(0, ContentBucket.UserMessage, userMessage, "user", model));
+        }
+
+        return new CollectedRecord(
+            parentRecordId,
+            WarpHarnessId,
+            RecordOp.LlmInvoke,
+            RecordKind.Internal,
+            string.Create(CultureInfo.InvariantCulture, $"{WarpHarnessId}:{model}"),
+            exchange.StartedAt.ToUniversalTime(),
+            RecordStatus.Ok,
+            conversationId,
+            null,
+            traceId,
+            model,
+            null,
+            null,
+            [],
+            null,
+            parts,
+            null,
+            null,
+            [],
+            null,
+            [],
+            new CollectedRecordSignals(null, null, correctionRule, null));
+    }
+
+    private static List<CollectedSession> BuildSessions(
+        string conversationId,
+        string? workspaceDirectory,
+        IReadOnlyList<CollectedModelUsage> reportedUsage)
+    {
+        return
         [
             new CollectedSession(
                 SessionKey: conversationId,
@@ -437,8 +460,6 @@ public class WarpMapper : IHarnessMapper
                 Title: null,
                 ReportedUsage: reportedUsage),
         ];
-
-        return new CollectedBatch(source, sessions, records, problems);
     }
 
     /// <summary>
