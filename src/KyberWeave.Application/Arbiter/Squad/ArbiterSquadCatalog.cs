@@ -173,14 +173,14 @@ public sealed class ArbiterSquadCatalog
                 exception);
         }
 
-        if (parsed is null || string.IsNullOrWhiteSpace(parsed.Name))
+        if (parsed?.Name is not { } name || string.IsNullOrWhiteSpace(name))
         {
             throw new InvalidOperationException(
                 $"Embedded agent '{fileName}' declares no name.");
         }
 
         return new ArbiterSquadAgent(
-            parsed.Name!,
+            name,
             parsed.Description ?? string.Empty,
             parsed.DelegatesTo is null ? [] : [.. parsed.DelegatesTo],
             parsed.CapabilityProfile ?? string.Empty,

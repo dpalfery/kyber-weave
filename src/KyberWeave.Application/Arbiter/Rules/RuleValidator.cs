@@ -517,7 +517,10 @@ public static class RuleValidator
         string? filePath,
         List<Diagnostic> diagnostics)
     {
-        string source = rule.Ask!.InstructionsFrom!;
+        // The caller only invokes this when the rule asks and names an instructions-from, so a null here is no-op.
+        if (rule.Ask?.InstructionsFrom is not { } source)
+            return;
+
         if (!source.StartsWith("lens:", StringComparison.Ordinal))
             return;
 
