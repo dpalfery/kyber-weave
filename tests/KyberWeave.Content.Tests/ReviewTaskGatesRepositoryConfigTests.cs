@@ -226,8 +226,9 @@ public sealed class ReviewTaskGatesRepositoryConfigTests
     }
 
     /// <summary>
-    ///     A change to the solution file, a NuGet.config, or an .editorconfig changes what the build
-    ///     compiles and how the analyzers read it, so the build gate must run for it. The format gates
+    ///     A change to the solution file, a NuGet.config, an .editorconfig, or an analyzer
+    ///     globalconfig changes what the build compiles and how the analyzers read it, so the build
+    ///     gate must run for it. The format gates
     ///     must not match those files: <c>dotnet format</c> given a solution in <c>--include</c> checks
     ///     nothing and exits 0, so a format gate that matched the solution would pass without checking.
     /// </summary>
@@ -241,7 +242,8 @@ public sealed class ReviewTaskGatesRepositoryConfigTests
             "KyberWeave.slnx",
             "NuGet.config",
             "src/KyberWeave.Core/NuGet.config",
-            ".editorconfig"
+            ".editorconfig",
+            "analyzers/ratchet.globalconfig"
         ];
 
         ReviewTaskGate build = Assert.Single(gates, gate => gate.Id == "dotnet-build");

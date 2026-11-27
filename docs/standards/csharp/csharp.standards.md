@@ -74,7 +74,7 @@ rationale nobody reads.
 
 ### Errors and diagnostics
 
-Parsers fail closed (KW-STD-INPUT-001). Code that parses or converts a value from outside the process refuses any input it does not recognise, with an error or diagnostic that names the input; it never silently drops, defaults or coerces it. The one exception is an unknown field in a format whose specification says to ignore unknown fields, and the code names that specification where it skips the field.
+Error handling fails closed (KW-STD-INPUT-001). Code that parses or converts a value from outside the process refuses any input it does not recognise, with an error or diagnostic that names the input; it never silently drops, defaults or coerces it. The one exception is an unknown field in a format whose specification says to ignore unknown fields, and the code names that specification where it skips the field.
 
 **Catch what you can name.** Operational failures are caught by type — `IOException`,
 `UnauthorizedAccessException`, `YamlException`, `InvalidDataException` — and translated into a
@@ -174,7 +174,10 @@ Consequences worth stating:
   `analyzers/ratchet.globalconfig`; `dotnet build KyberWeave.sln -c Release -p:KwAnalyzerAudit=true -p:TreatWarningsAsErrors=false`
   lists every remaining violation as a warning without failing. The change that brings an analyzer
   to zero deletes its line, and from then on it fails the build. A line is never added back. The
-  Sonar ids in `NoWarn` are inert: SonarAnalyzer is not referenced.
+  Sonar ids in `NoWarn` are inert: SonarAnalyzer is not referenced. The ratchet file is the
+  exception list for the analyzed rules the codebase still breaks, and the baseline table in
+  [`the remediation todo`](../../todo/csharp-standards-remediation.md) is the count. A location
+  list copied here would go stale on the next remediation pull request; those two move with it.
 - **No ReSharper command-line tools.** InspectCode is not a gate here: it can write its
   report and then never exit ([ADR 0075](../../adr/0075-inspectcode-is-removed-from-the-squad.md)).
   Static analysis is the compiler and analyzer warnings from the build gate.

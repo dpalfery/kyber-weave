@@ -44,11 +44,13 @@ An id in brackets names the analyzer that enforces the rule. Until the codebase 
   table or column name, environment variable, flag or meaningful number is a `const`, `enum` or
   `nameof()` in one place. Code that matches the fact uses that source, never a re-typed string or pattern.
 - **KW-STD-CS-002 One responsibility.** One reason to change per class and per method; split a class
-  that does two jobs. Guard clauses return or throw early instead of nesting. [CA1502, CA1506]
+  that does two jobs. Guard clauses return or throw early instead of nesting. [CA1502, CA1506;
+  product code only, the analyzers are off for test code]
 - **KW-STD-CS-003 Encapsulated and immutable.** `private` fields, `init` properties, records for
   values, `IReadOnly*` collections exposed and no public collection setter. [CA2227]
 - **KW-STD-CS-004 Null-safe.** Check with `is null` / `is not null`; guard public arguments with
-  `ArgumentNullException.ThrowIfNull`. The null-forgiving `!` is not used in new code. [CA1062]
+  `ArgumentNullException.ThrowIfNull`. [CA1062] The null-forgiving `!` is not used in new code.
+  No analyzer enforces that, so review does.
 - **KW-STD-CS-005 Expected failures are values.** Not found, invalid input or a failed gate returns
   a `Try*` result, a result record or a diagnostic. An exception means a bug or the unexpected.
 - **KW-STD-CS-006 Catch discipline.** No empty `catch`. Catch named types; catch bare `Exception`

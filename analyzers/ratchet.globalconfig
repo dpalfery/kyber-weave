@@ -4,12 +4,18 @@
 # suggestion: it shows in the editor and fails nothing. The remediation plan
 # (docs/todo/csharp-standards-remediation.md) fixes one rule at a time. When a rule
 # reaches zero violations, delete its line here in the same change; the rule then fails the build.
-# Never add a line back. To list what remains:
+# Never add a line back. Holding these at suggestion is the 2026-11-26 amendment to
+# docs/adr/0004-solution-level-static-analysis-and-noise-suppression.md. It is not the
+# solution-wide NoWarn that record rejects: a suggestion still shows, and the id is not in NoWarn.
+# To list what remains, build both solutions this ratchet covers:
 #   dotnet build KyberWeave.sln -c Release -p:KwAnalyzerAudit=true -p:TreatWarningsAsErrors=false
+#   dotnet build dash/server/KyberDash.sln -c Release -p:KwAnalyzerAudit=true -p:TreatWarningsAsErrors=false
 #
-# global_level 200 outranks the SDK's AnalysisMode=all config and analyzers/rules.globalconfig. .editorconfig outranks this file,
-# so none of these ids may appear there, with one exception: CA1502 and CA1506 are set to none for
-# tests/** in .editorconfig, because the complexity and coupling limits apply to product code only.
+# global_level 200 outranks the SDK's AnalysisMode=all config and analyzers/rules.globalconfig.
+# .editorconfig outranks this file, so a ratcheted id must not be set above suggestion there.
+# The deliberate exceptions are set to none for test code ([{tests,dash/server.tests}/**.cs]):
+# CA1062, because the test runner calls those methods and a caller cannot pass null; and CA1502
+# and CA1506, because KW-STD-CS-002's complexity and coupling limits cover product code only.
 is_global = true
 global_level = 200
 
