@@ -17,13 +17,16 @@ public static class ArbiterTriggerCatalog
     /// </summary>
     public const string TaskTechnologyFact = "plan.task.technology";
 
+    /// <summary>The fact holding the dispatch text with its routing header block removed.</summary>
+    public const string DelegationPromptFact = "delegation.prompt";
+
     private static readonly IReadOnlySet<string> DelegateFacts = new HashSet<string>(StringComparer.Ordinal)
     {
         "caller",
         "delegation.target",
         "delegation.target-class",
         "delegation.target-profile",
-        "delegation.prompt",
+        DelegationPromptFact,
         "delegation.head",
         "delegation.body-head",
         "delegation.markers",
@@ -64,7 +67,7 @@ public static class ArbiterTriggerCatalog
     {
         "caller",
         "delegation.target",
-        "delegation.prompt",
+        DelegationPromptFact,
         "delegation.head",
         "delegation.markers",
         "delegation.plan-file",

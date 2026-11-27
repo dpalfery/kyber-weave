@@ -165,7 +165,7 @@ public sealed partial class PlanFacts(IPlanFileResolver planPaths, IFileSystem f
     private static List<string> ScopeFiles(PlanTask task, PlanDocument document, ArbiterFactSet facts)
     {
         List<string> files = [.. task.Files];
-        if (!facts.TryGet("delegation.prompt", out ArbiterFact? prompt) || prompt.Value is not string text)
+        if (!facts.TryGet(ArbiterTriggerCatalog.DelegationPromptFact, out ArbiterFact? prompt) || prompt.Value is not string text)
             return files;
 
         List<string> otherTasksFiles = [.. document.Tasks
@@ -229,7 +229,7 @@ public sealed partial class PlanFacts(IPlanFileResolver planPaths, IFileSystem f
     /// The plan task a headerless dispatch names (see <see cref="TaskNamedIn(PlanDocument, string)"/>).
     /// </summary>
     private static PlanTask? TaskNamedIn(PlanDocument document, ArbiterFactSet facts) =>
-        facts.TryGet("delegation.prompt", out ArbiterFact? prompt) && prompt.Value is string text
+        facts.TryGet(ArbiterTriggerCatalog.DelegationPromptFact, out ArbiterFact? prompt) && prompt.Value is string text
             ? TaskNamedIn(document, text)
             : null;
 
