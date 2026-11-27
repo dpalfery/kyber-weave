@@ -4,7 +4,13 @@ import { defineConfig } from '@playwright/test'
 
 export default defineConfig({
   testDir: './e2e',
-  testMatch: ['harness-collection.spec.ts', 'file-harness-dashboard.spec.ts','otel-web-dashboard.spec.ts', 'otel-tray-dashboard.spec.ts'],
+  testMatch: [
+    'harness-collection.spec.ts',
+    'file-harness-dashboard.spec.ts',
+    'otel-web-dashboard.spec.ts',
+    'otel-tray-dashboard.spec.ts',
+    'harness-content-parity.spec.ts',
+  ],
   timeout: 30_000,
   expect: { timeout: 10_000 },
   workers: 1,

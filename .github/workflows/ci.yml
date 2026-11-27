@@ -1116,6 +1116,12 @@ jobs:
       - name: Harness-collection conformance spec
         run: npx --prefix dash playwright test --config dash/playwright.isolated.config.ts dash/e2e/harness-collection.spec.ts
 
+      # Cross-harness content parity: collection, projection and display of a
+      # harness's full content against the Copilot baseline. Runs after the
+      # conformance spec so a broken dashboard fails the fast check first.
+      - name: Harness content parity spec
+        run: npx --prefix dash playwright test --config dash/playwright.isolated.config.ts dash/e2e/harness-content-parity.spec.ts
+
       - name: Shut down .NET build servers
         if: always()
         run: dotnet build-server shutdown
@@ -1186,6 +1192,7 @@ jobs:
           attempt=1
           while [ "$attempt" -le "$retry" ]; do
             # Unquoted on purpose: the job env holds a space-separated list.
+            # shellcheck disable=SC2086
             if sudo apt-get update && sudo apt-get install -y $TAURI_APT_PACKAGES; then
               # Incomplete downloads live in partial/; the lock is root-owned.
               # Neither belongs in the cache, and the save runs as the runner.
@@ -1304,6 +1311,9 @@ jobs:
         run: |
           set -euo pipefail
           echo "## CI Results" > results.md
+          # One line per job keeps the table diffable; grouping these appends into one block redirect
+          # would hide which row a failed run reported.
+          # shellcheck disable=SC2129
           echo "" >> results.md
           echo "| Job | Status |" >> results.md
           echo "|-----|--------|" >> results.md
@@ -1348,6 +1358,7 @@ jobs:
           done
 
           if [ "$FAILED" = "true" ]; then
+            # shellcheck disable=SC2129
             echo "## Gate FAILED" >> results.md
             echo "" >> results.md
             echo "One or more required jobs failed or were cancelled." >> results.md
@@ -1355,6 +1366,7 @@ jobs:
             exit 1
           fi
 
+          # shellcheck disable=SC2129
           echo "## Gate PASSED" >> results.md
           echo "" >> results.md
           echo "All required checks passed." >> results.md

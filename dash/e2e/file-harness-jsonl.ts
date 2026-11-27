@@ -583,3 +583,294 @@ export const FILE_HARNESS_JSONL_FIXTURES: readonly FileHarnessFixture[] = [
   ...antigravityFixtures('antigravity', '.gemini/antigravity/brain'),
   ...antigravityFixtures('antigravity-cli', '.gemini/antigravity-cli/brain'),
 ]
+
+// ── Baseline-parity fixtures ────────────────────────────────────────────────
+//
+// One richer session per harness than the FILE_HARNESS_JSONL_FIXTURES contracts above, used by
+// dash/e2e/harness-content-parity.spec.ts to compare each harness's collection and display against
+// the dual Copilot baseline. They carry synthetic text only: the same structural shapes the
+// observed `~/.kyberdash/canon.db` snapshot showed (system prompt bucketing, reasoning, tool I/O,
+// withheld JSON documents), never a transcript from any real store.
+
+const PARITY_TURNS = 6
+
+/** One parity session per harness, sized to the shared turn count. */
+function parityPlan(harness: string): SessionPlan {
+  return { id: `parity-${harness}-${PARITY_TURNS}t`, turns: PARITY_TURNS }
+}
+
+// --- copilot-cli full-content baseline: system prompt, reasoning, tool I/O, withheld document ---
+const COPILOT_CLI_PARITY_MODEL = 'claude-sonnet-4.5'
+const COPILOT_CLI_PARITY_SYSTEM = 'You are a coding agent verifying telemetry capture parity.'
+const COPILOT_CLI_PARITY_DOCUMENT = JSON.stringify({
+  files: Array.from({ length: 40 }, (_, index) => ({ path: `src/parity-module-${index}.ts`, bytes: 1_024 + index })),
+})
+
+/** Builds the rich Copilot CLI journal: the file half of the dual Copilot baseline. */
+export function buildCopilotCliParityFixture(): FileHarnessFixture {
+  const plan = parityPlan('copilot-cli')
+  return {
+    contract: {
+      ...BASE_CONTRACT,
+      harness: 'copilot-cli',
+      sessionId: plan.id,
+      turns: plan.turns,
+      expectedToolCalls: plan.turns,
+      tokensMeasurable: true,
+      cacheCreationMeasurable: false,
+      contextMeasurable: true,
+      schemaMeasurable: false,
+      skillsMeasurable: true,
+      perTurnTokensMeasurable: true,
+      expectedSkills: ['tdd-workflow'],
+      expectedCostStatus: 'no_rate',
+      expectedModels: [COPILOT_CLI_PARITY_MODEL],
+    },
+    files: (baseTimeMs) => {
+      const lines: unknown[] = [
+        {
+          type: 'session.start',
+          id: `${plan.id}-e0`,
+          timestamp: iso(baseTimeMs),
+          data: {
+            sessionId: plan.id,
+            selectedModel: COPILOT_CLI_PARITY_MODEL,
+            copilotVersion: '1.0.99',
+            context: { cwd: '/synthetic/workspace', branch: 'main' },
+          },
+        },
+        {
+          type: 'system.message',
+          id: `${plan.id}-e1`,
+          timestamp: iso(baseTimeMs + 100),
+          data: { content: COPILOT_CLI_PARITY_SYSTEM },
+        },
+      ]
+      for (let turn = 1; turn <= plan.turns; turn += 1) {
+        const at = baseTimeMs + turn * TURN_SPACING_MS
+        const toolCallId = `${plan.id}-call-${turn}`
+        lines.push({
+          type: 'user.message',
+          id: `${plan.id}-u${turn}`,
+          timestamp: iso(at),
+          data: { content: `Parity step ${turn}: continue the work` },
+        })
+        lines.push({
+          type: 'assistant.reasoning',
+          id: `${plan.id}-r${turn}`,
+          timestamp: iso(at + 200),
+          data: { reasoningText: `Parity step ${turn}: review the captured context.` },
+        })
+        lines.push({
+          type: 'assistant.message',
+          id: `${plan.id}-a${turn}`,
+          timestamp: iso(at + 1_000),
+          data: {
+            messageId: `${plan.id}-msg-${turn}`,
+            content: `Finished parity step ${turn}.`,
+            inputTokens: 900 + turn,
+            outputTokens: 145 + turn,
+            cacheReadTokens: 300,
+            toolRequests: [{ toolCallId, name: 'view', arguments: { path: `src/parity-${turn}.ts` } }],
+          },
+        })
+        lines.push({
+          type: 'tool.execution_start',
+          id: `${plan.id}-s${turn}`,
+          parentId: `${plan.id}-a${turn}`,
+          timestamp: iso(at + 1_100),
+          data: { toolCallId, toolName: 'view', arguments: { path: `src/parity-${turn}.ts` } },
+        })
+        const result = turn === 2
+          ? { items: JSON.parse(COPILOT_CLI_PARITY_DOCUMENT) }
+          : { content: `contents of src/parity-${turn}.ts` }
+        lines.push({
+          type: 'tool.execution_complete',
+          id: `${plan.id}-c${turn}`,
+          parentId: `${plan.id}-s${turn}`,
+          timestamp: iso(at + 1_450),
+          data: { toolCallId, toolName: 'view', success: true, result },
+        })
+      }
+      lines.push({
+        type: 'skill.invoked',
+        id: `${plan.id}-skill`,
+        timestamp: iso(baseTimeMs + TURN_SPACING_MS + 1_600),
+        data: { skillName: 'tdd-workflow' },
+      })
+      lines.push({
+        type: 'session.shutdown',
+        id: `${plan.id}-shutdown`,
+        timestamp: iso(baseTimeMs + plan.turns * TURN_SPACING_MS + 2_000),
+        data: {
+          modelMetrics: [
+            {
+              model: COPILOT_CLI_PARITY_MODEL,
+              inputTokens: plan.turns * 900,
+              outputTokens: plan.turns * 145,
+              cacheReadTokens: 300,
+            },
+          ],
+        },
+      })
+      return [
+        { relativePath: `.copilot/session-state/${plan.id}/events.jsonl`, content: jsonl(lines) },
+      ]
+    },
+  }
+}
+
+// --- droid collection-gap shape: conversation content without message structure or counters -----
+const DROID_PARITY_MODEL = 'GLM-5.1'
+
+/**
+ * Builds a droid session matching the `canon.db` collection gap: rich conversation content, but
+ * no message structure to project context from, no tool-definition schema, and no token counters
+ * (no companion settings file). Its contract names those gaps explicitly.
+ */
+export function buildDroidParityFixture(): FileHarnessFixture {
+  const plan = parityPlan('droid')
+  return {
+    contract: {
+      ...BASE_CONTRACT,
+      harness: 'droid',
+      sessionId: plan.id,
+      turns: plan.turns,
+      expectedToolCalls: null,
+      tokensMeasurable: false,
+      cacheCreationMeasurable: false,
+      contextMeasurable: false,
+      schemaMeasurable: false,
+      skillsMeasurable: false,
+      perTurnTokensMeasurable: false,
+      expectedSkills: [],
+      expectedCostStatus: 'out_of_scope',
+      expectedModels: [DROID_PARITY_MODEL],
+    },
+    files: (baseTimeMs) => [
+      {
+        relativePath: `.factory/sessions/parity-workspace/${plan.id}.jsonl`,
+        content: jsonl([
+          {
+            type: 'session_start',
+            id: plan.id,
+            title: `Droid parity gap ${plan.id}`,
+            cwd: '/synthetic/workspace',
+          },
+          ...Array.from({ length: plan.turns }, (_, index) => {
+            const turn = index + 1
+            const at = baseTimeMs + turn * TURN_SPACING_MS
+            return [
+              {
+                type: 'message',
+                timestamp: iso(at),
+                message: { role: 'user', content: [{ type: 'text', text: `Parity step ${turn}: continue the work` }] },
+              },
+              {
+                type: 'message',
+                id: `${plan.id}-a-${turn}`,
+                timestamp: iso(at + 2_500),
+                message: {
+                  role: 'assistant',
+                  content: [
+                    { type: 'reasoning', text: `Parity step ${turn}: plan the change.` },
+                    { type: 'text', text: `Finished parity step ${turn}.` },
+                  ],
+                },
+              },
+            ]
+          }).flat(),
+        ]),
+      },
+    ],
+  }
+}
+
+// --- claude-code projection-gap shape: system text in history, no system bucket, partial turns ---
+const CLAUDE_PARITY_MODEL = 'claude-sonnet-4-5'
+
+/**
+ * Builds a claude-code session matching the `canon.db` projection gap: the system text rides in
+ * `conversation_history` with a `system` role rather than a `system_prompt` bucket, tool inputs
+ * travel without text, and the tool-result turns carry content the projection only partly places.
+ */
+export function buildClaudeParityFixture(): FileHarnessFixture {
+  const plan = parityPlan('claude-code')
+  return {
+    contract: {
+      ...BASE_CONTRACT,
+      harness: 'claude-code',
+      sessionId: plan.id,
+      turns: plan.turns,
+      expectedToolCalls: toolCallCount(plan.turns),
+      tokensMeasurable: true,
+      cacheCreationMeasurable: true,
+      contextMeasurable: false,
+      schemaMeasurable: false,
+      skillsMeasurable: false,
+      perTurnTokensMeasurable: true,
+      expectedSkills: [],
+      expectedCostStatus: 'published_priced',
+      expectedModels: [CLAUDE_PARITY_MODEL],
+    },
+    files: (baseTimeMs) => {
+      const lines: unknown[] = []
+      for (let turn = 1; turn <= plan.turns; turn += 1) {
+        const at = baseTimeMs + turn * TURN_SPACING_MS
+        lines.push({
+          type: 'user',
+          sessionId: plan.id,
+          timestamp: iso(at),
+          ...(turn === 1 ? { customTitle: `Claude parity gap ${plan.id}` } : {}),
+          message: { role: 'system', content: [{ type: 'text', text: 'System guidance rides in history.' }] },
+        })
+        lines.push({
+          type: 'user',
+          sessionId: plan.id,
+          timestamp: iso(at + 100),
+          message: { role: 'user', content: [{ type: 'text', text: `Parity step ${turn}: continue the work` }] },
+        })
+        const content: unknown[] = [{ type: 'text', text: `Finished parity step ${turn}.` }]
+        if (hasTool(turn)) {
+          content.push({
+            type: 'tool_use',
+            id: `${plan.id}-tc-${turn}`,
+            name: 'read_file',
+            input: { path: `src/parity-${turn}.ts` },
+          })
+        }
+        lines.push({
+          type: 'assistant',
+          sessionId: plan.id,
+          timestamp: iso(at + 1_000),
+          message: {
+            id: `${plan.id}-msg-${turn}`,
+            role: 'assistant',
+            model: CLAUDE_PARITY_MODEL,
+            content,
+            usage: {
+              input_tokens: 100 + turn,
+              output_tokens: 40 + turn,
+              cache_read_input_tokens: 500,
+              cache_creation_input_tokens: 40,
+            },
+          },
+        })
+        if (hasTool(turn)) {
+          lines.push({
+            type: 'user',
+            sessionId: plan.id,
+            timestamp: iso(at + 2_000),
+            message: {
+              role: 'user',
+              content: [{ type: 'tool_result', tool_use_id: `${plan.id}-tc-${turn}`, content: `contents ${turn}` }],
+            },
+          })
+        }
+      }
+      return [
+        { relativePath: `.claude/projects/parity-project/${plan.id}.jsonl`, content: jsonl(lines) },
+      ]
+    },
+  }
+}

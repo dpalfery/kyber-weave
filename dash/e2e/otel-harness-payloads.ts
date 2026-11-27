@@ -1226,3 +1226,255 @@ export function buildDroidSessionFiles(contract: HarnessExpectationContract): Dr
     companion: companion + '\n',
   }
 }
+
+/** Which of the two Copilot capture surfaces a baseline fixture models. */
+export type CopilotBaselineSourceMode = 'primary' | 'secondary'
+
+/** Options for {@link buildCopilotBaselineFixture}; every field has a documented default. */
+export type CopilotBaselineFixtureOptions = {
+  readonly sessionId?: string
+  readonly sourceMode?: CopilotBaselineSourceMode
+}
+
+/** The `IsDocument` result the OTLP mapper withholds into `content_part_withheld`. */
+export type CopilotBaselineWithheldCase = {
+  readonly spanName: string
+  readonly resultAttribute: 'gen_ai.tool.call.result'
+  readonly documentKind: 'json-document'
+  readonly expectedBucket: 'content_part_withheld'
+  readonly expectedPlainText: ''
+}
+
+/** A rich Copilot OTLP fixture plus the withheld-content case it pins. */
+export type CopilotBaselineFixture = HarnessOtlpFixture & {
+  readonly sourceMode: CopilotBaselineSourceMode
+  readonly withheldCase: CopilotBaselineWithheldCase
+}
+
+/**
+ * The rich Copilot baseline contract: one fully measurable session covering every content
+ * dimension the canonical `copilot` OTLP baseline exhibits. Distinct from the stored
+ * `copilot` contracts above, so their assertions are untouched.
+ */
+export const COPILOT_BASELINE_CONTRACT: HarnessExpectationContract = {
+  harness: 'copilot',
+  sessionId: 'otel-e2e-copilot-baseline-rich',
+  turns: 6,
+  expectedToolCalls: 4,
+  tokensMeasurable: true,
+  cacheCreationMeasurable: true,
+  contextMeasurable: true,
+  schemaMeasurable: true,
+  skillsMeasurable: true,
+  perTurnTokensMeasurable: true,
+  pairedWithSessionFiles: false,
+  expectedSkills: ['tdd-workflow'],
+  expectedCostStatus: 'no_rate',
+  expectedModels: ['gpt-4o'],
+  expectedGapSubstrings: ['content_part_withheld'],
+  sendsLogs: true,
+}
+
+const COPILOT_BASELINE_WITHHELD_SPAN = 'copilot_chat.tool.withheld'
+
+// A JSON object result the mapper classifies as a document and withholds: `JsonDocumentText`
+// treats a complete object/array as a document, so this pins the `content_part_withheld` path.
+const COPILOT_BASELINE_WITHHELD_DOCUMENT = JSON.stringify({
+  files: Array.from({ length: 40 }, (_, index) => ({ file: `src/module-${index}.ts`, bytes: 1_024 + index })),
+})
+
+type CopilotBaselineToolSpec = {
+  readonly name: string
+  readonly tool: string
+  readonly arguments: string
+  readonly result: string
+  readonly mcpServer?: string
+  readonly mcpTool?: string
+}
+
+const COPILOT_BASELINE_TOOLS: readonly CopilotBaselineToolSpec[] = [
+  {
+    name: 'copilot_chat.tool.read',
+    tool: 'read_file',
+    arguments: JSON.stringify({ file: 'src/telemetry.ts' }),
+    result: 'const collector = 1',
+  },
+  {
+    name: COPILOT_BASELINE_WITHHELD_SPAN,
+    tool: 'read_file',
+    arguments: JSON.stringify({ file: 'package-lock.json' }),
+    result: COPILOT_BASELINE_WITHHELD_DOCUMENT,
+  },
+  {
+    name: 'copilot_chat.tool.mcp',
+    tool: 'codegraph_explore',
+    arguments: JSON.stringify({ query: 'KyberBridgeEngine' }),
+    result: 'symbol graph',
+    mcpServer: 'codegraph',
+    mcpTool: 'explore',
+  },
+  {
+    name: 'copilot_chat.tool.edit',
+    tool: 'edit_file',
+    arguments: JSON.stringify({ file: 'src/telemetry.ts' }),
+    result: 'applied',
+  },
+]
+
+/**
+ * Builds the rich dual Copilot baseline OTLP payload: system prompt, conversation history,
+ * tool definitions, `tool.invoke` spans (one with a withheld document result), an
+ * `agent.invoke` span, skill invocations, and log records.
+ */
+export function buildCopilotBaselineFixture(options: CopilotBaselineFixtureOptions = {}): CopilotBaselineFixture {
+  const contract = COPILOT_BASELINE_CONTRACT
+  const sessionId = options.sessionId ?? contract.sessionId
+  const sourceMode = options.sourceMode ?? 'primary'
+  const traceId = hexTraceId(90, 1)
+  const rootSpanId = hexSpanId(90, 1, 1)
+
+  const systemInstructions = 'You are a coding agent verifying telemetry capture.'
+  const spans: OtlpSpanWire[] = [
+    {
+      traceId,
+      spanId: rootSpanId,
+      name: 'invoke_agent copilot',
+      kind: 'SPAN_KIND_INTERNAL',
+      startTimeUnixNano: nanoAt(0),
+      endTimeUnixNano: nanoAt(contract.turns * 1_700 + 4_000),
+      status: { code: 'STATUS_CODE_OK' },
+      attributes: [
+        strAttr('gen_ai.operation.name', 'invoke_agent'),
+        strAttr('gen_ai.agent.name', 'copilot'),
+        strAttr('gen_ai.session.id', sessionId),
+        strAttr('copilot_chat.chat_session_id', sessionId),
+        strAttr('kyber.session.label', `Copilot baseline rich OTLP run (${sourceMode})`),
+      ],
+    },
+  ]
+
+  let seq = 2
+  const logRecords: OtlpLogRecordWire[] = []
+
+  for (let turn = 0; turn < contract.turns; turn++) {
+    const startMs = turn * 1_700 + 40
+    const endMs = startMs + 800
+    const turnSpanId = hexSpanId(90, 1, seq++)
+    const messages = JSON.stringify([
+      { role: 'system', content: systemInstructions },
+      { role: 'user', content: `Baseline turn ${turn + 1}: capture full content.` },
+      { role: 'assistant', content: `Baseline turn ${turn + 1}: content captured.` },
+    ])
+    const cacheRead = 1_800 + turn * 250
+    const cacheCreation = turn === 0 ? 900 : 150
+    const fresh = 950 + turn * 100
+
+    const turnAttributes: OtlpKeyValue[] = [
+      strAttr('gen_ai.session.id', sessionId),
+      strAttr('copilot_chat.chat_session_id', sessionId),
+      strAttr('gen_ai.response.model', 'gpt-4o'),
+      intAttr('gen_ai.usage.input_tokens', fresh + cacheRead + cacheCreation),
+      intAttr('gen_ai.usage.cache_read.input_tokens', cacheRead),
+      intAttr('gen_ai.usage.cache_creation.input_tokens', cacheCreation),
+      intAttr('gen_ai.usage.output_tokens', 160 + turn * 10),
+      strAttr('gen_ai.system_instructions', systemInstructions),
+      strAttr('gen_ai.input.messages', messages),
+    ]
+
+    if (turn === 0) {
+      turnAttributes.push(
+        strAttr('gen_ai.rules', 'Follow the repository rules.'),
+        strAttr('gen_ai.skills', 'tdd-workflow'),
+        strArrayAttr('kyber.skills.invoked', ['tdd-workflow']),
+        strAttr('gen_ai.tool.definitions', SHARED_TOOL_DEFS_JSON),
+      )
+    }
+
+    spans.push({
+      traceId,
+      spanId: turnSpanId,
+      parentSpanId: rootSpanId,
+      name: `copilot_chat.turn.${turn + 1}`,
+      kind: 'SPAN_KIND_CLIENT',
+      startTimeUnixNano: nanoAt(startMs),
+      endTimeUnixNano: nanoAt(endMs),
+      status: { code: 'STATUS_CODE_OK' },
+      attributes: turnAttributes,
+    })
+
+    const tool = COPILOT_BASELINE_TOOLS[turn]
+    if (tool !== undefined) {
+      const toolAttributes: OtlpKeyValue[] = [
+        strAttr('gen_ai.session.id', sessionId),
+        strAttr('copilot_chat.chat_session_id', sessionId),
+        strAttr('gen_ai.tool.name', tool.tool),
+        strAttr('gen_ai.tool.call.id', `${sessionId}-call-${turn + 1}`),
+        strAttr('gen_ai.tool.call.arguments', tool.arguments),
+        strAttr('gen_ai.tool.call.result', tool.result),
+      ]
+      if (tool.mcpServer !== undefined) toolAttributes.push(strAttr('gen_ai.tool.mcp.server', tool.mcpServer))
+      if (tool.mcpTool !== undefined) toolAttributes.push(strAttr('gen_ai.tool.mcp.tool', tool.mcpTool))
+
+      spans.push({
+        traceId,
+        spanId: hexSpanId(90, 1, seq++),
+        parentSpanId: turnSpanId,
+        name: tool.name,
+        kind: 'SPAN_KIND_INTERNAL',
+        startTimeUnixNano: nanoAt(endMs + 15),
+        endTimeUnixNano: nanoAt(endMs + 110),
+        status: { code: 'STATUS_CODE_OK' },
+        attributes: toolAttributes,
+      })
+    }
+
+    if (turn < 2) {
+      logRecords.push({
+        timeUnixNano: nanoAt(startMs - 10),
+        traceId,
+        spanId: hexSpanId(90, 1, 100 + turn),
+        eventName: 'copilot_chat.user_prompt',
+        body: { stringValue: `Baseline turn ${turn + 1}: capture full content.` },
+        attributes: [
+          strAttr('event.name', 'copilot_chat.user_prompt'),
+          strAttr('gen_ai.session.id', sessionId),
+          strAttr('copilot_chat.chat_session_id', sessionId),
+        ],
+      })
+    }
+  }
+
+  spans.push({
+    traceId,
+    spanId: hexSpanId(90, 1, seq++),
+    parentSpanId: rootSpanId,
+    name: 'invoke_agent explore',
+    kind: 'SPAN_KIND_INTERNAL',
+    startTimeUnixNano: nanoAt(2_000),
+    endTimeUnixNano: nanoAt(8_000),
+    status: { code: 'STATUS_CODE_OK' },
+    attributes: [
+      strAttr('gen_ai.operation.name', 'invoke_agent'),
+      strAttr('gen_ai.agent.name', 'explore'),
+      strAttr('gen_ai.session.id', sessionId),
+      strAttr('copilot_chat.chat_session_id', sessionId),
+      strAttr('gen_ai.tool.call.id', `${sessionId}-spawn`),
+    ],
+  })
+
+  return {
+    harness: 'copilot',
+    sessionId,
+    turns: contract.turns,
+    tracePayload: wrapTraces('copilot-chat', 'github.copilot.chat', spans),
+    logPayload: wrapLogs('copilot-chat', 'github.copilot.chat', logRecords),
+    sourceMode,
+    withheldCase: {
+      spanName: COPILOT_BASELINE_WITHHELD_SPAN,
+      resultAttribute: 'gen_ai.tool.call.result',
+      documentKind: 'json-document',
+      expectedBucket: 'content_part_withheld',
+      expectedPlainText: '',
+    },
+  }
+}
