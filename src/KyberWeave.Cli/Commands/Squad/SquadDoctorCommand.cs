@@ -27,23 +27,10 @@ internal sealed class SquadDoctorCommand : Command<SquadDoctorSettings>
 {
     private const string ArbiterServer = McpServerNames.Arbiter;
 
-    /// <summary>
-    /// Path identity for the skills roots a retired-skill copy can sit under: the same rules
-    /// <see cref="KyberWeave.Domain.Hooks.PathContainment"/> applies, because Windows and macOS
-    /// volumes usually ignore case and other hosts do not.
-    /// </summary>
-    private static readonly StringComparer SkillRootComparer =
-        OperatingSystem.IsWindows() || OperatingSystem.IsMacOS()
-            ? StringComparer.OrdinalIgnoreCase
-            : StringComparer.Ordinal;
-
     private readonly ISquadStateStore _stateStore;
     private readonly ISquadStateMigration _migration;
     private readonly ISquadGlobalRootResolver _globalRoots;
     private readonly ISquadRenderer _renderer;
-    private readonly ISquadModelPresetStore _presetStore;
-    private readonly ISquadDeploymentPlanner _planner;
-    private readonly ISquadResponseGuidanceStore _guidance;
     private readonly IProcessEnvironment _environment;
     private readonly ISquadSourceLocator _sourceLocator;
     private readonly ISquadSourceLoader _sourceLoader;
@@ -56,8 +43,8 @@ internal sealed class SquadDoctorCommand : Command<SquadDoctorSettings>
     private readonly SquadConsole _console;
     private readonly IWritableFileSystem _files;
     private readonly IMcpWiringService _wiring;
-    private readonly Func<string, string?>? _findExecutable;
     private readonly SquadCommandRoots _roots;
+    private readonly SquadDoctorDiagnostics _diagnostics;
 
     /// <summary>Creates the doctor command over the Squad services the host registers.</summary>
     /// <param name="stateStore">Reads the deployment state.</param>
@@ -127,9 +114,6 @@ internal sealed class SquadDoctorCommand : Command<SquadDoctorSettings>
         _migration = migration;
         _globalRoots = globalRoots;
         _renderer = renderer;
-        _presetStore = presetStore;
-        _planner = planner;
-        _guidance = guidance;
         _environment = environment;
         _sourceLocator = sourceLocator;
         _sourceLoader = sourceLoader;
@@ -142,8 +126,22 @@ internal sealed class SquadDoctorCommand : Command<SquadDoctorSettings>
         _console = output;
         _files = files;
         _wiring = wiring;
-        _findExecutable = processRunner is null ? null : name => processRunner.FindOnPath(name);
         _roots = roots;
+        _diagnostics = new SquadDoctorDiagnostics(
+            stateStore,
+            renderer,
+            globalRoots,
+            presetStore,
+            planner,
+            guidance,
+            environment,
+            sourceLoader,
+            skillShadowing,
+            devinOverlap,
+            output,
+            files,
+            pathSemantics,
+            processRunner is null ? null : name => processRunner.FindOnPath(name));
     }
 
     /// <inheritdoc />
@@ -192,34 +190,11 @@ internal sealed class SquadDoctorCommand : Command<SquadDoctorSettings>
         _console.Ansi.MarkupLine($"  [green]ok[/] CLI Version: [bold]{Markup.Escape(cliVersion)}[/]");
 
         // 2. Renderer coverage — which of the declared targets can actually install today.
-        ISquadRenderer renderer = _renderer;
-        string[] supported = renderer.SupportedTargets
-            .Select(SquadTargetCatalog.GetToken)
-            .OrderBy(token => token, StringComparer.Ordinal)
-            .ToArray();
-        string[] pending = SquadTargetCatalog.All
-            .Select(SquadTargetCatalog.GetToken)
-            .Except(supported, StringComparer.Ordinal)
-            .OrderBy(token => token, StringComparer.Ordinal)
-            .ToArray();
-        _console.Ansi.MarkupLine(
-            $"  [green]ok[/] Renderers available: [bold]{Markup.Escape(string.Join(", ", supported))}[/]");
-        if (pending.Length > 0)
-            _console.Ansi.MarkupLine(
-                $"  [grey]info[/] Not yet implemented: [bold]{Markup.Escape(string.Join(", ", pending))}[/] (see docs/todo/<target>.md)");
+        ReportRendererCoverage();
 
         // 3. MCP Probe
-        McpProcessProbe mcpProbe = SquadCommandComposition.ResolveProbe(_options.Executor, _environment);
-        ToolProbeResult mcpResult = mcpProbe.Probe();
-        if (mcpResult is { IsAvailable: true, Version: not null })
+        if (ReportMcpProbe())
         {
-            _console.Ansi.MarkupLine(
-                $"  [green]ok[/] Kyber-Weave MCP: [bold]kyber-weave-mcp {Markup.Escape(mcpResult.Version)}[/]");
-        }
-        else
-        {
-            string reason = mcpResult.FailureReason ?? "The 'kyber-weave-mcp' executable is not available on PATH.";
-            _console.Ansi.MarkupLine($"  [red]fail[/] Kyber-Weave MCP: {Markup.Escape(reason)}");
             hasIssues = true;
         }
 
@@ -264,15 +239,15 @@ internal sealed class SquadDoctorCommand : Command<SquadDoctorSettings>
 
         // 5. Devin duplicate imports. Runs without canonical source, because the duplicates it
         // looks for are what an installed workspace holds, not what the source would render.
-        ReportDevinImportOverlap(workingDirectory);
+        _diagnostics.ReportDevinImportOverlap(workingDirectory);
 
         // 5b. Retired skills. A stale directory at project or user level, or a receipt that
         // still claims one, is a warning, not a failure: the stale copy works.
-        ReportRetiredSkills(workingDirectory, homeStateStore);
+        _diagnostics.ReportRetiredSkills(workingDirectory, homeStateStore);
 
         // 5c. Project skills that hide an installed squad skill. A warning: the shadowing copy works,
         // it is just not the one the squad installed.
-        ReportShadowedSkills(workingDirectory, homeStateStore);
+        _diagnostics.ReportShadowedSkills(workingDirectory, homeStateStore);
 
         // 6. Home state: the migration the other verbs run, then the registry and any retained in-repo state.
         SquadMigrationReport migration = _roots.EnsureStateMigrated(
@@ -292,13 +267,13 @@ internal sealed class SquadDoctorCommand : Command<SquadDoctorSettings>
             hasIssues = true;
         }
 
-        if (ReportOwnedBlockDrift(workingDirectory, settings.Global))
+        if (_diagnostics.ReportOwnedBlockDrift(workingDirectory, settings.Global))
         {
             hasIssues = true;
         }
 
         if (settings.Global &&
-            ReportGlobalCollisions(workingDirectory, canonicalSourcePath, canonicalSourceValid))
+            _diagnostics.ReportGlobalCollisions(workingDirectory, canonicalSourcePath, canonicalSourceValid))
             hasIssues = true;
 
         _console.Ansi.WriteLine();
@@ -315,6 +290,44 @@ internal sealed class SquadDoctorCommand : Command<SquadDoctorSettings>
     public int Execute(CommandContext context, SquadDoctorSettings settings)
     {
         return Execute(context, settings, CancellationToken.None);
+    }
+
+    /// <summary>Reports which declared targets have a renderer that can install today.</summary>
+    private void ReportRendererCoverage()
+    {
+        ISquadRenderer renderer = _renderer;
+        string[] supported = renderer.SupportedTargets
+            .Select(SquadTargetCatalog.GetToken)
+            .OrderBy(token => token, StringComparer.Ordinal)
+            .ToArray();
+        string[] pending = SquadTargetCatalog.All
+            .Select(SquadTargetCatalog.GetToken)
+            .Except(supported, StringComparer.Ordinal)
+            .OrderBy(token => token, StringComparer.Ordinal)
+            .ToArray();
+        _console.Ansi.MarkupLine(
+            $"  [green]ok[/] Renderers available: [bold]{Markup.Escape(string.Join(", ", supported))}[/]");
+        if (pending.Length > 0)
+            _console.Ansi.MarkupLine(
+                $"  [grey]info[/] Not yet implemented: [bold]{Markup.Escape(string.Join(", ", pending))}[/] (see docs/todo/<target>.md)");
+    }
+
+    /// <summary>Probes the kyber-weave-mcp executable and reports its version or why it is unavailable.</summary>
+    /// <returns><see langword="true"/> when doctor should exit non-zero.</returns>
+    private bool ReportMcpProbe()
+    {
+        McpProcessProbe mcpProbe = SquadCommandComposition.ResolveProbe(_options.Executor, _environment);
+        ToolProbeResult mcpResult = mcpProbe.Probe();
+        if (mcpResult is { IsAvailable: true, Version: not null })
+        {
+            _console.Ansi.MarkupLine(
+                $"  [green]ok[/] Kyber-Weave MCP: [bold]kyber-weave-mcp {Markup.Escape(mcpResult.Version)}[/]");
+            return false;
+        }
+
+        string reason = mcpResult.FailureReason ?? "The 'kyber-weave-mcp' executable is not available on PATH.";
+        _console.Ansi.MarkupLine($"  [red]fail[/] Kyber-Weave MCP: {Markup.Escape(reason)}");
+        return true;
     }
 
     /// <summary>
@@ -494,140 +507,443 @@ internal sealed class SquadDoctorCommand : Command<SquadDoctorSettings>
     }
 
     /// <summary>
-    ///     Warns when Devin would load a Squad identity twice: once from <c>.devin/</c> and again
-    ///     from a tree it reads natively or imports from another tool.
+    ///     Reports the home-level registry: each stale entry, and each project whose in-repo Squad state was
+    ///     imported but is still present in its repository.
     /// </summary>
     /// <remarks>
-    ///     A warning rather than a failure: both copies are Squad's own and each works, so the
-    ///     cost is an ambiguous choice between two same-named profiles, not a broken install.
-    ///     Each warning names the remedy, and the remedy differs by tree — an imported tree has a
-    ///     <c>read_config_from</c> switch, a native one does not — so the hint is per entry. Keyed
-    ///     on the same <c>.devin/</c> marker target resolution uses, so a workspace without Devin
-    ///     is reported as skipped.
+    ///     Warnings rather than failures. A stale entry is harmless to the rest of the home, and retained in-repo
+    ///     state is kept on purpose by the migration; both need the operator's decision, not a failing exit code.
+    ///     The retained-state warning is only raised for a project still registered as live, because a stale
+    ///     project's home state is already gone and there is nothing to be authoritative over.
     /// </remarks>
-    private void ReportDevinImportOverlap(string workingDirectory)
+    private void ReportHomeState(ISquadStateStore stateStore)
     {
-        if (!_files.DirectoryExists(Path.Combine(workingDirectory, ".devin")))
+        IReadOnlyList<SquadProjectRegistryEntry> projects = stateStore.ListProjects();
+        if (projects.Count == 0)
         {
-            _console.Ansi.MarkupLine(
-                "  [grey]info[/] Devin duplicate imports: not checked (no '.devin/' in this directory)");
+            _console.WriteLine("  [grey]info[/] Registered Squad projects: none");
             return;
         }
 
-        // An unresolvable user directory only hides the user-level import settings; the
-        // project-level check still means something without it.
-        string? devinUserRoot;
-        try
+        foreach (SquadProjectRegistryEntry project in projects)
         {
-            devinUserRoot = _globalRoots
-                .ResolveGlobalRoot(SquadTarget.Devin);
-        }
-        catch (ArgumentException)
-        {
-            devinUserRoot = null;
-        }
-
-        DevinImportOverlapReport report = _devinOverlap.Inspect(
-            workingDirectory,
-            devinUserRoot);
-
-        if (report.Overlaps.Count == 0)
-        {
-            _console.Ansi.MarkupLine("  [green]ok[/] Devin duplicate imports: none");
-            return;
-        }
-
-        foreach (DevinImportOverlapEntry overlap in report.Overlaps)
-        {
-            _console.Ansi.MarkupLine(
-                $"  [yellow]warn[/] Devin also loads {overlap.Identities.Count} {overlap.Kind}(s) from " +
-                $"'{Markup.Escape(overlap.SourceRoot)}/' that '.devin/' already defines: " +
-                $"[bold]{Markup.Escape(string.Join(", ", overlap.Identities))}[/]");
-            _console.Ansi.MarkupLine(overlap.ImportSetting is null
-                ? $"         Devin reads '{Markup.Escape(overlap.SourceRoot)}/' natively and cannot be told " +
-                  "not to; deploy only one of the targets that write there."
-                : $"         Set \"read_config_from\": {{ \"{Markup.Escape(overlap.ImportSetting)}\": false }} " +
-                  "in .devin/config.json to stop the import (it also drops everything else that " +
-                  "import brings), or deploy only one of the two targets.");
-        }
-    }
-
-    /// <summary>
-    /// Warns when a skill folder the repository keeps for itself repeats the name of an installed
-    /// squad skill with different content, because a worker may load the repository's copy.
-    /// </summary>
-    /// <remarks>
-    /// Rule <c>KW-SQUAD-SHADOW-001</c>. A warning that never moves the exit code: the project copy
-    /// works, and deleting a tracked file is the operator's call. Installed skills come from the
-    /// project and global deployment receipts; with neither there is nothing to be shadowed.
-    /// </remarks>
-    private void ReportShadowedSkills(string workingDirectory, ISquadStateStore stateStore)
-    {
-        ISquadGlobalRootResolver globalRoots = _globalRoots;
-        List<SquadInstalledSkill> installed = [];
-        HashSet<string> managed = new(StringComparer.Ordinal);
-
-        foreach (SquadDeploymentScope scope in new[] { SquadDeploymentScope.Project, SquadDeploymentScope.Global })
-        {
-            SquadReceipt? receipt;
-            try
+            if (project.Stale)
             {
-                receipt = stateStore.ReadReceipt(workingDirectory, scope);
-            }
-            catch (Exception ex) when (FileFailure.Is(ex) || ex is InvalidDataException or JsonException)
-            {
-                // The retired-skills check above already names an unreadable receipt.
+                _console.WriteLine(
+                    $"  [yellow]warn[/] registered project '{Markup.Escape(project.Path)}' is stale " +
+                    $"({Markup.Escape(project.StaleReason ?? "unknown")}); " +
+                    "global updates skip it until its path is restored or its receipt is reinstalled.");
                 continue;
             }
 
-            if (receipt is null) continue;
+            string inRepoState = Path.Combine(project.Path, UserStatePaths.DirectoryName);
+            if (_files.FileExists(Path.Combine(inRepoState, "squad.receipt.json")) ||
+                _files.FileExists(Path.Combine(inRepoState, "squad.lock.yml")))
+                _console.WriteLine(
+                    $"  [yellow]warn[/] in-repo Squad state at '{Markup.Escape(inRepoState)}' is retained after its import. " +
+                    "The home record is now authoritative, so remove that directory from version control.");
+        }
+    }
 
-            foreach (SquadOwnedFile file in receipt.Files)
+}
+
+/// <summary>
+///     The deployment-state half of <c>squad doctor</c>: the checks that read receipts, locks and installed
+///     trees to report collisions, drift and stale state. Kept beside the command so one file holds a check's
+///     whole surface; the command owns only the prerequisite probes and their ordering.
+/// </summary>
+internal sealed class SquadDoctorDiagnostics
+{
+    /// <summary>
+    /// Path identity for the skills roots a retired-skill copy can sit under: the same rules
+    /// <see cref="KyberWeave.Domain.Hooks.PathContainment"/> applies, because Windows and macOS
+    /// volumes usually ignore case and other hosts do not.
+    /// </summary>
+    private static readonly StringComparer SkillRootComparer =
+        OperatingSystem.IsWindows() || OperatingSystem.IsMacOS()
+            ? StringComparer.OrdinalIgnoreCase
+            : StringComparer.Ordinal;
+
+    private readonly ISquadStateStore _stateStore;
+    private readonly ISquadRenderer _renderer;
+    private readonly ISquadGlobalRootResolver _globalRoots;
+    private readonly ISquadModelPresetStore _presetStore;
+    private readonly ISquadDeploymentPlanner _planner;
+    private readonly ISquadResponseGuidanceStore _guidance;
+    private readonly IProcessEnvironment _environment;
+    private readonly ISquadSourceLoader _sourceLoader;
+    private readonly ISquadSkillShadowing _skillShadowing;
+    private readonly IDevinImportOverlapInspector _devinOverlap;
+    private readonly SquadConsole _console;
+    private readonly IWritableFileSystem _files;
+    private readonly IFileSystemPathSemantics _pathSemantics;
+    private readonly Func<string, string?>? _findExecutable;
+
+    /// <summary>Creates the deployment-state checks over the same Squad services the command holds.</summary>
+    public SquadDoctorDiagnostics(
+        ISquadStateStore stateStore,
+        ISquadRenderer renderer,
+        ISquadGlobalRootResolver globalRoots,
+        ISquadModelPresetStore presetStore,
+        ISquadDeploymentPlanner planner,
+        ISquadResponseGuidanceStore guidance,
+        IProcessEnvironment environment,
+        ISquadSourceLoader sourceLoader,
+        ISquadSkillShadowing skillShadowing,
+        IDevinImportOverlapInspector devinOverlap,
+        SquadConsole console,
+        IWritableFileSystem files,
+        IFileSystemPathSemantics pathSemantics,
+        Func<string, string?>? findExecutable)
+    {
+        ArgumentNullException.ThrowIfNull(stateStore);
+        ArgumentNullException.ThrowIfNull(renderer);
+        ArgumentNullException.ThrowIfNull(globalRoots);
+        ArgumentNullException.ThrowIfNull(presetStore);
+        ArgumentNullException.ThrowIfNull(planner);
+        ArgumentNullException.ThrowIfNull(guidance);
+        ArgumentNullException.ThrowIfNull(environment);
+        ArgumentNullException.ThrowIfNull(sourceLoader);
+        ArgumentNullException.ThrowIfNull(skillShadowing);
+        ArgumentNullException.ThrowIfNull(devinOverlap);
+        ArgumentNullException.ThrowIfNull(console);
+        ArgumentNullException.ThrowIfNull(files);
+        ArgumentNullException.ThrowIfNull(pathSemantics);
+        _stateStore = stateStore;
+        _renderer = renderer;
+        _globalRoots = globalRoots;
+        _presetStore = presetStore;
+        _planner = planner;
+        _guidance = guidance;
+        _environment = environment;
+        _sourceLoader = sourceLoader;
+        _skillShadowing = skillShadowing;
+        _devinOverlap = devinOverlap;
+        _console = console;
+        _files = files;
+        _pathSemantics = pathSemantics;
+        _findExecutable = findExecutable;
+    }
+
+    /// <returns>
+    ///     <see langword="true" /> when the scan itself failed and doctor should exit non-zero.
+    ///     Warnings and skipped scans return <see langword="false" />.
+    /// </returns>
+    public bool ReportGlobalCollisions(
+        string workingDirectory,
+        string? canonicalSourcePath,
+        bool canonicalSourceValid)
+    {
+        if (canonicalSourcePath is null)
+        {
+            _console.Ansi.MarkupLine(
+                "  [grey]info[/] Global unmanaged-collision scan skipped: canonical source is not available from this working directory.");
+            return false;
+        }
+
+        if (!canonicalSourceValid)
+        {
+            _console.Ansi.MarkupLine(
+                "  [grey]info[/] Global unmanaged-collision scan skipped: canonical source validation failed.");
+            return false;
+        }
+
+        ISquadRenderer renderer = _renderer;
+        ISquadGlobalRootResolver globalRoots = _globalRoots;
+        ISquadStateStore stateStore = _stateStore;
+
+        List<SquadUnmanagedPathCollision> collisions = [];
+        bool invalidGlobalRoot = false;
+        try
+        {
+            SquadReceipt? receipt = stateStore.ReadReceipt(workingDirectory, SquadDeploymentScope.Global);
+            // Global state is one home-anchored receipt, so there is no sibling receipt to collide with.
+            IReadOnlyList<SquadReceipt> siblingReceipts = [];
+
+            SquadLock? squadLock = null;
+            try
             {
-                string[] parts = file.RelativePath.Replace('\\', '/').Split('/');
-                if (parts.Length < 3 || parts[^1] != "SKILL.md" || parts[^3] != "skills") continue;
+                squadLock = stateStore.ReadLock(workingDirectory, SquadDeploymentScope.Global);
+            }
+            catch (Exception)
+            {
+                // Lock read failure falls back to comparison render without presets.
+            }
 
-                string fullPath;
+            Dictionary<SquadTarget, SquadModelPreset>? loadedPresets = LoadPresets(squadLock);
+
+            SquadSource sharedSource = _sourceLoader.Load(canonicalSourcePath);
+
+            // The same lookup install and update make, so the expected Antigravity files match what was written.
+            string? docsServerCommand = SquadDocsServerCommand.Resolve(SquadDeploymentScope.Global, _findExecutable, _files.FileExists);
+            foreach (SquadTarget target in renderer.SupportedTargets)
+            {
+                // A future native renderer whose per-user directory is not yet verified
+                // still registers in SupportedTargets. Probing the resolver first keeps
+                // doctor --global from crashing the whole scan. Relative override values
+                // throw ArgumentException from SquadGlobalRoots; catch that per target so
+                // the remaining harnesses still scan.
+                string targetGlobalRoot;
                 try
                 {
-                    fullPath = SquadDeploymentPlanRules.ResolveOwnedFilePath(receipt, workingDirectory, globalRoots, file, _pathSemantics);
+                    targetGlobalRoot = globalRoots.ResolveGlobalRoot(target);
                 }
-                catch (Exception ex) when (ex is InvalidOperationException or ArgumentException)
+                catch (ArgumentOutOfRangeException)
                 {
+                    _console.Ansi.MarkupLine(
+                        $"  [grey]info[/] Global unmanaged-collision scan skipped for '{Markup.Escape(SquadTargetCatalog.GetToken(target))}': no verified global root.");
+                    continue;
+                }
+                catch (ArgumentException ex)
+                {
+                    _console.Ansi.MarkupLine(
+                        $"  [red]fail[/] Invalid global root for '{Markup.Escape(SquadTargetCatalog.GetToken(target))}': {Markup.Escape(ex.Message)}");
+                    invalidGlobalRoot = true;
                     continue;
                 }
 
-                if (scope == SquadDeploymentScope.Project) managed.Add(fullPath);
-                if (_files.FileExists(fullPath)) installed.Add(new SquadInstalledSkill(parts[^2], fullPath));
+                SquadRenderResult render = RenderAndInject(target, canonicalSourcePath, sharedSource, docsServerCommand, loadedPresets);
+
+                collisions.AddRange(_planner.CollectUnmanagedCollisions(
+                    workingDirectory,
+                    SquadDeploymentScope.Global,
+                    render.Files,
+                    globalRoots,
+                    receipt,
+                    siblingReceipts));
             }
         }
-
-        if (installed.Count == 0)
+        catch (Exception ex) when (
+            FileFailure.Is(ex) || ex is SquadRenderValidationException or InvalidDataException)
         {
             _console.Ansi.MarkupLine(
-                "  [grey]info[/] Project skills shadowing the squad: not checked (no installed squad skills found)");
-            return;
+                $"  [red]fail[/] Global unmanaged-collision scan failed: {Markup.Escape(ex.Message)}");
+            return true;
         }
 
-        IReadOnlyList<SquadSkillShadow> shadows = _skillShadowing.Find(workingDirectory, installed, managed);
-        if (shadows.Count == 0)
+        if (collisions.Count == 0)
+            _console.Ansi.MarkupLine("  [green]ok[/] Global unmanaged collisions: none");
+        else
+            foreach (SquadUnmanagedPathCollision collision in collisions)
+                _console.Ansi.MarkupLine(
+                    $"  [yellow]warn[/] Unmanaged global file '{Markup.Escape(collision.RelativePath)}' collides with canonical identity '{Markup.Escape(collision.Identity)}'.");
+
+        return invalidGlobalRoot;
+    }
+
+    /// <summary>Loads the presets the lock names for the comparison render, omitting any that are invalid or unreadable.</summary>
+    private Dictionary<SquadTarget, SquadModelPreset>? LoadPresets(SquadLock? squadLock)
+    {
+        if (squadLock?.ModelPresets is not { Count: > 0 })
+            return null;
+
+        ISquadModelPresetStore presetStore = _presetStore;
+        Dictionary<SquadTarget, SquadModelPreset>? loadedPresets = null;
+        foreach (KeyValuePair<SquadTarget, SquadAppliedPreset> entry in squadLock.ModelPresets)
         {
-            _console.Ansi.MarkupLine("  [green]ok[/] Project skills shadowing the squad: none");
-            return;
+            try
+            {
+                SquadModelPreset? preset = presetStore.TryLoad(entry.Value.Name);
+                if (preset is not null)
+                {
+                    loadedPresets ??= new Dictionary<SquadTarget, SquadModelPreset>();
+                    loadedPresets[entry.Key] = preset;
+                }
+            }
+            catch (Exception)
+            {
+                // Omit invalid or unreadable preset from comparison render.
+            }
         }
 
-        _console.WriteUnfolded(() =>
+        return loadedPresets;
+    }
+
+    /// <summary>
+    /// Renders the canonical source for one target at global scope and applies the effective response guidance,
+    /// mirroring install and update so the collision scan compares against what a deployment would write. A failed
+    /// render throws <see cref="SquadRenderValidationException"/> rather than reading as an empty corpus.
+    /// </summary>
+    private SquadRenderResult RenderAndInject(
+        SquadTarget target,
+        string canonicalSourcePath,
+        SquadSource sharedSource,
+        string? docsServerCommand,
+        Dictionary<SquadTarget, SquadModelPreset>? loadedPresets)
+    {
+        SquadRenderResult render = _renderer.RenderAsync(
+                new SquadRenderRequest(
+                    canonicalSourcePath,
+                    [target],
+                    SquadDeploymentScope.Global,
+                    GlobalRoots: _globalRoots,
+                    ModelPresets: loadedPresets,
+                    PreloadedSource: sharedSource,
+                    EnvironmentReader: _environment.GetVariable,
+                    DocsServerCommand: docsServerCommand))
+            .GetAwaiter()
+            .GetResult();
+
+        if (!render.Success || render.Errors.Count > 0)
         {
-            foreach (SquadSkillShadow shadow in shadows)
+            // Mirror install and update: a failed render is a collision-scan failure, not an empty corpus,
+            // so it must not reach the no-block check below.
+            string error = render.Errors.Count > 0
+                ? string.Join(Environment.NewLine, render.Errors)
+                : "Squad render failed.";
+            throw new SquadRenderValidationException(error);
+        }
+
+        List<string> warnings = [];
+        string effectiveGuidance = _guidance.ReadEffective(
+            UserStatePaths.StateDirectory(_stateStore.UserPaths.HomeDirectory),
+            warnings);
+        if (!SquadResponsePreferencesInjector.HasAnyBlock(render))
+            warnings.Add(SquadResponsePreferencesInjector.NoBlockWarning);
+        _console.WriteTransactionWarnings(warnings);
+        return SquadResponsePreferencesInjector.Inject(render, effectiveGuidance);
+    }
+
+    /// <summary>
+    /// Reports receipt-owned hook blocks whose entries no longer match the file on disk:
+    /// a hand-edited or missing owned entry is drift (Req 8.4), naming the file and the
+    /// container.
+    /// </summary>
+    /// <remarks>
+    /// Blocks own entries, never files, so a missing or unparsable file drifts every entry
+    /// it should carry rather than reading as a whole-file miss. A deployment without a
+    /// receipt, or a receipt without blocks, is reported as skipped rather than failed:
+    /// there is nothing owned to drift. Both the file's path and its shape are read from the
+    /// receipt, so diagnosis never depends on a render that may no longer exist and never
+    /// needs a scope of its own to say where a global block lives.
+    /// </remarks>
+    /// <returns><see langword="true"/> when doctor should exit non-zero.</returns>
+    public bool ReportOwnedBlockDrift(string workingDirectory, bool isGlobal)
+    {
+        SquadDeploymentScope scope = SquadCommandComposition.ResolveScope(isGlobal);
+        ISquadStateStore stateStore = _stateStore;
+        ISquadGlobalRootResolver globalRoots = _globalRoots;
+
+        SquadReceipt? receipt;
+        try
+        {
+            receipt = stateStore.ReadReceipt(workingDirectory, scope);
+        }
+        catch (Exception ex) when (FileFailure.Is(ex) || ex is InvalidDataException or System.Text.Json.JsonException)
+        {
+            _console.Ansi.MarkupLine($"  [yellow]warn[/] Owned blocks: cannot read the ownership receipt: {Markup.Escape(ex.Message)}");
+            return false;
+        }
+
+        if (receipt is null)
+        {
+            _console.Ansi.MarkupLine(
+                "  [grey]info[/] Owned blocks: not checked (no Kyber-Squad deployment found)");
+            return false;
+        }
+
+        if (receipt.Blocks.Count == 0)
+        {
+            _console.Ansi.MarkupLine("  [green]ok[/] Owned blocks: none");
+            return false;
+        }
+
+        bool hasDrift = false;
+        foreach (SquadOwnedBlock block in receipt.Blocks)
+        {
+            string suffix = scope == SquadDeploymentScope.Global ? $" ({block.Target})" : string.Empty;
+            string fileLabel = $"{Markup.Escape(block.RelativePath)}{suffix}";
+
+            string fullPath;
+            try
+            {
+                fullPath = SquadDeploymentPlanRules.ResolveOwnedFilePath(
+                    receipt,
+                    workingDirectory,
+                    globalRoots,
+                    new SquadOwnedFile(block.RelativePath, new string('0', 64), block.Target, false), _pathSemantics);
+            }
+            catch (Exception ex) when (ex is InvalidOperationException or ArgumentException)
             {
                 _console.Ansi.MarkupLine(
-                    $"  [yellow]warn[/] [bold]KW-SQUAD-SHADOW-001[/] Project skill '{Markup.Escape(shadow.Name)}' at " +
-                    $"[bold]{Markup.Escape(shadow.ProjectPath)}[/] differs from the installed squad skill at " +
-                    $"[bold]{Markup.Escape(shadow.InstalledPath)}[/]; agents may read the project copy.");
-                _console.Ansi.MarkupLine(
-                    "         Delete the project copy, or re-run [grey]squad install[/] for this project.");
+                    $"  [red]fail[/] Owned block drift: {fileLabel} ({Markup.Escape(ex.Message)})");
+                hasDrift = true;
+                continue;
             }
-        });
+
+            if (!SquadHookJsonBlock.TryResolveFormat(block, out SquadHookBlockFormat format))
+            {
+                _console.Ansi.MarkupLine($"  [red]fail[/] Owned block drift: {fileLabel} (unknown shared hook file)");
+                hasDrift = true;
+                continue;
+            }
+
+            if (!_files.FileExists(fullPath))
+            {
+                foreach (SquadOwnedBlockEntry entry in block.Entries)
+                {
+                    _console.Ansi.MarkupLine($"  [red]fail[/] Owned block drift: {fileLabel} {Markup.Escape(entry.Container)} (missing)");
+                }
+
+                if (block.Entries.Count == 0)
+                {
+                    _console.Ansi.MarkupLine($"  [red]fail[/] Owned block drift: {fileLabel} (missing)");
+                }
+
+                hasDrift = true;
+                continue;
+            }
+
+            string currentJson;
+            try
+            {
+                currentJson = _files.ReadAllText(fullPath);
+            }
+            catch (Exception ex) when (FileFailure.Is(ex))
+            {
+                _console.Ansi.MarkupLine(
+                    $"  [red]fail[/] Owned block drift: {fileLabel} (unreadable: {Markup.Escape(ex.Message)})");
+                hasDrift = true;
+                continue;
+            }
+
+            Dictionary<string, string> expected = new(StringComparer.Ordinal);
+            foreach (SquadOwnedBlockEntry entry in block.Entries)
+            {
+                expected[entry.Container] = entry.Sha256;
+            }
+
+            IReadOnlyList<SquadHookDrift> drifts;
+            try
+            {
+                drifts = SquadHookJsonBlock.FindDrift(format, currentJson, expected);
+            }
+            catch (Exception ex) when (ex is JsonException or InvalidOperationException)
+            {
+                foreach (SquadOwnedBlockEntry entry in block.Entries)
+                {
+                    _console.Ansi.MarkupLine($"  [red]fail[/] Owned block drift: {fileLabel} {Markup.Escape(entry.Container)} (unparsable)");
+                }
+
+                hasDrift = true;
+                continue;
+            }
+
+            foreach (SquadHookDrift drift in drifts)
+            {
+                _console.Ansi.MarkupLine($"  [red]fail[/] Owned block drift: {fileLabel} {Markup.Escape(drift.Location)} ({Markup.Escape(drift.Reason)})");
+                hasDrift = true;
+            }
+        }
+
+        if (!hasDrift)
+        {
+            int entryCount = receipt.Blocks.Sum(block => block.Entries.Count);
+            string entryWord = entryCount == 1 ? "entry" : "entries";
+            _console.Ansi.MarkupLine($"  [green]ok[/] Owned blocks: {receipt.Blocks.Count} blocks, {entryCount} {entryWord} healthy");
+        }
+
+        return hasDrift;
     }
 
     /// <summary>
@@ -642,7 +958,7 @@ internal sealed class SquadDoctorCommand : Command<SquadDoctorSettings>
     /// live in a standards template. The remedy is the same for every retired skill: delete the
     /// stale directory, then run <c>squad update</c> to reconcile the receipt.
     /// </remarks>
-    private void ReportRetiredSkills(string workingDirectory, ISquadStateStore stateStore)
+    public void ReportRetiredSkills(string workingDirectory, ISquadStateStore stateStore)
     {
         List<(SquadRetiredSkill Skill, string Path)> staleDirs = [];
         foreach (string skillsRoot in RetiredSkillSearchRoots(workingDirectory))
@@ -810,340 +1126,140 @@ internal sealed class SquadDoctorCommand : Command<SquadDoctorSettings>
     }
 
     /// <summary>
-    ///     Reports the home-level registry: each stale entry, and each project whose in-repo Squad state was
-    ///     imported but is still present in its repository.
+    /// Warns when a skill folder the repository keeps for itself repeats the name of an installed
+    /// squad skill with different content, because a worker may load the repository's copy.
     /// </summary>
     /// <remarks>
-    ///     Warnings rather than failures. A stale entry is harmless to the rest of the home, and retained in-repo
-    ///     state is kept on purpose by the migration; both need the operator's decision, not a failing exit code.
-    ///     The retained-state warning is only raised for a project still registered as live, because a stale
-    ///     project's home state is already gone and there is nothing to be authoritative over.
+    /// Rule <c>KW-SQUAD-SHADOW-001</c>. A warning that never moves the exit code: the project copy
+    /// works, and deleting a tracked file is the operator's call. Installed skills come from the
+    /// project and global deployment receipts; with neither there is nothing to be shadowed.
     /// </remarks>
-    private void ReportHomeState(ISquadStateStore stateStore)
+    public void ReportShadowedSkills(string workingDirectory, ISquadStateStore stateStore)
     {
-        IReadOnlyList<SquadProjectRegistryEntry> projects = stateStore.ListProjects();
-        if (projects.Count == 0)
+        ISquadGlobalRootResolver globalRoots = _globalRoots;
+        List<SquadInstalledSkill> installed = [];
+        HashSet<string> managed = new(StringComparer.Ordinal);
+
+        foreach (SquadDeploymentScope scope in new[] { SquadDeploymentScope.Project, SquadDeploymentScope.Global })
         {
-            _console.WriteLine("  [grey]info[/] Registered Squad projects: none");
+            SquadReceipt? receipt;
+            try
+            {
+                receipt = stateStore.ReadReceipt(workingDirectory, scope);
+            }
+            catch (Exception ex) when (FileFailure.Is(ex) || ex is InvalidDataException or JsonException)
+            {
+                // The retired-skills check above already names an unreadable receipt.
+                continue;
+            }
+
+            if (receipt is null) continue;
+
+            foreach (SquadOwnedFile file in receipt.Files)
+            {
+                string[] parts = file.RelativePath.Replace('\\', '/').Split('/');
+                if (parts.Length < 3 || parts[^1] != "SKILL.md" || parts[^3] != "skills") continue;
+
+                string fullPath;
+                try
+                {
+                    fullPath = SquadDeploymentPlanRules.ResolveOwnedFilePath(receipt, workingDirectory, globalRoots, file, _pathSemantics);
+                }
+                catch (Exception ex) when (ex is InvalidOperationException or ArgumentException)
+                {
+                    continue;
+                }
+
+                if (scope == SquadDeploymentScope.Project) managed.Add(fullPath);
+                if (_files.FileExists(fullPath)) installed.Add(new SquadInstalledSkill(parts[^2], fullPath));
+            }
+        }
+
+        if (installed.Count == 0)
+        {
+            _console.Ansi.MarkupLine(
+                "  [grey]info[/] Project skills shadowing the squad: not checked (no installed squad skills found)");
             return;
         }
 
-        foreach (SquadProjectRegistryEntry project in projects)
+        IReadOnlyList<SquadSkillShadow> shadows = _skillShadowing.Find(workingDirectory, installed, managed);
+        if (shadows.Count == 0)
         {
-            if (project.Stale)
-            {
-                _console.WriteLine(
-                    $"  [yellow]warn[/] registered project '{Markup.Escape(project.Path)}' is stale " +
-                    $"({Markup.Escape(project.StaleReason ?? "unknown")}); " +
-                    "global updates skip it until its path is restored or its receipt is reinstalled.");
-                continue;
-            }
-
-            string inRepoState = Path.Combine(project.Path, UserStatePaths.DirectoryName);
-            if (_files.FileExists(Path.Combine(inRepoState, "squad.receipt.json")) ||
-                _files.FileExists(Path.Combine(inRepoState, "squad.lock.yml")))
-                _console.WriteLine(
-                    $"  [yellow]warn[/] in-repo Squad state at '{Markup.Escape(inRepoState)}' is retained after its import. " +
-                    "The home record is now authoritative, so remove that directory from version control.");
-        }
-    }
-
-    /// <returns>
-    ///     <see langword="true" /> when the scan itself failed and doctor should exit non-zero.
-    ///     Warnings and skipped scans return <see langword="false" />.
-    /// </returns>
-    private bool ReportGlobalCollisions(
-        string workingDirectory,
-        string? canonicalSourcePath,
-        bool canonicalSourceValid)
-    {
-        if (canonicalSourcePath is null)
-        {
-            _console.Ansi.MarkupLine(
-                "  [grey]info[/] Global unmanaged-collision scan skipped: canonical source is not available from this working directory.");
-            return false;
+            _console.Ansi.MarkupLine("  [green]ok[/] Project skills shadowing the squad: none");
+            return;
         }
 
-        if (!canonicalSourceValid)
+        _console.WriteUnfolded(() =>
         {
-            _console.Ansi.MarkupLine(
-                "  [grey]info[/] Global unmanaged-collision scan skipped: canonical source validation failed.");
-            return false;
-        }
-
-        ISquadRenderer renderer = _renderer;
-        ISquadGlobalRootResolver globalRoots = _globalRoots;
-        ISquadStateStore stateStore = _stateStore;
-
-        List<SquadUnmanagedPathCollision> collisions = [];
-        bool invalidGlobalRoot = false;
-        try
-        {
-            SquadReceipt? receipt = stateStore.ReadReceipt(workingDirectory, SquadDeploymentScope.Global);
-            // Global state is one home-anchored receipt, so there is no sibling receipt to collide with.
-            IReadOnlyList<SquadReceipt> siblingReceipts = [];
-
-            SquadLock? squadLock = null;
-            try
+            foreach (SquadSkillShadow shadow in shadows)
             {
-                squadLock = stateStore.ReadLock(workingDirectory, SquadDeploymentScope.Global);
-            }
-            catch (Exception)
-            {
-                // Lock read failure falls back to comparison render without presets.
-            }
-
-            Dictionary<SquadTarget, SquadModelPreset>? loadedPresets = null;
-            if (squadLock?.ModelPresets is { Count: > 0 })
-            {
-                ISquadModelPresetStore presetStore = _presetStore;
-                foreach (KeyValuePair<SquadTarget, SquadAppliedPreset> entry in squadLock.ModelPresets)
-                {
-                    try
-                    {
-                        SquadModelPreset? preset = presetStore.TryLoad(entry.Value.Name);
-                        if (preset is not null)
-                        {
-                            loadedPresets ??= new Dictionary<SquadTarget, SquadModelPreset>();
-                            loadedPresets[entry.Key] = preset;
-                        }
-                    }
-                    catch (Exception)
-                    {
-                        // Omit invalid or unreadable preset from comparison render.
-                    }
-                }
-            }
-
-            SquadSource sharedSource = _sourceLoader.Load(canonicalSourcePath);
-
-            // The same lookup install and update make, so the expected Antigravity files match what was written.
-            string? docsServerCommand = SquadDocsServerCommand.Resolve(SquadDeploymentScope.Global, _findExecutable, _files.FileExists);
-            foreach (SquadTarget target in renderer.SupportedTargets)
-            {
-                // A future native renderer whose per-user directory is not yet verified
-                // still registers in SupportedTargets. Probing the resolver first keeps
-                // doctor --global from crashing the whole scan. Relative override values
-                // throw ArgumentException from SquadGlobalRoots; catch that per target so
-                // the remaining harnesses still scan.
-                string targetGlobalRoot;
-                try
-                {
-                    targetGlobalRoot = globalRoots.ResolveGlobalRoot(target);
-                }
-                catch (ArgumentOutOfRangeException)
-                {
-                    _console.Ansi.MarkupLine(
-                        $"  [grey]info[/] Global unmanaged-collision scan skipped for '{Markup.Escape(SquadTargetCatalog.GetToken(target))}': no verified global root.");
-                    continue;
-                }
-                catch (ArgumentException ex)
-                {
-                    _console.Ansi.MarkupLine(
-                        $"  [red]fail[/] Invalid global root for '{Markup.Escape(SquadTargetCatalog.GetToken(target))}': {Markup.Escape(ex.Message)}");
-                    invalidGlobalRoot = true;
-                    continue;
-                }
-
-                SquadRenderResult render = renderer.RenderAsync(
-                        new SquadRenderRequest(
-                            canonicalSourcePath,
-                            [target],
-                            SquadDeploymentScope.Global,
-                            GlobalRoots: globalRoots,
-                            ModelPresets: loadedPresets,
-                            PreloadedSource: sharedSource,
-                            EnvironmentReader: _environment.GetVariable,
-                            DocsServerCommand: docsServerCommand))
-                    .GetAwaiter()
-                    .GetResult();
-
-                if (!render.Success || render.Errors.Count > 0)
-                {
-                    // Mirror install and update: a failed render is a collision-scan failure, not an empty corpus,
-                    // so it must not reach the no-block check below.
-                    string error = render.Errors.Count > 0
-                        ? string.Join(Environment.NewLine, render.Errors)
-                        : "Squad render failed.";
-                    throw new SquadRenderValidationException(error);
-                }
-
-                List<string> warnings = [];
-                string effectiveGuidance = _guidance.ReadEffective(
-                    UserStatePaths.StateDirectory(stateStore.UserPaths.HomeDirectory),
-                    warnings);
-                if (!SquadResponsePreferencesInjector.HasAnyBlock(render))
-                    warnings.Add(SquadResponsePreferencesInjector.NoBlockWarning);
-                _console.WriteTransactionWarnings(warnings);
-                render = SquadResponsePreferencesInjector.Inject(render, effectiveGuidance);
-
-                collisions.AddRange(_planner.CollectUnmanagedCollisions(
-                    workingDirectory,
-                    SquadDeploymentScope.Global,
-                    render.Files,
-                    globalRoots,
-                    receipt,
-                    siblingReceipts));
-            }
-        }
-        catch (Exception ex) when (
-            FileFailure.Is(ex) || ex is SquadRenderValidationException or InvalidDataException)
-        {
-            _console.Ansi.MarkupLine(
-                $"  [red]fail[/] Global unmanaged-collision scan failed: {Markup.Escape(ex.Message)}");
-            return true;
-        }
-
-        if (collisions.Count == 0)
-            _console.Ansi.MarkupLine("  [green]ok[/] Global unmanaged collisions: none");
-        else
-            foreach (SquadUnmanagedPathCollision collision in collisions)
                 _console.Ansi.MarkupLine(
-                    $"  [yellow]warn[/] Unmanaged global file '{Markup.Escape(collision.RelativePath)}' collides with canonical identity '{Markup.Escape(collision.Identity)}'.");
-
-        return invalidGlobalRoot;
+                    $"  [yellow]warn[/] [bold]KW-SQUAD-SHADOW-001[/] Project skill '{Markup.Escape(shadow.Name)}' at " +
+                    $"[bold]{Markup.Escape(shadow.ProjectPath)}[/] differs from the installed squad skill at " +
+                    $"[bold]{Markup.Escape(shadow.InstalledPath)}[/]; agents may read the project copy.");
+                _console.Ansi.MarkupLine(
+                    "         Delete the project copy, or re-run [grey]squad install[/] for this project.");
+            }
+        });
     }
 
     /// <summary>
-    /// Reports receipt-owned hook blocks whose entries no longer match the file on disk:
-    /// a hand-edited or missing owned entry is drift (Req 8.4), naming the file and the
-    /// container.
+    ///     Warns when Devin would load a Squad identity twice: once from <c>.devin/</c> and again
+    ///     from a tree it reads natively or imports from another tool.
     /// </summary>
     /// <remarks>
-    /// Blocks own entries, never files, so a missing or unparsable file drifts every entry
-    /// it should carry rather than reading as a whole-file miss. A deployment without a
-    /// receipt, or a receipt without blocks, is reported as skipped rather than failed:
-    /// there is nothing owned to drift. Both the file's path and its shape are read from the
-    /// receipt, so diagnosis never depends on a render that may no longer exist and never
-    /// needs a scope of its own to say where a global block lives.
+    ///     A warning rather than a failure: both copies are Squad's own and each works, so the
+    ///     cost is an ambiguous choice between two same-named profiles, not a broken install.
+    ///     Each warning names the remedy, and the remedy differs by tree — an imported tree has a
+    ///     <c>read_config_from</c> switch, a native one does not — so the hint is per entry. Keyed
+    ///     on the same <c>.devin/</c> marker target resolution uses, so a workspace without Devin
+    ///     is reported as skipped.
     /// </remarks>
-    /// <returns><see langword="true"/> when doctor should exit non-zero.</returns>
-    private bool ReportOwnedBlockDrift(string workingDirectory, bool isGlobal)
+    public void ReportDevinImportOverlap(string workingDirectory)
     {
-        SquadDeploymentScope scope = SquadCommandComposition.ResolveScope(isGlobal);
-        ISquadStateStore stateStore = _stateStore;
-        ISquadGlobalRootResolver globalRoots = _globalRoots;
-
-        SquadReceipt? receipt;
-        try
-        {
-            receipt = stateStore.ReadReceipt(workingDirectory, scope);
-        }
-        catch (Exception ex) when (FileFailure.Is(ex) || ex is InvalidDataException or System.Text.Json.JsonException)
-        {
-            _console.Ansi.MarkupLine($"  [yellow]warn[/] Owned blocks: cannot read the ownership receipt: {Markup.Escape(ex.Message)}");
-            return false;
-        }
-
-        if (receipt is null)
+        if (!_files.DirectoryExists(Path.Combine(workingDirectory, ".devin")))
         {
             _console.Ansi.MarkupLine(
-                "  [grey]info[/] Owned blocks: not checked (no Kyber-Squad deployment found)");
-            return false;
+                "  [grey]info[/] Devin duplicate imports: not checked (no '.devin/' in this directory)");
+            return;
         }
 
-        if (receipt.Blocks.Count == 0)
+        // An unresolvable user directory only hides the user-level import settings; the
+        // project-level check still means something without it.
+        string? devinUserRoot;
+        try
         {
-            _console.Ansi.MarkupLine("  [green]ok[/] Owned blocks: none");
-            return false;
+            devinUserRoot = _globalRoots
+                .ResolveGlobalRoot(SquadTarget.Devin);
         }
-
-        bool hasDrift = false;
-        foreach (SquadOwnedBlock block in receipt.Blocks)
+        catch (ArgumentException)
         {
-            string suffix = scope == SquadDeploymentScope.Global ? $" ({block.Target})" : string.Empty;
-            string fileLabel = $"{Markup.Escape(block.RelativePath)}{suffix}";
-
-            string fullPath;
-            try
-            {
-                fullPath = SquadDeploymentPlanRules.ResolveOwnedFilePath(
-                    receipt,
-                    workingDirectory,
-                    globalRoots,
-                    new SquadOwnedFile(block.RelativePath, new string('0', 64), block.Target, false), _pathSemantics);
-            }
-            catch (Exception ex) when (ex is InvalidOperationException or ArgumentException)
-            {
-                _console.Ansi.MarkupLine(
-                    $"  [red]fail[/] Owned block drift: {fileLabel} ({Markup.Escape(ex.Message)})");
-                hasDrift = true;
-                continue;
-            }
-
-            if (!SquadHookJsonBlock.TryResolveFormat(block, out SquadHookBlockFormat format))
-            {
-                _console.Ansi.MarkupLine($"  [red]fail[/] Owned block drift: {fileLabel} (unknown shared hook file)");
-                hasDrift = true;
-                continue;
-            }
-
-            if (!_files.FileExists(fullPath))
-            {
-                foreach (SquadOwnedBlockEntry entry in block.Entries)
-                {
-                    _console.Ansi.MarkupLine($"  [red]fail[/] Owned block drift: {fileLabel} {Markup.Escape(entry.Container)} (missing)");
-                }
-
-                if (block.Entries.Count == 0)
-                {
-                    _console.Ansi.MarkupLine($"  [red]fail[/] Owned block drift: {fileLabel} (missing)");
-                }
-
-                hasDrift = true;
-                continue;
-            }
-
-            string currentJson;
-            try
-            {
-                currentJson = _files.ReadAllText(fullPath);
-            }
-            catch (Exception ex) when (FileFailure.Is(ex))
-            {
-                _console.Ansi.MarkupLine(
-                    $"  [red]fail[/] Owned block drift: {fileLabel} (unreadable: {Markup.Escape(ex.Message)})");
-                hasDrift = true;
-                continue;
-            }
-
-            Dictionary<string, string> expected = new(StringComparer.Ordinal);
-            foreach (SquadOwnedBlockEntry entry in block.Entries)
-            {
-                expected[entry.Container] = entry.Sha256;
-            }
-
-            IReadOnlyList<SquadHookDrift> drifts;
-            try
-            {
-                drifts = SquadHookJsonBlock.FindDrift(format, currentJson, expected);
-            }
-            catch (Exception ex) when (ex is JsonException or InvalidOperationException)
-            {
-                foreach (SquadOwnedBlockEntry entry in block.Entries)
-                {
-                    _console.Ansi.MarkupLine($"  [red]fail[/] Owned block drift: {fileLabel} {Markup.Escape(entry.Container)} (unparsable)");
-                }
-
-                hasDrift = true;
-                continue;
-            }
-
-            foreach (SquadHookDrift drift in drifts)
-            {
-                _console.Ansi.MarkupLine($"  [red]fail[/] Owned block drift: {fileLabel} {Markup.Escape(drift.Location)} ({Markup.Escape(drift.Reason)})");
-                hasDrift = true;
-            }
+            devinUserRoot = null;
         }
 
-        if (!hasDrift)
+        DevinImportOverlapReport report = _devinOverlap.Inspect(
+            workingDirectory,
+            devinUserRoot);
+
+        if (report.Overlaps.Count == 0)
         {
-            int entryCount = receipt.Blocks.Sum(block => block.Entries.Count);
-            string entryWord = entryCount == 1 ? "entry" : "entries";
-            _console.Ansi.MarkupLine($"  [green]ok[/] Owned blocks: {receipt.Blocks.Count} blocks, {entryCount} {entryWord} healthy");
+            _console.Ansi.MarkupLine("  [green]ok[/] Devin duplicate imports: none");
+            return;
         }
 
-        return hasDrift;
+        foreach (DevinImportOverlapEntry overlap in report.Overlaps)
+        {
+            _console.Ansi.MarkupLine(
+                $"  [yellow]warn[/] Devin also loads {overlap.Identities.Count} {overlap.Kind}(s) from " +
+                $"'{Markup.Escape(overlap.SourceRoot)}/' that '.devin/' already defines: " +
+                $"[bold]{Markup.Escape(string.Join(", ", overlap.Identities))}[/]");
+            _console.Ansi.MarkupLine(overlap.ImportSetting is null
+                ? $"         Devin reads '{Markup.Escape(overlap.SourceRoot)}/' natively and cannot be told " +
+                  "not to; deploy only one of the targets that write there."
+                : $"         Set \"read_config_from\": {{ \"{Markup.Escape(overlap.ImportSetting)}\": false }} " +
+                  "in .devin/config.json to stop the import (it also drops everything else that " +
+                  "import brings), or deploy only one of the two targets.");
+        }
     }
 }
 
