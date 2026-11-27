@@ -1,3 +1,5 @@
+using KyberWeave.Core.Review;
+
 namespace KyberWeave.Core.Arbiter.Facts;
 
 /// <summary>
@@ -18,8 +20,15 @@ public static class AlsoInScopeLines
     {
         ArgumentNullException.ThrowIfNull(taskId);
         ArgumentNullException.ThrowIfNull(files);
-        return Prefix + taskId + Separator + string.Join(", ", files);
+        return Prefix + taskId + Separator + string.Join(", ", files.Where(IsNameable));
     }
+
+    /// <summary>Whether <paramref name="file"/> can be written on a line without changing the line's grammar.</summary>
+    /// <param name="file">A path a finding or a plan lists.</param>
+    public static bool IsNameable(string file) =>
+        CitedLineCheck.IsRepositoryRelative(file)
+        && !file.Contains(',', StringComparison.Ordinal)
+        && !file.Any(char.IsControl);
 
     /// <summary>The files every also-in-scope line of <paramref name="dispatch"/> names, in the order they first appear.</summary>
     /// <param name="dispatch">The dispatch text, routing header block included.</param>
@@ -27,6 +36,21 @@ public static class AlsoInScopeLines
     {
         ArgumentNullException.ThrowIfNull(dispatch);
         List<string> files = [];
+        foreach (AlsoInScopeEntry entry in Entries(dispatch))
+        {
+            if (!files.Contains(entry.File, StringComparer.Ordinal))
+                files.Add(entry.File);
+        }
+
+        return files;
+    }
+
+    /// <summary>The task id and file every also-in-scope line of <paramref name="dispatch"/> names, in the order they appear.</summary>
+    /// <param name="dispatch">The dispatch text, routing header block included.</param>
+    public static IReadOnlyList<AlsoInScopeEntry> Entries(string dispatch)
+    {
+        ArgumentNullException.ThrowIfNull(dispatch);
+        List<AlsoInScopeEntry> entries = [];
         foreach (string raw in dispatch.Split('\n'))
         {
             string line = raw.TrimEnd('\r');
@@ -37,14 +61,20 @@ public static class AlsoInScopeLines
             if (close < 0)
                 continue;
 
+            string taskId = line[Prefix.Length..close];
             foreach (string file in line[(close + Separator.Length)..]
                          .Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
             {
-                if (!files.Contains(file, StringComparer.Ordinal))
-                    files.Add(file);
+                if (IsNameable(file))
+                    entries.Add(new AlsoInScopeEntry(taskId, file));
             }
         }
 
-        return files;
+        return entries;
     }
 }
+
+/// <summary>One file an also-in-scope line names, and the plan task the line says it belongs to.</summary>
+/// <param name="TaskId">The plan task whose file the line names.</param>
+/// <param name="File">The file, repository-relative.</param>
+public readonly record struct AlsoInScopeEntry(string TaskId, string File);

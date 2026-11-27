@@ -143,6 +143,26 @@ public sealed class ArbiterDiffAlsoInScopeTests
             ArbiterConfigDefaults.Product.Rules,
             rule => string.Equals(rule.Id, "KW-ARB-DIFF-001", StringComparison.Ordinal));
 
+    /// <summary>A file is accepted only under the task id of the plan task that lists it, so a line cannot name another id.</summary>
+    [Fact]
+    public void AnAlsoInScopeFileNamedUnderTheWrongTaskIdIsNotAddedToTheScope()
+    {
+        const string prompt =
+            """
+            KYBER-ARBITER: true
+            PLAN_FILE: docs/plans/cards.md
+            TASK: T2
+            Also in scope (task T2): src/Http/OrdersController.cs
+            Fix packet: /work/review/cycle-3/fix-packets/task-T2.md
+            """;
+
+        ArbiterFactSet facts = FactsWithPrompt(prompt, "src/Contract/OrderDto.cs");
+
+        Assert.Equal(
+            ["src/Contract/OrderDto.cs"],
+            Assert.IsAssignableFrom<IEnumerable<string>>(facts.Facts[PlanFacts.ScopeFilesFact].Value));
+    }
+
     private void DefinePlan(string plan) => _files.WriteAllText($"{Root}/{PlanPath}", plan);
 
     private ArbiterFactSet Facts(params string[] changed) => FactsWithPrompt(Prompt, changed);

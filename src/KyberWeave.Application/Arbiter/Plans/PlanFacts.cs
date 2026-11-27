@@ -170,14 +170,16 @@ public sealed partial class PlanFacts(IPlanFileResolver planPaths, IFileSystem f
 
         List<PlanTask> otherTasks = [.. document.Tasks
             .Where(other => !string.Equals(other.Id, task.Id, StringComparison.Ordinal))];
-        foreach (string file in AlsoInScopeLines.Files(text))
+        foreach (AlsoInScopeEntry entry in AlsoInScopeLines.Entries(text))
         {
-            string path = PlanFileOwnership.Normalize(file);
-            if (otherTasks.Any(other => other.Files.Any(listed => PlanFileOwnership.Owns(listed, path)))
-                && !files.Contains(path, StringComparer.Ordinal))
-            {
-                files.Add(path);
-            }
+            PlanTask? named = otherTasks.FirstOrDefault(
+                other => string.Equals(other.Id, entry.TaskId, StringComparison.Ordinal));
+            if (named is null || !named.Files.Any(listed => PlanFileOwnership.Owns(listed, entry.File)))
+                continue;
+
+            string file = PlanFileOwnership.Normalize(entry.File);
+            if (!files.Contains(file, StringComparer.Ordinal))
+                files.Add(file);
         }
 
         return files;

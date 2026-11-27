@@ -745,9 +745,12 @@ internal static class FixPacketWriter
         /// <summary>The files of other tasks this packet's fix may edit, one entry per task.</summary>
         internal List<OtherTaskFiles> AlsoInScope { get; } = [];
 
-        /// <summary>Names a file of another task this packet's fix may edit, once.</summary>
+        /// <summary>Names a file of another task this packet's fix may edit, once. A file the line grammar cannot carry is dropped.</summary>
         internal void AddAlsoInScope(string taskId, string file)
         {
+            if (!AlsoInScopeLines.IsNameable(file))
+                return;
+
             OtherTaskFiles? entry = AlsoInScope.Find(other => string.Equals(other.TaskId, taskId, StringComparison.Ordinal));
             if (entry is null)
             {
