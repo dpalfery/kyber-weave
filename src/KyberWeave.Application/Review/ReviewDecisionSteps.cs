@@ -422,11 +422,12 @@ public sealed class ReviewDecisionSteps(ICitedSourceFiles sources, IContainedFil
         if (string.IsNullOrWhiteSpace(finding.Evidence))
             return string.Empty;
 
+        string evidence = finding.Evidence;
         // The evidence is seat-written: only its first characters are scanned, and only the first few citations are read.
         StringBuilder text = new();
         int added = 0;
         int notes = 0;
-        foreach (System.Text.RegularExpressions.Match match in ReviewVerdictRules.EvidenceCitation().Matches(ReviewSeatInput.Clip(finding.Evidence)!).Take(ReviewVerdictRules.MaxEvidenceCitations))
+        foreach (System.Text.RegularExpressions.Match match in ReviewVerdictRules.EvidenceCitation().Matches(ReviewSeatInput.Clip(evidence, ReviewSeatInput.MaxTextCharacters)).Take(ReviewVerdictRules.MaxEvidenceCitations))
         {
             string file = match.Groups["file"].Value;
             string? failure = null;
