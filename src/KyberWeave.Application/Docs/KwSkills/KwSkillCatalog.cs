@@ -374,7 +374,9 @@ public sealed class KwSkillCatalog : IKwSkillCatalog
             return;
         }
 
-        entries.Add(new KwSkillEntry(name, skill.Frontmatter.Description!.Trim(), source));
+        string description = skill.Frontmatter.Description
+            ?? throw new InvalidOperationException("A parsed skill must declare a description.");
+        entries.Add(new KwSkillEntry(name, description.Trim(), source));
     }
 
     private static bool Parse(

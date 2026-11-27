@@ -485,10 +485,10 @@ public sealed partial class RunDelivery
             validation.Add(reviewLine);
 
         List<string> decisions = [.. facts?.LowConfidenceDecisions ?? []];
-        if (decisions.Count > 0 && facts!.AcceptedRecommendations > 0)
-            decisions.Add(facts.AcceptedRecommendations == 1
+        if (decisions.Count > 0 && facts is { } knownFacts && knownFacts.AcceptedRecommendations > 0)
+            decisions.Add(knownFacts.AcceptedRecommendations == 1
                 ? "One other decision followed the planner's recommendation; the plan lists it."
-                : $"{facts.AcceptedRecommendations.ToString(CultureInfo.InvariantCulture)} other decisions followed the planner's recommendation; the plan lists them.");
+                : $"{knownFacts.AcceptedRecommendations.ToString(CultureInfo.InvariantCulture)} other decisions followed the planner's recommendation; the plan lists them.");
 
         List<string> notes = [];
         if (!string.IsNullOrWhiteSpace(request.Notes))
@@ -820,7 +820,7 @@ public sealed partial class RunDelivery
             .Order(StringComparer.Ordinal)
             .Select(path => (Path: path, Text: ReadTodo(path, report)))
             .Where(todo => todo.Text is not null)
-            .Select(todo => $"{RunEvidence.DocumentTitle(todo.Text!) ?? Path.GetFileNameWithoutExtension(todo.Path)} (`{todo.Path}`)")];
+            .Select(todo => $"{RunEvidence.DocumentTitle(todo.Text ?? string.Empty) ?? Path.GetFileNameWithoutExtension(todo.Path)} (`{todo.Path}`)")];
     }
 
     /// <summary>

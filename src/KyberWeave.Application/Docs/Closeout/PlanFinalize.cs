@@ -181,7 +181,7 @@ public sealed partial class PlanFinalize
 
         List<string> touched = [plan, taskFile];
         if (indexText is not null)
-            touched.Add(planIndex!);
+            touched.Add(RequiredPlanIndex(planIndex));
         if (HasOtherStaged(touched, plan, report))
             return Refused();
 
@@ -239,7 +239,7 @@ public sealed partial class PlanFinalize
         {
             _store.WriteAllText(_files.Absolute(plan), newPlan);
             if (newIndex is not null)
-                _store.WriteAllText(_files.Absolute(planIndex!), newIndex);
+                _store.WriteAllText(_files.Absolute(RequiredPlanIndex(planIndex)), newIndex);
 
             PlanTaskFileOutcome written = generator.Run(plan, PlanTaskFileMode.Write);
             report.AddRange(written.Report.Items.Where(item => item.Severity == Severity.Error));
@@ -276,6 +276,9 @@ public sealed partial class PlanFinalize
         _files.CommitOnly(touched, CommitMessage(plan), report, plan, Step);
         return new PlanFinalizeOutcome(report, true, false, taskFile, ReadyQueue(taskFile, plan, report));
     }
+
+    private static string RequiredPlanIndex(string? planIndex) =>
+        planIndex ?? throw new InvalidOperationException("The configuration registers no plan index.");
 
     /// <summary>Reads an approval mode, <c>autonomous</c> or <c>supervised</c>, case-insensitively.</summary>
     public static bool TryParseMode(string? value, out PlanApprovalMode mode)
