@@ -279,7 +279,7 @@ public sealed class DocsScaffolder : IDocsScaffoldingService
             {
                 string relative = $"{folder}/{file.RelativePath}";
                 string absolute = RequireContained(repoRoot, relative, nameof(docsRoot));
-                _files.CreateDirectory(Path.GetDirectoryName(absolute)!);
+                _files.CreateDirectory(RequireDirectoryName(absolute));
                 // Atomic, as the home-folder cache writes the same bytes: a reader never sees a
                 // half-written file, and a link planted at the destination is replaced, not followed.
                 _files.WriteAllBytesAtomic(absolute, file.Bytes.ToArray());
@@ -516,6 +516,11 @@ public sealed class DocsScaffolder : IDocsScaffoldingService
         return absolute;
     }
 
+    /// <summary>The containing folder of a file path, refusing a path that names none.</summary>
+    private static string RequireDirectoryName(string absolutePath) =>
+        Path.GetDirectoryName(absolutePath)
+            ?? throw new InvalidOperationException($"The path '{absolutePath}' has no containing folder.");
+
     /// <summary>
     /// Creates the host config when the repository has none — with the <c>mcp:</c> declaration
     /// and any rendered review block already in it — and otherwise rewrites only its
@@ -695,7 +700,7 @@ public sealed class DocsScaffolder : IDocsScaffoldingService
         string absolute = RequireContained(repoRoot, AnalysisCacheIgnorePath, nameof(repoRoot));
         if (!_files.FileExists(absolute))
         {
-            _files.CreateDirectory(Path.GetDirectoryName(absolute)!);
+            _files.CreateDirectory(RequireDirectoryName(absolute));
             _files.WriteAllText(
                 absolute,
                 AnalysisCacheIgnoreEntry + "\n" + McpReceiptsIgnoreEntry + "\n");
@@ -846,7 +851,7 @@ public sealed class DocsScaffolder : IDocsScaffoldingService
         if (existed && !force)
             return new ScaffoldedFile(relativePath, ScaffoldOutcome.Skipped);
 
-        _files.CreateDirectory(Path.GetDirectoryName(absolute)!);
+        _files.CreateDirectory(RequireDirectoryName(absolute));
         _files.WriteAllText(absolute, content);
         return new ScaffoldedFile(
             relativePath, existed ? ScaffoldOutcome.Updated : ScaffoldOutcome.Created);
@@ -1034,7 +1039,7 @@ public sealed class DocsScaffolder : IDocsScaffoldingService
             if (existed && !force)
                 return new ScaffoldedFile(relativePath, ScaffoldOutcome.Skipped);
 
-            _files.CreateDirectory(Path.GetDirectoryName(absolute)!);
+            _files.CreateDirectory(RequireDirectoryName(absolute));
             _files.WriteAllText(absolute, content);
             return new ScaffoldedFile(
                 relativePath, existed ? ScaffoldOutcome.Updated : ScaffoldOutcome.Created);

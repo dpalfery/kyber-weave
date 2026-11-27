@@ -105,7 +105,8 @@ public sealed class PlanLifecycleService(
             return false;
         }
 
-        plan = resolution.Path!;
+        plan = resolution.Path
+            ?? throw new InvalidOperationException("A found plan resolution must name its path.");
         return true;
     }
 

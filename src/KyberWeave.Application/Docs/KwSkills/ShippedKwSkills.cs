@@ -59,7 +59,9 @@ internal sealed class ShippedKwSkills(
         }
 
         hash.TransformFinalBlock([], 0, 0);
-        string digest = Convert.ToHexStringLower(hash.Hash!)[..12];
+        byte[] hashBytes = hash.Hash
+            ?? throw new InvalidOperationException("The skill digest was not finalised.");
+        string digest = Convert.ToHexStringLower(hashBytes)[..12];
 
         string home = environment.HomeDirectory;
         string root = paths.GetFullPath(UserStatePaths.KwSkillsDirectory(home), home);
@@ -91,7 +93,9 @@ internal sealed class ShippedKwSkills(
 
         foreach ((string target, byte[] bytes) in targets)
         {
-            files.CreateDirectory(Path.GetDirectoryName(target)!);
+            string directory = Path.GetDirectoryName(target)
+                ?? throw new InvalidDataException($"The manifest file '{target}' has no containing folder.");
+            files.CreateDirectory(directory);
             files.WriteAllBytesAtomic(target, bytes);
         }
 

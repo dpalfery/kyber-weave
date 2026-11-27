@@ -202,7 +202,10 @@ public sealed class McpWiringInspector(IMcpConfigFiles files, McpRepositoryPath 
 
         string hint = obstruction switch
         {
-            McpLinkObstruction.Link => LinkedHint(namedPath, detection.Obstruction.Segment!),
+            McpLinkObstruction.Link => LinkedHint(
+                namedPath,
+                detection.Obstruction.Segment
+                    ?? throw new InvalidOperationException("A linked obstruction must name its segment.")),
             McpLinkObstruction.Denied => DeniedHint(namedPath),
             _ => GapHint(entry, server, namedPath, detection)
         };

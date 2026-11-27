@@ -37,7 +37,8 @@ internal sealed class HostConfiguration : IDocsHostConfiguration
             return false;
         }
 
-        config = result.Config!;
+        config = result.Config
+            ?? throw new InvalidOperationException("A successful configuration load must produce a configuration.");
         foreach (string warning in config.Review.Warnings)
         {
             report.Add(new Diagnostic(
