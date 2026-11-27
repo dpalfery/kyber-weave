@@ -137,6 +137,7 @@ public partial class SqliteRelationalStore : IOperationalStore
     /// <inheritdoc />
     public void SetLastCleanAtUtc(string lastCleanAtUtc)
     {
+        ArgumentNullException.ThrowIfNull(lastCleanAtUtc);
         string valueExpr = GuardedNonEmptyTextExpr("store_clean_stamp", "last_clean_at_utc", lastCleanAtUtc);
         ExecuteTransaction($"INSERT OR REPLACE INTO store_clean_stamp (singleton_id, last_clean_at_utc) VALUES (1, {valueExpr});\n");
     }
@@ -174,6 +175,7 @@ public partial class SqliteRelationalStore : IOperationalStore
     /// <inheritdoc />
     public void SetContentPurgeMarkUtc(string purgedThroughUtc)
     {
+        ArgumentNullException.ThrowIfNull(purgedThroughUtc);
         string valueExpr = GuardedNonEmptyTextExpr("content_purge_mark", "purged_through_utc", purgedThroughUtc);
         ExecuteTransaction($"INSERT OR REPLACE INTO content_purge_mark (singleton_id, purged_through_utc) VALUES (1, {valueExpr});\n");
     }
@@ -947,6 +949,8 @@ public partial class SqliteRelationalStore : IOperationalStore
     /// <inheritdoc />
     public void RecordIngest(string source, int count, string timestampUtc)
     {
+        ArgumentNullException.ThrowIfNull(source);
+        ArgumentNullException.ThrowIfNull(timestampUtc);
         string sourceExpr = GuardedNonEmptyTextExpr("ingest_log", "source", source);
         RequireNonNegative(count, "ingest_log", "record_count");
         string timestampExpr = GuardedNonEmptyTextExpr("ingest_log", "timestamp_utc", timestampUtc);
