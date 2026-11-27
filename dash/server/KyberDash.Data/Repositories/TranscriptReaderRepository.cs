@@ -480,19 +480,40 @@ public class TranscriptReaderRepository : ITranscriptReaderRepository
         ClaudeUsageLine? usage,
         string fileStem)
     {
-        string? discoveredSessionId = null;
-        string? nativeRecordId = usage?.MessageId;
-        string? sessionTitle = null;
-        string? terminationReason = null;
-        int? exitCode = null;
-        bool hasCorrection = false;
-        string? correctionRule = null;
-        List<ContentPart> parts = [];
-        List<ReaderToolCall> toolCalls = [];
-        List<ReaderToolResult> toolResults = [];
-        int order = 0;
-
+        ClaudeGroupBuilder builder = new(fileStem, usage);
         foreach (string line in lines)
+        {
+            builder.AddLine(line);
+        }
+
+        return builder.Build();
+    }
+
+    /// <summary>Accumulates one Claude transcript group's lines into parts, tool calls, and metadata.</summary>
+    private sealed class ClaudeGroupBuilder
+    {
+        private readonly string fileStem;
+        private readonly ClaudeUsageLine? usage;
+        private readonly List<ContentPart> parts = [];
+        private readonly List<ReaderToolCall> toolCalls = [];
+        private readonly List<ReaderToolResult> toolResults = [];
+        private string? discoveredSessionId;
+        private string? nativeRecordId;
+        private string? sessionTitle;
+        private string? terminationReason;
+        private int? exitCode;
+        private bool hasCorrection;
+        private string? correctionRule;
+        private int order;
+
+        internal ClaudeGroupBuilder(string fileStem, ClaudeUsageLine? usage)
+        {
+            this.fileStem = fileStem;
+            this.usage = usage;
+            nativeRecordId = usage?.MessageId;
+        }
+
+        internal void AddLine(string line)
         {
             JsonDocument doc;
             try
@@ -501,187 +522,241 @@ public class TranscriptReaderRepository : ITranscriptReaderRepository
             }
             catch (JsonException)
             {
-                continue;
+                return;
             }
 
             using (doc)
             {
-                if (doc.RootElement.ValueKind != JsonValueKind.Object)
-                    continue;
-
-                JsonElement record = doc.RootElement;
-                discoveredSessionId ??= ReadString(record, "sessionId");
-                sessionTitle ??= ReadString(record, "customTitle") ?? ReadString(record, "aiTitle");
-
-                if (TryReadInt(record, "exitCode", out int ec))
-                    exitCode = ec;
-                if (TryReadInt(record, "exit_code", out int ecSnake))
-                    exitCode = ecSnake;
-
-                string? term = ReadString(record, "terminationReason") ?? ReadString(record, "stop_reason");
-                if (term is not null)
-                    terminationReason = term;
-
-                string? recType = ReadString(record, "type");
-                if (recType is "exit" or "result")
+                if (doc.RootElement.ValueKind == JsonValueKind.Object)
                 {
-                    terminationReason = recType;
-                    if (TryReadInt(record, "code", out int code))
-                        exitCode = code;
-                    if (TryReadInt(record, "exitCode", out int recEc))
-                        exitCode = recEc;
-                }
-
-                string? server = ReadString(record, "attributionMcpServer")?.Trim();
-                if (string.IsNullOrEmpty(server))
-                    server = null;
-
-                string? lineTimestamp = ReadString(record, "timestamp");
-
-                if (!record.TryGetProperty("message", out JsonElement msgEl) || msgEl.ValueKind != JsonValueKind.Object)
-                    continue;
-
-                if (nativeRecordId is null && msgEl.TryGetProperty("usage", out _))
-                    nativeRecordId = ReadString(msgEl, "id");
-
-                string? role = ReadString(msgEl, "role");
-                if (!msgEl.TryGetProperty("content", out JsonElement contentEl))
-                    continue;
-
-                if (contentEl.ValueKind == JsonValueKind.String)
-                {
-                    string? text = contentEl.GetString();
-                    if (!string.IsNullOrEmpty(text))
-                    {
-                        if (string.Equals(role, "user", StringComparison.Ordinal))
-                        {
-                            CorrectionDetectionResult check = CanonFindings.DetectUserCorrection(text);
-                            if (check.Matched)
-                            {
-                                hasCorrection = true;
-                                correctionRule = check.Rule;
-                            }
-                        }
-
-                        parts.Add(new ContentPart("conversation_history", text, Server: server, Order: order++));
-                    }
-
-                    continue;
-                }
-
-                if (contentEl.ValueKind != JsonValueKind.Array)
-                    continue;
-
-                foreach (JsonElement block in contentEl.EnumerateArray())
-                {
-                    if (block.ValueKind != JsonValueKind.Object)
-                        continue;
-
-                    string? blockType = ReadString(block, "type");
-                    if (string.Equals(blockType, "text", StringComparison.Ordinal))
-                    {
-                        string? text = ReadString(block, "text");
-                        if (string.IsNullOrEmpty(text))
-                            continue;
-
-                        if (string.Equals(role, "user", StringComparison.Ordinal))
-                        {
-                            CorrectionDetectionResult check = CanonFindings.DetectUserCorrection(text);
-                            if (check.Matched)
-                            {
-                                hasCorrection = true;
-                                correctionRule = check.Rule;
-                            }
-                        }
-
-                        parts.Add(new ContentPart("conversation_history", text, Server: server, Order: order++));
-                    }
-                    else if (string.Equals(blockType, "thinking", StringComparison.Ordinal))
-                    {
-                        string? text = ReadString(block, "thinking") ?? ReadString(block, "text");
-                        if (!string.IsNullOrEmpty(text))
-                            parts.Add(new ContentPart("conversation_history", text, Server: server, Order: order++));
-                    }
-                    else if (string.Equals(blockType, "tool_result", StringComparison.Ordinal))
-                    {
-                        string text = ExtractClaudeToolResultText(block);
-                        string toolCallId = ReadString(block, "tool_use_id") ?? ReadString(block, "id") ?? string.Empty;
-                        if (!string.IsNullOrEmpty(toolCallId))
-                        {
-                            bool isError = (block.TryGetProperty("is_error", out JsonElement errEl) && errEl.ValueKind == JsonValueKind.True)
-                                || (TryReadInt(block, "exit_code", out int toolEc1) && toolEc1 != 0)
-                                || (TryReadInt(block, "exitCode", out int toolEc2) && toolEc2 != 0);
-
-                            toolResults.Add(new ReaderToolResult
-                            {
-                                ToolCallId = toolCallId,
-                                Content = text,
-                                IsError = isError,
-                                Timestamp = lineTimestamp,
-                            });
-                        }
-
-                        if (!string.IsNullOrEmpty(text))
-                            parts.Add(new ContentPart("tool_result_content", text, Server: server, Order: order++));
-                    }
-                    else if (string.Equals(blockType, "tool_use", StringComparison.Ordinal))
-                    {
-                        string id = ReadString(block, "id") ?? string.Empty;
-                        string name = ReadString(block, "name") ?? string.Empty;
-                        if (string.IsNullOrEmpty(id) && string.IsNullOrEmpty(name))
-                            continue;
-
-                        JsonElement? argObj = null;
-                        string? rawArgStr = null;
-                        if (block.TryGetProperty("input", out JsonElement inputEl))
-                        {
-                            if (inputEl.ValueKind == JsonValueKind.String)
-                                rawArgStr = inputEl.GetString();
-                            else if (inputEl.ValueKind == JsonValueKind.Object)
-                                argObj = inputEl.Clone();
-                        }
-
-                        toolCalls.Add(new ReaderToolCall
-                        {
-                            Id = id,
-                            Name = name,
-                            Arguments = argObj ?? JsonSerializer.SerializeToElement(new Dictionary<string, object?>()),
-                            RawArgumentsString = rawArgStr,
-                            Timestamp = lineTimestamp,
-                        });
-                    }
+                    ProcessRecord(doc.RootElement);
                 }
             }
         }
 
-        if (parts.Count == 0 && discoveredSessionId is null && toolCalls.Count == 0 && toolResults.Count == 0 && usage is null)
-            return null;
-
-        string sessionId = discoveredSessionId ?? fileStem;
-        ReaderTurn turn = new()
+        internal ClaudeTurnGroup? Build()
         {
-            Parts = parts,
-            SessionId = sessionId,
-            NativeRecordId = nativeRecordId,
-            TerminationReason = terminationReason,
-            ExitCode = exitCode,
-            IsCorrection = hasCorrection ? true : null,
-            CorrectionRule = correctionRule,
-            ToolCalls = toolCalls.Count > 0 ? toolCalls : null,
-            ToolResults = toolResults.Count > 0 ? toolResults : null,
-        };
+            if (parts.Count == 0 && discoveredSessionId is null && toolCalls.Count == 0 && toolResults.Count == 0 && usage is null)
+            {
+                return null;
+            }
 
-        return new ClaudeTurnGroup(
-            SessionId: sessionId,
-            NativeRecordId: nativeRecordId,
-            Timestamp: usage?.Timestamp ?? "1970-01-01T00:00:00.000Z",
-            Model: usage?.Model ?? "unknown",
-            InputTokens: usage?.InputTokens ?? 0,
-            OutputTokens: usage?.OutputTokens ?? 0,
-            CacheReadTokens: usage?.CacheReadTokens ?? 0,
-            CacheCreationTokens: usage?.CacheCreationTokens ?? 0,
-            Turn: turn,
-            SessionTitle: sessionTitle);
+            string sessionId = discoveredSessionId ?? fileStem;
+            ReaderTurn turn = new()
+            {
+                Parts = parts,
+                SessionId = sessionId,
+                NativeRecordId = nativeRecordId,
+                TerminationReason = terminationReason,
+                ExitCode = exitCode,
+                IsCorrection = hasCorrection ? true : null,
+                CorrectionRule = correctionRule,
+                ToolCalls = toolCalls.Count > 0 ? toolCalls : null,
+                ToolResults = toolResults.Count > 0 ? toolResults : null,
+            };
+
+            return new ClaudeTurnGroup(
+                SessionId: sessionId,
+                NativeRecordId: nativeRecordId,
+                Timestamp: usage?.Timestamp ?? "1970-01-01T00:00:00.000Z",
+                Model: usage?.Model ?? "unknown",
+                InputTokens: usage?.InputTokens ?? 0,
+                OutputTokens: usage?.OutputTokens ?? 0,
+                CacheReadTokens: usage?.CacheReadTokens ?? 0,
+                CacheCreationTokens: usage?.CacheCreationTokens ?? 0,
+                Turn: turn,
+                SessionTitle: sessionTitle);
+        }
+
+        private void ProcessRecord(JsonElement record)
+        {
+            discoveredSessionId ??= ReadString(record, "sessionId");
+            sessionTitle ??= ReadString(record, "customTitle") ?? ReadString(record, "aiTitle");
+
+            if (TryReadInt(record, "exitCode", out int ec))
+            {
+                exitCode = ec;
+            }
+
+            if (TryReadInt(record, "exit_code", out int ecSnake))
+            {
+                exitCode = ecSnake;
+            }
+
+            string? term = ReadString(record, "terminationReason") ?? ReadString(record, "stop_reason");
+            if (term is not null)
+            {
+                terminationReason = term;
+            }
+
+            string? recType = ReadString(record, "type");
+            if (recType is "exit" or "result")
+            {
+                terminationReason = recType;
+                if (TryReadInt(record, "code", out int code))
+                {
+                    exitCode = code;
+                }
+
+                if (TryReadInt(record, "exitCode", out int recEc))
+                {
+                    exitCode = recEc;
+                }
+            }
+
+            string? server = ReadString(record, "attributionMcpServer")?.Trim();
+            if (string.IsNullOrEmpty(server))
+            {
+                server = null;
+            }
+
+            string? lineTimestamp = ReadString(record, "timestamp");
+
+            if (!record.TryGetProperty("message", out JsonElement msgEl) || msgEl.ValueKind != JsonValueKind.Object)
+            {
+                return;
+            }
+
+            if (nativeRecordId is null && msgEl.TryGetProperty("usage", out _))
+            {
+                nativeRecordId = ReadString(msgEl, "id");
+            }
+
+            string? role = ReadString(msgEl, "role");
+            if (!msgEl.TryGetProperty("content", out JsonElement contentEl))
+            {
+                return;
+            }
+
+            ProcessContent(contentEl, role, server, lineTimestamp);
+        }
+
+        private void ProcessContent(JsonElement contentEl, string? role, string? server, string? lineTimestamp)
+        {
+            if (contentEl.ValueKind == JsonValueKind.String)
+            {
+                AddConversationText(contentEl.GetString(), role, server);
+                return;
+            }
+
+            if (contentEl.ValueKind != JsonValueKind.Array)
+            {
+                return;
+            }
+
+            foreach (JsonElement block in contentEl.EnumerateArray())
+            {
+                if (block.ValueKind == JsonValueKind.Object)
+                {
+                    ProcessContentBlock(block, role, server, lineTimestamp);
+                }
+            }
+        }
+
+        private void ProcessContentBlock(JsonElement block, string? role, string? server, string? lineTimestamp)
+        {
+            string? blockType = ReadString(block, "type");
+            if (string.Equals(blockType, "text", StringComparison.Ordinal))
+            {
+                AddConversationText(ReadString(block, "text"), role, server);
+            }
+            else if (string.Equals(blockType, "thinking", StringComparison.Ordinal))
+            {
+                string? text = ReadString(block, "thinking") ?? ReadString(block, "text");
+                AddPartIfPresent("conversation_history", text, server);
+            }
+            else if (string.Equals(blockType, "tool_result", StringComparison.Ordinal))
+            {
+                AddToolResult(block, server, lineTimestamp);
+            }
+            else if (string.Equals(blockType, "tool_use", StringComparison.Ordinal))
+            {
+                AddToolUse(block, lineTimestamp);
+            }
+        }
+
+        private void AddConversationText(string? text, string? role, string? server)
+        {
+            if (string.IsNullOrEmpty(text))
+            {
+                return;
+            }
+
+            if (string.Equals(role, "user", StringComparison.Ordinal))
+            {
+                CorrectionDetectionResult check = CanonFindings.DetectUserCorrection(text);
+                if (check.Matched)
+                {
+                    hasCorrection = true;
+                    correctionRule = check.Rule;
+                }
+            }
+
+            parts.Add(new ContentPart("conversation_history", text, Server: server, Order: order++));
+        }
+
+        private void AddPartIfPresent(string bucket, string? text, string? server)
+        {
+            if (!string.IsNullOrEmpty(text))
+            {
+                parts.Add(new ContentPart(bucket, text, Server: server, Order: order++));
+            }
+        }
+
+        private void AddToolResult(JsonElement block, string? server, string? lineTimestamp)
+        {
+            string text = ExtractClaudeToolResultText(block);
+            string toolCallId = ReadString(block, "tool_use_id") ?? ReadString(block, "id") ?? string.Empty;
+            if (!string.IsNullOrEmpty(toolCallId))
+            {
+                bool isError = (block.TryGetProperty("is_error", out JsonElement errEl) && errEl.ValueKind == JsonValueKind.True)
+                    || (TryReadInt(block, "exit_code", out int toolEc1) && toolEc1 != 0)
+                    || (TryReadInt(block, "exitCode", out int toolEc2) && toolEc2 != 0);
+
+                toolResults.Add(new ReaderToolResult
+                {
+                    ToolCallId = toolCallId,
+                    Content = text,
+                    IsError = isError,
+                    Timestamp = lineTimestamp,
+                });
+            }
+
+            AddPartIfPresent("tool_result_content", text, server);
+        }
+
+        private void AddToolUse(JsonElement block, string? lineTimestamp)
+        {
+            string id = ReadString(block, "id") ?? string.Empty;
+            string name = ReadString(block, "name") ?? string.Empty;
+            if (string.IsNullOrEmpty(id) && string.IsNullOrEmpty(name))
+            {
+                return;
+            }
+
+            JsonElement? argObj = null;
+            string? rawArgStr = null;
+            if (block.TryGetProperty("input", out JsonElement inputEl))
+            {
+                if (inputEl.ValueKind == JsonValueKind.String)
+                {
+                    rawArgStr = inputEl.GetString();
+                }
+                else if (inputEl.ValueKind == JsonValueKind.Object)
+                {
+                    argObj = inputEl.Clone();
+                }
+            }
+
+            toolCalls.Add(new ReaderToolCall
+            {
+                Id = id,
+                Name = name,
+                Arguments = argObj ?? JsonSerializer.SerializeToElement(new Dictionary<string, object?>()),
+                RawArgumentsString = rawArgStr,
+                Timestamp = lineTimestamp,
+            });
+        }
     }
 
     private static (IReadOnlyList<ReaderTurn> Turns, IReadOnlyList<SourceRecordEnvelope> Envelopes) ReadCodexInternal(
@@ -693,36 +768,326 @@ public class TranscriptReaderRepository : ITranscriptReaderRepository
         string fileStem = Path.GetFileNameWithoutExtension(filePath);
         string resolvedSourceKey = !string.IsNullOrWhiteSpace(sourceKey) ? sourceKey : Path.GetFullPath(filePath);
         string resolvedImportedAt = importedAt ?? NowIso();
+        CodexTurnBuilder builder = new(fileStem, resolvedSourceKey, sourceRevision, resolvedImportedAt);
 
-        string? systemPrompt = null;
-        string? instructionContext = null;
-        List<ContentPart> items = [];
-        List<ReaderToolCall> pendingCalls = [];
-        List<ReaderToolResult> pendingResults = [];
-        string? sessionId = null;
-        long? contextWindow = null;
-        string? terminationReason = null;
-        int? exitCode = null;
-        bool? isCorrection = null;
-        string? correctionRule = null;
-        string currentModel = "codex";
-        bool dirty = false;
-        bool yielded = false;
-        int turnIndex = 0;
+        try
+        {
+            using StreamReader reader = new(filePath, Encoding.UTF8, detectEncodingFromByteOrderMarks: true);
+            string? line;
+            while ((line = reader.ReadLine()) is not null)
+            {
+                if (!string.IsNullOrWhiteSpace(line))
+                {
+                    builder.AddLine(line);
+                }
+            }
+        }
+        catch (IOException)
+        {
+            return (builder.Turns, builder.Envelopes);
+        }
 
-        List<ReaderTurn> turns = [];
-        List<SourceRecordEnvelope> envelopes = [];
+        builder.Finish();
+        return (builder.Turns, builder.Envelopes);
+    }
 
-        ReaderTurn? BuildSnapshotIfNonEmpty()
+    /// <summary>Accumulates one Codex transcript's turns and provider-call envelopes.</summary>
+    private sealed class CodexTurnBuilder
+    {
+        private readonly string fileStem;
+        private readonly string resolvedSourceKey;
+        private readonly string? sourceRevision;
+        private readonly string resolvedImportedAt;
+        private readonly List<ContentPart> items = [];
+        private readonly List<ReaderToolCall> pendingCalls = [];
+        private readonly List<ReaderToolResult> pendingResults = [];
+        private readonly List<ReaderTurn> turns = [];
+        private readonly List<SourceRecordEnvelope> envelopes = [];
+        private string? systemPrompt;
+        private string? instructionContext;
+        private string? sessionId;
+        private long? contextWindow;
+        private string? terminationReason;
+        private int? exitCode;
+        private bool? isCorrection;
+        private string? correctionRule;
+        private string currentModel = "codex";
+        private bool dirty;
+        private bool yielded;
+        private int turnIndex;
+
+        internal CodexTurnBuilder(string fileStem, string resolvedSourceKey, string? sourceRevision, string resolvedImportedAt)
+        {
+            this.fileStem = fileStem;
+            this.resolvedSourceKey = resolvedSourceKey;
+            this.sourceRevision = sourceRevision;
+            this.resolvedImportedAt = resolvedImportedAt;
+        }
+
+        internal IReadOnlyList<ReaderTurn> Turns => turns;
+
+        internal IReadOnlyList<SourceRecordEnvelope> Envelopes => envelopes;
+
+        internal void AddLine(string line)
+        {
+            JsonDocument doc;
+            try
+            {
+                doc = JsonDocument.Parse(line);
+            }
+            catch (JsonException)
+            {
+                return;
+            }
+
+            using (doc)
+            {
+                if (doc.RootElement.ValueKind == JsonValueKind.Object)
+                {
+                    ProcessEntry(doc.RootElement);
+                }
+            }
+        }
+
+        internal void Finish()
+        {
+            if (!dirty && yielded)
+            {
+                return;
+            }
+
+            ReaderTurn? trailing = BuildSnapshotIfNonEmpty();
+            if (trailing is not null)
+            {
+                turns.Add(trailing);
+            }
+        }
+
+        private void ProcessEntry(JsonElement entry)
+        {
+            string? entryType = ReadString(entry, "type");
+            string? entryTimestamp = ReadString(entry, "timestamp");
+            if (!entry.TryGetProperty("payload", out JsonElement payload) || payload.ValueKind != JsonValueKind.Object)
+            {
+                return;
+            }
+
+            if (string.Equals(entryType, "session_meta", StringComparison.Ordinal))
+            {
+                ProcessSessionMeta(payload);
+            }
+            else if (string.Equals(entryType, "world_state", StringComparison.Ordinal))
+            {
+                ProcessWorldState(payload);
+            }
+            else if (string.Equals(entryType, "event_msg", StringComparison.Ordinal))
+            {
+                ProcessEventMessage(payload, entryTimestamp);
+            }
+            else if (string.Equals(entryType, "response_item", StringComparison.Ordinal))
+            {
+                ProcessResponseItem(payload, entryTimestamp);
+            }
+        }
+
+        private void ProcessSessionMeta(JsonElement payload)
+        {
+            string? sid = ReadString(payload, "session_id");
+            if (!string.IsNullOrEmpty(sid))
+            {
+                sessionId = sid;
+                dirty = true;
+            }
+
+            string? prompt = ReadCodexSystemPrompt(payload);
+            if (!string.IsNullOrEmpty(prompt))
+            {
+                systemPrompt = prompt;
+                dirty = true;
+            }
+
+            string? modelFromMeta = ReadString(payload, "model");
+            if (!string.IsNullOrEmpty(modelFromMeta))
+            {
+                currentModel = modelFromMeta;
+            }
+        }
+
+        private void ProcessWorldState(JsonElement payload)
+        {
+            string? agentsMd = ReadCodexAgentsMd(payload);
+            if (!string.IsNullOrEmpty(agentsMd))
+            {
+                instructionContext = agentsMd;
+                dirty = true;
+            }
+        }
+
+        private void ProcessEventMessage(JsonElement payload, string? entryTimestamp)
+        {
+            long? win = ReadCodexContextWindow(payload);
+            if (win.HasValue)
+            {
+                contextWindow = win.Value;
+            }
+
+            string? eventType = ReadString(payload, "type");
+            if (string.Equals(eventType, "task_complete", StringComparison.Ordinal))
+            {
+                terminationReason = "task_complete";
+                exitCode = 0;
+                dirty = true;
+            }
+            else if (eventType is "task_failed" or "error")
+            {
+                terminationReason = eventType;
+                exitCode = TryReadInt(payload, "exit_code", out int failCode) ? failCode : 1;
+                dirty = true;
+            }
+            else if (eventType is "turn_aborted" or "cancelled")
+            {
+                terminationReason = "aborted";
+                dirty = true;
+            }
+            else if (string.Equals(eventType, "token_count", StringComparison.Ordinal))
+            {
+                ProcessTokenCount(payload, entryTimestamp);
+            }
+        }
+
+        private void ProcessTokenCount(JsonElement payload, string? entryTimestamp)
+        {
+            turnIndex++;
+            ReaderTurn? flushed = BuildSnapshotIfNonEmpty();
+            if (flushed is not null)
+            {
+                turns.Add(flushed);
+            }
+
+            if (!TryExtractCodexUsage(payload, entryTimestamp, sessionId ?? fileStem, currentModel, turnIndex, out ParsedProviderCall? call, out string? detectedModel))
+            {
+                return;
+            }
+
+            if (!string.IsNullOrEmpty(detectedModel))
+            {
+                currentModel = detectedModel;
+            }
+
+            string nativeSid = sessionId ?? fileStem;
+            envelopes.Add(new SourceRecordEnvelope
+            {
+                HarnessId = CodexHarnessId,
+                SourceKey = resolvedSourceKey,
+                NativeSessionId = nativeSid,
+                SourceRevision = sourceRevision,
+                Format = CodexFormat,
+                ParserId = CodexParserId,
+                ParserContractVersion = ParserContractVersion,
+                ImportedAt = resolvedImportedAt,
+                Call = call!,
+                ReaderTurn = flushed,
+            });
+        }
+
+        private void ProcessResponseItem(JsonElement payload, string? entryTimestamp)
+        {
+            string? itemType = ReadString(payload, "type");
+            if (string.Equals(itemType, "message", StringComparison.Ordinal))
+            {
+                ProcessMessageItem(payload);
+            }
+            else if (itemType is "function_call" or "custom_tool_call")
+            {
+                ProcessToolCallItem(payload, entryTimestamp);
+            }
+            else if (itemType is "function_call_output" or "custom_tool_call_output")
+            {
+                ProcessToolResultItem(payload, entryTimestamp);
+            }
+        }
+
+        private void ProcessMessageItem(JsonElement payload)
+        {
+            string? text = ReadCodexMessageText(payload);
+            if (string.IsNullOrEmpty(text))
+            {
+                return;
+            }
+
+            CorrectionDetectionResult check = CanonFindings.DetectUserCorrection(text);
+            if (check.Matched)
+            {
+                isCorrection = true;
+                correctionRule = check.Rule;
+            }
+
+            items.Add(new ContentPart("conversation_history", text));
+            dirty = true;
+        }
+
+        private void ProcessToolCallItem(JsonElement payload, string? entryTimestamp)
+        {
+            string id = ReadString(payload, "call_id") ?? ReadString(payload, "id") ?? string.Empty;
+            string name = ReadString(payload, "name") ?? string.Empty;
+            if (string.IsNullOrEmpty(name))
+            {
+                return;
+            }
+
+            string? rawArgs = ReadString(payload, "arguments") ?? ReadString(payload, "input");
+            pendingCalls.Add(new ReaderToolCall
+            {
+                Id = id,
+                Name = name,
+                RawArgumentsString = rawArgs ?? "{}",
+                Timestamp = entryTimestamp,
+            });
+            dirty = true;
+        }
+
+        private void ProcessToolResultItem(JsonElement payload, string? entryTimestamp)
+        {
+            string? outputText = ReadCodexToolResultText(payload);
+            if (string.IsNullOrEmpty(outputText))
+            {
+                return;
+            }
+
+            items.Add(new ContentPart("tool_result_content", outputText));
+            string callId = ReadString(payload, "call_id") ?? ReadString(payload, "id") ?? string.Empty;
+            if (!string.IsNullOrEmpty(callId))
+            {
+                pendingResults.Add(new ReaderToolResult
+                {
+                    ToolCallId = callId,
+                    Content = outputText,
+                    IsError = false,
+                    Timestamp = entryTimestamp,
+                });
+            }
+
+            dirty = true;
+        }
+
+        private ReaderTurn? BuildSnapshotIfNonEmpty()
         {
             List<ContentPart> snapshotParts = [];
             int order = 0;
             if (systemPrompt is not null)
+            {
                 snapshotParts.Add(new ContentPart("system_prompt", systemPrompt, Order: order++));
+            }
+
             if (instructionContext is not null)
+            {
                 snapshotParts.Add(new ContentPart("instruction_context", instructionContext, Order: order++));
+            }
+
             foreach (ContentPart item in items)
+            {
                 snapshotParts.Add(item with { Order = order++ });
+            }
 
             if (snapshotParts.Count == 0
                 && sessionId is null
@@ -757,202 +1122,6 @@ public class TranscriptReaderRepository : ITranscriptReaderRepository
             pendingResults.Clear();
             return turn;
         }
-
-        try
-        {
-            using StreamReader reader = new(filePath, Encoding.UTF8, detectEncodingFromByteOrderMarks: true);
-            string? line;
-            while ((line = reader.ReadLine()) is not null)
-            {
-                if (string.IsNullOrWhiteSpace(line))
-                    continue;
-
-                JsonDocument doc;
-                try
-                {
-                    doc = JsonDocument.Parse(line);
-                }
-                catch (JsonException)
-                {
-                    continue;
-                }
-
-                using (doc)
-                {
-                    if (doc.RootElement.ValueKind != JsonValueKind.Object)
-                        continue;
-
-                    JsonElement entry = doc.RootElement;
-                    string? entryType = ReadString(entry, "type");
-                    string? entryTimestamp = ReadString(entry, "timestamp");
-                    if (!entry.TryGetProperty("payload", out JsonElement payload) || payload.ValueKind != JsonValueKind.Object)
-                        continue;
-
-                    if (string.Equals(entryType, "session_meta", StringComparison.Ordinal))
-                    {
-                        string? sid = ReadString(payload, "session_id");
-                        if (!string.IsNullOrEmpty(sid))
-                        {
-                            sessionId = sid;
-                            dirty = true;
-                        }
-
-                        string? prompt = ReadCodexSystemPrompt(payload);
-                        if (!string.IsNullOrEmpty(prompt))
-                        {
-                            systemPrompt = prompt;
-                            dirty = true;
-                        }
-
-                        string? modelFromMeta = ReadString(payload, "model");
-                        if (!string.IsNullOrEmpty(modelFromMeta))
-                            currentModel = modelFromMeta;
-
-                        continue;
-                    }
-
-                    if (string.Equals(entryType, "world_state", StringComparison.Ordinal))
-                    {
-                        string? agentsMd = ReadCodexAgentsMd(payload);
-                        if (!string.IsNullOrEmpty(agentsMd))
-                        {
-                            instructionContext = agentsMd;
-                            dirty = true;
-                        }
-
-                        continue;
-                    }
-
-                    if (string.Equals(entryType, "event_msg", StringComparison.Ordinal))
-                    {
-                        long? win = ReadCodexContextWindow(payload);
-                        if (win.HasValue)
-                            contextWindow = win.Value;
-
-                        string? eventType = ReadString(payload, "type");
-                        if (string.Equals(eventType, "task_complete", StringComparison.Ordinal))
-                        {
-                            terminationReason = "task_complete";
-                            exitCode = 0;
-                            dirty = true;
-                        }
-                        else if (eventType is "task_failed" or "error")
-                        {
-                            terminationReason = eventType;
-                            exitCode = TryReadInt(payload, "exit_code", out int failCode) ? failCode : 1;
-                            dirty = true;
-                        }
-                        else if (eventType is "turn_aborted" or "cancelled")
-                        {
-                            terminationReason = "aborted";
-                            dirty = true;
-                        }
-                        else if (string.Equals(eventType, "token_count", StringComparison.Ordinal))
-                        {
-                            turnIndex++;
-                            ReaderTurn? flushed = BuildSnapshotIfNonEmpty();
-                            if (flushed is not null)
-                                turns.Add(flushed);
-
-                            if (TryExtractCodexUsage(payload, entryTimestamp, sessionId ?? fileStem, currentModel, turnIndex, out ParsedProviderCall? call, out string? detectedModel))
-                            {
-                                if (!string.IsNullOrEmpty(detectedModel))
-                                    currentModel = detectedModel;
-
-                                string nativeSid = sessionId ?? fileStem;
-                                envelopes.Add(new SourceRecordEnvelope
-                                {
-                                    HarnessId = CodexHarnessId,
-                                    SourceKey = resolvedSourceKey,
-                                    NativeSessionId = nativeSid,
-                                    SourceRevision = sourceRevision,
-                                    Format = CodexFormat,
-                                    ParserId = CodexParserId,
-                                    ParserContractVersion = ParserContractVersion,
-                                    ImportedAt = resolvedImportedAt,
-                                    Call = call!,
-                                    ReaderTurn = flushed,
-                                });
-                            }
-                        }
-
-                        continue;
-                    }
-
-                    if (!string.Equals(entryType, "response_item", StringComparison.Ordinal))
-                        continue;
-
-                    string? itemType = ReadString(payload, "type");
-                    if (string.Equals(itemType, "message", StringComparison.Ordinal))
-                    {
-                        string? text = ReadCodexMessageText(payload);
-                        if (string.IsNullOrEmpty(text))
-                            continue;
-
-                        CorrectionDetectionResult check = CanonFindings.DetectUserCorrection(text);
-                        if (check.Matched)
-                        {
-                            isCorrection = true;
-                            correctionRule = check.Rule;
-                        }
-
-                        items.Add(new ContentPart("conversation_history", text));
-                        dirty = true;
-                    }
-                    else if (itemType is "function_call" or "custom_tool_call")
-                    {
-                        string id = ReadString(payload, "call_id") ?? ReadString(payload, "id") ?? string.Empty;
-                        string name = ReadString(payload, "name") ?? string.Empty;
-                        if (string.IsNullOrEmpty(name))
-                            continue;
-
-                        string? rawArgs = ReadString(payload, "arguments") ?? ReadString(payload, "input");
-                        pendingCalls.Add(new ReaderToolCall
-                        {
-                            Id = id,
-                            Name = name,
-                            RawArgumentsString = rawArgs ?? "{}",
-                            Timestamp = entryTimestamp,
-                        });
-                        dirty = true;
-                    }
-                    else if (itemType is "function_call_output" or "custom_tool_call_output")
-                    {
-                        string? outputText = ReadCodexToolResultText(payload);
-                        if (string.IsNullOrEmpty(outputText))
-                            continue;
-
-                        items.Add(new ContentPart("tool_result_content", outputText));
-                        string callId = ReadString(payload, "call_id") ?? ReadString(payload, "id") ?? string.Empty;
-                        if (!string.IsNullOrEmpty(callId))
-                        {
-                            pendingResults.Add(new ReaderToolResult
-                            {
-                                ToolCallId = callId,
-                                Content = outputText,
-                                IsError = false,
-                                Timestamp = entryTimestamp,
-                            });
-                        }
-
-                        dirty = true;
-                    }
-                }
-            }
-        }
-        catch (IOException)
-        {
-            return (turns, envelopes);
-        }
-
-        if (dirty || !yielded)
-        {
-            ReaderTurn? trailing = BuildSnapshotIfNonEmpty();
-            if (trailing is not null)
-                turns.Add(trailing);
-        }
-
-        return (turns, envelopes);
     }
 
     private static string ExtractClaudeToolResultText(JsonElement block)
