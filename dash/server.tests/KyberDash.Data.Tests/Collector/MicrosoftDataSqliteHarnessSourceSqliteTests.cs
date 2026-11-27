@@ -23,24 +23,34 @@ public sealed class MicrosoftDataSqliteHarnessSourceSqliteTests : IDisposable
     /// <inheritdoc />
     public void Dispose()
     {
-        foreach (string unreadableFile in unreadableFiles)
-        {
-            if (!OperatingSystem.IsWindows())
-            {
-                File.SetUnixFileMode(unreadableFile, UnixFileMode.UserRead | UnixFileMode.UserWrite);
-            }
-        }
-
-        foreach (string sealedDirectory in sealedDirectories)
-        {
-            if (!OperatingSystem.IsWindows())
-            {
-                File.SetUnixFileMode(sealedDirectory, UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute);
-            }
-        }
-
-        directory.Dispose();
+        Dispose(true);
         GC.SuppressFinalize(this);
+    }
+
+    /// <summary>Restores the permissions the tests changed and deletes the scratch directory when disposing.</summary>
+    /// <param name="disposing">Whether managed state should be released.</param>
+    private void Dispose(bool disposing)
+    {
+        if (disposing)
+        {
+            foreach (string unreadableFile in unreadableFiles)
+            {
+                if (!OperatingSystem.IsWindows())
+                {
+                    File.SetUnixFileMode(unreadableFile, UnixFileMode.UserRead | UnixFileMode.UserWrite);
+                }
+            }
+
+            foreach (string sealedDirectory in sealedDirectories)
+            {
+                if (!OperatingSystem.IsWindows())
+                {
+                    File.SetUnixFileMode(sealedDirectory, UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute);
+                }
+            }
+
+            directory.Dispose();
+        }
     }
 
     [Fact]

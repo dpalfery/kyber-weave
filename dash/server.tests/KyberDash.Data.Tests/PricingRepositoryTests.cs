@@ -33,11 +33,21 @@ public sealed class PricingRepositoryTests : IDisposable
     /// <inheritdoc />
     public void Dispose()
     {
-        // Restore the process-wide provider so other tests are not left with a repository-backed
-        // one (or with empty tables that would price ambient reads as having no rate).
-        PricingField("_pricingProvider").SetValue(null, savedPricingProvider.Provider);
-        PricingField("_cachedTables").SetValue(null, savedPricingProvider.Cache);
+        Dispose(true);
         GC.SuppressFinalize(this);
+    }
+
+    /// <summary>Restores the process-wide pricing provider the constructor replaced when disposing.</summary>
+    /// <param name="disposing">Whether managed state should be released.</param>
+    private void Dispose(bool disposing)
+    {
+        if (disposing)
+        {
+            // Restore the process-wide provider so other tests are not left with a repository-backed
+            // one (or with empty tables that would price ambient reads as having no rate).
+            PricingField("_pricingProvider").SetValue(null, savedPricingProvider.Provider);
+            PricingField("_cachedTables").SetValue(null, savedPricingProvider.Cache);
+        }
     }
 
     private static FieldInfo PricingField(string name) =>

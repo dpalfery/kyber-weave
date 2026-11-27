@@ -23,8 +23,18 @@ public sealed class RecordSourceNameTests : IDisposable
     /// <inheritdoc />
     public void Dispose()
     {
-        directory.Dispose();
+        Dispose(true);
         GC.SuppressFinalize(this);
+    }
+
+    /// <summary>Deletes the scratch directory when disposing.</summary>
+    /// <param name="disposing">Whether managed state should be released.</param>
+    private void Dispose(bool disposing)
+    {
+        if (disposing)
+        {
+            directory.Dispose();
+        }
     }
 
     /// <summary>Every record read returns the OTLP locator for a record from an OTLP batch.</summary>

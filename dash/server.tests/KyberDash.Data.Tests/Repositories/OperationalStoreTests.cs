@@ -29,7 +29,7 @@ public class OperationalStoreTests : IDisposable
     /// <inheritdoc />
     public void Dispose()
     {
-        Dispose(disposing: true);
+        Dispose(true);
         GC.SuppressFinalize(this);
     }
 
