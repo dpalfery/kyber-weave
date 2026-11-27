@@ -105,9 +105,9 @@ rules a workflow edit must keep are in
     byte-compare, both attestation predicates per archive through `gh attestation verify` (CycloneDX
     SBOM and SLSA provenance), and the recorded package versions through the GitHub Packages API.
     They do not re-run the macOS signature and notarization assertions of the skipped tray builds:
-    the publishing run ran those on exactly the bytes it published, and the hit path's manifest
-    byte-compare and digest match prove the published bytes are still those. `attest-sbom` skips with
-    the chain, because the hitting run builds nothing to attest.
+    the publishing run ran those on exactly the bytes it published, and the hit path's per-archive
+    `gh attestation verify` proves the published bytes are still those the publishing run asserted.
+    `attest-sbom` skips with the chain, because the hitting run builds nothing to attest.
 12. **The mechanism fails open to running, never to skipping.** Eviction, a fork, a quota limit, a
     stale receipt, a malformed receipt and a cache-reserve race all miss and run the job in full. The
     receipt save carries `continue-on-error: true` — the only such flag outside `trivy`, `semgrep` and

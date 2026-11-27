@@ -42,7 +42,11 @@ namespace KyberWeave.Tests;
 ///       a live, unverified release; a miss whose publish step failed treats
 ///       only HTTP 404 as "published nothing", treats a 2xx as "a release
 ///       already exists" without claiming this run created it, and treats
-///       every other lookup result as a failed lookup.
+///       every other lookup result as a failed lookup, and
+///   (k) a chain hit attributes the published archives' bytes to the
+///       per-archive attestation verification. The manifest byte-compare
+///       proves the manifest text only, so the ADR, the plan, the runbook
+///       and the distribution note do not call it a digest match.
 ///
 /// The fail-closed exit behaviour of those shell commands is not statically
 /// observable; it is review scope, not test scope. The structures above —
@@ -435,6 +439,53 @@ public sealed class ReleaseReceiptSkipTests
     }
 
     [Fact]
+    public void AChainHitAttributesPublishedBytesToAttestationVerify()
+    {
+        // The manifest diff proves the manifest text is unchanged. It does not
+        // re-hash the archives. The per-archive attestation verification is
+        // what binds each published archive to the bytes the publishing run
+        // asserted, so the documents that describe the hit path must say that
+        // and must not call the manifest diff a digest match.
+        string[] paths =
+        {
+            "docs/adr/0095-ci-jobs-skip-on-content-hash-receipts-only-with-a-complete-fingerprint.md",
+            "docs/plans/2026-11-26-ci-content-hash-skip-and-provenance.md",
+            "docs/ci-pipelines/workflows-runbook.md",
+            "docs/distribution.md",
+        };
+
+        foreach (string path in paths)
+        {
+            string text = Corpus.ReadText(path);
+            Assert.DoesNotContain("digest match", text, StringComparison.OrdinalIgnoreCase);
+            Assert.DoesNotContain("digest-match", text, StringComparison.OrdinalIgnoreCase);
+            Assert.DoesNotContain("byte-compare proves the published bytes", text, StringComparison.Ordinal);
+            Assert.DoesNotContain("matches every published digest", text, StringComparison.Ordinal);
+            Assert.DoesNotContain("recorded digests", text, StringComparison.Ordinal);
+            Assert.DoesNotContain("byte-identity", text, StringComparison.Ordinal);
+        }
+
+        string adr = Collapse(Corpus.ReadText(paths[0]));
+        int decision11 = adr.IndexOf("11. **A release chain hit", StringComparison.Ordinal);
+        int decision12 = adr.IndexOf("12. **The mechanism fails open", StringComparison.Ordinal);
+        Assert.True(decision11 >= 0 && decision12 > decision11, "ADR 0095 has no decision 11.");
+        Assert.Contains(
+            "the hit path's per-archive `gh attestation verify` proves the published bytes",
+            adr[decision11..decision12],
+            StringComparison.Ordinal);
+
+        string plan = Collapse(Corpus.ReadText(paths[1]));
+        Assert.Contains(
+            "the hit path's per-archive attestation verification proves the published bytes",
+            plan,
+            StringComparison.Ordinal);
+
+        const string RunbookProof = "the hit path's per-archive `gh attestation verify` proves those archives";
+        Assert.Contains(RunbookProof, Collapse(Corpus.ReadText(paths[2])), StringComparison.Ordinal);
+        Assert.Contains(RunbookProof, Collapse(Corpus.ReadText(paths[3])), StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void AttestSbomMintsProvenanceForEveryArchiveBesideTheSbomAttestations()
     {
         string attest = ReadJob("attest-sbom");
@@ -512,6 +563,11 @@ public sealed class ReleaseReceiptSkipTests
     // ---------------------------------------------------------------------------------------
     // helpers
     // ---------------------------------------------------------------------------------------
+
+    private static string Collapse(string text)
+    {
+        return Regex.Replace(text, @"\s+", " ");
+    }
 
     private static string ReadWorkflow()
     {

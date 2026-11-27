@@ -1,6 +1,6 @@
 schema-version: 2
 plan: docs/plans/2026-11-26-ci-content-hash-skip-and-provenance.md
-execution-digest: 37f81b14a3353a32dbe534dcb459f73efee406d9b697a19adb2980392eae18c7
+execution-digest: 4339374b902dc98f4f9d653577281b9eaad166badcd61382dbf7651b66af7cda
 tasks:
   - id: T1
     capabilities: GitHub Actions workflow authoring, with xUnit repository-policy tests that read
@@ -200,7 +200,7 @@ tasks:
         - On a hit, `release` and `gh-packages` run their verification — sorted-set asset comparison,
           manifest `diff`, both attestation predicates per archive, package-version lookups — with each
           command exiting non-zero on a mismatch; the hit path does not re-run the macOS signature and
-          notarization assertions, which are carried by the digest match; on a miss they behave
+          notarization assertions, which are carried by the per-archive attestation verification; on a miss they behave
           exactly as today
         - The chain save is miss-only (`steps.verdict.outputs.skip != 'true'`) and carries
           `continue-on-error: true`: a hit never refreshes the receipt's age, and a cache-reserve

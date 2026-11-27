@@ -225,8 +225,9 @@ every published archive with `gh attestation verify` — `Verify SBOM attestatio
 `https://slsa.dev/provenance/v1`. `gh-packages` proves each recorded `name@version` is still
 published. A missing asset, an extra asset, a manifest that does not match, a missing attestation
 or a missing package version fails the job. A hit does not re-check the macOS signature or the
-notarization: the publishing run verified those on the archives whose hashes the recorded manifest
-lists, and the hit path rejects a manifest that is not byte-identical to it.
+notarization: the publishing run verified those on the archives it published, and the hit path's
+per-archive `gh attestation verify` proves those archives are still the bytes that run attested.
+The manifest `diff` proves only that `SHA256SUMS.txt` is unchanged.
 
 A stale, absent or unparsable receipt rebuilds the chain. The receipt is written only in the
 `release` job, only after every post-publish check passed, and only on the miss path, so a skip can

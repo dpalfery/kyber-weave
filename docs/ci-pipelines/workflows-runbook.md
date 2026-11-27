@@ -484,10 +484,11 @@ On a hit the publish jobs verify instead of re-publishing, and every check fails
 | `Report the run that published this release` | Always runs, so a hit still names the proving run after a failed verify step, and it claims only what happened: a hit whose receipt recorded the proving run writes `Published by <url>` to the step summary; a hit whose receipt recorded no run points at the verdict step's log; a green miss names this run as the publisher; a miss whose publish step succeeded but whose verification failed reports a live, unverified release; a miss whose publish step failed and whose tag lookup returns 2xx says a release for the tag already exists and this run did not complete publishing it; only a 404 says it published nothing; and any other lookup result says the lookup failed and does not claim the release is absent. |
 
 What a hit carries rather than re-checks is the signing work. The publishing run verified the
-macOS Developer ID signature, the team and the notarization assertions on the archives whose
-hashes the recorded manifest lists, and the hit path fails unless the published manifest is
-byte-identical to that recorded one. `Verify the signature, the team and the notarization` lives in
-`build-tray` behind the skip guard, so it does not run a second time.
+macOS Developer ID signature, the team and the notarization assertions on the archives it
+published, and the hit path's per-archive `gh attestation verify` proves those archives are still
+the bytes that run attested. The manifest `diff` proves only that `SHA256SUMS.txt` is unchanged.
+`Verify the signature, the team and the notarization` lives in `build-tray` behind the skip guard,
+so it does not run a second time.
 
 The receipt save is miss-only and carries `continue-on-error: true`. Miss-only because a hit that
 refreshed `saved_at_epoch` would make the skip permanent; the ceiling has to expire on its own. The
