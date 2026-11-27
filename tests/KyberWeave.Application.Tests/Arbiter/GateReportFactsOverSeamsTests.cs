@@ -135,6 +135,22 @@ public sealed class GateReportFactsOverSeamsTests
         Assert.True(Facts().FailedGateCorroborates(Root, "t7-cycle-2"));
     }
 
+    /// <summary>
+    /// The task part of <c>REVIEW_RUN</c> names one folder under the scratch root. A rooted value, or one carrying
+    /// a parent segment, must not name a cycle report; the dispatch falls back to the repository's default report.
+    /// </summary>
+    [Theory]
+    [InlineData("/etc/x-cycle-1")]
+    [InlineData("../../outside/y-cycle-1")]
+    public void AReviewRunWhoseTaskNamesAPathNeverReadsACycleReport(string reviewRun)
+    {
+        _ = Write("/repo/artifacts/gates.json", Passing());
+        _ = Write("/repo/.agent_scratchpad/etc/x/review/cycle-1/gates.json", Failing());
+        _ = Write("/outside/y/review/cycle-1/gates.json", Failing());
+
+        Assert.False(Facts().FailedGateCorroborates(Root, reviewRun));
+    }
+
     /// <summary>A dispatch that names no cycle keeps reading the repository's default report.</summary>
     [Fact]
     public void ADispatchWithNoReviewRunStillReadsTheDefaultReport()
@@ -225,6 +241,21 @@ public sealed class GateReportFactsOverSeamsTests
         _files.CreateFileLink("/repo/linked.json", "/elsewhere/gates.json");
 
         Assert.Null(Facts().Agrees(Claim("/repo/linked.json"), Root));
+    }
+
+    /// <summary>
+    /// Containment follows every hop: the first link can point inside the repository at a second link that
+    /// leaves it, so only the final target says whether the report is inside the tree.
+    /// </summary>
+    [Fact]
+    public void AReportReachedThroughAChainOfLinksOutOfTheRepositoryIsNeverRead()
+    {
+        _ = Write("/elsewhere/gates.json", Passing());
+        _files.CreateDirectory(Root);
+        _files.CreateFileLink("/repo/second.json", "/elsewhere/gates.json");
+        _files.CreateFileLink("/repo/first.json", "/repo/second.json");
+
+        Assert.Null(Facts().Agrees(Claim("/repo/first.json"), Root));
     }
 
     [Fact]

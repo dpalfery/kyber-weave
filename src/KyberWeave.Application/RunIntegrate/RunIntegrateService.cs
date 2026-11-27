@@ -340,7 +340,10 @@ public sealed class RunIntegrateService : IRunIntegrateService
         return new RunIntegrateOutcome(status, head, Notes: notes);
     }
 
-    /// <summary>Applies the task's commits to the run branch, refusing a dirty run worktree first.</summary>
+    /// <summary>
+    /// Applies the task's commits to the run branch, refusing first only when an uncommitted run-worktree path is one
+    /// those commits change.
+    /// </summary>
     /// <param name="runWorktree">The run's worktree.</param>
     /// <param name="taskBranch">The branch the task committed on.</param>
     /// <param name="runBranch">The run's branch.</param>
@@ -356,8 +359,9 @@ public sealed class RunIntegrateService : IRunIntegrateService
     {
         head = null;
 
-        // An uncommitted tracked change would make git either refuse the cherry-pick halfway or fold the operator's
-        // work into the task's commit, so the run worktree must be clean before anything is applied.
+        // Only an uncommitted path the task's own commits change is dangerous: git would then refuse the apply
+        // halfway, or fold the operator's work into the task's commit. A path the commits do not touch is left
+        // alone by both a fast-forward and a cherry-pick, so it is reported and kept rather than blocking the task.
         GitOutcome status = _git.Run(runWorktree, ["-C", runWorktree, "status", "--porcelain", "--untracked-files=no"]);
         if (!status.Succeeded)
         {
@@ -365,11 +369,28 @@ public sealed class RunIntegrateService : IRunIntegrateService
         }
 
         string[] dirty = PathsOfStatus(status.StandardOutput);
-        if (dirty.Length > 0)
+
+        GitOutcome changed = _git.Run(
+            runWorktree, ["-C", runWorktree, "diff", "--name-only", runBranch + "..." + taskBranch]);
+        if (!changed.Succeeded)
+        {
+            return Failed(
+                $"git could not list the files '{taskBranch}' changes: {changed.FirstErrorLine}");
+        }
+
+        HashSet<string> taskPaths = new(PathsOfOutput(changed.StandardOutput), StringComparer.Ordinal);
+        string[] clashing = [.. dirty.Where(path => Touches(path, taskPaths))];
+        if (clashing.Length > 0)
         {
             return Refuse(
-                $"the run worktree '{runWorktree}' has uncommitted changes: {string.Join(", ", dirty)}. " +
-                "Commit or stash them before integrating.");
+                $"the run worktree '{runWorktree}' has uncommitted changes to files this task changes: " +
+                $"{string.Join(", ", clashing)}. Commit or stash them before integrating.");
+        }
+
+        if (dirty.Length > 0)
+        {
+            notes.Add(
+                "leaving these uncommitted changes in the run worktree in place: " + string.Join(", ", dirty));
         }
 
         bool? fastForward = IsAncestor(runWorktree, runBranch, taskBranch, out GitOutcome ancestry);
@@ -690,6 +711,21 @@ public sealed class RunIntegrateService : IRunIntegrateService
             .Select(line => line.Length > 3 ? line[3..].Trim() : line.Trim())
             .Where(line => line.Length > 0)
             .ToArray();
+
+    /// <summary>
+    /// Whether one dirty status entry is a path the task changes, reading a rename's two sides so either one counts.
+    /// </summary>
+    private static bool Touches(string dirtyEntry, HashSet<string> taskPaths)
+    {
+        if (taskPaths.Contains(dirtyEntry))
+        {
+            return true;
+        }
+
+        int arrow = dirtyEntry.IndexOf(" -> ", StringComparison.Ordinal);
+        return arrow >= 0
+            && (taskPaths.Contains(dirtyEntry[..arrow]) || taskPaths.Contains(dirtyEntry[(arrow + 4)..]));
+    }
 
     private static string[] PathsOfOutput(string output) =>
         output

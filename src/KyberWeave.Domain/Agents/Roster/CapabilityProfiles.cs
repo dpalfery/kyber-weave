@@ -87,7 +87,8 @@ public static class CapabilityProfiles
             [Orchestrator] = NotSquad,
         };
 
-    private static readonly HashSet<string> Writers = new(StringComparer.Ordinal)
+    /// <summary>Every capability profile that writes project files, so a run must be started before it is dispatched.</summary>
+    public static IReadOnlySet<string> Writers { get; } = new HashSet<string>(StringComparer.Ordinal)
     {
         Worker,
         Documentation,

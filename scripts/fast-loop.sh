@@ -348,9 +348,14 @@ if [[ "${needs_dotnet}" -eq 1 ]]; then
       unit_status="${unit_exit}"
     fi
   done
+  policy_total=0
   if [[ "${needs_policy}" -eq 1 ]]; then
     step "repository-policy tests (same filter)"
-    dotnet "${POLICY_TEST_DLL}" "${test_args[@]+"${test_args[@]}"}" | tee -a "${test_log}" || policy_status=$?
+    policy_log="$(mktemp "${TMPDIR:-/tmp}/kw-fast-loop-policy.XXXXXX")"
+    dotnet "${POLICY_TEST_DLL}" "${test_args[@]+"${test_args[@]}"}" >"${policy_log}" 2>&1 || policy_status=$?
+    cat "${policy_log}" | tee -a "${test_log}"
+    policy_total="$(sed $'s/\x1b\\[[0-9;]*m//g' "${policy_log}" | grep -oE 'Total: [0-9]+' | head -1 | grep -oE '[0-9]+' || true)"
+    rm -f "${policy_log}"
   else
     # Checked on its own: the unit total must not stand in for a scan run that matched nothing.
     step "repository-policy source scans"
@@ -367,12 +372,22 @@ if [[ "${needs_dotnet}" -eq 1 ]]; then
       "${unit_status}" "${policy_status}" >&2
     exit $(( unit_status != 0 ? unit_status : policy_status ))
   fi
-  if [[ "${has_test_filter}" -eq 1 && "${unit_total}" -eq 0 ]]; then
-    printf 'no unit tests ran; the filter matched nothing:\n' >&2
-    for ((index = 0; index < ${#test_args[@]}; index += 2)); do
-      printf '  %s %s\n' "${test_args[${index}]}" "${test_args[$((index + 1))]}" >&2
-    done
-    exit 1
+  if [[ "${has_test_filter}" -eq 1 ]]; then
+    if [[ "${touched}" -eq 1 && "${unit_total}" -eq 0 ]]; then
+      printf 'no unit tests ran; the filter matched nothing:\n' >&2
+      for ((index = 0; index < ${#test_args[@]}; index += 2)); do
+        printf '  %s %s\n' "${test_args[${index}]}" "${test_args[$((index + 1))]}" >&2
+      done
+      exit 1
+    fi
+    # An explicit --class / --method may select only repository-policy tests, so the two runs are counted together.
+    if [[ "${touched}" -eq 0 && $(( unit_total + policy_total )) -eq 0 ]]; then
+      printf 'no unit or repository-policy tests ran; the filter matched nothing:\n' >&2
+      for ((index = 0; index < ${#test_args[@]}; index += 2)); do
+        printf '  %s %s\n' "${test_args[${index}]}" "${test_args[$((index + 1))]}" >&2
+      done
+      exit 1
+    fi
   fi
   if ! sed $'s/\x1b\\[[0-9;]*m//g' "${test_log}" | grep -Eq 'Total: [1-9][0-9]*,'; then
     printf 'no tests ran; check the --class / --method filter\n' >&2

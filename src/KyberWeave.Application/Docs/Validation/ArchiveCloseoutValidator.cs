@@ -411,11 +411,15 @@ public sealed partial class ArchiveCloseoutValidator
     /// <summary>C2: the body must not still report a live implementation status.</summary>
     private static string? CheckBodyStatus(DocumentModel archived)
     {
-        string? bodyStatus = PlanStatus.ParseBodyStatus(archived.Body);
-        if (bodyStatus is null || !PlanStatus.IsOpen(bodyStatus))
+        string? written = PlanStatus.ParseBodyStatusLine(archived.Body);
+        if (written is null)
             return null;
 
-        return $"C2: the body still reports live status '{bodyStatus}'. " +
+        string? bodyStatus = PlanStatus.Parse(written) ?? PlanStatus.ParseLeading(written);
+        if (PlanStatus.IsClosed(bodyStatus))
+            return null;
+
+        return $"C2: the body still reports live status '{bodyStatus ?? written}'. " +
                $"Close the work before archiving it, so the archive does not read as unfinished.";
     }
 

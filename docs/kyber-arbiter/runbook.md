@@ -334,8 +334,9 @@ the conductor and code-reviewer.
 ## Reading a run-start refusal
 
 `KW-ARB-RUN-001` stops an orchestrator (`conductor` or `bug-crusher`) handing a specialist that writes
-project files (capability profile `worker` or `documentation`, or a planner: `architect` or
-`product-planning`) any work while no run is live for the repository. Without it, a conductor that skipped
+project files (capability profile `worker`, `documentation` or `root-fixer`, or a planner:
+`architect`, `architect-copilot`, `architect-devin`, `product-planning` or
+`product-planning-devin`) any work while no run is live for the repository. Without it, a conductor that skipped
 run start sent every developer to edit the canonical checkout on the default branch, and a conductor that
 planned first left the plan and its task file untracked there. `NEXT` names the fix: run
 `kyber-weave run start --harness <harness> --type <type> --slug <slug>`, or dispatch `devops` with

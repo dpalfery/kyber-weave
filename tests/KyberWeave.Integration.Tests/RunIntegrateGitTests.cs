@@ -127,6 +127,40 @@ public sealed class RunIntegrateGitTests : IDisposable
         Assert.True(File.Exists(Path.Combine(_run, ".agent_scratchpad", "T1", "report.md")));
     }
 
+    [Fact]
+    public void AnUnrelatedUncommittedFileInTheRunWorktreeSurvivesAFastForwardUnchanged()
+    {
+        Commit(_first, "one.txt", "first task\n", "feat: first task");
+        File.WriteAllText(Path.Combine(_run, "README.md"), "the architect's uncommitted revision\n", Encoding.UTF8);
+
+        RunIntegrateOutcome outcome = Integrate("T1", _first);
+
+        Assert.True(outcome.Status == RunIntegrateStatus.Integrated, outcome.Message);
+        Assert.Equal(
+            "the architect's uncommitted revision\n",
+            File.ReadAllText(Path.Combine(_run, "README.md"), Encoding.UTF8));
+        Assert.Contains(" M README.md", GitOutput(_run, "status", "--porcelain", "--untracked-files=no"), StringComparison.Ordinal);
+        Assert.Contains(outcome.Notes ?? [], note => note.Contains("README.md", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public void AnUnrelatedUncommittedFileInTheRunWorktreeSurvivesACherryPickUnchanged()
+    {
+        Commit(_second, "two.txt", "second task\n", "feat: second task");
+        // The run branch moves after the task branch was cut, so the task needs a cherry-pick.
+        Commit(_run, "run.txt", "run moved on\n", "feat: the run moved on");
+        File.WriteAllText(Path.Combine(_run, "README.md"), "the architect's uncommitted revision\n", Encoding.UTF8);
+
+        RunIntegrateOutcome outcome = Integrate("T2", _second);
+
+        Assert.True(outcome.Status == RunIntegrateStatus.Integrated, outcome.Message);
+        Assert.Equal(
+            "the architect's uncommitted revision\n",
+            File.ReadAllText(Path.Combine(_run, "README.md"), Encoding.UTF8));
+        Assert.Contains("feat: second task", GitOutput(_run, "log", "--format=%s", "-1"), StringComparison.Ordinal);
+        Assert.False(CherryPickStateExists());
+    }
+
     private RunIntegrateOutcome Integrate(string taskId, string taskWorktree) =>
         _service.Integrate(new RunIntegrateRequest(taskId, taskWorktree, _run, _work, _work));
 
