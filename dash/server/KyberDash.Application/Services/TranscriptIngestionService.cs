@@ -29,6 +29,7 @@ public class TranscriptIngestionService : ITranscriptIngestionService
     private readonly string homeDirectory;
     private readonly string stateDirectory;
     private readonly Func<DateTimeOffset> clock;
+    private readonly TimeProvider time;
 
 
     /// <summary>
@@ -44,6 +45,7 @@ public class TranscriptIngestionService : ITranscriptIngestionService
     /// <param name="options">Application options supplying state directory overrides.</param>
     /// <param name="homeDirectory">Optional home directory override for deterministic discovery.</param>
     /// <param name="clock">Optional UTC clock override for deterministic refresh timestamps.</param>
+    /// <param name="time">Optional time provider backing the default clock; defaults to system time when omitted.</param>
     public TranscriptIngestionService(
         IRelationalStoreWriter writer,
         IOperationalStore operationalStore,
@@ -52,7 +54,8 @@ public class TranscriptIngestionService : ITranscriptIngestionService
         IHarnessFileSystem? fileSystem = null,
         DashOptions? options = null,
         string? homeDirectory = null,
-        Func<DateTimeOffset>? clock = null)
+        Func<DateTimeOffset>? clock = null,
+        TimeProvider? time = null)
     {
         ArgumentNullException.ThrowIfNull(writer);
         ArgumentNullException.ThrowIfNull(operationalStore);
@@ -75,7 +78,8 @@ public class TranscriptIngestionService : ITranscriptIngestionService
                 ? Path.Combine(this.homeDirectory, CanonDbPath.DefaultDirectoryName)
                 : ServerStateRepository.ResolveStateDirectory();
 
-        this.clock = clock ?? (static () => DateTimeOffset.UtcNow);
+        this.time = time ?? TimeProvider.System;
+        this.clock = clock ?? (() => this.time.GetUtcNow());
     }
 
     /// <inheritdoc />
@@ -354,7 +358,7 @@ public class TranscriptIngestionService : ITranscriptIngestionService
     /// <summary>The retention floor for the current instant, formatted as the purge cutoff.</summary>
     /// <returns>ISO-8601 UTC cutoff.</returns>
     public static string RetentionFloorIso() =>
-        FormatUtc(CanonRefreshEngine.ContentRetentionFloor(DateTimeOffset.UtcNow));
+        FormatUtc(CanonRefreshEngine.ContentRetentionFloor(TimeProvider.System.GetUtcNow()));
 
     private RefreshReport RefreshRelationalSources(int historyWeeks)
     {
