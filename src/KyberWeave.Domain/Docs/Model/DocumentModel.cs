@@ -170,7 +170,7 @@ public sealed class DocumentModel
     /// subject even for a document that failed to declare one.
     /// </summary>
     public string Subject =>
-        string.IsNullOrWhiteSpace(Frontmatter.Id) ? RelativePath : Frontmatter.Id!;
+        Frontmatter.Id is { } id && !string.IsNullOrWhiteSpace(id) ? id : RelativePath;
 
     public IReadOnlyList<string> ApiEndpoints => Frontmatter.ApiEndpoints ?? [];
     public IReadOnlyList<string> DecidedBy => Frontmatter.DecidedBy ?? [];
@@ -184,7 +184,7 @@ public sealed class DocumentModel
     {
         get
         {
-            string docId = string.IsNullOrWhiteSpace(Frontmatter.Id) ? RelativePath : Frontmatter.Id!;
+            string docId = Frontmatter.Id is { } id && !string.IsNullOrWhiteSpace(id) ? id : RelativePath;
             string? slug = Frontmatter.Lead?.Trim();
             if (string.IsNullOrEmpty(slug))
             {
