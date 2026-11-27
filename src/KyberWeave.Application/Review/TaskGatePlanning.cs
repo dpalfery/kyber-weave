@@ -167,31 +167,9 @@ public static class TaskGatePlanning
 
         foreach (ReviewTaskGate gate in gates)
         {
-            // A gate with no program has nothing to start. The loader refuses this where the operator wrote it;
-            // a caller that builds the record directly is refused here by name, and the other gates still plan.
-            if (gate.Run.Count == 0)
+            if (GateRefusal(gate) is { } refusal)
             {
-                refusals.Add(
-                    $"Task gate '{gate.Id}' run has no command. Declare it as a list: run: [dotnet, format, KyberWeave.sln].");
-                continue;
-            }
-
-            // A command that is a changed file would execute the file, so it is refused whether or not
-            // the gate applies to this change. It is a defect in the configuration, not in the change.
-            if (gate.Run[0] == ChangedToken || (gate.Fix.Count > 0 && gate.Fix[0] == ChangedToken))
-            {
-                refusals.Add(
-                    $"Task gate '{gate.Id}' uses {{changed}} as its program. Name the command, and pass " +
-                    "the files as arguments.");
-                continue;
-            }
-
-            // The same for a class list where the program belongs: the source tree would then choose what runs.
-            if (NamesTestsInProgram(gate))
-            {
-                refusals.Add(
-                    $"Task gate '{gate.Id}' uses {{tests}} as its program. Name the command, and pass the " +
-                    "test classes as arguments.");
+                refusals.Add(refusal);
                 continue;
             }
 
@@ -268,6 +246,37 @@ public static class TaskGatePlanning
         }
 
         return new TaskGatePlan(planned, skipped, refusals.Distinct(StringComparer.Ordinal).ToArray());
+    }
+
+    /// <summary>
+    /// The reason a gate cannot be planned at all, or <see langword="null"/> when it can. Each of these is a defect
+    /// in the configuration rather than in the change, so it is refused whether or not the gate applies.
+    /// </summary>
+    private static string? GateRefusal(ReviewTaskGate gate)
+    {
+        // A gate with no program has nothing to start. The loader refuses this where the operator wrote it;
+        // a caller that builds the record directly is refused here by name, and the other gates still plan.
+        if (gate.Run.Count == 0)
+        {
+            return $"Task gate '{gate.Id}' run has no command. Declare it as a list: run: [dotnet, format, KyberWeave.sln].";
+        }
+
+        // A command that is a changed file would execute the file, so it is refused whether or not
+        // the gate applies to this change. It is a defect in the configuration, not in the change.
+        if (gate.Run[0] == ChangedToken || (gate.Fix.Count > 0 && gate.Fix[0] == ChangedToken))
+        {
+            return $"Task gate '{gate.Id}' uses {{changed}} as its program. Name the command, and pass " +
+                   "the files as arguments.";
+        }
+
+        // The same for a class list where the program belongs: the source tree would then choose what runs.
+        if (NamesTestsInProgram(gate))
+        {
+            return $"Task gate '{gate.Id}' uses {{tests}} as its program. Name the command, and pass the " +
+                   "test classes as arguments.";
+        }
+
+        return null;
     }
 
     /// <returns>

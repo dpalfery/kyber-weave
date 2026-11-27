@@ -580,61 +580,13 @@ public static partial class RedClassifier
             TestRunSummary? run = RedLanguages.All.Select(language => language.ReadTests(gate.Output)).FirstOrDefault(summary => summary is not null);
             if (gate.ExitCode == 0)
             {
-                if (run is { Total: > 0, Failed: 0 })
-                {
-                    testsPassed = true;
-                    filter ??= FilterOf(gate.Command);
-                }
-                else if (ZeroTests(gate))
-                {
-                    rejected[gate.Id] = ZeroTestsReason(gate, ownFiles, projectOf);
-                }
-
+                AcceptPassingGate(gate, run, ownFiles, projectOf, rejected, ref testsPassed, ref filter);
                 continue;
             }
 
-            IReadOnlyList<CompileError> errors = ParseErrors(gate.Output);
-            if (errors.Count > 0 || HasUnparsedError(gate.Output, errors))
+            if (TryAcceptCompileFailure(gate, ownFiles, symbols, accepted, rejected, ref filter)
+                || TryAcceptTestFailure(gate, run, failing, accepted, ref assertion, ref filter))
             {
-                bool validDirectory = TryGateDirectory(gate, out string? gateDirectory);
-                bool Own(string file) =>
-                    validDirectory
-                    && IsOwnFile(
-                        file,
-                        ownFiles,
-                        gateDirectory,
-                        gate.RepositoryRoot,
-                        gate.CanonicalRepositoryRoot,
-                        gate.IsFileSystemCaseInsensitive);
-
-                bool anyMissing = errors.Any(error => error.Symbol is not null && Own(error.File));
-                errors = [.. errors.Where(error => !(anyMissing && ConsequenceCodes.Contains(error.Code) && Own(error.File)))];
-                List<CompileError> other = [.. errors.Where(error => error.Symbol is null || !Own(error.File))];
-                if (other.Count > 0 || HasUnparsedError(gate.Output, errors))
-                {
-                    rejected[gate.Id] = other.Count > 0
-                        ? "the build failed for a reason other than a missing symbol in this task's files: "
-                          + string.Join("; ", other.Take(ExamplesShown).Select(Describe))
-                          + (other.Count > ExamplesShown ? $"; and {other.Count - ExamplesShown} more" : string.Empty)
-                        : "the build printed an error that is not a compiler error in a source file: " + FirstOtherError(gate.Output);
-                    continue;
-                }
-
-                symbols.AddRange(errors.Select(error => error.Symbol!).Where(symbol => !symbols.Contains(symbol, StringComparer.Ordinal)).Distinct(StringComparer.Ordinal));
-                accepted[gate.Id] = "compile failed only on missing symbols: " + string.Join(", ", errors.Select(error => error.Symbol!).Distinct(StringComparer.Ordinal));
-                filter ??= FilterOf(gate.Command);
-                continue;
-            }
-
-            if (run is { Failed: > 0, Total: > 0 })
-            {
-                // The runner whose summary matched names the tests and the assertion; another runner's patterns could match noise.
-                RedLanguage runner = RedLanguages.All.First(language => language.ReadTests(gate.Output) is not null);
-                failing.AddRange(runner.FailedTests(gate.Output).Where(name => !failing.Contains(name, StringComparer.Ordinal)));
-                assertion ??= runner.Assertion(gate.Output);
-
-                accepted[gate.Id] = $"tests ran and failed: {run.Failed} of {run.Total}";
-                filter = FilterOf(gate.Command);
                 continue;
             }
 
@@ -644,10 +596,7 @@ public static partial class RedClassifier
                 continue;
             }
 
-            string? infrastructure = RedLanguages.All.SelectMany(language => language.Infrastructure).FirstOrDefault(entry => entry.Pattern.IsMatch(gate.Output)).Reason;
-            rejected[gate.Id] = infrastructure is not null
-                ? $"'{gate.Command}' exited {gate.ExitCode} and no test failed: {infrastructure}. That is an infrastructure failure, not RED"
-                : $"'{gate.Command}' exited {gate.ExitCode} with no compiler error and no failing test in its output, so the failure is not RED evidence";
+            RejectUnclassified(gate, rejected);
         }
 
         if (rejected.Count > 0)
@@ -678,6 +627,108 @@ public static partial class RedClassifier
             ? $"RED_EVIDENCE: {filter ?? "build"} — compile: missing {string.Join(", ", symbols)}"
             : $"RED_EVIDENCE: {filter ?? "tests"} — {(failing.Count > 0 ? string.Join(", ", failing.Take(10)) : "failing tests")} — {assertion ?? "assertion failed"}";
         return new RedOutcome(true, string.Empty, line, symbols, failing, accepted, rejected);
+    }
+
+    /// <summary>Records what an exited-zero gate proves: the tests passed, or it ran none.</summary>
+    private static void AcceptPassingGate(
+        RedGateObservation gate,
+        TestRunSummary? run,
+        IReadOnlyList<string> ownFiles,
+        Func<string, string?>? projectOf,
+        Dictionary<string, string> rejected,
+        ref bool testsPassed,
+        ref string? filter)
+    {
+        if (run is { Total: > 0, Failed: 0 })
+        {
+            testsPassed = true;
+            filter ??= FilterOf(gate.Command);
+        }
+        else if (ZeroTests(gate))
+        {
+            rejected[gate.Id] = ZeroTestsReason(gate, ownFiles, projectOf);
+        }
+    }
+
+    /// <summary>
+    /// Classifies a failed gate whose output carries compiler errors, accepting it when every error is a missing symbol
+    /// in this task's own files. Returns whether the gate was classified.
+    /// </summary>
+    private static bool TryAcceptCompileFailure(
+        RedGateObservation gate,
+        IReadOnlyList<string> ownFiles,
+        List<string> symbols,
+        Dictionary<string, string> accepted,
+        Dictionary<string, string> rejected,
+        ref string? filter)
+    {
+        IReadOnlyList<CompileError> errors = ParseErrors(gate.Output);
+        if (errors.Count == 0 && !HasUnparsedError(gate.Output, errors))
+        {
+            return false;
+        }
+
+        bool validDirectory = TryGateDirectory(gate, out string? gateDirectory);
+        bool Own(string file) =>
+            validDirectory
+            && IsOwnFile(
+                file,
+                ownFiles,
+                gateDirectory,
+                gate.RepositoryRoot,
+                gate.CanonicalRepositoryRoot,
+                gate.IsFileSystemCaseInsensitive);
+
+        bool anyMissing = errors.Any(error => error.Symbol is not null && Own(error.File));
+        errors = [.. errors.Where(error => !(anyMissing && ConsequenceCodes.Contains(error.Code) && Own(error.File)))];
+        List<CompileError> other = [.. errors.Where(error => error.Symbol is null || !Own(error.File))];
+        if (other.Count > 0 || HasUnparsedError(gate.Output, errors))
+        {
+            rejected[gate.Id] = other.Count > 0
+                ? "the build failed for a reason other than a missing symbol in this task's files: "
+                  + string.Join("; ", other.Take(ExamplesShown).Select(Describe))
+                  + (other.Count > ExamplesShown ? $"; and {other.Count - ExamplesShown} more" : string.Empty)
+                : "the build printed an error that is not a compiler error in a source file: " + FirstOtherError(gate.Output);
+            return true;
+        }
+
+        symbols.AddRange(errors.Select(error => error.Symbol!).Where(symbol => !symbols.Contains(symbol, StringComparer.Ordinal)).Distinct(StringComparer.Ordinal));
+        accepted[gate.Id] = "compile failed only on missing symbols: " + string.Join(", ", errors.Select(error => error.Symbol!).Distinct(StringComparer.Ordinal));
+        filter ??= FilterOf(gate.Command);
+        return true;
+    }
+
+    /// <summary>Classifies a failed gate whose output carries a failing test run. Returns whether it did.</summary>
+    private static bool TryAcceptTestFailure(
+        RedGateObservation gate,
+        TestRunSummary? run,
+        List<string> failing,
+        Dictionary<string, string> accepted,
+        ref string? assertion,
+        ref string? filter)
+    {
+        if (run is not { Failed: > 0, Total: > 0 })
+        {
+            return false;
+        }
+
+        // The runner whose summary matched names the tests and the assertion; another runner's patterns could match noise.
+        RedLanguage runner = RedLanguages.All.First(language => language.ReadTests(gate.Output) is not null);
+        failing.AddRange(runner.FailedTests(gate.Output).Where(name => !failing.Contains(name, StringComparer.Ordinal)));
+        assertion ??= runner.Assertion(gate.Output);
+
+        accepted[gate.Id] = $"tests ran and failed: {run.Failed} of {run.Total}";
+        filter = FilterOf(gate.Command);
+        return true;
+    }
+
+    /// <summary>Records why a failed gate with no compiler error and no failing test is not RED evidence.</summary>
+    private static void RejectUnclassified(RedGateObservation gate, Dictionary<string, string> rejected)
+    {
+        string? infrastructure = RedLanguages.All.SelectMany(language => language.Infrastructure).FirstOrDefault(entry => entry.Pattern.IsMatch(gate.Output)).Reason;
+        rejected[gate.Id] = infrastructure is not null
+            ? $"'{gate.Command}' exited {gate.ExitCode} and no test failed: {infrastructure}. That is an infrastructure failure, not RED"
+            : $"'{gate.Command}' exited {gate.ExitCode} with no compiler error and no failing test in its output, so the failure is not RED evidence";
     }
 
     private static bool ZeroTests(RedGateObservation gate) =>
