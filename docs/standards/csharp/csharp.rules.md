@@ -52,7 +52,10 @@ An id in brackets names the analyzer that enforces the rule. Until the codebase 
 - **KW-STD-CS-005 Expected failures are values.** Not found, invalid input or a failed gate returns
   a `Try*` result, a result record or a diagnostic. An exception means a bug or the unexpected.
 - **KW-STD-CS-006 Catch discipline.** No empty `catch`. Catch named types; catch bare `Exception`
-  only to log and rethrow with `throw;`, never `throw ex;`. [CA1031]
+  only to log and rethrow with `throw;`, never `throw ex;`. One exception: at a documented boundary
+  where crashing the host is worse than continuing (a hook entry point, an install step, an Arbiter
+  evaluation), `catch (Exception ex) when (ex is not OutOfMemoryException && ex is not
+  OperationCanceledException)` is allowed, and only when the handler logs or records the error. [CA1031]
 - **KW-STD-CS-007 Open/closed, substitutable.** New behaviour is a new implementation of an
   interface, not another branch in a `switch` over kinds. An implementation honours its interface:
   no `NotImplementedException` or `NotSupportedException` stubs.
