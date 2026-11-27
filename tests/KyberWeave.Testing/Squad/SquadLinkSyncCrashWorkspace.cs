@@ -55,7 +55,16 @@ public abstract class SquadLinkSyncCrashWorkspace : IDisposable
     public IReadOnlyDictionary<string, SquadTreeEntry> Capture() => SquadStateTreeCapture.Capture(Disk, Root);
 
     /// <inheritdoc />
-    public abstract void Dispose();
+    public void Dispose()
+    {
+        Dispose(disposing: true);
+        GC.SuppressFinalize(this);
+    }
+
+    /// <inheritdoc />
+    protected virtual void Dispose(bool disposing)
+    {
+    }
 }
 
 /// <summary>The link sync crash workspace over <see cref="InMemoryFileSystem"/>: every operation is a fault point.</summary>
@@ -100,11 +109,6 @@ public sealed class InMemorySquadLinkSyncCrashWorkspace : SquadLinkSyncCrashWork
 
     /// <inheritdoc />
     public override void Restart() => _files.ClearFaults();
-
-    /// <inheritdoc />
-    public override void Dispose()
-    {
-    }
 }
 
 /// <summary>
@@ -172,9 +176,4 @@ public sealed class PhysicalSquadLinkSyncCrashWorkspace : SquadLinkSyncCrashWork
 
     /// <inheritdoc />
     public override void Restart() => _faulting.Restart();
-
-    /// <inheritdoc />
-    public override void Dispose()
-    {
-    }
 }

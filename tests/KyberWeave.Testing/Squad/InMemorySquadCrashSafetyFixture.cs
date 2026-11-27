@@ -269,13 +269,6 @@ public sealed class InMemorySquadCrashSafetyFixture : SquadCrashSafetyFixture
         }
     }
 
-    /// <inheritdoc />
-    public override void Dispose()
-    {
-        Dispose(disposing: true);
-        GC.SuppressFinalize(this);
-    }
-
     /// <summary>Whether an exception is the fake's own stop.</summary>
     /// <param name="exception">The exception a run threw.</param>
     /// <returns>True for a kill, possibly wrapped.</returns>

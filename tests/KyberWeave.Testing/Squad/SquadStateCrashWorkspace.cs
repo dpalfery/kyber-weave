@@ -46,7 +46,16 @@ public abstract class SquadStateCrashWorkspace : IDisposable
     public abstract IReadOnlyDictionary<string, SquadTreeEntry> Capture();
 
     /// <inheritdoc />
-    public abstract void Dispose();
+    public void Dispose()
+    {
+        Dispose(disposing: true);
+        GC.SuppressFinalize(this);
+    }
+
+    /// <inheritdoc />
+    protected virtual void Dispose(bool disposing)
+    {
+    }
 }
 
 /// <summary>The crash workspace over <see cref="InMemorySquadState"/>: every operation is a fault point.</summary>
@@ -77,11 +86,6 @@ public sealed class InMemorySquadStateCrashWorkspace : SquadStateCrashWorkspace
 
     /// <inheritdoc />
     public override IReadOnlyDictionary<string, SquadTreeEntry> Capture() => _state.Capture();
-
-    /// <inheritdoc />
-    public override void Dispose()
-    {
-    }
 }
 
 /// <summary>
@@ -157,9 +161,4 @@ public sealed class PhysicalSquadStateCrashWorkspace : SquadStateCrashWorkspace
     /// <inheritdoc />
     public override IReadOnlyDictionary<string, SquadTreeEntry> Capture() =>
         SquadStateTreeCapture.Capture(_disk, _directory);
-
-    /// <inheritdoc />
-    public override void Dispose()
-    {
-    }
 }

@@ -342,7 +342,11 @@ public abstract class SquadCrashSafetyFixture : IDisposable
     }
 
     /// <inheritdoc />
-    public abstract void Dispose();
+    public void Dispose()
+    {
+        Dispose(disposing: true);
+        GC.SuppressFinalize(this);
+    }
 
     /// <inheritdoc />
     protected virtual void Dispose(bool disposing)
@@ -537,13 +541,6 @@ public sealed class PhysicalSquadCrashSafetyFixture : SquadCrashSafetyFixture
             throw new InvalidOperationException(
                 $"The kill snapshot did not restore exactly, so the next case would run on a contaminated tree: {difference}");
         }
-    }
-
-    /// <inheritdoc />
-    public override void Dispose()
-    {
-        Dispose(disposing: true);
-        GC.SuppressFinalize(this);
     }
 
     /// <inheritdoc />
