@@ -544,137 +544,177 @@ public static class ArchitectShellGuard
     /// refused here, before the command is matched: substitutions, grouping, backgrounding, a redirect other
     /// than <c>2&gt;&amp;1</c> and (Bash) <c>2&gt;/dev/null</c>, a backslash in Bash, and unbalanced quotes.
     /// </summary>
-    private static Tokens Tokenize(string text, bool bash)
-    {
-        List<string> words = [];
-        List<bool> quotedWords = [];
-        StringBuilder word = new();
-        bool inWord = false;
-        bool quoted = false;
-        Quote quote = Quote.None;
+    private static Tokens Tokenize(string text, bool bash) => new TokenReader(text, bash).Read();
 
-        void Flush()
+    /// <summary>
+    /// Reads one segment's words, tracking the quote it is in and refusing a construct it cannot account for.
+    /// </summary>
+    private sealed class TokenReader(string text, bool bash)
+    {
+        private readonly List<string> _words = [];
+        private readonly List<bool> _quotedWords = [];
+        private readonly StringBuilder _word = new();
+        private bool _inWord;
+        private bool _quoted;
+        private Quote _quote;
+        private int _index;
+
+        public Tokens Read()
         {
-            if (inWord)
+            while (_index < text.Length)
             {
-                words.Add(word.ToString());
-                quotedWords.Add(quoted);
-                word.Clear();
-                inWord = false;
-                quoted = false;
+                char c = text[_index];
+                if (_quote == Quote.Single)
+                {
+                    ReadSingle(c);
+                    _index++;
+                    continue;
+                }
+
+                if (_quote == Quote.Double)
+                {
+                    Refusal? doubleRefusal = ReadDouble(c);
+                    if (doubleRefusal is not null)
+                    {
+                        return new Tokens(_words, doubleRefusal);
+                    }
+
+                    _index++;
+                    continue;
+                }
+
+                if (c == ' ' || c == '\t')
+                {
+                    Flush();
+                    _index++;
+                    continue;
+                }
+
+                Refusal? unquotedRefusal = ReadUnquoted(c);
+                if (unquotedRefusal is not null)
+                {
+                    return new Tokens(_words, unquotedRefusal);
+                }
+
+                _index++;
+            }
+
+            if (_quote != Quote.None)
+            {
+                return new Tokens(_words, UnbalancedQuoteRefusal);
+            }
+
+            Flush();
+            return new Tokens(_words, null, _quotedWords);
+        }
+
+        private void ReadSingle(char c)
+        {
+            if (c == '\'')
+            {
+                _quote = Quote.None;
+            }
+            else
+            {
+                _word.Append(c);
             }
         }
 
-        for (int i = 0; i < text.Length; i++)
+        private Refusal? ReadDouble(char c)
         {
-            char c = text[i];
-            if (quote == Quote.Single)
+            if (c == '"')
             {
-                if (c == '\'')
-                {
-                    quote = Quote.None;
-                }
-                else
-                {
-                    word.Append(c);
-                }
-
-                continue;
+                _quote = Quote.None;
+                return null;
             }
 
-            if (quote == Quote.Double)
+            if (c == '$' || c == '`')
             {
-                if (c == '"')
-                {
-                    quote = Quote.None;
-                    continue;
-                }
-
-                if (c == '$' || c == '`')
-                {
-                    return new Tokens(words, SubstitutionRefusal);
-                }
-
-                if (c == '\\' && bash && i + 1 < text.Length)
-                {
-                    char escaped = text[i + 1];
-                    if (escaped == '$' || escaped == '`')
-                    {
-                        return new Tokens(words, SubstitutionRefusal);
-                    }
-
-                    word.Append(escaped);
-                    i++;
-                    continue;
-                }
-
-                word.Append(c);
-                continue;
+                return SubstitutionRefusal;
             }
 
-            if (c == ' ' || c == '\t')
+            if (c == '\\' && bash && _index + 1 < text.Length)
             {
-                Flush();
-                continue;
+                char escaped = text[_index + 1];
+                if (escaped == '$' || escaped == '`')
+                {
+                    return SubstitutionRefusal;
+                }
+
+                _word.Append(escaped);
+                _index++;
+                return null;
             }
 
+            _word.Append(c);
+            return null;
+        }
+
+        private Refusal? ReadUnquoted(char c)
+        {
             switch (c)
             {
                 case '\'':
-                    quote = Quote.Single;
-                    inWord = true;
-                    quoted = true;
+                    _quote = Quote.Single;
+                    _inWord = true;
+                    _quoted = true;
                     break;
                 case '"':
-                    quote = Quote.Double;
-                    inWord = true;
-                    quoted = true;
+                    _quote = Quote.Double;
+                    _inWord = true;
+                    _quoted = true;
                     break;
                 case '$':
                 case '`':
-                    return new Tokens(words, SubstitutionRefusal);
+                    return SubstitutionRefusal;
                 case '*':
                 case '?':
                 case '[':
                     // An unquoted pattern expands in the shell to file names the check never saw, and a name that begins
                     // with a dash would then read as an option. A quoted pattern is passed through as written.
-                    return new Tokens(words, GlobRefusal);
+                    return GlobRefusal;
                 case '(':
                 case ')':
                 case '{':
                 case '}':
-                    return new Tokens(words, GroupingRefusal);
+                    return GroupingRefusal;
                 case '<':
-                    return new Tokens(words, InputRedirectRefusal);
+                    return InputRedirectRefusal;
                 case '&':
-                    return new Tokens(words, BackgroundRefusal);
+                    return BackgroundRefusal;
                 case '\\' when bash:
-                    return new Tokens(words, BackslashRefusal);
+                    return BackslashRefusal;
                 case '>':
-                    if (inWord && !quoted && word.ToString() == "2" && AllowedErrorRedirect(text, i + 1, bash, out int last))
+                    if (_inWord && !_quoted && _word.ToString() == "2" && AllowedErrorRedirect(text, _index + 1, bash, out int last))
                     {
                         // The descriptor and the redirect are one token that the list allows; it names no file.
-                        word.Clear();
-                        inWord = false;
-                        i = last;
+                        _word.Clear();
+                        _inWord = false;
+                        _index = last;
                         break;
                     }
 
-                    return new Tokens(words, OutputRedirectRefusal);
+                    return OutputRedirectRefusal;
                 default:
-                    word.Append(c);
-                    inWord = true;
+                    _word.Append(c);
+                    _inWord = true;
                     break;
             }
+
+            return null;
         }
 
-        if (quote != Quote.None)
+        private void Flush()
         {
-            return new Tokens(words, UnbalancedQuoteRefusal);
+            if (_inWord)
+            {
+                _words.Add(_word.ToString());
+                _quotedWords.Add(_quoted);
+                _word.Clear();
+                _inWord = false;
+                _quoted = false;
+            }
         }
-
-        Flush();
-        return new Tokens(words, null, quotedWords);
     }
 
     /// <summary>
@@ -867,29 +907,28 @@ public static class ArchitectShellGuard
                 "Ask the conductor to run that script or tool");
         }
 
+        return CheckListedCommand(
+            name, words, quoted, bash, directory, departure, origin, planningDirectories);
+    }
+
+    private static Refusal? CheckListedCommand(
+        string name,
+        List<string> words,
+        List<bool> quoted,
+        bool bash,
+        string directory,
+        string? departure,
+        string? origin,
+        IReadOnlyList<string> planningDirectories)
+    {
         switch (name)
         {
             case KyberWeaveCli:
                 return CheckKyberWeave(words);
             case "codegraph":
-                // Exactly one query operand. A quoted query is an operand even when it begins with a dash; an unquoted
-                // dash-leading word is a flag, and explore takes none.
-                return words.Count == 3
-                    && string.Equals(words[1], "explore", StringComparison.Ordinal)
-                    && words[2].Length > 0
-                    && (!IsFlag(words[2]) || (quoted.Count > 2 && quoted[2]))
-                    ? null
-                    : new Refusal(
-                        "is not a codegraph form on the architect's list",
-                        "Use codegraph explore \"<query>\"");
+                return CheckCodegraph(words, quoted);
             case "git":
                 return CheckGit(words);
-            case "grep":
-            case "ls":
-            case "head":
-            case "wc":
-            case "cut":
-                return null;
             case "rg":
                 return CheckRipgrep(words);
             case "tail":
@@ -902,6 +941,22 @@ public static class ArchitectShellGuard
                 return CheckUniq(words);
             case "touch":
                 return CheckTouch(words, bash, directory, departure, origin, planningDirectories);
+            default:
+                return CheckUnlistedCommand(name);
+        }
+    }
+
+    /// <summary>Checks the commands that are known but never allowed, or that need no argument check.</summary>
+    private static Refusal? CheckUnlistedCommand(string name)
+    {
+        switch (name)
+        {
+            case "grep":
+            case "ls":
+            case "head":
+            case "wc":
+            case "cut":
+                return null;
             case "cat":
             case "sed":
             case "awk":
@@ -931,55 +986,28 @@ public static class ArchitectShellGuard
         }
     }
 
+    /// <summary>
+    /// Checks <c>codegraph explore</c>: exactly one query operand. A quoted query is an operand even when it begins
+    /// with a dash; an unquoted dash-leading word is a flag, and explore takes none.
+    /// </summary>
+    private static Refusal? CheckCodegraph(List<string> words, List<bool> quoted) =>
+        words.Count == 3
+            && string.Equals(words[1], "explore", StringComparison.Ordinal)
+            && words[2].Length > 0
+            && (!IsFlag(words[2]) || (quoted.Count > 2 && quoted[2]))
+            ? null
+            : new Refusal(
+                "is not a codegraph form on the architect's list",
+                "Use codegraph explore \"<query>\"");
+
+
     private static Refusal? CheckKyberWeave(List<string> words)
     {
         bool docs = words.Count >= 3 && string.Equals(words[1], "docs", StringComparison.Ordinal);
-        bool validate = docs
-            && words.Count == 4
-            && string.Equals(words[2], "validate", StringComparison.Ordinal)
-            && !IsFlag(words[3]);
         // --merge-ready is the pull-request gate: it fails while the plan is an open Draft (KW-DOC-LIFECYCLE-003
         // and -005), which is exactly the state the architect writes in. The refusal is specific so the architect
         // drops the flag rather than concluding the docs command itself is off the list.
-        bool validateMergeReady = docs
-            && string.Equals(words[2], "validate", StringComparison.Ordinal)
-            && words.Contains("--merge-ready", StringComparer.Ordinal);
-        bool drift = docs
-            && words.Count == 4
-            && string.Equals(words[2], "drift", StringComparison.Ordinal)
-            && !IsFlag(words[3]);
-        // The task file writer: exactly one path operand, then --write or --check. The command derives the file from
-        // the plan and writes only <plan>.tasks.yml beside it, so the guard needs no path rule of its own.
-        bool docsTasks = docs
-            && words.Count == 5
-            && string.Equals(words[2], "tasks", StringComparison.Ordinal)
-            && !IsFlag(words[3])
-            && (string.Equals(words[4], "--write", StringComparison.Ordinal)
-                || string.Equals(words[4], "--check", StringComparison.Ordinal));
-        // doctor --ensure takes no operand: an extra path would be a second target the form does not name.
-        bool doctor = words.Count == 3
-            && string.Equals(words[1], "doctor", StringComparison.Ordinal)
-            && string.Equals(words[2], "--ensure", StringComparison.Ordinal);
-
-        // The plan reader: exactly one path operand, then -f json. Any other arbiter subcommand (eval, setup,
-        // install, uninstall, and the rest) is not this form and is refused by the default branch.
-        bool arbiterPlan = words.Count == 6
-            && string.Equals(words[1], "arbiter", StringComparison.Ordinal)
-            && string.Equals(words[2], "plan", StringComparison.Ordinal)
-            && !IsFlag(words[3])
-            && string.Equals(words[4], "-f", StringComparison.Ordinal)
-            && string.Equals(words[5], "json", StringComparison.Ordinal);
-
-        // The architect's own brief: read-only, for the architect alone, and only flags that each take one value.
-        bool brief = words.Count >= 4
-            && words.Count % 2 == 0
-            && string.Equals(words[1], "squad", StringComparison.Ordinal)
-            && string.Equals(words[2], "brief", StringComparison.Ordinal)
-            && string.Equals(words[3], "architect", StringComparison.Ordinal)
-            && Enumerable.Range(0, (words.Count - 4) / 2).All(pair =>
-                BriefFlags.Contains(words[4 + (2 * pair)]) && !IsFlag(words[5 + (2 * pair)]));
-
-        if (validateMergeReady)
+        if (IsValidateMergeReady(words, docs))
         {
             return new Refusal(
                 "passes --merge-ready, the pull-request gate, which fails while the plan is an open Draft " +
@@ -987,12 +1015,77 @@ public static class ArchitectShellGuard
                 "Drop --merge-ready: run kyber-weave docs validate <dir> while the plan is in the active plans folder");
         }
 
-        return validate || drift || docsTasks || doctor || arbiterPlan || brief
+        return IsListedKyberWeaveForm(words, docs)
             ? null
             : new Refusal(
                 "is not a kyber-weave form on the architect's list",
                 "Use kyber-weave docs validate <dir>, docs drift <dir>, docs tasks <plan file> --write, doctor --ensure, arbiter plan <plan file> -f json, or squad brief architect with --path, --plan, --autonomy or --mode");
     }
+
+    private static bool IsValidateMergeReady(List<string> words, bool docs) =>
+        docs
+        && string.Equals(words[2], "validate", StringComparison.Ordinal)
+        && words.Contains("--merge-ready", StringComparer.Ordinal);
+
+    private static bool IsListedKyberWeaveForm(List<string> words, bool docs) =>
+        IsDocsValidate(words, docs)
+        || IsDocsDrift(words, docs)
+        || IsDocsTasks(words, docs)
+        || IsDoctor(words)
+        || IsArbiterPlan(words)
+        || IsBrief(words);
+
+    private static bool IsDocsValidate(List<string> words, bool docs) =>
+        docs
+        && words.Count == 4
+        && string.Equals(words[2], "validate", StringComparison.Ordinal)
+        && !IsFlag(words[3]);
+
+    private static bool IsDocsDrift(List<string> words, bool docs) =>
+        docs
+        && words.Count == 4
+        && string.Equals(words[2], "drift", StringComparison.Ordinal)
+        && !IsFlag(words[3]);
+
+    /// <summary>
+    /// The task file writer: exactly one path operand, then --write or --check. The command derives the file from
+    /// the plan and writes only &lt;plan&gt;.tasks.yml beside it, so the guard needs no path rule of its own.
+    /// </summary>
+    private static bool IsDocsTasks(List<string> words, bool docs) =>
+        docs
+        && words.Count == 5
+        && string.Equals(words[2], "tasks", StringComparison.Ordinal)
+        && !IsFlag(words[3])
+        && (string.Equals(words[4], "--write", StringComparison.Ordinal)
+            || string.Equals(words[4], "--check", StringComparison.Ordinal));
+
+    /// <summary>doctor --ensure takes no operand: an extra path would be a second target the form does not name.</summary>
+    private static bool IsDoctor(List<string> words) =>
+        words.Count == 3
+        && string.Equals(words[1], "doctor", StringComparison.Ordinal)
+        && string.Equals(words[2], "--ensure", StringComparison.Ordinal);
+
+    /// <summary>
+    /// The plan reader: exactly one path operand, then -f json. Any other arbiter subcommand (eval, setup,
+    /// install, uninstall, and the rest) is not this form and is refused by the default branch.
+    /// </summary>
+    private static bool IsArbiterPlan(List<string> words) =>
+        words.Count == 6
+        && string.Equals(words[1], "arbiter", StringComparison.Ordinal)
+        && string.Equals(words[2], "plan", StringComparison.Ordinal)
+        && !IsFlag(words[3])
+        && string.Equals(words[4], "-f", StringComparison.Ordinal)
+        && string.Equals(words[5], "json", StringComparison.Ordinal);
+
+    /// <summary>The architect's own brief: read-only, for the architect alone, and only flags that each take one value.</summary>
+    private static bool IsBrief(List<string> words) =>
+        words.Count >= 4
+        && words.Count % 2 == 0
+        && string.Equals(words[1], "squad", StringComparison.Ordinal)
+        && string.Equals(words[2], "brief", StringComparison.Ordinal)
+        && string.Equals(words[3], "architect", StringComparison.Ordinal)
+        && Enumerable.Range(0, (words.Count - 4) / 2).All(pair =>
+            BriefFlags.Contains(words[4 + (2 * pair)]) && !IsFlag(words[5 + (2 * pair)]));
 
     private static Refusal? CheckGit(List<string> words)
     {
