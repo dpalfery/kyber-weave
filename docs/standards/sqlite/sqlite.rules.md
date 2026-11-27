@@ -34,9 +34,11 @@ last-reviewed: 2026-11-26
 
 - A canon column does not hold a JSON document. A missing row means the value was not
   reported, and it is not stored as zero.
-- **KW-STD-SQL-004 to -007 apply from the remediation's first slice**, which gives
-  `BaseSqliteRepository` a parameterized command path and the engine its SQLite package; until it
-  lands, new code uses the existing `TextExpr` path and adds no new CLI database.
+- **KW-STD-SQL-004 to -007 apply to new code now.** The remediation's first slice gives
+  `BaseSqliteRepository` a parameterized command path and the engine its SQLite package.
+  Until that slice lands, the existing `TextExpr` call sites stay as debt
+  (`docs/todo/csharp-standards-remediation.md`). New code does not add to them, and it adds no
+  new CLI database.
 - **KW-STD-SQL-004 Parameterized.** Every value enters SQL as a named `$parameter` on the
   command. `TextExpr` and blob literals are retired; existing ones are remediation debt
   (`docs/todo/csharp-standards-remediation.md`).
