@@ -106,10 +106,12 @@ public static class CanonSynthDedup
     public static IReadOnlyList<CanonicalRecord> Deduplicate(
         IReadOnlyList<CanonicalRecord> synthRecords,
         IReadOnlyList<CanonicalRecord> otlpRecords,
-        Action<SpanProblemRow>? recordProblem = null)
+        Action<SpanProblemRow>? recordProblem = null,
+        TimeProvider? timeProvider = null)
     {
         ArgumentNullException.ThrowIfNull(synthRecords);
         ArgumentNullException.ThrowIfNull(otlpRecords);
+        TimeProvider clock = timeProvider ?? TimeProvider.System;
 
         Dictionary<string, CanonicalRecord> fileByTurn = new(StringComparer.Ordinal);
         List<string> fileKeyOrder = [];
@@ -150,7 +152,7 @@ public static class CanonSynthDedup
 
             joinedFileKeys.Add(key);
             kept.Add(JoinOtelAndFileTurn(otlp, file));
-            RecordDisagreement(key, [file], [otlp], recordProblem);
+            RecordDisagreement(key, [file], [otlp], recordProblem, clock);
         }
 
         foreach (string key in fileKeyOrder)
@@ -211,7 +213,8 @@ public static class CanonSynthDedup
         string key,
         IReadOnlyList<CanonicalRecord> fileRecords,
         IReadOnlyList<CanonicalRecord> otlpRecords,
-        Action<SpanProblemRow>? recordProblem = null)
+        Action<SpanProblemRow>? recordProblem = null,
+        TimeProvider? timeProvider = null)
     {
         SideSummary file = Summarize(fileRecords);
         SideSummary otlp = Summarize(otlpRecords);
@@ -226,7 +229,7 @@ public static class CanonSynthDedup
             ? otlpRecords[0].Timestamp
             : fileRecords.Count > 0
                 ? fileRecords[0].Timestamp
-                : DateTimeOffset.UtcNow.UtcDateTime.ToString("yyyy-MM-dd'T'HH:mm:ss.fff'Z'", CultureInfo.InvariantCulture);
+                : (timeProvider ?? TimeProvider.System).GetUtcNow().UtcDateTime.ToString("yyyy-MM-dd'T'HH:mm:ss.fff'Z'", CultureInfo.InvariantCulture);
 
         string message = string.Create(
             CultureInfo.InvariantCulture,
