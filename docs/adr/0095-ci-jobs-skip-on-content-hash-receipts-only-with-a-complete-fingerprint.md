@@ -13,8 +13,8 @@ decided-by: []
 
 ## Status
 
-Accepted, 2026-11-26. Records the decisions of the active plan [CI content-hash skip receipts and
-provenance](../plans/2026-11-26-ci-content-hash-skip-and-provenance.md), including the two
+Accepted, 2026-11-26. Records the decisions of the plan [CI content-hash skip receipts and
+provenance](../archive/plans/2026-11-26-ci-content-hash-skip-and-provenance.md), including the two
 owner decisions taken at its approve-and-execute gate: one uniform four-hour ceiling for CI and the
 release chain, and `integration-test` left skip-eligible despite its AI-graded tests.
 

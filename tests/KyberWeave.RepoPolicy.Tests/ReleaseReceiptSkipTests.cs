@@ -449,7 +449,7 @@ public sealed class ReleaseReceiptSkipTests
         string[] paths =
         {
             "docs/adr/0095-ci-jobs-skip-on-content-hash-receipts-only-with-a-complete-fingerprint.md",
-            "docs/plans/2026-11-26-ci-content-hash-skip-and-provenance.md",
+            "docs/archive/plans/2026-11-26-ci-content-hash-skip-and-provenance.md",
             "docs/ci-pipelines/workflows-runbook.md",
             "docs/distribution.md",
         };

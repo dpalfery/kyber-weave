@@ -189,7 +189,7 @@ jobs:
         id: fp
         shell: bash
         env:
-          INPUT_HASH: ${{ hashFiles('.agents/**', '.apm/**', '.claude/**', '.codex/**', '.commandcode/**', '.cursor/**', '.devin/**', '.factory/**', '.github/**', '.kilo/**', '.kyber-weave/**', '.opencode/**', '.pi/**', '.playwright-cli/**', '.vscode/**', 'dash/**', 'docs/**', 'homebrew/**', 'npm/**', 'products/**', 'samples/**', 'scripts/**', 'src/**', 'templates/**', 'tests/**', '.editorconfig', '.gitattributes', '.gitignore', '.gitleaks.toml', '.mcp.json', 'AGENTS.md', 'CLAUDE.md', 'CODE_OF_CONDUCT.md', 'CONTRIBUTING.md', 'Directory.Build.props', 'HANDOVER-WAVE4.md', 'HANDOVER.md', 'KyberWeave.Unit.slnf', 'KyberWeave.sln', 'KyberWeave.sln.DotSettings', 'LICENSE', 'NOTICE', 'README.md', 'REFACTOR-LAYERS.md', 'REVIEW.md', 'SECURITY.md', 'apm.yml', 'global.json', 'kilo.json') }}
+          INPUT_HASH: ${{ hashFiles('.agents/**', '.apm/**', '.claude/**', '.codex/**', '.commandcode/**', '.cursor/**', '.devin/**', '.factory/**', '.github/**', '.kilo/**', '.kyber-weave/**', '.opencode/**', '.pi/**', '.playwright-cli/**', '.vscode/**', 'analyzers/**', 'dash/**', 'docs/**', 'homebrew/**', 'npm/**', 'products/**', 'samples/**', 'scripts/**', 'src/**', 'templates/**', 'tests/**', '.editorconfig', '.gitattributes', '.gitignore', '.gitleaks.toml', '.mcp.json', 'AGENTS.md', 'CLAUDE.md', 'CODE_OF_CONDUCT.md', 'CONTRIBUTING.md', 'Directory.Build.props', 'HANDOVER-WAVE4.md', 'HANDOVER.md', 'KyberWeave.Unit.slnf', 'KyberWeave.sln', 'KyberWeave.sln.DotSettings', 'LICENSE', 'NOTICE', 'README.md', 'REFACTOR-LAYERS.md', 'REVIEW.md', 'SECURITY.md', 'apm.yml', 'global.json', 'kilo.json') }}
         run: |
           set -euo pipefail
           hash="${INPUT_HASH:-}"
@@ -427,7 +427,7 @@ jobs:
           for file in artifacts/nupkg/*.nupkg; do
             [ -f "${file}" ] || continue
             digest="$(sha256sum "${file}" | cut -d' ' -f1)"
-            digests="$(jq --arg path "${file}" --arg digest "sha256:${digest}" '. + {($path): $digest}' <<<"${digests}")"
+            digests="$(jq -c --arg path "${file}" --arg digest "sha256:${digest}" '. + {($path): $digest}' <<<"${digests}")"
           done
           printf 'digests=%s\n' "${digests}" >> "${GITHUB_OUTPUT}"
 
@@ -521,7 +521,7 @@ jobs:
         id: fp
         shell: bash
         env:
-          INPUT_HASH: ${{ hashFiles('.agents/**', '.apm/**', '.claude/**', '.codex/**', '.commandcode/**', '.cursor/**', '.devin/**', '.factory/**', '.github/**', '.kilo/**', '.kyber-weave/**', '.opencode/**', '.pi/**', '.playwright-cli/**', '.vscode/**', 'dash/**', 'docs/**', 'homebrew/**', 'npm/**', 'products/**', 'samples/**', 'scripts/**', 'src/**', 'templates/**', 'tests/**', '.editorconfig', '.gitattributes', '.gitignore', '.gitleaks.toml', '.mcp.json', 'AGENTS.md', 'CLAUDE.md', 'CODE_OF_CONDUCT.md', 'CONTRIBUTING.md', 'Directory.Build.props', 'HANDOVER-WAVE4.md', 'HANDOVER.md', 'KyberWeave.Unit.slnf', 'KyberWeave.sln', 'KyberWeave.sln.DotSettings', 'LICENSE', 'NOTICE', 'README.md', 'REFACTOR-LAYERS.md', 'REVIEW.md', 'SECURITY.md', 'apm.yml', 'global.json', 'kilo.json') }}
+          INPUT_HASH: ${{ hashFiles('.agents/**', '.apm/**', '.claude/**', '.codex/**', '.commandcode/**', '.cursor/**', '.devin/**', '.factory/**', '.github/**', '.kilo/**', '.kyber-weave/**', '.opencode/**', '.pi/**', '.playwright-cli/**', '.vscode/**', 'analyzers/**', 'dash/**', 'docs/**', 'homebrew/**', 'npm/**', 'products/**', 'samples/**', 'scripts/**', 'src/**', 'templates/**', 'tests/**', '.editorconfig', '.gitattributes', '.gitignore', '.gitleaks.toml', '.mcp.json', 'AGENTS.md', 'CLAUDE.md', 'CODE_OF_CONDUCT.md', 'CONTRIBUTING.md', 'Directory.Build.props', 'HANDOVER-WAVE4.md', 'HANDOVER.md', 'KyberWeave.Unit.slnf', 'KyberWeave.sln', 'KyberWeave.sln.DotSettings', 'LICENSE', 'NOTICE', 'README.md', 'REFACTOR-LAYERS.md', 'REVIEW.md', 'SECURITY.md', 'apm.yml', 'global.json', 'kilo.json') }}
         run: |
           set -euo pipefail
           hash="${INPUT_HASH:-}"
@@ -951,7 +951,7 @@ jobs:
           for file in sbom-out/kyber-weave-sbom-*.cdx.json; do
             [ -f "${file}" ] || continue
             digest="$(sha256sum "${file}" | cut -d' ' -f1)"
-            digests="$(jq --arg path "${file}" --arg digest "sha256:${digest}" '. + {($path): $digest}' <<<"${digests}")"
+            digests="$(jq -c --arg path "${file}" --arg digest "sha256:${digest}" '. + {($path): $digest}' <<<"${digests}")"
           done
           printf 'digests=%s\n' "${digests}" >> "${GITHUB_OUTPUT}"
 
@@ -1044,7 +1044,7 @@ jobs:
         id: fp
         shell: bash
         env:
-          INPUT_HASH: ${{ hashFiles('.agents/**', '.apm/**', '.claude/**', '.codex/**', '.commandcode/**', '.cursor/**', '.devin/**', '.factory/**', '.github/**', '.kilo/**', '.kyber-weave/**', '.opencode/**', '.pi/**', '.playwright-cli/**', '.vscode/**', 'dash/**', 'docs/**', 'homebrew/**', 'npm/**', 'products/**', 'samples/**', 'scripts/**', 'src/**', 'templates/**', 'tests/**', '.editorconfig', '.gitattributes', '.gitignore', '.gitleaks.toml', '.mcp.json', 'AGENTS.md', 'CLAUDE.md', 'CODE_OF_CONDUCT.md', 'CONTRIBUTING.md', 'Directory.Build.props', 'HANDOVER-WAVE4.md', 'HANDOVER.md', 'KyberWeave.Unit.slnf', 'KyberWeave.sln', 'KyberWeave.sln.DotSettings', 'LICENSE', 'NOTICE', 'README.md', 'REFACTOR-LAYERS.md', 'REVIEW.md', 'SECURITY.md', 'apm.yml', 'global.json', 'kilo.json') }}
+          INPUT_HASH: ${{ hashFiles('.agents/**', '.apm/**', '.claude/**', '.codex/**', '.commandcode/**', '.cursor/**', '.devin/**', '.factory/**', '.github/**', '.kilo/**', '.kyber-weave/**', '.opencode/**', '.pi/**', '.playwright-cli/**', '.vscode/**', 'analyzers/**', 'dash/**', 'docs/**', 'homebrew/**', 'npm/**', 'products/**', 'samples/**', 'scripts/**', 'src/**', 'templates/**', 'tests/**', '.editorconfig', '.gitattributes', '.gitignore', '.gitleaks.toml', '.mcp.json', 'AGENTS.md', 'CLAUDE.md', 'CODE_OF_CONDUCT.md', 'CONTRIBUTING.md', 'Directory.Build.props', 'HANDOVER-WAVE4.md', 'HANDOVER.md', 'KyberWeave.Unit.slnf', 'KyberWeave.sln', 'KyberWeave.sln.DotSettings', 'LICENSE', 'NOTICE', 'README.md', 'REFACTOR-LAYERS.md', 'REVIEW.md', 'SECURITY.md', 'apm.yml', 'global.json', 'kilo.json') }}
         run: |
           set -euo pipefail
           hash="${INPUT_HASH:-}"
@@ -1254,7 +1254,7 @@ jobs:
         id: fp
         shell: bash
         env:
-          INPUT_HASH: ${{ hashFiles('.agents/**', '.apm/**', '.claude/**', '.codex/**', '.commandcode/**', '.cursor/**', '.devin/**', '.factory/**', '.github/**', '.kilo/**', '.kyber-weave/**', '.opencode/**', '.pi/**', '.playwright-cli/**', '.vscode/**', 'dash/**', 'docs/**', 'homebrew/**', 'npm/**', 'products/**', 'samples/**', 'scripts/**', 'src/**', 'templates/**', 'tests/**', '.editorconfig', '.gitattributes', '.gitignore', '.gitleaks.toml', '.mcp.json', 'AGENTS.md', 'CLAUDE.md', 'CODE_OF_CONDUCT.md', 'CONTRIBUTING.md', 'Directory.Build.props', 'HANDOVER-WAVE4.md', 'HANDOVER.md', 'KyberWeave.Unit.slnf', 'KyberWeave.sln', 'KyberWeave.sln.DotSettings', 'LICENSE', 'NOTICE', 'README.md', 'REFACTOR-LAYERS.md', 'REVIEW.md', 'SECURITY.md', 'apm.yml', 'global.json', 'kilo.json') }}
+          INPUT_HASH: ${{ hashFiles('.agents/**', '.apm/**', '.claude/**', '.codex/**', '.commandcode/**', '.cursor/**', '.devin/**', '.factory/**', '.github/**', '.kilo/**', '.kyber-weave/**', '.opencode/**', '.pi/**', '.playwright-cli/**', '.vscode/**', 'analyzers/**', 'dash/**', 'docs/**', 'homebrew/**', 'npm/**', 'products/**', 'samples/**', 'scripts/**', 'src/**', 'templates/**', 'tests/**', '.editorconfig', '.gitattributes', '.gitignore', '.gitleaks.toml', '.mcp.json', 'AGENTS.md', 'CLAUDE.md', 'CODE_OF_CONDUCT.md', 'CONTRIBUTING.md', 'Directory.Build.props', 'HANDOVER-WAVE4.md', 'HANDOVER.md', 'KyberWeave.Unit.slnf', 'KyberWeave.sln', 'KyberWeave.sln.DotSettings', 'LICENSE', 'NOTICE', 'README.md', 'REFACTOR-LAYERS.md', 'REVIEW.md', 'SECURITY.md', 'apm.yml', 'global.json', 'kilo.json') }}
         run: |
           set -euo pipefail
           hash="${INPUT_HASH:-}"
@@ -1427,7 +1427,7 @@ jobs:
           for file in artifacts/cli-linux-x64/kyber-weave artifacts/mcp-linux-x64/kyber-weave-mcp artifacts/arbiter-linux-x64/kyber-weave-arbiter; do
             [ -f "${file}" ] || continue
             digest="$(sha256sum "${file}" | cut -d' ' -f1)"
-            digests="$(jq --arg path "${file}" --arg digest "sha256:${digest}" '. + {($path): $digest}' <<<"${digests}")"
+            digests="$(jq -c --arg path "${file}" --arg digest "sha256:${digest}" '. + {($path): $digest}' <<<"${digests}")"
           done
           printf 'digests=%s\n' "${digests}" >> "${GITHUB_OUTPUT}"
 
@@ -1529,7 +1529,7 @@ jobs:
         id: fp
         shell: bash
         env:
-          INPUT_HASH: ${{ hashFiles('.agents/**', '.apm/**', '.claude/**', '.codex/**', '.commandcode/**', '.cursor/**', '.devin/**', '.factory/**', '.github/**', '.kilo/**', '.kyber-weave/**', '.opencode/**', '.pi/**', '.playwright-cli/**', '.vscode/**', 'dash/**', 'docs/**', 'homebrew/**', 'npm/**', 'products/**', 'samples/**', 'scripts/**', 'src/**', 'templates/**', 'tests/**', '.editorconfig', '.gitattributes', '.gitignore', '.gitleaks.toml', '.mcp.json', 'AGENTS.md', 'CLAUDE.md', 'CODE_OF_CONDUCT.md', 'CONTRIBUTING.md', 'Directory.Build.props', 'HANDOVER-WAVE4.md', 'HANDOVER.md', 'KyberWeave.Unit.slnf', 'KyberWeave.sln', 'KyberWeave.sln.DotSettings', 'LICENSE', 'NOTICE', 'README.md', 'REFACTOR-LAYERS.md', 'REVIEW.md', 'SECURITY.md', 'apm.yml', 'global.json', 'kilo.json') }}
+          INPUT_HASH: ${{ hashFiles('.agents/**', '.apm/**', '.claude/**', '.codex/**', '.commandcode/**', '.cursor/**', '.devin/**', '.factory/**', '.github/**', '.kilo/**', '.kyber-weave/**', '.opencode/**', '.pi/**', '.playwright-cli/**', '.vscode/**', 'analyzers/**', 'dash/**', 'docs/**', 'homebrew/**', 'npm/**', 'products/**', 'samples/**', 'scripts/**', 'src/**', 'templates/**', 'tests/**', '.editorconfig', '.gitattributes', '.gitignore', '.gitleaks.toml', '.mcp.json', 'AGENTS.md', 'CLAUDE.md', 'CODE_OF_CONDUCT.md', 'CONTRIBUTING.md', 'Directory.Build.props', 'HANDOVER-WAVE4.md', 'HANDOVER.md', 'KyberWeave.Unit.slnf', 'KyberWeave.sln', 'KyberWeave.sln.DotSettings', 'LICENSE', 'NOTICE', 'README.md', 'REFACTOR-LAYERS.md', 'REVIEW.md', 'SECURITY.md', 'apm.yml', 'global.json', 'kilo.json') }}
         run: |
           set -euo pipefail
           hash="${INPUT_HASH:-}"
@@ -1746,7 +1746,7 @@ jobs:
         id: fp
         shell: bash
         env:
-          INPUT_HASH: ${{ hashFiles('.agents/**', '.apm/**', '.claude/**', '.codex/**', '.commandcode/**', '.cursor/**', '.devin/**', '.factory/**', '.github/**', '.kilo/**', '.kyber-weave/**', '.opencode/**', '.pi/**', '.playwright-cli/**', '.vscode/**', 'dash/**', 'docs/**', 'homebrew/**', 'npm/**', 'products/**', 'samples/**', 'scripts/**', 'src/**', 'templates/**', 'tests/**', '.editorconfig', '.gitattributes', '.gitignore', '.gitleaks.toml', '.mcp.json', 'AGENTS.md', 'CLAUDE.md', 'CODE_OF_CONDUCT.md', 'CONTRIBUTING.md', 'Directory.Build.props', 'HANDOVER-WAVE4.md', 'HANDOVER.md', 'KyberWeave.Unit.slnf', 'KyberWeave.sln', 'KyberWeave.sln.DotSettings', 'LICENSE', 'NOTICE', 'README.md', 'REFACTOR-LAYERS.md', 'REVIEW.md', 'SECURITY.md', 'apm.yml', 'global.json', 'kilo.json') }}
+          INPUT_HASH: ${{ hashFiles('.agents/**', '.apm/**', '.claude/**', '.codex/**', '.commandcode/**', '.cursor/**', '.devin/**', '.factory/**', '.github/**', '.kilo/**', '.kyber-weave/**', '.opencode/**', '.pi/**', '.playwright-cli/**', '.vscode/**', 'analyzers/**', 'dash/**', 'docs/**', 'homebrew/**', 'npm/**', 'products/**', 'samples/**', 'scripts/**', 'src/**', 'templates/**', 'tests/**', '.editorconfig', '.gitattributes', '.gitignore', '.gitleaks.toml', '.mcp.json', 'AGENTS.md', 'CLAUDE.md', 'CODE_OF_CONDUCT.md', 'CONTRIBUTING.md', 'Directory.Build.props', 'HANDOVER-WAVE4.md', 'HANDOVER.md', 'KyberWeave.Unit.slnf', 'KyberWeave.sln', 'KyberWeave.sln.DotSettings', 'LICENSE', 'NOTICE', 'README.md', 'REFACTOR-LAYERS.md', 'REVIEW.md', 'SECURITY.md', 'apm.yml', 'global.json', 'kilo.json') }}
         run: |
           set -euo pipefail
           hash="${INPUT_HASH:-}"
@@ -1951,7 +1951,7 @@ jobs:
         id: fp
         shell: bash
         env:
-          INPUT_HASH: ${{ hashFiles('.agents/**', '.apm/**', '.claude/**', '.codex/**', '.commandcode/**', '.cursor/**', '.devin/**', '.factory/**', '.github/**', '.kilo/**', '.kyber-weave/**', '.opencode/**', '.pi/**', '.playwright-cli/**', '.vscode/**', 'dash/**', 'docs/**', 'homebrew/**', 'npm/**', 'products/**', 'samples/**', 'scripts/**', 'src/**', 'templates/**', 'tests/**', '.editorconfig', '.gitattributes', '.gitignore', '.gitleaks.toml', '.mcp.json', 'AGENTS.md', 'CLAUDE.md', 'CODE_OF_CONDUCT.md', 'CONTRIBUTING.md', 'Directory.Build.props', 'HANDOVER-WAVE4.md', 'HANDOVER.md', 'KyberWeave.Unit.slnf', 'KyberWeave.sln', 'KyberWeave.sln.DotSettings', 'LICENSE', 'NOTICE', 'README.md', 'REFACTOR-LAYERS.md', 'REVIEW.md', 'SECURITY.md', 'apm.yml', 'global.json', 'kilo.json') }}
+          INPUT_HASH: ${{ hashFiles('.agents/**', '.apm/**', '.claude/**', '.codex/**', '.commandcode/**', '.cursor/**', '.devin/**', '.factory/**', '.github/**', '.kilo/**', '.kyber-weave/**', '.opencode/**', '.pi/**', '.playwright-cli/**', '.vscode/**', 'analyzers/**', 'dash/**', 'docs/**', 'homebrew/**', 'npm/**', 'products/**', 'samples/**', 'scripts/**', 'src/**', 'templates/**', 'tests/**', '.editorconfig', '.gitattributes', '.gitignore', '.gitleaks.toml', '.mcp.json', 'AGENTS.md', 'CLAUDE.md', 'CODE_OF_CONDUCT.md', 'CONTRIBUTING.md', 'Directory.Build.props', 'HANDOVER-WAVE4.md', 'HANDOVER.md', 'KyberWeave.Unit.slnf', 'KyberWeave.sln', 'KyberWeave.sln.DotSettings', 'LICENSE', 'NOTICE', 'README.md', 'REFACTOR-LAYERS.md', 'REVIEW.md', 'SECURITY.md', 'apm.yml', 'global.json', 'kilo.json') }}
         run: |
           set -euo pipefail
           hash="${INPUT_HASH:-}"
@@ -2179,7 +2179,7 @@ jobs:
         id: fp
         shell: bash
         env:
-          INPUT_HASH: ${{ hashFiles('.agents/**', '.apm/**', '.claude/**', '.codex/**', '.commandcode/**', '.cursor/**', '.devin/**', '.factory/**', '.github/**', '.kilo/**', '.kyber-weave/**', '.opencode/**', '.pi/**', '.playwright-cli/**', '.vscode/**', 'dash/**', 'docs/**', 'homebrew/**', 'npm/**', 'products/**', 'samples/**', 'scripts/**', 'src/**', 'templates/**', 'tests/**', '.editorconfig', '.gitattributes', '.gitignore', '.gitleaks.toml', '.mcp.json', 'AGENTS.md', 'CLAUDE.md', 'CODE_OF_CONDUCT.md', 'CONTRIBUTING.md', 'Directory.Build.props', 'HANDOVER-WAVE4.md', 'HANDOVER.md', 'KyberWeave.Unit.slnf', 'KyberWeave.sln', 'KyberWeave.sln.DotSettings', 'LICENSE', 'NOTICE', 'README.md', 'REFACTOR-LAYERS.md', 'REVIEW.md', 'SECURITY.md', 'apm.yml', 'global.json', 'kilo.json') }}
+          INPUT_HASH: ${{ hashFiles('.agents/**', '.apm/**', '.claude/**', '.codex/**', '.commandcode/**', '.cursor/**', '.devin/**', '.factory/**', '.github/**', '.kilo/**', '.kyber-weave/**', '.opencode/**', '.pi/**', '.playwright-cli/**', '.vscode/**', 'analyzers/**', 'dash/**', 'docs/**', 'homebrew/**', 'npm/**', 'products/**', 'samples/**', 'scripts/**', 'src/**', 'templates/**', 'tests/**', '.editorconfig', '.gitattributes', '.gitignore', '.gitleaks.toml', '.mcp.json', 'AGENTS.md', 'CLAUDE.md', 'CODE_OF_CONDUCT.md', 'CONTRIBUTING.md', 'Directory.Build.props', 'HANDOVER-WAVE4.md', 'HANDOVER.md', 'KyberWeave.Unit.slnf', 'KyberWeave.sln', 'KyberWeave.sln.DotSettings', 'LICENSE', 'NOTICE', 'README.md', 'REFACTOR-LAYERS.md', 'REVIEW.md', 'SECURITY.md', 'apm.yml', 'global.json', 'kilo.json') }}
         run: |
           set -euo pipefail
           hash="${INPUT_HASH:-}"
@@ -2397,7 +2397,7 @@ jobs:
         id: fp
         shell: bash
         env:
-          INPUT_HASH: ${{ hashFiles('.agents/**', '.apm/**', '.claude/**', '.codex/**', '.commandcode/**', '.cursor/**', '.devin/**', '.factory/**', '.github/**', '.kilo/**', '.kyber-weave/**', '.opencode/**', '.pi/**', '.playwright-cli/**', '.vscode/**', 'dash/**', 'docs/**', 'homebrew/**', 'npm/**', 'products/**', 'samples/**', 'scripts/**', 'src/**', 'templates/**', 'tests/**', '.editorconfig', '.gitattributes', '.gitignore', '.gitleaks.toml', '.mcp.json', 'AGENTS.md', 'CLAUDE.md', 'CODE_OF_CONDUCT.md', 'CONTRIBUTING.md', 'Directory.Build.props', 'HANDOVER-WAVE4.md', 'HANDOVER.md', 'KyberWeave.Unit.slnf', 'KyberWeave.sln', 'KyberWeave.sln.DotSettings', 'LICENSE', 'NOTICE', 'README.md', 'REFACTOR-LAYERS.md', 'REVIEW.md', 'SECURITY.md', 'apm.yml', 'global.json', 'kilo.json') }}
+          INPUT_HASH: ${{ hashFiles('.agents/**', '.apm/**', '.claude/**', '.codex/**', '.commandcode/**', '.cursor/**', '.devin/**', '.factory/**', '.github/**', '.kilo/**', '.kyber-weave/**', '.opencode/**', '.pi/**', '.playwright-cli/**', '.vscode/**', 'analyzers/**', 'dash/**', 'docs/**', 'homebrew/**', 'npm/**', 'products/**', 'samples/**', 'scripts/**', 'src/**', 'templates/**', 'tests/**', '.editorconfig', '.gitattributes', '.gitignore', '.gitleaks.toml', '.mcp.json', 'AGENTS.md', 'CLAUDE.md', 'CODE_OF_CONDUCT.md', 'CONTRIBUTING.md', 'Directory.Build.props', 'HANDOVER-WAVE4.md', 'HANDOVER.md', 'KyberWeave.Unit.slnf', 'KyberWeave.sln', 'KyberWeave.sln.DotSettings', 'LICENSE', 'NOTICE', 'README.md', 'REFACTOR-LAYERS.md', 'REVIEW.md', 'SECURITY.md', 'apm.yml', 'global.json', 'kilo.json') }}
         run: |
           set -euo pipefail
           hash="${INPUT_HASH:-}"
@@ -2594,7 +2594,7 @@ jobs:
         id: fp
         shell: bash
         env:
-          INPUT_HASH: ${{ hashFiles('.agents/**', '.apm/**', '.claude/**', '.codex/**', '.commandcode/**', '.cursor/**', '.devin/**', '.factory/**', '.github/**', '.kilo/**', '.kyber-weave/**', '.opencode/**', '.pi/**', '.playwright-cli/**', '.vscode/**', 'dash/**', 'docs/**', 'homebrew/**', 'npm/**', 'products/**', 'samples/**', 'scripts/**', 'src/**', 'templates/**', 'tests/**', '.editorconfig', '.gitattributes', '.gitignore', '.gitleaks.toml', '.mcp.json', 'AGENTS.md', 'CLAUDE.md', 'CODE_OF_CONDUCT.md', 'CONTRIBUTING.md', 'Directory.Build.props', 'HANDOVER-WAVE4.md', 'HANDOVER.md', 'KyberWeave.Unit.slnf', 'KyberWeave.sln', 'KyberWeave.sln.DotSettings', 'LICENSE', 'NOTICE', 'README.md', 'REFACTOR-LAYERS.md', 'REVIEW.md', 'SECURITY.md', 'apm.yml', 'global.json', 'kilo.json') }}
+          INPUT_HASH: ${{ hashFiles('.agents/**', '.apm/**', '.claude/**', '.codex/**', '.commandcode/**', '.cursor/**', '.devin/**', '.factory/**', '.github/**', '.kilo/**', '.kyber-weave/**', '.opencode/**', '.pi/**', '.playwright-cli/**', '.vscode/**', 'analyzers/**', 'dash/**', 'docs/**', 'homebrew/**', 'npm/**', 'products/**', 'samples/**', 'scripts/**', 'src/**', 'templates/**', 'tests/**', '.editorconfig', '.gitattributes', '.gitignore', '.gitleaks.toml', '.mcp.json', 'AGENTS.md', 'CLAUDE.md', 'CODE_OF_CONDUCT.md', 'CONTRIBUTING.md', 'Directory.Build.props', 'HANDOVER-WAVE4.md', 'HANDOVER.md', 'KyberWeave.Unit.slnf', 'KyberWeave.sln', 'KyberWeave.sln.DotSettings', 'LICENSE', 'NOTICE', 'README.md', 'REFACTOR-LAYERS.md', 'REVIEW.md', 'SECURITY.md', 'apm.yml', 'global.json', 'kilo.json') }}
         run: |
           set -euo pipefail
           hash="${INPUT_HASH:-}"

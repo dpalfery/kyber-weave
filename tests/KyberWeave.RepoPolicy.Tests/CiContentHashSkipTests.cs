@@ -90,7 +90,8 @@ public sealed class CiContentHashSkipTests
     [
         ".agents/**", ".apm/**", ".claude/**", ".codex/**", ".commandcode/**", ".cursor/**",
         ".devin/**", ".factory/**", ".github/**", ".kilo/**", ".kyber-weave/**", ".opencode/**",
-        ".pi/**", ".playwright-cli/**", ".vscode/**", "dash/**", "docs/**", "homebrew/**",
+        ".pi/**", ".playwright-cli/**", ".vscode/**", "analyzers/**", "dash/**", "docs/**",
+        "homebrew/**",
         "npm/**", "products/**", "samples/**", "scripts/**", "src/**", "templates/**", "tests/**",
         ".editorconfig", ".gitattributes", ".gitignore", ".gitleaks.toml", ".mcp.json",
         "AGENTS.md", "CLAUDE.md", "CODE_OF_CONDUCT.md", "CONTRIBUTING.md", "Directory.Build.props",
@@ -407,6 +408,42 @@ public sealed class CiContentHashSkipTests
         Assert.True(
             wrong.Count == 0,
             $"These receipt steps have no 'shell: bash', so a Windows leg runs them under pwsh: {string.Join(", ", wrong)}.");
+    }
+
+    /// <summary>
+    ///     The digest step writes one <c>name=value</c> line. <c>jq</c> pretty-prints by default, and a
+    ///     newline in <c>GITHUB_OUTPUT</c> is not a legal output line, so the step fails before the
+    ///     receipt is saved.
+    /// </summary>
+    [Fact]
+    public void TheDigestStepWritesCompactJsonToTheStepOutput()
+    {
+        IReadOnlyDictionary<string, YamlMappingNode> jobs = JobsOf(LoadWorkflow());
+        List<string> problems = [];
+
+        foreach (AttestedProduct product in AttestedProducts)
+        {
+            if (!jobs.TryGetValue(product.Job, out YamlMappingNode? node))
+            {
+                problems.Add($"{product.Job}: is not a job, so its digest is never written.");
+                continue;
+            }
+
+            Step? digest = StepsOf(node).SingleOrDefault(step => step.Id == "digest");
+            if (digest is null)
+            {
+                problems.Add($"{product.Job}: has no digest step.");
+                continue;
+            }
+
+            string run = RunOf(digest);
+            if (!run.Contains("jq -c ", StringComparison.Ordinal))
+            {
+                problems.Add($"{product.Job}: the digest jq is not compact, so its JSON spans lines.");
+            }
+        }
+
+        Assert.True(problems.Count == 0, "Digest output problems:\n" + string.Join('\n', problems));
     }
 
     /// <summary>
