@@ -111,6 +111,7 @@ public sealed class PlanLifecycleService(
 
     public static string LifecycleResponse(string provenance, string result, DiagnosticReport report, string? next)
     {
+        ArgumentNullException.ThrowIfNull(report);
         StringBuilder sb = new();
         sb.AppendLine(provenance);
         sb.AppendLine(CultureInfo.InvariantCulture, $"result: {result}");

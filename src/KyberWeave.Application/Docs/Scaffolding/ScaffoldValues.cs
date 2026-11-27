@@ -35,6 +35,7 @@ public static class ScaffoldValues
     /// <exception cref="ArgumentException">The value contains a control character or a pipe.</exception>
     public static void RequireCatalogValue(string value, string parameterName)
     {
+        ArgumentNullException.ThrowIfNull(value);
         RequireEmittableValue(value, parameterName);
         if (value.Contains('|', StringComparison.Ordinal))
         {

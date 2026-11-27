@@ -92,6 +92,9 @@ public sealed class CodeGraphIndexProvisioner(
         string lockDirectory,
         CodeGraphRestore restore = CodeGraphRestore.AllWrittenFiles)
     {
+        ArgumentNullException.ThrowIfNull(options);
+        ArgumentNullException.ThrowIfNull(executor);
+
         List<DoctorCheck> checks = [];
 
         if (!DetectBinary(options, executor, out bool missing, out string? binaryReason))

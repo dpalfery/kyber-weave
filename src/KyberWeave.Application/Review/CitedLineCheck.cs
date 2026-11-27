@@ -22,6 +22,9 @@ public static class CitedLineCheck
     /// <param name="lines">The cited file's lines.</param>
     public static CitedLineResult Judge(ReviewFinding finding, string[] lines)
     {
+        ArgumentNullException.ThrowIfNull(finding);
+        ArgumentNullException.ThrowIfNull(lines);
+
         // Line 0 or a negative line can no more exist than one past the end, so it is repaired the same way.
         if (finding.Line >= 1 && finding.Line <= lines.Length)
             return CitedLineResult.Unchanged(finding);
