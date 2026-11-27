@@ -7,25 +7,26 @@ using YamlDotNet.RepresentationModel;
 namespace KyberWeave.Core.Docs.Parsing;
 
 /// <summary>
-///     Reads <c>lead</c> and <c>sections</c> frontmatter onto <see cref="DocumentFrontmatter" />.
+///     Reads the <c>lead</c> and <c>sections</c> frontmatter and returns its values rather than
+///     writing them onto a passed instance: <see cref="DocumentFrontmatter" />'s properties are
+///     init-only, so the values can only be assigned while composing a new instance.
 /// </summary>
 internal static class SectionFrontmatterParser
 {
     private const string PreamblePlaceholder = "__kyber_preamble_slug__";
 
-    internal static string? Apply(string yaml, DocumentFrontmatter frontmatter)
+    internal static (string? Error, string? Lead, Dictionary<string, DocumentSectionVocabulary>? Sections) Apply(string yaml)
     {
-        ArgumentNullException.ThrowIfNull(frontmatter);
         if (string.IsNullOrWhiteSpace(yaml))
         {
-            return null;
+            return (null, null, null);
         }
 
         string normalized = yaml.Replace("\r\n", "\n", StringComparison.Ordinal);
         string? shapeError = ValidateSectionsShape(normalized);
         if (shapeError is not null)
         {
-            return shapeError;
+            return (shapeError, null, null);
         }
 
         string patched = normalized
@@ -39,17 +40,13 @@ internal static class SectionFrontmatterParser
         }
         catch (Exception ex)
         {
-            return ex.Message;
+            return (ex.Message, null, null);
         }
 
-        if (!string.IsNullOrWhiteSpace(overlay.Lead))
-        {
-            frontmatter.Lead = overlay.Lead.Trim();
-        }
-
+        string? lead = string.IsNullOrWhiteSpace(overlay.Lead) ? null : overlay.Lead.Trim();
         if (overlay.Sections is not { Count: > 0 })
         {
-            return null;
+            return (null, lead, null);
         }
 
         Dictionary<string, DocumentSectionVocabulary> sections = new(StringComparer.Ordinal);
@@ -59,8 +56,7 @@ internal static class SectionFrontmatterParser
             sections[slug] = entry.Value;
         }
 
-        frontmatter.Sections = sections;
-        return null;
+        return (null, lead, sections);
     }
 
     private static string? ValidateSectionsShape(string yaml)

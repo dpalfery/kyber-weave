@@ -29,7 +29,7 @@ public sealed class SkillFrontmatter
 
     /// <summary>Optional. Free-form string-to-string metadata (author, version, etc.).</summary>
     [YamlMember(Alias = "metadata")]
-    public Dictionary<string, string>? Metadata { get; set; }
+    public Dictionary<string, string>? Metadata { get; init; }
 
     /// <summary>
     /// Optional, EXPERIMENTAL. Space-separated list of tools the skill is allowed to use.

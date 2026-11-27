@@ -244,8 +244,8 @@ public sealed partial class DocumentLoader : IDocumentSource
 
         DocumentFrontmatter? frontmatter = null;
         string? parseError = null;
-        DocumentFrontmatter sectionOverlay = new();
-        string? sectionFrontmatterError = SectionFrontmatterParser.Apply(read.Yaml, sectionOverlay);
+        (string? sectionFrontmatterError, string? overlayLead, Dictionary<string, DocumentSectionVocabulary>? overlaySections)
+            = SectionFrontmatterParser.Apply(read.Yaml);
         try
         {
             frontmatter = MarkdownFrontmatterReader.Deserializer
@@ -257,17 +257,14 @@ public sealed partial class DocumentLoader : IDocumentSource
         }
 
         frontmatter ??= new DocumentFrontmatter();
-        if (parseError is null && sectionFrontmatterError is null)
+        if (parseError is null && sectionFrontmatterError is null
+            && (!string.IsNullOrWhiteSpace(overlayLead) || overlaySections is not null))
         {
-            if (!string.IsNullOrWhiteSpace(sectionOverlay.Lead))
+            frontmatter = frontmatter with
             {
-                frontmatter.Lead = sectionOverlay.Lead;
-            }
-
-            if (sectionOverlay.Sections is not null)
-            {
-                frontmatter.Sections = sectionOverlay.Sections;
-            }
+                Lead = string.IsNullOrWhiteSpace(overlayLead) ? frontmatter.Lead : overlayLead,
+                Sections = overlaySections is null ? frontmatter.Sections : overlaySections
+            };
         }
 
         return new DocumentModel
