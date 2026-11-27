@@ -311,8 +311,8 @@ public sealed class CodeGraphFreshness : ICodeGraphFreshnessGate
         string owner = holder is { } id
             ? $"it records PID {id.ToString(CultureInfo.InvariantCulture)}, which is {(running ? "running" : "not running")}"
             : "it records no PID";
-        string fix = running
-            ? $"wait for process {holder!.Value.ToString(CultureInfo.InvariantCulture)} to finish its index work, or stop it"
+        string fix = running && holder is { } heldProcess
+            ? $"wait for process {heldProcess.ToString(CultureInfo.InvariantCulture)} to finish its index work, or stop it"
             : $"codegraph unlock {CodeGraphIndexRules.QuoteShellPath(_repositoryRoot, _environment.OperatingSystem == OperatingSystemKind.Windows)}";
 
         return Failure(
