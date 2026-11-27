@@ -55,13 +55,16 @@ public class SettingsRepository : ISettingsRepository
     public const string FactoryContentConsentProperty = "contentCapture";
 
     private readonly IOperationalStore store;
+    private readonly TimeProvider timeProvider;
 
     /// <summary>Initializes a repository backed by <paramref name="store"/>.</summary>
     /// <param name="store">Operational store holding the shared operator switches.</param>
-    public SettingsRepository(IOperationalStore store)
+    /// <param name="timeProvider">Clock supplying the consent record's update timestamp; defaults to <see cref="TimeProvider.System"/>.</param>
+    public SettingsRepository(IOperationalStore store, TimeProvider? timeProvider = null)
     {
         ArgumentNullException.ThrowIfNull(store);
         this.store = store;
+        this.timeProvider = timeProvider ?? TimeProvider.System;
     }
 
     /// <inheritdoc />
@@ -167,7 +170,7 @@ public class SettingsRepository : ISettingsRepository
         byte[] json = JsonSerializer.SerializeToUtf8Bytes(new
         {
             contentCapture = enabled,
-            updatedAt = DateTimeOffset.UtcNow.UtcDateTime.ToString("yyyy-MM-dd'T'HH:mm:ss.fff'Z'", CultureInfo.InvariantCulture),
+            updatedAt = timeProvider.GetUtcNow().UtcDateTime.ToString("yyyy-MM-dd'T'HH:mm:ss.fff'Z'", CultureInfo.InvariantCulture),
         });
 
         AtomicFile.Write(path, json);
