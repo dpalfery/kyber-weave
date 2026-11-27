@@ -21,7 +21,11 @@ public static class GitChangeParsing
     }
 
     /// <summary>Splits git's NUL-separated output into its non-empty entries.</summary>
-    public static string[] SplitPaths(string output) => output.Split('\0', StringSplitOptions.RemoveEmptyEntries);
+    public static string[] SplitPaths(string output)
+    {
+        ArgumentNullException.ThrowIfNull(output);
+        return output.Split('\0', StringSplitOptions.RemoveEmptyEntries);
+    }
 
     /// <summary>The changed and untracked paths as one distinct, ordinal-sorted list.</summary>
     public static IReadOnlyList<string> Combine(IEnumerable<string> changed, IEnumerable<string> untracked) =>
@@ -36,6 +40,9 @@ public static class GitChangeParsing
     /// <param name="untracked">The untracked paths.</param>
     public static IReadOnlyList<ChangedPath> ParseNameStatus(string[] status, string[] untracked)
     {
+        ArgumentNullException.ThrowIfNull(status);
+        ArgumentNullException.ThrowIfNull(untracked);
+
         List<ChangedPath> changes = new();
         for (int i = 0; i < status.Length; i++)
         {

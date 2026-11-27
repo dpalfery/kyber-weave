@@ -88,6 +88,8 @@ public static class PacketTestCommandRenderer
     /// <summary>The argument as a shell reads it back unchanged: bare when it holds only safe characters, else quoted.</summary>
     public static string Quote(string element, bool windows)
     {
+        ArgumentNullException.ThrowIfNull(element);
+
         bool safe = element.Length > 0
             && element[0] != '~'
             && element.All(c => char.IsAsciiLetterOrDigit(c) || c is '_' or '-' or '.' or '/' or '=' or ':' or ',' or '@' or '%' or '+' or '~');
