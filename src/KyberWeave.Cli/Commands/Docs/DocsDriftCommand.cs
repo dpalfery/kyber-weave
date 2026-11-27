@@ -18,6 +18,8 @@ public sealed class DocsDriftCommand(
     /// <inheritdoc />
     public override int Execute(CommandContext context, DocsSettings settings, CancellationToken cancellationToken)
     {
+        ArgumentNullException.ThrowIfNull(settings);
+
         DiagnosticReport report = new DiagnosticReport();
         if (!DocsCommandComposition.TryCreateLoader(configs, settings, report, documents, out IDocumentSource? loader))
         {

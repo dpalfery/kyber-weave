@@ -59,6 +59,8 @@ public sealed class ArbiterAuditCommand(
     /// </summary>
     public override int Execute(CommandContext context, ArbiterSettings settings, CancellationToken cancellationToken)
     {
+        ArgumentNullException.ThrowIfNull(settings);
+
         DiagnosticReport report = new();
         if (!configs.TryResolve(settings.Path, settings.Config, report, out KyberWeaveConfig config, out _))
         {
