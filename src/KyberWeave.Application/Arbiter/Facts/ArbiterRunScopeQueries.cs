@@ -12,6 +12,7 @@ public static class ArbiterRunScopeQueries
     /// <param name="pre">The pre event.</param>
     public static bool Includes(this ArbiterRunScope scope, ArbiterLedgerEvent pre)
     {
+        ArgumentNullException.ThrowIfNull(scope);
         ArgumentNullException.ThrowIfNull(pre);
         return (scope.StartedAt is null || pre.At >= scope.StartedAt)
             && (pre.Run is null || string.Equals(Normalize(pre.Run), Normalize(scope.Root), StringComparison.Ordinal));

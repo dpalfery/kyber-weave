@@ -131,8 +131,14 @@ public static class ArbiterCliText
     /// <param name="model">The answering model.</param>
     /// <returns>The override file's text.</returns>
     /// <exception cref="ArgumentException">Thrown when a value contains a control character.</exception>
-    public static string RenderUserOverride(string kindName, string endpoint, string model) =>
-        $"provider:\n  kind: {YamlScalar(kindName)}\n  endpoint: {YamlScalar(endpoint)}\n  model: {YamlScalar(model)}\n";
+    public static string RenderUserOverride(string kindName, string endpoint, string model)
+    {
+        ArgumentNullException.ThrowIfNull(kindName);
+        ArgumentNullException.ThrowIfNull(endpoint);
+        ArgumentNullException.ThrowIfNull(model);
+
+        return $"provider:\n  kind: {YamlScalar(kindName)}\n  endpoint: {YamlScalar(endpoint)}\n  model: {YamlScalar(model)}\n";
+    }
 
     private static string YamlScalar(string value)
     {

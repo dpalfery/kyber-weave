@@ -11,10 +11,16 @@ namespace KyberWeave.Core.Agents.Parsing;
 /// </summary>
 public sealed partial class TomlAgentParser(IPathResolver paths, IProcessEnvironment environment) : IAgentParser
 {
-    public bool CanParse(string filePath) => filePath.EndsWith(".toml", StringComparison.OrdinalIgnoreCase);
+    public bool CanParse(string filePath)
+    {
+        ArgumentNullException.ThrowIfNull(filePath);
+        return filePath.EndsWith(".toml", StringComparison.OrdinalIgnoreCase);
+    }
 
     public AgentModel Parse(string content, string filePath, HarnessKind harness)
     {
+        ArgumentNullException.ThrowIfNull(content);
+
         string dirName = Path.GetDirectoryName(paths.GetFullPath(filePath, environment.CurrentDirectory))!;
         string fileName = Path.GetFileNameWithoutExtension(filePath);
 

@@ -7,11 +7,15 @@ public static class ArbiterModelTargetsChecks
     /// <param name="targets">The table to check.</param>
     /// <param name="harness">The harness the caller asked for.</param>
     /// <returns>True when the schema, harness and every section match.</returns>
-    public static bool IsCompleteFor(this ArbiterModelTargets targets, string harness) =>
-        targets.Schema == ArbiterModelTargets.SchemaName
-        && targets.Harness == harness
-        && targets.Preset is not null
-        && targets.BundleDigest is not null
-        && targets.Profiles is not null
-        && targets.Agents is not null;
+    public static bool IsCompleteFor(this ArbiterModelTargets targets, string harness)
+    {
+        ArgumentNullException.ThrowIfNull(targets);
+
+        return targets.Schema == ArbiterModelTargets.SchemaName
+            && targets.Harness == harness
+            && targets.Preset is not null
+            && targets.BundleDigest is not null
+            && targets.Profiles is not null
+            && targets.Agents is not null;
+    }
 }
