@@ -140,8 +140,8 @@ public sealed class StandardsTemplateDiff
         List<string> hostOnly = _files
             .EnumerateFiles(Absolute(folder), "*", recursive: false)
             .Select(Path.GetFileName)
-            .Where(file => file is not null && !templateNames.Contains(file))
-            .Select(file => file!)
+            .OfType<string>()
+            .Where(file => !templateNames.Contains(file))
             .OrderBy(file => file, StringComparer.Ordinal)
             .ToList();
 

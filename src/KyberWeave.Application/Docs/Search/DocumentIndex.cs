@@ -209,11 +209,10 @@ public sealed partial class DocumentIndex
         if (standard is null) return null;
 
         string? parent = standard.Frontmatter.BuildsOn?.Trim();
-        bool hasParent = !string.IsNullOrWhiteSpace(parent);
 
         return new StandardsBundle(
             SharedRulesDocument(),
-            hasParent ? ScopedDocuments(DocType.Rule, parent!).FirstOrDefault() : null,
+            string.IsNullOrWhiteSpace(parent) ? null : ScopedDocuments(DocType.Rule, parent).FirstOrDefault(),
             ScopedDocuments(DocType.Rule, key).FirstOrDefault(),
             standard);
     }

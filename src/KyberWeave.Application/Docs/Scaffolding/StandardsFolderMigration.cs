@@ -590,7 +590,8 @@ public sealed partial class StandardsFolderMigration
     {
         if (_files.FileExists(path)) return false;
 
-        string directory = Path.GetDirectoryName(path)!;
+        string directory = Path.GetDirectoryName(path)
+            ?? throw new ArgumentException("The target path must name a file.", nameof(path));
         string temporary = Path.Combine(directory, $".{Path.GetFileName(path)}.{_ids.NewGuid():N}.tmp");
 
         try
