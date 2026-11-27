@@ -1,3 +1,5 @@
+using System.ComponentModel;
+using System.Text.Json;
 using System.Text.Json.Nodes;
 using KyberWeave.Contracts.Repositories;
 using KyberWeave.Contracts.Services;
@@ -67,8 +69,9 @@ public sealed class ConductorGuard(
                 homeDirectory ?? process.HomeDirectory,
                 log);
         }
-        catch (Exception ex)
+        catch (Exception ex) when (ex is not OutOfMemoryException && ex is not OperationCanceledException)
         {
+            // Hook entry point: nothing may crash the host, and the deny is logged.
             answer = ConductorGuardRules.Deny("The conductor guard could not read this tool call, so it was denied.");
             TryLog(log, $"conductor guard could not read the event: {ex.Message}");
         }
@@ -96,7 +99,7 @@ public sealed class ConductorGuard(
         {
             hookEvent = ConductorHookEventReader.Read(stdin);
         }
-        catch (Exception)
+        catch (Exception ex) when (ex is JsonException or InvalidOperationException)
         {
             exitCode = 0;
             return false;
@@ -120,7 +123,7 @@ public sealed class ConductorGuard(
             {
                 stdout.Write(answer);
             }
-            catch (Exception ex)
+            catch (Exception ex) when (ex is IOException or ObjectDisposedException)
             {
                 // Nothing more can reach Copilot once stdout fails; the exit code stays 0 as documented.
                 TryLog(log, $"conductor guard could not write its answer: {ex.Message}");
@@ -136,7 +139,7 @@ public sealed class ConductorGuard(
         {
             log.WriteLine($"{HookCommand.FailClosedCode}: {ConductorGuardRules.OneLine(message)}");
         }
-        catch (Exception)
+        catch (Exception ex) when (ex is IOException or ObjectDisposedException)
         {
             // The log is best effort.
         }
@@ -359,7 +362,7 @@ public sealed class ConductorGuard(
         {
             return git.ListWorktrees(cwd);
         }
-        catch (Exception)
+        catch (Exception ex) when (FileFailure.Is(ex) || ex is Win32Exception or InvalidOperationException)
         {
             return [];
         }
