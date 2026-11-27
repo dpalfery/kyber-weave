@@ -380,7 +380,7 @@ public sealed class ArbiterInstallService(
             events.Add(new ArbiterInstallError(ex.Message));
             return StopApplied(1, events);
         }
-        catch (Exception ex)
+        catch (Exception ex) when (ex is not OutOfMemoryException && ex is not OperationCanceledException)
         {
             events.Add(new ArbiterInstallError(ex.Message));
             return StopApplied(1, events);

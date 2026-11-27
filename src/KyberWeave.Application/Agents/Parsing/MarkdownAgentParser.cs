@@ -4,6 +4,7 @@ using KyberWeave.Contracts.Paths;
 using KyberWeave.Contracts.Repositories;
 using KyberWeave.Core.Agents.Model;
 using KyberWeave.Core.Parsing;
+using YamlDotNet.Core;
 
 namespace KyberWeave.Core.Agents.Parsing;
 
@@ -69,7 +70,7 @@ public sealed partial class MarkdownAgentParser(IPathResolver paths, IProcessEnv
                     }
                 }
             }
-            catch
+            catch (YamlException)
             {
                 // Best-effort yaml parsing — scalar overlay below still recovers provenance.
             }
