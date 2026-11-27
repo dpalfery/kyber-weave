@@ -115,7 +115,7 @@ public sealed class FactoryHookAdapter : IHarnessHookAdapter
         return insertion.Kind switch
         {
             DispatchInsertionKind.Inserted => RenderPreAllowPrompt(toolInput, insertion.Text),
-            DispatchInsertionKind.Stopped => RenderPreDeny(insertion.Reason!),
+            DispatchInsertionKind.Stopped => RenderPreDeny(insertion.StopReason),
             _ => null,
         };
     }
@@ -187,7 +187,7 @@ public sealed class FactoryHookAdapter : IHarnessHookAdapter
         DispatchInsertion insertion = DispatchPromptInsertion.Expand(prompt, context, target);
         if (insertion.Kind == DispatchInsertionKind.Stopped)
         {
-            return RenderPreDeny(insertion.Reason!);
+            return RenderPreDeny(insertion.StopReason);
         }
 
         bool inserted = insertion.Kind == DispatchInsertionKind.Inserted;
@@ -427,7 +427,8 @@ public sealed class FactoryHookAdapter : IHarnessHookAdapter
         return updated;
     }
 
-    private static string RenderPreDeny(string reason) => HookDecisionDocuments.PreToolUsePermissionDeny(reason);
+    private static string RenderPreDeny(string reason) =>
+        HookDecisionDocuments.PreToolUsePermissionDeny(reason);
 
     private static string RenderPreAllowStrip(JsonElement toolInput, string prompt) =>
         RenderPreAllow(JsonNode.Parse(toolInput.GetRawText()) as JsonObject

@@ -112,12 +112,12 @@ public sealed class HookRunContextResolver(
                      (environment.CurrentDirectory, "the process directory"),
                  })
         {
-            if (string.IsNullOrWhiteSpace(candidate))
+            if (candidate is not { } present || string.IsNullOrWhiteSpace(present))
             {
                 continue;
             }
 
-            if (!TryFullPath(candidate!, BaseFor(candidate!), out string full, notes, name))
+            if (!TryFullPath(present, BaseFor(present), out string full, notes, name))
             {
                 continue;
             }
@@ -274,9 +274,9 @@ public sealed class HookRunContextResolver(
         string? plan = PlanFileOf(request.Prompt);
         string? canonical = CanonicalOf(common, worktrees);
 
-        if (!string.IsNullOrWhiteSpace(request.AgentWorktree))
+        if (TextOrNull(request.AgentWorktree) is { } agentCandidate)
         {
-            if (TryCandidate(request.AgentWorktree!, "the agent's working directory", root, common, worktrees, notes, out string agentWorktree))
+            if (TryCandidate(agentCandidate, "the agent's working directory", root, common, worktrees, notes, out string agentWorktree))
             {
                 return (agentWorktree, HookRunContextSource.EventWorktree, EventRun(agentWorktree, liveRuns, notes));
             }
@@ -295,8 +295,8 @@ public sealed class HookRunContextResolver(
         }
 
         string? cwd = null;
-        if (!string.IsNullOrWhiteSpace(request.EventCwd)
-            && TryCandidate(request.EventCwd!, "the payload's cwd", root, common, worktrees, notes, out string cwdWorktree))
+        if (TextOrNull(request.EventCwd) is { } eventCwd
+            && TryCandidate(eventCwd, "the payload's cwd", root, common, worktrees, notes, out string cwdWorktree))
         {
             cwd = cwdWorktree;
         }
@@ -365,8 +365,8 @@ public sealed class HookRunContextResolver(
         string? canonical,
         List<string> notes)
     {
-        if (string.IsNullOrWhiteSpace(request.LeadingCdTarget)
-            || !TryCandidate(request.LeadingCdTarget!, "the command's leading cd", root, common, worktrees, notes, out string cdWorktree)
+        if (TextOrNull(request.LeadingCdTarget) is not { } leadingCdTarget
+            || !TryCandidate(leadingCdTarget, "the command's leading cd", root, common, worktrees, notes, out string cdWorktree)
             || (canonical is not null && IsSame(cdWorktree, canonical)))
         {
             return null;
@@ -500,7 +500,7 @@ public sealed class HookRunContextResolver(
                 return false;
             }
 
-            if (common is null || IsSame(candidateCommon!, common))
+            if (common is null || (candidateCommon is not null && IsSame(candidateCommon, common)))
             {
                 worktree = containing;
                 return true;
@@ -754,4 +754,8 @@ public sealed class HookRunContextResolver(
 
     private static string Combine(string root, string relative) =>
         Path.Combine(root, relative.Replace('/', Path.DirectorySeparatorChar));
+
+    /// <summary>The value when it carries text, or null when it is null, empty or whitespace.</summary>
+    private static string? TextOrNull(string? value) =>
+        string.IsNullOrWhiteSpace(value) ? null : value;
 }

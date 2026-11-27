@@ -159,7 +159,7 @@ public sealed class PluginHookAdapter : IHarnessHookAdapter
         return insertion.Kind switch
         {
             DispatchInsertionKind.Inserted => RenderAllowWithArgs(envelope.Args, _promptArgument, insertion.Text),
-            DispatchInsertionKind.Stopped => RenderBlock(insertion.Reason!),
+            DispatchInsertionKind.Stopped => RenderBlock(insertion.StopReason),
             _ => null,
         };
     }
@@ -186,7 +186,7 @@ public sealed class PluginHookAdapter : IHarnessHookAdapter
 
         if (insertion.Kind == DispatchInsertionKind.Stopped)
         {
-            return RenderBlock(insertion.Reason!);
+            return RenderBlock(insertion.StopReason);
         }
 
         bool inserted = insertion.Kind == DispatchInsertionKind.Inserted;
