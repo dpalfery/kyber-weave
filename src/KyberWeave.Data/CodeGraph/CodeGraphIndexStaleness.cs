@@ -40,6 +40,7 @@ public sealed class CodeGraphIndexStaleness(IFileSystem disk, IProgramRunner git
         string? indexedCommit,
         IReadOnlyDictionary<string, (long ModifiedMilliseconds, int NodeCount)> files)
     {
+        ArgumentNullException.ThrowIfNull(files);
         HashSet<string> codeExtensions = new(StringComparer.OrdinalIgnoreCase);
         foreach ((string path, (long _, int nodes)) in files)
         {

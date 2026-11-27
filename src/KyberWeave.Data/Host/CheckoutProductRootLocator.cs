@@ -16,6 +16,7 @@ public sealed class CheckoutProductRootLocator(IFileSystem files, IPathResolver 
     /// <inheritdoc />
     public string? Locate(string workingDirectory, string productRelativePath)
     {
+        ArgumentNullException.ThrowIfNull(productRelativePath);
         if (string.IsNullOrWhiteSpace(workingDirectory) || !files.DirectoryExists(workingDirectory))
         {
             return null;
