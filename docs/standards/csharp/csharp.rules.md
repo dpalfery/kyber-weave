@@ -59,10 +59,12 @@ An id in brackets names the analyzer that enforces the rule. Until the codebase 
   no `NotImplementedException` or `NotSupportedException` stubs.
 - **KW-STD-CS-008 Small interfaces, composition.** Role-sized interfaces, so no class implements a
   member it does not use. Share behaviour by injecting a helper, not through a base class.
-- **KW-STD-CS-009 Explicit comparison and culture.** Every comparison method, dictionary and set names
-  its `StringComparison` or `StringComparer`; casing and formatting name their culture. `==` on
-  strings is ordinal and stays allowed. Build strings in a loop with `StringBuilder`.
-  [CA1304, CA1305, CA1307, CA1309, CA1310, CA1311]
+- **KW-STD-CS-009 Explicit comparison and culture.** Every comparison method names its
+  `StringComparison` and every dictionary or set names its `StringComparer`; casing and formatting
+  name their culture. `==` on strings is ordinal and stays allowed. Build strings in a loop with
+  `StringBuilder`. [CA1304, CA1305, CA1307, CA1309, CA1310, CA1311] The analyzer set covers method
+  calls and formatting only. The collection-construction clause and the `StringBuilder` clause
+  (Sonar S1643, which is not referenced) are review-only.
 - **KW-STD-CS-010 No primitive obsession.** A domain identifier or value (session key, plan id,
   harness id, money) is a `readonly record struct` wrapper, not a raw `string`, `int` or `Guid`.
 - **KW-STD-CS-011 No boolean flag arguments.** A `bool` parameter that switches behaviour becomes an
