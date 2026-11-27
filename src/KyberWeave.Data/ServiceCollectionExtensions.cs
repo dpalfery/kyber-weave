@@ -40,6 +40,19 @@ public static class ServiceCollectionExtensions
 
         _ = services.AddWeaveRunData();
         services.TryAddSingleton(TimeProvider.System);
+        RegisterFileSystemAdapters(services);
+        RegisterCodeGraphAndAnalysisAdapters(services);
+        RegisterMcpAdapters(services);
+        _ = services.AddWeaveSquadData();
+        RegisterReviewAndSkillAdapters(services);
+        _ = services.AddWeaveArbiterData();
+        return services;
+    }
+
+    /// <summary>Registers the file system, process and host locator adapters.</summary>
+    /// <param name="services">The collection to populate.</param>
+    private static void RegisterFileSystemAdapters(IServiceCollection services)
+    {
         services.TryAddSingleton<IProductRootLocator>(sp => new CheckoutProductRootLocator(
             sp.GetRequiredService<IFileSystem>(),
             sp.GetRequiredService<IPathResolver>(),
@@ -48,6 +61,12 @@ public static class ServiceCollectionExtensions
         services.TryAddSingleton<IBoundedProcessExecutor>(_ => new KernelBoundedProcessExecutor());
         services.TryAddSingleton<IExclusiveFileWriter>(_ => new ExclusiveFileWriter());
         services.TryAddSingleton<IDoctorFileSystem>(_ => new PhysicalDoctorFileSystem());
+    }
+
+    /// <summary>Registers the code graph, analysis and embedding adapters.</summary>
+    /// <param name="services">The collection to populate.</param>
+    private static void RegisterCodeGraphAndAnalysisAdapters(IServiceCollection services)
+    {
         services.TryAddSingleton(sp => new CodeGraphIndexStaleness(
             sp.GetRequiredService<IFileSystem>(),
             sp.GetRequiredService<IProgramRunner>()));
@@ -61,6 +80,12 @@ public static class ServiceCollectionExtensions
         services.TryAddSingleton<IAnalysisPersistenceFactory, SqliteAnalysisPersistenceFactory>();
         services.TryAddSingleton<IEmbeddingTransport, LoopbackEmbeddingTransport>();
         services.TryAddSingleton<IEmbeddingGeneratorFactory, OpenAiCompatibleEmbeddingGeneratorFactory>();
+    }
+
+    /// <summary>Registers the hook, MCP, status line and launch command adapters.</summary>
+    /// <param name="services">The collection to populate.</param>
+    private static void RegisterMcpAdapters(IServiceCollection services)
+    {
         services.TryAddSingleton<IGitHookFiles, FileGitHookFiles>();
         services.TryAddSingleton<IMcpStdioSessionFactory, StdioMcpSessionFactory>();
         services.TryAddSingleton<IStatusLineFiles, FileStatusLineFiles>();
@@ -70,7 +95,12 @@ public static class ServiceCollectionExtensions
             sp.GetRequiredService<IFileSystem>(),
             sp.GetRequiredService<IPathResolver>(),
             sp.GetRequiredService<IProcessEnvironment>()));
-        _ = services.AddWeaveSquadData();
+    }
+
+    /// <summary>Registers the review, skill and project file adapters.</summary>
+    /// <param name="services">The collection to populate.</param>
+    private static void RegisterReviewAndSkillAdapters(IServiceCollection services)
+    {
         services.TryAddSingleton<IProgramRunner>(_ => new ProcessProgramRunner());
         services.TryAddSingleton<ISeatFolder, FileSeatFolder>();
         services.TryAddSingleton<ISkillArchiveWriter, ZipSkillArchiveWriter>();
@@ -85,8 +115,6 @@ public static class ServiceCollectionExtensions
             sp.GetRequiredService<IPathResolver>(),
             sp.GetRequiredService<IProcessEnvironment>()));
         services.TryAddSingleton<IRepositoryToolSettings>(sp => new ConfigFileToolSettings(sp.GetRequiredService<IKyberWeaveConfigRepository>()));
-        _ = services.AddWeaveArbiterData();
-        return services;
     }
 
     /// <summary>

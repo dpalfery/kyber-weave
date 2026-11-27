@@ -26,6 +26,16 @@ public static class SquadServiceCollectionExtensions
     {
         ArgumentNullException.ThrowIfNull(services);
 
+        RegisterSquadProfileAdapters(services);
+        RegisterUpdateAndImportAdapters(services);
+        RegisterSquadInspectionAndLaunchAdapters(services);
+        return services;
+    }
+
+    /// <summary>Registers the Squad profile, skills and file access adapters.</summary>
+    /// <param name="services">The collection to populate.</param>
+    private static void RegisterSquadProfileAdapters(IServiceCollection services)
+    {
         services.TryAddSingleton<ISquadReleaseHttpHandlers, SocketSquadReleaseHttpHandlers>();
         services.TryAddSingleton<IFileSystemPathSemantics>(_ => SquadFileSystemPathSemantics.Instance);
         services.TryAddSingleton<ISquadUserPaths>(sp => EnvironmentSquadUserPaths.Create(sp.GetRequiredService<IProcessEnvironment>()));
@@ -36,6 +46,12 @@ public static class SquadServiceCollectionExtensions
             sp.GetRequiredService<IProcessEnvironment>()));
         services.TryAddSingleton<ISquadFactoryHooksShadowing>(sp => new FactoryHooksShadowing(sp.GetRequiredService<IFileSystem>()));
         services.TryAddSingleton<ISquadFileAccess, PhysicalSquadFileAccess>();
+    }
+
+    /// <summary>Registers the update, packaging and import adapters.</summary>
+    /// <param name="services">The collection to populate.</param>
+    private static void RegisterUpdateAndImportAdapters(IServiceCollection services)
+    {
         services.TryAddSingleton<IConsoleProcessLauncher, ProcessConsoleLauncher>();
         services.TryAddSingleton<IUpdateFileModes, UnixUpdateFileModes>();
         services.TryAddSingleton<ISelfUpdateSystem>(sp => new SelfUpdateSystem(
@@ -55,6 +71,12 @@ public static class SquadServiceCollectionExtensions
             sp.GetRequiredService<IFileSystem>(),
             sp.GetRequiredService<IPathResolver>(),
             sp.GetRequiredService<IProcessEnvironment>()));
+    }
+
+    /// <summary>Registers the inspection, launcher, source and link adapters.</summary>
+    /// <param name="services">The collection to populate.</param>
+    private static void RegisterSquadInspectionAndLaunchAdapters(IServiceCollection services)
+    {
         services.TryAddSingleton<IZCodeMcpInspector>(sp => new ZCodeMcpConfiguration(
             sp.GetRequiredService<IFileSystem>(),
             sp.GetRequiredService<IPathResolver>(),
@@ -77,7 +99,6 @@ public static class SquadServiceCollectionExtensions
         services.TryAddSingleton<ISquadLinkFileSystem>(_ => OperatingSystem.IsWindows()
             ? new WindowsSquadLinkFileSystem()
             : new UnixSquadLinkFileSystem());
-        return services;
     }
 }
 
