@@ -24,7 +24,7 @@ public sealed class RoutingEvalCase
 
     [YamlIgnore]
     public bool ExpectsNoFire =>
-        string.IsNullOrWhiteSpace(Expected) || Expected!.Equals("none", StringComparison.OrdinalIgnoreCase);
+        string.IsNullOrWhiteSpace(Expected) || (Expected is { } expected && expected.Equals("none", StringComparison.OrdinalIgnoreCase));
 }
 
 /// <summary>A routing eval set: the cases one eval file declares.</summary>
@@ -48,7 +48,7 @@ public sealed class RoutingEvalFile
 public sealed record RoutingCaseResult(RoutingEvalCase Case, RoutingResult Result, bool Passed)
 {
     public string ActualLabel => Result.Fired ? Result.SelectedSkill ?? "(no selection)" : "(no fire)";
-    public string ExpectedLabel => Case.ExpectsNoFire ? "(no fire)" : Case.Expected!;
+    public string ExpectedLabel => Case.ExpectsNoFire ? "(no fire)" : (Case.Expected is { } expected ? expected : "(no fire)");
 }
 
 /// <summary>The accuracy of a routing eval set: how many cases passed, out of how many.</summary>
