@@ -440,7 +440,10 @@ public static class GateCatalogueRenderer
         AddNoteComment(lines, entry, "      ");
         lines.AddRange(TaskGateLines(gate, "      "));
         renderer.AgentsWithLive.Add(agent);
-        renderer.Written.Add((TechnologyAgentMap.TechnologyFor(agent) ?? string.Empty, id));
+        renderer.Written.Add((
+            TechnologyAgentMap.TechnologyFor(agent)
+                ?? throw new InvalidOperationException($"The agent '{agent}' maps to no technology."),
+            id));
 
         if (entry.Role is "format" or "lint")
             renderer.TaskRenders.Add(new LiveTaskRender(served[0], entry, gate));
