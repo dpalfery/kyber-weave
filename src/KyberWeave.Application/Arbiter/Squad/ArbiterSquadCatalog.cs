@@ -1,5 +1,6 @@
 using System.Reflection;
 using System.Text;
+using KyberWeave.Core.Agents.Roster;
 using KyberWeave.Core.Parsing;
 
 namespace KyberWeave.Core.Arbiter;
@@ -41,7 +42,7 @@ public sealed class ArbiterSquadCatalog
     /// The architect's capability profile. The architect shell guard (<c>KW-ARB-SHELL-001</c>) and the Squad
     /// wiring that renders it both key on this one name, so it is declared once here.
     /// </summary>
-    public const string ArchitectCapabilityProfile = "architect";
+    public const string ArchitectCapabilityProfile = CapabilityProfiles.Architect;
 
     private const string AgentResourcePrefix = "Arbiter.Roster.";
     private const string LensResourcePrefix = "Arbiter.Lens.";
@@ -83,17 +84,8 @@ public sealed class ArbiterSquadCatalog
     /// (investigator, read-only, review-seat, reviewer, platform-reader). Any other profile — including the
     /// orchestrator's — is not Squad routable and maps to <c>not-squad</c>.
     /// </remarks>
-    public static string TargetClassFor(string capabilityProfile)
-    {
-        ArgumentNullException.ThrowIfNull(capabilityProfile);
-        return capabilityProfile switch
-        {
-            "worker" or "publishing-worker" or "documentation" => "implementation",
-            ArchitectCapabilityProfile or "product-planning" => "planner",
-            "investigator" or "read-only" or "review-seat" or "reviewer" or "platform-reader" => "read-only",
-            _ => "not-squad",
-        };
-    }
+    public static string TargetClassFor(string capabilityProfile) =>
+        CapabilityProfiles.TargetClassFor(capabilityProfile);
 
     /// <summary>Extracts the <c>## Applicability</c> section body from lens markdown.</summary>
     internal static string ReadApplicabilitySection(string markdown)

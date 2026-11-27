@@ -1,3 +1,4 @@
+using KyberWeave.Core.Arbiter.ModelTargets;
 using KyberWeave.Core.Arbiter.Rules;
 using KyberWeave.Core.Diagnostics;
 
@@ -53,16 +54,11 @@ public sealed record ArbiterModelTargetingConfig(
     IReadOnlyDictionary<string, string> DifficultyProfiles,
     IReadOnlyList<string> Ladder)
 {
-    /// <summary>The shipped defaults: shadow mode, easy to fast, standard to general, hard to deep-planning.</summary>
+    /// <summary>The shipped defaults: shadow mode and the three developer tiers' profiles.</summary>
     public static ArbiterModelTargetingConfig Defaults { get; } = new(
         "shadow",
-        new Dictionary<string, string>(StringComparer.Ordinal)
-        {
-            ["easy"] = "fast",
-            ["standard"] = "general",
-            ["hard"] = "deep-planning",
-        },
-        ["fast", "general", "deep-planning"]);
+        TierProfiles.Default.DifficultyProfiles,
+        TierProfiles.Default.Ladder);
 }
 
 /// <summary>The <c>arbiter.stores</c> block: size and retention limits for the Arbiter's stores.</summary>

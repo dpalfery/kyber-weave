@@ -21,18 +21,6 @@ namespace KyberWeave.Arbiter.Hooks;
 /// </remarks>
 public static partial class DispatchPromptInsertion
 {
-    /// <summary>The header whose value is the task to build a prompt for.</summary>
-    public const string TaskHeader = "TASK";
-
-    /// <summary>The header that names the technology of a dispatch that belongs to no task.</summary>
-    public const string TechnologyHeader = "TECHNOLOGY";
-
-    /// <summary>The header that names the file a retry's earlier results live in.</summary>
-    public const string PriorResultsHeader = "PRIOR_RESULTS";
-
-    /// <summary>The header that names how many attempts at the task already failed.</summary>
-    public const string FailedAttemptsHeader = "FAILED_ATTEMPTS";
-
     private static readonly string[] ExpandedTags =
     [
         "<task>",
@@ -64,40 +52,18 @@ public static partial class DispatchPromptInsertion
     /// </summary>
     /// <remarks>
     /// From the per-harness table in <c>docs/kyber-arbiter/architecture.md</c>, which records a harness as a rewrite
-    /// only where a live dispatch showed the worker received the replaced text. Every other harness, and any token
-    /// this list does not know, takes the prompt file instead.
+    /// only where a live dispatch showed the worker received the replaced text. The flag lives on
+    /// <see cref="HarnessRegistry"/>; every other harness, and any token the registry does not know, takes the prompt
+    /// file instead.
     /// </remarks>
     /// <param name="harness">The harness token, such as <c>claude</c> or <c>antigravity</c>.</param>
-    public static bool CanRewriteDispatch(string? harness)
-    {
-        if (string.IsNullOrWhiteSpace(harness))
-        {
-            return false;
-        }
-
-        return RewriteHarnesses.Contains(harness.Trim());
-    }
+    public static bool CanRewriteDispatch(string? harness) => HarnessRegistry.RewritesDispatch(harness);
 
     /// <summary>
     /// Every harness token recorded as rewriting the dispatch. Each one must be served by an adapter that inserts
     /// the prompt: a token listed here and served by nothing would leave the worker with no prompt and no file.
     /// </summary>
-    public static IReadOnlySet<string> RewriteHarnessTokens => RewriteHarnesses;
-
-    private static readonly IReadOnlySet<string> RewriteHarnesses = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
-    {
-        "claude",
-        "copilot-vscode",
-        "copilot-cli",
-        "codex",
-        "cursor",
-        "opencode",
-        "pi",
-        "kilo",
-        "antigravity",
-        "factory",
-        "devin",
-    };
+    public static IReadOnlySet<string> RewriteHarnessTokens => HarnessRegistry.RewriteTokens;
 
     /// <summary>Expands the dispatch's identity line into the full prompt, or says why it cannot.</summary>
     /// <param name="prompt">The dispatch text as the harness sent it.</param>
@@ -120,7 +86,7 @@ public static partial class DispatchPromptInsertion
             return DispatchInsertion.None;
         }
 
-        DispatchHeaders headers = DispatchHeaders.Parse(prompt);
+        PromptHeaders headers = PromptHeaders.Parse(prompt);
         if (headers.TaskId is null && headers.Technology is null)
         {
             return string.IsNullOrWhiteSpace(target)
@@ -203,7 +169,7 @@ public static partial class DispatchPromptInsertion
 
     /// <summary>The instruction a stopped dispatch carries, naming the command that prints the same prompt.</summary>
     /// <param name="headers">The identity lines the dispatch wrote.</param>
-    private static string Why(DispatchHeaders headers)
+    private static string Why(PromptHeaders headers)
     {
         ArgumentNullException.ThrowIfNull(headers);
 
@@ -220,7 +186,7 @@ public static partial class DispatchPromptInsertion
     /// <param name="PriorResultsPath">The first <c>PRIOR_RESULTS</c> value, or null.</param>
     /// <param name="FailedAttempts">The first <c>FAILED_ATTEMPTS</c> value that parses, or zero.</param>
     /// <param name="Body">Every line below the header block, unchanged.</param>
-    private sealed record DispatchHeaders(
+    private sealed record PromptHeaders(
         string? TaskId,
         string? PlanFile,
         string? Technology,
@@ -230,7 +196,7 @@ public static partial class DispatchPromptInsertion
     {
         /// <summary>Reads the header block at the start of <paramref name="prompt"/>.</summary>
         /// <param name="prompt">The dispatch text as the harness sent it.</param>
-        public static DispatchHeaders Parse(string prompt)
+        public static PromptHeaders Parse(string prompt)
         {
             ArgumentNullException.ThrowIfNull(prompt);
 
@@ -250,7 +216,7 @@ public static partial class DispatchPromptInsertion
 
                 // Only a real task dispatch is expanded: a task id the task files cannot have is not one, and
                 // its line stays in the body with everything below it.
-                if (name == TaskHeader && !HeaderBlock.IsTaskId(value))
+                if (name == DispatchHeaders.Task && !HeaderBlock.IsTaskId(value))
                 {
                     break;
                 }
@@ -259,12 +225,12 @@ public static partial class DispatchPromptInsertion
             }
 
             string body = string.Join('\n', lines.Skip(index)).TrimStart('\n');
-            return new DispatchHeaders(
-                Value(values, TaskHeader),
-                Value(values, "PLAN_FILE"),
-                Value(values, TechnologyHeader),
-                Value(values, PriorResultsHeader),
-                Attempts(Value(values, FailedAttemptsHeader)),
+            return new PromptHeaders(
+                Value(values, DispatchHeaders.Task),
+                Value(values, DispatchHeaders.PlanFile),
+                Value(values, DispatchHeaders.Technology),
+                Value(values, DispatchHeaders.PriorResults),
+                Attempts(Value(values, DispatchHeaders.FailedAttempts)),
                 body);
         }
 

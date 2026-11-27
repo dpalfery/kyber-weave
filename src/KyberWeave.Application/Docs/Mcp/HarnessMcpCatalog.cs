@@ -1,5 +1,6 @@
 using System.Text.Json;
 using System.Text.Json.Nodes;
+using KyberWeave.Arbiter.Hooks;
 
 namespace KyberWeave.Core.Docs.Mcp;
 
@@ -218,7 +219,7 @@ public static class HarnessMcpCatalog
     [
         new HarnessMcpEntry
         {
-            Harness = "factory",
+            Harness = HarnessRegistry.Factory.McpCatalogName!,
             Shape = McpConfigurationShape.Json,
             Paths = [".factory/mcp.json"],
             ServerKeyPath = ["mcpServers"],
@@ -247,7 +248,7 @@ public static class HarnessMcpCatalog
         },
         new HarnessMcpEntry
         {
-            Harness = "claude-code",
+            Harness = HarnessRegistry.Claude.McpCatalogName!,
             Shape = McpConfigurationShape.Json,
             Paths = [".mcp.json"],
             ServerKeyPath = ["mcpServers"],
@@ -279,7 +280,7 @@ public static class HarnessMcpCatalog
         },
         new HarnessMcpEntry
         {
-            Harness = "cursor",
+            Harness = HarnessRegistry.Cursor.McpCatalogName!,
             Shape = McpConfigurationShape.Json,
             Paths = [".cursor/mcp.json"],
             ServerKeyPath = ["mcpServers"],
@@ -308,7 +309,7 @@ public static class HarnessMcpCatalog
         },
         new HarnessMcpEntry
         {
-            Harness = "vscode",
+            Harness = HarnessRegistry.CopilotVsCode.McpCatalogName!,
             Shape = McpConfigurationShape.Json,
             Paths = [".vscode/mcp.json"],
             // Not `mcpServers`: VS Code keys the map `servers`, and the wrong key fails silently.
@@ -357,7 +358,7 @@ public static class HarnessMcpCatalog
         },
         new HarnessMcpEntry
         {
-            Harness = "codex",
+            Harness = HarnessRegistry.Codex.McpCatalogName!,
             Shape = McpConfigurationShape.Toml,
             Paths = [".codex/config.toml"],
             ServerKeyPath = ["mcp_servers"],
@@ -371,7 +372,7 @@ public static class HarnessMcpCatalog
         },
         new HarnessMcpEntry
         {
-            Harness = "opencode",
+            Harness = HarnessRegistry.OpenCode.McpCatalogName!,
             Shape = McpConfigurationShape.Json,
             Paths = ["opencode.json"],
             ServerKeyPath = ["mcp"],
@@ -409,7 +410,7 @@ public static class HarnessMcpCatalog
         },
         new HarnessMcpEntry
         {
-            Harness = "zcode",
+            Harness = HarnessRegistry.ZCode.McpCatalogName!,
             Shape = McpConfigurationShape.Json,
             // The project tiers, working directory to worktree root. The user tier under the
             // ZCode storage root is never read (R2.6): a server wired only there is not wired for

@@ -3,6 +3,7 @@ using System.Text;
 using System.Text.RegularExpressions;
 using KyberWeave.Arbiter.Hooks;
 using KyberWeave.Contracts.Repositories;
+using KyberWeave.Core.Arbiter;
 
 namespace KyberWeave.Data.Hooks.Arbiter;
 
@@ -104,7 +105,7 @@ public sealed class FileDispatchClaimStore(IWritableFileSystem files, TimeProvid
         string id = key.ToolUseId.Length <= MaxSafeIdLength && SafeIdPattern.IsMatch(key.ToolUseId)
             ? key.ToolUseId
             : Convert.ToHexStringLower(SHA256.HashData(Encoding.UTF8.GetBytes(key.ToolUseId)));
-        return Path.Combine(projectRoot, "artifacts", "arbiter", "claims", $"{id}.{key.Phase}");
+        return Path.Combine(ArbiterStateDirectory.ClaimsDirectory(ArbiterStateDirectory.ForProject(projectRoot)), $"{id}.{key.Phase}");
     }
 
     // Pruning is housekeeping: a file that cannot be deleted now is retried on the next claim, and it

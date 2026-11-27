@@ -1,4 +1,6 @@
 using System.Text.RegularExpressions;
+using KyberWeave.Arbiter.Hooks;
+using KyberWeave.Core.Agents.Roster;
 using KyberWeave.Core.Configuration;
 
 namespace KyberWeave.Core.Arbiter.Facts;
@@ -18,13 +20,6 @@ namespace KyberWeave.Core.Arbiter.Facts;
 /// </remarks>
 public static partial class TriggerClassifier
 {
-    private static readonly IReadOnlySet<string> TrustedHarnesses = new HashSet<string>(
-        StringComparer.OrdinalIgnoreCase)
-    {
-        "claude",
-        "copilot-vscode",
-    };
-
     private static readonly IReadOnlySet<string> SpecPhases = new HashSet<string>(StringComparer.Ordinal)
     {
         "requirements",
@@ -34,39 +29,24 @@ public static partial class TriggerClassifier
         "finalization",
     };
 
-    /// <summary>
-    /// The marker the conductor writes when it hands the run-start step to a worker, because it has no
-    /// shell of its own to run the tool with.
-    /// </summary>
-    private const string RunStartMarker = "RUN-START";
-
-    /// <summary>The harness whose hook payload names the calling agent for every sub-agent, so no name means the root.</summary>
-    private const string RootNamesNoCallerHarness = "copilot-cli";
-
-    /// <summary>
-    /// The marker a conductor writes first on a rework dispatch, naming the failure cluster the worker is
-    /// reworking. Its <c>FAILURE:</c> section carries the failing output the same-failure rule compares.
-    /// </summary>
-    internal const string FailureClusterMarker = "FAILURE-CLUSTER";
-
     /// <summary>Whether <paramref name="harness"/> hooks project-wide rather than per agent.</summary>
     public static bool IsProjectWideHarness(string harness)
     {
         ArgumentNullException.ThrowIfNull(harness);
-        return !TrustedHarnesses.Contains(harness);
+        return !HarnessRegistry.IsTrusted(harness);
     }
 
     /// <summary>Derives the target class from the embedded catalog's capability profile.</summary>
     public static string TargetClassFor(string? target)
     {
         if (string.IsNullOrWhiteSpace(target))
-            return "not-squad";
+            return CapabilityProfiles.NotSquad;
 
         ArbiterSquadCatalog catalog = ArbiterSquadCatalog.LoadEmbedded();
         if (catalog.Agents.TryGetValue(target, out ArbiterSquadAgent? agent))
             return agent.TargetClass;
 
-        return "not-squad";
+        return CapabilityProfiles.NotSquad;
     }
 
     /// <summary>
@@ -92,30 +72,30 @@ public static partial class TriggerClassifier
             .Split('\n')
             .Select(line => line.Trim())
             .Where(line => line.Length > 0)];
-        bool hasPlanFile = headers.ContainsKey("PLAN_FILE");
+        bool hasPlanFile = headers.ContainsKey(DispatchHeaders.PlanFile);
         string? first = body.Count > 0 ? body[0] : null;
         string? second = body.Count > 1 ? body[1] : null;
 
         if (first is not null)
         {
-            if (first.StartsWith("INTAKE:", StringComparison.Ordinal))
-                return "INTAKE";
+            if (first.StartsWith(DispatchHeaders.Intake + ":", StringComparison.Ordinal))
+                return DispatchHeaders.Intake;
             if (IsRunStartMarker(first))
-                return RunStartMarker;
-            if (first.StartsWith("FINDINGS:", StringComparison.Ordinal))
-                return "FINDINGS";
-            if (first.StartsWith(FailureClusterMarker + ":", StringComparison.Ordinal))
-                return FailureClusterMarker;
-            if (first.StartsWith("STATUS: ARBITER_ESCALATION", StringComparison.Ordinal))
-                return "STATUS: ARBITER_ESCALATION";
-            if (string.Equals(first, "FINALIZE", StringComparison.Ordinal) && hasPlanFile)
-                return "FINALIZE";
+                return DispatchHeaders.RunStart;
+            if (first.StartsWith(DispatchHeaders.Findings + ":", StringComparison.Ordinal))
+                return DispatchHeaders.Findings;
+            if (first.StartsWith(DispatchHeaders.FailureCluster + ":", StringComparison.Ordinal))
+                return DispatchHeaders.FailureCluster;
+            if (first.StartsWith(ReturnStatus.EscalationLine, StringComparison.Ordinal))
+                return ReturnStatus.EscalationLine;
+            if (string.Equals(first, DispatchHeaders.Finalize, StringComparison.Ordinal) && hasPlanFile)
+                return DispatchHeaders.Finalize;
             if (IsSpecPhasePair(first, second))
-                return "FEATURE/PHASE";
+                return DispatchHeaders.Feature + "/" + DispatchHeaders.Phase;
         }
 
         if (hasPlanFile)
-            return "PLAN_FILE";
+            return DispatchHeaders.PlanFile;
 
         return null;
     }
@@ -127,7 +107,7 @@ public static partial class TriggerClassifier
     /// </summary>
     private static bool IsRunStartMarker(string line)
     {
-        string prefix = RunStartMarker + ":";
+        string prefix = DispatchHeaders.RunStart + ":";
         return line.StartsWith(prefix, StringComparison.Ordinal)
                && string.Equals(line[prefix.Length..].Trim(), "true", StringComparison.OrdinalIgnoreCase);
     }
@@ -183,21 +163,21 @@ public static partial class TriggerClassifier
         {
             (string? caller, string source) = ResolveCaller(ev, target, block, targetClass);
             return new TriggerClassification(
-                "gate.select", caller, source, target, targetClass, headers, marker, true);
+                ArbiterTriggers.GateSelect, caller, source, target, targetClass, headers, marker, true);
         }
 
         if (!ev.IsDispatch)
             return new TriggerClassification(null, null, ArbiterCallerSources.None, target, targetClass, headers, marker, true);
 
         (string? resolved, string resolvedSource) = ResolveCaller(ev, target, block, targetClass);
-        bool marked = headers.ContainsKey("KYBER-ARBITER");
+        bool marked = headers.ContainsKey(DispatchHeaders.Marker);
         bool unidentified = resolved is null;
 
         // A project-wide hook fires for every agent, so an unmarked dispatch from a caller nobody names passes,
         // unless its target is a Squad agent: the catalog is a machine fact, and routing must not depend on the
         // orchestrator volunteering headers.
         if (!marked && unidentified && IsProjectWideHarness(ev.Harness)
-            && string.Equals(targetClass, "not-squad", StringComparison.Ordinal))
+            && string.Equals(targetClass, CapabilityProfiles.NotSquad, StringComparison.Ordinal))
             return new TriggerClassification(null, null, ArbiterCallerSources.None, target, targetClass, headers, marker, true);
 
         string? trigger = ClassifyTrigger(resolved, target, targetClass, headers, marker, IsRootSession(ev, resolved));
@@ -252,8 +232,8 @@ public static partial class TriggerClassifier
 
         // Header inference keys on the catalog class, not on a name substring: only
         // the conductor's roster holds planners.
-        if (targetInfers && string.Equals(targetClass, "planner", StringComparison.Ordinal))
-            return ("conductor", ArbiterCallerSources.Header);
+        if (targetInfers && string.Equals(targetClass, CapabilityProfiles.Planner, StringComparison.Ordinal))
+            return (AgentRoles.Conductor, ArbiterCallerSources.Header);
 
         return (null, ArbiterCallerSources.None);
     }
@@ -263,10 +243,10 @@ public static partial class TriggerClassifier
     {
         bool lensTarget = string.Equals(target, "review-lens", StringComparison.Ordinal)
             || string.Equals(target, "review-triage", StringComparison.Ordinal);
-        if (lensTarget && headers.ContainsKey("LENS"))
-            return "lens.spawn";
-        if (string.Equals(target, "review-lens", StringComparison.Ordinal) && headers.ContainsKey("REFUTE"))
-            return "refute.spawn";
+        if (lensTarget && headers.ContainsKey(DispatchHeaders.Lens))
+            return ArbiterTriggers.LensSpawn;
+        if (string.Equals(target, "review-lens", StringComparison.Ordinal) && headers.ContainsKey(DispatchHeaders.Refute))
+            return ArbiterTriggers.RefuteSpawn;
         return null;
     }
 
@@ -278,7 +258,7 @@ public static partial class TriggerClassifier
     private static bool IsRootSession(ArbiterEvent ev, string? resolvedCaller) =>
         resolvedCaller is null
         && ev.AssertedCaller is null
-        && string.Equals(ev.Harness, RootNamesNoCallerHarness, StringComparison.OrdinalIgnoreCase);
+        && HarnessRegistry.UnnamedCallerIsRoot(ev.Harness);
 
     private static string? ClassifyTrigger(
         string? caller,
@@ -292,63 +272,62 @@ public static partial class TriggerClassifier
         // of its own, so the dispatch carries no PLAN_FILE. KW-ARB-PLAN-001 asks whether a delegate names a
         // plan, and a confident no would refuse the very route the marker exists for; investigate keeps the roster check
         // and KW-ARB-READONLY-001 doing their work over the dispatch instead.
-        if (string.Equals(marker, RunStartMarker, StringComparison.Ordinal))
-            return "investigate";
+        if (string.Equals(marker, DispatchHeaders.RunStart, StringComparison.Ordinal))
+            return ArbiterTriggers.Investigate;
 
         // Where a sub-agent cannot dispatch, the review-council skill has the session a human started (the
         // conductor, or bug-crusher) seat the council for code-reviewer (ADR 0079); a council seat is the same
         // lens or refutation spawn whichever of them dispatches it.
-        bool reviewer = string.Equals(caller, "code-reviewer", StringComparison.Ordinal);
-        if ((reviewer || string.Equals(caller, "conductor", StringComparison.Ordinal)
-                      || string.Equals(caller, "bug-crusher", StringComparison.Ordinal))
+        bool reviewer = AgentRoles.IsReviewer(caller);
+        if ((reviewer || string.Equals(caller, AgentRoles.Conductor, StringComparison.Ordinal)
+                      || string.Equals(caller, AgentRoles.BugCrusher, StringComparison.Ordinal))
             && CouncilSeat(target, headers) is { } seat)
             return seat;
 
         // A rework dispatch (FAILURE-CLUSTER marker) is classified as the ordinary delegation: its failure rule
         // rides as a secondary trigger, derived by SecondaryTriggers.For.
-        if (string.Equals(caller, "conductor", StringComparison.Ordinal))
+        if (string.Equals(caller, AgentRoles.Conductor, StringComparison.Ordinal))
         {
-            if (string.Equals(targetClass, "implementation", StringComparison.Ordinal))
-                return "delegate";
-            if (string.Equals(targetClass, "planner", StringComparison.Ordinal))
-                return "delegate.planner";
-            if (string.Equals(targetClass, "read-only", StringComparison.Ordinal))
-                return "investigate";
-            return "investigate";
+            if (string.Equals(targetClass, CapabilityProfiles.Implementation, StringComparison.Ordinal))
+                return ArbiterTriggers.Delegate;
+            if (string.Equals(targetClass, CapabilityProfiles.Planner, StringComparison.Ordinal))
+                return ArbiterTriggers.DelegatePlanner;
+            if (string.Equals(targetClass, CapabilityProfiles.ReadOnlyClass, StringComparison.Ordinal))
+                return ArbiterTriggers.Investigate;
+            return ArbiterTriggers.Investigate;
         }
 
         if (reviewer)
-            return "investigate";
+            return ArbiterTriggers.Investigate;
 
-        if (string.Equals(caller, "architect", StringComparison.Ordinal)
-            || string.Equals(caller, "product-owner", StringComparison.Ordinal))
-            return "investigate";
+        if (AgentRoles.IsPlanner(caller))
+            return ArbiterTriggers.Investigate;
 
         if (caller is null
-            && headers.ContainsKey("KYBER-ARBITER")
-            && string.Equals(targetClass, "read-only", StringComparison.Ordinal)
-            && !headers.ContainsKey("PLAN_FILE")
-            && !headers.ContainsKey("TASK"))
-            return "investigate";
+            && headers.ContainsKey(DispatchHeaders.Marker)
+            && string.Equals(targetClass, CapabilityProfiles.ReadOnlyClass, StringComparison.Ordinal)
+            && !headers.ContainsKey(DispatchHeaders.PlanFile)
+            && !headers.ContainsKey(DispatchHeaders.Task))
+            return ArbiterTriggers.Investigate;
 
         // An identified caller outside its roster still classifies as investigate;
         // ROSTER-001 escalates it.
         if (caller is not null)
-            return "investigate";
+            return ArbiterTriggers.Investigate;
 
-        if (headers.ContainsKey("KYBER-ARBITER"))
-            return "investigate";
+        if (headers.ContainsKey(DispatchHeaders.Marker))
+            return ArbiterTriggers.Investigate;
 
         // The root session handing a Squad writer work is a delegation whether or not it wrote headers: the
         // conductor's headers are optional (ADR 0082), so plan and task identity are resolved from machine facts
         // (the run's worktree, its active plan, a task id the plan holds) and every judgement allows what it cannot name.
-        if (rootSession && string.Equals(targetClass, "implementation", StringComparison.Ordinal))
-            return "delegate";
+        if (rootSession && string.Equals(targetClass, CapabilityProfiles.Implementation, StringComparison.Ordinal))
+            return ArbiterTriggers.Delegate;
 
         // Any other Squad target with no caller and no headers: only the machine-fact rules have anything to judge,
         // and each of them allows a caller it cannot name.
-        if (!string.Equals(targetClass, "not-squad", StringComparison.Ordinal))
-            return "investigate";
+        if (!string.Equals(targetClass, CapabilityProfiles.NotSquad, StringComparison.Ordinal))
+            return ArbiterTriggers.Investigate;
 
         return null;
     }
@@ -365,11 +344,11 @@ public static partial class TriggerClassifier
 
     private static string ToReturned(string trigger) => trigger switch
     {
-        "delegate" => "delegate.returned",
-        "delegate.planner" => "delegate.planner.returned",
-        "investigate" => "investigate.returned",
-        "lens.spawn" => "lens.returned",
-        "refute.spawn" => "refute.returned",
+        ArbiterTriggers.Delegate => ArbiterTriggers.DelegateReturned,
+        ArbiterTriggers.DelegatePlanner => ArbiterTriggers.DelegatePlannerReturned,
+        ArbiterTriggers.Investigate => ArbiterTriggers.InvestigateReturned,
+        ArbiterTriggers.LensSpawn => ArbiterTriggers.LensReturned,
+        ArbiterTriggers.RefuteSpawn => ArbiterTriggers.RefuteReturned,
         _ => trigger,
     };
 
@@ -378,11 +357,11 @@ public static partial class TriggerClassifier
         if (second is null)
             return false;
 
-        bool firstFeature = first.StartsWith("FEATURE:", StringComparison.Ordinal);
-        bool firstPhase = first.StartsWith("PHASE:", StringComparison.Ordinal)
+        bool firstFeature = first.StartsWith(DispatchHeaders.Feature + ":", StringComparison.Ordinal);
+        bool firstPhase = first.StartsWith(DispatchHeaders.Phase + ":", StringComparison.Ordinal)
             && SpecPhases.Contains(PhaseValue(first));
-        bool secondFeature = second.StartsWith("FEATURE:", StringComparison.Ordinal);
-        bool secondPhase = second.StartsWith("PHASE:", StringComparison.Ordinal)
+        bool secondFeature = second.StartsWith(DispatchHeaders.Feature + ":", StringComparison.Ordinal);
+        bool secondPhase = second.StartsWith(DispatchHeaders.Phase + ":", StringComparison.Ordinal)
             && SpecPhases.Contains(PhaseValue(second));
 
         return (firstFeature && secondPhase) || (firstPhase && secondFeature);
@@ -394,6 +373,6 @@ public static partial class TriggerClassifier
         return match.Success ? match.Groups["phase"].Value.Trim() : string.Empty;
     }
 
-    [GeneratedRegex(@"^PHASE:[ \t]*(?<phase>\S.*?)[ \t]*$", RegexOptions.CultureInvariant)]
+    [GeneratedRegex(@"^" + DispatchHeaders.Phase + @":[ \t]*(?<phase>\S.*?)[ \t]*$", RegexOptions.CultureInvariant)]
     private static partial Regex PhaseLineRegex();
 }

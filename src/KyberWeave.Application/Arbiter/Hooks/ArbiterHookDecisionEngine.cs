@@ -38,11 +38,7 @@ namespace KyberWeave.Arbiter.Hooks;
 /// </remarks>
 public sealed class ArbiterHookDecisionEngine : IContextualHookDecisionEngine, IBackgroundDispatchEngine, IArbiterProviderSource, ILostReturnRecovery
 {
-    private const string ModelTrigger = "delegate.model";
-    private const string TriageShortcutTrigger = "triage.shortcut";
-    private const string IntakeShortcutTrigger = "intake.shortcut";
-    private const string DocsImpactShortcutTrigger = "docs-impact.shortcut";
-    private const string IntakeMarkerPrefix = "INTAKE:";
+    private const string IntakeMarkerPrefix = DispatchHeaders.Intake + ":";
     private const string ModelTargetingOff = "off";
 
     private readonly Func<KyberWeaveConfig, IArbiterProvider> _providerFactory;
@@ -147,7 +143,7 @@ public sealed class ArbiterHookDecisionEngine : IContextualHookDecisionEngine, I
     /// <inheritdoc/>
     public HookOutcome DecidePreDispatch(string caller, string? target, string prompt, KyberWeaveConfig config) =>
         DecidePreDispatch(
-            "claude",
+            HarnessRegistry.ClaudeToken,
             caller,
             target,
             prompt,
@@ -157,7 +153,7 @@ public sealed class ArbiterHookDecisionEngine : IContextualHookDecisionEngine, I
     /// <inheritdoc/>
     public HookOutcome DecidePostDispatch(string caller, string? target, string toolOutput, KyberWeaveConfig config) =>
         DecidePostDispatch(
-            "claude",
+            HarnessRegistry.ClaudeToken,
             caller,
             target,
             string.Empty,
@@ -388,11 +384,11 @@ public sealed class ArbiterHookDecisionEngine : IContextualHookDecisionEngine, I
         }
 
         StringBuilder block = new();
-        AppendHeader(block, "PLAN_FILE", headers.PlanFile);
-        AppendHeader(block, "TASK", headers.Task);
-        AppendHeader(block, "LENS", headers.Lens);
-        AppendHeader(block, "REFUTE", headers.Refute);
-        AppendHeader(block, "TECHNOLOGY", headers.Technology);
+        AppendHeader(block, DispatchHeaders.PlanFile, headers.PlanFile);
+        AppendHeader(block, DispatchHeaders.Task, headers.Task);
+        AppendHeader(block, DispatchHeaders.Lens, headers.Lens);
+        AppendHeader(block, DispatchHeaders.Refute, headers.Refute);
+        AppendHeader(block, DispatchHeaders.Technology, headers.Technology);
         return block.Length == 0 ? prompt : block.Append('\n').Append(prompt).ToString();
     }
 
@@ -960,7 +956,7 @@ public sealed class ArbiterHookDecisionEngine : IContextualHookDecisionEngine, I
     /// <summary>The plan a dispatch names: its routing header, else the <c>PLAN_FILE</c> line of an escalation envelope.</summary>
     private static string? PlanFileFor(string prompt)
     {
-        if (HeaderBlock.Parse(prompt).RawValues.TryGetValue("PLAN_FILE", out string? named)
+        if (HeaderBlock.Parse(prompt).RawValues.TryGetValue(DispatchHeaders.PlanFile, out string? named)
             && !string.IsNullOrWhiteSpace(named))
         {
             return named.Trim();
@@ -1154,17 +1150,17 @@ public sealed class ArbiterHookDecisionEngine : IContextualHookDecisionEngine, I
     /// </summary>
     private static string? SubstituteDigestFor(ArbiterDecisionRecord answered, string prompt)
     {
-        if (string.Equals(answered.Trigger, TriageShortcutTrigger, StringComparison.Ordinal))
+        if (string.Equals(answered.Trigger, ArbiterTriggers.TriageShortcut, StringComparison.Ordinal))
         {
             return SubstituteDigests.Triage(answered.Id);
         }
 
-        if (string.Equals(answered.Trigger, DocsImpactShortcutTrigger, StringComparison.Ordinal))
+        if (string.Equals(answered.Trigger, ArbiterTriggers.DocsImpactShortcut, StringComparison.Ordinal))
         {
             return SubstituteDigests.DocsImpact(answered.Id);
         }
 
-        if (!string.Equals(answered.Trigger, IntakeShortcutTrigger, StringComparison.Ordinal))
+        if (!string.Equals(answered.Trigger, ArbiterTriggers.IntakeShortcut, StringComparison.Ordinal))
         {
             return null;
         }
@@ -1196,7 +1192,7 @@ public sealed class ArbiterHookDecisionEngine : IContextualHookDecisionEngine, I
     /// </summary>
     private static ArbiterModelBlock? ModelBlockFor(IReadOnlyList<ArbiterDecisionRecord> decisions, string ledgerId) =>
         decisions.LastOrDefault(decision => string.Equals(decision.LedgerId, ledgerId, StringComparison.Ordinal)
-            && string.Equals(decision.Trigger, ModelTrigger, StringComparison.Ordinal))?.Model;
+            && string.Equals(decision.Trigger, ArbiterTriggers.DelegateModel, StringComparison.Ordinal))?.Model;
 
     private static string RenderReason(
         ArbiterDecisionRecord record,
@@ -1210,7 +1206,7 @@ public sealed class ArbiterHookDecisionEngine : IContextualHookDecisionEngine, I
 
         if (string.Equals(record.Outcome, RuleEffects.Skip, StringComparison.Ordinal))
         {
-            headers.TryGetValue("LENS", out string? lens);
+            headers.TryGetValue(DispatchHeaders.Lens, out string? lens);
             return new ArbiterSkipNote(
                 lens ?? "unknown",
                 RuleIdsOf(record),
@@ -1220,7 +1216,7 @@ public sealed class ArbiterHookDecisionEngine : IContextualHookDecisionEngine, I
 
         if (string.Equals(record.Outcome, RuleEffects.Verify, StringComparison.Ordinal))
         {
-            headers.TryGetValue("REFUTE", out string? refute);
+            headers.TryGetValue(DispatchHeaders.Refute, out string? refute);
             return new ArbiterVerifiedNote(
                 refute ?? "unknown",
                 RuleIdsOf(record),
@@ -1323,17 +1319,11 @@ public sealed class ArbiterHookDecisionEngine : IContextualHookDecisionEngine, I
             ? "unknown error"
             : message.Replace("\r\n", " ", StringComparison.Ordinal).Replace('\n', ' ').Replace('\r', ' ');
 
-    private string ResolveArbiterDirectory(string repoRoot, HookScope scope, string? homeDirectory)
-    {
-        if (scope == HookScope.Global)
-        {
-            string effectiveHome = _hostConfig.ResolveHomeDirectory(homeDirectory);
-            string rootKey = ProjectRootKey(repoRoot, _process.CurrentDirectory);
-            return Path.Combine(effectiveHome, ".kyber-weave", "arbiter", "projects", rootKey);
-        }
-
-        return Path.Combine(repoRoot, "artifacts", "arbiter");
-    }
+    /// <summary>The directory the evaluation records in: the user-level store for the user-level hook, the project's otherwise.</summary>
+    private string ResolveArbiterDirectory(string repoRoot, HookScope scope, string? homeDirectory) =>
+        scope == HookScope.Global
+            ? ArbiterStateDirectory.ForGlobal(_hostConfig.ResolveHomeDirectory(homeDirectory), repoRoot, _process.CurrentDirectory)
+            : ArbiterStateDirectory.ForProject(repoRoot);
 
     /// <summary>
     /// The directory holding the harness's model targets table, or null when the state directory already
@@ -1356,23 +1346,13 @@ public sealed class ArbiterHookDecisionEngine : IContextualHookDecisionEngine, I
         {
             string home = _hostConfig.ResolveHomeDirectory(context.HomeDirectory);
             string root = new SquadGlobalRoots(_environment, home).ResolveGlobalRoot(target);
-            return Path.Combine(root, ".kyber-weave", "arbiter");
+            return UserStatePaths.ArbiterDirectory(root);
         }
         catch (ArgumentException)
         {
             // A target with no verified global root cannot be installed at user scope, so it has no table.
             return null;
         }
-    }
-
-    /// <summary>The per-project key a global ledger directory is named by: the hash of the root's full path.</summary>
-    /// <param name="projectRoot">The project root, relative or fully qualified.</param>
-    /// <param name="baseDirectory">The fully qualified directory a relative root is resolved against.</param>
-    internal static string ProjectRootKey(string projectRoot, string baseDirectory)
-    {
-        string canonical = Path.TrimEndingDirectorySeparator(Path.GetFullPath(projectRoot, baseDirectory));
-        byte[] hash = System.Security.Cryptography.SHA256.HashData(System.Text.Encoding.UTF8.GetBytes(canonical));
-        return Convert.ToHexStringLower(hash);
     }
 
     /// <summary>

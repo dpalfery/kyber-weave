@@ -1,6 +1,7 @@
 using System.Text.Json;
 using System.Text.RegularExpressions;
 using KyberWeave.Contracts.Repositories;
+using KyberWeave.Core.Agents.Roster;
 using KyberWeave.Core.Arbiter.Plans;
 using KyberWeave.Core.Configuration;
 using KyberWeave.Core.Diagnostics;
@@ -181,7 +182,7 @@ public sealed partial class PlanTaskFileValidator
         // A name that ends in the task file's suffix is the task file itself, or a file
         // KW-DOC-LIFECYCLE-005 already reports; this rule takes only what that one leaves.
         string name = Path.GetFileName(file);
-        if (!name.Contains(".tasks.", StringComparison.OrdinalIgnoreCase)
+        if (!name.Contains(TaskFileNameInfix, StringComparison.OrdinalIgnoreCase)
             || name.EndsWith(TaskFileSuffix, StringComparison.OrdinalIgnoreCase)
             || name.EndsWith(LegacyTaskFileSuffix, StringComparison.OrdinalIgnoreCase)
             || !LooksLikeTaskFile(file))
@@ -741,7 +742,7 @@ public sealed partial class PlanTaskFileValidator
         string dispatched = PlanTaskAgentPick.ResolveRemovedAgent(recorded, entry.Difficulty)?.Resolved ?? recorded;
         if (dispatched.Length > 0)
         {
-            return PlanTaskAgentPick.DeveloperTiers.Contains(dispatched, StringComparer.Ordinal);
+            return DeveloperTiers.All.Contains(dispatched, StringComparer.Ordinal);
         }
 
         string capabilities = entry.Capabilities ?? string.Empty;
@@ -835,9 +836,10 @@ public sealed partial class PlanTaskFileValidator
     /// Read from the body rather than the frontmatter, because this repository's vocabulary has no Ready
     /// status: an approved plan stays <c>status: current</c> and says <c>**Status: Ready**</c> in its
     /// opening paragraph, and an approved specification's <c>tasks.md</c> says <c>**Status:** Ready</c>
-    /// with the colon inside the bold label. <see cref="ReadyStatusRegex"/> accepts both forms.
+    /// with the colon inside the bold label. <see cref="PlanStatus.ParseBodyStatus"/> accepts both forms.
     /// </remarks>
-    private static bool IsReady(DocumentModel artifact) => ReadyStatusRegex().IsMatch(artifact.Body);
+    private static bool IsReady(DocumentModel artifact) =>
+        PlanStatus.IsReady(PlanStatus.ParseBodyStatus(artifact.Body));
 
     private string FullPath(string relativePath) =>
         Path.Combine(_repoRoot, relativePath.Replace('/', Path.DirectorySeparatorChar));
@@ -869,9 +871,4 @@ public sealed partial class PlanTaskFileValidator
 
     private static string Describe(IReadOnlyList<string> values) =>
         values.Count == 0 ? "none" : string.Join(", ", values);
-
-    // The plan form puts the colon inside the bold, `**Status: Ready**`; the spec form closes the
-    // bold after the colon, `**Status:** Ready`. Both name the same state.
-    [GeneratedRegex(@"\*\*Status:(?:\*\*)?\s*Ready(?![\w-])", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant)]
-    private static partial Regex ReadyStatusRegex();
 }

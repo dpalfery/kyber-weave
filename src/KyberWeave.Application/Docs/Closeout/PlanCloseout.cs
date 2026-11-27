@@ -45,7 +45,6 @@ public sealed partial class PlanCloseout
     /// <summary>A step done, or a step a preview would do.</summary>
     public const string Step = "KW-DOC-CLOSEOUT-004";
 
-    private const string PlansSegment = "plans";
     private const string InventoryColumns = "| Plan | Status | Date | Archive Date | Canonical Docs / Harvested ADRs | Goal |";
 
     private readonly string _repoRoot;
@@ -118,7 +117,7 @@ public sealed partial class PlanCloseout
         }
 
         string root = _files.DocsRootOf(plan);
-        string archiveFolder = Join(root, OntologyConfig.ArchiveSegment, PlansSegment);
+        string archiveFolder = Join(root, OntologyConfig.ArchiveSegment, DocsLayout.Plans);
         string target = Join(archiveFolder, name);
         string inventory = Join(archiveFolder, "README.md");
         string planIndex = _files.PlanIndexPath()!;
@@ -329,8 +328,8 @@ public sealed partial class PlanCloseout
 
         front = FrontmatterStatus().Replace(front, "status: archived", 1);
         body = BodyStatusValue().IsMatch(body)
-            ? BodyStatusValue().Replace(body, $"**Status:** Archived, {stamp}", 1)
-            : BodyStatusBold().Replace(body, $"**Status: Archived, {stamp}.**", 1);
+            ? BodyStatusValue().Replace(body, $"**Status:** {PlanStatus.Archived}, {stamp}", 1)
+            : BodyStatusBold().Replace(body, $"**Status: {PlanStatus.Archived}, {stamp}.**", 1);
         return front + body;
     }
 
@@ -348,7 +347,7 @@ public sealed partial class PlanCloseout
         }
 
         string goal = (archived.Frontmatter.Title ?? name).Replace("|", "\\|", StringComparison.Ordinal);
-        return $"| [{name}]({name}) | Archived — complete {stamp} | {created} | {stamp} | " +
+        return $"| [{name}]({name}) | {PlanStatus.Archived} — complete {stamp} | {created} | {stamp} | " +
                $"{string.Join("; ", destinations).Replace("|", "\\|", StringComparison.Ordinal)} | {goal} |";
     }
 
@@ -366,7 +365,7 @@ public sealed partial class PlanCloseout
                 ? match.Groups[1].Value
                 : "Maintainers";
             string stamp = date.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture);
-            return ($"---\nid: {OntologyConfig.ArchiveSegment}/{PlansSegment}/index\ntitle: Archived Plan Inventory\n" +
+            return ($"---\nid: {OntologyConfig.ArchiveSegment}/{DocsLayout.Plans}/index\ntitle: Archived Plan Inventory\n" +
                     $"doc-type: index\nstatus: current\nowner: {owner}\nlast-reviewed: {stamp}\n---\n\n" +
                     $"# Archived Plan Inventory\n\nPlans that finished and were archived, newest first.\n\n" +
                     $"## Archived Plans\n\n{table}", "create");

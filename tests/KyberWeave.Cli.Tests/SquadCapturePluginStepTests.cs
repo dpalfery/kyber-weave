@@ -7,6 +7,7 @@ using KyberWeave.Core.Squad.Deployment;
 using KyberWeave.Core.Squad.Rendering;
 using KyberWeave.Tests.Fakes;
 using Xunit;
+using KyberWeave.Contracts.Repositories;
 
 namespace KyberWeave.Tests;
 

@@ -143,8 +143,8 @@ internal static class FactoryTranscript
     private static (string? Plan, string? Task, string? Work) TaskOf(FactoryBackgroundDispatch dispatch)
     {
         IReadOnlyDictionary<string, string> headers = HeaderBlock.Parse(dispatch.Prompt).Headers;
-        string? task = headers.GetValueOrDefault("TASK");
-        return (headers.GetValueOrDefault("PLAN_FILE"), task, task is null ? dispatch.Target + "\n" + dispatch.Prompt : null);
+        string? task = headers.GetValueOrDefault(DispatchHeaders.Task);
+        return (headers.GetValueOrDefault(DispatchHeaders.PlanFile), task, task is null ? dispatch.Target + "\n" + dispatch.Prompt : null);
     }
 
     private static FactoryBackgroundDispatch? ReadLine(

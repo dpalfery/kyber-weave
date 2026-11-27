@@ -1,6 +1,6 @@
+using KyberWeave.Core;
 using System.Text.Json;
 using System.Text.Json.Nodes;
-using KyberWeave.Cli.Commands.Review;
 using KyberWeave.Contracts.Paths;
 using KyberWeave.Contracts.Repositories;
 using KyberWeave.Contracts.Services;
@@ -31,8 +31,6 @@ public sealed class ReviewCycleService(
     IPathResolver paths,
     IProcessEnvironment environment) : IReviewCycleService
 {
-    private const string UnreadableInput = "KW-REVIEW-023";
-
     /// <inheritdoc />
     public ReviewCommandResult Run(
         ReviewCycleRequest request,
@@ -63,7 +61,7 @@ public sealed class ReviewCycleService(
         if (liveRun is not null && !request.Json)
             output.WriteLine(liveRun);
 
-        string reviewFolder = Path.Combine(scratchpad, task, "review");
+        string reviewFolder = Path.Combine(scratchpad, task, ScratchLayout.ReviewFolderName);
         PriorCycles prior = trees.Prior(tree, request.BaseRef, cycles.ReadFinished(reviewFolder));
         ReviewCyclePlan plan = ReviewCyclePlanning.Plan(
             prior.Valid,
@@ -75,15 +73,16 @@ public sealed class ReviewCycleService(
         if (plan.Prior is { } priorCycle)
         {
             (bool ok, IReadOnlyList<ReviewFinding> found) = selector.ReadRecheck(
-                priorCycle, config.Review.Policy, report, UnreadableInput, Severity.Error, "review cycle");
+                priorCycle, config.Review.Policy, report, ReviewDiagnosticCodes.UnreadableInput, Severity.Error, "review cycle");
             if (!ok)
                 return ReviewCommandResultFactory.Reported(1, report);
 
             recheck = found;
         }
 
-        string folder = Path.Combine(reviewFolder, $"cycle-{plan.Number}");
-        string command = ReviewCycleView.GatesCommand(root, Path.Combine(folder, "gates.json"), request.BaseRef);
+        string folder = Path.Combine(reviewFolder, ScratchLayout.CycleFolder(plan.Number));
+        string command = ReviewCycleView.GatesCommand(
+            root, Path.Combine(tree, ScratchLayout.CycleGates(task, plan.Number)), request.BaseRef);
         if (request.Json)
             output.WriteLine(ToJson(tree, plan, folder, recheck, prior.Ignored, liveRun, command));
         else

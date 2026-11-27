@@ -1,5 +1,6 @@
 using System.Text;
 using System.Text.Json;
+using KyberWeave.Core.FileSystem;
 using KyberWeave.Core.Squad.Deployment;
 
 namespace KyberWeave.Domain.StatusLine;
@@ -26,8 +27,6 @@ public sealed class StatusLineReceiptFormat
     /// <summary>The one receipt schema. A file that declares anything else is refused, not guessed at.</summary>
     public const string Schema = "kyber-utilities.statusline.receipt/v1";
 
-    private const string StateDirectoryRelativePath = ".kyber-weave/utilities/statusline";
-
     private static readonly JsonWriterOptions WriterOptions = new()
     {
         Indented = true,
@@ -53,8 +52,7 @@ public sealed class StatusLineReceiptFormat
         _target = target;
         _semantics = semantics;
         ReceiptPath = Path.Combine(
-            roots.HomeDirectory,
-            StateDirectoryRelativePath.Replace('/', Path.DirectorySeparatorChar),
+            UserStatePaths.StatusLineDirectory(roots.HomeDirectory),
             TargetToken(target) + ".receipt.json");
     }
 

@@ -119,9 +119,9 @@ public sealed class TieredAgentRenderTests
     private static readonly Regex DevHardToken = new(
         @"(?<![\w-])dev-hard(?![\w-])", RegexOptions.CultureInvariant);
 
-    /// <summary>A model-profile switch arm: <c>"dev-hard" =&gt; "high",</c>.</summary>
+    /// <summary>A model-profile switch arm or table entry: <c>"dev-hard" =&gt; "high",</c> or <c>["dev-hard"] = "high",</c>.</summary>
     private static readonly Regex ProfileMappingArm = new(
-        @"^\s*(case\s+)?""dev-hard""\s*=>", RegexOptions.CultureInvariant);
+        @"^\s*(case\s+)?""dev-hard""\s*=>|^\s*\[""dev-hard""\]\s*=", RegexOptions.CultureInvariant);
 
     /// <summary>
     /// A native agent file carries the agent's name as its own file stem — <c>&lt;name&gt;.md</c>,

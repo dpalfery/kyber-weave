@@ -111,6 +111,8 @@ impact-components:
 ## docs-dev closeout
 ````
 
+**Tasks that meet at an interface.** When two tasks produce and consume the same interface (an HTTP response the UI reads, a message, a stored row another task queries) and neither depends on the other, they are built in parallel against mocks, so each can pass while the two disagree. Write the interface's exact shape once, in a `## Decisions` row (field names, nesting, types, status codes), and quote it in both tasks' Files lines. Then either make the consumer depend on the producer, or give one task an acceptance check that runs across the real boundary (the consumer's test against the producer's real response or a fixture generated from it), so a mismatch fails a task gate instead of reaching the review.
+
 Where the host declares task gates, a task's **Commands** are the task-gate runs only, exactly as the worker's packet prints them (test-first: the failing run with `--red`, then the passing run; standard mode: the one passing run): the gate runs the Test contract's runner command, so listing that command as a step of its own makes the worker run every test twice.
 
 **Verification gates use what the host already runs.** The plan proves the request with the host's declared gates and tests, including database-backed tests that start the host's local container or test database through its own script: that is the host's procedure, so the plan runs it as given. Never plan a step an autonomous run cannot do alone: a person's confirmation or reservation, an "exclusive window" on a shared environment, a manual check in a browser, or a run that only happens when someone opts in. Where the request asks for proof a gate cannot give, the plan says so in a `PR note:` under out-of-scope boundaries instead of a step that will be skipped.
@@ -228,7 +230,7 @@ Under `autonomy: autonomous`, decide per the autonomous-decisions reference and 
 
 After every plan save, obtain the two checks. Leave `mergeReady` false while the plan is in the active plans folder, and never validate with `--merge-ready`: that mode is the pull-request gate and always rejects an open Draft (`KW-DOC-LIFECYCLE-003`). A shell is not permission to implement.
 
-Fix every finding a check reports in the plan — errors and warnings alike — and re-check until the only findings left are the standards warning period below. The standards warning period (`KW-DOC-SPEC-012`, `KW-DOC-SPEC-013`, `KW-CONFIG-REG-001`, `KW-CONFIG-REG-002`) is outside your write boundary and does not stop the plan: `docs-dev` clears it at closeout with `kyber-weave docs standards migrate`, committed with the closeout. Do not list it as a risk, an accepted warning or out of scope. Any other finding outside your write boundary is `STATUS: BLOCKED`, and then name the finding, why you cannot fix it, and who can.
+Fix every finding a check reports in the plan — errors and warnings alike — and re-check until the only findings left are the standards warning period below. The standards warning period (`KW-DOC-SPEC-012`, `KW-DOC-SPEC-013`, `KW-DOC-SKILL-005`, `KW-CONFIG-REG-001`, `KW-CONFIG-REG-002`) is outside your write boundary and does not stop the plan: `docs-dev` clears it at closeout with `kyber-weave docs standards migrate`, committed with the closeout. Do not list it as a risk, an accepted warning or out of scope. A finding outside your write boundary that `RUN_BASE` already had (the file it names is unchanged since `RUN_BASE`, by `git diff RUN_BASE -- <file>`) is pre-existing and does not stop the plan either, whatever its code: list it on a `DOCS_PRE_EXISTING:` line and `docs-dev` clears it at closeout. Any other finding outside your write boundary is `STATUS: BLOCKED`, and then name the finding, why you cannot fix it, and who can.
 
 ### With a shell
 
@@ -240,7 +242,7 @@ The MCP result cannot be checked against your checkout, so do not rely on it. Us
 
 ## Ready
 
-Return `PLAN_READY` only when the saved Draft has no open decisions (all rows in `## Decisions` have status `ANSWERED` or approved), has a `## Request trace` row for every explicit instruction in the request, contains the selected mode and matching approved contract, declares its scale (`documentation-impact` with `impact-components`) and its `Design harvest` table, has a schedulable dependency graph, and both documentation checks pass (no error; the standards warning period does not count):
+Return `PLAN_READY` only when the saved Draft has no open decisions (all rows in `## Decisions` have status `ANSWERED` or approved), has a `## Request trace` row for every explicit instruction in the request, contains the selected mode and matching approved contract, declares its scale (`documentation-impact` with `impact-components`) and its `Design harvest` table, has a schedulable dependency graph, and both documentation checks pass (no error; the standards warning period and `DOCS_PRE_EXISTING` findings do not count):
 
 ```text
 STATUS: PLAN_READY
@@ -248,6 +250,7 @@ PLAN_FILE: <saved path>
 OPEN_DECISIONS: none
 DOCS_VALIDATE: pass
 DOCS_DRIFT: pass
+DOCS_PRE_EXISTING: <code file, one per finding; or none>
 ```
 
 The conductor presents **approve and execute**, stating the declared scale and components so the owner confirms scale before execution. Proceed at high confidence only when the scale and harvest targets are unambiguous.

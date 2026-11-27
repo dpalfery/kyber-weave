@@ -22,7 +22,6 @@ internal static class ModelTargetFacts
     internal const string PriorResult = ModelTargetResolver.PriorResultFact;
     private const string PriorProfile = "model-targeting.prior-profile";
     private const string LadderNext = "model-targeting.ladder.next";
-    private const string BudgetExceeded = "BUDGET_EXCEEDED";
 
     private static readonly IReadOnlyList<string> TestPatterns = ArbiterConfigDefaults.Product.TestFilePatterns;
 
@@ -136,7 +135,7 @@ internal static class ModelTargetFacts
         {
             string? result = ResultOf(post.Returns);
             if (post.Phase != ArbiterLedgerPhases.Post || post.PreId is null || post.PreId == ledgerId
-                || result is not ("PASS" or "FAIL")
+                || result is not (ReturnStatus.Pass or ReturnStatus.Fail)
                 || !pres.TryGetValue(post.PreId, out ArbiterLedgerEvent? pre)
                 || !string.Equals(pre.Headers?.Task, task, StringComparison.Ordinal)
                 || (planFile is not null && !string.Equals(pre.Headers?.PlanFile, planFile, StringComparison.Ordinal)))
@@ -147,7 +146,7 @@ internal static class ModelTargetFacts
             delivered ??= DeliveredBlocksByLedgerId(decisions.ReadAll());
             (string? profile, string? token) = RanOn(pre, delivered);
             latest = new ArbiterPriorAttempt(
-                string.Equals(result, "PASS", StringComparison.Ordinal) ? "pass" : "fail",
+                string.Equals(result, ReturnStatus.Pass, StringComparison.Ordinal) ? "pass" : "fail",
                 profile,
                 token);
         }
@@ -161,7 +160,7 @@ internal static class ModelTargetFacts
     /// </summary>
     private static string? ResultOf(ArbiterReturnMarkers? returns) =>
         returns?.TaskReview
-        ?? (string.Equals(returns?.PlannerStatus, BudgetExceeded, StringComparison.Ordinal) ? "FAIL" : null);
+        ?? (string.Equals(returns?.PlannerStatus, ReturnStatus.BudgetExceeded, StringComparison.Ordinal) ? ReturnStatus.Fail : null);
 
     /// <summary>
     /// The delivered model block of each ledger event, the first one logged for an event winning. Built once per

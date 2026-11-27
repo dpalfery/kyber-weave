@@ -1,3 +1,5 @@
+using KyberWeave.Core.Agents.Roster;
+
 namespace KyberWeave.Core.Review.Catalogue;
 
 /// <summary>
@@ -7,8 +9,8 @@ namespace KyberWeave.Core.Review.Catalogue;
 /// The names stay here after the files are gone, because a host's <c>review.task-gates</c> entries outlive the
 /// agents that wrote them: Requirement 13.2 keeps an agent-keyed entry resolving for two minor releases through
 /// <c>TechnologyAgentMap</c>, and Requirement 13.4 reports each one for a removed agent as a warning that
-/// names <see cref="MigrationCommand"/>. This is the one shipped list all three readers share, so the departure of an
-/// agent and the warning about its config entry cannot disagree.
+/// names <see cref="MigrationCommand"/>. The names themselves are <see cref="AgentRoles.Retired"/>, the one list
+/// all readers share, so the departure of an agent and the warning about its config entry cannot disagree.
 /// </remarks>
 public static class RemovedAgentMap
 {
@@ -23,12 +25,7 @@ public static class RemovedAgentMap
     /// <c>docs-dev</c> stays, because it follows the documentation settings a host already customises, and
     /// <c>devops</c> is its replacement rather than one of the departed.
     /// </remarks>
-    public static IReadOnlyList<string> Agents { get; } =
-    [
-        "csharp-dev", "dal-dev", "maui-dev", "pulumi-dev",
-        "typescript-dev", "react-dev", "rust-dev", "tauri-dev", "go-dev", "python-dev",
-        "sql-database-architect", "test-dev", "azure-reader", "github-devops"
-    ];
+    public static IReadOnlyList<string> Agents { get; } = [.. AgentRoles.Retired.Keys];
 
     /// <summary>Whether the removal phase deletes <paramref name="agent"/>.</summary>
     /// <param name="agent">An agent slug, or null.</param>
@@ -37,7 +34,6 @@ public static class RemovedAgentMap
         if (string.IsNullOrWhiteSpace(agent))
             return false;
 
-        string name = agent.Trim();
-        return Agents.Contains(name, StringComparer.Ordinal);
+        return AgentRoles.Retired.ContainsKey(agent.Trim());
     }
 }

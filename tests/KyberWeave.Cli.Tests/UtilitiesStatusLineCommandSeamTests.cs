@@ -6,6 +6,7 @@ using KyberWeave.Domain.StatusLine;
 using KyberWeave.Tests.Fakes;
 using Spectre.Console.Testing;
 using Xunit;
+using KyberWeave.Application.StatusLine;
 
 namespace KyberWeave.Tests;
 

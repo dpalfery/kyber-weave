@@ -13,7 +13,7 @@ internal sealed record FailureRecord(string DecisionId, string Text);
 internal static class FailureFacts
 {
     /// <summary>The trigger a rework dispatch carrying the failure-cluster marker derives.</summary>
-    public const string Trigger = "delegate.failure";
+    public const string Trigger = ArbiterTriggers.DelegateFailure;
 
     /// <summary>The step-0 and step-1 fact holding the earlier failure of the cluster, absent for a first failure.</summary>
     public const string PreviousText = "failure.previous-text";
@@ -30,7 +30,7 @@ internal static class FailureFacts
     public static string? ClusterOf(string prompt)
     {
         ArgumentNullException.ThrowIfNull(prompt);
-        string prefix = TriggerClassifier.FailureClusterMarker + ":";
+        string prefix = DispatchHeaders.FailureCluster + ":";
         string? first = BodyLines(prompt).FirstOrDefault();
         if (first is null || !first.StartsWith(prefix, StringComparison.Ordinal))
         {

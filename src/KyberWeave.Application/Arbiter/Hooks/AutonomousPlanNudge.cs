@@ -13,7 +13,7 @@ namespace KyberWeave.Arbiter.Hooks;
 internal static class AutonomousPlanNudge
 {
     /// <summary>The trigger of a planner dispatch's return.</summary>
-    internal const string Trigger = "delegate.planner.returned";
+    internal const string Trigger = ArbiterTriggers.DelegatePlannerReturned;
 
     /// <summary>The note, word for word.</summary>
     internal const string Note =
@@ -21,7 +21,6 @@ internal static class AutonomousPlanNudge
         + "'AUTONOMOUS_APPROVAL: plan-approve-execute (autonomous: recommendation accepted)'. Do not ask the user to "
         + "approve; then dispatch the ready tasks.";
 
-    private const string PlanReady = "PLAN_READY";
     private const string Architect = "architect";
 
     /// <summary>Whether this return is the architect's <c>PLAN_READY</c> in a run recorded as autonomous.</summary>
@@ -36,7 +35,7 @@ internal static class AutonomousPlanNudge
         && IsArchitect(target)
         && string.Equals(
             ReturnMarkerParser.Parse(toolOutput, readAttestations: false)?.PlannerStatus,
-            PlanReady,
+            ReturnStatus.PlanReady,
             StringComparison.OrdinalIgnoreCase);
 
     /// <summary>
@@ -68,7 +67,7 @@ internal static class AutonomousPlanNudge
             && string.Equals(other.Target, current.Target, StringComparison.Ordinal)
             && other.Phase == ArbiterLedgerPhases.Post
             && string.Equals(other.Trigger, Trigger, StringComparison.Ordinal)
-            && string.Equals(other.Returns?.PlannerStatus, PlanReady, StringComparison.OrdinalIgnoreCase)
+            && string.Equals(other.Returns?.PlannerStatus, ReturnStatus.PlanReady, StringComparison.OrdinalIgnoreCase)
             && (key is not null
                 ? string.Equals(other.CallId, key, StringComparison.Ordinal)
                 : string.Equals(other.PreId, preId, StringComparison.Ordinal)));

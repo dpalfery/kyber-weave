@@ -1,4 +1,4 @@
-namespace KyberWeave.Cli.Commands.Review;
+namespace KyberWeave.Core.Review;
 
 /// <summary>Rule identifiers for individual gate outcomes.</summary>
 public static class ReviewGateOutcome
@@ -10,7 +10,7 @@ public static class ReviewGateOutcome
     public const string Failed = "KW-REVIEW-022";
 
     /// <summary>A gate that does not apply to the change and was not executed.</summary>
-    public const string NotApplicable = "KW-REVIEW-026";
+    public const string NotApplicable = ReviewDiagnosticCodes.GateSkipped;
 }
 
 /// <summary>Rule identifiers for duplicate-detection outcomes.</summary>

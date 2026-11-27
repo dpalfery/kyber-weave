@@ -2,6 +2,7 @@ using KyberWeave.Contracts.Paths;
 using KyberWeave.Contracts.Repositories;
 using System.Text.Json;
 using KyberWeave.Contracts.Services;
+using KyberWeave.Core;
 using KyberWeave.Core.Arbiter;
 using KyberWeave.Core.Arbiter.Facts;
 using KyberWeave.Core.Arbiter.Plans;
@@ -266,7 +267,7 @@ internal sealed class HookGitFacts(
     }
 
     private static bool IsScratchpad(string path) =>
-        path.StartsWith(".agent_scratchpad/", StringComparison.Ordinal);
+        path.StartsWith(ScratchLayout.Root + "/", StringComparison.Ordinal);
 
     private static bool IsRunBranchWriter(ArbiterFactSet facts) =>
         facts.TryGet("delegation.target-profile", out ArbiterFact? profile)
@@ -421,14 +422,14 @@ internal sealed class HookGitFacts(
     }
 
     private static bool IsDispatchTriggerWithReturn(string? trigger) =>
-        string.Equals(trigger, "delegate", StringComparison.Ordinal)
-        || string.Equals(trigger, "delegate.planner", StringComparison.Ordinal)
-        || string.Equals(trigger, "investigate", StringComparison.Ordinal);
+        string.Equals(trigger, ArbiterTriggers.Delegate, StringComparison.Ordinal)
+        || string.Equals(trigger, ArbiterTriggers.DelegatePlanner, StringComparison.Ordinal)
+        || string.Equals(trigger, ArbiterTriggers.Investigate, StringComparison.Ordinal);
 
     private string ResolveArbiterDirectory(string cwd) =>
         !string.IsNullOrWhiteSpace(arbiterDirectory)
             ? arbiterDirectory
-            : Path.Combine(cwd, "artifacts", "arbiter");
+            : ArbiterStateDirectory.ForProject(cwd);
 
     private void RecordPreSnapshot(
         string directory,

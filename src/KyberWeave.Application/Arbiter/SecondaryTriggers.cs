@@ -1,3 +1,4 @@
+using KyberWeave.Core.Agents.Roster;
 using KyberWeave.Core.Arbiter.Facts;
 
 namespace KyberWeave.Core.Arbiter;
@@ -15,19 +16,11 @@ namespace KyberWeave.Core.Arbiter;
 /// </remarks>
 internal static class SecondaryTriggers
 {
-    private const string Delegate = "delegate";
-    private const string DelegateModel = "delegate.model";
-    private const string ImplementationClass = "implementation";
-    private const string Investigate = "investigate";
-    private const string DelegatePlanner = "delegate.planner";
-    private const string TriageShortcut = "triage.shortcut";
-    private const string IntakeShortcut = "intake.shortcut";
-    private const string DocsImpactShortcut = "docs-impact.shortcut";
-    private const string BugCrusher = "bug-crusher";
-    private const string BugCrusherInvestigator = "bug-crusher-investigator";
-    private const string DocsDev = "docs-dev";
-    private const string IntakeMarker = "INTAKE";
-    private const string DocsImpactMarker = "DOCS-IMPACT: true";
+    private const string ImplementationClass = CapabilityProfiles.Implementation;
+    private const string BugCrusher = AgentRoles.BugCrusher;
+    private const string BugCrusherInvestigator = AgentRoles.BugCrusherInvestigator;
+    private const string DocsDev = AgentRoles.DocsDev;
+    private const string DocsImpactMarker = DispatchHeaders.DocsImpact + ": true";
 
     /// <summary>Returns the secondary triggers for <paramref name="primaryTrigger"/>, in evaluation order.</summary>
     /// <param name="primaryTrigger">The primary trigger the dispatch classified as.</param>
@@ -38,37 +31,37 @@ internal static class SecondaryTriggers
         ArgumentNullException.ThrowIfNull(ev);
 
         List<string> triggers = [];
-        if (string.Equals(primaryTrigger, Delegate, StringComparison.Ordinal)
+        if (string.Equals(primaryTrigger, ArbiterTriggers.Delegate, StringComparison.Ordinal)
             && string.Equals(TriggerClassifier.TargetClassFor(ev.Target), ImplementationClass, StringComparison.Ordinal))
         {
-            triggers.Add(DelegateModel);
+            triggers.Add(ArbiterTriggers.DelegateModel);
         }
 
-        if (string.Equals(primaryTrigger, Delegate, StringComparison.Ordinal)
+        if (string.Equals(primaryTrigger, ArbiterTriggers.Delegate, StringComparison.Ordinal)
             && string.Equals(TriggerClassifier.TargetClassFor(ev.Target), ImplementationClass, StringComparison.Ordinal)
             && FailureFacts.ClusterOf(ev.Prompt) is not null)
         {
             triggers.Add(FailureFacts.Trigger);
         }
 
-        if (string.Equals(primaryTrigger, Investigate, StringComparison.Ordinal)
+        if (string.Equals(primaryTrigger, ArbiterTriggers.Investigate, StringComparison.Ordinal)
             && string.Equals(ev.HarnessCaller ?? ev.Caller, BugCrusher, StringComparison.Ordinal)
             && string.Equals(ev.Target, BugCrusherInvestigator, StringComparison.Ordinal))
         {
-            triggers.Add(TriageShortcut);
+            triggers.Add(ArbiterTriggers.TriageShortcut);
         }
 
-        if (string.Equals(primaryTrigger, DelegatePlanner, StringComparison.Ordinal)
-            && string.Equals(TriggerClassifier.PlannerMarkerFor(ev.Prompt, HeaderBlock.Parse(ev.Prompt).Headers), IntakeMarker, StringComparison.Ordinal))
+        if (string.Equals(primaryTrigger, ArbiterTriggers.DelegatePlanner, StringComparison.Ordinal)
+            && string.Equals(TriggerClassifier.PlannerMarkerFor(ev.Prompt, HeaderBlock.Parse(ev.Prompt).Headers), DispatchHeaders.Intake, StringComparison.Ordinal))
         {
-            triggers.Add(IntakeShortcut);
+            triggers.Add(ArbiterTriggers.IntakeShortcut);
         }
 
-        if (string.Equals(primaryTrigger, Delegate, StringComparison.Ordinal)
+        if (string.Equals(primaryTrigger, ArbiterTriggers.Delegate, StringComparison.Ordinal)
             && string.Equals(ev.Target, DocsDev, StringComparison.Ordinal)
             && IsDocsImpactDispatch(ev.Prompt))
         {
-            triggers.Add(DocsImpactShortcut);
+            triggers.Add(ArbiterTriggers.DocsImpactShortcut);
         }
 
         return triggers;

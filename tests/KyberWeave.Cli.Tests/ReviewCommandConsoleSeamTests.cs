@@ -9,6 +9,7 @@ using KyberWeave.Core.Review;
 using KyberWeave.Tests.Fakes;
 using Spectre.Console.Testing;
 using Xunit;
+using KyberWeave.Contracts.Repositories;
 
 namespace KyberWeave.Tests;
 

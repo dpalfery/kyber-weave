@@ -1,8 +1,8 @@
-using KyberWeave.Cli.Update;
 using KyberWeave.Contracts.Repositories;
 using KyberWeave.Data.Docs.FileSystem;
 using KyberWeave.Data.Hooks;
 using KyberWeave.Data.Paths;
+using KyberWeave.Data.Update;
 
 namespace KyberWeave.Testing.Update;
 

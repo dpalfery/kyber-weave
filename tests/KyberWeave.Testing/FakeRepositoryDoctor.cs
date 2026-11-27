@@ -1,6 +1,7 @@
 using KyberWeave.Cli.Commands.Squad.Infrastructure;
 using KyberWeave.Contracts.Services;
 using KyberWeave.Domain.Doctor;
+using KyberWeave.Contracts.Repositories;
 
 namespace KyberWeave.Tests;
 

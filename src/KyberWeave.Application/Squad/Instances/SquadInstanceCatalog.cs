@@ -1,4 +1,5 @@
 using System.Collections.Frozen;
+using KyberWeave.Arbiter.Hooks;
 
 namespace KyberWeave.Core.Squad.Deployment;
 
@@ -12,7 +13,7 @@ public static class SquadInstanceCatalog
     [
         new(
             SquadTarget.Claude,
-            "claude",
+            HarnessRegistry.SquadTokenFor(SquadTarget.Claude),
             SquadInstanceKind.HomeReplace,
             "CLAUDE_CONFIG_DIR",
             [],
@@ -21,7 +22,7 @@ public static class SquadInstanceCatalog
             null),
         new(
             SquadTarget.Codex,
-            "codex",
+            HarnessRegistry.SquadTokenFor(SquadTarget.Codex),
             SquadInstanceKind.HomeReplace,
             "CODEX_HOME",
             [],
@@ -30,7 +31,7 @@ public static class SquadInstanceCatalog
             null),
         new(
             SquadTarget.Copilot,
-            "copilot",
+            HarnessRegistry.SquadTokenFor(SquadTarget.Copilot),
             SquadInstanceKind.HomeReplace,
             "COPILOT_HOME",
             [],
@@ -39,7 +40,7 @@ public static class SquadInstanceCatalog
             null),
         new(
             SquadTarget.Pi,
-            "pi",
+            HarnessRegistry.SquadTokenFor(SquadTarget.Pi),
             SquadInstanceKind.HomeReplace,
             "PI_CODING_AGENT_DIR",
             [],
@@ -48,7 +49,7 @@ public static class SquadInstanceCatalog
             null),
         new(
             SquadTarget.OpenCode,
-            "opencode",
+            HarnessRegistry.SquadTokenFor(SquadTarget.OpenCode),
             SquadInstanceKind.ConfigLayer,
             "OPENCODE_CONFIG_DIR",
             [],
@@ -57,7 +58,7 @@ public static class SquadInstanceCatalog
             null),
         new(
             SquadTarget.Kilo,
-            "kilo",
+            HarnessRegistry.SquadTokenFor(SquadTarget.Kilo),
             SquadInstanceKind.ConfigLayer,
             "KILO_CONFIG_DIR",
             [],
@@ -66,7 +67,7 @@ public static class SquadInstanceCatalog
             null),
         new(
             SquadTarget.Cursor,
-            "cursor",
+            HarnessRegistry.SquadTokenFor(SquadTarget.Cursor),
             SquadInstanceKind.ConfigLayer,
             "CURSOR_CONFIG_DIR",
             [],
@@ -75,7 +76,7 @@ public static class SquadInstanceCatalog
             null),
         new(
             SquadTarget.ZCode,
-            "zcode",
+            HarnessRegistry.SquadTokenFor(SquadTarget.ZCode),
             SquadInstanceKind.ConfigLayer,
             "ZCODE_STORAGE_DIR",
             [],
@@ -84,7 +85,7 @@ public static class SquadInstanceCatalog
             null),
         new(
             SquadTarget.Antigravity,
-            "antigravity",
+            HarnessRegistry.SquadTokenFor(SquadTarget.Antigravity),
             SquadInstanceKind.None,
             null,
             [],
@@ -93,7 +94,7 @@ public static class SquadInstanceCatalog
             "Antigravity does not support configuration or home directory redirection via environment variable."),
         new(
             SquadTarget.Factory,
-            "factory",
+            HarnessRegistry.SquadTokenFor(SquadTarget.Factory),
             SquadInstanceKind.None,
             null,
             [],
@@ -102,7 +103,7 @@ public static class SquadInstanceCatalog
             "Factory does not support configuration or home directory redirection via environment variable."),
         new(
             SquadTarget.CommandCode,
-            "commandcode",
+            HarnessRegistry.SquadTokenFor(SquadTarget.CommandCode),
             SquadInstanceKind.None,
             null,
             [],
@@ -111,7 +112,7 @@ public static class SquadInstanceCatalog
             "CommandCode has no config-directory variable and no XDG base directory: only whole-HOME redirection can move it, which also moves authentication and system-tool state. Its global root is ~/.commandcode, not the home directory a link sync would copy."),
         new(
             SquadTarget.Devin,
-            "devin",
+            HarnessRegistry.SquadTokenFor(SquadTarget.Devin),
             SquadInstanceKind.None,
             null,
             [],
@@ -120,7 +121,7 @@ public static class SquadInstanceCatalog
             "Devin stores configuration in system app data and does not support instance directory redirection."),
         new(
             SquadTarget.Warp,
-            "warp",
+            HarnessRegistry.SquadTokenFor(SquadTarget.Warp),
             SquadInstanceKind.None,
             null,
             [],

@@ -6,12 +6,12 @@ using System.Text;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using System.Text.RegularExpressions;
-using KyberWeave.Cli.Update;
+using KyberWeave.Application.Update;
 using KyberWeave.Contracts.Paths;
 using KyberWeave.Contracts.Repositories;
 using KyberWeave.Core.Squad.Release;
 
-namespace KyberWeave.Cli.Commands.Squad.Infrastructure;
+namespace KyberWeave.Application.Squad.Release;
 
 /// <summary>Retrieves a version-matched Squad asset from a GitHub release.</summary>
 /// <remarks>

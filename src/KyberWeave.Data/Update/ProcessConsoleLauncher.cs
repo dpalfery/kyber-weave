@@ -1,7 +1,7 @@
 using System.ComponentModel;
 using System.Diagnostics;
 
-namespace KyberWeave.Cli.Update;
+namespace KyberWeave.Data.Update;
 
 /// <summary>The adapter that starts a child on this console: the only code in the update that calls <c>Process.Start</c>.</summary>
 internal sealed class ProcessConsoleLauncher : IConsoleProcessLauncher

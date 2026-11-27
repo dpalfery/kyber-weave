@@ -1,4 +1,4 @@
-namespace KyberWeave.Cli.Update;
+namespace KyberWeave.Data.Update;
 
 /// <summary>Reads and sets the Unix permission bits of a file an update installs.</summary>
 /// <remarks>

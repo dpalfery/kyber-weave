@@ -1,5 +1,6 @@
 using KyberWeave.Cli.Commands.Squad.Infrastructure;
 using KyberWeave.Tests.FileSystem;
+using KyberWeave.Application.Squad.Release;
 
 namespace KyberWeave.Tests.Fakes;
 

@@ -1,3 +1,4 @@
+using KyberWeave.Core.FileSystem;
 using KyberWeave.Domain.FileSystem;
 using KyberWeave.Domain.Doctor;
 using YamlDotNet.Core;
@@ -27,7 +28,7 @@ public static class DocsEnabled
         ArgumentNullException.ThrowIfNull(readText);
         ArgumentNullException.ThrowIfNull(directoryExists);
 
-        string? config = readText(Path.Combine(root, ".kyber-weave", "kyber-weave.yml"));
+        string? config = readText(Path.Combine(root, UserStatePaths.DirectoryName, "kyber-weave.yml"));
         if (config is null)
             return false;
 

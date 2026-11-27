@@ -62,7 +62,7 @@ public static class RuleValidator
     /// <summary>An unknown <c>model-targeting</c> mode, difficulty key, or difficulty profile. Names the valid values.</summary>
     public const string ModelTargetingInvalid = "KW-ARB-CONFIG-012";
 
-    /// <summary>An invalid <c>model-targeting.ladder</c>: empty, repeated, or not a profile name. Shows an example ladder.</summary>
+    /// <summary>Retired: a host <c>model-targeting.ladder</c> is refused with <see cref="ModelTargetingInvalid"/>.</summary>
     public const string LadderInvalid = "KW-ARB-CONFIG-013";
 
     /// <summary><c>shadow</c> set on a rule whose shadow state the model-targeting mode owns.</summary>

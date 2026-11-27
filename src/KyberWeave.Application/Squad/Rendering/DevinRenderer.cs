@@ -1,5 +1,6 @@
 using System.Text;
 using System.Text.Json.Nodes;
+using KyberWeave.Arbiter.Hooks;
 using KyberWeave.Core.Configuration;
 using KyberWeave.Core.Squad.Deployment;
 using KyberWeave.Core.Squad.Model;
@@ -165,7 +166,7 @@ namespace KyberWeave.Core.Squad.Rendering;
 /// </remarks>
 public sealed class DevinRenderer : SquadHarnessRenderer
 {
-    private const string TargetToken = "devin";
+    private const string TargetToken = HarnessRegistry.DevinToken;
 
     /// <summary>Matches Devin's subagent dispatch tool ([F12]). The vendor documents only
     /// that <c>run_subagent</c> "takes a profile"; no namespaced spelling of the tool is

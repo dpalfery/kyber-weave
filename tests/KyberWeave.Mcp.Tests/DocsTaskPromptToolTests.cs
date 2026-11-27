@@ -1,3 +1,4 @@
+using KyberWeave.Core;
 using KyberWeave.Core.Docs.Validation;
 using Xunit;
 
@@ -42,7 +43,7 @@ public sealed class DocsTaskPromptToolTests
         Assert.Contains("harness: unknown MCP client 'warp'; the prompt file was written", reply, StringComparison.Ordinal);
         Assert.Contains("prompt file: .agent_scratchpad/t1/prompt.md", reply, StringComparison.Ordinal);
         Assert.Contains("read it first", reply, StringComparison.Ordinal);
-        Assert.True(fixture.Exists(Path.Combine(TaskPromptService.ScratchFolder, "t1", "prompt.md")));
+        Assert.True(fixture.Exists(Path.Combine(ScratchLayout.Root, "t1", "prompt.md")));
     }
 
     [Fact]

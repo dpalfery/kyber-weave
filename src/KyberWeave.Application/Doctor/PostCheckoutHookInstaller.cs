@@ -1,6 +1,5 @@
 using System.ComponentModel;
 using System.Diagnostics;
-using KyberWeave.Cli.Commands.Squad.Infrastructure;
 using KyberWeave.Contracts.Paths;
 using KyberWeave.Contracts.Repositories;
 using KyberWeave.Core.Doctor;

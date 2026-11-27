@@ -1,4 +1,3 @@
-using KyberWeave.Cli.Commands.Squad.Infrastructure;
 using KyberWeave.Contracts.Repositories;
 using KyberWeave.Contracts.Services;
 using KyberWeave.Core.Doctor;

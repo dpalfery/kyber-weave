@@ -27,8 +27,10 @@ public interface IGateReportFacts
     /// Whether the repository's gate report shows a failed gate, which corroborates a lens finding. The same
     /// report reader <see cref="Agrees(string?, string?)"/> uses, so a finding and a digest are checked against one source.
     /// </summary>
+    /// <param name="repositoryRoot">The root a relative report path resolves against.</param>
+    /// <param name="reviewRun">The cycle the dispatch names, or null when it names none.</param>
     /// <returns><c>true</c> when a gate ran and failed; <c>false</c> when the report is missing or shows none failed.</returns>
-    bool FailedGateCorroborates(string? repositoryRoot);
+    bool FailedGateCorroborates(string? repositoryRoot, string? reviewRun);
 
     /// <summary>Whether a returned digest's gate report corroborates its claimed status.</summary>
     /// <param name="returnedText">The worker's return text, digest included.</param>

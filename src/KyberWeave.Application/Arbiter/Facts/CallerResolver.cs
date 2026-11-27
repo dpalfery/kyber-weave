@@ -1,3 +1,5 @@
+using KyberWeave.Core.Agents.Roster;
+
 namespace KyberWeave.Core.Arbiter.Facts;
 
 /// <summary>Where a resolved caller identity comes from, highest rank first.</summary>
@@ -55,27 +57,27 @@ public static class CallerResolver
 
     private static string? InferFromHeaders(IReadOnlyDictionary<string, string?> headers)
     {
-        if (Header(headers, "PLAN_FILE") is not null || Header(headers, "TASK") is not null)
-            return "conductor";
-        if (Header(headers, "LENS") is not null || Header(headers, "REFUTE") is not null)
-            return "code-reviewer";
+        if (Header(headers, DispatchHeaders.PlanFile) is not null || Header(headers, DispatchHeaders.Task) is not null)
+            return AgentRoles.Conductor;
+        if (Header(headers, DispatchHeaders.Lens) is not null || Header(headers, DispatchHeaders.Refute) is not null)
+            return AgentRoles.CodeReviewer;
         string? target = Header(headers, "TARGET") ?? Header(headers, "DELEGATION_TARGET");
         if (target is not null && IsPlannerTarget(target))
-            return "conductor";
+            return AgentRoles.Conductor;
         return null;
     }
 
     /// <summary>
-    /// The canonical planner agents. A target name is matched exactly, never by a
+    /// The canonical planner names: the two planner agents and the <c>product-planning</c> capability profile,
+    /// which a target may name even though it is not an agent. A target name is matched exactly, never by a
     /// substring: <c>release-planner-tool</c> is not a planner and must not make a
     /// non-conductor caller look like the conductor.
     /// </summary>
     private static bool IsPlannerTarget(string target)
     {
         string normalized = target.Trim();
-        return normalized.Equals("architect", StringComparison.OrdinalIgnoreCase)
-            || normalized.Equals("product-owner", StringComparison.OrdinalIgnoreCase)
-            || normalized.Equals("product-planning", StringComparison.OrdinalIgnoreCase);
+        return AgentRoles.IsPlanner(normalized, StringComparison.OrdinalIgnoreCase)
+            || CapabilityProfiles.IsPlanner(normalized);
     }
 
     private static string? Header(IReadOnlyDictionary<string, string?> headers, string name)

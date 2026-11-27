@@ -1,4 +1,5 @@
 using System.ComponentModel;
+using KyberWeave.Core.Docs.Model;
 using Spectre.Console.Cli;
 
 namespace KyberWeave.Cli.Commands.Docs;
@@ -13,7 +14,7 @@ public sealed class DocsPacketSettings : CommandSettings
 
     /// <summary>The plan, only when it cannot be found from the repository's own state.</summary>
     [CommandOption("--plan <PLAN>")]
-    [Description("The plan, written any natural way. Leave it out: the one Ready or In progress plan is used (else the one in another git worktree that has the task), and several are listed.")]
+    [Description("The plan, written any natural way. Leave it out: the one " + PlanStatus.ActiveWords + " plan is used (else the one in another git worktree that has the task), and several are listed.")]
     public string? Plan { get; set; }
 
     /// <summary>A file holding the earlier tasks' reported results.</summary>

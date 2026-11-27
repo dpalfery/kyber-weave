@@ -1,3 +1,4 @@
+using KyberWeave.Core;
 using KyberWeave.Contracts.Paths;
 using KyberWeave.Contracts.Repositories;
 using System.Text;
@@ -55,7 +56,7 @@ public sealed class GateReportFacts(
     public const string RedAcceptedSummaryPrefix = "RED accepted";
 
     /// <summary>The digest line whose claim the rule checks.</summary>
-    private const string DigestMarker = "TASK_GATE:";
+    private const string DigestMarker = ReturnStatus.TaskGate;
 
     /// <summary>The digest field naming the report the claimed gate run wrote.</summary>
     private const string ReportField = "report=";
@@ -65,7 +66,7 @@ public sealed class GateReportFacts(
     /// that something went wrong or that nothing ran, so it is not a claim of a clean run
     /// and the report cannot back it.
     /// </summary>
-    private const string PassedStatus = "PASS";
+    private const string PassedStatus = ReturnStatus.Pass;
 
     /// <summary>Reads the gate report for a repository root.</summary>
     /// <returns>The report, or <c>null</c> when it is missing or unreadable.</returns>
@@ -139,16 +140,55 @@ public sealed class GateReportFacts(
     }
 
     /// <summary>
-    /// Whether the repository's gate report shows a failed gate, which corroborates a lens finding. The same
+    /// Whether the gate report behind a finding shows a failed gate, which corroborates a lens finding. The same
     /// report reader <see cref="Agrees(string?, string?)"/> uses, so a finding and a digest are checked against one source.
+    /// A council dispatch reads the cycle its <c>REVIEW_RUN</c> names; every other dispatch reads the repository's
+    /// default report.
     /// </summary>
+    /// <param name="repositoryRoot">The root a relative report path resolves against.</param>
+    /// <param name="reviewRun">The cycle the dispatch names, or null when it names none.</param>
     /// <returns><c>true</c> when a gate ran and failed; <c>false</c> when the report is missing or shows none failed.</returns>
-    public bool FailedGateCorroborates(string? repositoryRoot)
+    public bool FailedGateCorroborates(string? repositoryRoot, string? reviewRun)
     {
-        GateReport? report = string.IsNullOrWhiteSpace(repositoryRoot) ? null : TryRead(repositoryRoot);
+        GateReport? report = string.IsNullOrWhiteSpace(repositoryRoot) ? null : TryReadForDispatch(repositoryRoot, reviewRun);
         return report?.Gates is not null
             && report.Gates.Any(gate => gate is not null && !gate.Passed && !gate.NotApplicable);
     }
+
+    /// <summary>
+    /// The report the dispatch's gate run wrote: the named cycle's report for a council dispatch, else the
+    /// repository's default report. A cycle report that is absent falls back to the default.
+    /// </summary>
+    /// <param name="repositoryRoot">The root a relative path resolves against.</param>
+    /// <param name="reviewRun">The cycle the dispatch names, or null when it names none.</param>
+    private GateReport? TryReadForDispatch(string repositoryRoot, string? reviewRun)
+    {
+        string? fullRoot = FullRoot(repositoryRoot);
+        if (fullRoot is null)
+            return null;
+
+        if (ScratchLayout.TryParseReviewRun(reviewRun, out string task, out int cycle)
+            && IsTaskFolderName(task)
+            && Resolve(ScratchLayout.CycleGates(task, cycle), fullRoot) is { } cyclePath
+            && TryReadFile(cyclePath) is { } cycleReport)
+        {
+            return cycleReport;
+        }
+
+        return TryReadFile(Path.Combine(fullRoot, "artifacts", "gates.json"));
+    }
+
+    /// <summary>
+    /// Whether the task parsed from <c>REVIEW_RUN</c> is one folder name rather than a path. The header's value is
+    /// not path-checked, so a rooted or parent-relative task would otherwise name a directory outside the scratch root.
+    /// </summary>
+    private static bool IsTaskFolderName(string task) =>
+        task.Length > 0
+        && !Path.IsPathRooted(task)
+        && !task.Contains('/', StringComparison.Ordinal)
+        && !task.Contains('\\', StringComparison.Ordinal)
+        && !string.Equals(task, ".", StringComparison.Ordinal)
+        && !string.Equals(task, "..", StringComparison.Ordinal);
 
     /// <summary>Whether a returned digest's gate report corroborates its claimed status.</summary>
     /// <param name="returnedText">The worker's return text, digest included.</param>
@@ -283,7 +323,7 @@ public sealed class GateReportFacts(
             claims.Any(c => string.Equals(CanonicalReportPath(c.ReportPath, readBase), finalCanonical, pathComparison) &&
                             !string.Equals(c.Claimed, PassedStatus, StringComparison.Ordinal)))
         {
-            return finalClaim with { Claimed = "FAIL" };
+            return finalClaim with { Claimed = ReturnStatus.Fail };
         }
 
         return finalClaim;
@@ -344,14 +384,16 @@ public sealed class GateReportFacts(
             string checkPath = resolved;
             while (checkPath.Length >= fullRepo.Length)
             {
-                if (store.GetLinkTarget(checkPath) is { } linkTarget)
+                if (store.GetLinkTarget(checkPath) is not null)
                 {
-                    string target = paths.GetFullPath(
-                        linkTarget,
-                        Path.GetDirectoryName(checkPath) ?? fullRepo);
-
-                    if (!target.StartsWith(normalizedRepo, comparison) && !string.Equals(target, fullRepo, comparison))
+                    // The final target is what matters: an intermediate link can sit inside the repository and
+                    // point at a second link that leaves it, so a one-hop read would miss the escape.
+                    string? target = store.GetFinalLinkTarget(checkPath);
+                    if (target is null
+                        || (!target.StartsWith(normalizedRepo, comparison) && !string.Equals(target, fullRepo, comparison)))
+                    {
                         return null;
+                    }
                 }
 
                 string? parent = Path.GetDirectoryName(checkPath);

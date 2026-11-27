@@ -17,13 +17,16 @@ public static class ArbiterTriggerCatalog
     /// </summary>
     public const string TaskTechnologyFact = "plan.task.technology";
 
+    /// <summary>The fact holding the dispatch text with its routing header block removed.</summary>
+    public const string DelegationPromptFact = "delegation.prompt";
+
     private static readonly IReadOnlySet<string> DelegateFacts = new HashSet<string>(StringComparer.Ordinal)
     {
         "caller",
         "delegation.target",
         "delegation.target-class",
         "delegation.target-profile",
-        "delegation.prompt",
+        DelegationPromptFact,
         "delegation.head",
         "delegation.body-head",
         "delegation.markers",
@@ -43,6 +46,7 @@ public static class ArbiterTriggerCatalog
         "plan.task",
         "plan.task.text",
         "plan.task.files",
+        "plan.task.scope-files",
         "plan.task.depends-on",
         "plan.task.skills",
         "plan.task.technology",
@@ -63,7 +67,7 @@ public static class ArbiterTriggerCatalog
     {
         "caller",
         "delegation.target",
-        "delegation.prompt",
+        DelegationPromptFact,
         "delegation.head",
         "delegation.markers",
         "delegation.plan-file",
@@ -79,19 +83,19 @@ public static class ArbiterTriggerCatalog
     public static IReadOnlyDictionary<string, IReadOnlySet<string>> FactsByTrigger { get; } =
         new Dictionary<string, IReadOnlySet<string>>(StringComparer.Ordinal)
         {
-            ["delegate"] = DelegateFacts,
-            ["delegate.returned"] = Union(
+            [ArbiterTriggers.Delegate] = DelegateFacts,
+            [ArbiterTriggers.DelegateReturned] = Union(
                 DelegateFacts,
                 [
                     "git.changed-paths.since-dispatch", "git.changed-paths.attributed", "ledger.concurrent.paths", "gate.report.agrees",
                     "gate.report.failing-run-first", "gate.report.claim", "delegation.returned-tail", "checkout.stray-paths", "config.task-gates-declared",
                     "plan.task.files-all-tests",
                 ]),
-            ["delegate.planner"] = DelegatePlannerFacts,
-            ["delegate.planner.returned"] = Union(
+            [ArbiterTriggers.DelegatePlanner] = DelegatePlannerFacts,
+            [ArbiterTriggers.DelegatePlannerReturned] = Union(
                 DelegatePlannerFacts,
                 ["git.changed-paths.since-dispatch", "git.changed-paths.attributed", "ledger.concurrent.paths", "checkout.stray-paths"]),
-            ["investigate"] = new HashSet<string>(StringComparer.Ordinal)
+            [ArbiterTriggers.Investigate] = new HashSet<string>(StringComparer.Ordinal)
             {
                 "caller",
                 "delegation.target",
@@ -101,7 +105,7 @@ public static class ArbiterTriggerCatalog
                 "roster.caller.delegates-to",
                 "run.started",
             },
-            ["investigate.returned"] = new HashSet<string>(StringComparer.Ordinal)
+            [ArbiterTriggers.InvestigateReturned] = new HashSet<string>(StringComparer.Ordinal)
             {
                 "caller",
                 "delegation.target",
@@ -114,7 +118,7 @@ public static class ArbiterTriggerCatalog
                 "delegation.target-profile",
                 "checkout.stray-paths",
             },
-            ["delegate.model"] = new HashSet<string>(StringComparer.Ordinal)
+            [ArbiterTriggers.DelegateModel] = new HashSet<string>(StringComparer.Ordinal)
             {
                 "plan.task.text",
                 "plan.task.files",
@@ -130,33 +134,33 @@ public static class ArbiterTriggerCatalog
                 "harness.model-override",
                 "harness.observes-returns",
             },
-            ["intake.shortcut"] = new HashSet<string>(StringComparer.Ordinal)
+            [ArbiterTriggers.IntakeShortcut] = new HashSet<string>(StringComparer.Ordinal)
             {
                 "intake.request",
             },
-            ["triage.shortcut"] = new HashSet<string>(StringComparer.Ordinal)
+            [ArbiterTriggers.TriageShortcut] = new HashSet<string>(StringComparer.Ordinal)
             {
                 "defect.report",
             },
-            ["docs-impact.shortcut"] = new HashSet<string>(StringComparer.Ordinal)
+            [ArbiterTriggers.DocsImpactShortcut] = new HashSet<string>(StringComparer.Ordinal)
             {
                 "docs.governed-paths-changed",
                 "review.changed-paths",
                 "review.diff-summary",
             },
-            ["delegate.failure"] = new HashSet<string>(StringComparer.Ordinal)
+            [ArbiterTriggers.DelegateFailure] = new HashSet<string>(StringComparer.Ordinal)
             {
                 "failure.previous-text",
                 "failure.current-text",
                 "ledger.task.prior-attempt",
             },
-            ["sections.select"] = new HashSet<string>(StringComparer.Ordinal)
+            [ArbiterTriggers.SectionsSelect] = new HashSet<string>(StringComparer.Ordinal)
             {
                 "task.text",
                 "section.candidates",
                 "section.candidate.*",
             },
-            ["comment.triage"] = new HashSet<string>(StringComparer.Ordinal)
+            [ArbiterTriggers.CommentTriage] = new HashSet<string>(StringComparer.Ordinal)
             {
                 "comment.body",
                 "comment.path",
@@ -166,14 +170,14 @@ public static class ArbiterTriggerCatalog
                 "comment.fixing-commits",
             },
             // Asked by `review verdict` on the seat files, never by a hook.
-            ["review.verdict"] = new HashSet<string>(StringComparer.Ordinal)
+            [ArbiterTriggers.ReviewVerdict] = new HashSet<string>(StringComparer.Ordinal)
             {
                 "finding.severity",
                 "finding.claim",
                 "finding.failure-scenario",
                 "override.class",
             },
-            ["lens.spawn"] = new HashSet<string>(StringComparer.Ordinal)
+            [ArbiterTriggers.LensSpawn] = new HashSet<string>(StringComparer.Ordinal)
             {
                 "lens.name",
                 "lens.applicability",
@@ -185,7 +189,7 @@ public static class ArbiterTriggerCatalog
                 "review.no-code-change-paths",
                 "review.changed-hunks",
             },
-            ["lens.returned"] = new HashSet<string>(StringComparer.Ordinal)
+            [ArbiterTriggers.LensReturned] = new HashSet<string>(StringComparer.Ordinal)
             {
                 "finding.id",
                 "finding.file",
@@ -201,8 +205,8 @@ public static class ArbiterTriggerCatalog
                 "finding.gate-corroborated",
             },
             // A refuter's return reads no facts: its outcome is parsed from the return text, not a rule.
-            ["refute.returned"] = new HashSet<string>(StringComparer.Ordinal),
-            ["refute.spawn"] = new HashSet<string>(StringComparer.Ordinal)
+            [ArbiterTriggers.RefuteReturned] = new HashSet<string>(StringComparer.Ordinal),
+            [ArbiterTriggers.RefuteSpawn] = new HashSet<string>(StringComparer.Ordinal)
             {
                 "finding.id",
                 "finding.claim",
@@ -218,7 +222,7 @@ public static class ArbiterTriggerCatalog
                 "review.rename-only-paths",
                 "review.no-code-change-paths",
             },
-            ["gate.select"] = new HashSet<string>(StringComparer.Ordinal)
+            [ArbiterTriggers.GateSelect] = new HashSet<string>(StringComparer.Ordinal)
             {
                 "gate.id",
                 "gate.applies-when.paths",
@@ -227,7 +231,7 @@ public static class ArbiterTriggerCatalog
             },
             // Raised by the worker guard on a sub-agent's own command call, so a technology's rules can
             // declare the forms a read-only dispatch may run.
-            ["worker.command"] = new HashSet<string>(StringComparer.Ordinal)
+            [ArbiterTriggers.WorkerCommand] = new HashSet<string>(StringComparer.Ordinal)
             {
                 "worker.name",
                 "worker.capability-profile",

@@ -1,7 +1,7 @@
-using KyberWeave.Cli.Update;
 using KyberWeave.Contracts.Paths;
 using KyberWeave.Contracts.Repositories;
 using KyberWeave.Contracts.Services;
+using KyberWeave.Domain.Update;
 
 namespace KyberWeave.Application.Update;
 

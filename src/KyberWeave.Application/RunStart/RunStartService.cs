@@ -1,5 +1,4 @@
 using System.Diagnostics;
-using KyberWeave.Cli.Commands.Squad.Infrastructure;
 using KyberWeave.Contracts.Repositories;
 using KyberWeave.Contracts.Services;
 using KyberWeave.Core.Configuration;
@@ -508,7 +507,7 @@ public sealed class RunStartService(
     {
         string location = configPath is not null
             ? Path.GetRelativePath(repoRoot, configPath).Replace('\\', '/')
-            : ".kyber-weave/kyber-weave.yml";
+            : UserStatePaths.RepositoryConfigRelativePath;
 
         List<RunStartMessage> messages =
         [

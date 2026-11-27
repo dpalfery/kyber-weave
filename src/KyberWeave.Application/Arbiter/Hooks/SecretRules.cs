@@ -1,6 +1,7 @@
 using System.Buffers;
 using System.Text;
 using System.Text.RegularExpressions;
+using KyberWeave.Core.Arbiter;
 
 namespace KyberWeave.Arbiter.Hooks;
 
@@ -153,7 +154,7 @@ internal static partial class SecretRules
         $"{CaseClause(secretCase)}. Never read or print a password, key or token. Let the tool read its own " +
         "configuration (user-secrets, a container's environment), or pass the value by reference (for example " +
         "sh -c '... \"$VAR\"') so it never appears in the command or its output. If the task truly needs a secret, " +
-        "stop and return BLOCKED with an Open item: line saying so.";
+        "stop and return " + ReturnStatus.Blocked + " with an Open item: line saying so.";
 
     private static string CaseClause(SecretCase secretCase) => secretCase switch
     {

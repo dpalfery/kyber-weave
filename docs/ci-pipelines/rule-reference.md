@@ -68,7 +68,7 @@ Reported only when the `plan-index` or `todo-index` registry property names a do
 | `KW-DOC-LIFECYCLE-003` | Error | A plan or specification still in its active folder — raised only by `docs validate --merge-ready` |
 | `KW-DOC-LIFECYCLE-004` | Error | An archived entry the change touches without closeout evidence (`C0`–`C9`) — raised only by `docs validate --merge-ready` |
 | `KW-DOC-LIFECYCLE-005` | Error | A task file (`<plan>.tasks.yml` beside a plan, `tasks.yml` in a specification folder) is left behind, under the active folders or under the archive — raised only by `docs validate --merge-ready` |
-| `KW-DOC-LIFECYCLE-006` | Error | The plan index claims an open plan that does not exist: a table row with a Draft, Ready, In progress or Blocked status whose plan file is gone, or a sentence outside the table that restates a plan's status, such as `` `Plan` (Draft) `` |
+| `KW-DOC-LIFECYCLE-006` | Error | The plan index claims an open plan that does not exist: a table row with a Draft, Ready, In progress, Blocked or Review required status whose plan file is gone, or a sentence outside the table that restates a plan's status, such as `` `Plan` (Draft) `` |
 
 ### Plan closeout — `docs closeout`
 
@@ -381,7 +381,7 @@ receipts and logs key on them, so an id is never reused or renumbered.
 | `KW-ARB-MODE-001` | Retired | — | Formerly: failing tests exist before an implementation dispatch in test-first mode. Retired 2026-11-13 with the RED/GREEN task split; see `KW-ARB-MODE-002` ([ADR 0076](../adr/0076-test-first-is-one-worker-per-task.md)) |
 | `KW-ARB-MODE-002` | `delegate.returned` | 0 | In test-first mode the task gate's accepted `--red` report sits, older, beside the passing report the `TASK_GATE:` line claims. Every answer allows and is logged: `no-failing-run` (none, or only a later one) is recorded for monitoring, not a stop; standard mode, a documentation target, a task whose files are all test files and a `Not applicable` contract row answer `not-required`. A host may override the effect to `escalate` |
 | `KW-ARB-ROSTER-001` | `delegate`, `investigate` | 0 | Target is in the caller's `delegates-to`. Judged only for a caller the catalog names with a `delegates-to` list; any other caller answers `no-roster`, which allows |
-| `KW-ARB-RUN-001` | `delegate`, `delegate.planner`, `investigate` | 0 | A run is live for the repository before an orchestrator hands a specialist that writes files (`worker`, `documentation`, or a planner's `architect` or `product-planning` profile) any work. `not-started` escalates and names `kyber-weave run start`; the run-start dispatch, `devops` and read-only targets are exempt, and unreadable evidence allows |
+| `KW-ARB-RUN-001` | `delegate`, `delegate.planner`, `investigate` | 0 | A run is live for the repository before an orchestrator hands a specialist that writes files (`worker`, `documentation`, `architect`, `architect-copilot`, `architect-devin`, `product-planning`, `product-planning-devin`, or `root-fixer`) any work. `not-started` escalates and names `kyber-weave run start`; the run-start dispatch, `devops` and read-only targets are exempt, and unreadable evidence allows |
 | `KW-ARB-PLANREAD-001` | `delegate` | 0, then 1 | The dispatch does not tell the worker to open a plan, specification or todo file; a documentation-profile target is exempt, and only a confident model `names-plan` escalates |
 | `KW-ARB-DIFF-001` | `delegate.returned` | 0, then 1 | Delegation changed only files of its task's work, after the files of sibling dispatches in flight in the same working tree are set aside; what cannot be attributed allows. `out-of-scope` escalates at step 0; only a confident model `outside-task` escalates otherwise |
 | `KW-ARB-GATE-REPORT-001` | `delegate.returned` | 0, then 1 | The worker ran the task gate. A report that contradicts the `TASK_GATE` claim (`disagrees`) escalates at step 0; a host that declares no `review.task-gates` entry for the returning agent gets a non-escalating `no-gates-declared` at step 0 (the documentation developer has no task gate); an unreadable line otherwise goes to the model, and only a confident `missing` escalates |
@@ -439,8 +439,8 @@ Hook guards are not rules: hosts cannot tune a guard by id, but `arbiter.enabled
 | `KW-ARB-CONFIG-009` | Error | User override holds a key other than `provider` |
 | `KW-ARB-CONFIG-010` | Error | Non-loopback endpoint uses `http` |
 | `KW-ARB-CONFIG-011` | Error | `arbiter.global` is declared in a project config; user-level `arbiter.global.targets` is the only valid global schema |
-| `KW-ARB-CONFIG-012` | Error | `model-targeting.mode` is not `off`, `shadow` or `enforce`, or a `difficulty-profiles` key or value is not a semantic profile. The message lists the valid values |
-| `KW-ARB-CONFIG-013` | Error | `model-targeting.ladder` is empty, repeats a profile, or names a value that is not a semantic profile. The message shows an example ladder |
+| `KW-ARB-CONFIG-012` | Error | `model-targeting.mode` is not `off`, `shadow` or `enforce`, or the host sets `model-targeting.difficulty-profiles` or `model-targeting.ladder`. The shipped developer tiers fix the table (`easy` to `fast`, `standard` to `general`, `hard` to `dev-hard`) and the ladder (`fast`, `general`, `dev-hard`), so both keys are refused and the message names the key |
+| `KW-ARB-CONFIG-013` | Error | Retired: no configuration emits it. A host `model-targeting.ladder` is refused with `KW-ARB-CONFIG-012` |
 | `KW-ARB-CONFIG-014` | Error | `shadow` is set on `KW-ARB-DIFFICULTY-001` or `KW-ARB-LADDER-001`, whose shadow state `model-targeting.mode` owns |
 | `KW-ARB-CONFIG-015` | Error | A savings value is out of range or in a forbidden place: `stores.max-item-bytes` outside 1 to 1048576, `stores.retain-days` below 1 (a value above 3650 is clamped, not refused), a blank `comment-triage.bot-logins` entry, a `dispatch-budget` value below 1, a host rule using `for-each`, or a host rule mapping an answer to an effect only shipped rules may use |
 | `KW-ARB-CONFIG-016` | Warning | The provider timeout in force (after the user override) plus two seconds of evaluation does not fit the hook timeout rendered from the repository's `timeout-ms` |
@@ -461,6 +461,9 @@ Hook guards are not rules: hosts cannot tune a guard by id, but `arbiter.enabled
 | `KW-ARB-GUARD-001` | Warning | No plan, spec, or todo index declared, so the Read guard protects nothing |
 | `KW-ARB-PARSE-001` | Warning | A dependency names no task in the artifact |
 | `KW-ARB-PARSE-002` | Info | A task lists no files, so its file-scope checks are skipped |
+| `KW-ARB-PARSE-003` | Warning | A task's difficulty is not one the roster recognises |
+| `KW-ARB-PARSE-004` | Warning | A plan has no Tasks section, or no task in it parsed, so readiness answers `no-tasks` |
+| `KW-ARB-PARSE-005` | Error | The plan file is missing, unreadable, or not a file the command reads (a symbolic link, or outside the documentation roots) |
 | `KW-ARB-AUDIT-001` | Warning | Ledger event with no decision: the hook was killed, timed out, or crashed after recording the event |
 | `KW-ARB-AUDIT-002` | Warning | Unmarked dispatch to a Squad agent with an unidentified caller |
 | `KW-ARB-AUDIT-003` | Warning | Unpaired event: a `pre` with no `post`, or a `post` with no `pre` |

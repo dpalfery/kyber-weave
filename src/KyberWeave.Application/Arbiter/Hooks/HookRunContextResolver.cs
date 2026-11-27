@@ -569,12 +569,12 @@ public sealed class HookRunContextResolver(
         }
 
         HeaderBlock block = HeaderBlock.Parse(prompt);
-        if (block.Headers.TryGetValue("PLAN_FILE", out string? valid))
+        if (block.Headers.TryGetValue(DispatchHeaders.PlanFile, out string? valid))
         {
             return valid;
         }
 
-        return block.RawValues.TryGetValue("PLAN_FILE", out string? raw) ? raw : null;
+        return block.RawValues.TryGetValue(DispatchHeaders.PlanFile, out string? raw) ? raw : null;
     }
 
     private static bool NamesAWorktree(string? prompt) =>

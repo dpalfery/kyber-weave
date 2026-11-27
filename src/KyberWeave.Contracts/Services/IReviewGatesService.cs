@@ -1,6 +1,6 @@
-using KyberWeave.Cli.Commands.Squad.Infrastructure;
 using KyberWeave.Core.Diagnostics;
 using KyberWeave.Core.Review;
+using KyberWeave.Contracts.Repositories;
 
 namespace KyberWeave.Contracts.Services;
 

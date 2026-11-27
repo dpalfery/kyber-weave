@@ -74,6 +74,24 @@ public sealed class PlanFactsTests
     }
 
     [Fact]
+    public void ADraftPlanQuotingAReadyStatusIsNotTheActivePlan()
+    {
+        WritePlan(
+            "docs/plans/cards.md",
+            "# Plan: job status cards\n\n**Status: Draft.**\n\n## Notes\n\n"
+            + "The finalize step writes `**Status: Ready, 2026-11-14.**` into the plan.\n");
+
+        ArbiterFactSet facts = Facts(
+            new TriggerClassification("delegate", "conductor", "harness", "dev-medium", "implementation", Headers(), null, true),
+            new ArbiterFactSet()
+                .With("config.planning-dirs", new List<string> { "docs/plans/**" }, ArbiterFactLabel.Asserted)
+                .With("delegation.prompt", "TASK: T1\n\nWrite the tests first.", ArbiterFactLabel.Asserted));
+
+        Assert.Null(Value(facts, "plan.exists"));
+        Assert.Null(Value(facts, "plan.task"));
+    }
+
+    [Fact]
     public void AWhitespaceRepositoryRoot_IsAnAbsentPlanRatherThanAThrow()
     {
         ArbiterFactSet facts = new PlanFacts(new ContainedPlanFileResolver(), _files).Enrich(

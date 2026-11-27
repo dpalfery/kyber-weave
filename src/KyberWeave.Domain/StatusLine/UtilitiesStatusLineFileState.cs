@@ -1,4 +1,4 @@
-namespace KyberWeave.Cli.Commands.Utilities;
+namespace KyberWeave.Domain.StatusLine;
 
 /// <summary>How a receipt-owned file compares to the digest the receipt recorded for it.</summary>
 public enum UtilitiesStatusLineFileState

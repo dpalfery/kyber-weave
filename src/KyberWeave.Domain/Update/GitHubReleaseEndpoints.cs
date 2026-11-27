@@ -1,4 +1,4 @@
-namespace KyberWeave.Cli.Update;
+namespace KyberWeave.Domain.Update;
 
 /// <summary>The github.com repository and endpoints every ordinary install reads Releases from.</summary>
 internal static class GitHubReleaseEndpoints

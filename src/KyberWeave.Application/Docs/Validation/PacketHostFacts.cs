@@ -1,3 +1,4 @@
+using KyberWeave.Core;
 using System.Globalization;
 using System.Text;
 using System.Text.RegularExpressions;
@@ -46,8 +47,6 @@ public sealed partial class PacketHostFacts(IFileSystem files) : IPacketHostFact
         ("<!-- CODEGRAPH_START -->", "<!-- CODEGRAPH_END -->"),
     ];
 
-    private const string ScratchpadRoot = ".agent_scratchpad";
-
     /// <summary>Builds the section for one task.</summary>
     /// <param name="repoRoot">The repository root, where the host <c>AGENTS.md</c> is read.</param>
     /// <param name="config">The effective configuration.</param>
@@ -72,7 +71,7 @@ public sealed partial class PacketHostFacts(IFileSystem files) : IPacketHostFact
         text.AppendLine();
         text.AppendLine("Assembled from this repository's configuration and root AGENTS.md. Open AGENTS.md only for something this section does not answer.");
         text.AppendLine();
-        text.AppendLine(CultureInfo.InvariantCulture, $"- Scratchpad for this task: `{ScratchpadRoot}/{(string.IsNullOrWhiteSpace(taskId) ? "<task-id>" : TaskSlug.Normalise(taskId))}/` (the task gate uses this same folder, so a build you run by hand with `--artifacts-path` here reuses its output)");
+        text.AppendLine(CultureInfo.InvariantCulture, $"- Scratchpad for this task: `{ScratchLayout.Root}/{(string.IsNullOrWhiteSpace(taskId) ? "<task-id>" : TaskSlug.Normalise(taskId))}/` (the task gate uses this same folder, so a build you run by hand with `--artifacts-path` here reuses its output)");
         foreach (ConfigRegEntry entry in config.ConfigReg.Resolve(config.Ontology))
         {
             if (entry.Kind == ConfigRegEntryKind.Path)

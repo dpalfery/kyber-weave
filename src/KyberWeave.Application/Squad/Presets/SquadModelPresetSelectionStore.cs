@@ -1,3 +1,4 @@
+using KyberWeave.Core.FileSystem;
 using KyberWeave.Contracts.Repositories;
 using System.Text;
 using System.Text.RegularExpressions;
@@ -49,7 +50,7 @@ public sealed partial class SquadModelPresetSelectionStore : ISquadModelPresetSe
         ArgumentException.ThrowIfNullOrWhiteSpace(userPaths.HomeDirectory);
         _files = files;
         _semantics = semantics;
-        _selectionsDirectory = Path.Combine(userPaths.HomeDirectory, ".kyber-weave", "squad", "selections");
+        _selectionsDirectory = UserStatePaths.SquadSelectionsDirectory(userPaths.HomeDirectory);
     }
 
     /// <summary>

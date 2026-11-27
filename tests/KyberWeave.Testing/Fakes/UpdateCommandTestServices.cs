@@ -1,7 +1,6 @@
 using KyberWeave.Application;
 using KyberWeave.Cli.Commands.Update;
 using KyberWeave.Cli.Composition;
-using KyberWeave.Cli.Update;
 using KyberWeave.Contracts.Repositories;
 using KyberWeave.Contracts.Services;
 using KyberWeave.Core.Docs.Mcp;
@@ -11,6 +10,7 @@ using Spectre.Console.Testing;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
 using Spectre.Console;
+using KyberWeave.Domain.Update;
 
 namespace KyberWeave.Tests.Fakes;
 

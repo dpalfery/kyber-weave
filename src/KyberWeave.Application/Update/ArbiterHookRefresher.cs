@@ -2,9 +2,9 @@ using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
 using System.Text.Json.Nodes;
+using KyberWeave.Arbiter.Hooks;
 using KyberWeave.Contracts.Repositories;
 using KyberWeave.Core.Squad.Model;
-using KyberWeave.Cli.Commands.Squad;
 using KyberWeave.Core.Arbiter;
 using KyberWeave.Contracts.Services;
 using KyberWeave.Core.Configuration;
@@ -13,7 +13,7 @@ using KyberWeave.Core.FileSystem;
 using KyberWeave.Core.Squad.Deployment;
 using KyberWeave.Core.Squad.Rendering;
 
-namespace KyberWeave.Cli.Update;
+namespace KyberWeave.Application.Update;
 
 /// <summary>
 /// Default arbiter-hook refresh: re-renders hooks for each enabled project through the Squad
@@ -311,8 +311,8 @@ internal sealed class ArbiterHookRefresher(
         {
             string rendered = target switch
             {
-                SquadTarget.Kilo => ArbiterPluginShim.Render("kilo", SquadDeploymentScope.Global),
-                SquadTarget.OpenCode => ArbiterPluginShim.Render("opencode", SquadDeploymentScope.Global),
+                SquadTarget.Kilo => ArbiterPluginShim.Render(HarnessRegistry.KiloToken, SquadDeploymentScope.Global),
+                SquadTarget.OpenCode => ArbiterPluginShim.Render(HarnessRegistry.OpenCodeToken, SquadDeploymentScope.Global),
                 SquadTarget.Pi => PiRenderer.RenderArbiterExtension(timeoutSeconds, SquadDeploymentScope.Global),
                 SquadTarget.Copilot => Encoding.UTF8.GetString(
                     CopilotRenderer.RenderCliHooksFile(timeoutSeconds, SquadDeploymentScope.Global, "hooks/kyber-arbiter.json").Content.Span),

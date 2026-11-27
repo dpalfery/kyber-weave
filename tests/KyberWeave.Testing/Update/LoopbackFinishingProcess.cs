@@ -1,6 +1,7 @@
-using KyberWeave.Cli.Update;
 using KyberWeave.Contracts.Repositories;
 using KyberWeave.Core.Processes;
+using KyberWeave.Application.Update;
+using KyberWeave.Domain.Update;
 
 namespace KyberWeave.Testing.Update;
 

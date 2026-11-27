@@ -1,3 +1,4 @@
+using KyberWeave.Core;
 namespace KyberWeave.Core.Review;
 
 /// <summary>Counts the changed lines of a review scope that count toward its size, and names the paths that do not.</summary>
@@ -20,8 +21,8 @@ public static class ReviewScopeRules
         ArgumentNullException.ThrowIfNull(path);
 
         string normalized = path.Replace('\\', '/');
-        if (normalized.Equals(".agent_scratchpad", StringComparison.OrdinalIgnoreCase) ||
-            normalized.StartsWith(".agent_scratchpad/", StringComparison.OrdinalIgnoreCase))
+        if (normalized.Equals(ScratchLayout.Root, StringComparison.OrdinalIgnoreCase) ||
+            normalized.StartsWith(ScratchLayout.Root + "/", StringComparison.OrdinalIgnoreCase))
         {
             return true;
         }

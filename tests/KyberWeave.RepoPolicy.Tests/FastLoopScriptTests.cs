@@ -74,6 +74,101 @@ public sealed class FastLoopScriptTests
     }
 
     /// <summary>
+    /// A filter that names no test in either project fails the loop: the unit total and the repository-policy total
+    /// are counted together for an explicit <c>--class</c> / <c>--method</c>, so a run that matched nothing cannot
+    /// read as clean.
+    /// </summary>
+    [Fact]
+    public void FilterThatMatchesNoTestInEitherProject_FailsTheLoop()
+    {
+        SkipIfBashUnavailable();
+        using FastLoopFixture fixture = new();
+        fixture.ReplaceDotnetStub(
+            """
+            #!/bin/sh
+            echo "dotnet $*" >> "$CALL_LOG"
+            case "$*" in
+              *tests/KyberWeave.Application.Tests/bin/*)
+                echo "Total: 0"
+                ;;
+              *tests/KyberWeave.RepoPolicy.Tests/bin/*)
+                echo "Total: 0"
+                ;;
+            esac
+            exit 0
+            """);
+
+        ProcessResult result = fixture.RunFastLoop("--class", "KyberWeave.Application.Tests.DoesNotExistTests");
+
+        Assert.Equal(1, result.ExitCode);
+        Assert.Contains("no unit or repository-policy tests ran; the filter matched nothing", result.StandardError, StringComparison.Ordinal);
+        Assert.Contains("KyberWeave.Application.Tests.DoesNotExistTests", result.StandardError, StringComparison.Ordinal);
+        Assert.DoesNotContain("Fast tier clean", result.StandardOutput, StringComparison.Ordinal);
+    }
+
+    /// <summary>
+    /// An explicit filter may select only repository-policy tests. The unit projects then report no total, and the
+    /// policy run's total is what proves the filter matched.
+    /// </summary>
+    [Fact]
+    public void FilterThatSelectsOnlyPolicyTests_Passes()
+    {
+        SkipIfBashUnavailable();
+        using FastLoopFixture fixture = new();
+        fixture.ReplaceDotnetStub(
+            """
+            #!/bin/sh
+            echo "dotnet $*" >> "$CALL_LOG"
+            case "$*" in
+              *tests/KyberWeave.RepoPolicy.Tests/bin/*)
+                echo "Total: 1, Passed: 1"
+                ;;
+              *tests/KyberWeave.*.Tests/bin/*)
+                echo "Total: 0"
+                ;;
+            esac
+            exit 0
+            """);
+
+        ProcessResult result = fixture.RunFastLoop("--class", "KyberWeave.Tests.ProcessSpawnSitesTests");
+
+        Assert.Equal(0, result.ExitCode);
+        Assert.Contains("KyberWeave.RepoPolicy.Tests.dll -class KyberWeave.Tests.ProcessSpawnSitesTests", fixture.GetCallLog(), StringComparison.Ordinal);
+        Assert.DoesNotContain("the filter matched nothing", result.StandardError, StringComparison.Ordinal);
+    }
+
+    /// <summary>
+    /// The touched routing reads a namespace that starts after leading whitespace, so the class it names is the
+    /// one the runner can match rather than the fallback namespace.
+    /// </summary>
+    [Fact]
+    public void TouchedReadsAnIndentedNamespaceAndNamesTheTestClass()
+    {
+        SkipIfBashUnavailable();
+        using FastLoopFixture fixture = new();
+
+        fixture.WriteProductSource("ReviewCycleService");
+        fixture.WriteChangedTestFile(
+            "KyberWeave.Application.Tests",
+            "Review/ReviewServiceSeamTests.cs",
+            """
+              namespace KyberWeave.Application.Tests.Review;
+
+            public sealed class ReviewServiceSeamTests
+            {
+                private ReviewCycleService? _service;
+            }
+            """);
+
+        ProcessResult result = fixture.RunFastLoop("--touched");
+        string log = fixture.GetCallLog();
+
+        Assert.Equal(0, result.ExitCode);
+        Assert.Contains("-class KyberWeave.Application.Tests.Review.ReviewServiceSeamTests", log, StringComparison.Ordinal);
+        Assert.DoesNotContain("-class KyberWeave.Tests.ReviewServiceSeamTests", log, StringComparison.Ordinal);
+    }
+
+    /// <summary>
     /// Editing markdown inside <c>dash/tray/ui/</c> must trigger documentation validation.
     /// </summary>
     [Fact]
@@ -318,7 +413,7 @@ public sealed class FastLoopScriptTests
             .Select(match => match.Groups[1].Value)
             .ToArray();
 
-        Assert.Equal(3, classes.Length);
+        Assert.Equal(4, classes.Length);
         Assert.All(classes, name => Assert.NotNull(typeof(FastLoopScriptTests).Assembly.GetType(name)));
     }
 
@@ -387,6 +482,24 @@ public sealed class FastLoopScriptTests
             string source = Path.Combine(Root, "src", "KyberWeave.Core", "Example.cs");
             Directory.CreateDirectory(Path.GetDirectoryName(source)!);
             File.WriteAllText(source, "namespace Example;\n");
+        }
+
+        /// <summary>Writes one product C# file declaring <paramref name="typeName"/>, so a test can reference it.</summary>
+        public void WriteProductSource(string typeName)
+        {
+            string source = Path.Combine(Root, "src", "KyberWeave.Core", "Example.cs");
+            Directory.CreateDirectory(Path.GetDirectoryName(source)!);
+            File.WriteAllText(
+                source,
+                $"namespace Example;\n\npublic sealed class {typeName}\n{{\n}}\n");
+        }
+
+        /// <summary>Writes one changed test file at a path relative to its project.</summary>
+        public void WriteChangedTestFile(string project, string relativePath, string content)
+        {
+            string path = Path.Combine(Root, "tests", project, relativePath);
+            Directory.CreateDirectory(Path.GetDirectoryName(path)!);
+            File.WriteAllText(path, content.ReplaceLineEndings("\n") + "\n");
         }
 
         /// <summary>Writes one changed unit-test file declaring <paramref name="className"/>.</summary>

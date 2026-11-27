@@ -1,4 +1,3 @@
-using KyberWeave.Cli.Commands.Squad.Infrastructure;
 using KyberWeave.Contracts.Host;
 using KyberWeave.Contracts.Paths;
 using KyberWeave.Contracts.Repositories;

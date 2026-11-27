@@ -1,3 +1,5 @@
+using KyberWeave.Core.FileSystem;
+
 namespace KyberWeave.Core.Docs.Mcp;
 
 /// <summary>How the repair wrote a file, which is what decides how removal undoes it.</summary>
@@ -57,7 +59,7 @@ public sealed record McpWiringReceiptRecord(
 public sealed class McpWiringReceipt
 {
     /// <summary>Where the receipt lives, relative to the repository root.</summary>
-    public const string RelativePath = ".kyber-weave/receipts/mcp-wiring.json";
+    public const string RelativePath = UserStatePaths.McpWiringReceiptRelativePath;
 
     /// <summary>The schema this code writes and understands.</summary>
     public const int SchemaVersion = 1;
@@ -74,11 +76,7 @@ public sealed class McpWiringReceipt
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(repositoryRoot);
 
-        return Path.Combine(
-            repositoryRoot,
-            ".kyber-weave",
-            "receipts",
-            "mcp-wiring.json");
+        return UserStatePaths.McpWiringReceiptFile(repositoryRoot);
     }
 
     /// <summary>
