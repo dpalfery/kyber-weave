@@ -37,6 +37,7 @@ public static class SquadSkillOutputPaths
         string name,
         IReadOnlySet<string> suppressedSkillIdentities)
     {
+        ArgumentNullException.ThrowIfNull(suppressedSkillIdentities);
         return target switch
         {
             SquadTarget.Copilot when !suppressedSkillIdentities.Contains(name) => $".github/skills/{name}/SKILL.md",

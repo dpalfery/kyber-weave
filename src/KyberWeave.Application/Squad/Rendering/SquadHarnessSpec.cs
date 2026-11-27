@@ -98,6 +98,8 @@ public static class SquadHarnessLowering
         string harnessToken,
         SquadModelPolicy policy)
     {
+        ArgumentNullException.ThrowIfNull(agent);
+        ArgumentNullException.ThrowIfNull(modelProfiles);
         if (policy == SquadModelPolicy.NotRendered || string.IsNullOrWhiteSpace(agent.ModelProfile))
         {
             return null;
@@ -122,16 +124,19 @@ public static class SquadHarnessLowering
     }
 
     /// <summary>Collapses a multi-line scalar onto one line, dropping blank lines.</summary>
-    public static string SingleLine(string value, SquadLineBreaks lineBreaks) =>
-        lineBreaks == SquadLineBreaks.Preserved ? value :
-        lineBreaks == SquadLineBreaks.LineFeedOnly
-            ? string.Join(
-                ' ',
-                value.Replace("\r\n", "\n", StringComparison.Ordinal)
-                    .Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
-            : string.Join(
-                " ",
-                value.Split(['\r', '\n'], StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries));
+    public static string SingleLine(string value, SquadLineBreaks lineBreaks)
+    {
+        ArgumentNullException.ThrowIfNull(value);
+        return lineBreaks == SquadLineBreaks.Preserved ? value :
+            lineBreaks == SquadLineBreaks.LineFeedOnly
+                ? string.Join(
+                    ' ',
+                    value.Replace("\r\n", "\n", StringComparison.Ordinal)
+                        .Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
+                : string.Join(
+                    " ",
+                    value.Split(['\r', '\n'], StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries));
+    }
 
     /// <summary>
     /// Splits a <c>&lt;model&gt;[reasoningEffort=&lt;level&gt;]</c> value into the bare model id and
@@ -146,6 +151,9 @@ public static class SquadHarnessLowering
         IReadOnlyList<string> allowedLevels,
         string harnessDisplayName)
     {
+        ArgumentNullException.ThrowIfNull(modelValue);
+        ArgumentNullException.ThrowIfNull(allowedLevels);
+
         // An empty level list is the harness's misconfiguration, not the operator's model value.
         if (allowedLevels.Count == 0)
         {
@@ -229,6 +237,7 @@ public sealed class SquadToolMap
         string profileName,
         IReadOnlyDictionary<string, SquadCapabilityProfile> capabilityProfiles)
     {
+        ArgumentNullException.ThrowIfNull(capabilityProfiles);
         HashSet<string> granted = new(_ungoverned, StringComparer.Ordinal);
         if (!capabilityProfiles.TryGetValue(profileName, out SquadCapabilityProfile? profile))
         {

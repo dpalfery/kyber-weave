@@ -56,6 +56,7 @@ public static class SquadWorkerBaselineInjector
     /// <exception cref="SquadRenderValidationException">The file does not carry exactly one non-empty block.</exception>
     public static string ExtractBlock(string text, string path)
     {
+        ArgumentNullException.ThrowIfNull(text);
         int openIndex = text.IndexOf(BlockOpen, StringComparison.Ordinal);
         int closeIndex = openIndex < 0
             ? -1

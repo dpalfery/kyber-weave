@@ -34,6 +34,7 @@ public static class StatusLineTargetRootsExtensions
     /// </remarks>
     public static string ResolveHarnessRoot(this StatusLineTargetRoots roots, StatusLineTarget target)
     {
+        ArgumentNullException.ThrowIfNull(roots);
         RequireDefinedTarget(target);
         return target switch
         {
