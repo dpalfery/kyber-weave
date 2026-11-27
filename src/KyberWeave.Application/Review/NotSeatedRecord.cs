@@ -42,9 +42,12 @@ public static class NotSeatedRecord
     }
 
     /// <summary>The cycle number in a <c>cycle-&lt;n&gt;</c> folder name, or zero when the name is not one.</summary>
-    public static int CycleNumber(string folderName) =>
-        folderName.StartsWith(ScratchLayout.CycleFolderPrefix, StringComparison.Ordinal)
+    public static int CycleNumber(string folderName)
+    {
+        ArgumentNullException.ThrowIfNull(folderName);
+        return folderName.StartsWith(ScratchLayout.CycleFolderPrefix, StringComparison.Ordinal)
         && int.TryParse(folderName.AsSpan(ScratchLayout.CycleFolderPrefix.Length), System.Globalization.NumberStyles.None, System.Globalization.CultureInfo.InvariantCulture, out int n)
             ? n
             : 0;
+    }
 }
