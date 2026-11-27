@@ -306,8 +306,11 @@ public class CostBasisJsonConverter : JsonConverter<CostBasis>
         CanonModelWireStrings.ParseCostBasis(reader.GetString());
 
     /// <inheritdoc />
-    public override void Write(Utf8JsonWriter writer, CostBasis value, JsonSerializerOptions options) =>
+    public override void Write(Utf8JsonWriter writer, CostBasis value, JsonSerializerOptions options)
+    {
+        ArgumentNullException.ThrowIfNull(writer);
         writer.WriteStringValue(value.ToWireString());
+    }
 }
 
 /// <summary>Serializes <see cref="CostStatus"/> using wire strings.</summary>
@@ -318,8 +321,11 @@ public class CostStatusJsonConverter : JsonConverter<CostStatus>
         CanonModelWireStrings.ParseCostStatus(reader.GetString());
 
     /// <inheritdoc />
-    public override void Write(Utf8JsonWriter writer, CostStatus value, JsonSerializerOptions options) =>
+    public override void Write(Utf8JsonWriter writer, CostStatus value, JsonSerializerOptions options)
+    {
+        ArgumentNullException.ThrowIfNull(writer);
         writer.WriteStringValue(value.ToWireString());
+    }
 }
 
 /// <summary>Serializes <see cref="ProblemSeverity"/> using wire strings.</summary>
@@ -330,6 +336,9 @@ public class ProblemSeverityJsonConverter : JsonConverter<ProblemSeverity>
         CanonModelWireStrings.ParseProblemSeverity(reader.GetString());
 
     /// <inheritdoc />
-    public override void Write(Utf8JsonWriter writer, ProblemSeverity value, JsonSerializerOptions options) =>
+    public override void Write(Utf8JsonWriter writer, ProblemSeverity value, JsonSerializerOptions options)
+    {
+        ArgumentNullException.ThrowIfNull(writer);
         writer.WriteStringValue(value.ToWireString());
+    }
 }

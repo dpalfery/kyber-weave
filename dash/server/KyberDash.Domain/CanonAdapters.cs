@@ -584,6 +584,9 @@ public static class CanonAdapters
     /// <returns>The attribute text, or <see langword="null"/> when no listed key carries text.</returns>
     public static string? ReadText(IReadOnlyDictionary<string, JsonElement> attributes, IReadOnlyList<string> keys)
     {
+        ArgumentNullException.ThrowIfNull(attributes);
+        ArgumentNullException.ThrowIfNull(keys);
+
         foreach (string key in keys)
         {
             if (!attributes.TryGetValue(key, out JsonElement element))
