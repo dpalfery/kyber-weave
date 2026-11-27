@@ -32,6 +32,8 @@ public sealed class DocsIntegrityCheckCommand : Command<DocsIntegrityCheckSettin
 
     public override int Execute(CommandContext context, DocsIntegrityCheckSettings settings, CancellationToken cancellationToken)
     {
+        ArgumentNullException.ThrowIfNull(settings);
+
         try
         {
             DocumentationAnalysisResult result = _service.Analyze(settings);
@@ -83,6 +85,8 @@ public sealed class DocsReviewExportCommand : Command<DocsReviewExportSettings>
 
     public override int Execute(CommandContext context, DocsReviewExportSettings settings, CancellationToken cancellationToken)
     {
+        ArgumentNullException.ThrowIfNull(settings);
+
         try
         {
             ArgumentException.ThrowIfNullOrWhiteSpace(settings.OutputPath);
@@ -126,6 +130,8 @@ public sealed class DocsReviewImportCommand : Command<DocsReviewImportSettings>
 
     public override int Execute(CommandContext context, DocsReviewImportSettings settings, CancellationToken cancellationToken)
     {
+        ArgumentNullException.ThrowIfNull(settings);
+
         try
         {
             ArgumentException.ThrowIfNullOrWhiteSpace(settings.InputPath);

@@ -42,6 +42,7 @@ public static class CommandHelpers
         out string? resolvedConfigPath)
     {
         ArgumentNullException.ThrowIfNull(configs);
+        ArgumentNullException.ThrowIfNull(report);
 
         KyberWeaveConfigLoadResult result = configs.TryLoad(repoRoot, configPath);
         resolvedConfigPath = result.ConfigPath;
@@ -92,6 +93,8 @@ public static class CommandHelpers
         string subjectLabel)
     {
         ArgumentNullException.ThrowIfNull(console);
+        ArgumentNullException.ThrowIfNull(report);
+        ArgumentNullException.ThrowIfNull(settings);
 
         if (settings.NoInfo)
         {

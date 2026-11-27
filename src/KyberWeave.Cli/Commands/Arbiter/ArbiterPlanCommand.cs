@@ -29,6 +29,8 @@ public sealed class ArbiterPlanCommand(
     /// </summary>
     public override int Execute(CommandContext context, ArbiterSettings settings, CancellationToken cancellationToken)
     {
+        ArgumentNullException.ThrowIfNull(settings);
+
         DiagnosticReport report = new();
         string root = planArguments.RepositoryRootFor(settings.Path, settings.WorkingDirectory);
         if (!planArguments.TryResolve(root, PlanArguments.ConfigForResolving(root, settings.Config, configs), files, settings.Path, settings.WorkingDirectory, "arbiter plan", report, out string relative))

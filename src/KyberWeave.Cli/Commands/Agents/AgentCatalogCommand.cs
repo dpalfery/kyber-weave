@@ -14,6 +14,8 @@ public sealed class AgentCatalogCommand(IAgentGovernanceService agents, IKyberWe
     /// <inheritdoc />
     public override int Execute(CommandContext context, AgentCatalogSettings settings, CancellationToken cancellationToken)
     {
+        ArgumentNullException.ThrowIfNull(settings);
+
         DiagnosticReport report = new DiagnosticReport();
         if (!CommandHelpers.TryLoadConfig(configs, settings.Path, settings.Config, report, out KyberWeaveConfig config))
         {

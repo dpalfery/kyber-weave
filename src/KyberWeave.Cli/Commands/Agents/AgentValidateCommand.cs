@@ -10,6 +10,8 @@ public sealed class AgentValidateCommand(IAgentGovernanceService agents, IAnsiCo
     /// <inheritdoc />
     public override int Execute(CommandContext context, AgentCommandSettings settings, CancellationToken cancellationToken)
     {
+        ArgumentNullException.ThrowIfNull(settings);
+
         AgentAnalysis analysis = agents.Validate(settings.Path, settings.Harness);
         DiagnosticReport report = analysis.Report;
 
