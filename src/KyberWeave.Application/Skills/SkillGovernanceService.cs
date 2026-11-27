@@ -139,9 +139,9 @@ public sealed class SkillGovernanceService(
 
         foreach (SkillLoadResult r in results)
         {
-            if (r.Success)
+            if (r.Success && r.Skill is { } skill)
             {
-                skills.Add(r.Skill!);
+                skills.Add(skill);
             }
             else
             {
