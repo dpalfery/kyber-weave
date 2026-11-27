@@ -3584,7 +3584,8 @@ public abstract class KyberBridgeEngineSections : KyberBridgeEngineSessionSectio
         IReadOnlyList<StoredExecution> executions = projections.ListExecutionsForRun(runId);
         HashSet<string> runSessionIds = [.. executions
             .Select(static e => e.SessionId)
-            .OfType<string>()];
+            .OfType<string>()
+            .Where(static id => id.Length > 0)];
         // A derived run groups sessions rather than being named on the finding rows, so a run's
         // findings are the ones naming the run or any of its sessions.
         List<StoredFinding> findings = [.. projections.ListFindings()
