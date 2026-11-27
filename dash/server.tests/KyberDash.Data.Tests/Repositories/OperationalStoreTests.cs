@@ -7,11 +7,13 @@ using System.Text;
 using KyberDash.Application.Tests.Fakes;
 using KyberDash.Contracts.Repositories;
 using KyberDash.Core.Exceptions;
+using KyberDash.Core.Repositories;
 using KyberDash.Core.Resilience;
 using KyberDash.Data.Collector;
 using KyberDash.Data.Repositories;
 using KyberDash.Domain;
 using KyberDash.Domain.Schema;
+using Microsoft.Data.Sqlite;
 using Xunit;
 
 namespace KyberDash.Data.Tests.Repositories;
@@ -71,7 +73,6 @@ public class OperationalStoreTests : IDisposable
         ScriptedSqliteRelationalStore scriptedAbsent = new(
             Path.Combine(directory.Path, "scripted-absent", "canon.db"),
             new SqliteCircuitBreaker());
-        scriptedAbsent.EnqueueResponse(string.Empty);
         Assert.Null(scriptedAbsent.GetStoreState());
 
         sqlite.ClearRecordedSql();
@@ -683,16 +684,8 @@ public class OperationalStoreTests : IDisposable
             Assert.DoesNotContain("json_object(", sql, StringComparison.OrdinalIgnoreCase);
             Assert.DoesNotContain("json_array(", sql, StringComparison.OrdinalIgnoreCase);
             Assert.DoesNotContain("json_each(", sql, StringComparison.OrdinalIgnoreCase);
-            string normalized = sql.Replace("\r\n", "\n", StringComparison.Ordinal);
-            if (normalized.StartsWith("PRAGMA foreign_keys = ON;\nBEGIN IMMEDIATE;\n", StringComparison.Ordinal))
-            {
-                Assert.EndsWith("\nCOMMIT;\n", normalized, StringComparison.Ordinal);
-            }
-            else
-            {
-                Assert.Contains(".headers off", normalized, StringComparison.Ordinal);
-                Assert.Contains(".mode tabs", normalized, StringComparison.Ordinal);
-            }
+            Assert.DoesNotContain(".headers off", sql, StringComparison.Ordinal);
+            Assert.DoesNotContain(".mode tabs", sql, StringComparison.Ordinal);
         }
     }
 
@@ -790,29 +783,54 @@ public class OperationalStoreTests : IDisposable
         public void ClearRecordedSql() => executedSql.Clear();
 
         /// <summary>Reads <c>PRAGMA freelist_count</c>, the pages a delete leaves that only a vacuum reclaims.</summary>
-        public long FreelistPageCount() =>
-            long.Parse(ExecuteSqliteCore("PRAGMA freelist_count;\n").Trim(), System.Globalization.CultureInfo.InvariantCulture);
+        public long FreelistPageCount()
+        {
+            IReadOnlyList<long> rows = QueryRows<long>(
+                "PRAGMA freelist_count;\n",
+                new Dictionary<string, object?>(StringComparer.Ordinal),
+                static reader => reader.GetInt64(reader.GetOrdinal("freelist_count")));
+            return rows.Count == 0 ? 0L : rows[0];
+        }
 
-        protected override string ExecuteSqliteCore(string sql)
+        protected override IReadOnlyList<T> QueryRows<T>(
+            string sql,
+            IReadOnlyDictionary<string, object?> parameters,
+            Func<SqliteDataReader, T> map)
         {
             executedSql.Add(sql);
-            return base.ExecuteSqliteCore(sql);
+            return base.QueryRows(sql, parameters, map);
+        }
+
+        protected override void ExecuteStatements(IReadOnlyList<SqlStatement> statements)
+        {
+            foreach (SqlStatement statement in statements)
+            {
+                executedSql.Add(statement.Sql);
+            }
+
+            base.ExecuteStatements(statements);
         }
     }
 
     private class ScriptedSqliteRelationalStore : SqliteRelationalStore
     {
-        private readonly Queue<string> responses = new();
-
         public ScriptedSqliteRelationalStore(string databasePath, ICircuitBreaker circuitBreaker)
             : base(databasePath, circuitBreaker, initialize: false)
         {
         }
 
-        public void EnqueueResponse(string response) => responses.Enqueue(response);
+        protected override IReadOnlyList<T> QueryRows<T>(
+            string sql,
+            IReadOnlyDictionary<string, object?> parameters,
+            Func<SqliteDataReader, T> map) => [];
 
-        protected override string ExecuteSqliteCore(string sql) =>
-            responses.Count > 0 ? responses.Dequeue() : string.Empty;
+        protected override void ExecuteStatements(IReadOnlyList<SqlStatement> statements)
+        {
+        }
+
+        protected override void ExecuteStatementsWithoutTransaction(IReadOnlyList<SqlStatement> statements)
+        {
+        }
     }
 
     private class RecordingSqliteRelationalStore : SqliteRelationalStore
@@ -828,10 +846,25 @@ public class OperationalStoreTests : IDisposable
 
         public void ClearRecordedSql() => executedSql.Clear();
 
-        protected override string ExecuteSqliteCore(string sql)
+        protected override IReadOnlyList<T> QueryRows<T>(
+            string sql,
+            IReadOnlyDictionary<string, object?> parameters,
+            Func<SqliteDataReader, T> map)
         {
             executedSql.Add(sql);
-            return string.Empty;
+            return [];
+        }
+
+        protected override void ExecuteStatements(IReadOnlyList<SqlStatement> statements)
+        {
+            foreach (SqlStatement statement in statements)
+            {
+                executedSql.Add(statement.Sql);
+            }
+        }
+
+        protected override void ExecuteStatementsWithoutTransaction(IReadOnlyList<SqlStatement> statements)
+        {
         }
     }
 }

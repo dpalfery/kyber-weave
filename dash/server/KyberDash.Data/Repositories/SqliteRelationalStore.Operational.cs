@@ -7,6 +7,7 @@ using KyberDash.Contracts.Repositories;
 using KyberDash.Core.Exceptions;
 using KyberDash.Data.Collector;
 using KyberDash.Domain;
+using Microsoft.Data.Sqlite;
 
 namespace KyberDash.Data.Repositories;
 
@@ -39,20 +40,15 @@ public partial class SqliteRelationalStore : IOperationalStore
             "COALESCE((SELECT hosted FROM operator_setting_receiver WHERE singleton_id = 1), 0) AS hosted, " +
             "COALESCE((SELECT port FROM operator_setting_dashboard WHERE singleton_id = 1), 4747) AS port;\n";
 
-        if (GetType() != typeof(SqliteRelationalStore))
-        {
-            return ReadScriptedSettings(sql);
-        }
-
-        IReadOnlyList<SettingsView> rows = Query<SettingsView>(
+        IReadOnlyList<SettingsView> rows = QueryRows<SettingsView>(
             sql,
             NewParameters(),
             reader => new SettingsView(
-                FolderImportScheduled: reader.GetInt64(reader.GetOrdinal("scheduled")) != 0,
-                JobsPaused: reader.GetInt64(reader.GetOrdinal("paused")) != 0,
-                RefreshCadenceMinutes: reader.GetInt32(reader.GetOrdinal("minutes")),
-                ReceiverHosted: reader.GetInt64(reader.GetOrdinal("hosted")) != 0,
-                DashboardPort: reader.GetInt32(reader.GetOrdinal("port"))));
+                FolderImportScheduled: ParseBoolFlag(CellText(reader, "scheduled"), "operator_setting_folder_import.scheduled"),
+                JobsPaused: ParseBoolFlag(CellText(reader, "paused"), "operator_setting_jobs.paused"),
+                RefreshCadenceMinutes: ParseInt32Required(CellText(reader, "minutes"), "operator_setting_refresh_cadence.minutes"),
+                ReceiverHosted: ParseBoolFlag(CellText(reader, "hosted"), "operator_setting_receiver.hosted"),
+                DashboardPort: ParseInt32Required(CellText(reader, "port"), "operator_setting_dashboard.port")));
 
         if (rows.Count != 1)
         {
@@ -90,17 +86,12 @@ public partial class SqliteRelationalStore : IOperationalStore
         string sql =
             "SELECT schema_version, detector_version FROM store_state WHERE singleton_id = 1 LIMIT 1;\n";
 
-        if (GetType() != typeof(SqliteRelationalStore))
-        {
-            return ReadScriptedStoreState(sql);
-        }
-
-        IReadOnlyList<StoreStateView> rows = Query<StoreStateView>(
+        IReadOnlyList<StoreStateView> rows = QueryRows<StoreStateView>(
             sql,
             NewParameters(),
             reader => new StoreStateView(
-                reader.GetInt32(reader.GetOrdinal("schema_version")),
-                reader.GetInt32(reader.GetOrdinal("detector_version"))));
+                ParseInt32Required(CellText(reader, "schema_version"), "store_state.schema_version"),
+                ParseInt32Required(CellText(reader, "detector_version"), "store_state.detector_version")));
         return rows.Count == 0 ? null : rows[0];
     }
 
@@ -1049,37 +1040,9 @@ public partial class SqliteRelationalStore : IOperationalStore
         }
     }
 
-    private SettingsView ReadScriptedSettings(string sql)
-    {
-        string output = CircuitBreaker.Execute(() => ExecuteSqliteCore(TabReadScriptHeader + sql));
-        List<string> lines = [.. output.Split('\n', StringSplitOptions.RemoveEmptyEntries)];
-        if (lines.Count != 1)
-        {
-            throw new StoredDataException($"Expected single scalar row from operator_setting query, got {lines.Count}.");
-        }
-
-        string[] cols = SplitTabLine(lines[0], 5, "operator_setting");
-        return new SettingsView(
-            FolderImportScheduled: ParseBoolFlag(cols[0], "operator_setting_folder_import.scheduled"),
-            JobsPaused: ParseBoolFlag(cols[1], "operator_setting_jobs.paused"),
-            RefreshCadenceMinutes: ParseInt32Required(cols[2], "operator_setting_refresh_cadence.minutes"),
-            ReceiverHosted: ParseBoolFlag(cols[3], "operator_setting_receiver.hosted"),
-            DashboardPort: ParseInt32Required(cols[4], "operator_setting_dashboard.port"));
-    }
-
-    private StoreStateView? ReadScriptedStoreState(string sql)
-    {
-        string output = CircuitBreaker.Execute(() => ExecuteSqliteCore(TabReadScriptHeader + sql));
-        foreach (string line in output.Split('\n', StringSplitOptions.RemoveEmptyEntries))
-        {
-            string[] cols = SplitTabLine(line, 2, "store_state");
-            return new StoreStateView(
-                ParseInt32Required(cols[0], "store_state.schema_version"),
-                ParseInt32Required(cols[1], "store_state.detector_version"));
-        }
-
-        return null;
-    }
+    private static string CellText(SqliteDataReader reader, string columnName) =>
+        Convert.ToString(reader.GetValue(reader.GetOrdinal(columnName)), CultureInfo.InvariantCulture)
+        ?? string.Empty;
 
     private string? ReadSingletonText(string tableName, string columnName)
     {

@@ -14,8 +14,6 @@ namespace KyberDash.Data.Repositories;
 
 public partial class SqliteRelationalStore : IRelationalStoreReader
 {
-    private const string TabReadScriptHeader = ".headers off\n.mode tabs\n";
-
     /// <summary>
     /// Joins a record (alias <c>r</c>) to its source row. An inner join, because
     /// <c>record.source_id</c> is a required foreign key: a record always has a source, and one
@@ -5026,6 +5024,7 @@ public partial class SqliteRelationalStore : IRelationalStoreReader
         ArgumentNullException.ThrowIfNull(sql);
         ArgumentNullException.ThrowIfNull(parameters);
         ArgumentNullException.ThrowIfNull(map);
+        EnsureDatabaseDirectoryIfMissing();
         return Query(sql, parameters, map);
     }
 
@@ -5036,70 +5035,6 @@ public partial class SqliteRelationalStore : IRelationalStoreReader
         string name = "$p" + parameters.Count.ToString(CultureInfo.InvariantCulture);
         parameters.Add(name, value);
         return name;
-    }
-
-    private static string[] SplitTabLine(string line, int expectedColumns, string context)
-    {
-        string[] cols = line.Split('\t');
-        if (cols.Length != expectedColumns)
-        {
-            throw new StoredDataException(
-                $"Expected {expectedColumns.ToString(CultureInfo.InvariantCulture)} columns for {context}, got {cols.Length.ToString(CultureInfo.InvariantCulture)}.");
-        }
-
-        return cols;
-    }
-
-    private static string ParseHexRequired(string hexCell, string columnName)
-    {
-        try
-        {
-            return DecodeHexText(hexCell);
-        }
-        catch (FormatException ex)
-        {
-            throw new StoredDataException($"Invalid hexadecimal UTF-8 payload in '{columnName}': '{hexCell}'.", ex);
-        }
-    }
-
-    private static string? ParseNullableHex(string typeCell, string hexCell, string columnName)
-    {
-        if (string.Equals(typeCell, "null", StringComparison.Ordinal))
-        {
-            return null;
-        }
-
-        if (string.Equals(typeCell, "text", StringComparison.Ordinal))
-        {
-            return ParseHexRequired(hexCell, columnName);
-        }
-
-        throw new StoredDataException($"Unexpected SQLite storage type '{typeCell}' for nullable text column '{columnName}'.");
-    }
-
-    private static long ParseInt64Required(string cell, string columnName)
-    {
-        if (long.TryParse(cell, NumberStyles.Integer, CultureInfo.InvariantCulture, out long value))
-        {
-            return value;
-        }
-
-        throw new StoredDataException($"Invalid integer value '{cell}' for '{columnName}'.");
-    }
-
-    private static long? ParseNullableInt64(string typeCell, string valCell, string columnName)
-    {
-        if (string.Equals(typeCell, "null", StringComparison.Ordinal))
-        {
-            return null;
-        }
-
-        if (string.Equals(typeCell, "integer", StringComparison.Ordinal))
-        {
-            return ParseInt64Required(valCell, columnName);
-        }
-
-        throw new StoredDataException($"Unexpected SQLite storage type '{typeCell}' for nullable integer column '{columnName}'.");
     }
 
     private static int ParseInt32Required(string cell, string columnName)
@@ -5118,32 +5053,6 @@ public partial class SqliteRelationalStore : IRelationalStoreReader
         "1" => true,
         _ => throw new StoredDataException($"Invalid boolean flag '{cell}' for '{columnName}'."),
     };
-
-    private static double ParseDoubleRequired(string cell, string columnName)
-    {
-        if (double.TryParse(cell, NumberStyles.Float | NumberStyles.AllowThousands, CultureInfo.InvariantCulture, out double value) &&
-            double.IsFinite(value))
-        {
-            return value;
-        }
-
-        throw new StoredDataException($"Invalid finite floating-point value '{cell}' for '{columnName}'.");
-    }
-
-    private static double? ParseNullableDouble(string typeCell, string valCell, string columnName)
-    {
-        if (string.Equals(typeCell, "null", StringComparison.Ordinal))
-        {
-            return null;
-        }
-
-        if (typeCell is "real" or "integer")
-        {
-            return ParseDoubleRequired(valCell, columnName);
-        }
-
-        throw new StoredDataException($"Unexpected SQLite storage type '{typeCell}' for nullable real column '{columnName}'.");
-    }
 
     private static string? ReadNullableString(SqliteDataReader reader, string columnName)
     {
