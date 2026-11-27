@@ -244,21 +244,17 @@ public static class TriggerFactBuilder
                 // read: its host facts name the planning indexes, and the worker is told to
                 // use that prompt, not a plan (Req 9.18). Only the hook's own record of the
                 // insertion exempts it, because a conductor can type the prompt's tags too.
-                "delegation.planning-paths" => promptInserted
-                    ? []
-                    : PlanReadInstruction.NamesPathUnder(PlanReadInstruction.WithoutRoutingMetadata(stripped), planningDirs),
+                "delegation.planning-paths" => PlanningPaths(promptInserted, stripped, planningDirs),
                 "delegation.plan-file" => planFile,
                 // Absent (null) unless PLAN_FILE was present but failed validation or repeated.
-                "delegation.plan-file-rejected" => block.RejectedNames.Contains(DispatchHeaders.PlanFile) ? true : null,
+                "delegation.plan-file-rejected" => RejectedFlag(block),
                 "delegation.task" => task,
                 "delegation.markers" => marker,
                 "config.planning-dirs" => planningDirs,
                 // A machine fact: whether the host's task gates resolve any gate for the agent that returned and
                 // the technology the dispatch names, by the same resolver the gate run uses. A host whose gates
                 // are keyed only by technology must not read as having none.
-                "config.task-gates-declared" => target is not null
-                                                && TaskGateResolver.Resolve(
-                                                    config.Review, target, technology, parentTechnology).Gates.Count > 0,
+                "config.task-gates-declared" => TaskGatesDeclared(config, target, technology, parentTechnology),
                 "lens.name" => lens,
                 "lens.applicability" => applicability,
                 "finding.id" => finding is null ? null : refute,
@@ -279,6 +275,25 @@ public static class TriggerFactBuilder
 
         return facts;
     }
+
+    /// <summary>The planning paths a dispatch names, unless the hook inserted the prompt and so already routed it.</summary>
+    private static IReadOnlyList<string> PlanningPaths(bool promptInserted, string stripped, IReadOnlyList<string> planningDirs) =>
+        promptInserted
+            ? []
+            : PlanReadInstruction.NamesPathUnder(PlanReadInstruction.WithoutRoutingMetadata(stripped), planningDirs);
+
+    /// <summary>True when PLAN_FILE was present but failed validation or was repeated, otherwise null.</summary>
+    private static bool? RejectedFlag(HeaderBlock block) =>
+        block.RejectedNames.Contains(DispatchHeaders.PlanFile) ? true : null;
+
+    /// <summary>Whether the task's gates resolve any gate for the returning agent and technology.</summary>
+    private static bool TaskGatesDeclared(
+        KyberWeaveConfig config,
+        string? target,
+        string? technology,
+        string? parentTechnology) =>
+        target is not null
+        && TaskGateResolver.Resolve(config.Review, target, technology, parentTechnology).Gates.Count > 0;
 
     /// <summary>
     /// Narrows <c>config.task-gates-declared</c> to the gates that apply to the task's files (D10): the fact stays
