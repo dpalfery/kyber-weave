@@ -339,6 +339,83 @@ public sealed class FixPacketWriterTests : IDisposable
             StringComparison.Ordinal);
     }
 
+    /// <summary>
+    /// A finding whose fix must change a file another task owns and the file it anchors on are one packet, owned by the
+    /// first of those tasks in plan order. The packet and its dispatch name the other task's files, so the worker may
+    /// edit them and the Arbiter's scope check reads them as part of this fix.
+    /// </summary>
+    [Fact]
+    public void AFindingThatSpansTwoTasksFilesIsOnePacketThatNamesTheOtherTasksFiles()
+    {
+        WritePlan("""
+            schema-version: 1
+            plan: docs/plans/demo.md
+            tasks:
+              - id: T2
+                files:
+                  - src/Contract/OrderDto.cs
+              - id: T3
+                files:
+                  - src/Http/OrdersController.cs
+            """);
+        ScriptChange(Plan, "src/Contract/OrderDto.cs", "src/Http/OrdersController.cs");
+
+        FixPacketOutcome outcome = Write(
+            [
+                Finding(
+                    "contract/page-envelope",
+                    "src/Contract/OrderDto.cs",
+                    evidence: "src/Http/OrdersController.cs:40 returns totalCount under page, and the page reads it at the root.")
+            ],
+            []);
+
+        string block = Assert.Single(outcome.DispatchBlocks);
+        Assert.Equal("T2", GroupOf(block));
+        string packet = Read("task-T2");
+        Assert.Contains("### contract/page-envelope", packet, StringComparison.Ordinal);
+        Assert.Contains(
+            "This fix may also edit task T3's files: src/Http/OrdersController.cs.",
+            packet,
+            StringComparison.Ordinal);
+        Assert.Contains("Also in scope (task T3): src/Http/OrdersController.cs\n", block, StringComparison.Ordinal);
+        Assert.False(PacketExists("task-T3"));
+    }
+
+    /// <summary>Findings that touch the same file are one fix even when the file is cited from another task's file.</summary>
+    [Fact]
+    public void FindingsThatShareAFileAreOnePacket()
+    {
+        WritePlan("""
+            schema-version: 1
+            plan: docs/plans/demo.md
+            tasks:
+              - id: T2
+                files:
+                  - src/Contract/OrderDto.cs
+              - id: T3
+                files:
+                  - src/Http/OrdersController.cs
+            """);
+        ScriptChange(Plan, "src/Contract/OrderDto.cs", "src/Http/OrdersController.cs");
+
+        FixPacketOutcome outcome = Write(
+            [
+                Finding(
+                    "contract/page-envelope",
+                    "src/Contract/OrderDto.cs",
+                    evidence: "src/Http/OrdersController.cs:40 returns the envelope."),
+                Finding("http/page-envelope", "src/Http/OrdersController.cs")
+            ],
+            []);
+
+        string block = Assert.Single(outcome.DispatchBlocks);
+        Assert.Equal("T2", GroupOf(block));
+        string packet = Read("task-T2");
+        Assert.Contains("### contract/page-envelope", packet, StringComparison.Ordinal);
+        Assert.Contains("### http/page-envelope", packet, StringComparison.Ordinal);
+        Assert.False(PacketExists("task-T3"));
+    }
+
     /// <summary>A packet that cannot be written is reported, and the blocks of the packets already written are kept.</summary>
     [Fact]
     public void APacketThatCannotBeWrittenKeepsTheBlocksOfThePacketsBeforeIt()
@@ -484,7 +561,11 @@ public sealed class FixPacketWriterTests : IDisposable
     private bool PacketExists(string name) => _services.Files.FileExists(PacketFile(name));
 
     private static ReviewFinding Finding(
-        string id, string file, int line = 12, string claim = "The loop bound excludes the final element.") =>
+        string id,
+        string file,
+        int line = 12,
+        string claim = "The loop bound excludes the final element.",
+        string? evidence = "src/Foo.cs:12") =>
         new(
             id,
             "correctness",
@@ -494,7 +575,7 @@ public sealed class FixPacketWriterTests : IDisposable
             line,
             "if (i < count)",
             claim,
-            "src/Foo.cs:12",
+            evidence,
             "The last element is never processed.",
             "Use <= or count + 1.",
             Kind: FindingKind.Defect,

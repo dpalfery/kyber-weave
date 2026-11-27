@@ -283,15 +283,28 @@ internal static class FixPacketWriter
     /// The packets of one round: each task with findings, in plan order, then <c>unassigned</c>, then <c>docs</c>, so
     /// the documentation fix is dispatched after every code fix it describes.
     /// </summary>
+    /// <remarks>
+    /// A fix is grouped by the files it touches, not by the file the finding anchors on: a finding whose fix also
+    /// changes a file another task owns, and findings that touch the same file, must reach one packet or neither half
+    /// compiles. The first of those tasks in plan order owns the packet and names the other tasks' files it may edit.
+    /// </remarks>
     private static List<Packet> Group(
         IReadOnlyList<ReviewFinding> findings,
         IReadOnlyList<GateResult> gates,
         IReadOnlyList<PlanTaskFileEntry> tasks)
     {
+        Dictionary<string, int> planOrder = [];
+        for (int index = 0; index < tasks.Count; index++)
+        {
+            if (tasks[index].Id is { } id && !planOrder.ContainsKey(id))
+                planOrder[id] = index;
+        }
+
         Dictionary<string, Packet> byTask = new(StringComparer.Ordinal);
         List<ReviewFinding> docs = [];
         List<ReviewFinding> unassigned = [];
         List<GateResult> unassignedGates = [.. gates];
+        List<OwnedFinding> owned = [];
 
         foreach (ReviewFinding finding in findings)
         {
@@ -308,17 +321,35 @@ internal static class FixPacketWriter
                 continue;
             }
 
-            string id = owners[0].Id!;
-            if (!byTask.TryGetValue(id, out Packet? packet))
-                byTask[id] = packet = new Packet(PacketKind.Task, id, [], []);
-            packet.Findings.Add(finding);
+            owned.Add(new OwnedFinding(finding, TouchedFiles(finding, tasks)));
+        }
 
-            // The first task in plan order owns the file; the others are named so a worker knows where else it is in scope.
-            foreach (PlanTaskFileEntry other in owners.Skip(1))
+        foreach (IReadOnlyList<OwnedFinding> component in Components(owned))
+        {
+            List<TouchedFile> touched = [.. component.SelectMany(entry => entry.Touched).DistinctBy(file => file.Path)];
+            string ownerId = touched
+                .SelectMany(file => file.Owners)
+                .MinBy(task => planOrder[task.Id!])!.Id!;
+            if (!byTask.TryGetValue(ownerId, out Packet? packet))
+                byTask[ownerId] = packet = new Packet(PacketKind.Task, ownerId, [], []);
+
+            foreach (OwnedFinding entry in component)
             {
-                string note = $"{Normalize(finding.File)} is also listed by task {other.Id} in the plan's task file.";
-                if (!packet.Notes.Contains(note, StringComparer.Ordinal))
-                    packet.Notes.Add(note);
+                packet.Findings.Add(entry.Finding);
+
+                // The first task in plan order owns the file; the others are named so a worker knows where else it is in scope.
+                foreach (PlanTaskFileEntry other in Owners(tasks, entry.Finding.File).Skip(1))
+                {
+                    string note = $"{Normalize(entry.Finding.File)} is also listed by task {other.Id} in the plan's task file.";
+                    if (!packet.Notes.Contains(note, StringComparer.Ordinal))
+                        packet.Notes.Add(note);
+                }
+            }
+
+            foreach (TouchedFile file in touched.Where(file => file.Owners.All(task => task.Id != ownerId)))
+            {
+                foreach (PlanTaskFileEntry other in file.Owners)
+                    packet.AddAlsoInScope(other.Id!, file.Path);
             }
         }
 
@@ -334,6 +365,78 @@ internal static class FixPacketWriter
         if (docs.Count > 0)
             packets.Add(new Packet(PacketKind.Docs, DocsGroup, docs, []));
         return packets;
+    }
+
+    /// <summary>The findings whose fix touches one set of files, joined transitively by any file they share.</summary>
+    private static List<List<OwnedFinding>> Components(IReadOnlyList<OwnedFinding> findings)
+    {
+        int[] parent = [.. Enumerable.Range(0, findings.Count)];
+        int Find(int index)
+        {
+            while (parent[index] != index)
+            {
+                parent[index] = parent[parent[index]];
+                index = parent[index];
+            }
+
+            return index;
+        }
+
+        Dictionary<string, int> firstByFile = new(StringComparer.Ordinal);
+        for (int index = 0; index < findings.Count; index++)
+        {
+            foreach (TouchedFile file in findings[index].Touched)
+            {
+                if (firstByFile.TryGetValue(file.Path, out int earlier))
+                {
+                    int first = Find(index);
+                    int second = Find(earlier);
+                    if (first != second)
+                        parent[second] = first;
+                }
+                else
+                {
+                    firstByFile[file.Path] = index;
+                }
+            }
+        }
+
+        Dictionary<int, List<OwnedFinding>> byRoot = [];
+        for (int index = 0; index < findings.Count; index++)
+        {
+            int root = Find(index);
+            if (!byRoot.TryGetValue(root, out List<OwnedFinding>? component))
+                byRoot[root] = component = [];
+            component.Add(findings[index]);
+        }
+
+        return [.. byRoot.Values];
+    }
+
+    /// <summary>The files a finding's fix touches with the tasks that own each: its own file and every file its evidence cites.</summary>
+    private static IReadOnlyList<TouchedFile> TouchedFiles(ReviewFinding finding, IReadOnlyList<PlanTaskFileEntry> tasks)
+    {
+        List<string> paths = [Normalize(finding.File)];
+        if (!string.IsNullOrWhiteSpace(finding.Evidence))
+        {
+            foreach (System.Text.RegularExpressions.Match match in ReviewVerdictRules.EvidenceCitation()
+                         .Matches(finding.Evidence).Take(ReviewVerdictRules.MaxEvidenceCitations))
+            {
+                string cited = match.Groups["file"].Value;
+                if (CitedLineCheck.IsRepositoryRelative(cited))
+                    paths.Add(Normalize(cited));
+            }
+        }
+
+        List<TouchedFile> touched = [];
+        foreach (string path in paths.Distinct(StringComparer.Ordinal))
+        {
+            IReadOnlyList<PlanTaskFileEntry> owners = Owners(tasks, path);
+            if (owners.Count > 0)
+                touched.Add(new TouchedFile(path, owners));
+        }
+
+        return touched;
     }
 
     /// <summary>The tasks whose file scope names the finding's file, in plan order.</summary>
@@ -425,11 +528,17 @@ internal static class FixPacketWriter
         StringBuilder text = new();
         text.Append("# Fix packet: ").Append(packet.Group).Append("\n\n");
         text.Append(Header).Append("\n\n");
-        if (packet.Notes.Count > 0)
+        if (packet.Notes.Count > 0 || packet.AlsoInScope.Count > 0)
         {
             text.Append("## Scope notes\n\n");
             foreach (string note in packet.Notes)
                 text.Append("- ").Append(note).Append('\n');
+            foreach (OtherTaskFiles other in packet.AlsoInScope)
+            {
+                text.Append("- This fix may also edit task ").Append(other.TaskId).Append("'s files: ")
+                    .Append(string.Join(", ", other.Files)).Append(".\n");
+            }
+
             text.Append('\n');
         }
 
@@ -591,6 +700,14 @@ internal static class FixPacketWriter
                 break;
         }
 
+        // The Arbiter judges the dispatch's text against the task, so the other tasks' files the fix must change are
+        // named here, not only in the packet the worker opens.
+        foreach (OtherTaskFiles other in packet.AlsoInScope)
+        {
+            block.Append("Also in scope (task ").Append(other.TaskId).Append("): ")
+                .Append(string.Join(", ", other.Files)).Append('\n');
+        }
+
         block.Append("Fix packet: ").Append(path).Append('\n');
         block.Append("--- end ---");
         return block.ToString();
@@ -630,7 +747,33 @@ internal static class FixPacketWriter
     {
         /// <summary>One line for another task that also lists one of the packet's files.</summary>
         internal List<string> Notes { get; } = [];
+
+        /// <summary>The files of other tasks this packet's fix may edit, one entry per task.</summary>
+        internal List<OtherTaskFiles> AlsoInScope { get; } = [];
+
+        /// <summary>Names a file of another task this packet's fix may edit, once.</summary>
+        internal void AddAlsoInScope(string taskId, string file)
+        {
+            OtherTaskFiles? entry = AlsoInScope.Find(other => string.Equals(other.TaskId, taskId, StringComparison.Ordinal));
+            if (entry is null)
+            {
+                entry = new OtherTaskFiles(taskId, []);
+                AlsoInScope.Add(entry);
+            }
+
+            if (!entry.Files.Contains(file, StringComparer.Ordinal))
+                entry.Files.Add(file);
+        }
     }
+
+    /// <summary>Another task whose files this packet's fix may edit.</summary>
+    private sealed record OtherTaskFiles(string TaskId, List<string> Files);
+
+    /// <summary>A finding the round sends to a fix, and the task-owned files its fix touches.</summary>
+    private sealed record OwnedFinding(ReviewFinding Finding, IReadOnlyList<TouchedFile> Touched);
+
+    /// <summary>A file a fix touches, and the tasks whose scope lists it.</summary>
+    private sealed record TouchedFile(string Path, IReadOnlyList<PlanTaskFileEntry> Owners);
 }
 
 /// <summary>What one fix round took, and where the packets belong.</summary>
