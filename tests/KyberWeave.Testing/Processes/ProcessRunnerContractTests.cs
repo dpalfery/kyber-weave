@@ -63,9 +63,20 @@ public abstract class ProcessRunnerContractTests : IDisposable
     protected abstract void PrepareWorkingDirectoryFile(string name, string content);
 
     /// <summary>Releases anything the implementation under test created.</summary>
-    public virtual void Dispose()
+    public void Dispose()
     {
+        Dispose(true);
         GC.SuppressFinalize(this);
+    }
+
+    /// <summary>Releases anything the implementation under test created.</summary>
+    /// <param name="disposing"><see langword="true"/> when called from <see cref="Dispose"/>; <see langword="false"/> when called from a finalizer.</param>
+    protected virtual void Dispose(bool disposing)
+    {
+        if (disposing)
+        {
+            // The base owns no resources; derived classes clean up what they created.
+        }
     }
 
     [Fact]
