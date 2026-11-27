@@ -181,7 +181,7 @@ public sealed class ArbiterEvaluator : IArbiterEvaluator
         {
             throw;
         }
-        catch (Exception ex)
+        catch (Exception ex) when (ex is not OutOfMemoryException && ex is not OperationCanceledException)
         {
             // Fail open: an evaluator exception is an error result that allows. The caller logs
             // KW-ARB-HOOK-001 with the message, and the ledger entry already appended keeps the trail.

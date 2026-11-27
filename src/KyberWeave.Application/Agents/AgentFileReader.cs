@@ -1,7 +1,10 @@
+using System.Text.RegularExpressions;
 using KyberWeave.Contracts.Paths;
 using KyberWeave.Contracts.Repositories;
 using KyberWeave.Core.Agents.Model;
 using KyberWeave.Core.Agents.Parsing;
+using KyberWeave.Core.FileSystem;
+using YamlDotNet.Core;
 
 namespace KyberWeave.Application.Agents;
 
@@ -96,7 +99,8 @@ public sealed class AgentFileReader(IFileSystem files, IPathResolver paths, IPro
 
                 results.Add(new AgentLoadResult(true, parser.Parse(files.ReadAllText(file), file, harness), file, null));
             }
-            catch (Exception ex)
+            catch (Exception ex) when (FileFailure.Is(ex) ||
+                                       ex is InvalidOperationException or FormatException or RegexMatchTimeoutException or YamlException)
             {
                 results.Add(new AgentLoadResult(false, null, file, ex.Message));
             }

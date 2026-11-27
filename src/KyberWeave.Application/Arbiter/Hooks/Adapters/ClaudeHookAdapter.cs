@@ -920,7 +920,7 @@ public sealed class ClaudeHookAdapter : IHarnessHookAdapter
         {
             throw;
         }
-        catch (Exception ex)
+        catch (Exception ex) when (ex is not OutOfMemoryException && ex is not OperationCanceledException)
         {
             // Any other failure of the write or its log line ends here: the dispatch runs without the model.
             LogWriteFailure(context, ex);

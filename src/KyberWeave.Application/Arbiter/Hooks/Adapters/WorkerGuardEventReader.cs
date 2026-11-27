@@ -2,6 +2,7 @@ using System.Text.Json;
 using System.Text.Json.Nodes;
 using KyberWeave.Contracts.Repositories;
 using KyberWeave.Core.Arbiter;
+using KyberWeave.Core.FileSystem;
 
 namespace KyberWeave.Arbiter.Hooks;
 
@@ -186,7 +187,7 @@ internal static class WorkerGuardEventReader
                 "KW-ARB-SECRET-001 and KW-ARB-CHECKOUT-001 still apply, and the profile-specific " +
                 "worker guard rules were skipped for this call.");
         }
-        catch (Exception)
+        catch (Exception exception) when (FileFailure.Is(exception) || exception is ObjectDisposedException)
         {
             // The log is best effort.
         }
