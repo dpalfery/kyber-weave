@@ -14,7 +14,7 @@ namespace KyberDash.Data.Tests.Repositories;
 /// parent are, and for <see cref="IRelationalStoreWriter.DeleteProblem"/>: every case runs against
 /// <see cref="SqliteRelationalStore"/> over a real database and against <see cref="InMemoryRelationalStore"/>.
 /// </summary>
-public class SharedSpanWriteParityTests : IDisposable
+public sealed class SharedSpanWriteParityTests : IDisposable
 {
     private const string SpanId = "synth:claude-code:parent-session:msg_1";
     private const string SessionKey = "parent-session";

@@ -12,7 +12,7 @@ namespace KyberDash.Data.Tests.Repositories;
 /// <c>source</c> row: the OTLP locator for an OTLP batch, <c>codeburn/&lt;harness&gt;</c> for a
 /// file batch. Runs over a real <c>sqlite3</c> database, because the join itself is what is proved.
 /// </summary>
-public class RecordSourceNameTests : IDisposable
+public sealed class RecordSourceNameTests : IDisposable
 {
     private const string SessionKey = "sess-src";
     private const string PluginLocator = "kyberdash-factory-plugin";

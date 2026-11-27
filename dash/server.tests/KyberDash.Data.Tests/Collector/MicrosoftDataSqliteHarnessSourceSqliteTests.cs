@@ -12,7 +12,7 @@ namespace KyberDash.Data.Tests.Collector;
 /// directory, copy reuse and replacement, the refusal codes, URI escaping of the immutable path, and the
 /// busy and permission-denied classifications.
 /// </summary>
-public class MicrosoftDataSqliteHarnessSourceSqliteTests : IDisposable
+public sealed class MicrosoftDataSqliteHarnessSourceSqliteTests : IDisposable
 {
     private const string Ddl = "CREATE TABLE messages (id INTEGER PRIMARY KEY, role TEXT NOT NULL, body TEXT);";
 

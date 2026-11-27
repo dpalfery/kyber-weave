@@ -10,7 +10,7 @@ namespace KyberDash.Data.Tests.Repositories;
 /// <c>record_request_id</c>) are written and read back by every SQLite record read, so the
 /// projector's id join between an OTLP turn and its transcript twin sees them.
 /// </summary>
-public class RecordJoinIdTests : IDisposable
+public sealed class RecordJoinIdTests : IDisposable
 {
     private const string SessionKey = "sess-ids";
 

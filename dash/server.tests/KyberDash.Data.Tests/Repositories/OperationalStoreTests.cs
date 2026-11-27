@@ -24,12 +24,26 @@ namespace KyberDash.Data.Tests.Repositories;
 public class OperationalStoreTests : IDisposable
 {
     private readonly TempDirectory directory = new();
+    private bool disposed;
 
     /// <inheritdoc />
     public void Dispose()
     {
-        directory.Dispose();
+        Dispose(disposing: true);
         GC.SuppressFinalize(this);
+    }
+
+    /// <summary>Deletes the scratch directory when disposing.</summary>
+    /// <param name="disposing">Whether managed state should be released.</param>
+    protected virtual void Dispose(bool disposing)
+    {
+        if (!disposing || disposed)
+        {
+            return;
+        }
+
+        disposed = true;
+        directory.Dispose();
     }
 
     [Fact]

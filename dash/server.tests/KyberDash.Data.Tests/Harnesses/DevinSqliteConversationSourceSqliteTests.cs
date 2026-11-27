@@ -12,7 +12,7 @@ namespace KyberDash.Data.Tests.Harnesses;
 /// opened through the Microsoft.Data.Sqlite adapter: the node-count filter, hidden sessions, the
 /// <c>SinceUtc</c> cutoff on <c>last_activity_at</c> and the export in <c>row_id</c> order.
 /// </summary>
-public class DevinSqliteConversationSourceSqliteTests : IDisposable
+public sealed class DevinSqliteConversationSourceSqliteTests : IDisposable
 {
     private const string Ddl =
         "CREATE TABLE sessions (id TEXT PRIMARY KEY, working_directory TEXT, model TEXT, title TEXT, " +

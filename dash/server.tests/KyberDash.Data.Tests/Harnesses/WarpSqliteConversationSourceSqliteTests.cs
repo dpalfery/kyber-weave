@@ -13,7 +13,7 @@ namespace KyberDash.Data.Tests.Harnesses;
 /// Microsoft.Data.Sqlite adapter: which conversations are listed, the SQL filters and order of the export,
 /// and a round trip through <see cref="WarpMapper.Map"/> that yields one record per exchange.
 /// </summary>
-public class WarpSqliteConversationSourceSqliteTests : IDisposable
+public sealed class WarpSqliteConversationSourceSqliteTests : IDisposable
 {
     private const string SchemaDdl = """
         CREATE TABLE agent_conversations (conversation_id TEXT PRIMARY KEY, conversation_data TEXT, last_modified_at TEXT);

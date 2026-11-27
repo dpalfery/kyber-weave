@@ -17,7 +17,7 @@ namespace KyberDash.Data.Tests.Repositories;
 /// (<see langword="null"/>) when neither exists. Both the SQLite store and the in-memory store
 /// answer the same figures.
 /// </summary>
-public class SessionUsageTotalsTests : IDisposable
+public sealed class SessionUsageTotalsTests : IDisposable
 {
     private const string HarnessId = DroidSessionMapper.DroidHarnessId;
     private const string SessionKey = "sess-usage";

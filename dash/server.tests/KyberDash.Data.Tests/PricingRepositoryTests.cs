@@ -18,7 +18,7 @@ namespace KyberDash.Data.Tests;
 /// behind once starved a parallel reader of rates for <c>claude-sonnet-4-5</c>.
 /// </remarks>
 [Collection(Repositories.CanonPricingStatics.Name)]
-public class PricingRepositoryTests : IDisposable
+public sealed class PricingRepositoryTests : IDisposable
 {
     private readonly (Func<PricingTables>? Provider, PricingTables? Cache) savedPricingProvider;
 

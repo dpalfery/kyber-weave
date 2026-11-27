@@ -5,7 +5,7 @@ using Xunit;
 namespace KyberDash.Data.Tests.Collector;
 
 /// <summary>Real-file tests for the bounded read of <see cref="PhysicalHarnessFileSystem"/>.</summary>
-public class PhysicalHarnessFileSystemTests : IDisposable
+public sealed class PhysicalHarnessFileSystemTests : IDisposable
 {
     private readonly string directory = Directory.CreateTempSubdirectory("kyberdash-bounded-read-").FullName;
 

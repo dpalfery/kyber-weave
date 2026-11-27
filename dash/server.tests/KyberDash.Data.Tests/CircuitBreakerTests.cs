@@ -9,7 +9,7 @@ namespace KyberDash.Data.Tests;
 /// Polly v8 circuit-breaker behaviour for <see cref="SqliteCircuitBreaker"/> and the way
 /// <see cref="SqliteRelationalStore"/> hands every database call to it.
 /// </summary>
-public class CircuitBreakerTests : IDisposable
+public sealed class CircuitBreakerTests : IDisposable
 {
     private static readonly TimeSpan BreakDuration = TimeSpan.FromMilliseconds(600);
 
