@@ -264,7 +264,7 @@ public static class OtlpLogMapper
             {
                 normalized = adapter.Normalize(item.RawSpan);
             }
-            catch (Exception exception)
+            catch (Exception exception) when (exception is ArgumentException or JsonException or InvalidOperationException or NotSupportedException or ObjectDisposedException)
             {
                 rejected++;
                 problemAssignments.Add((
