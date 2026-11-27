@@ -119,7 +119,7 @@ public sealed partial class CodexHookAdapter : IHarnessHookAdapter
         return insertion.Kind switch
         {
             DispatchInsertionKind.Inserted => RenderPreAllowPrompt(toolInput, insertion.Text),
-            DispatchInsertionKind.Stopped => RenderPreDeny(insertion.Reason!),
+            DispatchInsertionKind.Stopped => RenderPreDeny(StopReason(insertion)),
             _ => null,
         };
     }
@@ -155,7 +155,7 @@ public sealed partial class CodexHookAdapter : IHarnessHookAdapter
 
         if (insertion.Kind == DispatchInsertionKind.Stopped)
         {
-            return RenderPreDeny(insertion.Reason!);
+            return RenderPreDeny(StopReason(insertion));
         }
 
         bool inserted = insertion.Kind == DispatchInsertionKind.Inserted;
@@ -334,6 +334,11 @@ public sealed partial class CodexHookAdapter : IHarnessHookAdapter
                 ["permissionDecisionReason"] = reason,
             },
         }.ToJsonString();
+
+    /// <summary>The reason a stopped insertion carries; only a <see cref="DispatchInsertionKind.Stopped"/> asks for one.</summary>
+    private static string StopReason(DispatchInsertion insertion) =>
+        insertion.Reason ?? throw new InvalidOperationException(
+            "A dispatch insertion stopped without a reason.");
 
     private static string RenderPreAllowStrip(JsonElement toolInput, string message) =>
         RenderPreAllow(JsonNode.Parse(toolInput.GetRawText()) as JsonObject

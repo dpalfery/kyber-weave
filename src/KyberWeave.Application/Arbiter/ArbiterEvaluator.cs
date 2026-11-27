@@ -823,7 +823,8 @@ public sealed class ArbiterEvaluator : IArbiterEvaluator
             List<Question> unanswerable,
             List<Question> noCandidates)
         {
-            RuleAsk ask = rule.Ask!;
+            RuleAsk ask = rule.Ask ?? throw new InvalidOperationException(
+                $"Rule '{rule.Id}' has no ask to expand.");
             if (ask.ForEach is null)
             {
                 questions.Add(new Question(rule.Id, null, rule));
@@ -1714,7 +1715,9 @@ public sealed class ArbiterEvaluator : IArbiterEvaluator
             string neutral = ArbiterTriggerFamilies.NeutralEffect(plan.Family);
             // The primary allows when it reaches its family's allow-equivalent, the neutral effect. A gate's
             // neutral is applies and a shortcut's is spawn, so comparing against allow alone suppressed them.
-            ArbiterTriggerFamily primaryFamily = ArbiterTriggerFamilies.ForTrigger(classification.Trigger!);
+            ArbiterTriggerFamily primaryFamily = ArbiterTriggerFamilies.ForTrigger(
+                classification.Trigger ?? throw new InvalidOperationException(
+                    "A secondary is recorded only for a dispatch that classified a trigger."));
             bool primaryAllows = string.Equals(
                 primaryOutcome, ArbiterTriggerFamilies.NeutralEffect(primaryFamily), StringComparison.Ordinal);
             // The record's own id is allocated up front: a same-failure advisory names the record it is written on.
