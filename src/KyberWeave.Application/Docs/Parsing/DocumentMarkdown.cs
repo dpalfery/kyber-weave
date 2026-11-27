@@ -76,10 +76,15 @@ public sealed partial class DocumentMarkdown
             // and win, because a two-word section scores high on cosine similarity.
             if (heading is null && !HasProse(buffer)) return;
 
+            // Trim('\n') drops the empty lines at the body's start; count them so the body's
+            // own first line is known and a nested heading inside it is numbered truly.
+            int leadingBlank = buffer.TakeWhile(static l => l.Length == 0).Count();
+            int bufferStart = heading is null ? 1 : headingLine + 1;
             sections.Add(new DocumentSection(
                 heading ?? string.Empty,
                 string.Join("\n", buffer).Trim('\n'),
-                headingLine));
+                headingLine,
+                bufferStart + leadingBlank));
         }
 
         for (int i = 0; i < lines.Length; i++)
