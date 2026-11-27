@@ -464,7 +464,8 @@ public static class HarnessRegistry
         {
             if (row.McpCatalogName is { } name)
             {
-                index[name] = row;
+                // Add, not assign: a duplicate catalog name is a table defect and fails at startup.
+                index.Add(name, row);
             }
         }
 
@@ -493,7 +494,9 @@ public static class HarnessRegistry
             .OrderBy(row => row.HookOrder);
         foreach (HarnessDescriptor row in hookedRows)
         {
-            if (row.SquadTarget is { } target && !targets.Contains(target))
+            SquadTarget target = row.SquadTarget ?? throw new InvalidOperationException(
+                $"Harness '{row.Token}' has a hook order but no Squad target.");
+            if (!targets.Contains(target))
             {
                 targets.Add(target);
             }
@@ -510,10 +513,8 @@ public static class HarnessRegistry
             .OrderBy(row => row.FallbackOrder);
         foreach (HarnessDescriptor row in fallbackRows)
         {
-            if (row.SquadTarget is { } target)
-            {
-                targets.Add(target);
-            }
+            targets.Add(row.SquadTarget ?? throw new InvalidOperationException(
+                $"Harness '{row.Token}' has a fallback order but no Squad target."));
         }
 
         return targets.ToArray();
