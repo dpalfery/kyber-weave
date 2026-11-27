@@ -70,6 +70,24 @@ internal static class DocsToolsComposition
         services.AddSingleton<IDocsGateRunner, DocsGateRunner>();
         services.AddSingleton<IKwSkillCatalog>(provider => Skills(provider, repositoryRoot));
         services.AddSingleton<IDocsQueryService, DocsQueryService>();
+        AddHostBoundServices(services, repositoryRoot);
+
+        // The dispatch tool asks for this one directly, and the SDK constructs the tool from the container on each
+        // call, so an unregistered parameter is an invocation error every client sees rather than a startup failure.
+        services.AddSingleton<ITaskPromptService>(provider =>
+            Prompts(provider, provider.GetRequiredService<DocumentIndexHost>()));
+
+        // A tool call may name another worktree of this repository with projectPath. Those are served by
+        // tools of their own, built on demand and kept in a small least-recently-used set.
+        services.AddSingleton(provider => DocsRootRegistry.ForRepository(repositoryRoot, codeGraphRefreshEnabled, provider));
+        return services;
+    }
+
+    /// <summary>The services over one checkout that the domain collaborators behind the tools resolve.</summary>
+    /// <param name="services">The collection to populate.</param>
+    /// <param name="repositoryRoot">The checkout the services are bound to.</param>
+    private static void AddHostBoundServices(IServiceCollection services, string repositoryRoot)
+    {
         services.AddSingleton<IPlanLifecycleService>(provider => new PlanLifecycleService(
             repositoryRoot,
             provider.GetRequiredService<IDocsQueryService>(),
@@ -91,16 +109,6 @@ internal static class DocsToolsComposition
             provider.GetRequiredService<IRepositoryDoctor>(),
             provider.GetRequiredService<IBoundedProcessExecutor>(),
             provider.GetRequiredService<IProcessEnvironment>()));
-
-        // The dispatch tool asks for this one directly, and the SDK constructs the tool from the container on each
-        // call, so an unregistered parameter is an invocation error every client sees rather than a startup failure.
-        services.AddSingleton<ITaskPromptService>(provider =>
-            Prompts(provider, provider.GetRequiredService<DocumentIndexHost>()));
-
-        // A tool call may name another worktree of this repository with projectPath. Those are served by
-        // tools of their own, built on demand and kept in a small least-recently-used set.
-        services.AddSingleton(provider => DocsRootRegistry.ForRepository(repositoryRoot, codeGraphRefreshEnabled, provider));
-        return services;
     }
 
     /// <summary>
