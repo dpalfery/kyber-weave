@@ -645,7 +645,8 @@ public static partial class CanonPricing
         double totalValue = 0;
         foreach (CostBlock block in valued)
         {
-            totalValue += block.Value!.Value;
+            if (block.Value is double valuedTotal)
+                totalValue += valuedTotal;
             if (block.ByModel is null)
                 continue;
 
@@ -696,9 +697,10 @@ public static partial class CanonPricing
             int count = 0;
             foreach (CostBlock block in valued)
             {
-                if (string.Equals(block.Basis.ToWireString(), basis, StringComparison.Ordinal))
+                if (string.Equals(block.Basis.ToWireString(), basis, StringComparison.Ordinal) &&
+                    block.Value is double basisTotal)
                 {
-                    sum += block.Value!.Value;
+                    sum += basisTotal;
                     count++;
                 }
             }
@@ -1299,10 +1301,10 @@ public static partial class CanonPricing
         if (measurability is null)
             return new AvailabilityResult(true, "measured");
 
-        if (TryGetNotMeasurable(measurability, "schema_cost", "This source does not provide schema-cost data.", out AvailabilityResult schemaBlocked))
+        if (TryGetNotMeasurable(measurability, "schema_cost", "This source does not provide schema-cost data.") is { } schemaBlocked)
             return schemaBlocked;
 
-        if (TryGetNotMeasurable(measurability, "tool_definitions", "This source does not provide tool-definition data.", out AvailabilityResult defsBlocked))
+        if (TryGetNotMeasurable(measurability, "tool_definitions", "This source does not provide tool-definition data.") is { } defsBlocked)
             return defsBlocked;
 
         return new AvailabilityResult(true, "measured");
@@ -1321,7 +1323,7 @@ public static partial class CanonPricing
         }
 
         string firstKey = CanonValidation.CanonicalContentKeys[0];
-        if (TryGetNotMeasurable(measurability, firstKey, "This source does not provide message-structure data.", out AvailabilityResult blocked))
+        if (TryGetNotMeasurable(measurability, firstKey, "This source does not provide message-structure data.") is { } blocked)
             return blocked;
 
         return new AvailabilityResult(false, "not_measurable", "This source does not provide message-structure data.");
@@ -1777,26 +1779,23 @@ public static partial class CanonPricing
         return false;
     }
 
-    private static bool TryGetNotMeasurable(
+    private static AvailabilityResult? TryGetNotMeasurable(
         IReadOnlyDictionary<string, JsonElement> measurability,
         string key,
-        string defaultReason,
-        out AvailabilityResult blocked)
+        string defaultReason)
     {
         if (measurability.TryGetValue(key, out JsonElement el) && IsNotMeasurable(el))
         {
             string reason = el.ValueKind == JsonValueKind.Object &&
                             el.TryGetProperty("reason", out JsonElement r) &&
                             r.ValueKind == JsonValueKind.String &&
-                            !string.IsNullOrEmpty(r.GetString())
-                ? r.GetString()!
+                            r.GetString() is { Length: > 0 } reportedReason
+                ? reportedReason
                 : defaultReason;
-            blocked = new AvailabilityResult(false, "not_measurable", reason);
-            return true;
+            return new AvailabilityResult(false, "not_measurable", reason);
         }
 
-        blocked = default!;
-        return false;
+        return null;
     }
 
 }
