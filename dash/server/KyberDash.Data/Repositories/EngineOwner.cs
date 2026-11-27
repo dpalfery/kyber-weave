@@ -11,7 +11,7 @@ namespace KyberDash.Data.Repositories;
 /// Binding the socket elects the owner; every other process sees the descriptor and can ask it for
 /// its info or request a graceful shutdown.
 /// </summary>
-public class EngineOwner : IEngineOwnerLease
+public sealed class EngineOwner : IEngineOwnerLease
 {
     private readonly Socket listener = new(AddressFamily.Unix, SocketType.Stream, ProtocolType.Unspecified);
     private readonly CancellationTokenSource shutdown = new();

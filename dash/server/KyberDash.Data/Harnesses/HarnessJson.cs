@@ -208,6 +208,8 @@ public static class HarnessJson
     /// <returns>The first trimmed non-empty value, or <see langword="null"/>.</returns>
     public static string? FirstPresentString(params string?[] values)
     {
+        ArgumentNullException.ThrowIfNull(values);
+
         foreach (string? value in values)
         {
             string? trimmed = value?.Trim();
