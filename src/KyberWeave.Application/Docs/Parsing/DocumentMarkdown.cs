@@ -209,12 +209,6 @@ public sealed partial class DocumentMarkdown
 
     private sealed record Heading(int Line, int Level, string Text);
 
-    /// <summary>True when the lines contain something other than headings and blanks.</summary>
-    private static bool HasProse(IEnumerable<string> lines)
-    {
-        return lines.Any(l => !string.IsNullOrWhiteSpace(l) && !l.TrimStart().StartsWith('#'));
-    }
-
     /// <summary>
     ///     Splits a body into <c>###</c> retrieval leaves with GitHub slug ids. Deeper headings
     ///     stay inside their parent <c>###</c> leaf. Fenced blocks are ordinary content — a
@@ -425,27 +419,44 @@ public sealed partial class DocumentMarkdown
         return false;
     }
 
-    private static string LinkPlainText(LinkInline link)
-    {
-        StringBuilder builder = new();
-        foreach (Inline child in link)
-            if (child is LiteralInline literal)
-                builder.Append(literal.Content.ToString());
-
-        return builder.ToString();
-    }
-
+    /// <summary>
+    /// The text a heading or link displays. Walks the whole inline tree rather than the
+    /// container's direct children, because a heading such as <c>### `unsafe`</c> holds its
+    /// word in a <see cref="CodeInline"/> and one written with emphasis holds it in a nested
+    /// container; reading only literals drops those words from the heading text.
+    /// </summary>
     private static string PlainText(ContainerInline? inline)
     {
         if (inline is null) return string.Empty;
 
         StringBuilder builder = new();
-        foreach (Inline child in inline)
-            if (child is LiteralInline literal)
-                builder.Append(literal.Content.ToString());
-
+        AppendPlainText(inline, builder);
         return builder.ToString();
     }
+
+    private static void AppendPlainText(ContainerInline container, StringBuilder builder)
+    {
+        foreach (Inline child in container)
+        {
+            switch (child)
+            {
+                case LiteralInline literal:
+                    builder.Append(literal.Content.ToString());
+                    break;
+                case CodeInline code:
+                    builder.Append(code.Content);
+                    break;
+                case LineBreakInline:
+                    builder.Append(' ');
+                    break;
+                case ContainerInline nested:
+                    AppendPlainText(nested, builder);
+                    break;
+            }
+        }
+    }
+
+    private static string LinkPlainText(LinkInline link) => PlainText(link);
 
     private static string SlugifyHeading(string heading)
     {
