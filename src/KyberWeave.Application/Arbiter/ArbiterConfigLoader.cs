@@ -170,13 +170,18 @@ public static class ArbiterConfigLoader
         foreach (ArbiterRule shipped in baseRules)
         {
             rules.Add(overridden.Contains(shipped.Id)
-                ? ApplyOverride(shipped, section!.Rules!.First(entry => string.Equals(entry.Id?.Trim(), shipped.Id, StringComparison.Ordinal)))
+                ? ApplyOverride(shipped, FirstOverride(section, shipped.Id))
                 : shipped);
         }
 
         rules.AddRange(hostRules);
         return Compose(defaults, section, enabled, rules, testFilePatterns, folderParents, lensPaths, folderFindings);
     }
+
+    private static ArbiterRuleYaml FirstOverride(ArbiterYamlSection? section, string ruleId) =>
+        section?.Rules?.FirstOrDefault(entry =>
+            string.Equals(entry.Id?.Trim(), ruleId, StringComparison.Ordinal))
+        ?? throw new InvalidOperationException($"No arbiter.rules entry overrides '{ruleId}'.");
 
     /// <summary>
     /// Validates the host's <c>arbiter.rules</c> entries, collecting the ids that override a shipped rule and the
@@ -711,7 +716,7 @@ public static class ArbiterConfigLoader
                     : [.. document.LensPaths
                         .Where(entry => !string.IsNullOrWhiteSpace(entry.Lens))
                         .Select(entry => new ArbiterLensPathEntry(
-                            entry.Lens!.Trim(),
+                            entry.Lens?.Trim() ?? string.Empty,
                             entry.NotApplicableWhenAllMatch is null ? [] : [.. entry.NotApplicableWhenAllMatch]))]);
             return true;
         }
@@ -1079,9 +1084,10 @@ public static class ArbiterConfigLoader
     {
         result = null;
 
-        if (ask.Type is not ("choice" or "score" or "noul"))
+        string? askType = ask.Type;
+        if (askType is not ("choice" or "score" or "noul"))
         {
-            error = $"rule '{id}' ask type '{ask.Type}' is not supported. Use choice, score or noul.";
+            error = $"rule '{id}' ask type '{askType}' is not supported. Use choice, score or noul.";
             return false;
         }
 
@@ -1104,7 +1110,7 @@ public static class ArbiterConfigLoader
         }
 
         result = new RuleAsk(
-            ask.Type!,
+            askType,
             new Dictionary<string, string>(ask.State, StringComparer.Ordinal),
             ask.Criteria is null ? null : new Dictionary<string, string>(ask.Criteria, StringComparer.Ordinal),
             ask.Levels is null ? null : [.. ask.Levels],
@@ -1167,7 +1173,8 @@ public static class ArbiterConfigLoader
         out string? error)
     {
         predicate = null;
-        List<ArbiterWhenYaml> children = hasAll ? when.All! : when.Any!;
+        List<ArbiterWhenYaml> children = (hasAll ? when.All : when.Any)
+            ?? throw new InvalidOperationException("An all/any combinator has no child list.");
         if (children.Count == 0)
         {
             error = "an all/any combinator needs at least one child predicate.";

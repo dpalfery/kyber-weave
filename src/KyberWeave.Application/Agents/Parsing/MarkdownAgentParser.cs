@@ -33,7 +33,8 @@ public sealed partial class MarkdownAgentParser(IPathResolver paths, IProcessEnv
     public AgentModel Parse(string content, string filePath, HarnessKind harness)
     {
         string raw = content;
-        string dirName = Path.GetDirectoryName(paths.GetFullPath(filePath, environment.CurrentDirectory))!;
+        string dirName = Path.GetDirectoryName(paths.GetFullPath(filePath, environment.CurrentDirectory))
+            ?? throw new InvalidOperationException($"The path '{filePath}' has no directory.");
         string fileName = Path.GetFileName(filePath);
 
         // Standardize role name from file name (e.g. architect.agent.md -> architect, dev-medium.md -> dev-medium)
