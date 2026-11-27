@@ -22,7 +22,7 @@ namespace KyberDash.Data.Tests.Repositories;
 /// range when the range ends at the marker it found, and restarts at that marker otherwise; a
 /// wildcard (no session rows under a range) absorbs every keyed write that continues it.
 /// </remarks>
-public class StoreWriteMarkerParityTests : IDisposable
+public sealed class StoreWriteMarkerParityTests : IDisposable
 {
     private readonly TempDirectory directory = new();
 

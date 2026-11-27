@@ -6,7 +6,7 @@ using KyberDash.Domain;
 namespace KyberDash.Data.Tests;
 
 /// <summary>Process-coordination files and leases for <see cref="ServerStateRepository"/>.</summary>
-public class ServerStateRepositoryTests : IDisposable
+public sealed class ServerStateRepositoryTests : IDisposable
 {
     private readonly TempDirectory directory = new();
     private readonly ServerStateRepository repository = new();

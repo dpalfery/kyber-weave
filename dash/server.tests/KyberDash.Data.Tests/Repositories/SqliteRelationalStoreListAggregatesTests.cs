@@ -17,7 +17,7 @@ namespace KyberDash.Data.Tests.Repositories;
 /// projections, and at most one fallback batch for turns of sessions without a projection,
 /// regardless of session count.
 /// </summary>
-public class SqliteRelationalStoreListAggregatesTests : IDisposable
+public sealed class SqliteRelationalStoreListAggregatesTests : IDisposable
 {
     private const string HarnessId = "perf-harness";
 

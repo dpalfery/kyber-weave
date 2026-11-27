@@ -7,7 +7,7 @@ using Xunit;
 namespace KyberDash.Data.Tests;
 
 /// <summary>Streaming JSONL parsing and local source discovery for <see cref="TranscriptReaderRepository"/>.</summary>
-public class TranscriptReaderRepositoryTests : IDisposable
+public sealed class TranscriptReaderRepositoryTests : IDisposable
 {
     private const string ClaudeUsageLine =
         "{\"type\":\"assistant\",\"sessionId\":\"session-a\",\"timestamp\":\"2026-01-01T00:00:01Z\",\"message\":" +

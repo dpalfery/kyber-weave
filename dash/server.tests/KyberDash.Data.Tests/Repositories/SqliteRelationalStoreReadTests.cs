@@ -29,7 +29,7 @@ namespace KyberDash.Data.Tests.Repositories;
 /// differently between the two stores (or between the parity section and the spot checks).
 /// </remarks>
 [Collection(CanonPricingStatics.Name)]
-public class SqliteRelationalStoreReadTests : IDisposable
+public sealed class SqliteRelationalStoreReadTests : IDisposable
 {
     private const string DummySha256 = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
 

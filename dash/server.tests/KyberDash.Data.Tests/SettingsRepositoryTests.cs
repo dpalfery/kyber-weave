@@ -11,7 +11,7 @@ using Xunit;
 namespace KyberDash.Data.Tests;
 
 /// <summary>Fail-closed validation and persistence for <see cref="SettingsRepository"/>.</summary>
-public class SettingsRepositoryTests : IDisposable
+public sealed class SettingsRepositoryTests : IDisposable
 {
     private readonly TempDirectory directory = new();
     private readonly InMemoryRelationalStore store = new();
