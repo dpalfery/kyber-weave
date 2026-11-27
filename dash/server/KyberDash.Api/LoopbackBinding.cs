@@ -1,3 +1,4 @@
+using System.Diagnostics.CodeAnalysis;
 using System.Globalization;
 using System.Net;
 using System.Net.Sockets;
@@ -227,7 +228,7 @@ public static class LoopbackBinding
         }
     }
 
-    private static bool TryLoopback(string address, out Uri uri)
+    private static bool TryLoopback(string address, [NotNullWhen(true)] out Uri? uri)
     {
         if (Uri.TryCreate(address, UriKind.Absolute, out Uri? parsed) && parsed.Port > 0)
         {
@@ -235,7 +236,7 @@ public static class LoopbackBinding
             return true;
         }
 
-        uri = null!;
+        uri = null;
         return false;
     }
 

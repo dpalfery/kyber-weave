@@ -94,7 +94,7 @@ public static class OtlpEndpointMappings
         bool isJson = string.Equals(mediaType, "application/json", StringComparison.OrdinalIgnoreCase);
         bool isProtobuf = string.Equals(mediaType, "application/x-protobuf", StringComparison.OrdinalIgnoreCase)
             || string.Equals(mediaType, "application/protobuf", StringComparison.OrdinalIgnoreCase);
-        if (!isJson && !isProtobuf)
+        if (mediaType is not { } contentType || (!isJson && !isProtobuf))
         {
             return Results.Json(
                 new
@@ -123,9 +123,9 @@ public static class OtlpEndpointMappings
         {
             IngestAdmissionResult admission = signal switch
             {
-                OtlpSignalKind.Traces => await collector.AdmitTracesAsync(body, mediaType!, cancellationToken).ConfigureAwait(false),
-                OtlpSignalKind.Logs => await collector.AdmitLogsAsync(body, mediaType!, cancellationToken).ConfigureAwait(false),
-                _ => await collector.AdmitMetricsAsync(body, mediaType!, cancellationToken).ConfigureAwait(false),
+                OtlpSignalKind.Traces => await collector.AdmitTracesAsync(body, contentType, cancellationToken).ConfigureAwait(false),
+                OtlpSignalKind.Logs => await collector.AdmitLogsAsync(body, contentType, cancellationToken).ConfigureAwait(false),
+                _ => await collector.AdmitMetricsAsync(body, contentType, cancellationToken).ConfigureAwait(false),
             };
             return DashHttp.OtlpAdmission(admission);
         }
