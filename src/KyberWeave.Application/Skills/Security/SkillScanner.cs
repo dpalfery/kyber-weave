@@ -1,4 +1,5 @@
 using KyberWeave.Core.Diagnostics;
+using KyberWeave.Core.FileSystem;
 using KyberWeave.Core.Security;
 using KyberWeave.Core.Skills.Model;
 
@@ -42,7 +43,7 @@ public sealed class SkillScanner
         {
             string? text;
             try { text = readScriptText(script); }
-            catch { text = null; }
+            catch (Exception exception) when (FileFailure.Is(exception)) { text = null; }
 
             if (text is null)
             {

@@ -1,6 +1,9 @@
+using System.Text.Json;
 using KyberWeave.Contracts.Repositories;
+using KyberWeave.Core.FileSystem;
 using KyberWeave.Core.Squad.Deployment;
 using KyberWeave.Core.Squad.Model;
+using KyberWeave.Core.Squad.Validation;
 
 namespace KyberWeave.Core.Squad.Rendering;
 
@@ -36,7 +39,7 @@ public sealed class FileSquadRenderInputReader(
             {
                 source = loader.Load(request.SourceDirectory);
             }
-            catch (Exception exception)
+            catch (Exception exception) when (IsRenderInputFailure(exception))
             {
                 sourceFailure = exception;
             }
@@ -48,7 +51,7 @@ public sealed class FileSquadRenderInputReader(
         {
             baselineBlock = baseline.ReadBlock(request.SourceDirectory);
         }
-        catch (Exception exception)
+        catch (Exception exception) when (IsRenderInputFailure(exception))
         {
             baselineFailure = exception;
         }
@@ -74,6 +77,10 @@ public sealed class FileSquadRenderInputReader(
                 declared),
         };
     }
+
+    private static bool IsRenderInputFailure(Exception exception) =>
+        exception is SquadSourceValidationException or SquadRenderValidationException or JsonException or InvalidOperationException
+        || FileFailure.Is(exception);
 
     private (bool Declared, string? OverlayText, Exception? OverlayFailure) ReadOperatorChannel(
         SquadRenderRequest request,

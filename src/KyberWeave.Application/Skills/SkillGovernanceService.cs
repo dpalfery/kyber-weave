@@ -2,6 +2,7 @@ using KyberWeave.Contracts.Paths;
 using KyberWeave.Contracts.Repositories;
 using KyberWeave.Contracts.Services;
 using KyberWeave.Core.Diagnostics;
+using KyberWeave.Core.FileSystem;
 using KyberWeave.Core.Skills.Authoring;
 using KyberWeave.Core.Skills.Model;
 using KyberWeave.Core.Skills.Parsing;
@@ -159,7 +160,7 @@ public sealed class SkillGovernanceService(
         {
             return files.ReadAllText(script.AbsolutePath);
         }
-        catch
+        catch (Exception exception) when (FileFailure.Is(exception))
         {
             return null;
         }
