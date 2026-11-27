@@ -47,6 +47,7 @@ public class TranscriptReaderRepository : ITranscriptReaderRepository
     private readonly string stateDirectory;
     private readonly IHarnessFileSystem fileSystem;
     private readonly HarnessSourceRegistry sourceRegistry;
+    private readonly TimeProvider timeProvider;
 
     /// <summary>Initializes a reader that discovers sources under the current user's home directory.</summary>
     public TranscriptReaderRepository()
@@ -65,10 +66,12 @@ public class TranscriptReaderRepository : ITranscriptReaderRepository
     /// <param name="homeDirectory">Home directory holding local harness roots; defaults to the current user's.</param>
     /// <param name="fileSystem">Filesystem seam used for discovery; defaults to <see cref="PhysicalHarnessFileSystem.Instance"/>.</param>
     /// <param name="stateDirectory">KyberDash state directory holding caches; defaults to <c>.kyberdash</c> under <paramref name="homeDirectory"/> when provided, otherwise <see cref="ServerStateRepository.ResolveStateDirectory"/>.</param>
+    /// <param name="timeProvider">Clock seam for generated timestamps; defaults to <see cref="TimeProvider.System"/>.</param>
     public TranscriptReaderRepository(
         string? homeDirectory,
         IHarnessFileSystem? fileSystem,
-        string? stateDirectory = null)
+        string? stateDirectory = null,
+        TimeProvider? timeProvider = null)
     {
         bool explicitHome = !string.IsNullOrWhiteSpace(homeDirectory);
         this.homeDirectory = explicitHome
@@ -80,6 +83,7 @@ public class TranscriptReaderRepository : ITranscriptReaderRepository
                 ? Path.Combine(this.homeDirectory, CanonDbPath.DefaultDirectoryName)
                 : ServerStateRepository.ResolveStateDirectory();
         this.fileSystem = fileSystem ?? PhysicalHarnessFileSystem.Instance;
+        this.timeProvider = timeProvider ?? TimeProvider.System;
         sourceRegistry = new HarnessSourceRegistry(HarnessSourceRegistry.CreateSqliteSource(this.stateDirectory));
     }
 
@@ -299,8 +303,8 @@ public class TranscriptReaderRepository : ITranscriptReaderRepository
         return sources;
     }
 
-    private static string NowIso() =>
-        DateTimeOffset.UtcNow.UtcDateTime.ToString("yyyy-MM-dd'T'HH:mm:ss.fff'Z'", CultureInfo.InvariantCulture);
+    private string NowIso() =>
+        timeProvider.GetUtcNow().UtcDateTime.ToString("yyyy-MM-dd'T'HH:mm:ss.fff'Z'", CultureInfo.InvariantCulture);
 
     /// <summary>True when a usage-less turn still carries content worth keeping.</summary>
     private static bool HasTurnContent(ReaderTurn turn) =>
@@ -759,7 +763,7 @@ public class TranscriptReaderRepository : ITranscriptReaderRepository
         }
     }
 
-    private static (IReadOnlyList<ReaderTurn> Turns, IReadOnlyList<SourceRecordEnvelope> Envelopes) ReadCodexInternal(
+    private (IReadOnlyList<ReaderTurn> Turns, IReadOnlyList<SourceRecordEnvelope> Envelopes) ReadCodexInternal(
         string filePath,
         string? sourceKey = null,
         string? sourceRevision = null,
