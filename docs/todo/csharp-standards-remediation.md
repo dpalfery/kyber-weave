@@ -32,6 +32,8 @@ under `docs/plans/` on the branch that delivers it, and that plan is archived in
 - The string comparison and culture analyzers (CA1304, CA1305, CA1307, CA1309, CA1310, CA1311) had
   no violations, so they fail the build now.
 - CA1062 does not apply to test code (`.editorconfig`, `[{tests,dash/server.tests}/**.cs]`).
+- CA1502 and CA1506 do not apply to test code either (same `.editorconfig` section); CA1001 and
+  CA1063 do, since leaked handles make tests flaky. The owner approved this on 2026-11-26.
 
 ## Baseline (2026-11-26, branch `claude/csharp-practices-review-edb1a8` at `409e1a879` plus this change)
 
@@ -49,14 +51,15 @@ Unique `file(line,col) id` locations from the audit build of `KyberWeave.sln` an
 | CA2227 | KW-STD-CS-003 collection setter | 4 | — | — | — | 4 | mechanical |
 
 Rules with no analyzer, as raw `grep -E` hit counts over `src` and `dash/server` (not yet sorted
-into real violations and false positives; the inventory pass does that):
+into real violations and false positives; the inventory pass does that). A backslash before a
+pipe in a pattern cell is the table's escape; the pattern the grep runs uses a plain pipe.
 
 | Rule | Pattern | Hits |
 |---|---|---|
 | KW-STD-SQL-004 parameterized | `TextExpr\(` | 234 |
 | KW-STD-CS-004 no `!` | `[A-Za-z0-9_\)\]]![.;,)\[]` | 327 |
 | KW-STD-CS-013 no blocking on async | `\.Wait\(\)\|\.GetAwaiter\(\)\.GetResult\(\)\|\.Result\b[^<]` | 62 |
-| E4 time seam | `DateTime(Offset)?\.(Now\|UtcNow)` | 27 |
+| clock seam | `DateTime(Offset)?\.(Now\|UtcNow)` | 27 |
 | KW-STD-CS-007 no stub members | `NotImplementedException\|NotSupportedException\(\)` | 20 |
 | KW-STD-CS-018 HTTP handlers | `new HttpClient\(` | 4 |
 | KW-STD-SQL-007 in process | `"sqlite3"` | 3 |
@@ -64,6 +67,12 @@ into real violations and false positives; the inventory pass does that):
 KW-STD-CS-002 beyond the two metrics, KW-STD-CS-005, -008, -010, -011, -014, -016, -017, -019,
 -020 and -021 are review rules: the inventory does not search for them, and reviewers apply them to
 changed code.
+
+The clock seam has no KW-STD id. It is the clock sentence under "Interface first, unit tested"
+in [`csharp.rules.md`](../standards/csharp/csharp.rules.md): the clock is reached only through
+its seam. A no-analyzer row takes its `rule` value from the Rule cell of the table above
+(`clock seam` for that row). An analyzer row takes the KW-STD id from
+`analyzers/ratchet.globalconfig`.
 
 ## Roles
 
@@ -85,9 +94,9 @@ The owner chose the local Qwen model for this work. The standing model rule rout
 fails twice on Qwen after being split smaller, the orchestrator asks the owner before switching it.
 Never an Anthropic model in opencode.
 
-Worktrees go under `/Users/dave/git/opencode-worktrees/csharp-remediation/` (Defender skips `~/git`).
+Worktrees go under `~/git/opencode-worktrees/csharp-remediation/` (Defender skips `~/git`).
 The shared work folder, outside every worktree, is
-`/Users/dave/git/opencode-worktrees/csharp-remediation/work/`.
+`~/git/opencode-worktrees/csharp-remediation/work/`.
 
 ## Step 1: the inventory pass (one Qwen instance)
 
@@ -102,7 +111,7 @@ worker in it with this prompt:
 > 2. From both logs, keep every line matching `<path>.cs(<line>,<col>): warning CA<digits>`, make the
 >    path relative to the worktree root, and drop duplicates. Write one row per location to
 >    `../work/inventory.tsv` with these tab-separated columns:
->    `rule` (the KW-STD id from `analyzers/ratchet.globalconfig`), `analyzer`, `path`, `line`,
+>    `rule` (an analyzer row takes the KW-STD id from `analyzers/ratchet.globalconfig`; a no-analyzer row takes the Rule cell of the table above), `analyzer`, `path`, `line`,
 >    `project` (the folder under `src/`, `tests/`, `dash/server/` or `dash/server.tests/`), `kind`
 >    (`mechanical` for CA1062, CA1001, CA1063, CA2227; `judgement` for the rest), `note` (empty).
 > 3. For each pattern in the "Rules with no analyzer" table of
@@ -189,9 +198,8 @@ The searched rules in the second baseline table have no remaining real violation
 
 ## Open questions for the owner
 
-1. Do CA1001, CA1063, CA1031, CA1502 and CA1506 apply to test code? Test code holds 214 of the 699
-   violations, including 127 of the 132 disposal ones. Recommendation: keep CA1001 and CA1063 for
-   tests, since leaked handles make tests flaky, and exempt tests from CA1502 and CA1506 like CA1062.
+1. Decided 2026-11-26: CA1001, CA1063 and CA1031 apply to test code; CA1502 and CA1506 do not
+   (see the scope list above).
 2. Sonar: none of the Sonar ids in `Directory.Build.props` `NoWarn` do anything, because SonarAnalyzer
    is not referenced. So magic numbers (S109), nesting (S134), method length (S138), cognitive
    complexity (S3776) and concatenation in loops (S1643) have no analyzer. Recommendation: keep them

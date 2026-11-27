@@ -44,6 +44,12 @@ public sealed partial class PlanFacts(IPlanFileResolver planPaths, IFileSystem f
     public const string TaskListFact = "plan.task-list";
 
     /// <summary>
+    /// The task's own files plus every file a fix-round dispatch names as also in scope for another task, which is the
+    /// scope the return's diff is judged against.
+    /// </summary>
+    public const string ScopeFilesFact = "plan.task.scope-files";
+
+    /// <summary>
     /// The fact holding the task's one technology, from its <c>Technology:</c> label, when it names one. It selects
     /// the technology folder's Arbiter rules; a task that names none leaves it absent.
     /// </summary>
@@ -124,6 +130,7 @@ public sealed partial class PlanFacts(IPlanFileResolver planPaths, IFileSystem f
             facts = facts.With("plan.task", task.Id, ArbiterFactLabel.Derived);
             facts = facts.With("plan.task.text", task.Text, ArbiterFactLabel.Derived);
             facts = facts.With("plan.task.files", task.Files.ToList(), ArbiterFactLabel.Derived);
+            facts = facts.With(ScopeFilesFact, ScopeFiles(task, document, facts), ArbiterFactLabel.Derived);
             facts = facts.With("plan.task.depends-on", task.DependsOn.ToList(), ArbiterFactLabel.Derived);
             facts = facts.With("plan.task.skills", task.Skills.ToList(), ArbiterFactLabel.Derived);
             if (!string.IsNullOrWhiteSpace(task.Technology))
@@ -149,6 +156,33 @@ public sealed partial class PlanFacts(IPlanFileResolver planPaths, IFileSystem f
         }
 
         return facts;
+    }
+
+    /// <summary>
+    /// The task's files, then the files another task of the plan lists that its dispatch names as also in scope,
+    /// without duplicates. A named file no other task lists is ignored, so a dispatch cannot widen the scope itself.
+    /// </summary>
+    private static List<string> ScopeFiles(PlanTask task, PlanDocument document, ArbiterFactSet facts)
+    {
+        List<string> files = [.. task.Files];
+        if (!facts.TryGet(ArbiterTriggerCatalog.DelegationPromptFact, out ArbiterFact? prompt) || prompt.Value is not string text)
+            return files;
+
+        List<PlanTask> otherTasks = [.. document.Tasks
+            .Where(other => !string.Equals(other.Id, task.Id, StringComparison.Ordinal))];
+        foreach (AlsoInScopeEntry entry in AlsoInScopeLines.Entries(text))
+        {
+            PlanTask? named = otherTasks.FirstOrDefault(
+                other => string.Equals(other.Id, entry.TaskId, StringComparison.Ordinal));
+            if (named is null || !named.Files.Any(listed => PlanFileOwnership.Owns(listed, entry.File)))
+                continue;
+
+            string file = PlanFileOwnership.Normalize(entry.File);
+            if (!files.Contains(file, StringComparer.Ordinal))
+                files.Add(file);
+        }
+
+        return files;
     }
 
     private static bool IsDelegation(string? trigger) =>
@@ -200,7 +234,7 @@ public sealed partial class PlanFacts(IPlanFileResolver planPaths, IFileSystem f
     /// The plan task a headerless dispatch names (see <see cref="TaskNamedIn(PlanDocument, string)"/>).
     /// </summary>
     private static PlanTask? TaskNamedIn(PlanDocument document, ArbiterFactSet facts) =>
-        facts.TryGet("delegation.prompt", out ArbiterFact? prompt) && prompt.Value is string text
+        facts.TryGet(ArbiterTriggerCatalog.DelegationPromptFact, out ArbiterFact? prompt) && prompt.Value is string text
             ? TaskNamedIn(document, text)
             : null;
 
