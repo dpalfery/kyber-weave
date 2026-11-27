@@ -4,7 +4,7 @@ title: Architecture decision records
 doc-type: index
 status: current
 owner: dpalfery
-last-reviewed: 2026-11-23
+last-reviewed: 2026-11-26
 ---
 
 # Architecture decision records
@@ -113,6 +113,7 @@ existing record.
 | [0092](0092-dashboard-views-load-by-section-and-page.md) | [Dashboard views load by section and by page](0092-dashboard-views-load-by-section-and-page.md) | Accepted | 2026-11-23 | The session view is one endpoint and one query per section with server-side paging (25 rows per list section, 100 roots on the sessions list), sections issued at mount in page order and served in parallel, conversation text fetched only when displayed, and the monolithic session payload retired; the report prices its window with one keyed batched read. Supersedes the session-payload clauses of ADR 0007 D3, ADR 0011 D3 and ADR 0041 D3 in part. Rejected: one smaller payload, two-tier split, scroll-gated loading, client-side paging, keyset-only paging. |
 | [0093](0093-kw-skills-load-on-demand-through-kw-docs.md) | [KW skills load on demand through kw-docs and are never deployed as harness skills](0093-kw-skills-load-on-demand-through-kw-docs.md) | Accepted | 2026-11-24 | Guidance for a technology or role is a KW skill in a separate pool (`standards/skills/<name>/SKILL.md`, repository over shipped), assigned by a names-only `<scope>.skills.yml`, listed by name and description in one `<kw-skills>` dispatch part, and read through the kw-docs `load_skill` tool; it is never deployed to a harness skill folder. Refines ADR 0049. Rejected: inlined prose, harness deployment, a new CLI. |
 | [0094](0094-squad-inserts-the-kw-docs-entry-into-antigravitys-user-mcp-config.md) | [Squad inserts the kw-docs entry into Antigravity's user MCP config](0094-squad-inserts-the-kw-docs-entry-into-antigravitys-user-mcp-config.md) | Accepted | 2026-11-25 | `kyber-weave-mcp --any-repo` serves any initialized repository named per call by `projectPath` (conflicts with `--repo-root` and `--expect-root` refuse with `KW-MCP-ROOT-003`); Squad renders it into Antigravity agent files and, on global install and update, inserts one `kw-docs` entry into Antigravity's user MCP config by byte splice, never overwriting an entry or echoing contents. Narrows ADR 0052 decision 2 for this write only. Rejected: a pinned root, a per-repository `cwd`, leaving the file to the operator, overwriting an existing entry. |
+| [0095](0095-ci-jobs-skip-on-content-hash-receipts-only-with-a-complete-fingerprint.md) | [CI jobs skip on content-hash receipts only when the fingerprint covers the job's whole input set](0095-ci-jobs-skip-on-content-hash-receipts-only-with-a-complete-fingerprint.md) | Accepted | 2026-11-26 | A job skips on a content-hash receipt only when its whole input set is fingerprinted, the skip is invisible to the required check, and the receipt is inside one uniform four-hour ceiling; the release chain skips as one version-bound unit whose hit path re-verifies the published assets, manifest and both attestation types. |
 
 ## Writing one
 
