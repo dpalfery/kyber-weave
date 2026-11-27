@@ -770,45 +770,9 @@ public static class CanonSynth
         (JsonElement boundedArgsElement, string rawSerializedArgs, int argsBytes, bool argsTruncated, string? canonicalArgsHash) =
             BoundToolArguments(toolCall);
 
-        long durationMs = 0;
-        JsonElement durationAvailability = NotMeasurableElement("Tool duration was not reported in telemetry.");
-        if (toolCall.DurationMs is { } measuredDuration)
-        {
-            durationMs = Math.Max(0, measuredDuration);
-            durationAvailability = MeasuredElement();
-        }
-        else if (!string.IsNullOrEmpty(toolCall.Timestamp) && !string.IsNullOrEmpty(toolResult?.Timestamp)
-            && DateTimeOffset.TryParse(toolCall.Timestamp, CultureInfo.InvariantCulture, DateTimeStyles.RoundtripKind, out DateTimeOffset startTs)
-            && DateTimeOffset.TryParse(toolResult.Timestamp, CultureInfo.InvariantCulture, DateTimeStyles.RoundtripKind, out DateTimeOffset endTs))
-        {
-            long diffMs = (long)Math.Round((endTs - startTs).TotalMilliseconds);
-            if (diffMs >= 0)
-            {
-                durationMs = diffMs;
-                durationAvailability = JsonSerializer.SerializeToElement("derived");
-            }
-        }
+        (long durationMs, JsonElement durationAvailability) = ResolveToolDuration(toolCall, toolResult);
 
-        List<ContentPart> parts = [];
-        if (toolResult is not null)
-        {
-            int textBytes = resultBytes ?? Encoding.UTF8.GetByteCount(toolResult.Content);
-            if (textBytes > MaxToolResultBytes)
-            {
-                parts.Add(new ContentPart(
-                    Part: "tool_result_content",
-                    Text: CanonValidation.TruncateContentPartUtf8(toolResult.Content, MaxToolResultBytes),
-                    Order: 0,
-                    Truncated: true));
-            }
-            else
-            {
-                parts.Add(new ContentPart(
-                    Part: "tool_result_content",
-                    Text: toolResult.Content,
-                    Order: 0));
-            }
-        }
+        List<ContentPart> parts = BuildToolResultParts(toolResult, resultBytes);
 
         string provider = ResolveToolProvider(parentRecord, call);
         HashSet<string> childCarried = toolResult is not null
@@ -822,31 +786,17 @@ public static class CanonSynth
             childCarried);
         measurability["duration"] = durationAvailability;
 
-        Dictionary<string, JsonElement> raw = new(StringComparer.Ordinal)
-        {
-            ["gen_ai.tool.name"] = JsonSerializer.SerializeToElement(toolCall.Name),
-            ["gen_ai.tool.call_id"] = JsonSerializer.SerializeToElement(toolCall.Id),
-            ["gen_ai.tool.status"] = JsonSerializer.SerializeToElement(status),
-            ["gen_ai.tool.arguments_bytes"] = JsonSerializer.SerializeToElement(argsBytes),
-            ["arguments"] = boundedArgsElement,
-        };
-
-        if (resultBytes.HasValue)
-            raw["gen_ai.tool.result_bytes"] = JsonSerializer.SerializeToElement(resultBytes.Value);
-
-        if (argsTruncated)
-        {
-            if (canonicalArgsHash is not null)
-                raw["gen_ai.tool.arguments_hash"] = JsonSerializer.SerializeToElement(canonicalArgsHash);
-
-            raw["gen_ai.tool.arguments_truncated"] = JsonSerializer.SerializeToElement(true);
-        }
-
-        if (toolCall.DurationMs is not null || (durationMs >= 0 && !string.IsNullOrEmpty(toolCall.Timestamp) && !string.IsNullOrEmpty(toolResult?.Timestamp)))
-            raw["gen_ai.tool.duration_ms"] = JsonSerializer.SerializeToElement(durationMs);
-
-        if (parts.Count > 0)
-            raw["result"] = JsonSerializer.SerializeToElement(parts[0].Text);
+        Dictionary<string, JsonElement> raw = BuildToolRawMap(
+            toolCall,
+            toolResult,
+            status,
+            resultBytes,
+            boundedArgsElement,
+            argsBytes,
+            argsTruncated,
+            canonicalArgsHash,
+            durationMs,
+            parts);
 
         string toolKeyId = !string.IsNullOrEmpty(toolCall.Id) ? toolCall.Id : index.ToString(CultureInfo.InvariantCulture);
         byte[] hashBytes = SHA256.HashData(Encoding.UTF8.GetBytes($"{toolKeyId}:{toolCall.Name}:{rawSerializedArgs}"));
@@ -873,6 +823,97 @@ public static class CanonSynth
             Measurability = measurability,
             Raw = raw,
         };
+    }
+
+    /// <summary>Resolves the measured or derived duration for a tool call plus its measurability element.</summary>
+    private static (long DurationMs, JsonElement Availability) ResolveToolDuration(
+        ReaderToolCall toolCall,
+        ReaderToolResult? toolResult)
+    {
+        if (toolCall.DurationMs is { } measuredDuration)
+            return (Math.Max(0, measuredDuration), MeasuredElement());
+
+        if (toolResult is not null
+            && !string.IsNullOrEmpty(toolCall.Timestamp)
+            && !string.IsNullOrEmpty(toolResult.Timestamp)
+            && DateTimeOffset.TryParse(toolCall.Timestamp, CultureInfo.InvariantCulture, DateTimeStyles.RoundtripKind, out DateTimeOffset startTs)
+            && DateTimeOffset.TryParse(toolResult.Timestamp, CultureInfo.InvariantCulture, DateTimeStyles.RoundtripKind, out DateTimeOffset endTs))
+        {
+            long diffMs = (long)Math.Round((endTs - startTs).TotalMilliseconds);
+            if (diffMs >= 0)
+                return (diffMs, JsonSerializer.SerializeToElement("derived"));
+        }
+
+        return (0, NotMeasurableElement("Tool duration was not reported in telemetry."));
+    }
+
+    /// <summary>Builds the truncated-or-intact content parts for a tool result.</summary>
+    private static List<ContentPart> BuildToolResultParts(ReaderToolResult? toolResult, int? resultBytes)
+    {
+        List<ContentPart> parts = [];
+        if (toolResult is null)
+            return parts;
+
+        int textBytes = resultBytes ?? Encoding.UTF8.GetByteCount(toolResult.Content);
+        if (textBytes > MaxToolResultBytes)
+        {
+            parts.Add(new ContentPart(
+                Part: "tool_result_content",
+                Text: CanonValidation.TruncateContentPartUtf8(toolResult.Content, MaxToolResultBytes),
+                Order: 0,
+                Truncated: true));
+        }
+        else
+        {
+            parts.Add(new ContentPart(
+                Part: "tool_result_content",
+                Text: toolResult.Content,
+                Order: 0));
+        }
+
+        return parts;
+    }
+
+    /// <summary>Builds the raw telemetry map for a synthesized tool call.</summary>
+    private static Dictionary<string, JsonElement> BuildToolRawMap(
+        ReaderToolCall toolCall,
+        ReaderToolResult? toolResult,
+        string status,
+        int? resultBytes,
+        JsonElement boundedArgsElement,
+        int argsBytes,
+        bool argsTruncated,
+        string? canonicalArgsHash,
+        long durationMs,
+        List<ContentPart> parts)
+    {
+        Dictionary<string, JsonElement> raw = new(StringComparer.Ordinal)
+        {
+            ["gen_ai.tool.name"] = JsonSerializer.SerializeToElement(toolCall.Name),
+            ["gen_ai.tool.call_id"] = JsonSerializer.SerializeToElement(toolCall.Id),
+            ["gen_ai.tool.status"] = JsonSerializer.SerializeToElement(status),
+            ["gen_ai.tool.arguments_bytes"] = JsonSerializer.SerializeToElement(argsBytes),
+            ["arguments"] = boundedArgsElement,
+        };
+
+        if (resultBytes.HasValue)
+            raw["gen_ai.tool.result_bytes"] = JsonSerializer.SerializeToElement(resultBytes.Value);
+
+        if (argsTruncated)
+        {
+            if (canonicalArgsHash is not null)
+                raw["gen_ai.tool.arguments_hash"] = JsonSerializer.SerializeToElement(canonicalArgsHash);
+
+            raw["gen_ai.tool.arguments_truncated"] = JsonSerializer.SerializeToElement(true);
+        }
+
+        if (toolCall.DurationMs is not null || (durationMs >= 0 && !string.IsNullOrEmpty(toolCall.Timestamp) && !string.IsNullOrEmpty(toolResult?.Timestamp)))
+            raw["gen_ai.tool.duration_ms"] = JsonSerializer.SerializeToElement(durationMs);
+
+        if (parts.Count > 0)
+            raw["result"] = JsonSerializer.SerializeToElement(parts[0].Text);
+
+        return raw;
     }
 
     /// <summary>Synthesizes all child <c>tool.invoke</c> spans for one parent model invocation turn.</summary>
