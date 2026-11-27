@@ -13,10 +13,12 @@ using Xunit;
 namespace KyberWeave.Tests;
 
 /// <summary>What <c>squad brief</c> writes for a printed brief and for each refusal, over fake console and builder.</summary>
-public sealed class SquadBriefCommandTests
+public sealed class SquadBriefCommandTests : IDisposable
 {
     private readonly TestConsole _ansi = new() { EmitAnsiSequences = false };
     private readonly FakeConsole _streams = new();
+
+    public void Dispose() => _ansi.Dispose();
 
     [Fact]
     public void Execute_UnknownFormat_RefusesWithTheFormats()

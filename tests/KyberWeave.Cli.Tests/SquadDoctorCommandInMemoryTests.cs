@@ -18,7 +18,7 @@ namespace KyberWeave.Tests;
 /// global collision scan (clean, colliding, invalid source, corrupt or blank receipts) and the install-time
 /// unmanaged-collision refusal. No test here touches the disk or starts a program.
 /// </summary>
-public sealed class SquadDoctorCommandInMemoryTests
+public sealed class SquadDoctorCommandInMemoryTests : IDisposable
 {
     private readonly TestConsole _ansi = new() { EmitAnsiSequences = false };
     private readonly InMemorySquadState _state = new();
@@ -29,6 +29,8 @@ public sealed class SquadDoctorCommandInMemoryTests
         _ansi.Profile.Width = 100_000;
         _console = new SquadConsole(_ansi, new FakeConsole());
     }
+
+    public void Dispose() => _ansi.Dispose();
 
     [Fact]
     public void Doctor_SourceLessInstalledLayout_DoesNotReportMissingCanonicalSource()

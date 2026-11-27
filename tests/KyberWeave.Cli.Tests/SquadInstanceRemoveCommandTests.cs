@@ -12,13 +12,15 @@ using Xunit;
 namespace KyberWeave.Tests;
 
 /// <summary>What <c>squad instance remove</c> asks, prints and removes, over fake paths, console and instance service.</summary>
-public sealed class SquadInstanceRemoveCommandTests
+public sealed class SquadInstanceRemoveCommandTests : IDisposable
 {
     private const string Home = "/kw/home";
     private readonly TestConsole _ansi = new() { EmitAnsiSequences = false };
     private readonly FakeConsole _streams = new(isInputRedirected: true);
     private readonly RecordingInstances _instances = new();
     private readonly StubFiles _files = new();
+
+    public void Dispose() => _ansi.Dispose();
 
     [Fact]
     public void Execute_InstanceFound_RemovesItWithoutAskingWhenNotInteractive()

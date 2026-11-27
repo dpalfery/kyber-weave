@@ -16,7 +16,7 @@ namespace KyberWeave.Tests;
 /// What <c>squad status</c> reads and prints over an in-memory Squad state: a missing receipt, a matching one,
 /// a drifted file, a missing file, the global scope, and a legacy global receipt. No test here touches the disk.
 /// </summary>
-public sealed class SquadStatusCommandInMemoryTests
+public sealed class SquadStatusCommandInMemoryTests : IDisposable
 {
     private readonly TestConsole _ansi = new() { EmitAnsiSequences = false };
     private readonly InMemorySquadState _state = new();
@@ -27,6 +27,8 @@ public sealed class SquadStatusCommandInMemoryTests
         _ansi.Profile.Width = 200;
         _console = new SquadConsole(_ansi, new FakeConsole());
     }
+
+    public void Dispose() => _ansi.Dispose();
 
     [Fact]
     public void Status_MissingReceipt_ExitsOneWithGuidanceToInstall()
