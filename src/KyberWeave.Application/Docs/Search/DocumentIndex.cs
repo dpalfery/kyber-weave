@@ -372,7 +372,7 @@ public sealed partial class DocumentIndex
         HashSet<string> stated = new(StringComparer.Ordinal);
         foreach (DocumentModel candidate in candidates)
         {
-            foreach (DocumentSection section in candidate.Sections)
+            foreach (DocumentSection section in TopicSections(candidate))
             {
                 stated.UnionWith(SectionVector(section).Keys);
             }
@@ -809,7 +809,104 @@ public sealed partial class DocumentIndex
     }
 
     /// <summary>
-    /// Fills a document's share of the budget with its most relevant <c>##</c> sections.
+    /// The sections a topic is scored against. An <c>##</c> section that contains
+    /// <c>###</c> headings is expanded to those headings, and to its own lead when
+    /// that lead has prose. The parent heading is not scored on its own: "Security
+    /// and data handling" would otherwise beat "Errors and diagnostics" on the
+    /// single shared word and spend the budget before the subsection is reached.
+    /// A section with no <c>###</c> heading stays as it is, which is what the
+    /// in-memory fixtures score.
+    /// </summary>
+    private static List<DocumentSection> TopicSections(DocumentModel doc)
+    {
+        List<DocumentSection> sections = new();
+        foreach (DocumentSection section in doc.Sections)
+        {
+            sections.AddRange(ExpandNestedHeadings(section));
+        }
+
+        return sections;
+    }
+
+    /// <summary>
+    /// Splits one <c>##</c> section on its <c>###</c> headings. A <c>###</c> line
+    /// inside a fence is prose, not a boundary. Returns the section unchanged when
+    /// it has no such heading.
+    /// </summary>
+    private static List<DocumentSection> ExpandNestedHeadings(DocumentSection section)
+    {
+        string[] lines = section.Body.Replace("\r\n", "\n", StringComparison.Ordinal).Split('\n');
+        List<DocumentSection> children = new();
+        List<string> buffer = new();
+        string? heading = null;
+        int headingLine = section.LineNumber;
+        int bodyLine = section.BodyLine > 0 ? section.BodyLine : section.LineNumber + 1;
+        bool inFence = false;
+        bool sawNested = false;
+
+        void FlushNested()
+        {
+            if (heading is null) return;
+
+            children.Add(new DocumentSection(
+                heading,
+                string.Join("\n", buffer).Trim('\n'),
+                headingLine));
+        }
+
+        for (int i = 0; i < lines.Length; i++)
+        {
+            string line = lines[i];
+            if (line.TrimStart().StartsWith("```", StringComparison.Ordinal))
+            {
+                inFence = !inFence;
+            }
+            else if (!inFence && line.StartsWith("### ", StringComparison.Ordinal))
+            {
+                if (!sawNested && HasProse(buffer))
+                {
+                    children.Add(new DocumentSection(
+                        section.Heading,
+                        string.Join("\n", buffer).Trim('\n'),
+                        section.LineNumber));
+                }
+                else if (sawNested)
+                {
+                    FlushNested();
+                }
+
+                sawNested = true;
+                heading = line[4..].Trim();
+                headingLine = bodyLine + i;
+                buffer = [];
+                continue;
+            }
+
+            buffer.Add(line);
+        }
+
+        if (!sawNested) return [section];
+
+        FlushNested();
+        return children;
+    }
+
+    /// <summary>True when the lines contain something other than blanks.</summary>
+    private static bool HasProse(List<string> lines)
+    {
+        foreach (string line in lines)
+        {
+            if (!string.IsNullOrWhiteSpace(line)) return true;
+        }
+
+        return false;
+    }
+
+    /// <summary>
+    /// Fills a document's share of the budget with its most relevant sections. A
+    /// <c>##</c> heading that contains <c>###</c> headings is scored at those
+    /// headings, so a sibling heading that shares one word of the topic cannot
+    /// crowd out the subsection that discusses it.
     /// </summary>
     /// <remarks>
     /// <para>
@@ -834,9 +931,10 @@ public sealed partial class DocumentIndex
         IReadOnlyDictionary<string, double> queryVector,
         int budget)
     {
-        if (doc.Sections.Count == 0) return DocumentExcerpt.Empty;
+        IReadOnlyList<DocumentSection> sections = TopicSections(doc);
+        if (sections.Count == 0) return DocumentExcerpt.Empty;
 
-        List<(DocumentSection Section, double Score)> ranked = doc.Sections
+        List<(DocumentSection Section, double Score)> ranked = sections
             .Select(section =>
             {
                 Dictionary<string, double> vector = SectionVector(section);
