@@ -23,7 +23,7 @@ try
     exitCode = await Composition.DispatchAsync(args, Console.In, Console.Out, Console.Error)
         .ConfigureAwait(false);
 }
-catch (Exception ex)
+catch (Exception ex) when (ex is not OutOfMemoryException && ex is not OperationCanceledException)
 {
     // Last resort: the streams themselves broke. Nothing may go to stdout. Exit 0: the
     // Arbiter never blocks a dispatch on its own failure (ADR 0072), and exit 2 is a block
@@ -70,7 +70,7 @@ static async Task<int> ServeAsync(string[] args)
         await host.RunAsync().ConfigureAwait(false);
         return 0;
     }
-    catch (Exception ex)
+    catch (Exception ex) when (ex is not OutOfMemoryException && ex is not OperationCanceledException)
     {
         // A host that never came up is the client's mistake to fix, not a crash to read:
         // stdout owns protocol frames, so the message goes to stderr, one line, and the
