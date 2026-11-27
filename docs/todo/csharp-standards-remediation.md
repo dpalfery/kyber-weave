@@ -57,7 +57,7 @@ pipe in a pattern cell is the table's escape; the pattern the grep runs uses a p
 | KW-STD-SQL-004 parameterized | `TextExpr\(` | 234 |
 | KW-STD-CS-004 no `!` | `[A-Za-z0-9_\)\]]![.;,)\[]` | 327 |
 | KW-STD-CS-013 no blocking on async | `\.Wait\(\)\|\.GetAwaiter\(\)\.GetResult\(\)\|\.Result\b[^<]` | 62 |
-| E4 time seam | `DateTime(Offset)?\.(Now\|UtcNow)` | 27 |
+| clock seam | `DateTime(Offset)?\.(Now\|UtcNow)` | 27 |
 | KW-STD-CS-007 no stub members | `NotImplementedException\|NotSupportedException\(\)` | 20 |
 | KW-STD-CS-018 HTTP handlers | `new HttpClient\(` | 4 |
 | KW-STD-SQL-007 in process | `"sqlite3"` | 3 |
@@ -65,6 +65,12 @@ pipe in a pattern cell is the table's escape; the pattern the grep runs uses a p
 KW-STD-CS-002 beyond the two metrics, KW-STD-CS-005, -008, -010, -011, -014, -016, -017, -019,
 -020 and -021 are review rules: the inventory does not search for them, and reviewers apply them to
 changed code.
+
+The clock seam has no KW-STD id. It is the clock sentence under "Interface first, unit tested"
+in [`csharp.rules.md`](../standards/csharp/csharp.rules.md): the clock is reached only through
+its seam. A no-analyzer row takes its `rule` value from the Rule cell of the table above
+(`clock seam` for that row). An analyzer row takes the KW-STD id from
+`analyzers/ratchet.globalconfig`.
 
 ## Roles
 
@@ -103,7 +109,7 @@ worker in it with this prompt:
 > 2. From both logs, keep every line matching `<path>.cs(<line>,<col>): warning CA<digits>`, make the
 >    path relative to the worktree root, and drop duplicates. Write one row per location to
 >    `../work/inventory.tsv` with these tab-separated columns:
->    `rule` (the KW-STD id from `analyzers/ratchet.globalconfig`), `analyzer`, `path`, `line`,
+>    `rule` (an analyzer row takes the KW-STD id from `analyzers/ratchet.globalconfig`; a no-analyzer row takes the Rule cell of the table above), `analyzer`, `path`, `line`,
 >    `project` (the folder under `src/`, `tests/`, `dash/server/` or `dash/server.tests/`), `kind`
 >    (`mechanical` for CA1062, CA1001, CA1063, CA2227; `judgement` for the rest), `note` (empty).
 > 3. For each pattern in the "Rules with no analyzer" table of
