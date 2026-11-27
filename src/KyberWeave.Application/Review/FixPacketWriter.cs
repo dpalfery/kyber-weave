@@ -420,7 +420,7 @@ internal static class FixPacketWriter
         if (!string.IsNullOrWhiteSpace(finding.Evidence))
         {
             foreach (System.Text.RegularExpressions.Match match in ReviewVerdictRules.EvidenceCitation()
-                         .Matches(finding.Evidence).Take(ReviewVerdictRules.MaxEvidenceCitations))
+                         .Matches(ReviewSeatInput.Clip(finding.Evidence)!).Take(ReviewVerdictRules.MaxEvidenceCitations))
             {
                 string cited = match.Groups["file"].Value;
                 if (CitedLineCheck.IsRepositoryRelative(cited))

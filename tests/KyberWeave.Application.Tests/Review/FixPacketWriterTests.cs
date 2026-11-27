@@ -381,6 +381,41 @@ public sealed class FixPacketWriterTests : IDisposable
         Assert.False(PacketExists("task-T3"));
     }
 
+    /// <summary>
+    /// Seat text is capped before anything scans it, so a citation past the cap never widens the fix's scope to another
+    /// task's file.
+    /// </summary>
+    [Fact]
+    public void ACitationBeyondTheSeatTextLimitDoesNotExtendTheScope()
+    {
+        WritePlan("""
+            schema-version: 1
+            plan: docs/plans/demo.md
+            tasks:
+              - id: T2
+                files:
+                  - src/Contract/OrderDto.cs
+              - id: T3
+                files:
+                  - src/Http/OrdersController.cs
+            """);
+        ScriptChange(Plan, "src/Contract/OrderDto.cs");
+        string padding = string.Concat(Enumerable.Repeat("# ", ReviewSeatInput.MaxTextCharacters / 2));
+
+        FixPacketOutcome outcome = Write(
+            [
+                Finding(
+                    "contract/page-envelope",
+                    "src/Contract/OrderDto.cs",
+                    evidence: padding + "src/Http/OrdersController.cs:40 returns the envelope.")
+            ],
+            []);
+
+        string block = Assert.Single(outcome.DispatchBlocks);
+        Assert.DoesNotContain("Also in scope", block, StringComparison.Ordinal);
+        Assert.DoesNotContain("This fix may also edit task T3's files", Read("task-T2"), StringComparison.Ordinal);
+    }
+
     /// <summary>Findings that touch the same file are one fix even when the file is cited from another task's file.</summary>
     [Fact]
     public void FindingsThatShareAFileAreOnePacket()
