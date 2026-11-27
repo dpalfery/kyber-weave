@@ -1,5 +1,6 @@
 using KyberWeave.Application.Review;
 using KyberWeave.Contracts.Repositories;
+using KyberWeave.Core.Arbiter.Facts;
 using KyberWeave.Core.Review;
 using KyberWeave.Tests;
 using Xunit;
@@ -378,6 +379,7 @@ public sealed class FixPacketWriterTests : IDisposable
             packet,
             StringComparison.Ordinal);
         Assert.Contains("Also in scope (task T3): src/Http/OrdersController.cs\n", block, StringComparison.Ordinal);
+        Assert.Contains("src/Http/OrdersController.cs", AlsoInScopeLines.Files(block));
         Assert.False(PacketExists("task-T3"));
     }
 

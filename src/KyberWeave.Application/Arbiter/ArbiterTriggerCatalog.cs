@@ -43,6 +43,7 @@ public static class ArbiterTriggerCatalog
         "plan.task",
         "plan.task.text",
         "plan.task.files",
+        "plan.task.scope-files",
         "plan.task.depends-on",
         "plan.task.skills",
         "plan.task.technology",

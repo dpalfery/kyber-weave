@@ -3,6 +3,7 @@ using System.Globalization;
 using System.Text;
 using System.Text.Json;
 using KyberWeave.Contracts.Repositories;
+using KyberWeave.Core.Arbiter.Facts;
 using KyberWeave.Core.Docs.Validation;
 using KyberWeave.Core.FileSystem;
 using KyberWeave.Core.Review;
@@ -703,10 +704,7 @@ internal static class FixPacketWriter
         // The Arbiter judges the dispatch's text against the task, so the other tasks' files the fix must change are
         // named here, not only in the packet the worker opens.
         foreach (OtherTaskFiles other in packet.AlsoInScope)
-        {
-            block.Append("Also in scope (task ").Append(other.TaskId).Append("): ")
-                .Append(string.Join(", ", other.Files)).Append('\n');
-        }
+            block.Append(AlsoInScopeLines.Line(other.TaskId, other.Files)).Append('\n');
 
         block.Append("Fix packet: ").Append(path).Append('\n');
         block.Append("--- end ---");
