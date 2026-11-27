@@ -1261,78 +1261,135 @@ public static class CanonAdapters
             string? sessionId = ReadNonEmptyString(raw.Attributes, "opencode.session.id") ?? record.SessionId;
 
             Dictionary<string, JsonElement> measurability = new(StringComparer.Ordinal);
-            TokenUsage tokens = record.Tokens;
-            if (string.Equals(kind, "step", StringComparison.Ordinal))
+            TokenUsage tokens = BuildTokenUsage(raw, kind, record.Tokens, measurability);
+
+            List<ContentPart> parts = BuildParts(raw, record, out string? prompt, out string? system, out string? tools);
+            AddContentMeasurability(measurability, raw, kind, prompt, system, tools);
+
+            CostBlock cost = ReadCost(raw);
+            Dictionary<string, JsonElement> strippedRaw = BuildStrippedRaw(raw);
+
+            return record with
             {
-                long? input = ReadOptionalCounter(raw.Attributes, ["opencode.usage.input"]);
-                long? cacheRead = ReadOptionalCounter(raw.Attributes, ["opencode.usage.cache_read"]);
-                long? cacheCreation = ReadOptionalCounter(raw.Attributes, ["opencode.usage.cache_write"]);
-                long? output = ReadOptionalCounter(raw.Attributes, ["opencode.usage.output"]);
-                long? reasoning = ReadOptionalCounter(raw.Attributes, ["opencode.usage.reasoning"]);
+                SessionId = sessionId,
+                Op = op,
+                Name = name,
+                Tokens = tokens,
+                Cost = cost,
+                Parts = parts,
+                Content = CanonValidation.ContentFromParts(parts),
+                Measurability = measurability,
+                Raw = strippedRaw,
+            };
+        }
 
-                // Sum in decimal: it cannot wrap, and a negative reasoning count must not read as an
-                // overflow. The comparisons keep the cast inside long's range.
-                decimal adjustedSum = (decimal)(output ?? 0) + (reasoning ?? 0);
-                bool outputOverflowed = output.HasValue
-                    && (adjustedSum > long.MaxValue || adjustedSum < long.MinValue);
-                long adjustedOutput = output.HasValue && !outputOverflowed ? (long)adjustedSum : 0;
-                long? adjustedReasoning = output.HasValue && reasoning.HasValue && !outputOverflowed
-                    ? reasoning.Value
-                    : null;
-
-                tokens = ExclusiveConvention(
-                    input ?? 0,
-                    cacheRead ?? 0,
-                    cacheCreation ?? 0,
-                    adjustedOutput,
-                    adjustedReasoning);
-
-                bool inputReported = input.HasValue || cacheRead.HasValue || cacheCreation.HasValue;
-                measurability["token_usage"] = inputReported
-                    ? MeasuredElement()
-                    : NotMeasurableElement("OpenCode telemetry did not report input token usage for this span.");
-                if (!output.HasValue)
-                {
-                    measurability["output"] = NotMeasurableElement(
-                        "OpenCode telemetry did not report output token usage for this span.");
-                }
-                else if (outputOverflowed)
-                {
-                    measurability["output"] = NotMeasurableElement(
-                        "OpenCode reported an output count whose sum with its reasoning count overflows a 64-bit counter.");
-                }
-                else
-                {
-                    measurability["output"] = MeasuredElement();
-                }
-                measurability["cache_read"] = cacheRead.HasValue
-                    ? MeasuredElement()
-                    : NotMeasurableElement("OpenCode did not export a cache read counter.");
-                measurability["cache_creation"] = cacheCreation.HasValue
-                    ? MeasuredElement()
-                    : NotMeasurableElement("OpenCode did not export a cache creation counter.");
-            }
-            else
+        private static TokenUsage BuildTokenUsage(
+            RawSpan raw,
+            string? kind,
+            TokenUsage fallback,
+            Dictionary<string, JsonElement> measurability)
+        {
+            if (!string.Equals(kind, "step", StringComparison.Ordinal))
             {
                 const string stepOnlyReason = "OpenCode reports token usage on step spans, not on request or tool spans.";
                 measurability["token_usage"] = NotMeasurableElement(stepOnlyReason);
                 measurability["output"] = NotMeasurableElement(stepOnlyReason);
                 measurability["cache_read"] = NotMeasurableElement(stepOnlyReason);
                 measurability["cache_creation"] = NotMeasurableElement(stepOnlyReason);
+                return fallback;
             }
 
+            long? input = ReadOptionalCounter(raw.Attributes, ["opencode.usage.input"]);
+            long? cacheRead = ReadOptionalCounter(raw.Attributes, ["opencode.usage.cache_read"]);
+            long? cacheCreation = ReadOptionalCounter(raw.Attributes, ["opencode.usage.cache_write"]);
+            long? output = ReadOptionalCounter(raw.Attributes, ["opencode.usage.output"]);
+            long? reasoning = ReadOptionalCounter(raw.Attributes, ["opencode.usage.reasoning"]);
+
+            // Sum in decimal: it cannot wrap, and a negative reasoning count must not read as an
+            // overflow. The comparisons keep the cast inside long's range.
+            decimal adjustedSum = (decimal)(output ?? 0) + (reasoning ?? 0);
+            bool outputOverflowed = output.HasValue
+                && (adjustedSum > long.MaxValue || adjustedSum < long.MinValue);
+            long adjustedOutput = output.HasValue && !outputOverflowed ? (long)adjustedSum : 0;
+            long? adjustedReasoning = output.HasValue && reasoning.HasValue && !outputOverflowed
+                ? reasoning.Value
+                : null;
+
+            AddStepMeasurability(measurability, input, cacheRead, cacheCreation, output, outputOverflowed);
+
+            return ExclusiveConvention(
+                input ?? 0,
+                cacheRead ?? 0,
+                cacheCreation ?? 0,
+                adjustedOutput,
+                adjustedReasoning);
+        }
+
+        private static void AddStepMeasurability(
+            Dictionary<string, JsonElement> measurability,
+            long? input,
+            long? cacheRead,
+            long? cacheCreation,
+            long? output,
+            bool outputOverflowed)
+        {
+            bool inputReported = input.HasValue || cacheRead.HasValue || cacheCreation.HasValue;
+            measurability["token_usage"] = inputReported
+                ? MeasuredElement()
+                : NotMeasurableElement("OpenCode telemetry did not report input token usage for this span.");
+            if (!output.HasValue)
+            {
+                measurability["output"] = NotMeasurableElement(
+                    "OpenCode telemetry did not report output token usage for this span.");
+            }
+            else if (outputOverflowed)
+            {
+                measurability["output"] = NotMeasurableElement(
+                    "OpenCode reported an output count whose sum with its reasoning count overflows a 64-bit counter.");
+            }
+            else
+            {
+                measurability["output"] = MeasuredElement();
+            }
+
+            measurability["cache_read"] = cacheRead.HasValue
+                ? MeasuredElement()
+                : NotMeasurableElement("OpenCode did not export a cache read counter.");
+            measurability["cache_creation"] = cacheCreation.HasValue
+                ? MeasuredElement()
+                : NotMeasurableElement("OpenCode did not export a cache creation counter.");
+        }
+
+        private static List<ContentPart> BuildParts(
+            RawSpan raw,
+            CanonicalRecord record,
+            out string? prompt,
+            out string? system,
+            out string? tools)
+        {
             List<ContentPart> parts = [.. record.Parts ?? []];
             int order = parts.Count;
-            string? prompt = ReadNonEmptyString(raw.Attributes, "opencode.prompt.text");
+            prompt = ReadNonEmptyString(raw.Attributes, "opencode.prompt.text");
             if (prompt is not null)
                 parts.Add(new ContentPart("conversation_history", prompt, Order: order++));
-            string? system = ReadNonEmptyString(raw.Attributes, "opencode.context.system");
+            system = ReadNonEmptyString(raw.Attributes, "opencode.context.system");
             if (system is not null)
                 parts.Add(new ContentPart("system_prompt", system, Order: order++));
-            string? tools = ReadNonEmptyString(raw.Attributes, "opencode.context.tools");
+            tools = ReadNonEmptyString(raw.Attributes, "opencode.context.tools");
             if (tools is not null)
                 parts.Add(new ContentPart("tool_definitions", tools, Order: order++));
 
+            return parts;
+        }
+
+        private static void AddContentMeasurability(
+            Dictionary<string, JsonElement> measurability,
+            RawSpan raw,
+            string? kind,
+            string? prompt,
+            string? system,
+            string? tools)
+        {
             if (string.Equals(kind, "request", StringComparison.Ordinal))
             {
                 measurability["user_prompt"] = prompt is not null
@@ -1352,12 +1409,18 @@ public static class CanonAdapters
                     ? MeasuredElement()
                     : NotMeasurableElement("OpenCode content capture is off, so this span did not capture skills_listed; turn OpenCode capture on in KyberDash Settings to record it.");
             }
+        }
 
+        private static CostBlock ReadCost(RawSpan raw)
+        {
             double? reportedCost = ReadFiniteDouble(raw.Attributes, "opencode.cost");
-            CostBlock cost = reportedCost is >= 0
+            return reportedCost is >= 0
                 ? new CostBlock(CostBasis.Harness, CostStatus.Priced, Value: reportedCost, Currency: "USD")
                 : new CostBlock(CostBasis.Unknown, CostStatus.NoRate);
+        }
 
+        private static Dictionary<string, JsonElement> BuildStrippedRaw(RawSpan raw)
+        {
             Dictionary<string, JsonElement> strippedRaw = new(StringComparer.Ordinal);
             foreach (KeyValuePair<string, JsonElement> entry in raw.Attributes)
             {
@@ -1374,18 +1437,7 @@ public static class CanonAdapters
             if (modelId is not null)
                 strippedRaw["gen_ai.request.model"] = JsonSerializer.SerializeToElement(modelId);
 
-            return record with
-            {
-                SessionId = sessionId,
-                Op = op,
-                Name = name,
-                Tokens = tokens,
-                Cost = cost,
-                Parts = parts,
-                Content = CanonValidation.ContentFromParts(parts),
-                Measurability = measurability,
-                Raw = strippedRaw,
-            };
+            return strippedRaw;
         }
 
         public Problem? Validate(CanonicalRecord record) => ValidateRecordTokens(record);
