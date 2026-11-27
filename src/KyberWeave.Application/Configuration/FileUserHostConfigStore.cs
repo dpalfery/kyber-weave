@@ -15,7 +15,7 @@ public sealed class FileUserHostConfigStore(IWritableFileSystem files) : IUserHo
         ArgumentException.ThrowIfNullOrWhiteSpace(home);
 
         string path = UserHostConfigPath.Of(home);
-        files.CreateDirectory(Path.GetDirectoryName(path)!);
+        files.CreateDirectory(Path.GetDirectoryName(path) ?? throw new IOException($"'{path}' has no folder."));
 
         string yaml = files.FileExists(path)
             ? files.ReadAllText(path)
@@ -37,7 +37,7 @@ public sealed class FileUserHostConfigStore(IWritableFileSystem files) : IUserHo
         ArgumentNullException.ThrowIfNull(targets);
 
         string path = UserHostConfigPath.Of(home);
-        files.CreateDirectory(Path.GetDirectoryName(path)!);
+        files.CreateDirectory(Path.GetDirectoryName(path) ?? throw new IOException($"'{path}' has no folder."));
 
         string yaml = files.FileExists(path)
             ? files.ReadAllText(path)

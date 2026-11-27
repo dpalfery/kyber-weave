@@ -114,11 +114,23 @@ public sealed class PlanRootResolver(
             return namedHolding[0];
         }
 
+        // Every worktree in `holding` holds the plan (its path resolves), so resolve each once and compare
+        // copies by their last write time; a copy whose metadata cannot be read is dropped, not picked.
+        List<(string Worktree, string Path)> copies = [];
+        foreach (string worktree in holding)
+        {
+            if (planPaths.Resolve(planFile, worktree) is { } path)
+                copies.Add((worktree, path));
+        }
+
+        if (copies.Count == 0)
+        {
+            return hookRoot;
+        }
+
         try
         {
-            return holding
-                .OrderByDescending(worktree => files.GetLastWriteTimeUtc(planPaths.Resolve(planFile, worktree)!))
-                .First();
+            return copies.OrderByDescending(copy => files.GetLastWriteTimeUtc(copy.Path)).First().Worktree;
         }
         catch (Exception exception) when (FileFailure.Is(exception))
         {
