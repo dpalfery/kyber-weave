@@ -13,8 +13,8 @@ decided-by: []
 
 ## Status
 
-Accepted, 2026-11-26. Records the decisions of the plan [CI content-hash skip receipts and
-provenance](../archive/plans/2026-11-26-ci-content-hash-skip-and-provenance.md), including the two
+Accepted, 2026-11-26. Records the decisions of the active plan [CI content-hash skip receipts and
+provenance](../plans/2026-11-26-ci-content-hash-skip-and-provenance.md), including the two
 owner decisions taken at its approve-and-execute gate: one uniform four-hour ceiling for CI and the
 release chain, and `integration-test` left skip-eligible despite its AI-graded tests.
 
@@ -90,12 +90,13 @@ rules a workflow edit must keep are in
    differs from this run's fingerprint are each a miss with their own summary line. Every receipt
    step declares `shell: bash`, because the Windows legs default to `pwsh`, where `date +%s` and the
    verdict's integer arithmetic do not work.
-10. **A skipped job keeps its evidence in the run.** A fresh hit writes the receipt JSON into the step
-    summary and sets `prior_run_url`, so the skip shows what proved it. Artifact-producing jobs mint
-    provenance attestations for their build products on the miss path with `actions/attest` in
-    provenance mode (no `sbom-path`), under `id-token: write` with a comment naming why; test reports
-    and SARIF analyses are recorded as digests only, and a job that produces no artifact carries
-    `artifact_digests: null` and `attested: false`. A skipped security scan uploads no SARIF, so
+10. **A skipped job keeps its evidence in the run.** A fresh hit writes the receipt JSON (including
+    `run_url`) into the step summary and sets `skip=true`, so the skip shows what proved it.
+    Artifact-producing jobs mint provenance attestations for their build products on the miss path
+    with `actions/attest` in provenance mode (no `sbom-path`), under `id-token: write` with a
+    comment naming why; jobs that produce no build product — including test-only and security-scan
+    jobs — carry `artifact_digests: null` and `attested: false` (test reports and SARIF files are
+    neither digested nor attested). A skipped security scan uploads no SARIF, so
     code scanning sees no new analysis for that scan during the skip window — the same informational
     state the `codeql` job already documents for a skipped matrix leg, and it cannot fail the required
     check.
