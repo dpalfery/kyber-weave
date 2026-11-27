@@ -210,6 +210,57 @@ public class CleanService : ICleanService
         string nowIso = DateTimeOffset.UtcNow.UtcDateTime.ToString(
             "yyyy-MM-dd'T'HH:mm:ss.fff'Z'", CultureInfo.InvariantCulture);
 
+        WipeScope scope = ReadScope(harnesses);
+
+        // Findings reference sessions without a foreign key, so the clean removes them itself before
+        // the rows they point at disappear.
+        foreach (string sessionId in scope.FindingSessionIds)
+        {
+            projections.DeleteFindingsForSession(sessionId);
+        }
+
+        foreach (StoredSessionProjection sessionProjection in scope.SessionProjections)
+        {
+            projections.DeleteSessionProjection(sessionProjection.SessionId);
+        }
+
+        foreach (StoredRun run in scope.Runs)
+        {
+            projections.DeleteRun(run.RunId);
+        }
+
+        foreach (StoredHarnessRollup rollup in scope.Rollups)
+        {
+            projections.DeleteHarnessRollup(rollup.HarnessId);
+        }
+
+        foreach (StoredSource source in scope.Sources)
+        {
+            writer.DeleteSource(source.SourceId);
+        }
+
+        // The wipe deletes projection rows directly and may delete no source at all, so the pass
+        // that follows would otherwise find the marker where the last pass left it and skip:
+        // bumping the marker forces a full pass, and the dirty range is cleared in its favour.
+        operationalStore.SetWriteMarker(operationalStore.GetWriteMarker() + 1);
+        operationalStore.ClearProjectionDirtyState();
+        operationalStore.SetLastCleanAtUtc(nowIso);
+
+        return new StoreWipeReport(
+            RecordsDeleted: scope.Records,
+            SessionsDeleted: 0,
+            TurnsDeleted: scope.Turns,
+            RunsDeleted: scope.Runs.Count,
+            ExecutionsDeleted: scope.Executions,
+            FindingsDeleted: scope.Findings,
+            RollupsDeleted: scope.Rollups.Count,
+            ProblemsDeleted: 0,
+            QuarantineDeleted: 0,
+            LastCleanAt: nowIso);
+    }
+
+    private WipeScope ReadScope(IReadOnlyList<string>? harnesses)
+    {
         List<CollectedSession> sessions = [];
         if (harnesses is null)
         {
@@ -295,28 +346,6 @@ public class CleanService : ICleanService
             .Where(rollup => harnesses is null || harnesses.Contains(rollup.HarnessId, StringComparer.Ordinal))
             .ToList();
 
-        // Findings reference sessions without a foreign key, so the clean removes them itself before
-        // the rows they point at disappear.
-        foreach (string sessionId in findingSessionIds)
-        {
-            projections.DeleteFindingsForSession(sessionId);
-        }
-
-        foreach (StoredSessionProjection sessionProjection in sessionProjections)
-        {
-            projections.DeleteSessionProjection(sessionProjection.SessionId);
-        }
-
-        foreach (StoredRun run in runs)
-        {
-            projections.DeleteRun(run.RunId);
-        }
-
-        foreach (StoredHarnessRollup rollup in rollups)
-        {
-            projections.DeleteHarnessRollup(rollup.HarnessId);
-        }
-
         List<StoredSource> sources = [];
         if (harnesses is null)
         {
@@ -330,28 +359,29 @@ public class CleanService : ICleanService
             }
         }
 
-        foreach (StoredSource source in sources)
-        {
-            writer.DeleteSource(source.SourceId);
-        }
-
-        // The wipe deletes projection rows directly and may delete no source at all, so the pass
-        // that follows would otherwise find the marker where the last pass left it and skip:
-        // bumping the marker forces a full pass, and the dirty range is cleared in its favour.
-        operationalStore.SetWriteMarker(operationalStore.GetWriteMarker() + 1);
-        operationalStore.ClearProjectionDirtyState();
-        operationalStore.SetLastCleanAtUtc(nowIso);
-
-        return new StoreWipeReport(
-            RecordsDeleted: records,
-            SessionsDeleted: 0,
-            TurnsDeleted: turns,
-            RunsDeleted: runs.Count,
-            ExecutionsDeleted: executions,
-            FindingsDeleted: findings,
-            RollupsDeleted: rollups.Count,
-            ProblemsDeleted: 0,
-            QuarantineDeleted: 0,
-            LastCleanAt: nowIso);
+        return new WipeScope(
+            sessions,
+            records,
+            sessionProjections,
+            turns,
+            runs,
+            executions,
+            findings,
+            findingSessionIds,
+            rollups,
+            sources);
     }
+
+    private sealed record WipeScope(
+        List<CollectedSession> Sessions,
+        int Records,
+        List<StoredSessionProjection> SessionProjections,
+        int Turns,
+        List<StoredRun> Runs,
+        int Executions,
+        int Findings,
+        HashSet<string> FindingSessionIds,
+        List<StoredHarnessRollup> Rollups,
+        List<StoredSource> Sources);
+
 }

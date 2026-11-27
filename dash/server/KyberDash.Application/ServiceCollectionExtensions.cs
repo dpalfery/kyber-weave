@@ -124,6 +124,17 @@ public static class ServiceCollectionExtensions
     /// <param name="services">Service collection to populate.</param>
     private static void RegisterServices(IServiceCollection services)
     {
+        RegisterProjectionServices(services);
+        RegisterIngestionServices(services);
+        RegisterQueryServices(services);
+        RegisterOperatorServices(services);
+    }
+
+    /// <summary>Registers projection, harness-source, and file-system support.</summary>
+    /// <param name="services">Service collection to populate.</param>
+    private static void RegisterProjectionServices(IServiceCollection services)
+    {
+
         services.TryAddSingleton<CanonProjectionService>(provider => new CanonProjectionService(
             provider.GetRequiredService<IRelationalStoreReader>(),
             provider.GetRequiredService<IProjectionStore>(),
@@ -137,7 +148,12 @@ public static class ServiceCollectionExtensions
             ServerStateRepository.ResolveStateDirectory(provider.GetService<DashOptions>()?.StateDirectory)));
         services.TryAddSingleton<HarnessSourceRegistry>(provider => new HarnessSourceRegistry(
             provider.GetRequiredService<IHarnessSqliteSource>()));
+    }
 
+    /// <summary>Registers transcript ingestion and the live collector.</summary>
+    /// <param name="services">Service collection to populate.</param>
+    private static void RegisterIngestionServices(IServiceCollection services)
+    {
         services.TryAddSingleton<TranscriptIngestionService>(provider => new TranscriptIngestionService(
             provider.GetRequiredService<IRelationalStoreWriter>(),
             provider.GetRequiredService<IOperationalStore>(),
@@ -152,7 +168,12 @@ public static class ServiceCollectionExtensions
             provider.GetRequiredService<IOperationalStore>(),
             provider.GetRequiredService<ITranscriptIngestionService>(),
             provider.GetRequiredService<DashOptions>()));
+    }
 
+    /// <summary>Registers the query, analytics, and clean services.</summary>
+    /// <param name="services">Service collection to populate.</param>
+    private static void RegisterQueryServices(IServiceCollection services)
+    {
         services.TryAddSingleton<IDashboardQueryService>(provider =>
             new DashboardQueryService(provider.GetRequiredService<KyberBridgeEngine>()));
 
@@ -166,7 +187,12 @@ public static class ServiceCollectionExtensions
             provider.GetRequiredService<IOperationalStore>(),
             provider.GetRequiredService<ICanonProjectionService>(),
             provider.GetRequiredService<ITranscriptIngestionService>()));
+    }
 
+    /// <summary>Registers settings, capture, scheduling, diagnostics, and operational services.</summary>
+    /// <param name="services">Service collection to populate.</param>
+    private static void RegisterOperatorServices(IServiceCollection services)
+    {
         services.TryAddSingleton<ISettingsService>(provider =>
             new SettingsService(provider.GetRequiredService<ISettingsRepository>()));
 
