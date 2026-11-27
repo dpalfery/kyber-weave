@@ -11,6 +11,7 @@ using KyberWeave.Core.FileSystem;
 using KyberWeave.Core.Parsing;
 using Markdig;
 using Markdig.Syntax;
+using YamlDotNet.Core;
 using YamlDotNet.Serialization;
 
 namespace KyberWeave.Core.Docs.Analysis.Glossary;
@@ -661,7 +662,7 @@ public class ManagedGlossary : IManagedGlossary
                     .Deserialize<Dictionary<string, string>?>(read.Yaml)
                     ?? new Dictionary<string, string>(StringComparer.Ordinal);
             }
-            catch (Exception exception)
+            catch (YamlException exception)
             {
                 frontmatterValid = false;
                 frontmatterError = exception.Message;
