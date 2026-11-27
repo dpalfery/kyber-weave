@@ -25,6 +25,7 @@ public sealed class SquadDeploymentPlan
         IReadOnlyList<SquadOwnedBlockDrift>? blockDrifts = null,
         IReadOnlyList<SquadDegradedFile>? degradedFiles = null)
     {
+        ArgumentNullException.ThrowIfNull(physicalRootIdentity);
         TargetRoot = targetRoot;
         PhysicalRootPath = physicalRootIdentity.PhysicalPath;
         PhysicalRootKey = physicalRootIdentity.Key;
