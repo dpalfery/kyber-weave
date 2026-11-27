@@ -85,6 +85,28 @@ public sealed class DocsPacketCommand(
             return Fail(report);
         }
 
+        PlanTaskFileEntry? entry = CheckTaskFile(root, config, plan, settings, report);
+        if (entry is null)
+        {
+            return Fail(report);
+        }
+
+        if (!ValidatePriorResults(settings.PriorResults, root, report))
+        {
+            return Fail(report);
+        }
+
+        if (!PrintPacket(root, config, plan, entry, settings, report))
+        {
+            return Fail(report);
+        }
+
+        return 0;
+    }
+
+    /// <summary>Runs the task-file check for the chosen plan and locates the named task; a stale or missing file is reported and null returned.</summary>
+    private PlanTaskFileEntry? CheckTaskFile(string root, KyberWeaveConfig config, string plan, DocsPacketSettings settings, DiagnosticReport report)
+    {
         PlanTaskFileOutcome outcome = tasks.Run(root, config, plan, PlanTaskFileMode.Check);
         if (outcome.File is null || outcome.Report.HasErrors)
         {
@@ -96,7 +118,7 @@ public sealed class DocsPacketCommand(
                 "docs packet",
                 plan,
                 Hint: $"Run 'kyber-weave docs tasks {plan} --write', then run this command again. If it still fails, report this output unchanged."));
-            return Fail(report);
+            return null;
         }
 
         PlanTaskFileEntry? entry = PlanTaskPacket.FindTask(outcome.File, settings.Task);
@@ -110,42 +132,53 @@ public sealed class DocsPacketCommand(
                 "docs packet",
                 plan,
                 Hint: "Use the task id from the dispatch, for example T1."));
-            return Fail(report);
+            return null;
         }
 
-        if (settings.PriorResults is not null)
+        return entry;
+    }
+
+    /// <summary>Checks that a supplied prior-results file is inside this run's scratch area and readable; a refusal is reported and false returned.</summary>
+    private bool ValidatePriorResults(string? priorResults, string root, DiagnosticReport report)
+    {
+        if (priorResults is null)
+            return true;
+
+        // Checked here so a refusal is reported under the packet's own code, before any prompt is built;
+        // the service applies the same rule when it reads the file for the <task> part.
+        if (!TaskPromptService.IsScratchFile(files, root, priorResults))
         {
-            // Checked here so a refusal is reported under the packet's own code, before any prompt is built;
-            // the service applies the same rule when it reads the file for the <task> part.
-            if (!TaskPromptService.IsScratchFile(files, root, settings.PriorResults))
-            {
-                report.Add(new Diagnostic(
-                    PriorResultsUnreadable,
-                    Severity.Error,
-                    $"The prior-results file '{settings.PriorResults}' is outside this run's scratch area. " +
-                    TaskPromptService.ScratchAreaHint(root),
-                    "docs packet",
-                    Hint: $"Keep the file under {ScratchLayout.Root} in this checkout."));
-                return Fail(report);
-            }
-
-            try
-            {
-                _ = files.ReadAllText(paths.GetFullPath(settings.PriorResults, root));
-            }
-            catch (Exception ex) when (FileFailure.Is(ex))
-            {
-                report.Add(new Diagnostic(
-                    PriorResultsUnreadable,
-                    Severity.Error,
-                    $"The prior-results file '{settings.PriorResults}' could not be read: {ex.Message}",
-                    "docs packet",
-                    Hint: "Pass a file that exists, or leave --prior-results out."));
-                return Fail(report);
-            }
+            report.Add(new Diagnostic(
+                PriorResultsUnreadable,
+                Severity.Error,
+                $"The prior-results file '{priorResults}' is outside this run's scratch area. " +
+                TaskPromptService.ScratchAreaHint(root),
+                "docs packet",
+                Hint: $"Keep the file under {ScratchLayout.Root} in this checkout."));
+            return false;
         }
 
-        // The prompt is built at print time, never written into the task file, so the digest is unaffected.
+        try
+        {
+            _ = files.ReadAllText(paths.GetFullPath(priorResults, root));
+        }
+        catch (Exception ex) when (FileFailure.Is(ex))
+        {
+            report.Add(new Diagnostic(
+                PriorResultsUnreadable,
+                Severity.Error,
+                $"The prior-results file '{priorResults}' could not be read: {ex.Message}",
+                "docs packet",
+                Hint: "Pass a file that exists, or leave --prior-results out."));
+            return false;
+        }
+
+        return true;
+    }
+
+    /// <summary>Builds the task's prompt at print time; it is never written into the task file, so the digest is unaffected.</summary>
+    private TaskPromptResult BuildTaskPrompt(string root, KyberWeaveConfig config, string plan, DocsPacketSettings settings)
+    {
         DocumentIndex index = DocumentIndex.Build(
             documents.Create(root, config.Ontology).Load(),
             codeGraph.ForRepository(root).Resolver);
@@ -156,9 +189,15 @@ public sealed class DocsPacketCommand(
             index.StandardsFor,
             environment,
             skills.ForRepository(root, config));
-        TaskPromptResult prompt = prompts.Build(
+        return prompts.Build(
             new TaskPromptRequest(root, settings.Task, plan, settings.Agent, settings.PriorResults),
             config);
+    }
+
+    /// <summary>Builds the task's prompt at print time and prints it with its test command; a refusal to build is reported and false returned.</summary>
+    private bool PrintPacket(string root, KyberWeaveConfig config, string plan, PlanTaskFileEntry entry, DocsPacketSettings settings, DiagnosticReport report)
+    {
+        TaskPromptResult prompt = BuildTaskPrompt(root, config, plan, settings);
 
         if (!prompt.Built)
         {
@@ -169,7 +208,7 @@ public sealed class DocsPacketCommand(
                 "docs packet",
                 plan,
                 Hint: $"Run 'kyber-weave docs tasks {plan} --write', then run this command again. If it still fails, report this output unchanged."));
-            return Fail(report);
+            return false;
         }
 
         CommandHelpers.WriteUnfolded(console, () => console.Profile.Out.Writer.WriteLine(prompt.Prompt));
@@ -198,7 +237,7 @@ public sealed class DocsPacketCommand(
             });
         }
 
-        return 0;
+        return true;
     }
 
     private string CurrentDirectory(DocsPacketSettings settings) =>
