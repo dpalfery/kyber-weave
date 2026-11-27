@@ -104,103 +104,31 @@ public sealed partial class SquadInstanceService : ISquadInstanceService
         VerifyPathContainment(home, targetToken, instanceRoot);
         string receiptPath = Path.Combine(instanceStateDir, ReceiptFileName);
 
-        IReadOnlyList<string>? lifecycleWarnings = null;
-
+        IReadOnlyList<string>? lifecycleWarnings;
         if (!_files.FileExists(receiptPath))
         {
-            _files.CreateDirectory(instanceRoot);
-            _files.CreateDirectory(instanceStateDir);
-
-            SquadInstallRequest installRequest = new(
+            lifecycleWarnings = await InstallInstanceAsync(
                 instanceRoot,
-                SquadDeploymentScope.Instance,
-                [target],
-                ModelPresets: new Dictionary<SquadTarget, string> { [target] = presetName });
-
-            SquadLifecycleResult installResult = await _lifecycleService.InstallAsync(installRequest, cancellationToken)
-                .ConfigureAwait(false);
-
-            if (!installResult.Success)
-            {
-                string errorMessage = installResult.Errors is { Count: > 0 }
-                    ? string.Join("; ", installResult.Errors)
-                    : "Instance installation failed.";
-                throw new InvalidOperationException(errorMessage);
-            }
-
-            lifecycleWarnings = installResult.Warnings;
+                instanceStateDir,
+                target,
+                presetName,
+                cancellationToken).ConfigureAwait(false);
         }
         else
         {
-            SquadLock? lockFile = stateStore.ReadLock(instanceRoot, SquadDeploymentScope.Instance);
-            SquadModelPreset? currentPreset = _presetStore.TryLoad(presetName);
-            string currentCliVersion = GetAssemblyVersion();
-
-            bool versionMismatch = lockFile is null ||
-                                   !string.Equals(lockFile.CliVersion, currentCliVersion, StringComparison.Ordinal);
-
-            bool presetMismatch = false;
-            if (lockFile is not null)
-            {
-                if (currentPreset is not null)
-                {
-                    if (lockFile.ModelPresets is null ||
-                        !lockFile.ModelPresets.TryGetValue(target, out SquadAppliedPreset? applied) ||
-                        !string.Equals(applied.Digest, currentPreset.Digest, StringComparison.Ordinal))
-                        presetMismatch = true;
-                }
-                else if (lockFile.ModelPresets is not null && lockFile.ModelPresets.ContainsKey(target))
-                {
-                    presetMismatch = true;
-                }
-            }
-
-            if (versionMismatch || presetMismatch)
-            {
-                SquadUpdateRequest updateRequest = new(
-                    instanceRoot,
-                    SquadDeploymentScope.Instance,
-                    [target],
-                    ModelPresets: new Dictionary<SquadTarget, string> { [target] = presetName });
-
-                SquadLifecycleResult updateResult = await _lifecycleService
-                    .UpdateAsync(updateRequest, cancellationToken)
-                    .ConfigureAwait(false);
-
-                if (!updateResult.Success)
-                {
-                    string errorMessage = updateResult.Errors is { Count: > 0 }
-                        ? string.Join("; ", updateResult.Errors)
-                        : "Instance update failed.";
-                    throw new InvalidOperationException(errorMessage);
-                }
-
-                lifecycleWarnings = updateResult.Warnings;
-            }
-        }
-
-        SquadInstanceRow row = SquadInstanceCatalog.GetRow(target);
-        IReadOnlyList<string> syncWarnings = [];
-
-        if (row.Kind == SquadInstanceKind.HomeReplace)
-        {
-            string mainHome = _globalRootResolver.ResolveGlobalRoot(target);
-            SquadReceipt? receipt = stateStore.ReadReceipt(instanceRoot, SquadDeploymentScope.Instance);
-
-            HashSet<string> renderedPaths = receipt is not null
-                ? receipt.Files.Select(file => file.RelativePath).ToHashSet(StringComparer.Ordinal)
-                : new HashSet<string>(StringComparer.Ordinal);
-
-            SquadInstanceLinkSyncResult syncResult = _linkSync.Sync(
+            lifecycleWarnings = await UpdateInstanceAsync(
                 instanceRoot,
-                mainHome,
-                row,
-                renderedPaths,
-                _linkFileSystem,
-                instanceStateDir);
-
-            syncWarnings = syncResult.Warnings;
+                target,
+                presetName,
+                stateStore,
+                cancellationToken).ConfigureAwait(false);
         }
+
+        IReadOnlyList<string> syncWarnings = SynchronizeInstanceLinks(
+            target,
+            instanceRoot,
+            instanceStateDir,
+            stateStore);
 
         List<string> allWarnings = new();
         if (lifecycleWarnings is { Count: > 0 }) allWarnings.AddRange(lifecycleWarnings);
@@ -208,6 +136,122 @@ public sealed partial class SquadInstanceService : ISquadInstanceService
         if (syncWarnings is { Count: > 0 }) allWarnings.AddRange(syncWarnings);
 
         return new SquadInstanceEnsureResult(instanceRoot, allWarnings);
+    }
+
+    private async Task<IReadOnlyList<string>?> InstallInstanceAsync(
+        string instanceRoot,
+        string instanceStateDir,
+        SquadTarget target,
+        string presetName,
+        CancellationToken cancellationToken)
+    {
+        _files.CreateDirectory(instanceRoot);
+        _files.CreateDirectory(instanceStateDir);
+
+        SquadInstallRequest installRequest = new(
+            instanceRoot,
+            SquadDeploymentScope.Instance,
+            [target],
+            ModelPresets: new Dictionary<SquadTarget, string> { [target] = presetName });
+
+        SquadLifecycleResult installResult = await _lifecycleService.InstallAsync(installRequest, cancellationToken)
+            .ConfigureAwait(false);
+
+        if (!installResult.Success)
+        {
+            string errorMessage = installResult.Errors is { Count: > 0 }
+                ? string.Join("; ", installResult.Errors)
+                : "Instance installation failed.";
+            throw new InvalidOperationException(errorMessage);
+        }
+
+        return installResult.Warnings;
+    }
+
+    private async Task<IReadOnlyList<string>?> UpdateInstanceAsync(
+        string instanceRoot,
+        SquadTarget target,
+        string presetName,
+        ISquadStateStore stateStore,
+        CancellationToken cancellationToken)
+    {
+        SquadLock? lockFile = stateStore.ReadLock(instanceRoot, SquadDeploymentScope.Instance);
+        SquadModelPreset? currentPreset = _presetStore.TryLoad(presetName);
+        string currentCliVersion = GetAssemblyVersion();
+
+        bool versionMismatch = lockFile is null ||
+                               !string.Equals(lockFile.CliVersion, currentCliVersion, StringComparison.Ordinal);
+
+        bool presetMismatch = false;
+        if (lockFile is not null)
+        {
+            if (currentPreset is not null)
+            {
+                if (lockFile.ModelPresets is null ||
+                    !lockFile.ModelPresets.TryGetValue(target, out SquadAppliedPreset? applied) ||
+                    !string.Equals(applied.Digest, currentPreset.Digest, StringComparison.Ordinal))
+                    presetMismatch = true;
+            }
+            else if (lockFile.ModelPresets is not null && lockFile.ModelPresets.ContainsKey(target))
+            {
+                presetMismatch = true;
+            }
+        }
+
+        if (!versionMismatch && !presetMismatch)
+        {
+            return null;
+        }
+
+        SquadUpdateRequest updateRequest = new(
+            instanceRoot,
+            SquadDeploymentScope.Instance,
+            [target],
+            ModelPresets: new Dictionary<SquadTarget, string> { [target] = presetName });
+
+        SquadLifecycleResult updateResult = await _lifecycleService
+            .UpdateAsync(updateRequest, cancellationToken)
+            .ConfigureAwait(false);
+
+        if (!updateResult.Success)
+        {
+            string errorMessage = updateResult.Errors is { Count: > 0 }
+                ? string.Join("; ", updateResult.Errors)
+                : "Instance update failed.";
+            throw new InvalidOperationException(errorMessage);
+        }
+
+        return updateResult.Warnings;
+    }
+
+    private IReadOnlyList<string> SynchronizeInstanceLinks(
+        SquadTarget target,
+        string instanceRoot,
+        string instanceStateDir,
+        ISquadStateStore stateStore)
+    {
+        SquadInstanceRow row = SquadInstanceCatalog.GetRow(target);
+        if (row.Kind != SquadInstanceKind.HomeReplace)
+        {
+            return [];
+        }
+
+        string mainHome = _globalRootResolver.ResolveGlobalRoot(target);
+        SquadReceipt? receipt = stateStore.ReadReceipt(instanceRoot, SquadDeploymentScope.Instance);
+
+        HashSet<string> renderedPaths = receipt is not null
+            ? receipt.Files.Select(file => file.RelativePath).ToHashSet(StringComparer.Ordinal)
+            : new HashSet<string>(StringComparer.Ordinal);
+
+        SquadInstanceLinkSyncResult syncResult = _linkSync.Sync(
+            instanceRoot,
+            mainHome,
+            row,
+            renderedPaths,
+            _linkFileSystem,
+            instanceStateDir);
+
+        return syncResult.Warnings;
     }
 
     /// <summary>

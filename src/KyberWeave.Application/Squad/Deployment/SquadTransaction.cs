@@ -29,7 +29,6 @@ public sealed class SquadTransaction : ISquadTransaction
 {
     private const string IntentFileName = "intent.json";
     private const string IntentSchema = "kyber-squad.transaction/v1";
-    private static readonly JsonSerializerOptions IntentJsonOptions = CreateIntentJsonOptions();
 
     private const string LeaseBusyMessage =
         "A Squad transaction is active for this deployment root. Wait for it to finish before retrying.";
@@ -604,7 +603,7 @@ public sealed class SquadTransaction : ISquadTransaction
                     mutation.RelativePath,
                     mutation.Target,
                     physicalRoot,
-                    GetEntryKind(fullPath),
+                    TransactionSupport.GetEntryKind(_files, fullPath),
                     CaptureMissingDirectories(
                             Path.GetDirectoryName(fullPath)!,
                             physicalRoot)
@@ -615,14 +614,14 @@ public sealed class SquadTransaction : ISquadTransaction
                         ? OriginalEntryKind.File
                         : OriginalEntryKind.Missing,
                     mutation.Kind == SquadFileMutationKind.Write
-                        ? Digest((mutation.Content
+                        ? TransactionSupport.Digest((mutation.Content
                                  ?? throw new InvalidOperationException(
                                      $"Write mutation '{mutation.RelativePath}' has no content.")).ToArray())
                         : string.Empty);
             })
             .ToArray();
-        OriginalEntryKind lockKind = GetEntryKind(lockPath);
-        OriginalEntryKind receiptKind = GetEntryKind(receiptPath);
+        OriginalEntryKind lockKind = TransactionSupport.GetEntryKind(_files, lockPath);
+        OriginalEntryKind receiptKind = TransactionSupport.GetEntryKind(_files, receiptPath);
         (OriginalEntryKind Kind, string Sha256) lockAfter = StateAfterImage(
             plan.LockMutation,
             lockKind,
@@ -673,11 +672,11 @@ public sealed class SquadTransaction : ISquadTransaction
             SquadStateMutation.Keep => (
                 originalKind,
                 originalKind == OriginalEntryKind.File
-                    ? Digest(_files.ReadAllBytes(originalPath))
+                    ? TransactionSupport.Digest(_files.ReadAllBytes(originalPath))
                     : string.Empty),
             SquadStateMutation.Write => (
                 OriginalEntryKind.File,
-                Digest(content ?? throw new InvalidOperationException(
+                TransactionSupport.Digest(content ?? throw new InvalidOperationException(
                     "A state write requires prepared content."))),
             SquadStateMutation.Delete => (OriginalEntryKind.Missing, string.Empty),
             _ => throw new ArgumentOutOfRangeException(
@@ -696,7 +695,7 @@ public sealed class SquadTransaction : ISquadTransaction
         SquadFilePrecondition precondition)
     {
         string fullPath = plan.ResolvePhysicalPath(precondition.Target, precondition.RelativePath, _semantics);
-        OriginalEntryKind kind = GetEntryKind(fullPath);
+        OriginalEntryKind kind = TransactionSupport.GetEntryKind(_files, fullPath);
         if (precondition.Kind == SquadFilePreconditionKind.Missing)
         {
             if (kind != OriginalEntryKind.Missing)
@@ -706,7 +705,7 @@ public sealed class SquadTransaction : ISquadTransaction
 
         if (kind is not (OriginalEntryKind.File or OriginalEntryKind.FileSymbolicLink) ||
             !string.Equals(
-                Digest(_files.ReadAllBytes(fullPath)),
+                TransactionSupport.Digest(_files.ReadAllBytes(fullPath)),
                 precondition.Sha256,
                 StringComparison.Ordinal))
             throw PreconditionConflict(precondition.RelativePath);
@@ -1200,7 +1199,7 @@ public sealed class SquadTransaction : ISquadTransaction
         ref IntentDocument intent)
     {
         string targetPath = SquadPathPolicy.ResolveFile(boundRoot, relativePath, _semantics);
-        OriginalEntryKind currentKind = GetEntryKind(targetPath);
+        OriginalEntryKind currentKind = TransactionSupport.GetEntryKind(_files, targetPath);
         if (currentKind == OriginalEntryKind.Missing)
         {
             if (expectedKind != OriginalEntryKind.Missing)
@@ -1281,12 +1280,12 @@ public sealed class SquadTransaction : ISquadTransaction
                                ArtifactFingerprintMatches(claimPath, artifact) &&
                                (expectedKind != OriginalEntryKind.File || expectedSha256.Length == 0 ||
                                 string.Equals(
-                                    Digest(_files.ReadAllBytes(claimPath)),
+                                    TransactionSupport.Digest(_files.ReadAllBytes(claimPath)),
                                     expectedSha256,
                                     StringComparison.Ordinal));
         if (!matchesExpected)
         {
-            if (GetEntryKind(targetPath) == OriginalEntryKind.Missing)
+            if (TransactionSupport.GetEntryKind(_files, targetPath) == OriginalEntryKind.Missing)
             {
                 VerifyAndMoveArtifactNoOverwrite(
                     artifact,
@@ -1348,7 +1347,7 @@ public sealed class SquadTransaction : ISquadTransaction
                     StringComparison.Ordinal))
             .ToArray();
         if (artifacts.Length != 1 ||
-            GetEntryKind(stagingPath) != artifacts[0].NodeKind ||
+            TransactionSupport.GetEntryKind(_files, stagingPath) != artifacts[0].NodeKind ||
             !ArtifactFingerprintMatches(stagingPath, artifacts[0]))
             throw new InvalidDataException(
                 $"Squad prepared artifact '{relativePath}' changed before publication.");
@@ -1362,10 +1361,10 @@ public sealed class SquadTransaction : ISquadTransaction
         string expectedSha256,
         string displayPath)
     {
-        if (GetEntryKind(path) != expectedKind ||
+        if (TransactionSupport.GetEntryKind(_files, path) != expectedKind ||
             (expectedKind == OriginalEntryKind.File &&
              !string.Equals(
-                 Digest(_files.ReadAllBytes(path)),
+                 TransactionSupport.Digest(_files.ReadAllBytes(path)),
                  expectedSha256,
                  StringComparison.Ordinal)))
             throw new InvalidDataException(
@@ -1429,7 +1428,7 @@ public sealed class SquadTransaction : ISquadTransaction
 
                 string directory = SquadPathPolicy.ResolveFile(file.PhysicalRoot, relativeDirectory, _semantics);
                 DeleteEmptyDirectory(directory);
-                if (GetEntryKind(directory) != OriginalEntryKind.Missing)
+                if (TransactionSupport.GetEntryKind(_files, directory) != OriginalEntryKind.Missing)
                     conflicts.Add(relativeDirectory);
             }
 
@@ -1509,8 +1508,8 @@ public sealed class SquadTransaction : ISquadTransaction
                 ? journalDirectory
                 : workDirectory;
             string claimPath = ResolveArtifactNode(artifactRoot, artifact.Path);
-            OriginalEntryKind claimKind = GetEntryKind(claimPath);
-            OriginalEntryKind targetKind = GetEntryKind(targetPath);
+            OriginalEntryKind claimKind = TransactionSupport.GetEntryKind(_files, claimPath);
+            OriginalEntryKind targetKind = TransactionSupport.GetEntryKind(_files, targetPath);
             if (claimKind == OriginalEntryKind.Missing)
             {
                 if (targetKind == OriginalEntryKind.Missing)
@@ -1538,13 +1537,13 @@ public sealed class SquadTransaction : ISquadTransaction
         string destinationPath,
         string displayPath)
     {
-        if (GetEntryKind(sourcePath) != artifact.NodeKind ||
+        if (TransactionSupport.GetEntryKind(_files, sourcePath) != artifact.NodeKind ||
             !ArtifactFingerprintMatches(sourcePath, artifact))
             throw new InvalidDataException(
                 $"Squad claim artifact '{displayPath}' changed before restoration.");
 
         MoveEntryNoOverwrite(sourcePath, destinationPath, artifact.NodeKind);
-        if (GetEntryKind(destinationPath) != artifact.NodeKind ||
+        if (TransactionSupport.GetEntryKind(_files, destinationPath) != artifact.NodeKind ||
             !ArtifactFingerprintMatches(destinationPath, artifact))
             throw new InvalidDataException(
                 $"Squad claim artifact '{displayPath}' changed during restoration.");
@@ -1554,7 +1553,7 @@ public sealed class SquadTransaction : ISquadTransaction
         string targetPath,
         CapturedRestorePayload payload)
     {
-        OriginalEntryKind currentKind = GetEntryKind(targetPath);
+        OriginalEntryKind currentKind = TransactionSupport.GetEntryKind(_files, targetPath);
         if (currentKind != payload.OriginalKind)
             return false;
 
@@ -1562,7 +1561,7 @@ public sealed class SquadTransaction : ISquadTransaction
         {
             OriginalEntryKind.Missing or OriginalEntryKind.Directory => true,
             OriginalEntryKind.File => string.Equals(
-                Digest(_files.ReadAllBytes(targetPath)),
+                TransactionSupport.Digest(_files.ReadAllBytes(targetPath)),
                 payload.ContentSha256,
                 StringComparison.Ordinal),
             OriginalEntryKind.FileSymbolicLink =>
@@ -1586,7 +1585,7 @@ public sealed class SquadTransaction : ISquadTransaction
         string afterSha256,
         CapturedRestorePayload payload)
     {
-        OriginalEntryKind currentKind = GetEntryKind(targetPath);
+        OriginalEntryKind currentKind = TransactionSupport.GetEntryKind(_files, targetPath);
         if (currentKind != afterKind)
             return false;
 
@@ -1594,7 +1593,7 @@ public sealed class SquadTransaction : ISquadTransaction
         {
             OriginalEntryKind.Missing or OriginalEntryKind.Directory => true,
             OriginalEntryKind.File => string.Equals(
-                Digest(_files.ReadAllBytes(targetPath)),
+                TransactionSupport.Digest(_files.ReadAllBytes(targetPath)),
                 afterSha256,
                 StringComparison.Ordinal),
             OriginalEntryKind.FileSymbolicLink or OriginalEntryKind.DirectorySymbolicLink =>
@@ -1687,21 +1686,21 @@ public sealed class SquadTransaction : ISquadTransaction
         if (originalKind is OriginalEntryKind.File or OriginalEntryKind.FileSymbolicLink)
         {
             IntentArtifact authority = RequireRestoreArtifact(intent, backupRole, backupRelativePath);
-            OriginalEntryKind beforeKind = GetEntryKind(backupPath);
+            OriginalEntryKind beforeKind = TransactionSupport.GetEntryKind(_files, backupPath);
             backupBytes = _files.ReadAllBytes(backupPath);
-            OriginalEntryKind afterKind = GetEntryKind(backupPath);
+            OriginalEntryKind afterKind = TransactionSupport.GetEntryKind(_files, backupPath);
             if (beforeKind != authority.NodeKind ||
                 afterKind != authority.NodeKind ||
                 backupBytes.LongLength != authority.ByteLength ||
-                !string.Equals(Digest(backupBytes), authority.Sha256, StringComparison.Ordinal))
+                !string.Equals(TransactionSupport.Digest(backupBytes), authority.Sha256, StringComparison.Ordinal))
                 throw new InvalidDataException(
                     $"Squad restore artifact '{backupRelativePath}' changed during capture.");
         }
         else if (originalKind == OriginalEntryKind.Directory)
         {
             IntentArtifact authority = RequireRestoreArtifact(intent, backupRole, backupRelativePath);
-            OriginalEntryKind beforeKind = GetEntryKind(backupPath);
-            OriginalEntryKind afterKind = GetEntryKind(backupPath);
+            OriginalEntryKind beforeKind = TransactionSupport.GetEntryKind(_files, backupPath);
+            OriginalEntryKind afterKind = TransactionSupport.GetEntryKind(_files, backupPath);
             if (beforeKind != authority.NodeKind || afterKind != authority.NodeKind)
                 throw new InvalidDataException(
                     $"Squad restore artifact '{backupRelativePath}' changed during capture.");
@@ -1712,32 +1711,23 @@ public sealed class SquadTransaction : ISquadTransaction
             OriginalEntryKind.DirectorySymbolicLink)
         {
             IntentArtifact authority = RequireRestoreArtifact(intent, linkRole, linkRelativePath);
-            OriginalEntryKind beforeKind = GetEntryKind(linkMetadataPath);
+            OriginalEntryKind beforeKind = TransactionSupport.GetEntryKind(_files, linkMetadataPath);
             byte[] linkBytes = _files.ReadAllBytes(linkMetadataPath);
-            OriginalEntryKind afterKind = GetEntryKind(linkMetadataPath);
+            OriginalEntryKind afterKind = TransactionSupport.GetEntryKind(_files, linkMetadataPath);
             if (beforeKind != authority.NodeKind ||
                 afterKind != authority.NodeKind ||
                 linkBytes.LongLength != authority.ByteLength ||
-                !string.Equals(Digest(linkBytes), authority.Sha256, StringComparison.Ordinal))
+                !string.Equals(TransactionSupport.Digest(linkBytes), authority.Sha256, StringComparison.Ordinal))
                 throw new InvalidDataException(
                     $"Squad restore artifact '{linkRelativePath}' changed during capture.");
 
-            try
-            {
-                linkTarget = new UTF8Encoding(false, true).GetString(linkBytes);
-            }
-            catch (DecoderFallbackException exception)
-            {
-                throw new InvalidDataException(
-                    $"Squad restore artifact '{linkRelativePath}' is not valid UTF-8.",
-                    exception);
-            }
+            linkTarget = TransactionSupport.DecodeLinkTarget(linkBytes, linkRelativePath);
         }
 
         return new CapturedRestorePayload(
             originalKind,
             backupBytes,
-            backupBytes.Length == 0 ? string.Empty : Digest(backupBytes),
+            backupBytes.Length == 0 ? string.Empty : TransactionSupport.Digest(backupBytes),
             linkTarget);
     }
 
@@ -1750,7 +1740,7 @@ public sealed class SquadTransaction : ISquadTransaction
     {
         _files.CreateDirectory(Path.GetDirectoryName(targetPath)!);
         if (!VerifyRestoreAfterImage(targetPath, afterKind, afterSha256, payload) ||
-            GetEntryKind(targetPath) != afterKind)
+            TransactionSupport.GetEntryKind(_files, targetPath) != afterKind)
             throw new InvalidDataException(
                 $"Squad live after-image '{displayPath}' changed before restoration.");
 
@@ -1842,7 +1832,7 @@ public sealed class SquadTransaction : ISquadTransaction
             .ToArray();
         if (matches.Length != 1 ||
             matches[0].LifecycleState != ArtifactLifecycleState.PreOperation ||
-            GetEntryKind(stagingPath) != matches[0].NodeKind ||
+            TransactionSupport.GetEntryKind(_files, stagingPath) != matches[0].NodeKind ||
             !ArtifactFingerprintMatches(stagingPath, matches[0]))
             throw new InvalidDataException(
                 $"Squad prepared artifact '{displayPath}' changed before it was consumed.");
@@ -1922,7 +1912,7 @@ public sealed class SquadTransaction : ISquadTransaction
         string sourcePath,
         ArtifactLifecycleState lifecycleState)
     {
-        OriginalEntryKind kind = GetEntryKind(sourcePath);
+        OriginalEntryKind kind = TransactionSupport.GetEntryKind(_files, sourcePath);
         return kind switch
         {
             OriginalEntryKind.File => new IntentArtifact(
@@ -1932,7 +1922,7 @@ public sealed class SquadTransaction : ISquadTransaction
                 relativePath,
                 kind,
                 _files.GetLength(sourcePath),
-                Digest(_files.ReadAllBytes(sourcePath)),
+                TransactionSupport.Digest(_files.ReadAllBytes(sourcePath)),
                 string.Empty,
                 lifecycleState),
             OriginalEntryKind.FileSymbolicLink => new IntentArtifact(
@@ -2144,28 +2134,6 @@ public sealed class SquadTransaction : ISquadTransaction
         }
     }
 
-    private OriginalEntryKind GetEntryKind(string path)
-    {
-        if (_files.GetLinkTarget(path) is not null)
-        {
-            if (OperatingSystem.IsWindows())
-                return (_files.GetAttributes(path) & FileAttributes.Directory) != 0
-                    ? OriginalEntryKind.DirectorySymbolicLink
-                    : OriginalEntryKind.FileSymbolicLink;
-
-            return _files.DirectoryExists(path)
-                ? OriginalEntryKind.DirectorySymbolicLink
-                : OriginalEntryKind.FileSymbolicLink;
-        }
-
-        if (_files.FileExists(path))
-            return OriginalEntryKind.File;
-
-        return _files.DirectoryExists(path)
-            ? OriginalEntryKind.Directory
-            : OriginalEntryKind.Missing;
-    }
-
     /// <summary>
     /// Captures the directories that do not exist yet between <paramref name="directoryPath"/> and its
     /// <paramref name="boundaryPath"/>, so a failed transaction removes exactly what it created.
@@ -2199,7 +2167,7 @@ public sealed class SquadTransaction : ISquadTransaction
         while (!_semantics.AreSame(current, boundary) &&
                _semantics.IsWithin(boundary, current))
         {
-            if (GetEntryKind(current) != OriginalEntryKind.Missing)
+            if (TransactionSupport.GetEntryKind(_files, current) != OriginalEntryKind.Missing)
                 break;
 
             missing.Add(current);
@@ -2300,7 +2268,7 @@ public sealed class SquadTransaction : ISquadTransaction
 
     private void DeleteEmptyDirectory(string path)
     {
-        if (GetEntryKind(path) != OriginalEntryKind.Directory ||
+        if (TransactionSupport.GetEntryKind(_files, path) != OriginalEntryKind.Directory ||
             _files.EnumerateEntries(path).Any())
             return;
 
@@ -2317,7 +2285,7 @@ public sealed class SquadTransaction : ISquadTransaction
 
     private void DeleteEntry(string path, bool recursiveDirectory)
     {
-        switch (GetEntryKind(path))
+        switch (TransactionSupport.GetEntryKind(_files, path))
         {
             case OriginalEntryKind.Missing:
                 return;
@@ -2511,7 +2479,7 @@ public sealed class SquadTransaction : ISquadTransaction
         bool overwrite)
     {
         byte[] bytes = Encoding.UTF8.GetBytes(
-            JsonSerializer.Serialize(intent, IntentJsonOptions) + "\n");
+            JsonSerializer.Serialize(intent, TransactionSupport.IntentJsonOptions) + "\n");
         PublishFileAtomic(intentPath, bytes, overwrite);
     }
 
@@ -2540,7 +2508,7 @@ public sealed class SquadTransaction : ISquadTransaction
             normalizedPath,
             OriginalEntryKind.File,
             bytes.LongLength,
-            Digest(bytes),
+            TransactionSupport.Digest(bytes),
             string.Empty,
             ArtifactLifecycleState.PreOperation));
     }
@@ -2660,8 +2628,8 @@ public sealed class SquadTransaction : ISquadTransaction
         try
         {
             string json = _files.ReadAllText(intentPath);
-            ValidateIntentJsonShape(json);
-            IntentDocument intent = JsonSerializer.Deserialize<IntentDocument>(json, IntentJsonOptions)
+            TransactionSupport.ValidateIntentJsonShape(json);
+            IntentDocument intent = JsonSerializer.Deserialize<IntentDocument>(json, TransactionSupport.IntentJsonOptions)
                                     ?? throw new InvalidDataException("Squad transaction intent is empty.");
             if (!string.Equals(intent.Schema, IntentSchema, StringComparison.Ordinal) ||
                 !string.Equals(intent.RootKey, expectedRootKey, StringComparison.Ordinal) ||
@@ -2724,194 +2692,6 @@ public sealed class SquadTransaction : ISquadTransaction
                 $"Squad transaction intent is invalid: {exception.Message}",
                 exception);
         }
-    }
-
-    private void ValidateIntentJsonShape(string json)
-    {
-        using JsonDocument document = JsonDocument.Parse(json);
-        RequireExactJsonFields(
-            document.RootElement,
-            [
-                "schema",
-                "phase",
-                "rootKey",
-                "transactionId",
-                "files",
-                "createdDirectories",
-                "lockKind",
-                "lockAfterKind",
-                "lockAfterSha256",
-                "receiptKind",
-                "receiptAfterKind",
-                "receiptAfterSha256",
-                "artifacts",
-                "activeTransitions"
-            ],
-            "transaction intent");
-        RequireCanonicalJsonEnum(
-            document.RootElement,
-            "phase",
-            ["preparing", "prepared", "committed"],
-            "transaction intent");
-        RequireCanonicalNodeKind(document.RootElement, "lockKind", "transaction intent");
-        RequireCanonicalNodeKind(document.RootElement, "lockAfterKind", "transaction intent");
-        RequireCanonicalNodeKind(document.RootElement, "receiptKind", "transaction intent");
-        RequireCanonicalNodeKind(document.RootElement, "receiptAfterKind", "transaction intent");
-
-        JsonElement files = document.RootElement.GetProperty("files");
-        if (files.ValueKind != JsonValueKind.Array)
-            throw new InvalidDataException("Squad transaction intent files must be an array.");
-        foreach (JsonElement file in files.EnumerateArray())
-        {
-            RequireExactJsonFields(
-                file,
-                [
-                    "relativePath",
-                    "target",
-                    "physicalRoot",
-                    "originalKind",
-                    "missingParentDirectories",
-                    "afterKind",
-                    "afterSha256"
-                ],
-                "transaction file");
-            RequireCanonicalNodeKind(file, "originalKind", "transaction file");
-            RequireCanonicalNodeKind(file, "afterKind", "transaction file");
-        }
-
-        JsonElement createdDirectories = document.RootElement.GetProperty("createdDirectories");
-        if (createdDirectories.ValueKind != JsonValueKind.Array)
-            throw new InvalidDataException(
-                "Squad transaction created directories must be an array.");
-
-        foreach (JsonElement directory in createdDirectories.EnumerateArray())
-        {
-            RequireExactJsonFields(
-                directory,
-                ["area", "path"],
-                "transaction created directory");
-            RequireCanonicalJsonEnum(
-                directory,
-                "area",
-                ["target", "state", "home"],
-                "transaction created directory");
-        }
-
-        JsonElement artifacts = document.RootElement.GetProperty("artifacts");
-        if (artifacts.ValueKind != JsonValueKind.Array)
-            throw new InvalidDataException("Squad transaction artifacts must be an array.");
-        foreach (JsonElement artifact in artifacts.EnumerateArray())
-        {
-            RequireExactJsonFields(
-                artifact,
-                [
-                    "transactionId",
-                    "area",
-                    "role",
-                    "path",
-                    "nodeKind",
-                    "byteLength",
-                    "sha256",
-                    "linkTarget",
-                    "lifecycleState"
-                ],
-                "transaction artifact");
-            RequireCanonicalJsonEnum(
-                artifact,
-                "area",
-                ["journal", "work"],
-                "transaction artifact");
-            RequireCanonicalJsonEnum(
-                artifact,
-                "role",
-                [
-                    "target-stage",
-                    "target-backup",
-                    "target-link-metadata",
-                    "state-stage",
-                    "state-original",
-                    "state-link-metadata",
-                    "claimed-original",
-                    "transition-metadata"
-                ],
-                "transaction artifact");
-            RequireCanonicalNodeKind(artifact, "nodeKind", "transaction artifact");
-            RequireCanonicalJsonEnum(
-                artifact,
-                "lifecycleState",
-                ["pre-operation", "active-transition", "post-operation"],
-                "transaction artifact");
-        }
-
-        JsonElement activeTransitions = document.RootElement.GetProperty("activeTransitions");
-        if (activeTransitions.ValueKind != JsonValueKind.Array)
-            throw new InvalidDataException("Squad transaction active transitions must be an array.");
-        foreach (JsonElement transition in activeTransitions.EnumerateArray())
-        {
-            RequireExactJsonFields(
-                transition,
-                ["artifactIdentity", "allowedState"],
-                "transaction active transition");
-            RequireCanonicalJsonEnum(
-                transition,
-                "allowedState",
-                ["pre-operation", "active-transition", "post-operation"],
-                "transaction active transition");
-        }
-    }
-
-    private void RequireCanonicalNodeKind(
-        JsonElement element,
-        string propertyName,
-        string subject)
-    {
-        RequireCanonicalJsonEnum(
-            element,
-            propertyName,
-            ["missing", "file", "directory", "fileSymbolicLink", "directorySymbolicLink"],
-            subject);
-    }
-
-    private void RequireCanonicalJsonEnum(
-        JsonElement element,
-        string propertyName,
-        IReadOnlyCollection<string> allowedValues,
-        string subject)
-    {
-        JsonElement value = element.GetProperty(propertyName);
-        if (value.ValueKind != JsonValueKind.String ||
-            value.GetString() is not { } token ||
-            !allowedValues.Contains(token))
-            throw new InvalidDataException(
-                $"Squad {subject} field '{propertyName}' must use its canonical enum token.");
-    }
-
-    private void RequireExactJsonFields(
-        JsonElement element,
-        IReadOnlyCollection<string> expected,
-        string subject)
-    {
-        if (element.ValueKind != JsonValueKind.Object)
-            throw new InvalidDataException($"Squad {subject} must be an object.");
-
-        HashSet<string> actual = new(StringComparer.Ordinal);
-        foreach (JsonProperty property in element.EnumerateObject())
-        {
-            if (!actual.Add(property.Name))
-                throw new InvalidDataException(
-                    $"Squad {subject} contains duplicate field '{property.Name}'.");
-
-            if (property.Value.ValueKind == JsonValueKind.Null)
-                throw new InvalidDataException(
-                    $"Squad {subject} field '{property.Name}' cannot be null.");
-        }
-
-        string[] missing = expected.Where(field => !actual.Contains(field)).ToArray();
-        string[] unknown = actual.Where(field => !expected.Contains(field)).ToArray();
-        if (missing.Length > 0 || unknown.Length > 0)
-            throw new InvalidDataException(
-                $"Squad {subject} has missing or unknown fields. " +
-                $"Missing: {string.Join(", ", missing)}; unknown: {string.Join(", ", unknown)}.");
     }
 
     private void ValidateAfterDigest(
@@ -3034,9 +2814,9 @@ public sealed class SquadTransaction : ISquadTransaction
         string originalPath = StateOriginalPath(workDirectory, stateName);
         bool unchangedFile = originalKind == OriginalEntryKind.File &&
                              afterKind == OriginalEntryKind.File &&
-                             GetEntryKind(originalPath) == OriginalEntryKind.File &&
+                             TransactionSupport.GetEntryKind(_files, originalPath) == OriginalEntryKind.File &&
                              string.Equals(
-                                 Digest(_files.ReadAllBytes(originalPath)),
+                                 TransactionSupport.Digest(_files.ReadAllBytes(originalPath)),
                                  afterSha256,
                                  StringComparison.Ordinal);
 
@@ -3076,7 +2856,7 @@ public sealed class SquadTransaction : ISquadTransaction
 
     private string ClaimRelativePath(string transactionId, string subject)
     {
-        return $"claimed-{transactionId}-{Digest(Encoding.UTF8.GetBytes(subject))}";
+        return $"claimed-{transactionId}-{TransactionSupport.Digest(Encoding.UTF8.GetBytes(subject))}";
     }
 
     private void VerifyArtifacts(
@@ -3095,7 +2875,28 @@ public sealed class SquadTransaction : ISquadTransaction
             throw new InvalidDataException(
                 "Squad prepared transaction contains an unpublished temporary artifact.");
 
-        HashSet<string> identities = new(StringComparer.Ordinal);
+        Dictionary<string, IntentTransition> transitions = BuildTransitionMap(activeTransitions);
+        if (transitions.Count > 1)
+            throw new InvalidDataException(
+                "Squad prepared transaction contains duplicate or multiple active transitions.");
+
+        HashSet<string> identities = VerifyArtifactEntries(
+            transactionId,
+            artifacts,
+            transitions,
+            journalDirectory,
+            workDirectory);
+
+        if (transitions.Keys.Any(identity => !identities.Contains(identity)))
+            throw new InvalidDataException(
+                "Squad prepared transaction transition names an unknown artifact.");
+
+        VerifyExactTransactionTree(artifacts, journalDirectory, workDirectory);
+    }
+
+    private static Dictionary<string, IntentTransition> BuildTransitionMap(
+        IReadOnlyList<IntentTransition> activeTransitions)
+    {
         Dictionary<string, IntentTransition> transitions = new(StringComparer.Ordinal);
         foreach (IntentTransition transition in activeTransitions)
             if (string.IsNullOrWhiteSpace(transition.ArtifactIdentity) ||
@@ -3104,10 +2905,17 @@ public sealed class SquadTransaction : ISquadTransaction
                 throw new InvalidDataException(
                     "Squad prepared transaction contains an invalid active transition.");
 
-        if (transitions.Count > 1)
-            throw new InvalidDataException(
-                "Squad prepared transaction contains duplicate or multiple active transitions.");
+        return transitions;
+    }
 
+    private HashSet<string> VerifyArtifactEntries(
+        string transactionId,
+        IReadOnlyList<IntentArtifact> artifacts,
+        Dictionary<string, IntentTransition> transitions,
+        string journalDirectory,
+        string workDirectory)
+    {
+        HashSet<string> identities = new(StringComparer.Ordinal);
         foreach (IntentArtifact artifact in artifacts)
         {
             if (!string.Equals(artifact.TransactionId, transactionId, StringComparison.Ordinal) ||
@@ -3127,21 +2935,9 @@ public sealed class SquadTransaction : ISquadTransaction
                 ? journalDirectory
                 : workDirectory;
             string path = ResolveArtifactNode(areaRoot, relativePath);
-            OriginalEntryKind currentKind = GetEntryKind(path);
+            OriginalEntryKind currentKind = TransactionSupport.GetEntryKind(_files, path);
             bool mayBeAbsent = artifact.LifecycleState == ArtifactLifecycleState.ActiveTransition;
-            if (artifact.LifecycleState == ArtifactLifecycleState.ActiveTransition)
-            {
-                if (!transitions.TryGetValue(identity, out IntentTransition? transition) ||
-                    transition.AllowedState != ArtifactLifecycleState.PreOperation)
-                    throw new InvalidDataException(
-                        "Squad prepared transaction has an undeclared active transition.");
-            }
-            else if (transitions.ContainsKey(identity))
-            {
-                throw new InvalidDataException(
-                    "Squad prepared transaction transition does not match its artifact lifecycle.");
-            }
-
+            ValidateArtifactTransition(artifact, identity, transitions);
             bool? expectedPresent = ArtifactExpectedPresent(artifact);
             if (currentKind == OriginalEntryKind.Missing && mayBeAbsent)
                 continue;
@@ -3160,11 +2956,26 @@ public sealed class SquadTransaction : ISquadTransaction
                     $"Squad prepared artifact '{relativePath}' failed length or digest verification.");
         }
 
-        if (transitions.Keys.Any(identity => !identities.Contains(identity)))
-            throw new InvalidDataException(
-                "Squad prepared transaction transition names an unknown artifact.");
+        return identities;
+    }
 
-        VerifyExactTransactionTree(artifacts, journalDirectory, workDirectory);
+    private static void ValidateArtifactTransition(
+        IntentArtifact artifact,
+        string identity,
+        Dictionary<string, IntentTransition> transitions)
+    {
+        if (artifact.LifecycleState == ArtifactLifecycleState.ActiveTransition)
+        {
+            if (!transitions.TryGetValue(identity, out IntentTransition? transition) ||
+                transition.AllowedState != ArtifactLifecycleState.PreOperation)
+                throw new InvalidDataException(
+                    "Squad prepared transaction has an undeclared active transition.");
+        }
+        else if (transitions.ContainsKey(identity))
+        {
+            throw new InvalidDataException(
+                "Squad prepared transaction transition does not match its artifact lifecycle.");
+        }
     }
 
     private bool ValidateArtifactFingerprint(IntentArtifact artifact)
@@ -3188,7 +2999,7 @@ public sealed class SquadTransaction : ISquadTransaction
             OriginalEntryKind.File =>
                 _files.GetLength(path) == artifact.ByteLength &&
                 string.Equals(
-                    Digest(_files.ReadAllBytes(path)),
+                    TransactionSupport.Digest(_files.ReadAllBytes(path)),
                     artifact.Sha256,
                     StringComparison.Ordinal),
             OriginalEntryKind.FileSymbolicLink => string.Equals(
@@ -3463,11 +3274,6 @@ public sealed class SquadTransaction : ISquadTransaction
         return SquadDeploymentPlanRules.DeployedFileIdentity(target, relativePath);
     }
 
-    private string Digest(ReadOnlySpan<byte> content)
-    {
-        return Convert.ToHexStringLower(SHA256.HashData(content));
-    }
-
     private SquadDeploymentConflictException PreconditionConflict(string relativePath)
     {
         return new SquadDeploymentConflictException(
@@ -3480,20 +3286,6 @@ public sealed class SquadTransaction : ISquadTransaction
         return new LeafClaimConflictException(
             $"Squad deployment leaf '{relativePath}' changed at the atomic claim boundary. " +
             "The raced node was preserved and the transaction journal was retained.");
-    }
-
-    private static JsonSerializerOptions CreateIntentJsonOptions()
-    {
-        JsonSerializerOptions options = new(JsonSerializerDefaults.Web)
-        {
-            WriteIndented = true,
-            NewLine = "\n",
-            UnmappedMemberHandling = JsonUnmappedMemberHandling.Disallow
-        };
-        options.Converters.Add(new JsonStringEnumConverter(
-            JsonNamingPolicy.CamelCase,
-            false));
-        return options;
     }
 
     /// <summary>
@@ -3718,4 +3510,253 @@ public sealed class SquadTransaction : ISquadTransaction
     [SuppressMessage("Design", "CA1032:Implement standard exception constructors",
         Justification = "Private nested exception used internally for transaction control flow.")]
     private sealed class LeafClaimConflictException(string message) : InvalidOperationException(message);
+    private static class TransactionSupport
+    {
+        internal static readonly JsonSerializerOptions IntentJsonOptions = CreateIntentJsonOptions();
+
+        internal static OriginalEntryKind GetEntryKind(IWritableFileSystem files, string path)
+        {
+            if (files.GetLinkTarget(path) is not null)
+            {
+                if (OperatingSystem.IsWindows())
+                    return (files.GetAttributes(path) & FileAttributes.Directory) != 0
+                        ? OriginalEntryKind.DirectorySymbolicLink
+                        : OriginalEntryKind.FileSymbolicLink;
+
+                return files.DirectoryExists(path)
+                    ? OriginalEntryKind.DirectorySymbolicLink
+                    : OriginalEntryKind.FileSymbolicLink;
+            }
+
+            if (files.FileExists(path))
+                return OriginalEntryKind.File;
+
+            return files.DirectoryExists(path)
+                ? OriginalEntryKind.Directory
+                : OriginalEntryKind.Missing;
+        }
+
+        internal static string Digest(ReadOnlySpan<byte> content)
+        {
+            return Convert.ToHexStringLower(SHA256.HashData(content));
+        }
+
+        internal static JsonSerializerOptions CreateIntentJsonOptions()
+        {
+            JsonSerializerOptions options = new(JsonSerializerDefaults.Web)
+            {
+                WriteIndented = true,
+                NewLine = "\n",
+                UnmappedMemberHandling = JsonUnmappedMemberHandling.Disallow
+            };
+            options.Converters.Add(new JsonStringEnumConverter(
+                JsonNamingPolicy.CamelCase,
+                false));
+            return options;
+        }
+
+        internal static void ValidateIntentJsonShape(string json)
+        {
+            using JsonDocument document = JsonDocument.Parse(json);
+            RequireExactJsonFields(
+                document.RootElement,
+                [
+                    "schema",
+                    "phase",
+                    "rootKey",
+                    "transactionId",
+                    "files",
+                    "createdDirectories",
+                    "lockKind",
+                    "lockAfterKind",
+                    "lockAfterSha256",
+                    "receiptKind",
+                    "receiptAfterKind",
+                    "receiptAfterSha256",
+                    "artifacts",
+                    "activeTransitions"
+                ],
+                "transaction intent");
+            RequireCanonicalJsonEnum(
+                document.RootElement,
+                "phase",
+                ["preparing", "prepared", "committed"],
+                "transaction intent");
+            RequireCanonicalNodeKind(document.RootElement, "lockKind", "transaction intent");
+            RequireCanonicalNodeKind(document.RootElement, "lockAfterKind", "transaction intent");
+            RequireCanonicalNodeKind(document.RootElement, "receiptKind", "transaction intent");
+            RequireCanonicalNodeKind(document.RootElement, "receiptAfterKind", "transaction intent");
+
+            JsonElement files = document.RootElement.GetProperty("files");
+            if (files.ValueKind != JsonValueKind.Array)
+                throw new InvalidDataException("Squad transaction intent files must be an array.");
+            foreach (JsonElement file in files.EnumerateArray())
+            {
+                RequireExactJsonFields(
+                    file,
+                    [
+                        "relativePath",
+                        "target",
+                        "physicalRoot",
+                        "originalKind",
+                        "missingParentDirectories",
+                        "afterKind",
+                        "afterSha256"
+                    ],
+                    "transaction file");
+                RequireCanonicalNodeKind(file, "originalKind", "transaction file");
+                RequireCanonicalNodeKind(file, "afterKind", "transaction file");
+            }
+
+            JsonElement createdDirectories = document.RootElement.GetProperty("createdDirectories");
+            if (createdDirectories.ValueKind != JsonValueKind.Array)
+                throw new InvalidDataException(
+                    "Squad transaction created directories must be an array.");
+
+            foreach (JsonElement directory in createdDirectories.EnumerateArray())
+            {
+                RequireExactJsonFields(
+                    directory,
+                    ["area", "path"],
+                    "transaction created directory");
+                RequireCanonicalJsonEnum(
+                    directory,
+                    "area",
+                    ["target", "state", "home"],
+                    "transaction created directory");
+            }
+
+            JsonElement artifacts = document.RootElement.GetProperty("artifacts");
+            if (artifacts.ValueKind != JsonValueKind.Array)
+                throw new InvalidDataException("Squad transaction artifacts must be an array.");
+            foreach (JsonElement artifact in artifacts.EnumerateArray())
+            {
+                RequireExactJsonFields(
+                    artifact,
+                    [
+                        "transactionId",
+                        "area",
+                        "role",
+                        "path",
+                        "nodeKind",
+                        "byteLength",
+                        "sha256",
+                        "linkTarget",
+                        "lifecycleState"
+                    ],
+                    "transaction artifact");
+                RequireCanonicalJsonEnum(
+                    artifact,
+                    "area",
+                    ["journal", "work"],
+                    "transaction artifact");
+                RequireCanonicalJsonEnum(
+                    artifact,
+                    "role",
+                    [
+                        "target-stage",
+                        "target-backup",
+                        "target-link-metadata",
+                        "state-stage",
+                        "state-original",
+                        "state-link-metadata",
+                        "claimed-original",
+                        "transition-metadata"
+                    ],
+                    "transaction artifact");
+                RequireCanonicalNodeKind(artifact, "nodeKind", "transaction artifact");
+                RequireCanonicalJsonEnum(
+                    artifact,
+                    "lifecycleState",
+                    ["pre-operation", "active-transition", "post-operation"],
+                    "transaction artifact");
+            }
+
+            JsonElement activeTransitions = document.RootElement.GetProperty("activeTransitions");
+            if (activeTransitions.ValueKind != JsonValueKind.Array)
+                throw new InvalidDataException("Squad transaction active transitions must be an array.");
+            foreach (JsonElement transition in activeTransitions.EnumerateArray())
+            {
+                RequireExactJsonFields(
+                    transition,
+                    ["artifactIdentity", "allowedState"],
+                    "transaction active transition");
+                RequireCanonicalJsonEnum(
+                    transition,
+                    "allowedState",
+                    ["pre-operation", "active-transition", "post-operation"],
+                    "transaction active transition");
+            }
+        }
+
+        private static void RequireCanonicalNodeKind(
+            JsonElement element,
+            string propertyName,
+            string subject)
+        {
+            RequireCanonicalJsonEnum(
+                element,
+                propertyName,
+                ["missing", "file", "directory", "fileSymbolicLink", "directorySymbolicLink"],
+                subject);
+        }
+
+        private static void RequireCanonicalJsonEnum(
+            JsonElement element,
+            string propertyName,
+            IReadOnlyCollection<string> allowedValues,
+            string subject)
+        {
+            JsonElement value = element.GetProperty(propertyName);
+            if (value.ValueKind != JsonValueKind.String ||
+                value.GetString() is not { } token ||
+                !allowedValues.Contains(token))
+                throw new InvalidDataException(
+                    $"Squad {subject} field '{propertyName}' must use its canonical enum token.");
+        }
+
+        private static void RequireExactJsonFields(
+            JsonElement element,
+            IReadOnlyCollection<string> expected,
+            string subject)
+        {
+            if (element.ValueKind != JsonValueKind.Object)
+                throw new InvalidDataException($"Squad {subject} must be an object.");
+
+            HashSet<string> actual = new(StringComparer.Ordinal);
+            foreach (JsonProperty property in element.EnumerateObject())
+            {
+                if (!actual.Add(property.Name))
+                    throw new InvalidDataException(
+                        $"Squad {subject} contains duplicate field '{property.Name}'.");
+
+                if (property.Value.ValueKind == JsonValueKind.Null)
+                    throw new InvalidDataException(
+                        $"Squad {subject} field '{property.Name}' cannot be null.");
+            }
+
+            string[] missing = expected.Where(field => !actual.Contains(field)).ToArray();
+            string[] unknown = actual.Where(field => !expected.Contains(field)).ToArray();
+            if (missing.Length > 0 || unknown.Length > 0)
+                throw new InvalidDataException(
+                    $"Squad {subject} has missing or unknown fields. " +
+                    $"Missing: {string.Join(", ", missing)}; unknown: {string.Join(", ", unknown)}.");
+        }
+
+
+        internal static string DecodeLinkTarget(byte[] linkBytes, string relativePath)
+        {
+            try
+            {
+                return new UTF8Encoding(false, true).GetString(linkBytes);
+            }
+            catch (DecoderFallbackException exception)
+            {
+                throw new InvalidDataException(
+                    $"Squad restore artifact '{relativePath}' is not valid UTF-8.",
+                    exception);
+            }
+        }
+    }
+
 }

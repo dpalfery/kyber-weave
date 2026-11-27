@@ -37,6 +37,18 @@ public static class SquadServiceCollectionExtensions
     {
         ArgumentNullException.ThrowIfNull(services);
 
+        RegisterReleaseServices(services);
+        RegisterStateServices(services);
+        RegisterPackagingServices(services);
+        RegisterInstanceServices(services);
+        RegisterSourceServices(services);
+        RegisterDeploymentServices(services);
+
+        return services;
+    }
+
+    private static void RegisterReleaseServices(IServiceCollection services)
+    {
         services.TryAddSingleton<ISquadReleaseSource>(sp => new GitHubSquadReleaseSource(
             sp.GetRequiredService<ISquadReleaseHttpHandlers>().Create(),
             ReleaseOrigin.Resolve(sp.GetRequiredService<IProcessEnvironment>().GetVariable).ApiRoot,
@@ -48,6 +60,10 @@ public static class SquadServiceCollectionExtensions
             FindLocalProductSquadRoot(sp.GetRequiredService<ISquadFileAccess>()) is { } local
                 ? new LocalCheckoutSquadReleaseSource(local, sp.GetRequiredService<ISquadCompanionSkills>())
                 : sp.GetRequiredService<ISquadReleaseSource>()));
+    }
+
+    private static void RegisterStateServices(IServiceCollection services)
+    {
         services.TryAddSingleton<ISquadStateStore>(sp => new SquadStateStore(
             sp.GetRequiredService<ISquadUserPaths>(),
             sp.GetRequiredService<IWritableFileSystem>(),
@@ -66,6 +82,10 @@ public static class SquadServiceCollectionExtensions
             sp.GetRequiredService<ISquadUserPaths>(),
             sp.GetRequiredService<IWritableFileSystem>(),
             sp.GetRequiredService<IFileSystemPathSemantics>()));
+    }
+
+    private static void RegisterPackagingServices(IServiceCollection services)
+    {
         services.TryAddSingleton<ISquadPackService, SquadPackService>();
         services.TryAddSingleton<ISquadArchiveWriter>(sp => new SquadPacker(
             sp.GetRequiredService<IWritableFileSystem>(),
@@ -87,6 +107,10 @@ public static class SquadServiceCollectionExtensions
             sp.GetRequiredService<CopilotPromptRefresher>(),
             sp.GetService<HttpMessageHandler>()));
         services.TryAddSingleton<ISquadLifecycleService>(sp => CreateLifecycle(sp, sp.GetRequiredService<ISquadReleaseSource>()));
+    }
+
+    private static void RegisterInstanceServices(IServiceCollection services)
+    {
         services.TryAddSingleton<ISquadInstanceService>(sp => new SquadInstanceService(
             CreateLifecycle(sp, sp.GetService<ISquadInstanceReleaseSource>() ?? sp.GetRequiredService<ISquadReleaseSource>()),
             sp.GetRequiredService<ISquadModelPresetStore>(),
@@ -101,6 +125,15 @@ public static class SquadServiceCollectionExtensions
             sp.GetRequiredService<IProcessEnvironment>(),
             sp.GetRequiredService<ISquadFileAccess>()));
         services.TryAddSingleton<ISquadModelPresetStore>(sp => new SquadModelPresetStore(sp.GetRequiredService<ISquadUserPaths>(), sp.GetRequiredService<IWritableFileSystem>()));
+        services.TryAddSingleton<ISquadInstanceLinkSync>(sp => new SquadInstanceLinkSync(
+            sp.GetRequiredService<IWritableFileSystem>(),
+            sp.GetRequiredService<IPathResolver>(),
+            sp.GetRequiredService<ILease>(),
+            sp.GetRequiredService<IProcessEnvironment>()));
+    }
+
+    private static void RegisterSourceServices(IServiceCollection services)
+    {
         services.TryAddSingleton<ISquadSourceLoader>(sp => new SquadSourceLoader(
             sp.GetRequiredService<IFileSystem>(),
             sp.GetRequiredService<IPathResolver>(),
@@ -118,6 +151,10 @@ public static class SquadServiceCollectionExtensions
             sp.GetRequiredService<ISquadWorkerBaselineFile>(),
             sp.GetRequiredService<IFileSystem>(),
             sp.GetRequiredService<IProcessEnvironment>()));
+    }
+
+    private static void RegisterDeploymentServices(IServiceCollection services)
+    {
         services.TryAddSingleton<ISquadModelPresetValidator>(sp => new SquadModelPresetValidator(sp.GetRequiredService<IFileSystem>()));
         services.TryAddSingleton<ISquadDeploymentPlanner>(sp => new SquadDeploymentPlanner(
             sp.GetRequiredService<IFileSystem>(),
@@ -134,11 +171,6 @@ public static class SquadServiceCollectionExtensions
             sp.GetRequiredService<IWritableFileSystem>(),
             sp.GetRequiredService<IFileSystemPathSemantics>(),
             sp.GetRequiredService<IIdGenerator>()));
-        services.TryAddSingleton<ISquadInstanceLinkSync>(sp => new SquadInstanceLinkSync(
-            sp.GetRequiredService<IWritableFileSystem>(),
-            sp.GetRequiredService<IPathResolver>(),
-            sp.GetRequiredService<ILease>(),
-            sp.GetRequiredService<IProcessEnvironment>()));
         services.TryAddSingleton<ISquadSkillShadowing>(sp => new SquadSkillShadowing(
             sp.GetRequiredService<IFileSystem>(),
             sp.GetRequiredService<IPathResolver>(),
@@ -150,7 +182,6 @@ public static class SquadServiceCollectionExtensions
             sp.GetRequiredService<IFileSystem>(),
             sp.GetRequiredService<IPathResolver>(),
             sp.GetRequiredService<IProcessEnvironment>()));
-        return services;
     }
 
     private static string? FindLocalProductSquadRoot(ISquadFileAccess files)
