@@ -122,11 +122,14 @@ public sealed class DocsInitCommand : Command<DocsInitSettings>
         (int ExitCode, ScaffoldResult? Result, string? Error) attempt = TryScaffold(_scaffolder, settings);
         if (attempt.ExitCode != 0)
         {
-            _console.MarkupLine($"[red]Could not scaffold: {Markup.Escape(attempt.Error!)}[/]");
+            string error = attempt.Error
+                ?? throw new InvalidOperationException("The scaffold failed without an error message.");
+            _console.MarkupLine($"[red]Could not scaffold: {Markup.Escape(error)}[/]");
             return attempt.ExitCode;
         }
 
-        ScaffoldResult result = attempt.Result!;
+        ScaffoldResult result = attempt.Result
+            ?? throw new InvalidOperationException("The scaffold succeeded without a result.");
         string rootNote = result.DocsRootSource switch
         {
             DocsRootSource.Configuration => " [grey](configured)[/]",

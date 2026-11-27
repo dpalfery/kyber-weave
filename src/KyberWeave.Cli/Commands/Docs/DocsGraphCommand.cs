@@ -31,13 +31,14 @@ public sealed class DocsExportGraphCommand(
                 report,
                 documents,
                 out IDocumentSource? loader,
-                out KyberWeaveConfig config))
+                out KyberWeaveConfig config)
+            || loader is null)
         {
             CommandHelpers.Finish(console, report, settings, "docs export-graph", "Document");
             return 1;
         }
 
-        DocumentSet set = loader!.Load();
+        DocumentSet set = loader.Load();
         ICodeGraphResolver resolver = DocsCommandComposition.CreateResolver(settings, codeGraph);
 
         if (!resolver.IsAvailable)

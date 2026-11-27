@@ -46,7 +46,7 @@ public static class CommandHelpers
 
         KyberWeaveConfigLoadResult result = configs.TryLoad(repoRoot, configPath);
         resolvedConfigPath = result.ConfigPath;
-        if (!result.Success)
+        if (!result.Success || result.Config is not { } loadedConfig)
         {
             report.Add(new Diagnostic(
                 KyberWeaveConfigDiagnosticCodes.LoadError,
@@ -58,7 +58,7 @@ public static class CommandHelpers
             return false;
         }
 
-        config = result.Config!;
+        config = loadedConfig;
 
         // Unknown keys load but do nothing, so each one is surfaced rather than left to be noticed later.
         foreach (string warning in config.Review.Warnings)
