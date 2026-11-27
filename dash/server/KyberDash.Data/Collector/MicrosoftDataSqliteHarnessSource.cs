@@ -55,12 +55,13 @@ public class MicrosoftDataSqliteHarnessSource : IHarnessSqliteSource
     private readonly Func<string, long> fileLength;
     private readonly Func<long> timestamp;
     private readonly Action<string>? betweenCopies;
+    private readonly TimeProvider timeProvider;
 
     /// <summary>Creates the adapter.</summary>
     /// <param name="limits">Size and time limits.</param>
     /// <param name="cacheRoot">Directory that holds the read-only copies; created on first use.</param>
     public MicrosoftDataSqliteHarnessSource(HarnessSqliteLimits limits, string cacheRoot)
-        : this(limits, cacheRoot, null, null)
+        : this(limits, cacheRoot, null, null, null, null)
     {
     }
 
@@ -70,12 +71,14 @@ public class MicrosoftDataSqliteHarnessSource : IHarnessSqliteSource
     /// <param name="fileLength">Length of a file, zero when it is absent, read for the open decision; the file system when null.</param>
     /// <param name="timestamp">The clock the command timeout is measured on, in <see cref="Stopwatch"/> ticks; <see cref="Stopwatch.GetTimestamp"/> when null.</param>
     /// <param name="betweenCopies">Runs with the source path after the database is copied and before its WAL is; tests use it to change the source mid-copy.</param>
+    /// <param name="timeProvider">Clock supplying the stale-temp cutoff; defaults to <see cref="TimeProvider.System"/>.</param>
     internal MicrosoftDataSqliteHarnessSource(
         HarnessSqliteLimits limits,
         string cacheRoot,
         Func<string, long>? fileLength = null,
         Func<long>? timestamp = null,
-        Action<string>? betweenCopies = null)
+        Action<string>? betweenCopies = null,
+        TimeProvider? timeProvider = null)
     {
         ArgumentNullException.ThrowIfNull(limits);
         ArgumentException.ThrowIfNullOrWhiteSpace(cacheRoot);
@@ -87,6 +90,7 @@ public class MicrosoftDataSqliteHarnessSource : IHarnessSqliteSource
         this.fileLength = fileLength ?? LengthOrZero;
         this.timestamp = timestamp ?? Stopwatch.GetTimestamp;
         this.betweenCopies = betweenCopies;
+        this.timeProvider = timeProvider ?? TimeProvider.System;
     }
 
     /// <summary>Creates the adapter with default limits and the cache root <c>&lt;canon.db directory&gt;/sqlite-ro</c>.</summary>
@@ -502,7 +506,7 @@ public class MicrosoftDataSqliteHarnessSource : IHarnessSqliteSource
     /// </summary>
     private void EvictStaleTemps()
     {
-        DateTime staleBefore = DateTime.UtcNow - StaleTempAge;
+        DateTime staleBefore = timeProvider.GetUtcNow().UtcDateTime - StaleTempAge;
         foreach (string file in Directory.EnumerateFiles(cacheRoot, "*.db.tmp-*"))
         {
             try
