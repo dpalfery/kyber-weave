@@ -28,30 +28,54 @@ public sealed class ArbiterRulesCommand(IArbiterConfigResolver configs, IAnsiCon
             return 1;
         }
 
-        IReadOnlyList<ArbiterRule> rules = config.Arbiter.Rules;
-        if (settings.Trigger is not null)
+        IReadOnlyList<ArbiterRule>? rules = FilterRules(config.Arbiter.Rules, settings.Trigger, report);
+        if (rules is null)
         {
-            try
-            {
-                ArbiterTriggerFamilies.ForTrigger(settings.Trigger);
-            }
-            catch (ArgumentException exception)
-            {
-                report.Add(new Diagnostic(
-                    RuleValidator.MalformedSection,
-                    Severity.Error,
-                    exception.Message,
-                    "--trigger",
-                    Hint: "List every trigger's rules by omitting --trigger."));
-                CommandHelpers.Finish(console, report, settings, "arbiter rules", "Rule");
-                return 1;
-            }
-
-            rules = [.. rules.Where(rule =>
-                string.Equals(rule.Trigger, settings.Trigger, StringComparison.Ordinal))];
+            CommandHelpers.Finish(console, report, settings, "arbiter rules", "Rule");
+            return 1;
         }
 
-        // Sized to its content, not expanded: under an unfolded console width, Expand pads the table to the width.
+        Table table = BuildRulesTable(rules);
+
+        // Unfolded so a wide table is not split mid-word, which would break a column name such as "For-each".
+        CommandHelpers.WriteUnfolded(console, () => console.Write(table));
+        console.MarkupLine($"[grey]{rules.Count} rule(s) listed.[/]");
+
+        CommandHelpers.Finish(console, report, settings, "arbiter rules", "Rule");
+        return report.HasErrors ? 1 : 0;
+    }
+
+    /// <summary>Runs the command without cancellation; the entry point tests use.</summary>
+    public int Execute(CommandContext context, ArbiterSettings settings) =>
+        Execute(context, settings, CancellationToken.None);
+
+    /// <summary>Validates and applies <c>--trigger</c>; an unknown trigger is reported and null returned.</summary>
+    private static IReadOnlyList<ArbiterRule>? FilterRules(IReadOnlyList<ArbiterRule> rules, string? trigger, DiagnosticReport report)
+    {
+        if (trigger is null)
+            return rules;
+
+        try
+        {
+            ArbiterTriggerFamilies.ForTrigger(trigger);
+        }
+        catch (ArgumentException exception)
+        {
+            report.Add(new Diagnostic(
+                RuleValidator.MalformedSection,
+                Severity.Error,
+                exception.Message,
+                "--trigger",
+                Hint: "List every trigger's rules by omitting --trigger."));
+            return null;
+        }
+
+        return [.. rules.Where(rule => string.Equals(rule.Trigger, trigger, StringComparison.Ordinal))];
+    }
+
+    /// <summary>Builds the one-row-per-rule table. Sized to its content: under an unfolded console width, Expand pads it to the width.</summary>
+    private static Table BuildRulesTable(IReadOnlyList<ArbiterRule> rules)
+    {
         Table table = new Table().Border(TableBorder.Rounded);
         table.AddColumn("Id");
         table.AddColumn("Trigger");
@@ -78,17 +102,8 @@ public sealed class ArbiterRulesCommand(IArbiterConfigResolver configs, IAnsiCon
                 new Markup(Markup.Escape(rule.Ask?.ForEach ?? "—")));
         }
 
-        // Unfolded so a wide table is not split mid-word, which would break a column name such as "For-each".
-        CommandHelpers.WriteUnfolded(console, () => console.Write(table));
-        console.MarkupLine($"[grey]{rules.Count} rule(s) listed.[/]");
-
-        CommandHelpers.Finish(console, report, settings, "arbiter rules", "Rule");
-        return report.HasErrors ? 1 : 0;
+        return table;
     }
-
-    /// <summary>Runs the command without cancellation; the entry point tests use.</summary>
-    public int Execute(CommandContext context, ArbiterSettings settings) =>
-        Execute(context, settings, CancellationToken.None);
 
     private static string StepFor(ArbiterRule rule)
     {
