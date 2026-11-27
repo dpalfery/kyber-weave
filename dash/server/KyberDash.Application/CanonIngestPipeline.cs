@@ -285,7 +285,7 @@ public static class CanonIngestPipeline
             {
                 normalized = adapter.Normalize(raw);
             }
-            catch (Exception exception)
+            catch (Exception exception) when (exception is JsonException or InvalidOperationException or ArgumentException)
             {
                 rejected++;
                 string? sessionId = CanonAdapters.CanonicalSessionId(raw.Attributes);
