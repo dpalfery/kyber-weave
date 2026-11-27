@@ -79,7 +79,8 @@ public sealed class ArbiterEvalCommand(
         {
             throw;
         }
-        catch (Exception exception)
+        // Documented boundary: a failed evaluation records its hook error and exits 1 rather than crashing the host.
+        catch (Exception exception) when (exception is not OutOfMemoryException && exception is not OperationCanceledException)
         {
             report.Add(new Diagnostic(
                 ArbiterEvaluator.HookErrorCode,

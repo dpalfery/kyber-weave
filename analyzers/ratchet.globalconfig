@@ -13,4 +13,3 @@ is_global = true
 global_level = 200
 
 # KW-STD-CS-006 catch discipline: catch named types; bare Exception only to log and rethrow.
-dotnet_diagnostic.CA1031.severity = suggestion

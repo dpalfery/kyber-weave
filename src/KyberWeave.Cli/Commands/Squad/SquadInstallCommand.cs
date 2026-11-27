@@ -203,7 +203,8 @@ internal sealed class SquadInstallCommand : Command<SquadInstallSettings>
             _output.WriteFailure(ex);
             return 1;
         }
-        catch (Exception ex)
+        // Documented boundary: an install failure is the command's ordinary error output, not an unhandled exception.
+        catch (Exception ex) when (ex is not OutOfMemoryException && ex is not OperationCanceledException)
         {
             _output.WriteFailure(ex);
             return 1;

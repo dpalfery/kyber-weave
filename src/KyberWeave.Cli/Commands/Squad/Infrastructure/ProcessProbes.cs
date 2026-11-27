@@ -108,7 +108,9 @@ internal static class ProcessProbe
                 Version: null,
                 FailureReason: $"The '{executable} --version' probe did not finish in time and was stopped.");
         }
-        catch (Exception)
+        // Documented boundary: a startup failure of any kind degrades to the probe's category; the doctor and
+        // status commands that host it must not crash on it. The category is recorded in the result.
+        catch (Exception ex) when (ex is not OutOfMemoryException && ex is not OperationCanceledException)
         {
             // Startup exceptions can echo PATH values or launch credentials. The probe
             // reports only the category needed by doctor/status callers.

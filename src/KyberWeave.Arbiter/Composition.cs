@@ -112,7 +112,7 @@ public static class Composition
                 HookCommand command = (commandFactory ?? CreateDefault)(stderr);
                 return command.Run(harness, caller, stdinText, stdout, stderr, scope, home);
             }
-            catch (Exception ex)
+            catch (Exception ex) when (IsBoundaryFailure(ex))
             {
                 // Fail open: the stdin read or the host construction broke before the host's own
                 // catch existed. The failure is logged and the dispatch continues (ADR 0072).
@@ -127,7 +127,7 @@ public static class Composition
             {
                 stdinText = await stdin.ReadToEndAsync().ConfigureAwait(false);
             }
-            catch (Exception ex)
+            catch (Exception ex) when (IsBoundaryFailure(ex))
             {
                 // An empty event is unreadable, so the guard answers it with an explicit deny.
                 stdinText = string.Empty;
@@ -135,7 +135,7 @@ public static class Composition
                 {
                     await stderr.WriteLineAsync($"{HookCommand.FailClosedCode}: conductor guard could not read stdin: {OneLine(ex.Message)}").ConfigureAwait(false);
                 }
-                catch (Exception)
+                catch (Exception logFault) when (IsBoundaryFailure(logFault))
                 {
                     // Stderr is best effort; the deny on stdout still fails closed.
                 }
@@ -153,7 +153,7 @@ public static class Composition
             {
                 guard = (services ?? ArbiterContainer.CreateGuards).Invoke().GetRequiredService<IConductorGuard>();
             }
-            catch (Exception ex)
+            catch (Exception ex) when (IsBoundaryFailure(ex))
             {
                 // The guard fails closed: a container that cannot be built answers with an explicit deny.
                 await WriteBestEffortAsync(
@@ -182,7 +182,7 @@ public static class Composition
             {
                 stdinText = await stdin.ReadToEndAsync().ConfigureAwait(false);
             }
-            catch (Exception ex)
+            catch (Exception ex) when (IsBoundaryFailure(ex))
             {
                 // An unread event allows: the guard only refuses on a fact it read (ADR 0072).
                 await stderr.WriteLineAsync($"{HookCommand.FailClosedCode}: worker guard could not read stdin: {OneLine(ex.Message)}").ConfigureAwait(false);
@@ -201,7 +201,7 @@ public static class Composition
             {
                 worker = (services ?? ArbiterContainer.CreateGuards).Invoke().GetRequiredService<IWorkerGuard>();
             }
-            catch (Exception ex)
+            catch (Exception ex) when (IsBoundaryFailure(ex))
             {
                 // The guard only refuses on a fact it read (ADR 0072): a container that cannot be built allows.
                 await WriteBestEffortAsync(
@@ -272,7 +272,7 @@ public static class Composition
                 ? HarnessAdapterRegistry.AllowDocumentOf(harness, payload)
                 : HarnessAdapterRegistry.DisabledAllowDocumentOf(harness);
         }
-        catch (Exception)
+        catch (Exception ex) when (IsBoundaryFailure(ex))
         {
             // Without an adapter there is no allow document; empty stdout allows on every command harness.
         }
@@ -284,7 +284,7 @@ public static class Composition
                 "The dispatch continues without an Arbiter decision.")
                 .ConfigureAwait(false);
         }
-        catch (Exception)
+        catch (Exception ex) when (IsBoundaryFailure(ex))
         {
             // Stderr is best effort.
         }
@@ -295,7 +295,7 @@ public static class Composition
             {
                 await stdout.WriteAsync(allow).ConfigureAwait(false);
             }
-            catch (Exception)
+            catch (Exception ex) when (IsBoundaryFailure(ex))
             {
                 // Stdout is broken; exit 0 still lets the dispatch continue.
             }
@@ -303,6 +303,13 @@ public static class Composition
 
         return 0;
     }
+
+    /// <summary>
+    /// The hook entry is a documented catch boundary (KW-STD-CS-006): crashing the host is worse than
+    /// the logged fail-open or fail-closed answer, so every failure but these two is handled here.
+    /// </summary>
+    private static bool IsBoundaryFailure(Exception exception) =>
+        exception is not OutOfMemoryException and not OperationCanceledException;
 
     private static string OneLine(string message) =>
         message.Replace("\r\n", " ", StringComparison.Ordinal)
@@ -325,7 +332,7 @@ public static class Composition
         {
             await writer.WriteLineAsync(line).ConfigureAwait(false);
         }
-        catch (Exception)
+        catch (Exception ex) when (IsBoundaryFailure(ex))
         {
             // The log is best effort.
         }
