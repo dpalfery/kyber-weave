@@ -997,7 +997,7 @@ public sealed class SquadLifecycleService : ISquadLifecycleService
         {
             if (_files.DirectoryExists(path)) _files.DeleteDirectory(path);
         }
-        catch
+        catch (Exception exception) when (FileFailure.Is(exception))
         {
             // Suppress cleanup failure in temporary directory
         }
