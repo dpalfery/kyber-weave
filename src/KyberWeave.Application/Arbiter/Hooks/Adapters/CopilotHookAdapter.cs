@@ -46,10 +46,10 @@ namespace KyberWeave.Arbiter.Hooks.Adapters;
 public sealed partial class CopilotHookAdapter : IHarnessHookAdapter
 {
     /// <summary>The VS Code Local-schema harness token.</summary>
-    public const string VsCodeToken = "copilot-vscode";
+    public static string VsCodeToken => HarnessRegistry.CopilotVsCodeToken;
 
     /// <summary>The Copilot CLI-schema harness token.</summary>
-    public const string CliToken = "copilot-cli";
+    public static string CliToken => HarnessRegistry.CopilotCliToken;
 
     private readonly IHookDecisionEngine _engine;
     private readonly string _harnessToken;
@@ -747,7 +747,7 @@ public sealed partial class CopilotHookAdapter : IHarnessHookAdapter
         // absent, so the rules answer undecidable. An unmarked one passes through
         // untouched before configuration loads.
         string? prompt = GetNodeString(args, "prompt");
-        return prompt is null || !HeaderBlock.Parse(prompt).Headers.ContainsKey("KYBER-ARBITER");
+        return prompt is null || !HeaderBlock.Parse(prompt).Headers.ContainsKey(DispatchHeaders.Marker);
     }
 
     private enum CopilotSchema

@@ -1,3 +1,4 @@
+using KyberWeave.Core;
 using KyberWeave.Application.Review;
 using KyberWeave.Cli.Commands.Docs;
 using KyberWeave.Contracts.Repositories;
@@ -109,8 +110,8 @@ public sealed class DocsPacketCommandTests
     public void PriorResultsFromAFileInTheScratchAreaFillTheirSection()
     {
         using DocFixture fixture = Ready();
-        string results = fixture.FullPath(TaskPromptService.ScratchFolder + "/results.txt");
-        _ = fixture.Write(TaskPromptService.ScratchFolder + "/results.txt", "T1 reported: built, 4 tests green.");
+        string results = fixture.FullPath(ScratchLayout.Root + "/results.txt");
+        _ = fixture.Write(ScratchLayout.Root + "/results.txt", "T1 reported: built, 4 tests green.");
 
         (int exit, string output) = Packet(fixture, "T2", prior: results);
 
@@ -134,7 +135,7 @@ public sealed class DocsPacketCommandTests
 
         Assert.Equal(1, exit);
         Assert.Contains(DocsPacketCommand.PriorResultsUnreadable, output, StringComparison.Ordinal);
-        Assert.Contains(TaskPromptService.ScratchFolder, output, StringComparison.Ordinal);
+        Assert.Contains(ScratchLayout.Root, output, StringComparison.Ordinal);
         Assert.DoesNotContain(DocsPacketCommand.TaskFileStale, output, StringComparison.Ordinal);
     }
 

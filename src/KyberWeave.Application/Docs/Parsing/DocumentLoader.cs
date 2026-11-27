@@ -493,14 +493,25 @@ public sealed partial class DocumentLoader : IDocumentSource
         };
     }
 
-    private static DocStatus ParseStatus(string? value) =>
-        value?.Trim().ToLowerInvariant() switch
 #pragma warning restore CA1308
+
+    private DocStatus ParseStatus(string? value)
+    {
+        string? key = StatusKey(value);
+        if (key is null)
+            return DocStatus.Unknown;
+
+        foreach (string status in _config.Statuses)
         {
-            "current" => DocStatus.Current,
-            "draft" => DocStatus.Draft,
-            "needs-review" => DocStatus.NeedsReview,
-            "superseded" => DocStatus.Superseded,
-            _ => DocStatus.Unknown
-        };
+            if (string.Equals(StatusKey(status), key, StringComparison.Ordinal))
+                return Enum.TryParse(key, ignoreCase: true, out DocStatus parsed) ? parsed : DocStatus.Unknown;
+        }
+
+        return DocStatus.Unknown;
+    }
+
+    private static string? StatusKey(string? value) =>
+        string.IsNullOrWhiteSpace(value)
+            ? null
+            : value.Trim().Replace("-", string.Empty, StringComparison.Ordinal).ToUpperInvariant();
 }

@@ -1,8 +1,8 @@
-using KyberWeave.Cli.Update;
 using KyberWeave.Contracts.Paths;
 using KyberWeave.Contracts.Repositories;
 using KyberWeave.Contracts.Services;
 using KyberWeave.Core.Squad.Packaging;
+using KyberWeave.Application.Update;
 
 namespace KyberWeave.Application.Squad.Packaging;
 

@@ -6,6 +6,7 @@ using KyberWeave.Contracts.Services;
 using KyberWeave.Core.Configuration;
 using KyberWeave.Core.Docs.KwSkills;
 using KyberWeave.Core.Docs.Model;
+using KyberWeave.Core.FileSystem;
 using KyberWeave.Core.Parsing;
 using KyberWeave.Core.Review.Catalogue;
 using YamlDotNet.Core;
@@ -40,7 +41,7 @@ public sealed class DocsScaffolder : IDocsScaffoldingService
     private readonly IKyberStandardsTemplates _templates;
     private readonly ReviewBlockWriter _reviewBlock;
 
-    private const string AnalysisCacheIgnorePath = ".kyber-weave/.gitignore";
+    private const string AnalysisCacheIgnorePath = UserStatePaths.AnalysisCacheIgnoreRelativePath;
     private const string AnalysisCacheIgnoreEntry = "cache/";
 
     /// <summary>

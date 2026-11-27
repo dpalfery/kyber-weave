@@ -18,7 +18,7 @@ public static class FindingKindRouting
     public const string Code = "KW-REVIEW-063";
 
     /// <summary>The lens whose findings are always defects, whatever kind the seat wrote.</summary>
-    public const string SecurityLens = "security";
+    public const string SecurityLens = ReviewLensCatalogue.Security;
 
     /// <summary>What a plan objection with no quoted basis is recorded as breaking.</summary>
     public const string NoBasisQuoted = "no basis quoted";

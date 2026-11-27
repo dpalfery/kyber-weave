@@ -1,5 +1,6 @@
 using System.Text.Json;
 using System.Text.Json.Nodes;
+using KyberWeave.Arbiter.Hooks;
 using KyberWeave.Contracts.Repositories;
 using KyberWeave.Core.Squad.Rendering;
 
@@ -30,7 +31,7 @@ namespace KyberWeave.Core.Squad.Deployment;
 /// <param name="files">Reads the target's Factory settings and hook files.</param>
 public sealed class FactoryHooksShadowing(IFileSystem files) : ISquadFactoryHooksShadowing
 {
-    private const string FactoryTargetToken = "factory";
+    private const string FactoryTargetToken = HarnessRegistry.FactoryToken;
     private const string HooksJsonRelativePath = ".factory/hooks.json";
     private const string SettingsJsonRelativePath = ".factory/settings.json";
     private const string SettingsHooksKey = "hooks";

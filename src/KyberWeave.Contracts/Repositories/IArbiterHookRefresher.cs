@@ -1,4 +1,4 @@
-namespace KyberWeave.Cli.Update;
+namespace KyberWeave.Contracts.Repositories;
 
 /// <summary>The outcome of one arbiter hook refresh over the registered projects.</summary>
 /// <param name="Refreshed">Projects whose hooks were re-rendered.</param>

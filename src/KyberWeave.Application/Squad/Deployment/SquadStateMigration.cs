@@ -1,3 +1,4 @@
+using KyberWeave.Core.FileSystem;
 using KyberWeave.Contracts.Host;
 using KyberWeave.Contracts.Repositories;
 using System.Diagnostics.CodeAnalysis;
@@ -24,7 +25,7 @@ public sealed class SquadStateMigration : ISquadStateMigration
     private const string ReceiptFileName = "squad.receipt.json";
     private const string LockFileName = "squad.lock.yml";
     private const string TargetRootProperty = "targetRoot";
-    private const string InRepoStateDirectoryName = ".kyber-weave";
+    private const string InRepoStateDirectoryName = UserStatePaths.DirectoryName;
     private const string LegacyRootsRelativeDirectory = "KyberWeave/squad/roots";
 
     private const string HomeAuthorityReason =

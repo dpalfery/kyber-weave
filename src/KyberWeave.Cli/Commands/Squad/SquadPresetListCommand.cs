@@ -1,3 +1,4 @@
+using KyberWeave.Core.FileSystem;
 using KyberWeave.Contracts.Repositories;
 using KyberWeave.Cli.Commands.Squad.Infrastructure;
 using KyberWeave.Core.Squad.Deployment;
@@ -136,7 +137,7 @@ internal sealed class SquadPresetListCommand : Command<SquadPresetListSettings>
             }
         }
 
-        string selectionsDir = Path.Combine(userPaths.HomeDirectory, ".kyber-weave", "squad", "selections");
+        string selectionsDir = UserStatePaths.SquadSelectionsDirectory(userPaths.HomeDirectory);
         if (_files.DirectoryExists(selectionsDir))
         {
             foreach (string file in _files.EnumerateFiles(selectionsDir, "*.yml", recursive: false))
@@ -176,7 +177,7 @@ internal sealed class SquadPresetListCommand : Command<SquadPresetListSettings>
             }
         }
 
-        string presetsDir = Path.Combine(userPaths.HomeDirectory, ".kyber-weave", "squad", "presets");
+        string presetsDir = UserStatePaths.SquadPresetsDirectory(userPaths.HomeDirectory);
         foreach (string name in presetNames)
         {
             string presetPath = Path.Combine(presetsDir, $"{name}.yml");

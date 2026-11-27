@@ -1,3 +1,4 @@
+using KyberWeave.Core;
 using System.Globalization;
 using System.Text.Json;
 using System.Text.RegularExpressions;
@@ -23,14 +24,8 @@ public static partial class ReviewCyclePlanning
     /// <summary>The file that records which change a cycle reviewed.</summary>
     public const string IdentityFile = "cycle.json";
 
-    /// <summary>The file the gate run writes the gate report to.</summary>
-    public const string GatesFile = "gates.json";
-
     /// <summary>The file that records the commit a cycle reviewed.</summary>
     public const string HeadFile = "head";
-
-    private const string FolderPrefix = "cycle-";
-    private const string ScratchpadPrefix = ".agent_scratchpad/";
 
     private static readonly JsonSerializerOptions IdentityJson = new() { WriteIndented = true };
 
@@ -226,7 +221,7 @@ public static partial class ReviewCyclePlanning
         && (gate.AppliesWhen is not { Paths.Count: > 0 } applies || applies.Paths.Any(pattern => PathGlob.IsMatch(pattern, path)));
 
     private static bool IsScratchpad(string path) =>
-        path.Replace('\\', '/').StartsWith(ScratchpadPrefix, StringComparison.Ordinal);
+        path.Replace('\\', '/').StartsWith(ScratchLayout.Root + "/", StringComparison.Ordinal);
 
     private static (ReviewCycleRecord cycle, GateResult result)? LastResult(
         IReadOnlyList<ReviewCycleRecord> finished,
@@ -300,8 +295,8 @@ public static partial class ReviewCyclePlanning
     }
 
     public static int? TryNumber(string name) =>
-        name.StartsWith(FolderPrefix, StringComparison.Ordinal)
-        && int.TryParse(name.AsSpan(FolderPrefix.Length), NumberStyles.None, CultureInfo.InvariantCulture, out int number)
+        name.StartsWith(ScratchLayout.CycleFolderPrefix, StringComparison.Ordinal)
+        && int.TryParse(name.AsSpan(ScratchLayout.CycleFolderPrefix.Length), NumberStyles.None, CultureInfo.InvariantCulture, out int number)
         && number > 0
             ? number
             : null;

@@ -1,6 +1,7 @@
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
+using KyberWeave.Core.Arbiter;
 using KyberWeave.Core.Arbiter.ModelTargets;
 using KyberWeave.Core.Squad.Deployment;
 using KyberWeave.Core.Squad.Model;
@@ -28,11 +29,11 @@ public static class ArbiterModelTargetsFile
 
     /// <summary>The project-scope path of one harness's table, relative to the project root.</summary>
     /// <param name="harness">The harness token.</param>
-    public static string ProjectRelativePath(string harness) => $"artifacts/arbiter/model-targets.{harness}.json";
+    public static string ProjectRelativePath(string harness) => ArbiterStateDirectory.ProjectRelativeModelTargetsPath(harness);
 
     /// <summary>The global-scope path of one harness's table, relative to that harness's global root.</summary>
     /// <param name="harness">The harness token.</param>
-    public static string GlobalRelativePath(string harness) => $".kyber-weave/arbiter/model-targets.{harness}.json";
+    public static string GlobalRelativePath(string harness) => ArbiterStateDirectory.GlobalRelativeModelTargetsPath(harness);
 
     /// <summary>
     /// Builds one table file per hooked target in the request, when the Arbiter is enabled and the scope

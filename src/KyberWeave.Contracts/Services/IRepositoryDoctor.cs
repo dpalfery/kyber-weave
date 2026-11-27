@@ -1,5 +1,5 @@
-using KyberWeave.Cli.Commands.Squad.Infrastructure;
 using KyberWeave.Domain.Doctor;
+using KyberWeave.Contracts.Repositories;
 
 namespace KyberWeave.Contracts.Services;
 

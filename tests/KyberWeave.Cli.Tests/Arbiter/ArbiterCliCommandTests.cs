@@ -126,7 +126,7 @@ public sealed class ArbiterCliCommandTests : IDisposable
     }
 
     [Fact]
-    public void Plan_WithoutTasks_ReportsPlan001()
+    public void Plan_WithoutTasks_ReportsParse004()
     {
         string plan = WriteFile("arbiter-plan-empty.md", """
             # Packet without tasks
@@ -141,7 +141,7 @@ public sealed class ArbiterCliCommandTests : IDisposable
             null!,
             new ArbiterSettings { Path = plan }));
 
-        Assert.Contains("KW-ARB-PLAN-001", execution.Output, StringComparison.Ordinal);
+        Assert.Contains("KW-ARB-PARSE-004", execution.Output, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -234,7 +234,7 @@ public sealed class ArbiterCliCommandTests : IDisposable
     }
 
     /// <summary>
-    /// A plan with no tasks has no execution to digest. It reports KW-ARB-PLAN-001 and no digest in
+    /// A plan with no tasks has no execution to digest. It reports KW-ARB-PARSE-004 and no digest in
     /// either format, so a digest for an empty execution cannot be copied into a task file.
     /// </summary>
     [Fact]
@@ -256,7 +256,7 @@ public sealed class ArbiterCliCommandTests : IDisposable
             null!,
             new ArbiterSettings { Path = plan }));
 
-        Assert.Contains("KW-ARB-PLAN-001", json.Output, StringComparison.Ordinal);
+        Assert.Contains("KW-ARB-PARSE-004", json.Output, StringComparison.Ordinal);
         Assert.False(ReportsMetric(json.Output, "execution-digest"));
         Assert.DoesNotContain("Execution digest:", table.Output, StringComparison.Ordinal);
     }
@@ -341,8 +341,8 @@ public sealed class ArbiterCliCommandTests : IDisposable
 
         Assert.Equal(0, json.ExitCode);
         Assert.Equal(0, table.ExitCode);
-        Assert.Contains("KW-ARB-PLAN-001", json.Output, StringComparison.Ordinal);
-        Assert.Contains("KW-ARB-PLAN-001", table.Output, StringComparison.Ordinal);
+        Assert.Contains("KW-ARB-PARSE-004", json.Output, StringComparison.Ordinal);
+        Assert.Contains("KW-ARB-PARSE-004", table.Output, StringComparison.Ordinal);
         Assert.False(ReportsMetric(json.Output, "execution-digest"));
         Assert.DoesNotContain("Execution digest:", table.Output, StringComparison.Ordinal);
     }

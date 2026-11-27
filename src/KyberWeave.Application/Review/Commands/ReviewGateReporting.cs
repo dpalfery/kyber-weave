@@ -1,5 +1,5 @@
-using KyberWeave.Cli.Commands.Review;
 using KyberWeave.Contracts.Repositories;
+using KyberWeave.Core.Arbiter;
 using KyberWeave.Core.Configuration;
 using KyberWeave.Core.Diagnostics;
 using KyberWeave.Core.Processes;
@@ -17,22 +17,22 @@ public static class ReviewGateReporting
     public const string NoGatesDeclared = "KW-REVIEW-020";
 
     /// <summary>The state of the CodeGraph index a review runs over.</summary>
-    public const string IndexState = "KW-REVIEW-038";
+    public const string IndexState = ReviewDiagnosticCodes.IndexState;
 
     /// <summary>A gate the deadline or its own time limit stopped before a result.</summary>
     public const string GateNotRun = VerdictEngine.GateNotRun;
 
     /// <summary>A report file that could not be written.</summary>
-    public const string ReportWriteFailed = "KW-REVIEW-025";
+    public const string ReportWriteFailed = ReviewDiagnosticCodes.ReportWriteFailed;
 
     /// <summary>A gate left out because it does not apply to the change.</summary>
-    public const string GateSkipped = "KW-REVIEW-026";
+    public const string GateSkipped = ReviewDiagnosticCodes.GateSkipped;
 
     /// <summary>An agent with no task gates declared.</summary>
     public const string NoGatesForAgent = "KW-REVIEW-027";
 
     /// <summary>An input refused before any gate started.</summary>
-    public const string InvalidInput = "KW-REVIEW-028";
+    public const string InvalidInput = ReviewDiagnosticCodes.InvalidInput;
 
     /// <summary>A task gate whose fix command did not succeed.</summary>
     public const string FixFailed = "KW-REVIEW-029";
@@ -43,11 +43,8 @@ public static class ReviewGateReporting
     /// <summary>The changed set could not be listed, so include-scoped gates ran unscoped.</summary>
     public const string ChangedSetUnknown = "KW-REVIEW-034";
 
-    /// <summary>The prior cycle's findings could not be read.</summary>
-    public const string PriorFindingsUnreadable = "KW-REVIEW-023";
-
     /// <summary>A gate whose earlier passing result this cycle carries.</summary>
-    public const string GateCarried = "KW-REVIEW-048";
+    public const string GateCarried = ReviewDiagnosticCodes.GateCarried;
 
     /// <summary>A RED run accepted as valid failing evidence.</summary>
     public const string RedAccepted = "KW-REVIEW-051";
@@ -440,7 +437,7 @@ public static class ReviewGateReporting
             : string.Join(",", report.Gates.Where(gate => !gate.Passed && !gate.NotApplicable).Select(gate => gate.Id).DefaultIfEmpty("none"));
         return
         [
-            $"TASK_GATE: {(outcome.Passed ? "PASS" : "FAIL")} — agent={agent} gates={report.Gates.Count} failed={failed} skipped={skipped} report={reportPath ?? "<none>"} runs={runCount}",
+            $"{ReturnStatus.TaskGate} {(outcome.Passed ? ReturnStatus.Pass : ReturnStatus.Fail)} — agent={agent} gates={report.Gates.Count} failed={failed} skipped={skipped} report={reportPath ?? "<none>"} runs={runCount}",
             outcome.Passed ? outcome.EvidenceLine : $"RED_REJECTED: {outcome.Reason}",
         ];
     }

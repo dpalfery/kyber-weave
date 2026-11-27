@@ -8,7 +8,7 @@ using KyberWeave.Core.Diagnostics;
 using KyberWeave.Core.FileSystem;
 using YamlDotNet.Core;
 
-namespace KyberWeave.Cli.Commands.Arbiter;
+namespace KyberWeave.Application.Arbiter;
 
 /// <summary>Resolves the Arbiter configuration over the registered user settings, environment and file system.</summary>
 /// <param name="userSettings">Applies the user override to the repository provider.</param>
@@ -150,7 +150,7 @@ public sealed class ArbiterConfigResolver(
                 : Path.Combine(repoRoot, configPath);
         }
 
-        string defaultPath = Path.Combine(repoRoot, ".kyber-weave", "kyber-weave.yml");
+        string defaultPath = Path.Combine(repoRoot, UserStatePaths.DirectoryName, "kyber-weave.yml");
         if (files.FileExists(defaultPath))
         {
             return defaultPath;

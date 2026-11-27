@@ -4,6 +4,7 @@ using System.Text.RegularExpressions;
 using KyberWeave.Arbiter.Hooks.Adapters;
 using KyberWeave.Contracts.Paths;
 using KyberWeave.Contracts.Repositories;
+using KyberWeave.Core;
 using KyberWeave.Core.Arbiter.Facts;
 
 namespace KyberWeave.Arbiter.Hooks;
@@ -42,7 +43,7 @@ public sealed partial class ReviewSeatRecorder(IWritableFileSystem files, IPathR
         }
 
         string lens = shape.Groups["lens"].Value;
-        if (HeaderBlock.Parse(prompt).Headers.TryGetValue("LENS", out string? declared)
+        if (HeaderBlock.Parse(prompt).Headers.TryGetValue(DispatchHeaders.Lens, out string? declared)
             && !string.Equals(declared, lens, StringComparison.Ordinal))
         {
             context.Log.WriteLine(
@@ -224,6 +225,6 @@ public sealed partial class ReviewSeatRecorder(IWritableFileSystem files, IPathR
     [GeneratedRegex(@"^[ \t]*Packet:[ \t]*(?<path>\S.*?)[ \t]*$", RegexOptions.Multiline | RegexOptions.CultureInvariant)]
     private static partial Regex PacketRegex();
 
-    [GeneratedRegex(@"^(?<cycle>(?:.*/)?review/cycle-\d+)/packets/(?<lens>[a-z0-9][a-z0-9-]*)\.md$", RegexOptions.CultureInvariant)]
+    [GeneratedRegex(@"^(?<cycle>(?:.*/)?" + ScratchLayout.ReviewFolderName + "/" + ScratchLayout.CycleFolderPattern + @")/packets/(?<lens>[a-z0-9][a-z0-9-]*)\.md$", RegexOptions.CultureInvariant)]
     private static partial Regex PacketPathRegex();
 }

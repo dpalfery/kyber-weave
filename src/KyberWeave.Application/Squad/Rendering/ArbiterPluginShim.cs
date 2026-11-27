@@ -1,5 +1,6 @@
 using System.Text.Json;
 using System.Text.RegularExpressions;
+using KyberWeave.Arbiter.Hooks;
 using KyberWeave.Core.Squad.Deployment;
 
 namespace KyberWeave.Core.Squad.Rendering;
@@ -422,11 +423,11 @@ public static class ArbiterPluginShim
 
         (string imports, string body, string defaultExport) = harnessToken switch
         {
-            "opencode" => (
+            HarnessRegistry.OpenCodeToken => (
                 isGlobal ? OpenCodeGlobalImports : OpenCodeProjectImports,
                 OpenCodePluginBody(literal),
                 OpenCodeDefaultExport),
-            "kilo" => (KiloImports, KiloPluginBody(literal), KiloDefaultExport),
+            HarnessRegistry.KiloToken => (KiloImports, KiloPluginBody(literal), KiloDefaultExport),
             _ => throw new ArgumentException(
                 $"Arbiter plugin harness token '{harnessToken}' has no known loader " +
                 $"default-export shape: expected one of opencode, kilo.",

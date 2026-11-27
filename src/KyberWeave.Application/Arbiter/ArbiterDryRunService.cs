@@ -99,7 +99,7 @@ public sealed class ArbiterDryRunService(
         if (provider is null)
             return null;
 
-        string arbiterDirectory = Path.Combine(repositoryRoot, "artifacts", "arbiter");
+        string arbiterDirectory = ArbiterStateDirectory.ForProject(repositoryRoot);
         IArbiterEvaluator evaluator = evaluators.Create(
             provider,
             keyResolver,

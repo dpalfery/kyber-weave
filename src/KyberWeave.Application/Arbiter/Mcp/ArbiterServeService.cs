@@ -78,8 +78,8 @@ public sealed class ArbiterServeService(
         // A refutation or lens fan-out call carries its routing in the structured
         // fields, never in a hand-written header: a call with neither says what to
         // pass instead of failing classification (review 20.1, Major 2).
-        bool fanOut = string.Equals(trigger, "lens.spawn", StringComparison.Ordinal)
-            || string.Equals(trigger, "refute.spawn", StringComparison.Ordinal);
+        bool fanOut = string.Equals(trigger, ArbiterTriggers.LensSpawn, StringComparison.Ordinal)
+            || string.Equals(trigger, ArbiterTriggers.RefuteSpawn, StringComparison.Ordinal);
         if (fanOut && facts.Lens is not { Count: > 0 } && !Present(facts.Finding))
         {
             return Failure(
@@ -391,7 +391,7 @@ public sealed class ArbiterServeService(
             return ErrorJson($"The comment is larger than {MaxTextChars} characters.");
         }
 
-        string arbiterDirectory = Path.Combine(context.RepoRoot, "artifacts", "arbiter");
+        string arbiterDirectory = ArbiterStateDirectory.ForProject(context.RepoRoot);
         // The effective rules, so a host override of the comment rule's shadow state is the one the service honours.
         // A root whose configuration cannot be loaded uses the shipped rules and no bot logins: the fail-safe answer.
         (KyberWeaveConfig? config, _) = Load();
@@ -642,7 +642,7 @@ public sealed class ArbiterServeService(
                     "for example `id: security/key-in-argv`.";
             }
 
-            if (!HeaderBlock.Parse("REFUTE: " + block.Id).TryGet("REFUTE", out _))
+            if (!HeaderBlock.Parse("REFUTE: " + block.Id).TryGet(DispatchHeaders.Refute, out _))
             {
                 return $"The finding id '{block.Id}' is not lens/slug: use one lens name, a slash and a lowercase slug, " +
                     "for example `id: security/key-in-argv`.";

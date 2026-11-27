@@ -1,3 +1,5 @@
+using KyberWeave.Core.Arbiter;
+
 namespace KyberWeave.Tests.Arbiter;
 
 /// <summary>The rule ids the shipped Arbiter configuration carries, one each, so several classes can compare a loaded
@@ -24,7 +26,7 @@ internal static class ArbiterExpectedRuleIds
         "KW-ARB-PREEX-001",
         "KW-ARB-CLAIM-001",
         "KW-ARB-GATE-CORROBORATED-001",
-        "KW-ARB-GATE-001",
+        ArbiterRuleIds.GateSelect,
         "KW-ARB-PLANREAD-001",
         "KW-ARB-GATE-REPORT-001",
         "KW-ARB-LENS-002",

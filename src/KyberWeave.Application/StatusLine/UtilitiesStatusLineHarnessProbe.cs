@@ -4,7 +4,7 @@ using KyberWeave.Core.Processes;
 
 using KyberWeave.Contracts.Repositories;
 
-namespace KyberWeave.Cli.Commands.Utilities;
+namespace KyberWeave.Application.StatusLine;
 
 /// <summary>Best-effort version probe for a harness binary.</summary>
 public static class UtilitiesStatusLineHarnessProbe

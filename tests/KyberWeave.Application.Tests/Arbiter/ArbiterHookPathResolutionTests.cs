@@ -5,6 +5,7 @@ using KyberWeave.Arbiter.Hooks;
 using KyberWeave.Arbiter.Mcp;
 using KyberWeave.Contracts.Repositories;
 using KyberWeave.Contracts.Services;
+using KyberWeave.Core.Arbiter;
 using KyberWeave.Core.Diagnostics;
 using KyberWeave.Core.RunStart;
 using KyberWeave.Tests.Fakes;
@@ -29,16 +30,16 @@ public sealed class ArbiterHookPathResolutionTests
     {
         string expected = Convert.ToHexStringLower(SHA256.HashData(Encoding.UTF8.GetBytes("/kw/work/repo")));
 
-        Assert.Equal(expected, ArbiterHookDecisionEngine.ProjectRootKey("repo", Current));
-        Assert.NotEqual(expected, ArbiterHookDecisionEngine.ProjectRootKey("repo", "/kw/elsewhere"));
+        Assert.Equal(expected, ArbiterStateDirectory.ProjectRootKey("repo", Current));
+        Assert.NotEqual(expected, ArbiterStateDirectory.ProjectRootKey("repo", "/kw/elsewhere"));
     }
 
     [Fact]
     public void ProjectRootKey_ATrailingSeparatorDoesNotChangeTheKey()
     {
         Assert.Equal(
-            ArbiterHookDecisionEngine.ProjectRootKey("/kw/work/repo", Current),
-            ArbiterHookDecisionEngine.ProjectRootKey("/kw/work/repo/", Current));
+            ArbiterStateDirectory.ProjectRootKey("/kw/work/repo", Current),
+            ArbiterStateDirectory.ProjectRootKey("/kw/work/repo/", Current));
     }
 
     [Fact]

@@ -30,7 +30,7 @@ namespace KyberWeave.Arbiter.Hooks.Adapters;
 public sealed partial class CodexHookAdapter : IHarnessHookAdapter
 {
     /// <summary>The harness token this adapter serves.</summary>
-    public const string Token = "codex";
+    public const string Token = HarnessRegistry.CodexToken;
 
     private readonly IHookDecisionEngine _engine;
 

@@ -1,9 +1,9 @@
-using System.Text.RegularExpressions;
 using KyberWeave.Contracts.Paths;
 using KyberWeave.Contracts.Repositories;
 using KyberWeave.Contracts.Services;
 using KyberWeave.Core.Configuration;
 using KyberWeave.Core.Docs.Closeout;
+using KyberWeave.Core.Docs.Model;
 using KyberWeave.Core.FileSystem;
 
 namespace KyberWeave.Core.Docs.Validation;
@@ -26,13 +26,13 @@ public sealed partial class PlanTaskService(
 
     /// <inheritdoc />
     public IReadOnlyList<string> ActivePlans(string repoRoot, KyberWeaveConfig config) =>
-        Plans(repoRoot, config, ActiveStatusRegex());
+        Plans(repoRoot, config, PlanStatus.IsActive);
 
     /// <inheritdoc />
     public IReadOnlyList<string> ReviewPlans(string repoRoot, KyberWeaveConfig config) =>
-        Plans(repoRoot, config, ReviewStatusRegex());
+        Plans(repoRoot, config, PlanStatus.IsInReview);
 
-    private IReadOnlyList<string> Plans(string repoRoot, KyberWeaveConfig config, Regex status)
+    private IReadOnlyList<string> Plans(string repoRoot, KyberWeaveConfig config, Func<string?, bool> inStatus)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(repoRoot);
         ArgumentNullException.ThrowIfNull(config);
@@ -54,7 +54,7 @@ public sealed partial class PlanTaskService(
                     .Where(files.FileExists));
             foreach (string file in candidates)
             {
-                if (IsInStatus(file, status))
+                if (IsInStatus(file, inStatus))
                 {
                     found.Add(Path.GetRelativePath(root, file).Replace('\\', '/'));
                 }
@@ -64,21 +64,15 @@ public sealed partial class PlanTaskService(
         return [.. found.Distinct(StringComparer.Ordinal).Order(StringComparer.Ordinal)];
     }
 
-    private bool IsInStatus(string file, Regex status)
+    private bool IsInStatus(string file, Func<string?, bool> inStatus)
     {
         try
         {
-            return status.IsMatch(files.ReadAllTextBounded(file));
+            return inStatus(PlanStatus.ParseBodyStatus(files.ReadAllTextBounded(file)));
         }
         catch (Exception exception) when (FileFailure.Is(exception) || exception is InvalidDataException)
         {
             return false;
         }
     }
-
-    [GeneratedRegex(@"\*\*Status:(?:\*\*)?\s*(?:Ready|In[ -]progress)(?![\w-])", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant)]
-    private static partial Regex ActiveStatusRegex();
-
-    [GeneratedRegex(@"\*\*Status:(?:\*\*)?\s*(?:Review\s+required|Blocked)(?![\w-])", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant)]
-    private static partial Regex ReviewStatusRegex();
 }

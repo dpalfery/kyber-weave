@@ -2,7 +2,6 @@ using System.ComponentModel;
 using System.Diagnostics;
 using System.Diagnostics.CodeAnalysis;
 using System.Globalization;
-using KyberWeave.Cli.Commands.Squad.Infrastructure;
 using KyberWeave.Core.Processes;
 
 namespace KyberWeave.Contracts.Repositories;

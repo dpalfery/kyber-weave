@@ -1,6 +1,7 @@
 using System.Globalization;
 using System.Text;
 using System.Text.Json.Nodes;
+using KyberWeave.Arbiter.Hooks;
 using KyberWeave.Core.Squad.Deployment;
 using KyberWeave.Core.Squad.Model;
 
@@ -155,7 +156,7 @@ public sealed class CursorRenderer : SquadHarnessRenderer
 
     private static SquadRenderedBlock BuildArbiterBlock(int timeoutSeconds, SquadDeploymentScope scope) =>
         new(
-            "cursor",
+            HarnessRegistry.CursorToken,
             scope == SquadDeploymentScope.Global ? "hooks.json" : SquadHookJsonBlock.RelativePath(SquadHookBlockFormat.Cursor),
             SquadHookBlockFormat.Cursor,
             [
@@ -252,7 +253,7 @@ public sealed class CursorRenderer : SquadHarnessRenderer
         }
 
         return new SquadDegradationRecord(
-            "cursor",
+            HarnessRegistry.CursorToken,
             agent.Name,
             agent.Name,
             "permission-not-expressible",
@@ -277,7 +278,7 @@ public sealed class CursorRenderer : SquadHarnessRenderer
             : "this agent renders as a top-level Cursor skill instead of a '.cursor/agents/' file";
 
         return new SquadDegradationRecord(
-            "cursor",
+            HarnessRegistry.CursorToken,
             agent.Name,
             agent.Name,
             "permission-not-expressible",

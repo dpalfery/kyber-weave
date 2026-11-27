@@ -1,3 +1,4 @@
+using KyberWeave.Core.Agents.Roster;
 using KyberWeave.Core.Arbiter;
 using KyberWeave.Core.Configuration;
 using KyberWeave.Core.Docs.Validation;
@@ -53,7 +54,7 @@ public static class RosterDelegatesTo
         // A caller that dispatches no developer never gains one: the roster replaces a developer roster, not a
         // persona. A caller that does gets the whole ladder, because the task's rating and failed attempts pick the
         // rung and only one tier in the snapshot would leave the step-up with nowhere to go.
-        IReadOnlyList<string> tiers = PlanTaskAgentPick.DeveloperTiers;
+        IReadOnlyList<string> tiers = DeveloperTiers.All;
         if (!translated.Any(tiers.Contains))
         {
             return translated;
@@ -99,7 +100,7 @@ public static class RosterDelegatesTo
     private static bool IsTechnologyDeveloper(string name, ArbiterSquadCatalog catalog)
     {
         if (PlanTaskAgentPick.RemovedAgents.TryGetValue(name, out string? replacement)
-            && PlanTaskAgentPick.DeveloperTiers.Contains(replacement, StringComparer.Ordinal))
+            && DeveloperTiers.All.Contains(replacement, StringComparer.Ordinal))
         {
             return true;
         }

@@ -72,7 +72,7 @@ TOUCHED_TEST_ROOTS=(
 # The policy tests that read source text. A C#-only edit can trip them (an unlisted process
 # spawn, a banned upstream name, ambient I/O in Domain), and they only read files, so they run
 # on every .NET loop.
-POLICY_SOURCE_SCANS=(-class KyberWeave.Tests.ProcessSpawnSitesTests -class KyberWeave.Tests.UpstreamSeveranceTests -class KyberWeave.Tests.DomainPurityTests)
+POLICY_SOURCE_SCANS=(-class KyberWeave.Tests.ProcessSpawnSitesTests -class KyberWeave.Tests.UpstreamSeveranceTests -class KyberWeave.Tests.DomainPurityTests -class KyberWeave.Tests.ReviewDiagnosticCodeUniquenessTests)
 
 step() { printf '\n=== %s ===\n' "$1"; }
 
@@ -255,7 +255,7 @@ if [[ "${needs_dotnet}" -eq 1 ]]; then
     for file in "${changed_cs[@]+"${changed_cs[@]}"}"; do
       while IFS= read -r type_name; do
         touched_types+=("${type_name}")
-      done < <(grep -oE '^[[:space:]]*(public|internal)[[:space:]]+([a-z]+[[:space:]]+)*(class|record|struct|interface|enum)[[:space:]]+[A-Za-z0-9_]+' "${file}" | awk '{print $NF}')
+      done < <(grep -oE '^[[:space:]]*((public|internal|private|protected|file|static|sealed|abstract|partial|readonly|ref|unsafe|new)[[:space:]]+)*(class|record([[:space:]]+(class|struct))?|struct|interface|enum)[[:space:]]+[A-Za-z0-9_]+' "${file}" | awk '{print $NF}')
     done
     touched_files=()
     for file in "${changed_cs[@]+"${changed_cs[@]}"}"; do
@@ -276,7 +276,7 @@ if [[ "${needs_dotnet}" -eq 1 ]]; then
     integration_classes=()
     while IFS= read -r file; do
       [[ -z "${file}" ]] && continue
-      namespace_name="$(sed -nE 's/^namespace[[:space:]]+([A-Za-z0-9_.]+).*/\1/p' "${file}" | head -1)"
+      namespace_name="$(sed -nE 's/^[[:space:]]*namespace[[:space:]]+([A-Za-z0-9_.]+).*/\1/p' "${file}" | head -1)"
       [[ -z "${namespace_name}" ]] && namespace_name="KyberWeave.Tests"
       while IFS= read -r class_name; do
         if [[ "${file}" == tests/KyberWeave.Integration.Tests/*.cs ]]; then
@@ -284,7 +284,7 @@ if [[ "${needs_dotnet}" -eq 1 ]]; then
         else
           touched_classes+=("${namespace_name}.${class_name}")
         fi
-      done < <(grep -oE '^[[:space:]]*public[[:space:]]+(sealed[[:space:]]+|partial[[:space:]]+)*class[[:space:]]+[A-Za-z0-9_]+' "${file}" | awk '{print $NF}')
+      done < <(grep -oE '^[[:space:]]*((public|internal)[[:space:]]+)((static|sealed|abstract|partial|readonly|ref|unsafe|new)[[:space:]]+)*(class|record([[:space:]]+(class|struct))?)[[:space:]]+[A-Za-z0-9_]+' "${file}" | awk '{print $NF}')
     done < <(printf '%s\n' "${touched_files[@]+"${touched_files[@]}"}" | sort -u)
     # Integration classes are never run here (requirement 7.3): CI's "Integration tests" job runs them.
     if [[ ${#integration_classes[@]} -gt 0 ]]; then
@@ -310,9 +310,16 @@ if [[ "${needs_dotnet}" -eq 1 ]]; then
     step "tests (filtered)"
   fi
 
-  # A filter that matches nothing exits 0, which reads as a pass, so read the runner's own total.
-  # A --class / --method filter names classes in any project, so every unit project and the policy
-  # project run with the same arguments and the total is read across all of them.
+  # A filter that names no test class runs zero tests and exits 0, which reads as a pass. The runner's
+  # own total is the only evidence a filter matched, so read it from the unit logs themselves. The policy
+  # project can run with the same filter and report a total even when every unit project matched nothing,
+  # which is why the unit totals are summed here and the combined log is only a fallback for a whole run.
+  has_test_filter=0
+  for arg in "${test_args[@]+"${test_args[@]}"}"; do
+    case "${arg}" in
+      -class|-method) has_test_filter=1 ;;
+    esac
+  done
   # Every run always happens, so a unit failure cannot hide the policy results; the loop
   # fails after all of them, naming each exit status. The projects are independent and small, so the
   # unit projects run at the same time. Each is its own background process and its status comes back
@@ -321,6 +328,7 @@ if [[ "${needs_dotnet}" -eq 1 ]]; then
   test_log="$(mktemp "${TMPDIR:-/tmp}/kw-fast-loop.XXXXXX")"
   unit_status=0
   policy_status=0
+  unit_total=0
   unit_pids=()
   unit_logs=()
   for unit_dll in "${UNIT_TEST_DLLS[@]}"; do
@@ -333,14 +341,21 @@ if [[ "${needs_dotnet}" -eq 1 ]]; then
     unit_exit=0
     wait "${unit_pids[${index}]}" || unit_exit=$?
     cat "${unit_logs[${index}]}" | tee -a "${test_log}"
+    unit_run_total="$(sed $'s/\x1b\\[[0-9;]*m//g' "${unit_logs[${index}]}" | grep -oE 'Total: [0-9]+' | head -1 | grep -oE '[0-9]+' || true)"
+    unit_total=$(( unit_total + ${unit_run_total:-0} ))
     rm -f "${unit_logs[${index}]}"
     if [[ "${unit_exit}" -ne 0 ]]; then
       unit_status="${unit_exit}"
     fi
   done
+  policy_total=0
   if [[ "${needs_policy}" -eq 1 ]]; then
     step "repository-policy tests (same filter)"
-    dotnet "${POLICY_TEST_DLL}" "${test_args[@]+"${test_args[@]}"}" | tee -a "${test_log}" || policy_status=$?
+    policy_log="$(mktemp "${TMPDIR:-/tmp}/kw-fast-loop-policy.XXXXXX")"
+    dotnet "${POLICY_TEST_DLL}" "${test_args[@]+"${test_args[@]}"}" >"${policy_log}" 2>&1 || policy_status=$?
+    cat "${policy_log}" | tee -a "${test_log}"
+    policy_total="$(sed $'s/\x1b\\[[0-9;]*m//g' "${policy_log}" | grep -oE 'Total: [0-9]+' | head -1 | grep -oE '[0-9]+' || true)"
+    rm -f "${policy_log}"
   else
     # Checked on its own: the unit total must not stand in for a scan run that matched nothing.
     step "repository-policy source scans"
@@ -356,6 +371,23 @@ if [[ "${needs_dotnet}" -eq 1 ]]; then
     printf '\ntests failed: unit projects exit %s, repository-policy tests exit %s\n' \
       "${unit_status}" "${policy_status}" >&2
     exit $(( unit_status != 0 ? unit_status : policy_status ))
+  fi
+  if [[ "${has_test_filter}" -eq 1 ]]; then
+    if [[ "${touched}" -eq 1 && "${unit_total}" -eq 0 ]]; then
+      printf 'no unit tests ran; the filter matched nothing:\n' >&2
+      for ((index = 0; index < ${#test_args[@]}; index += 2)); do
+        printf '  %s %s\n' "${test_args[${index}]}" "${test_args[$((index + 1))]}" >&2
+      done
+      exit 1
+    fi
+    # An explicit --class / --method may select only repository-policy tests, so the two runs are counted together.
+    if [[ "${touched}" -eq 0 && $(( unit_total + policy_total )) -eq 0 ]]; then
+      printf 'no unit or repository-policy tests ran; the filter matched nothing:\n' >&2
+      for ((index = 0; index < ${#test_args[@]}; index += 2)); do
+        printf '  %s %s\n' "${test_args[${index}]}" "${test_args[$((index + 1))]}" >&2
+      done
+      exit 1
+    fi
   fi
   if ! sed $'s/\x1b\\[[0-9;]*m//g' "${test_log}" | grep -Eq 'Total: [1-9][0-9]*,'; then
     printf 'no tests ran; check the --class / --method filter\n' >&2

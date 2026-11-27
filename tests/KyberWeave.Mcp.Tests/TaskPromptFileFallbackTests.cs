@@ -1,3 +1,4 @@
+using KyberWeave.Core;
 using KyberWeave.Contracts.Services;
 using KyberWeave.Core.Configuration;
 using KyberWeave.Core.Docs.Validation;
@@ -37,7 +38,7 @@ public sealed class TaskPromptFileFallbackTests : IDisposable
 
         Assert.True(result.Built, result.Refusal);
         Assert.Equal(".agent_scratchpad/t1/prompt.md", result.PromptFile);
-        string written = _fixture.ReadText(Path.Combine(TaskPromptService.ScratchFolder, "t1", "prompt.md"));
+        string written = _fixture.ReadText(Path.Combine(ScratchLayout.Root, "t1", "prompt.md"));
         Assert.Equal(result.Prompt, written);
         Assert.StartsWith("<task>", written, StringComparison.Ordinal);
     }
@@ -54,7 +55,7 @@ public sealed class TaskPromptFileFallbackTests : IDisposable
 
         Assert.True(result.Built, result.Refusal);
         Assert.Null(result.PromptFile);
-        Assert.False(_fixture.Exists(Path.Combine(TaskPromptService.ScratchFolder, "t1", "prompt.md")), $"'{harness}' rewrites the dispatch, so it must not get a prompt file.");
+        Assert.False(_fixture.Exists(Path.Combine(ScratchLayout.Root, "t1", "prompt.md")), $"'{harness}' rewrites the dispatch, so it must not get a prompt file.");
     }
 
     /// <summary>
@@ -69,7 +70,7 @@ public sealed class TaskPromptFileFallbackTests : IDisposable
             Config);
 
         Assert.True(result.Built, result.Refusal);
-        string expected = $"{TaskPromptService.ScratchFolder}/csharp/{TaskPromptService.PromptFileName}";
+        string expected = $"{ScratchLayout.Root}/csharp/{TaskPromptService.PromptFileName}";
         Assert.Equal(expected, result.PromptFile);
         Assert.Equal(result.Prompt, _fixture.ReadText(expected));
     }
@@ -81,7 +82,7 @@ public sealed class TaskPromptFileFallbackTests : IDisposable
             .BuildTaskPromptForClient("warp", taskId: null, technology: "csharp");
 
         Assert.Contains(
-            $"prompt file: {TaskPromptService.ScratchFolder}/csharp/{TaskPromptService.PromptFileName}",
+            $"prompt file: {ScratchLayout.Root}/csharp/{TaskPromptService.PromptFileName}",
             reply,
             StringComparison.Ordinal);
         Assert.Contains("read it first", reply, StringComparison.Ordinal);
@@ -96,7 +97,7 @@ public sealed class TaskPromptFileFallbackTests : IDisposable
 
         Assert.True(result.Built, result.Refusal);
         Assert.Null(result.PromptFile);
-        Assert.False(_fixture.Exists(Path.Combine(TaskPromptService.ScratchFolder, "t1", "prompt.md")));
+        Assert.False(_fixture.Exists(Path.Combine(ScratchLayout.Root, "t1", "prompt.md")));
     }
 
     [Fact]
@@ -118,14 +119,14 @@ public sealed class TaskPromptFileFallbackTests : IDisposable
         Assert.Contains("prompt file: none", reply, StringComparison.Ordinal);
         Assert.Contains("harness: copilot-cli (from MCP client 'copilot-cli')", reply, StringComparison.Ordinal);
         Assert.DoesNotContain("read it first", reply, StringComparison.Ordinal);
-        Assert.False(_fixture.Exists(Path.Combine(TaskPromptService.ScratchFolder, "t1", "prompt.md")));
+        Assert.False(_fixture.Exists(Path.Combine(ScratchLayout.Root, "t1", "prompt.md")));
     }
 
     [Fact]
     public void AFileThatCannotBeWrittenIsARefusalNotAPromptTheConductorDispatches()
     {
         // A file where the task folder must be created makes the write fail on every platform.
-        _fixture.Write(TaskPromptService.ScratchFolder, "not a folder");
+        _fixture.Write(ScratchLayout.Root, "not a folder");
 
         TaskPromptResult result = Build("warp");
 
@@ -140,9 +141,9 @@ public sealed class TaskPromptFileFallbackTests : IDisposable
         TaskPromptResult result = Build("warp");
 
         Assert.True(result.Built, result.Refusal);
-        Assert.StartsWith($"{TaskPromptService.ScratchFolder}/", result.PromptFile!, StringComparison.Ordinal);
+        Assert.StartsWith($"{ScratchLayout.Root}/", result.PromptFile!, StringComparison.Ordinal);
 
         string gitignore = Corpus.ReadText(".gitignore");
-        Assert.Contains($"{TaskPromptService.ScratchFolder}/", gitignore, StringComparison.Ordinal);
+        Assert.Contains($"{ScratchLayout.Root}/", gitignore, StringComparison.Ordinal);
     }
 }

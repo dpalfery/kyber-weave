@@ -1,5 +1,5 @@
 using System.Reflection;
-using KyberWeave.Cli.Update;
+using KyberWeave.Application.Update;
 
 namespace KyberWeave.Cli;
 

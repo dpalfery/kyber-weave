@@ -228,7 +228,7 @@ Under `autonomy: autonomous`, decide per the autonomous-decisions reference and 
 
 After every plan save, obtain the two checks. Leave `mergeReady` false while the plan is in the active plans folder, and never validate with `--merge-ready`: that mode is the pull-request gate and always rejects an open Draft (`KW-DOC-LIFECYCLE-003`). A shell is not permission to implement.
 
-Fix every finding a check reports in the plan — errors and warnings alike — and re-check until the only findings left are the standards warning period below. The standards warning period (`KW-DOC-SPEC-012`, `KW-DOC-SPEC-013`, `KW-CONFIG-REG-001`, `KW-CONFIG-REG-002`) is outside your write boundary and does not stop the plan: `docs-dev` clears it at closeout with `kyber-weave docs standards migrate`, committed with the closeout. Do not list it as a risk, an accepted warning or out of scope. Any other finding outside your write boundary is `STATUS: BLOCKED`, and then name the finding, why you cannot fix it, and who can.
+Fix every finding a check reports in the plan — errors and warnings alike — and re-check until the only findings left are the standards warning period below. The standards warning period (`KW-DOC-SPEC-012`, `KW-DOC-SPEC-013`, `KW-DOC-SKILL-005`, `KW-CONFIG-REG-001`, `KW-CONFIG-REG-002`) is outside your write boundary and does not stop the plan: `docs-dev` clears it at closeout with `kyber-weave docs standards migrate`, committed with the closeout. Do not list it as a risk, an accepted warning or out of scope. A finding outside your write boundary that `RUN_BASE` already had (the file it names is unchanged since `RUN_BASE`, by `git diff RUN_BASE -- <file>`) is pre-existing and does not stop the plan either, whatever its code: list it on a `DOCS_PRE_EXISTING:` line and `docs-dev` clears it at closeout. Any other finding outside your write boundary is `STATUS: BLOCKED`, and then name the finding, why you cannot fix it, and who can.
 
 ### With a shell
 
@@ -240,7 +240,7 @@ The MCP result cannot be checked against your checkout, so do not rely on it. Us
 
 ## Ready
 
-Return `PLAN_READY` only when the saved Draft has no open decisions (all rows in `## Decisions` have status `ANSWERED` or approved), has a `## Request trace` row for every explicit instruction in the request, contains the selected mode and matching approved contract, declares its scale (`documentation-impact` with `impact-components`) and its `Design harvest` table, has a schedulable dependency graph, and both documentation checks pass (no error; the standards warning period does not count):
+Return `PLAN_READY` only when the saved Draft has no open decisions (all rows in `## Decisions` have status `ANSWERED` or approved), has a `## Request trace` row for every explicit instruction in the request, contains the selected mode and matching approved contract, declares its scale (`documentation-impact` with `impact-components`) and its `Design harvest` table, has a schedulable dependency graph, and both documentation checks pass (no error; the standards warning period and `DOCS_PRE_EXISTING` findings do not count):
 
 ```text
 STATUS: PLAN_READY
@@ -248,6 +248,7 @@ PLAN_FILE: <saved path>
 OPEN_DECISIONS: none
 DOCS_VALIDATE: pass
 DOCS_DRIFT: pass
+DOCS_PRE_EXISTING: <code file, one per finding; or none>
 ```
 
 The conductor presents **approve and execute**, stating the declared scale and components so the owner confirms scale before execution. Proceed at high confidence only when the scale and harvest targets are unambiguous.

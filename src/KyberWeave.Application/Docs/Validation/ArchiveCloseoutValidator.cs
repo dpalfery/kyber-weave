@@ -37,11 +37,6 @@ public sealed partial class ArchiveCloseoutValidator
     /// <summary>Archived work without closeout evidence.</summary>
     public const string MissingCloseoutEvidence = "KW-DOC-LIFECYCLE-004";
 
-    private static readonly string[] ClosedFrontmatterStatuses = ["ARCHIVED", "COMPLETE", "SUPERSEDED"];
-
-    private static readonly string[] LiveBodyStatuses =
-        ["DRAFT", "READY", "IN PROGRESS", "IN-PROGRESS", "BLOCKED", "REVIEW REQUIRED", "REVIEW-REQUIRED"];
-
     private static readonly string[] ComponentScales = ["NEW-COMPONENT", "EXTENDS-COMPONENT"];
 
     private const string NoDesignChangeScale = "NO-DESIGN-CHANGE";
@@ -56,7 +51,7 @@ public sealed partial class ArchiveCloseoutValidator
     // The one archive kind that keeps an inventory of its entries directly in its folder. Another
     // kind's README.md at that depth is an ordinary archived entry and still needs its closeout
     // evidence. IndexSectionCatalog registers the same file; the two change together.
-    private const string InventoryKind = "plans";
+    private const string InventoryKind = DocsLayout.Plans;
 
     private readonly string _repoRoot;
     private readonly KyberWeaveConfig _config;
@@ -137,7 +132,7 @@ public sealed partial class ArchiveCloseoutValidator
                     MissingCloseoutEvidence,
                     Severity.Error,
                     exception.Message,
-                    "archive",
+                    OntologyConfig.ArchiveSegment,
                     Hint: "Fix the archived entry path so it is a regular file inside the repository, then call docs_validate_governed_document_schema again."));
                 continue;
             }
@@ -406,7 +401,7 @@ public sealed partial class ArchiveCloseoutValidator
     private static string? CheckClosedStatus(DocumentModel archived)
     {
         string raw = (archived.Frontmatter.Status ?? string.Empty).Trim();
-        if (ClosedFrontmatterStatuses.Contains(raw.ToUpperInvariant(), StringComparer.Ordinal))
+        if (PlanStatus.IsClosed(raw))
             return null;
 
         return $"C1: frontmatter status '{raw}' is not closed work. " +
@@ -416,33 +411,16 @@ public sealed partial class ArchiveCloseoutValidator
     /// <summary>C2: the body must not still report a live implementation status.</summary>
     private static string? CheckBodyStatus(DocumentModel archived)
     {
-        string? bodyStatus = BodyStatus(archived.Body);
-        if (bodyStatus is null
-            || !LiveBodyStatuses.Contains(bodyStatus.ToUpperInvariant(), StringComparer.Ordinal))
-        {
+        string? written = PlanStatus.ParseBodyStatusLine(archived.Body);
+        if (written is null)
             return null;
-        }
 
-        return $"C2: the body still reports live status '{bodyStatus}'. " +
+        string? bodyStatus = PlanStatus.Parse(written) ?? PlanStatus.ParseLeading(written);
+        if (PlanStatus.IsClosed(bodyStatus))
+            return null;
+
+        return $"C2: the body still reports live status '{bodyStatus ?? written}'. " +
                $"Close the work before archiving it, so the archive does not read as unfinished.";
-    }
-
-    /// <summary>The body's **Status:** value, when the body declares one.</summary>
-    private static string? BodyStatus(string body)
-    {
-        foreach (string line in body.Split('\n'))
-        {
-            string trimmed = line.Trim();
-            string? value = trimmed.StartsWith("**Status:**", StringComparison.Ordinal)
-                ? trimmed["**Status:**".Length..].Trim()
-                : trimmed.StartsWith("**Status**:", StringComparison.Ordinal)
-                    ? trimmed["**Status**:".Length..].Trim()
-                    : null;
-            if (value is not null && value.Length > 0)
-                return value;
-        }
-
-        return null;
     }
 
     /// <summary>C3: the Decisions table and the ids it declares.</summary>

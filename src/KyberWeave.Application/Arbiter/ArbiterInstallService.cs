@@ -558,12 +558,12 @@ public sealed class ArbiterInstallService(
                 : Path.Combine(root, configOption);
         }
 
-        return FindConfigPath(root) ?? Path.Combine(root, ".kyber-weave", "kyber-weave.yml");
+        return FindConfigPath(root) ?? Path.Combine(root, UserStatePaths.DirectoryName, "kyber-weave.yml");
     }
 
     private string? FindConfigPath(string root)
     {
-        string defaultPath = Path.Combine(root, ".kyber-weave", "kyber-weave.yml");
+        string defaultPath = Path.Combine(root, UserStatePaths.DirectoryName, "kyber-weave.yml");
         if (files.FileExists(defaultPath))
             return defaultPath;
 

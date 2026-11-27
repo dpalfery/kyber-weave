@@ -14,7 +14,6 @@ namespace KyberWeave.Core.FileSystem;
 /// </remarks>
 public static class WorkerSessionPaths
 {
-    private const string DirectoryName = "sessions";
     private const string ChildSuffix = ".session";
     private const string PendingSuffix = ".list";
     private const string PendingPrefix = "pending-";
@@ -29,7 +28,7 @@ public static class WorkerSessionPaths
     /// <summary>The directory the ledger's files sit in.</summary>
     /// <param name="home">The operator's home.</param>
     /// <returns>The absolute directory path.</returns>
-    public static string DirectoryOf(string home) => Path.Combine(home, ".kyber-weave", "arbiter", DirectoryName);
+    public static string DirectoryOf(string home) => UserStatePaths.WorkerSessionsDirectory(home);
 
     /// <summary>The file one child session is recorded in.</summary>
     /// <param name="home">The operator's home.</param>

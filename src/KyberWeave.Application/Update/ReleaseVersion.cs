@@ -1,7 +1,8 @@
 using System.Globalization;
 using System.Text.RegularExpressions;
+using KyberWeave.Domain.Update;
 
-namespace KyberWeave.Cli.Update;
+namespace KyberWeave.Application.Update;
 
 /// <summary>Normalizes GitHub tags and assembly informational versions for comparison.</summary>
 public static partial class ReleaseVersion

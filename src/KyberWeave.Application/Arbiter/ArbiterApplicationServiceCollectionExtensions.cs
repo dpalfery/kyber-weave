@@ -43,7 +43,7 @@ public static class ArbiterApplicationServiceCollectionExtensions
             sp.GetRequiredService<IArbiterHttpHandlers>(),
             sp.GetRequiredService<TimeProvider>(),
             () => sp.GetRequiredService<ICredentialStore>()));
-        services.TryAddSingleton<IArbiterConfigResolver, Cli.Commands.Arbiter.ArbiterConfigResolver>();
+        services.TryAddSingleton<IArbiterConfigResolver, KyberWeave.Application.Arbiter.ArbiterConfigResolver>();
         services.TryAddSingleton<IArbiterSectionSelectionService, ArbiterSectionSelectionService>();
         services.TryAddSingleton<IArbiterModelTargetsReader>(sp => new FileArbiterModelTargetsReader(sp.GetRequiredService<IFileSystem>()));
         services.TryAddSingleton<IArbiterUserSettings>(sp => new FileArbiterUserSettings(sp.GetRequiredService<IFileSystem>()));
@@ -81,8 +81,8 @@ public static class ArbiterApplicationServiceCollectionExtensions
         services.TryAddSingleton<IArbiterDoctorService, ArbiterDoctorService>();
         services.TryAddSingleton<IArbiterInstallService, ArbiterInstallService>();
         services.TryAddSingleton<IArbiterRepositoryLocator, Core.Arbiter.ArbiterRepositoryLocator>();
-        services.TryAddSingleton<IArbiterUninstaller, Cli.Commands.Arbiter.ArbiterUninstaller>();
-        services.TryAddSingleton<IArbiterHarnessGating, Cli.Commands.Arbiter.ArbiterHarnessGating>();
+        services.TryAddSingleton<IArbiterUninstaller, KyberWeave.Application.Arbiter.ArbiterUninstaller>();
+        services.TryAddSingleton<IArbiterHarnessGating, KyberWeave.Application.Arbiter.ArbiterHarnessGating>();
         services.TryAddSingleton<IArbiterInstallLifecycle>(sp => new Core.Arbiter.ArbiterInstallLifecycle(() =>
             Squad.SquadServiceCollectionExtensions.CreateLifecycle(
                 sp,

@@ -16,16 +16,6 @@ namespace KyberWeave.Tests.Arbiter;
 /// </summary>
 public sealed class ArbiterSavingsConfigTests
 {
-    private static readonly string[] SixProfiles =
-    [
-        "architect",
-        "deep-planning",
-        "dev-hard",
-        "fast",
-        "general",
-        "reviewer",
-    ];
-
     [Fact]
     public void Defaults_WithNoSavingsKeys_UseShadowModeAndTheShippedLadder()
     {
@@ -34,8 +24,8 @@ public sealed class ArbiterSavingsConfigTests
         Assert.Equal("shadow", config.ModelTargeting.Mode);
         Assert.Equal("fast", config.ModelTargeting.DifficultyProfiles["easy"]);
         Assert.Equal("general", config.ModelTargeting.DifficultyProfiles["standard"]);
-        Assert.Equal("deep-planning", config.ModelTargeting.DifficultyProfiles["hard"]);
-        Assert.Equal(["fast", "general", "deep-planning"], config.ModelTargeting.Ladder);
+        Assert.Equal("dev-hard", config.ModelTargeting.DifficultyProfiles["hard"]);
+        Assert.Equal(["fast", "general", "dev-hard"], config.ModelTargeting.Ladder);
         Assert.Equal(16384, config.Stores.MaxItemBytes);
         Assert.Equal(14, config.Stores.RetainDays);
         Assert.Empty(config.CommentTriage.BotLogins);
@@ -58,7 +48,7 @@ public sealed class ArbiterSavingsConfigTests
     }
 
     [Fact]
-    public void DifficultyValueOutsideTheSixProfiles_RaisesConfig012ListingTheSix()
+    public void HostDifficultyProfiles_IsRefusedNamingTheKey()
     {
         YamlDotNet.Core.YamlException exception = Assert.ThrowsAny<YamlDotNet.Core.YamlException>(
             () => KyberWeaveConfigAssembler.FromYaml("""
@@ -69,16 +59,15 @@ public sealed class ArbiterSavingsConfigTests
                 """));
 
         Assert.Contains("[KW-ARB-CONFIG-012]", exception.Message, StringComparison.Ordinal);
-        Assert.Contains("claude-sonnet-5-5", exception.Message, StringComparison.Ordinal);
-        foreach (string profile in SixProfiles)
-            Assert.Contains(profile, exception.Message, StringComparison.Ordinal);
+        Assert.Contains("arbiter.model-targeting.difficulty-profiles", exception.Message, StringComparison.Ordinal);
     }
 
     [Theory]
     [InlineData("ladder: []")]
     [InlineData("ladder: [fast, fast, general]")]
     [InlineData("ladder: [fast, claude-sonnet-5-5]")]
-    public void InvalidLadder_RaisesConfig013WithAnExampleLadder(string ladder)
+    [InlineData("ladder: [fast, general, dev-hard]")]
+    public void HostLadder_IsRefusedNamingTheKey(string ladder)
     {
         YamlDotNet.Core.YamlException exception = Assert.ThrowsAny<YamlDotNet.Core.YamlException>(
             () => KyberWeaveConfigAssembler.FromYaml($"""
@@ -87,8 +76,9 @@ public sealed class ArbiterSavingsConfigTests
                     {ladder}
                 """));
 
-        Assert.Contains("[KW-ARB-CONFIG-013]", exception.Message, StringComparison.Ordinal);
-        Assert.Contains("deep-planning", exception.Message, StringComparison.Ordinal);
+        Assert.Contains("[KW-ARB-CONFIG-012]", exception.Message, StringComparison.Ordinal);
+        Assert.Contains("arbiter.model-targeting.ladder", exception.Message, StringComparison.Ordinal);
+        Assert.Contains("dev-hard", exception.Message, StringComparison.Ordinal);
     }
 
     [Theory]

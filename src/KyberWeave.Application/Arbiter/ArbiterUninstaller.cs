@@ -5,7 +5,7 @@ using KyberWeave.Contracts.Services;
 using KyberWeave.Core.Squad.Deployment;
 using KyberWeave.Core.Squad.Rendering;
 
-namespace KyberWeave.Cli.Commands.Arbiter;
+namespace KyberWeave.Application.Arbiter;
 
 /// <summary>
 /// Default arbiter uninstaller: deletes the renderers' arbiter-exclusive files and scrubs their

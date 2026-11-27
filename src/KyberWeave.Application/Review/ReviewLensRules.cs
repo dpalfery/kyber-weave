@@ -11,7 +11,7 @@ public static class ReviewLensRules
 
     /// <summary>The lenses never asked: always seated for a code change, or decided by the gate run.</summary>
     public static IReadOnlyList<string> NeverAsked { get; } =
-        ["correctness", "test-adequacy", .. CouncilSeating.AfterGates];
+        [ReviewLensCatalogue.Correctness, ReviewLensCatalogue.TestAdequacy, .. CouncilSeating.AfterGates];
 
     private const int MaxSummaryChars = 6000;
 

@@ -178,7 +178,7 @@ public sealed class ArbiterAuditService(
         // Model targeting rides every writer dispatch whether or not a plan task resolved, so its answers would mask
         // a run whose judgement rules never ran: only the judgement rules on the other triggers count.
         int evaluations = inScope
-            .Where(record => !string.Equals(record.Trigger, "delegate.model", StringComparison.Ordinal))
+            .Where(record => !string.Equals(record.Trigger, ArbiterTriggers.DelegateModel, StringComparison.Ordinal))
             .Sum(record => record.Rules.Count(rule =>
             rule.Step == 1 && !string.Equals(rule.Answer, ArbiterStep1BatchResult.NotEvaluated, StringComparison.Ordinal)));
         int implementationDispatches = inScope

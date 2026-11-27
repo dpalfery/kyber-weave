@@ -6,6 +6,7 @@ using KyberWeave.Tests.FileSystem;
 using KyberWeave.Testing.Squad;
 using Spectre.Console.Testing;
 using Xunit;
+using KyberWeave.Data.Squad.Packaging;
 
 namespace KyberWeave.Tests;
 

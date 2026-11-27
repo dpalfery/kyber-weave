@@ -58,7 +58,7 @@ public sealed class CommentTriageService(
     private const string Real = "real";
     private const string Nitpick = "nitpick";
     private const string AlreadyFixed = "already-fixed";
-    private const string TriggerName = "comment.triage";
+    private const string TriggerName = ArbiterTriggers.CommentTriage;
 
     /// <summary>Classifies <paramref name="request"/> and records the decision.</summary>
     /// <param name="request">The comment to classify.</param>

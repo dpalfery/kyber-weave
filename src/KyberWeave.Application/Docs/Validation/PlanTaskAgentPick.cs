@@ -1,4 +1,5 @@
 using KyberWeave.Contracts.Host;
+using KyberWeave.Core.Agents.Roster;
 using KyberWeave.Core.Arbiter;
 using KyberWeave.Core.Arbiter.Providers;
 using KyberWeave.Core.Arbiter.Rules;
@@ -25,59 +26,19 @@ public sealed class PlanTaskAgentPick : IPlanTaskAgentPicker, IDisposable
     /// <summary>The confidence a pick needs to be written to the task file.</summary>
     public const double ConfidenceFloor = 0.8;
 
-    /// <summary>The first tier of the step-up ladder.</summary>
-    public const string EasyTier = "dev-easy";
-
-    /// <summary>
-    /// The tier that stands for the developer kind under the tiered roster. A pick returns it as the kind of
-    /// worker; the task-file writer records the tier the rating gives, and the dispatch steps it up by failed attempts.
-    /// </summary>
-    public const string DeveloperKind = "dev-medium";
-
-    /// <summary>The last tier of the step-up ladder, which a failed attempt never climbs past.</summary>
-    public const string HardTier = "dev-hard";
-
     /// <summary>The agent a removed planning agent's schema and data-model work goes to.</summary>
-    public const string ArchitectAgent = "architect";
+    public const string ArchitectAgent = AgentRoles.Architect;
 
     /// <summary>The agent that replaces the removed read-only platform agent.</summary>
-    public const string PlatformResearcherAgent = "platform-researcher";
+    public const string PlatformResearcherAgent = AgentRoles.PlatformResearcher;
 
     /// <summary>The agent that replaces the removed delivery agent.</summary>
-    public const string DevopsAgent = "devops";
-
-    /// <summary>The three developer agents in step-up order (Requirement 3.2).</summary>
-    public static IReadOnlyList<string> DeveloperTiers { get; } = [EasyTier, DeveloperKind, HardTier];
+    public const string DevopsAgent = AgentRoles.Devops;
 
     /// <summary>
-    /// The names the removal phase deletes, each mapped to the agent that does its work afterwards. A technology
-    /// developer maps to <see cref="DeveloperKind"/>: the task's difficulty and failed attempts then choose the
-    /// tier, as they do for every developer dispatch under the tiered roster.
+    /// The names the removal phase deletes, each mapped to the agent that does its work afterwards.
     /// </summary>
-    /// <remarks>
-    /// The lookup ignores case because the name it answers comes from a plan's hand-written <c>Role:</c> line, which
-    /// no check normalises: an author who writes <c>CSharp-Dev</c> must still reach the developer tier rather than
-    /// have the conductor dispatch a name no installed agent answers to. The values stay the canonical lowercase
-    /// agent names.
-    /// </remarks>
-    public static IReadOnlyDictionary<string, string> RemovedAgents { get; } =
-        new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
-        {
-            ["csharp-dev"] = DeveloperKind,
-            ["dal-dev"] = DeveloperKind,
-            ["maui-dev"] = DeveloperKind,
-            ["pulumi-dev"] = DeveloperKind,
-            ["typescript-dev"] = DeveloperKind,
-            ["react-dev"] = DeveloperKind,
-            ["rust-dev"] = DeveloperKind,
-            ["tauri-dev"] = DeveloperKind,
-            ["go-dev"] = DeveloperKind,
-            ["python-dev"] = DeveloperKind,
-            ["test-dev"] = DeveloperKind,
-            ["sql-database-architect"] = ArchitectAgent,
-            ["azure-reader"] = PlatformResearcherAgent,
-            ["github-devops"] = DevopsAgent,
-        };
+    public static IReadOnlyDictionary<string, string> RemovedAgents => AgentRoles.Retired;
 
     /// <summary>The question every pick asks.</summary>
     public const string Question = "Which agent should do this task, judged by the abilities it needs and the files it changes?";
@@ -116,29 +77,6 @@ public sealed class PlanTaskAgentPick : IPlanTaskAgentPicker, IDisposable
     public void Dispose() => (_provider as IDisposable)?.Dispose();
 
     /// <summary>
-    /// The developer tier for a task: <c>min(hard, rated difficulty + failed attempts)</c>. A task with no rating
-    /// is a medium task, as the task file writes it, so a dispatch that belongs to no task also starts at medium.
-    /// </summary>
-    /// <param name="difficulty">The rating in use: <c>easy</c>, <c>medium</c> or <c>hard</c>, or null when none is recorded.</param>
-    /// <param name="failedAttempts">How many attempts at this task already failed.</param>
-    public static string DeveloperTier(string? difficulty, int failedAttempts)
-    {
-        int rated = difficulty?.Trim() switch
-        {
-            "easy" => 0,
-            "hard" => DeveloperTiers.Count - 1,
-            _ => 1,
-        };
-
-        // Long arithmetic: a retry count at the top of its range must clamp to the last tier, not wrap to a
-        // negative index a few steps below zero.
-        long climbed = Math.Min(
-            DeveloperTiers.Count - 1,
-            rated + (long)Math.Max(failedAttempts, 0));
-        return DeveloperTiers[(int)climbed];
-    }
-
-    /// <summary>
     /// The sentence that refuses a dispatch to a technology developer under the tiered roster and names the tier the
     /// task belongs on. Both dispatch paths that refuse one — the task-prompt tool and the Arbiter's roster rule —
     /// read it from here, so the refusal a conductor sees is the same whichever path answered.
@@ -149,7 +87,7 @@ public sealed class PlanTaskAgentPick : IPlanTaskAgentPicker, IDisposable
     public static string TieredDeveloperRefusal(string named, string? difficulty, int failedAttempts = 0)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(named);
-        string tier = DeveloperTier(difficulty, failedAttempts);
+        string tier = DeveloperTiers.For(difficulty, failedAttempts);
         return $"'{named}' is a worker-roster: technology agent, and this run is worker-roster: tiered. " +
             $"This task's developer is '{tier}' (tier = min(hard, rated difficulty + failed attempts)). " +
             $"Dispatch '{tier}' instead.";
@@ -169,8 +107,8 @@ public sealed class PlanTaskAgentPick : IPlanTaskAgentPicker, IDisposable
         if (named is null || !RemovedAgents.TryGetValue(named, out string? replacement))
             return null;
 
-        string resolved = string.Equals(replacement, DeveloperKind, StringComparison.Ordinal)
-            ? DeveloperTier(difficulty, failedAttempts)
+        string resolved = string.Equals(replacement, DeveloperTiers.Medium, StringComparison.Ordinal)
+            ? DeveloperTiers.For(difficulty, failedAttempts)
             : replacement;
         return new RemovedAgentResolution(named, resolved, $"'{named}' was removed; this task goes to '{resolved}'.");
     }
@@ -185,15 +123,17 @@ public sealed class PlanTaskAgentPick : IPlanTaskAgentPicker, IDisposable
     /// <summary>
     /// The agents a task may go to under <paramref name="roster"/>. An agent that declares no roster serves both,
     /// so the agents that stay under either roster are always candidates. Under the tiered roster the three
-    /// developer agents are one candidate, <see cref="DeveloperKind"/>: the pick chooses the kind of worker and
+    /// developer agents are one candidate, <see cref="DeveloperTiers.Medium"/>: the pick chooses the kind of worker and
     /// the difficulty then chooses the tier (Requirement 3.1). A null roster offers every agent, as the
-    /// decision-model tests ask.
+    /// decision-model tests ask. The root fixer (<c>bug-crusher</c>) is implementation-class but is not a task
+    /// worker: it is an entry point a human starts for one defect, not a delegate a plan task may be sent to.
     /// </summary>
     /// <param name="roster">The active roster, <c>technology</c> or <c>tiered</c>; null for both.</param>
     public static IReadOnlyList<ArbiterSquadAgent> ImplementationAgents(string? roster)
     {
         IEnumerable<ArbiterSquadAgent> agents = ArbiterSquadCatalog.LoadEmbedded().Agents.Values
-            .Where(agent => string.Equals(agent.TargetClass, "implementation", StringComparison.Ordinal)
+            .Where(agent => string.Equals(agent.TargetClass, CapabilityProfiles.Implementation, StringComparison.Ordinal)
+                            && !string.Equals(agent.CapabilityProfile, CapabilityProfiles.RootFixer, StringComparison.Ordinal)
                             && !string.IsNullOrWhiteSpace(agent.Description));
 
         if (roster is not null)
@@ -204,7 +144,7 @@ public sealed class PlanTaskAgentPick : IPlanTaskAgentPicker, IDisposable
 
         if (string.Equals(roster, WorkerRosters.Tiered, StringComparison.Ordinal))
         {
-            agents = agents.Where(agent => agent.Name is not (EasyTier or HardTier));
+            agents = agents.Where(agent => agent.Name is not (DeveloperTiers.Easy or DeveloperTiers.Hard));
         }
 
         return [.. agents.OrderBy(agent => agent.Name, StringComparer.Ordinal)];
@@ -256,7 +196,7 @@ public sealed class PlanTaskAgentPick : IPlanTaskAgentPicker, IDisposable
             .With($"{key}.capabilities", Bounded(task.Capabilities ?? "(not stated)"), ArbiterFactLabel.Derived)
             .With($"{key}.files", string.Join(", ", task.Files ?? []), ArbiterFactLabel.Derived)
             .With($"{key}.task", task.Prompt ?? "(not stated)", ArbiterFactLabel.Asserted)
-            .With($"{key}.architect-rating", TierLabel(task.Difficulty), ArbiterFactLabel.Derived)
+            .With($"{key}.architect-rating", DeveloperTiers.LabelFor(task.Difficulty), ArbiterFactLabel.Derived)
             .With($"{key}.rubric", rubric ?? "(not available)", ArbiterFactLabel.Asserted);
         string id = RulePrefix + task.Id;
         string agreementId = AgreementPrefix + task.Id;
@@ -331,26 +271,6 @@ public sealed class PlanTaskAgentPick : IPlanTaskAgentPicker, IDisposable
 
         return _rubric;
     }
-
-    /// <summary>The architect's rating with the tier the rubric reads it as: <c>easy (standard)</c> and so on.</summary>
-    /// <param name="difficulty">The rating in use: <c>easy</c>, <c>medium</c> or <c>hard</c>, or null when none is recorded.</param>
-    public static string TierLabel(string? difficulty) => difficulty?.Trim() switch
-    {
-        "easy" => "easy (standard)",
-        "medium" => "medium (intermediate)",
-        "hard" => "hard (advanced)",
-        _ => difficulty ?? "(none)",
-    };
-
-    /// <summary>The rubric's own name for a rating's tier: <c>standard</c>, <c>intermediate</c> or <c>advanced</c>.</summary>
-    /// <param name="difficulty">The rating in use: <c>easy</c>, <c>medium</c> or <c>hard</c>, or null when none is recorded.</param>
-    public static string TierNameOf(string? difficulty) => difficulty?.Trim() switch
-    {
-        "easy" => "standard",
-        "medium" => "intermediate",
-        "hard" => "advanced",
-        _ => "unrated",
-    };
 
     /// <summary>The agreement rule, judged by the same rubric the architect rated the task with, asked beside the pick.</summary>
     private static ArbiterRule AgreementRuleFor(string taskId, string key) => new(

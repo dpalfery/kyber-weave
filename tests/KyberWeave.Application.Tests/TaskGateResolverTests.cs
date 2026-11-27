@@ -92,6 +92,32 @@ public sealed class TaskGateResolverTests
     }
 
     /// <summary>
+    /// The shipped delivery agent is the one the map names for <c>github-actions</c>; the retired name it
+    /// replaced stays in the map only for a host that still holds it.
+    /// </summary>
+    /// <remarks>
+    /// Both names map to the one technology. Reading the retired name first would leave a host that keyed its
+    /// gates under the shipped <c>devops</c> entry unresolved.
+    /// </remarks>
+    [Fact]
+    public void TheShippedDeliveryAgentIsTheMappedAgentForGithubActions()
+    {
+        ReviewConfig review = Config("""
+            review:
+              task-gates:
+                devops:
+                  - id: workflow-lint
+                    run: [actionlint]
+            """).Review;
+
+        TaskGateResolution resolved = TaskGateResolver.Resolve(review, "dev-medium", "github-actions");
+
+        Assert.Equal(["workflow-lint"], resolved.Gates.Select(gate => gate.Id));
+        Assert.Equal(TaskGateSource.MappedAgent, resolved.Source);
+        Assert.Equal("devops", resolved.EntryKey);
+    }
+
+    /// <summary>
     /// A developer tier is a difficulty, not a technology. Every tier resolves the same gates the task's
     /// technology declares through the technology agent, never its own name.
     /// </summary>

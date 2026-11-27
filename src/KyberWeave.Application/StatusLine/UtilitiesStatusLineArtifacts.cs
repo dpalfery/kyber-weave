@@ -1,6 +1,6 @@
 using KyberWeave.Domain.StatusLine;
 
-namespace KyberWeave.Cli.Commands.Utilities;
+namespace KyberWeave.Application.StatusLine;
 
 /// <summary>The per-target facts the deploy and doctor commands need about an artifact set.</summary>
 public static class UtilitiesStatusLineArtifacts

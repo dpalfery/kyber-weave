@@ -2,6 +2,7 @@ using KyberWeave.Contracts.Repositories;
 using System.Text.RegularExpressions;
 using KyberWeave.Core.Arbiter.Facts;
 using KyberWeave.Core.Arbiter.Rules;
+using KyberWeave.Core.Docs.Model;
 using KyberWeave.Core.FileSystem;
 
 namespace KyberWeave.Core.Arbiter.Plans;
@@ -58,11 +59,11 @@ public sealed partial class PlanFacts(IPlanFileResolver planPaths, IFileSystem f
         ArgumentNullException.ThrowIfNull(classification);
         ArgumentNullException.ThrowIfNull(repositoryRoot);
 
-        string? planFile = HeaderValue(classification, "PLAN_FILE");
-        string? taskValue = HeaderValue(classification, "TASK");
+        string? planFile = HeaderValue(classification, DispatchHeaders.PlanFile);
+        string? taskValue = HeaderValue(classification, DispatchHeaders.Task);
         // A dispatch that wrote any routing header is judged on its headers; one that wrote none is identified from
         // machine facts instead (ADR 0082).
-        bool marked = classification.Headers.ContainsKey("KYBER-ARBITER") || classification.RawHeaders.ContainsKey("KYBER-ARBITER");
+        bool marked = classification.Headers.ContainsKey(DispatchHeaders.Marker) || classification.RawHeaders.ContainsKey(DispatchHeaders.Marker);
         bool machine = planFile is null && taskValue is null && !marked && IsDelegation(classification.Trigger);
         if (IsDelegation(classification.Trigger))
         {
@@ -151,8 +152,8 @@ public sealed partial class PlanFacts(IPlanFileResolver planPaths, IFileSystem f
     }
 
     private static bool IsDelegation(string? trigger) =>
-        string.Equals(trigger, "delegate", StringComparison.Ordinal)
-        || string.Equals(trigger, "delegate.returned", StringComparison.Ordinal);
+        string.Equals(trigger, ArbiterTriggers.Delegate, StringComparison.Ordinal)
+        || string.Equals(trigger, ArbiterTriggers.DelegateReturned, StringComparison.Ordinal);
 
     /// <summary>
     /// The one Ready or In-progress plan directly in a planning folder of <paramref name="repositoryRoot"/>, or a
@@ -181,7 +182,7 @@ public sealed partial class PlanFacts(IPlanFileResolver planPaths, IFileSystem f
                         .Where(files.FileExists));
                 foreach (string file in candidates)
                 {
-                    if (ActiveStatusRegex().IsMatch(files.ReadAllText(file)))
+                    if (PlanStatus.IsActive(PlanStatus.ParseBodyStatus(files.ReadAllText(file))))
                         active.Add(Path.GetRelativePath(repositoryRoot, file).Replace('\\', '/'));
                 }
             }
@@ -235,9 +236,6 @@ public sealed partial class PlanFacts(IPlanFileResolver planPaths, IFileSystem f
 
         return named.Count == 1 ? named[0] : null;
     }
-
-    [GeneratedRegex(@"\*\*Status:(?:\*\*)?\s*(?:Ready|In[ -]progress)(?![\w-])", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant)]
-    private static partial Regex ActiveStatusRegex();
 
     [GeneratedRegex(@"^[ \t]*(?:TASK_ID|TASK|Task)[ \t]*[:#]?[ \t]*(?<id>[A-Za-z]{0,4}-?\d+[A-Za-z0-9.]*)\b", RegexOptions.Multiline | RegexOptions.CultureInvariant)]
     private static partial Regex TaskLabelRegex();

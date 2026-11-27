@@ -1,6 +1,6 @@
-using KyberWeave.Cli.Update;
 using System.Globalization;
 using Xunit;
+using KyberWeave.Domain.Update;
 
 namespace KyberWeave.Testing.Update;
 

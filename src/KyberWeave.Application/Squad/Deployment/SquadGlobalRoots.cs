@@ -1,4 +1,6 @@
+using KyberWeave.Core.FileSystem;
 using System.Text.Json;
+using KyberWeave.Arbiter.Hooks;
 
 namespace KyberWeave.Core.Squad.Deployment;
 
@@ -94,7 +96,7 @@ public sealed class SquadGlobalRoots : ISquadGlobalRootResolver
         _readFileText = readFileText ?? (_ => null);
         _homeDirectory = RequireFullyQualified(homeDirectory, nameof(homeDirectory));
         _isWindows = isWindows ?? OperatingSystem.IsWindows();
-        _instancesDirectory = Path.GetFullPath(Path.Combine(_homeDirectory, ".kyber-weave", "squad", "instances"));
+        _instancesDirectory = Path.GetFullPath(UserStatePaths.SquadInstancesDirectory(_homeDirectory));
     }
 
     /// <inheritdoc />
@@ -111,7 +113,7 @@ public sealed class SquadGlobalRoots : ISquadGlobalRootResolver
             SquadTarget.Antigravity => ResolveWithOverride(null, Path.Combine(".gemini", "config")),
             SquadTarget.Pi => ResolveWithOverride("PI_CODING_AGENT_DIR", Path.Combine(".pi", "agent")),
             SquadTarget.OpenCode => ResolveOpenCodeRoot(),
-            SquadTarget.Kilo => ResolveXdgConfigAppRoot("kilo"),
+            SquadTarget.Kilo => ResolveXdgConfigAppRoot(HarnessRegistry.KiloToken),
             SquadTarget.Factory => ResolveWithOverride(null, ".factory"),
             SquadTarget.Warp => ResolveWithOverride(null, ".warp"),
             SquadTarget.ZCode => ResolveZCodeRoot(),
@@ -210,7 +212,7 @@ public sealed class SquadGlobalRoots : ISquadGlobalRootResolver
         if (!string.IsNullOrEmpty(configDirOverride))
             return RequireValidOverride(configDirOverride, "OPENCODE_CONFIG_DIR");
 
-        return ResolveXdgConfigAppRoot("opencode");
+        return ResolveXdgConfigAppRoot(HarnessRegistry.OpenCodeToken);
     }
 
     /// <summary>
@@ -226,13 +228,13 @@ public sealed class SquadGlobalRoots : ISquadGlobalRootResolver
     /// </remarks>
     private string ResolveDevinRoot()
     {
-        if (!_isWindows) return ResolveXdgConfigAppRoot("devin");
+        if (!_isWindows) return ResolveXdgConfigAppRoot(HarnessRegistry.DevinToken);
 
         string? appData = _getEnvironmentVariable("APPDATA");
         string roamingRoot = string.IsNullOrEmpty(appData)
             ? Path.Combine(_homeDirectory, "AppData", "Roaming")
             : RequireValidOverride(appData, "APPDATA");
-        return Path.Combine(roamingRoot, "devin");
+        return Path.Combine(roamingRoot, HarnessRegistry.DevinToken);
     }
 
     private string ResolveXdgConfigAppRoot(string applicationDirectoryName)

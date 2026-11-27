@@ -1,4 +1,4 @@
-namespace KyberWeave.Cli.Update;
+namespace KyberWeave.Data.Update;
 
 /// <summary>Starts a child that shares this console and waits for it, bounded.</summary>
 /// <remarks>

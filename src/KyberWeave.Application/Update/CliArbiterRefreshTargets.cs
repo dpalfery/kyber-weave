@@ -4,7 +4,7 @@ using KyberWeave.Core.Configuration;
 using KyberWeave.Core.Squad.Deployment;
 using KyberWeave.Core.Squad.Model;
 
-namespace KyberWeave.Cli.Update;
+namespace KyberWeave.Application.Update;
 
 /// <summary>Reads the projects and global targets the update's arbiter hook refresh covers, from the user's registry and configuration.</summary>
 /// <param name="state">Lists the registered projects.</param>

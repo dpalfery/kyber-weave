@@ -2,9 +2,9 @@ using KyberWeave.Contracts.Paths;
 using KyberWeave.Contracts.Repositories;
 using KyberWeave.Data.Hooks;
 using KyberWeave.Data.Paths;
-using KyberWeave.Cli.Update;
 using KyberWeave.Tests.Fakes;
 using KyberWeave.Tests.FileSystem;
+using KyberWeave.Data.Update;
 
 namespace KyberWeave.Testing.Update;
 

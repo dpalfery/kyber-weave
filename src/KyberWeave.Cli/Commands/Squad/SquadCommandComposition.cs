@@ -2,7 +2,6 @@ using System.Diagnostics.CodeAnalysis;
 using KyberWeave.Cli.Commands.Arbiter;
 using KyberWeave.Cli.Commands.Squad.Infrastructure;
 using KyberWeave.Cli.Composition;
-using KyberWeave.Cli.Update;
 using KyberWeave.Contracts.Repositories;
 using KyberWeave.Core.Configuration;
 using KyberWeave.Core.Diagnostics;
@@ -15,6 +14,8 @@ using KyberWeave.Core.Squad.Validation;
 using KyberWeave.Core.Text;
 using Spectre.Console;
 using KyberWeave.Core.FileSystem;
+using KyberWeave.Application.Update;
+using KyberWeave.Domain.Update;
 
 namespace KyberWeave.Cli.Commands.Squad;
 

@@ -1,7 +1,7 @@
-using KyberWeave.Cli.Update;
 using KyberWeave.Contracts.Services;
 using Spectre.Console;
 using Spectre.Console.Cli;
+using KyberWeave.Domain.Update;
 
 namespace KyberWeave.Cli.Commands.Update;
 

@@ -16,6 +16,24 @@ public static class DocsLayout
     /// <summary>Holds a technology's coding standard per subdirectory.</summary>
     public const string Standards = "standards";
 
+    /// <summary>The active plans folder.</summary>
+    public const string Plans = "plans";
+
+    /// <summary>The active specifications folder.</summary>
+    public const string Specifications = "specs";
+
+    /// <summary>The todo folder.</summary>
+    public const string Todos = "todo";
+
+    /// <summary>The architecture decision records folder.</summary>
+    public const string Adr = "adr";
+
+    /// <summary>The repository-wide rules folder.</summary>
+    public const string Rules = "rules";
+
+    /// <summary>The reference material folder.</summary>
+    public const string Reference = "reference";
+
     /// <summary>
     /// The directories every governed corpus gets, each with a canonical index README.
     /// </summary>
@@ -25,7 +43,7 @@ public static class DocsLayout
     /// convention rather than a shape the ontology has an opinion about.
     /// </remarks>
     public static IReadOnlyList<string> Folders { get; } =
-        [Standards, "plans", "specs", "todo", "adr", "rules", "reference"];
+        [Standards, Plans, Specifications, Todos, Adr, Rules, Reference];
 
     public static string Index(string docsRoot) => $"{docsRoot}/README.md";
 

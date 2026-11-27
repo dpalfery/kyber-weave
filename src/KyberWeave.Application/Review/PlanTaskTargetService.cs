@@ -5,6 +5,7 @@ using KyberWeave.Contracts.Services;
 using KyberWeave.Core.Arbiter.Plans;
 using KyberWeave.Core.Configuration;
 using KyberWeave.Core.Docs.Closeout;
+using KyberWeave.Core.Docs.Model;
 using KyberWeave.Core.Docs.Validation;
 using KyberWeave.Core.FileSystem;
 using KyberWeave.Core.Review;
@@ -39,7 +40,7 @@ public sealed partial class PlanTaskTargetService(
         IReadOnlyList<string> active = tasks.ActivePlans(root, config);
         if (active.Count > 1)
         {
-            reason = $"{active.Count} plans are Ready or In progress ({string.Join(", ", active)})";
+            reason = $"{active.Count} plans are {PlanStatus.ActiveWords} ({string.Join(", ", active)})";
             return null;
         }
 
@@ -74,7 +75,7 @@ public sealed partial class PlanTaskTargetService(
 
         reason = unusable ?? (plans.Count switch
         {
-            0 => "no plan is Ready or In progress in this checkout or any other worktree of this repository",
+            0 => $"no plan is {PlanStatus.ActiveWords} in this checkout or any other worktree of this repository",
             1 => $"'{typedTask}' names no one task in {plans[0]}",
             _ => $"'{typedTask}' names no one task in {string.Join(", ", plans)}"
         });

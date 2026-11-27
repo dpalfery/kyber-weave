@@ -279,7 +279,7 @@ public static class ArchitectShellGuard
         new(
             false,
             $"Kyber-Weave Arbiter shell guard ({RuleId}) denied this {toolName} call: '{segment}' " +
-            $"{refusal.Why}. {refusal.Replacement}. If you need this command, return STATUS: BLOCKED " +
+            $"{refusal.Why}. {refusal.Replacement}. If you need this command, return {ReturnStatus.Prefix} {ReturnStatus.Blocked} " +
             "naming it; do not work around the denial.");
 
     private static string? CommandOf(JsonElement toolInput)

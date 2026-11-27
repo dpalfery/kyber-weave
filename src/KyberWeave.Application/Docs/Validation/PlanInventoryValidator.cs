@@ -37,10 +37,10 @@ public sealed partial class PlanInventoryValidator
     public const string UnlistedPlan = "KW-DOC-LIFECYCLE-001";
 
     /// <summary>
-    /// The plan index claims an open plan that does not exist: a table row with a Draft, Ready, In progress
-    /// or Blocked status whose plan file is gone, or a sentence outside the table that restates a plan's
-    /// status. Only the table row is kept in step with the plan by the finalize and closeout tools, so any
-    /// other restatement goes stale when the plan is archived.
+    /// The plan index claims an open plan that does not exist: a table row whose status is one of
+    /// <see cref="PlanStatus.OpenWords"/> and whose plan file is gone, or a sentence outside the table that
+    /// restates a plan's status. Only the table row is kept in step with the plan by the finalize and closeout
+    /// tools, so any other restatement goes stale when the plan is archived.
     /// </summary>
     public const string StaleOpenEntry = "KW-DOC-LIFECYCLE-006";
 
@@ -110,7 +110,7 @@ public sealed partial class PlanInventoryValidator
             if (!line.StartsWith('|'))
             {
                 statusColumn = -1;
-                if (RestatedStatus().Match(line) is { Success: true } prose)
+                if (RestatedStatus.Match(line) is { Success: true } prose)
                 {
                     report.Add(new Diagnostic(
                         StaleOpenEntry, Severity.Error,
@@ -130,7 +130,7 @@ public sealed partial class PlanInventoryValidator
                 continue;
             }
 
-            if (statusColumn >= cells.Length || !OpenStatus().IsMatch(cells[statusColumn])
+            if (statusColumn >= cells.Length || !OpenStatus.IsMatch(cells[statusColumn])
                 || RowLink().Match(line) is not { Success: true } link)
             {
                 continue;
@@ -148,12 +148,14 @@ public sealed partial class PlanInventoryValidator
         }
     }
 
-    [GeneratedRegex(@"^(?:Draft|Ready|In progress|Blocked)\b", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant)]
-    private static partial Regex OpenStatus();
-
     [GeneratedRegex(@"\]\(([^)#\s]+\.md)(?:#[^)]*)?\)", RegexOptions.CultureInvariant)]
     private static partial Regex RowLink();
 
-    [GeneratedRegex(@"(?:`[^`]+`|\])\s*\((?:Draft|Ready|In progress|Blocked)\)", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant)]
-    private static partial Regex RestatedStatus();
+    private static readonly Regex OpenStatus = new(
+        $@"^(?:{PlanStatus.OpenPattern})\b",
+        RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
+
+    private static readonly Regex RestatedStatus = new(
+        $@"(?:`[^`]+`|\])\s*\((?:{PlanStatus.OpenPattern})\)",
+        RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
 }

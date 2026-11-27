@@ -42,7 +42,7 @@ public static class SubstituteDigests
 
         return string.Join(
             "\n",
-            "STATUS: INTAKE_RECOMMENDATION",
+            ReturnStatus.Prefix + " " + ReturnStatus.IntakeRecommendation,
             $"INPUT: {OneField(input)}",
             $"RECOMMENDATION: {recommendation}",
             $"RATIONALE: Arbiter shortcut (decision {decisionId})",

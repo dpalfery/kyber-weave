@@ -140,10 +140,10 @@ internal static partial class ReturnMarkerParser
     [GeneratedRegex(@"^RESULT:\s+(PASS|FAIL)\b", RegexOptions.Multiline | RegexOptions.CultureInvariant)]
     private static partial Regex ResultRegex();
 
-    [GeneratedRegex(@"^STATUS:[ \t]*(\S+)", RegexOptions.Multiline | RegexOptions.CultureInvariant)]
+    [GeneratedRegex(@"^" + ReturnStatus.Prefix + @"[ \t]*(\S+)", RegexOptions.Multiline | RegexOptions.CultureInvariant)]
     private static partial Regex StatusRegex();
 
-    [GeneratedRegex(@"^TASK_GATE:[ \t]*(\S+)", RegexOptions.Multiline | RegexOptions.CultureInvariant)]
+    [GeneratedRegex(@"^" + ReturnStatus.TaskGate + @"[ \t]*(\S+)", RegexOptions.Multiline | RegexOptions.CultureInvariant)]
     private static partial Regex TaskGateRegex();
 
     [GeneratedRegex(@"^ATTESTED:[ \t]*(.+?)[ \t]*\r?$", RegexOptions.Multiline | RegexOptions.CultureInvariant)]

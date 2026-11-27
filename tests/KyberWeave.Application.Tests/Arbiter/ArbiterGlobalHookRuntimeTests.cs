@@ -1,5 +1,6 @@
 using System.Text.Json;
 using KyberWeave.Arbiter.Hooks;
+using KyberWeave.Core.Arbiter;
 using KyberWeave.Core.Configuration;
 using KyberWeave.Tests.Fakes;
 using Xunit;
@@ -68,7 +69,7 @@ public sealed class ArbiterGlobalHookRuntimeTests
             HookScope.Global,
             host.HomeDirectory);
 
-        string rootKey = ArbiterHookDecisionEngine.ProjectRootKey(projectRoot, host.WorkingDirectory);
+        string rootKey = ArbiterStateDirectory.ProjectRootKey(projectRoot, host.WorkingDirectory);
         string ledgerRoot = Path.Combine(host.HomeDirectory, ".kyber-weave", "arbiter", "projects", rootKey);
 
         Assert.Equal(0, run.Exit);

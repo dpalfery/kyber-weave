@@ -1,3 +1,4 @@
+using KyberWeave.Core.FileSystem;
 using System.Text.RegularExpressions;
 using KyberWeave.Cli.Commands.Squad.Infrastructure;
 using KyberWeave.Contracts.Paths;
@@ -97,12 +98,12 @@ internal sealed partial class SquadInstanceRemoveCommand : Command<SquadInstance
 
         ISquadUserPaths userPaths = _userPaths;
         string targetToken = SquadTargetCatalog.GetToken(target);
-        string instanceRoot = Path.Combine(userPaths.HomeDirectory, ".kyber-weave", "squad", "instances", targetToken,
+        string instanceRoot = Path.Combine(UserStatePaths.SquadInstancesDirectory(userPaths.HomeDirectory), targetToken,
             settings.Preset);
-        string instanceStateDir = Path.Combine(userPaths.HomeDirectory, ".kyber-weave", "squad", "instance-state",
+        string instanceStateDir = Path.Combine(UserStatePaths.SquadInstanceStateDirectory(userPaths.HomeDirectory),
             targetToken, settings.Preset);
 
-        string expectedBase = FullPath(Path.Combine(userPaths.HomeDirectory, ".kyber-weave", "squad", "instances", targetToken));
+        string expectedBase = FullPath(Path.Combine(UserStatePaths.SquadInstancesDirectory(userPaths.HomeDirectory), targetToken));
         string fullInstanceRoot = FullPath(instanceRoot);
         string prefix = expectedBase.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar) + Path.DirectorySeparatorChar;
 

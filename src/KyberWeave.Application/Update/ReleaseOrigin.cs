@@ -1,4 +1,6 @@
-namespace KyberWeave.Cli.Update;
+using KyberWeave.Domain.Update;
+
+namespace KyberWeave.Application.Update;
 
 /// <summary>
 /// The host serving Release metadata and assets: github.com, or a loopback stand-in.

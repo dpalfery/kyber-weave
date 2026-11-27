@@ -1448,8 +1448,8 @@ in order:
    first), omitted when none is assigned and the lists have no problems. The list is capped at the
    first 20 skills with the remainder counted as an omission line under it. A problem reading the
    lists — an unreadable or malformed list, or a listed name that is no skill — is named under
-   `Problems in the skills lists:` (rule `KW-DOC-SKILL-001`, capped with the remainder counted),
-   and the section appears for that reason alone when no skill survived the lists. The section
+   `Problems in the skills lists:` (rules `KW-DOC-SKILL-001` and `-002`, capped with the remainder
+   counted), and the section appears for that reason alone when no skill survived the lists. The section
    comes from one shared renderer, so the answer and the prompt cannot disagree. Read a listed
    skill with [`load_skill`](#load_skillname-projectpath--null).
 7. `## <technology> standard`: a `###` heading with the standard's title, then the identity

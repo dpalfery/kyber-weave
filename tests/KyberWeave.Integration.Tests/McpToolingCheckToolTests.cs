@@ -1,6 +1,7 @@
 using System.Diagnostics;
 using System.Reflection;
 using KyberWeave.Contracts.Repositories;
+using KyberWeave.Core.Arbiter;
 using KyberWeave.Core.Processes;
 using KyberWeave.Mcp;
 using KyberWeave.Tests.Fakes;
@@ -84,7 +85,7 @@ public sealed class McpToolingCheckToolTests : IDisposable
         Assert.Contains(lines, line => line.StartsWith("PASS codegraph.", StringComparison.Ordinal));
         Assert.Contains(lines, line => line.StartsWith("PASS mcp.", StringComparison.Ordinal));
         Assert.DoesNotContain(lines, line => line.StartsWith("FAIL ", StringComparison.Ordinal));
-        Assert.DoesNotContain(ToolingCheckService.ToolFailureLine, lines);
+        Assert.DoesNotContain(ReturnStatus.ToolFailureLine, lines);
         Assert.Equal("EXIT: 0", lines[^1]);
     }
 
@@ -97,7 +98,7 @@ public sealed class McpToolingCheckToolTests : IDisposable
         int failure = Array.FindIndex(lines, line => line.StartsWith("FAIL codegraph.", StringComparison.Ordinal));
         Assert.True(failure >= 0, "Expected a FAIL line for a codegraph check.");
         Assert.StartsWith("  fix: ", lines[failure + 1], StringComparison.Ordinal);
-        Assert.Contains(ToolingCheckService.ToolFailureLine, lines);
+        Assert.Contains(ReturnStatus.ToolFailureLine, lines);
         Assert.Equal("EXIT: 1", lines[^1]);
     }
 
@@ -106,7 +107,7 @@ public sealed class McpToolingCheckToolTests : IDisposable
     {
         string[] lines = Lines(Tools(_ => throw DoctorHarness.BinaryNotFound()).RunToolingCheck(Root));
 
-        Assert.Contains(ToolingCheckService.ToolFailureLine, lines);
+        Assert.Contains(ReturnStatus.ToolFailureLine, lines);
         Assert.Equal("EXIT: 3", lines[^1]);
     }
 
@@ -119,7 +120,7 @@ public sealed class McpToolingCheckToolTests : IDisposable
 
         Assert.Contains(lines, line => line.StartsWith("PASS codegraph.", StringComparison.Ordinal)
             && line.Contains(" warning: ", StringComparison.Ordinal));
-        Assert.DoesNotContain(ToolingCheckService.ToolFailureLine, lines);
+        Assert.DoesNotContain(ReturnStatus.ToolFailureLine, lines);
         Assert.Equal("EXIT: 0", lines[^1]);
     }
 
