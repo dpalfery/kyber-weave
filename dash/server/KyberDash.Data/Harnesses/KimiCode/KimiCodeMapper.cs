@@ -257,6 +257,21 @@ public class KimiCodeMapper : IHarnessMapper
             : null;
     }
 
+    private sealed class WireParseState
+    {
+        public List<KimiCodeCall> Calls { get; } = [];
+        public List<KimiCodeParseProblem> Problems { get; } = [];
+        public Dictionary<string, string> AliasModels { get; } = new(StringComparer.Ordinal);
+        public Dictionary<string, string> Prompts { get; } = new(StringComparer.Ordinal);
+        public List<KimiCodeToolCall> PendingTools { get; set; } = [];
+        public string CurrentPrompt { get; set; } = string.Empty;
+        public string CurrentModel { get; set; } = string.Empty;
+        public string CurrentModelAlias { get; set; } = string.Empty;
+        public string CurrentTurnId { get; set; } = string.Empty;
+        public string? CurrentRequestTimestamp { get; set; }
+        public int UsageOrdinal { get; set; }
+    }
+
     /// <summary>
     /// Parses a Kimi Code <c>wire.jsonl</c> stream into a strongly typed wire document.
     /// </summary>
@@ -271,24 +286,14 @@ public class KimiCodeMapper : IHarnessMapper
             return new KimiCodeWireDocument([], 0, state, []);
         }
 
-        List<KimiCodeCall> calls = [];
-        List<KimiCodeParseProblem> problems = [];
-        Dictionary<string, string> aliasModels = new(StringComparer.Ordinal);
-        Dictionary<string, string> prompts = new(StringComparer.Ordinal);
-        List<KimiCodeToolCall> pendingTools = [];
-        string currentPrompt = string.Empty;
-        string currentModel = string.Empty;
-        string currentModelAlias = string.Empty;
-        string currentTurnId = string.Empty;
-        string? currentRequestTimestamp = null;
-        int totalLines = 0;
-        int usageOrdinal = 0;
+        WireParseState parseState = new();
 
         string? fallbackTimestamp = state?.UpdatedAt ?? state?.CreatedAt;
 
         using StringReader reader = new(rawText);
         string? rawLine;
         int lineNumber = 0;
+        int totalLines = 0;
 
         while ((rawLine = reader.ReadLine()) is not null)
         {
@@ -307,7 +312,7 @@ public class KimiCodeMapper : IHarnessMapper
             }
             catch (JsonException ex)
             {
-                problems.Add(Fail(lineNumber, $"Skipping malformed Kimi Code wire line {lineNumber}: {ex.Message}"));
+                parseState.Problems.Add(Fail(lineNumber, $"Skipping malformed Kimi Code wire line {lineNumber}: {ex.Message}"));
                 continue;
             }
 
@@ -315,101 +320,121 @@ public class KimiCodeMapper : IHarnessMapper
             {
                 if (lineDoc.RootElement.ValueKind != JsonValueKind.Object)
                 {
-                    problems.Add(Fail(lineNumber, $"Skipping non-object Kimi Code wire line {lineNumber}."));
+                    parseState.Problems.Add(Fail(lineNumber, $"Skipping non-object Kimi Code wire line {lineNumber}."));
                     continue;
                 }
 
-                JsonElement record = lineDoc.RootElement;
-                string eventType = ReadStringOnly(record, "type")?.Trim() ?? string.Empty;
-
-                if (string.Equals(eventType, "turn.prompt", StringComparison.Ordinal))
-                {
-                    pendingTools = [];
-                    currentPrompt = ReadInputText(record);
-                    continue;
-                }
-
-                if (string.Equals(eventType, "llm.request", StringComparison.Ordinal))
-                {
-                    string model = ReadStringOnly(record, "model")?.Trim() ?? string.Empty;
-                    string modelAlias = ReadStringOnly(record, "modelAlias")?.Trim() ?? string.Empty;
-                    string turnId = TurnIdFromStep(ReadStringOnly(record, "turnStep"));
-                    if (model.Length > 0 && modelAlias.Length > 0)
-                    {
-                        aliasModels[modelAlias] = model;
-                    }
-
-                    if (turnId.Length > 0 && currentPrompt.Length > 0)
-                    {
-                        prompts[turnId] = currentPrompt;
-                    }
-
-                    currentModel = model;
-                    currentModelAlias = modelAlias;
-                    currentTurnId = turnId;
-                    currentRequestTimestamp = ReadTimestamp(record);
-                    continue;
-                }
-
-                if (string.Equals(eventType, "context.append_loop_event", StringComparison.Ordinal))
-                {
-                    if (ReadToolDetails(record) is KimiCodeToolCall tool)
-                    {
-                        pendingTools.Add(tool);
-                    }
-
-                    continue;
-                }
-
-                if (!string.Equals(eventType, "usage.record", StringComparison.Ordinal))
-                {
-                    continue;
-                }
-
-                if (!record.TryGetProperty("usage", out JsonElement usageEl)
-                    || usageEl.ValueKind != JsonValueKind.Object)
-                {
-                    continue;
-                }
-
-                string usageAlias = ReadStringOnly(record, "model")?.Trim() ?? string.Empty;
-                string realModel = aliasModels.TryGetValue(usageAlias, out string? aliased)
-                    ? aliased
-                    : currentModel.Length > 0 ? currentModel : DefaultModel;
-                string timestamp = ReadTimestamp(record)
-                    ?? currentRequestTimestamp
-                    ?? fallbackTimestamp
-                    ?? string.Empty;
-                if (timestamp.Length == 0)
-                {
-                    pendingTools = [];
-                    continue;
-                }
-
-                string? resolvedTurnId = currentTurnId.Length > 0 ? currentTurnId : null;
-                string userMessage = resolvedTurnId is not null && prompts.TryGetValue(resolvedTurnId, out string? prompted)
-                    ? prompted
-                    : currentPrompt;
-
-                calls.Add(new KimiCodeCall(
-                    LineNumber: lineNumber,
-                    UsageOrdinal: usageOrdinal,
-                    Model: realModel,
-                    ModelAlias: usageAlias,
-                    TurnId: resolvedTurnId,
-                    UserMessage: userMessage,
-                    Timestamp: timestamp,
-                    InputTokens: ReadNonNegativeNumber(usageEl, "inputOther"),
-                    OutputTokens: ReadNonNegativeNumber(usageEl, "output"),
-                    CacheReadTokens: ReadNonNegativeNumber(usageEl, "inputCacheRead"),
-                    CacheWriteTokens: ReadNonNegativeNumber(usageEl, "inputCacheCreation"),
-                    Tools: [.. pendingTools]));
-                usageOrdinal++;
-                pendingTools = [];
+                ProcessWireRecord(lineDoc.RootElement, lineNumber, parseState, fallbackTimestamp);
             }
         }
 
-        return new KimiCodeWireDocument(calls, totalLines, state, problems);
+        return new KimiCodeWireDocument(parseState.Calls, totalLines, state, parseState.Problems);
+    }
+
+    private static void ProcessWireRecord(
+        JsonElement record,
+        int lineNumber,
+        WireParseState state,
+        string? fallbackTimestamp)
+    {
+        string eventType = ReadStringOnly(record, "type")?.Trim() ?? string.Empty;
+
+        if (string.Equals(eventType, "turn.prompt", StringComparison.Ordinal))
+        {
+            state.PendingTools = [];
+            state.CurrentPrompt = ReadInputText(record);
+            return;
+        }
+
+        if (string.Equals(eventType, "llm.request", StringComparison.Ordinal))
+        {
+            ApplyLlmRequest(record, state);
+            return;
+        }
+
+        if (string.Equals(eventType, "context.append_loop_event", StringComparison.Ordinal))
+        {
+            if (ReadToolDetails(record) is KimiCodeToolCall tool)
+            {
+                state.PendingTools.Add(tool);
+            }
+
+            return;
+        }
+
+        if (string.Equals(eventType, "usage.record", StringComparison.Ordinal))
+        {
+            ApplyUsageRecord(record, lineNumber, state, fallbackTimestamp);
+        }
+    }
+
+    private static void ApplyLlmRequest(JsonElement record, WireParseState state)
+    {
+        string model = ReadStringOnly(record, "model")?.Trim() ?? string.Empty;
+        string modelAlias = ReadStringOnly(record, "modelAlias")?.Trim() ?? string.Empty;
+        string turnId = TurnIdFromStep(ReadStringOnly(record, "turnStep"));
+        if (model.Length > 0 && modelAlias.Length > 0)
+        {
+            state.AliasModels[modelAlias] = model;
+        }
+
+        if (turnId.Length > 0 && state.CurrentPrompt.Length > 0)
+        {
+            state.Prompts[turnId] = state.CurrentPrompt;
+        }
+
+        state.CurrentModel = model;
+        state.CurrentModelAlias = modelAlias;
+        state.CurrentTurnId = turnId;
+        state.CurrentRequestTimestamp = ReadTimestamp(record);
+    }
+
+    private static void ApplyUsageRecord(
+        JsonElement record,
+        int lineNumber,
+        WireParseState state,
+        string? fallbackTimestamp)
+    {
+        if (!record.TryGetProperty("usage", out JsonElement usageEl)
+            || usageEl.ValueKind != JsonValueKind.Object)
+        {
+            return;
+        }
+
+        string usageAlias = ReadStringOnly(record, "model")?.Trim() ?? string.Empty;
+        string realModel = state.AliasModels.TryGetValue(usageAlias, out string? aliased)
+            ? aliased
+            : state.CurrentModel.Length > 0 ? state.CurrentModel : DefaultModel;
+        string timestamp = ReadTimestamp(record)
+            ?? state.CurrentRequestTimestamp
+            ?? fallbackTimestamp
+            ?? string.Empty;
+        if (timestamp.Length == 0)
+        {
+            state.PendingTools = [];
+            return;
+        }
+
+        string? resolvedTurnId = state.CurrentTurnId.Length > 0 ? state.CurrentTurnId : null;
+        string userMessage = resolvedTurnId is not null && state.Prompts.TryGetValue(resolvedTurnId, out string? prompted)
+            ? prompted
+            : state.CurrentPrompt;
+
+        state.Calls.Add(new KimiCodeCall(
+            LineNumber: lineNumber,
+            UsageOrdinal: state.UsageOrdinal,
+            Model: realModel,
+            ModelAlias: usageAlias,
+            TurnId: resolvedTurnId,
+            UserMessage: userMessage,
+            Timestamp: timestamp,
+            InputTokens: ReadNonNegativeNumber(usageEl, "inputOther"),
+            OutputTokens: ReadNonNegativeNumber(usageEl, "output"),
+            CacheReadTokens: ReadNonNegativeNumber(usageEl, "inputCacheRead"),
+            CacheWriteTokens: ReadNonNegativeNumber(usageEl, "inputCacheCreation"),
+            Tools: [.. state.PendingTools]));
+        state.UsageOrdinal++;
+        state.PendingTools = [];
     }
 
     /// <inheritdoc />
@@ -430,6 +455,19 @@ public class KimiCodeMapper : IHarnessMapper
         string traceId = string.Create(CultureInfo.InvariantCulture, $"{CanonSynth.SynthSpanPrefix}{KimiCodeHarnessId}:{sessionId}");
         string? workingDirectory = SafeOptionalText(document.State?.WorkDir);
 
+        List<CollectedRecord> records = BuildCallRecords(document, sessionId, agentId, traceId);
+        List<CollectedSession> sessions = BuildSessions(records.Count, document.TotalLines, sessionId, workingDirectory);
+
+        List<CollectedProblem> problems = BuildProblems(document.ParseProblems, unit.Unit.SourceKey, sessionId, importedAtUtc);
+        return new CollectedBatch(source, sessions, records, problems);
+    }
+
+    private static List<CollectedRecord> BuildCallRecords(
+        KimiCodeWireDocument document,
+        string sessionId,
+        string agentId,
+        string traceId)
+    {
         List<CollectedRecord> records = [];
         HashSet<string> seenRecordIds = new(StringComparer.Ordinal);
 
@@ -448,53 +486,7 @@ public class KimiCodeMapper : IHarnessMapper
                     $"{CanonSynth.SynthSpanPrefix}{KimiCodeHarnessId}:{sessionId}:{agentId}:{call.LineNumber}:{call.UsageOrdinal}"),
                 call.LineNumber);
 
-            List<CollectedContentPart> parts = [];
-            string? correctionRule = null;
-            if (!string.IsNullOrEmpty(call.UserMessage))
-            {
-                CorrectionDetectionResult check = CanonFindings.DetectUserCorrection(call.UserMessage);
-                if (check.Matched)
-                {
-                    correctionRule = check.Rule;
-                }
-
-                parts.Add(ToolContentMeasurer.BuildContentPart(0, ContentBucket.UserMessage, call.UserMessage, "user", call.Model));
-            }
-
-            List<CollectedTokenCount> tokens =
-            [
-                new CollectedTokenCount(TokenClass.Input, call.InputTokens),
-                new CollectedTokenCount(TokenClass.Output, call.OutputTokens),
-                new CollectedTokenCount(TokenClass.CacheRead, call.CacheReadTokens),
-                new CollectedTokenCount(TokenClass.CacheWrite, call.CacheWriteTokens),
-            ];
-
-            CollectedRecord parentRecord = new(
-                RecordId: parentRecordId,
-                HarnessId: KimiCodeHarnessId,
-                Op: RecordOp.LlmInvoke,
-                Kind: RecordKind.Internal,
-                Name: string.Create(CultureInfo.InvariantCulture, $"{KimiCodeHarnessId}:{call.Model}"),
-                StartedAt: startedAt.Value,
-                Status: RecordStatus.Ok,
-                SessionKey: sessionId,
-                ParentRecordId: null,
-                TraceId: traceId,
-                Model: call.Model,
-                EndedAt: null,
-                ReportedDurationMs: null,
-                Tokens: tokens,
-                ReportedCost: null,
-                Parts: parts,
-                Tool: null,
-                Agent: null,
-                SkillsInvoked: [],
-                AgentInstanceId: null,
-                ToolDefinitions: [],
-                Signals: new CollectedRecordSignals(null, null, correctionRule, null),
-                ReportedInputTokens: call.InputTokens + call.CacheReadTokens + call.CacheWriteTokens,
-                ReportedOutputTokens: call.OutputTokens);
-
+            CollectedRecord parentRecord = BuildCallRecord(call, startedAt.Value, sessionId, traceId, parentRecordId);
             records.Add(parentRecord);
 
             for (int t = 0; t < call.Tools.Count; t++)
@@ -503,8 +495,72 @@ public class KimiCodeMapper : IHarnessMapper
             }
         }
 
+        return records;
+    }
+
+    private static CollectedRecord BuildCallRecord(
+        KimiCodeCall call,
+        DateTimeOffset startedAt,
+        string sessionId,
+        string traceId,
+        string parentRecordId)
+    {
+        List<CollectedContentPart> parts = [];
+        string? correctionRule = null;
+        if (!string.IsNullOrEmpty(call.UserMessage))
+        {
+            CorrectionDetectionResult check = CanonFindings.DetectUserCorrection(call.UserMessage);
+            if (check.Matched)
+            {
+                correctionRule = check.Rule;
+            }
+
+            parts.Add(ToolContentMeasurer.BuildContentPart(0, ContentBucket.UserMessage, call.UserMessage, "user", call.Model));
+        }
+
+        List<CollectedTokenCount> tokens =
+        [
+            new CollectedTokenCount(TokenClass.Input, call.InputTokens),
+            new CollectedTokenCount(TokenClass.Output, call.OutputTokens),
+            new CollectedTokenCount(TokenClass.CacheRead, call.CacheReadTokens),
+            new CollectedTokenCount(TokenClass.CacheWrite, call.CacheWriteTokens),
+        ];
+
+        return new CollectedRecord(
+            RecordId: parentRecordId,
+            HarnessId: KimiCodeHarnessId,
+            Op: RecordOp.LlmInvoke,
+            Kind: RecordKind.Internal,
+            Name: string.Create(CultureInfo.InvariantCulture, $"{KimiCodeHarnessId}:{call.Model}"),
+            StartedAt: startedAt,
+            Status: RecordStatus.Ok,
+            SessionKey: sessionId,
+            ParentRecordId: null,
+            TraceId: traceId,
+            Model: call.Model,
+            EndedAt: null,
+            ReportedDurationMs: null,
+            Tokens: tokens,
+            ReportedCost: null,
+            Parts: parts,
+            Tool: null,
+            Agent: null,
+            SkillsInvoked: [],
+            AgentInstanceId: null,
+            ToolDefinitions: [],
+            Signals: new CollectedRecordSignals(null, null, correctionRule, null),
+            ReportedInputTokens: call.InputTokens + call.CacheReadTokens + call.CacheWriteTokens,
+            ReportedOutputTokens: call.OutputTokens);
+    }
+
+    private static List<CollectedSession> BuildSessions(
+        int recordCount,
+        int totalLines,
+        string sessionId,
+        string? workingDirectory)
+    {
         List<CollectedSession> sessions = [];
-        if (records.Count > 0 || document.TotalLines > 0)
+        if (recordCount > 0 || totalLines > 0)
         {
             CollectedWorkspace? workspace = workingDirectory is not null
                 ? new CollectedWorkspace(workingDirectory, null, null)
@@ -519,8 +575,7 @@ public class KimiCodeMapper : IHarnessMapper
                 ReportedUsage: []));
         }
 
-        List<CollectedProblem> problems = BuildProblems(document.ParseProblems, unit.Unit.SourceKey, sessionId, importedAtUtc);
-        return new CollectedBatch(source, sessions, records, problems);
+        return sessions;
     }
 
     private static CollectedRecord BuildToolInvokeRecord(
