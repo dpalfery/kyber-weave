@@ -11,7 +11,7 @@ namespace KyberDash.Data.Repositories;
 /// Binding the socket elects the owner; every other process sees the descriptor and can ask it for
 /// its info or request a graceful shutdown.
 /// </summary>
-public sealed class EngineOwner : IEngineOwnerLease
+public class EngineOwner : IEngineOwnerLease
 {
     private readonly Socket listener = new(AddressFamily.Unix, SocketType.Stream, ProtocolType.Unspecified);
     private readonly CancellationTokenSource shutdown = new();
@@ -117,14 +117,22 @@ public sealed class EngineOwner : IEngineOwnerLease
     /// </summary>
     public void Dispose()
     {
-        if (disposed)
-            return;
-
-        disposed = true;
-        shutdown.Cancel();
-        listener.Dispose();
-        shutdown.Dispose();
+        Dispose(true);
         GC.SuppressFinalize(this);
+    }
+
+    protected virtual void Dispose(bool disposing)
+    {
+        if (disposing)
+        {
+            if (disposed)
+                return;
+
+            disposed = true;
+            shutdown.Cancel();
+            listener.Dispose();
+            shutdown.Dispose();
+        }
     }
 
     /// <summary>Stops the accept loop, waits for it, and closes the listener, leaving the files for the next owner.</summary>

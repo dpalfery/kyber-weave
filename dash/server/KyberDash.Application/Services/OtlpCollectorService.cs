@@ -23,7 +23,7 @@ namespace KyberDash.Application;
 /// the process exited, invisible to every reader of the store.
 /// </para>
 /// </remarks>
-public sealed class OtlpCollectorService : IOtlpCollectorService, IDisposable
+public class OtlpCollectorService : IOtlpCollectorService, IDisposable
 {
     /// <summary><c>Retry-After</c> seconds advertised while ingestion is administratively paused.</summary>
     public const int PauseRetryAfterSeconds = 5;
@@ -292,8 +292,17 @@ public sealed class OtlpCollectorService : IOtlpCollectorService, IDisposable
     /// </remarks>
     public void Dispose()
     {
-        flushWake.Dispose();
-        flushShutdown.Dispose();
+        Dispose(true);
+        GC.SuppressFinalize(this);
+    }
+
+    protected virtual void Dispose(bool disposing)
+    {
+        if (disposing)
+        {
+            flushWake.Dispose();
+            flushShutdown.Dispose();
+        }
     }
 
     /// <summary>Wakes the flush loop without blocking the request that admitted the telemetry.</summary>

@@ -7,7 +7,7 @@ namespace KyberDash.Data.Repositories;
 /// Exclusive lease on <c>jobs.lock</c>. Releasing it deletes the file only while this process still
 /// owns the recorded pid, so a lease reclaimed by another process is never removed underneath it.
 /// </summary>
-public sealed class JobsLease : IDisposable
+public class JobsLease : IDisposable
 {
     private readonly string lockPath;
     private readonly int pid;
@@ -57,8 +57,16 @@ public sealed class JobsLease : IDisposable
     /// <inheritdoc />
     public void Dispose()
     {
-        Release();
+        Dispose(true);
         GC.SuppressFinalize(this);
+    }
+
+    protected virtual void Dispose(bool disposing)
+    {
+        if (disposing)
+        {
+            Release();
+        }
     }
 
     /// <summary>True when a process with <paramref name="candidatePid"/> is still running.</summary>
