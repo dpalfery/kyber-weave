@@ -130,7 +130,7 @@ public sealed partial class PlanFacts(IPlanFileResolver planPaths, IFileSystem f
             facts = facts.With("plan.task", task.Id, ArbiterFactLabel.Derived);
             facts = facts.With("plan.task.text", task.Text, ArbiterFactLabel.Derived);
             facts = facts.With("plan.task.files", task.Files.ToList(), ArbiterFactLabel.Derived);
-            facts = facts.With(ScopeFilesFact, ScopeFiles(task, facts), ArbiterFactLabel.Derived);
+            facts = facts.With(ScopeFilesFact, ScopeFiles(task, document, facts), ArbiterFactLabel.Derived);
             facts = facts.With("plan.task.depends-on", task.DependsOn.ToList(), ArbiterFactLabel.Derived);
             facts = facts.With("plan.task.skills", task.Skills.ToList(), ArbiterFactLabel.Derived);
             if (!string.IsNullOrWhiteSpace(task.Technology))
@@ -158,16 +158,22 @@ public sealed partial class PlanFacts(IPlanFileResolver planPaths, IFileSystem f
         return facts;
     }
 
-    /// <summary>The task's files, then the files its dispatch names as also in scope, without duplicates.</summary>
-    private static List<string> ScopeFiles(PlanTask task, ArbiterFactSet facts)
+    /// <summary>
+    /// The task's files, then the files another task of the plan lists that its dispatch names as also in scope,
+    /// without duplicates. A named file no other task lists is ignored, so a dispatch cannot widen the scope itself.
+    /// </summary>
+    private static List<string> ScopeFiles(PlanTask task, PlanDocument document, ArbiterFactSet facts)
     {
         List<string> files = [.. task.Files];
         if (!facts.TryGet("delegation.prompt", out ArbiterFact? prompt) || prompt.Value is not string text)
             return files;
 
+        List<string> otherTasksFiles = [.. document.Tasks
+            .Where(other => !string.Equals(other.Id, task.Id, StringComparison.Ordinal))
+            .SelectMany(other => other.Files)];
         foreach (string file in AlsoInScopeLines.Files(text))
         {
-            if (!files.Contains(file, StringComparer.Ordinal))
+            if (otherTasksFiles.Contains(file, StringComparer.Ordinal) && !files.Contains(file, StringComparer.Ordinal))
                 files.Add(file);
         }
 

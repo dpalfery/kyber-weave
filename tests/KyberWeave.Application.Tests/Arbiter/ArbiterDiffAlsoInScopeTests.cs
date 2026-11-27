@@ -73,12 +73,34 @@ public sealed class ArbiterDiffAlsoInScopeTests
         Assert.Equal(RuleEffects.Escalate, Rule().Effects["outside-task"]);
     }
 
+    /// <summary>A path an also-in-scope line names but no plan task lists in its files is not part of the fix's scope.</summary>
+    [Fact]
+    public void AnAlsoInScopeFileNoPlanTaskOwnsIsNotAddedToTheScope()
+    {
+        const string prompt =
+            """
+            KYBER-ARBITER: true
+            PLAN_FILE: docs/plans/cards.md
+            TASK: T2
+            Also in scope (task T3): src/Other/Unowned.cs
+            Fix packet: /work/review/cycle-3/fix-packets/task-T2.md
+            """;
+
+        ArbiterFactSet facts = FactsWithPrompt(prompt, "src/Contract/OrderDto.cs");
+
+        Assert.Equal(
+            ["src/Contract/OrderDto.cs"],
+            Assert.IsAssignableFrom<IEnumerable<string>>(facts.Facts[PlanFacts.ScopeFilesFact].Value));
+    }
+
     private static ArbiterRule Rule() =>
         Assert.Single(
             ArbiterConfigDefaults.Product.Rules,
             rule => string.Equals(rule.Id, "KW-ARB-DIFF-001", StringComparison.Ordinal));
 
-    private ArbiterFactSet Facts(params string[] changed)
+    private ArbiterFactSet Facts(params string[] changed) => FactsWithPrompt(Prompt, changed);
+
+    private ArbiterFactSet FactsWithPrompt(string prompt, params string[] changed)
     {
         TriggerClassification classification = new(
             ArbiterTriggers.DelegateReturned,
@@ -99,7 +121,7 @@ public sealed class ArbiterDiffAlsoInScopeTests
             Arbiter = ArbiterConfigDefaults.Product,
             Ontology = OntologyConfig.ProductDefaults.WithDocsRoot("docs"),
         };
-        ArbiterFactSet facts = TriggerFactBuilder.Build(classification, Prompt, config);
+        ArbiterFactSet facts = TriggerFactBuilder.Build(classification, prompt, config);
         facts = new PlanFacts(new ContainedPlanFileResolver(), _files).Enrich(facts, classification, Root);
         return facts.With("git.changed-paths.attributed", changed.ToList(), ArbiterFactLabel.Derived);
     }
