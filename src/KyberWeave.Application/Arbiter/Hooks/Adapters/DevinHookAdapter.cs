@@ -102,7 +102,7 @@ public sealed class DevinHookAdapter : IHarnessHookAdapter
         return insertion.Kind switch
         {
             DispatchInsertionKind.Inserted => RenderMergePrompt(insertion.Text),
-            DispatchInsertionKind.Stopped => RenderPreDeny(insertion.Reason!),
+            DispatchInsertionKind.Stopped => RenderPreDeny(insertion.Reason),
             _ => null,
         };
     }
@@ -181,7 +181,7 @@ public sealed class DevinHookAdapter : IHarnessHookAdapter
         DispatchInsertion insertion = DispatchPromptInsertion.Expand(prompt, context, target);
         if (insertion.Kind == DispatchInsertionKind.Stopped)
         {
-            return RenderPreDeny(insertion.Reason!);
+            return RenderPreDeny(insertion.Reason);
         }
 
         bool inserted = insertion.Kind == DispatchInsertionKind.Inserted;
@@ -376,14 +376,22 @@ public sealed class DevinHookAdapter : IHarnessHookAdapter
         return output.ToJsonString();
     }
 
-    private static string RenderPreDeny(string reason) =>
-        new JsonObject
+    private static string RenderPreDeny(string? reason)
+    {
+        if (reason is null)
+        {
+            throw new InvalidOperationException(
+                "A stopped dispatch carries no reason.");
+        }
+
+        return new JsonObject
         {
             // [F12]: the top-level decision block is the only deny shape Devin
             // documents; permissionDecision is not documented for it.
             ["decision"] = "block",
             ["reason"] = reason,
         }.ToJsonString();
+    }
 
     /// <summary>The merge that writes <paramref name="prompt"/> into the tool call, every other field left as Devin has it.</summary>
     private static string RenderMergePrompt(string prompt) =>

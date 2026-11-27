@@ -162,7 +162,7 @@ public sealed partial class CopilotHookAdapter : IHarnessHookAdapter
             return insertion.Kind switch
             {
                 DispatchInsertionKind.Inserted => RenderLocalPreAllowPrompt(toolInput, insertion.Text),
-                DispatchInsertionKind.Stopped => RenderLocalPreDeny(insertion.Reason!),
+                DispatchInsertionKind.Stopped => RenderLocalPreDeny(insertion.Reason),
                 _ => null,
             };
         }
@@ -202,7 +202,7 @@ public sealed partial class CopilotHookAdapter : IHarnessHookAdapter
         return cliInsertion.Kind switch
         {
             DispatchInsertionKind.Inserted => RenderCliAllowPrompt(args, cliInsertion.Text),
-            DispatchInsertionKind.Stopped => RenderCliDeny(cliInsertion.Reason!),
+            DispatchInsertionKind.Stopped => RenderCliDeny(cliInsertion.Reason),
             _ => null,
         };
     }
@@ -296,8 +296,8 @@ public sealed partial class CopilotHookAdapter : IHarnessHookAdapter
     private static IReadOnlyList<string> AgentNamesOf(JsonElement payload) =>
         [.. AgentNameFields
             .Select(name => GetString(payload, name))
+            .OfType<string>()
             .Where(name => !string.IsNullOrWhiteSpace(name))
-            .Select(name => name!)
             .Distinct(StringComparer.OrdinalIgnoreCase)];
 
     /// <summary>
@@ -413,7 +413,7 @@ public sealed partial class CopilotHookAdapter : IHarnessHookAdapter
 
             if (insertion.Kind == DispatchInsertionKind.Stopped)
             {
-                return RenderLocalPreDeny(insertion.Reason!);
+                return RenderLocalPreDeny(insertion.Reason);
             }
 
             bool inserted = insertion.Kind == DispatchInsertionKind.Inserted;
@@ -602,7 +602,7 @@ public sealed partial class CopilotHookAdapter : IHarnessHookAdapter
 
         if (insertion.Kind == DispatchInsertionKind.Stopped)
         {
-            return RenderCliDeny(insertion.Reason!);
+            return RenderCliDeny(insertion.Reason);
         }
 
         bool inserted = insertion.Kind == DispatchInsertionKind.Inserted;
@@ -1135,8 +1135,15 @@ public sealed partial class CopilotHookAdapter : IHarnessHookAdapter
         return new JsonObject { ["hookSpecificOutput"] = output }.ToJsonString();
     }
 
-    private static string RenderLocalPreDeny(string reason) =>
-        new JsonObject
+    private static string RenderLocalPreDeny(string? reason)
+    {
+        if (reason is null)
+        {
+            throw new InvalidOperationException(
+                "A stopped dispatch carries no reason.");
+        }
+
+        return new JsonObject
         {
             ["hookSpecificOutput"] = new JsonObject
             {
@@ -1145,6 +1152,7 @@ public sealed partial class CopilotHookAdapter : IHarnessHookAdapter
                 ["permissionDecisionReason"] = reason,
             },
         }.ToJsonString();
+    }
 
     internal readonly record struct TrustedDecisionKey(
         string ToolUseId,
@@ -1253,12 +1261,20 @@ public sealed partial class CopilotHookAdapter : IHarnessHookAdapter
         return node;
     }
 
-    private static string RenderCliDeny(string reason) =>
-        new JsonObject
+    private static string RenderCliDeny(string? reason)
+    {
+        if (reason is null)
+        {
+            throw new InvalidOperationException(
+                "A stopped dispatch carries no reason.");
+        }
+
+        return new JsonObject
         {
             ["permissionDecision"] = "deny",
             ["permissionDecisionReason"] = reason,
         }.ToJsonString();
+    }
 
     private static string RenderCliAllowStrip(JsonObject args, string prompt)
     {

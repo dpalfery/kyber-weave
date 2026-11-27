@@ -302,7 +302,7 @@ public sealed class WorkerGuard(
     /// </remarks>
     private string? CommandRefusal(WorkerGuardRules.ToolCall call, string home)
     {
-        if (!WorkerGuardRules.IsCommandJudged(call))
+        if (!WorkerGuardRules.IsCommandJudged(call) || call.Command is not { } command)
         {
             return null;
         }
@@ -350,7 +350,7 @@ public sealed class WorkerGuard(
         return WorkerGuardRules.CommandRefusal(
             loaded.Config.Arbiter.Rules,
             call,
-            call.Command!,
+            command,
             scope,
             loaded.Config.Arbiter.RuleFolderParents);
     }

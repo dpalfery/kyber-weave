@@ -932,7 +932,9 @@ internal sealed class ArbiterOutcomeMapper
             .Where(rule => string.Equals(rule.Effect, RuleEffects.Drop, StringComparison.Ordinal)
                 && rule.Suppressed != true
                 && rule.Candidate is not null)
-            .Select(rule => ArbiterFindingNotices.DroppedLine(rule.Candidate!, record.Id))
+            .Select(rule => rule.Candidate)
+            .OfType<string>()
+            .Select(candidate => ArbiterFindingNotices.DroppedLine(candidate, record.Id))
             .ToList();
         if (lines.Count == 0)
         {
@@ -1305,7 +1307,8 @@ internal sealed class ArbiterBackgroundDispatch
         // gives no id, and is taken over the prompt the worker actually runs.
         HashSet<string> taken = events
             .Where(e => e.Phase == ArbiterLedgerPhases.Post && e.PreId is not null)
-            .Select(e => e.PreId!)
+            .Select(e => e.PreId)
+            .OfType<string>()
             .Concat(_background.ForSession(arbiterDirectory, dispatch.SessionId).Select(record => record.PreId))
             .ToHashSet(StringComparer.Ordinal);
         List<ArbiterLedgerEvent> pres = [.. events.Where(e =>
@@ -1481,7 +1484,8 @@ internal sealed class ArbiterBackgroundDispatch
         DateTimeOffset now = _clock.GetUtcNow();
         HashSet<string> paired = [.. events
             .Where(e => e.Phase == ArbiterLedgerPhases.Post && e.PreId is not null)
-            .Select(e => e.PreId!)];
+            .Select(e => e.PreId)
+            .OfType<string>()];
 
         // A followed background agent names its own dispatch: the saved record holds the pre event it answers, so no
         // name match, no multiple-match refusal and no late-stop check applies. Anything else uses the name rule.

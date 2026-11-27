@@ -159,7 +159,7 @@ public sealed class PluginHookAdapter : IHarnessHookAdapter
         return insertion.Kind switch
         {
             DispatchInsertionKind.Inserted => RenderAllowWithArgs(envelope.Args, _promptArgument, insertion.Text),
-            DispatchInsertionKind.Stopped => RenderBlock(insertion.Reason!),
+            DispatchInsertionKind.Stopped => RenderBlock(insertion.Reason),
             _ => null,
         };
     }
@@ -186,7 +186,7 @@ public sealed class PluginHookAdapter : IHarnessHookAdapter
 
         if (insertion.Kind == DispatchInsertionKind.Stopped)
         {
-            return RenderBlock(insertion.Reason!);
+            return RenderBlock(insertion.Reason);
         }
 
         bool inserted = insertion.Kind == DispatchInsertionKind.Inserted;
@@ -332,12 +332,20 @@ public sealed class PluginHookAdapter : IHarnessHookAdapter
             ["decision"] = "allow",
         }.ToJsonString();
 
-    private static string RenderBlock(string reason) =>
-        new JsonObject
+    private static string RenderBlock(string? reason)
+    {
+        if (reason is null)
+        {
+            throw new InvalidOperationException(
+                "A stopped dispatch carries no reason.");
+        }
+
+        return new JsonObject
         {
             ["decision"] = "block",
             ["reason"] = reason,
         }.ToJsonString();
+    }
 
     private static string RenderAllowWithArgs(JsonElement args, string promptArgument, string strippedPrompt)
     {
