@@ -75,6 +75,7 @@ public partial class MenubarService : IMenubarService
     private readonly TrayPlatform platform;
     private readonly Func<TimeSpan, CancellationToken, Task> delay;
     private readonly Action<string> startDetached;
+    private readonly TimeProvider timeProvider;
 
     /// <summary>
     /// Initializes a new <see cref="MenubarService"/> that runs the real system tools on the real platform.
@@ -94,12 +95,14 @@ public partial class MenubarService : IMenubarService
     /// <param name="platform">The platform to decide for; the running one when <see langword="null"/>.</param>
     /// <param name="delay">Waits between quit polls; <see cref="Task.Delay(TimeSpan, CancellationToken)"/> when <see langword="null"/>.</param>
     /// <param name="startDetached">Starts the Windows tray executable without waiting for it; a real process start when <see langword="null"/>.</param>
+    /// <param name="timeProvider">Clock supplying install and Trash timestamps; defaults to <see cref="TimeProvider.System"/>.</param>
     public MenubarService(
         IServerStateRepository serverState,
         TrayToolRunner? runTool,
         TrayPlatform? platform,
         Func<TimeSpan, CancellationToken, Task>? delay,
-        Action<string>? startDetached = null)
+        Action<string>? startDetached = null,
+        TimeProvider? timeProvider = null)
     {
         ArgumentNullException.ThrowIfNull(serverState);
         this.serverState = serverState;
@@ -107,6 +110,7 @@ public partial class MenubarService : IMenubarService
         this.platform = platform ?? CurrentPlatform();
         this.delay = delay ?? Task.Delay;
         this.startDetached = startDetached ?? StartProcessDetached;
+        this.timeProvider = timeProvider ?? TimeProvider.System;
     }
 
     private static void StartProcessDetached(string path)
@@ -593,7 +597,7 @@ public partial class MenubarService : IMenubarService
         return null;
     }
 
-    private static async Task<string> InstallMacosAsync(
+    private async Task<string> InstallMacosAsync(
         byte[] payload,
         string staging,
         string artifact,
@@ -671,7 +675,7 @@ public partial class MenubarService : IMenubarService
         return target;
     }
 
-    private static async Task<string> InstallWindowsAsync(
+    private async Task<string> InstallWindowsAsync(
         byte[] payload,
         string staging,
         string artifact,
@@ -800,7 +804,7 @@ public partial class MenubarService : IMenubarService
         }
     }
 
-    private static string MoveToTrash(string path, string home)
+    private string MoveToTrash(string path, string home)
     {
         if (string.IsNullOrWhiteSpace(home))
         {
@@ -809,7 +813,7 @@ public partial class MenubarService : IMenubarService
 
         string trashDir = EnsureDirectory(Path.Combine(home, ".Trash"));
         string baseName = Path.GetFileName(path);
-        string dest = Path.Combine(trashDir, string.Create(CultureInfo.InvariantCulture, $"{baseName}.{DateTimeOffset.UtcNow.ToUnixTimeMilliseconds()}"));
+        string dest = Path.Combine(trashDir, string.Create(CultureInfo.InvariantCulture, $"{baseName}.{timeProvider.GetUtcNow().ToUnixTimeMilliseconds()}"));
         Directory.Move(path, dest);
         return dest;
     }
@@ -847,7 +851,7 @@ public partial class MenubarService : IMenubarService
         return trimmed.Length > 0 ? trimmed : fallback;
     }
 
-    private static void WriteRecord(
+    private void WriteRecord(
         string configDir,
         string recordPath,
         string target,
@@ -863,7 +867,7 @@ public partial class MenubarService : IMenubarService
         TrayRecord record = new(
             Path: target,
             Version: version,
-            InstalledAt: DateTimeOffset.UtcNow.UtcDateTime.ToString("yyyy-MM-dd'T'HH:mm:ss.fff'Z'", CultureInfo.InvariantCulture),
+            InstalledAt: timeProvider.GetUtcNow().UtcDateTime.ToString("yyyy-MM-dd'T'HH:mm:ss.fff'Z'", CultureInfo.InvariantCulture),
             Platform: platform,
             KyberDashPath: exePath);
 
