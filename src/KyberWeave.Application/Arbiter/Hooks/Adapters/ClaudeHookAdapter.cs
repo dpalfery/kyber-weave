@@ -439,34 +439,7 @@ public sealed class ClaudeHookAdapter : IHarnessHookAdapter
         string? status = GetString(response, "status");
         if (string.Equals(status, "async_launched", StringComparison.Ordinal))
         {
-            string? toolUseId = GetString(payload, "tool_use_id");
-            string? agentId = GetString(response, "agentId");
-            string? sessionId = GetString(payload, "session_id");
-            if (_engine is IBackgroundDispatchEngine background)
-            {
-                if (string.IsNullOrWhiteSpace(agentId) || string.IsNullOrWhiteSpace(sessionId))
-                {
-                    context.Log.WriteLine(
-                        $"Arbiter: background launch of agent '{agentId ?? "(none)"}' in session '{sessionId ?? "(none)"}' " +
-                        "is not recorded; a launch needs both an agent id and a session id.");
-                }
-                else
-                {
-                    // The engine saves the dispatch in the Arbiter's own state: each hook event is a separate process,
-                    // so nothing here may keep it in memory.
-                    background.TrackBackgroundDispatch(
-                        new BackgroundDispatch(
-                            Token,
-                            sessionId,
-                            agentId,
-                            caller,
-                            SubagentTypeOf(payload),
-                            PromptOf(payload),
-                            toolUseId),
-                        context);
-                }
-            }
-
+            TrackAsyncLaunch(payload, response, caller, context);
             return string.Empty;
         }
 
@@ -520,7 +493,45 @@ public sealed class ClaudeHookAdapter : IHarnessHookAdapter
         HookOutcome outcome = saved is not null && key is not null
             ? key.Engine.DecideBackgroundReturn(Token, key.SessionId, key.AgentId, output, config, context)
             : DecidePost(payload, caller, target, prompt, output, config, context);
-        return outcome.Kind switch
+        return RenderPostOutcome(outcome);
+    }
+
+    /// <summary>Records a background agent's launch against the Arbiter's own state so the return pairs with its pre.</summary>
+    private void TrackAsyncLaunch(JsonElement payload, JsonElement response, string caller, HookContext context)
+    {
+        string? toolUseId = GetString(payload, "tool_use_id");
+        string? agentId = GetString(response, "agentId");
+        string? sessionId = GetString(payload, "session_id");
+        if (_engine is not IBackgroundDispatchEngine background)
+        {
+            return;
+        }
+
+        if (string.IsNullOrWhiteSpace(agentId) || string.IsNullOrWhiteSpace(sessionId))
+        {
+            context.Log.WriteLine(
+                $"Arbiter: background launch of agent '{agentId ?? "(none)"}' in session '{sessionId ?? "(none)"}' " +
+                "is not recorded; a launch needs both an agent id and a session id.");
+            return;
+        }
+
+        // The engine saves the dispatch in the Arbiter's own state: each hook event is a separate process,
+        // so nothing here may keep it in memory.
+        background.TrackBackgroundDispatch(
+            new BackgroundDispatch(
+                Token,
+                sessionId,
+                agentId,
+                caller,
+                SubagentTypeOf(payload),
+                PromptOf(payload),
+                toolUseId),
+            context);
+    }
+
+    /// <summary>Renders a post-dispatch decision as the harness's answer text.</summary>
+    private static string RenderPostOutcome(HookOutcome outcome) =>
+        outcome.Kind switch
         {
             HookOutcomeKind.PassThrough => string.Empty,
             HookOutcomeKind.Allow => string.Empty,
@@ -539,7 +550,6 @@ public sealed class ClaudeHookAdapter : IHarnessHookAdapter
             _ => throw new InvalidOperationException(
                 $"Hook engine returned pre-dispatch outcome '{outcome.Kind}' for a post-dispatch event."),
         };
-    }
 
     /// <summary>
     /// A completed dispatch whose result is only Claude Code's delivery notice, with no report kept for its agent yet.

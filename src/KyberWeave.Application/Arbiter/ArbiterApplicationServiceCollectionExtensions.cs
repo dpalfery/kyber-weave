@@ -26,6 +26,28 @@ public static class ArbiterApplicationServiceCollectionExtensions
     /// <returns>The same collection, for chaining.</returns>
     internal static IServiceCollection AddWeaveArbiterApplication(this IServiceCollection services)
     {
+        RegisterArbiterCoreServices(services);
+        RegisterArbiterFactServices(services);
+        services.TryAddSingleton<IArbiterPlanService, ArbiterPlanService>();
+        services.TryAddSingleton<IArbiterTuneService, ArbiterTuneService>();
+        services.TryAddSingleton<IArbiterAuditService, ArbiterAuditService>();
+        services.TryAddSingleton<IArbiterDoctorService, ArbiterDoctorService>();
+        services.TryAddSingleton<IArbiterInstallService, ArbiterInstallService>();
+        services.TryAddSingleton<IArbiterRepositoryLocator, Core.Arbiter.ArbiterRepositoryLocator>();
+        services.TryAddSingleton<IArbiterUninstaller, KyberWeave.Application.Arbiter.ArbiterUninstaller>();
+        services.TryAddSingleton<IArbiterHarnessGating, KyberWeave.Application.Arbiter.ArbiterHarnessGating>();
+        services.TryAddSingleton<IArbiterInstallLifecycle>(sp => new Core.Arbiter.ArbiterInstallLifecycle(() =>
+            Squad.SquadServiceCollectionExtensions.CreateLifecycle(
+                sp,
+                sp.GetService<ISquadInstanceReleaseSource>() ?? sp.GetRequiredService<ISquadReleaseSource>())));
+        _ = services.AddWeaveArbiterHookHost();
+        return services;
+    }
+
+    /// <summary>Registers the Arbiter's state, provider and settings collaborators.</summary>
+    /// <param name="services">The collection to populate.</param>
+    private static void RegisterArbiterCoreServices(IServiceCollection services)
+    {
         services.TryAddSingleton<IArbiterStateFactory>(sp => new FileArbiterStateFactory(
             sp.GetRequiredService<IArbiterLogStore>(),
             sp.GetRequiredService<IFileSystem>(),
@@ -48,6 +70,12 @@ public static class ArbiterApplicationServiceCollectionExtensions
         services.TryAddSingleton<IArbiterModelTargetsReader>(sp => new FileArbiterModelTargetsReader(sp.GetRequiredService<IFileSystem>()));
         services.TryAddSingleton<IArbiterUserSettings>(sp => new FileArbiterUserSettings(sp.GetRequiredService<IFileSystem>()));
         services.TryAddSingleton<IArbiterUserOverrideWriter>(sp => new FileArbiterUserOverrideWriter(sp.GetRequiredService<IWritableFileSystem>()));
+    }
+
+    /// <summary>Registers the fact readers and the plan/hook-run resolvers they feed.</summary>
+    /// <param name="services">The collection to populate.</param>
+    private static void RegisterArbiterFactServices(IServiceCollection services)
+    {
         services.TryAddSingleton<IFileTextFacts>(sp => new FileTextFacts(
             sp.GetRequiredService<IRepositoryFileStore>(),
             sp.GetRequiredService<IPathResolver>(),
@@ -75,20 +103,6 @@ public static class ArbiterApplicationServiceCollectionExtensions
             sp.GetRequiredService<IProcessEnvironment>(),
             sp.GetRequiredService<IRunStateStore>(),
             sp.GetRequiredService<ICheckedOutBranchReader>()));
-        services.TryAddSingleton<IArbiterPlanService, ArbiterPlanService>();
-        services.TryAddSingleton<IArbiterTuneService, ArbiterTuneService>();
-        services.TryAddSingleton<IArbiterAuditService, ArbiterAuditService>();
-        services.TryAddSingleton<IArbiterDoctorService, ArbiterDoctorService>();
-        services.TryAddSingleton<IArbiterInstallService, ArbiterInstallService>();
-        services.TryAddSingleton<IArbiterRepositoryLocator, Core.Arbiter.ArbiterRepositoryLocator>();
-        services.TryAddSingleton<IArbiterUninstaller, KyberWeave.Application.Arbiter.ArbiterUninstaller>();
-        services.TryAddSingleton<IArbiterHarnessGating, KyberWeave.Application.Arbiter.ArbiterHarnessGating>();
-        services.TryAddSingleton<IArbiterInstallLifecycle>(sp => new Core.Arbiter.ArbiterInstallLifecycle(() =>
-            Squad.SquadServiceCollectionExtensions.CreateLifecycle(
-                sp,
-                sp.GetService<ISquadInstanceReleaseSource>() ?? sp.GetRequiredService<ISquadReleaseSource>())));
-        _ = services.AddWeaveArbiterHookHost();
-        return services;
     }
 
     /// <summary>

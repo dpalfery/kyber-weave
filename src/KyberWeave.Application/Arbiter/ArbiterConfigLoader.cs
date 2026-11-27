@@ -80,11 +80,6 @@ public static class ArbiterConfigLoader
     /// <summary>The prefix every shipped rule id carries. Host rules must not use it.</summary>
     internal const string ShippedIdPrefix = "KW-ARB-";
 
-    /// <summary>The upper bound on <c>arbiter.stores.max-item-bytes</c>: one mebibyte.</summary>
-    private const int MaxStoreItemBytesLimit = 1_048_576;
-
-    private static readonly string[] ModelTargetingModes = ["off", "shadow", "enforce"];
-
     /// <summary>Shipped rules whose shadow state <c>arbiter.model-targeting.mode</c> owns.</summary>
     private static readonly HashSet<string> ModelTargetingRuleIds = new(StringComparer.Ordinal)
     {
@@ -168,53 +163,10 @@ public static class ArbiterConfigLoader
         IReadOnlyDictionary<string, ArbiterRule> shippedById = baseRules
             .GroupBy(rule => rule.Id, StringComparer.Ordinal)
             .ToDictionary(group => group.Key, group => group.First(), StringComparer.Ordinal);
-        List<ArbiterRule> rules = new(baseRules.Count + (section?.Rules?.Count ?? 0));
-        HashSet<string> overridden = new(StringComparer.Ordinal);
-        HashSet<string> seenHost = new(StringComparer.Ordinal);
         List<ArbiterRule> hostRules = [];
+        HashSet<string> overridden = CollectHostRules(section, shippedById, hostRules);
 
-        if (section?.Rules is not null)
-        {
-            foreach (ArbiterRuleYaml entry in section.Rules)
-            {
-                string id = entry.Id?.Trim() ?? string.Empty;
-                if (string.IsNullOrEmpty(id))
-                    throw new YamlException(
-                        $"[{RuleValidator.MalformedSection}] arbiter.rules has an entry with no id. Every rule needs one.");
-
-                if (id.Contains(RuleValidator.ExpansionSeparator, StringComparison.Ordinal))
-                    throw new YamlException(
-                        $"[{RuleValidator.MalformedSection}] rule '{id}' contains '{RuleValidator.ExpansionSeparator}', which names a for-each question. Host rule ids may not contain it.");
-
-                if (entry.Shadow is not null && ModelTargetingRuleIds.Contains(id))
-                    throw new YamlException(
-                        $"[{RuleValidator.ShadowOwnedByMode}] rule '{id}' sets shadow, but arbiter.model-targeting.mode owns its shadow state. Set the mode instead.");
-
-                if (!seenHost.Add(id))
-                    throw new YamlException(
-                        $"[{RuleValidator.DuplicateOrReservedId}] arbiter.rules declares '{id}' more than once.");
-
-                if (shippedById.ContainsKey(id))
-                {
-                    string? violation = FindOverrideViolation(entry);
-                    if (violation is not null)
-                        throw new YamlException(violation);
-                    overridden.Add(id);
-                }
-                else
-                {
-                    if (id.StartsWith(ShippedIdPrefix, StringComparison.Ordinal))
-                        throw new YamlException(
-                            $"[{RuleValidator.DuplicateOrReservedId}] rule '{id}' uses the reserved '{ShippedIdPrefix}' prefix. " +
-                            "Host rules use their own ids, without that prefix.");
-                    CheckHostSavingsFields(id, entry);
-                    if (!TryConvertRules(entry, out IReadOnlyList<ArbiterRule>? hostConverted, out string? error))
-                        throw new YamlException($"[{RuleValidator.MalformedSection}] {error}");
-                    hostRules.AddRange(hostConverted);
-                }
-            }
-        }
-
+        List<ArbiterRule> rules = new(baseRules.Count + hostRules.Count);
         foreach (ArbiterRule shipped in baseRules)
         {
             rules.Add(overridden.Contains(shipped.Id)
@@ -223,7 +175,77 @@ public static class ArbiterConfigLoader
         }
 
         rules.AddRange(hostRules);
-        ArbiterModelTargetingConfig modelTargeting = MergeModelTargeting(defaults.ModelTargeting, section?.ModelTargeting);
+        return Compose(defaults, section, enabled, rules, testFilePatterns, folderParents, lensPaths, folderFindings);
+    }
+
+    /// <summary>
+    /// Validates the host's <c>arbiter.rules</c> entries, collecting the ids that override a shipped rule and the
+    /// host rules that extend it. A malformed entry throws the same <see cref="YamlException"/> the loader always did.
+    /// </summary>
+    private static HashSet<string> CollectHostRules(
+        ArbiterYamlSection? section,
+        IReadOnlyDictionary<string, ArbiterRule> shippedById,
+        List<ArbiterRule> hostRules)
+    {
+        HashSet<string> overridden = new(StringComparer.Ordinal);
+        HashSet<string> seenHost = new(StringComparer.Ordinal);
+        if (section?.Rules is null)
+            return overridden;
+
+        foreach (ArbiterRuleYaml entry in section.Rules)
+        {
+            string id = entry.Id?.Trim() ?? string.Empty;
+            if (string.IsNullOrEmpty(id))
+                throw new YamlException(
+                    $"[{RuleValidator.MalformedSection}] arbiter.rules has an entry with no id. Every rule needs one.");
+
+            if (id.Contains(RuleValidator.ExpansionSeparator, StringComparison.Ordinal))
+                throw new YamlException(
+                    $"[{RuleValidator.MalformedSection}] rule '{id}' contains '{RuleValidator.ExpansionSeparator}', which names a for-each question. Host rule ids may not contain it.");
+
+            if (entry.Shadow is not null && ModelTargetingRuleIds.Contains(id))
+                throw new YamlException(
+                    $"[{RuleValidator.ShadowOwnedByMode}] rule '{id}' sets shadow, but arbiter.model-targeting.mode owns its shadow state. Set the mode instead.");
+
+            if (!seenHost.Add(id))
+                throw new YamlException(
+                    $"[{RuleValidator.DuplicateOrReservedId}] arbiter.rules declares '{id}' more than once.");
+
+            if (shippedById.ContainsKey(id))
+            {
+                string? violation = FindOverrideViolation(entry);
+                if (violation is not null)
+                    throw new YamlException(violation);
+                overridden.Add(id);
+            }
+            else
+            {
+                if (id.StartsWith(ShippedIdPrefix, StringComparison.Ordinal))
+                    throw new YamlException(
+                        $"[{RuleValidator.DuplicateOrReservedId}] rule '{id}' uses the reserved '{ShippedIdPrefix}' prefix. " +
+                        "Host rules use their own ids, without that prefix.");
+                CheckHostSavingsFields(id, entry);
+                if (!TryConvertRules(entry, out IReadOnlyList<ArbiterRule>? hostConverted, out string? error))
+                    throw new YamlException($"[{RuleValidator.MalformedSection}] {error}");
+                hostRules.AddRange(hostConverted);
+            }
+        }
+
+        return overridden;
+    }
+
+    /// <summary>Builds the merged configuration from the folded folders, the host rules and the remaining sections.</summary>
+    private static ArbiterConfig Compose(
+        ArbiterConfig defaults,
+        ArbiterYamlSection? section,
+        bool enabled,
+        List<ArbiterRule> rules,
+        IReadOnlyList<string> testFilePatterns,
+        IReadOnlyDictionary<string, string> folderParents,
+        IReadOnlyList<ArbiterLensPathEntry> lensPaths,
+        IReadOnlyList<Diagnostic> folderFindings)
+    {
+        ArbiterModelTargetingConfig modelTargeting = ArbiterConfigMergeSupport.MergeModelTargeting(defaults.ModelTargeting, section?.ModelTargeting);
 
         return new ArbiterConfig
         {
@@ -236,10 +258,10 @@ public static class ArbiterConfigLoader
             LensPaths = lensPaths,
             ModelTargeting = modelTargeting,
             RuleFolderFindings = folderFindings,
-            Stores = MergeStores(defaults.Stores, section?.Stores),
-            CommentTriage = MergeCommentTriage(defaults.CommentTriage, section?.CommentTriage),
-            DispatchBudget = MergeDispatchBudget(defaults.DispatchBudget, section?.DispatchBudget, "dispatch-budget"),
-            SeatBudget = MergeDispatchBudget(defaults.SeatBudget, section?.SeatBudget, "seat-budget"),
+            Stores = ArbiterConfigMergeSupport.MergeStores(defaults.Stores, section?.Stores),
+            CommentTriage = ArbiterConfigMergeSupport.MergeCommentTriage(defaults.CommentTriage, section?.CommentTriage),
+            DispatchBudget = ArbiterConfigMergeSupport.MergeDispatchBudget(defaults.DispatchBudget, section?.DispatchBudget, "dispatch-budget"),
+            SeatBudget = ArbiterConfigMergeSupport.MergeDispatchBudget(defaults.SeatBudget, section?.SeatBudget, "seat-budget"),
         };
     }
 
@@ -309,73 +331,7 @@ public static class ArbiterConfigLoader
     /// fails to parse or an empty set is a build error, because a partial shipped catalogue
     /// would silently stop enforcing rules.
     /// </remarks>
-    internal static ArbiterConfig LoadEmbeddedDefaults()
-    {
-        Assembly assembly = typeof(ArbiterConfigLoader).Assembly;
-        List<ArbiterRule> rules = [];
-        List<string> testFilePatterns = [];
-        List<ArbiterLensPathEntry> lensPaths = [];
-
-        foreach (string resource in EmbeddedRulesResources)
-        {
-            using Stream? stream = assembly.GetManifestResourceStream(resource);
-            if (stream is null)
-            {
-                throw new InvalidOperationException(
-                    $"Embedded resource '{resource}' is missing. " +
-                    "The project must embed the three role arbiter-rules files.");
-            }
-
-            string yaml;
-            using (StreamReader reader = new(stream, Encoding.UTF8))
-                yaml = reader.ReadToEnd();
-
-            ArbiterDefaultRulesYaml? document;
-            try
-            {
-                document = MarkdownFrontmatterReader.Deserializer.Deserialize<ArbiterDefaultRulesYaml>(yaml);
-            }
-            catch (YamlException exception)
-            {
-                throw new InvalidOperationException(
-                    $"Embedded resource '{resource}' is not valid YAML: {exception.Message}",
-                    exception);
-            }
-
-            if (document?.Rules is not null)
-            {
-                foreach (ArbiterRuleYaml entry in document.Rules)
-                {
-                    if (!TryConvertRules(entry, out IReadOnlyList<ArbiterRule>? converted, out string? error))
-                    {
-                        throw new InvalidOperationException(
-                            $"Embedded resource '{resource}' is invalid: {error}");
-                    }
-
-                    rules.AddRange(converted);
-                }
-            }
-
-            if (document?.TestFilePatterns is not null)
-                testFilePatterns.AddRange(document.TestFilePatterns);
-
-            if (document?.LensPaths is not null)
-                lensPaths.AddRange(ParseLensPaths(document.LensPaths));
-        }
-
-        if (rules.Count == 0)
-        {
-            throw new InvalidOperationException(
-                "The embedded role arbiter-rules files declare no rules.");
-        }
-
-        return new ArbiterConfig
-        {
-            TestFilePatterns = testFilePatterns,
-            LensPaths = lensPaths,
-            Rules = rules,
-        };
-    }
+    internal static ArbiterConfig LoadEmbeddedDefaults() => ArbiterEmbeddedDefaultsLoader.Load(EmbeddedRulesResources);
 
     /// <summary>
     /// Reads the host's role folders over <paramref name="shipped"/> and adds every declared technology's folder.
@@ -1189,26 +1145,7 @@ public static class ArbiterConfigLoader
         }
 
         if (hasAll || hasAny)
-        {
-            List<ArbiterWhenYaml> children = (hasAll ? when.All : when.Any)!;
-            if (children.Count == 0)
-            {
-                error = "an all/any combinator needs at least one child predicate.";
-                return false;
-            }
-
-            List<RulePredicate> childPredicates = new(children.Count);
-            foreach (ArbiterWhenYaml child in children)
-            {
-                if (!TryConvertWhen(child, out RulePredicate? childPredicate, out error))
-                    return false;
-                childPredicates.Add(childPredicate);
-            }
-
-            predicate = hasAll ? RulePredicate.All([.. childPredicates]) : RulePredicate.Any([.. childPredicates]);
-            error = null;
-            return true;
-        }
+            return TryConvertCombinator(when, hasAll, out predicate, out error);
 
         if (hasNot)
         {
@@ -1219,6 +1156,44 @@ public static class ArbiterConfigLoader
             return true;
         }
 
+        return TryConvertLeaf(when, out predicate, out error);
+    }
+
+    /// <summary>Converts an <c>all</c> or <c>any</c> combinator's children into their combined predicate.</summary>
+    private static bool TryConvertCombinator(
+        ArbiterWhenYaml when,
+        bool hasAll,
+        [NotNullWhen(true)] out RulePredicate? predicate,
+        out string? error)
+    {
+        predicate = null;
+        List<ArbiterWhenYaml> children = hasAll ? when.All! : when.Any!;
+        if (children.Count == 0)
+        {
+            error = "an all/any combinator needs at least one child predicate.";
+            return false;
+        }
+
+        List<RulePredicate> childPredicates = new(children.Count);
+        foreach (ArbiterWhenYaml child in children)
+        {
+            if (!TryConvertWhen(child, out RulePredicate? childPredicate, out error))
+                return false;
+            childPredicates.Add(childPredicate);
+        }
+
+        predicate = hasAll ? RulePredicate.All([.. childPredicates]) : RulePredicate.Any([.. childPredicates]);
+        error = null;
+        return true;
+    }
+
+    /// <summary>Converts a single fact-and-operator predicate.</summary>
+    private static bool TryConvertLeaf(
+        ArbiterWhenYaml when,
+        [NotNullWhen(true)] out RulePredicate? predicate,
+        out string? error)
+    {
+        predicate = null;
         if (string.IsNullOrWhiteSpace(when.Fact))
         {
             error = "a when names one fact and one operator; the fact is missing.";
@@ -1441,110 +1416,6 @@ public static class ArbiterConfigLoader
         }
     }
 
-    private static ArbiterModelTargetingConfig MergeModelTargeting(
-        ArbiterModelTargetingConfig defaults,
-        ArbiterModelTargetingYaml? section)
-    {
-        if (section is null)
-            return defaults;
-
-        string mode = defaults.Mode;
-        if (section.Mode is not null)
-        {
-            mode = section.Mode.Trim();
-            if (!ModelTargetingModes.Contains(mode, StringComparer.Ordinal))
-            {
-                throw new YamlException(
-                    $"[{RuleValidator.ModelTargetingInvalid}] arbiter.model-targeting.mode '{section.Mode}' is not a mode. " +
-                    $"Use one of: {string.Join(", ", ModelTargetingModes)}.");
-            }
-        }
-
-        Dictionary<string, string> difficulty = new(defaults.DifficultyProfiles, StringComparer.Ordinal);
-        if (section.DifficultyProfiles is not null)
-        {
-            throw new YamlException(
-                $"[{RuleValidator.ModelTargetingInvalid}] arbiter.model-targeting.difficulty-profiles is not read: " +
-                "the shipped developer tiers fix the table. Remove the key. " +
-                $"The shipped table is easy: {TierProfiles.Default.DifficultyProfiles["easy"]}, " +
-                $"standard: {TierProfiles.Default.DifficultyProfiles["standard"]}, " +
-                $"hard: {TierProfiles.Default.DifficultyProfiles["hard"]}.");
-        }
-
-        if (section.Ladder is not null)
-        {
-            throw new YamlException(
-                $"[{RuleValidator.ModelTargetingInvalid}] arbiter.model-targeting.ladder is not read: " +
-                "the shipped developer tiers fix the ladder. Remove the key. " +
-                $"The shipped ladder is {string.Join(", ", TierProfiles.Default.Ladder)}.");
-        }
-
-        return new ArbiterModelTargetingConfig(mode, difficulty, defaults.Ladder);
-    }
-
-    private static ArbiterStoresConfig MergeStores(ArbiterStoresConfig defaults, ArbiterStoresYaml? section)
-    {
-        if (section is null)
-            return defaults;
-
-        int maxItemBytes = section.MaxItemBytes ?? defaults.MaxItemBytes;
-        if (maxItemBytes is < 1 or > MaxStoreItemBytesLimit)
-        {
-            throw new YamlException(
-                $"[{RuleValidator.SavingsValueInvalid}] arbiter.stores.max-item-bytes must be between 1 and {MaxStoreItemBytesLimit} bytes.");
-        }
-
-        int retainDays = section.RetainDays ?? defaults.RetainDays;
-        if (retainDays < 1)
-            throw new YamlException($"[{RuleValidator.SavingsValueInvalid}] arbiter.stores.retain-days must be at least 1.");
-
-        return new ArbiterStoresConfig(maxItemBytes, retainDays);
-    }
-
-    private static ArbiterDispatchBudgetConfig MergeDispatchBudget(
-        ArbiterDispatchBudgetConfig defaults,
-        ArbiterDispatchBudgetYaml? section,
-        string key)
-    {
-        if (section is null)
-            return defaults;
-
-        int minutes = section.Minutes ?? defaults.Minutes;
-        int toolCalls = section.ToolCalls ?? defaults.ToolCalls;
-        int callMinutes = section.CallMinutes ?? defaults.CallMinutes;
-        if (minutes < 1 || toolCalls < 1 || callMinutes < 1)
-        {
-            throw new YamlException(
-                $"[{RuleValidator.SavingsValueInvalid}] arbiter.{key}.minutes, tool-calls and call-minutes must each be at least 1, " +
-                $"e.g. {{ minutes: {defaults.Minutes}, tool-calls: {defaults.ToolCalls}, call-minutes: {defaults.CallMinutes} }}.");
-        }
-
-        return new ArbiterDispatchBudgetConfig(minutes, toolCalls, callMinutes);
-    }
-
-    private static ArbiterCommentTriageConfig MergeCommentTriage(
-        ArbiterCommentTriageConfig defaults,
-        ArbiterCommentTriageYaml? section)
-    {
-        if (section?.BotLogins is null)
-            return defaults;
-
-        List<string> logins = [];
-        foreach (string? login in section.BotLogins)
-        {
-            string trimmed = login?.Trim() ?? string.Empty;
-            if (trimmed.Length == 0)
-            {
-                throw new YamlException(
-                    $"[{RuleValidator.SavingsValueInvalid}] arbiter.comment-triage.bot-logins has a blank login. Remove it or name the bot.");
-            }
-
-            logins.Add(trimmed);
-        }
-
-        // A list replaces the default rather than appending to it.
-        return new ArbiterCommentTriageConfig([.. logins.Distinct(StringComparer.Ordinal)]);
-    }
 
     private static ArbiterProviderConfig MergeProvider(ArbiterProviderConfig defaults, ArbiterProviderYaml? section)
     {
@@ -1577,7 +1448,7 @@ public static class ArbiterConfigLoader
                 $"arbiter.provider.kind '{kind}' is not supported. Use none or systemone."),
         };
 
-    private static IReadOnlyList<ArbiterLensPathEntry> ParseLensPaths(List<ArbiterLensPathYaml>? entries)
+    internal static IReadOnlyList<ArbiterLensPathEntry> ParseLensPaths(List<ArbiterLensPathYaml>? entries)
     {
         if (entries is null)
             return [];
@@ -1618,6 +1489,195 @@ public static class ArbiterConfigLoader
         return merged;
     }
 }
+
+/// <summary>The per-section mergers that fold the host YAML over the shipped defaults.</summary>
+internal static class ArbiterConfigMergeSupport
+{
+    /// <summary>The model-targeting modes the host may name.</summary>
+    internal static readonly string[] ModelTargetingModes = ["off", "shadow", "enforce"];
+
+    /// <summary>The upper bound on <c>arbiter.stores.max-item-bytes</c>: one mebibyte.</summary>
+    private const int MaxStoreItemBytesLimit = 1_048_576;
+
+    internal static ArbiterModelTargetingConfig MergeModelTargeting(
+        ArbiterModelTargetingConfig defaults,
+        ArbiterModelTargetingYaml? section)
+    {
+        if (section is null)
+            return defaults;
+
+        string mode = defaults.Mode;
+        if (section.Mode is not null)
+        {
+            mode = section.Mode.Trim();
+            if (!ModelTargetingModes.Contains(mode, StringComparer.Ordinal))
+            {
+                throw new YamlException(
+                    $"[{RuleValidator.ModelTargetingInvalid}] arbiter.model-targeting.mode '{section.Mode}' is not a mode. " +
+                    $"Use one of: {string.Join(", ", ModelTargetingModes)}.");
+            }
+        }
+
+        Dictionary<string, string> difficulty = new(defaults.DifficultyProfiles, StringComparer.Ordinal);
+        if (section.DifficultyProfiles is not null)
+        {
+            throw new YamlException(
+                $"[{RuleValidator.ModelTargetingInvalid}] arbiter.model-targeting.difficulty-profiles is not read: " +
+                "the shipped developer tiers fix the table. Remove the key. " +
+                $"The shipped table is easy: {TierProfiles.Default.DifficultyProfiles["easy"]}, " +
+                $"standard: {TierProfiles.Default.DifficultyProfiles["standard"]}, " +
+                $"hard: {TierProfiles.Default.DifficultyProfiles["hard"]}.");
+        }
+
+        if (section.Ladder is not null)
+        {
+            throw new YamlException(
+                $"[{RuleValidator.ModelTargetingInvalid}] arbiter.model-targeting.ladder is not read: " +
+                "the shipped developer tiers fix the ladder. Remove the key. " +
+                $"The shipped ladder is {string.Join(", ", TierProfiles.Default.Ladder)}.");
+        }
+
+        return new ArbiterModelTargetingConfig(mode, difficulty, defaults.Ladder);
+    }
+
+    internal static ArbiterStoresConfig MergeStores(ArbiterStoresConfig defaults, ArbiterStoresYaml? section)
+    {
+        if (section is null)
+            return defaults;
+
+        int maxItemBytes = section.MaxItemBytes ?? defaults.MaxItemBytes;
+        if (maxItemBytes is < 1 or > MaxStoreItemBytesLimit)
+        {
+            throw new YamlException(
+                $"[{RuleValidator.SavingsValueInvalid}] arbiter.stores.max-item-bytes must be between 1 and {MaxStoreItemBytesLimit} bytes.");
+        }
+
+        int retainDays = section.RetainDays ?? defaults.RetainDays;
+        if (retainDays < 1)
+            throw new YamlException($"[{RuleValidator.SavingsValueInvalid}] arbiter.stores.retain-days must be at least 1.");
+
+        return new ArbiterStoresConfig(maxItemBytes, retainDays);
+    }
+
+    internal static ArbiterDispatchBudgetConfig MergeDispatchBudget(
+        ArbiterDispatchBudgetConfig defaults,
+        ArbiterDispatchBudgetYaml? section,
+        string key)
+    {
+        if (section is null)
+            return defaults;
+
+        int minutes = section.Minutes ?? defaults.Minutes;
+        int toolCalls = section.ToolCalls ?? defaults.ToolCalls;
+        int callMinutes = section.CallMinutes ?? defaults.CallMinutes;
+        if (minutes < 1 || toolCalls < 1 || callMinutes < 1)
+        {
+            throw new YamlException(
+                $"[{RuleValidator.SavingsValueInvalid}] arbiter.{key}.minutes, tool-calls and call-minutes must each be at least 1, " +
+                $"e.g. {{ minutes: {defaults.Minutes}, tool-calls: {defaults.ToolCalls}, call-minutes: {defaults.CallMinutes} }}.");
+        }
+
+        return new ArbiterDispatchBudgetConfig(minutes, toolCalls, callMinutes);
+    }
+
+    internal static ArbiterCommentTriageConfig MergeCommentTriage(
+        ArbiterCommentTriageConfig defaults,
+        ArbiterCommentTriageYaml? section)
+    {
+        if (section?.BotLogins is null)
+            return defaults;
+
+        List<string> logins = [];
+        foreach (string? login in section.BotLogins)
+        {
+            string trimmed = login?.Trim() ?? string.Empty;
+            if (trimmed.Length == 0)
+            {
+                throw new YamlException(
+                    $"[{RuleValidator.SavingsValueInvalid}] arbiter.comment-triage.bot-logins has a blank login. Remove it or name the bot.");
+            }
+
+            logins.Add(trimmed);
+        }
+
+        // A list replaces the default rather than appending to it.
+        return new ArbiterCommentTriageConfig([.. logins.Distinct(StringComparer.Ordinal)]);
+    }
+}
+
+
+/// <summary>Reads the shipped role rules from the assembly's embedded resources.</summary>
+internal static class ArbiterEmbeddedDefaultsLoader
+{
+    internal static ArbiterConfig Load(IReadOnlyList<string> resources)
+    {
+        Assembly assembly = typeof(ArbiterConfigLoader).Assembly;
+        List<ArbiterRule> rules = [];
+        List<string> testFilePatterns = [];
+        List<ArbiterLensPathEntry> lensPaths = [];
+
+        foreach (string resource in resources)
+        {
+            using Stream? stream = assembly.GetManifestResourceStream(resource);
+            if (stream is null)
+            {
+                throw new InvalidOperationException(
+                    $"Embedded resource '{resource}' is missing. " +
+                    "The project must embed the three role arbiter-rules files.");
+            }
+
+            string yaml;
+            using (StreamReader reader = new(stream, Encoding.UTF8))
+                yaml = reader.ReadToEnd();
+
+            ArbiterDefaultRulesYaml? document;
+            try
+            {
+                document = MarkdownFrontmatterReader.Deserializer.Deserialize<ArbiterDefaultRulesYaml>(yaml);
+            }
+            catch (YamlException exception)
+            {
+                throw new InvalidOperationException(
+                    $"Embedded resource '{resource}' is not valid YAML: {exception.Message}",
+                    exception);
+            }
+
+            if (document?.Rules is not null)
+            {
+                foreach (ArbiterRuleYaml entry in document.Rules)
+                {
+                    if (!ArbiterConfigLoader.TryConvertRules(entry, out IReadOnlyList<ArbiterRule>? converted, out string? error))
+                    {
+                        throw new InvalidOperationException(
+                            $"Embedded resource '{resource}' is invalid: {error}");
+                    }
+
+                    rules.AddRange(converted);
+                }
+            }
+
+            if (document?.TestFilePatterns is not null)
+                testFilePatterns.AddRange(document.TestFilePatterns);
+
+            if (document?.LensPaths is not null)
+                lensPaths.AddRange(ArbiterConfigLoader.ParseLensPaths(document.LensPaths));
+        }
+
+        if (rules.Count == 0)
+        {
+            throw new InvalidOperationException(
+                "The embedded role arbiter-rules files declare no rules.");
+        }
+
+        return new ArbiterConfig
+        {
+            TestFilePatterns = testFilePatterns,
+            LensPaths = lensPaths,
+            Rules = rules,
+        };
+    }
+}
+
 
 /// <summary>The top-level shape of one embedded role <c>arbiter-rules.yml</c>.</summary>
 internal sealed class ArbiterDefaultRulesYaml

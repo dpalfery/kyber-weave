@@ -114,121 +114,21 @@ public sealed class ArbiterInstallService(
         bool needsKey = providerKind == ArbiterProviderKind.Systemone
                         && !IsLoopbackEndpoint(endpoint);
 
-        string? keyToStore = NullIfEmpty(request.ArbiterKey);
-        if (needsKey && keyToStore is null && request.KeyStdin)
-            keyToStore = NullIfEmpty(ReadStdinKey());
-
-        if (needsKey && keyToStore is null)
-        {
-            if (!string.IsNullOrEmpty(ResolveStoredKey(endpoint, repositoryConfig, effectiveProvider)))
-            {
-                keyToStore = null;
-            }
-            else
-            {
-                string? prompted = request.KeyStdin ? null : NullIfEmpty(ReadPromptedKey());
-                if (!string.IsNullOrEmpty(prompted))
-                {
-                    keyToStore = prompted;
-                }
-                else
-                {
-                    events.Add(new ArbiterInstallError(
-                        $"{ArbiterKeyResolver.MissingKeyCode}: A remote provider is configured, " +
-                        $"and no key resolves for origin '{origin}'. " +
-                        "Run with --arbiter-key, --key-stdin, or export " +
-                        $"{ArbiterKeyResolver.EnvVarName}."));
-                    return StopPrepared(2, events);
-                }
-            }
-        }
+        (bool keyStop, string? keyToStore) = ResolveKeyToStore(
+            request, needsKey, endpoint, origin, repositoryConfig, effectiveProvider, events);
+        if (keyStop)
+            return StopPrepared(2, events);
 
         string? existingStored = needsKey ? ReadStoredKey(origin) : null;
         bool keyWriteNeeded = needsKey
                               && !string.IsNullOrEmpty(keyToStore)
                               && !string.Equals(existingStored, keyToStore, StringComparison.Ordinal);
 
-        if (isProjectScope
-            && !request.DryRun
-            && string.IsNullOrWhiteSpace(request.ConfigOption)
-            && FindConfigPath(root) is null)
-        {
-            try
-            {
-                scaffolder.Scaffold(root);
-            }
-            catch (Exception ex) when (FileFailure.Is(ex) || ex is InvalidOperationException)
-            {
-                events.Add(new ArbiterInstallError($"The documentation scaffold could not be created: {ex.Message}"));
-                return StopPrepared(1, events);
-            }
-        }
-
         SquadDeploymentScope scope = isProjectScope ? SquadDeploymentScope.Project : SquadDeploymentScope.Global;
-        string configPath;
-        string? existingText;
-        string desiredText;
-        bool configChanged;
-
-        if (isProjectScope)
-        {
-            configPath = ResolveConfigPath(root, request.ConfigOption);
-            existingText = ReadConfigText(configPath, events);
-            if (existingText is null)
-                return StopPrepared(1, events);
-
-            try
-            {
-                desiredText = HostConfigYaml.WithArbiterProviderKind(
-                    HostConfigYaml.WithArbiterEnabled(existingText),
-                    kindName);
-            }
-            catch (InvalidDataException ex)
-            {
-                events.Add(new ArbiterInstallError(ex.Message));
-                return StopPrepared(1, events);
-            }
-
-            configChanged = !string.Equals(desiredText, existingText, StringComparison.Ordinal);
-        }
-        else
-        {
-            configPath = UserHostConfigPath.Of(root);
-            if (files.FileExists(configPath))
-            {
-                existingText = files.ReadAllText(configPath);
-            }
-            else if (request.DryRun)
-            {
-                existingText = string.Empty;
-            }
-            else
-            {
-                existingText = userConfig.EnsureUserConfig(root);
-            }
-
-            List<string> globalTargets = [.. userConfig.ReadGlobalTargets(root)];
-            if (!globalTargets.Any(token => string.Equals(token, request.TargetToken, StringComparison.OrdinalIgnoreCase)))
-            {
-                globalTargets.Add(request.TargetToken);
-            }
-
-            try
-            {
-                desiredText = HostConfigYaml.WithArbiterGlobalTargets(
-                    HostConfigYaml.WithArbiterProviderKind(
-                        HostConfigYaml.WithArbiterEnabled(existingText),
-                        kindName),
-                    globalTargets);
-            }
-            catch (InvalidDataException ex)
-            {
-                events.Add(new ArbiterInstallError(ex.Message));
-                return StopPrepared(1, events);
-            }
-
-            configChanged = !string.Equals(desiredText, existingText, StringComparison.Ordinal);
-        }
+        (bool configStop, string configPath, string desiredText, bool configChanged) =
+            PrepareConfigText(root, request, isProjectScope, kindName, events);
+        if (configStop)
+            return StopPrepared(1, events);
 
         if (!SquadTargetCatalog.TryResolve(request.TargetToken, out SquadTarget target))
         {
@@ -274,6 +174,147 @@ public sealed class ArbiterInstallService(
                 needsKey,
                 endpoint,
                 existingReceipt));
+    }
+
+    /// <summary>
+    /// Resolves the key the install stores: the request's own, then the piped or prompted one; a key already in the
+    /// credential store needs no rewrite. <c>Stop</c> is set when the remote provider has no key to resolve.
+    /// </summary>
+    private (bool Stop, string? KeyToStore) ResolveKeyToStore(
+        ArbiterInstallRequest request,
+        bool needsKey,
+        string endpoint,
+        string origin,
+        KyberWeaveConfig repositoryConfig,
+        ArbiterProviderConfig effectiveProvider,
+        List<ArbiterInstallEvent> events)
+    {
+        string? keyToStore = NullIfEmpty(request.ArbiterKey);
+        if (needsKey && keyToStore is null && request.KeyStdin)
+            keyToStore = NullIfEmpty(ReadStdinKey());
+
+        if (!needsKey || keyToStore is not null)
+            return (false, keyToStore);
+
+        if (!string.IsNullOrEmpty(ResolveStoredKey(endpoint, repositoryConfig, effectiveProvider)))
+            return (false, null);
+
+        string? prompted = request.KeyStdin ? null : NullIfEmpty(ReadPromptedKey());
+        if (!string.IsNullOrEmpty(prompted))
+            return (false, prompted);
+
+        events.Add(new ArbiterInstallError(
+            $"{ArbiterKeyResolver.MissingKeyCode}: A remote provider is configured, " +
+            $"and no key resolves for origin '{origin}'. " +
+            "Run with --arbiter-key, --key-stdin, or export " +
+            $"{ArbiterKeyResolver.EnvVarName}."));
+        return (true, null);
+    }
+
+    /// <summary>
+    /// Works out the config text the install writes: scaffolds the docs on a bare project root, reads the existing
+    /// file, and folds the Arbiter settings in. <c>Stop</c> is set when the file cannot be read or written.
+    /// </summary>
+    private (bool Stop, string ConfigPath, string DesiredText, bool ConfigChanged) PrepareConfigText(
+        string root,
+        ArbiterInstallRequest request,
+        bool isProjectScope,
+        string kindName,
+        List<ArbiterInstallEvent> events)
+    {
+        if (isProjectScope
+            && !request.DryRun
+            && string.IsNullOrWhiteSpace(request.ConfigOption)
+            && FindConfigPath(root) is null)
+        {
+            try
+            {
+                scaffolder.Scaffold(root);
+            }
+            catch (Exception ex) when (FileFailure.Is(ex) || ex is InvalidOperationException)
+            {
+                events.Add(new ArbiterInstallError($"The documentation scaffold could not be created: {ex.Message}"));
+                return (true, string.Empty, string.Empty, false);
+            }
+        }
+
+        return isProjectScope
+            ? PrepareProjectConfigText(root, request, kindName, events)
+            : PrepareGlobalConfigText(root, request, kindName, events);
+    }
+
+    /// <summary>The project-scope config text: the existing file with the Arbiter's enabled flag and provider kind set.</summary>
+    private (bool Stop, string ConfigPath, string DesiredText, bool ConfigChanged) PrepareProjectConfigText(
+        string root,
+        ArbiterInstallRequest request,
+        string kindName,
+        List<ArbiterInstallEvent> events)
+    {
+        string configPath = ResolveConfigPath(root, request.ConfigOption);
+        string? existingText = ReadConfigText(configPath, events);
+        if (existingText is null)
+            return (true, configPath, string.Empty, false);
+
+        string desiredText;
+        try
+        {
+            desiredText = HostConfigYaml.WithArbiterProviderKind(
+                HostConfigYaml.WithArbiterEnabled(existingText),
+                kindName);
+        }
+        catch (InvalidDataException ex)
+        {
+            events.Add(new ArbiterInstallError(ex.Message));
+            return (true, configPath, string.Empty, false);
+        }
+
+        return (false, configPath, desiredText, !string.Equals(desiredText, existingText, StringComparison.Ordinal));
+    }
+
+    /// <summary>The global-scope config text: the user config with the target added and the Arbiter's settings set.</summary>
+    private (bool Stop, string ConfigPath, string DesiredText, bool ConfigChanged) PrepareGlobalConfigText(
+        string root,
+        ArbiterInstallRequest request,
+        string kindName,
+        List<ArbiterInstallEvent> events)
+    {
+        string configPath = UserHostConfigPath.Of(root);
+        string existingText;
+        if (files.FileExists(configPath))
+        {
+            existingText = files.ReadAllText(configPath);
+        }
+        else if (request.DryRun)
+        {
+            existingText = string.Empty;
+        }
+        else
+        {
+            existingText = userConfig.EnsureUserConfig(root);
+        }
+
+        List<string> globalTargets = [.. userConfig.ReadGlobalTargets(root)];
+        if (!globalTargets.Any(token => string.Equals(token, request.TargetToken, StringComparison.OrdinalIgnoreCase)))
+        {
+            globalTargets.Add(request.TargetToken);
+        }
+
+        string desiredText;
+        try
+        {
+            desiredText = HostConfigYaml.WithArbiterGlobalTargets(
+                HostConfigYaml.WithArbiterProviderKind(
+                    HostConfigYaml.WithArbiterEnabled(existingText),
+                    kindName),
+                globalTargets);
+        }
+        catch (InvalidDataException ex)
+        {
+            events.Add(new ArbiterInstallError(ex.Message));
+            return (true, configPath, string.Empty, false);
+        }
+
+        return (false, configPath, desiredText, !string.Equals(desiredText, existingText, StringComparison.Ordinal));
     }
 
     /// <inheritdoc />
