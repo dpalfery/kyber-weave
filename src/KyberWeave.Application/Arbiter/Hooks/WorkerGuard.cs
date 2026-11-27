@@ -138,8 +138,9 @@ public sealed class WorkerGuard(
                 stdout.Write(WorkerGuardRules.Deny(harness, reason));
             }
         }
-        catch (Exception ex)
+        catch (Exception ex) when (ex is not OutOfMemoryException && ex is not OperationCanceledException)
         {
+            // Hook entry point: any error allows, and the log says why (ADR 0072).
             TryLog(log, $"{HookCommand.FailClosedCode}: worker guard could not decide ({WorkerGuardRules.OneLine(ex.Message)}); the tool call continues.");
         }
 
@@ -534,7 +535,7 @@ public sealed class WorkerGuard(
         {
             log.WriteLine(message);
         }
-        catch (Exception)
+        catch (Exception ex) when (ex is IOException or ObjectDisposedException)
         {
             // The log is best effort.
         }
