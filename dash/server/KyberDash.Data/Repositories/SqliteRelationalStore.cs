@@ -748,6 +748,38 @@ public partial class SqliteRelationalStore : BaseSqliteRepository, IRelationalSt
         rebuildCallback?.Invoke();
     }
 
+    private static string GuardedText(string tableName, string columnName, string? value)
+    {
+        if (value is null)
+        {
+            throw new DashValidationException(
+                ConstraintViolatedCode,
+                $"Required TEXT column '{tableName}.{columnName}' cannot be null.");
+        }
+
+        if (JsonDocumentText.IsDocument(value))
+        {
+            throw new DashValidationException(
+                JsonTextRefusedCode,
+                $"Refused JSON object or array text in '{tableName}.{columnName}'.");
+        }
+
+        return value;
+    }
+
+    private static string GuardedNonEmptyText(string tableName, string columnName, string? value)
+    {
+        string text = GuardedText(tableName, columnName, value);
+        if (text.Length == 0)
+        {
+            throw new DashValidationException(
+                ConstraintViolatedCode,
+                $"Non-empty TEXT column '{tableName}.{columnName}' cannot be empty.");
+        }
+
+        return text;
+    }
+
     private static string GuardedTextExpr(string tableName, string columnName, string? value)
     {
         if (value is null)
