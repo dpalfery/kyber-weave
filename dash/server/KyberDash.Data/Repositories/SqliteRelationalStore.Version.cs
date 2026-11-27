@@ -3,7 +3,6 @@ using System.Collections.Generic;
 using System.Globalization;
 using System.IO;
 using System.Linq;
-using System.Text;
 using System.Threading;
 using KyberDash.Core.Repositories;
 using KyberDash.Domain.Schema;
@@ -276,19 +275,15 @@ public partial class SqliteRelationalStore
     private void ApplyWalPragmasAndStoreState()
     {
         string storeStateDdl = SchemaDdlGenerator.GenerateTableDdl(RelationalSchemaCatalog.GetTable("store_state"));
-        string journalMode = "PRAGMA journal_mode = WAL;\n";
-        string synchronous = "PRAGMA synchronous = NORMAL;\n";
-        string sizeLimit = $"PRAGMA journal_size_limit = {IntSql(WalSizeLimitBytes)};\n";
 
-        if (GetType() != typeof(SqliteRelationalStore))
-        {
-            CircuitBreaker.Execute(() => ExecuteSqliteCore(journalMode + synchronous + sizeLimit + storeStateDdl));
-            return;
-        }
-
-        // Journal mode cannot change inside a transaction, so the pragmas run as one script and the
+        // Journal mode cannot change inside a transaction, so the pragmas run without one and the
         // table DDL that follows runs through the transactional statement path.
-        CircuitBreaker.Execute(() => ExecuteSqliteCore(journalMode + synchronous + sizeLimit));
+        ExecuteStatementsWithoutTransaction(
+        [
+            SqlStatement.Of("PRAGMA journal_mode = WAL;\n"),
+            SqlStatement.Of("PRAGMA synchronous = NORMAL;\n"),
+            SqlStatement.Of($"PRAGMA journal_size_limit = {IntSql(WalSizeLimitBytes)};\n"),
+        ]);
         ExecuteStatements([SqlStatement.Of(storeStateDdl)]);
     }
 
@@ -297,20 +292,6 @@ public partial class SqliteRelationalStore
         string schemaDdl = SchemaDdlGenerator.GenerateSchemaDdl();
         string stampSql =
             $"INSERT OR IGNORE INTO store_state (singleton_id, schema_version, detector_version) VALUES (1, $schemaVersion, $detectorVersion);\n";
-
-        if (GetType() != typeof(SqliteRelationalStore))
-        {
-            StringBuilder script = new();
-            script.Append("PRAGMA foreign_keys = ON;\n");
-            script.Append("BEGIN IMMEDIATE;\n");
-            script.Append(schemaDdl);
-            script.Append(
-                CultureInfo.InvariantCulture,
-                $"INSERT OR IGNORE INTO store_state (singleton_id, schema_version, detector_version) VALUES (1, {IntSql(SchemaVersion)}, {IntSql(DetectorVersion)});\n");
-            script.Append("COMMIT;\n");
-            CircuitBreaker.Execute(() => ExecuteSqliteCore(script.ToString()));
-            return;
-        }
 
         SqlStatement schemaStatement = SqlStatement.Of(schemaDdl);
         SqlStatement stampStatement = new(
@@ -323,71 +304,36 @@ public partial class SqliteRelationalStore
         ExecuteStatements([schemaStatement, stampStatement]);
     }
 
-    private IReadOnlyList<string> ReadNameRows(string sql)
-    {
-        if (GetType() == typeof(SqliteRelationalStore))
-        {
-            return Query<string>(
-                sql,
-                EmptyParameters(),
-                static reader => reader.GetString(reader.GetOrdinal("name")));
-        }
+    private IReadOnlyList<string> ReadNameRows(string sql) =>
+        QueryRows<string>(
+            sql,
+            EmptyParameters(),
+            static reader => reader.GetString(reader.GetOrdinal("name")));
 
-        return ReadScriptedRows(sql);
-    }
+    private IReadOnlyList<string> ReadSchemaVersionRows(string sql) =>
+        QueryRows<string>(
+            sql,
+            EmptyParameters(),
+            static reader =>
+            {
+                object version = reader.GetValue(reader.GetOrdinal("schema_version"));
+                object detectorVersion = reader.GetValue(reader.GetOrdinal("detector_version"));
+                return Convert.ToString(version, CultureInfo.InvariantCulture) +
+                    "\t" +
+                    Convert.ToString(detectorVersion, CultureInfo.InvariantCulture);
+            });
 
-    private IReadOnlyList<string> ReadSchemaVersionRows(string sql)
-    {
-        if (GetType() == typeof(SqliteRelationalStore))
-        {
-            return Query<string>(
-                sql,
-                EmptyParameters(),
-                static reader =>
-                {
-                    object version = reader.GetValue(reader.GetOrdinal("schema_version"));
-                    object detectorVersion = reader.GetValue(reader.GetOrdinal("detector_version"));
-                    return Convert.ToString(version, CultureInfo.InvariantCulture) +
-                        "\t" +
-                        Convert.ToString(detectorVersion, CultureInfo.InvariantCulture);
-                });
-        }
-
-        return ReadScriptedRows(sql);
-    }
-
-    private IReadOnlyList<string> ReadValueRows(string sql)
-    {
-        if (GetType() == typeof(SqliteRelationalStore))
-        {
-            return Query<string>(
-                sql,
-                EmptyParameters(),
-                static reader => Convert.ToString(
-                    reader.GetValue(reader.GetOrdinal("value")),
-                    CultureInfo.InvariantCulture) ?? string.Empty);
-        }
-
-        return ReadScriptedRows(sql);
-    }
-
-    private IReadOnlyList<string> ReadScriptedRows(string sql)
-    {
-        string output = CircuitBreaker.Execute(() => ExecuteSqliteCore(".headers off\n.mode tabs\n" + sql));
-        return output
-            .Replace("\r", string.Empty, StringComparison.Ordinal)
-            .Split('\n', StringSplitOptions.RemoveEmptyEntries);
-    }
+    private IReadOnlyList<string> ReadValueRows(string sql) =>
+        QueryRows<string>(
+            sql,
+            EmptyParameters(),
+            static reader => Convert.ToString(
+                reader.GetValue(reader.GetOrdinal("value")),
+                CultureInfo.InvariantCulture) ?? string.Empty);
 
     private void ExecuteSchemaBody(string bodySql)
     {
-        if (GetType() == typeof(SqliteRelationalStore))
-        {
-            ExecuteStatements([SqlStatement.Of(bodySql)]);
-            return;
-        }
-
-        CircuitBreaker.Execute(() => ExecuteSqliteCore("BEGIN IMMEDIATE;\n" + bodySql + "COMMIT;\n"));
+        ExecuteStatements([SqlStatement.Of(bodySql)]);
     }
 
     private static Dictionary<string, object?> EmptyParameters() => new(StringComparer.Ordinal);

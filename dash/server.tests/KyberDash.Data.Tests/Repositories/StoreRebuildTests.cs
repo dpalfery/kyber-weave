@@ -2,9 +2,12 @@ using System;
 using System.Collections.Generic;
 using System.Globalization;
 using System.IO;
+using System.Text;
+using KyberDash.Core.Repositories;
 using KyberDash.Core.Resilience;
 using KyberDash.Data.Repositories;
 using KyberDash.Domain.Schema;
+using Microsoft.Data.Sqlite;
 using Xunit;
 
 namespace KyberDash.Data.Tests.Repositories;
@@ -44,8 +47,6 @@ public class StoreRebuildTests
             log: logs.Add);
         store.EnqueueResponse(discoveredTable);
         store.EnqueueResponse(versionQueryResponse);
-        store.EnqueueResponse(string.Empty);
-        store.EnqueueResponse(string.Empty);
 
         store.EnsureInitialized();
 
@@ -82,13 +83,13 @@ public class StoreRebuildTests
         Assert.Contains("unevidenced (zcode)", logs[0], StringComparison.Ordinal);
         Assert.Contains("re-ingest", logs[0], StringComparison.OrdinalIgnoreCase);
 
-        Assert.Equal(4, store.ExecutedSql.Count);
+        Assert.Equal(5, store.ExecutedSql.Count);
         AssertZeroDataRowReads(store);
         string probeSql = NormalizeLineEndings(store.ExecutedSql[0]);
         Assert.Contains("sqlite_master", probeSql, StringComparison.Ordinal);
         string pragmaSql = NormalizeLineEndings(store.ExecutedSql[2]);
         Assert.Contains("PRAGMA journal_mode = WAL;", pragmaSql, StringComparison.Ordinal);
-        string ddlSql = NormalizeLineEndings(store.ExecutedSql[3]);
+        string ddlSql = NormalizeLineEndings(store.ExecutedSql[4]);
         Assert.Contains(NormalizeLineEndings(SchemaDdlGenerator.GenerateSchemaDdl()).Trim(), ddlSql, StringComparison.Ordinal);
         Assert.Contains(
             $"INSERT OR IGNORE INTO store_state (singleton_id, schema_version, detector_version) VALUES (1, {SqliteRelationalStore.SchemaVersion.ToString(CultureInfo.InvariantCulture)}, {SqliteRelationalStore.DetectorVersion.ToString(CultureInfo.InvariantCulture)});",
@@ -119,14 +120,12 @@ public class StoreRebuildTests
             log: logs.Add);
         store.EnqueueResponse("store_state");
         store.EnqueueResponse("24\t5");
-        store.EnqueueResponse(string.Empty);
-        store.EnqueueResponse(string.Empty);
 
         store.EnsureInitialized();
 
         Assert.True(callbackRan);
         Assert.True(store.RebuiltFromOlderSchema);
-        Assert.Equal(4, store.ExecutedSql.Count);
+        Assert.Equal(5, store.ExecutedSql.Count);
         Assert.False(Directory.Exists(rootDir));
     }
 
@@ -146,8 +145,6 @@ public class StoreRebuildTests
             log: logs.Add);
         store.EnqueueResponse("metadata");
         store.EnqueueResponse("24");
-        store.EnqueueResponse(string.Empty);
-        store.EnqueueResponse(string.Empty);
 
         store.EnsureInitialized();
 
@@ -180,8 +177,6 @@ public class StoreRebuildTests
             onRebuiltFromOlderSchema: () => rebuildCallbackInvoked = true);
         store.EnqueueResponse("store_state");
         store.EnqueueResponse("24\t5");
-        store.EnqueueResponse(string.Empty);
-        store.EnqueueResponse(string.Empty);
 
         store.EnsureInitialized();
 
@@ -377,15 +372,81 @@ public class StoreRebuildTests
 
         public void EnqueueResponse(string response) => queuedResponses.Enqueue(response);
 
-        protected override string ExecuteSqliteCore(string sql)
+        protected override IReadOnlyList<T> QueryRows<T>(
+            string sql,
+            IReadOnlyDictionary<string, object?> parameters,
+            Func<SqliteDataReader, T> map)
+        {
+            executedSql.Add(sql);
+            if (sql.Contains("PRAGMA", StringComparison.OrdinalIgnoreCase))
+            {
+                return [];
+            }
+
+            if (queuedResponses.Count > 0)
+            {
+                string response = queuedResponses.Dequeue();
+                if (typeof(T) == typeof(string))
+                {
+                    return response.Length == 0
+                        ? []
+                        : (IReadOnlyList<T>)(object)new List<string> { response };
+                }
+            }
+
+            return [];
+        }
+
+        protected override void ExecuteStatements(IReadOnlyList<SqlStatement> statements)
         {
             if (!FileSystem.FileExists(DatabasePath))
             {
                 EnsureDatabaseDirectory();
             }
 
-            executedSql.Add(sql);
-            return queuedResponses.Count > 0 ? queuedResponses.Dequeue() : string.Empty;
+            StringBuilder script = new();
+            script.Append("BEGIN IMMEDIATE;\n");
+            foreach (SqlStatement statement in statements)
+            {
+                script.Append(RenderStatement(statement));
+            }
+
+            script.Append("COMMIT;\n");
+            executedSql.Add(script.ToString());
         }
+
+        protected override void ExecuteStatementsWithoutTransaction(IReadOnlyList<SqlStatement> statements)
+        {
+            StringBuilder script = new();
+            foreach (SqlStatement statement in statements)
+            {
+                script.Append(RenderStatement(statement));
+            }
+
+            executedSql.Add(script.ToString());
+        }
+
+        private static string RenderStatement(SqlStatement statement)
+        {
+            string sql = statement.Sql;
+            string[] names = [.. statement.Parameters.Keys];
+            Array.Sort(names, static (left, right) => right.Length.CompareTo(left.Length));
+            foreach (string name in names)
+            {
+                sql = sql.Replace(name, RenderParameterLiteral(statement.Parameters[name]), StringComparison.Ordinal);
+            }
+
+            return sql;
+        }
+
+        private static string RenderParameterLiteral(object? value) => value switch
+        {
+            null => "NULL",
+            string text => $"X'{Convert.ToHexString(Encoding.UTF8.GetBytes(text))}' || ''",
+            byte[] bytes => $"X'{Convert.ToHexString(bytes)}'",
+            double real => real.ToString("G17", CultureInfo.InvariantCulture),
+            IFormattable formattable => formattable.ToString(null, CultureInfo.InvariantCulture),
+            _ => value.ToString() ?? "NULL",
+        };
     }
 }

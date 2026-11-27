@@ -18,8 +18,8 @@ namespace KyberDash.Data.Repositories;
 
 /// <summary>
 /// SQLite-backed implementation of <see cref="IRelationalStoreWriter"/> and the write half of
-/// <see cref="IProjectionStore"/>, executing DDL initialization and transactional hex-encoded
-/// SQL batches through <see cref="BaseSqliteRepository.ExecuteSqliteCore"/>.
+/// <see cref="IProjectionStore"/>, executing DDL initialization and transactional parameterized
+/// SQL statement batches through the base repository.
 /// </summary>
 public partial class SqliteRelationalStore : BaseSqliteRepository, IRelationalStoreWriter, IProjectionStore
 {
@@ -657,19 +657,29 @@ public partial class SqliteRelationalStore : BaseSqliteRepository, IRelationalSt
     }
 
     /// <summary>
-    /// Ensures the parent directory exists before delegating to <see cref="BaseSqliteRepository.ExecuteSqliteCore"/>,
-    /// so test subclasses overriding <see cref="ExecuteSqliteCore"/> touch zero filesystem entries.
+    /// Ensures the parent directory exists before a statement or query opens the database file, so
+    /// a read or write on a store whose file does not yet exist never fails on a missing directory.
     /// </summary>
-    /// <param name="sql">Complete SQL script passed to <c>sqlite3</c>.</param>
-    /// <returns>Standard output captured from <c>sqlite3</c>.</returns>
-    protected override string ExecuteSqliteCore(string sql)
+    protected void EnsureDatabaseDirectoryIfMissing()
     {
         if (!fileSystem.FileExists(DatabasePath))
         {
             EnsureDatabaseDirectory();
         }
+    }
 
-        return base.ExecuteSqliteCore(sql);
+    /// <inheritdoc />
+    protected override void ExecuteStatements(IReadOnlyList<SqlStatement> statements)
+    {
+        EnsureDatabaseDirectoryIfMissing();
+        base.ExecuteStatements(statements);
+    }
+
+    /// <inheritdoc />
+    protected override void ExecuteStatementsWithoutTransaction(IReadOnlyList<SqlStatement> statements)
+    {
+        EnsureDatabaseDirectoryIfMissing();
+        base.ExecuteStatementsWithoutTransaction(statements);
     }
 
     private static string ResolveDatabasePath(DashOptions options)
@@ -777,52 +787,11 @@ public partial class SqliteRelationalStore : BaseSqliteRepository, IRelationalSt
                 initialized = true;
             }
 
-            if (GetType() == typeof(SqliteRelationalStore))
-            {
-                ExecuteStatements(statements);
-            }
-            else
-            {
-                // A subclass overrides ExecuteSqliteCore to script or inspect SQL, so honour that
-                // seam by rendering the parameterized statements into one script for it.
-                StringBuilder script = new();
-                script.Append("PRAGMA foreign_keys = ON;\n");
-                script.Append("BEGIN IMMEDIATE;\n");
-                foreach (SqlStatement statement in statements)
-                {
-                    script.Append(RenderStatement(statement));
-                }
-
-                script.Append("COMMIT;\n");
-                CircuitBreaker.Execute(() => ExecuteSqliteCore(script.ToString()));
-            }
+            ExecuteStatements(statements);
         }
 
         rebuildCallback?.Invoke();
     }
-
-    private static string RenderStatement(SqlStatement statement)
-    {
-        string sql = statement.Sql;
-        string[] names = [.. statement.Parameters.Keys];
-        Array.Sort(names, static (left, right) => right.Length.CompareTo(left.Length));
-        foreach (string name in names)
-        {
-            sql = sql.Replace(name, RenderParameterLiteral(statement.Parameters[name]), StringComparison.Ordinal);
-        }
-
-        return sql;
-    }
-
-    private static string RenderParameterLiteral(object? value) => value switch
-    {
-        null => "NULL",
-        string text => $"X'{Convert.ToHexString(Encoding.UTF8.GetBytes(text))}' || ''",
-        byte[] bytes => $"X'{Convert.ToHexString(bytes)}'",
-        double real => real.ToString("G17", CultureInfo.InvariantCulture),
-        IFormattable formattable => formattable.ToString(null, CultureInfo.InvariantCulture),
-        _ => value.ToString() ?? "NULL",
-    };
 
     private void ExecuteTransaction(string bodySql)
     {
@@ -836,19 +805,7 @@ public partial class SqliteRelationalStore : BaseSqliteRepository, IRelationalSt
                 initialized = true;
             }
 
-            if (GetType() == typeof(SqliteRelationalStore))
-            {
-                ExecuteStatements([SqlStatement.Of(bodySql)]);
-            }
-            else
-            {
-                StringBuilder script = new(bodySql.Length + 64);
-                script.Append("PRAGMA foreign_keys = ON;\n");
-                script.Append("BEGIN IMMEDIATE;\n");
-                script.Append(bodySql);
-                script.Append("COMMIT;\n");
-                CircuitBreaker.Execute(() => ExecuteSqliteCore(script.ToString()));
-            }
+            ExecuteStatements([SqlStatement.Of(bodySql)]);
         }
 
         rebuildCallback?.Invoke();

@@ -1,5 +1,3 @@
-using System.Globalization;
-using System.Text;
 using KyberDash.Core.Exceptions;
 using KyberDash.Core.Resilience;
 using Microsoft.Data.Sqlite;
@@ -64,80 +62,9 @@ public abstract class BaseSqliteRepository
         this.busyAttempts = busyAttempts;
     }
 
-    /// <summary>Executes a single SQLite batch run without modifying circuit-breaker state directly.</summary>
-    protected virtual string ExecuteSqliteCore(string sql)
-    {
-        ArgumentNullException.ThrowIfNull(sql);
-        EnsureSqliteProviderInitialized();
-
-        string cleanedSql = StripCliDotCommands(sql);
-        if (string.IsNullOrWhiteSpace(cleanedSql))
-            return string.Empty;
-
-        string connectionString = BuildConnectionString();
-
-        for (int attempt = 1; attempt <= busyAttempts; attempt++)
-        {
-            try
-            {
-                using SqliteConnection connection = new(connectionString);
-                connection.Open();
-
-                using SqliteCommand command = CreateCommand(connection, cleanedSql);
-                command.CommandTimeout = Math.Max(1, (int)Math.Ceiling(batchTimeout.TotalSeconds));
-
-                using SqliteDataReader reader = command.ExecuteReader();
-                StringBuilder sb = new();
-                bool hasMore = true;
-                while (hasMore)
-                {
-                    while (reader.Read())
-                    {
-                        for (int i = 0; i < reader.FieldCount; i++)
-                        {
-                            if (i > 0)
-                                sb.Append('\t');
-                            if (!reader.IsDBNull(i))
-                            {
-                                object value = reader.GetValue(i);
-                                if (value is byte[] bytes)
-                                    sb.Append(Convert.ToHexString(bytes));
-                                else
-                                    sb.Append(Convert.ToString(value, CultureInfo.InvariantCulture));
-                            }
-                        }
-                        sb.Append('\n');
-                    }
-                    hasMore = reader.NextResult();
-                }
-
-                return sb.ToString();
-            }
-            catch (SqliteException ex) when (ex.SqliteErrorCode is SqliteBusyResultCode or SqliteLockedResultCode)
-            {
-                if (attempt < busyAttempts)
-                {
-                    Thread.Sleep(50 * attempt);
-                    continue;
-                }
-                throw new SqliteExecutionException($"sqlite3 error {ex.SqliteErrorCode}: {ex.Message}", ex.SqliteErrorCode, ex.Message);
-            }
-            catch (SqliteException ex)
-            {
-                throw new SqliteExecutionException($"sqlite3 error {ex.SqliteErrorCode}: {ex.Message}", ex.SqliteErrorCode, ex.Message);
-            }
-            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
-            {
-                throw new SqliteExecutionException($"Database access error: {ex.Message}", ex);
-            }
-        }
-
-        throw new SqliteExecutionException("The canonical store operation did not complete.");
-    }
-
     /// <summary>Executes parameterized statements in one immediate transaction through the circuit breaker.</summary>
     /// <param name="statements">Statements to run, each binding its values by <c>$name</c> parameter.</param>
-    protected void ExecuteStatements(IReadOnlyList<SqlStatement> statements)
+    protected virtual void ExecuteStatements(IReadOnlyList<SqlStatement> statements)
     {
         ArgumentNullException.ThrowIfNull(statements);
         CircuitBreaker.Execute(() => ExecuteStatementsCore(statements));
@@ -157,6 +84,31 @@ public abstract class BaseSqliteRepository
         ArgumentNullException.ThrowIfNull(parameters);
         ArgumentNullException.ThrowIfNull(map);
         return CircuitBreaker.Execute(() => QueryCore(sql, parameters, map));
+    }
+
+    /// <summary>
+    /// Executes parameterized statements through the circuit breaker without opening a transaction,
+    /// for statements SQLite refuses inside one (journal-mode pragmas).
+    /// </summary>
+    /// <param name="statements">Statements to run in order, each binding its values by <c>$name</c> parameter.</param>
+    protected virtual void ExecuteStatementsWithoutTransaction(IReadOnlyList<SqlStatement> statements)
+    {
+        ArgumentNullException.ThrowIfNull(statements);
+        CircuitBreaker.Execute(() => ExecuteStatementsWithoutTransactionCore(statements));
+    }
+
+    private void ExecuteStatementsWithoutTransactionCore(IReadOnlyList<SqlStatement> statements)
+    {
+        EnsureSqliteProviderInitialized();
+        ExecuteWithRetry(BuildConnectionString(), connection =>
+        {
+            foreach (SqlStatement statement in statements)
+            {
+                ExecuteCommand(connection, statement.Sql, statement.Parameters);
+            }
+
+            return true;
+        });
     }
 
     private void ExecuteStatementsCore(IReadOnlyList<SqlStatement> statements)
@@ -304,21 +256,4 @@ public abstract class BaseSqliteRepository
         }
     }
 
-    private static string StripCliDotCommands(string sql)
-    {
-        string[] lines = sql.Split('\n');
-        StringBuilder sb = new();
-        foreach (string line in lines)
-        {
-            string trimmed = line.TrimStart();
-            if (trimmed.StartsWith('.'))
-                continue;
-            sb.AppendLine(line);
-        }
-        return sb.ToString().Trim();
-    }
-
-    /// <summary>Decodes hex-encoded UTF-8 bytes returned by SQLite's hexadecimal text projection.</summary>
-    protected static string DecodeHexText(string hex) =>
-        Encoding.UTF8.GetString(Convert.FromHexString(hex));
 }

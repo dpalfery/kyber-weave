@@ -6,10 +6,12 @@ using KyberDash.Contracts.Repositories;
 using KyberDash.Contracts.Services;
 using KyberDash.Core;
 using KyberDash.Core.Exceptions;
+using KyberDash.Core.Repositories;
 using KyberDash.Core.Resilience;
 using KyberDash.Data.Collector;
 using KyberDash.Data.Repositories;
 using KyberDash.Domain;
+using Microsoft.Data.Sqlite;
 using Microsoft.Extensions.DependencyInjection;
 using Moq;
 using Xunit;
@@ -608,12 +610,7 @@ public static class SettingsCleanDoctorReportTests
                 log: _ => { });
             store.EnqueueResponse("store_state");
             store.EnqueueResponse("24\t5");
-            store.EnqueueResponse(string.Empty);
-            store.EnqueueResponse(string.Empty);
             store.EnsureInitialized();
-            store.EnqueueResponse("0");
-            store.EnqueueResponse(string.Empty);
-            store.EnqueueResponse(string.Empty);
             Mock<ICircuitBreaker> breaker = new();
             breaker.SetupGet(candidate => candidate.State).Returns(DashCircuitState.Closed);
 
@@ -677,8 +674,14 @@ public static class SettingsCleanDoctorReportTests
         private sealed class FreelistSqliteRelationalStore(string databasePath, ICircuitBreaker circuitBreaker)
             : SqliteRelationalStore(databasePath, circuitBreaker)
         {
-            public long FreelistPageCount() =>
-                long.Parse(ExecuteSqliteCore("PRAGMA freelist_count;\n").Trim(), CultureInfo.InvariantCulture);
+            public long FreelistPageCount()
+            {
+                IReadOnlyList<long> rows = QueryRows<long>(
+                    "PRAGMA freelist_count;\n",
+                    new Dictionary<string, object?>(StringComparer.Ordinal),
+                    static reader => reader.GetInt64(reader.GetOrdinal("freelist_count")));
+                return rows.Count == 0 ? 0L : rows[0];
+            }
         }
 
         [Fact]
@@ -758,14 +761,41 @@ public static class SettingsCleanDoctorReportTests
 
             public void EnqueueResponse(string response) => queuedResponses.Enqueue(response);
 
-            protected override string ExecuteSqliteCore(string sql)
+            protected override IReadOnlyList<T> QueryRows<T>(
+                string sql,
+                IReadOnlyDictionary<string, object?> parameters,
+                Func<SqliteDataReader, T> map)
             {
-                if (!FileSystem.FileExists(DatabasePath))
+                if (sql.Contains("PRAGMA", StringComparison.OrdinalIgnoreCase))
                 {
-                    EnsureDatabaseDirectory();
+                    return [];
                 }
 
-                return queuedResponses.Count > 0 ? queuedResponses.Dequeue() : string.Empty;
+                if (queuedResponses.Count > 0)
+                {
+                    string response = queuedResponses.Dequeue();
+                    if (typeof(T) == typeof(string))
+                    {
+                        return response.Length == 0
+                            ? []
+                            : (IReadOnlyList<T>)(object)new List<string> { response };
+                    }
+                }
+
+                if (typeof(T) == typeof(int))
+                {
+                    return (IReadOnlyList<T>)(object)new List<int> { 0 };
+                }
+
+                return [];
+            }
+
+            protected override void ExecuteStatements(IReadOnlyList<SqlStatement> statements)
+            {
+            }
+
+            protected override void ExecuteStatementsWithoutTransaction(IReadOnlyList<SqlStatement> statements)
+            {
             }
         }
     }

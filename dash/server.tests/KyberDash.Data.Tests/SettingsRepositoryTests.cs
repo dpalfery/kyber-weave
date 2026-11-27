@@ -6,6 +6,7 @@ using KyberDash.Core.Resilience;
 using KyberDash.Data.Collector;
 using KyberDash.Data.Repositories;
 using KyberDash.Domain;
+using Microsoft.Data.Sqlite;
 using Xunit;
 
 namespace KyberDash.Data.Tests;
@@ -42,16 +43,16 @@ public sealed class SettingsRepositoryTests : IDisposable
     }
 
     [Theory]
-    [InlineData("yes please\t0\t5\t0\t4747\n")]
-    [InlineData("0\t0\t1e3\t0\t4747\n")]
-    [InlineData("0\t0\t5\tON\t4747\n")]
-    [InlineData("0\t0\t5\t0\tnotanint\n")]
+    [InlineData("yes please\t0\t5\t0\t4747")]
+    [InlineData("0\t0\t3.5\t0\t4747")]
+    [InlineData("0\t0\t5\tON\t4747")]
+    [InlineData("0\t0\t5\t0\tnotanint")]
     public void ReadSettings_FailsClosedOnCorruptCellsFromSqliteRelationalStore(string scriptedRow)
     {
         ScriptedSqliteRelationalStore scripted = new(
             Path.Combine(directory.Path, "corrupt.db"),
             new SqliteCircuitBreaker());
-        scripted.EnqueueResponse(scriptedRow);
+        scripted.EnqueueSettingsRow(scriptedRow);
         SettingsRepository repository = new(scripted);
 
         Assert.Throws<StoredDataException>(() => repository.ReadSettings());
@@ -74,8 +75,8 @@ public sealed class SettingsRepositoryTests : IDisposable
     }
 
     [Theory]
-    [InlineData("0\t1\t0\t1\t65536\n", false, true, true)]
-    [InlineData("1\t0\t1441\t0\t-1\n", true, false, false)]
+    [InlineData("0\t1\t0\t1\t65536", false, true, true)]
+    [InlineData("1\t0\t1441\t0\t-1", true, false, false)]
     public void ReadSettings_ClampsOutOfRangeSqliteIntegersToDefaults(
         string scriptedRow,
         bool expectedFolderImport,
@@ -85,7 +86,7 @@ public sealed class SettingsRepositoryTests : IDisposable
         ScriptedSqliteRelationalStore scripted = new(
             Path.Combine(directory.Path, "out-of-range.db"),
             new SqliteCircuitBreaker());
-        scripted.EnqueueResponse(scriptedRow);
+        scripted.EnqueueSettingsRow(scriptedRow);
         SettingsRepository repository = new(scripted);
 
         SettingsView settings = repository.ReadSettings();
@@ -271,19 +272,53 @@ public sealed class SettingsRepositoryTests : IDisposable
 
     private class ScriptedSqliteRelationalStore : SqliteRelationalStore
     {
-        private readonly Queue<Func<string>> handlers = new();
+        private readonly Queue<Exception> handlers = new();
+        private readonly Queue<string> settingsRows = new();
 
         public ScriptedSqliteRelationalStore(string databasePath, ICircuitBreaker circuitBreaker)
             : base(databasePath, circuitBreaker, initialize: false)
         {
         }
 
-        public void EnqueueResponse(string response) => handlers.Enqueue(() => response);
+        public void EnqueueException(Exception exception) => handlers.Enqueue(exception);
 
-        public void EnqueueException(Exception exception) => handlers.Enqueue(() => throw exception);
+        public void EnqueueSettingsRow(string row) => settingsRows.Enqueue(row);
 
-        protected override string ExecuteSqliteCore(string sql) =>
-            handlers.Count > 0 ? handlers.Dequeue().Invoke() : string.Empty;
+        protected override IReadOnlyList<T> QueryRows<T>(
+            string sql,
+            IReadOnlyDictionary<string, object?> parameters,
+            Func<SqliteDataReader, T> map)
+        {
+            if (handlers.Count > 0)
+            {
+                throw handlers.Dequeue();
+            }
+
+            if (settingsRows.Count == 0)
+            {
+                return [];
+            }
+
+            string[] cells = settingsRows.Dequeue().Split('\t');
+            using SqliteConnection connection = new("Data Source=:memory:");
+            connection.Open();
+            using SqliteCommand command = connection.CreateCommand();
+            command.CommandText =
+                "SELECT $a AS scheduled, $b AS paused, $c AS minutes, $d AS hosted, $e AS port;";
+            command.Parameters.AddWithValue("$a", cells[0]);
+            command.Parameters.AddWithValue("$b", cells[1]);
+            command.Parameters.AddWithValue("$c", cells[2]);
+            command.Parameters.AddWithValue("$d", cells[3]);
+            command.Parameters.AddWithValue("$e", cells[4]);
+            using SqliteDataReader reader = command.ExecuteReader();
+            List<T> rows = [];
+            while (reader.Read())
+            {
+                rows.Add(map(reader));
+            }
+
+            return rows;
+        }
     }
 
     private class StubOperationalStore : IOperationalStore
