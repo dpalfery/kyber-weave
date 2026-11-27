@@ -49,7 +49,8 @@ Unique `file(line,col) id` locations from the audit build of `KyberWeave.sln` an
 | CA2227 | KW-STD-CS-003 collection setter | 4 | — | — | — | 4 | mechanical |
 
 Rules with no analyzer, as raw `grep -E` hit counts over `src` and `dash/server` (not yet sorted
-into real violations and false positives; the inventory pass does that):
+into real violations and false positives; the inventory pass does that). A backslash before a
+pipe in a pattern cell is the table's escape; the pattern the grep runs uses a plain pipe.
 
 | Rule | Pattern | Hits |
 |---|---|---|
