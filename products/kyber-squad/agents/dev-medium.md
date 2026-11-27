@@ -91,7 +91,7 @@ Use the host's indexes before raw reads.
 
 ## Completion digest
 
-Return the digest the passing task gate prints, with your commit's sha. The shape below shows the alternatives with `|`; every line you return carries exactly one of them (`STATUS: PASS`, never the whole list):
+Return the digest the passing task gate prints, with your commit's sha. The shape below shows the alternatives with `|`; every digest line that shows alternatives with `|` carries exactly one of them (`STATUS: PASS`, never the whole list):
 
 ```text
 STATUS: PASS | FAIL | ESCALATION
