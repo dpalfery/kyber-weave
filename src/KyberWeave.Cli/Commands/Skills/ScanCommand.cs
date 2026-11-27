@@ -20,6 +20,7 @@ public sealed class ScanCommand(ISkillGovernanceService skills, IAnsiConsole con
     /// <inheritdoc />
     public override int Execute(CommandContext context, ScanSettings settings, CancellationToken cancellationToken)
     {
+        ArgumentNullException.ThrowIfNull(settings);
         DiagnosticReport report = skills.Scan(settings.Path);
 
         CommandHelpers.Finish(console, report, settings, "skill scan", "Skill");

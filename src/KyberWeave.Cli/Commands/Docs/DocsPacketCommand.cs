@@ -65,6 +65,7 @@ public sealed class DocsPacketCommand(
     /// </summary>
     public override int Execute(CommandContext context, DocsPacketSettings settings, CancellationToken cancellationToken)
     {
+        ArgumentNullException.ThrowIfNull(settings);
         DiagnosticReport report = new();
         string current = CurrentDirectory(settings);
         string root = settings.Plan is null ? roots.Find(current) : plans.RepositoryRootFor(settings.Plan, current);

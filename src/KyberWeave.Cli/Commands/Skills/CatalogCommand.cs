@@ -27,6 +27,7 @@ public sealed class CatalogCommand(ISkillGovernanceService skills, IAnsiConsole 
     /// <inheritdoc />
     public override int Execute(CommandContext context, CatalogSettings settings, CancellationToken cancellationToken)
     {
+        ArgumentNullException.ThrowIfNull(settings);
         SkillSet set = skills.LoadSet(settings.Path);
         if (set.Count == 0)
         {

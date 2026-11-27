@@ -37,6 +37,7 @@ public sealed class DocsStandardsMigrateCommand(
         DocsStandardsMigrateSettings settings,
         CancellationToken cancellationToken)
     {
+        ArgumentNullException.ThrowIfNull(settings);
         DiagnosticReport report = new();
         if (!DocsCommandComposition.TryResolveConfig(
                 configs, settings, report, out KyberWeaveConfig config, out _))
