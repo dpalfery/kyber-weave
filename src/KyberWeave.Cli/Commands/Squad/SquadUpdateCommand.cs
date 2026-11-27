@@ -272,8 +272,9 @@ internal sealed class SquadUpdateCommand : Command<SquadUpdateSettings>
                 _output.WriteLine($"[red]error:[/] {Markup.Escape(ex.Message)}");
                 return 1;
             }
-            catch (Exception ex)
+            catch (Exception ex) when (ex is not OutOfMemoryException && ex is not OperationCanceledException)
             {
+                // Command boundary: a failed instance refresh is reported rather than crashing the host.
                 _output.WriteClientInputError($"Instance refresh failed: {ex.Message}");
                 return 1;
             }
@@ -483,8 +484,9 @@ internal sealed class SquadUpdateCommand : Command<SquadUpdateSettings>
             _output.WriteFailure(ex);
             return 1;
         }
-        catch (Exception ex)
+        catch (Exception ex) when (ex is not OutOfMemoryException && ex is not OperationCanceledException)
         {
+            // Command boundary: a failed update is reported as exit 1 rather than crashing the host.
             _output.WriteFailure(ex);
             return 1;
         }
