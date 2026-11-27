@@ -10,7 +10,7 @@ namespace KyberDash.Data.Tests.Repositories;
 /// <c>record_request_id</c>) are written and read back by every SQLite record read, so the
 /// projector's id join between an OTLP turn and its transcript twin sees them.
 /// </summary>
-public class RecordJoinIdTests : IDisposable
+public sealed class RecordJoinIdTests : IDisposable
 {
     private const string SessionKey = "sess-ids";
 
@@ -18,8 +18,18 @@ public class RecordJoinIdTests : IDisposable
 
     public void Dispose()
     {
-        directory.Dispose();
+        Dispose(true);
         GC.SuppressFinalize(this);
+    }
+
+    /// <summary>Deletes the scratch directory when disposing.</summary>
+    /// <param name="disposing">Whether managed state should be released.</param>
+    private void Dispose(bool disposing)
+    {
+        if (disposing)
+        {
+            directory.Dispose();
+        }
     }
 
     /// <summary>Both ids round-trip through every record read.</summary>

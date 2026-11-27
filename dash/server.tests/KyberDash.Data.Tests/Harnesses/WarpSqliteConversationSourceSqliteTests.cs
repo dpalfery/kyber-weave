@@ -13,7 +13,7 @@ namespace KyberDash.Data.Tests.Harnesses;
 /// Microsoft.Data.Sqlite adapter: which conversations are listed, the SQL filters and order of the export,
 /// and a round trip through <see cref="WarpMapper.Map"/> that yields one record per exchange.
 /// </summary>
-public class WarpSqliteConversationSourceSqliteTests : IDisposable
+public sealed class WarpSqliteConversationSourceSqliteTests : IDisposable
 {
     private const string SchemaDdl = """
         CREATE TABLE agent_conversations (conversation_id TEXT PRIMARY KEY, conversation_data TEXT, last_modified_at TEXT);
@@ -29,8 +29,18 @@ public class WarpSqliteConversationSourceSqliteTests : IDisposable
     /// <inheritdoc />
     public void Dispose()
     {
-        directory.Dispose();
+        Dispose(true);
         GC.SuppressFinalize(this);
+    }
+
+    /// <summary>Deletes the scratch directory when disposing.</summary>
+    /// <param name="disposing">Whether managed state should be released.</param>
+    private void Dispose(bool disposing)
+    {
+        if (disposing)
+        {
+            directory.Dispose();
+        }
     }
 
     [Fact]

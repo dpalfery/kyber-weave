@@ -5,7 +5,7 @@ using Xunit;
 namespace KyberDash.Data.Tests.Collector;
 
 /// <summary>Real-file tests for the bounded read of <see cref="PhysicalHarnessFileSystem"/>.</summary>
-public class PhysicalHarnessFileSystemTests : IDisposable
+public sealed class PhysicalHarnessFileSystemTests : IDisposable
 {
     private readonly string directory = Directory.CreateTempSubdirectory("kyberdash-bounded-read-").FullName;
 
@@ -31,7 +31,17 @@ public class PhysicalHarnessFileSystemTests : IDisposable
 
     public void Dispose()
     {
-        Directory.Delete(directory, recursive: true);
+        Dispose(true);
         GC.SuppressFinalize(this);
+    }
+
+    /// <summary>Deletes the scratch directory when disposing.</summary>
+    /// <param name="disposing">Whether managed state should be released.</param>
+    private void Dispose(bool disposing)
+    {
+        if (disposing)
+        {
+            Directory.Delete(directory, recursive: true);
+        }
     }
 }

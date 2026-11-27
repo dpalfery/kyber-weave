@@ -13,7 +13,7 @@ namespace KyberDash.Data.Tests.Harnesses;
 /// is written with <see cref="SqliteFixtureDatabase"/> and read through the Microsoft.Data.Sqlite adapter, so
 /// the key range, the JSON projection and the 500-character cut are proved by SQLite itself.
 /// </summary>
-public class CursorSqliteConversationSourceSqliteTests : IDisposable
+public sealed class CursorSqliteConversationSourceSqliteTests : IDisposable
 {
     private const string Ddl = "CREATE TABLE cursorDiskKV (key TEXT UNIQUE, value BLOB);";
     private static readonly DateTimeOffset BaselineUtc = new(2026, 11, 19, 12, 0, 0, TimeSpan.Zero);
@@ -23,8 +23,18 @@ public class CursorSqliteConversationSourceSqliteTests : IDisposable
     /// <inheritdoc />
     public void Dispose()
     {
-        directory.Dispose();
+        Dispose(true);
         GC.SuppressFinalize(this);
+    }
+
+    /// <summary>Deletes the scratch directory when disposing.</summary>
+    /// <param name="disposing">Whether managed state should be released.</param>
+    private void Dispose(bool disposing)
+    {
+        if (disposing)
+        {
+            directory.Dispose();
+        }
     }
 
     [Fact]
