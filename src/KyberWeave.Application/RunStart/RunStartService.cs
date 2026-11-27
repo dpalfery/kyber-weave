@@ -50,45 +50,21 @@ public sealed class RunStartService(
         KyberWeaveConfig config = request.Config;
         IRunStartRunner runner = runners.Open(repositoryRoot);
 
-        // Before the tool checks, on purpose. A worker that cannot reach the standards and gates this
-        // repository chose cannot use the tools anyway, and a tool failure reported first would send the
-        // operator to repair a remote that was never the thing standing in the way.
-        if (RunStartPlanner.NeedsOnboarding(config.ConfigReg, request.ConfigPath is not null))
+        RunStartOutcome? prerequisiteStopped = CheckPrerequisites(
+            runner,
+            config,
+            request,
+            repositoryRoot,
+            messages);
+        if (prerequisiteStopped is not null)
         {
-            return StopForOnboarding(config, request.ConfigPath, repositoryRoot);
+            return prerequisiteStopped;
         }
 
-        if (!runner.CodeGraphBinaryIsAvailable())
+        RunStartOutcome? fetchStopped = HandleFetch(runner.Fetch(), config, messages);
+        if (fetchStopped is not null)
         {
-            messages.Add(new RunStartMessage(
-                RunStartMessageKind.Error,
-                "'codegraph' is not on PATH, so the tools a run depends on cannot be indexed or tested."));
-            messages.Add(new RunStartMessage(
-                RunStartMessageKind.Remedy,
-                "install the CodeGraph CLI so that 'codegraph' resolves on PATH, then start the run again."));
-            return Stopped(RunStartStatus.CodeGraphMissing, messages);
-        }
-
-        GitOutcome fetch = runner.Fetch();
-        if (!fetch.Succeeded)
-        {
-            if (config.ConfigReg.StopsOnToolFailure)
-            {
-                messages.Add(new RunStartMessage(
-                    RunStartMessageKind.Error,
-                    $"'git fetch origin --prune' failed: {fetch.FirstErrorLine}"));
-                messages.Add(new RunStartMessage(
-                    RunStartMessageKind.Remedy,
-                    "a run that cannot refresh its base plans against stale history. Fix the remote, " +
-                    "or set 'stop-on-tool-failure: false' in .kyber-weave/kyber-weave.yml to continue from " +
-                    "the base this checkout last fetched."));
-                return Stopped(RunStartStatus.ToolFailure, messages);
-            }
-
-            messages.Add(new RunStartMessage(
-                RunStartMessageKind.Warning,
-                $"'git fetch origin --prune' failed ({fetch.FirstErrorLine}); " +
-                "continuing from the base this checkout last fetched."));
+            return fetchStopped;
         }
 
         string baseRef = RunStartPlanner.BaseRefFor(config.ConfigReg.RunBaseBranch);
@@ -112,52 +88,15 @@ public sealed class RunStartService(
         string? resumeTarget = null;
         if (resume is not null)
         {
-            string remotePrefix = RunStartPlanner.Remote + "/";
-            bool isExplicitRemote = resume.StartsWith(remotePrefix, StringComparison.Ordinal);
-            string stripped = isExplicitRemote
-                ? resume[remotePrefix.Length..]
-                : resume;
-
-            if (string.Equals(stripped, "HEAD", StringComparison.Ordinal))
+            (string resumeRefCandidate, string? resumeTargetCandidate, string? refusal) =
+                ResolveResume(runner, resume);
+            if (refusal is not null)
             {
-                return Refuse(
-                    messages,
-                    $"'{resume}' is a symbolic reference, not a branch name. Pass the " +
-                    "branch a plan or pull request already owns.");
+                return Refuse(messages, refusal);
             }
 
-            if (isExplicitRemote)
-            {
-                if (runner.HasRemoteBranch(stripped))
-                {
-                    resumeRef = remotePrefix + stripped;
-                    resumeTarget = stripped;
-                }
-                else
-                {
-                    return Refuse(
-                        messages,
-                        $"No local or origin branch is named '{resume}', so there is nothing to resume. Pass the " +
-                        "branch a plan or pull request already owns.");
-                }
-            }
-            else if (runner.HasLocalBranch(resume))
-            {
-                resumeRef = resume;
-                resumeTarget = resume;
-            }
-            else if (runner.HasRemoteBranch(resume))
-            {
-                resumeRef = remotePrefix + resume;
-                resumeTarget = resume;
-            }
-            else
-            {
-                return Refuse(
-                    messages,
-                    $"No local or origin branch is named '{resume}', so there is nothing to resume. Pass the " +
-                    "branch a plan or pull request already owns.");
-            }
+            resumeRef = resumeRefCandidate;
+            resumeTarget = resumeTargetCandidate;
         }
 
         // Checked after the fetch, so a branch pushed from elsewhere counts. Git's own error would not say that
@@ -194,97 +133,42 @@ public sealed class RunStartService(
         (int? ahead, int? behind) = runner.Divergence(alignmentRef, startRef);
         string? originUrl = runner.OriginAddress();
 
-        GitOutcome status = runner.CheckoutStatus();
-        if (!status.Succeeded)
+        BranchLocation branchLocation = DetermineLocation(runner, messages);
+        if (branchLocation.Stopped is not null)
         {
-            return Fail(messages, $"git status failed: {status.FirstErrorLine}");
+            return branchLocation.Stopped;
         }
 
-        GitOutcome worktrees = runner.WorktreeList();
-        if (!worktrees.Succeeded)
-        {
-            return Fail(messages, $"git worktree list failed: {worktrees.FirstErrorLine}");
-        }
-
-        bool anotherWorktreeIsAttached = GitWorktreePorcelain.HasMultiple(worktrees.StandardOutput);
-
-        RunStartLocation location = RunStartPlanner.DecideLocation(
-            status.StandardOutput.Trim().Length == 0,
-            anotherWorktreeIsAttached);
-
+        RunStartLocation location = branchLocation.Location;
+        GitOutcome worktrees = branchLocation.Worktrees;
         string target = resumeTarget ?? branch;
-        string? worktreePath = null;
-        GitOutcome created;
-        if (location == RunStartLocation.InPlace)
+        BranchPlacement placement = PlaceBranch(
+            runner,
+            location,
+            target,
+            resumeTarget,
+            startRef,
+            resumeRef,
+            worktrees.StandardOutput,
+            messages);
+        if (placement.Stopped is not null)
         {
-            created = resumeTarget is null
-                ? runner.CreateBranchInPlace(target, startRef)
-                : runner.SwitchToBranch(target);
-        }
-        else
-        {
-            string? held = resumeTarget is null
-                ? null
-                : GitWorktreePorcelain.Holding(worktrees.StandardOutput, resumeTarget);
-            if (held is not null && files.DirectoryExists(held))
-            {
-                // Git allows a branch in one worktree only, so a resume continues in the one that holds it.
-                worktreePath = held;
-                created = new GitOutcome(0, string.Empty, string.Empty);
-            }
-            else
-            {
-                // A folder deleted by hand stays registered and would still claim the branch. Pruning removes
-                // only entries whose folder is gone.
-                if (held is not null)
-                {
-                    GitOutcome pruned = runner.Git("worktree", "prune");
-                    if (!pruned.Succeeded)
-                    {
-                        return Fail(
-                            messages,
-                            $"git worktree prune failed, so the deleted folder '{held}' still claims " +
-                            $"'{target}': {pruned.FirstErrorLine}");
-                    }
-                }
-
-                // Before the folder exists: once git makes the worktree its untracked folder would show in the checkout.
-                // A failure stops the run here, so no folder or claim is left behind.
-                GitOutcome excluded = runner.EnsureWorktreeFolderExcluded();
-                if (!excluded.Succeeded)
-                {
-                    messages.Add(new RunStartMessage(
-                        RunStartMessageKind.Error,
-                        $"could not exclude '{AgentWorktreeFolder.ExcludeLine}' from git's local exclude file: {excluded.FirstErrorLine}"));
-                    messages.Add(new RunStartMessage(
-                        RunStartMessageKind.Remedy,
-                        $"add '{AgentWorktreeFolder.ExcludeLine}' to .git/info/exclude and start again."));
-                    return Stopped(RunStartStatus.ToolFailure, messages);
-                }
-
-                worktreePath = runner.WorktreePathFor(target, clock.GetUtcNow());
-                try
-                {
-                    created = resumeTarget is null
-                        ? runner.CreateBranchInWorktree(target, startRef, worktreePath)
-                        : runner.AddWorktreeForBranch(target, worktreePath, resumeRef);
-                }
-                finally
-                {
-                    // Released whether git succeeded, failed, or threw, so no claim outlives its run.
-                    runner.ReleaseWorktreeClaim(worktreePath);
-                }
-            }
+            return placement.Stopped;
         }
 
-        // The check before creation can lose to another run of the same slug. That loser gets the same refusal
-        // and exit code as a branch that existed from the start, not a generic git failure.
-        if (!created.Succeeded && resume is null && runner.HasLocalBranch(branch))
-            return Refuse(messages, BranchExists(branch));
+        GitOutcome created = placement.Created;
+        string? worktreePath = placement.WorktreePath;
 
-        if (!created.Succeeded)
+        RunStartOutcome? placementFailure = CheckPlacement(
+            created,
+            resume,
+            runner,
+            branch,
+            target,
+            messages);
+        if (placementFailure is not null)
         {
-            return Fail(messages, $"git could not put '{target}' in place: {created.FirstErrorLine}");
+            return placementFailure;
         }
 
         // The branch is placed: record the base it was created from where a later dispatch
@@ -300,38 +184,18 @@ public sealed class RunStartService(
             startRef,
             repository is null ? null : new RunStartPlace(repository, worktreePath ?? repositoryRoot, clock.GetUtcNow(), autonomy));
 
-        // A new worktree has no index of its own, so the index goes where the run works. A failure here does not
-        // undo the branch: the operator repairs the index and the run continues in that tree.
-        string indexTree = worktreePath ?? repositoryRoot;
-        IProcessExecutor indexExecutor = request.IndexExecutor ?? new BoundedIndexExecutor(processes, DoctorOptions.Defaults.IndexTimeout);
-        WorktreeIndexOutcome index = worktreeIndex.Ensure(
-            indexTree,
-            DoctorOptions.Defaults,
-            indexExecutor,
-            environment.TempDirectory);
-        string indexLabel = IndexLabel(index);
-
-        if (index.StopsRun)
+        IndexPreparation indexPreparation = PrepareIndex(
+            request.IndexExecutor,
+            worktreePath ?? repositoryRoot,
+            target,
+            messages);
+        if (indexPreparation.Stopped is not null)
         {
-            string error =
-                $"the CodeGraph index for '{indexTree}' is not usable ({IndexReason(index)}), so the run stops here. " +
-                $"The branch '{target}' is in place.";
-            string remedy =
-                $"repair the index with: kyber-weave doctor --ensure {ShellQuote.Quote(indexTree)} (the branch needs no " +
-                "second run start: once that command passes, the run continues in that tree).";
-            messages.Add(new RunStartMessage(RunStartMessageKind.Error, error, StandardErrorWhenJson: true));
-            messages.Add(new RunStartMessage(RunStartMessageKind.Remedy, remedy, StandardErrorWhenJson: true));
-            return Stopped(RunStartStatus.ToolFailure, messages);
+            return indexPreparation.Stopped;
         }
 
-        if (index.Status is WorktreeIndexStatus.Failed or WorktreeIndexStatus.BinaryMissing)
-        {
-            messages.Add(new RunStartMessage(
-                RunStartMessageKind.Warning,
-                $"the CodeGraph index for '{indexTree}' could not be prepared ({IndexReason(index)}), so the run continues " +
-                $"without it. Repair it with: kyber-weave doctor --ensure {ShellQuote.Quote(indexTree)}",
-                StandardErrorWhenJson: true));
-        }
+        string indexTree = indexPreparation.IndexTree;
+        string indexLabel = indexPreparation.IndexLabel;
 
         RunStartFacts facts = new(
             baseBranch,
@@ -425,6 +289,314 @@ public sealed class RunStartService(
             completedWarning =
                 $"git log could not read the commits on '{resumeRef}': {log.FirstErrorLine}";
         }
+    }
+
+    /// <summary>
+    ///     Stops a run whose repository has not answered onboarding or whose toolchain is missing.
+    /// </summary>
+    /// <remarks>
+    ///     Onboarding is checked before the tool checks, on purpose. A worker that cannot reach the
+    ///     standards and gates this repository chose cannot use the tools anyway, and a tool failure
+    ///     reported first would send the operator to repair a remote that was never the thing standing
+    ///     in the way.
+    /// </remarks>
+    private static RunStartOutcome? CheckPrerequisites(
+        IRunStartRunner runner,
+        KyberWeaveConfig config,
+        RunStartRequest request,
+        string repositoryRoot,
+        List<RunStartMessage> messages)
+    {
+        if (RunStartPlanner.NeedsOnboarding(config.ConfigReg, request.ConfigPath is not null))
+        {
+            return StopForOnboarding(config, request.ConfigPath, repositoryRoot);
+        }
+
+        if (runner.CodeGraphBinaryIsAvailable())
+        {
+            return null;
+        }
+
+        messages.Add(new RunStartMessage(
+            RunStartMessageKind.Error,
+            "'codegraph' is not on PATH, so the tools a run depends on cannot be indexed or tested."));
+        messages.Add(new RunStartMessage(
+            RunStartMessageKind.Remedy,
+            "install the CodeGraph CLI so that 'codegraph' resolves on PATH, then start the run again."));
+        return Stopped(RunStartStatus.CodeGraphMissing, messages);
+    }
+
+    /// <summary>
+    ///     Reports a fetch failure, or stops the run when the host asked tool failures to stop it.
+    /// </summary>
+    private static RunStartOutcome? HandleFetch(
+        GitOutcome fetch,
+        KyberWeaveConfig config,
+        List<RunStartMessage> messages)
+    {
+        if (fetch.Succeeded)
+        {
+            return null;
+        }
+
+        if (config.ConfigReg.StopsOnToolFailure)
+        {
+            messages.Add(new RunStartMessage(
+                RunStartMessageKind.Error,
+                $"'git fetch origin --prune' failed: {fetch.FirstErrorLine}"));
+            messages.Add(new RunStartMessage(
+                RunStartMessageKind.Remedy,
+                "a run that cannot refresh its base plans against stale history. Fix the remote, " +
+                "or set 'stop-on-tool-failure: false' in .kyber-weave/kyber-weave.yml to continue from " +
+                "the base this checkout last fetched."));
+            return Stopped(RunStartStatus.ToolFailure, messages);
+        }
+
+        messages.Add(new RunStartMessage(
+            RunStartMessageKind.Warning,
+            $"'git fetch origin --prune' failed ({fetch.FirstErrorLine}); " +
+            "continuing from the base this checkout last fetched."));
+        return null;
+    }
+
+    /// <summary>Reads the checkout and worktree state and decides where the branch belongs.</summary>
+    private static BranchLocation DetermineLocation(
+        IRunStartRunner runner,
+        List<RunStartMessage> messages)
+    {
+        GitOutcome status = runner.CheckoutStatus();
+        if (!status.Succeeded)
+        {
+            return new BranchLocation(default, default, Fail(messages, $"git status failed: {status.FirstErrorLine}"));
+        }
+
+        GitOutcome worktrees = runner.WorktreeList();
+        if (!worktrees.Succeeded)
+        {
+            return new BranchLocation(
+                default,
+                default,
+                Fail(messages, $"git worktree list failed: {worktrees.FirstErrorLine}"));
+        }
+
+        bool anotherWorktreeIsAttached = GitWorktreePorcelain.HasMultiple(worktrees.StandardOutput);
+
+        RunStartLocation location = RunStartPlanner.DecideLocation(
+            status.StandardOutput.Trim().Length == 0,
+            anotherWorktreeIsAttached);
+        return new BranchLocation(location, worktrees, null);
+    }
+
+    /// <summary>
+    ///     Ensures the CodeGraph index where the run works, reporting an unusable index or a warning.
+    /// </summary>
+    private IndexPreparation PrepareIndex(
+        IProcessExecutor? requestedExecutor,
+        string indexTree,
+        string target,
+        List<RunStartMessage> messages)
+    {
+        // A new worktree has no index of its own, so the index goes where the run works. A failure here does not
+        // undo the branch: the operator repairs the index and the run continues in that tree.
+        IProcessExecutor indexExecutor = requestedExecutor ?? new BoundedIndexExecutor(processes, DoctorOptions.Defaults.IndexTimeout);
+        WorktreeIndexOutcome index = worktreeIndex.Ensure(
+            indexTree,
+            DoctorOptions.Defaults,
+            indexExecutor,
+            environment.TempDirectory);
+        string indexLabel = IndexLabel(index);
+
+        if (index.StopsRun)
+        {
+            string error =
+                $"the CodeGraph index for '{indexTree}' is not usable ({IndexReason(index)}), so the run stops here. " +
+                $"The branch '{target}' is in place.";
+            string remedy =
+                $"repair the index with: kyber-weave doctor --ensure {ShellQuote.Quote(indexTree)} (the branch needs no " +
+                "second run start: once that command passes, the run continues in that tree).";
+            messages.Add(new RunStartMessage(RunStartMessageKind.Error, error, StandardErrorWhenJson: true));
+            messages.Add(new RunStartMessage(RunStartMessageKind.Remedy, remedy, StandardErrorWhenJson: true));
+            return new IndexPreparation(indexTree, indexLabel, Stopped(RunStartStatus.ToolFailure, messages));
+        }
+
+        if (index.Status is WorktreeIndexStatus.Failed or WorktreeIndexStatus.BinaryMissing)
+        {
+            messages.Add(new RunStartMessage(
+                RunStartMessageKind.Warning,
+                $"the CodeGraph index for '{indexTree}' could not be prepared ({IndexReason(index)}), so the run continues " +
+                $"without it. Repair it with: kyber-weave doctor --ensure {ShellQuote.Quote(indexTree)}",
+                StandardErrorWhenJson: true));
+        }
+
+        return new IndexPreparation(indexTree, indexLabel, null);
+    }
+
+    private sealed record BranchLocation(
+        RunStartLocation Location,
+        GitOutcome Worktrees,
+        RunStartOutcome? Stopped);
+
+    private sealed record IndexPreparation(
+        string IndexTree,
+        string IndexLabel,
+        RunStartOutcome? Stopped);
+
+    /// <summary>
+    ///     Resolves the ref and target a resume names, or the refusal to report when no branch matches.
+    /// </summary>
+    private static (string ResumeRef, string? ResumeTarget, string? Refusal) ResolveResume(
+        IRunStartRunner runner,
+        string resume)
+    {
+        string remotePrefix = RunStartPlanner.Remote + "/";
+        bool isExplicitRemote = resume.StartsWith(remotePrefix, StringComparison.Ordinal);
+        string stripped = isExplicitRemote
+            ? resume[remotePrefix.Length..]
+            : resume;
+
+        if (string.Equals(stripped, "HEAD", StringComparison.Ordinal))
+        {
+            return (
+                string.Empty,
+                null,
+                $"'{resume}' is a symbolic reference, not a branch name. Pass the " +
+                "branch a plan or pull request already owns.");
+        }
+
+        if (isExplicitRemote)
+        {
+            return runner.HasRemoteBranch(stripped)
+                ? (remotePrefix + stripped, stripped, null)
+                : (string.Empty, null, MissingResumeBranch(resume));
+        }
+
+        if (runner.HasLocalBranch(resume))
+        {
+            return (resume, resume, null);
+        }
+
+        if (runner.HasRemoteBranch(resume))
+        {
+            return (remotePrefix + resume, resume, null);
+        }
+
+        return (string.Empty, null, MissingResumeBranch(resume));
+    }
+
+    private static string MissingResumeBranch(string resume) =>
+        $"No local or origin branch is named '{resume}', so there is nothing to resume. Pass the " +
+        "branch a plan or pull request already owns.";
+
+    /// <summary>
+    ///     Places the target branch in place or in a worktree, returning either the git outcome and
+    ///     worktree path, or the outcome that stops the run.
+    /// </summary>
+    private BranchPlacement PlaceBranch(
+        IRunStartRunner runner,
+        RunStartLocation location,
+        string target,
+        string? resumeTarget,
+        string startRef,
+        string? resumeRef,
+        string worktreeOutput,
+        List<RunStartMessage> messages)
+    {
+        if (location == RunStartLocation.InPlace)
+        {
+            GitOutcome created = resumeTarget is null
+                ? runner.CreateBranchInPlace(target, startRef)
+                : runner.SwitchToBranch(target);
+            return new BranchPlacement(created, null, null);
+        }
+
+        string? held = resumeTarget is null
+            ? null
+            : GitWorktreePorcelain.Holding(worktreeOutput, resumeTarget);
+        if (held is not null && files.DirectoryExists(held))
+        {
+            // Git allows a branch in one worktree only, so a resume continues in the one that holds it.
+            return new BranchPlacement(new GitOutcome(0, string.Empty, string.Empty), held, null);
+        }
+
+        // A folder deleted by hand stays registered and would still claim the branch. Pruning removes
+        // only entries whose folder is gone.
+        if (held is not null)
+        {
+            GitOutcome pruned = runner.Git("worktree", "prune");
+            if (!pruned.Succeeded)
+            {
+                return new BranchPlacement(
+                    default,
+                    null,
+                    Fail(
+                        messages,
+                        $"git worktree prune failed, so the deleted folder '{held}' still claims " +
+                        $"'{target}': {pruned.FirstErrorLine}"));
+            }
+        }
+
+        // Before the folder exists: once git makes the worktree its untracked folder would show in the checkout.
+        // A failure stops the run here, so no folder or claim is left behind.
+        GitOutcome excluded = runner.EnsureWorktreeFolderExcluded();
+        if (!excluded.Succeeded)
+        {
+            messages.Add(new RunStartMessage(
+                RunStartMessageKind.Error,
+                $"could not exclude '{AgentWorktreeFolder.ExcludeLine}' from git's local exclude file: {excluded.FirstErrorLine}"));
+            messages.Add(new RunStartMessage(
+                RunStartMessageKind.Remedy,
+                $"add '{AgentWorktreeFolder.ExcludeLine}' to .git/info/exclude and start again."));
+            return new BranchPlacement(default, null, Stopped(RunStartStatus.ToolFailure, messages));
+        }
+
+        string worktreePath = runner.WorktreePathFor(target, clock.GetUtcNow());
+        GitOutcome result;
+        try
+        {
+            result = resumeTarget is null
+                ? runner.CreateBranchInWorktree(target, startRef, worktreePath)
+                : runner.AddWorktreeForBranch(target, worktreePath, resumeRef);
+        }
+        finally
+        {
+            // Released whether git succeeded, failed, or threw, so no claim outlives its run.
+            runner.ReleaseWorktreeClaim(worktreePath);
+        }
+
+        return new BranchPlacement(result, worktreePath, null);
+    }
+
+    private sealed record BranchPlacement(
+        GitOutcome Created,
+        string? WorktreePath,
+        RunStartOutcome? Stopped);
+
+    /// <summary>
+    ///     Maps a failed branch creation to the refusal or tool failure the run reports.
+    /// </summary>
+    /// <remarks>
+    ///     The check before creation can lose to another run of the same slug. That loser gets the same
+    ///     refusal and exit code as a branch that existed from the start, not a generic git failure.
+    /// </remarks>
+    private static RunStartOutcome? CheckPlacement(
+        GitOutcome created,
+        string? resume,
+        IRunStartRunner runner,
+        string branch,
+        string target,
+        List<RunStartMessage> messages)
+    {
+        if (!created.Succeeded && resume is null && runner.HasLocalBranch(branch))
+        {
+            return Refuse(messages, BranchExists(branch));
+        }
+
+        if (!created.Succeeded)
+        {
+            return Fail(messages, $"git could not put '{target}' in place: {created.FirstErrorLine}");
+        }
+
+        return null;
     }
 
     /// <summary>

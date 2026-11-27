@@ -54,6 +54,25 @@ public static class ServiceCollectionExtensions
 
         _ = services.AddWeaveDataServices();
         services.TryAddSingleton(TimeProvider.System);
+        ApplicationCoreRegistration.AddServices(services);
+        ApplicationHostRegistration.AddServices(services);
+        ApplicationAdapterRegistration.AddServices(services);
+        ApplicationReviewRegistration.AddServices(services);
+        return services;
+    }
+}
+
+internal static class ApplicationCoreRegistration
+{
+    internal static void AddServices(IServiceCollection services)
+    {
+        AddPlanningServices(services);
+        AddPromptServices(services);
+        AddDeliveryServices(services);
+    }
+
+    private static void AddPlanningServices(IServiceCollection services)
+    {
         _ = services.AddWeaveRunStartState();
         services.TryAddSingleton<IUserHostConfigStore>(sp => new FileUserHostConfigStore(sp.GetRequiredService<IWritableFileSystem>()));
         services.TryAddSingleton<IHooksConfigSource>(sp => new YamlHooksConfigSource(
@@ -84,6 +103,10 @@ public static class ServiceCollectionExtensions
             sp.GetRequiredService<IPathResolver>(),
             sp.GetRequiredService<IProcessEnvironment>(),
             sp.GetRequiredService<IKwSkillCatalogFactory>()));
+    }
+
+    private static void AddPromptServices(IServiceCollection services)
+    {
         services.TryAddSingleton<IPacketHostFacts>(sp => new PacketHostFacts(sp.GetRequiredService<IFileSystem>()));
         services.TryAddSingleton<ITaskPromptServiceFactory>(sp => new TaskPromptServiceFactory(
             sp.GetRequiredService<IPlanTaskService>(),
@@ -118,6 +141,10 @@ public static class ServiceCollectionExtensions
             sp.GetRequiredService<ConfiguredArbiterProviderFactory>(),
             sp.GetRequiredService<IProcessEnvironment>(),
             sp.GetRequiredService<IEmbeddedResources>()));
+    }
+
+    private static void AddDeliveryServices(IServiceCollection services)
+    {
         services.TryAddSingleton(sp => new RunDeliveryPorts(
             sp.GetRequiredService<IRepositoryFileStore>(),
             sp.GetRequiredService<IBoundedProcessExecutor>(),
@@ -135,6 +162,21 @@ public static class ServiceCollectionExtensions
             sp.GetRequiredService<IProcessEnvironment>(),
             sp.GetRequiredService<IPathResolver>(),
             sp.GetRequiredService<TimeProvider>()));
+    }
+
+}
+
+internal static class ApplicationHostRegistration
+{
+    internal static void AddServices(IServiceCollection services)
+    {
+        AddHostServices(services);
+        AddMcpServices(services);
+        AddDocsServices(services);
+    }
+
+    private static void AddHostServices(IServiceCollection services)
+    {
         services.TryAddSingleton<IStatusLineDeploymentService>(sp => new StatusLineDeploymentService(
             sp.GetRequiredService<IStatusLineFiles>(),
             sp.GetRequiredService<IFileSystemPathSemantics>()));
@@ -151,6 +193,10 @@ public static class ServiceCollectionExtensions
         services.TryAddSingleton<McpServerLiveProbe>();
         services.TryAddSingleton<PostCheckoutHookInstaller>();
         services.TryAddSingleton<IRepositoryDoctor, RepositoryDoctorService>();
+    }
+
+    private static void AddMcpServices(IServiceCollection services)
+    {
         services.TryAddSingleton(sp => new McpRepositoryPath(
             sp.GetRequiredService<IPathResolver>(),
             sp.GetRequiredService<IProcessEnvironment>()));
@@ -179,6 +225,10 @@ public static class ServiceCollectionExtensions
             sp.GetRequiredService<McpServerRenamer>(),
             sp.GetRequiredService<McpWiringFixes>(),
             sp.GetRequiredService<ILaunchCommandResolverFactory>()));
+    }
+
+    private static void AddDocsServices(IServiceCollection services)
+    {
         services.TryAddSingleton<IDocsHostConfiguration, HostConfiguration>();
         services.TryAddSingleton<IDocumentSourceFactory>(sp => new DocumentLoaderFactory(
             sp.GetRequiredService<IRepositoryFileStore>(),
@@ -216,6 +266,20 @@ public static class ServiceCollectionExtensions
             sp.GetRequiredService<IKyberStandardsTemplates>()));
         services.TryAddSingleton<ISquadBriefService>(sp => new SquadBriefService(sp.GetRequiredService<IFileSystem>()));
         _ = services.AddWeaveSquadApplication();
+    }
+
+}
+
+internal static class ApplicationAdapterRegistration
+{
+    internal static void AddServices(IServiceCollection services)
+    {
+        AddRepositoryAdapters(services);
+        AddReviewAdapters(services);
+    }
+
+    private static void AddRepositoryAdapters(IServiceCollection services)
+    {
         services.TryAddSingleton<IRepositoryTreeProbe>(sp => new FileRepositoryTreeProbe(
             sp.GetRequiredService<IFileSystem>(),
             sp.GetRequiredService<IPathResolver>(),
@@ -253,6 +317,10 @@ public static class ServiceCollectionExtensions
             sp.GetRequiredService<IReviewEvidenceStore>(),
             sp.GetRequiredService<IPathResolver>(),
             sp.GetRequiredService<IProcessEnvironment>()));
+    }
+
+    private static void AddReviewAdapters(IServiceCollection services)
+    {
         services.TryAddSingleton<IReviewWorkTreeService, ReviewWorkTreeService>();
         services.TryAddSingleton<ISuppressionScanService, SuppressionScanService>();
         services.TryAddSingleton<IGateRunService, GateRunService>();
@@ -281,6 +349,18 @@ public static class ServiceCollectionExtensions
             sp.GetRequiredService<IFileSystem>(),
             sp.GetRequiredService<IPathResolver>(),
             sp.GetRequiredService<IProcessEnvironment>()));
+    }
+}
+
+internal static class ApplicationReviewRegistration
+{
+    internal static void AddServices(IServiceCollection services)
+    {
+        AddReviewServices(services);
+    }
+
+    private static void AddReviewServices(IServiceCollection services)
+    {
         services.TryAddSingleton<IReviewCycleService>(sp => new ReviewCycleService(
             sp.GetRequiredService<IReviewWorkTreeService>(),
             sp.GetRequiredService<IReviewCycleStore>(),
@@ -330,6 +410,5 @@ public static class ServiceCollectionExtensions
         services.TryAddSingleton<IReviewDecisionModelFactory, ReviewDecisionModelFactory>();
         services.TryAddSingleton<IReviewVerdictService, ReviewVerdictService>();
         _ = services.AddWeaveArbiterApplication();
-        return services;
     }
 }
