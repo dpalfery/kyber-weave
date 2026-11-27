@@ -119,6 +119,9 @@ public class ReviewDecisionSession : IReviewDecisionModel
         if (_provider is null || rule?.Ask is null || questions.Count == 0)
             return answers;
 
+        RuleAsk ask = rule.Ask;
+        IArbiterProvider provider = _provider;
+
         // Every step is capped here, so a caller that forgets its own cap cannot ask one paid question per finding.
         // A step that already chose its questions by priority passes at most the cap and is not cut again.
         if (questions.Count > ReviewVerdictRules.MaxQuestionsPerStep)
@@ -148,10 +151,10 @@ public class ReviewDecisionSession : IReviewDecisionModel
             Sent[] wave = await Task.WhenAll(unasked
                     .Skip(start)
                     .Take(Concurrency)
-                    .Select(question => SendAsync(rule, question, cancellationToken)))
+                    .Select(question => SendAsync(provider, rule, ask, question, cancellationToken)))
                 .ConfigureAwait(false);
             foreach (Sent sent in wave)
-                await RecordAsync(rule, sent, answers, effectOf, cancellationToken).ConfigureAwait(false);
+                await RecordAsync(rule, ask, sent, answers, effectOf, cancellationToken).ConfigureAwait(false);
         }
 
         _cache?.Save();
@@ -190,16 +193,21 @@ public class ReviewDecisionSession : IReviewDecisionModel
 
     private sealed record Sent(ReviewQuestion Question, string Id, ArbiterStep1BatchResult? Batch, int LatencyMs, string? FaultType);
 
-    private async Task<Sent> SendAsync(ArbiterRule rule, ReviewQuestion question, CancellationToken cancellationToken)
+    private async Task<Sent> SendAsync(
+        IArbiterProvider provider,
+        ArbiterRule rule,
+        RuleAsk ask,
+        ReviewQuestion question,
+        CancellationToken cancellationToken)
     {
         Dictionary<string, ArbiterFact> facts = new(StringComparer.Ordinal);
-        ArbiterRule expanded = Expand(rule, question, 0, facts);
+        ArbiterRule expanded = Expand(rule, ask, question, 0, facts);
         long started = _clock.GetTimestamp();
         ArbiterStep1BatchResult? batch = null;
         string? faultType = null;
         try
         {
-            batch = await _provider!.AskStep1Async([expanded], new ArbiterFactSet(facts), null, cancellationToken).ConfigureAwait(false);
+            batch = await provider.AskStep1Async([expanded], new ArbiterFactSet(facts), null, cancellationToken).ConfigureAwait(false);
         }
         catch (Exception ex) when (!cancellationToken.IsCancellationRequested && ProviderFailures.IsAbsorbable(ex))
         {
@@ -212,6 +220,7 @@ public class ReviewDecisionSession : IReviewDecisionModel
 
     private async Task RecordAsync(
         ArbiterRule rule,
+        RuleAsk ask,
         Sent sent,
         Dictionary<string, ReviewAnswer> answers,
         Func<ReviewQuestion, ReviewAnswer, string> effectOf,
@@ -224,7 +233,7 @@ public class ReviewDecisionSession : IReviewDecisionModel
         if (fault)
             _faultCause ??= sent.FaultType;
         string status = fault ? ArbiterProviderStatuses.Error
-            : batch!.RequestSent ? ArbiterProviderStatuses.Answered
+            : batch is { RequestSent: true } ? ArbiterProviderStatuses.Answered
             : ArbiterProviderStatuses.OverBudget;
 
         {
@@ -233,7 +242,7 @@ public class ReviewDecisionSession : IReviewDecisionModel
             string answer = batch?.AnswersByRule.TryGetValue(id, out string? given) == true ? given : RuleEngine.Undecidable;
             ArbiterStep1Score? score = null;
             batch?.ScoresByRule?.TryGetValue(id, out score);
-            double? value = string.Equals(rule.Ask!.Type, "noul", StringComparison.Ordinal)
+            double? value = string.Equals(ask.Type, "noul", StringComparison.Ordinal)
                 ? score?.Probabilities is [double probability, ..] ? probability : null
                 : score?.Confidence;
             ReviewAnswer result = new(answer, value, score?.Threshold);
@@ -243,7 +252,7 @@ public class ReviewDecisionSession : IReviewDecisionModel
 
             string effect = effectOf(question, result);
             _decisions.Add(new ReviewDecision(rule.Id, question.Subject, answer, value, effect));
-            await LogAsync(rule, question, score, answer, effect, status, batch, sent.LatencyMs, cancellationToken)
+            await LogAsync(rule, ask, question, score, answer, effect, status, batch, sent.LatencyMs, cancellationToken)
                 .ConfigureAwait(false);
         }
     }
@@ -252,9 +261,8 @@ public class ReviewDecisionSession : IReviewDecisionModel
     /// One question per subject: the rule's id gains the for-each suffix the evaluator uses, and each state field reads
     /// a fact scoped to the subject, so questions in one request never share a value.
     /// </summary>
-    private static ArbiterRule Expand(ArbiterRule rule, ReviewQuestion question, int index, Dictionary<string, ArbiterFact> facts)
+    private static ArbiterRule Expand(ArbiterRule rule, RuleAsk ask, ReviewQuestion question, int index, Dictionary<string, ArbiterFact> facts)
     {
-        RuleAsk ask = rule.Ask!;
         Dictionary<string, string> state = new(StringComparer.Ordinal);
         foreach ((string field, string factName) in ask.State)
         {
@@ -282,6 +290,7 @@ public class ReviewDecisionSession : IReviewDecisionModel
 
     private async Task LogAsync(
         ArbiterRule rule,
+        RuleAsk ask,
         ReviewQuestion question,
         ArbiterStep1Score? score,
         string answer,
@@ -303,7 +312,7 @@ public class ReviewDecisionSession : IReviewDecisionModel
             score?.Confidence,
             score?.Threshold,
             rule.Effects.TryGetValue(answer, out string? mapped) ? mapped : ArbiterTriggerFamilies.NeutralEffect(ArbiterTriggerFamilies.ForTrigger(rule.Trigger)),
-            [.. rule.Ask!.State.Values.Distinct(StringComparer.Ordinal).Select(fact => new ArbiterRuleFactRef(fact, "derived"))],
+            [.. ask.State.Values.Distinct(StringComparer.Ordinal).Select(fact => new ArbiterRuleFactRef(fact, "derived"))],
             "review command: " + effect,
             candidate: question.Subject);
         // Usage is the request's, so only the first question of a request carries it, and a sum over the log stays true.
