@@ -49,16 +49,25 @@ public abstract class DoctorFileSystemContractTests : IDisposable
     /// <inheritdoc />
     public void Dispose()
     {
-        try
-        {
-            DeleteTree(Root);
-        }
-        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
-        {
-            // Best effort: the fixture sits under the system temporary directory.
-        }
-
+        Dispose(disposing: true);
         GC.SuppressFinalize(this);
+    }
+
+    /// <summary>Removes the scratch directory, best effort.</summary>
+    /// <param name="disposing">True when called from <see cref="Dispose()"/>.</param>
+    protected virtual void Dispose(bool disposing)
+    {
+        if (disposing)
+        {
+            try
+            {
+                DeleteTree(Root);
+            }
+            catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+            {
+                // Best effort: the fixture sits under the system temporary directory.
+            }
+        }
     }
 
     [Fact]

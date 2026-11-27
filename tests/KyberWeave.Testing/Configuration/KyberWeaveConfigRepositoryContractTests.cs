@@ -363,7 +363,17 @@ public abstract class KyberWeaveConfigRepositoryContractTests : IDisposable
     /// <inheritdoc />
     public void Dispose()
     {
-        Cleanup();
+        Dispose(disposing: true);
         GC.SuppressFinalize(this);
+    }
+
+    /// <summary>Releases whatever <see cref="NewRoot"/> and <see cref="NewHome"/> created.</summary>
+    /// <param name="disposing">True when called from <see cref="Dispose()"/>.</param>
+    protected virtual void Dispose(bool disposing)
+    {
+        if (disposing)
+        {
+            Cleanup();
+        }
     }
 }
