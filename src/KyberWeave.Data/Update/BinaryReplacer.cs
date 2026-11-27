@@ -1,3 +1,4 @@
+using System.ComponentModel;
 using System.Diagnostics;
 using KyberWeave.Contracts.Repositories;
 using KyberWeave.Core.Processes;
@@ -179,7 +180,8 @@ internal sealed class BinaryReplacer(
 
             processes.Run(startInfo, string.Empty, XattrTimeout);
         }
-        catch (Exception)
+        catch (Exception ex) when (ex is Win32Exception or IOException or InvalidOperationException
+                                       or UnauthorizedAccessException or TimeoutException)
         {
             // Best-effort: xattr is not required for the binaries to run. A hung xattr is stopped by the
             // runner at XattrTimeout and lands here like any other failure to clear the attribute.
