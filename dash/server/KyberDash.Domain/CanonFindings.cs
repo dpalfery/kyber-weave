@@ -809,9 +809,9 @@ public static partial class CanonFindings
                         if (item.ValueKind == JsonValueKind.Object &&
                             item.TryGetProperty("name", out JsonElement nameEl) &&
                             nameEl.ValueKind == JsonValueKind.String &&
-                            !string.IsNullOrEmpty(nameEl.GetString()))
+                            nameEl.GetString() is { Length: > 0 } name)
                         {
-                            named.Add(nameEl.GetString()!);
+                            named.Add(name);
                         }
                     }
 
@@ -822,9 +822,9 @@ public static partial class CanonFindings
                 else if (root.ValueKind == JsonValueKind.Object &&
                          root.TryGetProperty("name", out JsonElement objName) &&
                          objName.ValueKind == JsonValueKind.String &&
-                         !string.IsNullOrEmpty(objName.GetString()))
+                         objName.GetString() is { Length: > 0 } objectName)
                 {
-                    tools.Add((objName.GetString()!, measured));
+                    tools.Add((objectName, measured));
                 }
             }
             catch (JsonException)
@@ -981,7 +981,7 @@ public static partial class CanonFindings
         int turnsResident = residency.Turns.Count;
         long? schemaTokens = residency.Tokens;
         bool measured = schemaTokens.HasValue;
-        long? estimatedWasteTokens = measured ? schemaTokens!.Value * turnsResident : null;
+        long? estimatedWasteTokens = schemaTokens is long schemaTokenCount ? schemaTokenCount * turnsResident : null;
 
         (string firstSpanId, int firstTurnIdx) = residency.Turns[0];
         (string lastSpanId, int lastTurnIdx) = residency.Turns[^1];
@@ -1338,11 +1338,11 @@ public static partial class CanonFindings
         string titleExceeded;
         string thresholdDesc;
         long? excessTokens;
-        if (tokenExceeded)
+        if (tokenExceeded && item.Tokens is long tokenCount)
         {
             titleExceeded = $"{item.Tokens} tokens";
             thresholdDesc = $"{input.TokenThreshold} tokens";
-            excessTokens = item.Tokens!.Value - input.TokenThreshold;
+            excessTokens = tokenCount - input.TokenThreshold;
         }
         else if (byteExceeded)
         {
@@ -1957,7 +1957,7 @@ public static partial class CanonFindings
         long? tokensPerTurn = input.SkillTokens is not null && input.SkillTokens.TryGetValue(skill, out long tpt) ? tpt : null;
         bool measured = tokensPerTurn is > 0;
         int turnsCount = recordedTurns;
-        long? estimatedWasteTokens = measured ? tokensPerTurn!.Value * turnsCount : null;
+        long? estimatedWasteTokens = tokensPerTurn is > 0 and long tokensPerTurnCount ? tokensPerTurnCount * turnsCount : null;
 
         FindingEvidenceLink[] evidenceLinks = measured
             ?
@@ -2223,9 +2223,9 @@ public static partial class CanonFindings
             if (item.ValueKind == JsonValueKind.Object &&
                 item.TryGetProperty("name", out JsonElement nEl) &&
                 nEl.ValueKind == JsonValueKind.String &&
-                !string.IsNullOrEmpty(nEl.GetString()))
+                nEl.GetString() is { Length: > 0 } skillName)
             {
-                skills.Add(nEl.GetString()!);
+                skills.Add(skillName);
             }
         }
 
@@ -2454,8 +2454,8 @@ public static partial class CanonFindings
             {
                 foreach (JsonElement el in arr.EnumerateArray())
                 {
-                    if (el.ValueKind == JsonValueKind.String && !string.IsNullOrEmpty(el.GetString()))
-                        invoked.Add(el.GetString()!);
+                    if (el.ValueKind == JsonValueKind.String && el.GetString() is { Length: > 0 } invokedName)
+                        invoked.Add(invokedName);
                 }
             }
         }

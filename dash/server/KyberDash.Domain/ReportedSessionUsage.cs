@@ -242,7 +242,7 @@ public static class ReportedSessionUsage
                 previous = row;
             }
 
-            latest.Add(previous!);
+            latest.Add(previous ?? throw new InvalidOperationException("A cumulative usage series must contain at least one row."));
         }
 
         return latest;
