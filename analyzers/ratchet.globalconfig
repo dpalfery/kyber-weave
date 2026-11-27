@@ -8,7 +8,8 @@
 #   dotnet build KyberWeave.sln -c Release -p:KwAnalyzerAudit=true -p:TreatWarningsAsErrors=false
 #
 # global_level 200 outranks the SDK's AnalysisMode=all config and analyzers/rules.globalconfig. .editorconfig outranks this file,
-# so none of these ids may appear there.
+# so none of these ids may appear there, with one exception: CA1502 and CA1506 are set to none for
+# tests/** in .editorconfig, because the complexity and coupling limits apply to product code only.
 is_global = true
 global_level = 200
 
