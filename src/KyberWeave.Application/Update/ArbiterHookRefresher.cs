@@ -90,99 +90,119 @@ internal sealed class ArbiterHookRefresher(
             }
         }
 
+        (int globalRefreshed, int globalFailed) = RefreshGlobalHooks();
+        return new ArbiterHookRefreshResult(refreshed + globalRefreshed, failed + globalFailed);
+    }
+
+    private (int Refreshed, int Failed) RefreshGlobalHooks()
+    {
         string? home = ResolveHome();
         int globalRefreshed = 0;
         int globalFailed = 0;
-        if (!string.IsNullOrWhiteSpace(home))
+        if (string.IsNullOrWhiteSpace(home))
         {
-            int globalTimeout = ResolveGlobalTimeout(home);
-            SquadReceipt? receipt = null;
+            return (globalRefreshed, globalFailed);
+        }
+
+        int globalTimeout = ResolveGlobalTimeout(home);
+        SquadReceipt? receipt = null;
+        try
+        {
+            receipt = state.ReadReceipt(home, SquadDeploymentScope.Global);
+        }
+        catch (Exception ex) when (FileFailure.Is(ex) || ex is InvalidDataException)
+        {
+            log?.Invoke($"warning: could not read global squad receipt: {ex.Message}");
+        }
+
+        bool receiptChanged = false;
+        List<SquadOwnedFile>? updatedFiles = receipt is not null ? new(receipt.Files) : null;
+        List<SquadOwnedBlock>? updatedBlocks = receipt is not null ? new(receipt.Blocks) : null;
+
+        foreach ((string? targetToken, string? hookPath, string? hookRelativePath) in ResolveGlobalHookTargets(home))
+        {
+            if (string.IsNullOrWhiteSpace(hookPath))
+                continue;
+
+            if (!files.FileExists(hookPath))
+                continue;
+
             try
             {
-                receipt = state.ReadReceipt(home, SquadDeploymentScope.Global);
-            }
-            catch (Exception ex) when (FileFailure.Is(ex) || ex is InvalidDataException)
-            {
-                log?.Invoke($"warning: could not read global squad receipt: {ex.Message}");
-            }
-
-            bool receiptChanged = false;
-            List<SquadOwnedFile>? updatedFiles = receipt is not null ? new(receipt.Files) : null;
-            List<SquadOwnedBlock>? updatedBlocks = receipt is not null ? new(receipt.Blocks) : null;
-
-            foreach ((string? targetToken, string? hookPath, string? hookRelativePath) in ResolveGlobalHookTargets(home))
-            {
-                if (string.IsNullOrWhiteSpace(hookPath))
-                    continue;
-
-                if (!files.FileExists(hookPath))
-                    continue;
-
-                try
+                if (RefreshGlobalHook(hookPath, targetToken, globalTimeout, out string? newContent, out IReadOnlyList<SquadHookOwnedEntry>? newOwnedEntries))
                 {
-                    if (RefreshGlobalHook(hookPath, targetToken, globalTimeout, out string? newContent, out IReadOnlyList<SquadHookOwnedEntry>? newOwnedEntries))
-                    {
-                        globalRefreshed++;
+                    globalRefreshed++;
 
-                        if (receipt is not null && !string.IsNullOrWhiteSpace(targetToken))
+                    if (receipt is not null && !string.IsNullOrWhiteSpace(targetToken))
+                    {
+                        if (newOwnedEntries is { Count: > 0 } && updatedBlocks is not null)
                         {
-                            if (newOwnedEntries is { Count: > 0 } && updatedBlocks is not null)
+                            int blockIdx = FindOwnedIndex(
+                                updatedBlocks, targetToken, hookRelativePath, b => b.Target, b => b.RelativePath);
+                            if (blockIdx >= 0)
                             {
-                                int blockIdx = FindOwnedIndex(
-                                    updatedBlocks, targetToken, hookRelativePath, b => b.Target, b => b.RelativePath);
-                                if (blockIdx >= 0)
-                                {
-                                    SquadOwnedBlock existingBlock = updatedBlocks[blockIdx];
-                                    List<SquadOwnedBlockEntry> blockEntries = newOwnedEntries
-                                        .Select(e => new SquadOwnedBlockEntry(e.Location, e.Digest))
-                                        .ToList();
-                                    updatedBlocks[blockIdx] = existingBlock with { Entries = blockEntries };
-                                    receiptChanged = true;
-                                }
+                                SquadOwnedBlock existingBlock = updatedBlocks[blockIdx];
+                                List<SquadOwnedBlockEntry> blockEntries = newOwnedEntries
+                                    .Select(e => new SquadOwnedBlockEntry(e.Location, e.Digest))
+                                    .ToList();
+                                updatedBlocks[blockIdx] = existingBlock with { Entries = blockEntries };
+                                receiptChanged = true;
                             }
-                            else if (!string.IsNullOrEmpty(newContent) && updatedFiles is not null)
+                        }
+                        else if (!string.IsNullOrEmpty(newContent) && updatedFiles is not null)
+                        {
+                            int fileIdx = FindOwnedIndex(
+                                updatedFiles, targetToken, hookRelativePath, f => f.Target, f => f.RelativePath);
+                            if (fileIdx >= 0)
                             {
-                                int fileIdx = FindOwnedIndex(
-                                    updatedFiles, targetToken, hookRelativePath, f => f.Target, f => f.RelativePath);
-                                if (fileIdx >= 0)
-                                {
-                                    SquadOwnedFile existingFile = updatedFiles[fileIdx];
-                                    string newSha = Convert.ToHexStringLower(SHA256.HashData(Encoding.UTF8.GetBytes(newContent)));
-                                    updatedFiles[fileIdx] = existingFile with { Sha256 = newSha };
-                                    receiptChanged = true;
-                                }
+                                SquadOwnedFile existingFile = updatedFiles[fileIdx];
+                                string newSha = Convert.ToHexStringLower(SHA256.HashData(Encoding.UTF8.GetBytes(newContent)));
+                                updatedFiles[fileIdx] = existingFile with { Sha256 = newSha };
+                                receiptChanged = true;
                             }
                         }
                     }
                 }
-                catch (Exception ex) when (FileFailure.Is(ex) || ex is InvalidOperationException or JsonException)
-                {
-                    log?.Invoke($"warning: arbiter global hook refresh for '{targetToken}' failed: {ex.Message}");
-                    globalFailed++;
-                }
             }
-
-            if (receipt is not null && receiptChanged)
+            catch (Exception ex) when (FileFailure.Is(ex) || ex is InvalidOperationException or JsonException)
             {
-                try
-                {
-                    SquadReceipt updatedReceipt = receipt with
-                    {
-                        Files = updatedFiles ?? receipt.Files,
-                        Blocks = updatedBlocks ?? receipt.Blocks
-                    };
-                    string receiptPath = state.ResolveReceiptPath(home, SquadDeploymentScope.Global);
-                    string serialized = state.SerializeReceipt(updatedReceipt);
-                    files.WriteAllTextAtomic(receiptPath, serialized);
-                }
-                catch (Exception ex) when (FileFailure.Is(ex) || ex is JsonException)
-                {
-                    log?.Invoke($"warning: updating global squad receipt failed: {ex.Message}");
-                }
+                log?.Invoke($"warning: arbiter global hook refresh for '{targetToken}' failed: {ex.Message}");
+                globalFailed++;
             }
         }
 
-        return new ArbiterHookRefreshResult(refreshed + globalRefreshed, failed + globalFailed);
+        PersistGlobalReceiptIfChanged(home, receipt, receiptChanged, updatedFiles, updatedBlocks);
+
+        return (globalRefreshed, globalFailed);
+    }
+
+    private void PersistGlobalReceiptIfChanged(
+        string home,
+        SquadReceipt? receipt,
+        bool receiptChanged,
+        List<SquadOwnedFile>? updatedFiles,
+        List<SquadOwnedBlock>? updatedBlocks)
+    {
+        if (receipt is null || !receiptChanged)
+        {
+            return;
+        }
+
+        try
+        {
+            SquadReceipt updatedReceipt = receipt with
+            {
+                Files = updatedFiles ?? receipt.Files,
+                Blocks = updatedBlocks ?? receipt.Blocks
+            };
+            string receiptPath = state.ResolveReceiptPath(home, SquadDeploymentScope.Global);
+            string serialized = state.SerializeReceipt(updatedReceipt);
+            files.WriteAllTextAtomic(receiptPath, serialized);
+        }
+        catch (Exception ex) when (FileFailure.Is(ex) || ex is JsonException)
+        {
+            log?.Invoke($"warning: updating global squad receipt failed: {ex.Message}");
+        }
     }
 
     private string? ResolveHome()
