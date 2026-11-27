@@ -77,7 +77,11 @@ public sealed class DocumentSectionVocabulary
 /// <param name="Heading">The heading text, without the leading hashes.</param>
 /// <param name="Body">Everything under the heading up to the next <c>##</c>.</param>
 /// <param name="LineNumber">1-based line of the heading within the file.</param>
-public sealed record DocumentSection(string Heading, string Body, int LineNumber);
+/// <param name="BodyLine">
+/// 1-based line of <paramref name="Body"/>'s first line. The split trims blank lines from the
+/// body's edges, so this is not always <paramref name="LineNumber"/> + 1; 0 when unknown.
+/// </param>
+public sealed record DocumentSection(string Heading, string Body, int LineNumber, int BodyLine = 0);
 
 /// <summary>
 /// One retrievable <c>###</c> leaf (or preamble / section lead-in) with a stable

@@ -1,0 +1,10 @@
+# Analyzers the C# coding standard turns on (docs/standards/csharp/csharp.rules.md) that
+# AnalysisMode=all leaves off by default. Always applied. analyzers/ratchet.globalconfig outranks
+# this file while a rule still has violations.
+is_global = true
+global_level = 100
+
+# KW-STD-CS-002 single responsibility: method complexity and class coupling, at the analyzers'
+# default thresholds.
+dotnet_diagnostic.CA1502.severity = warning
+dotnet_diagnostic.CA1506.severity = warning

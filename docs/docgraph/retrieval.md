@@ -249,8 +249,14 @@ decision it records is unchanged and the tool is now
 **`docs_get_coding_standard_for_technology`**, not the explore tool. It is a **total across every
 standard returned** for the technology, split with a 1500-character floor each.
 
-Within a standard, `##` sections are ranked by rarity-weighted similarity, selected until
-the budget runs out, then **emitted in document order** so the prose still reads. Short
+Within a standard, the scoring unit is the `##` section, except that a `##` section holding
+`###` headings is scored as its lead (when the lead has prose) plus one unit per `###` heading.
+A parent heading is not scored on its own, so a sibling that shares one word of the topic cannot
+beat the subsection that discusses it. `DocumentMarkdown.SplitTopicSections` performs the split
+with Markdig, the same parse `Explore` uses, so an indented heading, a closing run of hashes and a
+`#` line inside a `~~~` fence are read the same way by both. Units are ranked by rarity-weighted
+similarity, selected
+until the budget runs out, then **emitted in document order** so the prose still reads. Short
 sections are damped, because a three-word stub can overlap a query almost perfectly while
 saying nothing. A section is selected only when its score clears the 0.02 section floor, with
 the top-ranked clearing section always included even if it alone exceeds the budget so the

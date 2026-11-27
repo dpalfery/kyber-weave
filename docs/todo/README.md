@@ -43,6 +43,7 @@ last-reviewed: YYYY-MM-DD
 
 | Todo | Component | Status | Description |
 |---|---|---|---|
+| [csharp-standards-remediation.md](csharp-standards-remediation.md) | CI Pipelines | draft | Bring the codebase in line with the 2026-11-26 C# and SQLite rules: a 699-violation analyzer ratchet, an opencode inventory pass on the local Qwen model, then up to three parallel fixers per wave. |
 | [kw-skills-load-on-demand.md](../archive/todo/kw-skills-load-on-demand.md) | KyberSquad | archived | Promoted to an implementation plan on 2026-11-24: technology and role agents get a list of Kyber-Weave skills at start and load one through kw-docs `load_skill`, separate from harness skills. |
 | [kw-skills-follow-ups.md](kw-skills-follow-ups.md) | KyberSquad | draft | Small follow-ups from delivering KW skills: a KyberDash technology gate, RED classifier and `review gates` gaps, a stale constant, unsurfaced skill-list problems, the Antigravity marker gate, and converting legacy `.skills.md`. |
 | [kw-skills-load-on-demand.md](kw-skills-load-on-demand.md) | KyberSquad | draft | User story: technology and role agents get a list of Kyber-Weave skills at start and load one through kw-docs `load_skill`, separate from harness skills. |

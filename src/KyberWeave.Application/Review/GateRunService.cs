@@ -82,8 +82,8 @@ public sealed class GateRunService(
         IReadOnlyList<ReviewGate> gates = config.Gates;
         GateResult?[] results = new GateResult?[gates.Count];
         List<(int Index, Task<GateResult?> Run)> alongside = [];
-        DateTime startedUtc = clock.GetUtcNow().UtcDateTime;
-        long started = clock.GetTimestamp();
+        GateRunClock started = GateRunClock.Now(clock);
+        DateTime startedUtc = started.Started.UtcDateTime;
         bool stopped = false;
 
         using CancellationTokenSource stop = new();
@@ -97,7 +97,7 @@ public sealed class GateRunService(
                 GateResult? settled;
                 if (AppliesWhenReason(gate, changedPaths) is string reason)
                     settled = NotApplicable(gate, reason);
-                else if (deadline is { } passed && deadline - clock.GetElapsedTime(started) <= TimeSpan.Zero)
+                else if (deadline is { } passed && deadline - started.Elapsed(clock) <= TimeSpan.Zero)
                     settled = DeadlinePassedBeforeStart(gate, passed);
                 else
                     settled = MissingRequirement(gate, workingDirectory);
@@ -365,7 +365,7 @@ public sealed class GateRunService(
         ReviewGate gate,
         string workingDirectory,
         TimeSpan? deadline,
-        long runStarted,
+        GateRunClock runStarted,
         SemaphoreSlim slots,
         CancellationToken stop)
     {
@@ -380,7 +380,7 @@ public sealed class GateRunService(
 
         try
         {
-            TimeSpan? timeLeft = deadline - clock.GetElapsedTime(runStarted);
+            TimeSpan? timeLeft = deadline - runStarted.Elapsed(clock);
             if (deadline is { } passed && timeLeft <= TimeSpan.Zero)
                 return DeadlinePassedBeforeStart(gate, passed);
 
@@ -449,7 +449,7 @@ public sealed class GateRunService(
                 Outcome: GateOutcome.NotStarted);
         }
 
-        long start = clock.GetTimestamp();
+        GateRunClock start = GateRunClock.Now(clock);
         TimeSpan ownTimeout = TimeSpan.FromSeconds(timeoutSeconds);
         bool deadlineFirst = budget?.TimeLeft is { } left && left <= ownTimeout;
         TimeSpan timeout = deadlineFirst && budget?.TimeLeft is { } remaining ? remaining : ownTimeout;
@@ -467,7 +467,7 @@ public sealed class GateRunService(
                 blocking,
                 printed ? 1 : process.ExitCode,
                 printed ? SummarizeOutput(process.StandardOutput) : Summarize(process, nameFailingTests),
-                (long)clock.GetElapsedTime(start).TotalMilliseconds,
+                ElapsedMilliseconds(start),
                 Outcome: GateOutcome.Completed);
         }
         catch (TimeoutException ex) when (deadlineFirst)
@@ -478,7 +478,7 @@ public sealed class GateRunService(
                 -1,
                 $"stopped at the council deadline of {budget?.Deadline.TotalSeconds:0} seconds ({DeadlineKey}) " +
                 $"after running {timeout.TotalSeconds:0} seconds: {ex.Message}",
-                (long)clock.GetElapsedTime(start).TotalMilliseconds,
+                ElapsedMilliseconds(start),
                 Outcome: GateOutcome.DeadlinePassed);
         }
         catch (TimeoutException ex)
@@ -488,8 +488,9 @@ public sealed class GateRunService(
                 blocking,
                 -1,
                 $"timed out after {timeoutSeconds} seconds: {ex.Message}",
-                (long)clock.GetElapsedTime(start).TotalMilliseconds,
-                Outcome: GateOutcome.TimedOut);
+                ElapsedMilliseconds(start),
+                Outcome: GateOutcome.TimedOut,
+                TimeoutSeconds: timeoutSeconds);
         }
         catch (Exception ex) when (ex is Win32Exception or InvalidOperationException)
         {
@@ -501,10 +502,14 @@ public sealed class GateRunService(
                 blocking,
                 -1,
                 $"could not start '{argv[0]}': {ex.Message}",
-                (long)clock.GetElapsedTime(start).TotalMilliseconds,
+                ElapsedMilliseconds(start),
                 Outcome: GateOutcome.NotStarted);
         }
     }
+
+    /// <summary>The time the gate took, on the same clock its process timeout ran on.</summary>
+    private long ElapsedMilliseconds(GateRunClock start) =>
+        Math.Max(0, (long)start.Elapsed(clock).TotalMilliseconds);
 
     private const int MaxSummaryLineLength = 200;
 

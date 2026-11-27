@@ -112,17 +112,22 @@ dotnet_diagnostic.CA1203.severity = suggestion
 dotnet_diagnostic.CA1204.severity = suggestion
 
 # Globalization Rules (CA1300-1399) - TREAT AS SUGGESTION
+# CA1304, CA1305, CA1307, CA1309, CA1310 and CA1311 are not here: they enforce the explicit string
+# comparison and culture rule (KW-STD-CS-009), and the codebase was clean of them on 2026-11-26.
 dotnet_diagnostic.CA1300.severity = suggestion
 dotnet_diagnostic.CA1301.severity = suggestion
 dotnet_diagnostic.CA1302.severity = suggestion
 dotnet_diagnostic.CA1303.severity = suggestion
-dotnet_diagnostic.CA1304.severity = suggestion
-dotnet_diagnostic.CA1305.severity = suggestion
 dotnet_diagnostic.CA1306.severity = suggestion
-dotnet_diagnostic.CA1307.severity = suggestion
 dotnet_diagnostic.CA1308.severity = suggestion
-dotnet_diagnostic.CA1309.severity = suggestion
-dotnet_diagnostic.CA1310.severity = suggestion
-dotnet_diagnostic.CA1311.severity = suggestion
 dotnet_diagnostic.CA1312.severity = suggestion
 dotnet_diagnostic.CA1313.severity = suggestion
+
+# Test methods are invoked by the test runner, never by a caller that could pass null, so the
+# public-argument guard of KW-STD-CS-004 (CA1062) does not apply to test code.
+# A dotnet_diagnostic severity line is outside the suppressions gate on purpose. That gate
+# recognises a pragma, a SuppressMessage attribute and a NoWarn element. The reason for this
+# exemption, and for each suggestion line in analyzers/ratchet.globalconfig, is the comment
+# above the line.
+[{tests,dash/server.tests}/**.cs]
+dotnet_diagnostic.CA1062.severity = none
