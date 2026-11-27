@@ -109,7 +109,7 @@ public abstract class KyberBridgeEngineBase
     internal CanonSessionProjectorEngine projector;
     internal CanonRollupsEngine rollups;
     internal Func<DateTimeOffset> clock;
-    internal TimeProvider time;
+    internal readonly TimeProvider time;
     internal string version;
     internal string instanceId;
     internal string storePath;
