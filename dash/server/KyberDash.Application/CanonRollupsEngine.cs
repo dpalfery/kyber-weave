@@ -341,66 +341,126 @@ public class CanonRollupsEngine
                 subagentSessions++;
             }
 
-            if (datum.Projection?.Context is StoredSessionContext context
-                && !IsUnnamedWindowSource(context.ContextLimitSource))
-            {
-                double peak = 0;
-                bool found = false;
-                foreach (StoredSessionContextTurn turn in context.Turns)
-                {
-                    if (turn.Pressure is double pressure && double.IsFinite(pressure)
-                        && (!found || pressure > peak))
-                    {
-                        peak = pressure;
-                        found = true;
-                    }
-                }
-
-                if (found)
-                {
-                    peakPressures.Add(peak);
-                    if (string.Equals(context.ContextLimitSource, "declared", StringComparison.Ordinal)
-                        || context.DerivedCounts.Count > 0)
-                    {
-                        anyDerivedPressure = true;
-                    }
-                }
-                else
-                {
-                    unknownWindowSessions++;
-                }
-            }
-            else
-            {
-                unknownWindowSessions++;
-            }
+            AccumulateContextPressure(datum, peakPressures, ref anyDerivedPressure, ref unknownWindowSessions);
 
             if (datum.Figures is not SessionSummaryFigure figures)
             {
                 continue;
             }
 
-            long input = figures.TotalInput ?? 0;
-            long cacheRead = figures.TotalCacheRead ?? 0;
-            totalInput += input;
-            totalCacheRead += cacheRead;
-
-            if (cacheRead > 0)
-            {
-                hasCacheRead = true;
-            }
-
-            HashSet<string> offered = new(figures.ToolsOffered, StringComparer.Ordinal);
-            totalDefinedTools += offered.Count;
-            foreach (string tool in figures.ToolsInvoked)
-            {
-                if (offered.Contains(tool))
-                {
-                    totalInvokedTools++;
-                }
-            }
+            AccumulateFigures(
+                figures,
+                ref totalInput,
+                ref totalCacheRead,
+                ref hasCacheRead,
+                ref totalDefinedTools,
+                ref totalInvokedTools);
         }
 
+        List<StoredHarnessRollupMetric> metrics = BuildHarnessMetrics(
+            peakPressures,
+            anyDerivedPressure,
+            hasCacheRead,
+            totalInput,
+            totalCacheRead,
+            totalDefinedTools,
+            totalInvokedTools,
+            subagentSessions,
+            data.Count,
+            executions);
+
+        return new StoredHarnessRollup(
+            harness,
+            data.Count,
+            runCount,
+            executions.Count,
+            unknownWindowSessions,
+            data.Count,
+            metrics);
+    }
+
+    private static void AccumulateContextPressure(
+        SessionDatum datum,
+        List<double> peakPressures,
+        ref bool anyDerivedPressure,
+        ref int unknownWindowSessions)
+    {
+        if (datum.Projection?.Context is StoredSessionContext context
+            && !IsUnnamedWindowSource(context.ContextLimitSource))
+        {
+            double peak = 0;
+            bool found = false;
+            foreach (StoredSessionContextTurn turn in context.Turns)
+            {
+                if (turn.Pressure is double pressure && double.IsFinite(pressure)
+                    && (!found || pressure > peak))
+                {
+                    peak = pressure;
+                    found = true;
+                }
+            }
+
+            if (found)
+            {
+                peakPressures.Add(peak);
+                if (string.Equals(context.ContextLimitSource, "declared", StringComparison.Ordinal)
+                    || context.DerivedCounts.Count > 0)
+                {
+                    anyDerivedPressure = true;
+                }
+            }
+            else
+            {
+                unknownWindowSessions++;
+            }
+        }
+        else
+        {
+            unknownWindowSessions++;
+        }
+    }
+
+    private static void AccumulateFigures(
+        SessionSummaryFigure figures,
+        ref long totalInput,
+        ref long totalCacheRead,
+        ref bool hasCacheRead,
+        ref int totalDefinedTools,
+        ref int totalInvokedTools)
+    {
+        long input = figures.TotalInput ?? 0;
+        long cacheRead = figures.TotalCacheRead ?? 0;
+        totalInput += input;
+        totalCacheRead += cacheRead;
+
+        if (cacheRead > 0)
+        {
+            hasCacheRead = true;
+        }
+
+        HashSet<string> offered = new(figures.ToolsOffered, StringComparer.Ordinal);
+        totalDefinedTools += offered.Count;
+        foreach (string tool in figures.ToolsInvoked)
+        {
+            if (offered.Contains(tool))
+            {
+                totalInvokedTools++;
+            }
+        }
+    }
+
+    private static List<StoredHarnessRollupMetric> BuildHarnessMetrics(
+        List<double> peakPressures,
+        bool anyDerivedPressure,
+        bool hasCacheRead,
+        long totalInput,
+        long totalCacheRead,
+        int totalDefinedTools,
+        int totalInvokedTools,
+        int subagentSessions,
+        int sessionCount,
+        IReadOnlyList<StoredExecution> executions)
+    {
         List<StoredHarnessRollupMetric> metrics = [];
         if (peakPressures.Count > 0)
         {
@@ -412,42 +472,31 @@ public class CanonRollupsEngine
             metrics.Add(new StoredHarnessRollupMetric("context_pressure_p95", p95Pressure, basis));
         }
 
-        double? cacheHitRate = null;
         if (hasCacheRead && totalInput > 0)
         {
-            cacheHitRate = Math.Round((double)totalCacheRead / totalInput, 4);
-            metrics.Add(new StoredHarnessRollupMetric("cache_hit_rate", cacheHitRate.Value, "measured"));
+            double cacheHitRate = Math.Round((double)totalCacheRead / totalInput, 4);
+            metrics.Add(new StoredHarnessRollupMetric("cache_hit_rate", cacheHitRate, "measured"));
         }
 
-        double? toolYield = null;
         if (totalDefinedTools > 0)
         {
-            toolYield = Math.Round((double)totalInvokedTools / totalDefinedTools, 4);
-            metrics.Add(new StoredHarnessRollupMetric("tool_yield", toolYield.Value, "measured"));
+            double toolYield = Math.Round((double)totalInvokedTools / totalDefinedTools, 4);
+            metrics.Add(new StoredHarnessRollupMetric("tool_yield", toolYield, "measured"));
         }
 
-        double? delegationOverhead = null;
-        if (data.Count > 0 && subagentSessions > 0)
+        if (sessionCount > 0 && subagentSessions > 0)
         {
-            delegationOverhead = Math.Round((double)subagentSessions / data.Count, 4);
-            metrics.Add(new StoredHarnessRollupMetric("delegation_overhead", delegationOverhead.Value, "measured"));
+            double delegationOverhead = Math.Round((double)subagentSessions / sessionCount, 4);
+            metrics.Add(new StoredHarnessRollupMetric("delegation_overhead", delegationOverhead, "measured"));
         }
         else if (executions.Count > 1 && executions.Any(static execution => !execution.IsRoot))
         {
             int children = executions.Count(static execution => !execution.IsRoot);
-            delegationOverhead = Math.Round((double)children / executions.Count, 4);
-            metrics.Add(new StoredHarnessRollupMetric("delegation_overhead", delegationOverhead.Value, "measured"));
+            double delegationOverhead = Math.Round((double)children / executions.Count, 4);
+            metrics.Add(new StoredHarnessRollupMetric("delegation_overhead", delegationOverhead, "measured"));
         }
 
-        int sampleCount = Math.Max(data.Count, Math.Max(runCount, executions.Count));
-        return new StoredHarnessRollup(
-            harness,
-            data.Count,
-            runCount,
-            executions.Count,
-            unknownWindowSessions,
-            data.Count,
-            metrics);
+        return metrics;
     }
 
     /// <summary>Maps a stored harness rollup to the scorecard row shape.</summary>
