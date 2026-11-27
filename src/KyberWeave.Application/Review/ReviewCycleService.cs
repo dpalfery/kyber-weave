@@ -50,8 +50,8 @@ public sealed class ReviewCycleService(
         string tree = trees.Containing(root);
         string scratchpad = ReviewWorkTree.Scratchpad(tree);
         ReviewTaskChoice choice = selector.ChooseTask(tree, scratchpad, request.Task);
-        if (!choice.Chosen)
-            return ReviewCommandResultFactory.Refused(choice.Error!);
+        if (choice.Error is { } error)
+            return ReviewCommandResultFactory.Refused(error);
 
         string task = choice.Task;
         if (choice.Note is { } chosen && !request.Json)
