@@ -488,7 +488,7 @@ public sealed class ArbiterHookDecisionEngine : IContextualHookDecisionEngine, I
                 $"written ({OneLine(exception.Message)}); it still looks in flight until the unreturned horizon.");
         }
 
-        return new HookOutcome(HookOutcomeKind.Deny, insertion.Reason);
+        return new HookOutcome(HookOutcomeKind.Deny, insertion.StopReason);
     }
 
     /// <summary>

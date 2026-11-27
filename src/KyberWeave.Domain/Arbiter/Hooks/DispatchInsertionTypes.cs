@@ -57,4 +57,11 @@ public sealed record DispatchInsertion(DispatchInsertionKind Kind, string Text =
 {
     /// <summary>The one answer for a dispatch that needs no insertion.</summary>
     public static DispatchInsertion None { get; } = new(DispatchInsertionKind.None);
+
+    /// <summary>
+    /// The repair command a <see cref="DispatchInsertionKind.Stopped"/> answer carries; a stopped
+    /// answer without one is a bug, not a deny to render.
+    /// </summary>
+    public string StopReason => Reason ?? throw new InvalidOperationException(
+        "A stopped dispatch insertion carries no reason.");
 }
