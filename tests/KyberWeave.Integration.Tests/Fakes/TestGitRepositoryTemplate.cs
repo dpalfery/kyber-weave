@@ -35,7 +35,7 @@ public static class TestGitRepositoryTemplate
             {
                 if (Directory.Exists(TemplateRoot)) Directory.Delete(TemplateRoot, true);
             }
-            catch
+            catch (Exception ex) when (ex is DirectoryNotFoundException or IOException or UnauthorizedAccessException)
             {
                 // Best-effort cleanup on process termination.
             }
@@ -265,7 +265,7 @@ public static class TestGitRepositoryTemplate
                 Directory.Delete(path, true);
             }
         }
-        catch
+        catch (Exception ex) when (ex is DirectoryNotFoundException or IOException or UnauthorizedAccessException)
         {
             // Best-effort cleanup: the process-exit hook removes the template root anyway.
         }
@@ -337,7 +337,7 @@ public static class TestGitRepositoryTemplate
                 {
                     File.SetAttributes(targetPath, FileAttributes.Normal);
                 }
-                catch
+                catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
                 {
                     // Best-effort attribute normalization on POSIX / Windows.
                 }

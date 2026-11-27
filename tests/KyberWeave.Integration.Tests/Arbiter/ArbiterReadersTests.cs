@@ -1,3 +1,4 @@
+using System.ComponentModel;
 using KyberWeave.Data.Arbiter;
 using KyberWeave.Data.Hooks;
 using KyberWeave.Core.Arbiter.Plans;
@@ -231,7 +232,8 @@ public sealed class ArbiterReadersTests : IDisposable
                 plain,
                 new GitSnapshot("deadbeef", new Dictionary<string, string>(), new Dictionary<string, string>()));
         }
-        catch (Exception ex)
+        catch (Exception ex) when (
+            ex is IOException or UnauthorizedAccessException or InvalidOperationException or TimeoutException or Win32Exception)
         {
             failure = ex;
         }
