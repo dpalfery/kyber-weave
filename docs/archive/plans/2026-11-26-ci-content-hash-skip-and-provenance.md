@@ -15,8 +15,8 @@ impact-components:
 # CI content-hash skip receipts and provenance
 
 **Status: Archived, 2026-11-27.** Autonomy: supervised. The owner approved the plan at the
-approve-and-execute gate, all three tasks are committed and integrated, and the closeout harvest is
-complete; the review council runs next and the archive step follows it.
+approve-and-execute gate, all three tasks are committed and integrated, the closeout harvest is
+complete, and the plan is archived.
 
 ## Problem and goal
 
@@ -89,8 +89,9 @@ ceiling. A fork pull request restores nothing, so it is a miss regardless of age
   one is missing from this list, so the set cannot rot as the tree grows). No bare `'*'` or `'.*'`
   glob appears, and neither does `hashFiles('**')`: the runner's expansion of those patterns
   against `.git` cannot be observed from a static test, so every directory is listed as `<dir>/**`
-  and every root file by exact name (D15). At the tracked tree of revision `1405762e` the literal
-  is:
+  and every root file by exact name (D15). The tree at revision `1405762e` had 25 directories
+  and did not include `analyzers/`. That directory landed on main afterwards, and the literal
+  gained `analyzers/**` with it. The current literal is:
   `hashFiles('.agents/**','.apm/**','.claude/**','.codex/**','.commandcode/**','.cursor/**','.devin/**','.factory/**','.github/**','.kilo/**','.kyber-weave/**','.opencode/**','.pi/**','.playwright-cli/**','.vscode/**','analyzers/**','dash/**','docs/**','homebrew/**','npm/**','products/**','samples/**','scripts/**','src/**','templates/**','tests/**','.editorconfig','.gitattributes','.gitignore','.gitleaks.toml','.mcp.json','AGENTS.md','CLAUDE.md','CODE_OF_CONDUCT.md','CONTRIBUTING.md','Directory.Build.props','HANDOVER-WAVE4.md','HANDOVER.md','KyberWeave.Unit.slnf','KyberWeave.sln','KyberWeave.sln.DotSettings','LICENSE','NOTICE','README.md','REFACTOR-LAYERS.md','REVIEW.md','SECURITY.md','apm.yml','global.json','kilo.json')`
   `.git` is not tracked, so "every tracked top-level entry" needs no exception. The enumeration
   came from `git ls-tree HEAD`, not from a directory listing that could include build output.
@@ -338,7 +339,8 @@ alternatives that are rejected with reasons, and unsound relaxations would be si
   `samples` — and 24 root files, including `.editorconfig`, `.gitleaks.toml`, `.mcp.json`,
   `global.json` and the single `Directory.Build.props`; no root `Directory.Packages.props` or
   `NuGet.config` exists. The review's enumeration finding is verified: `W` now enumerates all of
-  them, and the sbom regex's `Directory\..*\.props` alternation is unanchored, so `S` uses
+  them. The current `W` literal also names `analyzers/**`, which was not in that revision. The
+  sbom regex's `Directory\..*\.props` alternation is unanchored, so `S` uses
   `**/Directory.*.props`.
 - **`ci.yml`'s `changes` job already encodes per-job input universes** (the SBOM regex, the
   dash/dotnet/code flags); the fingerprint sets reuse those declarations rather than inventing a
