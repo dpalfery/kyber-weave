@@ -324,17 +324,9 @@ public sealed class HookRunContextResolver(
         }
 
         // A leading cd counts only where the cwd says nothing about the run: absent, or the canonical checkout.
-        if (!string.IsNullOrWhiteSpace(request.LeadingCdTarget)
-            && TryCandidate(request.LeadingCdTarget!, "the command's leading cd", root, common, worktrees, notes, out string cdWorktree)
-            && (canonical is null || !IsSame(cdWorktree, canonical)))
+        if (LeadingCdCandidate(request, root, common, worktrees, liveRuns, canonical, notes) is { } fromLeadingCd)
         {
-            if (RunOf(cdWorktree, liveRuns, notes) is { } cdRun)
-            {
-                notes.Add($"the command's leading cd enters '{cdWorktree}', where the live run for branch '{cdRun.Branch}' works.");
-                return (cdWorktree, HookRunContextSource.EventWorktree, cdRun);
-            }
-
-            notes.Add($"the command's leading cd enters '{cdWorktree}', which belongs to no single live run; it was not used.");
+            return fromLeadingCd;
         }
 
         if (liveRuns.Count == 1)
@@ -358,6 +350,36 @@ public sealed class HookRunContextResolver(
         return (root, worktrees.Count > 0 && IsSame(root, worktrees[0])
             ? HookRunContextSource.PayloadCwd
             : HookRunContextSource.None, null);
+    }
+
+    /// <summary>
+    /// The candidate the command's leading <c>cd</c> names when the cwd says nothing about the run. Null when the cd
+    /// names no validated worktree of this repository, or names the canonical checkout the cwd already is.
+    /// </summary>
+    private (string Worktree, HookRunContextSource Source, RunRecord? Run)? LeadingCdCandidate(
+        HookRunContextRequest request,
+        string root,
+        string? common,
+        IReadOnlyList<string> worktrees,
+        IReadOnlyList<RunRecord> liveRuns,
+        string? canonical,
+        List<string> notes)
+    {
+        if (string.IsNullOrWhiteSpace(request.LeadingCdTarget)
+            || !TryCandidate(request.LeadingCdTarget!, "the command's leading cd", root, common, worktrees, notes, out string cdWorktree)
+            || (canonical is not null && IsSame(cdWorktree, canonical)))
+        {
+            return null;
+        }
+
+        if (RunOf(cdWorktree, liveRuns, notes) is { } cdRun)
+        {
+            notes.Add($"the command's leading cd enters '{cdWorktree}', where the live run for branch '{cdRun.Branch}' works.");
+            return (cdWorktree, HookRunContextSource.EventWorktree, cdRun);
+        }
+
+        notes.Add($"the command's leading cd enters '{cdWorktree}', which belongs to no single live run; it was not used.");
+        return null;
     }
 
     /// <summary>
