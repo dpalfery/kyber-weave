@@ -312,29 +312,19 @@ internal sealed class SquadPresetUseCommand : Command<SquadPresetUseSettings>
 
         SquadModelProfiles mergedProfiles = preset.ApplyTo(canonical.Profiles);
 
-        SquadPresetRewriteResult rewrite = SquadPresetFileRewriter.Rewrite(
-            activeReceipt.Files,
+        SquadPresetRewriteResult rewrite = BuildRewrite(
+            activeReceipt,
+            anchorRoot,
+            scope,
             targetTokens,
             mergedProfiles,
-            canonical.AgentProfiles,
-            file =>
-            {
-                string physicalPath = scope == SquadDeploymentScope.Global
-                    ? SquadDeploymentPlanRules.ResolveOwnedFilePath(activeReceipt, anchorRoot, effectiveGlobalRoots, file, _pathSemantics)
-                    : Path.Combine(anchorRoot, file.RelativePath);
-                return _files.FileExists(physicalPath) ? _files.ReadAllBytes(physicalPath) : null;
-            },
-            new ArbiterModelTargetsPreset(preset.Name, preset.Digest),
-            bundled: canonical.Profiles);
+            canonical,
+            preset,
+            effectiveGlobalRoots);
 
         if (settings.DryRun)
         {
-            foreach (SquadModelDiffItem diff in rewrite.Diffs)
-            {
-                _output.WriteLine(
-                    $"{diff.Agent}: {diff.OldModel ?? "none"} -> {diff.NewModel ?? "none"}");
-            }
-
+            WriteDiffs(rewrite);
             return 0;
         }
 
@@ -347,7 +337,70 @@ internal sealed class SquadPresetUseCommand : Command<SquadPresetUseSettings>
             applied[target] = new SquadAppliedPreset(preset.Name, preset.Digest);
         }
 
-        SquadLock nextLock = (activeLock ?? new SquadLock(
+        SquadLock nextLock = BuildNextLock(activeLock, targets, applied);
+
+        SquadDeploymentPlan plan = _planner.CreateUpdate(
+            anchorRoot,
+            scope,
+            nextLock,
+            rewrite.Files,
+            activeReceipt,
+            [],
+            true,
+            _time,
+            effectiveGlobalRoots);
+
+        return ApplyPlan(plan, selectionStores, targets, projectRoot, preset.Name);
+    }
+
+    private SquadPresetRewriteResult BuildRewrite(
+        SquadReceipt activeReceipt,
+        string anchorRoot,
+        SquadDeploymentScope scope,
+        HashSet<string> targetTokens,
+        SquadModelProfiles mergedProfiles,
+        SquadCanonicalProfiles canonical,
+        SquadModelPreset preset,
+        ISquadGlobalRootResolver effectiveGlobalRoots)
+    {
+        return SquadPresetFileRewriter.Rewrite(
+            activeReceipt.Files,
+            targetTokens,
+            mergedProfiles,
+            canonical.AgentProfiles,
+            file => ReadOwnedFileBytes(activeReceipt, anchorRoot, scope, effectiveGlobalRoots, file),
+            new ArbiterModelTargetsPreset(preset.Name, preset.Digest),
+            bundled: canonical.Profiles);
+    }
+
+    private byte[]? ReadOwnedFileBytes(
+        SquadReceipt activeReceipt,
+        string anchorRoot,
+        SquadDeploymentScope scope,
+        ISquadGlobalRootResolver effectiveGlobalRoots,
+        SquadOwnedFile file)
+    {
+        string physicalPath = scope == SquadDeploymentScope.Global
+            ? SquadDeploymentPlanRules.ResolveOwnedFilePath(activeReceipt, anchorRoot, effectiveGlobalRoots, file, _pathSemantics)
+            : Path.Combine(anchorRoot, file.RelativePath);
+        return _files.FileExists(physicalPath) ? _files.ReadAllBytes(physicalPath) : null;
+    }
+
+    private void WriteDiffs(SquadPresetRewriteResult rewrite)
+    {
+        foreach (SquadModelDiffItem diff in rewrite.Diffs)
+        {
+            _output.WriteLine(
+                $"{diff.Agent}: {diff.OldModel ?? "none"} -> {diff.NewModel ?? "none"}");
+        }
+    }
+
+    private static SquadLock BuildNextLock(
+        SquadLock? activeLock,
+        IReadOnlyList<SquadTarget> targets,
+        Dictionary<SquadTarget, SquadAppliedPreset> applied)
+    {
+        return (activeLock ?? new SquadLock(
                 LockSchemaV2,
                 "1.0.0",
                 "1.0.0",
@@ -363,18 +416,15 @@ internal sealed class SquadPresetUseCommand : Command<SquadPresetUseSettings>
             Schema = LockSchemaV2,
             ModelPresets = applied
         };
+    }
 
-        SquadDeploymentPlan plan = _planner.CreateUpdate(
-            anchorRoot,
-            scope,
-            nextLock,
-            rewrite.Files,
-            activeReceipt,
-            [],
-            true,
-            _time,
-            effectiveGlobalRoots);
-
+    private int ApplyPlan(
+        SquadDeploymentPlan plan,
+        IReadOnlyList<ISquadModelPresetSelectionStore> selectionStores,
+        IReadOnlyList<SquadTarget> targets,
+        string projectRoot,
+        string presetName)
+    {
         ISquadTransaction transaction = _transactions.Create(null);
         try
         {
@@ -395,7 +445,7 @@ internal sealed class SquadPresetUseCommand : Command<SquadPresetUseSettings>
         {
             foreach (SquadTarget target in targets)
             {
-                store.Record(projectRoot, target, preset.Name);
+                store.Record(projectRoot, target, presetName);
             }
         }
 

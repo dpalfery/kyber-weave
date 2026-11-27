@@ -418,46 +418,14 @@ internal sealed class SquadUpdateCommand : Command<SquadUpdateSettings>
             receiptTargets = [];
         }
 
-        // Load configuration if present
-        KyberWeaveConfigLoadResult configResult = _roots.TryLoadScopeConfig(
-            _configs,
-            run.TargetRoot,
-            run.Scope,
-            stateStore.UserPaths.HomeDirectory);
-        if (!configResult.Success)
+        UpdateTargets? targets = ResolveUpdateTargets(run, receiptTargets, stateStore, out int resolveExitCode);
+        if (targets is null)
         {
-            _output.WriteClientInputError(configResult.Error ?? "Failed to load configuration.");
-            return 1;
+            return resolveExitCode;
         }
 
-        SquadConfig squadConfig = configResult.Config?.Squad ?? SquadConfig.ProductDefaults;
-
-        SquadTargetResolutionRequest request = new()
-        {
-            RootPath = run.TargetRoot,
-            Operation = SquadTargetOperation.Update,
-            ExplicitTargets = run.ExplicitTargets,
-            ConfiguredTargets = squadConfig.Targets,
-            ReceiptTargets = receiptTargets,
-            ExplicitExclusions = run.ExplicitExclusions,
-            ConfiguredExclusions = squadConfig.Exclusions,
-            IsInteractive = _output.IsInteractive
-        };
-
-        SquadTargetResolutionDecision decision = _targets.Resolve(request);
-        if (decision.Kind == SquadTargetResolutionKind.Failure)
-        {
-            _output.Ansi.MarkupLine("[red]No deployment targets specified or detected.[/]");
-            if (decision.RecoveryCommand is not null)
-                _output.Ansi.MarkupLine($"Specify target(s) using [bold]{Markup.Escape(decision.RecoveryCommand)}[/].");
-
-            return decision.ExitCode ?? 2;
-        }
-
-        // The host's Arbiter settings travel into rendering (Req 22.2, 5.3): enabled
-        // verbatim, timeout-ms as whole hook seconds with headroom.
-        SquadArbiterWiring arbiterWiring = SquadCommandComposition.ResolveArbiterWiring(
-            configResult.Config?.Arbiter ?? Core.Arbiter.ArbiterConfigDefaults.Product);
+        SquadTargetResolutionDecision decision = targets.Decision;
+        SquadArbiterWiring arbiterWiring = targets.Arbiter;
 
         SquadUpdateRequest updateRequest = new(
             run.TargetRoot,
@@ -468,7 +436,7 @@ internal sealed class SquadUpdateCommand : Command<SquadUpdateSettings>
             ReplaceManaged: run.ReplaceManaged,
             DryRun: run.DryRun,
             Arbiter: arbiterWiring,
-            WorkerRoster: configResult.Config?.WorkerRoster);
+            WorkerRoster: targets.WorkerRoster);
 
         // A --global run writes beneath each selected target's own physical global root,
         // not beneath the home anchor. Resolve the roots through the same resolver the
@@ -500,32 +468,7 @@ internal sealed class SquadUpdateCommand : Command<SquadUpdateSettings>
                 .GetResult();
             if (result.Success)
             {
-                deployed?.AddRange(decision.Targets);
-                if (run.DryRun)
-                {
-                    int fileCount = result.Receipt?.Files.Count ?? 0;
-                    _output.WriteLine(
-                        $"[bold]Dry-run:[/] planned {fileCount} deployed files for [bold]{Markup.Escape(run.TargetRoot)}[/].");
-                }
-                else
-                {
-                    _output.WriteLine(
-                        $"[green]Successfully updated Kyber-Squad at [bold]{Markup.Escape(run.TargetRoot)}[/].[/]");
-                }
-
-                _output.WriteTransactionWarnings(result.Warnings);
-
-                // A project with no task gates learns where they come from. Squad writes no
-                // configuration itself, and the hint never changes this exit code.
-                if (run.Scope == SquadDeploymentScope.Project)
-                {
-                    SquadTaskGateHint.WriteIfNoTaskGates(run.TargetRoot, _configs, _output);
-                }
-
-                // Until trust is granted the hooks stay off (§10.7), so the update names
-                // each selected target's trust gate where the audit cannot observe the gap.
-                SquadInstallCommand.WriteArbiterTrustSteps(_output, decision.Targets, arbiterWiring);
-
+                WriteUpdateSuccess(result, run, decision, arbiterWiring, deployed);
                 return 0;
             }
 
@@ -547,6 +490,98 @@ internal sealed class SquadUpdateCommand : Command<SquadUpdateSettings>
         }
     }
 
+    /// <summary>
+    ///     Loads the scope's configuration and resolves the targets the update writes, or returns null with the exit
+    ///     code the refusal has already been reported under.
+    /// </summary>
+    private UpdateTargets? ResolveUpdateTargets(
+        UpdateRun run,
+        IReadOnlyList<SquadTarget> receiptTargets,
+        ISquadStateStore stateStore,
+        out int exitCode)
+    {
+        exitCode = 1;
+
+        KyberWeaveConfigLoadResult configResult = _roots.TryLoadScopeConfig(
+            _configs,
+            run.TargetRoot,
+            run.Scope,
+            stateStore.UserPaths.HomeDirectory);
+        if (!configResult.Success)
+        {
+            _output.WriteClientInputError(configResult.Error ?? "Failed to load configuration.");
+            return null;
+        }
+
+        SquadConfig squadConfig = configResult.Config?.Squad ?? SquadConfig.ProductDefaults;
+
+        SquadTargetResolutionRequest request = new()
+        {
+            RootPath = run.TargetRoot,
+            Operation = SquadTargetOperation.Update,
+            ExplicitTargets = run.ExplicitTargets,
+            ConfiguredTargets = squadConfig.Targets,
+            ReceiptTargets = receiptTargets,
+            ExplicitExclusions = run.ExplicitExclusions,
+            ConfiguredExclusions = squadConfig.Exclusions,
+            IsInteractive = _output.IsInteractive
+        };
+
+        SquadTargetResolutionDecision decision = _targets.Resolve(request);
+        if (decision.Kind == SquadTargetResolutionKind.Failure)
+        {
+            _output.Ansi.MarkupLine("[red]No deployment targets specified or detected.[/]");
+            if (decision.RecoveryCommand is not null)
+                _output.Ansi.MarkupLine($"Specify target(s) using [bold]{Markup.Escape(decision.RecoveryCommand)}[/].");
+
+            exitCode = decision.ExitCode ?? 2;
+            return null;
+        }
+
+        // The host's Arbiter settings travel into rendering (Req 22.2, 5.3): enabled
+        // verbatim, timeout-ms as whole hook seconds with headroom.
+        SquadArbiterWiring arbiterWiring = SquadCommandComposition.ResolveArbiterWiring(
+            configResult.Config?.Arbiter ?? Core.Arbiter.ArbiterConfigDefaults.Product);
+
+        exitCode = 0;
+        return new UpdateTargets(decision, arbiterWiring, configResult.Config?.WorkerRoster);
+    }
+
+    /// <summary>Prints what a successful update did and the steps the operator still has to take.</summary>
+    private void WriteUpdateSuccess(
+        SquadLifecycleResult result,
+        UpdateRun run,
+        SquadTargetResolutionDecision decision,
+        SquadArbiterWiring arbiterWiring,
+        List<SquadTarget>? deployed)
+    {
+        deployed?.AddRange(decision.Targets);
+        if (run.DryRun)
+        {
+            int fileCount = result.Receipt?.Files.Count ?? 0;
+            _output.WriteLine(
+                $"[bold]Dry-run:[/] planned {fileCount} deployed files for [bold]{Markup.Escape(run.TargetRoot)}[/].");
+        }
+        else
+        {
+            _output.WriteLine(
+                $"[green]Successfully updated Kyber-Squad at [bold]{Markup.Escape(run.TargetRoot)}[/].[/]");
+        }
+
+        _output.WriteTransactionWarnings(result.Warnings);
+
+        // A project with no task gates learns where they come from. Squad writes no
+        // configuration itself, and the hint never changes this exit code.
+        if (run.Scope == SquadDeploymentScope.Project)
+        {
+            SquadTaskGateHint.WriteIfNoTaskGates(run.TargetRoot, _configs, _output);
+        }
+
+        // Until trust is granted the hooks stay off (§10.7), so the update names
+        // each selected target's trust gate where the audit cannot observe the gap.
+        SquadInstallCommand.WriteArbiterTrustSteps(_output, decision.Targets, arbiterWiring);
+    }
+
     /// <summary>Runs the update without a cancellation token, for callers that have none to pass.</summary>
     public int Execute(CommandContext context, SquadUpdateSettings settings)
     {
@@ -562,6 +597,11 @@ internal sealed class SquadUpdateCommand : Command<SquadUpdateSettings>
     /// <param name="ReplaceManaged">Whether locally edited owned files are overwritten.</param>
     /// <param name="DryRun">Whether the update only plans.</param>
     /// <param name="Yes">Whether the confirmation prompt is skipped.</param>
+    private sealed record UpdateTargets(
+        SquadTargetResolutionDecision Decision,
+        SquadArbiterWiring Arbiter,
+        string? WorkerRoster);
+
     private sealed record UpdateRun(
         string TargetRoot,
         SquadDeploymentScope Scope,
