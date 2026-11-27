@@ -35,6 +35,7 @@ public sealed class DocsStandardsDiffCommand(
         DocsStandardsDiffSettings settings,
         CancellationToken cancellationToken)
     {
+        ArgumentNullException.ThrowIfNull(settings);
         DiagnosticReport report = new();
         if (!DocsCommandComposition.TryResolveConfig(configs, settings, report, out _, out OntologyConfig ontology))
         {

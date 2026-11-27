@@ -26,6 +26,7 @@ public sealed class PackCommand(ISkillGovernanceService skills, IAnsiConsole ans
     /// <inheritdoc />
     public override int Execute(CommandContext context, PackSettings settings, CancellationToken cancellationToken)
     {
+        ArgumentNullException.ThrowIfNull(settings);
         SkillPackResult result = skills.Pack(settings.Path, settings.Output, settings.SkipValidation);
 
         switch (result.Status)

@@ -35,6 +35,7 @@ public sealed class NewCommand(ISkillGovernanceService skills, IAnsiConsole ansi
     /// <inheritdoc />
     public override int Execute(CommandContext context, NewSettings settings, CancellationToken cancellationToken)
     {
+        ArgumentNullException.ThrowIfNull(settings);
         string name = settings.Name;
         SkillScaffoldResult result = skills.Scaffold(name, settings.Output, settings.Template, !settings.NoLicense, !settings.NoMetadata);
 

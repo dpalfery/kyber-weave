@@ -74,6 +74,7 @@ public sealed class PlanArguments(
         DiagnosticReport report,
         out string relative)
     {
+        ArgumentNullException.ThrowIfNull(report);
         string current = CurrentDirectory(workingDirectory);
         PlanPathResolution resolution = ResolverFor(root, config, planFiles).Resolve(argument, current);
         if (resolution.Found)
@@ -113,6 +114,8 @@ public sealed class PlanArguments(
     /// <summary>Says which file the argument resolved to, in the output a person or an agent reads; the structured formats carry it as a metric.</summary>
     public void Announce(DiagnosticReport report, AnalysisSettings settings, string relative)
     {
+        ArgumentNullException.ThrowIfNull(report);
+        ArgumentNullException.ThrowIfNull(settings);
         report.AddMetric("plan", relative);
         if (ReportRenderer.IsHuman(settings.FormatFor(console)))
         {

@@ -118,6 +118,7 @@ public sealed class DocsInitCommand : Command<DocsInitSettings>
     /// <inheritdoc />
     public override int Execute(CommandContext context, DocsInitSettings settings, CancellationToken cancellationToken)
     {
+        ArgumentNullException.ThrowIfNull(settings);
         (int ExitCode, ScaffoldResult? Result, string? Error) attempt = TryScaffold(_scaffolder, settings);
         if (attempt.ExitCode != 0)
         {
