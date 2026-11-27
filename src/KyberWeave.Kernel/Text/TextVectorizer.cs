@@ -92,6 +92,9 @@ public static partial class TextVectorizer
     /// <summary>Cosine similarity of two sparse term vectors; 0 when either is empty.</summary>
     public static double CosineSimilarity(IReadOnlyDictionary<string, double> a, IReadOnlyDictionary<string, double> b)
     {
+        ArgumentNullException.ThrowIfNull(a);
+        ArgumentNullException.ThrowIfNull(b);
+
         if (a.Count == 0 || b.Count == 0) return 0;
         double dot = 0;
         foreach ((string? k, double v) in a)
