@@ -1071,7 +1071,8 @@ public partial class DevinMapper : IHarnessMapper
             return null;
         }
 
-        return new CollectedCost(committedAcuCost * this.acuUsdRate!.Value, "USD");
+        double rate = this.acuUsdRate ?? throw new InvalidOperationException("A positive ACU rate must be configured before the reported cost can be built.");
+        return new CollectedCost(committedAcuCost * rate, "USD");
     }
 
     private static (IReadOnlyList<CollectedTokenCount> Tokens, long? ReportedInput, long? ReportedOutput) BuildTokens(DevinStepUsage usage)
@@ -1079,34 +1080,35 @@ public partial class DevinMapper : IHarnessMapper
         List<CollectedTokenCount> tokens = [];
         long inputSum = 0L;
         bool hasInput = false;
+        double? outputTokens = usage.OutputTokens;
 
-        if (IsPositiveNumber(usage.InputTokens))
+        if (usage.InputTokens is { } inputTokens && IsPositiveNumber(inputTokens))
         {
-            tokens.Add(new CollectedTokenCount(TokenClass.Input, (long)usage.InputTokens!.Value));
-            inputSum += (long)usage.InputTokens!.Value;
+            tokens.Add(new CollectedTokenCount(TokenClass.Input, (long)inputTokens));
+            inputSum += (long)inputTokens;
             hasInput = true;
         }
 
-        if (IsPositiveNumber(usage.CacheReadInputTokens))
+        if (usage.CacheReadInputTokens is { } cacheReadTokens && IsPositiveNumber(cacheReadTokens))
         {
-            tokens.Add(new CollectedTokenCount(TokenClass.CacheRead, (long)usage.CacheReadInputTokens!.Value));
-            inputSum += (long)usage.CacheReadInputTokens!.Value;
+            tokens.Add(new CollectedTokenCount(TokenClass.CacheRead, (long)cacheReadTokens));
+            inputSum += (long)cacheReadTokens;
             hasInput = true;
         }
 
-        if (IsPositiveNumber(usage.CacheCreationInputTokens))
+        if (usage.CacheCreationInputTokens is { } cacheWriteTokens && IsPositiveNumber(cacheWriteTokens))
         {
-            tokens.Add(new CollectedTokenCount(TokenClass.CacheWrite, (long)usage.CacheCreationInputTokens!.Value));
-            inputSum += (long)usage.CacheCreationInputTokens!.Value;
+            tokens.Add(new CollectedTokenCount(TokenClass.CacheWrite, (long)cacheWriteTokens));
+            inputSum += (long)cacheWriteTokens;
             hasInput = true;
         }
 
-        if (IsPositiveNumber(usage.OutputTokens))
+        if (outputTokens is { } output && IsPositiveNumber(output))
         {
-            tokens.Add(new CollectedTokenCount(TokenClass.Output, (long)usage.OutputTokens!.Value));
+            tokens.Add(new CollectedTokenCount(TokenClass.Output, (long)output));
         }
 
-        return (tokens, hasInput ? inputSum : null, IsPositiveNumber(usage.OutputTokens) ? (long)usage.OutputTokens!.Value : null);
+        return (tokens, hasInput ? inputSum : null, outputTokens is { } reportedOutput && IsPositiveNumber(reportedOutput) ? (long)reportedOutput : null);
     }
 
     private static CollectedRecord BuildToolInvokeRecord(
@@ -1236,9 +1238,9 @@ public partial class DevinMapper : IHarnessMapper
     {
         foreach (double? value in values)
         {
-            if (IsPositiveNumber(value))
+            if (value is { } positive && IsPositiveNumber(positive))
             {
-                return value!.Value;
+                return positive;
             }
         }
 

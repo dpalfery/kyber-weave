@@ -621,9 +621,12 @@ public class CopilotVscodeMapper : IHarnessMapper
             SetReplayValue(parent, last, target);
         }
 
-        foreach (ReplayNode item in items)
+        if (target.ArrayValues is { } arrayValues)
         {
-            target.ArrayValues!.Add(item);
+            foreach (ReplayNode item in items)
+            {
+                arrayValues.Add(item);
+            }
         }
 
         return workingRoot;
