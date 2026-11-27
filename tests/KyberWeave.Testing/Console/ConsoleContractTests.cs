@@ -33,9 +33,15 @@ public abstract class ConsoleContractTests : IDisposable
     protected abstract ConsoleWrites Capture(IConsole console, Action<IConsole> write);
 
     /// <summary>Releases anything the hooks redirected.</summary>
-    public virtual void Dispose()
+    public void Dispose()
     {
+        Dispose(disposing: true);
         GC.SuppressFinalize(this);
+    }
+
+    /// <inheritdoc />
+    protected virtual void Dispose(bool disposing)
+    {
     }
 
     [Fact]
