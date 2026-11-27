@@ -678,77 +678,97 @@ public class ClaudeTranscriptMapper : IHarnessMapper
 
         if (string.Equals(blockType, "text", StringComparison.Ordinal))
         {
-            string? text = ExtractPropertyAsContentText(blockEl, "text");
-            return string.IsNullOrEmpty(text)
-                ? null
-                : new ClaudeTranscriptContentBlock("text", Text: text);
+            return ParseTextBlock(blockEl);
         }
 
         if (string.Equals(blockType, "thinking", StringComparison.Ordinal))
         {
-            string? text = ExtractPropertyAsContentText(blockEl, "thinking")
-                ?? ExtractPropertyAsContentText(blockEl, "text");
-            return string.IsNullOrEmpty(text)
-                ? null
-                : new ClaudeTranscriptContentBlock("thinking", Text: text);
+            return ParseThinkingBlock(blockEl);
         }
 
         if (string.Equals(blockType, "tool_use", StringComparison.Ordinal))
         {
-            string id = ReadSafeMetadataText(blockEl, "id") ?? string.Empty;
-            string name = ReadSafeMetadataText(blockEl, "name") ?? string.Empty;
-            if (string.IsNullOrEmpty(id) && string.IsNullOrEmpty(name))
-            {
-                return null;
-            }
-
-            string? rawInputText = null;
-            bool inputIsString = false;
-            if (blockEl.TryGetProperty("input", out JsonElement inputEl)
-                && inputEl.ValueKind is not (JsonValueKind.Null or JsonValueKind.Undefined))
-            {
-                inputIsString = inputEl.ValueKind == JsonValueKind.String;
-                rawInputText = inputIsString
-                    ? (inputEl.GetString() ?? string.Empty)
-                    : inputEl.GetRawText();
-            }
-
-            return new ClaudeTranscriptContentBlock(
-                BlockType: "tool_use",
-                ToolUseId: id,
-                ToolName: name,
-                RawInputText: rawInputText,
-                InputIsString: inputIsString);
+            return ParseToolUseBlock(blockEl);
         }
 
         if (string.Equals(blockType, "tool_result", StringComparison.Ordinal))
         {
-            string toolCallId = ReadSafeMetadataText(blockEl, "tool_use_id")
-                ?? ReadSafeMetadataText(blockEl, "id")
-                ?? string.Empty;
-
-            bool isError = (blockEl.TryGetProperty("is_error", out JsonElement errEl) && errEl.ValueKind == JsonValueKind.True)
-                || (TryReadLong(blockEl, "exit_code", out long ec1) && ec1 != 0)
-                || (TryReadLong(blockEl, "exitCode", out long ec2) && ec2 != 0);
-
-            long? exitCode = TryReadLong(blockEl, "exit_code", out long exit1)
-                ? exit1
-                : (TryReadLong(blockEl, "exitCode", out long exit2) ? exit2 : null);
-
-            string? errorCode = ReadSafeMetadataText(blockEl, "error_code")
-                ?? ReadSafeMetadataText(blockEl, "errorCode");
-
-            string? resultContentText = ExtractToolResultText(blockEl);
-            return new ClaudeTranscriptContentBlock(
-                BlockType: "tool_result",
-                ToolUseId: toolCallId,
-                ResultContentText: resultContentText,
-                IsError: isError,
-                ExitCode: exitCode,
-                ErrorCode: errorCode);
+            return ParseToolResultBlock(blockEl);
         }
 
         return null;
+    }
+
+    private static ClaudeTranscriptContentBlock? ParseTextBlock(JsonElement blockEl)
+    {
+        string? text = ExtractPropertyAsContentText(blockEl, "text");
+        return string.IsNullOrEmpty(text)
+            ? null
+            : new ClaudeTranscriptContentBlock("text", Text: text);
+    }
+
+    private static ClaudeTranscriptContentBlock? ParseThinkingBlock(JsonElement blockEl)
+    {
+        string? text = ExtractPropertyAsContentText(blockEl, "thinking")
+            ?? ExtractPropertyAsContentText(blockEl, "text");
+        return string.IsNullOrEmpty(text)
+            ? null
+            : new ClaudeTranscriptContentBlock("thinking", Text: text);
+    }
+
+    private static ClaudeTranscriptContentBlock? ParseToolUseBlock(JsonElement blockEl)
+    {
+        string id = ReadSafeMetadataText(blockEl, "id") ?? string.Empty;
+        string name = ReadSafeMetadataText(blockEl, "name") ?? string.Empty;
+        if (string.IsNullOrEmpty(id) && string.IsNullOrEmpty(name))
+        {
+            return null;
+        }
+
+        string? rawInputText = null;
+        bool inputIsString = false;
+        if (blockEl.TryGetProperty("input", out JsonElement inputEl)
+            && inputEl.ValueKind is not (JsonValueKind.Null or JsonValueKind.Undefined))
+        {
+            inputIsString = inputEl.ValueKind == JsonValueKind.String;
+            rawInputText = inputIsString
+                ? (inputEl.GetString() ?? string.Empty)
+                : inputEl.GetRawText();
+        }
+
+        return new ClaudeTranscriptContentBlock(
+            BlockType: "tool_use",
+            ToolUseId: id,
+            ToolName: name,
+            RawInputText: rawInputText,
+            InputIsString: inputIsString);
+    }
+
+    private static ClaudeTranscriptContentBlock? ParseToolResultBlock(JsonElement blockEl)
+    {
+        string toolCallId = ReadSafeMetadataText(blockEl, "tool_use_id")
+            ?? ReadSafeMetadataText(blockEl, "id")
+            ?? string.Empty;
+
+        bool isError = (blockEl.TryGetProperty("is_error", out JsonElement errEl) && errEl.ValueKind == JsonValueKind.True)
+            || (TryReadLong(blockEl, "exit_code", out long ec1) && ec1 != 0)
+            || (TryReadLong(blockEl, "exitCode", out long ec2) && ec2 != 0);
+
+        long? exitCode = TryReadLong(blockEl, "exit_code", out long exit1)
+            ? exit1
+            : (TryReadLong(blockEl, "exitCode", out long exit2) ? exit2 : null);
+
+        string? errorCode = ReadSafeMetadataText(blockEl, "error_code")
+            ?? ReadSafeMetadataText(blockEl, "errorCode");
+
+        string? resultContentText = ExtractToolResultText(blockEl);
+        return new ClaudeTranscriptContentBlock(
+            BlockType: "tool_result",
+            ToolUseId: toolCallId,
+            ResultContentText: resultContentText,
+            IsError: isError,
+            ExitCode: exitCode,
+            ErrorCode: errorCode);
     }
 
     private static List<MergedLineGroup> MergeClaudeGroups(
@@ -830,11 +850,7 @@ public class ClaudeTranscriptMapper : IHarnessMapper
             return false;
         }
 
-        if ((prev.Usage.InputTokens ?? 0L) != (next.Usage.InputTokens ?? 0L)
-            || (prev.Usage.OutputTokens ?? 0L) != (next.Usage.OutputTokens ?? 0L)
-            || (prev.Usage.CacheReadInputTokens ?? 0L) != (next.Usage.CacheReadInputTokens ?? 0L)
-            || (prev.Usage.CacheCreationInputTokens ?? 0L) != (next.Usage.CacheCreationInputTokens ?? 0L)
-            || (prev.Usage.ReasoningTokens ?? 0L) != (next.Usage.ReasoningTokens ?? 0L))
+        if (!UsageCountersMatch(prev.Usage, next.Usage))
         {
             return false;
         }
@@ -844,15 +860,24 @@ public class ClaudeTranscriptMapper : IHarnessMapper
             return false;
         }
 
-        string prevTs = prev.Timestamp ?? FallbackTimestamp;
-        string nextTs = next.Timestamp ?? FallbackTimestamp;
+        return WithinMergeWindow(prev.Timestamp, next.Timestamp);
+    }
+
+    private static bool UsageCountersMatch(ClaudeTranscriptUsage prev, ClaudeTranscriptUsage next) =>
+        (prev.InputTokens ?? 0L) == (next.InputTokens ?? 0L)
+        && (prev.OutputTokens ?? 0L) == (next.OutputTokens ?? 0L)
+        && (prev.CacheReadInputTokens ?? 0L) == (next.CacheReadInputTokens ?? 0L)
+        && (prev.CacheCreationInputTokens ?? 0L) == (next.CacheCreationInputTokens ?? 0L)
+        && (prev.ReasoningTokens ?? 0L) == (next.ReasoningTokens ?? 0L);
+
+    private static bool WithinMergeWindow(string? prevTimestamp, string? nextTimestamp)
+    {
+        string prevTs = prevTimestamp ?? FallbackTimestamp;
+        string nextTs = nextTimestamp ?? FallbackTimestamp;
         if (DateTimeOffset.TryParse(prevTs, CultureInfo.InvariantCulture, DateTimeStyles.RoundtripKind, out DateTimeOffset prevDt)
             && DateTimeOffset.TryParse(nextTs, CultureInfo.InvariantCulture, DateTimeStyles.RoundtripKind, out DateTimeOffset nextDt))
         {
-            if (Math.Abs((nextDt - prevDt).TotalMilliseconds) > MergeWindowMs)
-            {
-                return false;
-            }
+            return Math.Abs((nextDt - prevDt).TotalMilliseconds) <= MergeWindowMs;
         }
 
         return true;
@@ -1119,202 +1144,43 @@ public class ClaudeTranscriptMapper : IHarnessMapper
         SourcePathInfo pathInfo,
         IReadOnlySet<string> listedSkills)
     {
-        string? discoveredSessionId = null;
-        bool isSidechain = false;
-        string? discoveredAgentId = null;
-        string? nativeRecordId = usageSnapshot?.MessageId;
-        string? requestId = null;
-        string? sessionTitle = null;
-        string? terminationReason = null;
-        int? exitCode = null;
-        string? correctionRule = null;
-        List<ParsedPart> parts = [];
-        List<ParsedToolCall> toolCalls = [];
-        List<ParsedToolResult> toolResults = [];
-        List<string> skillsInvoked = [];
-        List<string> skillsListed = [];
-        string? requestShapeHash = null;
+        TurnGroupDraft draft = new()
+        {
+            NativeRecordId = usageSnapshot?.MessageId,
+        };
 
         foreach (ClaudeTranscriptLine line in lines)
         {
-            discoveredSessionId ??= line.SessionId;
-            if (line.IsSidechain)
-            {
-                isSidechain = true;
-            }
-
-            discoveredAgentId ??= line.AgentId;
-
-            if (line.ListedSkills is { Count: > 0 } listed)
-            {
-                AddDistinct(skillsListed, listed);
-            }
-
-            if (line.RequestShapeHash is not null)
-            {
-                requestShapeHash = line.RequestShapeHash;
-            }
-
-            sessionTitle ??= line.SessionTitle;
-            if (string.Equals(line.Message?.Role, "assistant", StringComparison.Ordinal))
-            {
-                requestId ??= line.RequestId;
-            }
-
-            if (line.ExitCode.HasValue)
-            {
-                exitCode = line.ExitCode.Value;
-            }
-
-            if (line.TerminationReason is not null)
-            {
-                terminationReason = line.TerminationReason;
-            }
-
-            if (line.Message is null)
-            {
-                continue;
-            }
-
-            if (nativeRecordId is null && line.Message.Usage is not null)
-            {
-                nativeRecordId = line.Message.Id;
-            }
-
-            string? role = line.Message.Role;
-            string? server = line.AttributionMcpServer;
-
-            if (line.Message.ScalarContent is not null)
-            {
-                string text = line.Message.ScalarContent;
-                if (!string.IsNullOrEmpty(text))
-                {
-                    if (string.Equals(role, "user", StringComparison.Ordinal))
-                    {
-                        CorrectionDetectionResult check = CanonFindings.DetectUserCorrection(text);
-                        if (check.Matched)
-                        {
-                            correctionRule = check.Rule;
-                        }
-
-                        AddSlashCommandSkills(text, listedSkills, skillsInvoked);
-                    }
-
-                    parts.Add(new ParsedPart(ContentBucket.ConversationHistory, text, server, role));
-                }
-
-                continue;
-            }
-
-            foreach (ClaudeTranscriptContentBlock block in line.Message.Blocks)
-            {
-                if (string.Equals(block.BlockType, "text", StringComparison.Ordinal))
-                {
-                    string? text = block.Text;
-                    if (string.IsNullOrEmpty(text))
-                    {
-                        continue;
-                    }
-
-                    if (string.Equals(role, "user", StringComparison.Ordinal))
-                    {
-                        CorrectionDetectionResult check = CanonFindings.DetectUserCorrection(text);
-                        if (check.Matched)
-                        {
-                            correctionRule = check.Rule;
-                        }
-
-                        AddSlashCommandSkills(text, listedSkills, skillsInvoked);
-                    }
-
-                    parts.Add(new ParsedPart(ContentBucket.ConversationHistory, text, server, role));
-                }
-                else if (string.Equals(block.BlockType, "thinking", StringComparison.Ordinal))
-                {
-                    if (!string.IsNullOrEmpty(block.Text))
-                    {
-                        parts.Add(new ParsedPart(ContentBucket.ConversationHistory, block.Text, server, role));
-                    }
-                }
-                else if (string.Equals(block.BlockType, "tool_result", StringComparison.Ordinal))
-                {
-                    if (!string.IsNullOrEmpty(block.ToolUseId))
-                    {
-                        toolResults.Add(new ParsedToolResult(
-                            ToolCallId: block.ToolUseId,
-                            Content: block.ResultContentText,
-                            IsError: block.IsError,
-                            Timestamp: line.Timestamp,
-                            ExitCode: block.ExitCode,
-                            ErrorCode: block.ErrorCode));
-                    }
-
-                    if (!string.IsNullOrEmpty(block.ResultContentText))
-                    {
-                        parts.Add(new ParsedPart(ContentBucket.ToolResultContent, block.ResultContentText, server, role));
-                    }
-                }
-                else if (string.Equals(block.BlockType, "tool_use", StringComparison.Ordinal))
-                {
-                    string id = block.ToolUseId ?? string.Empty;
-                    string name = block.ToolName ?? string.Empty;
-                    if (string.IsNullOrEmpty(id) && string.IsNullOrEmpty(name))
-                    {
-                        continue;
-                    }
-
-                    string resolvedName = string.IsNullOrWhiteSpace(name) ? UnknownModelFallback : name;
-                    string toolPartText = FormatToolUsePartText(resolvedName, block.RawInputText);
-                    parts.Add(new ParsedPart(ContentBucket.ConversationHistory, toolPartText, server, role));
-
-                    if (string.Equals(name, SkillToolName, StringComparison.Ordinal)
-                        && ReadInvokedSkill(block.RawInputText, block.InputIsString) is { } invokedSkill)
-                    {
-                        AddDistinct(skillsInvoked, [invokedSkill]);
-                    }
-
-                    toolCalls.Add(new ParsedToolCall(
-                        Id: id,
-                        Name: resolvedName,
-                        RawInputText: block.RawInputText,
-                        InputIsString: block.InputIsString,
-                        Timestamp: line.Timestamp));
-                }
-            }
+            draft.ApplyLine(line, listedSkills);
         }
 
-        if (parts.Count == 0
-            && discoveredSessionId is null
-            && toolCalls.Count == 0
-            && toolResults.Count == 0
-            && skillsListed.Count == 0
-            && usageSnapshot is null)
+        if (draft.IsEmpty(usageSnapshot))
         {
             return null;
         }
 
         string? sessionId = usageSnapshot is not null && !string.IsNullOrEmpty(usageSnapshot.SessionId)
             ? usageSnapshot.SessionId
-            : ResolveSessionId(discoveredSessionId, isSidechain, discoveredAgentId, pathInfo);
+            : ResolveSessionId(draft.DiscoveredSessionId, draft.IsSidechain, draft.DiscoveredAgentId, pathInfo);
 
         return new ParsedTurnGroup(
             SessionId: sessionId,
-            NativeRecordId: nativeRecordId,
-            RequestId: requestId,
+            NativeRecordId: draft.NativeRecordId,
+            RequestId: draft.RequestId,
             Timestamp: usageSnapshot?.Timestamp ?? FallbackTimestamp,
             Model: usageSnapshot?.Model,
             Usage: usageSnapshot?.Usage,
-            SessionTitle: FormatSessionTitle(sessionTitle),
-            TerminationReason: terminationReason,
-            ExitCode: exitCode,
-            CorrectionRule: correctionRule,
+            SessionTitle: FormatSessionTitle(draft.SessionTitle),
+            TerminationReason: draft.TerminationReason,
+            ExitCode: draft.ExitCode,
+            CorrectionRule: draft.CorrectionRule,
             AgentInstanceId: null,
-            Parts: parts,
-            ToolCalls: toolCalls,
-            ToolResults: toolResults,
-            SkillsInvoked: skillsInvoked,
-            SkillsListed: skillsListed,
-            RequestShapeHash: requestShapeHash);
+            Parts: draft.Parts,
+            ToolCalls: draft.ToolCalls,
+            ToolResults: draft.ToolResults,
+            SkillsInvoked: draft.SkillsInvoked,
+            SkillsListed: draft.SkillsListed,
+            RequestShapeHash: draft.RequestShapeHash);
     }
 
     private static void AddDistinct(List<string> target, IEnumerable<string> values)
@@ -2088,6 +1954,221 @@ public class ClaudeTranscriptMapper : IHarnessMapper
 
     private static bool TryReadInt(JsonElement obj, string key, out int value) =>
         HarnessJson.TryReadInt(obj, key, out value);
+
+    private sealed class TurnGroupDraft
+    {
+        public string? DiscoveredSessionId { get; set; }
+
+        public bool IsSidechain { get; set; }
+
+        public string? DiscoveredAgentId { get; set; }
+
+        public string? NativeRecordId { get; set; }
+
+        public string? RequestId { get; set; }
+
+        public string? SessionTitle { get; set; }
+
+        public string? TerminationReason { get; set; }
+
+        public int? ExitCode { get; set; }
+
+        public string? CorrectionRule { get; set; }
+
+        public string? RequestShapeHash { get; set; }
+
+        public List<ParsedPart> Parts { get; } = [];
+
+        public List<ParsedToolCall> ToolCalls { get; } = [];
+
+        public List<ParsedToolResult> ToolResults { get; } = [];
+
+        public List<string> SkillsInvoked { get; } = [];
+
+        public List<string> SkillsListed { get; } = [];
+
+        public void ApplyLine(ClaudeTranscriptLine line, IReadOnlySet<string> listedSkills)
+        {
+            DiscoveredSessionId ??= line.SessionId;
+            if (line.IsSidechain)
+            {
+                IsSidechain = true;
+            }
+
+            DiscoveredAgentId ??= line.AgentId;
+
+            if (line.ListedSkills is { Count: > 0 } listed)
+            {
+                AddDistinct(SkillsListed, listed);
+            }
+
+            if (line.RequestShapeHash is not null)
+            {
+                RequestShapeHash = line.RequestShapeHash;
+            }
+
+            SessionTitle ??= line.SessionTitle;
+            if (string.Equals(line.Message?.Role, "assistant", StringComparison.Ordinal))
+            {
+                RequestId ??= line.RequestId;
+            }
+
+            if (line.ExitCode.HasValue)
+            {
+                ExitCode = line.ExitCode.Value;
+            }
+
+            if (line.TerminationReason is not null)
+            {
+                TerminationReason = line.TerminationReason;
+            }
+
+            if (line.Message is null)
+            {
+                return;
+            }
+
+            if (NativeRecordId is null && line.Message.Usage is not null)
+            {
+                NativeRecordId = line.Message.Id;
+            }
+
+            ApplyMessage(line.Message, line, listedSkills);
+        }
+
+        public bool IsEmpty(UsageSnapshot? usageSnapshot) =>
+            Parts.Count == 0
+            && DiscoveredSessionId is null
+            && ToolCalls.Count == 0
+            && ToolResults.Count == 0
+            && SkillsListed.Count == 0
+            && usageSnapshot is null;
+
+        private void ApplyMessage(
+            ClaudeTranscriptMessage message,
+            ClaudeTranscriptLine line,
+            IReadOnlySet<string> listedSkills)
+        {
+            string? role = message.Role;
+            string? server = line.AttributionMcpServer;
+
+            if (message.ScalarContent is not null)
+            {
+                if (!string.IsNullOrEmpty(message.ScalarContent))
+                {
+                    AddTextPart(message.ScalarContent, role, server, listedSkills);
+                }
+
+                return;
+            }
+
+            foreach (ClaudeTranscriptContentBlock block in message.Blocks)
+            {
+                ApplyBlock(block, line, role, server, listedSkills);
+            }
+        }
+
+        private void ApplyBlock(
+            ClaudeTranscriptContentBlock block,
+            ClaudeTranscriptLine line,
+            string? role,
+            string? server,
+            IReadOnlySet<string> listedSkills)
+        {
+            if (string.Equals(block.BlockType, "text", StringComparison.Ordinal))
+            {
+                if (!string.IsNullOrEmpty(block.Text))
+                {
+                    AddTextPart(block.Text, role, server, listedSkills);
+                }
+            }
+            else if (string.Equals(block.BlockType, "thinking", StringComparison.Ordinal))
+            {
+                if (!string.IsNullOrEmpty(block.Text))
+                {
+                    Parts.Add(new ParsedPart(ContentBucket.ConversationHistory, block.Text, server, role));
+                }
+            }
+            else if (string.Equals(block.BlockType, "tool_result", StringComparison.Ordinal))
+            {
+                ApplyToolResultBlock(block, line.Timestamp, role, server);
+            }
+            else if (string.Equals(block.BlockType, "tool_use", StringComparison.Ordinal))
+            {
+                ApplyToolUseBlock(block, line.Timestamp, role, server);
+            }
+        }
+
+        private void AddTextPart(string text, string? role, string? server, IReadOnlySet<string> listedSkills)
+        {
+            if (string.Equals(role, "user", StringComparison.Ordinal))
+            {
+                CorrectionDetectionResult check = CanonFindings.DetectUserCorrection(text);
+                if (check.Matched)
+                {
+                    CorrectionRule = check.Rule;
+                }
+
+                AddSlashCommandSkills(text, listedSkills, SkillsInvoked);
+            }
+
+            Parts.Add(new ParsedPart(ContentBucket.ConversationHistory, text, server, role));
+        }
+
+        private void ApplyToolResultBlock(
+            ClaudeTranscriptContentBlock block,
+            string? timestamp,
+            string? role,
+            string? server)
+        {
+            if (!string.IsNullOrEmpty(block.ToolUseId))
+            {
+                ToolResults.Add(new ParsedToolResult(
+                    ToolCallId: block.ToolUseId,
+                    Content: block.ResultContentText,
+                    IsError: block.IsError,
+                    Timestamp: timestamp,
+                    ExitCode: block.ExitCode,
+                    ErrorCode: block.ErrorCode));
+            }
+
+            if (!string.IsNullOrEmpty(block.ResultContentText))
+            {
+                Parts.Add(new ParsedPart(ContentBucket.ToolResultContent, block.ResultContentText, server, role));
+            }
+        }
+
+        private void ApplyToolUseBlock(
+            ClaudeTranscriptContentBlock block,
+            string? timestamp,
+            string? role,
+            string? server)
+        {
+            string id = block.ToolUseId ?? string.Empty;
+            string name = block.ToolName ?? string.Empty;
+            if (string.IsNullOrEmpty(id) && string.IsNullOrEmpty(name))
+            {
+                return;
+            }
+
+            string resolvedName = string.IsNullOrWhiteSpace(name) ? UnknownModelFallback : name;
+            string toolPartText = FormatToolUsePartText(resolvedName, block.RawInputText);
+            Parts.Add(new ParsedPart(ContentBucket.ConversationHistory, toolPartText, server, role));
+
+            if (string.Equals(name, SkillToolName, StringComparison.Ordinal)
+                && ReadInvokedSkill(block.RawInputText, block.InputIsString) is { } invokedSkill)
+            {
+                AddDistinct(SkillsInvoked, [invokedSkill]);
+            }
+
+            ToolCalls.Add(new ParsedToolCall(
+                Id: id,
+                Name: resolvedName,
+                RawInputText: block.RawInputText,
+                InputIsString: block.InputIsString,
+                Timestamp: timestamp));
+        }
+    }
 
     private record SourcePathInfo(
         string FileStem,
