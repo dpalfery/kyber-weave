@@ -13,6 +13,7 @@ public static class CorpusProvenance
     /// <param name="text">The text to read, typically a command's standard error.</param>
     public static string FirstLine(string text)
     {
+        ArgumentNullException.ThrowIfNull(text);
         string trimmed = text.Split(['\r', '\n'], StringSplitOptions.RemoveEmptyEntries).FirstOrDefault(Unavailable).Trim();
         return string.IsNullOrEmpty(trimmed) ? Unavailable : trimmed;
     }

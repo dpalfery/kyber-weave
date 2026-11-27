@@ -24,6 +24,7 @@ public static class CodeGraphIndexRules
     /// <param name="lockDirectory">The directory that holds lock files, normally the OS temp directory.</param>
     public static string LockPathFor(string root, string lockDirectory)
     {
+        ArgumentNullException.ThrowIfNull(root);
         byte[] digest = SHA256.HashData(Encoding.UTF8.GetBytes(Normalise(root)));
         string key = Convert.ToHexString(digest, 0, 8).ToUpperInvariant();
         return Path.Combine(lockDirectory, $"kyber-weave-codegraph-{key}.lock");
@@ -34,6 +35,7 @@ public static class CodeGraphIndexRules
     /// <param name="isWindows">Whether the shell is a Windows one.</param>
     public static string QuoteShellPath(string path, bool isWindows)
     {
+        ArgumentNullException.ThrowIfNull(path);
         if (!NeedsQuoting(path))
             return path;
 
@@ -44,8 +46,11 @@ public static class CodeGraphIndexRules
 
     /// <summary>Whether a doctor check reports that the CodeGraph index was busy provisioning.</summary>
     /// <param name="check">The check.</param>
-    public static bool IsBusy(DoctorCheck check) =>
-        check.Reason?.StartsWith("codegraph.index busy", StringComparison.Ordinal) == true;
+    public static bool IsBusy(DoctorCheck check)
+    {
+        ArgumentNullException.ThrowIfNull(check);
+        return check.Reason?.StartsWith("codegraph.index busy", StringComparison.Ordinal) == true;
+    }
 
     /// <summary>
     ///     How long the docs server waits before each further look at CodeGraph's lock file, when a refresh finds
@@ -72,11 +77,14 @@ public static class CodeGraphIndexRules
     ///     on disk cannot be answered from.
     /// </remarks>
     /// <param name="check">The <c>codegraph.index</c> check a provisioning run returned.</param>
-    public static bool IsIndexLockHeld(DoctorCheck check) =>
-        !check.Passed
-        && check.Reason is { } reason
-        && reason.StartsWith("codegraph sync exited ", StringComparison.Ordinal)
-        && reason.Contains("Sync could not acquire the file lock", StringComparison.Ordinal);
+    public static bool IsIndexLockHeld(DoctorCheck check)
+    {
+        ArgumentNullException.ThrowIfNull(check);
+        return !check.Passed
+            && check.Reason is { } reason
+            && reason.StartsWith("codegraph sync exited ", StringComparison.Ordinal)
+            && reason.Contains("Sync could not acquire the file lock", StringComparison.Ordinal);
+    }
 
     private static bool NeedsQuoting(string path) =>
         path.Length == 0 || path.Any(c => !char.IsAsciiLetterOrDigit(c) && c != '/' && c != '\\' && c != '.' && c != '-' && c != '_');

@@ -27,6 +27,9 @@ public sealed class DocsGateRunner(
         string? baseRef,
         DiagnosticReport report)
     {
+        ArgumentNullException.ThrowIfNull(loadDocuments);
+        ArgumentNullException.ThrowIfNull(report);
+
         if (!hostConfiguration.TryLoad(repositoryRoot, report, out KyberWeaveConfig config))
             return;
 
@@ -59,6 +62,10 @@ public sealed class DocsGateRunner(
         Func<ICodeGraphResolver> codeGraph,
         DiagnosticReport report)
     {
+        ArgumentNullException.ThrowIfNull(loadDocuments);
+        ArgumentNullException.ThrowIfNull(codeGraph);
+        ArgumentNullException.ThrowIfNull(report);
+
         if (!hostConfiguration.TryLoad(repositoryRoot, report, out KyberWeaveConfig _))
             return;
 

@@ -28,6 +28,7 @@ public sealed partial class DocumentMarkdown
 
     public static string ResolveDocId(DocumentFrontmatter frontmatter, string relativePath)
     {
+        ArgumentNullException.ThrowIfNull(frontmatter);
         return string.IsNullOrWhiteSpace(frontmatter.Id) ? relativePath : frontmatter.Id!;
     }
 
@@ -58,6 +59,7 @@ public sealed partial class DocumentMarkdown
     /// </summary>
     public static IReadOnlyList<DocumentSection> SplitSections(string body)
     {
+        ArgumentNullException.ThrowIfNull(body);
         List<DocumentSection> sections = new();
         string[] lines = body.Replace("\r\n", "\n", StringComparison.Ordinal).Split('\n');
 
@@ -117,6 +119,7 @@ public sealed partial class DocumentMarkdown
     /// </summary>
     public static IReadOnlyList<DocumentLeaf> SplitLeaves(string body, string docId)
     {
+        ArgumentNullException.ThrowIfNull(body);
         string normalized = body.Replace("\r\n", "\n", StringComparison.Ordinal);
         MarkdownDocument document = Markdown.Parse(normalized, LeafPipeline);
         Dictionary<HeadingBlock, string> headingIds = BuildHeadingIds(document, docId);
