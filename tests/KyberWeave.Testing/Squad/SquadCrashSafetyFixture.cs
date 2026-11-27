@@ -432,7 +432,8 @@ public sealed class PhysicalSquadCrashSafetyFixture : SquadCrashSafetyFixture
         catch (SquadCrashInjectedException)
         {
         }
-        catch (Exception exception)
+        // The fixture's boundary: report whatever the transaction threw instead of crashing the test host.
+        catch (Exception exception) when (exception is not OutOfMemoryException && exception is not OperationCanceledException)
         {
             problem = $"The flow reported the fault as {exception.GetType().Name}: {exception.Message}";
         }
@@ -463,7 +464,8 @@ public sealed class PhysicalSquadCrashSafetyFixture : SquadCrashSafetyFixture
         {
             return null;
         }
-        catch (Exception exception)
+        // The fixture's boundary: report whatever the transaction threw instead of crashing the test host.
+        catch (Exception exception) when (exception is not OutOfMemoryException && exception is not OperationCanceledException)
         {
             return $"The transaction reported the failure as {exception.GetType().Name}: {exception.Message}";
         }
