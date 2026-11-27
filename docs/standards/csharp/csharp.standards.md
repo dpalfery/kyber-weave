@@ -74,7 +74,7 @@ rationale nobody reads.
 
 ### Errors and diagnostics
 
-Error handling fails closed (KW-STD-INPUT-001). Code that parses or converts a value from outside the process refuses any input it does not recognise, with an error or diagnostic that names the input; it never silently drops, defaults or coerces it. The one exception is an unknown field in a format whose specification says to ignore unknown fields, and the code names that specification where it skips the field.
+Parsers fail closed (KW-STD-INPUT-001). Code that parses or converts a value from outside the process refuses any input it does not recognise, with an error or diagnostic that names the input; it never silently drops, defaults or coerces it. The one exception is an unknown field in a format whose specification says to ignore unknown fields, and the code names that specification where it skips the field.
 
 **Catch what you can name.** Operational failures are caught by type — `IOException`,
 `UnauthorizedAccessException`, `YamlException`, `InvalidDataException` — and translated into a
@@ -172,9 +172,10 @@ Consequences worth stating:
   (KW-STD-CS-001 to KW-STD-CS-021 in [`csharp.rules.md`](csharp.rules.md)) name the analyzers that
   enforce them. An analyzer whose rule the codebase still breaks is held at suggestion in
   `analyzers/ratchet.globalconfig`; `dotnet build KyberWeave.sln -c Release -p:KwAnalyzerAudit=true -p:TreatWarningsAsErrors=false`
-  lists every remaining violation as a warning without failing. The change that brings an analyzer
-  to zero deletes its line, and from then on it fails the build. A line is never added back. The
-  Sonar ids in `NoWarn` are inert: SonarAnalyzer is not referenced. The ratchet file is the
+  and the same for `dash/server/KyberDash.sln` list every remaining violation as a warning without
+  failing, because the ratchet governs both solutions. The change that brings an analyzer
+  to zero in both deletes its line, and from then on it fails the build. A line is never added
+  back. The Sonar ids in `NoWarn` are inert: SonarAnalyzer is not referenced. The ratchet file is the
   exception list for the analyzed rules the codebase still breaks, and the baseline table in
   [`the remediation todo`](../../todo/csharp-standards-remediation.md) is the count. A location
   list copied here would go stale on the next remediation pull request; those two move with it.
