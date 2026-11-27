@@ -231,7 +231,8 @@ internal sealed class SquadDoctorCommand : Command<SquadDoctorSettings>
                     $"  [red]fail[/] Canonical source validation failed: {Markup.Escape(ex.Message)}");
                 hasIssues = true;
             }
-            catch (Exception ex)
+            // Documented boundary: a failing maintainer check records a red line; the remaining checks still run.
+            catch (Exception ex) when (ex is not OutOfMemoryException && ex is not OperationCanceledException)
             {
                 _console.Ansi.MarkupLine($"  [red]fail[/] Canonical source loading failed: {Markup.Escape(ex.Message)}");
                 hasIssues = true;
@@ -665,7 +666,7 @@ internal sealed class SquadDoctorDiagnostics
             {
                 squadLock = stateStore.ReadLock(workingDirectory, SquadDeploymentScope.Global);
             }
-            catch (Exception)
+            catch (Exception ex) when (FileFailure.Is(ex) || ex is InvalidDataException)
             {
                 // Lock read failure falls back to comparison render without presets.
             }
@@ -750,7 +751,7 @@ internal sealed class SquadDoctorDiagnostics
                     loadedPresets[entry.Key] = preset;
                 }
             }
-            catch (Exception)
+            catch (Exception ex) when (FileFailure.Is(ex) || ex is SquadSourceValidationException)
             {
                 // Omit invalid or unreadable preset from comparison render.
             }
