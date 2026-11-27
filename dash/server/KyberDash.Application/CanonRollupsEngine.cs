@@ -76,8 +76,8 @@ public class CanonRollupsEngine
         "windsurf",
     ];
 
-    private readonly IRelationalStoreReader? reader;
-    private readonly IProjectionStore? projections;
+    private readonly IRelationalStoreReader reader;
+    private readonly IProjectionStore projections;
     private readonly IPricingRepository pricing;
 
     /// <summary>
@@ -226,7 +226,7 @@ public class CanonRollupsEngine
         _ = pricing.LoadPricingTables();
 
         Dictionary<string, List<CollectedSession>> sessionsByHarness = new(StringComparer.Ordinal);
-        foreach (CollectedSession session in reader!.Sessions())
+        foreach (CollectedSession session in reader.Sessions())
         {
             string normalized = CanonPricing.NormalizeHarnessName(session.HarnessId);
             if (CanonPricing.IsExcludedHarnessIdentity(normalized) || IsPrunedHarnessIdentity(normalized))
@@ -244,7 +244,7 @@ public class CanonRollupsEngine
         }
 
         Dictionary<string, List<StoredRun>> runsByHarness = new(StringComparer.Ordinal);
-        foreach (StoredRun run in projections!.ListRuns())
+        foreach (StoredRun run in projections.ListRuns())
         {
             string normalized = CanonPricing.NormalizeHarnessName(run.HarnessId);
             if (!runsByHarness.TryGetValue(normalized, out List<StoredRun>? harnessRuns))
@@ -312,7 +312,7 @@ public class CanonRollupsEngine
     private sealed record SessionDatum(StoredSessionProjection? Projection, SessionSummaryFigure? Figures);
 
     private SessionDatum ReadSessionDatum(string sessionKey) =>
-        new(projections!.GetSessionProjection(sessionKey), reader!.SessionSummaryFigures(sessionKey));
+        new(projections.GetSessionProjection(sessionKey), reader.SessionSummaryFigures(sessionKey));
 
     /// <summary>
     /// Aggregates measurable harness metrics from typed session projections and read-time
@@ -620,7 +620,7 @@ public class CanonRollupsEngine
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(runId);
 
-        StoredRun? storedRun = projections!.GetRun(runId);
+        StoredRun? storedRun = projections.GetRun(runId);
         if (storedRun is null)
         {
             return JsonSerializer.SerializeToElement<object?>(null);
@@ -696,7 +696,7 @@ public class CanonRollupsEngine
     /// <returns>Serialized harness comparison payload.</returns>
     public JsonElement CompareHarnesses()
     {
-        IReadOnlyList<StoredHarnessRollup> stored = projections!.ListHarnessRollups();
+        IReadOnlyList<StoredHarnessRollup> stored = projections.ListHarnessRollups();
         IReadOnlyList<HarnessRollupRow> rollups = stored.Count == 0
             ? ProjectRunsAndHarnessesRelational()
             : [.. stored.Select(ToHarnessRollupRow)];

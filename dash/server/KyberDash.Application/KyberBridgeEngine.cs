@@ -864,7 +864,7 @@ public abstract class KyberBridgeEngineRowBuilders : KyberBridgeEngineBase
                     ? listed
                     : NotMeasurableBlock($"{harness} did not export the session's listed skills."),
                 ["invocations"] = skillCounts.GetValueOrDefault(skillName),
-                ["turns_listed"] = listed ? turns!.ToArray() : Array.Empty<int>(),
+                ["turns_listed"] = turns is { } listedTurns ? listedTurns.ToArray() : Array.Empty<int>(),
             });
         }
 
@@ -3583,8 +3583,8 @@ public abstract class KyberBridgeEngineSections : KyberBridgeEngineSessionSectio
         IModelPricingLookup lookup = pricing.LoadPricingTables();
         IReadOnlyList<StoredExecution> executions = projections.ListExecutionsForRun(runId);
         HashSet<string> runSessionIds = [.. executions
-            .Where(static e => !string.IsNullOrEmpty(e.SessionId))
-            .Select(static e => e.SessionId!)];
+            .Select(static e => e.SessionId)
+            .OfType<string>()];
         // A derived run groups sessions rather than being named on the finding rows, so a run's
         // findings are the ones naming the run or any of its sessions.
         List<StoredFinding> findings = [.. projections.ListFindings()
@@ -4019,7 +4019,7 @@ public abstract class KyberBridgeEngineSections : KyberBridgeEngineSessionSectio
     {
         List<PredictionRow> predictions = [.. projections.ListPredictions().Select(ToPredictionRow)];
         List<PredictionRow> scored = [.. predictions.Where(p => p.CalibrationScore.HasValue)];
-        double? meanScore = scored.Count > 0 ? Math.Round(scored.Average(p => p.CalibrationScore!.Value), 4) : null;
+        double? meanScore = scored.Count > 0 ? Math.Round(scored.Average(p => p.CalibrationScore.GetValueOrDefault()), 4) : null;
 
         return JsonSerializer.SerializeToElement(new
         {
