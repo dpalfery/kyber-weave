@@ -215,7 +215,7 @@ public class FakeServerStateRepository : IServerStateRepository
     }
 
     /// <summary>A lease handle that does nothing, standing in for the lock file.</summary>
-    public class NoopLease : IDisposable
+    public sealed class NoopLease : IDisposable
     {
         /// <summary>Whether the lease was released.</summary>
         public bool Released { get; private set; }
