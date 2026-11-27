@@ -7,11 +7,16 @@ using Xunit;
 namespace KyberWeave.Tests;
 
 /// <summary>What the target-root confirmation echoes and asks, over a test console and the shared console fake.</summary>
-public sealed class SquadTargetRootConfirmationTests
+public sealed class SquadTargetRootConfirmationTests : IDisposable
 {
     private const string Root = "/kw/work/project";
     private readonly TestConsole _ansi = new() { EmitAnsiSequences = false };
     private readonly FakeConsole _streams = new();
+
+    public void Dispose()
+    {
+        _ansi.Dispose();
+    }
 
     [Fact]
     public void Confirm_InteractiveAccepted_ProceedsAfterAskingOnce()

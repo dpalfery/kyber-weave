@@ -16,7 +16,7 @@ namespace KyberWeave.Tests;
 /// a project deployment, a dry run, a corrupt receipt, one named harness, invalid input, the global scope and
 /// a legacy global receipt. No test here touches the disk.
 /// </summary>
-public sealed class SquadUninstallCommandInMemoryTests
+public sealed class SquadUninstallCommandInMemoryTests : IDisposable
 {
     private readonly TestConsole _ansi = new() { EmitAnsiSequences = false };
     private readonly InMemorySquadState _state = new();
@@ -29,6 +29,12 @@ public sealed class SquadUninstallCommandInMemoryTests
         _ansi.Profile.Width = 200;
         _console = new SquadConsole(_ansi, new FakeConsole());
         _release = new FakeSquadReleaseSource { Files = _state.Files };
+    }
+
+    public void Dispose()
+    {
+        _ansi.Dispose();
+        _release.Dispose();
     }
 
     [Fact]

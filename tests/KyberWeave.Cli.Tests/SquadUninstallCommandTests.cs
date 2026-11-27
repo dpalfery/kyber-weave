@@ -8,13 +8,18 @@ using Xunit;
 namespace KyberWeave.Tests;
 
 /// <summary>What <c>squad uninstall</c> resolves, asks and prints for a project, over the shared console, path and state fakes.</summary>
-public sealed class SquadUninstallCommandTests
+public sealed class SquadUninstallCommandTests : IDisposable
 {
     private const string WorkingDirectory = "/kw/work";
     private readonly TestConsole _ansi = new() { EmitAnsiSequences = false };
     private readonly FakeConsole _streams = new(isInputRedirected: true);
     private readonly FakeSquadStateStore _state = new(new FakeSquadUserPaths("/kw/appdata", "/kw/home"));
     private readonly FakeSquadStateMigration _migration = new();
+
+    public void Dispose()
+    {
+        _ansi.Dispose();
+    }
 
     [Fact]
     public void Execute_GlobalAndProjectTogether_IsRefusedWithoutTouchingAnything()

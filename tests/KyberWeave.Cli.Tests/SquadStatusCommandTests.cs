@@ -13,7 +13,7 @@ using Xunit;
 namespace KyberWeave.Tests;
 
 /// <summary>What <c>squad status</c> reads and prints, over the in-memory file system, the shared console and the state fakes.</summary>
-public sealed class SquadStatusCommandTests
+public sealed class SquadStatusCommandTests : IDisposable
 {
     private const string Project = "/kw/work";
     private const string Home = "/kw/home";
@@ -28,6 +28,11 @@ public sealed class SquadStatusCommandTests
     {
         _ansi.Profile.Width = 200;
         _files.CreateDirectory(Project);
+    }
+
+    public void Dispose()
+    {
+        _ansi.Dispose();
     }
 
     [Fact]
