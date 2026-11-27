@@ -23,7 +23,7 @@ namespace KyberWeave.Tests.CopilotPrompt;
 /// A foreign <c>*</c> entry is never overwritten. Every test runs over an in-memory home, so none can touch the
 /// real VS Code settings or the real home directory.
 /// </remarks>
-public sealed class CopilotPromptSettingsMergeTests
+public sealed class CopilotPromptSettingsMergeTests : IDisposable
 {
     private const string ModelOverridesSetting = VsCodeUserSettingsPaths.SettingId;
     private const string StarEntry = "*";
@@ -49,6 +49,8 @@ public sealed class CopilotPromptSettingsMergeTests
         _paths = new FakePathResolver(_memory);
         _ansi.Profile.Width = 400;
     }
+
+    public void Dispose() => _ansi.Dispose();
 
     /// <summary>What a command returned and what it printed.</summary>
     private sealed record Execution(int Result, string Output);

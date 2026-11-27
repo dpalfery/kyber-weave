@@ -10,13 +10,15 @@ namespace KyberWeave.Tests;
 /// What <c>run integrate</c> passes to the service and what it prints: the request the environment supplies, the
 /// one-line outcome, and the exit code the worker branches on.
 /// </summary>
-public sealed class RunIntegrateCommandTests
+public sealed class RunIntegrateCommandTests : IDisposable
 {
     private readonly TestConsole _console = new() { EmitAnsiSequences = false };
     private readonly StubIntegrate _integrate = new();
     private readonly FakeProcessEnvironment _environment = new(currentDirectory: "/work/task", homeDirectory: "/home/dev");
 
     public RunIntegrateCommandTests() => _console.Profile.Width = 400;
+
+    public void Dispose() => _console.Dispose();
 
     [Fact]
     public void TheRequestCarriesTheTaskTheCurrentDirectoryAndTheOperatorsHome()

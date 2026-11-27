@@ -13,7 +13,7 @@ namespace KyberWeave.Tests;
 /// How a plan argument finds its repository, resolves to a file and is announced, over the shared file-system, path,
 /// environment and console fakes: nothing here touches the disk or the host's console.
 /// </summary>
-public sealed class PlanArgumentsSeamTests
+public sealed class PlanArgumentsSeamTests : IDisposable
 {
     private const string WorkingDirectory = "/kw/work";
 
@@ -28,6 +28,8 @@ public sealed class PlanArgumentsSeamTests
         _console.Profile.Width = 400;
         _files.CreateDirectory(WorkingDirectory);
     }
+
+    public void Dispose() => _console.Dispose();
 
     [Fact]
     public void Find_StopsAtTheNearestDirectoryHoldingAGitDirectory()

@@ -20,7 +20,7 @@ namespace KyberWeave.Tests;
 /// What <c>docs init</c> resolves, runs and prints, over the shared file-system, path, environment, process and
 /// console fakes: nothing here touches the disk, starts a process or reads the host's console.
 /// </summary>
-public sealed class DocsInitCommandSeamTests
+public sealed class DocsInitCommandSeamTests : IDisposable
 {
     private const string WorkingDirectory = "/kw/work";
     private const string Root = "/kw/work/repo";
@@ -38,6 +38,8 @@ public sealed class DocsInitCommandSeamTests
         _console.Profile.Width = 400;
         _files.CreateDirectory(Root);
     }
+
+    public void Dispose() => _console.Dispose();
 
     [Fact]
     public void Execute_ScaffoldFailure_ReportsItAndReturnsOne()

@@ -12,7 +12,7 @@ namespace KyberWeave.Tests;
 /// the configuration through the file system, and prints on the console it was given, so these cases run over the
 /// in-memory file system and a test console with no disk and no terminal.
 /// </summary>
-public sealed class ReviewMigrateTaskGatesSeamTests
+public sealed class ReviewMigrateTaskGatesSeamTests : IDisposable
 {
     private const string Home = "/kw/work";
     private const string Root = "/kw/work/repo";
@@ -36,6 +36,8 @@ public sealed class ReviewMigrateTaskGatesSeamTests
     private readonly TestConsole _console = new();
 
     public ReviewMigrateTaskGatesSeamTests() => _console.Profile.Width = 200;
+
+    public void Dispose() => _console.Dispose();
 
     private int Run(ReviewMigrateTaskGatesSettings settings, FakeKyberWeaveConfigRepository? configs = null)
     {

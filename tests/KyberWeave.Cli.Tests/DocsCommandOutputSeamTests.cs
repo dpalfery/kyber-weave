@@ -18,7 +18,7 @@ namespace KyberWeave.Tests;
 /// The docs verbs that read the console, the working directory or the platform print to the console they were given
 /// and resolve the directory through the path and environment seams, so a unit test supplies both.
 /// </summary>
-public sealed class DocsCommandOutputSeamTests
+public sealed class DocsCommandOutputSeamTests : IDisposable
 {
     private const string WorkingDirectory = "/kw/work";
     private const string Root = "/kw/work/repo";
@@ -27,6 +27,8 @@ public sealed class DocsCommandOutputSeamTests
     private readonly InMemoryFileSystem _files = new();
     private readonly FakeKyberWeaveConfigRepository _configs = new();
     private readonly FakeConsole _standardError = new();
+
+    public void Dispose() => _console.Dispose();
 
     [Fact]
     public void PacketResolvesTheWorkingDirectoryThroughThePathSeamAndReportsOnItsConsole()

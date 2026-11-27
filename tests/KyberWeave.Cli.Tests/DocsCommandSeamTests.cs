@@ -18,7 +18,7 @@ namespace KyberWeave.Tests;
 /// The remaining docs verbs reach their clock, their paths and their console through a seam, so a unit test states
 /// the date, the directory and the output without reading the system clock or the process console.
 /// </summary>
-public sealed class DocsCommandSeamTests
+public sealed class DocsCommandSeamTests : IDisposable
 {
     private const string WorkingDirectory = "/kw/work";
     private const string Plan = "repo/docs/plans/2026-01-01-plan.md";
@@ -30,6 +30,8 @@ public sealed class DocsCommandSeamTests
     private readonly FakeProcessEnvironment _environment = new(currentDirectory: WorkingDirectory);
 
     public DocsCommandSeamTests() => _paths = new FakePathResolver(_files);
+
+    public void Dispose() => _console.Dispose();
 
     [Fact]
     public void CloseoutTakesItsArchiveDateFromTheInjectedClock()
