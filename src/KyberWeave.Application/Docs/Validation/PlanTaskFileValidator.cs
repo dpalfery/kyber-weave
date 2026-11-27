@@ -323,7 +323,7 @@ public sealed partial class PlanTaskFileValidator
             return;
         }
 
-        if (!TryRead(taskFile, artifact.RelativePath, report, out PlanTaskFile? file))
+        if (!TryRead(taskFile, artifact.RelativePath, report, out PlanTaskFile? file) || file is null)
         {
             return;
         }
@@ -357,7 +357,7 @@ public sealed partial class PlanTaskFileValidator
                 $"'{TaskFilePath(artifact)}'."));
         }
 
-        if (file!.SchemaVersion == PlanTaskFileRules.LegacySchemaVersion)
+        if (file.SchemaVersion == PlanTaskFileRules.LegacySchemaVersion)
         {
             // Version 1 is the older release's schema. It loads; the conversion warning above (or
             // this one for a version-1 YAML file) is the only finding it raises.

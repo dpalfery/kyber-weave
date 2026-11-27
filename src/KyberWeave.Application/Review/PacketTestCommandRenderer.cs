@@ -60,9 +60,9 @@ public static class PacketTestCommandRenderer
 
         StringBuilder text = new();
         text.Append(Heading).Append('\n');
-        if (gated.Count > 0)
+        if (gated.Count > 0 && agent is { } gateAgent)
         {
-            string run = GateCommand(agent!, entry.Id);
+            string run = GateCommand(gateAgent, entry.Id);
             text.Append("\nRun your tests with this one command. It builds, runs this task's tests, prints the failures in short, ")
                 .Append("and writes the report that is your evidence:\n\n")
                 .Append("    ").Append(run).Append(" --red    # test-first only: once, after writing the tests and before implementing\n")
