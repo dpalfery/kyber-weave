@@ -18,7 +18,7 @@ namespace KyberWeave.Tests;
 /// target or exclusion, refuse a targetless non-interactive run, and reconcile an explicit target set into
 /// the receipt, the lock and the render request. No test here touches the disk or the network.
 /// </summary>
-public sealed class SquadInstallAndUpdateCommandInMemoryTests
+public sealed class SquadInstallAndUpdateCommandInMemoryTests : IDisposable
 {
     private readonly TestConsole _ansi = new() { EmitAnsiSequences = false };
     private readonly InMemorySquadState _state = new();
@@ -30,6 +30,8 @@ public sealed class SquadInstallAndUpdateCommandInMemoryTests
         _ansi.Profile.Width = 200;
         _console = new SquadConsole(_ansi, new FakeConsole());
     }
+
+    public void Dispose() => _ansi.Dispose();
 
     [Fact]
     public void Install_WhenToolchainUnreleased_FailsClosedWithExitOne()

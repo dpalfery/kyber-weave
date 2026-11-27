@@ -9,7 +9,7 @@ using Xunit;
 namespace KyberWeave.Tests;
 
 /// <summary>Where a Squad verb anchors, what it migrates and which projects it names, over the in-memory file system and the shared fakes.</summary>
-public sealed class SquadCommandRootsTests
+public sealed class SquadCommandRootsTests : IDisposable
 {
     private const string WorkingDirectory = "/kw/work";
     private const string Home = "/kw/home";
@@ -17,6 +17,8 @@ public sealed class SquadCommandRootsTests
     private readonly TestConsole _ansi = new() { EmitAnsiSequences = false };
     private readonly FakeSquadStateStore _state = new(new FakeSquadUserPaths("/kw/appdata", Home));
     private readonly FakeSquadStateMigration _migration = new();
+
+    public void Dispose() => _ansi.Dispose();
 
     [Theory]
     [InlineData(null, "/kw/work")]
