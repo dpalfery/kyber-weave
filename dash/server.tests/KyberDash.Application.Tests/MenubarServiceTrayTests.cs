@@ -9,7 +9,7 @@ namespace KyberDash.Application.Tests;
 /// Proves the quit, launch and running decisions of <see cref="MenubarService"/> in memory: which binary is
 /// signalled, when nothing is, and when a force-kill is allowed.
 /// </summary>
-public class MenubarServiceTrayTests : IDisposable
+public sealed class MenubarServiceTrayTests : IDisposable
 {
     private readonly TempDirectory state = new();
     private readonly List<(string File, string[] Args)> calls = [];
