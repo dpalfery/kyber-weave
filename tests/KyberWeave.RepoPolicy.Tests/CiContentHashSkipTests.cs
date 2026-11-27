@@ -418,6 +418,45 @@ public sealed class CiContentHashSkipTests
     }
 
     /// <summary>
+    ///     The receipt's digest map covers a job's build products only. Test reports and SARIF files
+    ///     are neither digested nor attested, so no governed document may say they are.
+    /// </summary>
+    [Fact]
+    public void NoDocumentClaimsTestReportsOrSarifAreDigested()
+    {
+        string[] paths =
+        [
+            "docs/standards/github-actions/github-actions.standards.md",
+            "docs/archive/plans/2026-11-26-ci-content-hash-skip-and-provenance.md",
+            "docs/archive/plans/README.md",
+        ];
+
+        string[] claims =
+        [
+            "Test reports and SARIF files are digested",
+            "recorded as digests only",
+            "digest-only for reports and SARIF",
+            "Test reports and SARIF are digest-only",
+            "test reports and SARIF digested only",
+        ];
+
+        List<string> problems = [];
+        foreach (string path in paths)
+        {
+            string text = Corpus.ReadText(path);
+            foreach (string claim in claims)
+            {
+                if (text.Contains(claim, StringComparison.Ordinal))
+                {
+                    problems.Add($"{path}: '{claim}' claims a digest the workflow does not take.");
+                }
+            }
+        }
+
+        Assert.True(problems.Count == 0, "Digest-claim problems:\n" + string.Join('\n', problems));
+    }
+
+    /// <summary>
     ///     The digest step writes one <c>name=value</c> line. <c>jq</c> pretty-prints by default, and a
     ///     newline in <c>GITHUB_OUTPUT</c> is not a legal output line, so the step fails before the
     ///     receipt is saved.

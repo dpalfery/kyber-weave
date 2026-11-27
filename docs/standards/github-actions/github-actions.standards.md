@@ -221,8 +221,9 @@ are the rules a workflow edit has to keep.
   token.** `actions/attest` there takes `subject-path` and nothing else — no `sbom-path`, no
   `predicate` — so it binds the product to the workflow's identity. A job that attests declares
   `id-token: write`, `attestations: write` and `artifact-metadata: write`, with a comment naming
-  why, and a job that mints a token must attest. Test reports and SARIF files are digested into the
-  receipt and never attested. The release workflow has the other shape: `attest-sbom` mints
+  why, and a job that mints a token must attest. Only a job's build products are digested into the
+  receipt; test reports and SARIF files are neither digested nor attested. The release workflow has
+  the other shape: `attest-sbom` mints
   SBOM-predicate attestations with `sbom-path`, plus one provenance attestation over every
   archive.
 
