@@ -133,6 +133,10 @@ public sealed record ReviewFinding(
 /// <param name="Outcome">
 /// How the gate ended: it ran to the end, it was stopped at its time limit, or its program never started.
 /// </param>
+/// <param name="TimeoutSeconds">
+/// The gate's own timeout that stopped it; null when its own limit did not stop it. Recorded with the
+/// duration so a timed-out result can be read against the limit it exceeded.
+/// </param>
 /// <remarks>
 /// A gate that did not apply is neither passed nor failed: <see cref="Passed"/> is false,
 /// and the verdict engine excludes it from the failure count rather than treating an
@@ -146,7 +150,8 @@ public sealed record GateResult(
     string Summary,
     long DurationMilliseconds = 0,
     string? NotApplicableReason = null,
-    GateOutcome Outcome = GateOutcome.Completed)
+    GateOutcome Outcome = GateOutcome.Completed,
+    int? TimeoutSeconds = null)
 {
     /// <summary>Whether the gate succeeded.</summary>
     public bool Passed => ExitCode == 0 && NotApplicableReason is null;
