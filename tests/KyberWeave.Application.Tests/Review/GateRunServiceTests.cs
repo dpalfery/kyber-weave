@@ -5,7 +5,6 @@ using KyberWeave.Core.Processes;
 using KyberWeave.Core.Review;
 using KyberWeave.Tests.Fakes;
 using KyberWeave.Tests.FileSystem;
-using Microsoft.Extensions.Time.Testing;
 using Xunit;
 
 namespace KyberWeave.Application.Tests.Review;
@@ -19,7 +18,7 @@ public sealed class GateRunServiceTests
 {
     private const string Root = "/repo";
 
-    private readonly FakeTimeProvider _clock = new(new DateTimeOffset(2026, 11, 18, 9, 0, 0, TimeSpan.Zero));
+    private readonly SleepingTimeProvider _clock = new(new DateTimeOffset(2026, 11, 18, 9, 0, 0, TimeSpan.Zero));
     private readonly InMemoryFileSystem _files;
     private readonly FakeProcessEnvironment _environment = new(currentDirectory: Root);
     private readonly RecordingPrograms _programs;
@@ -94,6 +93,37 @@ public sealed class GateRunServiceTests
         GateResult result = Assert.Single(report.Gates);
         Assert.Equal(GateOutcome.TimedOut, result.Outcome);
         Assert.Equal(3000, result.DurationMilliseconds);
+        Assert.Equal(3, result.TimeoutSeconds);
+    }
+
+    [Fact]
+    public void AGateItsOwnTimeoutStoppedWhileTheMachineSleptRecordsThatLimitAndTheWholeTimeItTook()
+    {
+        // run-06: dotnet-build's 300-second limit fired during a 272-second clamshell sleep. The process
+        // timeout counts continuous time and fired; the monotonic clock the duration was read from paused,
+        // reporting 46.9 seconds for a gate that had spent its whole limit.
+        _programs.TimesOut(
+            "build",
+            awake: TimeSpan.FromMilliseconds(46_915),
+            asleep: TimeSpan.FromMilliseconds(253_085));
+
+        GateResult result = Assert.Single(_service.Run(Config(Gate("build", timeoutSeconds: 300)), Root).Gates);
+
+        Assert.Equal(GateOutcome.TimedOut, result.Outcome);
+        Assert.Equal(300, result.TimeoutSeconds);
+        Assert.Equal(300_000, result.DurationMilliseconds);
+    }
+
+    [Fact]
+    public void TheCouncilDeadlineCountsTheTimeTheMachineSpentAsleep()
+    {
+        _programs.Takes("first", TimeSpan.FromSeconds(10), asleep: TimeSpan.FromSeconds(600));
+
+        GateReport report = _service.Run(
+            Config(Gate("first"), Gate("second")), Root, deadline: TimeSpan.FromSeconds(300));
+
+        Assert.Equal(GateOutcome.Completed, report.Gates[0].Outcome);
+        Assert.Equal(GateOutcome.DeadlinePassed, report.Gates[1].Outcome);
     }
 
     [Fact]
@@ -139,9 +169,9 @@ public sealed class GateRunServiceTests
 
     private static ReviewGate Gate(string id, int timeoutSeconds = 900) => new(id, [id], TimeoutSeconds: timeoutSeconds);
 
-    private sealed class RecordingPrograms(FakeTimeProvider clock) : IProgramRunner
+    private sealed class RecordingPrograms(SleepingTimeProvider clock) : IProgramRunner
     {
-        private readonly Dictionary<string, (TimeSpan Elapsed, bool TimeOut)> _scripts = [];
+        private readonly Dictionary<string, (TimeSpan Elapsed, bool TimeOut, TimeSpan Asleep)> _scripts = [];
 
         public List<string> Started { get; } = [];
 
@@ -149,9 +179,11 @@ public sealed class GateRunServiceTests
 
         public List<string> WorkingDirectories { get; } = [];
 
-        public void Takes(string program, TimeSpan elapsed) => _scripts[program] = (elapsed, false);
+        public void Takes(string program, TimeSpan elapsed, TimeSpan asleep = default) =>
+            _scripts[program] = (elapsed, false, asleep);
 
-        public void TimesOut(string program, TimeSpan elapsed) => _scripts[program] = (elapsed, true);
+        public void TimesOut(string program, TimeSpan awake, TimeSpan asleep = default) =>
+            _scripts[program] = (awake, true, asleep);
 
         public ProcessResult Run(
             string program,
@@ -164,10 +196,34 @@ public sealed class GateRunServiceTests
             Started.Add(program);
             Timeouts.Add(timeout);
             WorkingDirectories.Add(workingDirectory);
-            (TimeSpan elapsed, bool timeOut) = _scripts.GetValueOrDefault(program);
+            (TimeSpan elapsed, bool timeOut, TimeSpan asleep) = _scripts.GetValueOrDefault(program);
             clock.Advance(elapsed);
+            clock.Sleep(asleep);
             return timeOut ? throw new TimeoutException($"{program} outlived its limit") : new ProcessResult(0, string.Empty, string.Empty);
         }
+    }
+
+    /// <summary>A clock whose monotonic timestamp pauses while the machine sleeps, as the real one does.</summary>
+    private sealed class SleepingTimeProvider(DateTimeOffset start) : TimeProvider
+    {
+        private DateTimeOffset _now = start;
+        private long _awakeTicks;
+
+        public override DateTimeOffset GetUtcNow() => _now;
+
+        public override long TimestampFrequency => TimeSpan.TicksPerSecond;
+
+        public override long GetTimestamp() => _awakeTicks;
+
+        /// <summary>Time the machine was awake: both clocks advance.</summary>
+        public void Advance(TimeSpan awake)
+        {
+            _now += awake;
+            _awakeTicks += awake.Ticks;
+        }
+
+        /// <summary>Time the machine was asleep: only the wall clock advances.</summary>
+        public void Sleep(TimeSpan slept) => _now += slept;
     }
 
     private sealed class NoCoverage : ICoverageReportSource
