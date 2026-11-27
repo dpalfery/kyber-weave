@@ -135,7 +135,8 @@ public sealed class InMemorySquadCrashSafetyFixture : SquadCrashSafetyFixture
         catch (Exception exception) when (IsKill(exception))
         {
         }
-        catch (Exception exception)
+        // The fixture's boundary: report whatever the transaction threw instead of crashing the test host.
+        catch (Exception exception) when (exception is not OutOfMemoryException && exception is not OperationCanceledException)
         {
             problem = $"The flow reported the fault as {exception.GetType().Name}: {exception.Message}";
         }

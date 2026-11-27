@@ -78,7 +78,11 @@ public sealed class SyntheticValidSquadReleaseSource : ISquadReleaseSource
             {
                 if (Directory.Exists(templateRoot)) Directory.Delete(templateRoot, true);
             }
-            catch
+            catch (IOException)
+            {
+                // Best-effort cleanup on process termination.
+            }
+            catch (UnauthorizedAccessException)
             {
                 // Best-effort cleanup on process termination.
             }
