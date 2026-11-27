@@ -121,7 +121,7 @@ public sealed partial class PlanCloseout
         string archiveFolder = Join(root, OntologyConfig.ArchiveSegment, DocsLayout.Plans);
         string target = Join(archiveFolder, name);
         string inventory = Join(archiveFolder, "README.md");
-        string planIndex = _files.PlanIndexPath()!;
+        string planIndex = PlanIndex();
 
         if (_store.FileExists(_files.Absolute(target)))
         {
@@ -167,11 +167,11 @@ public sealed partial class PlanCloseout
         // The archive gate reads the plan where it would be archived, so the copy goes there for the check and
         // is gone again before this method returns, whatever the outcome.
         string? newInventory = null;
-        string? newPlanIndex = null;
+        string newPlanIndex = string.Empty;
         bool planRowRemoved = false;
         string inventoryAction;
         string row;
-        string archiveDirectory = Path.GetDirectoryName(_files.Absolute(target))!;
+        string archiveDirectory = ArchiveDirectory(target);
         string? createdDirectory = FirstMissingDirectory(archiveDirectory);
         _store.CreateDirectory(archiveDirectory);
         bool wroteTarget = false;
@@ -258,7 +258,7 @@ public sealed partial class PlanCloseout
             Say(report, plan, $"Removed {taskFile}.");
         }
 
-        _store.WriteAllText(_files.Absolute(planIndex), newPlanIndex!);
+        _store.WriteAllText(_files.Absolute(planIndex), newPlanIndex);
         Say(report, plan, planRowRemoved ? $"Took its row out of {planIndex}." : $"{planIndex} had no row for it.");
         _store.WriteAllText(_files.Absolute(inventory), newInventory);
         Say(report, plan, $"Done: {inventoryAction} {inventory} with its row.");
@@ -267,6 +267,14 @@ public sealed partial class PlanCloseout
         Say(report, plan, "Run 'docs validate . --merge-ready' and 'docs drift .' next.");
         return new PlanCloseoutOutcome(report, true);
     }
+
+    private string PlanIndex() =>
+        _files.PlanIndexPath()
+        ?? throw new InvalidOperationException("The configuration registers no plan index.");
+
+    private string ArchiveDirectory(string target) =>
+        Path.GetDirectoryName(_files.Absolute(target))
+        ?? throw new InvalidOperationException($"The archive target '{target}' has no directory.");
 
     /// <summary>
     /// Reads the plan index, naming the problem when it is missing or unreadable. A missing or

@@ -159,14 +159,7 @@ public sealed class DocumentationReviewExchange
         string? error = ValidateBundle(bundle, candidatesById);
         if (error is not null) return Failure(error);
 
-        AnalysisVerdict[] verdicts = bundle.Verdicts.Select(item => new AnalysisVerdict(
-            item.CandidateId,
-            item.Label!.Value,
-            item.Confidence!.Value,
-            item.Rationale,
-            item.EvidenceIds,
-            item.RecommendedCanonicalLocation,
-            item.ProposedGlossarySenses)).ToArray();
+        AnalysisVerdict[] verdicts = bundle.Verdicts.Select(CreateVerdict).ToArray();
         AnalysisCandidate[] reviewedCandidates = bundle.Verdicts
             .Select(item => candidatesById[item.CandidateId])
             .ToArray();
@@ -193,6 +186,23 @@ public sealed class DocumentationReviewExchange
         }
 
         return new ReviewImportResult(true, verdicts.Length, new DiagnosticReport());
+    }
+
+    private static AnalysisVerdict CreateVerdict(ReviewVerdictItem item)
+    {
+        if (item.Label is not { } label)
+            throw new InvalidOperationException("A validated verdict must have a label.");
+        if (item.Confidence is not { } confidence)
+            throw new InvalidOperationException("A validated verdict must have a confidence.");
+
+        return new AnalysisVerdict(
+            item.CandidateId,
+            label,
+            confidence,
+            item.Rationale,
+            item.EvidenceIds,
+            item.RecommendedCanonicalLocation,
+            item.ProposedGlossarySenses);
     }
 
     /// <summary>

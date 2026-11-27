@@ -147,7 +147,7 @@ public static partial class PullRequestDescription
             }
 
             if (!used.Contains(SummaryToken))
-                output.Insert(0, ("Summary", values[SummaryToken]!));
+                output.Insert(0, ("Summary", content.Summary.Trim()));
             foreach (Section section in standard)
             {
                 if (section.Token is { } token && AlwaysShown.Contains(token, StringComparer.Ordinal)
