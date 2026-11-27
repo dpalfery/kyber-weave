@@ -195,9 +195,10 @@ public partial class McpStdioHost
         if (paramsElement.ValueKind == JsonValueKind.Object
             && paramsElement.TryGetProperty("protocolVersion", out JsonElement versionElement)
             && versionElement.ValueKind == JsonValueKind.String
-            && !string.IsNullOrWhiteSpace(versionElement.GetString()))
+            && versionElement.GetString() is { } requestedVersion
+            && !string.IsNullOrWhiteSpace(requestedVersion))
         {
-            protocolVersion = versionElement.GetString()!;
+            protocolVersion = requestedVersion;
         }
 
         return new JsonObject
