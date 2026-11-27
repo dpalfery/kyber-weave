@@ -50,6 +50,7 @@ public class BoundedIngestWriter
     private readonly long maxPendingBytes;
     private readonly int maxPendingItems;
     private readonly ITranscriptIngestionService? ingestion;
+    private readonly TimeProvider time;
 
     private readonly Queue<(OtlpSpan Span, long Bytes)> spanQueue = new();
     private readonly Queue<(OtlpLog Log, long Bytes)> logQueue = new();
@@ -71,12 +72,14 @@ public class BoundedIngestWriter
     /// Ingestion service spans are handed to on flush. When omitted, spans are normalized with the
     /// canonical pipeline and persisted straight to the store.
     /// </param>
+    /// <param name="time">Wall-clock time provider stamping the ingest audit row; defaults to <see cref="TimeProvider.System"/>.</param>
     public BoundedIngestWriter(
         int batchSize = DefaultBatchSize,
         long maxBodyBytes = DefaultMaxBodyBytes,
         long maxPendingBytes = DefaultMaxPendingBytes,
         int maxPendingItems = DefaultMaxPendingItems,
-        ITranscriptIngestionService? ingestion = null)
+        ITranscriptIngestionService? ingestion = null,
+        TimeProvider? time = null)
     {
         ArgumentOutOfRangeException.ThrowIfLessThanOrEqual(batchSize, 0);
         ArgumentOutOfRangeException.ThrowIfLessThanOrEqual(maxBodyBytes, 0L);
@@ -88,6 +91,7 @@ public class BoundedIngestWriter
         this.maxPendingBytes = maxPendingBytes;
         this.maxPendingItems = maxPendingItems;
         this.ingestion = ingestion;
+        this.time = time ?? TimeProvider.System;
     }
 
     /// <summary>Total accounted bytes currently queued or in flight to the store.</summary>
@@ -378,7 +382,7 @@ public class BoundedIngestWriter
                 operationalStore.RecordIngest(
                     "otlp",
                     accepted,
-                    DateTimeOffset.UtcNow.ToString("o", CultureInfo.InvariantCulture));
+                    time.GetUtcNow().ToString("o", CultureInfo.InvariantCulture));
             }
 
             return (new IngestOutcome(accepted, quarantined, rejected), metricPointsWritten);
