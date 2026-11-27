@@ -840,6 +840,7 @@ public sealed partial class DocumentIndex
         List<string> buffer = new();
         string? heading = null;
         int headingLine = section.LineNumber;
+        int bodyLine = section.BodyLine > 0 ? section.BodyLine : section.LineNumber + 1;
         bool inFence = false;
         bool sawNested = false;
 
@@ -876,7 +877,7 @@ public sealed partial class DocumentIndex
 
                 sawNested = true;
                 heading = line[4..].Trim();
-                headingLine = section.LineNumber + 1 + i;
+                headingLine = bodyLine + i;
                 buffer = [];
                 continue;
             }

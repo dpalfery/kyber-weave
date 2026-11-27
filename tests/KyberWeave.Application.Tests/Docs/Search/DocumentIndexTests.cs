@@ -835,6 +835,30 @@ public sealed class CodingStandardsLookupTests : IDisposable
     }
 
     /// <summary>
+    /// A nested heading keeps its true line: the section split trims the blank line under
+    /// "## Coding standards", and counting from the trimmed body put "### Errors and
+    /// diagnostics" one line early, which breaks the excerpt's document order.
+    /// </summary>
+    [Fact]
+    public void ANestedHeadingUnderABlankLineKeepsItsLineNumber()
+    {
+        string sections = """
+            ## Coding standards
+
+            ### Errors and diagnostics
+
+            Parsers fail closed with an error or diagnostic that names the input.
+            """;
+
+        DocumentIndex index = OneStandard(sections);
+
+        DocumentHit hit = index.CodingStandards("csharp", topic: "error handling", charBudget: 1000).Single();
+        int parentLine = hit.Document.Sections.Single(section => section.Heading == "Coding standards").LineNumber;
+
+        Assert.Equal(parentLine + 2, hit.Excerpt.Sections.Single().LineNumber);
+    }
+
+    /// <summary>
     /// A topic narrows the standard to the section that answers it, chosen the way
     /// <c>Explore</c> chooses a section: rarity-weighted terms, the topic's adjacent pairs
     /// fused into weak phrase matches, and document order for what is emitted. The sections
