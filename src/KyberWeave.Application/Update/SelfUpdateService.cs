@@ -29,8 +29,10 @@ internal sealed class SelfUpdateService(
         SelfUpdateHost snapshot = host();
         IArbiterHookRefresher refresher = refreshers.Create(log);
         HttpMessageHandler? owned = handler is null ? new SocketsHttpHandler { AllowAutoRedirect = true } : null;
+        HttpMessageHandler effectiveHandler = handler ?? owned
+            ?? throw new InvalidOperationException("No HTTP message handler was resolved for the update.");
         using SelfUpdater updater = new(
-            handler ?? owned!,
+            effectiveHandler,
             snapshot,
             files,
             paths,

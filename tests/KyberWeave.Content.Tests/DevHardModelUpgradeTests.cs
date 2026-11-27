@@ -118,8 +118,8 @@ public sealed class DevHardModelUpgradeTests
         foreach (SquadTarget target in SquadTargetCatalog.All)
         {
             string harness = SquadTargetCatalog.GetToken(target);
-            string hardModel = Resolve(devHard, harness);
-            string generalModel = Resolve(general, harness);
+            string? hardModel = Resolve(devHard, harness);
+            string? generalModel = Resolve(general, harness);
 
             if (NoSecondModel.TryGetValue(target, out string? reason))
             {
@@ -189,7 +189,7 @@ public sealed class DevHardModelUpgradeTests
         Assert.Equal(Sort(expected), Sort(profile.HarnessModels));
     }
 
-    private static string Resolve(SquadModelProfile profile, string harness) =>
+    private static string? Resolve(SquadModelProfile profile, string harness) =>
         profile.HarnessModels.TryGetValue(harness, out string? value) ? value : profile.Default;
 
     /// <summary>The rendered model value the harness emits for <paramref name="agent"/>.</summary>

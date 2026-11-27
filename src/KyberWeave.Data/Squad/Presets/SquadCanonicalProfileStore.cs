@@ -188,7 +188,13 @@ public sealed class SquadCanonicalProfileStore : ISquadCanonicalProfileStore
             {
                 SquadModelProfile profile = snapshot.Profiles.Profiles[category];
                 yaml.Append("  ").Append(ToYamlScalar(category)).Append(":\n");
-                AppendScalar(yaml, "default", profile.Default, 4);
+                // Validate refuses a category without a default, so this only guards a caller that skipped it.
+                AppendScalar(
+                    yaml,
+                    "default",
+                    profile.Default ?? throw new InvalidDataException(
+                        $"Squad snapshot profile category '{category}' must declare a 'default' model."),
+                    4);
                 foreach (string harness in profile.HarnessModels.Keys.OrderBy(key => key, StringComparer.Ordinal))
                     AppendScalar(yaml, harness, profile.HarnessModels[harness], 4);
             }

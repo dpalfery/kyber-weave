@@ -813,7 +813,7 @@ internal sealed class SelfUpdater : IDisposable
     /// </summary>
     private void RefreshArbiterHooks(SelfUpdateOptions options, string version, bool windows)
     {
-        if (options.NoArbiter || _arbiterHookRefresher is null)
+        if (options.NoArbiter || _arbiterHookRefresher is null || _arbiterTargets is null)
             return;
 
         string arbiter = Path.Combine(
@@ -830,7 +830,7 @@ internal sealed class SelfUpdater : IDisposable
             bool registryRead = true;
             try
             {
-                roots = _arbiterTargets!.CollectEnabledProjectRoots();
+                roots = _arbiterTargets.CollectEnabledProjectRoots();
             }
             catch (Exception ex) when (IsRegistryReadFailure(ex))
             {
@@ -843,7 +843,7 @@ internal sealed class SelfUpdater : IDisposable
 
             string? home = ResolveHome();
             bool hasConfiguredGlobalTargets = !string.IsNullOrWhiteSpace(home)
-                && _arbiterTargets!.ReadGlobalTargets(home).Count > 0;
+                && _arbiterTargets.ReadGlobalTargets(home).Count > 0;
 
             if (!registryRead && !hasConfiguredGlobalTargets)
                 return;
