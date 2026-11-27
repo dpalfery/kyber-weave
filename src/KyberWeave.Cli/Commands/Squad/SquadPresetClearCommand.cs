@@ -166,7 +166,8 @@ internal sealed class SquadPresetClearCommand : Command<SquadPresetClearSettings
                 SquadDeploymentScope.Global,
                 globalAnchor,
                 projectRoot,
-                globalReceipt!,
+                globalReceipt
+                    ?? throw new InvalidOperationException("A global preset clear needs the global deployment receipt."),
                 globalLock,
                 stateStore,
                 selectionStores,
@@ -216,7 +217,8 @@ internal sealed class SquadPresetClearCommand : Command<SquadPresetClearSettings
             SquadDeploymentScope.Project,
             projectRoot,
             projectRoot,
-            projectReceipt!,
+            projectReceipt
+                ?? throw new InvalidOperationException("A project preset clear needs the project deployment receipt."),
             projectLock,
             stateStore,
             selectionStores,

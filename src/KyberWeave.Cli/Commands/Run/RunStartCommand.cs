@@ -203,7 +203,8 @@ public sealed class RunStartCommand : Command<RunStartSettings>
                 }
             };
 
-            JsonNode document = JsonSerializer.SerializeToNode(json, JsonOptions)!;
+            JsonNode document = JsonSerializer.SerializeToNode(json, JsonOptions)
+                ?? throw new InvalidOperationException("The run-start report could not be serialized.");
             if (brief is not null)
             {
                 document["brief"] = JsonNode.Parse(BriefFormatter.ToJson(brief));
