@@ -130,115 +130,272 @@ public sealed partial class RunDelivery
     {
         ArgumentNullException.ThrowIfNull(request);
         DiagnosticReport report = new();
-        DeliveryOutcome Refused(string code, string message, string? hint = null)
-        {
-            report.Add(new Diagnostic(code, Severity.Error, message, "deliver", Hint: hint));
+
+        if (ResolveRequest(
+                request,
+                report,
+                out string summary,
+                out string branch,
+                out string harness,
+                out string type,
+                out string slug,
+                out string baseBranch,
+                out string baseRef) is not null)
             return new DeliveryOutcome(report, false);
-        }
 
-        string summary = request.Summary?.Trim() ?? string.Empty;
-        if (summary.Length == 0)
-            return Refused(InvalidRequest, "No summary was given. Nothing was changed.", "Pass one to three plain sentences: the problem and the outcome.");
-        if (summary.Length > MaxSummaryLength)
-            return Refused(InvalidRequest, $"The summary is longer than {MaxSummaryLength} characters. Nothing was changed.", "Keep it to one to three sentences.");
+        if (RejectNonGitHubOrigin(report, out string repository) is not null)
+            return new DeliveryOutcome(report, false);
 
-        string branch = Git("symbolic-ref", "--quiet", "--short", "HEAD").StandardOutput.Trim();
-        if (branch.Length == 0)
-            return Refused(NotARunBranch, "The checkout is not on a branch (detached HEAD). Nothing was changed.", "Call this from the run's worktree, on the run branch.");
-        if (!TryParseRunBranch(branch, out string harness, out string type, out string slug))
-        {
-            return Refused(NotARunBranch,
-                $"'{branch}' is not a run branch: run branches are named [<owner>.<agent>.]<harness>/<type>/<slug>. Nothing was changed.",
-                "Deliver only a branch that kyber-weave run start created.");
-        }
-
-        if (!_runState.TryReadBaseRef(_homeDirectory, branch, out string? baseRef) || baseRef is null)
-        {
-            return Refused(NotARunBranch, $"No run record names the base '{branch}' was started from. Nothing was changed.",
-                "Deliver only a branch kyber-weave run start created or resumed (--resume <branch>), which records its base.");
-        }
-
-        string? originHead = Git("symbolic-ref", "--quiet", "--short", $"refs/remotes/{Remote}/HEAD") is { ExitCode: 0 } head
-            ? head.StandardOutput.Trim()
-            : null;
-        string baseBranch = RunStartPlanner.BaseBranchName(baseRef, originHead);
-        string? defaultBranch = originHead is null ? null : RunStartPlanner.BaseBranchName(originHead, null);
-        if (string.Equals(branch, baseBranch, StringComparison.Ordinal) || string.Equals(branch, defaultBranch, StringComparison.Ordinal)
-            || string.Equals(baseBranch, "HEAD", StringComparison.Ordinal))
-        {
-            return Refused(NotARunBranch, $"'{branch}' is the base or default branch, or its base cannot be named. Nothing was changed.",
-                "Deliver only the run's own branch, never the branch it merges into.");
-        }
-
-        string remoteUrl = Git("remote", "get-url", Remote).StandardOutput.Trim();
-        if (GitHubRepository(remoteUrl) is not { } repository)
-        {
-            string host = remoteUrl.Contains("dev.azure.com", StringComparison.OrdinalIgnoreCase) || remoteUrl.Contains("visualstudio.com", StringComparison.OrdinalIgnoreCase)
-                ? "Azure DevOps"
-                : remoteUrl.Length == 0 ? "no origin remote" : "a host other than github.com";
-            return Refused(ProviderUnavailable, $"The origin remote is {host}; this step opens pull requests on github.com only. Nothing was changed.", DeliveryAgentHint);
-        }
-
-        ProcessResult status = Git("status", "--porcelain=v1", "-z", "--untracked-files=all");
-        if (status.ExitCode != 0)
-            return Refused(UncommittedChanges, $"git status failed: {FirstLine(status.StandardError)}. Nothing was changed.");
-
-        (string plansFolder, string archiveFolder) = PlanFolders();
-        string todoFolder = TodoFolder();
-        List<string> dirty = [.. ChangedPaths(status.StandardOutput).Where(path => !IsUnder(path, ScratchLayout.Root))];
-        List<string> pendingPlanFiles = [.. dirty.Where(path => IsUnder(path, plansFolder) || IsUnder(path, archiveFolder))];
-        List<string> pendingTodoFiles = [.. dirty.Where(path => IsUnder(path, todoFolder))];
-        List<string> foreign = [.. dirty.Except(pendingPlanFiles, StringComparer.Ordinal).Except(pendingTodoFiles, StringComparer.Ordinal)];
-        if (foreign.Count > 0)
-        {
-            return Refused(UncommittedChanges,
-                $"Uncommitted changes outside the plan and todo files: {string.Join(", ", foreign.Take(5))}{(foreign.Count > 5 ? $" and {foreign.Count - 5} more" : string.Empty)}. Nothing was changed.",
-                "Each worker commits its own changes. Send these to the worker that owns them, or restore files a tool touched by mistake, then call this again.");
-        }
+        if (RejectDirtyWorktree(
+                report,
+                out string plansFolder,
+                out string archiveFolder,
+                out string todoFolder,
+                out IReadOnlyList<string> pendingPlanFiles,
+                out IReadOnlyList<string> pendingTodoFiles,
+                out string statusOutput) is not null)
+            return new DeliveryOutcome(report, false);
 
         string mergeBase = Git("merge-base", baseRef, "HEAD").StandardOutput.Trim();
         if (mergeBase.Length == 0)
-            return Refused(NotARunBranch, $"'{branch}' shares no history with its base '{baseRef}'. Nothing was changed.");
+            return Refused(report, NotARunBranch, $"'{branch}' shares no history with its base '{baseRef}'. Nothing was changed.");
 
-        if (!TryFindPlan(request.PlanFile, mergeBase, plansFolder, archiveFolder, status.StandardOutput, report, out string? plan))
+        if (!TryFindPlan(request.PlanFile, mergeBase, plansFolder, archiveFolder, statusOutput, report, out string? plan))
             return new DeliveryOutcome(report, false);
 
         if (plan is not null)
             AfterPlanFound?.Invoke(_files.Absolute(plan));
 
-        string? planText = null;
-        try
-        {
-            planText = plan is null ? null : _store.ReadTextIfPresent(_files.Absolute(plan));
-        }
-        catch (Exception exception) when (FileFailure.Is(exception))
-        {
-            return Refused(PlanNotDeliverable, $"The plan '{plan}' could not be read: {exception.Message}. Nothing was changed.",
-                "Make the archived plan a readable file, then call this again.");
-        }
+        PlanFacts? facts = ReadPlanFacts(plan, report);
+        if (plan is not null && facts is null)
+            return new DeliveryOutcome(report, false);
 
-        if (plan is not null && planText is null)
-            return Refused(PlanNotDeliverable, $"The plan '{plan}' is no longer there. Nothing was changed.");
-
-        PlanFacts? facts = planText is null ? null : RunEvidence.ReadPlan(planText);
         string title = Title(request.Title, facts, harness, type, slug);
         if (!TitleFollowsConvention(title, harness))
         {
-            return Refused(InvalidRequest,
+            return Refused(report, InvalidRequest,
                 $"The title '{title}' does not follow <type>(<scope>): <summary> [{harness}], with the harness once, at the end. Nothing was changed.",
                 "Leave the title out to have it composed, or fix the override.");
         }
 
-        if (Gh("--version") is { ExitCode: not 0 } version)
-            return Refused(ProviderUnavailable, $"The GitHub CLI (gh) could not be run: {FirstLine(version.StandardError)}. Nothing was changed.", DeliveryAgentHint);
-        if (Gh("auth", "status", "--hostname", "github.com") is { ExitCode: not 0 } auth)
-            return Refused(ProviderUnavailable, $"The GitHub CLI is not signed in to github.com: {FirstLine(auth.StandardError + auth.StandardOutput)}. Nothing was changed.", DeliveryAgentHint);
+        if (CheckGitHubCli(report) is not null)
+            return new DeliveryOutcome(report, false);
 
         if (pendingPlanFiles.Count > 0 && !CommitPlanFiles([.. new[] { plansFolder, archiveFolder }.Where(folder => _store.DirectoryExists(_files.Absolute(folder)))], plan, report))
             return new DeliveryOutcome(report, false);
         if (pendingTodoFiles.Count > 0 && !CommitTodoFiles(todoFolder, report))
             return new DeliveryOutcome(report, false);
 
+        string body = PreparePullRequest(request, summary, facts, plan, todoFolder, type, slug, branch, mergeBase, report);
+
+        ProcessResult push = Git("push", "--porcelain", Remote, $"refs/heads/{branch}:refs/heads/{branch}");
+        if (push.ExitCode != 0)
+        {
+            return Refused(report, PushFailed, $"git push of '{branch}' was refused: {FirstLine(push.StandardError + push.StandardOutput)}.",
+                "Never force it. If the remote branch has commits this one lacks, a person decides how to reconcile them.");
+        }
+
+        Say(report, $"Pushed {branch} to {Remote}.");
+        return PullRequest(report, repository, branch, baseBranch, title, body, request.Draft);
+    }
+
+    /// <summary>
+    /// Resolves the request to the run branch it names, refusing a missing or overlong summary, a
+    /// branch that is not a run branch, a branch with no recorded base, and a branch that is its
+    /// own base or the default branch. The refusal is recorded in the report; the resolved parts
+    /// are answered through the out parameters, all defaulted when it refuses.
+    /// </summary>
+    private DeliveryOutcome? ResolveRequest(
+        DeliveryRequest request,
+        DiagnosticReport report,
+        out string summary,
+        out string branch,
+        out string harness,
+        out string type,
+        out string slug,
+        out string baseBranch,
+        out string baseRef)
+    {
+        summary = string.Empty;
+        branch = string.Empty;
+        harness = string.Empty;
+        type = string.Empty;
+        slug = string.Empty;
+        baseBranch = string.Empty;
+        baseRef = string.Empty;
+
+        summary = request.Summary?.Trim() ?? string.Empty;
+        if (summary.Length == 0)
+        {
+            return Refused(report, InvalidRequest, "No summary was given. Nothing was changed.", "Pass one to three plain sentences: the problem and the outcome.");
+        }
+        if (summary.Length > MaxSummaryLength)
+        {
+            return Refused(report, InvalidRequest, $"The summary is longer than {MaxSummaryLength} characters. Nothing was changed.", "Keep it to one to three sentences.");
+        }
+
+        branch = Git("symbolic-ref", "--quiet", "--short", "HEAD").StandardOutput.Trim();
+        if (branch.Length == 0)
+        {
+            return Refused(report, NotARunBranch, "The checkout is not on a branch (detached HEAD). Nothing was changed.", "Call this from the run's worktree, on the run branch.");
+        }
+        if (!TryParseRunBranch(branch, out harness, out type, out slug))
+        {
+            return Refused(report, NotARunBranch,
+                $"'{branch}' is not a run branch: run branches are named [<owner>.<agent>.]<harness>/<type>/<slug>. Nothing was changed.",
+                "Deliver only a branch that kyber-weave run start created.");
+        }
+
+        if (!_runState.TryReadBaseRef(_homeDirectory, branch, out string? baseRefValue) || baseRefValue is null)
+        {
+            return Refused(report, NotARunBranch, $"No run record names the base '{branch}' was started from. Nothing was changed.",
+                "Deliver only a branch kyber-weave run start created or resumed (--resume <branch>), which records its base.");
+        }
+        baseRef = baseRefValue;
+
+        string? originHead = Git("symbolic-ref", "--quiet", "--short", $"refs/remotes/{Remote}/HEAD") is { ExitCode: 0 } head
+            ? head.StandardOutput.Trim()
+            : null;
+        baseBranch = RunStartPlanner.BaseBranchName(baseRef, originHead);
+        string? defaultBranch = originHead is null ? null : RunStartPlanner.BaseBranchName(originHead, null);
+        if (string.Equals(branch, baseBranch, StringComparison.Ordinal) || string.Equals(branch, defaultBranch, StringComparison.Ordinal)
+            || string.Equals(baseBranch, "HEAD", StringComparison.Ordinal))
+        {
+            return Refused(report, NotARunBranch, $"'{branch}' is the base or default branch, or its base cannot be named. Nothing was changed.",
+                "Deliver only the run's own branch, never the branch it merges into.");
+        }
+
+        return null;
+    }
+
+    /// <summary>
+    /// Refuses an origin remote that is not a github.com one — the step opens pull requests on
+    /// github.com only — and answers with the owner and repository it is.
+    /// </summary>
+    private DeliveryOutcome? RejectNonGitHubOrigin(DiagnosticReport report, out string repository)
+    {
+        repository = string.Empty;
+
+        string remoteUrl = Git("remote", "get-url", Remote).StandardOutput.Trim();
+        if (GitHubRepository(remoteUrl) is not { } found)
+        {
+            string host = remoteUrl.Contains("dev.azure.com", StringComparison.OrdinalIgnoreCase) || remoteUrl.Contains("visualstudio.com", StringComparison.OrdinalIgnoreCase)
+                ? "Azure DevOps"
+                : remoteUrl.Length == 0 ? "no origin remote" : "a host other than github.com";
+            return Refused(report, ProviderUnavailable, $"The origin remote is {host}; this step opens pull requests on github.com only. Nothing was changed.", DeliveryAgentHint);
+        }
+
+        repository = found;
+        return null;
+    }
+
+    /// <summary>
+    /// Classifies the uncommitted changes: the plan and todo folders may hold pending changes the
+    /// delivery commits, but anything outside them is someone else's work and refuses. The folders,
+    /// the pending files, and the status output plan discovery reads are answered through the out
+    /// parameters, all defaulted when it refuses.
+    /// </summary>
+    private DeliveryOutcome? RejectDirtyWorktree(
+        DiagnosticReport report,
+        out string plansFolder,
+        out string archiveFolder,
+        out string todoFolder,
+        out IReadOnlyList<string> pendingPlanFiles,
+        out IReadOnlyList<string> pendingTodoFiles,
+        out string statusOutput)
+    {
+        plansFolder = string.Empty;
+        archiveFolder = string.Empty;
+        todoFolder = string.Empty;
+        pendingPlanFiles = [];
+        pendingTodoFiles = [];
+        statusOutput = string.Empty;
+
+        ProcessResult status = Git("status", "--porcelain=v1", "-z", "--untracked-files=all");
+        if (status.ExitCode != 0)
+            return Refused(report, UncommittedChanges, $"git status failed: {FirstLine(status.StandardError)}. Nothing was changed.");
+
+        // The out parameters may not be captured by the lambdas that classify the paths, so the
+        // locals carry the values until the classification is done.
+        (string folderPlans, string folderArchive) = PlanFolders();
+        string folderTodo = TodoFolder();
+        string statusText = status.StandardOutput;
+        List<string> dirty = [.. ChangedPaths(statusText).Where(path => !IsUnder(path, ScratchLayout.Root))];
+        List<string> folderPendingPlans = [.. dirty.Where(path => IsUnder(path, folderPlans) || IsUnder(path, folderArchive))];
+        List<string> folderPendingTodos = [.. dirty.Where(path => IsUnder(path, folderTodo))];
+        List<string> foreign = [.. dirty.Except(folderPendingPlans, StringComparer.Ordinal).Except(folderPendingTodos, StringComparer.Ordinal)];
+        if (foreign.Count > 0)
+        {
+            return Refused(report, UncommittedChanges,
+                $"Uncommitted changes outside the plan and todo files: {string.Join(", ", foreign.Take(5))}{(foreign.Count > 5 ? $" and {foreign.Count - 5} more" : string.Empty)}. Nothing was changed.",
+                "Each worker commits its own changes. Send these to the worker that owns them, or restore files a tool touched by mistake, then call this again.");
+        }
+
+        plansFolder = folderPlans;
+        archiveFolder = folderArchive;
+        todoFolder = folderTodo;
+        pendingPlanFiles = folderPendingPlans;
+        pendingTodoFiles = folderPendingTodos;
+        statusOutput = statusText;
+
+        return null;
+    }
+
+    /// <summary>
+    /// The plan's facts from its text. Null when there is no plan, and — with a refusal recorded —
+    /// when the plan cannot be read or is no longer there.
+    /// </summary>
+    private PlanFacts? ReadPlanFacts(string? plan, DiagnosticReport report)
+    {
+        if (plan is null)
+            return null;
+
+        try
+        {
+            string? planText = _store.ReadTextIfPresent(_files.Absolute(plan));
+            if (planText is null)
+            {
+                Refused(report, PlanNotDeliverable, $"The plan '{plan}' is no longer there. Nothing was changed.");
+                return null;
+            }
+
+            return RunEvidence.ReadPlan(planText);
+        }
+        catch (Exception exception) when (FileFailure.Is(exception))
+        {
+            Refused(report, PlanNotDeliverable, $"The plan '{plan}' could not be read: {exception.Message}. Nothing was changed.",
+                "Make the archived plan a readable file, then call this again.");
+            return null;
+        }
+    }
+
+    /// <summary>Refuses when the GitHub CLI cannot be run or is not signed in to github.com.</summary>
+    private DeliveryOutcome? CheckGitHubCli(DiagnosticReport report)
+    {
+        if (Gh("--version") is { ExitCode: not 0 } version)
+            return Refused(report, ProviderUnavailable, $"The GitHub CLI (gh) could not be run: {FirstLine(version.StandardError)}. Nothing was changed.", DeliveryAgentHint);
+        if (Gh("auth", "status", "--hostname", "github.com") is { ExitCode: not 0 } auth)
+            return Refused(report, ProviderUnavailable, $"The GitHub CLI is not signed in to github.com: {FirstLine(auth.StandardError + auth.StandardOutput)}. Nothing was changed.", DeliveryAgentHint);
+
+        return null;
+    }
+
+    /// <summary>
+    /// The pull request description: the run's content with its filed todos, rendered against the
+    /// host's template, naming the templates it could not read.
+    /// </summary>
+    private string PreparePullRequest(
+        DeliveryRequest request,
+        string summary,
+        PlanFacts? facts,
+        string? plan,
+        string todoFolder,
+        string type,
+        string slug,
+        string branch,
+        string mergeBase,
+        DiagnosticReport report)
+    {
         PullRequestContent content = Content(request, summary, facts, plan, type, slug, branch, mergeBase, report) with
         {
             FollowUps = FiledTodos(mergeBase, todoFolder, report)
@@ -250,17 +407,13 @@ public sealed partial class RunDelivery
                 $"The pull request template '{unreadable}' could not be read, so it was not used{(hostTemplate.Text is null ? "; the standard description format was used instead" : "; the next template found was used instead")}.", "deliver"));
         }
 
-        string body = PullRequestDescription.Render(_resources, content, hostTemplate.Text);
+        return PullRequestDescription.Render(_resources, content, hostTemplate.Text);
+    }
 
-        ProcessResult push = Git("push", "--porcelain", Remote, $"refs/heads/{branch}:refs/heads/{branch}");
-        if (push.ExitCode != 0)
-        {
-            return Refused(PushFailed, $"git push of '{branch}' was refused: {FirstLine(push.StandardError + push.StandardOutput)}.",
-                "Never force it. If the remote branch has commits this one lacks, a person decides how to reconcile them.");
-        }
-
-        Say(report, $"Pushed {branch} to {Remote}.");
-        return PullRequest(report, repository, branch, baseBranch, title, body, request.Draft);
+    private DeliveryOutcome Refused(DiagnosticReport report, string code, string message, string? hint = null)
+    {
+        report.Add(new Diagnostic(code, Severity.Error, message, "deliver", Hint: hint));
+        return new DeliveryOutcome(report, false);
     }
 
     /// <summary>Splits a run branch, <c>[&lt;owner&gt;.&lt;agent&gt;.]&lt;harness&gt;/&lt;type&gt;/&lt;slug&gt;</c>, into its parts.</summary>

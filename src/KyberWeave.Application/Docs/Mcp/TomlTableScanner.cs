@@ -99,8 +99,7 @@ public static class TomlTableScanner
         }
 
         List<string> servers = [];
-        bool inMultilineBasic = false;
-        bool inMultilineLiteral = false;
+        ScanState state = new();
 
         ReadOnlySpan<char> remaining = text.AsSpan();
         while (true)
@@ -108,99 +107,133 @@ public static class TomlTableScanner
             int breakAt = remaining.IndexOfAny('\r', '\n');
             ReadOnlySpan<char> content = breakAt < 0 ? remaining : remaining[..breakAt];
 
-            int index = 0;
-            int firstToken = FirstTokenIndex(content);
-
-            while (index < content.Length)
-            {
-                if (inMultilineBasic)
-                {
-                    int close = IndexAfter(content, index, MultilineBasicDelimiter);
-                    if (close < 0)
-                    {
-                        index = content.Length;
-                        break;
-                    }
-
-                    inMultilineBasic = false;
-                    index = close + MultilineBasicDelimiter.Length;
-                    continue;
-                }
-
-                if (inMultilineLiteral)
-                {
-                    int close = IndexAfter(content, index, MultilineLiteralDelimiter);
-                    if (close < 0)
-                    {
-                        index = content.Length;
-                        break;
-                    }
-
-                    inMultilineLiteral = false;
-                    index = close + MultilineLiteralDelimiter.Length;
-                    continue;
-                }
-
-                char current = content[index];
-
-                if (current == '#')
-                    break;
-
-                if (current == '"' && StartsWith(content, index, MultilineBasicDelimiter))
-                {
-                    inMultilineBasic = true;
-                    index += MultilineBasicDelimiter.Length;
-                    continue;
-                }
-
-                if (current == '\'' && StartsWith(content, index, MultilineLiteralDelimiter))
-                {
-                    inMultilineLiteral = true;
-                    index += MultilineLiteralDelimiter.Length;
-                    continue;
-                }
-
-                if (current == '"' || current == '\'')
-                {
-                    int close = ClosingQuote(content, index + 1, current);
-                    if (close < 0)
-                    {
-                        return Refused(
-                            $"a string opened on '{Summarize(content)}' is never closed on its own line, so the rest of the document is unreadable");
-                    }
-
-                    index = close + 1;
-                    continue;
-                }
-
-                if (current == '[' && index == firstToken)
-                {
-                    string? refusal = ReadHeader(content, index, servers, out int next);
-                    if (refusal is not null)
-                        return Refused(refusal);
-
-                    index = next;
-                    continue;
-                }
-
-                index++;
-            }
+            string? refusal = ScanLine(content, state, servers);
+            if (refusal is not null)
+                return Refused(refusal);
 
             if (breakAt < 0)
                 break;
 
-            // CRLF is one line break. Stepping past the CR alone would leave a line consisting of
-            // the LF, which costs nothing to scan but reads the file as one line longer than it is.
-            bool carriageReturn = remaining[breakAt] == '\r';
-            remaining = remaining[(breakAt + 1)..];
-            if (carriageReturn && remaining.Length > 0 && remaining[0] == '\n')
-                remaining = remaining[1..];
+            remaining = NextLine(remaining, breakAt);
         }
 
-        if (inMultilineBasic || inMultilineLiteral)
+        if (state.InMultilineBasic || state.InMultilineLiteral)
             return Refused("a multi-line string is opened and never closed, so any later header may be prose");
 
         return new TomlScanReport(TomlScanStatus.Classified, servers, null);
+    }
+
+    /// <summary>
+    /// The multi-line string state the line walk carries from line to line: a string opened on one
+    /// line keeps consuming lines until it closes, so the classifier must not treat those lines as
+    /// TOML.
+    /// </summary>
+    private sealed class ScanState
+    {
+        public bool InMultilineBasic { get; set; }
+
+        public bool InMultilineLiteral { get; set; }
+    }
+
+    /// <summary>
+    /// Steps past the line break of a line, where CRLF counts as one break: stepping past the CR
+    /// alone would leave a line consisting of the LF, which costs nothing to scan but reads the
+    /// file as one line longer than it is.
+    /// </summary>
+    private static ReadOnlySpan<char> NextLine(ReadOnlySpan<char> remaining, int breakAt)
+    {
+        ReadOnlySpan<char> afterBreak = remaining[(breakAt + 1)..];
+        if (remaining[breakAt] == '\r' && afterBreak.Length > 0 && afterBreak[0] == '\n')
+            return afterBreak[1..];
+
+        return afterBreak;
+    }
+
+    /// <summary>
+    /// Scans one line, walking its characters. Answers a refusal reason the moment the document
+    /// stops being classifiable — an unterminated single-line string or a header it cannot read —
+    /// and null when the line is consumed.
+    /// </summary>
+    private static string? ScanLine(ReadOnlySpan<char> content, ScanState state, List<string> servers)
+    {
+        int index = 0;
+        int firstToken = FirstTokenIndex(content);
+
+        while (index < content.Length)
+        {
+            if (state.InMultilineBasic)
+            {
+                int close = IndexAfter(content, index, MultilineBasicDelimiter);
+                if (close < 0)
+                {
+                    index = content.Length;
+                    break;
+                }
+
+                state.InMultilineBasic = false;
+                index = close + MultilineBasicDelimiter.Length;
+                continue;
+            }
+
+            if (state.InMultilineLiteral)
+            {
+                int close = IndexAfter(content, index, MultilineLiteralDelimiter);
+                if (close < 0)
+                {
+                    index = content.Length;
+                    break;
+                }
+
+                state.InMultilineLiteral = false;
+                index = close + MultilineLiteralDelimiter.Length;
+                continue;
+            }
+
+            char current = content[index];
+
+            if (current == '#')
+                break;
+
+            if (current == '"' && StartsWith(content, index, MultilineBasicDelimiter))
+            {
+                state.InMultilineBasic = true;
+                index += MultilineBasicDelimiter.Length;
+                continue;
+            }
+
+            if (current == '\'' && StartsWith(content, index, MultilineLiteralDelimiter))
+            {
+                state.InMultilineLiteral = true;
+                index += MultilineLiteralDelimiter.Length;
+                continue;
+            }
+
+            if (current == '"' || current == '\'')
+            {
+                int close = ClosingQuote(content, index + 1, current);
+                if (close < 0)
+                {
+                    return $"a string opened on '{Summarize(content)}' is never closed on its own line, so the rest of the document is unreadable";
+                }
+
+                index = close + 1;
+                continue;
+            }
+
+            if (current == '[' && index == firstToken)
+            {
+                string? refusal = ReadHeader(content, index, servers, out int next);
+                if (refusal is not null)
+                    return refusal;
+
+                index = next;
+                continue;
+            }
+
+            index++;
+        }
+
+        return null;
     }
 
     /// <summary>
