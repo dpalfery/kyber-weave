@@ -439,11 +439,11 @@ public sealed partial class ReviewVerdictService(
 
     /// <summary>The cycle's decision-model answer file, beside the seat folder; none for a hand-built findings file.</summary>
     private string? DecisionCachePath(ReviewVerdictRequest request) =>
-        request.Seats is null
-            ? null
-            : Path.Combine(
-                Path.GetDirectoryName(FullPath(request.Seats).TrimEnd(Path.DirectorySeparatorChar))!,
-                "decision-model.json");
+        request.Seats is { } seats
+            ? Path.Combine(
+                ParentFolder(FullPath(seats).TrimEnd(Path.DirectorySeparatorChar)),
+                "decision-model.json")
+            : null;
 
     /// <summary>
     /// Drops each finding a lens raised as a nitpick when the fix level is below <c>nitpick</c>, with a reported
@@ -867,6 +867,11 @@ public sealed partial class ReviewVerdictService(
     /// <summary>Resolves a path the caller spelled, a relative one against the working directory.</summary>
     private string FullPath(string path) => paths.GetFullPath(path, environment.CurrentDirectory);
 
+    /// <summary>The folder that holds the named path, refusing one that has no parent.</summary>
+    private static string ParentFolder(string path) =>
+        Path.GetDirectoryName(path)
+        ?? throw new InvalidOperationException($"'{path}' has no parent folder.");
+
     /// <summary>
     /// Reads the findings a verdict is computed from: the seat folder, or the deprecated findings document, with every
     /// lens accounted for. Every unreadable file is reported, not only the first, so one run tells the reviewer every seat to fix.
@@ -1013,7 +1018,7 @@ public sealed partial class ReviewVerdictService(
 
             // The cycle's recorded decisions first; a reason typed on the command line wins over the recorded one.
             Dictionary<string, string> notSeated = new(
-                notSeatedStore.Read(Path.GetDirectoryName(FullPath(request.Seats).TrimEnd(Path.DirectorySeparatorChar))!),
+                notSeatedStore.Read(ParentFolder(FullPath(request.Seats).TrimEnd(Path.DirectorySeparatorChar))),
                 StringComparer.Ordinal);
             foreach ((string lens, string reason) in ParseNotSeated(request.NotSeated, report))
                 notSeated[lens] = reason;
@@ -1537,7 +1542,7 @@ public sealed partial class ReviewVerdictService(
             DiagnosticReport report)
         {
             IReadOnlyList<GateResult> given = gates?.Gates ?? [];
-            if (request.Prior is null || gates is null)
+            if (request.Prior is null || gates is null || request.Gates is not { } gatesPath)
                 return given;
 
             ReviewGate[] absent =
@@ -1558,7 +1563,7 @@ public sealed partial class ReviewVerdictService(
                 commit => TryChangedSince(trees.Containing(root), commit))];
             string[] outstanding =
                 [.. decisions.Where(decision => decision is { Action: GateCycleAction.Rerun, FromCycle: not null }).Select(decision => decision.GateId)];
-            string command = ReviewCycleView.GatesCommand(root, FullPath(request.Gates!), request.BaseRef);
+            string command = ReviewCycleView.GatesCommand(root, FullPath(gatesPath), request.BaseRef);
             foreach (GateCycleDecision decision in decisions)
             {
                 if (decision is { Action: GateCycleAction.Carry, Carried: { } carried })
@@ -1592,7 +1597,10 @@ public sealed partial class ReviewVerdictService(
         /// </summary>
         public bool PriorBelongsToThisChange(string root, ReviewVerdictRequest request, DiagnosticReport report)
         {
-            IReadOnlyList<ReviewCycleRecord> history = cycles.ReadThrough(request.Prior!);
+            if (request.Prior is not { } prior)
+                return true;
+
+            IReadOnlyList<ReviewCycleRecord> history = cycles.ReadThrough(prior);
             if (history.Count == 0)
                 return true;
 
@@ -1642,7 +1650,7 @@ public sealed partial class ReviewVerdictService(
             if (request.Out is null || !ReviewCycleView.TryFromOutPath(paths, environment, request.Out, out _, out _))
                 return;
 
-            string folder = Path.GetDirectoryName(FullPath(request.Out))!;
+            string folder = ParentFolder(FullPath(request.Out));
             if (cycles.HasIdentity(folder) || trees.IdentityOf(trees.Containing(root), request.BaseRef) is not { } identity)
                 return;
 
