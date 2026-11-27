@@ -380,7 +380,7 @@ public sealed class SquadSourceLoader(IFileSystem files, IPathResolver paths, IP
                 throw new InvalidOperationException("Unreachable after validation failure.");
             }
 
-            profiles.Add(categoryName, new SquadModelProfile(defaultModel!, harnessModels));
+            profiles.Add(categoryName, new SquadModelProfile(defaultModel, harnessModels));
         }
 
         string name = Path.GetFileNameWithoutExtension(path);
@@ -1282,7 +1282,9 @@ public sealed class SquadSourceLoader(IFileSystem files, IPathResolver paths, IP
         int lineOffset = 0)
     {
         _ = nodeIsValue;
-        if (node is not YamlScalarNode scalarNode || string.IsNullOrWhiteSpace(scalarNode.Value))
+        if (node is not YamlScalarNode scalarNode ||
+            scalarNode.Value is not { } value ||
+            string.IsNullOrWhiteSpace(value))
         {
             SquadSourceValidator.Throw(
                 $"Field '{field}' must be a non-empty string.",
@@ -1290,9 +1292,10 @@ public sealed class SquadSourceLoader(IFileSystem files, IPathResolver paths, IP
                 sourcePath,
                 $"Add a non-empty string value for '{field}'.",
                 StartLine(node, lineOffset));
+            throw new InvalidOperationException("Unreachable after validation failure.");
         }
 
-        return ((YamlScalarNode)node).Value!;
+        return value;
     }
 
     private static YamlMappingNode RequireMapping(
@@ -1435,7 +1438,9 @@ public sealed class SquadSourceLoader(IFileSystem files, IPathResolver paths, IP
     {
         foreach (KeyValuePair<YamlNode, YamlNode> pair in mapping.Children)
         {
-            if (pair.Key is not YamlScalarNode keyNode || string.IsNullOrWhiteSpace(keyNode.Value))
+            if (pair.Key is not YamlScalarNode keyNode ||
+                keyNode.Value is not { } key ||
+                string.IsNullOrWhiteSpace(key))
             {
                 SquadSourceValidator.Throw(
                     "YAML mapping keys must be non-empty strings.",
@@ -1443,9 +1448,10 @@ public sealed class SquadSourceLoader(IFileSystem files, IPathResolver paths, IP
                     sourcePath,
                     "Replace the mapping key with a non-empty string.",
                     StartLine(pair.Key, lineOffset));
+                throw new InvalidOperationException("Unreachable after validation failure.");
             }
 
-            yield return new KeyValuePair<string, YamlNode>(((YamlScalarNode)pair.Key).Value!, pair.Value);
+            yield return new KeyValuePair<string, YamlNode>(key, pair.Value);
         }
     }
 

@@ -1,3 +1,4 @@
+using System.Diagnostics.CodeAnalysis;
 using System.Text.Json;
 
 namespace KyberWeave.Core.Squad.Model;
@@ -86,6 +87,8 @@ public sealed record SquadModelProfiles(
 
 /// <summary>A target-neutral default plus optional harness-specific model identifiers.</summary>
 public sealed record SquadModelProfile(
+    [AllowNull]
+    [property: AllowNull]
     string Default,
     IReadOnlyDictionary<string, string> HarnessModels);
 

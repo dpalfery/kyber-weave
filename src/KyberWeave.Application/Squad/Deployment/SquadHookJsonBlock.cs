@@ -637,8 +637,10 @@ public static class SquadHookJsonBlock
             {
                 for (int index = 0; index < array.Count; index++)
                 {
-                    JsonNode node = array[index]!;
-                    owned.Add(new SquadHookOwnedEntry($"{prefix}/{container}/{index}", CanonicalDigest(node)));
+                    if (array[index] is { } node)
+                    {
+                        owned.Add(new SquadHookOwnedEntry($"{prefix}/{container}/{index}", CanonicalDigest(node)));
+                    }
                 }
             }
         }

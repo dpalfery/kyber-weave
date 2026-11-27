@@ -124,11 +124,12 @@ public static partial class SquadResponsePreferencesInjector
         string path = relativePath.Replace('\\', '/');
         string fileName = Path.GetFileName(path) ?? string.Empty;
         string stem = Path.GetFileNameWithoutExtension(fileName);
-        string? parentName = Path.GetDirectoryName(path) is string directory ? Path.GetFileName(directory) : null;
+        string? parentDirectory = Path.GetDirectoryName(path);
+        string? parentName = parentDirectory is null ? null : Path.GetFileName(parentDirectory);
 
         return IsCarrierCandidate(stem) || IsCarrierCandidate(parentName) ||
-               (Path.GetDirectoryName(path) is not null &&
-                string.Equals(Path.GetFileName(Path.GetDirectoryName(path)!), "skills",
+               (parentDirectory is not null &&
+                string.Equals(Path.GetFileName(parentDirectory), "skills",
                     StringComparison.OrdinalIgnoreCase) &&
                 IsCarrierCandidate(fileName));
     }

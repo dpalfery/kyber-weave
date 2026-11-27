@@ -299,10 +299,10 @@ public sealed class CopilotRenderer : SquadHarnessRenderer
         Dictionary<string, object?>? hooks = arbiterHook is null
             ? null
             : ArbiterHooksFrontmatter(plan.Dispatchers.Contains(agent.Name), arbiterHook, context.Scope);
-        if (guardedConductor)
+        if (guardedConductor && context.EnabledArbiter is { } enabledArbiter)
         {
             hooks ??= new Dictionary<string, object?>(StringComparer.Ordinal);
-            AddConductorGuard(hooks, operatorChannelOverlay, context.EnabledArbiter!.HookTimeoutSeconds);
+            AddConductorGuard(hooks, operatorChannelOverlay, enabledArbiter.HookTimeoutSeconds);
         }
 
         if (hooks is not null)
