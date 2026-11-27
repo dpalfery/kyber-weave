@@ -168,8 +168,14 @@ public static partial class Program
         return DashVersion.Current;
     }
 
-    private static async Task<int> RunAsync(DashRuntimeSettings runtime, CancellationTokenSource shutdown)
+    private static async Task<int> RunAsync(
+        DashRuntimeSettings runtime,
+        CancellationTokenSource shutdown,
+        TimeProvider? clock = null)
     {
+        // The entry point is this host's composition root; an embedding host may substitute the clock.
+        TimeProvider time = clock ?? TimeProvider.System;
+
         Directory.CreateDirectory(runtime.StateDirectory);
 
         WebApplication app = BuildApplication(runtime);
@@ -248,7 +254,7 @@ public static partial class Program
                 new ServerInfo(
                     webUri.Port,
                     Environment.ProcessId,
-                    DateTimeOffset.UtcNow.UtcDateTime.ToString("yyyy-MM-dd'T'HH:mm:ss.fff'Z'", CultureInfo.InvariantCulture),
+                    time.GetUtcNow().UtcDateTime.ToString("yyyy-MM-dd'T'HH:mm:ss.fff'Z'", CultureInfo.InvariantCulture),
                     webUri,
                     ApiContractVersion));
 
