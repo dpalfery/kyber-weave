@@ -438,6 +438,33 @@ public partial class DevinMapper : IHarnessMapper
         HashSet<string> seenAnchors = new(StringComparer.Ordinal);
         HashSet<string> seenRecordIds = new(StringComparer.Ordinal);
 
+        AddStepRecords(records, document, sessionId, traceId, fallbackTimestamp, seenAnchors, seenRecordIds);
+
+        List<CollectedSession> sessions =
+        [
+            new CollectedSession(
+                SessionKey: sessionId,
+                HarnessId: DevinHarnessId,
+                NativeSessionId: sessionId,
+                Workspace: SafeOptionalText(document.WorkingDirectory) is { } workingDirectory
+                    ? new CollectedWorkspace(workingDirectory, null, null)
+                    : null,
+                Title: SafeOptionalText(document.Title),
+                ReportedUsage: []),
+        ];
+
+        return new CollectedBatch(source, sessions, records, problems);
+    }
+
+    private void AddStepRecords(
+        List<CollectedRecord> records,
+        DevinTranscriptDocument document,
+        string sessionId,
+        string traceId,
+        DateTimeOffset fallbackTimestamp,
+        HashSet<string> seenAnchors,
+        HashSet<string> seenRecordIds)
+    {
         for (int index = 0; index < document.Steps.Count; index++)
         {
             DevinStep step = document.Steps[index];
@@ -532,23 +559,7 @@ public partial class DevinMapper : IHarnessMapper
 
                 records.Add(BuildToolInvokeRecord(parentRecord, sessionId, traceId, toolCall, t, seenRecordIds));
             }
-
         }
-
-        List<CollectedSession> sessions =
-        [
-            new CollectedSession(
-                SessionKey: sessionId,
-                HarnessId: DevinHarnessId,
-                NativeSessionId: sessionId,
-                Workspace: SafeOptionalText(document.WorkingDirectory) is { } workingDirectory
-                    ? new CollectedWorkspace(workingDirectory, null, null)
-                    : null,
-                Title: SafeOptionalText(document.Title),
-                ReportedUsage: []),
-        ];
-
-        return new CollectedBatch(source, sessions, records, problems);
     }
 
     /// <summary>

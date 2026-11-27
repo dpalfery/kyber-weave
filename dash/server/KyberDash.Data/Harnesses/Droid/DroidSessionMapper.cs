@@ -443,37 +443,7 @@ public class DroidSessionMapper : IHarnessMapper
 
             if (string.Equals(msg.Role, "user", StringComparison.Ordinal))
             {
-                List<string> texts = [];
-                foreach (DroidContentBlock block in msg.Blocks)
-                {
-                    if (string.Equals(block.BlockType, "text", StringComparison.Ordinal)
-                        && !string.IsNullOrEmpty(block.Text))
-                    {
-                        texts.Add(block.Text);
-                    }
-                }
-
-                List<string> visibleTexts = texts
-                    .Where(static t => !t.StartsWith(SystemReminderPrefix, StringComparison.Ordinal))
-                    .ToList();
-                if (visibleTexts.Count > 0)
-                {
-                    pendingUserMessage = TruncateUserMessage(string.Join(' ', visibleTexts));
-                    if (entryTimestamp.HasValue)
-                    {
-                        boundaryMs = entryTimestamp;
-                    }
-                }
-
-                foreach (DroidContentBlock block in msg.Blocks)
-                {
-                    if (string.Equals(block.BlockType, "tool_result", StringComparison.Ordinal)
-                        && block.ToolResult is not null)
-                    {
-                        PairToolResult(calls, block.ToolResult, entryTimestamp);
-                    }
-                }
-
+                ApplyUserMessage(calls, msg, entryTimestamp, ref pendingUserMessage, ref boundaryMs);
                 continue;
             }
 
@@ -482,26 +452,7 @@ public class DroidSessionMapper : IHarnessMapper
                 continue;
             }
 
-            List<string> assistantTexts = [];
-            foreach (DroidContentBlock block in msg.Blocks)
-            {
-                if (string.Equals(block.BlockType, "text", StringComparison.Ordinal)
-                    && !string.IsNullOrEmpty(block.Text))
-                {
-                    assistantTexts.Add(block.Text);
-                }
-                else if (string.Equals(block.BlockType, "thinking", StringComparison.Ordinal)
-                    && !string.IsNullOrEmpty(block.Thinking))
-                {
-                    pendingThinking.Add(block.Thinking);
-                }
-                else if (string.Equals(block.BlockType, "tool_use", StringComparison.Ordinal)
-                    && block.ToolUse is not null)
-                {
-                    pendingTools.Add(block.ToolUse);
-                }
-            }
-
+            List<string> assistantTexts = CollectAssistantBlocks(msg, pendingTools, pendingThinking);
             if (pendingTools.Count == 0 && assistantTexts.Count == 0)
             {
                 continue;
@@ -564,6 +515,73 @@ public class DroidSessionMapper : IHarnessMapper
         }
 
         return calls;
+    }
+
+    private static void ApplyUserMessage(
+        List<PendingAssistantCall> calls,
+        DroidMessage msg,
+        DateTimeOffset? entryTimestamp,
+        ref string pendingUserMessage,
+        ref DateTimeOffset? boundaryMs)
+    {
+        List<string> texts = [];
+        foreach (DroidContentBlock block in msg.Blocks)
+        {
+            if (string.Equals(block.BlockType, "text", StringComparison.Ordinal)
+                && !string.IsNullOrEmpty(block.Text))
+            {
+                texts.Add(block.Text);
+            }
+        }
+
+        List<string> visibleTexts = texts
+            .Where(static t => !t.StartsWith(SystemReminderPrefix, StringComparison.Ordinal))
+            .ToList();
+        if (visibleTexts.Count > 0)
+        {
+            pendingUserMessage = TruncateUserMessage(string.Join(' ', visibleTexts));
+            if (entryTimestamp.HasValue)
+            {
+                boundaryMs = entryTimestamp;
+            }
+        }
+
+        foreach (DroidContentBlock block in msg.Blocks)
+        {
+            if (string.Equals(block.BlockType, "tool_result", StringComparison.Ordinal)
+                && block.ToolResult is not null)
+            {
+                PairToolResult(calls, block.ToolResult, entryTimestamp);
+            }
+        }
+    }
+
+    private static List<string> CollectAssistantBlocks(
+        DroidMessage msg,
+        List<DroidToolUse> pendingTools,
+        List<string> pendingThinking)
+    {
+        List<string> assistantTexts = [];
+        foreach (DroidContentBlock block in msg.Blocks)
+        {
+            if (string.Equals(block.BlockType, "text", StringComparison.Ordinal)
+                && !string.IsNullOrEmpty(block.Text))
+            {
+                assistantTexts.Add(block.Text);
+            }
+            else if (string.Equals(block.BlockType, "thinking", StringComparison.Ordinal)
+                && !string.IsNullOrEmpty(block.Thinking))
+            {
+                pendingThinking.Add(block.Thinking);
+            }
+            else if (string.Equals(block.BlockType, "tool_use", StringComparison.Ordinal)
+                && block.ToolUse is not null)
+            {
+                pendingTools.Add(block.ToolUse);
+            }
+        }
+
+        return assistantTexts;
     }
 
     private static void PairToolResult(List<PendingAssistantCall> calls, DroidToolResult result, DateTimeOffset? resultTimestamp)
