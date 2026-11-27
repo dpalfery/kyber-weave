@@ -1,10 +1,12 @@
 using System.Collections.ObjectModel;
 using System.Text;
+using System.Text.Json;
 using System.Text.Json.Nodes;
 using KyberWeave.Core.Configuration;
 using KyberWeave.Core.Squad.Deployment;
 using KyberWeave.Core.Squad.Model;
 using KyberWeave.Core.Squad.Validation;
+using YamlDotNet.Core;
 using YamlDotNet.Serialization;
 
 namespace KyberWeave.Core.Squad.Rendering;
@@ -126,7 +128,15 @@ public abstract class SquadHarnessRenderer : ISquadRenderer
         {
             return Task.FromCanceled<SquadRenderResult>(canceled.CancellationToken);
         }
-        catch (Exception exception)
+        catch (Exception exception) when (exception is SquadSourceValidationException
+                                               or InvalidOperationException
+                                               or ArgumentException
+                                               or NotSupportedException
+                                               or IOException
+                                               or UnauthorizedAccessException
+                                               or JsonException
+                                               or YamlException
+                                               or OperationCanceledException)
         {
             return Task.FromException<SquadRenderResult>(exception);
         }
