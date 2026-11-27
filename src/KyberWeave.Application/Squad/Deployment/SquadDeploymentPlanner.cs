@@ -256,8 +256,7 @@ public sealed class SquadDeploymentPlanner : ISquadDeploymentPlanner
                 previous.Adopted && !fileWillBeWritten));
         }
 
-        List<SquadOwnedBlockDrift> blockDrifts = [];
-        (List<SquadOwnedBlock> nextBlocks, HashSet<string> renderedBlockIdentities) = PlanBlockUpdates(
+        BlockPlanResult blockPlan = PlanBlockChanges(
             root,
             scope,
             globalRoots,
@@ -265,99 +264,55 @@ public sealed class SquadDeploymentPlanner : ISquadDeploymentPlanner
             previousReceipt,
             blocks,
             replaceManaged,
-            mutations,
-            preconditions,
-            blockDrifts);
-
-        foreach (SquadOwnedFile previous in previousReceipt.Files)
-        {
-            if (renderedIdentities.Contains(DeployedFileIdentity(previous.Target, previous.RelativePath)))
-                continue;
-
-            if (IsOwnedBySiblingReceipt(siblingGlobalReceipts, previous.Target, previous.RelativePath))
-                continue;
-
-            // The legacy-receipt refusal above already guarantees previousReceipt is not
-            // single-root by the time this loop runs, so every remaining entry resolves through
-            // the modern per-target path.
-            string fullPath = ResolvePhysicalPath(
-                scope, root, globalRoots, previous.Target, previous.RelativePath, false, _semantics);
-
-            if (_files.DirectoryExists(fullPath))
-            {
-                nextOwnedFiles.Add(previous);
-                continue;
-            }
-
-            if (!_files.FileExists(fullPath))
-                continue;
-
-            // An adopted entry is a file the host already had whose bytes equalled the release when Squad
-            // recorded them: the receipt says Squad never wrote them. Requirement 13.6 removes only what
-            // the Squad wrote, so a path a later release stops rendering stays on disk under its recorded
-            // hash, and the record is kept so a host that edits it later is still reported.
-            if (previous.Adopted)
-            {
-                nextOwnedFiles.Add(previous);
-                continue;
-            }
-
-            byte[] previousBytes;
-            try
-            {
-                previousBytes = _files.ReadAllBytes(fullPath);
-            }
-            catch (Exception exception) when (SquadResponseGuidanceDeployer.IsDegradableFailure(exception))
-            {
-                // Unreadable means unprovable: keep the record rather than delete bytes we cannot verify.
-                nextOwnedFiles.Add(previous);
-                AddDegradedFile(degradedFiles, previous.RelativePath, previous.Target);
-                continue;
-            }
-
-            string currentDigest = Digest(previousBytes);
-            if (string.Equals(currentDigest, previous.Sha256, StringComparison.Ordinal))
-            {
-                preconditions.Add(SquadFilePrecondition.Exact(
-                    previous.RelativePath,
-                    previous.Target,
-                    currentDigest));
-                mutations.Add(SquadFileMutation.Delete(previous.RelativePath, previous.Target));
-            }
-            else
-            {
-                nextOwnedFiles.Add(previous);
-            }
-        }
-
-        RetireMissingBlocks(
-            root,
-            scope,
-            globalRoots,
-            previousReceipt,
-            renderedBlockIdentities,
-            nextBlocks,
+            renderedIdentities,
+            siblingGlobalReceipts,
+            nextOwnedFiles,
+            degradedFiles,
             mutations,
             preconditions);
 
+        return CreateUpdatePlan(
+            targetRoot,
+            root,
+            identity,
+            scope,
+            squadLock,
+            degradations,
+            timeProvider,
+            nextOwnedFiles,
+            blockPlan,
+            previousReceipt,
+            mutations,
+            preconditions,
+            globalRoots,
+            degradedFiles);
+    }
+
+    private SquadDeploymentPlan CreateUpdatePlan(
+        string targetRoot,
+        string root,
+        SquadPhysicalRootIdentity identity,
+        SquadDeploymentScope scope,
+        SquadLock? squadLock,
+        IReadOnlyList<SquadDegradation> degradations,
+        TimeProvider timeProvider,
+        List<SquadOwnedFile> nextOwnedFiles,
+        BlockPlanResult blockPlan,
+        SquadReceipt previousReceipt,
+        List<SquadFileMutation> mutations,
+        List<SquadFilePrecondition> preconditions,
+        ISquadGlobalRootResolver? globalRoots,
+        List<SquadDegradedFile> degradedFiles)
+    {
         // Classified from what this update actually produces, not merely inherited from
         // previousReceipt (already confirmed non-single-root above whenever a resolver is
         // supplied) — so an update run with no resolver, where retained and freshly rendered
         // entries can legitimately differ in shape, never stamps a layout that disagrees with
         // the files it is about to write (#91: a mismatched label persisted here is exactly
         // what a later run that does supply a resolver would wrongly trust).
-        SquadReceiptLayout nextLayout = SquadReceiptLayout.PerTargetRoots;
-        if (scope == SquadDeploymentScope.Global)
-            try
-            {
-                nextLayout = ClassifyGlobalLayout(nextOwnedFiles);
-            }
-            catch (InvalidDataException)
-            {
-                throw LegacySingleRootLayoutConflict();
-            }
+        SquadReceiptLayout nextLayout = ResolveNextLayout(scope, nextOwnedFiles);
 
-        SquadReceipt receipt = NewReceipt(scope, root, timeProvider, degradations, nextOwnedFiles, nextBlocks) with
+        SquadReceipt receipt = NewReceipt(scope, root, timeProvider, degradations, nextOwnedFiles, blockPlan.NextBlocks) with
         {
             // Carried forward, never decided here: home-owned files are written outside this plan, so
             // attaching a record during planning would let a plan that later fails preflight describe
@@ -378,7 +333,7 @@ public sealed class SquadDeploymentPlanner : ISquadDeploymentPlanner
             SquadStateMutation.Write,
             globalRoots,
             isSingleRootLayout: nextLayout == SquadReceiptLayout.SingleRoot,
-            blockDrifts: blockDrifts,
+            blockDrifts: blockPlan.BlockDrifts,
             degradedFiles: degradedFiles);
     }
 
@@ -507,6 +462,130 @@ public sealed class SquadDeploymentPlanner : ISquadDeploymentPlanner
             globalRoots,
             isSingleRootLayout);
     }
+
+    private static SquadReceiptLayout ResolveNextLayout(
+        SquadDeploymentScope scope,
+        List<SquadOwnedFile> nextOwnedFiles)
+    {
+        SquadReceiptLayout nextLayout = SquadReceiptLayout.PerTargetRoots;
+        if (scope == SquadDeploymentScope.Global)
+            try
+            {
+                nextLayout = ClassifyGlobalLayout(nextOwnedFiles);
+            }
+            catch (InvalidDataException)
+            {
+                throw LegacySingleRootLayoutConflict();
+            }
+
+        return nextLayout;
+    }
+
+    private BlockPlanResult PlanBlockChanges(
+        string root,
+        SquadDeploymentScope scope,
+        ISquadGlobalRootResolver? globalRoots,
+        IReadOnlyList<NormalizedDeploymentFile> normalizedFiles,
+        SquadReceipt previousReceipt,
+        IReadOnlyList<SquadRenderedBlock>? blocks,
+        bool replaceManaged,
+        HashSet<string> renderedIdentities,
+        IReadOnlyList<SquadReceipt>? siblingGlobalReceipts,
+        List<SquadOwnedFile> nextOwnedFiles,
+        List<SquadDegradedFile> degradedFiles,
+        List<SquadFileMutation> mutations,
+        List<SquadFilePrecondition> preconditions)
+    {
+        List<SquadOwnedBlockDrift> blockDrifts = [];
+        (List<SquadOwnedBlock> nextBlocks, HashSet<string> renderedBlockIdentities) = PlanBlockUpdates(
+            root,
+            scope,
+            globalRoots,
+            normalizedFiles,
+            previousReceipt,
+            blocks,
+            replaceManaged,
+            mutations,
+            preconditions,
+            blockDrifts);
+
+        foreach (SquadOwnedFile previous in previousReceipt.Files)
+        {
+            if (renderedIdentities.Contains(DeployedFileIdentity(previous.Target, previous.RelativePath)))
+                continue;
+
+            if (IsOwnedBySiblingReceipt(siblingGlobalReceipts, previous.Target, previous.RelativePath))
+                continue;
+
+            // The legacy-receipt refusal above already guarantees previousReceipt is not
+            // single-root by the time this loop runs, so every remaining entry resolves through
+            // the modern per-target path.
+            string fullPath = ResolvePhysicalPath(
+                scope, root, globalRoots, previous.Target, previous.RelativePath, false, _semantics);
+
+            if (_files.DirectoryExists(fullPath))
+            {
+                nextOwnedFiles.Add(previous);
+                continue;
+            }
+
+            if (!_files.FileExists(fullPath))
+                continue;
+
+            // An adopted entry is a file the host already had whose bytes equalled the release when Squad
+            // recorded them: the receipt says Squad never wrote them. Requirement 13.6 removes only what
+            // the Squad wrote, so a path a later release stops rendering stays on disk under its recorded
+            // hash, and the record is kept so a host that edits it later is still reported.
+            if (previous.Adopted)
+            {
+                nextOwnedFiles.Add(previous);
+                continue;
+            }
+
+            byte[] previousBytes;
+            try
+            {
+                previousBytes = _files.ReadAllBytes(fullPath);
+            }
+            catch (Exception exception) when (SquadResponseGuidanceDeployer.IsDegradableFailure(exception))
+            {
+                // Unreadable means unprovable: keep the record rather than delete bytes we cannot verify.
+                nextOwnedFiles.Add(previous);
+                AddDegradedFile(degradedFiles, previous.RelativePath, previous.Target);
+                continue;
+            }
+
+            string currentDigest = Digest(previousBytes);
+            if (string.Equals(currentDigest, previous.Sha256, StringComparison.Ordinal))
+            {
+                preconditions.Add(SquadFilePrecondition.Exact(
+                    previous.RelativePath,
+                    previous.Target,
+                    currentDigest));
+                mutations.Add(SquadFileMutation.Delete(previous.RelativePath, previous.Target));
+            }
+            else
+            {
+                nextOwnedFiles.Add(previous);
+            }
+        }
+
+        RetireMissingBlocks(
+            root,
+            scope,
+            globalRoots,
+            previousReceipt,
+            renderedBlockIdentities,
+            nextBlocks,
+            mutations,
+            preconditions);
+
+        return new BlockPlanResult(nextBlocks, blockDrifts);
+    }
+
+    private sealed record BlockPlanResult(
+        List<SquadOwnedBlock> NextBlocks,
+        List<SquadOwnedBlockDrift> BlockDrifts);
 
     private static void ValidateCommon(
         string targetRoot,

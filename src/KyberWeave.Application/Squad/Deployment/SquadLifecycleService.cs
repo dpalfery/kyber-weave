@@ -166,6 +166,113 @@ public sealed class SquadLifecycleService : ISquadLifecycleService
         IReadOnlyList<string> recovery,
         CancellationToken cancellationToken)
     {
+        (SquadInstallRequest installRequest, SquadReceipt? existingReceipt) = PrepareInstall(request, targetRoot);
+        request = installRequest;
+
+        SquadLock? previousLock = _stateStore.ReadLock(targetRoot, request.Scope);
+        IReadOnlyDictionary<SquadTarget, string>? requestPresets = request.ModelPresets;
+        if (request.Scope == SquadDeploymentScope.Project &&
+            requestPresets is null &&
+            (previousLock?.ModelPresets is null || previousLock.ModelPresets.Count == 0))
+        {
+            SquadModelPresetSelection? projectSelection = _selectionStore.Read(request.TargetRoot);
+            if (projectSelection?.ModelPresets is { Count: > 0 }) requestPresets = projectSelection.ModelPresets;
+        }
+
+        Dictionary<SquadTarget, string> targetPresetNames =
+            SquadLifecycleMetadata.ResolveTargetPresetNames(requestPresets, previousLock);
+        Dictionary<SquadTarget, SquadModelPreset> loadedPresets =
+            SquadLifecycleMetadata.LoadAndVerifyPresets(_presetStore, _stateStore, targetPresetNames, request.Targets);
+
+        string version = request.Version ?? SquadDeploymentLockFactory.ResolveDefaultVersion();
+        string tempExtractDir = _files.NewScratchDirectoryPath("kyber-squad-extract-");
+
+        try
+        {
+            SquadRenderStage stage = await CreateStageAsync(
+                request.Repository,
+                version,
+                request.Targets,
+                request.Translation,
+                request.Arbiter,
+                request.WorkerRoster,
+                request.DryRun,
+                request.Scope,
+                targetRoot,
+                tempExtractDir,
+                recovery,
+                loadedPresets,
+                cancellationToken).ConfigureAwait(false);
+            SquadDeploymentPlan plan = BuildPlan(
+                targetRoot,
+                request.Scope,
+                request.Bundle,
+                request.Targets,
+                request.Exclusions ?? Array.Empty<string>(),
+                request.Translation,
+                request.Adopt,
+                replaceManaged: false,
+                request.Arbiter,
+                existingReceipt,
+                stage,
+                loadedPresets);
+
+            List<string> warnings = stage.Warnings;
+            AddPlanWarnings(
+                plan,
+                request.Targets,
+                request.Scope,
+                request.DryRun,
+                targetRoot,
+                stage.Source,
+                stage.DocsServerCommand,
+                warnings);
+
+            if (request.DryRun)
+            {
+                return new SquadLifecycleResult(
+                    true,
+                    plan,
+                    plan.Receipt,
+                    plan.Lock,
+                    plan.Receipt.Degradations,
+                    DryRun: true,
+                    ModelChanges: stage.ModelChanges,
+                    Warnings: warnings);
+            }
+
+            return CompleteDeployment(
+                plan,
+                request.Scope,
+                existingReceipt?.HomeFiles ?? [],
+                stage.Release.Version,
+                stage.Source,
+                warnings);
+        }
+        finally
+        {
+            CleanupTempDirectory(tempExtractDir);
+        }
+    }
+
+    /// <summary>
+    ///     The targets an install deploys: the requested ones, plus the ones an existing global install already has when
+    ///     the request names at least one more. A request that only repeats or drops existing targets is unchanged, so a
+    ///     project install, an instance install and a narrowing request keep their conflict.
+    /// </summary>
+    /// <param name="request">The install request.</param>
+    /// <returns>The targets the install will deploy.</returns>
+    public IReadOnlyList<SquadTarget> EffectiveInstallTargets(SquadInstallRequest request)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+        string root = SquadPhysicalRootIdentities.Resolve(request.TargetRoot, _pathSemantics).PhysicalPath;
+        return MergeAddedTargets(request, _stateStore.ReadReceipt(root, request.Scope));
+    }
+
+    private (SquadInstallRequest Request, SquadReceipt? ExistingReceipt) PrepareInstall(
+        SquadInstallRequest request,
+        string targetRoot)
+    {
         SquadReceipt? existingReceipt = _stateStore.ReadReceipt(targetRoot, request.Scope);
 
         // A global install that names a target the install does not have yet adds it: the existing targets stay
@@ -198,223 +305,220 @@ public sealed class SquadLifecycleService : ISquadLifecycleService
                 throw SquadDeploymentPlanRules.LegacySingleRootLayoutConflict();
         }
 
-        SquadLock? previousLock = _stateStore.ReadLock(targetRoot, request.Scope);
-        IReadOnlyDictionary<SquadTarget, string>? requestPresets = request.ModelPresets;
-        if (request.Scope == SquadDeploymentScope.Project &&
-            requestPresets is null &&
-            (previousLock?.ModelPresets is null || previousLock.ModelPresets.Count == 0))
-        {
-            SquadModelPresetSelection? projectSelection = _selectionStore.Read(request.TargetRoot);
-            if (projectSelection?.ModelPresets is { Count: > 0 }) requestPresets = projectSelection.ModelPresets;
-        }
-
-        Dictionary<SquadTarget, string> targetPresetNames =
-            ResolveTargetPresetNames(requestPresets, previousLock);
-        Dictionary<SquadTarget, SquadModelPreset> loadedPresets =
-            LoadAndVerifyPresets(targetPresetNames, request.Targets);
-
-        string version = request.Version ?? ResolveDefaultVersion();
-        string tempExtractDir = _files.NewScratchDirectoryPath("kyber-squad-extract-");
-
-        try
-        {
-            SquadReleaseResult releaseResult = await _releaseSource.DownloadAndExtractAsync(
-                new SquadReleaseRequest(request.Repository, version, tempExtractDir),
-                cancellationToken).ConfigureAwait(false);
-
-            List<SquadModelDiffItem>? modelChanges = null;
-            SquadSource? source = TryResolveSquadSource(releaseResult.ExtractionRoot);
-            if (source is not null)
-            {
-                foreach (KeyValuePair<SquadTarget, SquadModelPreset> kvp in loadedPresets)
-                    _presetValidator.Validate(kvp.Value, source.ModelProfiles);
-
-                if (request.DryRun) modelChanges = ComputeModelChanges(source, request.Targets, loadedPresets);
-            }
-            else if (loadedPresets.Count > 0)
-            {
-                throw new InvalidOperationException(
-                    "Cannot validate model presets because Squad source could not be resolved.");
-            }
-
-            string? userScopeDir = request.Scope is SquadDeploymentScope.Global or SquadDeploymentScope.Instance
-                ? _stateStore.UserPaths.ApplicationDataDirectory
-                : null;
-
-            SquadDeploymentScope renderScope = request.Scope == SquadDeploymentScope.Instance
-                ? SquadDeploymentScope.Global
-                : request.Scope;
-
-            ISquadGlobalRootResolver? effectiveGlobalRoots = _globalRoots;
-            if (request.Scope == SquadDeploymentScope.Instance && request.Targets.Count == 1)
-                effectiveGlobalRoots = new SquadInstanceRootResolver(targetRoot, request.Targets[0]);
-
-            string? docsServerCommand = SquadDocsServerCommand.Resolve(renderScope, _findExecutable, _files.FileExists);
-            SquadRenderRequest renderRequest = new(
-                releaseResult.ExtractionRoot,
-                request.Targets,
-                renderScope,
-                userScopeDir,
-                request.Translation,
-                effectiveGlobalRoots,
-                loadedPresets.Count > 0 ? loadedPresets : null,
-                null,
-                _environmentReader,
-                request.Arbiter,
-                WorkerRoster: request.WorkerRoster,
-                DocsServerCommand: docsServerCommand);
-
-            SquadRenderResult renderResult =
-                await _renderer.RenderAsync(renderRequest, cancellationToken).ConfigureAwait(false);
-            if (!renderResult.Success || renderResult.Errors.Count > 0)
-            {
-                string error = renderResult.Errors.Count > 0
-                    ? string.Join(Environment.NewLine, renderResult.Errors)
-                    : "Squad render failed.";
-                throw new SquadRenderValidationException(error);
-            }
-
-            List<string> warnings = [.. recovery, .. RenderWarningMessages(renderResult.Warnings)];
-            string effectiveGuidance = _guidance.ReadEffective(
-                _stateStore.ResolveHomeOwnedFilesRoot(),
-                warnings);
-            if (!SquadResponsePreferencesInjector.HasAnyBlock(renderResult))
-                warnings.Add(SquadResponsePreferencesInjector.NoBlockWarning);
-            renderResult = SquadResponsePreferencesInjector.Inject(renderResult, effectiveGuidance);
-            warnings.AddRange(SquadDocsServerCommand.MissingWarnings(renderScope, request.Targets, _findExecutable, docsServerCommand));
-
-            SquadLock squadLock = BuildLock(
-                releaseResult.Version,
-                request.Bundle,
-                request.Targets,
-                request.Exclusions ?? Array.Empty<string>(),
-                request.Translation,
-                releaseResult.Checksum.Sha256,
-                releaseResult.ExtractionRoot,
-                loadedPresets.Count > 0 ? loadedPresets : null);
-
-            // Factory's block is dropped here rather than at render time when splicing it
-            // would shadow the user's settings hooks (§10.8, R18): shadowing is a property
-            // of the target's current files, not of the render request.
-            FactoryHooksShadowingOutcome shadowing = _shadowing.Resolve(
-                targetRoot,
-                request.Targets,
-                request.Arbiter,
-                request.Scope,
-                renderResult.Blocks);
-
-            // With the Arbiter enabled, the targets and scope that stay unenforced are
-            // recorded at render time (Req 22.4): the reason lands in the render record's
-            // Details while the receipt keeps only the code.
-            IReadOnlyList<SquadDegradation> degradations = AppendArbiterDegradations(
-                renderResult.Degradations.Concat(shadowing.Degradations).ToList(),
-                request.Arbiter,
-                request.Targets,
-                request.Scope);
-
-            ISquadGlobalRootResolver? planGlobalRoots = request.Scope == SquadDeploymentScope.Instance
-                ? effectiveGlobalRoots
-                : _globalRoots;
-
-            SquadDeploymentPlan plan;
-            if (existingReceipt is null)
-            {
-                plan = _planner.CreateInstall(
-                    targetRoot: targetRoot,
-                    scope: request.Scope,
-                    squadLock: squadLock,
-                    renderedFiles: renderResult.Files,
-                    degradations: degradations,
-                    adopt: request.Adopt,
-                    timeProvider: _timeProvider,
-                    globalRoots: planGlobalRoots,
-                    siblingGlobalReceipts: [],
-                    blocks: shadowing.Blocks);
-            }
-            else
-            {
-                plan = _planner.CreateUpdate(
-                    targetRoot: targetRoot,
-                    scope: request.Scope,
-                    squadLock: squadLock,
-                    renderedFiles: renderResult.Files,
-                    previousReceipt: existingReceipt,
-                    degradations: degradations,
-                    replaceManaged: false,
-                    timeProvider: _timeProvider,
-                    globalRoots: planGlobalRoots,
-                    siblingGlobalReceipts: [],
-                    blocks: shadowing.Blocks);
-            }
-
-            warnings.AddRange(DegradedFileWarnings(plan));
-            warnings.AddRange(FactoryMcpConfiguration.Warnings(_files,
-                request.Targets,
-                request.Scope,
-                source,
-                targetRoot,
-                _stateStore.UserPaths.HomeDirectory));
-            warnings.AddRange(AntigravityMcpConfiguration.Ensure(_files,
-                request.Targets,
-                request.Scope,
-                _globalRoots,
-                docsServerCommand: docsServerCommand,
-                request.DryRun));
-
-            if (request.DryRun)
-                return new SquadLifecycleResult(
-                    true,
-                    plan,
-                    plan.Receipt,
-                    plan.Lock,
-                    plan.Receipt.Degradations,
-                    DryRun: true,
-                    ModelChanges: modelChanges,
-                    Warnings: warnings);
-
-            ISquadResponseGuidanceDeployer? guidanceDeployer =
-                request is { Scope: SquadDeploymentScope.Global, DryRun: false }
-                    ? _guidance.CreateDeployer(_stateStore.ResolveHomeOwnedFilesRoot())
-                    : null;
-
-            ISquadTransaction transaction = _transactions.Create(_observer);
-            transaction.Execute(
-                plan,
-                guidanceDeployer is null
-                    ? null
-                    : leasedPlan =>
-                        DeployGuidance(guidanceDeployer, leasedPlan, existingReceipt?.HomeFiles ?? [], warnings));
-
-            warnings.AddRange(transaction.Warnings);
-            WriteCanonicalSnapshot(releaseResult.Version, source, warnings);
-
-            return new SquadLifecycleResult(
-                true,
-                plan,
-                plan.Receipt,
-                plan.Lock,
-                plan.Receipt.Degradations,
-                DryRun: false,
-                Warnings: warnings);
-        }
-        finally
-        {
-            CleanupTempDirectory(tempExtractDir);
-        }
+        return (request, existingReceipt);
     }
 
-    /// <summary>
-    ///     The targets an install deploys: the requested ones, plus the ones an existing global install already has when
-    ///     the request names at least one more. A request that only repeats or drops existing targets is unchanged, so a
-    ///     project install, an instance install and a narrowing request keep their conflict.
-    /// </summary>
-    /// <param name="request">The install request.</param>
-    /// <returns>The targets the install will deploy.</returns>
-    public IReadOnlyList<SquadTarget> EffectiveInstallTargets(SquadInstallRequest request)
+    private (SquadReceipt PreviousReceipt, IReadOnlyList<SquadTarget> Targets) PrepareUpdate(
+        SquadUpdateRequest request,
+        string targetRoot)
     {
-        ArgumentNullException.ThrowIfNull(request);
-        string root = SquadPhysicalRootIdentities.Resolve(request.TargetRoot, _pathSemantics).PhysicalPath;
-        return MergeAddedTargets(request, _stateStore.ReadReceipt(root, request.Scope));
+        SquadReceipt previousReceipt = _stateStore.ReadReceipt(targetRoot, request.Scope)
+                                       ?? throw new SquadDeploymentConflictException(
+                                           $"No Kyber-Squad deployment found at '{targetRoot}'. Run 'squad install' first.");
+
+        // Refused before any network round trip (real or dry-run alike, since the download
+        // happens unconditionally below) rather than letting CreateUpdate's own refusal fire
+        // only after the release has already downloaded. Only meaningful once a per-target
+        // resolver is in play (see CreateUpdate's own guard): with none, legacy and modern
+        // resolution already agree.
+        if (_globalRoots is not null && SquadDeploymentPlanRules.IsLegacySingleRootReceipt(previousReceipt))
+            throw SquadDeploymentPlanRules.LegacySingleRootLayoutConflict();
+
+        IReadOnlyList<SquadTarget> targets;
+        if (request.Targets is { Count: > 0 })
+        {
+            targets = request.Targets;
+        }
+        else
+        {
+            HashSet<string> targetTokens = previousReceipt.Files
+                .Select(f => f.Target)
+                .Distinct(StringComparer.Ordinal)
+                .ToHashSet(StringComparer.Ordinal);
+            targets = SquadTargetCatalog.Parse(targetTokens);
+            if (targets.Count == 0)
+                throw new SquadDeploymentConflictException("No targets found in previous deployment receipt.");
+        }
+
+        RequireRenderableTargets(targets);
+
+        return (previousReceipt, targets);
+    }
+
+    private async Task<SquadRenderStage> CreateStageAsync(
+        string repository,
+        string version,
+        IReadOnlyList<SquadTarget> targets,
+        string translation,
+        SquadArbiterWiring? arbiter,
+        string? workerRoster,
+        bool dryRun,
+        SquadDeploymentScope scope,
+        string targetRoot,
+        string tempExtractDir,
+        IReadOnlyList<string> recovery,
+        IReadOnlyDictionary<SquadTarget, SquadModelPreset> loadedPresets,
+        CancellationToken cancellationToken)
+    {
+        return await SquadRenderStageFactory.CreateAsync(
+            _releaseSource,
+            _renderer,
+            _presetValidator,
+            _guidance,
+            _stateStore,
+            _sourceLoader,
+            _files,
+            _globalRoots,
+            _environmentReader,
+            _findExecutable,
+            repository,
+            version,
+            targets,
+            translation,
+            arbiter,
+            workerRoster,
+            dryRun,
+            scope,
+            targetRoot,
+            tempExtractDir,
+            recovery,
+            loadedPresets,
+            cancellationToken).ConfigureAwait(false);
+    }
+
+    private SquadDeploymentPlan BuildPlan(
+        string targetRoot,
+        SquadDeploymentScope scope,
+        string bundle,
+        IReadOnlyList<SquadTarget> targets,
+        IReadOnlyList<string> exclusions,
+        string translation,
+        bool adopt,
+        bool replaceManaged,
+        SquadArbiterWiring? arbiter,
+        SquadReceipt? previousReceipt,
+        SquadRenderStage stage,
+        IReadOnlyDictionary<SquadTarget, SquadModelPreset> loadedPresets)
+    {
+        SquadLock squadLock = SquadDeploymentLockFactory.Build(
+            _files,
+            stage.Release.Version,
+            bundle,
+            targets,
+            exclusions,
+            translation,
+            stage.Release.Checksum.Sha256,
+            stage.Release.ExtractionRoot,
+            loadedPresets.Count > 0 ? loadedPresets : null);
+
+        // Factory's block is dropped here rather than at render time when splicing it
+        // would shadow the user's settings hooks (§10.8, R18): shadowing is a property
+        // of the target's current files, not of the render request.
+        FactoryHooksShadowingOutcome shadowing = _shadowing.Resolve(
+            targetRoot,
+            targets,
+            arbiter,
+            scope,
+            stage.Render.Blocks);
+
+        // With the Arbiter enabled, the targets and scope that stay unenforced are
+        // recorded at render time (Req 22.4): the reason lands in the render record's
+        // Details while the receipt keeps only the code.
+        IReadOnlyList<SquadDegradation> degradations = SquadLifecycleMetadata.AppendArbiterDegradations(
+            stage.Render.Degradations.Concat(shadowing.Degradations).ToList(),
+            arbiter,
+            targets,
+            scope);
+
+        ISquadGlobalRootResolver? planGlobalRoots = scope == SquadDeploymentScope.Instance
+            ? stage.EffectiveGlobalRoots
+            : _globalRoots;
+
+        if (previousReceipt is null)
+        {
+            return _planner.CreateInstall(
+                targetRoot: targetRoot,
+                scope: scope,
+                squadLock: squadLock,
+                renderedFiles: stage.Render.Files,
+                degradations: degradations,
+                adopt: adopt,
+                timeProvider: _timeProvider,
+                globalRoots: planGlobalRoots,
+                siblingGlobalReceipts: [],
+                blocks: shadowing.Blocks);
+        }
+
+        return _planner.CreateUpdate(
+            targetRoot: targetRoot,
+            scope: scope,
+            squadLock: squadLock,
+            renderedFiles: stage.Render.Files,
+            previousReceipt: previousReceipt,
+            degradations: degradations,
+            replaceManaged: replaceManaged,
+            timeProvider: _timeProvider,
+            globalRoots: planGlobalRoots,
+            siblingGlobalReceipts: [],
+            blocks: shadowing.Blocks);
+    }
+
+    private void AddPlanWarnings(
+        SquadDeploymentPlan plan,
+        IReadOnlyList<SquadTarget> targets,
+        SquadDeploymentScope scope,
+        bool dryRun,
+        string targetRoot,
+        SquadSource? source,
+        string? docsServerCommand,
+        List<string> warnings)
+    {
+        warnings.AddRange(DegradedFileWarnings(plan));
+        warnings.AddRange(FactoryMcpConfiguration.Warnings(_files,
+            targets,
+            scope,
+            source,
+            targetRoot,
+            _stateStore.UserPaths.HomeDirectory));
+        warnings.AddRange(AntigravityMcpConfiguration.Ensure(_files,
+            targets,
+            scope,
+            _globalRoots,
+            docsServerCommand: docsServerCommand,
+            dryRun));
+    }
+
+    private SquadLifecycleResult CompleteDeployment(
+        SquadDeploymentPlan plan,
+        SquadDeploymentScope scope,
+        IReadOnlyList<SquadHomeFile> previousHomeFiles,
+        string releaseVersion,
+        SquadSource? source,
+        List<string> warnings)
+    {
+        ISquadResponseGuidanceDeployer? guidanceDeployer =
+            scope == SquadDeploymentScope.Global
+                ? _guidance.CreateDeployer(_stateStore.ResolveHomeOwnedFilesRoot())
+                : null;
+
+        ISquadTransaction transaction = _transactions.Create(_observer);
+        transaction.Execute(
+            plan,
+            guidanceDeployer is null
+                ? null
+                : leasedPlan => DeployGuidance(guidanceDeployer, leasedPlan, previousHomeFiles, warnings));
+
+        warnings.AddRange(transaction.Warnings);
+        SquadCanonicalSnapshotWriter.Write(_canonicalProfiles, releaseVersion, source, warnings);
+
+        return new SquadLifecycleResult(
+            true,
+            plan,
+            plan.Receipt,
+            plan.Lock,
+            plan.Receipt.Degradations,
+            DryRun: false,
+            Warnings: warnings);
     }
 
     /// <summary>
@@ -539,19 +643,6 @@ public sealed class SquadLifecycleService : ISquadLifecycleService
     ///     shows them. Without this a render warning, such as the operator channel's missing-server notice,
     ///     reaches no operator.
     /// </summary>
-    private static List<string> RenderWarningMessages(IReadOnlyList<SquadRenderWarning> warnings)
-    {
-        // Only the operator channel's warnings reach the CLI. A default install prints exactly what it printed
-        // before. The one exception is agent-body-too-long, which reaches the CLI only when the operator channel
-        // overlay was inlined, because then the overlay is what pushed the conductor over the cap.
-        bool overlayApplied = warnings.Any(warning => warning.Code == SquadOperatorChannel.OverlayAppliedCode);
-        return warnings
-            .Where(warning => SquadOperatorChannel.IsOperatorChannelWarning(warning.Code)
-                              || (overlayApplied && warning.Code == CopilotRenderer.AgentBodyTooLongCode))
-            .Select(warning => $"{warning.Code}: {warning.Message}")
-            .ToList();
-    }
-
     /// <summary>
     ///     Performs an update of an existing Kyber-Squad deployment in the target root.
     /// </summary>
@@ -592,175 +683,61 @@ public sealed class SquadLifecycleService : ISquadLifecycleService
         IReadOnlyList<string> recovery,
         CancellationToken cancellationToken)
     {
-        SquadReceipt previousReceipt = _stateStore.ReadReceipt(targetRoot, request.Scope)
-                                       ?? throw new SquadDeploymentConflictException(
-                                           $"No Kyber-Squad deployment found at '{targetRoot}'. Run 'squad install' first.");
-
-        // Refused before any network round trip (real or dry-run alike, since the download
-        // happens unconditionally below) rather than letting CreateUpdate's own refusal fire
-        // only after the release has already downloaded. Only meaningful once a per-target
-        // resolver is in play (see CreateUpdate's own guard): with none, legacy and modern
-        // resolution already agree.
-        if (_globalRoots is not null && SquadDeploymentPlanRules.IsLegacySingleRootReceipt(previousReceipt))
-            throw SquadDeploymentPlanRules.LegacySingleRootLayoutConflict();
-
-        IReadOnlyList<SquadTarget> targets;
-        if (request.Targets is { Count: > 0 })
-        {
-            targets = request.Targets;
-        }
-        else
-        {
-            HashSet<string> targetTokens = previousReceipt.Files
-                .Select(f => f.Target)
-                .Distinct(StringComparer.Ordinal)
-                .ToHashSet(StringComparer.Ordinal);
-            targets = SquadTargetCatalog.Parse(targetTokens);
-            if (targets.Count == 0)
-                throw new SquadDeploymentConflictException("No targets found in previous deployment receipt.");
-        }
-
-        RequireRenderableTargets(targets);
+        (SquadReceipt previousReceipt, IReadOnlyList<SquadTarget> targets) = PrepareUpdate(request, targetRoot);
 
         SquadLock? previousLock = _stateStore.ReadLock(targetRoot, request.Scope);
         Dictionary<SquadTarget, string> targetPresetNames =
-            ResolveTargetPresetNames(request.ModelPresets, previousLock);
+            SquadLifecycleMetadata.ResolveTargetPresetNames(request.ModelPresets, previousLock);
         Dictionary<SquadTarget, SquadModelPreset> loadedPresets =
-            LoadAndVerifyPresets(targetPresetNames, targets);
+            SquadLifecycleMetadata.LoadAndVerifyPresets(_presetStore, _stateStore, targetPresetNames, targets);
 
-        string version = request.Version ?? ResolveDefaultVersion();
+        string version = request.Version ?? SquadDeploymentLockFactory.ResolveDefaultVersion();
         string tempExtractDir = _files.NewScratchDirectoryPath("kyber-squad-extract-");
 
         try
         {
-            SquadReleaseResult releaseResult = await _releaseSource.DownloadAndExtractAsync(
-                new SquadReleaseRequest(request.Repository, version, tempExtractDir),
-                cancellationToken).ConfigureAwait(false);
-
-            List<SquadModelDiffItem>? modelChanges = null;
-            SquadSource? source = TryResolveSquadSource(releaseResult.ExtractionRoot);
-            if (source is not null)
-            {
-                foreach (KeyValuePair<SquadTarget, SquadModelPreset> kvp in loadedPresets)
-                    _presetValidator.Validate(kvp.Value, source.ModelProfiles);
-
-                if (request.DryRun) modelChanges = ComputeModelChanges(source, targets, loadedPresets);
-            }
-            else if (loadedPresets.Count > 0)
-            {
-                throw new InvalidOperationException(
-                    "Cannot validate model presets because Squad source could not be resolved.");
-            }
-
-            string? userScopeDir = request.Scope is SquadDeploymentScope.Global or SquadDeploymentScope.Instance
-                ? _stateStore.UserPaths.ApplicationDataDirectory
-                : null;
-
-            SquadDeploymentScope renderScope = request.Scope == SquadDeploymentScope.Instance
-                ? SquadDeploymentScope.Global
-                : request.Scope;
-
-            ISquadGlobalRootResolver? effectiveGlobalRoots = _globalRoots;
-            if (request.Scope == SquadDeploymentScope.Instance && targets.Count == 1)
-                effectiveGlobalRoots = new SquadInstanceRootResolver(targetRoot, targets[0]);
-
-            string? docsServerCommand = SquadDocsServerCommand.Resolve(renderScope, _findExecutable, _files.FileExists);
-            SquadRenderRequest renderRequest = new(
-                releaseResult.ExtractionRoot,
+            SquadRenderStage stage = await CreateStageAsync(
+                request.Repository,
+                version,
                 targets,
-                renderScope,
-                userScopeDir,
                 request.Translation,
-                effectiveGlobalRoots,
-                loadedPresets.Count > 0 ? loadedPresets : null,
-                null,
-                _environmentReader,
                 request.Arbiter,
-                WorkerRoster: request.WorkerRoster,
-                DocsServerCommand: docsServerCommand);
-
-            SquadRenderResult renderResult =
-                await _renderer.RenderAsync(renderRequest, cancellationToken).ConfigureAwait(false);
-            if (!renderResult.Success || renderResult.Errors.Count > 0)
-            {
-                string error = renderResult.Errors.Count > 0
-                    ? string.Join(Environment.NewLine, renderResult.Errors)
-                    : "Squad render failed.";
-                throw new SquadRenderValidationException(error);
-            }
-
-            List<string> warnings = [.. recovery, .. RenderWarningMessages(renderResult.Warnings)];
-            string effectiveGuidance = _guidance.ReadEffective(
-                _stateStore.ResolveHomeOwnedFilesRoot(),
-                warnings);
-            if (!SquadResponsePreferencesInjector.HasAnyBlock(renderResult))
-                warnings.Add(SquadResponsePreferencesInjector.NoBlockWarning);
-            renderResult = SquadResponsePreferencesInjector.Inject(renderResult, effectiveGuidance);
-            warnings.AddRange(SquadDocsServerCommand.MissingWarnings(renderScope, targets, _findExecutable, docsServerCommand));
-
-            SquadLock squadLock = BuildLock(
-                releaseResult.Version,
+                request.WorkerRoster,
+                request.DryRun,
+                request.Scope,
+                targetRoot,
+                tempExtractDir,
+                recovery,
+                loadedPresets,
+                cancellationToken).ConfigureAwait(false);
+            SquadDeploymentPlan plan = BuildPlan(
+                targetRoot,
+                request.Scope,
                 request.Bundle,
                 targets,
                 request.Exclusions ?? Array.Empty<string>(),
                 request.Translation,
-                releaseResult.Checksum.Sha256,
-                releaseResult.ExtractionRoot,
-                loadedPresets.Count > 0 ? loadedPresets : null);
-
-            // Same drop as install: a user who adds a settings hooks key after installing
-            // must not have their next update create the shadowing file (§10.8, R18).
-            FactoryHooksShadowingOutcome shadowing = _shadowing.Resolve(
-                targetRoot,
-                targets,
+                adopt: false,
+                request.ReplaceManaged,
                 request.Arbiter,
-                request.Scope,
-                renderResult.Blocks);
+                previousReceipt,
+                stage,
+                loadedPresets);
 
-            IReadOnlyList<SquadDegradation> degradations = AppendArbiterDegradations(
-                renderResult.Degradations.Concat(shadowing.Degradations).ToList(),
-                request.Arbiter,
-                targets,
-                request.Scope);
-
-            ISquadGlobalRootResolver? planGlobalRoots = request.Scope == SquadDeploymentScope.Instance
-                ? effectiveGlobalRoots
-                : _globalRoots;
-
-            // The plan is built first, so preflight — conflicts, adoption checks, legacy-layout refusal —
-            // decides whether this run may write at all before anything outside the transaction is
-            // touched. The home guidance is written after that decision and before the commit, so the
-            // receipt carries only a digest read back from the deployed path.
-            SquadDeploymentPlan plan = _planner.CreateUpdate(
-                targetRoot: targetRoot,
-                scope: request.Scope,
-                squadLock: squadLock,
-                renderedFiles: renderResult.Files,
-                previousReceipt: previousReceipt,
-                degradations: degradations,
-                replaceManaged: request.ReplaceManaged,
-                timeProvider: _timeProvider,
-                globalRoots: planGlobalRoots,
-                siblingGlobalReceipts: [],
-                blocks: shadowing.Blocks);
-
+            List<string> warnings = stage.Warnings;
             ReportPreservedEdits(plan, previousReceipt, request.ReplaceManaged, warnings);
-
-            warnings.AddRange(DegradedFileWarnings(plan));
-            warnings.AddRange(FactoryMcpConfiguration.Warnings(_files,
+            AddPlanWarnings(
+                plan,
                 targets,
                 request.Scope,
-                source,
+                request.DryRun,
                 targetRoot,
-                _stateStore.UserPaths.HomeDirectory));
-            warnings.AddRange(AntigravityMcpConfiguration.Ensure(_files,
-                targets,
-                request.Scope,
-                _globalRoots,
-                docsServerCommand: docsServerCommand,
-                request.DryRun));
+                stage.Source,
+                stage.DocsServerCommand,
+                warnings);
 
             if (request.DryRun)
+            {
                 return new SquadLifecycleResult(
                     true,
                     plan,
@@ -768,39 +745,17 @@ public sealed class SquadLifecycleService : ISquadLifecycleService
                     plan.Lock,
                     plan.Receipt.Degradations,
                     DryRun: true,
-                    ModelChanges: modelChanges,
+                    ModelChanges: stage.ModelChanges,
                     Warnings: warnings);
+            }
 
-            // The guidance is classified, written and read back inside the transaction, once it holds the
-            // lease and has re-checked the plan against the live tree. Written any earlier, an update that
-            // then lost the lease would already have replaced a file the winner records different bytes
-            // for, and a later release would read the shipped text as an operator edit. What remains: a
-            // failure inside the commit leaves the new default on disk under the old receipt. A retry of
-            // the same release adopts those bytes; a later release that ships different wording reads them
-            // as an operator edit, keeps them, and warns how to take its default.
-            ISquadResponseGuidanceDeployer? guidanceDeployer =
-                request is { Scope: SquadDeploymentScope.Global, DryRun: false }
-                    ? _guidance.CreateDeployer(_stateStore.ResolveHomeOwnedFilesRoot())
-                    : null;
-
-            ISquadTransaction transaction = _transactions.Create(_observer);
-            transaction.Execute(
+            return CompleteDeployment(
                 plan,
-                guidanceDeployer is null
-                    ? null
-                    : leasedPlan => DeployGuidance(guidanceDeployer, leasedPlan, previousReceipt.HomeFiles, warnings));
-
-            warnings.AddRange(transaction.Warnings);
-            WriteCanonicalSnapshot(releaseResult.Version, source, warnings);
-
-            return new SquadLifecycleResult(
-                true,
-                plan,
-                plan.Receipt,
-                plan.Lock,
-                plan.Receipt.Degradations,
-                DryRun: false,
-                Warnings: warnings);
+                request.Scope,
+                previousReceipt.HomeFiles,
+                stage.Release.Version,
+                stage.Source,
+                warnings);
         }
         finally
         {
@@ -919,130 +874,6 @@ public sealed class SquadLifecycleService : ISquadLifecycleService
     }
 
     /// <summary>
-    ///     Resolves target-to-preset name mapping from request presets and previous lock state.
-    /// </summary>
-    private static Dictionary<SquadTarget, string> ResolveTargetPresetNames(
-        IReadOnlyDictionary<SquadTarget, string>? requestPresets,
-        SquadLock? previousLock)
-    {
-        Dictionary<SquadTarget, string> targetPresetNames = new();
-
-        if (requestPresets == null)
-        {
-            if (previousLock?.ModelPresets is not null)
-                foreach (KeyValuePair<SquadTarget, SquadAppliedPreset> kvp in previousLock.ModelPresets)
-                    targetPresetNames[kvp.Key] = kvp.Value.Name;
-        }
-        else if (requestPresets.Count == 0)
-        {
-            targetPresetNames.Clear();
-        }
-        else
-        {
-            if (previousLock?.ModelPresets is not null)
-                foreach (KeyValuePair<SquadTarget, SquadAppliedPreset> kvp in previousLock.ModelPresets)
-                    targetPresetNames[kvp.Key] = kvp.Value.Name;
-
-            foreach (KeyValuePair<SquadTarget, string> kvp in requestPresets) targetPresetNames[kvp.Key] = kvp.Value;
-        }
-
-        return targetPresetNames;
-    }
-
-    /// <summary>
-    /// Carries the renderer degradations into receipt degradations, appending the
-    /// Arbiter unenforced-target records when the wiring is enabled.
-    /// </summary>
-    /// <remarks>
-    /// The Arbiter records are derived from the selected targets and scope (Req 22.4),
-    /// not from what the renderers emitted, so an unhooked target and a global install
-    /// are recorded even when the render itself produced no hooks.
-    /// </remarks>
-    private static IReadOnlyList<SquadDegradation> AppendArbiterDegradations(
-        IReadOnlyList<SquadDegradationRecord> rendered,
-        SquadArbiterWiring? arbiter,
-        IReadOnlyList<SquadTarget> targets,
-        SquadDeploymentScope scope)
-    {
-        List<SquadDegradation> degradations = rendered
-            .Select(d => new SquadDegradation(d.Target, d.CanonicalIdentity, d.Code))
-            .ToList();
-        if (arbiter?.Enabled == true)
-        {
-            foreach (SquadDegradationRecord record in ArbiterHookWiring.TargetDegradations(targets, scope))
-            {
-                degradations.Add(new SquadDegradation(record.Target, record.CanonicalIdentity, record.Code));
-            }
-        }
-
-        return degradations;
-    }
-
-    /// <summary>
-    ///     Loads and verifies preset presence before any release archive is downloaded.
-    /// </summary>
-    private Dictionary<SquadTarget, SquadModelPreset> LoadAndVerifyPresets(
-        Dictionary<SquadTarget, string> targetPresetNames,
-        IReadOnlyList<SquadTarget> targets)
-    {
-        Dictionary<SquadTarget, SquadModelPreset> loaded = new();
-        foreach (SquadTarget target in targets)
-            if (targetPresetNames.TryGetValue(target, out string? presetName) && !string.IsNullOrWhiteSpace(presetName))
-            {
-                SquadModelPreset? preset = null;
-                try
-                {
-                    preset = _presetStore.TryLoad(presetName);
-                }
-                catch (ArgumentException)
-                {
-                    // Invalid name regex treated as missing/invalid
-                }
-
-                if (preset is null)
-                {
-                    string targetToken = SquadTargetCatalog.GetToken(target);
-                    string presetPath = Path.Combine(
-                        UserStatePaths.SquadPresetsDirectory(_stateStore.UserPaths.HomeDirectory),
-                        $"{presetName}.yml");
-                    throw new SquadDeploymentConflictException(
-                        $"Model preset '{presetName}' for target '{targetToken}' was not found at '{presetPath}'. " +
-                        $"To clear this preset, run: kyber-weave squad preset clear --target {targetToken}");
-                }
-
-                loaded[target] = preset;
-            }
-
-        return loaded;
-    }
-
-    /// <summary>
-    ///     Resolves canonical Squad source for preset validation and model diffing, falling back
-    ///     to local checkout canonical source when the extraction directory is minimal (such as in tests).
-    /// </summary>
-    private SquadSource? TryResolveSquadSource(string extractionRoot)
-    {
-        string squadPath = Path.Combine(extractionRoot, "squad.yml");
-        if (_files.FileExists(squadPath))
-        {
-            string text = _files.ReadAllText(squadPath);
-            if (text.Contains("name:", StringComparison.Ordinal)) return _sourceLoader.Load(extractionRoot);
-        }
-
-        try
-        {
-            string? checkoutRoot = _files.FindCheckoutSquadSourceRoot();
-            if (checkoutRoot is not null) return _sourceLoader.Load(checkoutRoot);
-        }
-        catch (Exception ex) when (FileFailure.Is(ex))
-        {
-            // Ignore filesystem errors when searching parent directories
-        }
-
-        return null;
-    }
-
-    /// <summary>
     ///     Warns once per receipt-owned deployed file that the update kept because its bytes were edited
     ///     locally. The plan has already decided to keep them; this only reports that decision.
     /// </summary>
@@ -1138,70 +969,6 @@ public sealed class SquadLifecycleService : ISquadLifecycleService
     }
 
     /// <summary>
-    ///     Persists the canonical profile snapshot for a committed deployment, keyed by release version.
-    /// </summary>
-    /// <remarks>
-    ///     A snapshot failure never fails the deployment: the transaction is already durable, and the
-    ///     next update rebuilds the snapshot, so the warning names that repair. This mirrors the
-    ///     project-registry write-failure pattern in <c>SquadTransaction.RecordProjectRegistration</c>.
-    ///     A null source means there is nothing to snapshot (possible only when no checkout backs the
-    ///     extraction root and no presets forced resolution); the preset verbs then fail closed with
-    ///     the update remedy, the same migration path pre-snapshot deployments take. Dry-run callers
-    ///     never reach here: they return before the transaction executes.
-    /// </remarks>
-    private void WriteCanonicalSnapshot(string version, SquadSource? source, List<string> warnings)
-    {
-        if (source is null)
-            return;
-
-        try
-        {
-            Dictionary<string, string> agentProfiles = new(StringComparer.Ordinal);
-            foreach (SquadAgent agent in source.Agents)
-            {
-                // An agent with no profile runs on its session's model, so there is no category to
-                // record. The preset verbs rewrite a category, and this agent has none to rewrite.
-                if (!string.IsNullOrWhiteSpace(agent.ModelProfile))
-                {
-                    agentProfiles[agent.Name] = agent.ModelProfile;
-                }
-            }
-
-            _canonicalProfiles.Write(
-                new SquadCanonicalProfiles(version, source.ModelProfiles, agentProfiles));
-        }
-        catch (Exception exception) when (FileFailure.Is(exception) || exception is InvalidDataException)
-        {
-            warnings.Add(
-                $"The Squad canonical profile snapshot for version '{version}' was not written " +
-                $"({exception.Message}). The deployment itself is committed. " +
-                "Rerun `squad update` to rebuild the snapshot.");
-        }
-    }
-
-    /// <summary>
-    ///     Computes model diff items across affected targets for a dry-run invocation.
-    /// </summary>
-    private static List<SquadModelDiffItem> ComputeModelChanges(
-        SquadSource source,
-        IReadOnlyList<SquadTarget> targets,
-        IReadOnlyDictionary<SquadTarget, SquadModelPreset> loadedPresets)
-    {
-        List<SquadModelDiffItem> changes = new();
-        foreach (SquadTarget target in targets)
-            if (loadedPresets.TryGetValue(target, out SquadModelPreset? preset))
-            {
-                SquadModelProfiles after = preset.ApplyTo(source.ModelProfiles);
-                IReadOnlyList<SquadModelDiffItem> diffs =
-                    SquadModelDiff.Compute(source, target, source.ModelProfiles, after);
-                changes.AddRange(diffs);
-            }
-
-        changes.Sort((a, b) => StringComparer.Ordinal.Compare(a.Agent, b.Agent));
-        return changes;
-    }
-
-    /// <summary>
     ///     Rejects any requested target with no registered renderer before the release is
     ///     downloaded — a target with a renderer already existing per-target on
     ///     <see cref="_renderer" /> is a cheap property read, so there is no reason to spend a
@@ -1224,7 +991,238 @@ public sealed class SquadLifecycleService : ISquadLifecycleService
             $"Targets available today: {supported}.");
     }
 
-    private SquadLock BuildLock(
+    private void CleanupTempDirectory(string path)
+    {
+        try
+        {
+            if (_files.DirectoryExists(path)) _files.DeleteDirectory(path);
+        }
+        catch
+        {
+            // Suppress cleanup failure in temporary directory
+        }
+    }
+}
+
+internal sealed record SquadRenderStage(
+    SquadReleaseResult Release,
+    SquadSource? Source,
+    SquadRenderResult Render,
+    List<string> Warnings,
+    List<SquadModelDiffItem>? ModelChanges,
+    ISquadGlobalRootResolver? EffectiveGlobalRoots,
+    string? DocsServerCommand);
+
+internal static class SquadRenderStageFactory
+{
+    internal static async Task<SquadRenderStage> CreateAsync(
+        ISquadReleaseSource releaseSource,
+        ISquadRenderer renderer,
+        ISquadModelPresetValidator presetValidator,
+        ISquadResponseGuidanceStore guidance,
+        ISquadStateStore stateStore,
+        ISquadSourceLoader sourceLoader,
+        ISquadFileAccess files,
+        ISquadGlobalRootResolver? globalRoots,
+        Func<string, string?>? environmentReader,
+        Func<string, string?>? findExecutable,
+        string repository,
+        string version,
+        IReadOnlyList<SquadTarget> targets,
+        string translation,
+        SquadArbiterWiring? arbiter,
+        string? workerRoster,
+        bool dryRun,
+        SquadDeploymentScope scope,
+        string targetRoot,
+        string tempExtractDir,
+        IReadOnlyList<string> recovery,
+        IReadOnlyDictionary<SquadTarget, SquadModelPreset> loadedPresets,
+        CancellationToken cancellationToken)
+    {
+        SquadReleaseResult releaseResult = await releaseSource.DownloadAndExtractAsync(
+            new SquadReleaseRequest(repository, version, tempExtractDir),
+            cancellationToken).ConfigureAwait(false);
+
+        List<SquadModelDiffItem>? modelChanges = null;
+        SquadSource? source = TryResolveSquadSource(files, sourceLoader, releaseResult.ExtractionRoot);
+        if (source is not null)
+        {
+            foreach (KeyValuePair<SquadTarget, SquadModelPreset> kvp in loadedPresets)
+                presetValidator.Validate(kvp.Value, source.ModelProfiles);
+
+            if (dryRun) modelChanges = ComputeModelChanges(source, targets, loadedPresets);
+        }
+        else if (loadedPresets.Count > 0)
+        {
+            throw new InvalidOperationException(
+                "Cannot validate model presets because Squad source could not be resolved.");
+        }
+
+        return await RenderAsync(
+            releaseResult,
+            source,
+            modelChanges,
+            renderer,
+            guidance,
+            stateStore,
+            files,
+            globalRoots,
+            environmentReader,
+            findExecutable,
+            targets,
+            translation,
+            arbiter,
+            workerRoster,
+            dryRun,
+            scope,
+            targetRoot,
+            recovery,
+            loadedPresets,
+            cancellationToken).ConfigureAwait(false);
+    }
+
+    private static async Task<SquadRenderStage> RenderAsync(
+        SquadReleaseResult releaseResult,
+        SquadSource? source,
+        List<SquadModelDiffItem>? modelChanges,
+        ISquadRenderer renderer,
+        ISquadResponseGuidanceStore guidance,
+        ISquadStateStore stateStore,
+        ISquadFileAccess files,
+        ISquadGlobalRootResolver? globalRoots,
+        Func<string, string?>? environmentReader,
+        Func<string, string?>? findExecutable,
+        IReadOnlyList<SquadTarget> targets,
+        string translation,
+        SquadArbiterWiring? arbiter,
+        string? workerRoster,
+        bool dryRun,
+        SquadDeploymentScope scope,
+        string targetRoot,
+        IReadOnlyList<string> recovery,
+        IReadOnlyDictionary<SquadTarget, SquadModelPreset> loadedPresets,
+        CancellationToken cancellationToken)
+    {
+        string? userScopeDir = scope is SquadDeploymentScope.Global or SquadDeploymentScope.Instance
+            ? stateStore.UserPaths.ApplicationDataDirectory
+            : null;
+
+        SquadDeploymentScope renderScope = scope == SquadDeploymentScope.Instance
+            ? SquadDeploymentScope.Global
+            : scope;
+
+        ISquadGlobalRootResolver? effectiveGlobalRoots = globalRoots;
+        if (scope == SquadDeploymentScope.Instance && targets.Count == 1)
+            effectiveGlobalRoots = new SquadInstanceRootResolver(targetRoot, targets[0]);
+
+        string? docsServerCommand = SquadDocsServerCommand.Resolve(renderScope, findExecutable, files.FileExists);
+        SquadRenderRequest renderRequest = new(
+            releaseResult.ExtractionRoot,
+            targets,
+            renderScope,
+            userScopeDir,
+            translation,
+            effectiveGlobalRoots,
+            loadedPresets.Count > 0 ? loadedPresets : null,
+            null,
+            environmentReader,
+            arbiter,
+            WorkerRoster: workerRoster,
+            DocsServerCommand: docsServerCommand);
+
+        SquadRenderResult renderResult =
+            await renderer.RenderAsync(renderRequest, cancellationToken).ConfigureAwait(false);
+        if (!renderResult.Success || renderResult.Errors.Count > 0)
+        {
+            string error = renderResult.Errors.Count > 0
+                ? string.Join(Environment.NewLine, renderResult.Errors)
+                : "Squad render failed.";
+            throw new SquadRenderValidationException(error);
+        }
+
+        List<string> warnings = [.. recovery, .. RenderWarningMessages(renderResult.Warnings)];
+        string effectiveGuidance = guidance.ReadEffective(
+            stateStore.ResolveHomeOwnedFilesRoot(),
+            warnings);
+        if (!SquadResponsePreferencesInjector.HasAnyBlock(renderResult))
+            warnings.Add(SquadResponsePreferencesInjector.NoBlockWarning);
+        renderResult = SquadResponsePreferencesInjector.Inject(renderResult, effectiveGuidance);
+        warnings.AddRange(SquadDocsServerCommand.MissingWarnings(renderScope, targets, findExecutable, docsServerCommand));
+
+        return new SquadRenderStage(
+            releaseResult,
+            source,
+            renderResult,
+            warnings,
+            modelChanges,
+            effectiveGlobalRoots,
+            docsServerCommand);
+    }
+
+    private static List<string> RenderWarningMessages(IReadOnlyList<SquadRenderWarning> warnings)
+    {
+        // Only the operator channel's warnings reach the CLI. A default install prints exactly what it printed
+        // before. The one exception is agent-body-too-long, which reaches the CLI only when the operator channel
+        // overlay was inlined, because then the overlay is what pushed the conductor over the cap.
+        bool overlayApplied = warnings.Any(warning => warning.Code == SquadOperatorChannel.OverlayAppliedCode);
+        return warnings
+            .Where(warning => SquadOperatorChannel.IsOperatorChannelWarning(warning.Code)
+                              || (overlayApplied && warning.Code == CopilotRenderer.AgentBodyTooLongCode))
+            .Select(warning => $"{warning.Code}: {warning.Message}")
+            .ToList();
+    }
+
+    private static SquadSource? TryResolveSquadSource(
+        ISquadFileAccess files,
+        ISquadSourceLoader sourceLoader,
+        string extractionRoot)
+    {
+        string squadPath = Path.Combine(extractionRoot, "squad.yml");
+        if (files.FileExists(squadPath))
+        {
+            string text = files.ReadAllText(squadPath);
+            if (text.Contains("name:", StringComparison.Ordinal)) return sourceLoader.Load(extractionRoot);
+        }
+
+        try
+        {
+            string? checkoutRoot = files.FindCheckoutSquadSourceRoot();
+            if (checkoutRoot is not null) return sourceLoader.Load(checkoutRoot);
+        }
+        catch (Exception ex) when (FileFailure.Is(ex))
+        {
+            // Ignore filesystem errors when searching parent directories
+        }
+
+        return null;
+    }
+
+    internal static List<SquadModelDiffItem> ComputeModelChanges(
+        SquadSource source,
+        IReadOnlyList<SquadTarget> targets,
+        IReadOnlyDictionary<SquadTarget, SquadModelPreset> loadedPresets)
+    {
+        List<SquadModelDiffItem> changes = new();
+        foreach (SquadTarget target in targets)
+            if (loadedPresets.TryGetValue(target, out SquadModelPreset? preset))
+            {
+                SquadModelProfiles after = preset.ApplyTo(source.ModelProfiles);
+                IReadOnlyList<SquadModelDiffItem> diffs =
+                    SquadModelDiff.Compute(source, target, source.ModelProfiles, after);
+                changes.AddRange(diffs);
+            }
+
+        changes.Sort((a, b) => StringComparer.Ordinal.Compare(a.Agent, b.Agent));
+        return changes;
+    }
+
+}
+
+internal static class SquadDeploymentLockFactory
+{
+    internal static SquadLock Build(
+        ISquadFileAccess files,
         string version,
         string bundle,
         IReadOnlyList<SquadTarget> targets,
@@ -1235,8 +1233,8 @@ public sealed class SquadLifecycleService : ISquadLifecycleService
         IReadOnlyDictionary<SquadTarget, SquadModelPreset>? modelPresets = null)
     {
         string cliVersion = GetAssemblyVersion();
-        string bundleDigest = ComputeBundleDigest(extractionRoot, bundle);
-        SquadApmIdentity apmIdentity = ReadApmIdentity(extractionRoot);
+        string bundleDigest = ComputeBundleDigest(files, extractionRoot, bundle);
+        SquadApmIdentity apmIdentity = ReadApmIdentity(files, extractionRoot);
 
         Dictionary<SquadTarget, SquadAppliedPreset>? appliedPresets = null;
         if (modelPresets is { Count: > 0 })
@@ -1264,7 +1262,7 @@ public sealed class SquadLifecycleService : ISquadLifecycleService
             appliedPresets);
     }
 
-    private static string GetAssemblyVersion()
+    internal static string GetAssemblyVersion()
     {
         Assembly assembly = typeof(SquadLifecycleService).Assembly;
         string? infoVersion =
@@ -1278,15 +1276,15 @@ public sealed class SquadLifecycleService : ISquadLifecycleService
         return assembly.GetName().Version?.ToString() ?? "0.1.0";
     }
 
-    private static string ResolveDefaultVersion()
+    internal static string ResolveDefaultVersion()
     {
         return GetAssemblyVersion();
     }
 
-    private string ComputeBundleDigest(string extractionRoot, string bundle)
+    private static string ComputeBundleDigest(ISquadFileAccess files, string extractionRoot, string bundle)
     {
         string bundlePath = Path.Combine(extractionRoot, "bundles", $"{bundle}.yml");
-        if (_files.FileExists(bundlePath)) return Convert.ToHexStringLower(SHA256.HashData(_files.ReadAllBytes(bundlePath)));
+        if (files.FileExists(bundlePath)) return Convert.ToHexStringLower(SHA256.HashData(files.ReadAllBytes(bundlePath)));
 
         return Convert.ToHexStringLower(SHA256.HashData(Encoding.UTF8.GetBytes(bundle)));
     }
@@ -1303,14 +1301,14 @@ public sealed class SquadLifecycleService : ISquadLifecycleService
     ///     <c>SquadDeploymentStateTests</c> that implies) for a field that was already
     ///     optional and whose absence this code already handled correctly.
     /// </remarks>
-    private SquadApmIdentity ReadApmIdentity(string extractionRoot)
+    private static SquadApmIdentity ReadApmIdentity(ISquadFileAccess files, string extractionRoot)
     {
         string toolchainPath = Path.Combine(extractionRoot, "toolchain.yml");
-        if (!_files.FileExists(toolchainPath)) return SquadApmIdentity.None;
+        if (!files.FileExists(toolchainPath)) return SquadApmIdentity.None;
 
         try
         {
-            string yamlText = _files.ReadAllText(toolchainPath);
+            string yamlText = files.ReadAllText(toolchainPath);
             YamlStream yaml = new();
             yaml.Load(new StringReader(yamlText));
             if (yaml.Documents.Count > 0 && yaml.Documents[0].RootNode is YamlMappingNode root)
@@ -1367,15 +1365,158 @@ public sealed class SquadLifecycleService : ISquadLifecycleService
         return SquadApmIdentity.None;
     }
 
-    private void CleanupTempDirectory(string path)
+}
+
+internal static class SquadLifecycleMetadata
+{
+    /// <summary>
+    ///     Resolves target-to-preset name mapping from request presets and previous lock state.
+    /// </summary>
+    internal static Dictionary<SquadTarget, string> ResolveTargetPresetNames(
+        IReadOnlyDictionary<SquadTarget, string>? requestPresets,
+        SquadLock? previousLock)
     {
+        Dictionary<SquadTarget, string> targetPresetNames = new();
+
+        if (requestPresets == null)
+        {
+            if (previousLock?.ModelPresets is not null)
+                foreach (KeyValuePair<SquadTarget, SquadAppliedPreset> kvp in previousLock.ModelPresets)
+                    targetPresetNames[kvp.Key] = kvp.Value.Name;
+        }
+        else if (requestPresets.Count == 0)
+        {
+            targetPresetNames.Clear();
+        }
+        else
+        {
+            if (previousLock?.ModelPresets is not null)
+                foreach (KeyValuePair<SquadTarget, SquadAppliedPreset> kvp in previousLock.ModelPresets)
+                    targetPresetNames[kvp.Key] = kvp.Value.Name;
+
+            foreach (KeyValuePair<SquadTarget, string> kvp in requestPresets) targetPresetNames[kvp.Key] = kvp.Value;
+        }
+
+        return targetPresetNames;
+    }
+
+    /// <summary>
+    /// Carries the renderer degradations into receipt degradations, appending the
+    /// Arbiter unenforced-target records when the wiring is enabled.
+    /// </summary>
+    /// <remarks>
+    /// The Arbiter records are derived from the selected targets and scope (Req 22.4),
+    /// not from what the renderers emitted, so an unhooked target and a global install
+    /// are recorded even when the render itself produced no hooks.
+    /// </remarks>
+    internal static IReadOnlyList<SquadDegradation> AppendArbiterDegradations(
+        IReadOnlyList<SquadDegradationRecord> rendered,
+        SquadArbiterWiring? arbiter,
+        IReadOnlyList<SquadTarget> targets,
+        SquadDeploymentScope scope)
+    {
+        List<SquadDegradation> degradations = rendered
+            .Select(d => new SquadDegradation(d.Target, d.CanonicalIdentity, d.Code))
+            .ToList();
+        if (arbiter?.Enabled == true)
+        {
+            foreach (SquadDegradationRecord record in ArbiterHookWiring.TargetDegradations(targets, scope))
+            {
+                degradations.Add(new SquadDegradation(record.Target, record.CanonicalIdentity, record.Code));
+            }
+        }
+
+        return degradations;
+    }
+
+    /// <summary>
+    ///     Loads and verifies preset presence before any release archive is downloaded.
+    /// </summary>
+    internal static Dictionary<SquadTarget, SquadModelPreset> LoadAndVerifyPresets(
+        ISquadModelPresetStore presetStore,
+        ISquadStateStore stateStore,
+        Dictionary<SquadTarget, string> targetPresetNames,
+        IReadOnlyList<SquadTarget> targets)
+    {
+        Dictionary<SquadTarget, SquadModelPreset> loaded = new();
+        foreach (SquadTarget target in targets)
+            if (targetPresetNames.TryGetValue(target, out string? presetName) && !string.IsNullOrWhiteSpace(presetName))
+            {
+                SquadModelPreset? preset = null;
+                try
+                {
+                    preset = presetStore.TryLoad(presetName);
+                }
+                catch (ArgumentException)
+                {
+                    // Invalid name regex treated as missing/invalid
+                }
+
+                if (preset is null)
+                {
+                    string targetToken = SquadTargetCatalog.GetToken(target);
+                    string presetPath = Path.Combine(
+                        UserStatePaths.SquadPresetsDirectory(stateStore.UserPaths.HomeDirectory),
+                        $"{presetName}.yml");
+                    throw new SquadDeploymentConflictException(
+                        $"Model preset '{presetName}' for target '{targetToken}' was not found at '{presetPath}'. " +
+                        $"To clear this preset, run: kyber-weave squad preset clear --target {targetToken}");
+                }
+
+                loaded[target] = preset;
+            }
+
+        return loaded;
+    }
+
+}
+
+internal static class SquadCanonicalSnapshotWriter
+{
+    /// <summary>
+    ///     Persists the canonical profile snapshot for a committed deployment, keyed by release version.
+    /// </summary>
+    /// <remarks>
+    ///     A snapshot failure never fails the deployment: the transaction is already durable, and the
+    ///     next update rebuilds the snapshot, so the warning names that repair. This mirrors the
+    ///     project-registry write-failure pattern in <c>SquadTransaction.RecordProjectRegistration</c>.
+    ///     A null source means there is nothing to snapshot (possible only when no checkout backs the
+    ///     extraction root and no presets forced resolution); the preset verbs then fail closed with
+    ///     the update remedy, the same migration path pre-snapshot deployments take. Dry-run callers
+    ///     never reach here: they return before the transaction executes.
+    /// </remarks>
+    internal static void Write(
+        ISquadCanonicalProfileStore canonicalProfiles,
+        string version,
+        SquadSource? source,
+        List<string> warnings)
+    {
+        if (source is null)
+            return;
+
         try
         {
-            if (_files.DirectoryExists(path)) _files.DeleteDirectory(path);
+            Dictionary<string, string> agentProfiles = new(StringComparer.Ordinal);
+            foreach (SquadAgent agent in source.Agents)
+            {
+                // An agent with no profile runs on its session's model, so there is no category to
+                // record. The preset verbs rewrite a category, and this agent has none to rewrite.
+                if (!string.IsNullOrWhiteSpace(agent.ModelProfile))
+                {
+                    agentProfiles[agent.Name] = agent.ModelProfile;
+                }
+            }
+
+            canonicalProfiles.Write(
+                new SquadCanonicalProfiles(version, source.ModelProfiles, agentProfiles));
         }
-        catch
+        catch (Exception exception) when (FileFailure.Is(exception) || exception is InvalidDataException)
         {
-            // Suppress cleanup failure in temporary directory
+            warnings.Add(
+                $"The Squad canonical profile snapshot for version '{version}' was not written " +
+                $"({exception.Message}). The deployment itself is committed. " +
+                "Rerun `squad update` to rebuild the snapshot.");
         }
     }
+
 }
