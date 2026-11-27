@@ -82,7 +82,7 @@ public class CanonRefreshEngine
     private readonly IRelationalStoreWriter? writer;
     private readonly IRelationalStoreReader? reader;
     private readonly IOperationalStore? operationalStore;
-    private readonly HarnessSourceRegistry? sourceRegistry;
+    private readonly HarnessSourceRegistry sourceRegistry;
     private IReadOnlyDictionary<string, IHarnessMapper> mappersByHarness =
         new Dictionary<string, IHarnessMapper>(StringComparer.Ordinal);
     private IHarnessFileSystem fileSystem = PhysicalHarnessFileSystem.Instance;
@@ -148,9 +148,10 @@ public class CanonRefreshEngine
         this.fileSystem = fileSystem ?? PhysicalHarnessFileSystem.Instance;
 
         bool explicitHome = !string.IsNullOrWhiteSpace(homeDirectory);
-        this.homeDirectory = explicitHome
-            ? Path.GetFullPath(homeDirectory!)
-            : Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
+        string resolvedHome = string.IsNullOrWhiteSpace(homeDirectory)
+            ? Environment.GetFolderPath(Environment.SpecialFolder.UserProfile)
+            : Path.GetFullPath(homeDirectory);
+        this.homeDirectory = resolvedHome;
 
         this.stateDirectory = !string.IsNullOrWhiteSpace(options?.StateDirectory)
             ? Path.GetFullPath(options.StateDirectory)
@@ -259,8 +260,7 @@ public class CanonRefreshEngine
             "FullReingest requires the relational store constructor.");
         IOperationalStore activeStore = operationalStore ?? throw new InvalidOperationException(
             "FullReingest requires the relational store constructor.");
-        HarnessSourceRegistry activeRegistry = sourceRegistry ?? throw new InvalidOperationException(
-            "FullReingest requires the relational store constructor.");
+        HarnessSourceRegistry activeRegistry = sourceRegistry;
         ArgumentException.ThrowIfNullOrWhiteSpace(trigger);
 
         int normalizedWeeks = NormalizeHistoryWeeks(historyWeeks) ?? DefaultHistoryWeeks;
@@ -389,7 +389,7 @@ public class CanonRefreshEngine
     {
         ArgumentNullException.ThrowIfNull(unit);
 
-        IHarnessSourceReader? sourceReader = sourceRegistry!.GetReader(unit.HarnessId);
+        IHarnessSourceReader? sourceReader = sourceRegistry.GetReader(unit.HarnessId);
         IHarnessMapper? mapper = HarnessMapperLookup.Resolve(mappersByHarness, unit.HarnessId);
         if (sourceReader is null || mapper is null)
         {
