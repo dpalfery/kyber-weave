@@ -2,7 +2,7 @@ using Xunit;
 namespace KyberDash.Data.Tests;
 
 /// <summary>A scratch directory that is deleted when the test finishes.</summary>
-public class TempDirectory : IDisposable
+public sealed class TempDirectory : IDisposable
 {
     private bool disposed;
 

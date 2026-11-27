@@ -6,7 +6,7 @@ using KyberDash.Domain;
 namespace KyberDash.Data.Tests;
 
 /// <summary>Disk-override and embedded-bundle resolution for <see cref="WebAssetRepository"/>.</summary>
-public class WebAssetRepositoryTests : IDisposable
+public sealed class WebAssetRepositoryTests : IDisposable
 {
     private readonly TempDirectory directory = new();
 
