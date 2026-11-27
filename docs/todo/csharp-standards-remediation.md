@@ -85,9 +85,9 @@ The owner chose the local Qwen model for this work. The standing model rule rout
 fails twice on Qwen after being split smaller, the orchestrator asks the owner before switching it.
 Never an Anthropic model in opencode.
 
-Worktrees go under `/Users/dave/git/opencode-worktrees/csharp-remediation/` (Defender skips `~/git`).
+Worktrees go under `~/git/opencode-worktrees/csharp-remediation/` (Defender skips `~/git`).
 The shared work folder, outside every worktree, is
-`/Users/dave/git/opencode-worktrees/csharp-remediation/work/`.
+`~/git/opencode-worktrees/csharp-remediation/work/`.
 
 ## Step 1: the inventory pass (one Qwen instance)
 
