@@ -16,6 +16,8 @@ using ModelContextProtocol.Server;
 using Xunit;
 using KyberWeave.Tests.Corpus;
 using KyberWeave.Tests.RunStart;
+using KyberWeave.Application.Arbiter;
+using KyberWeave.Contracts.Repositories;
 
 namespace KyberWeave.Integration.Tests;
 

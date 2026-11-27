@@ -2,8 +2,9 @@ using System.Diagnostics;
 using KyberWeave.Contracts.Paths;
 using KyberWeave.Contracts.Repositories;
 using KyberWeave.Core.Processes;
+using KyberWeave.Domain.Update;
 
-namespace KyberWeave.Cli.Update;
+namespace KyberWeave.Data.Update;
 
 /// <summary>The processes, files and archives the self-update touches: starts children, probes the install directory and replaces binaries.</summary>
 /// <remarks>

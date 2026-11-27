@@ -1,6 +1,6 @@
 using System.Security.Cryptography;
 using System.Text;
-using KyberWeave.Cli.Update;
+using KyberWeave.Application.Update;
 
 namespace KyberWeave.Testing.Update;
 

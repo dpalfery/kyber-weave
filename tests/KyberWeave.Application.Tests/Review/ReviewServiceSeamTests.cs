@@ -6,6 +6,7 @@ using KyberWeave.Core.Configuration;
 using KyberWeave.Core.Diagnostics;
 using KyberWeave.Core.Docs.Validation;
 using KyberWeave.Core.Review;
+using KyberWeave.Data.Review;
 using KyberWeave.Tests;
 using KyberWeave.Tests.Fakes;
 using KyberWeave.Tests.FileSystem;
@@ -68,6 +69,25 @@ public sealed class ReviewServiceSeamTests
 
         Assert.Equal(1, result.ExitCode);
         Assert.Equal("/work/repo", configs.Root);
+    }
+
+    [Fact]
+    public void TheCycleCommandsPrintedGateCommandNamesAnAbsoluteReportPath()
+    {
+        _files.CreateDirectory("/work/repo/.git");
+        FakeReviewWorkTreeService trees = new() { WorkingDirectory = "/work" };
+        FileReviewCycleStore cycles = new(_files, Paths, _environment);
+        ReviewCycleService service = new(trees, cycles, new FakeReviewCycleSelector(), new LoadingConfigs(), Paths, _environment);
+        StringWriter output = new();
+
+        ReviewCommandResult result = service.Run(new ReviewCycleRequest("repo", null, "T1", null, false), output);
+
+        Assert.Equal(0, result.ExitCode);
+        Assert.Contains(
+            "run: kyber-weave review gates /work/repo --council --out " +
+            "/work/repo/.agent_scratchpad/T1/review/cycle-1/gates.json",
+            output.ToString(),
+            StringComparison.Ordinal);
     }
 
     [Fact]
@@ -212,6 +232,31 @@ public sealed class ReviewServiceSeamTests
         };
 
         return new PlanTaskTargetService(service, null!, git, _files, Paths, _environment);
+    }
+
+    /// <summary>Answers a product configuration, so the command runs past the load and reaches the lines it prints.</summary>
+    private sealed class LoadingConfigs : IConfigLoadService
+    {
+        public bool TryLoad(
+            string repoRoot,
+            string? configPath,
+            DiagnosticReport report,
+            out KyberWeaveConfig config,
+            out string? resolvedConfigPath)
+        {
+            config = new KyberWeaveConfig { Arbiter = ArbiterConfigDefaults.Product };
+            resolvedConfigPath = null;
+            return true;
+        }
+
+        public bool TryLoadWithDocsRoots(
+            string repoRoot,
+            string? configPath,
+            IReadOnlyList<string> docsRoots,
+            DiagnosticReport report,
+            out KyberWeaveConfig config,
+            out OntologyConfig ontology) =>
+            throw new InvalidOperationException("unexpected call");
     }
 
     /// <summary>Records the root it was asked to load and refuses, so the command stops before any other seam is used.</summary>

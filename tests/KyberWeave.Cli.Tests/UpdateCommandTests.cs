@@ -1,12 +1,12 @@
 using System.ComponentModel;
 using KyberWeave.Cli.Commands.Squad.Infrastructure;
 using KyberWeave.Cli.Commands.Update;
-using KyberWeave.Cli.Update;
 using KyberWeave.Core.Processes;
 using KyberWeave.Core.Squad.Deployment;
 using KyberWeave.Testing.Update;
 using KyberWeave.Tests.Fakes;
 using Xunit;
+using KyberWeave.Domain.Update;
 
 namespace KyberWeave.Cli.Tests;
 

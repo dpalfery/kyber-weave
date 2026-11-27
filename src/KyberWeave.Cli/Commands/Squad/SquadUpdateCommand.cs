@@ -1,5 +1,5 @@
+using KyberWeave.Core.FileSystem;
 using KyberWeave.Cli.Commands.Squad.Infrastructure;
-using KyberWeave.Cli.Update;
 using KyberWeave.Contracts.Repositories;
 using KyberWeave.Contracts.Services;
 using KyberWeave.Core.Configuration;
@@ -8,6 +8,7 @@ using KyberWeave.Core.Squad.Release;
 using KyberWeave.Core.Squad.Rendering;
 using Spectre.Console;
 using Spectre.Console.Cli;
+using KyberWeave.Domain.Update;
 
 namespace KyberWeave.Cli.Commands.Squad;
 
@@ -111,10 +112,10 @@ internal sealed class SquadUpdateCommand : Command<SquadUpdateSettings>
     private bool ValidateInstancePresets(ISquadUserPaths userPaths)
     {
         string home = userPaths.HomeDirectory;
-        string instanceStateBase = Path.Combine(home, ".kyber-weave", "squad", "instance-state");
+        string instanceStateBase = UserStatePaths.SquadInstanceStateDirectory(home);
         if (!_files.DirectoryExists(instanceStateBase)) return true;
 
-        string presetsDir = Path.Combine(home, ".kyber-weave", "squad", "presets");
+        string presetsDir = UserStatePaths.SquadPresetsDirectory(home);
 
         foreach (SquadDirectoryEntry targetDir in _files.EnumerateRealDirectories(instanceStateBase))
         {

@@ -54,7 +54,7 @@ internal static partial class ConductorGuardRules
         $"{McpServerNames.Arbiter}-arbiter_classify_bot_review_comment",
     };
 
-    internal static readonly string[] ContractDirectories = ["plans", "specs", "todo"];
+    internal static readonly string[] ContractDirectories = [DocsLayout.Plans, DocsLayout.Specifications, DocsLayout.Todos];
 
     // A plans/specs/todo segment can also name project code (web/specs/login.spec.ts), so outside the
     // configured planning directories only plan documents and their task files are readable.
@@ -96,7 +96,7 @@ internal static partial class ConductorGuardRules
         string prompt = call.Prompt ?? string.Empty;
         return string.Equals(
                 TriggerClassifier.PlannerMarkerFor(prompt, HeaderBlock.Parse(prompt).Headers),
-                "RUN-START",
+                DispatchHeaders.RunStart,
                 StringComparison.Ordinal)
             ? null
             : target;

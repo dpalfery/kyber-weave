@@ -1,4 +1,5 @@
 using KyberWeave.Testing.Squad;
+using KyberWeave.Core.Agents.Roster;
 using KyberWeave.Core.Arbiter;
 using KyberWeave.Core.Squad.Model;
 using KyberWeave.Core.Squad.Parsing;
@@ -122,5 +123,28 @@ public sealed class ArbiterSquadCatalogTests
             Assert.True(catalog.Lenses.TryGetValue(name, out ArbiterSquadLens? entry), $"Missing lens '{name}'.");
             Assert.Equal(expected, entry.Applicability);
         }
+    }
+
+    [Fact]
+    public void CapabilityProfileTargetClassesEqualTheShippedProfiles()
+    {
+        SquadSource source = CanonicalSquadTree.SharedSource;
+
+        Assert.Equal(
+            source.CapabilityProfiles.Profiles.Keys.Order(StringComparer.Ordinal),
+            CapabilityProfiles.TargetClasses.Keys.Order(StringComparer.Ordinal));
+    }
+
+    [Fact]
+    public void RootFixerIsAnImplementationWriter()
+    {
+        SquadSource source = CanonicalSquadTree.SharedSource;
+
+        Assert.Contains(CapabilityProfiles.RootFixer, source.CapabilityProfiles.Profiles.Keys);
+        Assert.Equal(CapabilityProfiles.Implementation, CapabilityProfiles.TargetClassFor(CapabilityProfiles.RootFixer));
+        Assert.True(CapabilityProfiles.IsWriter(CapabilityProfiles.RootFixer));
+        Assert.Equal(
+            CapabilityProfiles.TargetClassFor(CapabilityProfiles.RootFixer),
+            ArbiterSquadCatalog.TargetClassFor(CapabilityProfiles.RootFixer));
     }
 }

@@ -380,11 +380,10 @@ public sealed class WorkerGuard(
     private IReadOnlyList<string> LedgerDirectories(string cwd, string home)
     {
         string root = RepositoryRootOf(cwd);
-        List<string> directories = [Path.Combine(root, "artifacts", "arbiter")];
+        List<string> directories = [ArbiterStateDirectory.ForProject(root)];
         if (!string.IsNullOrWhiteSpace(home))
         {
-            directories.Add(Path.Combine(
-                home, ".kyber-weave", "arbiter", "projects", ArbiterHookDecisionEngine.ProjectRootKey(root, process.CurrentDirectory)));
+            directories.Add(ArbiterStateDirectory.ForGlobal(home, root, process.CurrentDirectory));
         }
 
         return [.. directories.Distinct(StringComparer.Ordinal)];

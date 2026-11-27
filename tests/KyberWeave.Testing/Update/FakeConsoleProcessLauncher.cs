@@ -1,4 +1,4 @@
-using KyberWeave.Cli.Update;
+using KyberWeave.Data.Update;
 
 namespace KyberWeave.Testing.Update;
 

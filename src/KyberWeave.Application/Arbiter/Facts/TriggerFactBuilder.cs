@@ -195,17 +195,17 @@ public static class TriggerFactBuilder
         foreach (KeyValuePair<string, ArbiterSquadAgent> entry in catalog.Agents)
             descriptions[entry.Key] = entry.Value.Description;
 
-        block.Headers.TryGetValue("PLAN_FILE", out string? planFile);
-        block.Headers.TryGetValue("TASK", out string? task);
-        block.Headers.TryGetValue("TECHNOLOGY", out string? technology);
+        block.Headers.TryGetValue(DispatchHeaders.PlanFile, out string? planFile);
+        block.Headers.TryGetValue(DispatchHeaders.Task, out string? task);
+        block.Headers.TryGetValue(DispatchHeaders.Technology, out string? technology);
         string? parentTechnology = repoRoot is not null && technology is not null
             ? TaskGateResolver.ParentTechnologyOrNone(files!, repoRoot, config, technology)
             : null;
-        block.Headers.TryGetValue("LENS", out string? lens);
-        block.Headers.TryGetValue("REFUTE", out string? refute);
+        block.Headers.TryGetValue(DispatchHeaders.Lens, out string? lens);
+        block.Headers.TryGetValue(DispatchHeaders.Refute, out string? refute);
         // REFUTE names the finding as <lens>/<slug>. The finding block's id line carries either that full value
         // or the bare slug, so the block is read by the full value first and the slug second.
-        RefuteFinding? finding = refute is not null && string.Equals(trigger, "refute.spawn", StringComparison.Ordinal)
+        RefuteFinding? finding = refute is not null && string.Equals(trigger, ArbiterTriggers.RefuteSpawn, StringComparison.Ordinal)
             ? RefuteFinding.Parse(stripped, refute) ?? RefuteFinding.Parse(stripped, refute[(refute.LastIndexOf('/') + 1)..])
             : null;
         string? applicability = lens is not null
@@ -231,8 +231,8 @@ public static class TriggerFactBuilder
                 // head is the dispatch the worker reads. Raw header values keep what validation rejected.
                 "delegation.head" => TextExcerpts.Head(prompt),
                 "delegation.body-head" => TextExcerpts.Head(PlanReadInstruction.WithoutRoutingMetadata(stripped)),
-                "delegation.plan-file-raw" => block.RawValues.TryGetValue("PLAN_FILE", out string? rawPlan) ? rawPlan : null,
-                "delegation.task-raw" => block.RawValues.TryGetValue("TASK", out string? rawTask) ? rawTask : null,
+                "delegation.plan-file-raw" => block.RawValues.TryGetValue(DispatchHeaders.PlanFile, out string? rawPlan) ? rawPlan : null,
+                "delegation.task-raw" => block.RawValues.TryGetValue(DispatchHeaders.Task, out string? rawTask) ? rawTask : null,
                 // The shortcut rules' questions read the dispatch body: the defect the investigator was sent to
                 // find, and the intake request the planner was asked to assess.
                 "defect.report" => stripped,
@@ -249,7 +249,7 @@ public static class TriggerFactBuilder
                     : PlanReadInstruction.NamesPathUnder(PlanReadInstruction.WithoutRoutingMetadata(stripped), planningDirs),
                 "delegation.plan-file" => planFile,
                 // Absent (null) unless PLAN_FILE was present but failed validation or repeated.
-                "delegation.plan-file-rejected" => block.RejectedNames.Contains("PLAN_FILE") ? true : null,
+                "delegation.plan-file-rejected" => block.RejectedNames.Contains(DispatchHeaders.PlanFile) ? true : null,
                 "delegation.task" => task,
                 "delegation.markers" => marker,
                 "config.planning-dirs" => planningDirs,
@@ -315,7 +315,7 @@ public static class TriggerFactBuilder
         if (taskFiles.Count == 0)
             return facts;
 
-        HeaderBlock.Parse(prompt).Headers.TryGetValue("TECHNOLOGY", out string? technology);
+        HeaderBlock.Parse(prompt).Headers.TryGetValue(DispatchHeaders.Technology, out string? technology);
         IReadOnlyList<ReviewTaskGate> gates = TaskGateResolver.Resolve(config.Review, target, technology, parentTechnology).Gates;
         bool applies = gates.Any(gate => gate.Include.Count == 0
                                          || taskFiles.Any(path => gate.Include.Any(pattern => PathGlob.IsMatch(pattern, path))));

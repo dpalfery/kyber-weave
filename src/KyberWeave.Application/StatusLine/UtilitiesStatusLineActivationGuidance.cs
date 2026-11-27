@@ -1,6 +1,6 @@
 using KyberWeave.Domain.StatusLine;
 
-namespace KyberWeave.Cli.Commands.Utilities;
+namespace KyberWeave.Application.StatusLine;
 
 /// <summary>Builds the per-harness activation snippet a deploy or doctor run prints.</summary>
 /// <remarks>

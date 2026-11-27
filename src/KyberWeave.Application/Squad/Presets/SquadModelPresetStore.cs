@@ -1,3 +1,4 @@
+using KyberWeave.Core.FileSystem;
 using KyberWeave.Contracts.Repositories;
 using System.Text.RegularExpressions;
 using KyberWeave.Core.Squad.Deployment;
@@ -25,7 +26,7 @@ public sealed partial class SquadModelPresetStore : ISquadModelPresetStore
         ArgumentNullException.ThrowIfNull(files);
         _files = files;
         ArgumentException.ThrowIfNullOrWhiteSpace(userPaths.HomeDirectory);
-        _presetsDirectory = Path.Combine(userPaths.HomeDirectory, ".kyber-weave", "squad", "presets");
+        _presetsDirectory = UserStatePaths.SquadPresetsDirectory(userPaths.HomeDirectory);
     }
 
     /// <summary>

@@ -18,6 +18,7 @@ using KyberWeave.Testing.Squad;
 using Spectre.Console;
 using KyberWeave.Tests.Configuration;
 using KyberWeave.Tests.FileSystem;
+using KyberWeave.Data.Squad.Packaging;
 
 namespace KyberWeave.Tests.Fakes;
 

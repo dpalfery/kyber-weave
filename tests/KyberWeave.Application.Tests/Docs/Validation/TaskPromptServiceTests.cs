@@ -1,3 +1,4 @@
+using KyberWeave.Core;
 using KyberWeave.Cli.Commands.Docs;
 using KyberWeave.Contracts.Repositories;
 using KyberWeave.Contracts.Services;
@@ -527,7 +528,7 @@ public sealed class TaskPromptServiceTests
     public void PriorResultsFromTheRunsScratchAreaReachTheTaskPart()
     {
         using DocFixture fixture = Ready();
-        string scratch = fixture.FullPath(TaskPromptService.ScratchFolder);
+        string scratch = fixture.FullPath(ScratchLayout.Root);
         fixture.Memory!.CreateDirectory(scratch);
         fixture.Memory.WriteAllText(Path.Combine(scratch, "results.txt"), "T1 reported: built, four tests green.");
         KyberWeaveConfig config = Config();
@@ -536,7 +537,7 @@ public sealed class TaskPromptServiceTests
             new TaskPromptRequest(
                 fixture.Root,
                 TaskId: "T1",
-                PriorResultsPath: $"{TaskPromptService.ScratchFolder}/results.txt"),
+                PriorResultsPath: $"{ScratchLayout.Root}/results.txt"),
             config);
 
         Assert.True(result.Built, result.Refusal);
@@ -553,7 +554,7 @@ public sealed class TaskPromptServiceTests
     {
         using DocFixture fixture = Ready();
         string runWorktree = fixture.FullPath("run-worktree");
-        string results = Path.Combine(runWorktree, TaskPromptService.ScratchFolder, "conductor", "T1-prior-results.md");
+        string results = Path.Combine(runWorktree, ScratchLayout.Root, "conductor", "T1-prior-results.md");
         fixture.Memory!.CreateDirectory(Path.GetDirectoryName(results)!);
         fixture.Memory.WriteAllText(results, "T1 reported: half done.");
         KyberWeaveConfig config = Config();
@@ -569,7 +570,7 @@ public sealed class TaskPromptServiceTests
         Assert.True(named.Built, named.Refusal);
         Assert.Contains("T1 reported: half done.", Between(named.Prompt, "task"), StringComparison.Ordinal);
         Assert.False(unnamed.Built);
-        Assert.Contains(Path.Combine(fixture.Root, TaskPromptService.ScratchFolder), unnamed.Refusal, StringComparison.Ordinal);
+        Assert.Contains(Path.Combine(fixture.Root, ScratchLayout.Root), unnamed.Refusal, StringComparison.Ordinal);
     }
 
     /// <summary>The dispatch's failed-attempt count reaches the worker inside the prompt, not only the request.</summary>
@@ -597,7 +598,7 @@ public sealed class TaskPromptServiceTests
     public void APriorResultsSymlinkOutOfTheScratchAreaIsRefused(string linked)
     {
         using DocFixture fixture = Ready();
-        string scratch = fixture.FullPath(TaskPromptService.ScratchFolder);
+        string scratch = fixture.FullPath(ScratchLayout.Root);
         if (linked == "file")
         {
             string secret = fixture.FullPath("results.txt");
@@ -622,11 +623,11 @@ public sealed class TaskPromptServiceTests
             new TaskPromptRequest(
                 fixture.Root,
                 TaskId: "T1",
-                PriorResultsPath: $"{TaskPromptService.ScratchFolder}/t1/link.md"),
+                PriorResultsPath: $"{ScratchLayout.Root}/t1/link.md"),
             config);
 
         Assert.False(result.Built);
-        Assert.Contains(TaskPromptService.ScratchFolder, result.Refusal, StringComparison.Ordinal);
+        Assert.Contains(ScratchLayout.Root, result.Refusal, StringComparison.Ordinal);
     }
 
     /// <summary>
@@ -648,7 +649,7 @@ public sealed class TaskPromptServiceTests
             config);
 
         Assert.False(result.Built);
-        Assert.Contains(TaskPromptService.ScratchFolder, result.Refusal, StringComparison.Ordinal);
+        Assert.Contains(ScratchLayout.Root, result.Refusal, StringComparison.Ordinal);
     }
 
     [Fact]

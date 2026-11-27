@@ -1,5 +1,6 @@
 using System.Text;
 using System.Text.RegularExpressions;
+using KyberWeave.Core.Agents.Roster;
 using KyberWeave.Core.Squad.Rendering;
 
 namespace KyberWeave.Core.Squad.Deployment;
@@ -162,8 +163,8 @@ public static partial class SquadResponsePreferencesInjector
         else
             return false;
 
-        return string.Equals(value, "conductor", StringComparison.OrdinalIgnoreCase) ||
-               string.Equals(value, "bug-crusher", StringComparison.OrdinalIgnoreCase);
+        return string.Equals(value, AgentRoles.Conductor, StringComparison.OrdinalIgnoreCase) ||
+               string.Equals(value, AgentRoles.BugCrusher, StringComparison.OrdinalIgnoreCase);
     }
 
     private static bool ContainsResponsePreferencesBlock(ReadOnlySpan<byte> content)
@@ -174,8 +175,8 @@ public static partial class SquadResponsePreferencesInjector
 
     private static bool IsCanonicalCarrier(string carrierName)
     {
-        return string.Equals(carrierName, "conductor", StringComparison.Ordinal) ||
-               string.Equals(carrierName, "bug-crusher", StringComparison.Ordinal);
+        return string.Equals(carrierName, AgentRoles.Conductor, StringComparison.Ordinal) ||
+               string.Equals(carrierName, AgentRoles.BugCrusher, StringComparison.Ordinal);
     }
 
     private static string? GetCanonicalCarrierName(string relativePath)
@@ -244,11 +245,11 @@ public static partial class SquadResponsePreferencesInjector
             value = value[8..];
 
         value = value.Trim();
-        if (string.Equals(value, "conductor", StringComparison.OrdinalIgnoreCase))
-            return "conductor";
+        if (string.Equals(value, AgentRoles.Conductor, StringComparison.OrdinalIgnoreCase))
+            return AgentRoles.Conductor;
 
-        if (string.Equals(value, "bug-crusher", StringComparison.OrdinalIgnoreCase))
-            return "bug-crusher";
+        if (string.Equals(value, AgentRoles.BugCrusher, StringComparison.OrdinalIgnoreCase))
+            return AgentRoles.BugCrusher;
 
         return null;
     }

@@ -2,10 +2,10 @@ using System.ComponentModel;
 using System.Diagnostics;
 using System.Globalization;
 
-using KyberWeave.Cli.Commands.Squad.Infrastructure;
 using KyberWeave.Contracts.Docs;
 using KyberWeave.Contracts.Paths;
 using KyberWeave.Contracts.Repositories;
+using KyberWeave.Core.Arbiter;
 using KyberWeave.Core.Configuration;
 using KyberWeave.Contracts.Services;
 using KyberWeave.Core.Processes;
@@ -408,7 +408,7 @@ public sealed class CodeGraphFreshness : ICodeGraphFreshnessGate
         }
 
         return CodeGraphGate.Blocking(
-            "STATUS: TOOL_FAILURE" + Environment.NewLine
+            ReturnStatus.ToolFailureLine + Environment.NewLine
             + "tool: codegraph" + Environment.NewLine
             + "reason: " + detail + Environment.NewLine
             + "fix: " + Remedies(remedy));

@@ -1,3 +1,4 @@
+using KyberWeave.Core;
 using KyberWeave.Contracts.Paths;
 using KyberWeave.Contracts.Repositories;
 using KyberWeave.Core.FileSystem;
@@ -86,7 +87,7 @@ public sealed class FileReviewCycleStore(
     public IReadOnlyList<string> TaskFolders(string scratchpad) =>
         files.DirectoryExists(Resolve(scratchpad))
             ? [.. files.EnumerateDirectories(Resolve(scratchpad))
-                .Where(dir => files.DirectoryExists(Path.Combine(dir, "review")))
+                .Where(dir => files.DirectoryExists(Path.Combine(dir, ScratchLayout.ReviewFolderName)))
                 .Select(dir => Path.GetFileName(dir))
                 .Order(StringComparer.Ordinal)]
             : [];
@@ -104,7 +105,7 @@ public sealed class FileReviewCycleStore(
             folder,
             ReadText(Path.Combine(folder, ReviewCyclePlanning.HeadFile), failOnUnreadable: true),
             ReadText(Path.Combine(folder, ReviewCyclePlanning.IdentityFile)),
-            ReadText(Path.Combine(folder, ReviewCyclePlanning.GatesFile)));
+            ReadText(Path.Combine(folder, ScratchLayout.GatesFileName)));
 
     private string? ReadText(string path, bool failOnUnreadable = false)
     {

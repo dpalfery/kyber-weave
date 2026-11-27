@@ -1,9 +1,7 @@
-using KyberWeave.Cli.Commands.Squad;
 using KyberWeave.Contracts.Host;
 using KyberWeave.Contracts.Paths;
 using KyberWeave.Contracts.Repositories;
 using KyberWeave.Data.Host;
-using KyberWeave.Cli.Update;
 using KyberWeave.Core.Squad.Deployment;
 using KyberWeave.Core.Squad.Model;
 using KyberWeave.Core.Squad.Packaging;
@@ -12,6 +10,8 @@ using KyberWeave.Core.FileSystem;
 using KyberWeave.Data.Squad.Release;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
+using KyberWeave.Data.Update;
+using KyberWeave.Data.Squad.Packaging;
 
 namespace KyberWeave.Data.Squad;
 

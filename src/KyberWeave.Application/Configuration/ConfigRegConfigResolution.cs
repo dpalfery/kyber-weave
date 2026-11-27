@@ -13,12 +13,12 @@ public static class ConfigRegConfigResolution
     /// </summary>
     private static readonly (string Folder, string Property)[] FolderProperties =
     [
-        ("plans", ConfigRegConfig.PlanIndexProperty),
-        ("specs", ConfigRegConfig.SpecificationIndexProperty),
-        ("todo", ConfigRegConfig.TodoIndexProperty),
-        ("adr", "adr-index"),
-        ("rules", ConfigRegConfig.RulesIndexProperty),
-        ("reference", "reference-index")
+        (DocsLayout.Plans, ConfigRegConfig.PlanIndexProperty),
+        (DocsLayout.Specifications, ConfigRegConfig.SpecificationIndexProperty),
+        (DocsLayout.Todos, ConfigRegConfig.TodoIndexProperty),
+        (DocsLayout.Adr, "adr-index"),
+        (DocsLayout.Rules, ConfigRegConfig.RulesIndexProperty),
+        (DocsLayout.Reference, "reference-index")
     ];
 
     /// <summary>

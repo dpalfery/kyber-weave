@@ -1,8 +1,9 @@
 using System.Runtime.InteropServices;
-using KyberWeave.Cli.Update;
 using KyberWeave.Contracts.Repositories;
 using KyberWeave.Tests.Fakes;
 using Xunit;
+using KyberWeave.Application.Update;
+using KyberWeave.Domain.Update;
 
 namespace KyberWeave.Application.Tests.Update;
 

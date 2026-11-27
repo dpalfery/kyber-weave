@@ -1,4 +1,5 @@
 using System.Text.Json;
+using KyberWeave.Arbiter.Hooks;
 using KyberWeave.Contracts.Paths;
 using KyberWeave.Contracts.Repositories;
 using KyberWeave.Core.FileSystem;
@@ -51,8 +52,8 @@ public sealed class DevinImportOverlap(
     [
         (".agents/agents", AgentKind, null),
         (".agents/skills", SkillKind, null),
-        (".claude/agents", AgentKind, "claude"),
-        (".claude/skills", SkillKind, "claude"),
+        (".claude/agents", AgentKind, HarnessRegistry.ClaudeToken),
+        (".claude/skills", SkillKind, HarnessRegistry.ClaudeToken),
         (".github/skills", SkillKind, "copilot"),
         (".windsurf/skills", SkillKind, "windsurf"),
     ];

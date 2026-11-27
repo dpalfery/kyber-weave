@@ -1,8 +1,8 @@
 using System.Text.Json.Nodes;
-using KyberWeave.Cli.Update;
 using KyberWeave.Tests;
 using KyberWeave.Tests.Fakes;
 using Xunit;
+using KyberWeave.Application.Update;
 
 namespace KyberWeave.Application.Tests.Update;
 

@@ -1,9 +1,9 @@
 using KyberWeave.Application;
-using KyberWeave.Cli.Update;
 using KyberWeave.Contracts.Repositories;
 using KyberWeave.Testing.Update;
 using Microsoft.Extensions.DependencyInjection;
 using Xunit;
+using KyberWeave.Data.Update;
 
 namespace KyberWeave.Tests;
 

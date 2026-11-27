@@ -4,7 +4,6 @@ using KyberWeave.Cli.Commands.Squad;
 using KyberWeave.Cli.Commands.Squad.Infrastructure;
 using KyberWeave.Contracts.Repositories;
 using KyberWeave.Application.Squad;
-using KyberWeave.Cli.Update;
 using KyberWeave.Core.Squad.Deployment;
 using KyberWeave.Core.Squad.Model;
 using KyberWeave.Core.Squad.Release;
@@ -13,6 +12,8 @@ using KyberWeave.Data.Hooks;
 using KyberWeave.Data.Host;
 using KyberWeave.Data.Paths;
 using KyberWeave.Data.Squad.Release;
+using KyberWeave.Application.Update;
+using KyberWeave.Application.Squad.Release;
 
 namespace KyberWeave.Tests.Fakes;
 

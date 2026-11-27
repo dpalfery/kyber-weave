@@ -38,7 +38,7 @@ public sealed class ArbiterPlanArgumentTests : IDisposable
 
         ArbiterCommandRun run = _host.Run(() => _host.Command<ArbiterPlanCommand>().Execute(null!, settings));
 
-        Assert.DoesNotContain("KW-ARB-PLAN-002", run.Output, StringComparison.Ordinal);
+        Assert.DoesNotContain("KW-ARB-PARSE-005", run.Output, StringComparison.Ordinal);
         Assert.Contains(Plan, run.Output.Replace('\\', '/'), StringComparison.Ordinal);
     }
 }

@@ -1,9 +1,9 @@
 using System.IO.Compression;
 using System.Security.Cryptography;
-using KyberWeave.Cli.Update;
 using KyberWeave.Contracts.Repositories;
 using KyberWeave.Core.Squad.Release;
 using KyberWeave.Data.Hooks;
+using KyberWeave.Application.Update;
 
 namespace KyberWeave.Tests.Fakes;
 

@@ -35,7 +35,7 @@ public sealed class GateRunService(
     private const string DeadlineKey = "review.council-deadline-seconds";
 
     private static readonly ArbiterRule GateSelectRule =
-        ArbiterConfigDefaults.Product.Rules.Single(rule => rule.Id == "KW-ARB-GATE-001");
+        ArbiterConfigDefaults.Product.Rules.Single(rule => rule.Id == ArbiterRuleIds.GateSelect);
 
     /// <summary>Runs every declared gate and returns the normalized report.</summary>
     /// <remarks>
@@ -156,7 +156,7 @@ public sealed class GateRunService(
             .With("gate.applies-when.paths", gate.AppliesWhen.Paths.ToList(), ArbiterFactLabel.Derived)
             .With("review.changed-paths", changedPaths.ToList(), ArbiterFactLabel.Derived);
 
-        ArbiterOutcome outcome = RuleEngine.EvaluateStep0([GateSelectRule], facts, "gate.select");
+        ArbiterOutcome outcome = RuleEngine.EvaluateStep0([GateSelectRule], facts, ArbiterTriggers.GateSelect);
         if (!string.Equals(outcome.CombinedEffect, RuleEffects.NotApplicable, StringComparison.Ordinal))
             return null;
 

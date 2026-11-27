@@ -1,3 +1,4 @@
+using KyberWeave.Core.FileSystem;
 using KyberWeave.Core.Parsing;
 
 namespace KyberWeave.Core.Configuration;
@@ -11,7 +12,7 @@ internal static class KyberWeaveYamlParser
     public const string DefaultFileName = "kyber-weave.yml";
 
     /// <summary>Repo-root folder holding Kyber-Weave host configuration.</summary>
-    public const string DefaultDirectoryName = ".kyber-weave";
+    public const string DefaultDirectoryName = UserStatePaths.DirectoryName;
 
     public static KyberWeaveYamlDocument Parse(string yaml)
     {

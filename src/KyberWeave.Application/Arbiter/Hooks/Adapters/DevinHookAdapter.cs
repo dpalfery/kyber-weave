@@ -42,7 +42,7 @@ namespace KyberWeave.Arbiter.Hooks.Adapters;
 public sealed class DevinHookAdapter : IHarnessHookAdapter
 {
     /// <summary>The harness token this adapter serves.</summary>
-    public const string Token = "devin";
+    public const string Token = HarnessRegistry.DevinToken;
 
     private const string DispatchTool = "run_subagent";
 

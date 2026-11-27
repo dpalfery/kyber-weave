@@ -39,7 +39,7 @@ namespace KyberWeave.Arbiter.Hooks.Adapters;
 public sealed class ClaudeHookAdapter : IHarnessHookAdapter
 {
     /// <summary>The harness token this adapter serves.</summary>
-    public const string Token = "claude";
+    public const string Token = HarnessRegistry.ClaudeToken;
 
     /// <summary>
     /// The sub-agents documentation the model-override declaration was read from. The aliases are

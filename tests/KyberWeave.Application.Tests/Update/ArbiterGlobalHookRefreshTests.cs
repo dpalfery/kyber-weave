@@ -1,9 +1,10 @@
-using KyberWeave.Cli.Update;
+using KyberWeave.Contracts.Repositories;
 using KyberWeave.Core.Squad.Deployment;
 using KyberWeave.Data.Configuration;
 using KyberWeave.Testing.Squad;
 using KyberWeave.Tests.Fakes;
 using Xunit;
+using KyberWeave.Application.Update;
 
 namespace KyberWeave.Application.Tests.Update;
 

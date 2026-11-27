@@ -45,16 +45,12 @@ public sealed class OpenWorkValidator
     // The task file a specification folder carries is `tasks.yml`; a plan's is
     // `<plan>.tasks.yml` beside the plan. The JSON names an older release wrote are left behind
     // the same way and are still recognised while they are read.
-    private const string FolderTaskFileName = "tasks.yml";
-    private const string LegacyFolderTaskFileName = "tasks.json";
-    private const string PlanTaskFileSuffix = ".tasks.yml";
-    private const string LegacyPlanTaskFileSuffix = ".tasks.json";
     private static readonly string[] TaskFileSearchPatterns = ["*.json", "*.yml"];
 
     private static readonly (string Property, string Kind, string ArchiveFolder, DocType[] WorkTypes)[] Inventories =
     [
-        (ConfigRegConfig.PlanIndexProperty, "Plan", "plans", [DocType.Plan]),
-        (ConfigRegConfig.SpecificationIndexProperty, "Specification", "specs", [DocType.Spec, DocType.Requirements])
+        (ConfigRegConfig.PlanIndexProperty, "Plan", DocsLayout.Plans, [DocType.Plan]),
+        (ConfigRegConfig.SpecificationIndexProperty, "Specification", DocsLayout.Specifications, [DocType.Spec, DocType.Requirements])
     ];
 
     private readonly KyberWeaveConfig _config;
@@ -150,10 +146,10 @@ public sealed class OpenWorkValidator
                 foreach (string file in _files.EnumerateContainedFiles(docsRoot, pattern))
                 {
                     string name = Path.GetFileName(file);
-                    if (!name.Equals(FolderTaskFileName, StringComparison.OrdinalIgnoreCase)
-                        && !name.Equals(LegacyFolderTaskFileName, StringComparison.OrdinalIgnoreCase)
-                        && !name.EndsWith(PlanTaskFileSuffix, StringComparison.OrdinalIgnoreCase)
-                        && !name.EndsWith(LegacyPlanTaskFileSuffix, StringComparison.OrdinalIgnoreCase))
+                    if (!name.Equals(PlanTaskFileRules.SpecTaskFileName, StringComparison.OrdinalIgnoreCase)
+                        && !name.Equals(PlanTaskFileRules.LegacySpecTaskFileName, StringComparison.OrdinalIgnoreCase)
+                        && !name.EndsWith(PlanTaskFileRules.TaskFileSuffix, StringComparison.OrdinalIgnoreCase)
+                        && !name.EndsWith(PlanTaskFileRules.LegacyTaskFileSuffix, StringComparison.OrdinalIgnoreCase))
                     {
                         continue;
                     }

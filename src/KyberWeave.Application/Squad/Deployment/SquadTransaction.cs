@@ -1,3 +1,4 @@
+using KyberWeave.Core.FileSystem;
 using KyberWeave.Contracts.Host;
 using KyberWeave.Contracts.Repositories;
 using System.Diagnostics.CodeAnalysis;
@@ -417,7 +418,7 @@ public sealed class SquadTransaction : ISquadTransaction
             // unexplained. It is the tool's own folder, so an empty one goes. Nothing above it is touched: those
             // folders may predate the transaction and the journal that recorded which ones it made is gone.
             string toolFolder = Path.GetDirectoryName(journalDirectory)!;
-            if (string.Equals(Path.GetFileName(toolFolder), ".kyber-weave", StringComparison.Ordinal))
+            if (string.Equals(Path.GetFileName(toolFolder), UserStatePaths.DirectoryName, StringComparison.Ordinal))
                 DeleteEmptyDirectory(toolFolder);
             return RecoveryOutcome.None;
         }
@@ -453,7 +454,7 @@ public sealed class SquadTransaction : ISquadTransaction
                 // Only the tool's own folder directly above is removed, and only when empty: the folders above it may
                 // predate the transaction, and the journal that recorded which ones it made never existed.
                 string toolFolder = Path.GetDirectoryName(journalDirectory)!;
-                if (string.Equals(Path.GetFileName(toolFolder), ".kyber-weave", StringComparison.Ordinal))
+                if (string.Equals(Path.GetFileName(toolFolder), UserStatePaths.DirectoryName, StringComparison.Ordinal))
                     DeleteEmptyDirectory(toolFolder);
                 recoveryCompleted = true;
                 return RecoveryOutcome.DiscardedUnstarted;

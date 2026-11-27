@@ -8,7 +8,6 @@ using KyberWeave.Core.Docs.Delivery;
 using KyberWeave.Contracts.Services;
 using KyberWeave.Core.Docs.Search;
 using KyberWeave.Core.Docs.Validation;
-using KyberWeave.Cli.Commands.Squad.Infrastructure;
 using Microsoft.Extensions.DependencyInjection;
 
 namespace KyberWeave.Mcp;

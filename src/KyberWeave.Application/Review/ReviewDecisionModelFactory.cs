@@ -72,6 +72,6 @@ public sealed class ReviewDecisionModelFactory(
         IArbiterProvider? client = arbiter.CreateProvider(config, null, ignored, out _);
         return client is null
             ? Create(null, [], null, clock, "the provider could not be built", cachePath)
-            : Create(client, config.Arbiter.Rules, Path.Combine(repositoryRoot, "artifacts", "arbiter"), clock, cachePath: cachePath);
+            : Create(client, config.Arbiter.Rules, ArbiterStateDirectory.ForProject(repositoryRoot), clock, cachePath: cachePath);
     }
 }

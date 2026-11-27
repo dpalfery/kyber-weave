@@ -203,7 +203,7 @@ public sealed class ConductorGuard(
         try
         {
             return runContexts.Resolve(new HookRunContextRequest(
-                "copilot-cli",
+                HarnessRegistry.CopilotCliToken,
                 WorkspaceRoot: null,
                 EventCwd: cwd,
                 ProcessDirectory: process.CurrentDirectory,
@@ -324,7 +324,7 @@ public sealed class ConductorGuard(
         }
 
         if (Path.IsPathRooted(home)
-            && fullPath.StartsWith(Prefix(Path.Combine(home, ".kyber-weave", "runs")), StringComparison.OrdinalIgnoreCase))
+            && fullPath.StartsWith(Prefix(UserStatePaths.RunsDirectory(home)), StringComparison.OrdinalIgnoreCase))
         {
             return !links.HasLinkBelow(Prefix(home), fullPath);
         }

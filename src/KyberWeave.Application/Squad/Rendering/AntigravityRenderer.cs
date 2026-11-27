@@ -1,6 +1,8 @@
 using System.Text;
 using System.Text.Json;
 using System.Text.Json.Nodes;
+using KyberWeave.Arbiter.Hooks;
+using KyberWeave.Core.Agents.Roster;
 using KyberWeave.Core.Configuration;
 using KyberWeave.Core.Squad.Deployment;
 using KyberWeave.Core.Squad.Model;
@@ -111,6 +113,18 @@ public sealed class AntigravityRenderer : SquadHarnessRenderer
         SquadModelPolicy.NotRendered,
         SquadLineBreaks.LineFeedOnly);
 
+    /// <summary>The reasoning effort Antigravity renders for each semantic model profile.</summary>
+    internal static IReadOnlyDictionary<string, string> ReasoningEffortByProfile { get; } =
+        new Dictionary<string, string>(StringComparer.Ordinal)
+        {
+            ["architect"] = "high",
+            ["deep-planning"] = "high",
+            [DeveloperTiers.Hard] = "high",
+            ["fast"] = "low",
+            ["general"] = "medium",
+            ["reviewer"] = "high",
+        };
+
     public AntigravityRenderer()
         : base(HarnessSpec)
     {
@@ -213,7 +227,7 @@ public sealed class AntigravityRenderer : SquadHarnessRenderer
     /// rendered agent and carries its instruction digest.
     /// </summary>
     private static SquadDegradationRecord BuildArbiterDegradation(SquadAgent agent) => new(
-        Target: "antigravity",
+        Target: HarnessRegistry.AntigravityToken,
         CanonicalIdentity: agent.Name,
         OutputIdentity: agent.Name,
         Code: ArbiterNotEnforcedCode,
@@ -238,7 +252,7 @@ public sealed class AntigravityRenderer : SquadHarnessRenderer
         if (!string.IsNullOrWhiteSpace(agent.ModelProfile)
             && modelProfiles.Profiles.TryGetValue(agent.ModelProfile, out SquadModelProfile? modelProfile))
         {
-            modelTier = modelProfile.HarnessModels.TryGetValue("antigravity", out string? antigravityModel)
+            modelTier = modelProfile.HarnessModels.TryGetValue(HarnessRegistry.AntigravityToken, out string? antigravityModel)
                 ? antigravityModel
                 : "inherit";
         }
@@ -508,20 +522,8 @@ public sealed class AntigravityRenderer : SquadHarnessRenderer
         return tools.OrderBy(t => t, StringComparer.Ordinal).ToArray();
     }
 
-    private static string? ResolveReasoningEffort(string modelProfile)
-    {
-        return modelProfile switch
-        {
-            "architect" => "high",
-            "deep-planning" => "high",
-            "reviewer" => "high",
-            "general" => "medium",
-            "fast" => "low",
-            "dev-hard" => "high",
-            "orchestration" => "minimal",
-            _ => null
-        };
-    }
+    private static string? ResolveReasoningEffort(string modelProfile) =>
+        ReasoningEffortByProfile.TryGetValue(modelProfile, out string? effort) ? effort : null;
 
     private static SquadDegradationRecord? BuildPermissionDegradation(
         SquadAgent agent,
@@ -551,7 +553,7 @@ public sealed class AntigravityRenderer : SquadHarnessRenderer
                 : SquadPermissionDecision.Deny;
 
         SquadDegradationRecord? notIsolable = CapabilityDegradations.BuildCapabilityNotIsolable(
-            "antigravity",
+            HarnessRegistry.AntigravityToken,
             agent.Name,
             agent.Name,
             agent.BodyDigest,
@@ -620,7 +622,7 @@ public sealed class AntigravityRenderer : SquadHarnessRenderer
         if (details.Count == 0) return null;
 
         return new SquadDegradationRecord(
-            "antigravity",
+            HarnessRegistry.AntigravityToken,
             agent.Name,
             agent.Name,
             "permission-not-expressible",

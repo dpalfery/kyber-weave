@@ -15,7 +15,7 @@ public sealed class ArbiterTuneService(IArbiterRepositoryLocator locator, IArbit
     /// <summary>The number of confidence bins: one per tenth of the unit interval.</summary>
     public const int HistogramBins = 10;
 
-    private const string DelegateModelTrigger = "delegate.model";
+    private const string DelegateModelTrigger = ArbiterTriggers.DelegateModel;
 
     /// <inheritdoc />
     public ArbiterTuneReport? Score(

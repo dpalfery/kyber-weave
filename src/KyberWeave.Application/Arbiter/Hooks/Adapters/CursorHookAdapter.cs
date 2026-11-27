@@ -33,7 +33,7 @@ namespace KyberWeave.Arbiter.Hooks.Adapters;
 public sealed class CursorHookAdapter : IHarnessHookAdapter
 {
     /// <summary>The harness token this adapter serves.</summary>
-    public const string Token = "cursor";
+    public const string Token = HarnessRegistry.CursorToken;
 
     private readonly IHookDecisionEngine _engine;
 

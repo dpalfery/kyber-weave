@@ -8,6 +8,7 @@ using KyberWeave.Core.Squad.Rendering;
 using KyberWeave.Tests.Fakes;
 using KyberWeave.Tests.FileSystem;
 using Spectre.Console;
+using KyberWeave.Data.Squad.Packaging;
 
 namespace KyberWeave.Testing.Squad;
 

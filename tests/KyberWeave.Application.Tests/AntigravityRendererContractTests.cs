@@ -1,6 +1,7 @@
 using KyberWeave.Testing.Squad;
 using System.Text;
 using System.Text.Json;
+using KyberWeave.Core.Arbiter.ModelTargets;
 using KyberWeave.Core.Squad.Deployment;
 using KyberWeave.Core.Squad.Model;
 using KyberWeave.Core.Squad.Parsing;
@@ -799,6 +800,15 @@ public sealed class AntigravityRendererContractTests : IDisposable
                     $"Agent '{agent.Name}' (profile '{agent.ModelProfile}') reasoning_effort must be '{expectedLevel}', got '{actualLevel}'");
             }
         }
+    }
+
+    [Fact]
+    public void ReasoningEffortTable_CoversEverySemanticProfile()
+    {
+        string[] expected = [.. ArbiterSemanticProfiles.All.Order(StringComparer.Ordinal)];
+        string[] actual = [.. AntigravityRenderer.ReasoningEffortByProfile.Keys.Order(StringComparer.Ordinal)];
+
+        Assert.Equal(expected, actual);
     }
 
     [Fact]

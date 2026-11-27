@@ -3,11 +3,13 @@ using System.Diagnostics;
 using System.Diagnostics.CodeAnalysis;
 using System.Security.Cryptography;
 using System.Text.Json;
+using KyberWeave.Arbiter.Hooks;
 using KyberWeave.Contracts.Paths;
 using KyberWeave.Contracts.Repositories;
 using KyberWeave.Core.Processes;
+using KyberWeave.Domain.Update;
 
-namespace KyberWeave.Cli.Update;
+namespace KyberWeave.Application.Update;
 
 /// <summary>
 /// Resolves a GitHub Release and replaces the running CLI (and sibling MCP) in place.
@@ -992,7 +994,7 @@ internal sealed class SelfUpdater : IDisposable
     /// </summary>
     private void UpdateCapturePlugin(bool windows)
     {
-        UpdateCapturePlugin("opencode", "OpenCode", windows);
+        UpdateCapturePlugin(HarnessRegistry.OpenCodeToken, "OpenCode", windows);
     }
 
     /// <summary>
@@ -1005,7 +1007,7 @@ internal sealed class SelfUpdater : IDisposable
     /// </remarks>
     private void UpdateFactoryCapturePlugin(bool windows)
     {
-        UpdateCapturePlugin("factory", "Factory", windows);
+        UpdateCapturePlugin(HarnessRegistry.FactoryToken, "Factory", windows);
     }
 
     /// <summary>

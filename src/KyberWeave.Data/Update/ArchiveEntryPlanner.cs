@@ -1,6 +1,7 @@
 using KyberWeave.Contracts.Paths;
+using KyberWeave.Domain.Update;
 
-namespace KyberWeave.Cli.Update;
+namespace KyberWeave.Data.Update;
 
 /// <summary>Decides where a release archive's entry may be written, and refuses one that would land outside the destination.</summary>
 internal sealed class ArchiveEntryPlanner(IPathResolver paths)

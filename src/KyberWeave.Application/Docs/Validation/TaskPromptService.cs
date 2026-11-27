@@ -1,8 +1,10 @@
+using KyberWeave.Core;
 using System.Globalization;
 using System.Text;
 using KyberWeave.Arbiter.Hooks;
 using KyberWeave.Contracts.Repositories;
 using KyberWeave.Contracts.Services;
+using KyberWeave.Core.Agents.Roster;
 using KyberWeave.Core.Arbiter;
 using KyberWeave.Core.Configuration;
 using KyberWeave.Core.Docs.KwSkills;
@@ -39,9 +41,6 @@ public sealed class TaskPromptService(
     /// <summary>What the last part says when the budget cut nothing.</summary>
     public const string NothingLeftOut = "Nothing was left out.";
 
-    /// <summary>The folder, relative to the repository root, a fallback harness's prompt file is written under.</summary>
-    public const string ScratchFolder = ".agent_scratchpad";
-
     /// <summary>The prompt file's name inside the task's scratch folder.</summary>
     public const string PromptFileName = "prompt.md";
 
@@ -59,9 +58,7 @@ public sealed class TaskPromptService(
     /// <param name="difficulty">The rating in use: <c>easy</c>, <c>medium</c> or <c>hard</c>, or null when none is recorded.</param>
     /// <param name="failedAttempts">How many attempts at this task already failed.</param>
     public static string DeveloperTier(string? difficulty, int failedAttempts) =>
-        PlanTaskAgentPick.DeveloperTier(difficulty, failedAttempts);
-
-    private static IReadOnlyList<string> DeveloperTiers => PlanTaskAgentPick.DeveloperTiers;
+        DeveloperTiers.For(difficulty, failedAttempts);
 
     /// <summary>
     /// The agent a tiered-roster dispatch goes to. The developer kind, which a task file written before the tier
@@ -85,10 +82,10 @@ public sealed class TaskPromptService(
 
         int tier = TierIndexOf(DeveloperTier(entry?.Difficulty, failedAttempts));
         if ((requested ?? recorded) is not { } named)
-            return entry is null || technology is not null ? DeveloperTiers[tier] : null;
+            return entry is null || technology is not null ? DeveloperTiers.All[tier] : null;
 
-        if (string.Equals(named, PlanTaskAgentPick.DeveloperKind, StringComparison.Ordinal))
-            return DeveloperTiers[tier];
+        if (string.Equals(named, DeveloperTiers.Medium, StringComparison.Ordinal))
+            return DeveloperTiers.All[tier];
 
         if (Raised(named, tier) is { } raised)
             return raised;
@@ -101,14 +98,14 @@ public sealed class TaskPromptService(
             return named;
         }
 
-        return entry is null || technology is not null ? DeveloperTiers[tier] : null;
+        return entry is null || technology is not null ? DeveloperTiers.All[tier] : null;
     }
 
     /// <summary>The higher of a named tier and the computed one, or null when the name is not a developer tier.</summary>
     private static string? Raised(string name, int computed)
     {
         int named = TierIndexOf(name);
-        return named < 0 ? null : DeveloperTiers[Math.Max(named, computed)];
+        return named < 0 ? null : DeveloperTiers.All[Math.Max(named, computed)];
     }
 
     /// <summary>
@@ -124,7 +121,7 @@ public sealed class TaskPromptService(
     {
         if (named is null || technology is null
             || !PlanTaskAgentPick.RemovedAgents.TryGetValue(named, out string? replacement)
-            || !string.Equals(replacement, PlanTaskAgentPick.DeveloperKind, StringComparison.Ordinal))
+            || !string.Equals(replacement, DeveloperTiers.Medium, StringComparison.Ordinal))
         {
             return null;
         }
@@ -137,9 +134,9 @@ public sealed class TaskPromptService(
     /// <summary>The tier's position on the ladder, or -1 when the name is not a developer tier.</summary>
     private static int TierIndexOf(string name)
     {
-        for (int index = 0; index < DeveloperTiers.Count; index++)
+        for (int index = 0; index < DeveloperTiers.All.Count; index++)
         {
-            if (string.Equals(DeveloperTiers[index], name, StringComparison.Ordinal))
+            if (string.Equals(DeveloperTiers.All[index], name, StringComparison.Ordinal))
                 return index;
         }
 
@@ -166,8 +163,8 @@ public sealed class TaskPromptService(
                 if (active.Count != 1)
                 {
                     return TaskPromptResult.NotBuilt(active.Count == 0
-                        ? "No prompt: no plan is Ready or In progress in this checkout. Approve a plan, or name the plan."
-                        : $"No prompt: {active.Count} plans are Ready or In progress ({string.Join(", ", active)}). Name one plan.");
+                        ? $"No prompt: no plan is {PlanStatus.ActiveWords} in this checkout. Approve a plan, or name the plan."
+                        : $"No prompt: {active.Count} plans are {PlanStatus.ActiveWords} ({string.Join(", ", active)}). Name one plan.");
                 }
 
                 plan = active[0];
@@ -345,10 +342,10 @@ public sealed class TaskPromptService(
     {
         IEnumerable<string> folders = new[] { root }
             .Concat(otherRoots ?? [])
-            .Select(folder => Path.Combine(folder, ScratchFolder))
+            .Select(folder => Path.Combine(folder, ScratchLayout.Root))
             .Distinct(StringComparer.Ordinal);
         return $"Write it under {string.Join(" or ", folders.Select(folder => $"'{folder}'"))}, and name it by that " +
-            $"absolute path or relative to the checkout (for example {ScratchFolder}/T1/prior-results.md), or leave it out.";
+            $"absolute path or relative to the checkout (for example {ScratchLayout.PriorResults("T1")}), or leave it out.";
     }
 
     /// <summary>
@@ -374,7 +371,7 @@ public sealed class TaskPromptService(
         absolute = resolved;
         return new[] { root }.Concat(otherRoots ?? []).Any(folder => IsInside(
             resolved,
-            Path.TrimEndingDirectorySeparator(RealPath(files, Path.GetFullPath(ScratchFolder, folder)))));
+            Path.TrimEndingDirectorySeparator(RealPath(files, Path.GetFullPath(ScratchLayout.Root, folder)))));
     }
 
     private static bool IsInside(string absolute, string scratch) =>
@@ -428,12 +425,12 @@ public sealed class TaskPromptService(
         if (slug.Length == 0)
         {
             return TaskPromptResult.NotBuilt(
-                $"No prompt: '{taskId}' does not make a task folder under {ScratchFolder}. Dispatch a task id with a " +
+                $"No prompt: '{taskId}' does not make a task folder under {ScratchLayout.Root}. Dispatch a task id with a " +
                 "letter or digit in it.",
                 TaskPromptRefusalKind.Finding);
         }
 
-        string relative = $"{ScratchFolder}/{slug}/{PromptFileName}";
+        string relative = $"{ScratchLayout.Root}/{slug}/{PromptFileName}";
         string path = Path.Combine(root, relative.Replace('/', Path.DirectorySeparatorChar));
         try
         {
@@ -453,7 +450,7 @@ public sealed class TaskPromptService(
             // is a positive finding about the dispatch: the worker would otherwise start with only the short line.
             return TaskPromptResult.NotBuilt(
                 $"No prompt: the prompt file '{relative}' could not be written ({ex.Message}). Check that " +
-                $"{ScratchFolder} is writable, then build the prompt again.",
+                $"{ScratchLayout.Root} is writable, then build the prompt again.",
                 TaskPromptRefusalKind.Finding);
         }
     }

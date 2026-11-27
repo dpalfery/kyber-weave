@@ -1,3 +1,4 @@
+using KyberWeave.Core;
 using System.ComponentModel;
 using System.Diagnostics;
 using System.Globalization;
@@ -10,7 +11,6 @@ using KyberWeave.Core.Configuration;
 using KyberWeave.Core.Diagnostics;
 using KyberWeave.Core.Docs.Closeout;
 using KyberWeave.Core.Processes;
-using KyberWeave.Cli.Commands.Squad.Infrastructure;
 using KyberWeave.Core.Review;
 using KyberWeave.Core.RunStart;
 using KyberWeave.Core.FileSystem;
@@ -57,8 +57,6 @@ public sealed partial class RunDelivery
     public const int MaxSummaryLength = 1000;
 
     private const string Remote = "origin";
-    private const string ScratchFolder = ".agent_scratchpad";
-    private const string TaskGateFile = "task-gate.json";
 
     /// <summary>
     /// The delivery agents a run may dispatch for the step that opens the pull request. Both hold the
@@ -187,7 +185,7 @@ public sealed partial class RunDelivery
 
         (string plansFolder, string archiveFolder) = PlanFolders();
         string todoFolder = TodoFolder();
-        List<string> dirty = [.. ChangedPaths(status.StandardOutput).Where(path => !IsUnder(path, ScratchFolder))];
+        List<string> dirty = [.. ChangedPaths(status.StandardOutput).Where(path => !IsUnder(path, ScratchLayout.Root))];
         List<string> pendingPlanFiles = [.. dirty.Where(path => IsUnder(path, plansFolder) || IsUnder(path, archiveFolder))];
         List<string> pendingTodoFiles = [.. dirty.Where(path => IsUnder(path, todoFolder))];
         List<string> foreign = [.. dirty.Except(pendingPlanFiles, StringComparer.Ordinal).Except(pendingTodoFiles, StringComparer.Ordinal)];
@@ -550,7 +548,7 @@ public sealed partial class RunDelivery
     /// </summary>
     private List<GateReport> TaskGateReports(string mergeBase, DiagnosticReport report)
     {
-        string scratch = Path.Combine(_repoRoot, ScratchFolder);
+        string scratch = Path.Combine(_repoRoot, ScratchLayout.Root);
         if (!_store.DirectoryExists(scratch))
             return [];
 
@@ -558,7 +556,7 @@ public sealed partial class RunDelivery
         List<GateReport> reports = [];
         foreach (string folder in _store.EnumerateDirectories(scratch))
         {
-            string file = Path.Combine(folder, TaskGateFile);
+            string file = Path.Combine(folder, ScratchLayout.TaskGateFileName);
             if (!_store.FileExists(file) || Path.GetFileName(folder).EndsWith("-red", StringComparison.OrdinalIgnoreCase))
                 continue;
             try
@@ -603,7 +601,7 @@ public sealed partial class RunDelivery
     /// <summary>The last review cycle that belongs to this change: this branch, this base, a head HEAD descends from.</summary>
     private ReviewEvidence? Review(string branch, string mergeBase, DiagnosticReport report)
     {
-        string scratch = Path.Combine(_repoRoot, ScratchFolder);
+        string scratch = Path.Combine(_repoRoot, ScratchLayout.Root);
         if (!_store.DirectoryExists(scratch))
             return null;
 
@@ -612,7 +610,7 @@ public sealed partial class RunDelivery
         List<ReviewCycleRecord> belonging = [];
         foreach (string folder in _store.EnumerateDirectories(scratch))
         {
-            IReadOnlyList<ReviewCycleRecord> finished = _cycles.ReadFinished(Path.Combine(folder, "review"));
+            IReadOnlyList<ReviewCycleRecord> finished = _cycles.ReadFinished(Path.Combine(folder, ScratchLayout.ReviewFolderName));
             belonging.AddRange(ReviewCyclePlanning.Belonging(finished, current,
                 commit => Git("merge-base", "--is-ancestor", commit, "HEAD").ExitCode == 0).Valid);
         }
@@ -711,7 +709,7 @@ public sealed partial class RunDelivery
         string index = _files.PlanIndexPath() ?? string.Empty;
         string plans = Path.GetDirectoryName(index)?.Replace('\\', '/') ?? string.Empty;
         string root = _files.DocsRootOf(index);
-        string archive = string.Join('/', new[] { root, OntologyConfig.ArchiveSegment, "plans" }.Where(part => part.Length > 0));
+        string archive = string.Join('/', new[] { root, OntologyConfig.ArchiveSegment, DocsLayout.Plans }.Where(part => part.Length > 0));
         return (plans, archive);
     }
 

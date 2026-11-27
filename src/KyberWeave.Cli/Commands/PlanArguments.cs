@@ -4,6 +4,7 @@ using KyberWeave.Contracts.Paths;
 using KyberWeave.Contracts.Repositories;
 using KyberWeave.Core.Configuration;
 using KyberWeave.Core.Diagnostics;
+using KyberWeave.Core.Docs;
 using KyberWeave.Core.Docs.Closeout;
 using Spectre.Console;
 
@@ -25,9 +26,6 @@ public sealed class PlanArguments(
     IProcessEnvironment environment,
     IAnsiConsole console)
 {
-    /// <summary>The argument matches more than one active plan or specification.</summary>
-    public const string Ambiguous = "KW-DOC-PLANREF-001";
-
     /// <summary>
     /// The repository an argument belongs to: the one holding the file when the argument names one, otherwise the
     /// repository the command was run in. Read before the configuration, because the configuration decides where plans live.
@@ -87,7 +85,7 @@ public sealed class PlanArguments(
         if (resolution.Ambiguous)
         {
             report.Add(new Diagnostic(
-                Ambiguous,
+                PlanReferenceRuleIds.Ambiguous,
                 Severity.Error,
                 $"'{argument}' matches {resolution.Candidates.Count} plans: {string.Join(", ", resolution.Candidates)}.",
                 subject,

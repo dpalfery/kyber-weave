@@ -17,19 +17,19 @@ public static class CouncilSeating
 {
     /// <summary>The lenses whose input includes a gate's output, so they start after the gates finish.</summary>
     public static IReadOnlyList<string> AfterGates { get; } =
-        ["duplicate-implementation", "static-analysis-triage", "test-adequacy"];
+        [ReviewLensCatalogue.DuplicateImplementation, ReviewLensCatalogue.StaticAnalysisTriage, ReviewLensCatalogue.TestAdequacy];
 
     /// <summary>The lenses <see cref="GateProvenSkips"/> decides once the gates finish.</summary>
-    public static IReadOnlyList<string> GateProvenLenses { get; } = ["duplicate-implementation", "static-analysis-triage"];
+    public static IReadOnlyList<string> GateProvenLenses { get; } = [ReviewLensCatalogue.DuplicateImplementation, ReviewLensCatalogue.StaticAnalysisTriage];
 
     /// <summary>The lenses that run on <c>review-triage</c>; every other lens runs on <c>review-lens</c>.</summary>
     public static IReadOnlyList<string> TriageLenses { get; } =
-        ["dependency-supply-chain", "duplicate-implementation", "static-analysis-triage"];
+        [ReviewLensCatalogue.DependencySupplyChain, ReviewLensCatalogue.DuplicateImplementation, ReviewLensCatalogue.StaticAnalysisTriage];
 
     private const string DocsOnlyReason = "the change is documentation only (every changed file is *.md)";
 
     /// <summary>The lenses whose Applicability section says they skip a documentation-only change.</summary>
-    private static readonly string[] SkipWhenDocsOnly = ["correctness", "test-adequacy"];
+    private static readonly string[] SkipWhenDocsOnly = [ReviewLensCatalogue.Correctness, ReviewLensCatalogue.TestAdequacy];
 
     /// <summary>
     ///     Lenses whose Applicability names the kinds of file they need: each is seated only when a changed path matches
@@ -39,7 +39,7 @@ public static class CouncilSeating
     private static readonly IReadOnlyDictionary<string, (string Needs, string[] Patterns)> SeatedOnlyWhenAnyMatch =
         new Dictionary<string, (string, string[])>(StringComparer.Ordinal)
         {
-            ["dependency-supply-chain"] = (
+            [ReviewLensCatalogue.DependencySupplyChain] = (
                 "a dependency manifest, lock file, container image or build input",
                 [
                     "**/package.json", "**/package-lock.json", "**/npm-shrinkwrap.json", "**/yarn.lock", "**/pnpm-lock.yaml",
@@ -54,7 +54,7 @@ public static class CouncilSeating
                     "**/Containerfile*", "**/docker-compose*", "**/compose.y*ml", "**/apm.yml", "**/*.sh", "**/*.ps1",
                     ".github/**",
                 ]),
-            ["infra-workflow"] = (
+            [ReviewLensCatalogue.InfraWorkflow] = (
                 "infrastructure, a CI or deployment workflow, a database migration or cloud resource configuration",
                 [
                     ".github/**", "**/.gitlab-ci.yml", "**/azure-pipelines*", "**/.azure-pipelines/**", "**/.azuredevops/**",
@@ -65,7 +65,7 @@ public static class CouncilSeating
                     "**/*kubernetes*/**", "**/*helm*/**", "**/charts/**", "**/infra/**", "**/*-infra/**", "**/*.Infra/**", "**/iac/**", "**/*deploy*/**",
                     "**/*terraform*/**", "**/*pulumi*/**", "**/*bicep*/**", "**/*ansible*/**", "**/*cloudformation*/**",
                 ]),
-            ["test-infrastructure"] = (
+            [ReviewLensCatalogue.TestInfrastructure] = (
                 "test support code in a test project or test directory",
                 [
                     "**/*test*/**", "**/*Test*/**", "**/*spec*/**", "**/*.test.*", "**/*.spec.*", "**/*_test.*",
@@ -129,8 +129,8 @@ public static class CouncilSeating
             StringComparer.Ordinal);
         if (fixPaths is null || fixPaths.Any(path => !PathGlob.IsMatch("**/*.md", path)))
         {
-            seated.Add("correctness");
-            seated.Add("test-adequacy");
+            seated.Add(ReviewLensCatalogue.Correctness);
+            seated.Add(ReviewLensCatalogue.TestAdequacy);
         }
 
         string[] ordered = [.. ReviewLensCatalogue.Names.Where(seated.Contains)];
@@ -155,13 +155,13 @@ public static class CouncilSeating
         Dictionary<string, string> skips = new(StringComparer.Ordinal);
         GateResult[] ran = [.. gates.Gates.Where(gate => !gate.NotApplicable)];
         if (ran.Length > 0 && ran.All(gate => gate.Passed))
-            skips["static-analysis-triage"] = $"gates {string.Join(", ", ran.Select(gate => gate.Id))} passed";
+            skips[ReviewLensCatalogue.StaticAnalysisTriage] = $"gates {string.Join(", ", ran.Select(gate => gate.Id))} passed";
 
         if (duplicates is { IndexAvailable: true } && changed is not null)
         {
             HashSet<string> paths = new(changed.Select(Normalize), StringComparer.Ordinal);
             if (!duplicates.Clusters.Any(cluster => cluster.Members.Any(member => paths.Contains(Normalize(member.File)))))
-                skips["duplicate-implementation"] = "no duplicate cluster names a changed file";
+                skips[ReviewLensCatalogue.DuplicateImplementation] = "no duplicate cluster names a changed file";
         }
 
         return skips;
@@ -196,7 +196,7 @@ public static class CouncilSeating
             : $"- Review guidance: {context.GuidancePath}. Apply its ground rules and what-not-to-flag, and the sections its lens and technology maps name for your lens and the changed files.");
         text.AppendLine(PlanLine(context));
         AppendSeverityOverrides(text, context, lens);
-        if (string.Equals(lens, "duplicate-implementation", StringComparison.Ordinal) && context.DuplicatesPath is not null)
+        if (string.Equals(lens, ReviewLensCatalogue.DuplicateImplementation, StringComparison.Ordinal) && context.DuplicatesPath is not null)
             text.AppendLine(CultureInfo.InvariantCulture, $"- Duplicates report: {context.DuplicatesPath}");
         text.AppendLine();
         text.AppendLine("## Lens charter");

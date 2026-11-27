@@ -1,4 +1,4 @@
-namespace KyberWeave.Cli.Update;
+namespace KyberWeave.Domain.Update;
 
 /// <summary>Snapshot of the running binary — where it lives, what it reports, which RID to fetch.</summary>
 public sealed record SelfUpdateHost(

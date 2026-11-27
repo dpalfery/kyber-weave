@@ -1,6 +1,7 @@
 using System.Globalization;
 using System.Text;
 using System.Text.RegularExpressions;
+using KyberWeave.Arbiter.Hooks;
 using KyberWeave.Core.Configuration;
 using KyberWeave.Core.Squad.Deployment;
 using KyberWeave.Core.Squad.Model;
@@ -481,7 +482,7 @@ public sealed class ZCodeRenderer : SquadHarnessRenderer
 
         rewritten = true;
         degradations.Add(new SquadDegradationRecord(
-            "zcode",
+            HarnessRegistry.ZCodeToken,
             agent.Name,
             agent.Name,
             "resource-links-rewritten",
@@ -679,7 +680,7 @@ public sealed class ZCodeRenderer : SquadHarnessRenderer
         if (narrowed.Count > 0)
         {
             yield return new SquadDegradationRecord(
-                "zcode",
+                HarnessRegistry.ZCodeToken,
                 agent.Name,
                 agent.Name,
                 "safety-narrowed",
@@ -725,7 +726,7 @@ public sealed class ZCodeRenderer : SquadHarnessRenderer
         if (notExpressible.Count > 0)
         {
             yield return new SquadDegradationRecord(
-                "zcode",
+                HarnessRegistry.ZCodeToken,
                 agent.Name,
                 agent.Name,
                 "permission-not-expressible",
@@ -743,7 +744,7 @@ public sealed class ZCodeRenderer : SquadHarnessRenderer
                 : SquadPermissionDecision.Deny;
 
         SquadDegradationRecord? notIsolable = CapabilityDegradations.BuildCapabilityNotIsolable(
-            "zcode",
+            HarnessRegistry.ZCodeToken,
             agent.Name,
             agent.Name,
             agent.BodyDigest,
@@ -775,7 +776,7 @@ public sealed class ZCodeRenderer : SquadHarnessRenderer
               "rather than as a skill";
 
         yield return new SquadDegradationRecord(
-            "zcode",
+            HarnessRegistry.ZCodeToken,
             agent.Name,
             agent.Name,
             "role-skill-fallback",
@@ -794,7 +795,7 @@ public sealed class ZCodeRenderer : SquadHarnessRenderer
                 agent.CapabilityProfile, capabilityProfiles, mcpServerNames);
 
         yield return new SquadDegradationRecord(
-            "zcode",
+            HarnessRegistry.ZCodeToken,
             agent.Name,
             agent.Name,
             "permission-not-expressible",

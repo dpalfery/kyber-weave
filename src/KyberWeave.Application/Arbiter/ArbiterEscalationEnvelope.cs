@@ -1,4 +1,5 @@
 using System.Globalization;
+using KyberWeave.Core.Agents.Roster;
 using KyberWeave.Core.RunStart;
 
 namespace KyberWeave.Core.Arbiter;
@@ -104,7 +105,7 @@ public sealed record ArbiterEscalationEnvelope(
         List<ArbiterEnvelopeEntry> ordered = [.. Entries.OrderBy(entry => entry.RuleId, StringComparer.Ordinal)];
         List<string> lines =
         [
-            "STATUS: ARBITER_ESCALATION",
+            ReturnStatus.EscalationLine,
             $"TRIGGER: {Trigger}",
             $"CALLER: {Caller}",
         ];
@@ -180,9 +181,8 @@ public sealed record ArbiterEscalationEnvelope(
         if (family == ArbiterTriggerFamily.Investigate)
         {
             if (caller is not null
-                && (string.Equals(caller, "architect", StringComparison.OrdinalIgnoreCase)
-                    || string.Equals(caller, "product-owner", StringComparison.OrdinalIgnoreCase)
-                    || string.Equals(caller, "code-reviewer", StringComparison.OrdinalIgnoreCase)))
+                && (AgentRoles.IsPlanner(caller, StringComparison.OrdinalIgnoreCase)
+                    || AgentRoles.IsReviewer(caller, StringComparison.OrdinalIgnoreCase)))
             {
                 return "report this in your own result; do not retry this dispatch unchanged.";
             }
@@ -210,7 +210,7 @@ public sealed record ArbiterSkipNote(
     /// <summary>Renders the note byte for byte.</summary>
     public string Render() => string.Join("\n",
     [
-        "STATUS: ARBITER_SKIP",
+        ReturnStatus.SkipLine,
         $"LENS: {Lens}",
         $"RULES: {string.Join(", ", RuleIds.OrderBy(id => id, StringComparer.Ordinal))}",
         $"ANSWER: {Answer.Render()}",
@@ -232,7 +232,7 @@ public sealed record ArbiterVerifiedNote(
     /// <summary>Renders the note byte for byte.</summary>
     public string Render() => string.Join("\n",
     [
-        "STATUS: ARBITER_VERIFIED",
+        ReturnStatus.VerifiedLine,
         $"REFUTE: {Refute}",
         $"RULES: {string.Join(", ", RuleIds.OrderBy(id => id, StringComparer.Ordinal))}",
         $"ANSWER: {Answer.Render()}",
@@ -254,7 +254,7 @@ public sealed record ArbiterAnnotationNote(
     /// <summary>Renders the note byte for byte.</summary>
     public string Render() => string.Join("\n",
     [
-        "STATUS: ARBITER_ANNOTATION",
+        ReturnStatus.AnnotationLine,
         $"FINDING: {Finding}",
         $"RULES: {string.Join(", ", RuleIds.OrderBy(id => id, StringComparer.Ordinal))}",
         $"ANSWER: {Answer.Render()}",

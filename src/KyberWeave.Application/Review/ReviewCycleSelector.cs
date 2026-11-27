@@ -15,8 +15,6 @@ namespace KyberWeave.Application.Review;
 /// <param name="files">Reads the prior cycle's findings document.</param>
 public sealed class ReviewCycleSelector(IReviewCycleStore cycles, IGitChangeReader git, IFileSystem files) : IReviewCycleSelector
 {
-    private const string InvalidInput = "KW-REVIEW-028";
-
     /// <inheritdoc />
     public ReviewTaskChoice ChooseTask(string tree, string scratchpad, string? given)
     {
@@ -28,7 +26,7 @@ public sealed class ReviewCycleSelector(IReviewCycleStore cycles, IGitChangeRead
             string task = TaskSlug.FindFolder(cycles.TaskFolders(scratchpad), given) ?? TaskSlug.Normalise(given);
             return task.Length > 0
                 ? new ReviewTaskChoice(task, null, null)
-                : new ReviewTaskChoice(string.Empty, null, $"{InvalidInput}: --task '{given}' has no letters or digits to name a folder with.");
+                : new ReviewTaskChoice(string.Empty, null, $"{ReviewDiagnosticCodes.InvalidInput}: --task '{given}' has no letters or digits to name a folder with.");
         }
 
         IReadOnlyList<string> folders = cycles.TaskFolders(scratchpad);
@@ -44,7 +42,7 @@ public sealed class ReviewCycleSelector(IReviewCycleStore cycles, IGitChangeRead
         if (folders.Count == 0 && branch.Length > 0)
             return new ReviewTaskChoice(branch, $"task: {branch} (no review folder yet; named for the current branch)", null);
 
-        string error = $"{InvalidInput}: --task is needed: " + (folders.Count == 0
+        string error = $"{ReviewDiagnosticCodes.InvalidInput}: --task is needed: " + (folders.Count == 0
             ? "there is no review folder and no current branch."
             : $"several review folders exist ({string.Join(", ", folders)}).");
         return new ReviewTaskChoice(string.Empty, null, error);

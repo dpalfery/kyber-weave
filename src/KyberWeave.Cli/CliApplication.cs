@@ -1,5 +1,6 @@
 using System.Reflection;
 using KyberWeave.Contracts.Repositories;
+using KyberWeave.Core.Agents.Roster;
 using KyberWeave.Core.Docs.Mcp;
 using Microsoft.Extensions.DependencyInjection.Extensions;
 using KyberWeave.Cli.Commands.Agents;
@@ -158,7 +159,7 @@ internal static class CliApplication
                     .WithDescription(
                         "Print one task's packet for the worker dispatched on it: the plan is found from the repository, " +
                         "the task file is checked against it, and {worktree} is filled in (KW-DOC-TASKS-CLI-*).")
-                    .WithExample("docs", "packet", "T1", "--agent", "dev-medium")
+                    .WithExample("docs", "packet", "T1", "--agent", DeveloperTiers.Medium)
                     .WithExample("docs", "packet", "T2", "--prior-results", ".agent_scratchpad/T2/prior-results.md");
 
                 docs.AddCommand<DocsCloseoutCommand>("closeout")

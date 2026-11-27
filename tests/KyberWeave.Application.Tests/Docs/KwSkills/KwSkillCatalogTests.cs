@@ -1,6 +1,7 @@
 using KyberWeave.Contracts.Services;
 using KyberWeave.Core.Configuration;
 using KyberWeave.Core.Docs.KwSkills;
+using KyberWeave.Core.Docs.Validation;
 using KyberWeave.Tests.Fakes;
 using KyberWeave.Tests.FileSystem;
 using Xunit;
@@ -107,6 +108,19 @@ public sealed class KwSkillCatalogTests
         KwSkillProblem problem = Assert.Single(list.Problems);
         Assert.Contains("csharp.skills.yml", problem.Path, StringComparison.Ordinal);
         Assert.Contains("KW-DOC-SKILL-001", problem.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void AListedNameThatIsNoSkillReportsTheUnknownNameRule()
+    {
+        Put("docs/standards/csharp/csharp.skills.yml", "- go-gates\n");
+
+        KwSkillList list = _catalog.SkillsFor("csharp", null);
+
+        Assert.Empty(list.Entries);
+        KwSkillProblem problem = Assert.Single(list.Problems);
+        Assert.Contains(DocSpecValidator.SkillListUnknownName, problem.Message, StringComparison.Ordinal);
+        Assert.DoesNotContain(DocSpecValidator.SkillListMalformed, problem.Message, StringComparison.Ordinal);
     }
 
     [Fact]

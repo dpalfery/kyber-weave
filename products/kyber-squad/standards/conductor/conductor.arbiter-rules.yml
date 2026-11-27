@@ -205,7 +205,7 @@ rules:
     decide:
       - when: { not: { fact: delegation.target, in: roster.caller.delegates-to } }
         answer: not-applicable
-      - when: { not: { fact: delegation.target-profile, in: [worker, documentation, architect, product-planning] } }
+      - when: { not: { fact: delegation.target-profile, in: [worker, documentation, architect, architect-copilot, architect-devin, product-planning, product-planning-devin, root-fixer] } }
         answer: not-applicable
       - when: { fact: delegation.markers, equals: RUN-START }
         answer: not-applicable

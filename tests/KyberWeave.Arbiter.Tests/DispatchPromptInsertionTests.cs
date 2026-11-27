@@ -321,21 +321,18 @@ public sealed class DispatchPromptInsertionTests
         }.ToJsonString(),
     };
 
-    /// <summary>Every harness whose dispatch hook rewrites the call, as the delivery table records it.</summary>
-    public static TheoryData<string> RewriteHarnesses => new()
+    /// <summary>Every harness whose dispatch hook rewrites the call, as the registry records it.</summary>
+    public static TheoryData<string> RewriteHarnesses
     {
-        "claude",
-        "copilot-vscode",
-        "copilot-cli",
-        "codex",
-        "cursor",
-        "opencode",
-        "kilo",
-        "pi",
-        "antigravity",
-        "factory",
-        "devin",
-    };
+        get
+        {
+            TheoryData<string> harnesses = new();
+            foreach (string token in HarnessRegistry.RewriteTokens.Order(StringComparer.Ordinal))
+                harnesses.Add(token);
+
+            return harnesses;
+        }
+    }
 
     /// <summary>
     /// Every served harness has a path to the prompt: one listed as rewriting must insert it in its adapter, and one
@@ -361,6 +358,29 @@ public sealed class DispatchPromptInsertionTests
             string stdout = adapter!.Handle(json(payload), payload, "conductor", EnabledConfig(), Context(new ScriptedPrompts()));
 
             Assert.Equal(expected, TryInsertedPrompt(token, stdout));
+        }
+    }
+
+    [Fact]
+    public void TheAdapterRosterAndTheRegistryAgreeInBothDirections()
+    {
+        HarnessAdapterRegistry registry = ArbiterTestServices.Registry(new RecordingEngine());
+
+        foreach (HarnessDescriptor row in HarnessRegistry.Rows)
+        {
+            Assert.Equal(row.ServedByHookAdapter, registry.Tokens.Contains(row.Token));
+        }
+
+        foreach (string token in registry.Tokens)
+        {
+            Assert.NotNull(HarnessRegistry.ByToken(token));
+        }
+
+        foreach (string token in DispatchPromptInsertion.RewriteHarnessTokens)
+        {
+            Assert.True(
+                HarnessRegistry.ByToken(token)!.ServedByHookAdapter,
+                $"Harness '{token}' rewrites the dispatch, but the registry says no adapter serves it.");
         }
     }
 

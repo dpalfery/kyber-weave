@@ -1,68 +1,20 @@
+using KyberWeave.Arbiter.Hooks;
+
 namespace KyberWeave.Core.Squad.Deployment;
 
 /// <summary>Canonical target tokens, aliases, and parsing for Kyber-Squad.</summary>
 public static class SquadTargetCatalog
 {
     private static readonly IReadOnlyList<SquadTarget> ApprovedTargets =
-        Array.AsReadOnly(
-        [
-            SquadTarget.Codex,
-            SquadTarget.Cursor,
-            SquadTarget.Claude,
-            SquadTarget.Copilot,
-            SquadTarget.OpenCode,
-            SquadTarget.Kilo,
-            SquadTarget.Antigravity,
-            SquadTarget.Warp,
-            SquadTarget.Factory,
-            SquadTarget.Pi,
-            SquadTarget.ZCode,
-            SquadTarget.Devin,
-            SquadTarget.CommandCode
-        ]);
+        Array.AsReadOnly(HarnessRegistry.SquadTargets.ToArray());
 
-    private static readonly IReadOnlyDictionary<string, SquadTarget> TargetsByToken =
-        new Dictionary<string, SquadTarget>(StringComparer.OrdinalIgnoreCase)
-        {
-            ["codex"] = SquadTarget.Codex,
-            ["cursor"] = SquadTarget.Cursor,
-            ["claude"] = SquadTarget.Claude,
-            ["copilot"] = SquadTarget.Copilot,
-            ["github-copilot"] = SquadTarget.Copilot,
-            ["opencode"] = SquadTarget.OpenCode,
-            ["kilo"] = SquadTarget.Kilo,
-            ["antigravity"] = SquadTarget.Antigravity,
-            ["warp"] = SquadTarget.Warp,
-            ["factory"] = SquadTarget.Factory,
-            ["factory-droids"] = SquadTarget.Factory,
-            ["pi"] = SquadTarget.Pi,
-            ["zcode"] = SquadTarget.ZCode,
-            ["devin"] = SquadTarget.Devin,
-            ["commandcode"] = SquadTarget.CommandCode,
-            ["command-code"] = SquadTarget.CommandCode
-        };
+    private static readonly IReadOnlyDictionary<string, SquadTarget> TargetsByToken = BuildTargetsByToken();
 
     /// <summary>The approved target roster in stable presentation order.</summary>
     public static IReadOnlyList<SquadTarget> All => ApprovedTargets;
 
     /// <summary>Returns the canonical command-line token for a target.</summary>
-    public static string GetToken(SquadTarget target) => target switch
-    {
-        SquadTarget.Codex => "codex",
-        SquadTarget.Cursor => "cursor",
-        SquadTarget.Claude => "claude",
-        SquadTarget.Copilot => "copilot",
-        SquadTarget.OpenCode => "opencode",
-        SquadTarget.Kilo => "kilo",
-        SquadTarget.Antigravity => "antigravity",
-        SquadTarget.Warp => "warp",
-        SquadTarget.Factory => "factory",
-        SquadTarget.Pi => "pi",
-        SquadTarget.ZCode => "zcode",
-        SquadTarget.Devin => "devin",
-        SquadTarget.CommandCode => "commandcode",
-        _ => throw new ArgumentOutOfRangeException(nameof(target), target, "Unknown Squad target.")
-    };
+    public static string GetToken(SquadTarget target) => HarnessRegistry.SquadTokenFor(target);
 
     /// <summary>
     /// Returns how <paramref name="target"/> projects canonical agents. This is a fact about the
@@ -167,6 +119,22 @@ public static class SquadTargetCatalog
         }
 
         return parsed;
+    }
+
+    private static Dictionary<string, SquadTarget> BuildTargetsByToken()
+    {
+        Dictionary<string, SquadTarget> map = new(StringComparer.OrdinalIgnoreCase);
+        foreach (HarnessDescriptor row in HarnessRegistry.Rows)
+        {
+            if (row.SquadTarget is not { } target || row.SquadToken is null)
+                continue;
+
+            map[row.SquadToken] = target;
+            foreach (string alias in row.SquadAliases)
+                map[alias] = target;
+        }
+
+        return map;
     }
 
     private static void AddUnique(

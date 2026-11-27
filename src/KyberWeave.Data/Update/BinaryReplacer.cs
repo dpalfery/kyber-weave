@@ -1,8 +1,9 @@
 using System.Diagnostics;
 using KyberWeave.Contracts.Repositories;
 using KyberWeave.Core.Processes;
+using KyberWeave.Domain.Update;
 
-namespace KyberWeave.Cli.Update;
+namespace KyberWeave.Data.Update;
 
 /// <summary>Puts an extracted binary in place of an installed one, so the installed path always holds a whole image.</summary>
 /// <remarks>

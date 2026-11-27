@@ -8,6 +8,7 @@ using KyberWeave.Tests.Fakes;
 using KyberWeave.Tests.FileSystem;
 using Xunit;
 using Xunit.Sdk;
+using KyberWeave.Application.Squad.Release;
 
 namespace KyberWeave.Tests.Squad;
 

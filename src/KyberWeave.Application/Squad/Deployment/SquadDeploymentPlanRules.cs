@@ -1,3 +1,4 @@
+using KyberWeave.Arbiter.Hooks;
 using KyberWeave.Core.Squad.Rendering;
 
 namespace KyberWeave.Core.Squad.Deployment;
@@ -5,32 +6,6 @@ namespace KyberWeave.Core.Squad.Deployment;
 /// <summary>Resolves where a deployment plan's files live, and classifies the layout of a receipt's files.</summary>
 public static class SquadDeploymentPlanRules
 {
-    /// <summary>
-    ///     Each target's pre-#91 legacy Global prefix, fixed per target and taken from the
-    ///     renderer's own prefix constant rather than derived from the target token, because two
-    ///     targets' verified prefixes diverge from their token: Copilot renders beneath
-    ///     <c>.github/</c>, not <c>.copilot/</c> (<c>CopilotRenderer</c>), and Antigravity
-    ///     beneath <c>.agents/</c>, not <c>.antigravity/</c> (<c>AntigravityRenderer</c>).
-    /// </summary>
-    private static readonly IReadOnlyDictionary<string, string> LegacyGlobalPrefixes =
-        new Dictionary<string, string>(StringComparer.Ordinal)
-        {
-            ["codex"] = ".codex/",
-            ["cursor"] = ".cursor/",
-            ["claude"] = ".claude/",
-            ["copilot"] = ".github/",
-            ["opencode"] = ".opencode/",
-            ["kilo"] = ".kilo/",
-            ["antigravity"] = ".agents/",
-            ["warp"] = ".warp/",
-            ["factory"] = ".factory/",
-            ["pi"] = ".pi/",
-            ["zcode"] = ".zcode/",
-            ["devin"] = ".devin/",
-            ["commandcode"] = ".commandcode/"
-        };
-
-
     /// <summary>
     ///     Replaces the receipt's target root with the canonical root it will be written against. Only the
     ///     transaction calls this, because only the store knows the home that a global receipt is anchored on.
@@ -214,7 +189,7 @@ public static class SquadDeploymentPlanRules
     ///     every owned path still carried its harness's dot-prefixed project folder. Since #91 every
     ///     renderer strips that prefix under Global scope — guarded by
     ///     <c>RenderReceiptLayout_GlobalRender_ContainsNoPrefixedPaths</c> — and writes a bare path
-    ///     instead, so whether a file starts with its own target's <see cref="LegacyGlobalPrefixes" />
+    ///     instead, so whether a file starts with its own target's <see cref="HarnessRegistry.LegacyGlobalPrefixes" />
     ///     entry is the fingerprint of a receipt #91 predates (A5): every entry prefixed classifies
     ///     as <see cref="SquadReceiptLayout.SingleRoot" />, no entry prefixed classifies as
     ///     <see cref="SquadReceiptLayout.PerTargetRoots" />, and a mix of the two is refused outright
@@ -228,7 +203,7 @@ public static class SquadDeploymentPlanRules
         bool anyBare = false;
         foreach (SquadOwnedFile file in files)
         {
-            bool isPrefixed = LegacyGlobalPrefixes.TryGetValue(file.Target, out string? prefix) &&
+            bool isPrefixed = HarnessRegistry.LegacyGlobalPrefixes.TryGetValue(file.Target, out string? prefix) &&
                               file.RelativePath.StartsWith(prefix, StringComparison.Ordinal);
             if (isPrefixed)
                 anyPrefixed = true;

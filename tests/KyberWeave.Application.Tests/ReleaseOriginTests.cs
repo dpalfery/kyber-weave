@@ -1,5 +1,6 @@
-using KyberWeave.Cli.Update;
 using Xunit;
+using KyberWeave.Application.Update;
+using KyberWeave.Domain.Update;
 
 namespace KyberWeave.Tests;
 

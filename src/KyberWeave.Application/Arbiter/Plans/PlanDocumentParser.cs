@@ -1,6 +1,7 @@
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.RegularExpressions;
+using KyberWeave.Core.Agents.Roster;
 using KyberWeave.Core.Diagnostics;
 using KyberWeave.Core.Parsing;
 using Markdig;
@@ -345,7 +346,7 @@ public static partial class PlanDocumentParser
     }
 
     /// <summary>Whether a <c>Difficulty:</c> value is one of the three the tier ladder reads.</summary>
-    private static bool IsDifficulty(string value) => value.Trim() is "easy" or "medium" or "hard";
+    private static bool IsDifficulty(string value) => DeveloperTiers.IsDifficulty(value);
 
     private static (string? Status, string? Mode, string Body) ReadFrontmatter(string text)
     {

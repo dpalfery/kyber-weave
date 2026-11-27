@@ -2,6 +2,7 @@ using KyberWeave.Cli.Commands.Review;
 using KyberWeave.Contracts.Repositories;
 using KyberWeave.Core.Review;
 using Xunit;
+using KyberWeave.Application.Review;
 
 namespace KyberWeave.Tests;
 

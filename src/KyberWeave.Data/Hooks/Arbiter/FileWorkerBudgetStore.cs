@@ -7,8 +7,6 @@ namespace KyberWeave.Data.Hooks.Arbiter;
 /// <summary>The budget files as append-only files that parallel hook processes share.</summary>
 public sealed class FileWorkerBudgetStore(IWritableFileSystem files) : IWorkerBudgetStore
 {
-    private const string BudgetDirectoryName = "budgets";
-
     /// <inheritdoc/>
     public void EnsureDirectory(string home) => files.CreateDirectory(DirectoryOf(home));
 
@@ -61,7 +59,7 @@ public sealed class FileWorkerBudgetStore(IWritableFileSystem files) : IWorkerBu
         }
     }
 
-    private static string DirectoryOf(string home) => Path.Combine(home, ".kyber-weave", "arbiter", BudgetDirectoryName);
+    private static string DirectoryOf(string home) => UserStatePaths.WorkerBudgetsDirectory(home);
 
     private static string PathOf(string home, string key) => Path.Combine(DirectoryOf(home), key + ".log");
 }
