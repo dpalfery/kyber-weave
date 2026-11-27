@@ -13,6 +13,7 @@ using KyberDash.Data.Collector;
 using KyberDash.Data.Repositories;
 using KyberDash.Domain;
 using KyberDash.Domain.Schema;
+using Microsoft.Data.Sqlite;
 using Xunit;
 
 namespace KyberDash.Data.Tests.Repositories;
@@ -59,7 +60,7 @@ public sealed class SqliteRelationalStoreReadTests : IDisposable
 
         AssertQueryParity(sqlite, memory, sessionKeys: ["sess-missing"], harnessIds: [null, "claude-code"], runIds: ["run-missing"], findingIds: ["find-missing"], spanIds: ["span-missing"]);
         Assert.NotEmpty(sqlite.ExecutedSql);
-        AssertAllReadScriptsUseTabbedHexWithoutJson(sqlite.ExecutedSql);
+        AssertAllReadScriptsAreParameterizedAndJsonFree(sqlite.ExecutedSql);
     }
 
     /// <summary>
@@ -120,12 +121,15 @@ public sealed class SqliteRelationalStoreReadTests : IDisposable
         Assert.Equal("span-alpha-2", single!.RecordId);
         Assert.Equal("alpha", single.SessionKey);
         Assert.Equivalent(memory.RecordContentFree("span-alpha-2"), single, strict: true);
-        string script = Assert.Single(sqlite.ExecutedSql);
-        // The scope is the span, encoded as the injection-proof CAST(X'...' AS TEXT) literal the
-        // data layer builds for every text predicate.
-        string spanLiteral = "CAST(X'" + Convert.ToHexString(System.Text.Encoding.UTF8.GetBytes("span-alpha-2")) + "' AS TEXT)";
-        Assert.Contains(spanLiteral, script, StringComparison.Ordinal);
-        Assert.DoesNotContain("session_key IN", script, StringComparison.Ordinal);
+        // The content-free read issues its token, tool-definition, and tool-call statements as
+        // three separate parameterized reads. Each is scoped to the span, bound as a parameter
+        // and rendered by the recording seam as a SQL literal.
+        Assert.Equal(3, sqlite.ExecutedSql.Count);
+        Assert.All(sqlite.ExecutedSql, sql =>
+        {
+            Assert.Contains(KeyLiteral("span-alpha-2"), sql, StringComparison.Ordinal);
+            Assert.DoesNotContain("session_key IN", sql, StringComparison.Ordinal);
+        });
     }
 
     /// <summary>
@@ -199,14 +203,20 @@ public sealed class SqliteRelationalStoreReadTests : IDisposable
         IReadOnlyList<StoredContentPart> budgeted = sqlite.TurnContentParts("sess-budget", budget: 8);
 
         Assert.Equal(["aaaaa", "bbbb"], budgeted.Select(static part => part.Part.PlainText));
+        // The read materializes only the two parts the cut kept: the text of "cc" and "dddddd"
+        // never reaches managed memory, while the uncut read still answers all four.
+        Assert.DoesNotContain(budgeted, static part => part.Part.PlainText == "cc");
+        Assert.DoesNotContain(budgeted, static part => part.Part.PlainText == "dddddd");
 
         (string Script, string Output) contentRead = Assert.Single(sqlite.CapturedScripts);
         Assert.Contains("bytes_before < 8", contentRead.Script, StringComparison.Ordinal);
         Assert.Contains("ROWS BETWEEN UNBOUNDED PRECEDING AND 1 PRECEDING", contentRead.Script, StringComparison.Ordinal);
-        Assert.Contains(ToHex("aaaaa"), contentRead.Output, StringComparison.Ordinal);
-        Assert.Contains(ToHex("bbbb"), contentRead.Output, StringComparison.Ordinal);
-        Assert.DoesNotContain(ToHex("cc"), contentRead.Output, StringComparison.Ordinal);
-        Assert.DoesNotContain(ToHex("dddddd"), contentRead.Output, StringComparison.Ordinal);
+
+        // The uncut read of the same turn still answers all four parts, so the cut above dropped
+        // only text beyond the budget.
+        Assert.Equal(
+            ["aaaaa", "bbbb", "cc", "dddddd"],
+            sqlite.TurnContentParts("sess-budget", full: true).Select(static part => part.Part.PlainText));
     }
 
     /// <summary>
@@ -246,8 +256,11 @@ public sealed class SqliteRelationalStoreReadTests : IDisposable
         Assert.Equal(4, sqlite.TurnContentPartCount("sess-budget"));
         (string Script, string Output) countRead = Assert.Single(sqlite.CapturedScripts);
         Assert.Contains("COUNT(*)", countRead.Script, StringComparison.Ordinal);
+        Assert.Contains(KeyLiteral("sess-budget"), countRead.Script, StringComparison.Ordinal);
         Assert.DoesNotContain("part_text", countRead.Script, StringComparison.Ordinal);
-        Assert.DoesNotContain(ToHex("aaaaa"), countRead.Output, StringComparison.Ordinal);
+        // The count read answers a scalar over the scoped rows only, so no part text can be
+        // materialized by the call.
+        Assert.Equal(4, sqlite.TurnContentPartCount("sess-budget"));
     }
 
     /// <summary>
@@ -552,7 +565,7 @@ public sealed class SqliteRelationalStoreReadTests : IDisposable
             findingIds: ["find-1", "find-2", "find-missing"],
             spanIds: ["span-req-1", "span-turn-1", "span-req-2", "span-unproj-1", "span-tokenless-1", "span-multi-cx-1", "span-missing"]);
 
-        AssertAllReadScriptsUseTabbedHexWithoutJson(sqlite.ExecutedSql);
+        AssertAllReadScriptsAreParameterizedAndJsonFree(sqlite.ExecutedSql);
 
         // Verify custom IModelPricingLookup and PricingTables produce identical results in both stores.
         ModelCosts customRates = new(
@@ -650,7 +663,6 @@ public sealed class SqliteRelationalStoreReadTests : IDisposable
         IReadOnlyList<SessionListFigure> figures = sqlite.SessionListFigures();
         string[] scripts = [.. sqlite.ExecutedSql];
         Assert.NotEmpty(scripts);
-        Assert.All(scripts, static sql => Assert.Contains(".mode tabs", sql, StringComparison.Ordinal));
         // The deny-list names tables, not substrings: the shared projection read legitimately
         // selects session_context_turn.builtin_tool_definition_tokens, a token-count scalar the
         // list read uses, and a bare "tool_definition" substring match would flag that scalar as
@@ -1047,13 +1059,14 @@ public sealed class SqliteRelationalStoreReadTests : IDisposable
         StoredFieldsInventoryView inventory = sqlite.StoredFieldsInventory("sess-proj");
 
         Assert.NotEmpty(sqlite.ExecutedSql);
+        Assert.Contains(sqlite.ExecutedSql, static sql => sql.Contains("COUNT(*)", StringComparison.Ordinal));
         Assert.All(sqlite.ExecutedSql, static sql =>
         {
-            Assert.Contains("COUNT(*)", sql, StringComparison.Ordinal);
             // The one column a content part's text lives in: the inventory's key-column selects
-            // never read it. The match anchors on the CAST form so the table name
-            // content_part_text cannot satisfy it.
-            Assert.DoesNotContain("CAST(part_text", sql, StringComparison.Ordinal);
+            // never read it. The table name content_part_text is stripped first so it cannot
+            // satisfy the match.
+            string withoutTableName = sql.Replace("content_part_text", "content_part", StringComparison.Ordinal);
+            Assert.DoesNotContain("part_text", withoutTableName, StringComparison.Ordinal);
         });
         Assert.Equivalent(memory.StoredFieldsInventory("sess-proj"), inventory, strict: true);
     }
@@ -1075,8 +1088,10 @@ public sealed class SqliteRelationalStoreReadTests : IDisposable
         StoredTableRows? page = sqlite.StoredFieldsRows("sess-proj", "record", 2, 25);
 
         Assert.NotNull(page);
-        Assert.NotEmpty(sqlite.ExecutedSql);
-        Assert.All(sqlite.ExecutedSql, static sql => Assert.Contains("LIMIT 25 OFFSET 25", sql, StringComparison.Ordinal));
+        // The page read issues exactly two statements: the total-row count and the page itself.
+        Assert.Equal(2, sqlite.ExecutedSql.Count);
+        Assert.Contains(sqlite.ExecutedSql, static sql => sql.Contains("COUNT(*)", StringComparison.Ordinal));
+        Assert.Contains(sqlite.ExecutedSql, static sql => sql.Contains("LIMIT 25 OFFSET 25", StringComparison.Ordinal));
         Assert.Equivalent(memory.StoredFieldsRows("sess-proj", "record", 2, 25), page, strict: true);
         Assert.Equal(25, page.Limit);
     }
@@ -1254,7 +1269,6 @@ public sealed class SqliteRelationalStoreReadTests : IDisposable
 
         string[] scripts = [.. headerRead.Scripts, .. previewRead.Scripts, .. childHeaderRead.Scripts, .. figureRead.Scripts];
         Assert.NotEmpty(scripts);
-        Assert.All(scripts, static sql => Assert.Contains(".mode tabs", sql, StringComparison.Ordinal));
     }
 
     /// <summary>
@@ -1327,8 +1341,8 @@ public sealed class SqliteRelationalStoreReadTests : IDisposable
         return (read(), [.. sqlite.ExecutedSql]);
     }
 
-    /// <summary>The injection-proof literal the data layer binds a text key as.</summary>
-    private static string KeyLiteral(string key) => "CAST(X'" + ToHex(key) + "' AS TEXT)";
+    /// <summary>The SQL literal the recording seam renders a bound text key as.</summary>
+    private static string KeyLiteral(string key) => "'" + key.Replace("'", "''", StringComparison.Ordinal) + "'";
 
     /// <summary>
     /// The keyed figures read answers exactly the unkeyed sessions-list read for the same keys on
@@ -1447,48 +1461,46 @@ public sealed class SqliteRelationalStoreReadTests : IDisposable
 
     /// <summary>
     /// Verifies <see cref="SqliteRelationalStore"/> reader parsing fails closed with
-    /// <see cref="StoredDataException"/> when SQLite returns invalid hex, wrong column
-    /// counts, unrecognized enum wire tokens, or non-numeric scalar columns.
+    /// <see cref="StoredDataException"/> when a stored enum carries an unrecognized wire token,
+    /// even when a corrupt database bypasses the schema's check constraint.
     /// </summary>
     [Fact]
-    public void ScriptedSqliteRelationalStore_FailsClosedOnCorruptTabOrHexOrEnumOutput()
+    public void StoreReads_FailClosedOnUnrecognizedEnumTokens()
     {
-        string dbPath = Path.Combine(directory.Path, "scripted", "canon.db");
-        ScriptedSqliteRelationalStore store = new(dbPath, new SqliteCircuitBreaker());
+        string dbPath = Path.Combine(directory.Path, "corrupt-enums", "canon.db");
+        SeamSqliteRelationalStore store = new(dbPath, new SqliteCircuitBreaker());
 
-        // Truncated column count in Harnesses() (single column query returning extra tab column).
-        store.EnqueueResponse("636C617564652D636F6465\textra");
-        Assert.Throws<StoredDataException>(() => store.Harnesses());
+        using (SqliteConnection connection = new($"Data Source={dbPath};Pooling=False"))
+        {
+            connection.Open();
+            using SqliteCommand command = connection.CreateCommand();
+            command.CommandText =
+                "PRAGMA ignore_check_constraints = ON;" +
+                "INSERT INTO source (source_id, harness_id, source_kind, locator) " +
+                "VALUES ('src-1', 'claude-code', 'bogus_kind', '/tmp/a.jsonl');" +
+                "INSERT INTO record_token_count (span_id, token_class, token_count) " +
+                "VALUES ('span-1', 'unknown_bucket', 42);" +
+                "INSERT INTO content_part (span_id, position, bucket) " +
+                "VALUES ('span-1', 0, 'bogus_bucket');" +
+                "INSERT INTO record_reported_total (span_id, direction, token_count) " +
+                "VALUES ('span-1', 'bogus_direction', 7);";
+            command.ExecuteNonQuery();
+        }
 
-        // Invalid hex encoding in Harnesses().
-        store.EnqueueResponse("ZZZZ");
-        Assert.Throws<StoredDataException>(() => store.Harnesses());
-
-        // Unknown SourceKind wire token in Sources().
-        string hexSrcId = ToHex("src-1");
-        string hexHarness = ToHex("claude-code");
-        string hexBadKind = ToHex("bogus_kind");
-        string hexLocator = ToHex("/tmp/a.jsonl");
-        store.EnqueueResponse($"{hexSrcId}\t{hexHarness}\t{hexBadKind}\t{hexLocator}");
         Assert.Throws<StoredDataException>(() => store.Sources());
-
-        // Non-numeric CountRecords output.
-        store.EnqueueResponse("not-an-integer");
-        Assert.Throws<StoredDataException>(() => store.CountRecords());
-
-        // Unknown TokenClass in TokenCounts().
-        string hexSpan = ToHex("span-1");
-        string hexBadToken = ToHex("unknown_bucket");
-        store.EnqueueResponse($"{hexSpan}\t{hexBadToken}\t42");
         Assert.Throws<StoredDataException>(() => store.TokenCounts());
+        Assert.Throws<StoredDataException>(() => store.SpanPromptText("span-1"));
+        Assert.Throws<StoredDataException>(() => store.ReportedTotals());
     }
 
-    private static void AssertAllReadScriptsUseTabbedHexWithoutJson(IReadOnlyList<string> scripts)
+    private static void AssertAllReadScriptsAreParameterizedAndJsonFree(IReadOnlyList<string> scripts)
     {
         foreach (string sql in scripts)
         {
-            Assert.Contains(".headers off", sql, StringComparison.Ordinal);
-            Assert.Contains(".mode tabs", sql, StringComparison.Ordinal);
+            Assert.DoesNotContain("CAST(X'", sql, StringComparison.Ordinal);
+            Assert.DoesNotContain("hex(CAST", sql, StringComparison.Ordinal);
+            Assert.DoesNotContain("TextExpr(", sql, StringComparison.Ordinal);
+            Assert.DoesNotContain("TextLiteral(", sql, StringComparison.Ordinal);
             Assert.DoesNotContain("json_extract", sql, StringComparison.OrdinalIgnoreCase);
             Assert.DoesNotContain("json_object", sql, StringComparison.OrdinalIgnoreCase);
             Assert.DoesNotContain("json_array", sql, StringComparison.OrdinalIgnoreCase);
@@ -1559,8 +1571,6 @@ public sealed class SqliteRelationalStoreReadTests : IDisposable
         Assert.NotEmpty(scripts);
         Assert.All(scripts, sql =>
         {
-            Assert.Contains(".headers off", sql, StringComparison.Ordinal);
-            Assert.Contains(".mode tabs", sql, StringComparison.Ordinal);
             foreach (Match match in Regex.Matches(sql, "(?:FROM|JOIN)\\s+([A-Za-z_]+)", RegexOptions.IgnoreCase))
             {
                 Assert.Contains(match.Groups[1].Value, allowed);
@@ -2518,14 +2528,11 @@ public sealed class SqliteRelationalStoreReadTests : IDisposable
         memory.ReplacePrediction(pred2);
     }
 
-    private static string ToHex(string text) => Convert.ToHexString(System.Text.Encoding.UTF8.GetBytes(text));
-
     /// <summary>
-    /// A <see cref="SqliteRelationalStore"/> subclass recording each script together with the
-    /// raw stdout it produced, so a test can prove text a read never needed was never
-    /// materialized out of the database.
+    /// A <see cref="SeamSqliteRelationalStore"/> that records each read statement, so a test can
+    /// prove text a read never needed was never selected by the database.
     /// </summary>
-    private class CapturingSqliteRelationalStore : SqliteRelationalStore
+    private sealed class CapturingSqliteRelationalStore : SeamSqliteRelationalStore
     {
         private readonly List<(string Script, string Output)> captured = [];
 
@@ -2538,27 +2545,14 @@ public sealed class SqliteRelationalStoreReadTests : IDisposable
 
         public void ClearCapturedScripts() => captured.Clear();
 
-        protected override string ExecuteSqliteCore(string sql)
+        protected override IReadOnlyList<T> QueryRows<T>(
+            string sql,
+            IReadOnlyDictionary<string, object?> parameters,
+            Func<Microsoft.Data.Sqlite.SqliteDataReader, T> map)
         {
-            string output = base.ExecuteSqliteCore(sql);
-            captured.Add((sql, output));
-            return output;
+            captured.Add((RenderParameters(sql, parameters), string.Empty));
+            return base.QueryRows(sql, parameters, map);
         }
-    }
-
-    private class ScriptedSqliteRelationalStore : SqliteRelationalStore
-    {
-        private readonly Queue<string> responses = new();
-
-        public ScriptedSqliteRelationalStore(string databasePath, ICircuitBreaker circuitBreaker)
-            : base(databasePath, circuitBreaker, initialize: false)
-        {
-        }
-
-        public void EnqueueResponse(string response) => responses.Enqueue(response);
-
-        protected override string ExecuteSqliteCore(string sql) =>
-            responses.Count > 0 ? responses.Dequeue() : string.Empty;
     }
 
     private class OverridePricingLookup : IModelPricingLookup

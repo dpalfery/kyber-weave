@@ -1,6 +1,7 @@
 using KyberDash.Application.Tests.Fakes;
 using KyberDash.Contracts.Repositories;
 using KyberDash.Core.Exceptions;
+using KyberDash.Core.Repositories;
 using KyberDash.Core.Resilience;
 using KyberDash.Data.Collector;
 using KyberDash.Data.Repositories;
@@ -311,7 +312,11 @@ public sealed class SharedSpanWriteParityTests : IDisposable
     /// <summary>The SQLite store with raw SQL, to build a store as an older build left it.</summary>
     private sealed class RawSqliteStore(string databasePath) : SqliteRelationalStore(databasePath, new SqliteCircuitBreaker())
     {
-        public string Raw(string sql) => ExecuteSqlite(sql);
+        public string Raw(string sql)
+        {
+            ExecuteStatements([SqlStatement.Of(sql)]);
+            return string.Empty;
+        }
     }
 
     private sealed record StoreUnderTest(
