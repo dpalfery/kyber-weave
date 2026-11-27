@@ -88,7 +88,7 @@ public class CanonRefreshEngine
     private IHarnessFileSystem fileSystem = PhysicalHarnessFileSystem.Instance;
     private string homeDirectory = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
     private string stateDirectory = ServerStateRepository.ResolveStateDirectory();
-    private Func<DateTimeOffset> clock = static () => DateTimeOffset.UtcNow;
+    private Func<DateTimeOffset> clock = static () => TimeProvider.System.GetUtcNow();
 
     /// <summary>Diagnostic code emitted when a local source unit cannot be read or parsed.</summary>
     public const string SourceUnreadableCode = "SOURCE_UNREADABLE";
@@ -158,7 +158,7 @@ public class CanonRefreshEngine
                 ? Path.Combine(this.homeDirectory, CanonDbPath.DefaultDirectoryName)
                 : ServerStateRepository.ResolveStateDirectory();
 
-        this.clock = clock ?? (static () => DateTimeOffset.UtcNow);
+        this.clock = clock ?? (static () => TimeProvider.System.GetUtcNow());
     }
 
     /// <summary>
