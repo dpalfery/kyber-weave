@@ -185,13 +185,19 @@ public abstract partial class BaseSqliteRepository
         Encoding.UTF8.GetString(Convert.FromHexString(hex));
 
     /// <summary>Splits stdout into trimmed non-empty lines.</summary>
-    protected static IEnumerable<string> Lines(string output) =>
-        output.Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+    protected static IEnumerable<string> Lines(string output)
+    {
+        ArgumentNullException.ThrowIfNull(output);
+        return output.Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+    }
 
     /// <summary>Splits stdout into raw non-empty lines preserving tab delimiters.</summary>
-    protected static IEnumerable<string> TabLines(string output) =>
-        output.Replace("\r", string.Empty, StringComparison.Ordinal)
+    protected static IEnumerable<string> TabLines(string output)
+    {
+        ArgumentNullException.ThrowIfNull(output);
+        return output.Replace("\r", string.Empty, StringComparison.Ordinal)
             .Split('\n', StringSplitOptions.RemoveEmptyEntries);
+    }
 
     private static ProcessStartInfo CreateStartInfo() =>
         new("sqlite3")
