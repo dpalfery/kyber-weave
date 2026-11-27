@@ -804,6 +804,61 @@ public sealed class CodingStandardsLookupTests : IDisposable
     }
 
     /// <summary>
+    /// A topic of two words has to reach the subsection that discusses them. The C#
+    /// standard nests "Errors and diagnostics" under "Coding standards", and a sibling
+    /// heading "Security and data handling" shares the word "handling". Scoring the
+    /// parent heading would pick that sibling and the budget would drop the subsection.
+    /// </summary>
+    [Fact]
+    public void ATwoWordTopicReachesTheNestedHeadingRatherThanTheSiblingThatSharesOneWord()
+    {
+        string sections = """
+            ## Coding standards
+
+            ### Errors and diagnostics
+
+            Parsers fail closed with an error or diagnostic that names the input.
+
+            ## Security and data handling
+
+            ### Safe filesystem enumeration
+
+            Walk one level at a time and do not follow a symbolic link.
+            """;
+
+        DocumentIndex index = OneStandard(sections);
+
+        DocumentHit hit = index.CodingStandards("csharp", topic: "error handling", charBudget: 1000).Single();
+
+        Assert.Equal(["Errors and diagnostics"], hit.Excerpt.Sections.Select(section => section.Heading));
+        Assert.DoesNotContain("Security and data handling", hit.Excerpt.OmittedHeadings);
+    }
+
+    /// <summary>
+    /// A nested heading keeps its true line: the section split trims the blank line under
+    /// "## Coding standards", and counting from the trimmed body put "### Errors and
+    /// diagnostics" one line early, which breaks the excerpt's document order.
+    /// </summary>
+    [Fact]
+    public void ANestedHeadingUnderABlankLineKeepsItsLineNumber()
+    {
+        string sections = """
+            ## Coding standards
+
+            ### Errors and diagnostics
+
+            Parsers fail closed with an error or diagnostic that names the input.
+            """;
+
+        DocumentIndex index = OneStandard(sections);
+
+        DocumentHit hit = index.CodingStandards("csharp", topic: "error handling", charBudget: 1000).Single();
+        int parentLine = hit.Document.Sections.Single(section => section.Heading == "Coding standards").LineNumber;
+
+        Assert.Equal(parentLine + 2, hit.Excerpt.Sections.Single().LineNumber);
+    }
+
+    /// <summary>
     /// A topic narrows the standard to the section that answers it, chosen the way
     /// <c>Explore</c> chooses a section: rarity-weighted terms, the topic's adjacent pairs
     /// fused into weak phrase matches, and document order for what is emitted. The sections
