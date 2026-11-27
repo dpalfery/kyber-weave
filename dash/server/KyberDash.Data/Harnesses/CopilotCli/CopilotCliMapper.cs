@@ -175,122 +175,76 @@ public class CopilotCliMapper : IHarnessMapper
             return new CollectedBatch(source, [], [], []);
         }
 
-        string? sessionModel = SafeOptionalText(document.InitialModel);
-        string? sessionTitle = SafeOptionalText(document.Title);
-        string? workingDirectory = SafeOptionalText(document.InitialContext?.WorkingDirectory);
-        string? repository = ResolveRepositoryName(document.InitialContext);
-        string? branch = SafeOptionalText(document.InitialContext?.Branch);
-        long? sessionDeclaredContextWindow = null;
-
-        Dictionary<string, string> agentModels = new(StringComparer.Ordinal);
-        Dictionary<string, string> latestSystemPrompts = new(StringComparer.Ordinal);
-        List<IReadOnlyList<CopilotCliModelUsage>> shutdownSnapshots = [];
-        Dictionary<string, List<string>> pendingUserMessages = new(StringComparer.Ordinal);
-        Dictionary<string, List<string>> pendingReasonings = new(StringComparer.Ordinal);
-
+        CopilotCliMappingState state = new(unit, importedAtUtc, sessionId, document);
         CopilotCliToolTelemetry toolTelemetry = ParseToolTelemetry(unit.RawText);
+        BuildMessageEntries(state, toolTelemetry);
 
-        List<AssistantMessageEntry> messageEntries = [];
-        Dictionary<string, AssistantMessageEntry> messageByEventId = new(StringComparer.Ordinal);
-        Dictionary<string, AssistantMessageEntry> messageByMessageId = new(StringComparer.Ordinal);
-        Dictionary<string, AssistantMessageEntry> messageByToolCallId = new(StringComparer.Ordinal);
-        HashSet<string> seenRecordIds = new(StringComparer.Ordinal);
+        AttachSkillInvocations(
+            toolTelemetry,
+            state.MessageEntries,
+            state.MessageByEventId,
+            state.MessageByMessageId,
+            state.MessageByToolCallId);
 
-        foreach (CopilotCliJournalEvent evt in document.Events)
+        List<CollectedRecord> records = BuildCorrelatedRecords(
+            sessionId,
+            HarnessId,
+            toolTelemetry,
+            state.MessageEntries,
+            state.MessageByEventId,
+            state.MessageByMessageId,
+            state.SeenRecordIds);
+
+        records.AddRange(BuildSubagentRecords(
+            sessionId,
+            HarnessId,
+            toolTelemetry,
+            records,
+            state.SeenRecordIds));
+
+        List<CollectedSession> sessions = BuildSessions(state, records);
+        List<CollectedProblem> problems = BuildProblems(document.ParseProblems, unit.Unit.SourceKey, sessionId, importedAtUtc);
+        return new CollectedBatch(source, sessions, records, problems);
+    }
+
+    private static List<CollectedSession> BuildSessions(CopilotCliMappingState state, List<CollectedRecord> records)
+    {
+        if (records.Count == 0 && state.Document.Events.Count == 0)
+        {
+            return [];
+        }
+
+        CollectedWorkspace? workspace = state.WorkingDirectory is not null
+            || state.Repository is not null
+            || state.Branch is not null
+            ? new CollectedWorkspace(state.WorkingDirectory, state.Repository, state.Branch)
+            : null;
+
+        return
+        [
+            new CollectedSession(
+                SessionKey: state.SessionId,
+                HarnessId: CopilotCliJournalReader.CopilotCliHarnessId,
+                NativeSessionId: state.SessionId,
+                Workspace: workspace,
+                Title: state.SessionTitle,
+                ReportedUsage: BuildReportedUsage(state.ShutdownSnapshots, state.SessionModel)),
+        ];
+    }
+
+    private static void BuildMessageEntries(CopilotCliMappingState state, CopilotCliToolTelemetry toolTelemetry)
+    {
+        foreach (CopilotCliJournalEvent evt in state.Document.Events)
         {
             string agentKey = string.IsNullOrWhiteSpace(evt.AgentId) ? RootAgentKey : evt.AgentId.Trim();
 
             if (evt.DeclaredContextWindow is > 0)
             {
-                sessionDeclaredContextWindow = evt.DeclaredContextWindow.Value;
+                state.SessionDeclaredContextWindow = evt.DeclaredContextWindow.Value;
             }
 
-            if (IsSessionStart(evt.EventType))
+            if (ApplyNonAssistantEvent(evt, state, agentKey))
             {
-                string? startModel = SafeOptionalText(evt.Model);
-                if (startModel is not null)
-                {
-                    sessionModel = startModel;
-                }
-
-                string? startTitle = SafeOptionalText(evt.Title);
-                if (startTitle is not null)
-                {
-                    sessionTitle = startTitle;
-                }
-
-                ApplyContextUpdate(evt.Context, ref workingDirectory, ref repository, ref branch);
-                continue;
-            }
-
-            if (IsModelChange(evt.EventType))
-            {
-                string? newModel = SafeOptionalText(evt.Model);
-                if (newModel is not null)
-                {
-                    if (agentKey.Length == 0)
-                    {
-                        sessionModel = newModel;
-                    }
-                    else
-                    {
-                        agentModels[agentKey] = newModel;
-                    }
-                }
-
-                continue;
-            }
-
-            if (IsContextChange(evt.EventType))
-            {
-                ApplyContextUpdate(evt.Context, ref workingDirectory, ref repository, ref branch);
-                string? updatedTitle = SafeOptionalText(evt.Title);
-                if (updatedTitle is not null)
-                {
-                    sessionTitle = updatedTitle;
-                }
-
-                continue;
-            }
-
-            if (IsShutdown(evt.EventType))
-            {
-                if (evt.ModelMetrics.Count > 0)
-                {
-                    shutdownSnapshots.Add(evt.ModelMetrics);
-                }
-
-                continue;
-            }
-
-            if (string.Equals(evt.EventType, "system.message", StringComparison.Ordinal))
-            {
-                if (!string.IsNullOrEmpty(evt.Content))
-                {
-                    latestSystemPrompts[agentKey] = evt.Content;
-                }
-
-                continue;
-            }
-
-            if (string.Equals(evt.EventType, "user.message", StringComparison.Ordinal))
-            {
-                if (!string.IsNullOrEmpty(evt.Content))
-                {
-                    AddPendingMessage(pendingUserMessages, agentKey, evt.Content);
-                }
-
-                continue;
-            }
-
-            if (string.Equals(evt.EventType, "assistant.reasoning", StringComparison.Ordinal))
-            {
-                string? reasoning = !string.IsNullOrEmpty(evt.ReasoningText) ? evt.ReasoningText : evt.Content;
-                if (!string.IsNullOrEmpty(reasoning))
-                {
-                    AddPendingMessage(pendingReasonings, agentKey, reasoning);
-                }
-
                 continue;
             }
 
@@ -299,176 +253,240 @@ public class CopilotCliMapper : IHarnessMapper
                 continue;
             }
 
-            string? activeModel = SafeOptionalText(evt.Model)
-                ?? (agentKey.Length > 0 && agentModels.TryGetValue(agentKey, out string? agentModel) ? agentModel : null)
-                ?? sessionModel;
+            AddAssistantMessage(evt, state, agentKey, toolTelemetry);
+        }
+    }
 
-            List<CollectedContentPart> parts = [];
-            int position = 0;
-            string? correctionRule = null;
-
-            if (latestSystemPrompts.TryGetValue(agentKey, out string? systemPrompt))
+    private static bool ApplyNonAssistantEvent(
+        CopilotCliJournalEvent evt,
+        CopilotCliMappingState state,
+        string agentKey)
+    {
+        if (IsSessionStart(evt.EventType))
+        {
+            string? startModel = SafeOptionalText(evt.Model);
+            if (startModel is not null)
             {
-                parts.Add(ToolContentMeasurer.BuildContentPart(position++, ContentBucket.SystemPrompt, systemPrompt, "system", activeModel));
+                state.SessionModel = startModel;
             }
 
-            if (pendingUserMessages.TryGetValue(agentKey, out List<string>? userMessages))
+            string? startTitle = SafeOptionalText(evt.Title);
+            if (startTitle is not null)
             {
-                foreach (string userMessage in userMessages)
+                state.SessionTitle = startTitle;
+            }
+
+            ApplyContextUpdate(evt.Context, state);
+            return true;
+        }
+
+        if (IsModelChange(evt.EventType))
+        {
+            string? newModel = SafeOptionalText(evt.Model);
+            if (newModel is not null)
+            {
+                if (agentKey.Length == 0)
                 {
-                    if (correctionRule is null)
-                    {
-                        CorrectionDetectionResult check = CanonFindings.DetectUserCorrection(userMessage);
-                        if (check.Matched)
-                        {
-                            correctionRule = check.Rule;
-                        }
-                    }
-
-                    parts.Add(ToolContentMeasurer.BuildContentPart(position++, ContentBucket.UserMessage, userMessage, "user", activeModel));
+                    state.SessionModel = newModel;
                 }
-
-                userMessages.Clear();
-            }
-
-            if (pendingReasonings.TryGetValue(agentKey, out List<string>? reasonings))
-            {
-                foreach (string reasoning in reasonings)
+                else
                 {
-                    parts.Add(ToolContentMeasurer.BuildContentPart(position++, ContentBucket.Reasoning, reasoning, "assistant", activeModel));
+                    state.AgentModels[agentKey] = newModel;
                 }
-
-                reasonings.Clear();
             }
 
-            if (!string.IsNullOrEmpty(evt.ReasoningText))
+            return true;
+        }
+
+        if (IsContextChange(evt.EventType))
+        {
+            ApplyContextUpdate(evt.Context, state);
+            string? updatedTitle = SafeOptionalText(evt.Title);
+            if (updatedTitle is not null)
             {
-                parts.Add(ToolContentMeasurer.BuildContentPart(position++, ContentBucket.Reasoning, evt.ReasoningText, "assistant", activeModel));
+                state.SessionTitle = updatedTitle;
             }
 
+            return true;
+        }
+
+        if (IsShutdown(evt.EventType))
+        {
+            if (evt.ModelMetrics.Count > 0)
+            {
+                state.ShutdownSnapshots.Add(evt.ModelMetrics);
+            }
+
+            return true;
+        }
+
+        if (string.Equals(evt.EventType, "system.message", StringComparison.Ordinal))
+        {
             if (!string.IsNullOrEmpty(evt.Content))
             {
-                parts.Add(ToolContentMeasurer.BuildContentPart(position++, ContentBucket.ConversationHistory, evt.Content, "assistant", activeModel));
+                state.LatestSystemPrompts[agentKey] = evt.Content;
             }
 
-            List<CollectedTokenCount> tokens = BuildTokens(evt);
-            List<string> skillsInvoked = ExtractInvokedSkills(evt.ToolRequests);
-            DateTimeOffset startedAt = ParseTimestamp(evt.Timestamp, unit.LastWriteUtc, importedAtUtc);
-            long? durationMs = evt.DurationMs is >= 0 ? evt.DurationMs.Value : null;
-            DateTimeOffset? endedAt = durationMs is > 0 ? startedAt.AddMilliseconds(durationMs.Value) : null;
-
-            string recordId = BuildUniqueRecordId(sessionId, evt, seenRecordIds);
-            string recordName = activeModel is not null ? $"copilot:{activeModel}" : "copilot:assistant.message";
-            string? agentInstanceId = agentKey.Length > 0 ? SafeOptionalText(agentKey) : null;
-            long? recordContextWindow = evt.DeclaredContextWindow is > 0
-                ? evt.DeclaredContextWindow.Value
-                : sessionDeclaredContextWindow;
-
-            CollectedRecord llmRecord = new(
-                RecordId: recordId,
-                HarnessId: HarnessId,
-                Op: RecordOp.LlmInvoke,
-                Kind: RecordKind.Internal,
-                Name: recordName,
-                StartedAt: startedAt,
-                Status: RecordStatus.Ok,
-                SessionKey: sessionId,
-                ParentRecordId: null,
-                TraceId: $"{CanonSynth.SynthSpanPrefix}{HarnessId}:{sessionId}",
-                Model: activeModel,
-                EndedAt: endedAt,
-                ReportedDurationMs: durationMs,
-                Tokens: tokens,
-                ReportedCost: null,
-                Parts: parts,
-                Tool: null,
-                Agent: null,
-                SkillsInvoked: skillsInvoked,
-                AgentInstanceId: agentInstanceId,
-                ToolDefinitions: [],
-                Signals: new CollectedRecordSignals(
-                    ErrorMessage: null,
-                    EditFailures: null,
-                    CorrectionRule: correctionRule,
-                    DeclaredContextWindow: recordContextWindow),
-                ReportedInputTokens: null,
-                ReportedOutputTokens: null);
-
-            IReadOnlyList<ParsedToolRequest> requestsForLine = toolTelemetry.ToolRequestsByLine.TryGetValue(evt.LineNumber, out List<ParsedToolRequest>? parsedRequests)
-                ? parsedRequests
-                : [];
-
-            AssistantMessageEntry entry = new(
-                LineNumber: evt.LineNumber,
-                EventId: SafeOptionalText(evt.EventId),
-                MessageId: SafeOptionalText(evt.MessageId),
-                AgentKey: agentKey,
-                Record: llmRecord,
-                ToolRequests: requestsForLine,
-                SkillsInvoked: [.. skillsInvoked],
-                SeenSkills: new HashSet<string>(skillsInvoked, StringComparer.Ordinal));
-
-            messageEntries.Add(entry);
-            if (entry.EventId is not null)
-            {
-                messageByEventId.TryAdd(entry.EventId, entry);
-            }
-
-            if (entry.MessageId is not null)
-            {
-                messageByMessageId.TryAdd(entry.MessageId, entry);
-            }
-
-            foreach (ParsedToolRequest request in requestsForLine)
-            {
-                if (!string.IsNullOrEmpty(request.ToolCallId))
-                {
-                    messageByToolCallId.TryAdd(request.ToolCallId, entry);
-                }
-            }
+            return true;
         }
 
-        AttachSkillInvocations(
-            toolTelemetry,
-            messageEntries,
-            messageByEventId,
-            messageByMessageId,
-            messageByToolCallId);
-
-        List<CollectedRecord> records = BuildCorrelatedRecords(
-            sessionId,
-            HarnessId,
-            toolTelemetry,
-            messageEntries,
-            messageByEventId,
-            messageByMessageId,
-            seenRecordIds);
-
-        records.AddRange(BuildSubagentRecords(
-            sessionId,
-            HarnessId,
-            toolTelemetry,
-            records,
-            seenRecordIds));
-
-        List<CollectedSession> sessions = [];
-        if (records.Count > 0 || document.Events.Count > 0)
+        if (string.Equals(evt.EventType, "user.message", StringComparison.Ordinal))
         {
-            CollectedWorkspace? workspace = workingDirectory is not null || repository is not null || branch is not null
-                ? new CollectedWorkspace(workingDirectory, repository, branch)
-                : null;
+            if (!string.IsNullOrEmpty(evt.Content))
+            {
+                AddPendingMessage(state.PendingUserMessages, agentKey, evt.Content);
+            }
 
-            sessions.Add(new CollectedSession(
-                SessionKey: sessionId,
-                HarnessId: HarnessId,
-                NativeSessionId: sessionId,
-                Workspace: workspace,
-                Title: sessionTitle,
-                ReportedUsage: BuildReportedUsage(shutdownSnapshots, sessionModel)));
+            return true;
         }
 
-        List<CollectedProblem> problems = BuildProblems(document.ParseProblems, unit.Unit.SourceKey, sessionId, importedAtUtc);
-        return new CollectedBatch(source, sessions, records, problems);
+        if (string.Equals(evt.EventType, "assistant.reasoning", StringComparison.Ordinal))
+        {
+            string? reasoning = !string.IsNullOrEmpty(evt.ReasoningText) ? evt.ReasoningText : evt.Content;
+            if (!string.IsNullOrEmpty(reasoning))
+            {
+                AddPendingMessage(state.PendingReasonings, agentKey, reasoning);
+            }
+
+            return true;
+        }
+
+        return false;
+    }
+
+    private static void AddAssistantMessage(
+        CopilotCliJournalEvent evt,
+        CopilotCliMappingState state,
+        string agentKey,
+        CopilotCliToolTelemetry toolTelemetry)
+    {
+        string? activeModel = SafeOptionalText(evt.Model)
+            ?? (agentKey.Length > 0 && state.AgentModels.TryGetValue(agentKey, out string? agentModel) ? agentModel : null)
+            ?? state.SessionModel;
+
+        List<CollectedContentPart> parts = [];
+        int position = 0;
+        string? correctionRule = null;
+
+        if (state.LatestSystemPrompts.TryGetValue(agentKey, out string? systemPrompt))
+        {
+            parts.Add(ToolContentMeasurer.BuildContentPart(position++, ContentBucket.SystemPrompt, systemPrompt, "system", activeModel));
+        }
+
+        if (state.PendingUserMessages.TryGetValue(agentKey, out List<string>? userMessages))
+        {
+            foreach (string userMessage in userMessages)
+            {
+                if (correctionRule is null)
+                {
+                    CorrectionDetectionResult check = CanonFindings.DetectUserCorrection(userMessage);
+                    if (check.Matched)
+                    {
+                        correctionRule = check.Rule;
+                    }
+                }
+
+                parts.Add(ToolContentMeasurer.BuildContentPart(position++, ContentBucket.UserMessage, userMessage, "user", activeModel));
+            }
+
+            userMessages.Clear();
+        }
+
+        if (state.PendingReasonings.TryGetValue(agentKey, out List<string>? reasonings))
+        {
+            foreach (string reasoning in reasonings)
+            {
+                parts.Add(ToolContentMeasurer.BuildContentPart(position++, ContentBucket.Reasoning, reasoning, "assistant", activeModel));
+            }
+
+            reasonings.Clear();
+        }
+
+        if (!string.IsNullOrEmpty(evt.ReasoningText))
+        {
+            parts.Add(ToolContentMeasurer.BuildContentPart(position++, ContentBucket.Reasoning, evt.ReasoningText, "assistant", activeModel));
+        }
+
+        if (!string.IsNullOrEmpty(evt.Content))
+        {
+            parts.Add(ToolContentMeasurer.BuildContentPart(position++, ContentBucket.ConversationHistory, evt.Content, "assistant", activeModel));
+        }
+
+        List<CollectedTokenCount> tokens = BuildTokens(evt);
+        List<string> skillsInvoked = ExtractInvokedSkills(evt.ToolRequests);
+        DateTimeOffset startedAt = ParseTimestamp(evt.Timestamp, state.Unit.LastWriteUtc, state.ImportedAtUtc);
+        long? durationMs = evt.DurationMs is >= 0 ? evt.DurationMs.Value : null;
+        DateTimeOffset? endedAt = durationMs is > 0 ? startedAt.AddMilliseconds(durationMs.Value) : null;
+
+        string recordId = BuildUniqueRecordId(state.SessionId, evt, state.SeenRecordIds);
+        string recordName = activeModel is not null ? $"copilot:{activeModel}" : "copilot:assistant.message";
+        string? agentInstanceId = agentKey.Length > 0 ? SafeOptionalText(agentKey) : null;
+        long? recordContextWindow = evt.DeclaredContextWindow is > 0
+            ? evt.DeclaredContextWindow.Value
+            : state.SessionDeclaredContextWindow;
+
+        CollectedRecord llmRecord = new(
+            RecordId: recordId,
+            HarnessId: CopilotCliJournalReader.CopilotCliHarnessId,
+            Op: RecordOp.LlmInvoke,
+            Kind: RecordKind.Internal,
+            Name: recordName,
+            StartedAt: startedAt,
+            Status: RecordStatus.Ok,
+            SessionKey: state.SessionId,
+            ParentRecordId: null,
+            TraceId: $"{CanonSynth.SynthSpanPrefix}{CopilotCliJournalReader.CopilotCliHarnessId}:{state.SessionId}",
+            Model: activeModel,
+            EndedAt: endedAt,
+            ReportedDurationMs: durationMs,
+            Tokens: tokens,
+            ReportedCost: null,
+            Parts: parts,
+            Tool: null,
+            Agent: null,
+            SkillsInvoked: skillsInvoked,
+            AgentInstanceId: agentInstanceId,
+            ToolDefinitions: [],
+            Signals: new CollectedRecordSignals(
+                ErrorMessage: null,
+                EditFailures: null,
+                CorrectionRule: correctionRule,
+                DeclaredContextWindow: recordContextWindow),
+            ReportedInputTokens: null,
+            ReportedOutputTokens: null);
+
+        IReadOnlyList<ParsedToolRequest> requestsForLine = toolTelemetry.ToolRequestsByLine.TryGetValue(evt.LineNumber, out List<ParsedToolRequest>? parsedRequests)
+            ? parsedRequests
+            : [];
+
+        AssistantMessageEntry entry = new(
+            LineNumber: evt.LineNumber,
+            EventId: SafeOptionalText(evt.EventId),
+            MessageId: SafeOptionalText(evt.MessageId),
+            AgentKey: agentKey,
+            Record: llmRecord,
+            ToolRequests: requestsForLine,
+            SkillsInvoked: [.. skillsInvoked],
+            SeenSkills: new HashSet<string>(skillsInvoked, StringComparer.Ordinal));
+
+        state.MessageEntries.Add(entry);
+        if (entry.EventId is not null)
+        {
+            state.MessageByEventId.TryAdd(entry.EventId, entry);
+        }
+
+        if (entry.MessageId is not null)
+        {
+            state.MessageByMessageId.TryAdd(entry.MessageId, entry);
+        }
+
+        foreach (ParsedToolRequest request in requestsForLine)
+        {
+            if (!string.IsNullOrEmpty(request.ToolCallId))
+            {
+                state.MessageByToolCallId.TryAdd(request.ToolCallId, entry);
+            }
+        }
     }
 
     private static bool IsSessionStart(string eventType) =>
@@ -562,11 +580,7 @@ public class CopilotCliMapper : IHarnessMapper
             or "session.resume"
             or "session.info";
 
-    private static void ApplyContextUpdate(
-        CopilotCliContextInfo? context,
-        ref string? workingDirectory,
-        ref string? repository,
-        ref string? branch)
+    private static void ApplyContextUpdate(CopilotCliContextInfo? context, CopilotCliMappingState state)
     {
         if (context is null)
         {
@@ -576,19 +590,19 @@ public class CopilotCliMapper : IHarnessMapper
         string? nextWorkingDir = SafeOptionalText(context.WorkingDirectory);
         if (nextWorkingDir is not null)
         {
-            workingDirectory = nextWorkingDir;
+            state.WorkingDirectory = nextWorkingDir;
         }
 
         string? nextRepo = ResolveRepositoryName(context);
         if (nextRepo is not null)
         {
-            repository = nextRepo;
+            state.Repository = nextRepo;
         }
 
         string? nextBranch = SafeOptionalText(context.Branch);
         if (nextBranch is not null)
         {
-            branch = nextBranch;
+            state.Branch = nextBranch;
         }
     }
 
@@ -848,136 +862,25 @@ public class CopilotCliMapper : IHarnessMapper
 
                 if (string.Equals(normalizedType, "assistant.message", StringComparison.Ordinal))
                 {
-                    List<ParsedToolRequest> requests = ParseLineToolRequests(data);
-                    if (requests.Count > 0)
-                    {
-                        toolRequestsByLine[lineNumber] = requests;
-                    }
-
+                    AddLineToolRequests(toolRequestsByLine, lineNumber, data);
                     continue;
                 }
 
                 if (string.Equals(normalizedType, "tool.execution_start", StringComparison.Ordinal))
                 {
-                    string? eventId = SafeOptionalText(ReadJsonString(root, "id"));
-                    string? parentId = SafeOptionalText(ReadJsonString(root, "parentId") ?? ReadJsonString(data, "parentId"));
-                    string? messageId = SafeOptionalText(ReadJsonString(data, "messageId"));
-                    string? toolCallId = SafeOptionalText(
-                        ReadJsonString(data, "toolCallId")
-                        ?? ReadJsonString(data, "callId")
-                        ?? ReadJsonString(data, "id")
-                        ?? ReadJsonString(root, "toolCallId"));
-                    string? toolName = SafeOptionalText(ReadJsonString(data, "toolName") ?? ReadJsonString(data, "name"));
-                    string? mcpServerName = SafeOptionalText(ReadMcpServerName(data));
-                    string? mcpToolName = SafeOptionalText(ReadMcpToolName(data));
-                    string? timestamp = ReadJsonString(root, "timestamp")
-                        ?? ReadJsonString(data, "startTime")
-                        ?? ReadJsonString(data, "timestamp");
-                    ToolContentMeasurement? inputMeasurement = MeasureToolInput(data);
-
-                    ParsedToolStart start = new(
-                        LineNumber: lineNumber,
-                        EventId: eventId,
-                        ParentId: parentId,
-                        MessageId: messageId,
-                        AgentKey: agentKey,
-                        ToolCallId: toolCallId,
-                        ToolName: toolName,
-                        McpServerName: mcpServerName,
-                        McpToolName: mcpToolName,
-                        Timestamp: timestamp,
-                        InputMeasurement: inputMeasurement);
-
-                    toolStarts.Add(start);
-                    if (toolCallId is not null)
-                    {
-                        _ = startByCallId.TryAdd(toolCallId, start);
-                        if (eventId is not null)
-                        {
-                            _ = startEventIdToCallId.TryAdd(eventId, toolCallId);
-                        }
-                    }
-
+                    AddToolStart(toolStarts, startByCallId, startEventIdToCallId, lineNumber, agentKey, root, data);
                     continue;
                 }
 
                 if (string.Equals(normalizedType, "tool.execution_complete", StringComparison.Ordinal))
                 {
-                    string? eventId = SafeOptionalText(ReadJsonString(root, "id"));
-                    string? parentId = SafeOptionalText(ReadJsonString(root, "parentId") ?? ReadJsonString(data, "parentId"));
-                    string? messageId = SafeOptionalText(ReadJsonString(data, "messageId"));
-                    string? toolCallId = SafeOptionalText(
-                        ReadJsonString(data, "toolCallId")
-                        ?? ReadJsonString(data, "callId")
-                        ?? ReadJsonString(data, "id")
-                        ?? ReadJsonString(root, "toolCallId"));
-                    string? toolName = SafeOptionalText(ReadJsonString(data, "toolName") ?? ReadJsonString(data, "name"));
-                    string? mcpServerName = SafeOptionalText(ReadMcpServerName(data));
-                    string? mcpToolName = SafeOptionalText(ReadMcpToolName(data));
-                    string? timestamp = ReadJsonString(root, "timestamp")
-                        ?? ReadJsonString(data, "endTime")
-                        ?? ReadJsonString(data, "timestamp");
-                    long? durationMs = ReadOptionalNonNegativeLong(data, "durationMs")
-                        ?? ReadOptionalNonNegativeLong(data, "duration_ms");
-                    long? exitCode = ReadOptionalLong(data, "exitCode")
-                        ?? ReadOptionalLong(data, "exit_code")
-                        ?? ReadOptionalLongFromNested(data, "result", "exitCode");
-                    ToolContentMeasurement? resultMeasurement = MeasureToolResult(data);
-                    (bool succeeded, string? errorMessage, string? errorCode) = ParseCompletionOutcome(data, resultMeasurement);
-
-                    ParsedToolComplete complete = new(
-                        LineNumber: lineNumber,
-                        EventId: eventId,
-                        ParentId: parentId,
-                        MessageId: messageId,
-                        AgentKey: agentKey,
-                        ToolCallId: toolCallId,
-                        ToolName: toolName,
-                        McpServerName: mcpServerName,
-                        McpToolName: mcpToolName,
-                        Timestamp: timestamp,
-                        DurationMs: durationMs,
-                        Succeeded: succeeded,
-                        ResultMeasurement: resultMeasurement,
-                        ErrorMessage: errorMessage,
-                        ErrorCode: errorCode,
-                        ExitCode: exitCode);
-
-                    toolCompletes.Add(complete);
-                    if (toolCallId is not null)
-                    {
-                        _ = completeByCallId.TryAdd(toolCallId, complete);
-                    }
-
+                    AddToolComplete(toolCompletes, completeByCallId, lineNumber, agentKey, root, data);
                     continue;
                 }
 
                 if (string.Equals(normalizedType, "skill.invoked", StringComparison.Ordinal))
                 {
-                    string? skillName = SafeOptionalText(
-                        ReadJsonString(data, "skillName")
-                        ?? ReadJsonString(data, "skill")
-                        ?? ReadJsonString(data, "name")
-                        ?? ReadJsonString(root, "skillName")
-                        ?? ReadJsonString(root, "skill")
-                        ?? ReadJsonString(root, "name"));
-
-                    if (skillName is null)
-                    {
-                        continue;
-                    }
-
-                    string? toolCallId = SafeOptionalText(ReadJsonString(data, "toolCallId") ?? ReadJsonString(data, "callId"));
-                    string? messageId = SafeOptionalText(ReadJsonString(data, "messageId"));
-                    string? parentId = SafeOptionalText(ReadJsonString(root, "parentId") ?? ReadJsonString(data, "parentId"));
-
-                    skillInvocations.Add(new ParsedSkillInvoked(
-                        LineNumber: lineNumber,
-                        SkillName: skillName,
-                        ToolCallId: toolCallId,
-                        MessageId: messageId,
-                        ParentId: parentId,
-                        AgentKey: agentKey));
+                    AddSkillInvocation(skillInvocations, lineNumber, agentKey, root, data);
                 }
 
                 // Sub-agent runs bracket delegation tool calls. `subagent.selected` is the legacy
@@ -985,11 +888,7 @@ public class CopilotCliMapper : IHarnessMapper
                 // carry the documented delegation join key (`data.toolCallId`).
                 if (IsSubagentLifecycleEvent(normalizedType))
                 {
-                    ParsedSubagentEvent? subagentEvent = ParseSubagentEvent(lineNumber, normalizedType, root, data);
-                    if (subagentEvent is not null)
-                    {
-                        subagentEvents.Add(subagentEvent);
-                    }
+                    AddSubagentEvent(subagentEvents, lineNumber, normalizedType, root, data);
                 }
             }
         }
@@ -1003,6 +902,169 @@ public class CopilotCliMapper : IHarnessMapper
             CompleteByCallId: completeByCallId,
             SkillInvocations: skillInvocations,
             SubagentEvents: subagentEvents);
+    }
+
+    private static void AddLineToolRequests(
+        Dictionary<int, List<ParsedToolRequest>> toolRequestsByLine,
+        int lineNumber,
+        JsonElement data)
+    {
+        List<ParsedToolRequest> requests = ParseLineToolRequests(data);
+        if (requests.Count > 0)
+        {
+            toolRequestsByLine[lineNumber] = requests;
+        }
+    }
+
+    private static void AddToolStart(
+        List<ParsedToolStart> toolStarts,
+        Dictionary<string, ParsedToolStart> startByCallId,
+        Dictionary<string, string> startEventIdToCallId,
+        int lineNumber,
+        string agentKey,
+        JsonElement root,
+        JsonElement data)
+    {
+        string? eventId = SafeOptionalText(ReadJsonString(root, "id"));
+        string? parentId = SafeOptionalText(ReadJsonString(root, "parentId") ?? ReadJsonString(data, "parentId"));
+        string? messageId = SafeOptionalText(ReadJsonString(data, "messageId"));
+        string? toolCallId = SafeOptionalText(
+            ReadJsonString(data, "toolCallId")
+            ?? ReadJsonString(data, "callId")
+            ?? ReadJsonString(data, "id")
+            ?? ReadJsonString(root, "toolCallId"));
+        string? toolName = SafeOptionalText(ReadJsonString(data, "toolName") ?? ReadJsonString(data, "name"));
+        string? mcpServerName = SafeOptionalText(ReadMcpServerName(data));
+        string? mcpToolName = SafeOptionalText(ReadMcpToolName(data));
+        string? timestamp = ReadJsonString(root, "timestamp")
+            ?? ReadJsonString(data, "startTime")
+            ?? ReadJsonString(data, "timestamp");
+        ToolContentMeasurement? inputMeasurement = MeasureToolInput(data);
+
+        ParsedToolStart start = new(
+            LineNumber: lineNumber,
+            EventId: eventId,
+            ParentId: parentId,
+            MessageId: messageId,
+            AgentKey: agentKey,
+            ToolCallId: toolCallId,
+            ToolName: toolName,
+            McpServerName: mcpServerName,
+            McpToolName: mcpToolName,
+            Timestamp: timestamp,
+            InputMeasurement: inputMeasurement);
+
+        toolStarts.Add(start);
+        if (toolCallId is not null)
+        {
+            _ = startByCallId.TryAdd(toolCallId, start);
+            if (eventId is not null)
+            {
+                _ = startEventIdToCallId.TryAdd(eventId, toolCallId);
+            }
+        }
+    }
+
+    private static void AddToolComplete(
+        List<ParsedToolComplete> toolCompletes,
+        Dictionary<string, ParsedToolComplete> completeByCallId,
+        int lineNumber,
+        string agentKey,
+        JsonElement root,
+        JsonElement data)
+    {
+        string? eventId = SafeOptionalText(ReadJsonString(root, "id"));
+        string? parentId = SafeOptionalText(ReadJsonString(root, "parentId") ?? ReadJsonString(data, "parentId"));
+        string? messageId = SafeOptionalText(ReadJsonString(data, "messageId"));
+        string? toolCallId = SafeOptionalText(
+            ReadJsonString(data, "toolCallId")
+            ?? ReadJsonString(data, "callId")
+            ?? ReadJsonString(data, "id")
+            ?? ReadJsonString(root, "toolCallId"));
+        string? toolName = SafeOptionalText(ReadJsonString(data, "toolName") ?? ReadJsonString(data, "name"));
+        string? mcpServerName = SafeOptionalText(ReadMcpServerName(data));
+        string? mcpToolName = SafeOptionalText(ReadMcpToolName(data));
+        string? timestamp = ReadJsonString(root, "timestamp")
+            ?? ReadJsonString(data, "endTime")
+            ?? ReadJsonString(data, "timestamp");
+        long? durationMs = ReadOptionalNonNegativeLong(data, "durationMs")
+            ?? ReadOptionalNonNegativeLong(data, "duration_ms");
+        long? exitCode = ReadOptionalLong(data, "exitCode")
+            ?? ReadOptionalLong(data, "exit_code")
+            ?? ReadOptionalLongFromNested(data, "result", "exitCode");
+        ToolContentMeasurement? resultMeasurement = MeasureToolResult(data);
+        (bool succeeded, string? errorMessage, string? errorCode) = ParseCompletionOutcome(data, resultMeasurement);
+
+        ParsedToolComplete complete = new(
+            LineNumber: lineNumber,
+            EventId: eventId,
+            ParentId: parentId,
+            MessageId: messageId,
+            AgentKey: agentKey,
+            ToolCallId: toolCallId,
+            ToolName: toolName,
+            McpServerName: mcpServerName,
+            McpToolName: mcpToolName,
+            Timestamp: timestamp,
+            DurationMs: durationMs,
+            Succeeded: succeeded,
+            ResultMeasurement: resultMeasurement,
+            ErrorMessage: errorMessage,
+            ErrorCode: errorCode,
+            ExitCode: exitCode);
+
+        toolCompletes.Add(complete);
+        if (toolCallId is not null)
+        {
+            _ = completeByCallId.TryAdd(toolCallId, complete);
+        }
+    }
+
+    private static void AddSkillInvocation(
+        List<ParsedSkillInvoked> skillInvocations,
+        int lineNumber,
+        string agentKey,
+        JsonElement root,
+        JsonElement data)
+    {
+        string? skillName = SafeOptionalText(
+            ReadJsonString(data, "skillName")
+            ?? ReadJsonString(data, "skill")
+            ?? ReadJsonString(data, "name")
+            ?? ReadJsonString(root, "skillName")
+            ?? ReadJsonString(root, "skill")
+            ?? ReadJsonString(root, "name"));
+
+        if (skillName is null)
+        {
+            return;
+        }
+
+        string? toolCallId = SafeOptionalText(ReadJsonString(data, "toolCallId") ?? ReadJsonString(data, "callId"));
+        string? messageId = SafeOptionalText(ReadJsonString(data, "messageId"));
+        string? parentId = SafeOptionalText(ReadJsonString(root, "parentId") ?? ReadJsonString(data, "parentId"));
+
+        skillInvocations.Add(new ParsedSkillInvoked(
+            LineNumber: lineNumber,
+            SkillName: skillName,
+            ToolCallId: toolCallId,
+            MessageId: messageId,
+            ParentId: parentId,
+            AgentKey: agentKey));
+    }
+
+    private static void AddSubagentEvent(
+        List<ParsedSubagentEvent> subagentEvents,
+        int lineNumber,
+        string normalizedType,
+        JsonElement root,
+        JsonElement data)
+    {
+        ParsedSubagentEvent? subagentEvent = ParseSubagentEvent(lineNumber, normalizedType, root, data);
+        if (subagentEvent is not null)
+        {
+            subagentEvents.Add(subagentEvent);
+        }
     }
 
     private static List<ParsedToolRequest> ParseLineToolRequests(JsonElement data)
@@ -1090,6 +1152,33 @@ public class CopilotCliMapper : IHarnessMapper
         HashSet<string> consumedCallIds = new(StringComparer.Ordinal);
         Dictionary<int, List<CollectedRecord>> extraToolsByMessageLine = [];
 
+        AddRequestedToolRecords(records, consumedCallIds, sessionId, harnessId, telemetry, messageEntries, seenRecordIds);
+        AddOrphanToolRecords(
+            records,
+            consumedCallIds,
+            extraToolsByMessageLine,
+            sessionId,
+            harnessId,
+            telemetry,
+            messageEntries,
+            messageByEventId,
+            messageByMessageId,
+            seenRecordIds);
+
+        return extraToolsByMessageLine.Count == 0
+            ? records
+            : MergeExtraTools(records, extraToolsByMessageLine, messageEntries);
+    }
+
+    private static void AddRequestedToolRecords(
+        List<CollectedRecord> records,
+        HashSet<string> consumedCallIds,
+        string sessionId,
+        string harnessId,
+        CopilotCliToolTelemetry telemetry,
+        List<AssistantMessageEntry> messageEntries,
+        HashSet<string> seenRecordIds)
+    {
         foreach (AssistantMessageEntry entry in messageEntries)
         {
             CollectedRecord finalizedLlm = entry.SkillsInvoked.Count == entry.Record.SkillsInvoked.Count
@@ -1133,97 +1222,163 @@ public class CopilotCliMapper : IHarnessMapper
                     seenRecordIds: seenRecordIds));
             }
         }
+    }
 
-        if (messageEntries.Count > 0)
+    private static void AddOrphanToolRecords(
+        List<CollectedRecord> records,
+        HashSet<string> consumedCallIds,
+        Dictionary<int, List<CollectedRecord>> extraToolsByMessageLine,
+        string sessionId,
+        string harnessId,
+        CopilotCliToolTelemetry telemetry,
+        List<AssistantMessageEntry> messageEntries,
+        Dictionary<string, AssistantMessageEntry> messageByEventId,
+        Dictionary<string, AssistantMessageEntry> messageByMessageId,
+        HashSet<string> seenRecordIds)
+    {
+        if (messageEntries.Count == 0)
         {
-            int fallbackIndex = 0;
-            foreach (ParsedToolStart start in telemetry.ToolStarts)
-            {
-                if (!string.IsNullOrEmpty(start.ToolCallId) && !consumedCallIds.Add(start.ToolCallId))
-                {
-                    continue;
-                }
-
-                ParsedToolComplete? complete = !string.IsNullOrEmpty(start.ToolCallId)
-                    && telemetry.CompleteByCallId.TryGetValue(start.ToolCallId, out ParsedToolComplete? matchedComplete)
-                    ? matchedComplete
-                    : null;
-
-                AssistantMessageEntry? parent = ResolveParentMessage(
-                    lineNumber: start.LineNumber,
-                    agentKey: start.AgentKey,
-                    toolCallId: start.ToolCallId,
-                    messageId: start.MessageId,
-                    parentId: start.ParentId,
-                    telemetry: telemetry,
-                    messageEntries: messageEntries,
-                    messageByEventId: messageByEventId,
-                    messageByMessageId: messageByMessageId,
-                    messageByToolCallId: null);
-
-                if (parent is null)
-                {
-                    continue;
-                }
-
-                CollectedRecord orphanTool = BuildToolInvokeRecord(
-                    parentRecord: parent.Record,
-                    parentLineNumber: parent.LineNumber,
-                    toolIndex: parent.ToolRequests.Count + fallbackIndex++,
-                    sessionId: sessionId,
-                    harnessId: harnessId,
-                    request: null,
-                    start: start,
-                    complete: complete,
-                    seenRecordIds: seenRecordIds);
-
-                AddExtraTool(extraToolsByMessageLine, parent.LineNumber, orphanTool);
-            }
-
-            foreach (ParsedToolComplete complete in telemetry.ToolCompletes)
-            {
-                if (!string.IsNullOrEmpty(complete.ToolCallId) && !consumedCallIds.Add(complete.ToolCallId))
-                {
-                    continue;
-                }
-
-                AssistantMessageEntry? parent = ResolveParentMessage(
-                    lineNumber: complete.LineNumber,
-                    agentKey: complete.AgentKey,
-                    toolCallId: complete.ToolCallId,
-                    messageId: complete.MessageId,
-                    parentId: complete.ParentId,
-                    telemetry: telemetry,
-                    messageEntries: messageEntries,
-                    messageByEventId: messageByEventId,
-                    messageByMessageId: messageByMessageId,
-                    messageByToolCallId: null);
-
-                if (parent is null)
-                {
-                    continue;
-                }
-
-                CollectedRecord completeOnlyTool = BuildToolInvokeRecord(
-                    parentRecord: parent.Record,
-                    parentLineNumber: parent.LineNumber,
-                    toolIndex: parent.ToolRequests.Count + fallbackIndex++,
-                    sessionId: sessionId,
-                    harnessId: harnessId,
-                    request: null,
-                    start: null,
-                    complete: complete,
-                    seenRecordIds: seenRecordIds);
-
-                AddExtraTool(extraToolsByMessageLine, parent.LineNumber, completeOnlyTool);
-            }
+            return;
         }
 
-        if (extraToolsByMessageLine.Count == 0)
-        {
-            return records;
-        }
+        int fallbackIndex = 0;
+        AddOrphanToolStarts(
+            consumedCallIds,
+            extraToolsByMessageLine,
+            sessionId,
+            harnessId,
+            telemetry,
+            messageEntries,
+            messageByEventId,
+            messageByMessageId,
+            seenRecordIds,
+            ref fallbackIndex);
 
+        AddOrphanToolCompletes(
+            consumedCallIds,
+            extraToolsByMessageLine,
+            sessionId,
+            harnessId,
+            telemetry,
+            messageEntries,
+            messageByEventId,
+            messageByMessageId,
+            seenRecordIds,
+            ref fallbackIndex);
+    }
+
+    private static void AddOrphanToolStarts(
+        HashSet<string> consumedCallIds,
+        Dictionary<int, List<CollectedRecord>> extraToolsByMessageLine,
+        string sessionId,
+        string harnessId,
+        CopilotCliToolTelemetry telemetry,
+        List<AssistantMessageEntry> messageEntries,
+        Dictionary<string, AssistantMessageEntry> messageByEventId,
+        Dictionary<string, AssistantMessageEntry> messageByMessageId,
+        HashSet<string> seenRecordIds,
+        ref int fallbackIndex)
+    {
+        foreach (ParsedToolStart start in telemetry.ToolStarts)
+        {
+            if (!string.IsNullOrEmpty(start.ToolCallId) && !consumedCallIds.Add(start.ToolCallId))
+            {
+                continue;
+            }
+
+            ParsedToolComplete? complete = !string.IsNullOrEmpty(start.ToolCallId)
+                && telemetry.CompleteByCallId.TryGetValue(start.ToolCallId, out ParsedToolComplete? matchedComplete)
+                ? matchedComplete
+                : null;
+
+            AssistantMessageEntry? parent = ResolveParentMessage(
+                lineNumber: start.LineNumber,
+                agentKey: start.AgentKey,
+                toolCallId: start.ToolCallId,
+                messageId: start.MessageId,
+                parentId: start.ParentId,
+                telemetry: telemetry,
+                messageEntries: messageEntries,
+                messageByEventId: messageByEventId,
+                messageByMessageId: messageByMessageId,
+                messageByToolCallId: null);
+
+            if (parent is null)
+            {
+                continue;
+            }
+
+            CollectedRecord orphanTool = BuildToolInvokeRecord(
+                parentRecord: parent.Record,
+                parentLineNumber: parent.LineNumber,
+                toolIndex: parent.ToolRequests.Count + fallbackIndex++,
+                sessionId: sessionId,
+                harnessId: harnessId,
+                request: null,
+                start: start,
+                complete: complete,
+                seenRecordIds: seenRecordIds);
+
+            AddExtraTool(extraToolsByMessageLine, parent.LineNumber, orphanTool);
+        }
+    }
+
+    private static void AddOrphanToolCompletes(
+        HashSet<string> consumedCallIds,
+        Dictionary<int, List<CollectedRecord>> extraToolsByMessageLine,
+        string sessionId,
+        string harnessId,
+        CopilotCliToolTelemetry telemetry,
+        List<AssistantMessageEntry> messageEntries,
+        Dictionary<string, AssistantMessageEntry> messageByEventId,
+        Dictionary<string, AssistantMessageEntry> messageByMessageId,
+        HashSet<string> seenRecordIds,
+        ref int fallbackIndex)
+    {
+        foreach (ParsedToolComplete complete in telemetry.ToolCompletes)
+        {
+            if (!string.IsNullOrEmpty(complete.ToolCallId) && !consumedCallIds.Add(complete.ToolCallId))
+            {
+                continue;
+            }
+
+            AssistantMessageEntry? parent = ResolveParentMessage(
+                lineNumber: complete.LineNumber,
+                agentKey: complete.AgentKey,
+                toolCallId: complete.ToolCallId,
+                messageId: complete.MessageId,
+                parentId: complete.ParentId,
+                telemetry: telemetry,
+                messageEntries: messageEntries,
+                messageByEventId: messageByEventId,
+                messageByMessageId: messageByMessageId,
+                messageByToolCallId: null);
+
+            if (parent is null)
+            {
+                continue;
+            }
+
+            CollectedRecord completeOnlyTool = BuildToolInvokeRecord(
+                parentRecord: parent.Record,
+                parentLineNumber: parent.LineNumber,
+                toolIndex: parent.ToolRequests.Count + fallbackIndex++,
+                sessionId: sessionId,
+                harnessId: harnessId,
+                request: null,
+                start: null,
+                complete: complete,
+                seenRecordIds: seenRecordIds);
+
+            AddExtraTool(extraToolsByMessageLine, parent.LineNumber, completeOnlyTool);
+        }
+    }
+
+    private static List<CollectedRecord> MergeExtraTools(
+        List<CollectedRecord> records,
+        Dictionary<int, List<CollectedRecord>> extraToolsByMessageLine,
+        List<AssistantMessageEntry> messageEntries)
+    {
         List<CollectedRecord> merged = new(records.Count + extraToolsByMessageLine.Values.Sum(static l => l.Count));
         Dictionary<string, int> parentLineByRecordId = messageEntries.ToDictionary(
             static e => e.Record.RecordId,
@@ -1616,33 +1771,7 @@ public class CopilotCliMapper : IHarnessMapper
             inputMeasurement,
             seenRecordIds);
 
-        DateTimeOffset startedAt = TryParseUtcTimestamp(start?.Timestamp, out DateTimeOffset parsedStart)
-            ? parsedStart
-            : parentRecord.StartedAt;
-
-        DateTimeOffset? endedAt = null;
-        long? durationMs = null;
-        if (complete is not null)
-        {
-            bool hasEndTimestamp = TryParseUtcTimestamp(complete.Timestamp, out DateTimeOffset parsedEnd);
-            if (complete.DurationMs is >= 0)
-            {
-                durationMs = complete.DurationMs.Value;
-            }
-            else if (hasEndTimestamp && parsedEnd >= startedAt)
-            {
-                durationMs = (long)Math.Round((parsedEnd - startedAt).TotalMilliseconds);
-            }
-
-            if (hasEndTimestamp && parsedEnd >= startedAt)
-            {
-                endedAt = parsedEnd;
-            }
-            else if (durationMs is >= 0)
-            {
-                endedAt = startedAt.AddMilliseconds(durationMs.Value);
-            }
-        }
+        ResolveToolTiming(parentRecord, start, complete, out DateTimeOffset startedAt, out DateTimeOffset? endedAt, out long? durationMs);
 
         RecordStatus status = complete is null
             ? RecordStatus.Unset
@@ -1650,38 +1779,14 @@ public class CopilotCliMapper : IHarnessMapper
                 ? RecordStatus.Ok
                 : RecordStatus.Error;
 
-        CollectedToolContent? resultContent = null;
-        List<CollectedContentPart> parts = [];
-        if (complete?.ResultMeasurement is { } resultMeasurement)
-        {
-            resultContent = resultMeasurement.ToToolContent(includeFingerprint: false);
-
-            string? plainText = resultMeasurement.IsDocument ? null : resultMeasurement.PlainText;
-            CollectedWithheldText? withheld = resultMeasurement.IsDocument ? resultMeasurement.ToWithheldText() : null;
-            long? originalBytes = resultMeasurement.IsDocument ? null : resultMeasurement.OriginalUtf8BytesWhenTruncated;
-
-            parts.Add(new CollectedContentPart(
-                Position: 0,
-                Bucket: ContentBucket.ToolResultContent,
-                PlainText: plainText,
-                Withheld: withheld,
-                ReportedTokens: null,
-                Server: mcpServerName,
-                Role: "tool",
-                Resident: null,
-                OriginalUtf8BytesWhenTruncated: originalBytes));
-        }
+        (CollectedToolContent? resultContent, List<CollectedContentPart> parts) = BuildToolResultParts(complete, mcpServerName);
 
         bool? succeeded = complete is null ? null : complete.Succeeded;
         CollectedError? error = complete is { Succeeded: false }
             ? new CollectedError(SafeToolErrorMessage(complete.ErrorMessage), complete.ErrorCode)
             : null;
         string? signalErrorMessage = error?.Message;
-
-        string? agentInstanceId = SafeOptionalText(
-            start is { AgentKey.Length: > 0 } ? start.AgentKey :
-            complete is { AgentKey.Length: > 0 } ? complete.AgentKey :
-            null) ?? parentRecord.AgentInstanceId;
+        string? agentInstanceId = ResolveToolAgentInstanceId(parentRecord, start, complete);
 
         CollectedToolCall collectedTool = new(
             CallId: safeCallId,
@@ -1719,6 +1824,84 @@ public class CopilotCliMapper : IHarnessMapper
             Signals: new CollectedRecordSignals(signalErrorMessage, null, null, null));
     }
 
+    private static void ResolveToolTiming(
+        CollectedRecord parentRecord,
+        ParsedToolStart? start,
+        ParsedToolComplete? complete,
+        out DateTimeOffset startedAt,
+        out DateTimeOffset? endedAt,
+        out long? durationMs)
+    {
+        startedAt = TryParseUtcTimestamp(start?.Timestamp, out DateTimeOffset parsedStart)
+            ? parsedStart
+            : parentRecord.StartedAt;
+
+        endedAt = null;
+        durationMs = null;
+        if (complete is null)
+        {
+            return;
+        }
+
+        bool hasEndTimestamp = TryParseUtcTimestamp(complete.Timestamp, out DateTimeOffset parsedEnd);
+        if (complete.DurationMs is >= 0)
+        {
+            durationMs = complete.DurationMs.Value;
+        }
+        else if (hasEndTimestamp && parsedEnd >= startedAt)
+        {
+            durationMs = (long)Math.Round((parsedEnd - startedAt).TotalMilliseconds);
+        }
+
+        if (hasEndTimestamp && parsedEnd >= startedAt)
+        {
+            endedAt = parsedEnd;
+        }
+        else if (durationMs is >= 0)
+        {
+            endedAt = startedAt.AddMilliseconds(durationMs.Value);
+        }
+    }
+
+    private static (CollectedToolContent? ResultContent, List<CollectedContentPart> Parts) BuildToolResultParts(
+        ParsedToolComplete? complete,
+        string? mcpServerName)
+    {
+        List<CollectedContentPart> parts = [];
+        if (complete?.ResultMeasurement is not { } resultMeasurement)
+        {
+            return (null, parts);
+        }
+
+        CollectedToolContent resultContent = resultMeasurement.ToToolContent(includeFingerprint: false);
+
+        string? plainText = resultMeasurement.IsDocument ? null : resultMeasurement.PlainText;
+        CollectedWithheldText? withheld = resultMeasurement.IsDocument ? resultMeasurement.ToWithheldText() : null;
+        long? originalBytes = resultMeasurement.IsDocument ? null : resultMeasurement.OriginalUtf8BytesWhenTruncated;
+
+        parts.Add(new CollectedContentPart(
+            Position: 0,
+            Bucket: ContentBucket.ToolResultContent,
+            PlainText: plainText,
+            Withheld: withheld,
+            ReportedTokens: null,
+            Server: mcpServerName,
+            Role: "tool",
+            Resident: null,
+            OriginalUtf8BytesWhenTruncated: originalBytes));
+
+        return (resultContent, parts);
+    }
+
+    private static string? ResolveToolAgentInstanceId(
+        CollectedRecord parentRecord,
+        ParsedToolStart? start,
+        ParsedToolComplete? complete) =>
+        SafeOptionalText(
+            start is { AgentKey.Length: > 0 } ? start.AgentKey :
+            complete is { AgentKey.Length: > 0 } ? complete.AgentKey :
+            null) ?? parentRecord.AgentInstanceId;
+
     private static (string? ServerName, string? ToolName) ResolveMcpAttribution(
         string safeToolName,
         ParsedToolRequest? request,
@@ -1728,33 +1911,15 @@ public class CopilotCliMapper : IHarnessMapper
         string? mcpServer = request?.McpServerName ?? start?.McpServerName ?? complete?.McpServerName;
         string? mcpTool = request?.McpToolName ?? start?.McpToolName ?? complete?.McpToolName;
 
-        if (mcpServer is null && mcpTool is null && safeToolName.StartsWith("mcp__", StringComparison.Ordinal))
+        if (mcpServer is null && mcpTool is null)
         {
-            int separatorIndex = safeToolName.IndexOf("__", 5, StringComparison.Ordinal);
-            if (separatorIndex > 5 && separatorIndex + 2 < safeToolName.Length)
+            if (safeToolName.StartsWith("mcp__", StringComparison.Ordinal))
             {
-                mcpServer = SafeOptionalText(safeToolName[5..separatorIndex]);
-                mcpTool = SafeOptionalText(safeToolName[(separatorIndex + 2)..]);
+                (mcpServer, mcpTool) = ParsePrefixedMcpAttribution(safeToolName);
             }
-        }
-        else if (mcpServer is null
-            && mcpTool is null
-            && string.Equals(request?.Type, "mcp", StringComparison.OrdinalIgnoreCase))
-        {
-            int doubleUnderscore = safeToolName.IndexOf("__", StringComparison.Ordinal);
-            if (doubleUnderscore > 0 && doubleUnderscore + 2 < safeToolName.Length)
+            else if (string.Equals(request?.Type, "mcp", StringComparison.OrdinalIgnoreCase))
             {
-                mcpServer = SafeOptionalText(safeToolName[..doubleUnderscore]);
-                mcpTool = SafeOptionalText(safeToolName[(doubleUnderscore + 2)..]);
-            }
-            else
-            {
-                int sep = safeToolName.IndexOfAny(['/', ':']);
-                if (sep > 0 && sep + 1 < safeToolName.Length)
-                {
-                    mcpServer = SafeOptionalText(safeToolName[..sep]);
-                    mcpTool = SafeOptionalText(safeToolName[(sep + 1)..]);
-                }
+                (mcpServer, mcpTool) = ParseTypedMcpAttribution(safeToolName);
             }
         }
 
@@ -1768,6 +1933,40 @@ public class CopilotCliMapper : IHarnessMapper
         }
 
         return (mcpServer, mcpTool);
+    }
+
+    private static (string? ServerName, string? ToolName) ParsePrefixedMcpAttribution(string safeToolName)
+    {
+        int separatorIndex = safeToolName.IndexOf("__", 5, StringComparison.Ordinal);
+        if (separatorIndex > 5 && separatorIndex + 2 < safeToolName.Length)
+        {
+            return (
+                SafeOptionalText(safeToolName[5..separatorIndex]),
+                SafeOptionalText(safeToolName[(separatorIndex + 2)..]));
+        }
+
+        return (null, null);
+    }
+
+    private static (string? ServerName, string? ToolName) ParseTypedMcpAttribution(string safeToolName)
+    {
+        int doubleUnderscore = safeToolName.IndexOf("__", StringComparison.Ordinal);
+        if (doubleUnderscore > 0 && doubleUnderscore + 2 < safeToolName.Length)
+        {
+            return (
+                SafeOptionalText(safeToolName[..doubleUnderscore]),
+                SafeOptionalText(safeToolName[(doubleUnderscore + 2)..]));
+        }
+
+        int sep = safeToolName.IndexOfAny(['/', ':']);
+        if (sep > 0 && sep + 1 < safeToolName.Length)
+        {
+            return (
+                SafeOptionalText(safeToolName[..sep]),
+                SafeOptionalText(safeToolName[(sep + 1)..]));
+        }
+
+        return (null, null);
     }
 
     private static string DeriveMcpToolName(string safeToolName, string mcpServer)
@@ -2001,6 +2200,66 @@ public class CopilotCliMapper : IHarnessMapper
 
     private static bool TryParseUtcTimestamp(string? rawTimestamp, out DateTimeOffset parsed) =>
         HarnessJson.TryParseTimestamp(rawTimestamp, out parsed);
+
+    private sealed class CopilotCliMappingState
+    {
+        internal CopilotCliMappingState(
+            NativeSourceUnit unit,
+            DateTimeOffset importedAtUtc,
+            string sessionId,
+            CopilotCliJournalDocument document)
+        {
+            Unit = unit;
+            ImportedAtUtc = importedAtUtc;
+            SessionId = sessionId;
+            Document = document;
+            SessionModel = SafeOptionalText(document.InitialModel);
+            SessionTitle = SafeOptionalText(document.Title);
+            WorkingDirectory = SafeOptionalText(document.InitialContext?.WorkingDirectory);
+            Repository = ResolveRepositoryName(document.InitialContext);
+            Branch = SafeOptionalText(document.InitialContext?.Branch);
+        }
+
+        internal NativeSourceUnit Unit { get; }
+
+        internal DateTimeOffset ImportedAtUtc { get; }
+
+        internal string SessionId { get; }
+
+        internal CopilotCliJournalDocument Document { get; }
+
+        internal string? SessionModel { get; set; }
+
+        internal string? SessionTitle { get; set; }
+
+        internal string? WorkingDirectory { get; set; }
+
+        internal string? Repository { get; set; }
+
+        internal string? Branch { get; set; }
+
+        internal long? SessionDeclaredContextWindow { get; set; }
+
+        internal Dictionary<string, string> AgentModels { get; } = new(StringComparer.Ordinal);
+
+        internal Dictionary<string, string> LatestSystemPrompts { get; } = new(StringComparer.Ordinal);
+
+        internal List<IReadOnlyList<CopilotCliModelUsage>> ShutdownSnapshots { get; } = [];
+
+        internal Dictionary<string, List<string>> PendingUserMessages { get; } = new(StringComparer.Ordinal);
+
+        internal Dictionary<string, List<string>> PendingReasonings { get; } = new(StringComparer.Ordinal);
+
+        internal List<AssistantMessageEntry> MessageEntries { get; } = [];
+
+        internal Dictionary<string, AssistantMessageEntry> MessageByEventId { get; } = new(StringComparer.Ordinal);
+
+        internal Dictionary<string, AssistantMessageEntry> MessageByMessageId { get; } = new(StringComparer.Ordinal);
+
+        internal Dictionary<string, AssistantMessageEntry> MessageByToolCallId { get; } = new(StringComparer.Ordinal);
+
+        internal HashSet<string> SeenRecordIds { get; } = new(StringComparer.Ordinal);
+    }
 
     private record ParsedToolRequest(
         int RequestOrder,

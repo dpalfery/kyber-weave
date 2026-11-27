@@ -134,140 +134,15 @@ public class CopilotVscodeMapper : IHarnessMapper
 
         for (int index = 0; index < document.Requests.Count; index++)
         {
-            CopilotVscodeRequest current = document.Requests[index];
-            string model = ResolveModel(current);
-            List<CollectedContentPart> parts = [];
-            int position = 0;
-
-            for (int prevIndex = 0; prevIndex < index; prevIndex++)
-            {
-                CopilotVscodeRequest previous = document.Requests[prevIndex];
-                if (!string.IsNullOrWhiteSpace(previous.UserMessage))
-                {
-                    parts.Add(ToolContentMeasurer.BuildContentPart(position++, ContentBucket.ConversationHistory, previous.UserMessage, "user", model));
-                }
-
-                if (!string.IsNullOrWhiteSpace(previous.ResponseText))
-                {
-                    parts.Add(ToolContentMeasurer.BuildContentPart(position++, ContentBucket.ConversationHistory, previous.ResponseText, "assistant", model));
-                }
-            }
-
-            string? correctionRule = null;
-            if (!string.IsNullOrWhiteSpace(current.UserMessage))
-            {
-                CorrectionDetectionResult correction = CanonFindings.DetectUserCorrection(current.UserMessage);
-                if (correction.Matched)
-                {
-                    correctionRule = correction.Rule;
-                }
-
-                parts.Add(ToolContentMeasurer.BuildContentPart(position++, ContentBucket.ConversationHistory, current.UserMessage, "user", model));
-            }
-
-            if (!string.IsNullOrWhiteSpace(current.ModeInstructions))
-            {
-                parts.Add(ToolContentMeasurer.BuildContentPart(position++, ContentBucket.InstructionContext, current.ModeInstructions, "system", model));
-            }
-
-            string recordId = BuildUniqueRecordId(sessionId, current, seenRecordIds);
-            string recordName = !string.Equals(model, "unknown", StringComparison.Ordinal)
-                ? $"copilot:{model}"
-                : "copilot-vscode:request";
-            DateTimeOffset startedAt = ResolveTimestamp(current.Timestamp, document.CreationDate, unit.LastWriteUtc, importedAtUtc);
-            string? agentInstanceId = SafeOptionalText(current.AgentId);
-
-            long? inputTokens = current.PromptTokens is >= 0 ? current.PromptTokens.Value : null;
-            long? outputTokens = ResolveOutputTokens(current);
-
-            List<CollectedTokenCount> tokens = [];
-            if (inputTokens.HasValue)
-            {
-                tokens.Add(new CollectedTokenCount(TokenClass.Input, inputTokens.Value));
-            }
-
-            if (outputTokens.HasValue)
-            {
-                tokens.Add(new CollectedTokenCount(TokenClass.Output, outputTokens.Value));
-            }
-
-            List<string> skillsInvoked = ExtractInvokedSkills(current.ToolCalls);
-
-            records.Add(new CollectedRecord(
-                RecordId: recordId,
-                HarnessId: CopilotVscodeHarnessId,
-                Op: RecordOp.LlmInvoke,
-                Kind: RecordKind.Internal,
-                Name: recordName,
-                StartedAt: startedAt,
-                Status: RecordStatus.Ok,
-                SessionKey: sessionId,
-                ParentRecordId: null,
-                TraceId: traceId,
-                Model: model,
-                EndedAt: null,
-                ReportedDurationMs: null,
-                Tokens: tokens,
-                ReportedCost: null,
-                Parts: parts,
-                Tool: null,
-                Agent: null,
-                SkillsInvoked: skillsInvoked,
-                AgentInstanceId: agentInstanceId,
-                ToolDefinitions: [],
-                Signals: new CollectedRecordSignals(
-                    ErrorMessage: null,
-                    EditFailures: null,
-                    CorrectionRule: correctionRule,
-                    DeclaredContextWindow: null),
-                ReportedInputTokens: inputTokens,
-                ReportedOutputTokens: outputTokens));
-
-            for (int toolIndex = 0; toolIndex < current.ToolCalls.Count; toolIndex++)
-            {
-                CopilotVscodeToolCall toolCall = current.ToolCalls[toolIndex];
-                string toolRecordId = BuildUniqueToolRecordId(recordId, toolIndex, seenRecordIds);
-                string callId = SafeOptionalText(toolCall.CallId)
-                    ?? string.Create(CultureInfo.InvariantCulture, $"tool-{toolIndex}");
-                CollectedToolContent? toolInput = !string.IsNullOrEmpty(toolCall.RawArgumentsText)
-                    ? ToolContentMeasurer.Measure(toolCall.RawArgumentsText, model: model).ToToolContent(includeFingerprint: true)
-                    : null;
-
-                records.Add(new CollectedRecord(
-                    RecordId: toolRecordId,
-                    HarnessId: CopilotVscodeHarnessId,
-                    Op: RecordOp.ToolInvoke,
-                    Kind: RecordKind.Internal,
-                    Name: toolCall.ToolName,
-                    StartedAt: startedAt,
-                    Status: RecordStatus.Ok,
-                    SessionKey: sessionId,
-                    ParentRecordId: recordId,
-                    TraceId: traceId,
-                    Model: null,
-                    EndedAt: null,
-                    ReportedDurationMs: null,
-                    Tokens: [],
-                    ReportedCost: null,
-                    Parts: [],
-                    Tool: new CollectedToolCall(
-                        CallId: callId,
-                        ToolName: toolCall.ToolName,
-                        McpServerName: null,
-                        McpToolName: null,
-                        Input: toolInput,
-                        Result: null,
-                        Succeeded: null,
-                        Error: null,
-                        ExitCode: null),
-                    Agent: null,
-                    SkillsInvoked: [],
-                    AgentInstanceId: agentInstanceId,
-                    ToolDefinitions: [],
-                    Signals: new CollectedRecordSignals(null, null, null, null),
-                    ReportedInputTokens: null,
-                    ReportedOutputTokens: null));
-            }
+            AddRequestRecords(
+                records,
+                document,
+                index,
+                sessionId,
+                traceId,
+                unit.LastWriteUtc,
+                importedAtUtc,
+                seenRecordIds);
         }
 
         List<CollectedSession> sessions =
@@ -282,6 +157,166 @@ public class CopilotVscodeMapper : IHarnessMapper
         ];
 
         return new CollectedBatch(source, sessions, records, problems);
+    }
+
+    private static void AddRequestRecords(
+        List<CollectedRecord> records,
+        CopilotVscodeJournalDocument document,
+        int index,
+        string sessionId,
+        string traceId,
+        DateTimeOffset sourceLastWriteUtc,
+        DateTimeOffset importedAtUtc,
+        HashSet<string> seenRecordIds)
+    {
+        CopilotVscodeRequest current = document.Requests[index];
+        string model = ResolveModel(current);
+        List<CollectedContentPart> parts = [];
+        int position = 0;
+
+        for (int prevIndex = 0; prevIndex < index; prevIndex++)
+        {
+            CopilotVscodeRequest previous = document.Requests[prevIndex];
+            if (!string.IsNullOrWhiteSpace(previous.UserMessage))
+            {
+                parts.Add(ToolContentMeasurer.BuildContentPart(position++, ContentBucket.ConversationHistory, previous.UserMessage, "user", model));
+            }
+
+            if (!string.IsNullOrWhiteSpace(previous.ResponseText))
+            {
+                parts.Add(ToolContentMeasurer.BuildContentPart(position++, ContentBucket.ConversationHistory, previous.ResponseText, "assistant", model));
+            }
+        }
+
+        string? correctionRule = null;
+        if (!string.IsNullOrWhiteSpace(current.UserMessage))
+        {
+            CorrectionDetectionResult correction = CanonFindings.DetectUserCorrection(current.UserMessage);
+            if (correction.Matched)
+            {
+                correctionRule = correction.Rule;
+            }
+
+            parts.Add(ToolContentMeasurer.BuildContentPart(position++, ContentBucket.ConversationHistory, current.UserMessage, "user", model));
+        }
+
+        if (!string.IsNullOrWhiteSpace(current.ModeInstructions))
+        {
+            parts.Add(ToolContentMeasurer.BuildContentPart(position++, ContentBucket.InstructionContext, current.ModeInstructions, "system", model));
+        }
+
+        string recordId = BuildUniqueRecordId(sessionId, current, seenRecordIds);
+        string recordName = !string.Equals(model, "unknown", StringComparison.Ordinal)
+            ? $"copilot:{model}"
+            : "copilot-vscode:request";
+        DateTimeOffset startedAt = ResolveTimestamp(current.Timestamp, document.CreationDate, sourceLastWriteUtc, importedAtUtc);
+        string? agentInstanceId = SafeOptionalText(current.AgentId);
+
+        long? inputTokens = current.PromptTokens is >= 0 ? current.PromptTokens.Value : null;
+        long? outputTokens = ResolveOutputTokens(current);
+
+        List<CollectedTokenCount> tokens = [];
+        if (inputTokens.HasValue)
+        {
+            tokens.Add(new CollectedTokenCount(TokenClass.Input, inputTokens.Value));
+        }
+
+        if (outputTokens.HasValue)
+        {
+            tokens.Add(new CollectedTokenCount(TokenClass.Output, outputTokens.Value));
+        }
+
+        List<string> skillsInvoked = ExtractInvokedSkills(current.ToolCalls);
+
+        records.Add(new CollectedRecord(
+            RecordId: recordId,
+            HarnessId: CopilotVscodeHarnessId,
+            Op: RecordOp.LlmInvoke,
+            Kind: RecordKind.Internal,
+            Name: recordName,
+            StartedAt: startedAt,
+            Status: RecordStatus.Ok,
+            SessionKey: sessionId,
+            ParentRecordId: null,
+            TraceId: traceId,
+            Model: model,
+            EndedAt: null,
+            ReportedDurationMs: null,
+            Tokens: tokens,
+            ReportedCost: null,
+            Parts: parts,
+            Tool: null,
+            Agent: null,
+            SkillsInvoked: skillsInvoked,
+            AgentInstanceId: agentInstanceId,
+            ToolDefinitions: [],
+            Signals: new CollectedRecordSignals(
+                ErrorMessage: null,
+                EditFailures: null,
+                CorrectionRule: correctionRule,
+                DeclaredContextWindow: null),
+            ReportedInputTokens: inputTokens,
+            ReportedOutputTokens: outputTokens));
+
+        for (int toolIndex = 0; toolIndex < current.ToolCalls.Count; toolIndex++)
+        {
+            AddToolRecord(records, current.ToolCalls[toolIndex], toolIndex, recordId, sessionId, traceId, startedAt, agentInstanceId, model, seenRecordIds);
+        }
+    }
+
+    private static void AddToolRecord(
+        List<CollectedRecord> records,
+        CopilotVscodeToolCall toolCall,
+        int toolIndex,
+        string recordId,
+        string sessionId,
+        string traceId,
+        DateTimeOffset startedAt,
+        string? agentInstanceId,
+        string model,
+        HashSet<string> seenRecordIds)
+    {
+        string toolRecordId = BuildUniqueToolRecordId(recordId, toolIndex, seenRecordIds);
+        string callId = SafeOptionalText(toolCall.CallId)
+            ?? string.Create(CultureInfo.InvariantCulture, $"tool-{toolIndex}");
+        CollectedToolContent? toolInput = !string.IsNullOrEmpty(toolCall.RawArgumentsText)
+            ? ToolContentMeasurer.Measure(toolCall.RawArgumentsText, model: model).ToToolContent(includeFingerprint: true)
+            : null;
+
+        records.Add(new CollectedRecord(
+            RecordId: toolRecordId,
+            HarnessId: CopilotVscodeHarnessId,
+            Op: RecordOp.ToolInvoke,
+            Kind: RecordKind.Internal,
+            Name: toolCall.ToolName,
+            StartedAt: startedAt,
+            Status: RecordStatus.Ok,
+            SessionKey: sessionId,
+            ParentRecordId: recordId,
+            TraceId: traceId,
+            Model: null,
+            EndedAt: null,
+            ReportedDurationMs: null,
+            Tokens: [],
+            ReportedCost: null,
+            Parts: [],
+            Tool: new CollectedToolCall(
+                CallId: callId,
+                ToolName: toolCall.ToolName,
+                McpServerName: null,
+                McpToolName: null,
+                Input: toolInput,
+                Result: null,
+                Succeeded: null,
+                Error: null,
+                ExitCode: null),
+            Agent: null,
+            SkillsInvoked: [],
+            AgentInstanceId: agentInstanceId,
+            ToolDefinitions: [],
+            Signals: new CollectedRecordSignals(null, null, null, null),
+            ReportedInputTokens: null,
+            ReportedOutputTokens: null));
     }
 
     /// <summary>

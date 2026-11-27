@@ -819,6 +819,68 @@ public partial class CursorMapper : IHarnessMapper
 
         // One turn is one user bubble together with the assistant bubbles that answer it, as on the
         // cursor-agent transcript path. Assistant bubbles before any user bubble form one leading turn.
+        (List<BubbleTurn> turns, List<string> composerOrder) = BuildBubbleTurns(document);
+
+        List<CollectedRecord> records = [];
+        HashSet<string> seenRecordIds = new(StringComparer.Ordinal);
+        foreach (BubbleTurn turn in turns)
+        {
+            string displayModel = turn.Model ?? DefaultBubbleModel;
+            string recordId = EnsureUniqueRecordId(
+                seenRecordIds,
+                string.Create(CultureInfo.InvariantCulture, $"{CanonSynth.SynthSpanPrefix}{harnessId}:{turn.ComposerId}:{turn.Anchor}"));
+
+            List<CollectedContentPart> parts = [];
+            int position = 0;
+            string? correctionRule = null;
+            if (!string.IsNullOrWhiteSpace(turn.UserText))
+            {
+                CorrectionDetectionResult correction = CanonFindings.DetectUserCorrection(turn.UserText);
+                if (correction.Matched)
+                {
+                    correctionRule = correction.Rule;
+                }
+
+                parts.Add(ToolContentMeasurer.BuildContentPart(position++, ContentBucket.UserMessage, turn.UserText, "user", displayModel));
+            }
+
+            foreach (string text in turn.AssistantTexts)
+            {
+                parts.Add(ToolContentMeasurer.BuildContentPart(position++, ContentBucket.ConversationHistory, text, "assistant", displayModel));
+            }
+
+            records.Add(BuildRecord(
+                recordId,
+                harnessId,
+                turn.ComposerId,
+                string.Create(CultureInfo.InvariantCulture, $"cursor:{displayModel}"),
+                turn.StartedAt,
+                displayModel,
+                turn.InputTokens,
+                turn.OutputTokens,
+                turn.InputTokens > 0 ? turn.InputTokens : null,
+                turn.OutputTokens > 0 ? turn.OutputTokens : null,
+                parts,
+                correctionRule));
+        }
+
+        List<CollectedSession> sessions = [];
+        foreach (string composerId in composerOrder)
+        {
+            sessions.Add(new CollectedSession(
+                SessionKey: composerId,
+                HarnessId: harnessId,
+                NativeSessionId: composerId,
+                Workspace: workspace,
+                Title: null,
+                ReportedUsage: []));
+        }
+
+        return new CollectedBatch(source, sessions, records, problems);
+    }
+
+    private static (List<BubbleTurn> Turns, List<string> ComposerOrder) BuildBubbleTurns(CursorBubbleDocument document)
+    {
         List<BubbleTurn> turns = [];
         Dictionary<string, BubbleTurn> openTurns = new(StringComparer.Ordinal);
         HashSet<string> composerIds = new(StringComparer.Ordinal);
@@ -880,62 +942,7 @@ public partial class CursorMapper : IHarnessMapper
             }
         }
 
-        List<CollectedRecord> records = [];
-        HashSet<string> seenRecordIds = new(StringComparer.Ordinal);
-        foreach (BubbleTurn turn in turns)
-        {
-            string displayModel = turn.Model ?? DefaultBubbleModel;
-            string recordId = EnsureUniqueRecordId(
-                seenRecordIds,
-                string.Create(CultureInfo.InvariantCulture, $"{CanonSynth.SynthSpanPrefix}{harnessId}:{turn.ComposerId}:{turn.Anchor}"));
-
-            List<CollectedContentPart> parts = [];
-            int position = 0;
-            string? correctionRule = null;
-            if (!string.IsNullOrWhiteSpace(turn.UserText))
-            {
-                CorrectionDetectionResult correction = CanonFindings.DetectUserCorrection(turn.UserText);
-                if (correction.Matched)
-                {
-                    correctionRule = correction.Rule;
-                }
-
-                parts.Add(ToolContentMeasurer.BuildContentPart(position++, ContentBucket.UserMessage, turn.UserText, "user", displayModel));
-            }
-
-            foreach (string text in turn.AssistantTexts)
-            {
-                parts.Add(ToolContentMeasurer.BuildContentPart(position++, ContentBucket.ConversationHistory, text, "assistant", displayModel));
-            }
-
-            records.Add(BuildRecord(
-                recordId,
-                harnessId,
-                turn.ComposerId,
-                string.Create(CultureInfo.InvariantCulture, $"cursor:{displayModel}"),
-                turn.StartedAt,
-                displayModel,
-                turn.InputTokens,
-                turn.OutputTokens,
-                turn.InputTokens > 0 ? turn.InputTokens : null,
-                turn.OutputTokens > 0 ? turn.OutputTokens : null,
-                parts,
-                correctionRule));
-        }
-
-        List<CollectedSession> sessions = [];
-        foreach (string composerId in composerOrder)
-        {
-            sessions.Add(new CollectedSession(
-                SessionKey: composerId,
-                HarnessId: harnessId,
-                NativeSessionId: composerId,
-                Workspace: workspace,
-                Title: null,
-                ReportedUsage: []));
-        }
-
-        return new CollectedBatch(source, sessions, records, problems);
+        return (turns, composerOrder);
     }
 
     /// <summary>
