@@ -168,13 +168,16 @@ public sealed partial class PlanFacts(IPlanFileResolver planPaths, IFileSystem f
         if (!facts.TryGet(ArbiterTriggerCatalog.DelegationPromptFact, out ArbiterFact? prompt) || prompt.Value is not string text)
             return files;
 
-        List<string> otherTasksFiles = [.. document.Tasks
-            .Where(other => !string.Equals(other.Id, task.Id, StringComparison.Ordinal))
-            .SelectMany(other => other.Files)];
+        List<PlanTask> otherTasks = [.. document.Tasks
+            .Where(other => !string.Equals(other.Id, task.Id, StringComparison.Ordinal))];
         foreach (string file in AlsoInScopeLines.Files(text))
         {
-            if (otherTasksFiles.Contains(file, StringComparer.Ordinal) && !files.Contains(file, StringComparer.Ordinal))
-                files.Add(file);
+            string path = PlanFileOwnership.Normalize(file);
+            if (otherTasks.Any(other => other.Files.Any(listed => PlanFileOwnership.Owns(listed, path)))
+                && !files.Contains(path, StringComparer.Ordinal))
+            {
+                files.Add(path);
+            }
         }
 
         return files;

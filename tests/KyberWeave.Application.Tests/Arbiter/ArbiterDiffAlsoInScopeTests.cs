@@ -93,10 +93,57 @@ public sealed class ArbiterDiffAlsoInScopeTests
             Assert.IsAssignableFrom<IEnumerable<string>>(facts.Facts[PlanFacts.ScopeFilesFact].Value));
     }
 
+    /// <summary>
+    /// A path that no other task lists exactly, but that sits under a directory another task lists, is part of the fix's
+    /// scope: the writer groups a coupled fix by the same rule, so the return must read the scope the same way.
+    /// </summary>
+    [Fact]
+    public void AFileUnderADirectoryAnotherTaskListsIsAlsoInScope()
+    {
+        DefinePlan(
+            """
+            # Plan: order cards
+
+            **Status: Ready, 2026-11-14.**
+
+            ## Tasks
+
+            ### T2 — Order DTO
+            - **Files:** `src/Contract/OrderDto.cs`
+
+            ### T3 — Orders controller
+            - **Files:** `src/Http`
+            """);
+
+        ArbiterFactSet facts = Facts("src/Contract/OrderDto.cs", "src/Http/OrdersController.cs");
+
+        Assert.Equal("inside-task", RuleEngine.Decide(Rule(), facts));
+    }
+
+    /// <summary>A <c>./</c>-prefixed entry names the same file git reports without the prefix.</summary>
+    [Fact]
+    public void ADotSlashPrefixedEntryNamesTheFileItPrefixes()
+    {
+        const string prompt =
+            """
+            KYBER-ARBITER: true
+            PLAN_FILE: docs/plans/cards.md
+            TASK: T2
+            Also in scope (task T3): ./src/Http/OrdersController.cs
+            Fix packet: /work/review/cycle-3/fix-packets/task-T2.md
+            """;
+
+        ArbiterFactSet facts = FactsWithPrompt(prompt, "src/Contract/OrderDto.cs", "src/Http/OrdersController.cs");
+
+        Assert.Equal("inside-task", RuleEngine.Decide(Rule(), facts));
+    }
+
     private static ArbiterRule Rule() =>
         Assert.Single(
             ArbiterConfigDefaults.Product.Rules,
             rule => string.Equals(rule.Id, "KW-ARB-DIFF-001", StringComparison.Ordinal));
+
+    private void DefinePlan(string plan) => _files.WriteAllText($"{Root}/{PlanPath}", plan);
 
     private ArbiterFactSet Facts(params string[] changed) => FactsWithPrompt(Prompt, changed);
 

@@ -341,7 +341,7 @@ internal static class FixPacketWriter
                 // The first task in plan order owns the file; the others are named so a worker knows where else it is in scope.
                 foreach (PlanTaskFileEntry other in Owners(tasks, entry.Finding.File).Skip(1))
                 {
-                    string note = $"{Normalize(entry.Finding.File)} is also listed by task {other.Id} in the plan's task file.";
+                    string note = $"{PlanFileOwnership.Normalize(entry.Finding.File)} is also listed by task {other.Id} in the plan's task file.";
                     if (!packet.Notes.Contains(note, StringComparer.Ordinal))
                         packet.Notes.Add(note);
                 }
@@ -417,7 +417,7 @@ internal static class FixPacketWriter
     /// <summary>The files a finding's fix touches with the tasks that own each: its own file and every file its evidence cites.</summary>
     private static IReadOnlyList<TouchedFile> TouchedFiles(ReviewFinding finding, IReadOnlyList<PlanTaskFileEntry> tasks)
     {
-        List<string> paths = [Normalize(finding.File)];
+        List<string> paths = [PlanFileOwnership.Normalize(finding.File)];
         if (!string.IsNullOrWhiteSpace(finding.Evidence))
         {
             foreach (System.Text.RegularExpressions.Match match in ReviewVerdictRules.EvidenceCitation()
@@ -425,7 +425,7 @@ internal static class FixPacketWriter
             {
                 string cited = match.Groups["file"].Value;
                 if (CitedLineCheck.IsRepositoryRelative(cited))
-                    paths.Add(Normalize(cited));
+                    paths.Add(PlanFileOwnership.Normalize(cited));
             }
         }
 
@@ -443,26 +443,13 @@ internal static class FixPacketWriter
     /// <summary>The tasks whose file scope names the finding's file, in plan order.</summary>
     private static IReadOnlyList<PlanTaskFileEntry> Owners(IReadOnlyList<PlanTaskFileEntry> tasks, string file)
     {
-        string path = Normalize(file);
+        string path = PlanFileOwnership.Normalize(file);
         return
         [
-            .. tasks.Where(task => task.Id is not null && task.Files?.Any(listed => Names(listed, path)) == true)
+            .. tasks.Where(
+                task => task.Id is not null
+                        && task.Files?.Any(listed => PlanFileOwnership.Owns(listed, path)) == true)
         ];
-    }
-
-    /// <summary>Whether a task's listed path is the file, or a directory the file sits under.</summary>
-    private static bool Names(string listed, string path)
-    {
-        string entry = Normalize(listed).TrimEnd('/');
-        return entry.Length > 0
-               && (string.Equals(entry, path, StringComparison.Ordinal)
-                   || path.StartsWith(entry + "/", StringComparison.Ordinal));
-    }
-
-    private static string Normalize(string path)
-    {
-        string normalized = path.Replace('\\', '/');
-        return normalized.StartsWith("./", StringComparison.Ordinal) ? normalized[2..] : normalized;
     }
 
     /// <summary>The name of each packet's file, unique within the round.</summary>
@@ -525,7 +512,7 @@ internal static class FixPacketWriter
     /// <summary>The packet's whole text: the fixed header, its notes, findings, the history and the commits on those files.</summary>
     private static string Text(Packet packet, Earlier earlier, string tree, IGitChangeReader git)
     {
-        List<string> files = [.. packet.Findings.Select(finding => Normalize(finding.File)).Distinct(StringComparer.Ordinal)];
+        List<string> files = [.. packet.Findings.Select(finding => PlanFileOwnership.Normalize(finding.File)).Distinct(StringComparer.Ordinal)];
         foreach (OtherTaskFiles other in packet.AlsoInScope)
         {
             foreach (string file in other.Files)
@@ -624,7 +611,7 @@ internal static class FixPacketWriter
     }
 
     private static bool Covered(IReadOnlyList<string> files, string file) =>
-        files.Contains(Normalize(file), StringComparer.Ordinal);
+        files.Contains(PlanFileOwnership.Normalize(file), StringComparer.Ordinal);
 
     /// <summary>
     /// The commits on the packet's files since its first readable cycle, or one line saying why they are not listed:
