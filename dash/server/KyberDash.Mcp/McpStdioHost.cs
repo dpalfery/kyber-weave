@@ -47,6 +47,7 @@ public partial class McpStdioHost
     private readonly Uri? _explicitServerUri;
     private readonly string? _stateDir;
     private readonly bool _verbose;
+    private readonly TimeProvider _timeProvider;
 
     /// <summary>Creates a stdio host over an already-resolved service container.</summary>
     /// <param name="analytics">The analytics service used when no live dashboard is reachable.</param>
@@ -55,13 +56,15 @@ public partial class McpStdioHost
     /// <param name="explicitServerUri">A <c>--server-url</c> override, already validated.</param>
     /// <param name="stateDir">The <c>--state-dir</c> override.</param>
     /// <param name="verbose">Whether to write diagnostics to stderr.</param>
+    /// <param name="timeProvider">Clock supplying the default scope window; defaults to <see cref="TimeProvider.System"/>.</param>
     public McpStdioHost(
         IAnalyticsService analytics,
         IEngineLifecycleService lifecycle,
         HttpClient httpClient,
         Uri? explicitServerUri = null,
         string? stateDir = null,
-        bool verbose = false)
+        bool verbose = false,
+        TimeProvider? timeProvider = null)
     {
         ArgumentNullException.ThrowIfNull(analytics);
         ArgumentNullException.ThrowIfNull(lifecycle);
@@ -73,6 +76,7 @@ public partial class McpStdioHost
         _explicitServerUri = explicitServerUri;
         _stateDir = stateDir;
         _verbose = verbose;
+        _timeProvider = timeProvider ?? TimeProvider.System;
     }
 
     /// <summary>Creates a stdio host from the raw <c>--server-url</c> text.</summary>
@@ -82,20 +86,23 @@ public partial class McpStdioHost
     /// <param name="explicitServerUrl">The <c>--server-url</c> text, validated here.</param>
     /// <param name="stateDir">The <c>--state-dir</c> override.</param>
     /// <param name="verbose">Whether to write diagnostics to stderr.</param>
+    /// <param name="timeProvider">Clock supplying the default scope window; defaults to <see cref="TimeProvider.System"/>.</param>
     public McpStdioHost(
         IAnalyticsService analytics,
         IEngineLifecycleService lifecycle,
         HttpClient httpClient,
         string? explicitServerUrl,
         string? stateDir = null,
-        bool verbose = false)
+        bool verbose = false,
+        TimeProvider? timeProvider = null)
         : this(
             analytics,
             lifecycle,
             httpClient,
             explicitServerUrl is not null && TryValidateLoopbackServerUrl(explicitServerUrl, out Uri? parsed) ? parsed : null,
             stateDir,
-            verbose)
+            verbose,
+            timeProvider)
     {
     }
 
@@ -544,7 +551,7 @@ public partial class McpStdioHost
     /// written for agents (names like <c>text</c> and <c>groups</c>); the engine accepts its own
     /// field names.
     /// </summary>
-    private static JsonObject BuildEngineBody(string toolName, JsonElement arguments)
+    private JsonObject BuildEngineBody(string toolName, JsonElement arguments)
     {
         JsonObject body = arguments.ValueKind == JsonValueKind.Object
             ? JsonNode.Parse(arguments.GetRawText()) as JsonObject ?? new JsonObject()
@@ -578,7 +585,7 @@ public partial class McpStdioHost
         return body;
     }
 
-    private static void ApplySearchSessionsBody(JsonObject body)
+    private void ApplySearchSessionsBody(JsonObject body)
     {
         if (!body.ContainsKey("query") && body.TryGetPropertyValue("text", out JsonNode? textNode) && textNode is not null)
         {
@@ -602,7 +609,7 @@ public partial class McpStdioHost
         }
     }
 
-    private static void ApplySessionCostBody(JsonObject body)
+    private void ApplySessionCostBody(JsonObject body)
     {
         MapMetricIds(body);
         if (body.TryGetPropertyValue("groups", out JsonNode? groupsNode) && groupsNode is not null)
@@ -634,7 +641,7 @@ public partial class McpStdioHost
         body["metrics"] = mapped;
     }
 
-    private static void ApplyWindowDays(JsonObject body)
+    private void ApplyWindowDays(JsonObject body)
     {
         if (!body.TryGetPropertyValue("windowDays", out JsonNode? node))
             return;
@@ -656,7 +663,7 @@ public partial class McpStdioHost
         if (days is < 1 or > 365)
             throw new InvalidOperationException("invalid_request: windowDays must be an integer between 1 and 365.");
 
-        DateTimeOffset end = DateTimeOffset.UtcNow;
+        DateTimeOffset end = _timeProvider.GetUtcNow();
         DateTimeOffset start = end.AddDays(-days);
         JsonObject scope = body["scope"] as JsonObject ?? new JsonObject();
         if (!scope.ContainsKey("from"))
