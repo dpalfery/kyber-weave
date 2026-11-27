@@ -606,7 +606,7 @@ public class SqliteRelationalStoreWriteTests
         Path.Combine(Path.GetTempPath(), $"kyberdash-t7-nowrite-{Guid.NewGuid():N}");
 
     private static string HexExpr(string value) =>
-        $"CAST(X'{Convert.ToHexString(Encoding.UTF8.GetBytes(value))}' AS TEXT)";
+        $"X'{Convert.ToHexString(Encoding.UTF8.GetBytes(value))}' || ''";
 
     private static string NormalizeLineEndings(string sql) =>
         sql.Replace("\r\n", "\n", StringComparison.Ordinal);
