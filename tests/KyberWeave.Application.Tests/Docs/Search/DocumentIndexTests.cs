@@ -390,6 +390,36 @@ public class DocumentSectionTests
         // not their ids: the parent's lead and both awkward headings are found by both splits.
         Assert.Equal(topic.Count, explore.Count);
     }
+
+    /// <summary>
+    /// A heading keeps every word it displays. The section split reads heading text from the
+    /// parsed inline tree, so a heading written as inline code or with emphasis must not lose
+    /// that word: the corpus has <c>### `unsafe`</c> in the Rust standard and amendment headings
+    /// such as <c>## Amendment 2026-10-12: `tool_search`</c>. The markup delimiters themselves
+    /// are not part of the heading text, so the words survive without their backticks or
+    /// asterisks.
+    /// </summary>
+    [Fact]
+    public void AHeadingKeepsItsInlineCodeEmphasisAndLinkWords()
+    {
+        const string Body = """
+            ## Coding standards
+
+            ### `unsafe` and *checked* arithmetic
+
+            Prose under a heading written with code and emphasis.
+
+            ### See [the runbook](../runbook.md)
+
+            Prose under a heading that is a link.
+            """;
+
+        IReadOnlyList<DocumentSection> sections = DocumentMarkdown.SplitTopicSections(Body);
+
+        Assert.Equal(
+            ["unsafe and checked arithmetic", "See the runbook"],
+            sections.Select(section => section.Heading));
+    }
 }
 
 public class CodeJoinScopingTests
