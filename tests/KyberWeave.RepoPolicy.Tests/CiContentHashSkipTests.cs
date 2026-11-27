@@ -135,7 +135,7 @@ public sealed class CiContentHashSkipTests
 
     /// <summary>
     ///     Each job that attests a build product, and the product's paths. Only a build product is
-    ///     attested; a test report or a SARIF file is digested into the receipt and nothing more.
+    ///     digested and attested; test reports and SARIF files are neither digested nor attested.
     /// </summary>
     private static readonly AttestedProduct[] AttestedProducts =
     [

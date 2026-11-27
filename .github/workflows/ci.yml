@@ -415,7 +415,7 @@ jobs:
         run: dotnet build-server shutdown
 
       # The receipt records the SHA-256 digests of what this run produced, so a reader can tie a pass
-      # to the exact bytes. Test reports and SARIF files are digested; only a build product is attested.
+      # to the exact bytes. Only the job's build products are digested and attested.
       - name: Digest the build products
         id: digest
         if: steps.verdict.outputs.skip != 'true' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository)
@@ -939,7 +939,7 @@ jobs:
           if-no-files-found: error
 
       # The receipt records the SHA-256 digests of what this run produced, so a reader can tie a pass
-      # to the exact bytes. Test reports and SARIF files are digested; only a build product is attested.
+      # to the exact bytes. Only the job's build products are digested and attested.
       - name: Digest the build products
         id: digest
         if: steps.verdict.outputs.skip != 'true' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository)
@@ -1415,7 +1415,7 @@ jobs:
           if-no-files-found: warn
 
       # The receipt records the SHA-256 digests of what this run produced, so a reader can tie a pass
-      # to the exact bytes. Test reports and SARIF files are digested; only a build product is attested.
+      # to the exact bytes. Only the job's build products are digested and attested.
       - name: Digest the build products
         id: digest
         if: steps.verdict.outputs.skip != 'true' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository)
