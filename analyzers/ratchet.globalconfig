@@ -11,8 +11,10 @@
 #   dotnet build KyberWeave.sln -c Release -p:KwAnalyzerAudit=true -p:TreatWarningsAsErrors=false
 #   dotnet build dash/server/KyberDash.sln -c Release -p:KwAnalyzerAudit=true -p:TreatWarningsAsErrors=false
 #
-# global_level 200 outranks the SDK's AnalysisMode=all config and analyzers/rules.globalconfig. .editorconfig outranks this file,
-# so none of these ids may appear there.
+# global_level 200 outranks the SDK's AnalysisMode=all config and analyzers/rules.globalconfig.
+# .editorconfig outranks this file, so a ratcheted id must not be set above suggestion there.
+# The deliberate exception is CA1062 set to none for test code
+# ([{tests,dash/server.tests}/**.cs]): the test runner calls those methods, and a caller cannot pass null.
 is_global = true
 global_level = 200
 
