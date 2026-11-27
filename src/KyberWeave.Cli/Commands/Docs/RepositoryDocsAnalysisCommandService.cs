@@ -128,6 +128,9 @@ internal sealed class RepositoryDocsAnalysisCommandService : IDocsAnalysisComman
                      candidate.Kind == AnalysisRuleKind.Terminology
                      && !string.IsNullOrWhiteSpace(candidate.Term)))
         {
+            string term = candidate.Term
+                ?? throw new InvalidOperationException("A terminology candidate has no term.");
+
             if (candidate.Verdict?.ProposedGlossarySenses is { Count: > 0 } reviewed)
             {
                 proposals.AddRange(reviewed.Select(sense => new GlossaryProposal(
@@ -143,7 +146,7 @@ internal sealed class RepositoryDocsAnalysisCommandService : IDocsAnalysisComman
                 .Where(claim => !string.IsNullOrWhiteSpace(claim.Component))
                 .GroupBy(claim => claim.Component, StringComparer.Ordinal)
                 .Select(group => new GlossaryProposal(
-                    candidate.Term!,
+                    term,
                     string.Empty,
                     [$"component:{group.Key}"],
                     [],
