@@ -215,28 +215,28 @@ public partial class SqliteRelationalStore : BaseSqliteRepository, IRelationalSt
         ArgumentNullException.ThrowIfNull(batch.Records);
         ArgumentNullException.ThrowIfNull(batch.Problems);
 
-        StringBuilder body = new();
+        SqlBatch sqlBatch = new();
 
         HashSet<string> harnesses = new(StringComparer.Ordinal);
-        AppendHarnessInsert(body, harnesses, batch.Source.HarnessId);
+        AppendHarnessInsert(sqlBatch, harnesses, batch.Source.HarnessId);
         foreach (CollectedSession session in batch.Sessions)
         {
             ArgumentNullException.ThrowIfNull(session);
-            AppendHarnessInsert(body, harnesses, session.HarnessId);
+            AppendHarnessInsert(sqlBatch, harnesses, session.HarnessId);
         }
 
         foreach (CollectedRecord record in batch.Records)
         {
             ArgumentNullException.ThrowIfNull(record);
-            AppendHarnessInsert(body, harnesses, record.HarnessId);
+            AppendHarnessInsert(sqlBatch, harnesses, record.HarnessId);
         }
 
         if (replaceSource)
         {
-            AppendSourceDelete(body, TextExpr(SourceIdOf(batch.Source)));
+            AppendSourceDelete(sqlBatch, SourceIdOf(batch.Source));
         }
 
-        string sourceIdExpr = AppendSourceInsert(body, batch.Source);
+        string sourceId = AppendSourceInsert(sqlBatch, batch.Source);
 
         HashSet<string> seenSessions = new(StringComparer.Ordinal);
         foreach (CollectedSession session in batch.Sessions)
@@ -248,7 +248,7 @@ public partial class SqliteRelationalStore : BaseSqliteRepository, IRelationalSt
                     $"Duplicate session_id '{session.SessionKey}' in CollectedBatch.Sessions.");
             }
 
-            AppendSessionUpsert(body, session);
+            AppendSessionUpsert(sqlBatch, session);
         }
 
         HashSet<string> seenRecords = new(StringComparer.Ordinal);
@@ -261,7 +261,7 @@ public partial class SqliteRelationalStore : BaseSqliteRepository, IRelationalSt
                     $"Duplicate span_id '{record.RecordId}' in CollectedBatch.Records.");
             }
 
-            AppendRecordInsert(body, sourceIdExpr, record);
+            AppendRecordInsert(sqlBatch, sourceId, record);
         }
 
         HashSet<string> seenProblems = new(StringComparer.Ordinal);
@@ -275,34 +275,34 @@ public partial class SqliteRelationalStore : BaseSqliteRepository, IRelationalSt
                     $"Duplicate problem_key '{problem.ProblemKey}' in CollectedBatch.Problems.");
             }
 
-            AppendProblemUpsert(body, problem);
+            AppendProblemUpsert(sqlBatch, problem);
         }
 
         if (replaceSource)
         {
             // As DeleteSource: the cascade removes records of sessions this batch may not name.
-            AppendWriteMarkerAdvance(body, dirtyKeys: null);
+            AppendWriteMarkerAdvance(sqlBatch, dirtyKeys: null);
         }
         else if (batch.Sessions.Count > 0 || batch.Records.Count > 0)
         {
-            AppendWriteMarkerAdvance(body, DirtySessionKeysOf(batch));
+            AppendWriteMarkerAdvance(sqlBatch, DirtySessionKeysOf(batch));
         }
 
-        ExecuteTransaction(body.ToString());
+        ExecuteTransaction(sqlBatch.ToStatements());
     }
 
     /// <inheritdoc />
     public void DeleteSource(string sourceId)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(sourceId);
-        string sourceIdExpr = GuardedTextExpr("source", "source_id", sourceId);
-        StringBuilder body = new();
-        AppendSourceDelete(body, sourceIdExpr);
+        string sourceIdValue = GuardedText("source", "source_id", sourceId);
+        SqlBatch batch = new();
+        AppendSourceDelete(batch, sourceIdValue);
 
         // The cascade removes records of sessions this call does not know, so a source delete
         // always marks the range wildcard.
-        AppendWriteMarkerAdvance(body, dirtyKeys: null);
-        ExecuteTransaction(body.ToString());
+        AppendWriteMarkerAdvance(batch, dirtyKeys: null);
+        ExecuteTransaction(batch.ToStatements());
     }
 
     /// <inheritdoc />
@@ -315,29 +315,42 @@ public partial class SqliteRelationalStore : BaseSqliteRepository, IRelationalSt
             return;
         }
 
-        string harnessExpr = GuardedTextExpr("source", "harness_id", harnessId);
-        string locatorExpr = GuardedTextExpr("source", "locator", sourceLocator);
-        string sourceSpans =
-            "SELECT r.span_id FROM record r JOIN source s ON s.source_id = r.source_id " +
-            $"WHERE s.harness_id = {harnessExpr} AND s.source_kind = {TextExpr("file")} AND s.locator = {locatorExpr}";
-
-        StringBuilder body = new();
+        string harness = GuardedText("source", "harness_id", harnessId);
+        string locator = GuardedText("source", "locator", sourceLocator);
+        SqlBatch batch = new();
         switch (estimated)
         {
             case EstimatedRecordTokens.AllRecordTokens:
-                body.Append(CultureInfo.InvariantCulture, $"DELETE FROM record_token_count WHERE span_id IN ({sourceSpans});\n");
-                body.Append(CultureInfo.InvariantCulture, $"DELETE FROM record_reported_total WHERE span_id IN ({sourceSpans});\n");
+                AppendSourceSpanTokenDelete(batch, "DELETE FROM record_token_count", harness, locator, excludeReportedTotal: false);
+                AppendSourceSpanTokenDelete(batch, "DELETE FROM record_reported_total", harness, locator, excludeReportedTotal: false);
                 break;
             case EstimatedRecordTokens.RecordsWithoutReportedTotal:
-                body.Append(
-                    CultureInfo.InvariantCulture,
-                    $"DELETE FROM record_token_count WHERE span_id IN ({sourceSpans}) AND span_id NOT IN (SELECT span_id FROM record_reported_total);\n");
+                AppendSourceSpanTokenDelete(batch, "DELETE FROM record_token_count", harness, locator, excludeReportedTotal: true);
                 break;
             default:
                 throw new ArgumentOutOfRangeException(nameof(estimated), estimated, "Unsupported estimated token scope.");
         }
 
-        ExecuteTransaction(body.ToString());
+        ExecuteTransaction(batch.ToStatements());
+    }
+
+    private static void AppendSourceSpanTokenDelete(
+        SqlBatch batch,
+        string deleteClause,
+        string harnessId,
+        string sourceLocator,
+        bool excludeReportedTotal)
+    {
+        string harnessParam = batch.Add(harnessId);
+        string kindParam = batch.Add("file");
+        string locatorParam = batch.Add(sourceLocator);
+        string sourceSpans =
+            "SELECT r.span_id FROM record r JOIN source s ON s.source_id = r.source_id " +
+            $"WHERE s.harness_id = {harnessParam} AND s.source_kind = {kindParam} AND s.locator = {locatorParam}";
+        string filter = excludeReportedTotal
+            ? $" AND span_id NOT IN (SELECT span_id FROM record_reported_total)"
+            : string.Empty;
+        batch.Append($"{deleteClause} WHERE span_id IN ({sourceSpans}){filter};\n");
     }
 
     /// <inheritdoc />
@@ -345,17 +358,20 @@ public partial class SqliteRelationalStore : BaseSqliteRepository, IRelationalSt
     {
         ArgumentNullException.ThrowIfNull(problem);
 
-        StringBuilder body = new();
-        AppendProblemUpsert(body, problem);
-        ExecuteTransaction(body.ToString());
+        SqlBatch batch = new();
+        AppendProblemUpsert(batch, problem);
+        ExecuteTransaction(batch.ToStatements());
     }
 
     /// <inheritdoc />
     public void DeleteProblem(string problemKey)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(problemKey);
-        string problemKeyExpr = GuardedTextExpr("ingest_problem", "problem_key", problemKey);
-        ExecuteTransaction($"DELETE FROM ingest_problem WHERE problem_key = {problemKeyExpr};\n");
+        string problemKeyParam = GuardedText("ingest_problem", "problem_key", problemKey);
+        SqlBatch batch = new();
+        string problemKeyValue = batch.Add(problemKeyParam);
+        batch.Append($"DELETE FROM ingest_problem WHERE problem_key = {problemKeyValue};\n");
+        ExecuteTransaction(batch.ToStatements());
     }
 
     public void ReplaceSessionProjection(StoredSessionProjection projection)
@@ -369,7 +385,7 @@ public partial class SqliteRelationalStore : BaseSqliteRepository, IRelationalSt
     {
         ArgumentNullException.ThrowIfNull(projections);
 
-        StringBuilder body = new();
+        SqlBatch batch = new();
         HashSet<string> seenSessions = new(StringComparer.Ordinal);
         foreach (StoredSessionProjection projection in projections)
         {
@@ -381,28 +397,32 @@ public partial class SqliteRelationalStore : BaseSqliteRepository, IRelationalSt
                     $"Duplicate session_id '{projection.SessionId}' in ReplaceSessionProjections.");
             }
 
-            AppendSessionProjectionReplace(body, projection);
+            AppendSessionProjectionReplace(batch, projection);
         }
 
-        ExecuteTransaction(body.ToString());
+        ExecuteTransaction(batch.ToStatements());
     }
 
     /// <inheritdoc />
     public void DeleteSessionProjection(string sessionId)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(sessionId);
-        string sessionIdExpr = GuardedTextExpr("session_projection", "session_id", sessionId);
-        ExecuteTransaction($"DELETE FROM session_projection WHERE session_id = {sessionIdExpr};\n");
+        string sessionIdValue = GuardedText("session_projection", "session_id", sessionId);
+        SqlBatch batch = new();
+        string sessionIdParam = batch.Add(sessionIdValue);
+        batch.Append($"DELETE FROM session_projection WHERE session_id = {sessionIdParam};\n");
+        ExecuteTransaction(batch.ToStatements());
     }
 
     public void ReplaceSessionTurns(string sessionId, IEnumerable<StoredSessionTurn> turns)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(sessionId);
         ArgumentNullException.ThrowIfNull(turns);
+        string sessionIdValue = GuardedText("session_turn", "session_id", sessionId);
 
-        string sessionIdExpr = GuardedTextExpr("session_turn", "session_id", sessionId);
-        StringBuilder body = new();
-        body.Append(CultureInfo.InvariantCulture, $"DELETE FROM session_turn WHERE session_id = {sessionIdExpr};\n");
+        SqlBatch batch = new();
+        string deleteSessionIdParam = batch.Add(sessionIdValue);
+        batch.Append($"DELETE FROM session_turn WHERE session_id = {deleteSessionIdParam};\n");
 
         foreach (StoredSessionTurn turn in turns)
         {
@@ -414,20 +434,22 @@ public partial class SqliteRelationalStore : BaseSqliteRepository, IRelationalSt
                     $"StoredSessionTurn.SessionId '{turn.SessionId}' does not match '{sessionId}'.");
             }
 
-            string spanIdExpr = GuardedTextExpr("session_turn", "span_id", turn.SpanId);
-            body.Append(
-                CultureInfo.InvariantCulture,
-                $"INSERT INTO session_turn (session_id, position, span_id) VALUES ({sessionIdExpr}, {IntSql(turn.Position)}, {spanIdExpr});\n");
+            string spanIdValue = GuardedText("session_turn", "span_id", turn.SpanId);
+            string insertSessionIdParam = batch.Add(sessionIdValue);
+            string insertSpanIdParam = batch.Add(spanIdValue);
+            string positionParam = batch.Add(turn.Position);
+            batch.Append(
+                $"INSERT INTO session_turn (session_id, position, span_id) VALUES ({insertSessionIdParam}, {positionParam}, {insertSpanIdParam});\n");
         }
 
-        ExecuteTransaction(body.ToString());
+        ExecuteTransaction(batch.ToStatements());
     }
 
     public void ReplaceRuns(IEnumerable<StoredRun> runs)
     {
         ArgumentNullException.ThrowIfNull(runs);
 
-        StringBuilder body = new();
+        SqlBatch batch = new();
         HashSet<string> seenRuns = new(StringComparer.Ordinal);
         foreach (StoredRun run in runs)
         {
@@ -439,18 +461,21 @@ public partial class SqliteRelationalStore : BaseSqliteRepository, IRelationalSt
                     $"Duplicate run_id '{run.RunId}' in ReplaceRuns.");
             }
 
-            AppendRunUpsert(body, run);
+            AppendRunUpsert(batch, run);
         }
 
-        ExecuteTransaction(body.ToString());
+        ExecuteTransaction(batch.ToStatements());
     }
 
     /// <inheritdoc />
     public void DeleteRun(string runId)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(runId);
-        string runIdExpr = GuardedTextExpr("run", "run_id", runId);
-        ExecuteTransaction($"DELETE FROM run WHERE run_id = {runIdExpr};\n");
+        string runIdValue = GuardedText("run", "run_id", runId);
+        SqlBatch batch = new();
+        string runIdParam = batch.Add(runIdValue);
+        batch.Append($"DELETE FROM run WHERE run_id = {runIdParam};\n");
+        ExecuteTransaction(batch.ToStatements());
     }
 
     public void ReplaceExecutions(IEnumerable<StoredExecution> executions)
@@ -472,30 +497,31 @@ public partial class SqliteRelationalStore : BaseSqliteRepository, IRelationalSt
             items.Add(execution);
         }
 
-        StringBuilder body = new();
-        List<string> executionIdExprs = new(items.Count);
+        SqlBatch batch = new();
 
         foreach (StoredExecution execution in items)
         {
-            string executionIdExpr = GuardedTextExpr("execution", "execution_id", execution.ExecutionId);
-            string runIdExpr = GuardedTextExpr("execution", "run_id", execution.RunId);
-            string harnessIdExpr = GuardedTextExpr("execution", "harness_id", execution.HarnessId);
-            executionIdExprs.Add(executionIdExpr);
+            string executionId = GuardedText("execution", "execution_id", execution.ExecutionId);
+            string runId = GuardedText("execution", "run_id", execution.RunId);
+            string harnessId = GuardedText("execution", "harness_id", execution.HarnessId);
 
-            body.Append(CultureInfo.InvariantCulture, $"DELETE FROM execution WHERE execution_id = {executionIdExpr};\n");
-            body.Append(
-                CultureInfo.InvariantCulture,
-                $"INSERT INTO execution (execution_id, run_id, harness_id, is_root) VALUES ({executionIdExpr}, {runIdExpr}, {harnessIdExpr}, {BoolSql(execution.IsRoot)});\n");
+            string deleteExecutionIdParam = batch.Add(executionId);
+            batch.Append($"DELETE FROM execution WHERE execution_id = {deleteExecutionIdParam};\n");
+
+            string insertExecutionIdParam = batch.Add(executionId);
+            string insertRunIdParam = batch.Add(runId);
+            string insertHarnessIdParam = batch.Add(harnessId);
+            string insertIsRootParam = batch.Add(execution.IsRoot ? 1 : 0);
+            batch.Append(
+                $"INSERT INTO execution (execution_id, run_id, harness_id, is_root) VALUES ({insertExecutionIdParam}, {insertRunIdParam}, {insertHarnessIdParam}, {insertIsRootParam});\n");
         }
 
-        for (int i = 0; i < items.Count; i++)
+        foreach (StoredExecution execution in items)
         {
-            StoredExecution execution = items[i];
-            string executionIdExpr = executionIdExprs[i];
-
-            AppendOptionalTextChild(body, "execution_session", "execution_id", executionIdExpr, "session_id", execution.SessionId);
-            AppendOptionalTextChild(body, "execution_parent", "execution_id", executionIdExpr, "parent_execution_id", execution.ParentExecutionId);
-            AppendOptionalTextChild(body, "execution_agent", "execution_id", executionIdExpr, "agent_name", execution.AgentName);
+            string executionId = GuardedText("execution", "execution_id", execution.ExecutionId);
+            AppendOptionalTextChild(batch, "execution_session", "execution_id", executionId, "session_id", execution.SessionId);
+            AppendOptionalTextChild(batch, "execution_parent", "execution_id", executionId, "parent_execution_id", execution.ParentExecutionId);
+            AppendOptionalTextChild(batch, "execution_agent", "execution_id", executionId, "agent_name", execution.AgentName);
 
             RequireMatchedPair(
                 execution.StartedAtUtc is not null,
@@ -506,30 +532,35 @@ public partial class SqliteRelationalStore : BaseSqliteRepository, IRelationalSt
 
             if (execution.StartedAtUtc is not null && execution.EndedAtUtc is not null)
             {
-                string startedExpr = GuardedTextExpr("execution_bounds", "started_at_utc", execution.StartedAtUtc);
-                string endedExpr = GuardedTextExpr("execution_bounds", "ended_at_utc", execution.EndedAtUtc);
-                body.Append(
-                    CultureInfo.InvariantCulture,
-                    $"INSERT INTO execution_bounds (execution_id, started_at_utc, ended_at_utc) VALUES ({executionIdExpr}, {startedExpr}, {endedExpr});\n");
+                string started = GuardedText("execution_bounds", "started_at_utc", execution.StartedAtUtc);
+                string ended = GuardedText("execution_bounds", "ended_at_utc", execution.EndedAtUtc);
+                string boundsExecutionIdParam = batch.Add(executionId);
+                string startedParam = batch.Add(started);
+                string endedParam = batch.Add(ended);
+                batch.Append(
+                    $"INSERT INTO execution_bounds (execution_id, started_at_utc, ended_at_utc) VALUES ({boundsExecutionIdParam}, {startedParam}, {endedParam});\n");
             }
         }
 
-        ExecuteTransaction(body.ToString());
+        ExecuteTransaction(batch.ToStatements());
     }
 
     /// <inheritdoc />
     public void DeleteExecutionsForRun(string runId)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(runId);
-        string runIdExpr = GuardedTextExpr("execution", "run_id", runId);
-        ExecuteTransaction($"DELETE FROM execution WHERE run_id = {runIdExpr};\n");
+        string runIdValue = GuardedText("execution", "run_id", runId);
+        SqlBatch batch = new();
+        string runIdParam = batch.Add(runIdValue);
+        batch.Append($"DELETE FROM execution WHERE run_id = {runIdParam};\n");
+        ExecuteTransaction(batch.ToStatements());
     }
 
     public void ReplaceHarnessRollups(IEnumerable<StoredHarnessRollup> rollups)
     {
         ArgumentNullException.ThrowIfNull(rollups);
 
-        StringBuilder body = new();
+        SqlBatch batch = new();
         HashSet<string> seenHarnesses = new(StringComparer.Ordinal);
         foreach (StoredHarnessRollup rollup in rollups)
         {
@@ -541,25 +572,28 @@ public partial class SqliteRelationalStore : BaseSqliteRepository, IRelationalSt
                     $"Duplicate harness_id '{rollup.HarnessId}' in ReplaceHarnessRollups.");
             }
 
-            AppendHarnessRollupReplace(body, rollup);
+            AppendHarnessRollupReplace(batch, rollup);
         }
 
-        ExecuteTransaction(body.ToString());
+        ExecuteTransaction(batch.ToStatements());
     }
 
     /// <inheritdoc />
     public void DeleteHarnessRollup(string harnessId)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(harnessId);
-        string harnessIdExpr = GuardedTextExpr("harness_rollup", "harness_id", harnessId);
-        ExecuteTransaction($"DELETE FROM harness_rollup WHERE harness_id = {harnessIdExpr};\n");
+        string harnessIdValue = GuardedText("harness_rollup", "harness_id", harnessId);
+        SqlBatch batch = new();
+        string harnessIdParam = batch.Add(harnessIdValue);
+        batch.Append($"DELETE FROM harness_rollup WHERE harness_id = {harnessIdParam};\n");
+        ExecuteTransaction(batch.ToStatements());
     }
 
     public void ReplaceFindings(IEnumerable<StoredFinding> findings)
     {
         ArgumentNullException.ThrowIfNull(findings);
 
-        StringBuilder body = new();
+        SqlBatch batch = new();
         HashSet<string> seenFindings = new(StringComparer.Ordinal);
         foreach (StoredFinding finding in findings)
         {
@@ -571,36 +605,42 @@ public partial class SqliteRelationalStore : BaseSqliteRepository, IRelationalSt
                     $"Duplicate finding_id '{finding.FindingId}' in ReplaceFindings.");
             }
 
-            AppendFindingReplace(body, finding);
+            AppendFindingReplace(batch, finding);
         }
 
-        ExecuteTransaction(body.ToString());
+        ExecuteTransaction(batch.ToStatements());
     }
 
     /// <inheritdoc />
     public void DeleteFindingsForSession(string sessionId)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(sessionId);
-        string sessionIdExpr = GuardedTextExpr("finding_session", "session_id", sessionId);
-        ExecuteTransaction(
-            $"DELETE FROM finding WHERE finding_id IN (SELECT finding_id FROM finding_session WHERE session_id = {sessionIdExpr});\n");
+        string sessionIdValue = GuardedText("finding_session", "session_id", sessionId);
+        SqlBatch batch = new();
+        string sessionIdParam = batch.Add(sessionIdValue);
+        batch.Append(
+            $"DELETE FROM finding WHERE finding_id IN (SELECT finding_id FROM finding_session WHERE session_id = {sessionIdParam});\n");
+        ExecuteTransaction(batch.ToStatements());
     }
 
     public void ReplacePrediction(StoredPrediction prediction)
     {
         ArgumentNullException.ThrowIfNull(prediction);
 
-        StringBuilder body = new();
-        AppendPredictionReplace(body, prediction);
-        ExecuteTransaction(body.ToString());
+        SqlBatch batch = new();
+        AppendPredictionReplace(batch, prediction);
+        ExecuteTransaction(batch.ToStatements());
     }
 
     /// <inheritdoc />
     public void DeletePrediction(string predictionId)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(predictionId);
-        string predictionIdExpr = GuardedTextExpr("prediction", "prediction_id", predictionId);
-        ExecuteTransaction($"DELETE FROM prediction WHERE prediction_id = {predictionIdExpr};\n");
+        string predictionIdValue = GuardedText("prediction", "prediction_id", predictionId);
+        SqlBatch batch = new();
+        string predictionIdParam = batch.Add(predictionIdValue);
+        batch.Append($"DELETE FROM prediction WHERE prediction_id = {predictionIdParam};\n");
+        ExecuteTransaction(batch.ToStatements());
     }
 
     /// <summary>Filesystem seam used for existence checks, directory creation, and rebuild cleanup.</summary>
@@ -694,7 +734,7 @@ public partial class SqliteRelationalStore : BaseSqliteRepository, IRelationalSt
     /// read the old range and marker before replacing either, and the marker moves last.
     /// </para>
     /// </remarks>
-    private static void AppendWriteMarkerAdvance(StringBuilder body, SortedSet<string>? dirtyKeys)
+    private static void AppendWriteMarkerAdvance(SqlBatch batch, SortedSet<string>? dirtyKeys)
     {
         const string PrevExpr =
             "(SELECT COALESCE((SELECT records_write_seq FROM store_write_marker WHERE singleton_id = 1), 0))";
@@ -703,28 +743,86 @@ public partial class SqliteRelationalStore : BaseSqliteRepository, IRelationalSt
 
         if (dirtyKeys is null)
         {
-            body.Append("DELETE FROM projection_dirty_session;\n");
+            batch.Append("DELETE FROM projection_dirty_session;\n");
         }
         else
         {
-            body.Append("DELETE FROM projection_dirty_session WHERE NOT " + ContinuingExpr + ";\n");
+            batch.Append("DELETE FROM projection_dirty_session WHERE NOT " + ContinuingExpr + ";\n");
             foreach (string key in dirtyKeys)
             {
-                string keyExpr = GuardedNonEmptyTextExpr("projection_dirty_session", "session_id", key);
-                body.Append(
-                    CultureInfo.InvariantCulture,
-                    $"INSERT OR IGNORE INTO projection_dirty_session (session_id) SELECT {keyExpr} " +
+                string keyValue = GuardedNonEmptyText("projection_dirty_session", "session_id", key);
+                string keyParam = batch.Add(keyValue);
+                batch.Append(
+                    $"INSERT OR IGNORE INTO projection_dirty_session (session_id) SELECT {keyParam} " +
                     $"WHERE NOT {ContinuingExpr} OR EXISTS (SELECT 1 FROM projection_dirty_session);\n");
             }
         }
 
-        body.Append(
+        batch.Append(
             "INSERT OR REPLACE INTO projection_dirty_range (singleton_id, from_seq, to_seq) SELECT 1, " +
             "CASE WHEN " + ContinuingExpr + " THEN (SELECT from_seq FROM projection_dirty_range WHERE singleton_id = 1) " +
             "ELSE " + PrevExpr + " END, " + PrevExpr + " + 1;\n");
-        body.Append(
+        batch.Append(
             "INSERT OR REPLACE INTO store_write_marker (singleton_id, records_write_seq) SELECT 1, " + PrevExpr + " + 1;\n");
     }
+
+    private void ExecuteTransaction(IReadOnlyList<SqlStatement> statements)
+    {
+        Action? rebuildCallback = null;
+        lock (writeGate)
+        {
+            if (!initialized)
+            {
+                rebuildCallback = Initialize();
+                initialized = true;
+            }
+
+            if (GetType() == typeof(SqliteRelationalStore))
+            {
+                ExecuteStatements(statements);
+            }
+            else
+            {
+                // A subclass overrides ExecuteSqliteCore to script or inspect SQL, so honour that
+                // seam by rendering the parameterized statements into one script for it.
+                StringBuilder script = new();
+                script.Append("PRAGMA foreign_keys = ON;\n");
+                script.Append("BEGIN IMMEDIATE;\n");
+                foreach (SqlStatement statement in statements)
+                {
+                    script.Append(RenderStatement(statement));
+                }
+
+                script.Append("COMMIT;\n");
+                ExecuteSqlite(script.ToString());
+            }
+        }
+
+        rebuildCallback?.Invoke();
+    }
+
+    private static string RenderStatement(SqlStatement statement)
+    {
+        string sql = statement.Sql;
+        string[] names = [.. statement.Parameters.Keys];
+        Array.Sort(names, static (left, right) => right.Length.CompareTo(left.Length));
+        foreach (string name in names)
+        {
+            sql = sql.Replace(name, RenderParameterLiteral(statement.Parameters[name]), StringComparison.Ordinal);
+        }
+
+        return sql;
+    }
+
+    private static string RenderParameterLiteral(object? value) => value switch
+    {
+        null => "NULL",
+        string text => $"CAST(X'{Convert.ToHexString(Encoding.UTF8.GetBytes(text))}' AS TEXT)",
+        byte[] bytes => $"X'{Convert.ToHexString(bytes)}'",
+        double real => real.ToString("G17", CultureInfo.InvariantCulture),
+        IFormattable formattable => formattable.ToString(null, CultureInfo.InvariantCulture),
+        _ => value.ToString() ?? "NULL",
+    };
 
     private void ExecuteTransaction(string bodySql)
     {
@@ -746,6 +844,54 @@ public partial class SqliteRelationalStore : BaseSqliteRepository, IRelationalSt
         }
 
         rebuildCallback?.Invoke();
+    }
+
+    /// <summary>Accumulates parameterized statements, each binding its values by generated <c>$name</c> marker.</summary>
+    private sealed class SqlBatch
+    {
+        private readonly List<SqlStatement> statements = [];
+        private readonly Dictionary<string, object?> parameters = new(StringComparer.Ordinal);
+        private readonly StringBuilder sql = new();
+
+        /// <summary>Binds one value to the current statement and returns its <c>$name</c> marker.</summary>
+        public string Add(object? value)
+        {
+            string name = "$p" + parameters.Count.ToString(CultureInfo.InvariantCulture);
+            parameters.Add(name, value);
+            return name;
+        }
+
+        /// <summary>Appends SQL text, completing the current statement when the text terminates it.</summary>
+        public void Append(string text)
+        {
+            ArgumentNullException.ThrowIfNull(text);
+            sql.Append(text);
+            if (text.EndsWith(";\n", StringComparison.Ordinal))
+            {
+                EndStatement();
+            }
+        }
+
+        /// <summary>Returns the completed statements, ending any trailing unterminated statement.</summary>
+        public IReadOnlyList<SqlStatement> ToStatements()
+        {
+            EndStatement();
+            return statements;
+        }
+
+        private void EndStatement()
+        {
+            if (sql.Length == 0)
+            {
+                return;
+            }
+
+            statements.Add(new SqlStatement(
+                sql.ToString(),
+                new Dictionary<string, object?>(parameters, StringComparer.Ordinal)));
+            sql.Clear();
+            parameters.Clear();
+        }
     }
 
     private static string GuardedText(string tableName, string columnName, string? value)
@@ -780,24 +926,10 @@ public partial class SqliteRelationalStore : BaseSqliteRepository, IRelationalSt
         return text;
     }
 
-    private static string GuardedTextExpr(string tableName, string columnName, string? value)
-    {
-        if (value is null)
-        {
-            throw new DashValidationException(
-                ConstraintViolatedCode,
-                $"Required TEXT column '{tableName}.{columnName}' cannot be null.");
-        }
-
-        if (JsonDocumentText.IsDocument(value))
-        {
-            throw new DashValidationException(
-                JsonTextRefusedCode,
-                $"Refused JSON object or array text in '{tableName}.{columnName}'.");
-        }
-
-        return TextExpr(value);
-    }
+    /// <summary>Encodes a validated text value for the legacy script builders that still build SQL text.</summary>
+    private static readonly Func<string, string, string?, string> GuardedTextExpr =
+        static (tableName, columnName, value) =>
+            $"CAST(X'{Convert.ToHexString(Encoding.UTF8.GetBytes(GuardedText(tableName, columnName, value)))}' AS TEXT)";
 
     private static string IntSql(int value) => value.ToString(CultureInfo.InvariantCulture);
 
@@ -805,7 +937,10 @@ public partial class SqliteRelationalStore : BaseSqliteRepository, IRelationalSt
 
     private static string BoolSql(bool value) => value ? "1" : "0";
 
-    private static string RealSql(string tableName, string columnName, double value)
+    private static string RealSql(string tableName, string columnName, double value) =>
+        RequireFiniteReal(tableName, columnName, value).ToString("G17", CultureInfo.InvariantCulture);
+
+    private static double RequireFiniteReal(string tableName, string columnName, double value)
     {
         if (double.IsNaN(value) || double.IsInfinity(value))
         {
@@ -814,7 +949,7 @@ public partial class SqliteRelationalStore : BaseSqliteRepository, IRelationalSt
                 $"REAL column '{tableName}.{columnName}' must be finite.");
         }
 
-        return value.ToString("G17", CultureInfo.InvariantCulture);
+        return value;
     }
 
     private static void RequireMatchedPair(
@@ -833,10 +968,10 @@ public partial class SqliteRelationalStore : BaseSqliteRepository, IRelationalSt
     }
 
     private static void AppendOptionalTextChild(
-        StringBuilder sql,
+        SqlBatch batch,
         string tableName,
         string keyColumn,
-        string keyExpr,
+        string keyValue,
         string valueColumn,
         string? value)
     {
@@ -845,15 +980,17 @@ public partial class SqliteRelationalStore : BaseSqliteRepository, IRelationalSt
             return;
         }
 
-        string valueExpr = GuardedTextExpr(tableName, valueColumn, value);
-        sql.Append(CultureInfo.InvariantCulture, $"INSERT INTO {tableName} ({keyColumn}, {valueColumn}) VALUES ({keyExpr}, {valueExpr});\n");
+        string valueText = GuardedText(tableName, valueColumn, value);
+        string keyParam = batch.Add(keyValue);
+        string valueParam = batch.Add(valueText);
+        batch.Append($"INSERT INTO {tableName} ({keyColumn}, {valueColumn}) VALUES ({keyParam}, {valueParam});\n");
     }
 
     private static void AppendOptionalLongChild(
-        StringBuilder sql,
+        SqlBatch batch,
         string tableName,
         string keyColumn,
-        string keyExpr,
+        string keyValue,
         string valueColumn,
         long? value)
     {
@@ -862,15 +999,18 @@ public partial class SqliteRelationalStore : BaseSqliteRepository, IRelationalSt
             return;
         }
 
-        sql.Append(CultureInfo.InvariantCulture, $"INSERT INTO {tableName} ({keyColumn}, {valueColumn}) VALUES ({keyExpr}, {LongSql(value.Value)});\n");
+        string keyParam = batch.Add(keyValue);
+        string valueParam = batch.Add(value.Value);
+        batch.Append($"INSERT INTO {tableName} ({keyColumn}, {valueColumn}) VALUES ({keyParam}, {valueParam});\n");
     }
 
-    private static void AppendHarnessInsert(StringBuilder sql, HashSet<string> seenHarnesses, string harnessId)
+    private static void AppendHarnessInsert(SqlBatch batch, HashSet<string> seenHarnesses, string harnessId)
     {
-        string harnessExpr = GuardedTextExpr("harness", "harness_id", harnessId);
+        string harnessValue = GuardedText("harness", "harness_id", harnessId);
         if (seenHarnesses.Add(harnessId))
         {
-            sql.Append(CultureInfo.InvariantCulture, $"INSERT OR IGNORE INTO harness (harness_id) VALUES ({harnessExpr});\n");
+            string harnessParam = batch.Add(harnessValue);
+            batch.Append($"INSERT OR IGNORE INTO harness (harness_id) VALUES ({harnessParam});\n");
         }
     }
 
@@ -878,15 +1018,16 @@ public partial class SqliteRelationalStore : BaseSqliteRepository, IRelationalSt
     /// Deletes one source and the records it owns, after handing each record another source still claims
     /// (<c>record_source_claim</c>) to that source, so a span shared with another transcript survives.
     /// </summary>
-    private static void AppendSourceDelete(StringBuilder sql, string sourceIdExpr)
+    private static void AppendSourceDelete(SqlBatch batch, string sourceId)
     {
+        string updateSourceIdParam = batch.Add(sourceId);
         string otherClaim =
-            $"FROM record_source_claim c WHERE c.span_id = record.span_id AND c.source_id <> {sourceIdExpr}";
-        sql.Append(
-            CultureInfo.InvariantCulture,
+            $"FROM record_source_claim c WHERE c.span_id = record.span_id AND c.source_id <> {updateSourceIdParam}";
+        batch.Append(
             $"UPDATE record SET source_id = (SELECT c.source_id {otherClaim} ORDER BY c.source_id LIMIT 1) " +
-            $"WHERE source_id = {sourceIdExpr} AND EXISTS (SELECT 1 {otherClaim});\n");
-        sql.Append(CultureInfo.InvariantCulture, $"DELETE FROM source WHERE source_id = {sourceIdExpr};\n");
+            $"WHERE source_id = {updateSourceIdParam} AND EXISTS (SELECT 1 {otherClaim});\n");
+        string deleteSourceIdParam = batch.Add(sourceId);
+        batch.Append($"DELETE FROM source WHERE source_id = {deleteSourceIdParam};\n");
     }
 
     private static string SourceIdOf(CollectedSource source)
@@ -896,102 +1037,130 @@ public partial class SqliteRelationalStore : BaseSqliteRepository, IRelationalSt
         return $"src-{Convert.ToHexStringLower(digest)[..16]}";
     }
 
-    private static string AppendSourceInsert(StringBuilder sql, CollectedSource source)
+    private static string AppendSourceInsert(SqlBatch batch, CollectedSource source)
     {
         string kindText = FormatSourceKind(source.Kind);
-        string harnessExpr = GuardedTextExpr("source", "harness_id", source.HarnessId);
-        string kindExpr = GuardedTextExpr("source", "source_kind", kindText);
-        string locatorExpr = GuardedTextExpr("source", "locator", source.Locator);
+        string sourceId = SourceIdOf(source);
+        string harnessValue = GuardedText("source", "harness_id", source.HarnessId);
+        string kindValue = GuardedText("source", "source_kind", kindText);
+        string locatorValue = GuardedText("source", "locator", source.Locator);
 
-        string sourceIdExpr = TextExpr(SourceIdOf(source));
+        string sourceIdParam = batch.Add(sourceId);
+        string harnessParam = batch.Add(harnessValue);
+        string kindParam = batch.Add(kindValue);
+        string locatorParam = batch.Add(locatorValue);
 
-        sql.Append(
-            CultureInfo.InvariantCulture,
-            $"INSERT OR IGNORE INTO source (source_id, harness_id, source_kind, locator) VALUES ({sourceIdExpr}, {harnessExpr}, {kindExpr}, {locatorExpr});\n");
-        return sourceIdExpr;
+        batch.Append(
+            $"INSERT OR IGNORE INTO source (source_id, harness_id, source_kind, locator) VALUES ({sourceIdParam}, {harnessParam}, {kindParam}, {locatorParam});\n");
+        return sourceId;
     }
 
-    private static void AppendSessionUpsert(StringBuilder sql, CollectedSession session)
+    private static void AppendSessionUpsert(SqlBatch batch, CollectedSession session)
     {
-        string sessionIdExpr = GuardedNonEmptyTextExpr("session", "session_id", session.SessionKey);
-        string harnessIdExpr = GuardedTextExpr("session", "harness_id", session.HarnessId);
-        string nativeSessionIdExpr = GuardedTextExpr("session", "native_session_id", session.NativeSessionId);
+        string sessionId = GuardedNonEmptyText("session", "session_id", session.SessionKey);
+        string harnessId = GuardedText("session", "harness_id", session.HarnessId);
+        string nativeSessionId = GuardedText("session", "native_session_id", session.NativeSessionId);
 
-        sql.Append(
-            CultureInfo.InvariantCulture,
-            $"INSERT INTO session (session_id, harness_id, native_session_id) VALUES ({sessionIdExpr}, {harnessIdExpr}, {nativeSessionIdExpr}) ");
-        sql.Append("ON CONFLICT(session_id) DO UPDATE SET harness_id = excluded.harness_id, native_session_id = excluded.native_session_id;\n");
+        string insertSessionIdParam = batch.Add(sessionId);
+        string insertHarnessIdParam = batch.Add(harnessId);
+        string insertNativeSessionIdParam = batch.Add(nativeSessionId);
+        batch.Append(
+            $"INSERT INTO session (session_id, harness_id, native_session_id) VALUES ({insertSessionIdParam}, {insertHarnessIdParam}, {insertNativeSessionIdParam}) ");
+        batch.Append("ON CONFLICT(session_id) DO UPDATE SET harness_id = excluded.harness_id, native_session_id = excluded.native_session_id;\n");
 
-        sql.Append(CultureInfo.InvariantCulture, $"DELETE FROM session_workspace WHERE session_id = {sessionIdExpr};\n");
-        sql.Append(CultureInfo.InvariantCulture, $"DELETE FROM session_repository WHERE session_id = {sessionIdExpr};\n");
-        sql.Append(CultureInfo.InvariantCulture, $"DELETE FROM session_branch WHERE session_id = {sessionIdExpr};\n");
-        sql.Append(CultureInfo.InvariantCulture, $"DELETE FROM session_title WHERE session_id = {sessionIdExpr};\n");
-        sql.Append(CultureInfo.InvariantCulture, $"DELETE FROM session_model_usage WHERE session_id = {sessionIdExpr};\n");
+        AppendSessionIdDelete(batch, "session_workspace", sessionId);
+        AppendSessionIdDelete(batch, "session_repository", sessionId);
+        AppendSessionIdDelete(batch, "session_branch", sessionId);
+        AppendSessionIdDelete(batch, "session_title", sessionId);
+        AppendSessionIdDelete(batch, "session_model_usage", sessionId);
 
         if (session.Workspace is not null)
         {
-            AppendOptionalTextChild(sql, "session_workspace", "session_id", sessionIdExpr, "working_directory", session.Workspace.WorkingDirectory);
-            AppendOptionalTextChild(sql, "session_repository", "session_id", sessionIdExpr, "repo_name", session.Workspace.Repository);
-            AppendOptionalTextChild(sql, "session_branch", "session_id", sessionIdExpr, "branch_name", session.Workspace.Branch);
+            AppendOptionalTextChild(batch, "session_workspace", "session_id", sessionId, "working_directory", session.Workspace.WorkingDirectory);
+            AppendOptionalTextChild(batch, "session_repository", "session_id", sessionId, "repo_name", session.Workspace.Repository);
+            AppendOptionalTextChild(batch, "session_branch", "session_id", sessionId, "branch_name", session.Workspace.Branch);
         }
 
-        AppendOptionalTextChild(sql, "session_title", "session_id", sessionIdExpr, "title", session.Title);
+        AppendOptionalTextChild(batch, "session_title", "session_id", sessionId, "title", session.Title);
 
         if (session.ReportedUsage is not null)
         {
             foreach (CollectedModelUsage usage in session.ReportedUsage)
             {
                 ArgumentNullException.ThrowIfNull(usage);
-                string modelExpr = GuardedTextExpr("session_model_usage", "model_id", usage.Model);
-                string tokenClassExpr = TextExpr(FormatTokenClass(usage.TokenClass));
-                sql.Append(
-                    CultureInfo.InvariantCulture,
-                    $"INSERT INTO session_model_usage (session_id, snapshot_position, model_id, token_class, token_count) VALUES ({sessionIdExpr}, {IntSql(usage.SnapshotPosition)}, {modelExpr}, {tokenClassExpr}, {LongSql(usage.Count)});\n");
+                string modelValue = GuardedText("session_model_usage", "model_id", usage.Model);
+                string tokenClass = FormatTokenClass(usage.TokenClass);
+                string usageSessionIdParam = batch.Add(sessionId);
+                string snapshotPositionParam = batch.Add(usage.SnapshotPosition);
+                string modelParam = batch.Add(modelValue);
+                string tokenClassParam = batch.Add(tokenClass);
+                string countParam = batch.Add(usage.Count);
+                batch.Append(
+                    $"INSERT INTO session_model_usage (session_id, snapshot_position, model_id, token_class, token_count) VALUES ({usageSessionIdParam}, {snapshotPositionParam}, {modelParam}, {tokenClassParam}, {countParam});\n");
             }
         }
     }
 
-    private static void AppendRecordInsert(StringBuilder sql, string sourceIdExpr, CollectedRecord record)
+    private static void AppendSessionIdDelete(SqlBatch batch, string tableName, string sessionId)
+    {
+        string sessionIdParam = batch.Add(sessionId);
+        batch.Append($"DELETE FROM {tableName} WHERE session_id = {sessionIdParam};\n");
+    }
+
+    private static void AppendRecordInsert(SqlBatch batch, string sourceId, CollectedRecord record)
     {
         if (record.Signals is null)
         {
             throw new DashValidationException(ConstraintViolatedCode, "CollectedRecord.Signals cannot be null.");
         }
 
-        string spanIdExpr = GuardedTextExpr("record", "span_id", record.RecordId);
-        string harnessIdExpr = GuardedTextExpr("record", "harness_id", record.HarnessId);
-        string opExpr = TextExpr(FormatRecordOp(record.Op));
-        string kindExpr = TextExpr(FormatRecordKind(record.Kind));
-        string nameExpr = GuardedTextExpr("record", "name", record.Name);
-        string startedExpr = TextExpr(FormatTimestamp(record.StartedAt));
-        string statusExpr = TextExpr(FormatRecordStatus(record.Status));
+        string spanId = GuardedText("record", "span_id", record.RecordId);
+        string harnessId = GuardedText("record", "harness_id", record.HarnessId);
+        string op = FormatRecordOp(record.Op);
+        string kind = FormatRecordKind(record.Kind);
+        string name = GuardedText("record", "name", record.Name);
+        string started = FormatTimestamp(record.StartedAt);
+        string status = FormatRecordStatus(record.Status);
 
         // One span can arrive from more than one source: a forked or resumed Claude Code transcript
         // copies its parent's lines, parent session id and message ids included, so both files map
         // to the same span id. The latest write owns the span; the delete cascades its child rows.
         // Each writer's claim is kept, so deleting the owner hands the span on (AppendSourceDelete).
-        sql.Append(CultureInfo.InvariantCulture, $"DELETE FROM record WHERE span_id = {spanIdExpr};\n");
-        sql.Append(
-            CultureInfo.InvariantCulture,
-            $"INSERT OR IGNORE INTO record_source_claim (span_id, source_id) VALUES ({spanIdExpr}, {sourceIdExpr});\n");
-        sql.Append(
-            CultureInfo.InvariantCulture,
-            $"INSERT INTO record (span_id, source_id, harness_id, op, kind, name, started_at_utc, status) VALUES ({spanIdExpr}, {sourceIdExpr}, {harnessIdExpr}, {opExpr}, {kindExpr}, {nameExpr}, {startedExpr}, {statusExpr});\n");
+        string deleteSpanParam = batch.Add(spanId);
+        batch.Append($"DELETE FROM record WHERE span_id = {deleteSpanParam};\n");
 
-        AppendOptionalNonEmptyTextChild(sql, "record_session_link", "span_id", spanIdExpr, "session_key", record.SessionKey);
-        AppendOptionalTextChild(sql, "record_parent", "span_id", spanIdExpr, "parent_span_id", record.ParentRecordId);
-        AppendOptionalTextChild(sql, "record_trace", "span_id", spanIdExpr, "trace_id", record.TraceId);
-        AppendOptionalTextChild(sql, "record_model", "span_id", spanIdExpr, "model_id", record.Model);
-        AppendOptionalTextChild(sql, "record_response_id", "span_id", spanIdExpr, "response_id", record.ResponseId);
-        AppendOptionalTextChild(sql, "record_request_id", "span_id", spanIdExpr, "request_id", record.RequestId);
+        string claimSpanParam = batch.Add(spanId);
+        string claimSourceParam = batch.Add(sourceId);
+        batch.Append(
+            $"INSERT OR IGNORE INTO record_source_claim (span_id, source_id) VALUES ({claimSpanParam}, {claimSourceParam});\n");
+
+        string insertSpanParam = batch.Add(spanId);
+        string insertSourceParam = batch.Add(sourceId);
+        string insertHarnessParam = batch.Add(harnessId);
+        string insertOpParam = batch.Add(op);
+        string insertKindParam = batch.Add(kind);
+        string insertNameParam = batch.Add(name);
+        string insertStartedParam = batch.Add(started);
+        string insertStatusParam = batch.Add(status);
+        batch.Append(
+            $"INSERT INTO record (span_id, source_id, harness_id, op, kind, name, started_at_utc, status) VALUES ({insertSpanParam}, {insertSourceParam}, {insertHarnessParam}, {insertOpParam}, {insertKindParam}, {insertNameParam}, {insertStartedParam}, {insertStatusParam});\n");
+
+        AppendOptionalNonEmptyTextChild(batch, "record_session_link", "span_id", spanId, "session_key", record.SessionKey);
+        AppendOptionalTextChild(batch, "record_parent", "span_id", spanId, "parent_span_id", record.ParentRecordId);
+        AppendOptionalTextChild(batch, "record_trace", "span_id", spanId, "trace_id", record.TraceId);
+        AppendOptionalTextChild(batch, "record_model", "span_id", spanId, "model_id", record.Model);
+        AppendOptionalTextChild(batch, "record_response_id", "span_id", spanId, "response_id", record.ResponseId);
+        AppendOptionalTextChild(batch, "record_request_id", "span_id", spanId, "request_id", record.RequestId);
 
         if (record.EndedAt.HasValue)
         {
-            string endedExpr = TextExpr(FormatTimestamp(record.EndedAt.Value));
-            sql.Append(CultureInfo.InvariantCulture, $"INSERT INTO record_end (span_id, ended_at_utc) VALUES ({spanIdExpr}, {endedExpr});\n");
+            string ended = FormatTimestamp(record.EndedAt.Value);
+            string endedSpanParam = batch.Add(spanId);
+            string endedParam = batch.Add(ended);
+            batch.Append($"INSERT INTO record_end (span_id, ended_at_utc) VALUES ({endedSpanParam}, {endedParam});\n");
         }
 
-        AppendOptionalLongChild(sql, "record_reported_duration", "span_id", spanIdExpr, "duration_ms", record.ReportedDurationMs);
+        AppendOptionalLongChild(batch, "record_reported_duration", "span_id", spanId, "duration_ms", record.ReportedDurationMs);
 
         if (record.Tokens is not null)
         {
@@ -1006,42 +1175,52 @@ public partial class SqliteRelationalStore : BaseSqliteRepository, IRelationalSt
                         $"Duplicate token_class '{tokenCount.TokenClass}' on record '{record.RecordId}'.");
                 }
 
-                string tokenClassExpr = TextExpr(FormatTokenClass(tokenCount.TokenClass));
-                sql.Append(
-                    CultureInfo.InvariantCulture,
-                    $"INSERT INTO record_token_count (span_id, token_class, token_count) VALUES ({spanIdExpr}, {tokenClassExpr}, {LongSql(tokenCount.Count)});\n");
+                string tokenClass = FormatTokenClass(tokenCount.TokenClass);
+                string tokenSpanParam = batch.Add(spanId);
+                string tokenClassParam = batch.Add(tokenClass);
+                string countParam = batch.Add(tokenCount.Count);
+                batch.Append(
+                    $"INSERT INTO record_token_count (span_id, token_class, token_count) VALUES ({tokenSpanParam}, {tokenClassParam}, {countParam});\n");
             }
         }
 
         if (record.ReportedInputTokens.HasValue)
         {
-            sql.Append(
-                CultureInfo.InvariantCulture,
-                $"INSERT INTO record_reported_total (span_id, direction, token_count) VALUES ({spanIdExpr}, {TextExpr("input")}, {LongSql(record.ReportedInputTokens.Value)});\n");
+            string inputSpanParam = batch.Add(spanId);
+            string directionParam = batch.Add("input");
+            string countParam = batch.Add(record.ReportedInputTokens.Value);
+            batch.Append(
+                $"INSERT INTO record_reported_total (span_id, direction, token_count) VALUES ({inputSpanParam}, {directionParam}, {countParam});\n");
         }
 
         if (record.ReportedOutputTokens.HasValue)
         {
-            sql.Append(
-                CultureInfo.InvariantCulture,
-                $"INSERT INTO record_reported_total (span_id, direction, token_count) VALUES ({spanIdExpr}, {TextExpr("output")}, {LongSql(record.ReportedOutputTokens.Value)});\n");
+            string outputSpanParam = batch.Add(spanId);
+            string directionParam = batch.Add("output");
+            string countParam = batch.Add(record.ReportedOutputTokens.Value);
+            batch.Append(
+                $"INSERT INTO record_reported_total (span_id, direction, token_count) VALUES ({outputSpanParam}, {directionParam}, {countParam});\n");
         }
 
         if (record.ReportedCost is not null)
         {
-            string amountSql = RealSql("record_reported_cost", "amount", record.ReportedCost.Amount);
-            string currencyExpr = GuardedTextExpr("record_reported_cost", "currency", record.ReportedCost.Currency);
-            sql.Append(
-                CultureInfo.InvariantCulture,
-                $"INSERT INTO record_reported_cost (span_id, amount, currency) VALUES ({spanIdExpr}, {amountSql}, {currencyExpr});\n");
+            double amount = RequireFiniteReal("record_reported_cost", "amount", record.ReportedCost.Amount);
+            string currencyValue = GuardedText("record_reported_cost", "currency", record.ReportedCost.Currency);
+            string costSpanParam = batch.Add(spanId);
+            string amountParam = batch.Add(amount);
+            string currencyParam = batch.Add(currencyValue);
+            batch.Append(
+                $"INSERT INTO record_reported_cost (span_id, amount, currency) VALUES ({costSpanParam}, {amountParam}, {currencyParam});\n");
         }
 
         if (record.SkillsInvoked is not null)
         {
             foreach (string skillName in record.SkillsInvoked)
             {
-                string skillExpr = GuardedTextExpr("record_skill_invocation", "skill_name", skillName);
-                sql.Append(CultureInfo.InvariantCulture, $"INSERT INTO record_skill_invocation (span_id, skill_name) VALUES ({spanIdExpr}, {skillExpr});\n");
+                string skillValue = GuardedText("record_skill_invocation", "skill_name", skillName);
+                string skillSpanParam = batch.Add(spanId);
+                string skillParam = batch.Add(skillValue);
+                batch.Append($"INSERT INTO record_skill_invocation (span_id, skill_name) VALUES ({skillSpanParam}, {skillParam});\n");
             }
         }
 
@@ -1049,37 +1228,43 @@ public partial class SqliteRelationalStore : BaseSqliteRepository, IRelationalSt
         {
             for (int position = 0; position < record.SkillsListed.Count; position++)
             {
-                string skillExpr = GuardedTextExpr("record_skill_listing", "skill_name", record.SkillsListed[position]);
-                sql.Append(CultureInfo.InvariantCulture, $"INSERT INTO record_skill_listing (span_id, position, skill_name) VALUES ({spanIdExpr}, {IntSql(position)}, {skillExpr});\n");
+                string skillValue = GuardedText("record_skill_listing", "skill_name", record.SkillsListed[position]);
+                string listingSpanParam = batch.Add(spanId);
+                string positionParam = batch.Add(position);
+                string skillParam = batch.Add(skillValue);
+                batch.Append($"INSERT INTO record_skill_listing (span_id, position, skill_name) VALUES ({listingSpanParam}, {positionParam}, {skillParam});\n");
             }
         }
 
-        AppendOptionalTextChild(sql, "record_agent_instance", "span_id", spanIdExpr, "agent_instance_id", record.AgentInstanceId);
-        AppendOptionalTextChild(sql, "record_error", "span_id", spanIdExpr, "message", record.Signals.ErrorMessage);
-        AppendOptionalLongChild(sql, "record_edit_failure", "span_id", spanIdExpr, "failure_count", record.Signals.EditFailures);
+        AppendOptionalTextChild(batch, "record_agent_instance", "span_id", spanId, "agent_instance_id", record.AgentInstanceId);
+        AppendOptionalTextChild(batch, "record_error", "span_id", spanId, "message", record.Signals.ErrorMessage);
+        AppendOptionalLongChild(batch, "record_edit_failure", "span_id", spanId, "failure_count", record.Signals.EditFailures);
 
         if (record.Signals.CorrectionRule is not null)
         {
-            string ruleExpr = GuardedTextExpr("record_correction_rule", "correction_rule", record.Signals.CorrectionRule);
-            sql.Append(CultureInfo.InvariantCulture, $"INSERT INTO record_correction (span_id) VALUES ({spanIdExpr});\n");
-            sql.Append(CultureInfo.InvariantCulture, $"INSERT INTO record_correction_rule (span_id, correction_rule) VALUES ({spanIdExpr}, {ruleExpr});\n");
+            string ruleValue = GuardedText("record_correction_rule", "correction_rule", record.Signals.CorrectionRule);
+            string correctionSpanParam = batch.Add(spanId);
+            batch.Append($"INSERT INTO record_correction (span_id) VALUES ({correctionSpanParam});\n");
+            string ruleSpanParam = batch.Add(spanId);
+            string ruleParam = batch.Add(ruleValue);
+            batch.Append($"INSERT INTO record_correction_rule (span_id, correction_rule) VALUES ({ruleSpanParam}, {ruleParam});\n");
         }
 
         AppendOptionalLongChild(
-            sql,
+            batch,
             "record_declared_context_window",
             "span_id",
-            spanIdExpr,
+            spanId,
             "declared_context_window",
             record.Signals.DeclaredContextWindow);
 
-        AppendRecordParts(sql, spanIdExpr, record);
-        AppendRecordToolDefinitions(sql, spanIdExpr, record);
-        AppendRecordToolCall(sql, spanIdExpr, record.Tool);
-        AppendRecordAgentInvocation(sql, spanIdExpr, record.Agent);
+        AppendRecordParts(batch, spanId, record);
+        AppendRecordToolDefinitions(batch, spanId, record);
+        AppendRecordToolCall(batch, spanId, record.Tool);
+        AppendRecordAgentInvocation(batch, spanId, record.Agent);
     }
 
-    private static void AppendRecordParts(StringBuilder sql, string spanIdExpr, CollectedRecord record)
+    private static void AppendRecordParts(SqlBatch batch, string spanId, CollectedRecord record)
     {
         if (record.Parts is null)
         {
@@ -1104,65 +1289,89 @@ public partial class SqliteRelationalStore : BaseSqliteRepository, IRelationalSt
                     $"content_part at position {IntSql(part.Position)} must specify exactly one of PlainText or Withheld.");
             }
 
-            string posSql = IntSql(part.Position);
-            string bucketExpr = TextExpr(FormatContentBucket(part.Bucket));
-            sql.Append(CultureInfo.InvariantCulture, $"INSERT INTO content_part (span_id, position, bucket) VALUES ({spanIdExpr}, {posSql}, {bucketExpr});\n");
+            string bucket = FormatContentBucket(part.Bucket);
+            string partSpanParam = batch.Add(spanId);
+            string partPositionParam = batch.Add(part.Position);
+            string bucketParam = batch.Add(bucket);
+            batch.Append($"INSERT INTO content_part (span_id, position, bucket) VALUES ({partSpanParam}, {partPositionParam}, {bucketParam});\n");
 
             if (part.PlainText is not null)
             {
-                string partTextExpr = GuardedTextExpr("content_part_text", "part_text", part.PlainText);
-                sql.Append(CultureInfo.InvariantCulture, $"INSERT INTO content_part_text (span_id, position, part_text) VALUES ({spanIdExpr}, {posSql}, {partTextExpr});\n");
+                string partText = GuardedText("content_part_text", "part_text", part.PlainText);
+                string textSpanParam = batch.Add(spanId);
+                string textPositionParam = batch.Add(part.Position);
+                string partTextParam = batch.Add(partText);
+                batch.Append($"INSERT INTO content_part_text (span_id, position, part_text) VALUES ({textSpanParam}, {textPositionParam}, {partTextParam});\n");
             }
             else if (part.Withheld is not null)
             {
-                sql.Append(
-                    CultureInfo.InvariantCulture,
-                    $"INSERT INTO content_part_withheld (span_id, position, utf8_bytes, characters, measured_tokens) VALUES ({spanIdExpr}, {posSql}, {LongSql(part.Withheld.Utf8Bytes)}, {LongSql(part.Withheld.Characters)}, {LongSql(part.Withheld.MeasuredTokens)});\n");
+                string withheldSpanParam = batch.Add(spanId);
+                string withheldPositionParam = batch.Add(part.Position);
+                string utf8Param = batch.Add(part.Withheld.Utf8Bytes);
+                string charactersParam = batch.Add(part.Withheld.Characters);
+                string measuredTokensParam = batch.Add(part.Withheld.MeasuredTokens);
+                batch.Append(
+                    $"INSERT INTO content_part_withheld (span_id, position, utf8_bytes, characters, measured_tokens) VALUES ({withheldSpanParam}, {withheldPositionParam}, {utf8Param}, {charactersParam}, {measuredTokensParam});\n");
                 if (part.Withheld.Tokenizer is string tokenizer)
                 {
-                    string tokenizerExpr = GuardedTextExpr("content_part_withheld_tokenizer", "tokenizer", tokenizer);
-                    sql.Append(
-                        CultureInfo.InvariantCulture,
-                        $"INSERT INTO content_part_withheld_tokenizer (span_id, position, tokenizer, is_model_own) VALUES ({spanIdExpr}, {posSql}, {tokenizerExpr}, {(part.Withheld.TokenizerIsModelOwn ? "1" : "0")});\n");
+                    string tokenizerValue = GuardedText("content_part_withheld_tokenizer", "tokenizer", tokenizer);
+                    string tokenizerSpanParam = batch.Add(spanId);
+                    string tokenizerPositionParam = batch.Add(part.Position);
+                    string tokenizerParam = batch.Add(tokenizerValue);
+                    string isModelOwnParam = batch.Add(part.Withheld.TokenizerIsModelOwn ? 1 : 0);
+                    batch.Append(
+                        $"INSERT INTO content_part_withheld_tokenizer (span_id, position, tokenizer, is_model_own) VALUES ({tokenizerSpanParam}, {tokenizerPositionParam}, {tokenizerParam}, {isModelOwnParam});\n");
                 }
             }
 
             if (part.ReportedTokens.HasValue)
             {
-                sql.Append(
-                    CultureInfo.InvariantCulture,
-                    $"INSERT INTO content_part_reported_tokens (span_id, position, token_count) VALUES ({spanIdExpr}, {posSql}, {LongSql(part.ReportedTokens.Value)});\n");
+                string reportedSpanParam = batch.Add(spanId);
+                string reportedPositionParam = batch.Add(part.Position);
+                string reportedTokensParam = batch.Add(part.ReportedTokens.Value);
+                batch.Append(
+                    $"INSERT INTO content_part_reported_tokens (span_id, position, token_count) VALUES ({reportedSpanParam}, {reportedPositionParam}, {reportedTokensParam});\n");
             }
 
             if (part.Server is not null)
             {
-                string serverExpr = GuardedTextExpr("content_part_server", "server_name", part.Server);
-                sql.Append(CultureInfo.InvariantCulture, $"INSERT INTO content_part_server (span_id, position, server_name) VALUES ({spanIdExpr}, {posSql}, {serverExpr});\n");
+                string serverValue = GuardedText("content_part_server", "server_name", part.Server);
+                string serverSpanParam = batch.Add(spanId);
+                string serverPositionParam = batch.Add(part.Position);
+                string serverParam = batch.Add(serverValue);
+                batch.Append($"INSERT INTO content_part_server (span_id, position, server_name) VALUES ({serverSpanParam}, {serverPositionParam}, {serverParam});\n");
             }
 
             if (part.Role is not null)
             {
-                string roleExpr = GuardedTextExpr("content_part_role", "role_name", part.Role);
-                sql.Append(CultureInfo.InvariantCulture, $"INSERT INTO content_part_role (span_id, position, role_name) VALUES ({spanIdExpr}, {posSql}, {roleExpr});\n");
+                string roleValue = GuardedText("content_part_role", "role_name", part.Role);
+                string roleSpanParam = batch.Add(spanId);
+                string rolePositionParam = batch.Add(part.Position);
+                string roleParam = batch.Add(roleValue);
+                batch.Append($"INSERT INTO content_part_role (span_id, position, role_name) VALUES ({roleSpanParam}, {rolePositionParam}, {roleParam});\n");
             }
 
             if (part.Resident.HasValue)
             {
-                sql.Append(
-                    CultureInfo.InvariantCulture,
-                    $"INSERT INTO content_part_residency (span_id, position, is_resident) VALUES ({spanIdExpr}, {posSql}, {BoolSql(part.Resident.Value)});\n");
+                string residentSpanParam = batch.Add(spanId);
+                string residentPositionParam = batch.Add(part.Position);
+                string residentParam = batch.Add(part.Resident.Value ? 1 : 0);
+                batch.Append(
+                    $"INSERT INTO content_part_residency (span_id, position, is_resident) VALUES ({residentSpanParam}, {residentPositionParam}, {residentParam});\n");
             }
 
             if (part.OriginalUtf8BytesWhenTruncated.HasValue)
             {
-                sql.Append(
-                    CultureInfo.InvariantCulture,
-                    $"INSERT INTO content_part_truncation (span_id, position, original_utf8_bytes) VALUES ({spanIdExpr}, {posSql}, {LongSql(part.OriginalUtf8BytesWhenTruncated.Value)});\n");
+                string truncationSpanParam = batch.Add(spanId);
+                string truncationPositionParam = batch.Add(part.Position);
+                string truncationBytesParam = batch.Add(part.OriginalUtf8BytesWhenTruncated.Value);
+                batch.Append(
+                    $"INSERT INTO content_part_truncation (span_id, position, original_utf8_bytes) VALUES ({truncationSpanParam}, {truncationPositionParam}, {truncationBytesParam});\n");
             }
         }
     }
 
-    private static void AppendRecordToolDefinitions(StringBuilder sql, string spanIdExpr, CollectedRecord record)
+    private static void AppendRecordToolDefinitions(SqlBatch batch, string spanId, CollectedRecord record)
     {
         if (record.ToolDefinitions is null)
         {
@@ -1180,40 +1389,50 @@ public partial class SqliteRelationalStore : BaseSqliteRepository, IRelationalSt
                     $"Duplicate tool_definition position {IntSql(definition.Position)} on record '{record.RecordId}'.");
             }
 
-            string posSql = IntSql(definition.Position);
-            string toolNameExpr = GuardedTextExpr("tool_definition", "tool_name", definition.ToolName);
-            sql.Append(
-                CultureInfo.InvariantCulture,
-                $"INSERT INTO tool_definition (span_id, position, tool_name, schema_tokens) VALUES ({spanIdExpr}, {posSql}, {toolNameExpr}, {LongSql(definition.SchemaTokens)});\n");
+            string toolNameValue = GuardedText("tool_definition", "tool_name", definition.ToolName);
+            string definitionSpanParam = batch.Add(spanId);
+            string positionParam = batch.Add(definition.Position);
+            string toolNameParam = batch.Add(toolNameValue);
+            string schemaTokensParam = batch.Add(definition.SchemaTokens);
+            batch.Append(
+                $"INSERT INTO tool_definition (span_id, position, tool_name, schema_tokens) VALUES ({definitionSpanParam}, {positionParam}, {toolNameParam}, {schemaTokensParam});\n");
 
             if (definition.Tokenizer is string tokenizer)
             {
-                string tokenizerExpr = GuardedTextExpr("tool_definition_tokenizer", "tokenizer", tokenizer);
-                sql.Append(
-                    CultureInfo.InvariantCulture,
-                    $"INSERT INTO tool_definition_tokenizer (span_id, position, tokenizer, is_model_own) VALUES ({spanIdExpr}, {posSql}, {tokenizerExpr}, {BoolSql(definition.TokenizerIsModelOwn)});\n");
+                string tokenizerValue = GuardedText("tool_definition_tokenizer", "tokenizer", tokenizer);
+                string tokenizerSpanParam = batch.Add(spanId);
+                string tokenizerPositionParam = batch.Add(definition.Position);
+                string tokenizerParam = batch.Add(tokenizerValue);
+                string isModelOwnParam = batch.Add(definition.TokenizerIsModelOwn ? 1 : 0);
+                batch.Append(
+                    $"INSERT INTO tool_definition_tokenizer (span_id, position, tokenizer, is_model_own) VALUES ({tokenizerSpanParam}, {tokenizerPositionParam}, {tokenizerParam}, {isModelOwnParam});\n");
             }
 
             if (definition.Server is not null)
             {
-                string serverExpr = GuardedTextExpr("tool_definition_server", "server_name", definition.Server);
-                sql.Append(
-                    CultureInfo.InvariantCulture,
-                    $"INSERT INTO tool_definition_server (span_id, position, server_name) VALUES ({spanIdExpr}, {posSql}, {serverExpr});\n");
+                string serverValue = GuardedText("tool_definition_server", "server_name", definition.Server);
+                string serverSpanParam = batch.Add(spanId);
+                string serverPositionParam = batch.Add(definition.Position);
+                string serverParam = batch.Add(serverValue);
+                batch.Append(
+                    $"INSERT INTO tool_definition_server (span_id, position, server_name) VALUES ({serverSpanParam}, {serverPositionParam}, {serverParam});\n");
             }
         }
     }
 
-    private static void AppendRecordToolCall(StringBuilder sql, string spanIdExpr, CollectedToolCall? tool)
+    private static void AppendRecordToolCall(SqlBatch batch, string spanId, CollectedToolCall? tool)
     {
         if (tool is null)
         {
             return;
         }
 
-        string callIdExpr = GuardedTextExpr("tool_call", "call_id", tool.CallId);
-        string toolNameExpr = GuardedTextExpr("tool_call", "tool_name", tool.ToolName);
-        sql.Append(CultureInfo.InvariantCulture, $"INSERT INTO tool_call (span_id, call_id, tool_name) VALUES ({spanIdExpr}, {callIdExpr}, {toolNameExpr});\n");
+        string callIdValue = GuardedText("tool_call", "call_id", tool.CallId);
+        string toolNameValue = GuardedText("tool_call", "tool_name", tool.ToolName);
+        string callSpanParam = batch.Add(spanId);
+        string callIdParam = batch.Add(callIdValue);
+        string callToolNameParam = batch.Add(toolNameValue);
+        batch.Append($"INSERT INTO tool_call (span_id, call_id, tool_name) VALUES ({callSpanParam}, {callIdParam}, {callToolNameParam});\n");
 
         RequireMatchedPair(
             tool.McpServerName is not null,
@@ -1224,34 +1443,40 @@ public partial class SqliteRelationalStore : BaseSqliteRepository, IRelationalSt
 
         if (tool.McpServerName is not null && tool.McpToolName is not null)
         {
-            string serverExpr = GuardedTextExpr("tool_call_mcp", "server_name", tool.McpServerName);
-            string serverToolExpr = GuardedTextExpr("tool_call_mcp", "server_tool_name", tool.McpToolName);
-            sql.Append(
-                CultureInfo.InvariantCulture,
-                $"INSERT INTO tool_call_mcp (span_id, server_name, server_tool_name) VALUES ({spanIdExpr}, {serverExpr}, {serverToolExpr});\n");
+            string serverValue = GuardedText("tool_call_mcp", "server_name", tool.McpServerName);
+            string serverToolValue = GuardedText("tool_call_mcp", "server_tool_name", tool.McpToolName);
+            string mcpSpanParam = batch.Add(spanId);
+            string serverParam = batch.Add(serverValue);
+            string serverToolParam = batch.Add(serverToolValue);
+            batch.Append(
+                $"INSERT INTO tool_call_mcp (span_id, server_name, server_tool_name) VALUES ({mcpSpanParam}, {serverParam}, {serverToolParam});\n");
         }
 
-        AppendToolContent(sql, spanIdExpr, tool.Input, "tool_call_input");
-        AppendToolContent(sql, spanIdExpr, tool.Result, "tool_call_result");
+        AppendToolContent(batch, spanId, tool.Input, "tool_call_input");
+        AppendToolContent(batch, spanId, tool.Result, "tool_call_result");
 
         if (tool.Succeeded.HasValue)
         {
-            sql.Append(CultureInfo.InvariantCulture, $"INSERT INTO tool_call_outcome (span_id, succeeded) VALUES ({spanIdExpr}, {BoolSql(tool.Succeeded.Value)});\n");
+            string outcomeSpanParam = batch.Add(spanId);
+            string succeededParam = batch.Add(tool.Succeeded.Value ? 1 : 0);
+            batch.Append($"INSERT INTO tool_call_outcome (span_id, succeeded) VALUES ({outcomeSpanParam}, {succeededParam});\n");
         }
 
         if (tool.Error is not null)
         {
-            string msgExpr = GuardedTextExpr("tool_call_error", "message", tool.Error.Message);
-            sql.Append(CultureInfo.InvariantCulture, $"INSERT INTO tool_call_error (span_id, message) VALUES ({spanIdExpr}, {msgExpr});\n");
-            AppendOptionalTextChild(sql, "tool_call_error_code", "span_id", spanIdExpr, "code", tool.Error.Code);
+            string messageValue = GuardedText("tool_call_error", "message", tool.Error.Message);
+            string errorSpanParam = batch.Add(spanId);
+            string messageParam = batch.Add(messageValue);
+            batch.Append($"INSERT INTO tool_call_error (span_id, message) VALUES ({errorSpanParam}, {messageParam});\n");
+            AppendOptionalTextChild(batch, "tool_call_error_code", "span_id", spanId, "code", tool.Error.Code);
         }
 
-        AppendOptionalLongChild(sql, "tool_call_exit_code", "span_id", spanIdExpr, "exit_code", tool.ExitCode);
+        AppendOptionalLongChild(batch, "tool_call_exit_code", "span_id", spanId, "exit_code", tool.ExitCode);
     }
 
     private static void AppendToolContent(
-        StringBuilder sql,
-        string spanIdExpr,
+        SqlBatch batch,
+        string spanId,
         CollectedToolContent? content,
         string tablePrefix)
     {
@@ -1260,71 +1485,98 @@ public partial class SqliteRelationalStore : BaseSqliteRepository, IRelationalSt
             return;
         }
 
-        sql.Append(
-            CultureInfo.InvariantCulture,
-            $"INSERT INTO {tablePrefix}_size (span_id, utf8_bytes, characters) VALUES ({spanIdExpr}, {LongSql(content.Utf8Bytes)}, {LongSql(content.Characters)});\n");
+        string sizeSpanParam = batch.Add(spanId);
+        string utf8Param = batch.Add(content.Utf8Bytes);
+        string charactersParam = batch.Add(content.Characters);
+        batch.Append(
+            $"INSERT INTO {tablePrefix}_size (span_id, utf8_bytes, characters) VALUES ({sizeSpanParam}, {utf8Param}, {charactersParam});\n");
 
         if (string.Equals(tablePrefix, "tool_call_input", StringComparison.Ordinal))
         {
-            AppendOptionalTextChild(sql, "tool_call_input_fingerprint", "span_id", spanIdExpr, "sha256", content.Sha256Fingerprint);
+            AppendOptionalTextChild(batch, "tool_call_input_fingerprint", "span_id", spanId, "sha256", content.Sha256Fingerprint);
         }
 
-        AppendOptionalTextChild(sql, $"{tablePrefix}_text", "span_id", spanIdExpr, "text", content.PlainText);
-        AppendOptionalLongChild(sql, $"{tablePrefix}_truncation", "span_id", spanIdExpr, "original_utf8_bytes", content.OriginalUtf8BytesWhenTruncated);
+        AppendOptionalTextChild(batch, $"{tablePrefix}_text", "span_id", spanId, "text", content.PlainText);
+        AppendOptionalLongChild(batch, $"{tablePrefix}_truncation", "span_id", spanId, "original_utf8_bytes", content.OriginalUtf8BytesWhenTruncated);
     }
 
-    private static void AppendRecordAgentInvocation(StringBuilder sql, string spanIdExpr, CollectedAgentInvocation? agent)
+    private static void AppendRecordAgentInvocation(SqlBatch batch, string spanId, CollectedAgentInvocation? agent)
     {
         if (agent is null)
         {
             return;
         }
 
-        string agentNameExpr = GuardedTextExpr("agent_invocation", "agent_name", agent.AgentName);
-        sql.Append(CultureInfo.InvariantCulture, $"INSERT INTO agent_invocation (span_id, agent_name) VALUES ({spanIdExpr}, {agentNameExpr});\n");
+        string agentNameValue = GuardedText("agent_invocation", "agent_name", agent.AgentName);
+        string agentSpanParam = batch.Add(spanId);
+        string agentNameParam = batch.Add(agentNameValue);
+        batch.Append($"INSERT INTO agent_invocation (span_id, agent_name) VALUES ({agentSpanParam}, {agentNameParam});\n");
 
-        AppendOptionalTextChild(sql, "agent_invocation_spawn", "span_id", spanIdExpr, "spawning_record_id", agent.SpawningCallId);
+        AppendOptionalTextChild(batch, "agent_invocation_spawn", "span_id", spanId, "spawning_record_id", agent.SpawningCallId);
 
         if (agent.Succeeded.HasValue)
         {
-            sql.Append(
-                CultureInfo.InvariantCulture,
-                $"INSERT INTO agent_invocation_outcome (span_id, succeeded) VALUES ({spanIdExpr}, {BoolSql(agent.Succeeded.Value)});\n");
+            string outcomeSpanParam = batch.Add(spanId);
+            string succeededParam = batch.Add(agent.Succeeded.Value ? 1 : 0);
+            batch.Append(
+                $"INSERT INTO agent_invocation_outcome (span_id, succeeded) VALUES ({outcomeSpanParam}, {succeededParam});\n");
         }
 
-        AppendOptionalTextChild(sql, "agent_invocation_error", "span_id", spanIdExpr, "message", agent.Error);
+        AppendOptionalTextChild(batch, "agent_invocation_error", "span_id", spanId, "message", agent.Error);
     }
 
-    private static void AppendProblemUpsert(StringBuilder sql, CollectedProblem problem)
+    private static void AppendOptionalNonEmptyTextChild(
+        SqlBatch batch,
+        string tableName,
+        string keyColumn,
+        string keyValue,
+        string valueColumn,
+        string? value)
     {
-        string problemKeyExpr = GuardedTextExpr("ingest_problem", "problem_key", problem.ProblemKey);
-        string severityExpr = GuardedTextExpr("ingest_problem", "severity", problem.Severity);
-        string codeExpr = GuardedTextExpr("ingest_problem", "code", problem.Code);
-        string messageExpr = GuardedTextExpr("ingest_problem", "message", problem.Message);
+        if (value is null)
+        {
+            return;
+        }
 
-        sql.Append(
-            CultureInfo.InvariantCulture,
-            $"INSERT INTO ingest_problem (problem_key, severity, code, message) VALUES ({problemKeyExpr}, {severityExpr}, {codeExpr}, {messageExpr}) ");
-        sql.Append("ON CONFLICT(problem_key) DO UPDATE SET severity = excluded.severity, code = excluded.code, message = excluded.message;\n");
+        string text = GuardedNonEmptyText(tableName, valueColumn, value);
+        string keyParam = batch.Add(keyValue);
+        string valueParam = batch.Add(text);
+        batch.Append($"INSERT INTO {tableName} ({keyColumn}, {valueColumn}) VALUES ({keyParam}, {valueParam});\n");
+    }
+
+    private static void AppendProblemUpsert(SqlBatch batch, CollectedProblem problem)
+    {
+        string problemKeyValue = GuardedText("ingest_problem", "problem_key", problem.ProblemKey);
+        string severityValue = GuardedText("ingest_problem", "severity", problem.Severity);
+        string codeValue = GuardedText("ingest_problem", "code", problem.Code);
+        string messageValue = GuardedText("ingest_problem", "message", problem.Message);
+
+        string upsertProblemKeyParam = batch.Add(problemKeyValue);
+        string severityParam = batch.Add(severityValue);
+        string codeParam = batch.Add(codeValue);
+        string messageParam = batch.Add(messageValue);
+        batch.Append(
+            $"INSERT INTO ingest_problem (problem_key, severity, code, message) VALUES ({upsertProblemKeyParam}, {severityParam}, {codeParam}, {messageParam}) ");
+        batch.Append("ON CONFLICT(problem_key) DO UPDATE SET severity = excluded.severity, code = excluded.code, message = excluded.message;\n");
 
         foreach (string childTable in ProblemChildTables)
         {
-            sql.Append(
-                CultureInfo.InvariantCulture,
-                $"DELETE FROM {childTable} WHERE problem_id = (SELECT problem_id FROM ingest_problem WHERE problem_key = {problemKeyExpr});\n");
+            string deleteProblemKeyParam = batch.Add(problemKeyValue);
+            batch.Append(
+                $"DELETE FROM {childTable} WHERE problem_id = (SELECT problem_id FROM ingest_problem WHERE problem_key = {deleteProblemKeyParam});\n");
         }
 
-        AppendProblemOptionalChild(sql, problemKeyExpr, "ingest_problem_span", "span_id", problem.SpanId);
-        AppendProblemOptionalChild(sql, problemKeyExpr, "ingest_problem_location", "location", problem.Location);
-        AppendProblemOptionalChild(sql, problemKeyExpr, "ingest_problem_session", "session_id", problem.SessionKey);
-        AppendProblemOptionalChild(sql, problemKeyExpr, "ingest_problem_harness", "harness_id", problem.HarnessId);
-        AppendProblemOptionalChild(sql, problemKeyExpr, "ingest_problem_timestamp", "timestamp_utc", problem.TimestampUtc);
-        AppendProblemOptionalChild(sql, problemKeyExpr, "ingest_problem_stack", "stack", problem.Stack);
+        AppendProblemOptionalChild(batch, problemKeyValue, "ingest_problem_span", "span_id", problem.SpanId);
+        AppendProblemOptionalChild(batch, problemKeyValue, "ingest_problem_location", "location", problem.Location);
+        AppendProblemOptionalChild(batch, problemKeyValue, "ingest_problem_session", "session_id", problem.SessionKey);
+        AppendProblemOptionalChild(batch, problemKeyValue, "ingest_problem_harness", "harness_id", problem.HarnessId);
+        AppendProblemOptionalChild(batch, problemKeyValue, "ingest_problem_timestamp", "timestamp_utc", problem.TimestampUtc);
+        AppendProblemOptionalChild(batch, problemKeyValue, "ingest_problem_stack", "stack", problem.Stack);
     }
 
     private static void AppendProblemOptionalChild(
-        StringBuilder sql,
-        string problemKeyExpr,
+        SqlBatch batch,
+        string problemKeyValue,
         string tableName,
         string columnName,
         string? value)
@@ -1334,13 +1586,14 @@ public partial class SqliteRelationalStore : BaseSqliteRepository, IRelationalSt
             return;
         }
 
-        string valueExpr = GuardedTextExpr(tableName, columnName, value);
-        sql.Append(
-            CultureInfo.InvariantCulture,
-            $"INSERT INTO {tableName} (problem_id, {columnName}) SELECT problem_id, {valueExpr} FROM ingest_problem WHERE problem_key = {problemKeyExpr};\n");
+        string valueText = GuardedText(tableName, columnName, value);
+        string valueParam = batch.Add(valueText);
+        string problemKeyParam = batch.Add(problemKeyValue);
+        batch.Append(
+            $"INSERT INTO {tableName} (problem_id, {columnName}) SELECT problem_id, {valueParam} FROM ingest_problem WHERE problem_key = {problemKeyParam};\n");
     }
 
-    private static void AppendSessionProjectionReplace(StringBuilder sql, StoredSessionProjection projection)
+    private static void AppendSessionProjectionReplace(SqlBatch batch, StoredSessionProjection projection)
     {
         if (projection.Context is not null && projection.ContextUnmeasurableReason is not null)
         {
@@ -1356,32 +1609,42 @@ public partial class SqliteRelationalStore : BaseSqliteRepository, IRelationalSt
                 "StoredSessionProjection cannot supply both Schema and SchemaUnmeasurableReason.");
         }
 
-        string sessionIdExpr = GuardedTextExpr("session_projection", "session_id", projection.SessionId);
-        string labelExpr = GuardedTextExpr("session_projection", "label", projection.Label);
-        string startedExpr = GuardedTextExpr("session_projection", "started_at_utc", projection.StartedAtUtc);
-        string endedExpr = GuardedTextExpr("session_projection", "ended_at_utc", projection.EndedAtUtc);
+        string sessionId = GuardedText("session_projection", "session_id", projection.SessionId);
+        string label = GuardedText("session_projection", "label", projection.Label);
+        string started = GuardedText("session_projection", "started_at_utc", projection.StartedAtUtc);
+        string ended = GuardedText("session_projection", "ended_at_utc", projection.EndedAtUtc);
 
-        sql.Append(CultureInfo.InvariantCulture, $"DELETE FROM session_projection WHERE session_id = {sessionIdExpr};\n");
-        sql.Append(
-            CultureInfo.InvariantCulture,
-            $"INSERT INTO session_projection (session_id, label, is_subagent, span_count, started_at_utc, ended_at_utc) VALUES ({sessionIdExpr}, {labelExpr}, {BoolSql(projection.IsSubagent)}, {IntSql(projection.SpanCount)}, {startedExpr}, {endedExpr});\n");
+        string deleteSessionIdParam = batch.Add(sessionId);
+        batch.Append($"DELETE FROM session_projection WHERE session_id = {deleteSessionIdParam};\n");
 
-        AppendOptionalTextChild(sql, "session_projection_parent", "session_id", sessionIdExpr, "parent_session_id", projection.ParentSessionId);
-        AppendOptionalTextChild(sql, "session_projection_agent", "session_id", sessionIdExpr, "agent_name", projection.AgentName);
+        string insertSessionIdParam = batch.Add(sessionId);
+        string labelParam = batch.Add(label);
+        string isSubagentParam = batch.Add(projection.IsSubagent ? 1 : 0);
+        string spanCountParam = batch.Add(projection.SpanCount);
+        string startedParam = batch.Add(started);
+        string endedParam = batch.Add(ended);
+        batch.Append(
+            $"INSERT INTO session_projection (session_id, label, is_subagent, span_count, started_at_utc, ended_at_utc) VALUES ({insertSessionIdParam}, {labelParam}, {isSubagentParam}, {spanCountParam}, {startedParam}, {endedParam});\n");
+
+        AppendOptionalTextChild(batch, "session_projection_parent", "session_id", sessionId, "parent_session_id", projection.ParentSessionId);
+        AppendOptionalTextChild(batch, "session_projection_agent", "session_id", sessionId, "agent_name", projection.AgentName);
 
         if (projection.IncludedInParent)
         {
-            sql.Append(CultureInfo.InvariantCulture, $"INSERT INTO session_projection_included_in_parent (session_id) VALUES ({sessionIdExpr});\n");
+            string includedSessionIdParam = batch.Add(sessionId);
+            batch.Append($"INSERT INTO session_projection_included_in_parent (session_id) VALUES ({includedSessionIdParam});\n");
         }
 
         if (projection.RequestSpanIds is not null)
         {
             for (int i = 0; i < projection.RequestSpanIds.Count; i++)
             {
-                string requestSpanExpr = GuardedTextExpr("session_request", "request_span_id", projection.RequestSpanIds[i]);
-                sql.Append(
-                    CultureInfo.InvariantCulture,
-                    $"INSERT INTO session_request (session_id, position, request_span_id) VALUES ({sessionIdExpr}, {IntSql(i)}, {requestSpanExpr});\n");
+                string requestSpanValue = GuardedText("session_request", "request_span_id", projection.RequestSpanIds[i]);
+                string requestSessionIdParam = batch.Add(sessionId);
+                string requestPositionParam = batch.Add(i);
+                string requestSpanParam = batch.Add(requestSpanValue);
+                batch.Append(
+                    $"INSERT INTO session_request (session_id, position, request_span_id) VALUES ({requestSessionIdParam}, {requestPositionParam}, {requestSpanParam});\n");
             }
         }
 
@@ -1397,37 +1660,41 @@ public partial class SqliteRelationalStore : BaseSqliteRepository, IRelationalSt
                         $"StoredSessionTurn.SessionId '{turn.SessionId}' does not match '{projection.SessionId}'.");
                 }
 
-                string spanIdExpr = GuardedTextExpr("session_turn", "span_id", turn.SpanId);
-                sql.Append(
-                    CultureInfo.InvariantCulture,
-                    $"INSERT INTO session_turn (session_id, position, span_id) VALUES ({sessionIdExpr}, {IntSql(turn.Position)}, {spanIdExpr});\n");
+                string turnSpanId = GuardedText("session_turn", "span_id", turn.SpanId);
+                string turnSessionIdParam = batch.Add(sessionId);
+                string turnPositionParam = batch.Add(turn.Position);
+                string turnSpanIdParam = batch.Add(turnSpanId);
+                batch.Append(
+                    $"INSERT INTO session_turn (session_id, position, span_id) VALUES ({turnSessionIdParam}, {turnPositionParam}, {turnSpanIdParam});\n");
             }
         }
 
         if (projection.Context is not null)
         {
-            AppendSessionContext(sql, sessionIdExpr, projection.Context);
+            AppendSessionContext(batch, sessionId, projection.Context);
         }
         else
         {
-            AppendOptionalTextChild(sql, "session_context_unmeasurable", "session_id", sessionIdExpr, "reason", projection.ContextUnmeasurableReason);
+            AppendOptionalTextChild(batch, "session_context_unmeasurable", "session_id", sessionId, "reason", projection.ContextUnmeasurableReason);
         }
 
         if (projection.Schema is not null)
         {
-            AppendSessionSchema(sql, sessionIdExpr, projection.Schema);
+            AppendSessionSchema(batch, sessionId, projection.Schema);
         }
         else
         {
-            AppendOptionalTextChild(sql, "session_schema_unmeasurable", "session_id", sessionIdExpr, "reason", projection.SchemaUnmeasurableReason);
+            AppendOptionalTextChild(batch, "session_schema_unmeasurable", "session_id", sessionId, "reason", projection.SchemaUnmeasurableReason);
         }
 
         if (projection.TimelineSubagentSpanIds is not null)
         {
             foreach (string spanId in projection.TimelineSubagentSpanIds)
             {
-                string spanIdExpr = GuardedTextExpr("session_timeline_subagent", "span_id", spanId);
-                sql.Append(CultureInfo.InvariantCulture, $"INSERT INTO session_timeline_subagent (session_id, span_id) VALUES ({sessionIdExpr}, {spanIdExpr});\n");
+                string subagentSpanValue = GuardedText("session_timeline_subagent", "span_id", spanId);
+                string subagentSessionIdParam = batch.Add(sessionId);
+                string subagentSpanParam = batch.Add(subagentSpanValue);
+                batch.Append($"INSERT INTO session_timeline_subagent (session_id, span_id) VALUES ({subagentSessionIdParam}, {subagentSpanParam});\n");
             }
         }
 
@@ -1435,28 +1702,37 @@ public partial class SqliteRelationalStore : BaseSqliteRepository, IRelationalSt
         {
             foreach (string spanId in projection.TimelineAuxiliarySpanIds)
             {
-                string spanIdExpr = GuardedTextExpr("session_timeline_auxiliary", "span_id", spanId);
-                sql.Append(CultureInfo.InvariantCulture, $"INSERT INTO session_timeline_auxiliary (session_id, span_id) VALUES ({sessionIdExpr}, {spanIdExpr});\n");
+                string auxiliarySpanValue = GuardedText("session_timeline_auxiliary", "span_id", spanId);
+                string auxiliarySessionIdParam = batch.Add(sessionId);
+                string auxiliarySpanParam = batch.Add(auxiliarySpanValue);
+                batch.Append($"INSERT INTO session_timeline_auxiliary (session_id, span_id) VALUES ({auxiliarySessionIdParam}, {auxiliarySpanParam});\n");
             }
         }
     }
 
-    private static void AppendSessionContext(StringBuilder sql, string sessionIdExpr, StoredSessionContext context)
+    private static void AppendSessionContext(SqlBatch batch, string sessionId, StoredSessionContext context)
     {
-        string sourceExpr = GuardedTextExpr("session_context", "context_limit_source", context.ContextLimitSource);
-        string freshJumpSql = RealSql("session_context", "fresh_jump_factor", context.FreshJumpFactor);
-        string accumSql = RealSql("session_context", "accumulation_rate", context.AccumulationRate);
+        string sourceValue = GuardedText("session_context", "context_limit_source", context.ContextLimitSource);
+        double freshJumpFactor = RequireFiniteReal("session_context", "fresh_jump_factor", context.FreshJumpFactor);
+        double accumulationRate = RequireFiniteReal("session_context", "accumulation_rate", context.AccumulationRate);
 
-        sql.Append(
-            CultureInfo.InvariantCulture,
-            $"INSERT INTO session_context (session_id, context_limit, context_limit_source, residual_total, fresh_jump_factor, accumulation_rate) VALUES ({sessionIdExpr}, {LongSql(context.ContextLimit)}, {sourceExpr}, {LongSql(context.ResidualTotal)}, {freshJumpSql}, {accumSql});\n");
+        string contextSessionIdParam = batch.Add(sessionId);
+        string contextLimitParam = batch.Add(context.ContextLimit);
+        string sourceParam = batch.Add(sourceValue);
+        string residualTotalParam = batch.Add(context.ResidualTotal);
+        string freshJumpParam = batch.Add(freshJumpFactor);
+        string accumulationParam = batch.Add(accumulationRate);
+        batch.Append(
+            $"INSERT INTO session_context (session_id, context_limit, context_limit_source, residual_total, fresh_jump_factor, accumulation_rate) VALUES ({contextSessionIdParam}, {contextLimitParam}, {sourceParam}, {residualTotalParam}, {freshJumpParam}, {accumulationParam});\n");
 
         if (context.ObservedBuckets is not null)
         {
             foreach (string bucket in context.ObservedBuckets)
             {
-                string bucketExpr = GuardedTextExpr("session_context_observed_part", "bucket", bucket);
-                sql.Append(CultureInfo.InvariantCulture, $"INSERT INTO session_context_observed_part (session_id, bucket) VALUES ({sessionIdExpr}, {bucketExpr});\n");
+                string bucketValue = GuardedText("session_context_observed_part", "bucket", bucket);
+                string observedSessionIdParam = batch.Add(sessionId);
+                string bucketParam = batch.Add(bucketValue);
+                batch.Append($"INSERT INTO session_context_observed_part (session_id, bucket) VALUES ({observedSessionIdParam}, {bucketParam});\n");
             }
         }
 
@@ -1465,10 +1741,12 @@ public partial class SqliteRelationalStore : BaseSqliteRepository, IRelationalSt
             foreach (StoredSessionContextDerivedCount counter in context.DerivedCounts)
             {
                 ArgumentNullException.ThrowIfNull(counter);
-                string counterExpr = GuardedTextExpr("session_context_derived_count", "counter", counter.Counter);
-                sql.Append(
-                    CultureInfo.InvariantCulture,
-                    $"INSERT INTO session_context_derived_count (session_id, counter, count) VALUES ({sessionIdExpr}, {counterExpr}, {LongSql(counter.Count)});\n");
+                string counterValue = GuardedText("session_context_derived_count", "counter", counter.Counter);
+                string countSessionIdParam = batch.Add(sessionId);
+                string counterParam = batch.Add(counterValue);
+                string countParam = batch.Add(counter.Count);
+                batch.Append(
+                    $"INSERT INTO session_context_derived_count (session_id, counter, count) VALUES ({countSessionIdParam}, {counterParam}, {countParam});\n");
             }
         }
 
@@ -1476,7 +1754,9 @@ public partial class SqliteRelationalStore : BaseSqliteRepository, IRelationalSt
         {
             foreach (int turnIndex in context.FlaggedTurnIndexes)
             {
-                sql.Append(CultureInfo.InvariantCulture, $"INSERT INTO session_context_flagged_turn (session_id, turn_index) VALUES ({sessionIdExpr}, {IntSql(turnIndex)});\n");
+                string flaggedSessionIdParam = batch.Add(sessionId);
+                string turnIndexParam = batch.Add(turnIndex);
+                batch.Append($"INSERT INTO session_context_flagged_turn (session_id, turn_index) VALUES ({flaggedSessionIdParam}, {turnIndexParam});\n");
             }
         }
 
@@ -1485,36 +1765,47 @@ public partial class SqliteRelationalStore : BaseSqliteRepository, IRelationalSt
             foreach (StoredSessionContextTurn turn in context.Turns)
             {
                 ArgumentNullException.ThrowIfNull(turn);
-                AppendSessionContextTurn(sql, sessionIdExpr, turn);
+                AppendSessionContextTurn(batch, sessionId, turn);
             }
         }
     }
 
-    private static void AppendSessionContextTurn(StringBuilder sql, string sessionIdExpr, StoredSessionContextTurn turn)
+    private static void AppendSessionContextTurn(SqlBatch batch, string sessionId, StoredSessionContextTurn turn)
     {
-        string posSql = IntSql(turn.Position);
-        string attributionExpr = GuardedTextExpr("session_context_turn", "residual_attribution", turn.ResidualAttribution);
+        string attributionValue = GuardedText("session_context_turn", "residual_attribution", turn.ResidualAttribution);
 
-        sql.Append(
-            CultureInfo.InvariantCulture,
+        string turnSessionIdParam = batch.Add(sessionId);
+        string turnPositionParam = batch.Add(turn.Position);
+        string inputTokensParam = batch.Add(turn.InputTokens);
+        string bucketedTokensParam = batch.Add(turn.BucketedTokens);
+        string residualTokensParam = batch.Add(turn.ResidualTokens);
+        string attributionParam = batch.Add(attributionValue);
+        string builtinTokensParam = batch.Add(turn.BuiltinToolDefinitionTokens);
+        string freshInputParam = batch.Add(turn.FreshInput);
+        batch.Append(
             $"INSERT INTO session_context_turn (session_id, position, input_tokens, bucketed_tokens, residual_tokens, residual_attribution, builtin_tool_definition_tokens, fresh_input) " +
-            $"VALUES ({sessionIdExpr}, {posSql}, {LongSql(turn.InputTokens)}, {LongSql(turn.BucketedTokens)}, {LongSql(turn.ResidualTokens)}, {attributionExpr}, {LongSql(turn.BuiltinToolDefinitionTokens)}, {LongSql(turn.FreshInput)});\n");
+            $"VALUES ({turnSessionIdParam}, {turnPositionParam}, {inputTokensParam}, {bucketedTokensParam}, {residualTokensParam}, {attributionParam}, {builtinTokensParam}, {freshInputParam});\n");
 
         RequireMatchedPair(turn.Headroom.HasValue, turn.Pressure.HasValue, "session_context_turn_headroom", "headroom", "pressure");
         if (turn.Headroom.HasValue && turn.Pressure.HasValue)
         {
-            string pressureSql = RealSql("session_context_turn_headroom", "pressure", turn.Pressure.Value);
-            sql.Append(
-                CultureInfo.InvariantCulture,
-                $"INSERT INTO session_context_turn_headroom (session_id, position, headroom, pressure) VALUES ({sessionIdExpr}, {posSql}, {LongSql(turn.Headroom.Value)}, {pressureSql});\n");
+            double pressure = RequireFiniteReal("session_context_turn_headroom", "pressure", turn.Pressure.Value);
+            string headroomSessionIdParam = batch.Add(sessionId);
+            string headroomPositionParam = batch.Add(turn.Position);
+            string headroomParam = batch.Add(turn.Headroom.Value);
+            string pressureParam = batch.Add(pressure);
+            batch.Append(
+                $"INSERT INTO session_context_turn_headroom (session_id, position, headroom, pressure) VALUES ({headroomSessionIdParam}, {headroomPositionParam}, {headroomParam}, {pressureParam});\n");
         }
 
         if (turn.AccumulationRate.HasValue)
         {
-            string rateSql = RealSql("session_context_turn_accumulation", "rate", turn.AccumulationRate.Value);
-            sql.Append(
-                CultureInfo.InvariantCulture,
-                $"INSERT INTO session_context_turn_accumulation (session_id, position, rate) VALUES ({sessionIdExpr}, {posSql}, {rateSql});\n");
+            double rate = RequireFiniteReal("session_context_turn_accumulation", "rate", turn.AccumulationRate.Value);
+            string rateSessionIdParam = batch.Add(sessionId);
+            string ratePositionParam = batch.Add(turn.Position);
+            string rateParam = batch.Add(rate);
+            batch.Append(
+                $"INSERT INTO session_context_turn_accumulation (session_id, position, rate) VALUES ({rateSessionIdParam}, {ratePositionParam}, {rateParam});\n");
         }
 
         if (turn.Buckets is not null)
@@ -1522,10 +1813,13 @@ public partial class SqliteRelationalStore : BaseSqliteRepository, IRelationalSt
             foreach (StoredTurnBucketTokens bucket in turn.Buckets)
             {
                 ArgumentNullException.ThrowIfNull(bucket);
-                string bucketExpr = GuardedTextExpr("session_context_turn_bucket", "bucket", bucket.Bucket);
-                sql.Append(
-                    CultureInfo.InvariantCulture,
-                    $"INSERT INTO session_context_turn_bucket (session_id, position, bucket, tokens) VALUES ({sessionIdExpr}, {posSql}, {bucketExpr}, {LongSql(bucket.Tokens)});\n");
+                string bucketValue = GuardedText("session_context_turn_bucket", "bucket", bucket.Bucket);
+                string bucketSessionIdParam = batch.Add(sessionId);
+                string bucketPositionParam = batch.Add(turn.Position);
+                string bucketParam = batch.Add(bucketValue);
+                string bucketTokensParam = batch.Add(bucket.Tokens);
+                batch.Append(
+                    $"INSERT INTO session_context_turn_bucket (session_id, position, bucket, tokens) VALUES ({bucketSessionIdParam}, {bucketPositionParam}, {bucketParam}, {bucketTokensParam});\n");
             }
         }
 
@@ -1534,20 +1828,26 @@ public partial class SqliteRelationalStore : BaseSqliteRepository, IRelationalSt
             foreach (StoredTurnServerDefinitionTokens server in turn.ServerDefinitions)
             {
                 ArgumentNullException.ThrowIfNull(server);
-                string serverExpr = GuardedTextExpr("session_context_turn_server_definitions", "server", server.Server);
-                sql.Append(
-                    CultureInfo.InvariantCulture,
-                    $"INSERT INTO session_context_turn_server_definitions (session_id, position, server, tokens) VALUES ({sessionIdExpr}, {posSql}, {serverExpr}, {LongSql(server.Tokens)});\n");
+                string serverValue = GuardedText("session_context_turn_server_definitions", "server", server.Server);
+                string serverSessionIdParam = batch.Add(sessionId);
+                string serverPositionParam = batch.Add(turn.Position);
+                string serverParam = batch.Add(serverValue);
+                string serverTokensParam = batch.Add(server.Tokens);
+                batch.Append(
+                    $"INSERT INTO session_context_turn_server_definitions (session_id, position, server, tokens) VALUES ({serverSessionIdParam}, {serverPositionParam}, {serverParam}, {serverTokensParam});\n");
             }
         }
 
         foreach (TokenizerLabel label in turn.Tokenizers)
         {
             ArgumentNullException.ThrowIfNull(label);
-            string tokenizerExpr = GuardedTextExpr("session_context_turn_tokenizer", "tokenizer", label.Tokenizer);
-            sql.Append(
-                CultureInfo.InvariantCulture,
-                $"INSERT INTO session_context_turn_tokenizer (session_id, position, tokenizer, is_model_own) VALUES ({sessionIdExpr}, {posSql}, {tokenizerExpr}, {BoolSql(label.IsModelOwn)});\n");
+            string tokenizerValue = GuardedText("session_context_turn_tokenizer", "tokenizer", label.Tokenizer);
+            string tokenizerSessionIdParam = batch.Add(sessionId);
+            string tokenizerPositionParam = batch.Add(turn.Position);
+            string tokenizerParam = batch.Add(tokenizerValue);
+            string isModelOwnParam = batch.Add(label.IsModelOwn ? 1 : 0);
+            batch.Append(
+                $"INSERT INTO session_context_turn_tokenizer (session_id, position, tokenizer, is_model_own) VALUES ({tokenizerSessionIdParam}, {tokenizerPositionParam}, {tokenizerParam}, {isModelOwnParam});\n");
         }
 
         RequireMatchedPair(
@@ -1558,9 +1858,12 @@ public partial class SqliteRelationalStore : BaseSqliteRepository, IRelationalSt
             "tokens");
         if (turn.StrippedBlockCount.HasValue && turn.StrippedTokens.HasValue)
         {
-            sql.Append(
-                CultureInfo.InvariantCulture,
-                $"INSERT INTO session_context_turn_stripped_instructions (session_id, position, block_count, tokens) VALUES ({sessionIdExpr}, {posSql}, {LongSql(turn.StrippedBlockCount.Value)}, {LongSql(turn.StrippedTokens.Value)});\n");
+            string strippedSessionIdParam = batch.Add(sessionId);
+            string strippedPositionParam = batch.Add(turn.Position);
+            string blockCountParam = batch.Add(turn.StrippedBlockCount.Value);
+            string strippedTokensParam = batch.Add(turn.StrippedTokens.Value);
+            batch.Append(
+                $"INSERT INTO session_context_turn_stripped_instructions (session_id, position, block_count, tokens) VALUES ({strippedSessionIdParam}, {strippedPositionParam}, {blockCountParam}, {strippedTokensParam});\n");
         }
 
         RequireMatchedPair(
@@ -1571,43 +1874,55 @@ public partial class SqliteRelationalStore : BaseSqliteRepository, IRelationalSt
             "factor");
         if (turn.PreviousFreshInput.HasValue && turn.FreshJumpFactor.HasValue)
         {
-            string factorSql = RealSql("session_context_turn_fresh_jump", "factor", turn.FreshJumpFactor.Value);
-            sql.Append(
-                CultureInfo.InvariantCulture,
-                $"INSERT INTO session_context_turn_fresh_jump (session_id, position, previous_fresh_input, factor) VALUES ({sessionIdExpr}, {posSql}, {LongSql(turn.PreviousFreshInput.Value)}, {factorSql});\n");
+            double factor = RequireFiniteReal("session_context_turn_fresh_jump", "factor", turn.FreshJumpFactor.Value);
+            string jumpSessionIdParam = batch.Add(sessionId);
+            string jumpPositionParam = batch.Add(turn.Position);
+            string previousFreshInputParam = batch.Add(turn.PreviousFreshInput.Value);
+            string factorParam = batch.Add(factor);
+            batch.Append(
+                $"INSERT INTO session_context_turn_fresh_jump (session_id, position, previous_fresh_input, factor) VALUES ({jumpSessionIdParam}, {jumpPositionParam}, {previousFreshInputParam}, {factorParam});\n");
         }
 
         if (turn.NonResidentTokens.HasValue)
         {
-            sql.Append(
-                CultureInfo.InvariantCulture,
-                $"INSERT INTO session_context_turn_non_resident (session_id, position, tokens) VALUES ({sessionIdExpr}, {posSql}, {LongSql(turn.NonResidentTokens.Value)});\n");
+            string nonResidentSessionIdParam = batch.Add(sessionId);
+            string nonResidentPositionParam = batch.Add(turn.Position);
+            string nonResidentTokensParam = batch.Add(turn.NonResidentTokens.Value);
+            batch.Append(
+                $"INSERT INTO session_context_turn_non_resident (session_id, position, tokens) VALUES ({nonResidentSessionIdParam}, {nonResidentPositionParam}, {nonResidentTokensParam});\n");
         }
     }
 
-    private static void AppendSessionSchema(StringBuilder sql, string sessionIdExpr, StoredSessionSchema schema)
+    private static void AppendSessionSchema(SqlBatch batch, string sessionId, StoredSessionSchema schema)
     {
-        sql.Append(
-            CultureInfo.InvariantCulture,
-            $"INSERT INTO session_schema (session_id, invocation_count, turn_count) VALUES ({sessionIdExpr}, {IntSql(schema.InvocationCount)}, {IntSql(schema.TurnCount)});\n");
+        string schemaSessionIdParam = batch.Add(sessionId);
+        string invocationCountParam = batch.Add(schema.InvocationCount);
+        string turnCountParam = batch.Add(schema.TurnCount);
+        batch.Append(
+            $"INSERT INTO session_schema (session_id, invocation_count, turn_count) VALUES ({schemaSessionIdParam}, {invocationCountParam}, {turnCountParam});\n");
 
         if (schema.RankedTools is not null)
         {
             foreach (StoredSchemaRankedTool tool in schema.RankedTools)
             {
                 ArgumentNullException.ThrowIfNull(tool);
-                string posSql = IntSql(tool.Position);
-                string toolNameExpr = GuardedTextExpr("session_schema_ranked_tool", "tool_name", tool.ToolName);
-                sql.Append(
-                    CultureInfo.InvariantCulture,
-                    $"INSERT INTO session_schema_ranked_tool (session_id, position, tool_name, cost_tokens, invoked) VALUES ({sessionIdExpr}, {posSql}, {toolNameExpr}, {LongSql(tool.CostTokens)}, {BoolSql(tool.Invoked)});\n");
+                string toolNameValue = GuardedText("session_schema_ranked_tool", "tool_name", tool.ToolName);
+                string rankedSessionIdParam = batch.Add(sessionId);
+                string rankedPositionParam = batch.Add(tool.Position);
+                string rankedToolNameParam = batch.Add(toolNameValue);
+                string costTokensParam = batch.Add(tool.CostTokens);
+                string invokedParam = batch.Add(tool.Invoked ? 1 : 0);
+                batch.Append(
+                    $"INSERT INTO session_schema_ranked_tool (session_id, position, tool_name, cost_tokens, invoked) VALUES ({rankedSessionIdParam}, {rankedPositionParam}, {rankedToolNameParam}, {costTokensParam}, {invokedParam});\n");
 
                 if (tool.ServerName is not null)
                 {
-                    string serverExpr = GuardedTextExpr("session_schema_ranked_tool_server", "server_name", tool.ServerName);
-                    sql.Append(
-                        CultureInfo.InvariantCulture,
-                        $"INSERT INTO session_schema_ranked_tool_server (session_id, position, server_name) VALUES ({sessionIdExpr}, {posSql}, {serverExpr});\n");
+                    string serverValue = GuardedText("session_schema_ranked_tool_server", "server_name", tool.ServerName);
+                    string serverSessionIdParam = batch.Add(sessionId);
+                    string serverPositionParam = batch.Add(tool.Position);
+                    string serverParam = batch.Add(serverValue);
+                    batch.Append(
+                        $"INSERT INTO session_schema_ranked_tool_server (session_id, position, server_name) VALUES ({serverSessionIdParam}, {serverPositionParam}, {serverParam});\n");
                 }
             }
         }
@@ -1617,94 +1932,128 @@ public partial class SqliteRelationalStore : BaseSqliteRepository, IRelationalSt
             foreach (StoredSchemaServerTokens server in schema.Servers)
             {
                 ArgumentNullException.ThrowIfNull(server);
-                string serverExpr = GuardedTextExpr("session_schema_server", "server_name", server.ServerName);
-                sql.Append(
-                    CultureInfo.InvariantCulture,
-                    $"INSERT INTO session_schema_server (session_id, server_name, tokens) VALUES ({sessionIdExpr}, {serverExpr}, {LongSql(server.Tokens)});\n");
+                string serverValue = GuardedText("session_schema_server", "server_name", server.ServerName);
+                string schemaServerSessionIdParam = batch.Add(sessionId);
+                string serverNameParam = batch.Add(serverValue);
+                string serverTokensParam = batch.Add(server.Tokens);
+                batch.Append(
+                    $"INSERT INTO session_schema_server (session_id, server_name, tokens) VALUES ({schemaServerSessionIdParam}, {serverNameParam}, {serverTokensParam});\n");
             }
         }
 
-        AppendOptionalLongChild(sql, "session_schema_unused", "session_id", sessionIdExpr, "token_residencies", schema.UnusedTokenResidencies);
+        AppendOptionalLongChild(batch, "session_schema_unused", "session_id", sessionId, "token_residencies", schema.UnusedTokenResidencies);
     }
 
-    private static void AppendRunUpsert(StringBuilder sql, StoredRun run)
+    private static void AppendRunUpsert(SqlBatch batch, StoredRun run)
     {
         RequireMatchedPair(run.StartedAtUtc is not null, run.EndedAtUtc is not null, "run_bounds", "started_at_utc", "ended_at_utc");
 
-        string runIdExpr = GuardedTextExpr("run", "run_id", run.RunId);
-        string harnessIdExpr = GuardedTextExpr("run", "harness_id", run.HarnessId);
-        string basisExpr = GuardedTextExpr("run", "grouping_basis", run.GroupingBasis);
-        string ruleExpr = GuardedTextExpr("run", "grouping_rule", run.GroupingRule);
+        string runId = GuardedText("run", "run_id", run.RunId);
+        string harnessId = GuardedText("run", "harness_id", run.HarnessId);
+        string basis = GuardedText("run", "grouping_basis", run.GroupingBasis);
+        string rule = GuardedText("run", "grouping_rule", run.GroupingRule);
 
-        sql.Append(
-            CultureInfo.InvariantCulture,
-            $"INSERT INTO run (run_id, harness_id, grouping_basis, grouping_rule, execution_count) VALUES ({runIdExpr}, {harnessIdExpr}, {basisExpr}, {ruleExpr}, {IntSql(run.ExecutionCount)}) ");
-        sql.Append("ON CONFLICT(run_id) DO UPDATE SET harness_id = excluded.harness_id, grouping_basis = excluded.grouping_basis, grouping_rule = excluded.grouping_rule, execution_count = excluded.execution_count;\n");
+        string insertRunIdParam = batch.Add(runId);
+        string insertHarnessIdParam = batch.Add(harnessId);
+        string basisParam = batch.Add(basis);
+        string ruleParam = batch.Add(rule);
+        string executionCountParam = batch.Add(run.ExecutionCount);
+        batch.Append(
+            $"INSERT INTO run (run_id, harness_id, grouping_basis, grouping_rule, execution_count) VALUES ({insertRunIdParam}, {insertHarnessIdParam}, {basisParam}, {ruleParam}, {executionCountParam}) ");
+        batch.Append("ON CONFLICT(run_id) DO UPDATE SET harness_id = excluded.harness_id, grouping_basis = excluded.grouping_basis, grouping_rule = excluded.grouping_rule, execution_count = excluded.execution_count;\n");
 
-        sql.Append(CultureInfo.InvariantCulture, $"DELETE FROM run_label WHERE run_id = {runIdExpr};\n");
-        sql.Append(CultureInfo.InvariantCulture, $"DELETE FROM run_working_directory WHERE run_id = {runIdExpr};\n");
-        sql.Append(CultureInfo.InvariantCulture, $"DELETE FROM run_bounds WHERE run_id = {runIdExpr};\n");
+        string deleteLabelRunIdParam = batch.Add(runId);
+        batch.Append($"DELETE FROM run_label WHERE run_id = {deleteLabelRunIdParam};\n");
+        string deleteWorkingDirectoryRunIdParam = batch.Add(runId);
+        batch.Append($"DELETE FROM run_working_directory WHERE run_id = {deleteWorkingDirectoryRunIdParam};\n");
+        string deleteBoundsRunIdParam = batch.Add(runId);
+        batch.Append($"DELETE FROM run_bounds WHERE run_id = {deleteBoundsRunIdParam};\n");
 
-        AppendOptionalTextChild(sql, "run_label", "run_id", runIdExpr, "label", run.Label);
-        AppendOptionalTextChild(sql, "run_working_directory", "run_id", runIdExpr, "working_directory", run.WorkingDirectory);
+        AppendOptionalTextChild(batch, "run_label", "run_id", runId, "label", run.Label);
+        AppendOptionalTextChild(batch, "run_working_directory", "run_id", runId, "working_directory", run.WorkingDirectory);
 
         if (run.StartedAtUtc is not null && run.EndedAtUtc is not null)
         {
-            string startedExpr = GuardedTextExpr("run_bounds", "started_at_utc", run.StartedAtUtc);
-            string endedExpr = GuardedTextExpr("run_bounds", "ended_at_utc", run.EndedAtUtc);
-            sql.Append(CultureInfo.InvariantCulture, $"INSERT INTO run_bounds (run_id, started_at_utc, ended_at_utc) VALUES ({runIdExpr}, {startedExpr}, {endedExpr});\n");
+            string started = GuardedText("run_bounds", "started_at_utc", run.StartedAtUtc);
+            string ended = GuardedText("run_bounds", "ended_at_utc", run.EndedAtUtc);
+            string boundsRunIdParam = batch.Add(runId);
+            string startedParam = batch.Add(started);
+            string endedParam = batch.Add(ended);
+            batch.Append($"INSERT INTO run_bounds (run_id, started_at_utc, ended_at_utc) VALUES ({boundsRunIdParam}, {startedParam}, {endedParam});\n");
         }
     }
 
-    private static void AppendHarnessRollupReplace(StringBuilder sql, StoredHarnessRollup rollup)
+    private static void AppendHarnessRollupReplace(SqlBatch batch, StoredHarnessRollup rollup)
     {
-        string harnessIdExpr = GuardedTextExpr("harness_rollup", "harness_id", rollup.HarnessId);
+        string harnessId = GuardedText("harness_rollup", "harness_id", rollup.HarnessId);
 
-        sql.Append(CultureInfo.InvariantCulture, $"DELETE FROM harness_rollup WHERE harness_id = {harnessIdExpr};\n");
-        sql.Append(
-            CultureInfo.InvariantCulture,
+        string deleteHarnessIdParam = batch.Add(harnessId);
+        batch.Append($"DELETE FROM harness_rollup WHERE harness_id = {deleteHarnessIdParam};\n");
+
+        string insertHarnessIdParam = batch.Add(harnessId);
+        string sessionCountParam = batch.Add(rollup.SessionCount);
+        string runCountParam = batch.Add(rollup.RunCount);
+        string executionCountParam = batch.Add(rollup.ExecutionCount);
+        string unknownWindowSessionsParam = batch.Add(rollup.UnknownWindowSessions);
+        string windowSessionsTotalParam = batch.Add(rollup.WindowSessionsTotal);
+        batch.Append(
             $"INSERT INTO harness_rollup (harness_id, session_count, run_count, execution_count, unknown_window_sessions, window_sessions_total) " +
-            $"VALUES ({harnessIdExpr}, {IntSql(rollup.SessionCount)}, {IntSql(rollup.RunCount)}, {IntSql(rollup.ExecutionCount)}, {IntSql(rollup.UnknownWindowSessions)}, {IntSql(rollup.WindowSessionsTotal)});\n");
+            $"VALUES ({insertHarnessIdParam}, {sessionCountParam}, {runCountParam}, {executionCountParam}, {unknownWindowSessionsParam}, {windowSessionsTotalParam});\n");
 
         if (rollup.Metrics is not null)
         {
             foreach (StoredHarnessRollupMetric metric in rollup.Metrics)
             {
                 ArgumentNullException.ThrowIfNull(metric);
-                string metricExpr = GuardedTextExpr("harness_rollup_metric", "metric", metric.Metric);
-                string valueSql = RealSql("harness_rollup_metric", "value", metric.Value);
-                string basisExpr = GuardedTextExpr("harness_rollup_metric", "basis", metric.Basis);
-                sql.Append(
-                    CultureInfo.InvariantCulture,
-                    $"INSERT INTO harness_rollup_metric (harness_id, metric, value, basis) VALUES ({harnessIdExpr}, {metricExpr}, {valueSql}, {basisExpr});\n");
+                string metricValue = GuardedText("harness_rollup_metric", "metric", metric.Metric);
+                double value = RequireFiniteReal("harness_rollup_metric", "value", metric.Value);
+                string basisValue = GuardedText("harness_rollup_metric", "basis", metric.Basis);
+                string metricHarnessIdParam = batch.Add(harnessId);
+                string metricParam = batch.Add(metricValue);
+                string valueParam = batch.Add(value);
+                string basisParam = batch.Add(basisValue);
+                batch.Append(
+                    $"INSERT INTO harness_rollup_metric (harness_id, metric, value, basis) VALUES ({metricHarnessIdParam}, {metricParam}, {valueParam}, {basisParam});\n");
             }
         }
     }
 
-    private static void AppendFindingReplace(StringBuilder sql, StoredFinding finding)
+    private static void AppendFindingReplace(SqlBatch batch, StoredFinding finding)
     {
-        string findingIdExpr = GuardedTextExpr("finding", "finding_id", finding.FindingId);
-        string detectorIdExpr = GuardedTextExpr("finding", "detector_id", finding.DetectorId);
-        string titleExpr = GuardedTextExpr("finding", "title", finding.Title);
-        string mechanismExpr = GuardedTextExpr("finding", "mechanism", finding.Mechanism);
-        string confidenceExpr = GuardedTextExpr("finding", "confidence", finding.Confidence);
-        string recommendationExpr = GuardedTextExpr("finding", "recommendation", finding.Recommendation);
-        string caveatExpr = GuardedTextExpr("finding", "outcome_risk_caveat", finding.OutcomeRiskCaveat);
-        string rankScoreSql = RealSql("finding", "rank_score", finding.RankScore);
+        string findingId = GuardedText("finding", "finding_id", finding.FindingId);
+        string detectorId = GuardedText("finding", "detector_id", finding.DetectorId);
+        string title = GuardedText("finding", "title", finding.Title);
+        string mechanism = GuardedText("finding", "mechanism", finding.Mechanism);
+        string confidence = GuardedText("finding", "confidence", finding.Confidence);
+        string recommendation = GuardedText("finding", "recommendation", finding.Recommendation);
+        string caveat = GuardedText("finding", "outcome_risk_caveat", finding.OutcomeRiskCaveat);
+        double rankScore = RequireFiniteReal("finding", "rank_score", finding.RankScore);
 
-        sql.Append(CultureInfo.InvariantCulture, $"DELETE FROM finding WHERE finding_id = {findingIdExpr};\n");
-        sql.Append(
-            CultureInfo.InvariantCulture,
+        string deleteFindingIdParam = batch.Add(findingId);
+        batch.Append($"DELETE FROM finding WHERE finding_id = {deleteFindingIdParam};\n");
+
+        string insertFindingIdParam = batch.Add(findingId);
+        string detectorIdParam = batch.Add(detectorId);
+        string titleParam = batch.Add(title);
+        string mechanismParam = batch.Add(mechanism);
+        string confidenceParam = batch.Add(confidence);
+        string recommendationParam = batch.Add(recommendation);
+        string caveatParam = batch.Add(caveat);
+        string rankScoreParam = batch.Add(rankScore);
+        batch.Append(
             $"INSERT INTO finding (finding_id, detector_id, title, mechanism, confidence, recommendation, outcome_risk_caveat, rank_score) " +
-            $"VALUES ({findingIdExpr}, {detectorIdExpr}, {titleExpr}, {mechanismExpr}, {confidenceExpr}, {recommendationExpr}, {caveatExpr}, {rankScoreSql});\n");
+            $"VALUES ({insertFindingIdParam}, {detectorIdParam}, {titleParam}, {mechanismParam}, {confidenceParam}, {recommendationParam}, {caveatParam}, {rankScoreParam});\n");
 
-        AppendOptionalLongChild(sql, "finding_estimated_waste", "finding_id", findingIdExpr, "tokens", finding.EstimatedWasteTokens);
+        AppendOptionalLongChild(batch, "finding_estimated_waste", "finding_id", findingId, "tokens", finding.EstimatedWasteTokens);
 
         if (finding.ErrorBar is not null)
         {
-            string lowerSql = RealSql("finding_error_bar", "lower", finding.ErrorBar.Lower);
-            string upperSql = RealSql("finding_error_bar", "upper", finding.ErrorBar.Upper);
-            sql.Append(CultureInfo.InvariantCulture, $"INSERT INTO finding_error_bar (finding_id, lower, upper) VALUES ({findingIdExpr}, {lowerSql}, {upperSql});\n");
+            double lower = RequireFiniteReal("finding_error_bar", "lower", finding.ErrorBar.Lower);
+            double upper = RequireFiniteReal("finding_error_bar", "upper", finding.ErrorBar.Upper);
+            string errorBarFindingIdParam = batch.Add(findingId);
+            string lowerParam = batch.Add(lower);
+            string upperParam = batch.Add(upper);
+            batch.Append($"INSERT INTO finding_error_bar (finding_id, lower, upper) VALUES ({errorBarFindingIdParam}, {lowerParam}, {upperParam});\n");
         }
 
         if (finding.EvidenceLinks is not null)
@@ -1713,51 +2062,67 @@ public partial class SqliteRelationalStore : BaseSqliteRepository, IRelationalSt
             {
                 FindingEvidenceLink link = finding.EvidenceLinks[i];
                 ArgumentNullException.ThrowIfNull(link);
-                string spanIdExpr = GuardedTextExpr("finding_evidence_link", "span_id", link.SpanId);
-                string descriptionExpr = GuardedTextExpr("finding_evidence_link", "description", link.Description);
-                sql.Append(
-                    CultureInfo.InvariantCulture,
-                    $"INSERT INTO finding_evidence_link (finding_id, position, span_id, turn_index, description) VALUES ({findingIdExpr}, {IntSql(i)}, {spanIdExpr}, {IntSql(link.TurnIndex)}, {descriptionExpr});\n");
+                string spanIdValue = GuardedText("finding_evidence_link", "span_id", link.SpanId);
+                string descriptionValue = GuardedText("finding_evidence_link", "description", link.Description);
+                string linkFindingIdParam = batch.Add(findingId);
+                string positionParam = batch.Add(i);
+                string spanIdParam = batch.Add(spanIdValue);
+                string turnIndexParam = batch.Add(link.TurnIndex);
+                string descriptionParam = batch.Add(descriptionValue);
+                batch.Append(
+                    $"INSERT INTO finding_evidence_link (finding_id, position, span_id, turn_index, description) VALUES ({linkFindingIdParam}, {positionParam}, {spanIdParam}, {turnIndexParam}, {descriptionParam});\n");
             }
         }
 
-        AppendOptionalTextChild(sql, "finding_run", "finding_id", findingIdExpr, "run_id", finding.RunId);
-        AppendOptionalTextChild(sql, "finding_session", "finding_id", findingIdExpr, "session_id", finding.SessionId);
-        AppendOptionalTextChild(sql, "finding_measurement_class", "finding_id", findingIdExpr, "measurement_class", finding.MeasurementClass);
-        AppendOptionalTextChild(sql, "finding_confidence_basis", "finding_id", findingIdExpr, "confidence_basis", finding.ConfidenceBasis);
-        AppendOptionalTextChild(sql, "finding_what_would_raise_it", "finding_id", findingIdExpr, "text", finding.WhatWouldRaiseIt);
+        AppendOptionalTextChild(batch, "finding_run", "finding_id", findingId, "run_id", finding.RunId);
+        AppendOptionalTextChild(batch, "finding_session", "finding_id", findingId, "session_id", finding.SessionId);
+        AppendOptionalTextChild(batch, "finding_measurement_class", "finding_id", findingId, "measurement_class", finding.MeasurementClass);
+        AppendOptionalTextChild(batch, "finding_confidence_basis", "finding_id", findingId, "confidence_basis", finding.ConfidenceBasis);
+        AppendOptionalTextChild(batch, "finding_what_would_raise_it", "finding_id", findingId, "text", finding.WhatWouldRaiseIt);
 
         if (finding.CompactionHazard is not null)
         {
-            string sourceExpr = GuardedTextExpr("finding_compaction_hazard", "context_limit_source", finding.CompactionHazard.ContextLimitSource);
-            sql.Append(
-                CultureInfo.InvariantCulture,
-                $"INSERT INTO finding_compaction_hazard (finding_id, context_limit, context_limit_source) VALUES ({findingIdExpr}, {LongSql(finding.CompactionHazard.ContextLimit)}, {sourceExpr});\n");
+            string sourceValue = GuardedText("finding_compaction_hazard", "context_limit_source", finding.CompactionHazard.ContextLimitSource);
+            string hazardFindingIdParam = batch.Add(findingId);
+            string contextLimitParam = batch.Add(finding.CompactionHazard.ContextLimit);
+            string sourceParam = batch.Add(sourceValue);
+            batch.Append(
+                $"INSERT INTO finding_compaction_hazard (finding_id, context_limit, context_limit_source) VALUES ({hazardFindingIdParam}, {contextLimitParam}, {sourceParam});\n");
         }
     }
 
-    private static void AppendPredictionReplace(StringBuilder sql, StoredPrediction prediction)
+    private static void AppendPredictionReplace(SqlBatch batch, StoredPrediction prediction)
     {
-        string predictionIdExpr = GuardedTextExpr("prediction", "prediction_id", prediction.PredictionId);
-        string findingIdExpr = GuardedTextExpr("prediction", "finding_id", prediction.FindingId);
-        string runIdExpr = GuardedTextExpr("prediction", "run_id", prediction.RunId);
-        string confidenceSql = RealSql("prediction", "confidence", prediction.Confidence);
-        string tierExpr = GuardedTextExpr("prediction", "confidence_tier", prediction.ConfidenceTier);
-        string createdExpr = GuardedTextExpr("prediction", "created_at_utc", prediction.CreatedAtUtc);
+        string predictionId = GuardedText("prediction", "prediction_id", prediction.PredictionId);
+        string findingId = GuardedText("prediction", "finding_id", prediction.FindingId);
+        string runId = GuardedText("prediction", "run_id", prediction.RunId);
+        double confidence = RequireFiniteReal("prediction", "confidence", prediction.Confidence);
+        string tier = GuardedText("prediction", "confidence_tier", prediction.ConfidenceTier);
+        string created = GuardedText("prediction", "created_at_utc", prediction.CreatedAtUtc);
 
-        sql.Append(CultureInfo.InvariantCulture, $"DELETE FROM prediction WHERE prediction_id = {predictionIdExpr};\n");
-        sql.Append(
-            CultureInfo.InvariantCulture,
+        string deletePredictionIdParam = batch.Add(predictionId);
+        batch.Append($"DELETE FROM prediction WHERE prediction_id = {deletePredictionIdParam};\n");
+
+        string insertPredictionIdParam = batch.Add(predictionId);
+        string findingIdParam = batch.Add(findingId);
+        string runIdParam = batch.Add(runId);
+        string predictedWasteTokensParam = batch.Add(prediction.PredictedWasteTokens);
+        string confidenceParam = batch.Add(confidence);
+        string tierParam = batch.Add(tier);
+        string createdParam = batch.Add(created);
+        batch.Append(
             $"INSERT INTO prediction (prediction_id, finding_id, run_id, predicted_waste_tokens, confidence, confidence_tier, created_at_utc) " +
-            $"VALUES ({predictionIdExpr}, {findingIdExpr}, {runIdExpr}, {LongSql(prediction.PredictedWasteTokens)}, {confidenceSql}, {tierExpr}, {createdExpr});\n");
+            $"VALUES ({insertPredictionIdParam}, {findingIdParam}, {runIdParam}, {predictedWasteTokensParam}, {confidenceParam}, {tierParam}, {createdParam});\n");
 
-        AppendOptionalTextChild(sql, "prediction_comparison", "prediction_id", predictionIdExpr, "comparison_run_id", prediction.ComparisonRunId);
-        AppendOptionalLongChild(sql, "prediction_observed_delta", "prediction_id", predictionIdExpr, "tokens", prediction.ObservedDeltaTokens);
+        AppendOptionalTextChild(batch, "prediction_comparison", "prediction_id", predictionId, "comparison_run_id", prediction.ComparisonRunId);
+        AppendOptionalLongChild(batch, "prediction_observed_delta", "prediction_id", predictionId, "tokens", prediction.ObservedDeltaTokens);
 
         if (prediction.CalibrationScore.HasValue)
         {
-            string scoreSql = RealSql("prediction_calibration", "score", prediction.CalibrationScore.Value);
-            sql.Append(CultureInfo.InvariantCulture, $"INSERT INTO prediction_calibration (prediction_id, score) VALUES ({predictionIdExpr}, {scoreSql});\n");
+            double score = RequireFiniteReal("prediction_calibration", "score", prediction.CalibrationScore.Value);
+            string calibrationPredictionIdParam = batch.Add(predictionId);
+            string scoreParam = batch.Add(score);
+            batch.Append($"INSERT INTO prediction_calibration (prediction_id, score) VALUES ({calibrationPredictionIdParam}, {scoreParam});\n");
         }
     }
 
