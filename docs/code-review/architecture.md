@@ -1157,8 +1157,9 @@ the `fix:` lines. The groups are the plan's tasks: a finding goes to the task wh
 its file, by exact path or by a listed directory prefix, and when two tasks list it the first in plan
 order keeps it while that packet names the other. A fix that must change files of more than one task —
 a finding whose evidence cites another task's file, or findings that touch the same file — is one
-group, owned by the first of those tasks in plan order, and that packet and its dispatch name the other
-tasks' files the fix may edit (`Also in scope (task <id>): <files>`), so the DTO and the controller
+group, owned by the first of those tasks in plan order. The packet's `## Scope notes` names the other
+tasks' files the fix may edit (`This fix may also edit task <id>'s files: <files>`), and its dispatch
+repeats them for the Arbiter (`Also in scope (task <id>): <files>`), so the DTO and the controller
 beside it change together instead of each half failing to compile alone. A finding on a `*.md` file goes
 to `docs`; a file no task lists, and every failed blocking gate, go to `unassigned`. Each packet is named for its group,
 sanitized to letters, digits, dot, underscore and dash, with `task-` before a plan task's group so a task
