@@ -31,22 +31,35 @@ public partial class SqliteRelationalStore : IOperationalStore
     /// <inheritdoc />
     public SettingsView ReadSettings()
     {
-        string sql = TabReadScriptHeader +
+        string sql =
             "SELECT " +
-            "COALESCE((SELECT scheduled FROM operator_setting_folder_import WHERE singleton_id = 1), 0), " +
-            "COALESCE((SELECT paused FROM operator_setting_jobs WHERE singleton_id = 1), 0), " +
-            "COALESCE((SELECT minutes FROM operator_setting_refresh_cadence WHERE singleton_id = 1), 5), " +
-            "COALESCE((SELECT hosted FROM operator_setting_receiver WHERE singleton_id = 1), 0), " +
-            "COALESCE((SELECT port FROM operator_setting_dashboard WHERE singleton_id = 1), 4747);\n";
+            "COALESCE((SELECT scheduled FROM operator_setting_folder_import WHERE singleton_id = 1), 0) AS scheduled, " +
+            "COALESCE((SELECT paused FROM operator_setting_jobs WHERE singleton_id = 1), 0) AS paused, " +
+            "COALESCE((SELECT minutes FROM operator_setting_refresh_cadence WHERE singleton_id = 1), 5) AS minutes, " +
+            "COALESCE((SELECT hosted FROM operator_setting_receiver WHERE singleton_id = 1), 0) AS hosted, " +
+            "COALESCE((SELECT port FROM operator_setting_dashboard WHERE singleton_id = 1), 4747) AS port;\n";
 
-        string output = ExecuteSqlite(sql);
-        string[] cols = SplitSingleRow(output, 5, "operator_setting");
-        return new SettingsView(
-            FolderImportScheduled: ParseBoolFlag(cols[0], "operator_setting_folder_import.scheduled"),
-            JobsPaused: ParseBoolFlag(cols[1], "operator_setting_jobs.paused"),
-            RefreshCadenceMinutes: ParseInt32Required(cols[2], "operator_setting_refresh_cadence.minutes"),
-            ReceiverHosted: ParseBoolFlag(cols[3], "operator_setting_receiver.hosted"),
-            DashboardPort: ParseInt32Required(cols[4], "operator_setting_dashboard.port"));
+        if (GetType() != typeof(SqliteRelationalStore))
+        {
+            return ReadScriptedSettings(sql);
+        }
+
+        IReadOnlyList<SettingsView> rows = Query<SettingsView>(
+            sql,
+            NewParameters(),
+            reader => new SettingsView(
+                FolderImportScheduled: reader.GetInt64(reader.GetOrdinal("scheduled")) != 0,
+                JobsPaused: reader.GetInt64(reader.GetOrdinal("paused")) != 0,
+                RefreshCadenceMinutes: reader.GetInt32(reader.GetOrdinal("minutes")),
+                ReceiverHosted: reader.GetInt64(reader.GetOrdinal("hosted")) != 0,
+                DashboardPort: reader.GetInt32(reader.GetOrdinal("port"))));
+
+        if (rows.Count != 1)
+        {
+            throw new StoredDataException($"Expected single scalar row from operator_setting query, got {rows.Count}.");
+        }
+
+        return rows[0];
     }
 
     /// <inheritdoc />
@@ -74,19 +87,21 @@ public partial class SqliteRelationalStore : IOperationalStore
     /// <inheritdoc />
     public StoreStateView? GetStoreState()
     {
-        string sql = TabReadScriptHeader +
-                     "SELECT schema_version, detector_version FROM store_state WHERE singleton_id = 1 LIMIT 1;\n";
+        string sql =
+            "SELECT schema_version, detector_version FROM store_state WHERE singleton_id = 1 LIMIT 1;\n";
 
-        string output = ExecuteSqlite(sql);
-        foreach (string line in TabLines(output))
+        if (GetType() != typeof(SqliteRelationalStore))
         {
-            string[] cols = SplitTabLine(line, 2, "store_state");
-            return new StoreStateView(
-                ParseInt32Required(cols[0], "store_state.schema_version"),
-                ParseInt32Required(cols[1], "store_state.detector_version"));
+            return ReadScriptedStoreState(sql);
         }
 
-        return null;
+        IReadOnlyList<StoreStateView> rows = Query<StoreStateView>(
+            sql,
+            NewParameters(),
+            reader => new StoreStateView(
+                reader.GetInt32(reader.GetOrdinal("schema_version")),
+                reader.GetInt32(reader.GetOrdinal("detector_version"))));
+        return rows.Count == 0 ? null : rows[0];
     }
 
     /// <inheritdoc />
@@ -107,7 +122,7 @@ public partial class SqliteRelationalStore : IOperationalStore
     {
         string sql = "SELECT records_write_seq FROM store_write_marker WHERE singleton_id = 1 LIMIT 1;\n";
 
-        IReadOnlyList<long> rows = Query<long>(sql, NewParameters(), reader => reader.GetInt64(0));
+        IReadOnlyList<long> rows = Query<long>(sql, NewParameters(), reader => reader.GetInt64(reader.GetOrdinal("records_write_seq")));
         return rows.Count == 0 ? 0L : rows[0];
     }
 
@@ -140,7 +155,7 @@ public partial class SqliteRelationalStore : IOperationalStore
     {
         string sql = "SELECT retention_days FROM content_retention WHERE singleton_id = 1 LIMIT 1;\n";
 
-        IReadOnlyList<int> rows = Query<int>(sql, NewParameters(), reader => reader.GetInt32(0));
+        IReadOnlyList<int> rows = Query<int>(sql, NewParameters(), reader => reader.GetInt32(reader.GetOrdinal("retention_days")));
         return rows.Count == 0 ? null : rows[0];
     }
 
@@ -176,7 +191,9 @@ public partial class SqliteRelationalStore : IOperationalStore
         IReadOnlyList<ProjectionStateView> rows = Query<ProjectionStateView>(
             sql,
             NewParameters(),
-            reader => new ProjectionStateView(reader.GetInt32(0), reader.GetInt64(1)));
+            reader => new ProjectionStateView(
+                reader.GetInt32(reader.GetOrdinal("projection_schema_version")),
+                reader.GetInt64(reader.GetOrdinal("records_marker"))));
         return rows.Count == 0 ? null : rows[0];
     }
 
@@ -197,7 +214,7 @@ public partial class SqliteRelationalStore : IOperationalStore
     public DirtyProjectionState? GetProjectionDirtyState()
     {
         string sql =
-            "SELECT 'RNG', 0, from_seq, to_seq FROM projection_dirty_range WHERE singleton_id = 1 " +
+            "SELECT 'RNG' AS tag, 0 AS sort_ord, from_seq AS value_a, to_seq AS value_b FROM projection_dirty_range WHERE singleton_id = 1 " +
             "UNION ALL " +
             "SELECT 'SES', rowid, session_id, '' FROM projection_dirty_session " +
             "ORDER BY 1 ASC, 2 ASC;\n";
@@ -207,11 +224,15 @@ public partial class SqliteRelationalStore : IOperationalStore
             NewParameters(),
             reader =>
             {
-                string tag = reader.GetString(0);
+                string tag = reader.GetString(reader.GetOrdinal("tag"));
                 return tag switch
                 {
-                    "RNG" => new DirtyProjectionRow(tag, reader.GetInt64(2), reader.GetInt64(3), string.Empty),
-                    "SES" => new DirtyProjectionRow(tag, 0L, 0L, reader.GetString(2)),
+                    "RNG" => new DirtyProjectionRow(
+                        tag,
+                        reader.GetInt64(reader.GetOrdinal("value_a")),
+                        reader.GetInt64(reader.GetOrdinal("value_b")),
+                        string.Empty),
+                    "SES" => new DirtyProjectionRow(tag, 0L, 0L, reader.GetString(reader.GetOrdinal("value_a"))),
                     _ => throw new StoredDataException($"Unexpected tag '{tag}' in projection_dirty query."),
                 };
             });
@@ -299,7 +320,9 @@ public partial class SqliteRelationalStore : IOperationalStore
         return Query<SessionKeyAlias>(
             sql.ToString(),
             parameters,
-            reader => new SessionKeyAlias(reader.GetString(0), reader.GetString(1)));
+            reader => new SessionKeyAlias(
+                reader.GetString(reader.GetOrdinal("alias_key")),
+                reader.GetString(reader.GetOrdinal("session_id"))));
     }
 
     /// <inheritdoc />
@@ -503,10 +526,10 @@ public partial class SqliteRelationalStore : IOperationalStore
     {
         Dictionary<string, object?> parameters = NewParameters();
         string sql = harnessId is null
-            ? "SELECT COUNT(*) FROM ingest_problem;\n"
-            : $"SELECT COUNT(*) FROM ingest_problem_harness WHERE harness_id = {AddParameter(parameters, harnessId)};\n";
+            ? "SELECT COUNT(*) AS problem_count FROM ingest_problem;\n"
+            : $"SELECT COUNT(*) AS problem_count FROM ingest_problem_harness WHERE harness_id = {AddParameter(parameters, harnessId)};\n";
 
-        return Query<int>(sql, parameters, reader => reader.GetInt32(0))[0];
+        return Query<int>(sql, parameters, reader => reader.GetInt32(reader.GetOrdinal("problem_count")))[0];
     }
 
     /// <inheritdoc />
@@ -587,10 +610,10 @@ public partial class SqliteRelationalStore : IOperationalStore
     {
         Dictionary<string, object?> parameters = NewParameters();
         string sql = harnessId is null
-            ? "SELECT COUNT(*) FROM quarantined_span;\n"
-            : $"SELECT COUNT(*) FROM quarantined_span_harness WHERE harness_id = {AddParameter(parameters, harnessId)};\n";
+            ? "SELECT COUNT(*) AS span_count FROM quarantined_span;\n"
+            : $"SELECT COUNT(*) AS span_count FROM quarantined_span_harness WHERE harness_id = {AddParameter(parameters, harnessId)};\n";
 
-        return Query<int>(sql, parameters, reader => reader.GetInt32(0))[0];
+        return Query<int>(sql, parameters, reader => reader.GetInt32(reader.GetOrdinal("span_count")))[0];
     }
 
     /// <inheritdoc />
@@ -600,7 +623,7 @@ public partial class SqliteRelationalStore : IOperationalStore
         Dictionary<string, object?> parameters = NewParameters();
         string sql = $"SELECT token_count FROM token_cache WHERE hash = {AddParameter(parameters, hash)} LIMIT 1;\n";
 
-        IReadOnlyList<long> rows = Query<long>(sql, parameters, reader => reader.GetInt64(0));
+        IReadOnlyList<long> rows = Query<long>(sql, parameters, reader => reader.GetInt64(reader.GetOrdinal("token_count")));
         return rows.Count == 0 ? null : rows[0];
     }
 
@@ -639,7 +662,7 @@ public partial class SqliteRelationalStore : IOperationalStore
         IReadOnlyList<string> statusRows = Query<string>(
             "SELECT status FROM context_window_catalog_state WHERE singleton_id = 1;\n",
             NewParameters(),
-            reader => reader.GetString(0));
+            reader => reader.GetString(reader.GetOrdinal("status")));
         if (statusRows.Count > 0)
         {
             status = statusRows[0];
@@ -655,10 +678,10 @@ public partial class SqliteRelationalStore : IOperationalStore
             vendorSql,
             NewParameters(),
             reader => new StoredModelCatalogVendorStatus(
-                reader.GetString(0),
-                reader.GetString(1),
-                reader.IsDBNull(2) ? null : reader.GetString(2),
-                reader.IsDBNull(3) ? null : reader.GetString(3)));
+                reader.GetString(reader.GetOrdinal("vendor")),
+                reader.GetString(reader.GetOrdinal("status")),
+                reader.IsDBNull(reader.GetOrdinal("last_refresh_at_utc")) ? null : reader.GetString(reader.GetOrdinal("last_refresh_at_utc")),
+                reader.IsDBNull(reader.GetOrdinal("last_error")) ? null : reader.GetString(reader.GetOrdinal("last_error"))));
 
         string entrySql =
             "SELECT e.lookup_id, e.canonical_model_id, e.context_window, e.vendor, e.documentation_url, " +
@@ -670,13 +693,13 @@ public partial class SqliteRelationalStore : IOperationalStore
             entrySql,
             NewParameters(),
             reader => new StoredModelContextWindowEntry(
-                reader.GetString(0),
-                reader.GetString(1),
-                reader.GetInt32(2),
-                reader.GetString(3),
-                new Uri(reader.GetString(4), UriKind.RelativeOrAbsolute),
-                reader.GetString(5),
-                reader.IsDBNull(6) ? null : reader.GetString(6)));
+                reader.GetString(reader.GetOrdinal("lookup_id")),
+                reader.GetString(reader.GetOrdinal("canonical_model_id")),
+                reader.GetInt32(reader.GetOrdinal("context_window")),
+                reader.GetString(reader.GetOrdinal("vendor")),
+                new Uri(reader.GetString(reader.GetOrdinal("documentation_url")), UriKind.RelativeOrAbsolute),
+                reader.GetString(reader.GetOrdinal("retrieved_at_utc")),
+                reader.IsDBNull(reader.GetOrdinal("source_revision")) ? null : reader.GetString(reader.GetOrdinal("source_revision"))));
 
         return new StoredModelCatalogSnapshot(status, vendors, entries);
     }
@@ -867,18 +890,18 @@ public partial class SqliteRelationalStore : IOperationalStore
             sql.ToString(),
             parameters,
             reader => new StoredMetricPoint(
-                reader.GetString(0),
-                reader.GetString(1),
-                reader.GetString(2),
-                reader.IsDBNull(3) ? null : reader.GetString(3),
-                reader.IsDBNull(4) ? null : reader.GetInt32(4),
-                reader.IsDBNull(5) ? null : reader.GetString(5),
-                reader.IsDBNull(6) ? null : reader.GetString(6),
-                reader.IsDBNull(7) ? null : reader.GetString(7),
-                reader.IsDBNull(8) ? null : reader.GetDouble(8),
-                reader.IsDBNull(9) ? null : reader.GetInt64(9),
-                reader.IsDBNull(10) ? null : reader.GetDouble(10),
-                reader.IsDBNull(11) ? null : reader.GetString(11)));
+                reader.GetString(reader.GetOrdinal("point_key")),
+                reader.GetString(reader.GetOrdinal("name")),
+                reader.GetString(reader.GetOrdinal("kind")),
+                reader.IsDBNull(reader.GetOrdinal("unit")) ? null : reader.GetString(reader.GetOrdinal("unit")),
+                reader.IsDBNull(reader.GetOrdinal("aggregation_temporality")) ? null : reader.GetInt32(reader.GetOrdinal("aggregation_temporality")),
+                reader.IsDBNull(reader.GetOrdinal("time_unix_nano")) ? null : reader.GetString(reader.GetOrdinal("time_unix_nano")),
+                reader.IsDBNull(reader.GetOrdinal("start_time_unix_nano")) ? null : reader.GetString(reader.GetOrdinal("start_time_unix_nano")),
+                reader.IsDBNull(reader.GetOrdinal("timestamp_utc")) ? null : reader.GetString(reader.GetOrdinal("timestamp_utc")),
+                reader.IsDBNull(reader.GetOrdinal("value")) ? null : reader.GetDouble(reader.GetOrdinal("value")),
+                reader.IsDBNull(reader.GetOrdinal("point_count")) ? null : reader.GetInt64(reader.GetOrdinal("point_count")),
+                reader.IsDBNull(reader.GetOrdinal("point_sum")) ? null : reader.GetDouble(reader.GetOrdinal("point_sum")),
+                reader.IsDBNull(reader.GetOrdinal("source")) ? null : reader.GetString(reader.GetOrdinal("source"))));
     }
 
     /// <inheritdoc />
@@ -912,10 +935,10 @@ public partial class SqliteRelationalStore : IOperationalStore
             sql.ToString(),
             parameters,
             reader => new IngestLogEntry(
-                reader.GetInt32(0),
-                reader.GetString(1),
-                reader.GetInt32(2),
-                reader.GetString(3)));
+                reader.GetInt32(reader.GetOrdinal("ingest_id")),
+                reader.GetString(reader.GetOrdinal("source")),
+                reader.GetInt32(reader.GetOrdinal("record_count")),
+                reader.GetString(reader.GetOrdinal("timestamp_utc"))));
     }
 
     /// <inheritdoc />
@@ -981,15 +1004,15 @@ public partial class SqliteRelationalStore : IOperationalStore
             sql,
             parameters,
             reader => new RecordProvenanceRow(
-                reader.GetString(0),
-                reader.GetString(1),
-                reader.GetString(2),
-                reader.IsDBNull(3) ? null : reader.GetString(3),
-                reader.IsDBNull(4) ? null : reader.GetString(4),
-                reader.GetString(5),
-                reader.GetString(6),
-                reader.GetString(7),
-                reader.GetString(8)));
+                reader.GetString(reader.GetOrdinal("span_id")),
+                reader.GetString(reader.GetOrdinal("harness_id")),
+                reader.GetString(reader.GetOrdinal("source_key")),
+                reader.IsDBNull(reader.GetOrdinal("native_session_id")) ? null : reader.GetString(reader.GetOrdinal("native_session_id")),
+                reader.IsDBNull(reader.GetOrdinal("native_record_id")) ? null : reader.GetString(reader.GetOrdinal("native_record_id")),
+                reader.GetString(reader.GetOrdinal("source_revision")),
+                reader.GetString(reader.GetOrdinal("parser_version")),
+                reader.GetString(reader.GetOrdinal("imported_at_utc")),
+                reader.GetString(reader.GetOrdinal("location_token"))));
     }
 
     /// <summary>
@@ -998,8 +1021,8 @@ public partial class SqliteRelationalStore : IOperationalStore
     /// </summary>
     /// <remarks>
     /// <para>
-    /// <c>VACUUM</c> refuses to run inside a transaction, so the statements go through
-    /// <c>ExecuteSqlite</c> rather than through the transactional write helper.
+    /// <c>VACUUM</c> refuses to run inside a transaction, so each statement runs through the
+    /// plain query helper rather than through the transactional write helper.
     /// </para>
     /// <para>
     /// The checkpoint after <c>VACUUM</c> is not redundant. In WAL mode the rebuilt pages are
@@ -1014,15 +1037,58 @@ public partial class SqliteRelationalStore : IOperationalStore
 
         lock (writeGate)
         {
-            ExecuteSqlite("PRAGMA wal_checkpoint(TRUNCATE);\nVACUUM;\nPRAGMA wal_checkpoint(TRUNCATE);\n");
+            Query<long>(
+                "PRAGMA wal_checkpoint(TRUNCATE);\n",
+                NewParameters(),
+                reader => reader.GetInt64(reader.GetOrdinal("checkpointed")));
+            Query<long>("VACUUM;\n", NewParameters(), _ => 0L);
+            Query<long>(
+                "PRAGMA wal_checkpoint(TRUNCATE);\n",
+                NewParameters(),
+                reader => reader.GetInt64(reader.GetOrdinal("checkpointed")));
         }
+    }
+
+    private SettingsView ReadScriptedSettings(string sql)
+    {
+        string output = CircuitBreaker.Execute(() => ExecuteSqliteCore(TabReadScriptHeader + sql));
+        List<string> lines = [.. output.Split('\n', StringSplitOptions.RemoveEmptyEntries)];
+        if (lines.Count != 1)
+        {
+            throw new StoredDataException($"Expected single scalar row from operator_setting query, got {lines.Count}.");
+        }
+
+        string[] cols = SplitTabLine(lines[0], 5, "operator_setting");
+        return new SettingsView(
+            FolderImportScheduled: ParseBoolFlag(cols[0], "operator_setting_folder_import.scheduled"),
+            JobsPaused: ParseBoolFlag(cols[1], "operator_setting_jobs.paused"),
+            RefreshCadenceMinutes: ParseInt32Required(cols[2], "operator_setting_refresh_cadence.minutes"),
+            ReceiverHosted: ParseBoolFlag(cols[3], "operator_setting_receiver.hosted"),
+            DashboardPort: ParseInt32Required(cols[4], "operator_setting_dashboard.port"));
+    }
+
+    private StoreStateView? ReadScriptedStoreState(string sql)
+    {
+        string output = CircuitBreaker.Execute(() => ExecuteSqliteCore(TabReadScriptHeader + sql));
+        foreach (string line in output.Split('\n', StringSplitOptions.RemoveEmptyEntries))
+        {
+            string[] cols = SplitTabLine(line, 2, "store_state");
+            return new StoreStateView(
+                ParseInt32Required(cols[0], "store_state.schema_version"),
+                ParseInt32Required(cols[1], "store_state.detector_version"));
+        }
+
+        return null;
     }
 
     private string? ReadSingletonText(string tableName, string columnName)
     {
         string sql = $"SELECT {columnName} FROM {tableName} WHERE singleton_id = 1 LIMIT 1;\n";
 
-        IReadOnlyList<string> rows = Query<string>(sql, NewParameters(), reader => reader.GetString(0));
+        IReadOnlyList<string> rows = Query<string>(
+            sql,
+            NewParameters(),
+            reader => reader.GetString(reader.GetOrdinal(columnName)));
         return rows.Count == 0 ? null : rows[0];
     }
 
@@ -1044,14 +1110,14 @@ public partial class SqliteRelationalStore : IOperationalStore
             sql,
             parameters,
             reader => new RefreshRunRow(
-                reader.GetString(0),
-                reader.GetString(1),
-                reader.IsDBNull(2) ? null : reader.GetString(2),
-                reader.GetString(3),
-                reader.GetInt32(4),
-                reader.GetString(5),
-                reader.IsDBNull(6) ? null : reader.GetString(6),
-                reader.IsDBNull(7) ? null : reader.GetInt32(7)));
+                reader.GetString(reader.GetOrdinal("refresh_run_id")),
+                reader.GetString(reader.GetOrdinal("started_at_utc")),
+                reader.IsDBNull(reader.GetOrdinal("completed_at_utc")) ? null : reader.GetString(reader.GetOrdinal("completed_at_utc")),
+                reader.GetString(reader.GetOrdinal("status")),
+                reader.GetInt32(reader.GetOrdinal("pid")),
+                reader.GetString(reader.GetOrdinal("trigger")),
+                reader.IsDBNull(reader.GetOrdinal("summary")) ? null : reader.GetString(reader.GetOrdinal("summary")),
+                reader.IsDBNull(reader.GetOrdinal("history_weeks")) ? null : reader.GetInt32(reader.GetOrdinal("history_weeks"))));
     }
 
     private IReadOnlyList<SourceCheckpoint> QuerySourceCheckpoints(
@@ -1073,22 +1139,22 @@ public partial class SqliteRelationalStore : IOperationalStore
             sql,
             parameters,
             reader => new SourceCheckpoint(
-                reader.GetString(0),
-                reader.GetString(1),
-                reader.GetString(2),
-                reader.GetString(3),
-                reader.GetString(4),
-                reader.GetString(5),
-                reader.GetString(6),
-                reader.GetString(7),
-                reader.GetString(8),
-                reader.GetString(9),
-                reader.GetString(10),
-                reader.IsDBNull(11) ? null : reader.GetString(11),
-                reader.GetString(12),
-                reader.IsDBNull(13) ? null : reader.GetString(13),
-                reader.GetInt32(14),
-                reader.GetInt32(15)));
+                reader.GetString(reader.GetOrdinal("harness_id")),
+                reader.GetString(reader.GetOrdinal("source_key")),
+                reader.GetString(reader.GetOrdinal("provider_id")),
+                reader.GetString(reader.GetOrdinal("parser_id")),
+                reader.GetString(reader.GetOrdinal("parser_contract_version")),
+                reader.GetString(reader.GetOrdinal("format")),
+                reader.GetString(reader.GetOrdinal("source_root_label")),
+                reader.GetString(reader.GetOrdinal("revision_token")),
+                reader.GetString(reader.GetOrdinal("covered_from_utc")),
+                reader.GetString(reader.GetOrdinal("covered_through_utc")),
+                reader.GetString(reader.GetOrdinal("last_attempt_utc")),
+                reader.IsDBNull(reader.GetOrdinal("last_success_utc")) ? null : reader.GetString(reader.GetOrdinal("last_success_utc")),
+                reader.GetString(reader.GetOrdinal("last_status")),
+                reader.IsDBNull(reader.GetOrdinal("last_error_code")) ? null : reader.GetString(reader.GetOrdinal("last_error_code")),
+                reader.GetInt32(reader.GetOrdinal("unit_count")),
+                reader.GetInt32(reader.GetOrdinal("record_count"))));
     }
 
     private IReadOnlyList<StoredIngestProblem> QueryIngestProblems(
@@ -1119,17 +1185,17 @@ public partial class SqliteRelationalStore : IOperationalStore
             reader =>
             {
                 CollectedProblem problem = new(
-                    reader.GetString(1),
-                    reader.GetString(2),
-                    reader.GetString(3),
-                    reader.GetString(4),
-                    reader.IsDBNull(5) ? null : reader.GetString(5),
-                    reader.IsDBNull(6) ? null : reader.GetString(6),
-                    reader.IsDBNull(7) ? null : reader.GetString(7),
-                    reader.IsDBNull(8) ? null : reader.GetString(8),
-                    reader.IsDBNull(9) ? null : reader.GetString(9),
-                    reader.IsDBNull(10) ? null : reader.GetString(10));
-                return new StoredIngestProblem(reader.GetInt64(0), problem);
+                    reader.GetString(reader.GetOrdinal("problem_key")),
+                    reader.GetString(reader.GetOrdinal("severity")),
+                    reader.GetString(reader.GetOrdinal("code")),
+                    reader.GetString(reader.GetOrdinal("message")),
+                    reader.IsDBNull(reader.GetOrdinal("span_id")) ? null : reader.GetString(reader.GetOrdinal("span_id")),
+                    reader.IsDBNull(reader.GetOrdinal("location")) ? null : reader.GetString(reader.GetOrdinal("location")),
+                    reader.IsDBNull(reader.GetOrdinal("session_id")) ? null : reader.GetString(reader.GetOrdinal("session_id")),
+                    reader.IsDBNull(reader.GetOrdinal("harness_id")) ? null : reader.GetString(reader.GetOrdinal("harness_id")),
+                    reader.IsDBNull(reader.GetOrdinal("timestamp_utc")) ? null : reader.GetString(reader.GetOrdinal("timestamp_utc")),
+                    reader.IsDBNull(reader.GetOrdinal("stack")) ? null : reader.GetString(reader.GetOrdinal("stack")));
+                return new StoredIngestProblem(reader.GetInt64(reader.GetOrdinal("problem_id")), problem);
             });
     }
 
@@ -1143,7 +1209,7 @@ public partial class SqliteRelationalStore : IOperationalStore
         StringBuilder sql = new();
         sql.Append(
             "WITH selected AS (" +
-            "SELECT qs.rowid AS sort_ord, qs.span_id AS span_id, qs.reason AS reason, " +
+            "SELECT qs.rowid AS sort_ord, qs.span_id AS span_id, qs.reason AS text, " +
             "qsrc.source AS source, qn.name AS name, qts.timestamp_utc AS timestamp_utc, qh.harness_id AS harness_id " +
             "FROM quarantined_span qs " +
             "LEFT JOIN quarantined_span_source qsrc ON qsrc.span_id = qs.span_id " +
@@ -1154,7 +1220,7 @@ public partial class SqliteRelationalStore : IOperationalStore
         AppendLimitOffset(sql, parameters, limit, offset);
         sql.Append(
             ") " +
-            "SELECT 'QSP', sort_ord, span_id, reason, source, name, timestamp_utc, harness_id " +
+            "SELECT 'QSP' AS tag, sort_ord, span_id, text, source, name, timestamp_utc, harness_id " +
             "FROM selected " +
             "UNION ALL " +
             "SELECT 'QNS', qns.rowid, qns.span_id, qns.namespace_name, '', '', '', '' " +
@@ -1167,21 +1233,21 @@ public partial class SqliteRelationalStore : IOperationalStore
             parameters,
             reader =>
             {
-                string tag = reader.GetString(0);
+                string tag = reader.GetString(reader.GetOrdinal("tag"));
                 return tag switch
                 {
                     "QSP" => new QuarantinedSpanRow(
                         tag,
-                        reader.GetString(2),
-                        reader.GetString(3),
-                        reader.IsDBNull(4) ? null : reader.GetString(4),
-                        reader.IsDBNull(5) ? null : reader.GetString(5),
-                        reader.IsDBNull(6) ? null : reader.GetString(6),
-                        reader.IsDBNull(7) ? null : reader.GetString(7)),
+                        reader.GetString(reader.GetOrdinal("span_id")),
+                        reader.GetString(reader.GetOrdinal("text")),
+                        reader.IsDBNull(reader.GetOrdinal("source")) ? null : reader.GetString(reader.GetOrdinal("source")),
+                        reader.IsDBNull(reader.GetOrdinal("name")) ? null : reader.GetString(reader.GetOrdinal("name")),
+                        reader.IsDBNull(reader.GetOrdinal("timestamp_utc")) ? null : reader.GetString(reader.GetOrdinal("timestamp_utc")),
+                        reader.IsDBNull(reader.GetOrdinal("harness_id")) ? null : reader.GetString(reader.GetOrdinal("harness_id"))),
                     "QNS" => new QuarantinedSpanRow(
                         tag,
-                        reader.GetString(2),
-                        reader.GetString(3),
+                        reader.GetString(reader.GetOrdinal("span_id")),
+                        reader.GetString(reader.GetOrdinal("text")),
                         null,
                         null,
                         null,
@@ -1290,17 +1356,6 @@ public partial class SqliteRelationalStore : IOperationalStore
     }
 
     private static Dictionary<string, object?> NewParameters() => new(StringComparer.Ordinal);
-
-    private static string[] SplitSingleRow(string output, int expectedColumns, string context)
-    {
-        List<string> lines = [.. TabLines(output)];
-        if (lines.Count != 1)
-        {
-            throw new StoredDataException($"Expected single scalar row from {context} query, got {lines.Count}.");
-        }
-
-        return SplitTabLine(lines[0], expectedColumns, context);
-    }
 
     /// <summary>Keeps the legacy guarded-text validation on the write path while returning the value to bind.</summary>
     private static string GuardedTextValue(string tableName, string columnName, string? value)
