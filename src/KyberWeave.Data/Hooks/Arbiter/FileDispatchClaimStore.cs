@@ -34,6 +34,7 @@ public sealed class FileDispatchClaimStore(IWritableFileSystem files, TimeProvid
     /// <inheritdoc/>
     public bool TryClaim(string projectRoot, DispatchClaimKey key, string owner)
     {
+        ArgumentNullException.ThrowIfNull(key);
         string path = ClaimPath(projectRoot, key);
         string directory = Path.GetDirectoryName(path)!;
         files.CreateDirectory(directory);
@@ -71,6 +72,7 @@ public sealed class FileDispatchClaimStore(IWritableFileSystem files, TimeProvid
     /// <inheritdoc/>
     public string? ReadOwner(string projectRoot, DispatchClaimKey key)
     {
+        ArgumentNullException.ThrowIfNull(key);
         try
         {
             string? owner = files.ReadLines(ClaimPath(projectRoot, key)).FirstOrDefault()?.Trim();
@@ -85,6 +87,7 @@ public sealed class FileDispatchClaimStore(IWritableFileSystem files, TimeProvid
     /// <inheritdoc/>
     public bool WaitForClaim(string projectRoot, DispatchClaimKey key)
     {
+        ArgumentNullException.ThrowIfNull(key);
         string path = ClaimPath(projectRoot, key);
         long started = time.GetTimestamp();
         while (!files.FileExists(path))

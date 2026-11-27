@@ -8,6 +8,7 @@ public sealed class FileLinkProbe : IFileLinkProbe
     /// <inheritdoc/>
     public bool HasLinkBelow(string root, string fullPath)
     {
+        ArgumentNullException.ThrowIfNull(root);
         string current = root.TrimEnd('/');
         foreach (string segment in fullPath[root.Length..].Split('/', StringSplitOptions.RemoveEmptyEntries))
         {

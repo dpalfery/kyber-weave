@@ -102,6 +102,7 @@ public sealed class FileCodeGraphIndexWorkspace(TimeProvider time) : ICodeGraphI
     /// <param name="ex">The exception.</param>
     public static bool IsSharingViolation(IOException ex)
     {
+        ArgumentNullException.ThrowIfNull(ex);
         int hr = ex.HResult;
         if (hr is unchecked((int)0x80070020) or unchecked((int)0x80070021) || (hr & 0xFFFF) is 32 or 33)
             return true;

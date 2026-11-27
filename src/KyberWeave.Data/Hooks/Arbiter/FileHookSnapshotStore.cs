@@ -20,6 +20,7 @@ public sealed class FileHookSnapshotStore(IWritableFileSystem files, TimeProvide
     /// <inheritdoc/>
     public void Update(string directory, string fileName, Func<string, string?> mutate)
     {
+        ArgumentNullException.ThrowIfNull(mutate);
         try
         {
             files.CreateDirectory(directory);
