@@ -165,11 +165,11 @@ internal sealed class YamlHooksConfigSource(IFileSystem fileSystem, IProcessEnvi
         map.Keys.Select(k => Convert.ToString(k, CultureInfo.InvariantCulture) ?? string.Empty)
             .Where(k => !known.Contains(k, StringComparer.Ordinal));
 
-    private static T Read<T>(Dictionary<object, object> map, string key, string scope, List<string> warnings, Reader<T> reader)
+    private static T? Read<T>(Dictionary<object, object> map, string key, string scope, List<string> warnings, Reader<T> reader)
     {
         if (!map.TryGetValue(key, out object? value))
         {
-            return default!;
+            return default;
         }
 
         T parsed = reader.Parse(value);

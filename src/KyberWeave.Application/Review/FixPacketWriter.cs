@@ -308,7 +308,12 @@ internal static class FixPacketWriter
                 continue;
             }
 
-            string id = owners[0].Id!;
+            if (owners[0].Id is not { } id)
+            {
+                unassigned.Add(finding);
+                continue;
+            }
+
             if (!byTask.TryGetValue(id, out Packet? packet))
                 byTask[id] = packet = new Packet(PacketKind.Task, id, [], []);
             packet.Findings.Add(finding);
@@ -323,9 +328,11 @@ internal static class FixPacketWriter
         }
 
         List<Packet> packets = [];
-        foreach (PlanTaskFileEntry task in tasks.Where(task => task.Id is not null))
+        foreach (PlanTaskFileEntry task in tasks)
         {
-            if (byTask.TryGetValue(task.Id!, out Packet? packet) && !packets.Contains(packet))
+            if (task.Id is not { } id || !byTask.TryGetValue(id, out Packet? packet))
+                continue;
+            if (!packets.Contains(packet))
                 packets.Add(packet);
         }
 

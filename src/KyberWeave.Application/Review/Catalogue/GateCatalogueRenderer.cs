@@ -440,7 +440,10 @@ public static class GateCatalogueRenderer
         AddNoteComment(lines, entry, "      ");
         lines.AddRange(TaskGateLines(gate, "      "));
         renderer.AgentsWithLive.Add(agent);
-        renderer.Written.Add((TechnologyAgentMap.TechnologyFor(agent)!, id));
+        renderer.Written.Add((
+            TechnologyAgentMap.TechnologyFor(agent)
+                ?? throw new InvalidOperationException($"The agent '{agent}' maps to no technology."),
+            id));
 
         if (entry.Role is "format" or "lint")
             renderer.TaskRenders.Add(new LiveTaskRender(served[0], entry, gate));
@@ -1049,9 +1052,6 @@ public static class GateCatalogueRenderer
     {
         string? seconds = OptionalScalar(mapping, "timeout-seconds");
         string? shortForm = OptionalScalar(mapping, "timeout");
-        if (seconds is null && shortForm is null)
-            return null;
-
         if (seconds is not null && shortForm is not null &&
             !string.Equals(seconds, shortForm, StringComparison.Ordinal))
         {
@@ -1059,7 +1059,9 @@ public static class GateCatalogueRenderer
                 $"{where} gate '{id}' sets both 'timeout' and 'timeout-seconds' to different values. Keep one.");
         }
 
-        string text = seconds ?? shortForm!;
+        string? text = seconds ?? shortForm;
+        if (text is null)
+            return null;
         if (!int.TryParse(text, NumberStyles.Integer, CultureInfo.InvariantCulture, out int value) || value <= 0)
         {
             throw new InvalidDataException(

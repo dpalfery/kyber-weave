@@ -957,7 +957,7 @@ public sealed partial class PlanTaskFileGenerator
             HashSet<string> have = [.. (actual.Tasks ?? []).Select(entry => entry.Id ?? string.Empty)];
             foreach (PlanTaskFileEntry want in expected.Tasks ?? [])
             {
-                if (!have.Contains(want.Id!))
+                if (want.Id is not { } wantedId || !have.Contains(wantedId))
                 {
                     Differs(report, path, $"task '{want.Id}' is missing", fix);
                 }
@@ -1061,7 +1061,7 @@ public sealed partial class PlanTaskFileGenerator
 
         foreach (PlanTaskFileEntry want in expected.Tasks ?? [])
         {
-            if (!have.TryGetValue(want.Id!, out PlanTaskFileEntry? got))
+            if (want.Id is not { } wantedId || !have.TryGetValue(wantedId, out PlanTaskFileEntry? got))
             {
                 Differs(report, taskFile, $"task '{want.Id}' is missing", fix);
                 continue;
@@ -1088,7 +1088,7 @@ public sealed partial class PlanTaskFileGenerator
             }
         }
 
-        HashSet<string> wanted = [.. (expected.Tasks ?? []).Select(entry => entry.Id!)];
+        HashSet<string> wanted = [.. (expected.Tasks ?? []).Select(entry => entry.Id).OfType<string>()];
         foreach (string extra in have.Keys.Where(id => !wanted.Contains(id)))
         {
             Differs(report, taskFile, $"task '{extra}' is in the file but not in the plan", fix);
