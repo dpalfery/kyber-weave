@@ -144,6 +144,10 @@ public static class RunStartPlanner
             return false;
         }
 
+        // A null or invalid value is refused above, so both are non-null here; guard the dereference, not the entry.
+        ArgumentNullException.ThrowIfNull(type);
+        ArgumentNullException.ThrowIfNull(slug);
+
         branch = $"{canonical}/{type!.Trim()}/{slug!.Trim()}";
         return true;
     }

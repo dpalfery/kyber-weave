@@ -67,6 +67,8 @@ public static partial class ReviewVerdictRules
     /// <param name="leftOut">How many findings a cap left out.</param>
     public static Dictionary<string, List<int>> GroupByFile(IReadOnlyList<ReviewFinding> findings, out int leftOut)
     {
+        ArgumentNullException.ThrowIfNull(findings);
+
         Dictionary<string, List<int>> byFile = new(StringComparer.Ordinal);
         int considered = 0;
         leftOut = 0;
@@ -104,6 +106,8 @@ public static partial class ReviewVerdictRules
     /// <returns>The chosen pairs, best first; how many candidates there were; how many findings were left out of the comparison.</returns>
     public static (List<(int A, int B)> Pairs, int CandidateCount, int LeftOut) NearbyPairs(IReadOnlyList<ReviewFinding> findings)
     {
+        ArgumentNullException.ThrowIfNull(findings);
+
         Dictionary<string, List<int>> byFile = GroupByFile(findings, out int leftOut);
 
         // A max-heap on the sort key, so the worst chosen pair is the one replaced when a better one turns up.
@@ -166,6 +170,8 @@ public static partial class ReviewVerdictRules
 
     public static IEnumerable<int> CitedNumbers(System.Text.RegularExpressions.Match match)
     {
+        ArgumentNullException.ThrowIfNull(match);
+
         // The numbers come from seat-written text: one that does not parse as a plausible line number is ignored.
         if (match.Groups["from"].Success && TryLineNumber(match.Groups["from"].Value, out int from))
         {
@@ -219,6 +225,9 @@ public static partial class ReviewVerdictRules
     /// </summary>
     public static bool ExcerptIsIn(string excerpt, string window)
     {
+        ArgumentNullException.ThrowIfNull(excerpt);
+        ArgumentNullException.ThrowIfNull(window);
+
         if (!ReviewSeatInput.ExcerptWithinLimits(excerpt))
             return false;
 
@@ -243,10 +252,17 @@ public static partial class ReviewVerdictRules
     /// <summary>A severity as seat files write it.</summary>
     public static string SeverityName(ReviewSeverity severity) => SeverityOverrideRules.SeverityName(severity);
 
-    public static string PairSubject(ReviewFinding a, ReviewFinding b) => $"{a.Id} ~ {b.Id}";
+    public static string PairSubject(ReviewFinding a, ReviewFinding b)
+    {
+        ArgumentNullException.ThrowIfNull(a);
+        ArgumentNullException.ThrowIfNull(b);
+        return $"{a.Id} ~ {b.Id}";
+    }
 
     public static int Find(int[] parent, int index)
     {
+        ArgumentNullException.ThrowIfNull(parent);
+
         while (parent[index] != index)
             index = parent[index] = parent[parent[index]];
         return index;
@@ -254,6 +270,8 @@ public static partial class ReviewVerdictRules
 
     public static string Normalize(string path)
     {
+        ArgumentNullException.ThrowIfNull(path);
+
         string normalized = path.Replace('\\', '/');
         return normalized.StartsWith("./", StringComparison.Ordinal) ? normalized[2..] : normalized;
     }
