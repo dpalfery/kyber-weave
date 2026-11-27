@@ -1,22 +1,33 @@
-using System.ComponentModel;
-using System.Diagnostics;
 using System.Globalization;
 using System.Text;
-using System.Text.RegularExpressions;
 using KyberDash.Core.Exceptions;
-using KyberDash.Core.Processes;
 using KyberDash.Core.Resilience;
 using Microsoft.Data.Sqlite;
 
 namespace KyberDash.Core.Repositories;
+
+/// <summary>A parameterized SQLite statement and the named parameters bound to it.</summary>
+/// <param name="Sql">SQL text whose values are supplied as <c>$name</c> parameters.</param>
+/// <param name="Parameters">Parameter values keyed by their <c>$name</c> marker.</param>
+public sealed record SqlStatement(string Sql, IReadOnlyDictionary<string, object?> Parameters)
+{
+    /// <summary>Creates a statement that binds no parameters.</summary>
+    /// <param name="sql">SQL text to execute.</param>
+    public static SqlStatement Of(string sql)
+    {
+        ArgumentNullException.ThrowIfNull(sql);
+        return new SqlStatement(sql, new Dictionary<string, object?>(StringComparer.Ordinal));
+    }
+}
 
 /// <summary>
 /// Base SQLite repository wrapping in-process SQLite execution with busy retries and a Polly
 /// <see cref="ICircuitBreaker"/> guard so persistent store failures fail fast instead of
 /// hanging the daemon.
 /// </summary>
-public abstract partial class BaseSqliteRepository
+public abstract class BaseSqliteRepository
 {
+
     private const int SqliteBusyResultCode = 5;
     private const int SqliteLockedResultCode = 6;
 
@@ -53,15 +64,6 @@ public abstract partial class BaseSqliteRepository
         this.busyAttempts = busyAttempts;
     }
 
-    [GeneratedRegex(@"\blocked\b", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant, matchTimeoutMilliseconds: 1000)]
-    private static partial Regex LockedWordRegex();
-
-    [GeneratedRegex(@"\bbusy\b", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant, matchTimeoutMilliseconds: 1000)]
-    private static partial Regex BusyWordRegex();
-
-    [GeneratedRegex(@"SQLITE_(?:BUSY|LOCKED)", RegexOptions.CultureInvariant, matchTimeoutMilliseconds: 1000)]
-    private static partial Regex SqliteBusyOrLockedRegex();
-
     /// <summary>Executes a SQLite batch script through the circuit breaker and returns stdout.</summary>
     protected string ExecuteSqlite(string sql)
     {
@@ -70,7 +72,6 @@ public abstract partial class BaseSqliteRepository
     }
 
     /// <summary>Executes a single SQLite batch run without modifying circuit-breaker state directly.</summary>
-    [System.Diagnostics.CodeAnalysis.SuppressMessage("Security", "CA2100:Review SQL queries for security vulnerabilities", Justification = "Internal engine executes parameterized and literal-escaped SQL scripts.")]
     protected virtual string ExecuteSqliteCore(string sql)
     {
         ArgumentNullException.ThrowIfNull(sql);
@@ -80,13 +81,7 @@ public abstract partial class BaseSqliteRepository
         if (string.IsNullOrWhiteSpace(cleanedSql))
             return string.Empty;
 
-        string connectionString = new SqliteConnectionStringBuilder
-        {
-            DataSource = DatabasePath,
-            Mode = SqliteOpenMode.ReadWriteCreate,
-            Pooling = false,
-            DefaultTimeout = Math.Max(1, (int)Math.Ceiling(busyTimeoutMilliseconds / 1000.0)),
-        }.ToString();
+        string connectionString = BuildConnectionString();
 
         for (int attempt = 1; attempt <= busyAttempts; attempt++)
         {
@@ -95,9 +90,8 @@ public abstract partial class BaseSqliteRepository
                 using SqliteConnection connection = new(connectionString);
                 connection.Open();
 
-                using SqliteCommand command = connection.CreateCommand();
+                using SqliteCommand command = CreateCommand(connection, cleanedSql);
                 command.CommandTimeout = Math.Max(1, (int)Math.Ceiling(batchTimeout.TotalSeconds));
-                command.CommandText = cleanedSql; // nosemgrep: csharp.lang.security.sqli.csharp-sqli.csharp-sqli
 
                 using SqliteDataReader reader = command.ExecuteReader();
                 StringBuilder sb = new();
@@ -146,6 +140,175 @@ public abstract partial class BaseSqliteRepository
         }
 
         throw new SqliteExecutionException("The canonical store operation did not complete.");
+    }
+
+    /// <summary>Executes parameterized statements in one immediate transaction through the circuit breaker.</summary>
+    /// <param name="statements">Statements to run, each binding its values by <c>$name</c> parameter.</param>
+    protected void ExecuteStatements(IReadOnlyList<SqlStatement> statements)
+    {
+        ArgumentNullException.ThrowIfNull(statements);
+        CircuitBreaker.Execute(() => ExecuteStatementsCore(statements));
+    }
+
+    /// <summary>Executes a parameterized query through the circuit breaker and maps every row.</summary>
+    /// <typeparam name="T">Mapped row type.</typeparam>
+    /// <param name="sql">SQL text whose values are supplied as <c>$name</c> parameters.</param>
+    /// <param name="parameters">Parameter values keyed by their <c>$name</c> marker.</param>
+    /// <param name="map">Maps one row; columns are read by name with <see cref="SqliteDataReader.GetOrdinal(string)"/>.</param>
+    protected IReadOnlyList<T> Query<T>(
+        string sql,
+        IReadOnlyDictionary<string, object?> parameters,
+        Func<SqliteDataReader, T> map)
+    {
+        ArgumentNullException.ThrowIfNull(sql);
+        ArgumentNullException.ThrowIfNull(parameters);
+        ArgumentNullException.ThrowIfNull(map);
+        return CircuitBreaker.Execute(() => QueryCore(sql, parameters, map));
+    }
+
+    private void ExecuteStatementsCore(IReadOnlyList<SqlStatement> statements)
+    {
+        EnsureSqliteProviderInitialized();
+        ExecuteWithRetry(BuildConnectionString(), connection =>
+        {
+            ExecuteInTransaction(connection, () =>
+            {
+                foreach (SqlStatement statement in statements)
+                {
+                    ExecuteCommand(connection, statement.Sql, statement.Parameters);
+                }
+            });
+            return true;
+        });
+    }
+
+    private IReadOnlyList<T> QueryCore<T>(
+        string sql,
+        IReadOnlyDictionary<string, object?> parameters,
+        Func<SqliteDataReader, T> map)
+    {
+        EnsureSqliteProviderInitialized();
+        return ExecuteWithRetry(BuildConnectionString(), connection =>
+        {
+            using SqliteCommand command = CreateCommand(connection, sql);
+            command.CommandTimeout = Math.Max(1, (int)Math.Ceiling(batchTimeout.TotalSeconds));
+            BindParameters(command, parameters);
+
+            using SqliteDataReader reader = command.ExecuteReader();
+            List<T> rows = [];
+            while (reader.Read())
+            {
+                rows.Add(map(reader));
+            }
+            return (IReadOnlyList<T>)rows;
+        });
+    }
+
+    private string BuildConnectionString() =>
+        new SqliteConnectionStringBuilder
+        {
+            DataSource = DatabasePath,
+            Mode = SqliteOpenMode.ReadWriteCreate,
+            Pooling = false,
+            DefaultTimeout = Math.Max(1, (int)Math.Ceiling(busyTimeoutMilliseconds / 1000.0)),
+        }.ToString();
+
+    private T ExecuteWithRetry<T>(string connectionString, Func<SqliteConnection, T> operation)
+    {
+        for (int attempt = 1; attempt <= busyAttempts; attempt++)
+        {
+            try
+            {
+                using SqliteConnection connection = new(connectionString);
+                connection.Open();
+                return operation(connection);
+            }
+            catch (SqliteException ex) when (ex.SqliteErrorCode is SqliteBusyResultCode or SqliteLockedResultCode)
+            {
+                if (attempt < busyAttempts)
+                {
+                    Thread.Sleep(50 * attempt);
+                    continue;
+                }
+                throw new SqliteExecutionException($"sqlite3 error {ex.SqliteErrorCode}: {ex.Message}", ex.SqliteErrorCode, ex.Message);
+            }
+            catch (SqliteException ex)
+            {
+                throw new SqliteExecutionException($"sqlite3 error {ex.SqliteErrorCode}: {ex.Message}", ex.SqliteErrorCode, ex.Message);
+            }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+            {
+                throw new SqliteExecutionException($"Database access error: {ex.Message}", ex);
+            }
+        }
+
+        throw new SqliteExecutionException("The canonical store operation did not complete.");
+    }
+
+    private void ExecuteInTransaction(SqliteConnection connection, Action body)
+    {
+        ExecuteCommand(connection, "PRAGMA foreign_keys = ON;", null);
+        ExecuteCommand(connection, "BEGIN IMMEDIATE;", null);
+        bool committed = false;
+        try
+        {
+            body();
+            ExecuteCommand(connection, "COMMIT;", null);
+            committed = true;
+        }
+        finally
+        {
+            if (!committed)
+            {
+                Rollback(connection);
+            }
+        }
+    }
+
+    private void Rollback(SqliteConnection connection)
+    {
+        try
+        {
+            ExecuteCommand(connection, "ROLLBACK;", null);
+        }
+        catch (SqliteException)
+        {
+            // The original failure is the one that matters; the connection discards a failed rollback.
+        }
+    }
+
+    [System.Diagnostics.CodeAnalysis.SuppressMessage("Security", "CA2100:Review SQL queries for security vulnerabilities", Justification = "Internal engine executes parameterized and literal-escaped SQL scripts.")]
+    private static SqliteCommand CreateCommand(SqliteConnection connection, string sql)
+    {
+        SqliteCommand command = connection.CreateCommand();
+        command.CommandText = sql; // nosemgrep: csharp.lang.security.sqli.csharp-sqli.csharp-sqli
+        return command;
+    }
+
+    private void ExecuteCommand(
+        SqliteConnection connection,
+        string sql,
+        IReadOnlyDictionary<string, object?>? parameters)
+    {
+        using SqliteCommand command = CreateCommand(connection, sql);
+        command.CommandTimeout = Math.Max(1, (int)Math.Ceiling(batchTimeout.TotalSeconds));
+        BindParameters(command, parameters);
+        command.ExecuteNonQuery();
+    }
+
+    private static void BindParameters(
+        SqliteCommand command,
+        IReadOnlyDictionary<string, object?>? parameters)
+    {
+        if (parameters is null)
+        {
+            return;
+        }
+
+        foreach (KeyValuePair<string, object?> parameter in parameters)
+        {
+            command.Parameters.AddWithValue(parameter.Key, parameter.Value ?? DBNull.Value);
+        }
     }
 
     private static string StripCliDotCommands(string sql)
@@ -197,29 +360,5 @@ public abstract partial class BaseSqliteRepository
         ArgumentNullException.ThrowIfNull(output);
         return output.Replace("\r", string.Empty, StringComparison.Ordinal)
             .Split('\n', StringSplitOptions.RemoveEmptyEntries);
-    }
-
-    private static ProcessStartInfo CreateStartInfo() =>
-        new("sqlite3")
-        {
-            RedirectStandardInput = true,
-            RedirectStandardOutput = true,
-            RedirectStandardError = true,
-            UseShellExecute = false,
-        };
-
-    private static bool IsBusy(ProcessResult result)
-    {
-        string output = result.StandardOutput + "\n" + result.StandardError;
-        if (output.Contains("database is locked", StringComparison.OrdinalIgnoreCase)
-            || output.Contains("database is busy", StringComparison.OrdinalIgnoreCase)
-            || LockedWordRegex().IsMatch(output)
-            || BusyWordRegex().IsMatch(output)
-            || SqliteBusyOrLockedRegex().IsMatch(output))
-        {
-            return true;
-        }
-
-        return result.ExitCode == SqliteBusyResultCode || result.ExitCode == SqliteLockedResultCode;
     }
 }
