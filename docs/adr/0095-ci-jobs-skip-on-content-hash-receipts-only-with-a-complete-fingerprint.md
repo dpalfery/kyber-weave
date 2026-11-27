@@ -56,7 +56,8 @@ rules a workflow edit must keep are in
    and the dash and tray jobs hash `dash/**` and `dash/tray/**` respectively, each with the root
    `global.json`, `Directory.Build.props`, `dash/.nvmrc` and `ci.yml` where those files are inputs to
    its verdict. The dash set also hashes `analyzers/**`, because `Directory.Build.props` imports
-   those analyzer configs into the KyberDash build.
+   those analyzer configs into the KyberDash build, and `.editorconfig`, because that job's format
+   checks read it.
 4. **The fingerprint enumeration is pinned complete by a test, and cannot rot.** A repository-policy
    test compares the whole-tree argument list against `git ls-tree HEAD`, so a new top-level entry
    fails until the list covers it. A narrower set must still cover every alternation of the

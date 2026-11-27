@@ -401,7 +401,7 @@ Four sets, fixed per job, each pinned by `CiContentHashSkipTests`:
 |---|---|---|
 | Whole tree | Every tracked top-level entry: 26 directories as `<dir>/**` and 24 root files by exact name | `build-test`, `integration-test`, `squad-filesystem-contract`, `publish-smoke`, `update-loop`, `skill-docs-gate`, `codeql`, `trivy`, `semgrep`, `gitleaks` |
 | SBOM | Every alternation of the `changes` job's sbom filter: the lockfiles, `**/*.csproj`, `**/Directory.*.props`, `global.json`, the three SBOM scripts, `dash/tray/vendor/**` and both workflow files | `sbom` |
-| Dash | `dash/**`, `global.json`, `Directory.Build.props`, `analyzers/**` and `ci.yml` | `ts-gates`, `dash-e2e` |
+| Dash | `dash/**`, `global.json`, `Directory.Build.props`, `analyzers/**`, `.editorconfig` and `ci.yml` | `ts-gates`, `dash-e2e` |
 | Tray | `dash/tray/**`, `dash/.nvmrc` and `ci.yml` | `tray-rust` |
 
 The whole-tree set names every entry instead of globbing the root: a bare `'*'` or `'**'` hashes

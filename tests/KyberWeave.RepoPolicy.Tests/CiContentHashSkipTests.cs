@@ -110,11 +110,15 @@ public sealed class CiContentHashSkipTests
     ];
 
     /// <summary>
-    ///     The KyberDash inputs: the dash package, the SDK and props its server builds under, and
-    ///     <c>analyzers/**</c>, which <c>Directory.Build.props</c> imports into that build.
+    ///     The KyberDash inputs: the dash package, the SDK and props its server builds under, the
+    ///     analyzer configs those props import, and the root <c>.editorconfig</c> its format checks
+    ///     read.
     /// </summary>
     private static readonly string[] DashInputs =
-        ["dash/**", "global.json", "Directory.Build.props", "analyzers/**", ".github/workflows/ci.yml"];
+    [
+        "dash/**", "global.json", "Directory.Build.props", "analyzers/**", ".editorconfig",
+        ".github/workflows/ci.yml",
+    ];
 
     /// <summary>The tray inputs: the crate, the Node pin outside <c>dash/tray/</c>, and this workflow.</summary>
     private static readonly string[] TrayInputs = ["dash/tray/**", "dash/.nvmrc", ".github/workflows/ci.yml"];

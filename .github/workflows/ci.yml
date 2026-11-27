@@ -2938,7 +2938,7 @@ jobs:
         id: fp
         shell: bash
         env:
-          INPUT_HASH: ${{ hashFiles('dash/**', 'global.json', 'Directory.Build.props', 'analyzers/**', '.github/workflows/ci.yml') }}
+          INPUT_HASH: ${{ hashFiles('dash/**', 'global.json', 'Directory.Build.props', 'analyzers/**', '.editorconfig', '.github/workflows/ci.yml') }}
         run: |
           set -euo pipefail
           hash="${INPUT_HASH:-}"
@@ -3196,7 +3196,7 @@ jobs:
         id: fp
         shell: bash
         env:
-          INPUT_HASH: ${{ hashFiles('dash/**', 'global.json', 'Directory.Build.props', 'analyzers/**', '.github/workflows/ci.yml') }}
+          INPUT_HASH: ${{ hashFiles('dash/**', 'global.json', 'Directory.Build.props', 'analyzers/**', '.editorconfig', '.github/workflows/ci.yml') }}
         run: |
           set -euo pipefail
           hash="${INPUT_HASH:-}"
