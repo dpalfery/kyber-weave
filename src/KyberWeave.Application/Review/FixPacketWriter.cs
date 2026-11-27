@@ -328,9 +328,13 @@ internal static class FixPacketWriter
         foreach (IReadOnlyList<OwnedFinding> component in Components(owned))
         {
             List<TouchedFile> touched = [.. component.SelectMany(entry => entry.Touched).DistinctBy(file => file.Path)];
+            // Owners keeps only tasks with an id, and a component holds at least one owned finding.
             string ownerId = touched
                 .SelectMany(file => file.Owners)
-                .MinBy(task => planOrder[task.Id!])!.Id!;
+                .Select(task => task.Id)
+                .OfType<string>()
+                .MinBy(id => planOrder[id])
+                ?? throw new InvalidOperationException("A component of owned findings has no owning task.");
             if (!byTask.TryGetValue(ownerId, out Packet? packet))
                 byTask[ownerId] = packet = new Packet(PacketKind.Task, ownerId, [], []);
 
@@ -349,8 +353,8 @@ internal static class FixPacketWriter
 
             foreach (TouchedFile file in touched.Where(file => file.Owners.All(task => task.Id != ownerId)))
             {
-                foreach (PlanTaskFileEntry other in file.Owners)
-                    packet.AddAlsoInScope(other.Id!, file.Path);
+                foreach (string otherId in file.Owners.Select(task => task.Id).OfType<string>())
+                    packet.AddAlsoInScope(otherId, file.Path);
             }
         }
 
@@ -423,7 +427,7 @@ internal static class FixPacketWriter
         if (!string.IsNullOrWhiteSpace(finding.Evidence))
         {
             foreach (System.Text.RegularExpressions.Match match in ReviewVerdictRules.EvidenceCitation()
-                         .Matches(ReviewSeatInput.Clip(finding.Evidence)!).Take(ReviewVerdictRules.MaxEvidenceCitations))
+                         .Matches(ReviewSeatInput.Clip(finding.Evidence, ReviewSeatInput.MaxTextCharacters)).Take(ReviewVerdictRules.MaxEvidenceCitations))
             {
                 string cited = match.Groups["file"].Value;
                 if (CitedLineCheck.IsRepositoryRelative(cited))
