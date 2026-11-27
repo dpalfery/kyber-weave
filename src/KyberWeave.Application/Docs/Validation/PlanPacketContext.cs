@@ -1,3 +1,4 @@
+using System.Diagnostics.CodeAnalysis;
 using System.Globalization;
 using System.Text;
 using System.Text.RegularExpressions;
@@ -110,7 +111,7 @@ internal sealed partial class PlanPacketContext
     }
 
     /// <summary>Whether the plan's Decisions table has a row for <paramref name="id"/> (normalized, such as <c>D5</c>).</summary>
-    public bool TryGetDecision(string id, out PlanDecision decision) => _decisions.TryGetValue(id, out decision!);
+    public bool TryGetDecision(string id, [NotNullWhen(true)] out PlanDecision? decision) => _decisions.TryGetValue(id, out decision);
 
     /// <summary>
     /// Whether any Decisions row's text starts with <paramref name="prefix"/>, ignoring case and the table's own

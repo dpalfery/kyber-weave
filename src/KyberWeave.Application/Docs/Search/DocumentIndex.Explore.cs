@@ -1,3 +1,4 @@
+using System.Diagnostics.CodeAnalysis;
 using System.Globalization;
 using System.Text;
 using KyberWeave.Core.Docs.Graph;
@@ -58,7 +59,7 @@ public sealed partial class DocumentIndex
 
         if (cursor is not null)
         {
-            if (!ExploreCursor.TryParse(cursor, out ExploreCursor parsed))
+            if (!ExploreCursor.TryParse(cursor, out ExploreCursor? parsed))
             {
                 return ExploreAnswer.InvalidCursor(
                     "The cursor does not continue this question. Ask again without a cursor.");
@@ -1087,9 +1088,9 @@ public sealed partial class DocumentIndex
 
 internal sealed record ExploreCursor(string RelativePath, string LeafId, int CharacterOffset)
 {
-    public static bool TryParse(string token, out ExploreCursor cursor)
+    public static bool TryParse(string token, [NotNullWhen(true)] out ExploreCursor? cursor)
     {
-        cursor = null!;
+        cursor = null;
         int lastPipe = token.LastIndexOf('|');
         if (lastPipe <= 0 || lastPipe >= token.Length - 1)
         {

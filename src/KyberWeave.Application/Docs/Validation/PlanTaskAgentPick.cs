@@ -189,6 +189,11 @@ public sealed class PlanTaskAgentPick : IPlanTaskAgentPicker, IDisposable
     /// <summary>One task's question, asked on its own so the model reads only that task's state.</summary>
     private async Task<PlanTaskAgentChoice?> AskAsync(PlanTaskFileEntry task)
     {
+        if (task.Id is not { } taskId)
+        {
+            return null;
+        }
+
         const string key = "pick";
         string? rubric = Rubric();
         ArbiterFactSet facts = new ArbiterFactSet()
@@ -198,12 +203,12 @@ public sealed class PlanTaskAgentPick : IPlanTaskAgentPicker, IDisposable
             .With($"{key}.task", task.Prompt ?? "(not stated)", ArbiterFactLabel.Asserted)
             .With($"{key}.architect-rating", DeveloperTiers.LabelFor(task.Difficulty), ArbiterFactLabel.Derived)
             .With($"{key}.rubric", rubric ?? "(not available)", ArbiterFactLabel.Asserted);
-        string id = RulePrefix + task.Id;
-        string agreementId = AgreementPrefix + task.Id;
-        List<ArbiterRule> rules = [RuleFor(task.Id!, key)];
+        string id = RulePrefix + taskId;
+        string agreementId = AgreementPrefix + taskId;
+        List<ArbiterRule> rules = [RuleFor(taskId, key)];
         if (rubric is not null)
         {
-            rules.Add(AgreementRuleFor(task.Id!, key));
+            rules.Add(AgreementRuleFor(taskId, key));
         }
 
         ArbiterStep1BatchResult result;
