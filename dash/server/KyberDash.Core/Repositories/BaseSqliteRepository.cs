@@ -9,7 +9,7 @@ namespace KyberDash.Core.Repositories;
 /// <summary>A parameterized SQLite statement and the named parameters bound to it.</summary>
 /// <param name="Sql">SQL text whose values are supplied as <c>$name</c> parameters.</param>
 /// <param name="Parameters">Parameter values keyed by their <c>$name</c> marker.</param>
-public sealed record SqlStatement(string Sql, IReadOnlyDictionary<string, object?> Parameters)
+public record SqlStatement(string Sql, IReadOnlyDictionary<string, object?> Parameters)
 {
     /// <summary>Creates a statement that binds no parameters.</summary>
     /// <param name="sql">SQL text to execute.</param>
