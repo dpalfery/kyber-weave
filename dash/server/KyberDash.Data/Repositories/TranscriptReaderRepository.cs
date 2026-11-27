@@ -74,8 +74,8 @@ public class TranscriptReaderRepository : ITranscriptReaderRepository
         TimeProvider? timeProvider = null)
     {
         bool explicitHome = !string.IsNullOrWhiteSpace(homeDirectory);
-        this.homeDirectory = explicitHome
-            ? Path.GetFullPath(homeDirectory!)
+        this.homeDirectory = explicitHome && homeDirectory is { } home
+            ? Path.GetFullPath(home)
             : Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
         this.stateDirectory = !string.IsNullOrWhiteSpace(stateDirectory)
             ? Path.GetFullPath(stateDirectory)
@@ -968,7 +968,8 @@ public class TranscriptReaderRepository : ITranscriptReaderRepository
                 turns.Add(flushed);
             }
 
-            if (!TryExtractCodexUsage(payload, entryTimestamp, sessionId ?? fileStem, currentModel, turnIndex, out ParsedProviderCall? call, out string? detectedModel))
+            if (!TryExtractCodexUsage(payload, entryTimestamp, sessionId ?? fileStem, currentModel, turnIndex, out ParsedProviderCall? call, out string? detectedModel)
+                || call is null)
             {
                 return;
             }
@@ -989,7 +990,7 @@ public class TranscriptReaderRepository : ITranscriptReaderRepository
                 ParserId = CodexParserId,
                 ParserContractVersion = ParserContractVersion,
                 ImportedAt = resolvedImportedAt,
-                Call = call!,
+                Call = call,
                 ReaderTurn = flushed,
             });
         }
