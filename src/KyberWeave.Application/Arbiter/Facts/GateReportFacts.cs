@@ -233,10 +233,11 @@ public sealed class GateReportFacts(
     /// </returns>
     public bool? FailingRunFirst(string? returnedText, string? repositoryRoot)
     {
-        if (Agrees(returnedText, repositoryRoot) is not true)
+        if (Agrees(returnedText, repositoryRoot) is not true || returnedText is null)
             return null;
 
-        DigestClaim claim = ReadClaim(returnedText!, repositoryRoot)!;
+        DigestClaim claim = ReadClaim(returnedText, repositoryRoot)
+            ?? throw new InvalidOperationException("A return that agreed with its report carries no readable claim.");
         string? path = Resolve(claim.ReportPath, repositoryRoot);
         if ((path is null || !store.FileExists(path)) && claim.WholeLinePath is not null)
             path = Resolve(claim.WholeLinePath, repositoryRoot) ?? path;
