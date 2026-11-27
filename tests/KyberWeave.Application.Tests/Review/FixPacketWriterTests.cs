@@ -418,6 +418,59 @@ public sealed class FixPacketWriterTests : IDisposable
         Assert.DoesNotContain("This fix may also edit task T3's files", Read("task-T2"), StringComparison.Ordinal);
     }
 
+    /// <summary>
+    /// A coupled packet's history and commits cover the other task's files too, so a finding or a commit already made
+    /// there is not lost to the worker that must edit it.
+    /// </summary>
+    [Fact]
+    public void ACoupledPacketsHistoryAndCommitsCoverTheOtherTasksFiles()
+    {
+        WritePlan("""
+            schema-version: 1
+            plan: docs/plans/demo.md
+            tasks:
+              - id: T2
+                files:
+                  - src/Contract/OrderDto.cs
+              - id: T3
+                files:
+                  - src/Http/OrdersController.cs
+            """);
+        WriteEarlierCycle(
+            1,
+            head: "aaaaaaa",
+            Finding("http/earlier", "src/Http/OrdersController.cs", line: 40, claim: "The controller drops the page."));
+        ScriptChange(Plan, "src/Contract/OrderDto.cs", "src/Http/OrdersController.cs");
+        _services.Processes.Script(
+            "git",
+            new ProcessRunResult(0, "ccccccc fix the controller\n", false),
+            "--literal-pathspecs",
+            "log",
+            "--oneline",
+            "--no-color",
+            "aaaaaaa..HEAD",
+            "--",
+            "src/Contract/OrderDto.cs",
+            "src/Http/OrdersController.cs");
+
+        _ = Write(
+            [
+                Finding(
+                    "contract/page-envelope",
+                    "src/Contract/OrderDto.cs",
+                    evidence: "src/Http/OrdersController.cs:40 returns the envelope.")
+            ],
+            [],
+            prior: Path.Combine(_review, "cycle-1"));
+
+        string packet = Read("task-T2");
+        Assert.Contains(
+            "cycle 1 · http/earlier (major) src/Http/OrdersController.cs:40 — The controller drops the page.",
+            packet,
+            StringComparison.Ordinal);
+        Assert.Contains("## Commits on these files since cycle 1\n\nccccccc fix the controller\n", packet, StringComparison.Ordinal);
+    }
+
     /// <summary>Findings that touch the same file are one fix even when the file is cited from another task's file.</summary>
     [Fact]
     public void FindingsThatShareAFileAreOnePacket()

@@ -526,6 +526,15 @@ internal static class FixPacketWriter
     private static string Text(Packet packet, Earlier earlier, string tree, IGitChangeReader git)
     {
         List<string> files = [.. packet.Findings.Select(finding => Normalize(finding.File)).Distinct(StringComparer.Ordinal)];
+        foreach (OtherTaskFiles other in packet.AlsoInScope)
+        {
+            foreach (string file in other.Files)
+            {
+                if (!files.Contains(file, StringComparer.Ordinal))
+                    files.Add(file);
+            }
+        }
+
         StringBuilder text = new();
         text.Append("# Fix packet: ").Append(packet.Group).Append("\n\n");
         text.Append(Header).Append("\n\n");
