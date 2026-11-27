@@ -352,6 +352,74 @@ public class DocumentSectionTests
         Assert.Single(sections);
         Assert.Equal("Commands", sections[0].Heading);
     }
+
+    /// <summary>
+    /// One reading of a heading, whichever split asks. Markdig accepts up to three leading
+    /// spaces, a closing run of hashes and <c>~~~</c> fences, and a hand-written line scanner
+    /// that matched only a column-zero <c>### </c> read all three differently from <c>Explore</c>.
+    /// </summary>
+    [Fact]
+    public void ATopicSplitAndAnExploreSplitAgreeOnTheAwkwardHeadingForms()
+    {
+        const string Body = """
+            ## Coding standards
+
+            A lead sentence under the parent heading.
+
+               ### Indented heading
+
+            Prose under an indented heading.
+
+            ~~~text
+            ### not a heading
+            ~~~
+
+            ### Closing hashes ###
+
+            Prose under a heading that closes with hashes.
+            """;
+
+        IReadOnlyList<DocumentSection> topic = DocumentMarkdown.SplitTopicSections(Body);
+        IReadOnlyList<DocumentLeaf> explore = DocumentMarkdown.SplitLeaves(Body, "csharp");
+
+        Assert.Equal(
+            ["Coding standards", "Indented heading", "Closing hashes"],
+            topic.Select(section => section.Heading));
+
+        // The leaf split names a leaf by its slug, so what is compared is which units exist,
+        // not their ids: the parent's lead and both awkward headings are found by both splits.
+        Assert.Equal(topic.Count, explore.Count);
+    }
+
+    /// <summary>
+    /// A heading keeps every word it displays. The section split reads heading text from the
+    /// parsed inline tree, so a heading written as inline code or with emphasis must not lose
+    /// that word: the corpus has <c>### `unsafe`</c> in the Rust standard and amendment headings
+    /// such as <c>## Amendment 2026-10-12: `tool_search`</c>. The markup delimiters themselves
+    /// are not part of the heading text, so the words survive without their backticks or
+    /// asterisks.
+    /// </summary>
+    [Fact]
+    public void AHeadingKeepsItsInlineCodeEmphasisAndLinkWords()
+    {
+        const string Body = """
+            ## Coding standards
+
+            ### `unsafe` and *checked* arithmetic
+
+            Prose under a heading written with code and emphasis.
+
+            ### See [the runbook](../runbook.md)
+
+            Prose under a heading that is a link.
+            """;
+
+        IReadOnlyList<DocumentSection> sections = DocumentMarkdown.SplitTopicSections(Body);
+
+        Assert.Equal(
+            ["unsafe and checked arithmetic", "See the runbook"],
+            sections.Select(section => section.Heading));
+    }
 }
 
 public class CodeJoinScopingTests
@@ -835,9 +903,9 @@ public sealed class CodingStandardsLookupTests : IDisposable
     }
 
     /// <summary>
-    /// A nested heading keeps its true line: the section split trims the blank line under
-    /// "## Coding standards", and counting from the trimmed body put "### Errors and
-    /// diagnostics" one line early, which breaks the excerpt's document order.
+    /// A nested heading keeps its true line. The section split trims the blank line under
+    /// "## Coding standards", so counting from the trimmed body put "### Errors and
+    /// diagnostics" one line above its heading.
     /// </summary>
     [Fact]
     public void ANestedHeadingUnderABlankLineKeepsItsLineNumber()

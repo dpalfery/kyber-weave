@@ -226,7 +226,7 @@ public static class TriggerFactBuilder
                 "delegation.target" => target,
                 "delegation.target-class" => targetClass,
                 "delegation.target-profile" => profile,
-                "delegation.prompt" => stripped,
+                ArbiterTriggerCatalog.DelegationPromptFact => stripped,
                 // Bounded excerpts for model questions: the raw head keeps the header block as written, the body
                 // head is the dispatch the worker reads. Raw header values keep what validation rejected.
                 "delegation.head" => TextExcerpts.Head(prompt),

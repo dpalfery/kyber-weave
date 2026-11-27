@@ -4,6 +4,7 @@ using KyberWeave.Contracts.Repositories;
 using KyberWeave.Core.Configuration;
 using KyberWeave.Core.Docs.Graph;
 using KyberWeave.Core.Docs.Model;
+using KyberWeave.Core.Docs.Parsing;
 using KyberWeave.Core.Text;
 using KyberWeave.Domain.CodeGraph;
 
@@ -809,97 +810,12 @@ public sealed partial class DocumentIndex
     }
 
     /// <summary>
-    /// The sections a topic is scored against. An <c>##</c> section that contains
-    /// <c>###</c> headings is expanded to those headings, and to its own lead when
-    /// that lead has prose. The parent heading is not scored on its own: "Security
-    /// and data handling" would otherwise beat "Errors and diagnostics" on the
-    /// single shared word and spend the budget before the subsection is reached.
-    /// A section with no <c>###</c> heading stays as it is, which is what the
-    /// in-memory fixtures score.
+    /// The sections a topic is scored against, split by the corpus's one Markdown parser so a
+    /// nested heading is read here the same way <c>Explore</c> reads it.
     /// </summary>
     private static List<DocumentSection> TopicSections(DocumentModel doc)
     {
-        List<DocumentSection> sections = new();
-        foreach (DocumentSection section in doc.Sections)
-        {
-            sections.AddRange(ExpandNestedHeadings(section));
-        }
-
-        return sections;
-    }
-
-    /// <summary>
-    /// Splits one <c>##</c> section on its <c>###</c> headings. A <c>###</c> line
-    /// inside a fence is prose, not a boundary. Returns the section unchanged when
-    /// it has no such heading.
-    /// </summary>
-    private static List<DocumentSection> ExpandNestedHeadings(DocumentSection section)
-    {
-        string[] lines = section.Body.Replace("\r\n", "\n", StringComparison.Ordinal).Split('\n');
-        List<DocumentSection> children = new();
-        List<string> buffer = new();
-        string? heading = null;
-        int headingLine = section.LineNumber;
-        int bodyLine = section.BodyLine > 0 ? section.BodyLine : section.LineNumber + 1;
-        bool inFence = false;
-        bool sawNested = false;
-
-        void FlushNested()
-        {
-            if (heading is null) return;
-
-            children.Add(new DocumentSection(
-                heading,
-                string.Join("\n", buffer).Trim('\n'),
-                headingLine));
-        }
-
-        for (int i = 0; i < lines.Length; i++)
-        {
-            string line = lines[i];
-            if (line.TrimStart().StartsWith("```", StringComparison.Ordinal))
-            {
-                inFence = !inFence;
-            }
-            else if (!inFence && line.StartsWith("### ", StringComparison.Ordinal))
-            {
-                if (!sawNested && HasProse(buffer))
-                {
-                    children.Add(new DocumentSection(
-                        section.Heading,
-                        string.Join("\n", buffer).Trim('\n'),
-                        section.LineNumber));
-                }
-                else if (sawNested)
-                {
-                    FlushNested();
-                }
-
-                sawNested = true;
-                heading = line[4..].Trim();
-                headingLine = bodyLine + i;
-                buffer = [];
-                continue;
-            }
-
-            buffer.Add(line);
-        }
-
-        if (!sawNested) return [section];
-
-        FlushNested();
-        return children;
-    }
-
-    /// <summary>True when the lines contain something other than blanks.</summary>
-    private static bool HasProse(List<string> lines)
-    {
-        foreach (string line in lines)
-        {
-            if (!string.IsNullOrWhiteSpace(line)) return true;
-        }
-
-        return false;
+        return [.. DocumentMarkdown.SplitTopicSections(doc.Body)];
     }
 
     /// <summary>

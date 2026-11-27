@@ -40,9 +40,11 @@ ARGS=(-p "$(cat "$RUN/prompt.md")" --agent conductor --model "$HC_CONDUCTOR_MODE
       --deny-tool 'kyber-weave(docs_push_run_branch_and_open_draft_pull_request)')
 [ -n "$HC_MAX_AI_CREDITS" ] && ARGS+=(--max-ai-credits "$HC_MAX_AI_CREDITS")
 
+# A machine that sleeps mid-run kills gates on their wall-clock timeout (run 6, D87); keep it awake on macOS.
+KEEP_AWAKE=(); command -v caffeinate >/dev/null && KEEP_AWAKE=(caffeinate -ims)
 START=$(date +%s)
 GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=remote.origin.pushurl GIT_CONFIG_VALUE_0=blocked-by-hill-climb \
-    timeout --signal=TERM --kill-after=60 "${HC_RUN_TIMEOUT_MIN}m" copilot "${ARGS[@]}" \
+    ${KEEP_AWAKE[@]+"${KEEP_AWAKE[@]}"} timeout --signal=TERM --kill-after=60 "${HC_RUN_TIMEOUT_MIN}m" copilot "${ARGS[@]}" \
     2>>"$RUN/stderr.log" | cat >>"$RUN/session.jsonl"
 CODE=${PIPESTATUS[0]}
 # Run 4 ended with both redirected files emptied; Copilot also keeps the stream in its session store, so fall back
