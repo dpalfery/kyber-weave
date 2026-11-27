@@ -34,17 +34,22 @@ last-reviewed: 2026-11-26
 
 - A canon column does not hold a JSON document. A missing row means the value was not
   reported, and it is not stored as zero.
-- **KW-STD-SQL-004 to -007 apply from the remediation's first slice**, which gives
-  `BaseSqliteRepository` a parameterized command path and the engine its SQLite package; until it
-  lands, new code uses the existing `TextExpr` path and adds no new CLI database.
+- **KW-STD-SQL-004 to -007 apply to new code now.** The remediation's first slice gives
+  `BaseSqliteRepository` a parameterized command path and the engine its SQLite package.
+  Until that slice lands, the existing `TextExpr` call sites stay as debt
+  (`docs/todo/csharp-standards-remediation.md`). New code does not add to them, and it adds no
+  new CLI database.
 - **KW-STD-SQL-004 Parameterized.** Every value enters SQL as a named `$parameter` on the
   command. `TextExpr` and blob literals are retired; existing ones are remediation debt
   (`docs/todo/csharp-standards-remediation.md`).
-- **KW-STD-SQL-005 Named statements.** Every statement is a named `const string` in one query
-  catalogue per store, the stored-procedure equivalent SQLite lacks. No SQL is assembled inside a
-  method beyond a generated `IN` list of parameters.
+- **KW-STD-SQL-005 Named statements.** Every query and DML statement is a named `const string`
+  in one query catalogue per store, the stored-procedure equivalent SQLite lacks. No query or DML
+  is assembled inside a method beyond a generated `IN` list of parameters. DDL is the exception:
+  `SchemaDdlGenerator` emits `CREATE TABLE` and `CREATE INDEX` from `RelationalSchemaCatalog`,
+  and that generator is the only sanctioned DDL writer.
 - **KW-STD-SQL-006 Named fields.** Read a row by column name (`GetOrdinal`) into a typed record,
   never by position and never by re-parsing text output.
-- **KW-STD-SQL-007 In process.** Every database the product owns, the engine's caches included, is
-  opened through `Microsoft.Data.Sqlite.Core` over the system SQLite. The `sqlite3` CLI is kept
-  only for reading CodeGraph's index.
+- **KW-STD-SQL-007 In process.** Product runtime code opens every database the product owns,
+  the engine's caches included, through `Microsoft.Data.Sqlite.Core` over the system SQLite.
+  The `sqlite3` CLI stays for reading CodeGraph's index, and for an integration test that needs
+  a real `sqlite3` process.

@@ -125,6 +125,10 @@ dotnet_diagnostic.CA1313.severity = suggestion
 
 # Test methods are invoked by the test runner, never by a caller that could pass null, so the
 # public-argument guard of KW-STD-CS-004 (CA1062) does not apply to test code.
+# A dotnet_diagnostic severity line is outside the suppressions gate on purpose. That gate
+# recognises a pragma, a SuppressMessage attribute and a NoWarn element. The reason for this
+# exemption, and for each suggestion line in analyzers/ratchet.globalconfig, is the comment
+# above the line.
 [{tests,dash/server.tests}/**.cs]
 dotnet_diagnostic.CA1062.severity = none
 # KW-STD-CS-002 limits method complexity and class coupling in product code. A test method wires
