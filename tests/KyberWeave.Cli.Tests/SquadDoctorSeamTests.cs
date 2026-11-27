@@ -32,7 +32,11 @@ public sealed class SquadDoctorSeamTests : IDisposable
     private readonly RecordingSourceLocator _locator = new();
     private readonly StubDevinOverlap _devinOverlap = new();
 
-    public void Dispose() => _ansi.Dispose();
+    public void Dispose()
+    {
+        _ansi.Dispose();
+        _streams.Dispose();
+    }
 
     /// <summary>A workspace with no Devin marker in the injected file system is reported as not checked.</summary>
     [Fact]

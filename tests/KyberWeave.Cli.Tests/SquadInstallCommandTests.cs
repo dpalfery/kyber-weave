@@ -19,7 +19,11 @@ public sealed class SquadInstallCommandTests : IDisposable
     private readonly FakeSquadTargetResolver _targets = new();
     private readonly FakeKyberWeaveConfigRepository _configs = new();
 
-    public void Dispose() => _ansi.Dispose();
+    public void Dispose()
+    {
+        _ansi.Dispose();
+        _streams.Dispose();
+    }
 
     [Fact]
     public void Execute_UnknownTarget_IsRefusedAsClientInput()

@@ -19,6 +19,7 @@ public sealed class SquadUninstallCommandTests : IDisposable
     public void Dispose()
     {
         _ansi.Dispose();
+        _streams.Dispose();
     }
 
     [Fact]

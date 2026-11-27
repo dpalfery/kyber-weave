@@ -22,6 +22,7 @@ public sealed class SquadUpdateCommandTests : IDisposable
     public void Dispose()
     {
         _ansi.Dispose();
+        _streams.Dispose();
     }
 
     [Fact]
