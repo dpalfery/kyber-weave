@@ -1549,6 +1549,9 @@ public sealed class SquadTransaction : ISquadTransaction
                 $"Squad claim artifact '{displayPath}' changed during restoration.");
     }
 
+    private OriginalEntryKind GetEntryKind(string path) =>
+        TransactionSupport.GetEntryKind(_files, path);
+
     private bool EntryMatchesOriginal(
         string targetPath,
         CapturedRestorePayload payload)
@@ -1740,7 +1743,7 @@ public sealed class SquadTransaction : ISquadTransaction
     {
         _files.CreateDirectory(Path.GetDirectoryName(targetPath)!);
         if (!VerifyRestoreAfterImage(targetPath, afterKind, afterSha256, payload) ||
-            TransactionSupport.GetEntryKind(_files, targetPath) != afterKind)
+            GetEntryKind(targetPath) != afterKind)
             throw new InvalidDataException(
                 $"Squad live after-image '{displayPath}' changed before restoration.");
 

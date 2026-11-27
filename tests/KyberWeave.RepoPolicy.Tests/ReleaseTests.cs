@@ -9,6 +9,7 @@ using KyberWeave.Core.Processes;
 using KyberWeave.Tests.Corpus;
 using Xunit;
 using Xunit.Sdk;
+using YamlDotNet.Core;
 using YamlDotNet.Serialization;
 
 namespace KyberWeave.Tests;
@@ -1160,7 +1161,7 @@ public sealed class ReleaseTests
             object? parsed = deserializer.Deserialize(workflow);
             Assert.NotNull(parsed);
         }
-        catch (Exception ex)
+        catch (YamlException ex)
         {
             Assert.Fail($"release.yml is not valid YAML: {ex.Message}");
         }
@@ -2047,7 +2048,11 @@ public sealed class ReleaseTests
             {
                 Directory.Delete(shimDir, true);
             }
-            catch
+            catch (IOException)
+            {
+                // best-effort cleanup
+            }
+            catch (UnauthorizedAccessException)
             {
                 // best-effort cleanup
             }
@@ -2205,7 +2210,11 @@ public sealed class ReleaseTests
             {
                 Directory.Delete(hermBinDir, true);
             }
-            catch
+            catch (IOException)
+            {
+                // best-effort cleanup
+            }
+            catch (UnauthorizedAccessException)
             {
                 // best-effort cleanup
             }
@@ -3295,7 +3304,12 @@ public sealed class ReleaseTests
             {
                 Directory.Delete(_dir, true);
             }
-            catch
+            catch (IOException)
+            {
+                // best-effort cleanup; sandbox lives under %TEMP% and is
+                // guaranteed-unique so a leak is bounded.
+            }
+            catch (UnauthorizedAccessException)
             {
                 // best-effort cleanup; sandbox lives under %TEMP% and is
                 // guaranteed-unique so a leak is bounded.

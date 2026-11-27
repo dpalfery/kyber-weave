@@ -38,7 +38,7 @@ internal static class SectionFrontmatterParser
         {
             overlay = MarkdownFrontmatterReader.Deserializer.Deserialize<SectionFrontmatterOverlay>(patched);
         }
-        catch (Exception ex)
+        catch (YamlException ex)
         {
             return (ex.Message, null, null);
         }

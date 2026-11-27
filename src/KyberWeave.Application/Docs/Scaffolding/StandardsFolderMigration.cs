@@ -4,6 +4,7 @@ using System.Text.RegularExpressions;
 using KyberWeave.Contracts.Paths;
 using KyberWeave.Contracts.Repositories;
 using KyberWeave.Core.Configuration;
+using KyberWeave.Core.FileSystem;
 
 namespace KyberWeave.Core.Docs.Scaffolding;
 
@@ -517,7 +518,7 @@ public sealed partial class StandardsFolderMigration
             {
                 undo[index]();
             }
-            catch (Exception exception)
+            catch (Exception exception) when (FileFailure.Is(exception))
             {
                 // Rollback is best effort: every undo runs even when an earlier one failed, and a
                 // failure is reported beside the original error rather than swallowed.

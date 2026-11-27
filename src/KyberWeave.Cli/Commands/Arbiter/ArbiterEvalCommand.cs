@@ -44,52 +44,15 @@ public sealed class ArbiterEvalCommand(
             return 1;
         }
 
-        if (settings.Trigger is not null)
+        if (!ValidateTrigger(settings.Trigger, report))
         {
-            try
-            {
-                ArbiterTriggerFamilies.ForTrigger(settings.Trigger);
-            }
-            catch (ArgumentException exception)
-            {
-                report.Add(new Diagnostic(
-                    RuleValidator.MalformedSection,
-                    Severity.Error,
-                    exception.Message,
-                    "--trigger"));
-                CommandHelpers.Finish(console, report, settings, "arbiter eval", "Dispatch");
-                return 1;
-            }
-        }
-
-        if (string.IsNullOrWhiteSpace(settings.Event) || !files.FileExists(settings.Event))
-        {
-            report.Add(new Diagnostic(
-                RuleValidator.MalformedSection,
-                Severity.Error,
-                settings.Event is null
-                    ? "No event file was supplied."
-                    : $"Event file '{settings.Event}' does not exist.",
-                "--event",
-                Hint: "Pass a recorded event, for example 'arbiter eval --trigger delegate --event ./event.json --provider none'."));
             CommandHelpers.Finish(console, report, settings, "arbiter eval", "Dispatch");
             return 1;
         }
 
-        ArbiterEvent ev;
-        try
+        ArbiterEvent? ev = LoadEvent(settings.Event, report);
+        if (ev is null)
         {
-            string json = files.ReadAllText(settings.Event);
-            ev = JsonSerializer.Deserialize<ArbiterEvent>(json, EventJson)
-                ?? throw new JsonException("The event file holds no event.");
-        }
-        catch (Exception exception) when (FileFailure.Is(exception) || exception is JsonException)
-        {
-            report.Add(new Diagnostic(
-                RuleValidator.MalformedSection,
-                Severity.Error,
-                $"Event file '{settings.Event}' could not be read as an ArbiterEvent: {exception.Message}",
-                "--event"));
             CommandHelpers.Finish(console, report, settings, "arbiter eval", "Dispatch");
             return 1;
         }
@@ -158,6 +121,61 @@ public sealed class ArbiterEvalCommand(
 
         CommandHelpers.Finish(console, report, settings, "arbiter eval", "Dispatch");
         return report.HasErrors ? 1 : 0;
+    }
+
+    /// <summary>Validates the <c>--trigger</c> value; an unknown trigger is reported and false returned.</summary>
+    private bool ValidateTrigger(string? trigger, DiagnosticReport report)
+    {
+        if (trigger is null)
+            return true;
+
+        try
+        {
+            ArbiterTriggerFamilies.ForTrigger(trigger);
+            return true;
+        }
+        catch (ArgumentException exception)
+        {
+            report.Add(new Diagnostic(
+                RuleValidator.MalformedSection,
+                Severity.Error,
+                exception.Message,
+                "--trigger"));
+            return false;
+        }
+    }
+
+    /// <summary>Reads and parses the event file named by <c>--event</c>; a missing or unreadable file is reported and null returned.</summary>
+    private ArbiterEvent? LoadEvent(string? eventPath, DiagnosticReport report)
+    {
+        if (string.IsNullOrWhiteSpace(eventPath) || !files.FileExists(eventPath))
+        {
+            report.Add(new Diagnostic(
+                RuleValidator.MalformedSection,
+                Severity.Error,
+                eventPath is null
+                    ? "No event file was supplied."
+                    : $"Event file '{eventPath}' does not exist.",
+                "--event",
+                Hint: "Pass a recorded event, for example 'arbiter eval --trigger delegate --event ./event.json --provider none'."));
+            return null;
+        }
+
+        try
+        {
+            string json = files.ReadAllText(eventPath);
+            return JsonSerializer.Deserialize<ArbiterEvent>(json, EventJson)
+                ?? throw new JsonException("The event file holds no event.");
+        }
+        catch (Exception exception) when (FileFailure.Is(exception) || exception is JsonException)
+        {
+            report.Add(new Diagnostic(
+                RuleValidator.MalformedSection,
+                Severity.Error,
+                $"Event file '{eventPath}' could not be read as an ArbiterEvent: {exception.Message}",
+                "--event"));
+            return null;
+        }
     }
 
     /// <summary>Runs the command without cancellation; the entry point tests use.</summary>

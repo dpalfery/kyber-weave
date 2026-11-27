@@ -300,44 +300,7 @@ public sealed class CopilotPromptUninstallCommand : Command<CopilotPromptSetting
         }
 
         string promptPath = CopilotPromptFile.InstalledPath(CopilotPromptCommandSupport.Home(environment));
-        List<(string File, byte[] Document)> removals = [];
-        List<string> refusals = [];
-
-        foreach (VsCodeFlavour flavour in CopilotPromptCommandSupport.DetectedTargets(environment, _files, requested))
-        {
-            string file = CopilotPromptCommandSupport.SettingsFileOf(flavour, environment);
-            SettingsFileRead read = CopilotPromptCommandSupport.ReadSettingsFile(_files, file);
-            if (read.Error is not null)
-            {
-                refusals.Add($"{file} could not be read, so it was left unchanged: {read.Error}");
-                continue;
-            }
-
-            if (read.Document is not { } document)
-                continue;
-
-            CopilotOverrideState? state = CopilotOverrideSettings.Read(document);
-            if (state is null)
-            {
-                refusals.Add($"{file} is not a readable JSON object, so it was left unchanged.");
-                continue;
-            }
-
-            if (!state.StarEntryPresent)
-                continue;
-
-            if (!CopilotPromptCommandSupport.PointsAtPrompt(state, promptPath, environment))
-            {
-                refusals.Add($"{file} has a '{CopilotOverrideSettings.StarEntry}' entry that is not Kyber-Weave's, so it was left unchanged.");
-                continue;
-            }
-
-            JsonSplicePlan plan = JsonServerSplice.PlanRemoval(document, [CopilotOverrideSettings.SettingId], CopilotOverrideSettings.StarEntry);
-            if (plan.Outcome == JsonSpliceOutcome.Removed)
-                removals.Add((file, plan.Document));
-            else
-                refusals.Add($"{file} cannot be changed safely: {plan.Message ?? "the document is not one VS Code can load"}");
-        }
+        (List<(string File, byte[] Document)> removals, List<string> refusals) = PlanRemovals(environment, promptPath, requested);
 
         if (refusals.Count > 0)
         {
@@ -393,6 +356,55 @@ public sealed class CopilotPromptUninstallCommand : Command<CopilotPromptSetting
         else
             CopilotPromptCommandSupport.Say(_console, "Restart VS Code to apply it.");
         return 0;
+    }
+
+    /// <summary>
+    /// Plans the uninstall per detected build: a settings file that holds this install's entry is queued for removal,
+    /// every other readable state is a refusal. Only an entry naming this prompt file is ever removed.
+    /// </summary>
+    private (List<(string File, byte[] Document)> Removals, List<string> Refusals) PlanRemovals(
+        CopilotPromptEnvironment environment, string promptPath, VsCodeFlavour? requested)
+    {
+        List<(string File, byte[] Document)> removals = [];
+        List<string> refusals = [];
+
+        foreach (VsCodeFlavour flavour in CopilotPromptCommandSupport.DetectedTargets(environment, _files, requested))
+        {
+            string file = CopilotPromptCommandSupport.SettingsFileOf(flavour, environment);
+            SettingsFileRead read = CopilotPromptCommandSupport.ReadSettingsFile(_files, file);
+            if (read.Error is not null)
+            {
+                refusals.Add($"{file} could not be read, so it was left unchanged: {read.Error}");
+                continue;
+            }
+
+            if (read.Document is not { } document)
+                continue;
+
+            CopilotOverrideState? state = CopilotOverrideSettings.Read(document);
+            if (state is null)
+            {
+                refusals.Add($"{file} is not a readable JSON object, so it was left unchanged.");
+                continue;
+            }
+
+            if (!state.StarEntryPresent)
+                continue;
+
+            if (!CopilotPromptCommandSupport.PointsAtPrompt(state, promptPath, environment))
+            {
+                refusals.Add($"{file} has a '{CopilotOverrideSettings.StarEntry}' entry that is not Kyber-Weave's, so it was left unchanged.");
+                continue;
+            }
+
+            JsonSplicePlan plan = JsonServerSplice.PlanRemoval(document, [CopilotOverrideSettings.SettingId], CopilotOverrideSettings.StarEntry);
+            if (plan.Outcome == JsonSpliceOutcome.Removed)
+                removals.Add((file, plan.Document));
+            else
+                refusals.Add($"{file} cannot be changed safely: {plan.Message ?? "the document is not one VS Code can load"}");
+        }
+
+        return (removals, refusals);
     }
 }
 

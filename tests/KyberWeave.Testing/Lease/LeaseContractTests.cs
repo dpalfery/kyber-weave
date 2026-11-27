@@ -158,7 +158,8 @@ public abstract class LeaseContractTests
             {
                 held.Dispose();
             }
-            catch (Exception exception)
+            // The thread entry point is a boundary: record any failure for the assertion instead of crashing the host.
+            catch (Exception exception) when (exception is not OutOfMemoryException && exception is not OperationCanceledException)
             {
                 failure = exception;
             }

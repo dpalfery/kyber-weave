@@ -1,9 +1,11 @@
+using System.ComponentModel;
 using KyberWeave.Arbiter.Hooks;
 using KyberWeave.Contracts.Repositories;
 using KyberWeave.Contracts.Services;
 using KyberWeave.Core.Arbiter;
 using KyberWeave.Core.Arbiter.Credentials;
 using KyberWeave.Core.Configuration;
+using KyberWeave.Core.FileSystem;
 
 namespace KyberWeave.Arbiter.Mcp;
 
@@ -48,7 +50,8 @@ public sealed class ArbiterServeContextFactory(
                 : effective.Endpoint;
             return ArbiterKeyResolver.Resolve(effective.Endpoint, credentials, process.GetVariable, userOverride) is not null;
         }
-        catch (Exception)
+        catch (Exception ex) when (FileFailure.Is(ex)
+            || ex is YamlDotNet.Core.YamlException or InvalidOperationException or Win32Exception)
         {
             return false;
         }

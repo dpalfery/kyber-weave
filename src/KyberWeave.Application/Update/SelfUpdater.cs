@@ -6,6 +6,7 @@ using System.Text.Json;
 using KyberWeave.Arbiter.Hooks;
 using KyberWeave.Contracts.Paths;
 using KyberWeave.Contracts.Repositories;
+using KyberWeave.Core.FileSystem;
 using KyberWeave.Core.Processes;
 using KyberWeave.Domain.Update;
 
@@ -294,7 +295,7 @@ internal sealed class SelfUpdater : IDisposable
                                 _files.DeleteFile(backup.Destination);
                             }
                         }
-                        catch
+                        catch (Exception ex) when (FileFailure.Is(ex))
                         {
                             // Best-effort rollback
                         }

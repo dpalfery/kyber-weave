@@ -3,6 +3,7 @@ using KyberWeave.Core.Skills.Model;
 using Markdig;
 using Markdig.Extensions.Yaml;
 using Markdig.Syntax;
+using YamlDotNet.Core;
 using YamlDotNet.RepresentationModel;
 using YamlDotNet.Serialization;
 using YamlDotNet.Serialization.NamingConventions;
@@ -123,7 +124,7 @@ public static class SkillParser
                 }
             }
         }
-        catch
+        catch (YamlException)
         {
             // Best-effort; deserialize already validated the YAML shape.
         }

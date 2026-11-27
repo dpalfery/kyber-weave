@@ -52,27 +52,8 @@ public sealed class DocsTasksCommand(
     {
         ArgumentNullException.ThrowIfNull(settings);
         DiagnosticReport report = new();
-        if (settings.List && (settings.Write || settings.Check || settings.Convert))
+        if (!ValidateModes(settings, report))
         {
-            report.Add(new Diagnostic(
-                ConflictingModes,
-                Severity.Error,
-                "--list cannot be used with --write, --check or --convert.",
-                "docs tasks",
-                Hint: "Run --list alone to see the tasks, or --check, --write or --convert alone."));
-            CommandHelpers.Finish(console, report, settings, "docs tasks", "Task file");
-            return 1;
-        }
-
-        if ((settings.Write && settings.Check)
-            || (settings.Convert && (settings.Write || settings.Check)))
-        {
-            report.Add(new Diagnostic(
-                ConflictingModes,
-                Severity.Error,
-                "--write, --check and --convert ask for different things and cannot be combined.",
-                "docs tasks",
-                Hint: "Run --check to see what differs, --write to fix it, or --convert to replace a JSON file."));
             CommandHelpers.Finish(console, report, settings, "docs tasks", "Task file");
             return 1;
         }
@@ -134,7 +115,42 @@ public sealed class DocsTasksCommand(
         }
 
         CommandHelpers.Finish(console, report, settings, "docs tasks", "Task file");
+        PrintOutcome(settings, mode, outcome, report);
+        return report.HasErrors ? 1 : 0;
+    }
 
+    /// <summary>Refuses the flag combinations that ask for opposite things; a refusal is reported and false returned.</summary>
+    private static bool ValidateModes(DocsTasksSettings settings, DiagnosticReport report)
+    {
+        if (settings.List && (settings.Write || settings.Check || settings.Convert))
+        {
+            report.Add(new Diagnostic(
+                ConflictingModes,
+                Severity.Error,
+                "--list cannot be used with --write, --check or --convert.",
+                "docs tasks",
+                Hint: "Run --list alone to see the tasks, or --check, --write or --convert alone."));
+            return false;
+        }
+
+        if ((settings.Write && settings.Check)
+            || (settings.Convert && (settings.Write || settings.Check)))
+        {
+            report.Add(new Diagnostic(
+                ConflictingModes,
+                Severity.Error,
+                "--write, --check and --convert ask for different things and cannot be combined.",
+                "docs tasks",
+                Hint: "Run --check to see what differs, --write to fix it, or --convert to replace a JSON file."));
+            return false;
+        }
+
+        return true;
+    }
+
+    /// <summary>Prints the difficulty checks and the write/preview status after the report has been rendered.</summary>
+    private void PrintOutcome(DocsTasksSettings settings, PlanTaskFileMode mode, PlanTaskFileOutcome outcome, DiagnosticReport report)
+    {
         if (!settings.NoInfo && ReportRenderer.IsHuman(settings.FormatFor(console)))
         {
             foreach (string check in outcome.DifficultyChecks ?? [])
@@ -161,8 +177,6 @@ public sealed class DocsTasksCommand(
                 console.MarkupLine($"{Markup.Escape(outcome.TaskFilePath)} is current ({outcome.TaskCount} task(s)).");
             }
         }
-
-        return report.HasErrors ? 1 : 0;
     }
 
     private IArbiterProvider? DefaultPacketProvider(KyberWeaveConfig config)

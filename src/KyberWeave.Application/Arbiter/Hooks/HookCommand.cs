@@ -259,8 +259,9 @@ public sealed class HookCommand : IArbiterHookHost
 
             return 0;
         }
-        catch (Exception ex)
+        catch (Exception ex) when (ex is not OutOfMemoryException && ex is not OperationCanceledException)
         {
+            // Hook entry point: fail open so the dispatch continues, and log the failure.
             // Fail open: the host could not reach a decision, so the dispatch continues and the
             // failure is logged with its code. Only a positive finding may block (ADR 0072).
             log.WriteLine(

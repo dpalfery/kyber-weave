@@ -50,7 +50,7 @@ public static class HookFastPath
             document = adapter.AllowDocument(parsed.RootElement);
             return true;
         }
-        catch (Exception)
+        catch (Exception ex) when (ex is JsonException or InvalidOperationException or ArgumentException or NotSupportedException)
         {
             return false;
         }

@@ -1,7 +1,9 @@
 using KyberWeave.Contracts.Paths;
 using KyberWeave.Contracts.Repositories;
 using KyberWeave.Contracts.Services;
+using KyberWeave.Core.FileSystem;
 using KyberWeave.Core.Squad.Packaging;
+using KyberWeave.Core.Squad.Validation;
 using KyberWeave.Application.Update;
 
 namespace KyberWeave.Application.Squad.Packaging;
@@ -70,7 +72,7 @@ public sealed class SquadPackService(
             (string apm, string plugins, string checksum) = packager.PackAll(sourcePath, outDir, version, companionSkillsRoot);
             return new SquadPackOutcome(SquadPackStatus.Packed, null, apm, plugins, checksum, warnings);
         }
-        catch (Exception ex)
+        catch (Exception ex) when (ex is SquadSourceValidationException or InvalidDataException or InvalidOperationException || FileFailure.Is(ex))
         {
             return new SquadPackOutcome(SquadPackStatus.Failed, ex.Message, null, null, null, warnings);
         }

@@ -132,7 +132,7 @@ internal static class WorkerGuardRules
                     || string.Equals(call.Agent.CapabilityProfile, SeatProfile, StringComparison.Ordinal)
                     || IsBudgeted(call.Agent.CapabilityProfile));
         }
-        catch (Exception)
+        catch (Exception ex) when (ex is JsonException or InvalidOperationException)
         {
             return true;
         }
@@ -180,7 +180,7 @@ internal static class WorkerGuardRules
             string? sessionId = FactoryText(root, "session_id");
             return sessionId is null || WorkerSessionPaths.ChildEntryExists(home, harness, sessionId);
         }
-        catch (Exception)
+        catch (Exception ex) when (ex is JsonException or InvalidOperationException || FileFailure.Is(ex))
         {
             // An unreadable event is left to the guard, which reports it.
             return true;

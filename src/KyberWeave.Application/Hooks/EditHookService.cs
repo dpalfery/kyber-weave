@@ -34,8 +34,9 @@ public sealed class EditHookService(
         {
             return new HookResult(0, "kyber-weave-hooks: stopped before finishing; the edit is not blocked.");
         }
-        catch (Exception ex)
+        catch (Exception ex) when (ex is not OutOfMemoryException && ex is not OperationCanceledException)
         {
+            // Hook entry-point boundary: an internal failure fails open and is recorded, never blocking the host.
             return new HookResult(0, $"kyber-weave-hooks: skipped after an internal error ({ex.GetType().Name}: {ex.Message}).");
         }
     }

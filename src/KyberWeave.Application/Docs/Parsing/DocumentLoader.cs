@@ -11,6 +11,7 @@ using Markdig.Extensions.AutoIdentifiers;
 using Markdig.Renderers.Html;
 using Markdig.Syntax;
 using Markdig.Syntax.Inlines;
+using YamlDotNet.Core;
 
 namespace KyberWeave.Core.Docs.Parsing;
 
@@ -251,7 +252,7 @@ public sealed partial class DocumentLoader : IDocumentSource
             frontmatter = MarkdownFrontmatterReader.Deserializer
                 .Deserialize<DocumentFrontmatter>(read.Yaml);
         }
-        catch (Exception ex)
+        catch (YamlException ex)
         {
             parseError = ex.Message;
         }
