@@ -384,232 +384,27 @@ public static partial class CanonFindings
                 Availability: NotMeasurable("Outcome was not observable for empty record set."));
         }
 
-        long? observedExitCode = null;
-        string? observedTerminationReason = null;
-        List<ErrorSignal> errorSignals = [];
-        List<CorrectionTurn> correctionTurns = [];
-        bool hasConversationHistory = false;
-        List<TestSuiteCounts> testOutputs = [];
-        string? lastStatus = null;
-
+        OutcomeObservations observations = new();
         for (int idx = 0; idx < records.Count; idx++)
-        {
-            CanonicalRecord record = records[idx];
-            lastStatus = record.Status;
-            string ts = record.Timestamp;
+            observations.ApplyRecord(records[idx], idx);
 
-            if (TryGetRawNumber(record, ["exitCode", "exit_code", "status_code"], out double exitNum) && double.IsFinite(exitNum))
-                observedExitCode = (long)exitNum;
-
-            string? rawTerm = RawString(record, ["terminationReason", "termination_reason", "stop_reason", "finish_reason"]);
-            if (!string.IsNullOrWhiteSpace(rawTerm))
-                observedTerminationReason = rawTerm.Trim();
-
-            string? rawType = RawString(record, ["type", "event"]);
-            if (rawType is "task_complete" or "task_failed" or "turn_aborted")
-            {
-                observedTerminationReason = rawType;
-                if (rawType == "task_complete" && !observedExitCode.HasValue)
-                    observedExitCode = 0;
-            }
-
-            if (record.Status is "error" or "fatal" or "failure")
-            {
-                errorSignals.Add(new ErrorSignal(
-                    Source: record.Source,
-                    Message: string.IsNullOrEmpty(record.Name) ? "Span error status" : record.Name,
-                    Code: record.Status,
-                    Timestamp: ts));
-            }
-
-            if (TryGetRawElement(record, ["error", "exception"], out JsonElement rawErr))
-            {
-                errorSignals.Add(new ErrorSignal(
-                    Source: record.Harness,
-                    Message: rawErr.ValueKind == JsonValueKind.String ? (rawErr.GetString() ?? string.Empty) : rawErr.GetRawText(),
-                    Timestamp: ts));
-            }
-
-            if (TryGetRawNumber(record, ["editFailed"], out double editFailed) && editFailed > 0)
-            {
-                errorSignals.Add(new ErrorSignal(
-                    Source: record.Harness,
-                    Message: $"{(long)editFailed} patch edit(s) failed",
-                    Timestamp: ts));
-            }
-
-            if (record.Content.TryGetValue("tool_result_content", out string? toolOutput) &&
-                !string.IsNullOrEmpty(toolOutput) &&
-                FatalToolExceptionRegex().IsMatch(toolOutput))
-            {
-                errorSignals.Add(new ErrorSignal(
-                    Source: record.Harness,
-                    Message: "Unhandled exception or panic observed in tool result",
-                    Timestamp: ts));
-            }
-
-            if (TryGetRawBool(record, ["isCorrection"], out bool isCorrection) && isCorrection)
-            {
-                hasConversationHistory = true;
-                string corrRule = RawString(record, ["correctionRule"]) ?? "explicit_telemetry_indicator";
-                correctionTurns.Add(new CorrectionTurn(idx, ts, corrRule));
-            }
-            else
-            {
-                string? userMessage = RawString(record, ["userMessage"]);
-                if (!string.IsNullOrWhiteSpace(userMessage))
-                {
-                    hasConversationHistory = true;
-                    CorrectionDetectionResult check = DetectUserCorrection(userMessage);
-                    if (check.Matched)
-                        correctionTurns.Add(new CorrectionTurn(idx, ts, check.Rule ?? "prefix_negation", check.Excerpt));
-                }
-
-                if (record.Parts is { Count: > 0 })
-                {
-                    foreach (ContentPart part in record.Parts)
-                    {
-                        if (string.Equals(part.Part, "conversation_history", StringComparison.Ordinal))
-                        {
-                            hasConversationHistory = true;
-                            CorrectionDetectionResult check = DetectUserCorrection(part.Text);
-                            if (check.Matched)
-                                correctionTurns.Add(new CorrectionTurn(idx, ts, check.Rule ?? "prefix_negation", check.Excerpt));
-                        }
-                    }
-                }
-                else if (record.Content.TryGetValue("conversation_history", out string? convText) && !string.IsNullOrEmpty(convText))
-                {
-                    hasConversationHistory = true;
-                    CorrectionDetectionResult check = DetectUserCorrection(convText);
-                    if (check.Matched)
-                        correctionTurns.Add(new CorrectionTurn(idx, ts, check.Rule ?? "prefix_negation", check.Excerpt));
-                }
-            }
-
-            if (record.Parts is not null)
-            {
-                foreach (ContentPart part in record.Parts)
-                {
-                    if (string.Equals(part.Part, "tool_result_content", StringComparison.Ordinal))
-                    {
-                        TestSuiteCounts? parsed = ParseTestCounts(part.Text);
-                        if (parsed is not null)
-                            testOutputs.Add(parsed);
-                    }
-                }
-            }
-            else if (record.Content.TryGetValue("tool_result_content", out string? contentResult))
-            {
-                TestSuiteCounts? parsed = ParseTestCounts(contentResult);
-                if (parsed is not null)
-                    testOutputs.Add(parsed);
-            }
-        }
-
-        TestSuiteDelta testDeltas;
-        if (testOutputs.Count == 0)
-        {
-            testDeltas = new TestSuiteDelta(NotMeasurable("No test execution results observed in records or tool results."));
-        }
-        else if (testOutputs.Count == 1)
-        {
-            TestSuiteCounts counts = testOutputs[0];
-            testDeltas = new TestSuiteDelta(Measured(), After: counts, DeltaPassed: counts.Passed, DeltaFailed: counts.Failed);
-        }
-        else
-        {
-            TestSuiteCounts before = testOutputs[0];
-            TestSuiteCounts after = testOutputs[^1];
-            testDeltas = new TestSuiteDelta(
-                Measured(),
-                Before: before,
-                After: after,
-                DeltaPassed: after.Passed - before.Passed,
-                DeltaFailed: after.Failed - before.Failed);
-        }
-
-        TerminationSignal termination = observedExitCode.HasValue || observedTerminationReason is not null
-            ? new TerminationSignal(Measured(), observedTerminationReason, observedExitCode)
+        TestSuiteDelta testDeltas = BuildTestSuiteDelta(observations.TestOutputs);
+        TerminationSignal termination = observations.ObservedExitCode.HasValue || observations.ObservedTerminationReason is not null
+            ? new TerminationSignal(Measured(), observations.ObservedTerminationReason, observations.ObservedExitCode)
             : new TerminationSignal(NotMeasurable("No termination or exit indicator was emitted by the harness."));
 
-        ErrorSummary errors = new(errorSignals.Count, errorSignals, Measured());
-        CorrectionSummary userCorrections = hasConversationHistory
-            ? new CorrectionSummary(correctionTurns.Count, correctionTurns, Measured())
+        ErrorSummary errors = new(observations.ErrorSignals.Count, observations.ErrorSignals, Measured());
+        CorrectionSummary userCorrections = observations.HasConversationHistory
+            ? new CorrectionSummary(observations.CorrectionTurns.Count, observations.CorrectionTurns, Measured())
             : new CorrectionSummary(0, [], NotMeasurable("No conversation history available to detect user corrections."));
 
-        string status;
-        string statusReason;
-        AvailabilityResult outcomeAvail;
-
-        bool isAbandoned = observedTerminationReason is not null && AbandonedReasonRegex().IsMatch(observedTerminationReason);
-        if (isAbandoned)
-        {
-            status = "abandoned";
-            statusReason = "Run was cancelled or aborted before completion.";
-            outcomeAvail = Measured();
-        }
-        else if (observedExitCode.HasValue && observedExitCode.Value != 0)
-        {
-            status = "failure";
-            statusReason = $"Process or command terminated with non-zero exit code {observedExitCode.Value}.";
-            outcomeAvail = Measured();
-        }
-        else if (testDeltas.After is { Failed: > 0 })
-        {
-            status = "failure";
-            statusReason = $"Test suite failed with {testDeltas.After.Failed} failing test(s).";
-            outcomeAvail = Measured();
-        }
-        else if (testDeltas.DeltaFailed > 0)
-        {
-            status = "failure";
-            statusReason = $"Test suite delta introduced {testDeltas.DeltaFailed} new test failure(s).";
-            outcomeAvail = Measured();
-        }
-        else if (errorSignals.Count > 0 &&
-                 (lastStatus == "error" || observedTerminationReason is "task_failed" or "error" or "fatal"))
-        {
-            status = "failure";
-            statusReason = $"Run terminated with fatal error: {errorSignals[0].Message}.";
-            outcomeAvail = Measured();
-        }
-        else if (userCorrections.Count > 0 &&
-                 (observedExitCode == 0 || observedTerminationReason == "task_complete"))
-        {
-            status = "inconclusive";
-            statusReason = $"Run exited with code 0 but required {userCorrections.Count} user correction turn(s).";
-            outcomeAvail = Measured();
-        }
-        else if (errorSignals.Count > 0 &&
-                 (observedExitCode == 0 || observedTerminationReason == "task_complete"))
-        {
-            status = "inconclusive";
-            statusReason = $"Run exited cleanly but recorded {errorSignals.Count} non-fatal error signal(s).";
-            outcomeAvail = Measured();
-        }
-        else if ((observedExitCode == 0 || observedTerminationReason == "task_complete") &&
-                 errorSignals.Count == 0 &&
-                 userCorrections.Count == 0)
-        {
-            status = "success";
-            statusReason = "Run completed cleanly with zero exit code and zero errors or user corrections.";
-            outcomeAvail = Measured();
-        }
-        else if (testDeltas.After is { Passed: > 0, Failed: 0 } &&
-                 errorSignals.Count == 0 &&
-                 userCorrections.Count == 0)
-        {
-            status = "success";
-            statusReason = $"Test suite passed with {testDeltas.After.Passed} test(s) and zero errors.";
-            outcomeAvail = Measured();
-        }
-        else
-        {
-            status = "not_measurable";
-            statusReason = "No observable outcome signals (exit code, termination event, test deltas, or fatal errors) were emitted.";
-            outcomeAvail = NotMeasurable("Outcome was not observable for this run.");
-        }
+        (string status, string statusReason, AvailabilityResult outcomeAvail) = ClassifyOutcome(
+            observations.ObservedExitCode,
+            observations.ObservedTerminationReason,
+            observations.LastStatus,
+            testDeltas,
+            errors,
+            userCorrections);
 
         return new OutcomeBlock(
             Status: status,
@@ -619,6 +414,213 @@ public static partial class CanonFindings
             UserCorrections: userCorrections,
             TestDeltas: testDeltas,
             Availability: outcomeAvail);
+    }
+
+    private static TestSuiteDelta BuildTestSuiteDelta(List<TestSuiteCounts> testOutputs)
+    {
+        if (testOutputs.Count == 0)
+            return new TestSuiteDelta(NotMeasurable("No test execution results observed in records or tool results."));
+
+        if (testOutputs.Count == 1)
+        {
+            TestSuiteCounts counts = testOutputs[0];
+            return new TestSuiteDelta(Measured(), After: counts, DeltaPassed: counts.Passed, DeltaFailed: counts.Failed);
+        }
+
+        TestSuiteCounts before = testOutputs[0];
+        TestSuiteCounts after = testOutputs[^1];
+        return new TestSuiteDelta(
+            Measured(),
+            Before: before,
+            After: after,
+            DeltaPassed: after.Passed - before.Passed,
+            DeltaFailed: after.Failed - before.Failed);
+    }
+
+    private static (string Status, string StatusReason, AvailabilityResult Availability) ClassifyOutcome(
+        long? observedExitCode,
+        string? observedTerminationReason,
+        string? lastStatus,
+        TestSuiteDelta testDeltas,
+        ErrorSummary errors,
+        CorrectionSummary userCorrections)
+    {
+        bool hasErrors = errors.Count > 0;
+        bool hasCorrections = userCorrections.Count > 0;
+        bool cleanExit = observedExitCode == 0 || observedTerminationReason == "task_complete";
+
+        if (observedTerminationReason is not null && AbandonedReasonRegex().IsMatch(observedTerminationReason))
+            return ("abandoned", "Run was cancelled or aborted before completion.", Measured());
+
+        if (observedExitCode.HasValue && observedExitCode.Value != 0)
+            return ("failure", $"Process or command terminated with non-zero exit code {observedExitCode.Value}.", Measured());
+
+        if (testDeltas.After is { Failed: > 0 })
+            return ("failure", $"Test suite failed with {testDeltas.After.Failed} failing test(s).", Measured());
+
+        if (testDeltas.DeltaFailed > 0)
+            return ("failure", $"Test suite delta introduced {testDeltas.DeltaFailed} new test failure(s).", Measured());
+
+        if (hasErrors && (lastStatus == "error" || observedTerminationReason is "task_failed" or "error" or "fatal"))
+            return ("failure", $"Run terminated with fatal error: {errors.Signals[0].Message}.", Measured());
+
+        if (hasCorrections && cleanExit)
+            return ("inconclusive", $"Run exited with code 0 but required {userCorrections.Count} user correction turn(s).", Measured());
+
+        if (hasErrors && cleanExit)
+            return ("inconclusive", $"Run exited cleanly but recorded {errors.Count} non-fatal error signal(s).", Measured());
+
+        if (cleanExit && !hasErrors && !hasCorrections)
+            return ("success", "Run completed cleanly with zero exit code and zero errors or user corrections.", Measured());
+
+        if (testDeltas.After is { Passed: > 0, Failed: 0 } && !hasErrors && !hasCorrections)
+            return ("success", $"Test suite passed with {testDeltas.After.Passed} test(s) and zero errors.", Measured());
+
+        return (
+            "not_measurable",
+            "No observable outcome signals (exit code, termination event, test deltas, or fatal errors) were emitted.",
+            NotMeasurable("Outcome was not observable for this run."));
+    }
+
+    private sealed class OutcomeObservations
+    {
+        public long? ObservedExitCode { get; set; }
+        public string? ObservedTerminationReason { get; set; }
+        public List<ErrorSignal> ErrorSignals { get; } = [];
+        public List<CorrectionTurn> CorrectionTurns { get; } = [];
+        public bool HasConversationHistory { get; set; }
+        public List<TestSuiteCounts> TestOutputs { get; } = [];
+        public string? LastStatus { get; set; }
+
+        public void ApplyRecord(CanonicalRecord record, int idx)
+        {
+            LastStatus = record.Status;
+            string ts = record.Timestamp;
+            ApplyTermination(record);
+            ApplyErrorSignals(record, ts);
+            ApplyCorrections(record, idx, ts);
+            ApplyTestOutputs(record);
+        }
+
+        private void ApplyTermination(CanonicalRecord record)
+        {
+            if (TryGetRawNumber(record, ["exitCode", "exit_code", "status_code"], out double exitNum) && double.IsFinite(exitNum))
+                ObservedExitCode = (long)exitNum;
+
+            string? rawTerm = RawString(record, ["terminationReason", "termination_reason", "stop_reason", "finish_reason"]);
+            if (!string.IsNullOrWhiteSpace(rawTerm))
+                ObservedTerminationReason = rawTerm.Trim();
+
+            string? rawType = RawString(record, ["type", "event"]);
+            if (rawType is "task_complete" or "task_failed" or "turn_aborted")
+            {
+                ObservedTerminationReason = rawType;
+                if (rawType == "task_complete" && !ObservedExitCode.HasValue)
+                    ObservedExitCode = 0;
+            }
+        }
+
+        private void ApplyErrorSignals(CanonicalRecord record, string ts)
+        {
+            if (record.Status is "error" or "fatal" or "failure")
+            {
+                ErrorSignals.Add(new ErrorSignal(
+                    Source: record.Source,
+                    Message: string.IsNullOrEmpty(record.Name) ? "Span error status" : record.Name,
+                    Code: record.Status,
+                    Timestamp: ts));
+            }
+
+            if (TryGetRawElement(record, ["error", "exception"], out JsonElement rawErr))
+            {
+                ErrorSignals.Add(new ErrorSignal(
+                    Source: record.Harness,
+                    Message: rawErr.ValueKind == JsonValueKind.String ? (rawErr.GetString() ?? string.Empty) : rawErr.GetRawText(),
+                    Timestamp: ts));
+            }
+
+            if (TryGetRawNumber(record, ["editFailed"], out double editFailed) && editFailed > 0)
+            {
+                ErrorSignals.Add(new ErrorSignal(
+                    Source: record.Harness,
+                    Message: $"{(long)editFailed} patch edit(s) failed",
+                    Timestamp: ts));
+            }
+
+            if (record.Content.TryGetValue("tool_result_content", out string? toolOutput) &&
+                !string.IsNullOrEmpty(toolOutput) &&
+                FatalToolExceptionRegex().IsMatch(toolOutput))
+            {
+                ErrorSignals.Add(new ErrorSignal(
+                    Source: record.Harness,
+                    Message: "Unhandled exception or panic observed in tool result",
+                    Timestamp: ts));
+            }
+        }
+
+        private void ApplyCorrections(CanonicalRecord record, int idx, string ts)
+        {
+            if (TryGetRawBool(record, ["isCorrection"], out bool isCorrection) && isCorrection)
+            {
+                HasConversationHistory = true;
+                string corrRule = RawString(record, ["correctionRule"]) ?? "explicit_telemetry_indicator";
+                CorrectionTurns.Add(new CorrectionTurn(idx, ts, corrRule));
+                return;
+            }
+
+            string? userMessage = RawString(record, ["userMessage"]);
+            if (!string.IsNullOrWhiteSpace(userMessage))
+            {
+                HasConversationHistory = true;
+                RecordDetectedCorrection(userMessage, idx, ts);
+            }
+
+            if (record.Parts is { Count: > 0 })
+            {
+                foreach (ContentPart part in record.Parts)
+                {
+                    if (string.Equals(part.Part, "conversation_history", StringComparison.Ordinal))
+                    {
+                        HasConversationHistory = true;
+                        RecordDetectedCorrection(part.Text, idx, ts);
+                    }
+                }
+            }
+            else if (record.Content.TryGetValue("conversation_history", out string? convText) && !string.IsNullOrEmpty(convText))
+            {
+                HasConversationHistory = true;
+                RecordDetectedCorrection(convText, idx, ts);
+            }
+        }
+
+        private void RecordDetectedCorrection(string? text, int idx, string ts)
+        {
+            CorrectionDetectionResult check = DetectUserCorrection(text);
+            if (check.Matched)
+                CorrectionTurns.Add(new CorrectionTurn(idx, ts, check.Rule ?? "prefix_negation", check.Excerpt));
+        }
+
+        private void ApplyTestOutputs(CanonicalRecord record)
+        {
+            if (record.Parts is not null)
+            {
+                foreach (ContentPart part in record.Parts)
+                {
+                    if (string.Equals(part.Part, "tool_result_content", StringComparison.Ordinal))
+                    {
+                        TestSuiteCounts? parsed = ParseTestCounts(part.Text);
+                        if (parsed is not null)
+                            TestOutputs.Add(parsed);
+                    }
+                }
+            }
+            else if (record.Content.TryGetValue("tool_result_content", out string? contentResult))
+            {
+                TestSuiteCounts? parsed = ParseTestCounts(contentResult);
+                if (parsed is not null)
+                    TestOutputs.Add(parsed);
+            }
+        }
     }
 
     /// <summary>Computes measured-outcome population coverage across a set of runs.</summary>
@@ -846,6 +848,31 @@ public static partial class CanonFindings
             : (records.Count > 0 && !string.IsNullOrEmpty(records[0].SessionId) ? records[0].SessionId : null);
         double discount = CalculateOutcomeRiskDiscount(input.Outcome, "dormant-tool-schema");
 
+        (List<CanonicalRecord> turnRecords, List<CanonicalRecord> toolRecords) = SplitTurnAndToolRecords(records);
+        Dictionary<string, ToolResidency> toolResidency = BuildToolResidency(turnRecords);
+        ApplyToolDefinitionSupply(toolResidency, input, turnRecords);
+        HashSet<string> invokedNames = CollectInvokedToolNames(toolRecords, input.Invocations);
+
+        string conversationText = string.Join(
+            " ",
+            turnRecords.Select(static t => t.Content.TryGetValue("conversation_history", out string? text) ? text : string.Empty));
+        IReadOnlyList<string> extraRefs = input.References ?? [];
+
+        List<Finding> findings = [];
+        foreach (KeyValuePair<string, ToolResidency> entry in toolResidency)
+        {
+            Finding? finding = BuildDormantToolFinding(
+                entry.Key, entry.Value, invokedNames, conversationText, extraRefs, input, sessionId, discount);
+            if (finding is not null)
+                findings.Add(finding);
+        }
+
+        return findings;
+    }
+
+    private static (List<CanonicalRecord> TurnRecords, List<CanonicalRecord> ToolRecords) SplitTurnAndToolRecords(
+        IReadOnlyList<CanonicalRecord> records)
+    {
         List<CanonicalRecord> turnRecords = [];
         List<CanonicalRecord> toolRecords = [];
         foreach (CanonicalRecord record in records)
@@ -856,6 +883,11 @@ public static partial class CanonFindings
                 toolRecords.Add(record);
         }
 
+        return (turnRecords, toolRecords);
+    }
+
+    private static Dictionary<string, ToolResidency> BuildToolResidency(List<CanonicalRecord> turnRecords)
+    {
         Dictionary<string, ToolResidency> toolResidency = new(StringComparer.Ordinal);
         for (int turnIdx = 0; turnIdx < turnRecords.Count; turnIdx++)
         {
@@ -874,30 +906,43 @@ public static partial class CanonFindings
             }
         }
 
-        if (input.ToolDefinitions is { Count: > 0 })
-        {
-            int totalTurns = input.TurnsCount ?? turnRecords.Count;
-            foreach (ToolDefinitionSupply def in input.ToolDefinitions)
-            {
-                if (toolResidency.TryGetValue(def.Name, out ToolResidency? existing))
-                {
-                    if (def.Tokens is > 0)
-                        existing.Tokens = Math.Max(existing.Tokens ?? 0, def.Tokens.Value);
-                }
-                else
-                {
-                    ToolResidency created = new() { Tokens = def.Tokens is > 0 ? def.Tokens : null };
-                    for (int i = 0; i < totalTurns; i++)
-                    {
-                        string spanId = i < turnRecords.Count ? turnRecords[i].SpanId : $"turn-span-{i}";
-                        created.Turns.Add((spanId, i));
-                    }
+        return toolResidency;
+    }
 
-                    toolResidency[def.Name] = created;
+    private static void ApplyToolDefinitionSupply(
+        Dictionary<string, ToolResidency> toolResidency,
+        DormantToolSchemaInput input,
+        List<CanonicalRecord> turnRecords)
+    {
+        if (input.ToolDefinitions is not { Count: > 0 })
+            return;
+
+        int totalTurns = input.TurnsCount ?? turnRecords.Count;
+        foreach (ToolDefinitionSupply def in input.ToolDefinitions)
+        {
+            if (toolResidency.TryGetValue(def.Name, out ToolResidency? existing))
+            {
+                if (def.Tokens is > 0)
+                    existing.Tokens = Math.Max(existing.Tokens ?? 0, def.Tokens.Value);
+            }
+            else
+            {
+                ToolResidency created = new() { Tokens = def.Tokens is > 0 ? def.Tokens : null };
+                for (int i = 0; i < totalTurns; i++)
+                {
+                    string spanId = i < turnRecords.Count ? turnRecords[i].SpanId : $"turn-span-{i}";
+                    created.Turns.Add((spanId, i));
                 }
+
+                toolResidency[def.Name] = created;
             }
         }
+    }
 
+    private static HashSet<string> CollectInvokedToolNames(
+        List<CanonicalRecord> toolRecords,
+        IReadOnlyList<string>? suppliedInvocations)
+    {
         HashSet<string> invokedNames = new(StringComparer.Ordinal);
         foreach (CanonicalRecord toolRec in toolRecords)
         {
@@ -906,77 +951,77 @@ public static partial class CanonFindings
             invokedNames.Add((resolved ?? toolRec.Name).Trim());
         }
 
-        if (input.Invocations is not null)
+        if (suppliedInvocations is not null)
         {
-            foreach (string inv in input.Invocations)
+            foreach (string inv in suppliedInvocations)
                 invokedNames.Add(inv.Trim());
         }
 
-        string conversationText = string.Join(
-            " ",
-            turnRecords.Select(static t => t.Content.TryGetValue("conversation_history", out string? text) ? text : string.Empty));
-        IReadOnlyList<string> extraRefs = input.References ?? [];
+        return invokedNames;
+    }
 
-        List<Finding> findings = [];
-        foreach (KeyValuePair<string, ToolResidency> entry in toolResidency)
-        {
-            string toolName = entry.Key;
-            ToolResidency residency = entry.Value;
-            if (residency.Turns.Count < 3 || invokedNames.Contains(toolName))
-                continue;
+    private static Finding? BuildDormantToolFinding(
+        string toolName,
+        ToolResidency residency,
+        HashSet<string> invokedNames,
+        string conversationText,
+        IReadOnlyList<string> extraRefs,
+        DormantToolSchemaInput input,
+        string? sessionId,
+        double discount)
+    {
+        if (residency.Turns.Count < 3 || invokedNames.Contains(toolName))
+            return null;
 
-            bool hasRef = conversationText.Contains(toolName, StringComparison.OrdinalIgnoreCase) ||
-                          extraRefs.Any(r => r.Contains(toolName, StringComparison.OrdinalIgnoreCase));
-            if (hasRef)
-                continue;
+        bool hasRef = conversationText.Contains(toolName, StringComparison.OrdinalIgnoreCase) ||
+                      extraRefs.Any(r => r.Contains(toolName, StringComparison.OrdinalIgnoreCase));
+        if (hasRef)
+            return null;
 
-            int turnsResident = residency.Turns.Count;
-            long? schemaTokens = residency.Tokens;
-            bool measured = schemaTokens.HasValue;
-            long? estimatedWasteTokens = measured ? schemaTokens!.Value * turnsResident : null;
+        int turnsResident = residency.Turns.Count;
+        long? schemaTokens = residency.Tokens;
+        bool measured = schemaTokens.HasValue;
+        long? estimatedWasteTokens = measured ? schemaTokens!.Value * turnsResident : null;
 
-            (string firstSpanId, int firstTurnIdx) = residency.Turns[0];
-            (string lastSpanId, int lastTurnIdx) = residency.Turns[^1];
+        (string firstSpanId, int firstTurnIdx) = residency.Turns[0];
+        (string lastSpanId, int lastTurnIdx) = residency.Turns[^1];
 
-            FindingEvidenceLink[] evidenceLinks =
-            [
-                new(firstSpanId, firstTurnIdx, measured
-                    ? $"Tool schema for \"{toolName}\" first registered in context ({schemaTokens} tokens)."
-                    : $"Tool schema for \"{toolName}\" first registered in context (size unmeasured)."),
-                new(lastSpanId, lastTurnIdx,
-                    $"Turn {lastTurnIdx} executed with tool \"{toolName}\" still resident in prompt context after {turnsResident} turns with 0 invocations."),
-            ];
+        FindingEvidenceLink[] evidenceLinks =
+        [
+            new(firstSpanId, firstTurnIdx, measured
+                ? $"Tool schema for \"{toolName}\" first registered in context ({schemaTokens} tokens)."
+                : $"Tool schema for \"{toolName}\" first registered in context (size unmeasured)."),
+            new(lastSpanId, lastTurnIdx,
+                $"Turn {lastTurnIdx} executed with tool \"{toolName}\" still resident in prompt context after {turnsResident} turns with 0 invocations."),
+        ];
 
-            string recommendation = $"Relocate tool schema \"{toolName}\" to on-demand loading or tool deferral using progressive disclosure, registering definitions only when task phases require them.";
-            string outcomeRiskCaveat = DeriveOutcomeRiskCaveat(
-                input.Outcome,
-                "dormant-tool-schema",
-                "Relocating tool schemas to on-demand loading requires the agent to be aware of tool availability; ensure tool discovery prompts are provided.");
+        string recommendation = $"Relocate tool schema \"{toolName}\" to on-demand loading or tool deferral using progressive disclosure, registering definitions only when task phases require them.";
+        string outcomeRiskCaveat = DeriveOutcomeRiskCaveat(
+            input.Outcome,
+            "dormant-tool-schema",
+            "Relocating tool schemas to on-demand loading requires the agent to be aware of tool availability; ensure tool discovery prompts are provided.");
 
-            findings.Add(new Finding(
-                Id: $"finding-dormant-tool-{toolName}-{sessionId ?? "session"}",
-                DetectorId: "dormant-tool-schema",
-                Title: $"Dormant Tool Schema: \"{toolName}\" resident across {turnsResident} turns without invocation",
-                Mechanism: measured
-                    ? $"Tool schema definition for \"{toolName}\" was injected into the prompt context on each turn ({schemaTokens} tokens/turn), accumulating {estimatedWasteTokens} tokens across {turnsResident} turns with zero invocations and no model references."
-                    : $"Tool schema definition for \"{toolName}\" was injected into the prompt context on each turn at an unmeasured size, remaining resident across {turnsResident} turns with zero invocations and no model references.",
-                EvidenceLinks: evidenceLinks,
-                Confidence: "deterministic",
-                EstimatedWasteTokens: estimatedWasteTokens,
-                Recommendation: recommendation,
-                ErrorBar: null,
-                OutcomeRiskCaveat: outcomeRiskCaveat,
-                RunId: input.RunId,
-                SessionId: sessionId,
-                RankScore: ComputeRankScore(estimatedWasteTokens ?? 0, "deterministic", discount),
-                MeasurementClass: measured ? "deterministic" : "coverage-gap",
-                ConfidenceBasis: "Deterministically measured from schema presence in turn context and 0 recorded invocation spans.",
-                WhatWouldRaiseIt: measured
-                    ? "Telemetry is already deterministic; confidence is at ceiling."
-                    : "Reported schema token sizes on the resident tool definitions would let the unused schema cost be measured."));
-        }
-
-        return findings;
+        return new Finding(
+            Id: $"finding-dormant-tool-{toolName}-{sessionId ?? "session"}",
+            DetectorId: "dormant-tool-schema",
+            Title: $"Dormant Tool Schema: \"{toolName}\" resident across {turnsResident} turns without invocation",
+            Mechanism: measured
+                ? $"Tool schema definition for \"{toolName}\" was injected into the prompt context on each turn ({schemaTokens} tokens/turn), accumulating {estimatedWasteTokens} tokens across {turnsResident} turns with zero invocations and no model references."
+                : $"Tool schema definition for \"{toolName}\" was injected into the prompt context on each turn at an unmeasured size, remaining resident across {turnsResident} turns with zero invocations and no model references.",
+            EvidenceLinks: evidenceLinks,
+            Confidence: "deterministic",
+            EstimatedWasteTokens: estimatedWasteTokens,
+            Recommendation: recommendation,
+            ErrorBar: null,
+            OutcomeRiskCaveat: outcomeRiskCaveat,
+            RunId: input.RunId,
+            SessionId: sessionId,
+            RankScore: ComputeRankScore(estimatedWasteTokens ?? 0, "deterministic", discount),
+            MeasurementClass: measured ? "deterministic" : "coverage-gap",
+            ConfidenceBasis: "Deterministically measured from schema presence in turn context and 0 recorded invocation spans.",
+            WhatWouldRaiseIt: measured
+                ? "Telemetry is already deterministic; confidence is at ceiling."
+                : "Reported schema token sizes on the resident tool definitions would let the unused schema cost be measured.");
     }
 
     /// <summary>Detector 2: identical tool invocations with matching arguments within the same session.</summary>
@@ -990,6 +1035,17 @@ public static partial class CanonFindings
         double discount = CalculateOutcomeRiskDiscount(input.Outcome, "duplicate-tool-call");
 
         List<NormalizedToolCall> calls = [];
+        CollectRecordedToolCalls(records, sessionId, calls);
+        AppendSuppliedToolCalls(input.Calls, sessionId, calls);
+
+        return BuildDuplicateToolCallFindings(calls, input, sessionId, discount);
+    }
+
+    private static void CollectRecordedToolCalls(
+        IReadOnlyList<CanonicalRecord> records,
+        string? sessionId,
+        List<NormalizedToolCall> calls)
+    {
         int turnIdx = 0;
         foreach (CanonicalRecord r in records)
         {
@@ -1019,23 +1075,36 @@ public static partial class CanonFindings
                     r.SessionId ?? sessionId));
             }
         }
+    }
 
-        if (input.Calls is { Count: > 0 })
+    private static void AppendSuppliedToolCalls(
+        IReadOnlyList<ToolCallSupply>? suppliedCalls,
+        string? sessionId,
+        List<NormalizedToolCall> calls)
+    {
+        if (suppliedCalls is not { Count: > 0 })
+            return;
+
+        for (int i = 0; i < suppliedCalls.Count; i++)
         {
-            for (int i = 0; i < input.Calls.Count; i++)
-            {
-                ToolCallSupply c = input.Calls[i];
-                calls.Add(new NormalizedToolCall(
-                    c.Name.Trim(),
-                    SerializeToolArgs(c.Arguments),
-                    c.ArgsHash,
-                    c.SpanId ?? $"tool-call-span-{i}",
-                    c.TurnIndex ?? i,
-                    c.Tokens,
-                    c.SessionId ?? sessionId));
-            }
+            ToolCallSupply c = suppliedCalls[i];
+            calls.Add(new NormalizedToolCall(
+                c.Name.Trim(),
+                SerializeToolArgs(c.Arguments),
+                c.ArgsHash,
+                c.SpanId ?? $"tool-call-span-{i}",
+                c.TurnIndex ?? i,
+                c.Tokens,
+                c.SessionId ?? sessionId));
         }
+    }
 
+    private static List<Finding> BuildDuplicateToolCallFindings(
+        List<NormalizedToolCall> calls,
+        DuplicateToolCallInput input,
+        string? sessionId,
+        double discount)
+    {
         List<Finding> findings = [];
         Dictionary<string, NormalizedToolCall> seenMap = new(StringComparer.Ordinal);
         foreach (NormalizedToolCall call in calls)
@@ -1046,45 +1115,7 @@ public static partial class CanonFindings
 
             if (seenMap.TryGetValue(key, out NormalizedToolCall? firstCall))
             {
-                long? wasteTokens = call.Tokens;
-                bool measured = wasteTokens.HasValue;
-                string preview = call.Args.Length == 0
-                    ? "(empty)"
-                    : (call.Args.Length > 100 ? call.Args[..100] : call.Args);
-
-                FindingEvidenceLink[] evidenceLinks =
-                [
-                    new(firstCall.SpanId, firstCall.TurnIndex, $"Initial invocation of \"{call.Name}\" with arguments: {preview}."),
-                    new(call.SpanId, call.TurnIndex, $"Duplicate identical invocation of \"{call.Name}\" with matching arguments, generating redundant output."),
-                ];
-
-                string recommendation = $"Implement client-side on-demand caching or relocate query results into local conversation state to defer duplicate \"{call.Name}\" tool executions.";
-                string outcomeRiskCaveat = DeriveOutcomeRiskCaveat(
-                    input.Outcome,
-                    "duplicate-tool-call",
-                    "Client-side result caching assumes queried external resources are idempotent; volatile resources may yield stale data if cached.");
-
-                findings.Add(new Finding(
-                    Id: $"finding-duplicate-call-{call.Name}-{call.SpanId}",
-                    DetectorId: "duplicate-tool-call",
-                    Title: $"Duplicate Tool Call: Identical invocation of \"{call.Name}\"",
-                    Mechanism: measured
-                        ? $"The tool \"{call.Name}\" was executed multiple times with identical arguments in the same session, repeating {wasteTokens} tokens of redundant call and result payloads."
-                        : $"The tool \"{call.Name}\" was executed multiple times with identical arguments in the same session, repeating a redundant call and result payload of unmeasured size.",
-                    EvidenceLinks: evidenceLinks,
-                    Confidence: "deterministic",
-                    EstimatedWasteTokens: wasteTokens,
-                    Recommendation: recommendation,
-                    ErrorBar: null,
-                    OutcomeRiskCaveat: outcomeRiskCaveat,
-                    RunId: input.RunId,
-                    SessionId: call.SessionId ?? sessionId,
-                    RankScore: ComputeRankScore(wasteTokens ?? 0, "deterministic", discount),
-                    MeasurementClass: measured ? "deterministic" : "coverage-gap",
-                    ConfidenceBasis: "Deterministically measured by hashing tool names and whitespace-normalized arguments across execution spans.",
-                    WhatWouldRaiseIt: measured
-                        ? "Deterministic measurement; confidence is at ceiling."
-                        : "Reported token counters or result byte counts on the duplicate tool spans would let the redundant payload be measured."));
+                findings.Add(CreateDuplicateToolCallFinding(call, firstCall, input, sessionId, discount));
             }
             else
             {
@@ -1093,6 +1124,54 @@ public static partial class CanonFindings
         }
 
         return findings;
+    }
+
+    private static Finding CreateDuplicateToolCallFinding(
+        NormalizedToolCall call,
+        NormalizedToolCall firstCall,
+        DuplicateToolCallInput input,
+        string? sessionId,
+        double discount)
+    {
+        long? wasteTokens = call.Tokens;
+        bool measured = wasteTokens.HasValue;
+        string preview = call.Args.Length == 0
+            ? "(empty)"
+            : (call.Args.Length > 100 ? call.Args[..100] : call.Args);
+
+        FindingEvidenceLink[] evidenceLinks =
+        [
+            new(firstCall.SpanId, firstCall.TurnIndex, $"Initial invocation of \"{call.Name}\" with arguments: {preview}."),
+            new(call.SpanId, call.TurnIndex, $"Duplicate identical invocation of \"{call.Name}\" with matching arguments, generating redundant output."),
+        ];
+
+        string recommendation = $"Implement client-side on-demand caching or relocate query results into local conversation state to defer duplicate \"{call.Name}\" tool executions.";
+        string outcomeRiskCaveat = DeriveOutcomeRiskCaveat(
+            input.Outcome,
+            "duplicate-tool-call",
+            "Client-side result caching assumes queried external resources are idempotent; volatile resources may yield stale data if cached.");
+
+        return new Finding(
+            Id: $"finding-duplicate-call-{call.Name}-{call.SpanId}",
+            DetectorId: "duplicate-tool-call",
+            Title: $"Duplicate Tool Call: Identical invocation of \"{call.Name}\"",
+            Mechanism: measured
+                ? $"The tool \"{call.Name}\" was executed multiple times with identical arguments in the same session, repeating {wasteTokens} tokens of redundant call and result payloads."
+                : $"The tool \"{call.Name}\" was executed multiple times with identical arguments in the same session, repeating a redundant call and result payload of unmeasured size.",
+            EvidenceLinks: evidenceLinks,
+            Confidence: "deterministic",
+            EstimatedWasteTokens: wasteTokens,
+            Recommendation: recommendation,
+            ErrorBar: null,
+            OutcomeRiskCaveat: outcomeRiskCaveat,
+            RunId: input.RunId,
+            SessionId: call.SessionId ?? sessionId,
+            RankScore: ComputeRankScore(wasteTokens ?? 0, "deterministic", discount),
+            MeasurementClass: measured ? "deterministic" : "coverage-gap",
+            ConfidenceBasis: "Deterministically measured by hashing tool names and whitespace-normalized arguments across execution spans.",
+            WhatWouldRaiseIt: measured
+                ? "Deterministic measurement; confidence is at ceiling."
+                : "Reported token counters or result byte counts on the duplicate tool spans would let the redundant payload be measured.");
     }
 
     /// <summary>Detector 3: tool outputs exceeding token, byte, or character thresholds.</summary>
@@ -1106,9 +1185,19 @@ public static partial class CanonFindings
         double discount = CalculateOutcomeRiskDiscount(input.Outcome, "oversized-tool-result");
 
         List<ToolResultItem> items = [];
+        CollectRecordedToolResults(records, sessionId, items);
+        AppendSuppliedToolResults(input.Results, sessionId, items);
+
+        return BuildOversizedToolResultFindings(items, input, sessionId, discount);
+    }
+
+    private static void CollectRecordedToolResults(
+        IReadOnlyList<CanonicalRecord> records,
+        string? sessionId,
+        List<ToolResultItem> items)
+    {
         int currentTurnIndex = 0;
         string lastLlmSpanId = string.Empty;
-
         foreach (CanonicalRecord r in records)
         {
             if (string.Equals(r.Op, "llm.invoke", StringComparison.Ordinal))
@@ -1118,156 +1207,191 @@ public static partial class CanonFindings
             }
             else if (string.Equals(r.Op, "tool.invoke", StringComparison.Ordinal))
             {
-                StringBuilder contentBuilder = new();
-                long reportedTokens = 0;
-                bool allPartsMeasured = true;
-                if (r.Parts is not null)
-                {
-                    foreach (ContentPart part in r.Parts)
-                    {
-                        if (string.Equals(part.Part, "tool_result_content", StringComparison.Ordinal) && !string.IsNullOrEmpty(part.Text))
-                        {
-                            contentBuilder.Append(part.Text);
-                            long? partTokens = CanonPricing.MeasuredCount(part.Tokens);
-                            if (partTokens.HasValue)
-                                reportedTokens += partTokens.Value;
-                            else
-                                allPartsMeasured = false;
-                        }
-                    }
-                }
-
-                string content = contentBuilder.ToString();
-                if (content.Length == 0 && TryGetRawElement(r, ["result", "output"], out JsonElement rawRes))
-                {
-                    content = rawRes.ValueKind == JsonValueKind.String ? (rawRes.GetString() ?? string.Empty) : rawRes.GetRawText();
-                    allPartsMeasured = false;
-                }
-
-                string toolName = (!string.IsNullOrEmpty(r.Name) && r.Name != "tool.invoke" ? r.Name : null)
-                    ?? RawString(r, ["gen_ai.tool.name", "tool.name", "tool_name"])
-                    ?? "tool";
-
-                long? resultBytes = TryGetRawNumber(r, ["gen_ai.tool.result_bytes"], out double rb) ? (long)rb : null;
-                int chars = content.Length;
-                long bytes = resultBytes ?? Encoding.UTF8.GetByteCount(content);
-
-                // A token figure derived from bytes or text length is an estimate (D15): without reported tokens the item stays unmeasured.
-                long? measuredTokens = allPartsMeasured && reportedTokens > 0 ? reportedTokens : null;
-
-                if (chars > 0 || bytes > 0 || content.Length > 0)
-                {
-                    items.Add(new ToolResultItem(
-                        toolName,
-                        measuredTokens,
-                        chars,
-                        bytes,
-                        r.SpanId,
-                        currentTurnIndex,
-                        string.IsNullOrEmpty(lastLlmSpanId) ? r.SpanId : lastLlmSpanId,
-                        r.SessionId ?? sessionId));
-                }
+                ToolResultItem? item = CreateRecordedToolResult(r, currentTurnIndex, lastLlmSpanId, sessionId);
+                if (item is not null)
+                    items.Add(item);
             }
         }
+    }
 
-        if (input.Results is { Count: > 0 })
+    private static ToolResultItem? CreateRecordedToolResult(
+        CanonicalRecord r,
+        int currentTurnIndex,
+        string lastLlmSpanId,
+        string? sessionId)
+    {
+        StringBuilder contentBuilder = new();
+        long reportedTokens = 0;
+        bool allPartsMeasured = true;
+        if (r.Parts is not null)
         {
-            for (int i = 0; i < input.Results.Count; i++)
+            foreach (ContentPart part in r.Parts)
             {
-                ToolResultSupply res = input.Results[i];
-                string content = res.Content switch
+                if (string.Equals(part.Part, "tool_result_content", StringComparison.Ordinal) && !string.IsNullOrEmpty(part.Text))
                 {
-                    null => string.Empty,
-                    string s => s,
-                    JsonElement el when el.ValueKind == JsonValueKind.String => el.GetString() ?? string.Empty,
-                    JsonElement el => el.GetRawText(),
-                    _ => JsonSerializer.Serialize(res.Content),
-                };
-                int chars = res.Characters ?? content.Length;
-                long bytes = res.Bytes ?? Encoding.UTF8.GetByteCount(content);
-                items.Add(new ToolResultItem(
-                    res.ToolName ?? "tool",
-                    res.Tokens,
-                    chars,
-                    bytes,
-                    res.SpanId ?? $"result-span-{i}",
-                    res.TurnIndex ?? i,
-                    $"llm-consuming-span-{i}",
-                    sessionId));
+                    contentBuilder.Append(part.Text);
+                    long? partTokens = CanonPricing.MeasuredCount(part.Tokens);
+                    if (partTokens.HasValue)
+                        reportedTokens += partTokens.Value;
+                    else
+                        allPartsMeasured = false;
+                }
             }
         }
 
+        string content = contentBuilder.ToString();
+        if (content.Length == 0 && TryGetRawElement(r, ["result", "output"], out JsonElement rawRes))
+        {
+            content = rawRes.ValueKind == JsonValueKind.String ? (rawRes.GetString() ?? string.Empty) : rawRes.GetRawText();
+            allPartsMeasured = false;
+        }
+
+        string toolName = (!string.IsNullOrEmpty(r.Name) && r.Name != "tool.invoke" ? r.Name : null)
+            ?? RawString(r, ["gen_ai.tool.name", "tool.name", "tool_name"])
+            ?? "tool";
+
+        long? resultBytes = TryGetRawNumber(r, ["gen_ai.tool.result_bytes"], out double rb) ? (long)rb : null;
+        int chars = content.Length;
+        long bytes = resultBytes ?? Encoding.UTF8.GetByteCount(content);
+
+        // A token figure derived from bytes or text length is an estimate (D15): without reported tokens the item stays unmeasured.
+        long? measuredTokens = allPartsMeasured && reportedTokens > 0 ? reportedTokens : null;
+
+        if (chars <= 0 && bytes <= 0 && content.Length <= 0)
+            return null;
+
+        return new ToolResultItem(
+            toolName,
+            measuredTokens,
+            chars,
+            bytes,
+            r.SpanId,
+            currentTurnIndex,
+            string.IsNullOrEmpty(lastLlmSpanId) ? r.SpanId : lastLlmSpanId,
+            r.SessionId ?? sessionId);
+    }
+
+    private static void AppendSuppliedToolResults(
+        IReadOnlyList<ToolResultSupply>? suppliedResults,
+        string? sessionId,
+        List<ToolResultItem> items)
+    {
+        if (suppliedResults is not { Count: > 0 })
+            return;
+
+        for (int i = 0; i < suppliedResults.Count; i++)
+        {
+            ToolResultSupply res = suppliedResults[i];
+            string content = res.Content switch
+            {
+                null => string.Empty,
+                string s => s,
+                JsonElement el when el.ValueKind == JsonValueKind.String => el.GetString() ?? string.Empty,
+                JsonElement el => el.GetRawText(),
+                _ => JsonSerializer.Serialize(res.Content),
+            };
+            int chars = res.Characters ?? content.Length;
+            long bytes = res.Bytes ?? Encoding.UTF8.GetByteCount(content);
+            items.Add(new ToolResultItem(
+                res.ToolName ?? "tool",
+                res.Tokens,
+                chars,
+                bytes,
+                res.SpanId ?? $"result-span-{i}",
+                res.TurnIndex ?? i,
+                $"llm-consuming-span-{i}",
+                sessionId));
+        }
+    }
+
+    private static List<Finding> BuildOversizedToolResultFindings(
+        List<ToolResultItem> items,
+        OversizedToolResultInput input,
+        string? sessionId,
+        double discount)
+    {
         List<Finding> findings = [];
         foreach (ToolResultItem item in items)
         {
-            bool tokenExceeded = item.Tokens > input.TokenThreshold;
-            bool charExceeded = item.Chars > input.CharThreshold;
-            bool byteExceeded = item.Bytes > input.ByteThreshold;
-            if (!tokenExceeded && !charExceeded && !byteExceeded)
-                continue;
-
-            // The excess is exact arithmetic on a reported token count; a bytes- or characters-only
-            // overrun has no reported token figure, so it is not measured rather than derived at a ratio (D15).
-            string titleExceeded;
-            string thresholdDesc;
-            long? excessTokens;
-            if (tokenExceeded)
-            {
-                titleExceeded = $"{item.Tokens} tokens";
-                thresholdDesc = $"{input.TokenThreshold} tokens";
-                excessTokens = item.Tokens!.Value - input.TokenThreshold;
-            }
-            else if (byteExceeded)
-            {
-                titleExceeded = $"{item.Bytes} bytes";
-                thresholdDesc = $"{input.ByteThreshold} bytes";
-                excessTokens = null;
-            }
-            else
-            {
-                titleExceeded = $"{item.Chars} characters";
-                thresholdDesc = $"{input.CharThreshold} characters";
-                excessTokens = null;
-            }
-
-            bool excessMeasured = excessTokens.HasValue;
-
-            FindingEvidenceLink[] evidenceLinks =
-            [
-                new(item.SpanId, item.TurnIndex, $"Tool \"{item.ToolName}\" returned oversized output ({item.tokensDisplay}), exceeding threshold ({thresholdDesc})."),
-                new(item.ConsumingSpanId, item.TurnIndex + 1, item.Tokens.HasValue
-                    ? $"Subsequent turn context re-read {item.Tokens} tokens into prompt history with low operational yield."
-                    : "Subsequent turn context re-read the result into prompt history with low operational yield (token size not reported)."),
-            ];
-
-            string recommendation = "Relocate large tool outputs to persistent storage and use progressive disclosure or on-demand pagination to return concise excerpts.";
-            string outcomeRiskCaveat = DeriveOutcomeRiskCaveat(
-                input.Outcome,
-                "oversized-tool-result",
-                "Truncating or paginating tool output may conceal error traces or multi-line diagnostics if subsequent steps require full logs.");
-
-            findings.Add(new Finding(
-                Id: $"finding-oversized-result-{item.ToolName}-{item.SpanId}",
-                DetectorId: "oversized-tool-result",
-                Title: $"Oversized Tool Result: \"{item.ToolName}\" returned {titleExceeded} exceeding budget",
-                Mechanism: excessMeasured
-                    ? $"Tool \"{item.ToolName}\" injected {item.Tokens} tokens ({item.Chars} characters, {item.Bytes} bytes) into context in a single output, exceeding the {thresholdDesc} limit and increasing per-turn re-read overhead by {excessTokens} tokens."
-                    : $"Tool \"{item.ToolName}\" injected {item.Chars} characters ({item.Bytes} bytes) into context in a single output, exceeding the {thresholdDesc} limit; no reported token count, so the added re-read overhead is not measured.",
-                EvidenceLinks: evidenceLinks,
-                Confidence: "deterministic",
-                EstimatedWasteTokens: excessTokens,
-                Recommendation: recommendation,
-                ErrorBar: null,
-                OutcomeRiskCaveat: outcomeRiskCaveat,
-                RunId: input.RunId,
-                SessionId: item.SessionId ?? sessionId,
-                RankScore: ComputeRankScore(excessTokens ?? 0, "deterministic", discount),
-                MeasurementClass: "deterministic",
-                ConfidenceBasis: "Deterministically measured by comparing tool result byte, character, and token lengths against configured thresholds.",
-                WhatWouldRaiseIt: "Deterministic measurement; confidence is at ceiling."));
+            Finding? finding = CreateOversizedToolResultFinding(item, input, sessionId, discount);
+            if (finding is not null)
+                findings.Add(finding);
         }
 
         return findings;
+    }
+
+    private static Finding? CreateOversizedToolResultFinding(
+        ToolResultItem item,
+        OversizedToolResultInput input,
+        string? sessionId,
+        double discount)
+    {
+        bool tokenExceeded = item.Tokens > input.TokenThreshold;
+        bool charExceeded = item.Chars > input.CharThreshold;
+        bool byteExceeded = item.Bytes > input.ByteThreshold;
+        if (!tokenExceeded && !charExceeded && !byteExceeded)
+            return null;
+
+        // The excess is exact arithmetic on a reported token count; a bytes- or characters-only
+        // overrun has no reported token figure, so it is not measured rather than derived at a ratio (D15).
+        string titleExceeded;
+        string thresholdDesc;
+        long? excessTokens;
+        if (tokenExceeded)
+        {
+            titleExceeded = $"{item.Tokens} tokens";
+            thresholdDesc = $"{input.TokenThreshold} tokens";
+            excessTokens = item.Tokens!.Value - input.TokenThreshold;
+        }
+        else if (byteExceeded)
+        {
+            titleExceeded = $"{item.Bytes} bytes";
+            thresholdDesc = $"{input.ByteThreshold} bytes";
+            excessTokens = null;
+        }
+        else
+        {
+            titleExceeded = $"{item.Chars} characters";
+            thresholdDesc = $"{input.CharThreshold} characters";
+            excessTokens = null;
+        }
+
+        bool excessMeasured = excessTokens.HasValue;
+
+        FindingEvidenceLink[] evidenceLinks =
+        [
+            new(item.SpanId, item.TurnIndex, $"Tool \"{item.ToolName}\" returned oversized output ({item.tokensDisplay}), exceeding threshold ({thresholdDesc})."),
+            new(item.ConsumingSpanId, item.TurnIndex + 1, item.Tokens.HasValue
+                ? $"Subsequent turn context re-read {item.Tokens} tokens into prompt history with low operational yield."
+                : "Subsequent turn context re-read the result into prompt history with low operational yield (token size not reported)."),
+        ];
+
+        string recommendation = "Relocate large tool outputs to persistent storage and use progressive disclosure or on-demand pagination to return concise excerpts.";
+        string outcomeRiskCaveat = DeriveOutcomeRiskCaveat(
+            input.Outcome,
+            "oversized-tool-result",
+            "Truncating or paginating tool output may conceal error traces or multi-line diagnostics if subsequent steps require full logs.");
+
+        return new Finding(
+            Id: $"finding-oversized-result-{item.ToolName}-{item.SpanId}",
+            DetectorId: "oversized-tool-result",
+            Title: $"Oversized Tool Result: \"{item.ToolName}\" returned {titleExceeded} exceeding budget",
+            Mechanism: excessMeasured
+                ? $"Tool \"{item.ToolName}\" injected {item.Tokens} tokens ({item.Chars} characters, {item.Bytes} bytes) into context in a single output, exceeding the {thresholdDesc} limit and increasing per-turn re-read overhead by {excessTokens} tokens."
+                : $"Tool \"{item.ToolName}\" injected {item.Chars} characters ({item.Bytes} bytes) into context in a single output, exceeding the {thresholdDesc} limit; no reported token count, so the added re-read overhead is not measured.",
+            EvidenceLinks: evidenceLinks,
+            Confidence: "deterministic",
+            EstimatedWasteTokens: excessTokens,
+            Recommendation: recommendation,
+            ErrorBar: null,
+            OutcomeRiskCaveat: outcomeRiskCaveat,
+            RunId: input.RunId,
+            SessionId: item.SessionId ?? sessionId,
+            RankScore: ComputeRankScore(excessTokens ?? 0, "deterministic", discount),
+            MeasurementClass: "deterministic",
+            ConfidenceBasis: "Deterministically measured by comparing tool result byte, character, and token lengths against configured thresholds.",
+            WhatWouldRaiseIt: "Deterministic measurement; confidence is at ceiling.");
     }
 
     /// <summary>Detector 4: consecutive prompt-prefix hash divergence invalidating KV-cache reuse.</summary>
@@ -1281,6 +1405,26 @@ public static partial class CanonFindings
         double discount = CalculateOutcomeRiskDiscount(input.Outcome, "prefix-cache-break");
 
         List<(string SpanId, int TurnIndex, string Hash, long? FreshInput)> turns = [];
+        CollectPrefixTurns(records, turns);
+        AppendSuppliedPrefixTurns(input.Turns, turns);
+
+        if (turns.Count < 2)
+            return [];
+
+        for (int i = 0; i < turns.Count - 1; i++)
+        {
+            Finding? finding = TryBuildPrefixBreakFinding(turns[i], turns[i + 1], input, sessionId, discount);
+            if (finding is not null)
+                return [finding];
+        }
+
+        return [];
+    }
+
+    private static void CollectPrefixTurns(
+        IReadOnlyList<CanonicalRecord> records,
+        List<(string SpanId, int TurnIndex, string Hash, long? FreshInput)> turns)
+    {
         int turnIdx = 0;
         foreach (CanonicalRecord r in records)
         {
@@ -1294,70 +1438,72 @@ public static partial class CanonFindings
             turns.Add((r.SpanId, turnIdx, prefix.Length > 0 ? HashNormalized(prefix) : string.Empty, r.Tokens.FreshInput));
             turnIdx++;
         }
+    }
 
-        if (input.Turns is { Count: > 0 })
+    private static void AppendSuppliedPrefixTurns(
+        IReadOnlyList<PrefixTurnSupply>? suppliedTurns,
+        List<(string SpanId, int TurnIndex, string Hash, long? FreshInput)> turns)
+    {
+        if (suppliedTurns is not { Count: > 0 })
+            return;
+
+        for (int i = 0; i < suppliedTurns.Count; i++)
         {
-            for (int i = 0; i < input.Turns.Count; i++)
-            {
-                PrefixTurnSupply t = input.Turns[i];
-                string prefix = t.PrefixText ?? string.Empty;
-                turns.Add((t.SpanId ?? $"turn-span-{i}", t.TurnIndex ?? i, prefix.Length > 0 ? HashNormalized(prefix) : string.Empty, t.FreshInput));
-            }
+            PrefixTurnSupply t = suppliedTurns[i];
+            string prefix = t.PrefixText ?? string.Empty;
+            turns.Add((t.SpanId ?? $"turn-span-{i}", t.TurnIndex ?? i, prefix.Length > 0 ? HashNormalized(prefix) : string.Empty, t.FreshInput));
         }
+    }
 
-        if (turns.Count < 2)
-            return [];
+    private static Finding? TryBuildPrefixBreakFinding(
+        (string SpanId, int TurnIndex, string Hash, long? FreshInput) turnA,
+        (string SpanId, int TurnIndex, string Hash, long? FreshInput) turnB,
+        PrefixCacheBreakInput input,
+        string? sessionId,
+        double discount)
+    {
+        (string spanA, int idxA, string hashA, long? _) = turnA;
+        (string spanB, int idxB, string hashB, long? freshB) = turnB;
 
-        for (int i = 0; i < turns.Count - 1; i++)
-        {
-            (string spanA, int idxA, string hashA, long? _) = turns[i];
-            (string spanB, int idxB, string hashB, long? freshB) = turns[i + 1];
+        if (hashA.Length == 0 || hashB.Length == 0 || string.Equals(hashA, hashB, StringComparison.Ordinal))
+            return null;
 
-            if (hashA.Length == 0 || hashB.Length == 0 || string.Equals(hashA, hashB, StringComparison.Ordinal))
-                continue;
+        long? wasteTokens = freshB is > 0 ? freshB : null;
+        bool measured = wasteTokens.HasValue;
 
-            long? wasteTokens = freshB is > 0 ? freshB : null;
-            bool measured = wasteTokens.HasValue;
+        FindingEvidenceLink[] evidenceLinks =
+        [
+            new(spanA, idxA, $"Turn {idxA} established baseline prompt prefix (hash: {hashA[..Math.Min(10, hashA.Length)]}...)."),
+            new(spanB, idxB, $"Turn {idxB} mutated prefix early in prompt (hash: {hashB[..Math.Min(10, hashB.Length)]}...), invalidating KV-cache reuse."),
+        ];
 
-            FindingEvidenceLink[] evidenceLinks =
-            [
-                new(spanA, idxA, $"Turn {idxA} established baseline prompt prefix (hash: {hashA[..Math.Min(10, hashA.Length)]}...)."),
-                new(spanB, idxB, $"Turn {idxB} mutated prefix early in prompt (hash: {hashB[..Math.Min(10, hashB.Length)]}...), invalidating KV-cache reuse."),
-            ];
+        string recommendation = "Relocate dynamic tokens (e.g. timestamps, turn counters, environment variables) to the end of prompt messages, preserving an immutable prefix for KV-cache reuse.";
+        string outcomeRiskCaveat = DeriveOutcomeRiskCaveat(
+            input.Outcome,
+            "prefix-cache-break",
+            "Relocating dynamic instructions to the prompt tail can subtly shift model attention weights for early turn system prompts.");
 
-            string recommendation = "Relocate dynamic tokens (e.g. timestamps, turn counters, environment variables) to the end of prompt messages, preserving an immutable prefix for KV-cache reuse.";
-            string outcomeRiskCaveat = DeriveOutcomeRiskCaveat(
-                input.Outcome,
-                "prefix-cache-break",
-                "Relocating dynamic instructions to the prompt tail can subtly shift model attention weights for early turn system prompts.");
-
-            return
-            [
-                new Finding(
-                    Id: $"finding-prefix-break-{sessionId ?? "session"}-{spanB}",
-                    DetectorId: "prefix-cache-break",
-                    Title: "Prefix Cache Break: Dynamic tokens injected early in prompt breaking KV-cache",
-                    Mechanism: measured
-                        ? $"Prefix tokens differed between turn {idxA} and turn {idxB}, breaking KV-cache prefix stability and forcing the model to re-evaluate {wasteTokens} fresh input tokens that could have been cached."
-                        : $"Prefix tokens differed between turn {idxA} and turn {idxB}, breaking KV-cache prefix stability and forcing the model to re-evaluate a fresh input payload of unmeasured size that could have been cached.",
-                    EvidenceLinks: evidenceLinks,
-                    Confidence: "deterministic",
-                    EstimatedWasteTokens: wasteTokens,
-                    Recommendation: recommendation,
-                    ErrorBar: null,
-                    OutcomeRiskCaveat: outcomeRiskCaveat,
-                    RunId: input.RunId,
-                    SessionId: sessionId,
-                    RankScore: ComputeRankScore(wasteTokens ?? 0, "deterministic", discount),
-                    MeasurementClass: measured ? "deterministic" : "coverage-gap",
-                    ConfidenceBasis: "Deterministically verified by whitespace-normalized SHA-256 hash divergence between consecutive turn prefixes.",
-                    WhatWouldRaiseIt: measured
-                        ? "Deterministic measurement; confidence is at ceiling."
-                        : "Reported fresh-input token counters on the breaking turn would let the invalidated prefix cost be measured."),
-            ];
-        }
-
-        return [];
+        return new Finding(
+            Id: $"finding-prefix-break-{sessionId ?? "session"}-{spanB}",
+            DetectorId: "prefix-cache-break",
+            Title: "Prefix Cache Break: Dynamic tokens injected early in prompt breaking KV-cache",
+            Mechanism: measured
+                ? $"Prefix tokens differed between turn {idxA} and turn {idxB}, breaking KV-cache prefix stability and forcing the model to re-evaluate {wasteTokens} fresh input tokens that could have been cached."
+                : $"Prefix tokens differed between turn {idxA} and turn {idxB}, breaking KV-cache prefix stability and forcing the model to re-evaluate a fresh input payload of unmeasured size that could have been cached.",
+            EvidenceLinks: evidenceLinks,
+            Confidence: "deterministic",
+            EstimatedWasteTokens: wasteTokens,
+            Recommendation: recommendation,
+            ErrorBar: null,
+            OutcomeRiskCaveat: outcomeRiskCaveat,
+            RunId: input.RunId,
+            SessionId: sessionId,
+            RankScore: ComputeRankScore(wasteTokens ?? 0, "deterministic", discount),
+            MeasurementClass: measured ? "deterministic" : "coverage-gap",
+            ConfidenceBasis: "Deterministically verified by whitespace-normalized SHA-256 hash divergence between consecutive turn prefixes.",
+            WhatWouldRaiseIt: measured
+                ? "Deterministic measurement; confidence is at ceiling."
+                : "Reported fresh-input token counters on the breaking turn would let the invalidated prefix cost be measured.");
     }
 
     /// <summary>Detector 5: session peak consumption exceeding 85% of a known (non-default/non-absent) context window.</summary>
@@ -1368,11 +1514,30 @@ public static partial class CanonFindings
         string? invocationSession = string.IsNullOrEmpty(input.SessionId) ? null : input.SessionId;
         double discount = CalculateOutcomeRiskDiscount(input.Outcome, "compaction-hazard");
 
-        string BaseKeyOf(CanonicalRecord record) =>
-            !string.IsNullOrEmpty(record.SessionId)
-                ? record.SessionId
-                : (!string.IsNullOrEmpty(record.TraceId) ? record.TraceId : (invocationSession ?? "session"));
+        Dictionary<string, HashSet<string>> harnessesByKey = BuildHarnessesByKey(records, invocationSession);
+        Dictionary<string, CompactionSessionGroup> groups = BuildCompactionGroups(records, input, invocationSession, harnessesByKey);
+        AppendSuppliedCompactionTurns(input.Turns, invocationSession, groups);
 
+        List<Finding> findings = [];
+        foreach (CompactionSessionGroup group in groups.Values)
+        {
+            Finding? finding = TryBuildCompactionFinding(group, input, discount);
+            if (finding is not null)
+                findings.Add(finding);
+        }
+
+        return findings;
+    }
+
+    private static string CompactionBaseKey(CanonicalRecord record, string? invocationSession) =>
+        !string.IsNullOrEmpty(record.SessionId)
+            ? record.SessionId
+            : (!string.IsNullOrEmpty(record.TraceId) ? record.TraceId : (invocationSession ?? "session"));
+
+    private static Dictionary<string, HashSet<string>> BuildHarnessesByKey(
+        IReadOnlyList<CanonicalRecord> records,
+        string? invocationSession)
+    {
         Dictionary<string, HashSet<string>> harnessesByKey = new(StringComparer.Ordinal);
         foreach (CanonicalRecord record in records)
         {
@@ -1380,7 +1545,7 @@ public static partial class CanonFindings
             if (harness is null)
                 continue;
 
-            string key = BaseKeyOf(record);
+            string key = CompactionBaseKey(record, invocationSession);
             if (!harnessesByKey.TryGetValue(key, out HashSet<string>? set))
             {
                 set = new HashSet<string>(StringComparer.Ordinal);
@@ -1390,25 +1555,23 @@ public static partial class CanonFindings
             set.Add(harness);
         }
 
+        return harnessesByKey;
+    }
+
+    private static Dictionary<string, CompactionSessionGroup> BuildCompactionGroups(
+        IReadOnlyList<CanonicalRecord> records,
+        CompactionHazardInput input,
+        string? invocationSession,
+        Dictionary<string, HashSet<string>> harnessesByKey)
+    {
         Dictionary<string, CompactionSessionGroup> groups = new(StringComparer.Ordinal);
-        CompactionSessionGroup GroupFor(string sid)
-        {
-            if (!groups.TryGetValue(sid, out CompactionSessionGroup? existing))
-            {
-                existing = new CompactionSessionGroup(sid);
-                groups[sid] = existing;
-            }
-
-            return existing;
-        }
-
         int turnIdx = 0;
         foreach (CanonicalRecord r in records)
         {
             if (!string.Equals(r.Op, "llm.invoke", StringComparison.Ordinal) || CanonPricing.CanonicalHarnessId(r.Harness) is null)
                 continue;
 
-            string key = BaseKeyOf(r);
+            string key = CompactionBaseKey(r, invocationSession);
             string? assigned = input.SessionIdentityLookup?.Invoke(key, r.Harness);
             string groupId = assigned ?? (harnessesByKey.TryGetValue(key, out HashSet<string>? set) && set.Count > 1
                 ? $"{CanonPricing.NormalizeHarnessName(r.Harness)}:{key}"
@@ -1418,137 +1581,210 @@ public static partial class CanonFindings
                 ? r.Tokens.ReportedInput
                 : CanonPricing.MeasuredInput(r.Tokens);
 
-            CompactionSessionGroup group = GroupFor(groupId);
+            CompactionSessionGroup group = GroupFor(groups, groupId);
             group.Turns.Add((r.SpanId, turnIdx, tokens));
             group.Records.Add(r);
             turnIdx++;
         }
 
-        if (input.Turns is { Count: > 0 })
+        return groups;
+    }
+
+    private static CompactionSessionGroup GroupFor(
+        Dictionary<string, CompactionSessionGroup> groups,
+        string sid)
+    {
+        if (!groups.TryGetValue(sid, out CompactionSessionGroup? existing))
         {
-            CompactionSessionGroup group = GroupFor(invocationSession ?? "session");
-            for (int i = 0; i < input.Turns.Count; i++)
-            {
-                CompactionTurnSupply t = input.Turns[i];
-                group.Turns.Add((t.SpanId ?? $"turn-span-{i}", t.TurnIndex ?? i, t.InputTokens ?? 0));
-            }
+            existing = new CompactionSessionGroup(sid);
+            groups[sid] = existing;
         }
 
-        List<Finding> findings = [];
-        foreach (CompactionSessionGroup group in groups.Values)
+        return existing;
+    }
+
+    private static void AppendSuppliedCompactionTurns(
+        IReadOnlyList<CompactionTurnSupply>? suppliedTurns,
+        string? invocationSession,
+        Dictionary<string, CompactionSessionGroup> groups)
+    {
+        if (suppliedTurns is not { Count: > 0 })
+            return;
+
+        CompactionSessionGroup group = GroupFor(groups, invocationSession ?? "session");
+        for (int i = 0; i < suppliedTurns.Count; i++)
         {
-            if (group.Turns.Count == 0)
-                continue;
+            CompactionTurnSupply t = suppliedTurns[i];
+            group.Turns.Add((t.SpanId ?? $"turn-span-{i}", t.TurnIndex ?? i, t.InputTokens ?? 0));
+        }
+    }
 
-            ContextWindowResult telemetryWindow = input.ContextLimit.HasValue
-                ? new ContextWindowResult(input.ContextLimit.Value, "reported")
-                : CanonPricing.ContextLimitOf(group.Records);
+    private static Finding? TryBuildCompactionFinding(
+        CompactionSessionGroup group,
+        CompactionHazardInput input,
+        double discount)
+    {
+        if (group.Turns.Count == 0)
+            return null;
 
-            ContextWindowResult? catalogWindow = string.Equals(telemetryWindow.ContextLimitSource, "default", StringComparison.Ordinal)
-                ? input.ResolveWindow?.Invoke(group.Records)
-                : null;
-            ContextWindowResult window = catalogWindow ?? telemetryWindow;
-            if (CanonPricing.IsUnnamedContextWindow(window.ContextLimitSource))
-                continue;
+        ContextWindowResult telemetryWindow = input.ContextLimit.HasValue
+            ? new ContextWindowResult(input.ContextLimit.Value, "reported")
+            : CanonPricing.ContextLimitOf(group.Records);
 
-            long limit = window.ContextLimit;
-            bool isDeclared = string.Equals(window.ContextLimitSource, "declared", StringComparison.Ordinal);
-            bool isCatalog = string.Equals(window.ContextLimitSource, "catalog", StringComparison.Ordinal);
+        ContextWindowResult? catalogWindow = string.Equals(telemetryWindow.ContextLimitSource, "default", StringComparison.Ordinal)
+            ? input.ResolveWindow?.Invoke(group.Records)
+            : null;
+        ContextWindowResult window = catalogWindow ?? telemetryWindow;
+        if (CanonPricing.IsUnnamedContextWindow(window.ContextLimitSource))
+            return null;
 
-            (string SpanId, int TurnIndex, long Tokens) peak = group.Turns[0];
-            foreach ((string SpanId, int TurnIndex, long Tokens) t in group.Turns)
-            {
-                if (t.Tokens > peak.Tokens)
-                    peak = t;
-            }
+        long limit = window.ContextLimit;
+        bool isDeclared = string.Equals(window.ContextLimitSource, "declared", StringComparison.Ordinal);
+        bool isCatalog = string.Equals(window.ContextLimitSource, "catalog", StringComparison.Ordinal);
 
-            long thresholdTokens = (long)Math.Floor(limit * 0.85);
-            if (peak.Tokens <= thresholdTokens)
-                continue;
+        (string SpanId, int TurnIndex, long Tokens) peak = FindPeakTurn(group.Turns);
+        long thresholdTokens = (long)Math.Floor(limit * 0.85);
+        if (peak.Tokens <= thresholdTokens)
+            return null;
 
-            double ratio = (double)peak.Tokens / limit;
-            long estimatedWasteTokens = peak.Tokens - thresholdTokens;
-            bool overWindow = peak.Tokens > limit;
-            bool inferred = overWindow || isDeclared || isCatalog;
-            string confidence = inferred ? "heuristic" : "deterministic";
-            string measurementClass = inferred ? "inferred" : "deterministic";
+        double ratio = (double)peak.Tokens / limit;
+        long estimatedWasteTokens = peak.Tokens - thresholdTokens;
+        bool overWindow = peak.Tokens > limit;
+        bool inferred = overWindow || isDeclared || isCatalog;
+        string confidence = inferred ? "heuristic" : "deterministic";
+        string measurementClass = inferred ? "inferred" : "deterministic";
 
-            (string SpanId, int TurnIndex, long Tokens) prior = group.Turns.FirstOrDefault(t => t.TurnIndex != peak.TurnIndex);
-            if (prior.SpanId is null)
-                prior = group.Turns[0];
+        (string SpanId, int TurnIndex, long Tokens) prior = group.Turns.FirstOrDefault(t => t.TurnIndex != peak.TurnIndex);
+        if (prior.SpanId is null)
+            prior = group.Turns[0];
 
-            FindingEvidenceLink[] evidenceLinks =
-            [
-                new(prior.SpanId, prior.TurnIndex, $"Turn {prior.TurnIndex} consumed {prior.Tokens} tokens ({Math.Round((double)prior.Tokens / limit * 100.0)}% capacity) approaching context limits."),
-                new(peak.SpanId, peak.TurnIndex, $"Peak context consumption reached {peak.Tokens} tokens ({Math.Round(ratio * 100.0)}% capacity), exceeding the 85% compaction hazard threshold."),
-            ];
+        FindingEvidenceLink[] evidenceLinks =
+        [
+            new(prior.SpanId, prior.TurnIndex, $"Turn {prior.TurnIndex} consumed {prior.Tokens} tokens ({Math.Round((double)prior.Tokens / limit * 100.0)}% capacity) approaching context limits."),
+            new(peak.SpanId, peak.TurnIndex, $"Peak context consumption reached {peak.Tokens} tokens ({Math.Round(ratio * 100.0)}% capacity), exceeding the 85% compaction hazard threshold."),
+        ];
 
-            string recommendation = "Apply progressive disclosure and relocate historical conversation turns into structured checkpoints or rollups before reaching the 85% window limit.";
-            const string baseCaveat = "Abrupt context compaction or summarization risks discarding early user constraints or domain definitions.";
-            string outcomeRiskCaveat = DeriveOutcomeRiskCaveat(
-                input.Outcome,
-                "compaction-hazard",
-                isCatalog
-                    ? $"{baseCaveat} The window is a vendor catalog value, not a harness-reported measurement, so the percentage is inferred, never measured."
-                    : baseCaveat);
+        string recommendation = "Apply progressive disclosure and relocate historical conversation turns into structured checkpoints or rollups before reaching the 85% window limit.";
+        const string baseCaveat = "Abrupt context compaction or summarization risks discarding early user constraints or domain definitions.";
+        string outcomeRiskCaveat = DeriveOutcomeRiskCaveat(
+            input.Outcome,
+            "compaction-hazard",
+            isCatalog
+                ? $"{baseCaveat} The window is a vendor catalog value, not a harness-reported measurement, so the percentage is inferred, never measured."
+                : baseCaveat);
 
-            string windowPhrase = input.ContextLimit.HasValue
-                ? "declared by the caller"
+        return CreateCompactionFinding(
+            group,
+            input,
+            discount,
+            window,
+            limit,
+            peak,
+            evidenceLinks,
+            recommendation,
+            outcomeRiskCaveat,
+            ratio,
+            estimatedWasteTokens,
+            overWindow,
+            isDeclared,
+            isCatalog,
+            confidence,
+            measurementClass);
+    }
+
+    private static (string SpanId, int TurnIndex, long Tokens) FindPeakTurn(
+        List<(string SpanId, int TurnIndex, long Tokens)> turns)
+    {
+        (string SpanId, int TurnIndex, long Tokens) peak = turns[0];
+        foreach ((string SpanId, int TurnIndex, long Tokens) t in turns)
+        {
+            if (t.Tokens > peak.Tokens)
+                peak = t;
+        }
+
+        return peak;
+    }
+
+    private static (string Phrase, string Kind) DescribeCompactionWindow(
+        CompactionHazardInput input,
+        bool isCatalog,
+        bool isDeclared)
+    {
+        string phrase = input.ContextLimit.HasValue
+            ? "declared by the caller"
+            : isCatalog
+                ? "taken from the vendor catalog"
+                : isDeclared
+                    ? "declared for the session"
+                    : "reported by session telemetry";
+        string kind = isCatalog ? "vendor catalog" : isDeclared ? "declared" : "reported";
+        return (phrase, kind);
+    }
+
+    private static Finding CreateCompactionFinding(
+        CompactionSessionGroup group,
+        CompactionHazardInput input,
+        double discount,
+        ContextWindowResult window,
+        long limit,
+        (string SpanId, int TurnIndex, long Tokens) peak,
+        FindingEvidenceLink[] evidenceLinks,
+        string recommendation,
+        string outcomeRiskCaveat,
+        double ratio,
+        long estimatedWasteTokens,
+        bool overWindow,
+        bool isDeclared,
+        bool isCatalog,
+        string confidence,
+        string measurementClass)
+    {
+        (string windowPhrase, string windowKind) = DescribeCompactionWindow(input, isCatalog, isDeclared);
+        string aggregateCaveat = overWindow
+            ? $" The peak exceeds the {windowKind} window itself, so the turn's token attribution likely aggregates child calls rather than one turn's context; the spend is measured, the single-turn reading is inferred."
+            : string.Empty;
+        string declaredCaveat = isDeclared
+            ? " The window is a declared window, not a harness-reported measurement, so the percentage is inferred."
+            : string.Empty;
+        string catalogCaveat = isCatalog
+            ? " The window is a vendor catalog value, not a harness-reported measurement, so the percentage is inferred."
+            : string.Empty;
+
+        CultureInfo enUs = CultureInfo.GetCultureInfo("en-US");
+        return new Finding(
+            Id: $"finding-compaction-hazard-{group.SessionId}-{peak.SpanId}",
+            DetectorId: "compaction-hazard",
+            Title: overWindow
+                ? $"Compaction Hazard: Context consumption exceeds the {windowKind} window without summarization plan"
+                : $"Compaction Hazard: Context consumption reached {Math.Round(ratio * 100.0)}% of window without summarization plan",
+            Mechanism: $"Peak context consumption reached {peak.Tokens} tokens ({Math.Round(ratio * 100.0)}% of {limit} token window), exceeding the 85% safety boundary without active compaction or summarization. Window of record: {limit.ToString("N0", enUs)} tokens ({windowPhrase}).{aggregateCaveat}{declaredCaveat}{catalogCaveat}",
+            EvidenceLinks: evidenceLinks,
+            Confidence: confidence,
+            EstimatedWasteTokens: estimatedWasteTokens,
+            Recommendation: recommendation,
+            ErrorBar: null,
+            OutcomeRiskCaveat: outcomeRiskCaveat,
+            RunId: input.RunId,
+            SessionId: group.SessionId,
+            RankScore: ComputeRankScore(estimatedWasteTokens, confidence, discount),
+            MeasurementClass: measurementClass,
+            ConfidenceBasis: overWindow
+                ? $"Peak turn input tokens exceed the {windowKind} context window, so single-turn attribution is inferred (likely aggregate of child calls) rather than measured."
                 : isCatalog
-                    ? "taken from the vendor catalog"
+                    ? "Compared against a vendor catalog window; the spend is measured, but the percentage against a vendor catalog is inferred rather than measured."
                     : isDeclared
-                        ? "declared for the session"
-                        : "reported by session telemetry";
-
-            string windowKind = isCatalog ? "vendor catalog" : isDeclared ? "declared" : "reported";
-            string aggregateCaveat = overWindow
-                ? $" The peak exceeds the {windowKind} window itself, so the turn's token attribution likely aggregates child calls rather than one turn's context; the spend is measured, the single-turn reading is inferred."
-                : string.Empty;
-            string declaredCaveat = isDeclared
-                ? " The window is a declared window, not a harness-reported measurement, so the percentage is inferred."
-                : string.Empty;
-            string catalogCaveat = isCatalog
-                ? " The window is a vendor catalog value, not a harness-reported measurement, so the percentage is inferred."
-                : string.Empty;
-
-            CultureInfo enUs = CultureInfo.GetCultureInfo("en-US");
-            findings.Add(new Finding(
-                Id: $"finding-compaction-hazard-{group.SessionId}-{peak.SpanId}",
-                DetectorId: "compaction-hazard",
-                Title: overWindow
-                    ? $"Compaction Hazard: Context consumption exceeds the {windowKind} window without summarization plan"
-                    : $"Compaction Hazard: Context consumption reached {Math.Round(ratio * 100.0)}% of window without summarization plan",
-                Mechanism: $"Peak context consumption reached {peak.Tokens} tokens ({Math.Round(ratio * 100.0)}% of {limit} token window), exceeding the 85% safety boundary without active compaction or summarization. Window of record: {limit.ToString("N0", enUs)} tokens ({windowPhrase}).{aggregateCaveat}{declaredCaveat}{catalogCaveat}",
-                EvidenceLinks: evidenceLinks,
-                Confidence: confidence,
-                EstimatedWasteTokens: estimatedWasteTokens,
-                Recommendation: recommendation,
-                ErrorBar: null,
-                OutcomeRiskCaveat: outcomeRiskCaveat,
-                RunId: input.RunId,
-                SessionId: group.SessionId,
-                RankScore: ComputeRankScore(estimatedWasteTokens, confidence, discount),
-                MeasurementClass: measurementClass,
-                ConfidenceBasis: overWindow
-                    ? $"Peak turn input tokens exceed the {windowKind} context window, so single-turn attribution is inferred (likely aggregate of child calls) rather than measured."
-                    : isCatalog
-                        ? "Compared against a vendor catalog window; the spend is measured, but the percentage against a vendor catalog is inferred rather than measured."
-                        : isDeclared
-                            ? "Compared against the session-declared window; the spend is measured, but the percentage against a declared window is inferred rather than measured."
-                            : "Deterministically measured by comparing the session peak turn input tokens against the context window in effect for that session.",
-                WhatWouldRaiseIt: overWindow
-                    ? $"Harness emission of per-turn input counters that reconcile with the {windowKind} window."
-                    : isCatalog || isDeclared
-                        ? "Harness reporting of the context window in session telemetry would let the percentage be measured."
-                        : "Deterministic measurement; confidence is at ceiling.",
-                Payload: new Dictionary<string, object?>(StringComparer.Ordinal)
-                {
-                    ["contextLimit"] = limit,
-                    ["contextLimitSource"] = window.ContextLimitSource,
-                }));
-        }
-
-        return findings;
+                        ? "Compared against the session-declared window; the spend is measured, but the percentage against a declared window is inferred rather than measured."
+                        : "Deterministically measured by comparing the session peak turn input tokens against the context window in effect for that session.",
+            WhatWouldRaiseIt: overWindow
+                ? $"Harness emission of per-turn input counters that reconcile with the {windowKind} window."
+                : isCatalog || isDeclared
+                    ? "Harness reporting of the context window in session telemetry would let the percentage be measured."
+                    : "Deterministic measurement; confidence is at ceiling.",
+            Payload: new Dictionary<string, object?>(StringComparer.Ordinal)
+            {
+                ["contextLimit"] = limit,
+                ["contextLimitSource"] = window.ContextLimitSource,
+            });
     }
 
     /// <summary>Detector 6: subagent token share exceeding 60% without outcome justification.</summary>
@@ -1648,24 +1884,12 @@ public static partial class CanonFindings
         if (turnRecords.Count == 0)
             return [];
 
-        IReadOnlyList<string>? listedNames = input.ReferencedSkills is not null
-            ? input.ReferencedSkills
-            : ReadListedSkillNames(records);
-        IReadOnlyList<string>? invokedNames = input.ExecutedSkills is not null
-            ? input.ExecutedSkills
-            : ReadInvokedSkillNames(records);
+        IReadOnlyList<string>? listedNames = input.ReferencedSkills ?? ReadListedSkillNames(records);
+        IReadOnlyList<string>? invokedNames = input.ExecutedSkills ?? ReadInvokedSkillNames(records);
         if (listedNames is null || invokedNames is null)
             return [];
 
-        List<string> referenced = [];
-        HashSet<string> seenReferenced = new(StringComparer.Ordinal);
-        foreach (string rawName in listedNames)
-        {
-            string trimmed = rawName.Trim();
-            if (trimmed.Length > 0 && seenReferenced.Add(trimmed))
-                referenced.Add(trimmed);
-        }
-
+        List<string> referenced = NormalizeUniqueSkillNames(listedNames);
         if (referenced.Count == 0)
             return [];
 
@@ -1677,6 +1901,31 @@ public static partial class CanonFindings
                 executedSet.Add(trimmed);
         }
 
+        return BuildInactiveSkillFindings(referenced, executedSet, turnRecords, input, sessionId, discount);
+    }
+
+    private static List<string> NormalizeUniqueSkillNames(IReadOnlyList<string> rawNames)
+    {
+        List<string> names = [];
+        HashSet<string> seen = new(StringComparer.Ordinal);
+        foreach (string rawName in rawNames)
+        {
+            string trimmed = rawName.Trim();
+            if (trimmed.Length > 0 && seen.Add(trimmed))
+                names.Add(trimmed);
+        }
+
+        return names;
+    }
+
+    private static List<Finding> BuildInactiveSkillFindings(
+        List<string> referenced,
+        HashSet<string> executedSet,
+        List<CanonicalRecord> turnRecords,
+        InactiveSkillReferenceInput input,
+        string? sessionId,
+        double discount)
+    {
         CanonicalRecord firstTurn = turnRecords[0];
         int recordedTurns = turnRecords.Count;
         CanonicalRecord lastTurn = turnRecords[^1];
@@ -1688,53 +1937,67 @@ public static partial class CanonFindings
             if (executedSet.Contains(skill))
                 continue;
 
-            long? tokensPerTurn = input.SkillTokens is not null && input.SkillTokens.TryGetValue(skill, out long tpt) ? tpt : null;
-            bool measured = tokensPerTurn is > 0;
-            int turnsCount = recordedTurns;
-            long? estimatedWasteTokens = measured ? tokensPerTurn!.Value * turnsCount : null;
-
-            FindingEvidenceLink[] evidenceLinks = measured
-                ?
-                [
-                    new(firstTurn.SpanId, 0, $"Skill instructions for \"{skill}\" loaded into prompt context ({tokensPerTurn} tokens/turn)."),
-                    new(lastTurn.SpanId, turnsCount - 1, $"Turn {turnsCount - 1} completed with skill \"{skill}\" resident in prompt across {turnsCount} turns without activation."),
-                ]
-                :
-                [
-                    new(firstTurn.SpanId, 0, $"Skill \"{skill}\" listed (size unmeasured)."),
-                    new(lastTurn.SpanId, lastTurnIndex, $"Turn {lastTurnIndex} is the last of {recordedTurns} recorded {(recordedTurns == 1 ? "turn" : "turns")}; skill \"{skill}\" was listed and not invoked in any of them."),
-                ];
-
-            string recommendation = $"Relocate skill instructions for \"{skill}\" to on-demand progressive disclosure, loading skill prompt blocks dynamically only when matching task intents occur.";
-            string outcomeRiskCaveat = DeriveOutcomeRiskCaveat(
-                input.Outcome,
-                "inactive-skill-reference",
-                "Per Decision D16, skill activation telemetry is not exported directly; skill instructions may supply latent guidance even when uncalled.");
-
-            findings.Add(new Finding(
-                Id: $"finding-inactive-skill-{skill}-{sessionId ?? "session"}",
-                DetectorId: "inactive-skill-reference",
-                Title: $"Inactive Skill Reference: Skill \"{skill}\" listed with 0 invocations",
-                Mechanism: measured
-                    ? $"Skill instruction block for \"{skill}\" remained resident in prompt context across {turnsCount} turns ({tokensPerTurn} tokens/turn), accumulating {estimatedWasteTokens} tokens without explicit execution or activation."
-                    : $"Skill \"{skill}\" was listed in the session's {recordedTurns} recorded {(recordedTurns == 1 ? "turn" : "turns")} with 0 invocations; its context size was not measured.",
-                EvidenceLinks: evidenceLinks,
-                Confidence: "heuristic",
-                EstimatedWasteTokens: estimatedWasteTokens,
-                Recommendation: recommendation,
-                ErrorBar: null,
-                OutcomeRiskCaveat: outcomeRiskCaveat,
-                RunId: input.RunId,
-                SessionId: sessionId,
-                RankScore: ComputeRankScore(estimatedWasteTokens ?? 0, "heuristic", discount),
-                MeasurementClass: measured ? "inferred" : "coverage-gap",
-                ConfidenceBasis: "Decision D16: Stamped at low confidence (heuristic) because a listed skill that is never loaded may still shape output, so activation is inferred from Skill calls and the invoked key.",
-                WhatWouldRaiseIt: measured
-                    ? "Harness export of skill activation spans for skills applied without a Skill tool call."
-                    : "Reported skill-block token sizes would let the context size of the listed skill be measured. Harness export of discrete skill activation spans would also raise confidence."));
+            findings.Add(CreateInactiveSkillFinding(
+                skill, firstTurn, lastTurn, recordedTurns, lastTurnIndex, input, sessionId, discount));
         }
 
         return findings;
+    }
+
+    private static Finding CreateInactiveSkillFinding(
+        string skill,
+        CanonicalRecord firstTurn,
+        CanonicalRecord lastTurn,
+        int recordedTurns,
+        int lastTurnIndex,
+        InactiveSkillReferenceInput input,
+        string? sessionId,
+        double discount)
+    {
+        long? tokensPerTurn = input.SkillTokens is not null && input.SkillTokens.TryGetValue(skill, out long tpt) ? tpt : null;
+        bool measured = tokensPerTurn is > 0;
+        int turnsCount = recordedTurns;
+        long? estimatedWasteTokens = measured ? tokensPerTurn!.Value * turnsCount : null;
+
+        FindingEvidenceLink[] evidenceLinks = measured
+            ?
+            [
+                new(firstTurn.SpanId, 0, $"Skill instructions for \"{skill}\" loaded into prompt context ({tokensPerTurn} tokens/turn)."),
+                new(lastTurn.SpanId, turnsCount - 1, $"Turn {turnsCount - 1} completed with skill \"{skill}\" resident in prompt across {turnsCount} turns without activation."),
+            ]
+            :
+            [
+                new(firstTurn.SpanId, 0, $"Skill \"{skill}\" listed (size unmeasured)."),
+                new(lastTurn.SpanId, lastTurnIndex, $"Turn {lastTurnIndex} is the last of {recordedTurns} recorded {(recordedTurns == 1 ? "turn" : "turns")}; skill \"{skill}\" was listed and not invoked in any of them."),
+            ];
+
+        string recommendation = $"Relocate skill instructions for \"{skill}\" to on-demand progressive disclosure, loading skill prompt blocks dynamically only when matching task intents occur.";
+        string outcomeRiskCaveat = DeriveOutcomeRiskCaveat(
+            input.Outcome,
+            "inactive-skill-reference",
+            "Per Decision D16, skill activation telemetry is not exported directly; skill instructions may supply latent guidance even when uncalled.");
+
+        return new Finding(
+            Id: $"finding-inactive-skill-{skill}-{sessionId ?? "session"}",
+            DetectorId: "inactive-skill-reference",
+            Title: $"Inactive Skill Reference: Skill \"{skill}\" listed with 0 invocations",
+            Mechanism: measured
+                ? $"Skill instruction block for \"{skill}\" remained resident in prompt context across {turnsCount} turns ({tokensPerTurn} tokens/turn), accumulating {estimatedWasteTokens} tokens without explicit execution or activation."
+                : $"Skill \"{skill}\" was listed in the session's {recordedTurns} recorded {(recordedTurns == 1 ? "turn" : "turns")} with 0 invocations; its context size was not measured.",
+            EvidenceLinks: evidenceLinks,
+            Confidence: "heuristic",
+            EstimatedWasteTokens: estimatedWasteTokens,
+            Recommendation: recommendation,
+            ErrorBar: null,
+            OutcomeRiskCaveat: outcomeRiskCaveat,
+            RunId: input.RunId,
+            SessionId: sessionId,
+            RankScore: ComputeRankScore(estimatedWasteTokens ?? 0, "heuristic", discount),
+            MeasurementClass: measured ? "inferred" : "coverage-gap",
+            ConfidenceBasis: "Decision D16: Stamped at low confidence (heuristic) because a listed skill that is never loaded may still shape output, so activation is inferred from Skill calls and the invoked key.",
+            WhatWouldRaiseIt: measured
+                ? "Harness export of skill activation spans for skills applied without a Skill tool call."
+                : "Reported skill-block token sizes would let the context size of the listed skill be measured. Harness export of discrete skill activation spans would also raise confidence.");
     }
 
     /// <summary>Runs all seven detectors and returns Decision D6-ranked findings.</summary>
@@ -1742,88 +2005,124 @@ public static partial class CanonFindings
     {
         ArgumentNullException.ThrowIfNull(input);
         List<Finding> all = [];
-
-        DormantToolSchemaInput dormant = input.DormantToolSchema is null
-            ? new DormantToolSchemaInput(input.RunId, input.SessionId, input.Records, input.Outcome)
-            : input.DormantToolSchema with
-            {
-                RunId = input.DormantToolSchema.RunId ?? input.RunId,
-                SessionId = input.DormantToolSchema.SessionId ?? input.SessionId,
-                Records = input.DormantToolSchema.Records ?? input.Records,
-                Outcome = input.DormantToolSchema.Outcome ?? input.Outcome,
-            };
-        all.AddRange(DetectDormantToolSchema(dormant));
-
-        DuplicateToolCallInput duplicate = input.DuplicateToolCall is null
-            ? new DuplicateToolCallInput(input.RunId, input.SessionId, input.Records, Outcome: input.Outcome)
-            : input.DuplicateToolCall with
-            {
-                RunId = input.DuplicateToolCall.RunId ?? input.RunId,
-                SessionId = input.DuplicateToolCall.SessionId ?? input.SessionId,
-                Records = input.DuplicateToolCall.Records ?? input.Records,
-                Outcome = input.DuplicateToolCall.Outcome ?? input.Outcome,
-            };
-        all.AddRange(DetectDuplicateToolCall(duplicate));
-
-        OversizedToolResultInput oversized = input.OversizedToolResult is null
-            ? new OversizedToolResultInput(input.RunId, input.SessionId, input.Records, Outcome: input.Outcome)
-            : input.OversizedToolResult with
-            {
-                RunId = input.OversizedToolResult.RunId ?? input.RunId,
-                SessionId = input.OversizedToolResult.SessionId ?? input.SessionId,
-                Records = input.OversizedToolResult.Records ?? input.Records,
-                Outcome = input.OversizedToolResult.Outcome ?? input.Outcome,
-            };
-        all.AddRange(DetectOversizedToolResult(oversized));
-
-        PrefixCacheBreakInput prefix = input.PrefixCacheBreak is null
-            ? new PrefixCacheBreakInput(input.RunId, input.SessionId, input.Records, Outcome: input.Outcome)
-            : input.PrefixCacheBreak with
-            {
-                RunId = input.PrefixCacheBreak.RunId ?? input.RunId,
-                SessionId = input.PrefixCacheBreak.SessionId ?? input.SessionId,
-                Records = input.PrefixCacheBreak.Records ?? input.Records,
-                Outcome = input.PrefixCacheBreak.Outcome ?? input.Outcome,
-            };
-        all.AddRange(DetectPrefixCacheBreak(prefix));
-
-        CompactionHazardInput compaction = input.CompactionHazard is null
-            ? new CompactionHazardInput(input.RunId, input.SessionId, input.Records, ContextLimit: input.ContextLimit, Outcome: input.Outcome, SessionIdentityLookup: input.SessionIdentityLookup, ResolveWindow: input.ResolveWindow)
-            : input.CompactionHazard with
-            {
-                RunId = input.CompactionHazard.RunId ?? input.RunId,
-                SessionId = input.CompactionHazard.SessionId ?? input.SessionId,
-                Records = input.CompactionHazard.Records ?? input.Records,
-                Outcome = input.CompactionHazard.Outcome ?? input.Outcome,
-                ContextLimit = input.CompactionHazard.ContextLimit ?? input.ContextLimit,
-                SessionIdentityLookup = input.CompactionHazard.SessionIdentityLookup ?? input.SessionIdentityLookup,
-                ResolveWindow = input.CompactionHazard.ResolveWindow ?? input.ResolveWindow,
-            };
-        all.AddRange(DetectCompactionHazard(compaction));
-
-        UnboundedDelegationInput delegation = input.UnboundedDelegation is null
-            ? new UnboundedDelegationInput(input.RunId, input.SessionId, input.Records, Outcome: input.Outcome)
-            : input.UnboundedDelegation with
-            {
-                RunId = input.UnboundedDelegation.RunId ?? input.RunId,
-                SessionId = input.UnboundedDelegation.SessionId ?? input.SessionId,
-                Records = input.UnboundedDelegation.Records ?? input.Records,
-                Outcome = input.UnboundedDelegation.Outcome ?? input.Outcome,
-            };
-        all.AddRange(DetectUnboundedDelegation(delegation));
-
-        InactiveSkillReferenceInput skills = input.InactiveSkillReference is null
-            ? new InactiveSkillReferenceInput(input.RunId, input.SessionId, input.Records, Outcome: input.Outcome)
-            : input.InactiveSkillReference with
-            {
-                RunId = input.InactiveSkillReference.RunId ?? input.RunId,
-                SessionId = input.InactiveSkillReference.SessionId ?? input.SessionId,
-                Records = input.InactiveSkillReference.Records ?? input.Records,
-                Outcome = input.InactiveSkillReference.Outcome ?? input.Outcome,
-            };
-        all.AddRange(DetectInactiveSkillReference(skills));
-
+        all.AddRange(DetectDormantToolSchema(ResolveDormantInput(input)));
+        all.AddRange(DetectDuplicateToolCall(ResolveDuplicateInput(input)));
+        all.AddRange(DetectOversizedToolResult(ResolveOversizedInput(input)));
+        all.AddRange(DetectPrefixCacheBreak(ResolvePrefixInput(input)));
+        all.AddRange(DetectCompactionHazard(ResolveCompactionInput(input)));
+        all.AddRange(DetectUnboundedDelegation(ResolveDelegationInput(input)));
+        all.AddRange(DetectInactiveSkillReference(ResolveInactiveSkillInput(input)));
         return RankFindings(all);
+    }
+
+    private static DormantToolSchemaInput ResolveDormantInput(DetectFindingsInput input)
+    {
+        if (input.DormantToolSchema is null)
+            return new DormantToolSchemaInput(input.RunId, input.SessionId, input.Records, input.Outcome);
+
+        return input.DormantToolSchema with
+        {
+            RunId = input.DormantToolSchema.RunId ?? input.RunId,
+            SessionId = input.DormantToolSchema.SessionId ?? input.SessionId,
+            Records = input.DormantToolSchema.Records ?? input.Records,
+            Outcome = input.DormantToolSchema.Outcome ?? input.Outcome,
+        };
+    }
+
+    private static DuplicateToolCallInput ResolveDuplicateInput(DetectFindingsInput input)
+    {
+        if (input.DuplicateToolCall is null)
+            return new DuplicateToolCallInput(input.RunId, input.SessionId, input.Records, Outcome: input.Outcome);
+
+        return input.DuplicateToolCall with
+        {
+            RunId = input.DuplicateToolCall.RunId ?? input.RunId,
+            SessionId = input.DuplicateToolCall.SessionId ?? input.SessionId,
+            Records = input.DuplicateToolCall.Records ?? input.Records,
+            Outcome = input.DuplicateToolCall.Outcome ?? input.Outcome,
+        };
+    }
+
+    private static OversizedToolResultInput ResolveOversizedInput(DetectFindingsInput input)
+    {
+        if (input.OversizedToolResult is null)
+            return new OversizedToolResultInput(input.RunId, input.SessionId, input.Records, Outcome: input.Outcome);
+
+        return input.OversizedToolResult with
+        {
+            RunId = input.OversizedToolResult.RunId ?? input.RunId,
+            SessionId = input.OversizedToolResult.SessionId ?? input.SessionId,
+            Records = input.OversizedToolResult.Records ?? input.Records,
+            Outcome = input.OversizedToolResult.Outcome ?? input.Outcome,
+        };
+    }
+
+    private static PrefixCacheBreakInput ResolvePrefixInput(DetectFindingsInput input)
+    {
+        if (input.PrefixCacheBreak is null)
+            return new PrefixCacheBreakInput(input.RunId, input.SessionId, input.Records, Outcome: input.Outcome);
+
+        return input.PrefixCacheBreak with
+        {
+            RunId = input.PrefixCacheBreak.RunId ?? input.RunId,
+            SessionId = input.PrefixCacheBreak.SessionId ?? input.SessionId,
+            Records = input.PrefixCacheBreak.Records ?? input.Records,
+            Outcome = input.PrefixCacheBreak.Outcome ?? input.Outcome,
+        };
+    }
+
+    private static CompactionHazardInput ResolveCompactionInput(DetectFindingsInput input)
+    {
+        if (input.CompactionHazard is null)
+        {
+            return new CompactionHazardInput(
+                input.RunId,
+                input.SessionId,
+                input.Records,
+                ContextLimit: input.ContextLimit,
+                Outcome: input.Outcome,
+                SessionIdentityLookup: input.SessionIdentityLookup,
+                ResolveWindow: input.ResolveWindow);
+        }
+
+        return input.CompactionHazard with
+        {
+            RunId = input.CompactionHazard.RunId ?? input.RunId,
+            SessionId = input.CompactionHazard.SessionId ?? input.SessionId,
+            Records = input.CompactionHazard.Records ?? input.Records,
+            Outcome = input.CompactionHazard.Outcome ?? input.Outcome,
+            ContextLimit = input.CompactionHazard.ContextLimit ?? input.ContextLimit,
+            SessionIdentityLookup = input.CompactionHazard.SessionIdentityLookup ?? input.SessionIdentityLookup,
+            ResolveWindow = input.CompactionHazard.ResolveWindow ?? input.ResolveWindow,
+        };
+    }
+
+    private static UnboundedDelegationInput ResolveDelegationInput(DetectFindingsInput input)
+    {
+        if (input.UnboundedDelegation is null)
+            return new UnboundedDelegationInput(input.RunId, input.SessionId, input.Records, Outcome: input.Outcome);
+
+        return input.UnboundedDelegation with
+        {
+            RunId = input.UnboundedDelegation.RunId ?? input.RunId,
+            SessionId = input.UnboundedDelegation.SessionId ?? input.SessionId,
+            Records = input.UnboundedDelegation.Records ?? input.Records,
+            Outcome = input.UnboundedDelegation.Outcome ?? input.Outcome,
+        };
+    }
+
+    private static InactiveSkillReferenceInput ResolveInactiveSkillInput(DetectFindingsInput input)
+    {
+        if (input.InactiveSkillReference is null)
+            return new InactiveSkillReferenceInput(input.RunId, input.SessionId, input.Records, Outcome: input.Outcome);
+
+        return input.InactiveSkillReference with
+        {
+            RunId = input.InactiveSkillReference.RunId ?? input.RunId,
+            SessionId = input.InactiveSkillReference.SessionId ?? input.SessionId,
+            Records = input.InactiveSkillReference.Records ?? input.Records,
+            Outcome = input.InactiveSkillReference.Outcome ?? input.Outcome,
+        };
     }
 
     private static AvailabilityResult Measured() => new(true, "measured");
@@ -1863,52 +2162,13 @@ public static partial class CanonFindings
         IReadOnlyDictionary<string, JsonElement>? raw = record.Raw;
 
         if (raw is not null && raw.TryGetValue(SkillsListedKey, out JsonElement claudeEl))
-        {
-            // isInitial is optional: a listing hydrated from the relational store does not keep it,
-            // and the names are unioned either way. A present flag must still be a boolean.
-            if (claudeEl.ValueKind != JsonValueKind.Object ||
-                (claudeEl.TryGetProperty("isInitial", out JsonElement initEl) &&
-                 initEl.ValueKind is not (JsonValueKind.True or JsonValueKind.False)) ||
-                !claudeEl.TryGetProperty("skills", out JsonElement arrEl) ||
-                arrEl.ValueKind != JsonValueKind.Array)
-            {
-                return false;
-            }
-
-            foreach (JsonElement item in arrEl.EnumerateArray())
-            {
-                if (item.ValueKind == JsonValueKind.Object &&
-                    item.TryGetProperty("name", out JsonElement nEl) &&
-                    nEl.ValueKind == JsonValueKind.String &&
-                    !string.IsNullOrEmpty(nEl.GetString()))
-                {
-                    skills.Add(nEl.GetString()!);
-                }
-            }
-
-            return true;
-        }
+            return TryParseClaudeListing(claudeEl, out skills);
 
         if (raw is not null && raw.TryGetValue(CopilotListingKey, out JsonElement copilotEl))
             return TryParseStringArrayJson(copilotEl, out skills);
 
         if (raw is not null && raw.TryGetValue(AntigravityListingKey, out JsonElement agyEl))
-        {
-            if (agyEl.ValueKind != JsonValueKind.String)
-                return false;
-            string s = agyEl.GetString() ?? string.Empty;
-            if (!s.StartsWith(AntigravityListingPrefix, StringComparison.Ordinal))
-                return false;
-
-            foreach (string part in s[AntigravityListingPrefix.Length..].Split(','))
-            {
-                string trimmed = part.Trim();
-                if (trimmed.Length > 0)
-                    skills.Add(trimmed);
-            }
-
-            return true;
-        }
+            return TryParseAntigravityListing(agyEl, out skills);
 
         if (raw is not null && raw.TryGetValue(OpenCodeListingKey, out JsonElement ocEl))
         {
@@ -1919,7 +2179,8 @@ public static partial class CanonFindings
         }
 
         string promptText = SystemPromptText(record);
-        if (string.Equals(CanonPricing.HarnessFamily(record.Harness), "opencode", StringComparison.Ordinal))
+        string family = CanonPricing.HarnessFamily(record.Harness);
+        if (string.Equals(family, "opencode", StringComparison.Ordinal))
         {
             if (TryParseOpenCodeAvailableSkills(promptText, out bool hasBlock, out List<string> ids))
             {
@@ -1931,40 +2192,101 @@ public static partial class CanonFindings
                 return false;
         }
 
-        if (SkillsTagOpenRegex().IsMatch(promptText))
+        if (TryParseXmlSkillListing(promptText, out List<string> xmlSkills))
         {
-            foreach (Match m in XmlSkillElementRegex().Matches(promptText))
-            {
-                Match nm = XmlNameElementRegex().Match(m.Groups[1].Value);
-                if (nm.Success)
-                {
-                    string name = nm.Groups[1].Value.Trim();
-                    if (name.Length > 0)
-                        skills.Add(name);
-                }
-            }
-
-            if (skills.Count > 0)
-                return true;
+            skills = xmlSkills;
+            return true;
         }
 
-        if (string.Equals(CanonPricing.HarnessFamily(record.Harness), "claude-code", StringComparison.Ordinal) &&
-            record.Parts is not null)
-        {
-            foreach (ContentPart part in record.Parts)
-            {
-                bool eligible = string.Equals(part.Part, "system_prompt", StringComparison.Ordinal) ||
-                                (string.Equals(part.Part, "conversation_history", StringComparison.Ordinal) &&
-                                 string.Equals(part.Role, "system", StringComparison.Ordinal));
-                if (!eligible || string.IsNullOrEmpty(part.Text))
-                    continue;
+        if (string.Equals(family, "claude-code", StringComparison.Ordinal) && record.Parts is not null)
+            return TryReadClaudeBodyListing(record.Parts, out skills);
 
-                List<string> parsedBody = ParseClaudeBodyListing(part.Text);
-                if (parsedBody.Count > 0)
-                {
-                    skills = parsedBody;
-                    return true;
-                }
+        return false;
+    }
+
+    private static bool TryParseClaudeListing(JsonElement claudeEl, out List<string> skills)
+    {
+        skills = [];
+        // isInitial is optional: a listing hydrated from the relational store does not keep it,
+        // and the names are unioned either way. A present flag must still be a boolean.
+        if (claudeEl.ValueKind != JsonValueKind.Object ||
+            (claudeEl.TryGetProperty("isInitial", out JsonElement initEl) &&
+             initEl.ValueKind is not (JsonValueKind.True or JsonValueKind.False)) ||
+            !claudeEl.TryGetProperty("skills", out JsonElement arrEl) ||
+            arrEl.ValueKind != JsonValueKind.Array)
+        {
+            return false;
+        }
+
+        foreach (JsonElement item in arrEl.EnumerateArray())
+        {
+            if (item.ValueKind == JsonValueKind.Object &&
+                item.TryGetProperty("name", out JsonElement nEl) &&
+                nEl.ValueKind == JsonValueKind.String &&
+                !string.IsNullOrEmpty(nEl.GetString()))
+            {
+                skills.Add(nEl.GetString()!);
+            }
+        }
+
+        return true;
+    }
+
+    private static bool TryParseAntigravityListing(JsonElement agyEl, out List<string> skills)
+    {
+        skills = [];
+        if (agyEl.ValueKind != JsonValueKind.String)
+            return false;
+        string s = agyEl.GetString() ?? string.Empty;
+        if (!s.StartsWith(AntigravityListingPrefix, StringComparison.Ordinal))
+            return false;
+
+        foreach (string part in s[AntigravityListingPrefix.Length..].Split(','))
+        {
+            string trimmed = part.Trim();
+            if (trimmed.Length > 0)
+                skills.Add(trimmed);
+        }
+
+        return true;
+    }
+
+    private static bool TryParseXmlSkillListing(string promptText, out List<string> skills)
+    {
+        skills = [];
+        if (!SkillsTagOpenRegex().IsMatch(promptText))
+            return false;
+
+        foreach (Match m in XmlSkillElementRegex().Matches(promptText))
+        {
+            Match nm = XmlNameElementRegex().Match(m.Groups[1].Value);
+            if (nm.Success)
+            {
+                string name = nm.Groups[1].Value.Trim();
+                if (name.Length > 0)
+                    skills.Add(name);
+            }
+        }
+
+        return skills.Count > 0;
+    }
+
+    private static bool TryReadClaudeBodyListing(IReadOnlyList<ContentPart> parts, out List<string> skills)
+    {
+        skills = [];
+        foreach (ContentPart part in parts)
+        {
+            bool eligible = string.Equals(part.Part, "system_prompt", StringComparison.Ordinal) ||
+                            (string.Equals(part.Part, "conversation_history", StringComparison.Ordinal) &&
+                             string.Equals(part.Role, "system", StringComparison.Ordinal));
+            if (!eligible || string.IsNullOrEmpty(part.Text))
+                continue;
+
+            List<string> parsedBody = ParseClaudeBodyListing(part.Text);
+            if (parsedBody.Count > 0)
+            {
+                skills = parsedBody;
+                return true;
             }
         }
 
