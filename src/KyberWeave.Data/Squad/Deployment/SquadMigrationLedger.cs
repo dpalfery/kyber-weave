@@ -122,5 +122,6 @@ public sealed record SquadMigrationLedger(
             : keys.Append(key).Order(StringComparer.Ordinal).ToArray();
 
     private static JsonArray ToJsonArray(IEnumerable<string> keys) =>
-        new(keys.Select(key => (JsonNode)JsonValue.Create(key)!).ToArray());
+        new(keys.Select(key => (JsonNode)(JsonValue.Create(key)
+            ?? throw new InvalidOperationException("A migration ledger key cannot be null."))).ToArray());
 }
