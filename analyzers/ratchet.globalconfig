@@ -7,8 +7,9 @@
 # Never add a line back. Holding these at suggestion is the 2026-11-26 amendment to
 # docs/adr/0004-solution-level-static-analysis-and-noise-suppression.md. It is not the
 # solution-wide NoWarn that record rejects: a suggestion still shows, and the id is not in NoWarn.
-# To list what remains:
+# To list what remains, build both solutions this ratchet covers:
 #   dotnet build KyberWeave.sln -c Release -p:KwAnalyzerAudit=true -p:TreatWarningsAsErrors=false
+#   dotnet build dash/server/KyberDash.sln -c Release -p:KwAnalyzerAudit=true -p:TreatWarningsAsErrors=false
 #
 # global_level 200 outranks the SDK's AnalysisMode=all config and analyzers/rules.globalconfig. .editorconfig outranks this file,
 # so none of these ids may appear there.
