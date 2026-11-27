@@ -80,10 +80,11 @@ public sealed partial class ReviewVerdictService(
         if (!TryPrepare(request, report, cancellationToken, out Prepared? prepared) || prepared is null)
             return Failed(report);
 
-        return Complete(request, prepared, report, cancellationToken);
+        return Complete(prepared, report, cancellationToken);
     }
 
     /// <summary>What the verdict is judged on, once every input is read and every finding dropped or overridden.</summary>
+    /// <param name="Request">The request with every cycle-derived option filled in.</param>
     /// <param name="Root">The absolute path the verdict was computed against.</param>
     /// <param name="Config">The loaded host configuration.</param>
     /// <param name="Input">The findings document the seat output was read into.</param>
@@ -94,6 +95,7 @@ public sealed partial class ReviewVerdictService(
     /// <param name="ModelEffects">The summary lines the decision model's answers produced.</param>
     /// <param name="Dropped">The findings dropped with a stated reason.</param>
     private sealed record Prepared(
+        ReviewVerdictRequest Request,
         string Root,
         KyberWeaveConfig Config,
         FindingsReport Input,
@@ -187,17 +189,17 @@ public sealed partial class ReviewVerdictService(
         findings = ApplyDecisionModel(
             model, findings, request.Candidates, config.Review.Policy.FixLevel == ReviewFixLevel.Nitpick, report, dropped, modelEffects, cancellationToken);
 
-        prepared = new Prepared(root, config, input, findings, gateResults, gates, model, modelEffects, dropped);
+        prepared = new Prepared(request, root, config, input, findings, gateResults, gates, model, modelEffects, dropped);
         return true;
     }
 
     /// <summary>Judges the prepared findings, reports the verdict and writes the document and the cycle record.</summary>
     private ReviewVerdictResult Complete(
-        ReviewVerdictRequest request,
         Prepared prepared,
         DiagnosticReport report,
         CancellationToken cancellationToken)
     {
+        ReviewVerdictRequest request = prepared.Request;
         List<ReviewFinding> findings = prepared.Findings;
         ReviewOutcome outcome = VerdictEngine.Evaluate(
             findings,
