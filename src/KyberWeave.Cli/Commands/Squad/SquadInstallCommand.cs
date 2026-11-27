@@ -94,23 +94,8 @@ internal sealed class SquadInstallCommand : Command<SquadInstallSettings>
         // Coalesce the positional path with --path and validate explicit targets,
         // exclusions, and the pinned version; invalid client input returns exit code 2
         // before any resolution or network call
-        string? effectivePath;
-        string? pinnedVersion;
-        try
+        if (!TryResolveClientInput(settings, out string? effectivePath, out string? pinnedVersion))
         {
-            effectivePath = SquadCommandComposition.CoalesceTargetPath(settings.Path, settings.PathOption);
-
-            if (settings.Targets.Length > 0)
-                _ = SquadTargetCatalog.Parse(settings.Targets);
-
-            if (settings.Exclusions.Length > 0)
-                _ = SquadTargetCatalog.Parse(settings.Exclusions);
-
-            pinnedVersion = SquadCommandComposition.NormalizePinnedVersion(settings.Version);
-        }
-        catch (Exception ex) when (ex is ArgumentException or SelfUpdateException)
-        {
-            _output.WriteClientInputError(ex.Message);
             return 2;
         }
 
@@ -135,52 +120,24 @@ internal sealed class SquadInstallCommand : Command<SquadInstallSettings>
             ? _roots.ResolveGlobalAnchorRoot(stateStore, effectivePath, settings.DryRun)
             : projectRoot;
 
-        // Load configuration if present. A project that cannot be read — no config file,
-        // or one that does not parse — still installs: the squad config falls back to product
-        // defaults and the task-gate hint below says where review gates come from. Only a
-        // global run, which has no project whose gates could be missing, keeps the load
-        // failure fatal.
-        KyberWeaveConfigLoadResult configResult = _roots.TryLoadScopeConfig(
-            _configs,
+        SquadTargetResolutionDecision? resolved = PrepareDecision(
             targetRoot,
             scope,
-            stateStore.UserPaths.HomeDirectory);
-        if (!configResult.Success && scope != SquadDeploymentScope.Project)
+            stateStore,
+            settings,
+            out KyberWeaveConfig? config,
+            out int resolutionExitCode);
+        if (resolved is null)
         {
-            _output.WriteClientInputError(configResult.Error ?? "Failed to load configuration.");
-            return 1;
+            return resolutionExitCode;
         }
 
-        SquadConfig squadConfig = configResult.Config?.Squad ?? SquadConfig.ProductDefaults;
-
-        // Perform target resolution
-        SquadTargetResolutionRequest request = new()
-        {
-            RootPath = targetRoot,
-            Operation = SquadTargetOperation.Install,
-            ExplicitTargets = settings.Targets,
-            ConfiguredTargets = squadConfig.Targets,
-            ExplicitExclusions = settings.Exclusions,
-            ConfiguredExclusions = squadConfig.Exclusions,
-            IsInteractive = _output.IsInteractive
-        };
-
-        SquadTargetResolutionDecision decision = _targets.Resolve(request);
-        if (decision.Kind == SquadTargetResolutionKind.Failure)
-        {
-            _output.Ansi.MarkupLine("[red]No deployment targets specified or detected.[/]");
-            if (decision.RecoveryCommand is not null)
-            {
-                _output.Ansi.MarkupLine($"Specify target(s) using [bold]{Markup.Escape(decision.RecoveryCommand)}[/].");
-            }
-
-            return decision.ExitCode ?? 2;
-        }
+        SquadTargetResolutionDecision decision = resolved;
 
         // The host's Arbiter settings travel into rendering (Req 22.2, 5.3): enabled
         // verbatim, timeout-ms as whole hook seconds with headroom.
         SquadArbiterWiring arbiterWiring = SquadCommandComposition.ResolveArbiterWiring(
-            configResult.Config?.Arbiter ?? Core.Arbiter.ArbiterConfigDefaults.Product);
+            config?.Arbiter ?? Core.Arbiter.ArbiterConfigDefaults.Product);
         // A --global run writes beneath each selected target's own physical global root,
         // not beneath the home anchor. The same injected resolver the lifecycle plans with
         // names the roots, so the confirmation shows the real destinations.
@@ -195,7 +152,7 @@ internal sealed class SquadInstallCommand : Command<SquadInstallSettings>
             Adopt: settings.Adopt,
             DryRun: settings.DryRun,
             Arbiter: arbiterWiring,
-            WorkerRoster: configResult.Config?.WorkerRoster);
+            WorkerRoster: config?.WorkerRoster);
 
         // A global install that names a target the install lacks adds it to the existing ones, so the confirmation
         // lists every root the run writes beneath, not only the new target's.
@@ -227,65 +184,7 @@ internal sealed class SquadInstallCommand : Command<SquadInstallSettings>
                 .GetResult();
             if (result.Success)
             {
-                if (settings.DryRun)
-                {
-                    int fileCount = result.Receipt?.Files.Count ?? 0;
-                    _output.WriteLine(
-                        $"[bold]Dry-run:[/] planned {fileCount} deployed files for [bold]{Markup.Escape(targetRoot)}[/].");
-                }
-                else
-                {
-                    _output.WriteLine(
-                        $"[green]Successfully installed Kyber-Squad to [bold]{Markup.Escape(targetRoot)}[/].[/]");
-                }
-
-                if (deployedTargets.Count > decision.Targets.Count)
-                {
-                    _output.WriteLine(
-                        "Extended the existing global install; it now has "
-                        + $"{Markup.Escape(string.Join(", ", deployedTargets.Select(SquadTargetCatalog.GetToken)))}.");
-                }
-
-                // Until trust is granted the hooks stay off (§10.7), so the install names
-                // each selected target's trust gate where the audit cannot observe the gap.
-                // Global Warp stays fallback-only: the install still prints the MCP registration
-                // guidance, but it never mutates ~/.warp/.mcp.json.
-                WriteArbiterTrustSteps(_output, decision.Targets, arbiterWiring);
-                if (arbiterWiring.Enabled && scope == SquadDeploymentScope.Project && decision.Targets.Contains(SquadTarget.OpenCode)
-                    && OpenCodeArbiterRegistrationStep(scope) is { } openCodeStep)
-                {
-                    _output.Out.WriteLine(openCodeStep);
-                }
-
-                if (scope == SquadDeploymentScope.Global && (decision.Targets.Contains(SquadTarget.Warp) || decision.Targets.Contains(SquadTarget.ZCode)))
-                {
-                    string targetToken = decision.Targets.Contains(SquadTarget.Warp)
-                        ? HarnessRegistry.WarpToken
-                        : HarnessRegistry.ZCodeToken;
-                    string configPath = targetToken == HarnessRegistry.WarpToken
-                        ? "~/.warp/.mcp.json"
-                        : "~/.zcode/.mcp.json";
-                    _output.Out.WriteLine(RegistrationStepMessage(configPath));
-                }
-
-                _output.WriteTransactionWarnings(result.Warnings);
-
-                // A project with no task gates learns where they come from. Squad writes no
-                // configuration itself, and the hint never changes this exit code.
-                if (scope == SquadDeploymentScope.Project)
-                {
-                    SquadTaskGateHint.WriteIfNoTaskGates(targetRoot, _configs, _output);
-                }
-
-                // The capture plugin is global, so only a global deployment reaches it. It runs after the
-                // deployment has succeeded and cannot change this command's exit code.
-                if (scope == SquadDeploymentScope.Global)
-                    KyberDashCapturePluginStep.RunForGlobal(
-                        _capturePluginStep,
-                        decision.Targets,
-                        settings.NoCapturePlugin,
-                        settings.DryRun,
-                        _globalRoots);
+                WriteInstallSuccess(result, settings, scope, targetRoot, decision, deployedTargets, arbiterWiring);
                 return 0;
             }
 
@@ -314,6 +213,170 @@ internal sealed class SquadInstallCommand : Command<SquadInstallSettings>
     public int Execute(CommandContext context, SquadInstallSettings settings)
     {
         return Execute(context, settings, CancellationToken.None);
+    }
+
+    /// <summary>
+    ///     Loads configuration if present and resolves the install targets, or returns null with the exit code the
+    ///     refusal has already been reported under.
+    /// </summary>
+    /// <remarks>
+    ///     A project that cannot be read — no config file, or one that does not parse — still installs: the squad
+    ///     config falls back to product defaults and the task-gate hint says where review gates come from. Only a
+    ///     global run, which has no project whose gates could be missing, keeps the load failure fatal.
+    /// </remarks>
+    private SquadTargetResolutionDecision? PrepareDecision(
+        string targetRoot,
+        SquadDeploymentScope scope,
+        ISquadStateStore stateStore,
+        SquadInstallSettings settings,
+        out KyberWeaveConfig? config,
+        out int exitCode)
+    {
+        exitCode = 1;
+
+        KyberWeaveConfigLoadResult configResult = _roots.TryLoadScopeConfig(
+            _configs,
+            targetRoot,
+            scope,
+            stateStore.UserPaths.HomeDirectory);
+        if (!configResult.Success && scope != SquadDeploymentScope.Project)
+        {
+            _output.WriteClientInputError(configResult.Error ?? "Failed to load configuration.");
+            config = null;
+            return null;
+        }
+
+        config = configResult.Config;
+
+        SquadConfig squadConfig = configResult.Config?.Squad ?? SquadConfig.ProductDefaults;
+
+        SquadTargetResolutionRequest request = new()
+        {
+            RootPath = targetRoot,
+            Operation = SquadTargetOperation.Install,
+            ExplicitTargets = settings.Targets,
+            ConfiguredTargets = squadConfig.Targets,
+            ExplicitExclusions = settings.Exclusions,
+            ConfiguredExclusions = squadConfig.Exclusions,
+            IsInteractive = _output.IsInteractive
+        };
+
+        SquadTargetResolutionDecision decision = _targets.Resolve(request);
+        if (decision.Kind == SquadTargetResolutionKind.Failure)
+        {
+            WriteResolutionFailure(decision);
+            exitCode = decision.ExitCode ?? 2;
+            return null;
+        }
+
+        exitCode = 0;
+        return decision;
+    }
+
+    private bool TryResolveClientInput(
+        SquadInstallSettings settings,
+        out string? effectivePath,
+        out string? pinnedVersion)
+    {
+        try
+        {
+            effectivePath = SquadCommandComposition.CoalesceTargetPath(settings.Path, settings.PathOption);
+
+            if (settings.Targets.Length > 0)
+                _ = SquadTargetCatalog.Parse(settings.Targets);
+
+            if (settings.Exclusions.Length > 0)
+                _ = SquadTargetCatalog.Parse(settings.Exclusions);
+
+            pinnedVersion = SquadCommandComposition.NormalizePinnedVersion(settings.Version);
+            return true;
+        }
+        catch (Exception ex) when (ex is ArgumentException or SelfUpdateException)
+        {
+            _output.WriteClientInputError(ex.Message);
+            effectivePath = null;
+            pinnedVersion = null;
+            return false;
+        }
+    }
+
+    private void WriteResolutionFailure(SquadTargetResolutionDecision decision)
+    {
+        _output.Ansi.MarkupLine("[red]No deployment targets specified or detected.[/]");
+        if (decision.RecoveryCommand is not null)
+        {
+            _output.Ansi.MarkupLine($"Specify target(s) using [bold]{Markup.Escape(decision.RecoveryCommand)}[/].");
+        }
+    }
+
+    private void WriteInstallSuccess(
+        SquadLifecycleResult result,
+        SquadInstallSettings settings,
+        SquadDeploymentScope scope,
+        string targetRoot,
+        SquadTargetResolutionDecision decision,
+        IReadOnlyList<SquadTarget> deployedTargets,
+        SquadArbiterWiring arbiterWiring)
+    {
+        if (settings.DryRun)
+        {
+            int fileCount = result.Receipt?.Files.Count ?? 0;
+            _output.WriteLine(
+                $"[bold]Dry-run:[/] planned {fileCount} deployed files for [bold]{Markup.Escape(targetRoot)}[/].");
+        }
+        else
+        {
+            _output.WriteLine(
+                $"[green]Successfully installed Kyber-Squad to [bold]{Markup.Escape(targetRoot)}[/].[/]");
+        }
+
+        if (deployedTargets.Count > decision.Targets.Count)
+        {
+            _output.WriteLine(
+                "Extended the existing global install; it now has "
+                + $"{Markup.Escape(string.Join(", ", deployedTargets.Select(SquadTargetCatalog.GetToken)))}.");
+        }
+
+        // Until trust is granted the hooks stay off (§10.7), so the install names
+        // each selected target's trust gate where the audit cannot observe the gap.
+        // Global Warp stays fallback-only: the install still prints the MCP registration
+        // guidance, but it never mutates ~/.warp/.mcp.json.
+        WriteArbiterTrustSteps(_output, decision.Targets, arbiterWiring);
+        if (arbiterWiring.Enabled && scope == SquadDeploymentScope.Project && decision.Targets.Contains(SquadTarget.OpenCode)
+            && OpenCodeArbiterRegistrationStep(scope) is { } openCodeStep)
+        {
+            _output.Out.WriteLine(openCodeStep);
+        }
+
+        if (scope == SquadDeploymentScope.Global && (decision.Targets.Contains(SquadTarget.Warp) || decision.Targets.Contains(SquadTarget.ZCode)))
+        {
+            string targetToken = decision.Targets.Contains(SquadTarget.Warp)
+                ? HarnessRegistry.WarpToken
+                : HarnessRegistry.ZCodeToken;
+            string configPath = targetToken == HarnessRegistry.WarpToken
+                ? "~/.warp/.mcp.json"
+                : "~/.zcode/.mcp.json";
+            _output.Out.WriteLine(RegistrationStepMessage(configPath));
+        }
+
+        _output.WriteTransactionWarnings(result.Warnings);
+
+        // A project with no task gates learns where they come from. Squad writes no
+        // configuration itself, and the hint never changes this exit code.
+        if (scope == SquadDeploymentScope.Project)
+        {
+            SquadTaskGateHint.WriteIfNoTaskGates(targetRoot, _configs, _output);
+        }
+
+        // The capture plugin is global, so only a global deployment reaches it. It runs after the
+        // deployment has succeeded and cannot change this command's exit code.
+        if (scope == SquadDeploymentScope.Global)
+            KyberDashCapturePluginStep.RunForGlobal(
+                _capturePluginStep,
+                decision.Targets,
+                settings.NoCapturePlugin,
+                settings.DryRun,
+                _globalRoots);
     }
 
     private static string RegistrationStepMessage(string configPath)
