@@ -29,7 +29,11 @@ public sealed class RunStartCommandConsoleTests : IDisposable
 
     public RunStartCommandConsoleTests() => _markup.Profile.Width = 400;
 
-    public void Dispose() => _markup.Dispose();
+    public void Dispose()
+    {
+        _markup.Dispose();
+        _standard.Dispose();
+    }
 
     [Fact]
     public void Execute_ANonConventionalType_RefusesOnTheConsoleWithExitCodeTwo()

@@ -3,7 +3,7 @@ using Microsoft.Extensions.Time.Testing;
 namespace KyberWeave.Tests.Fakes;
 
 /// <summary>A fake clock that tells the test each time something starts waiting on it.</summary>
-public sealed class ParkObservingTimeProvider : FakeTimeProvider
+public sealed class ParkObservingTimeProvider : FakeTimeProvider, IDisposable
 {
     private static readonly TimeSpan HangGuard = TimeSpan.FromSeconds(30);
 
@@ -51,5 +51,11 @@ public sealed class ParkObservingTimeProvider : FakeTimeProvider
         }
 
         return task.GetAwaiter().GetResult();
+    }
+
+    /// <inheritdoc />
+    public void Dispose()
+    {
+        _parks.Dispose();
     }
 }

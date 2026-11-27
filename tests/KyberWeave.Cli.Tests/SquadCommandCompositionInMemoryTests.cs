@@ -26,7 +26,11 @@ public sealed class SquadCommandCompositionInMemoryTests : IDisposable
         _files.CreateDirectory(_workingDirectory);
     }
 
-    public void Dispose() => _ansi.Dispose();
+    public void Dispose()
+    {
+        _ansi.Dispose();
+        _standardStreams.Dispose();
+    }
 
     [Fact]
     public void SquadCommandComposition_ResolveStateStore_ReturnsConfiguredOrSharedPaths()

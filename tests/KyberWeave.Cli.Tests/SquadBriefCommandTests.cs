@@ -18,7 +18,11 @@ public sealed class SquadBriefCommandTests : IDisposable
     private readonly TestConsole _ansi = new() { EmitAnsiSequences = false };
     private readonly FakeConsole _streams = new();
 
-    public void Dispose() => _ansi.Dispose();
+    public void Dispose()
+    {
+        _ansi.Dispose();
+        _streams.Dispose();
+    }
 
     [Fact]
     public void Execute_UnknownFormat_RefusesWithTheFormats()

@@ -48,7 +48,11 @@ public sealed class SquadPresetStatusDoctorTests : IDisposable
 
     public SquadPresetStatusDoctorTests() => _ansi.Profile.Width = 200;
 
-    public void Dispose() => _ansi.Dispose();
+    public void Dispose()
+    {
+        _ansi.Dispose();
+        _streams.Dispose();
+    }
 
     private InMemoryFileSystem Files => _state.Files;
 

@@ -28,7 +28,11 @@ public sealed class DocsCommandOutputSeamTests : IDisposable
     private readonly FakeKyberWeaveConfigRepository _configs = new();
     private readonly FakeConsole _standardError = new();
 
-    public void Dispose() => _console.Dispose();
+    public void Dispose()
+    {
+        _console.Dispose();
+        _standardError.Dispose();
+    }
 
     [Fact]
     public void PacketResolvesTheWorkingDirectoryThroughThePathSeamAndReportsOnItsConsole()

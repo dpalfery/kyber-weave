@@ -20,7 +20,11 @@ public sealed class SquadInstanceRemoveCommandTests : IDisposable
     private readonly RecordingInstances _instances = new();
     private readonly StubFiles _files = new();
 
-    public void Dispose() => _ansi.Dispose();
+    public void Dispose()
+    {
+        _ansi.Dispose();
+        _streams.Dispose();
+    }
 
     [Fact]
     public void Execute_InstanceFound_RemovesItWithoutAskingWhenNotInteractive()

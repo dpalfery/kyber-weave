@@ -32,7 +32,11 @@ public sealed class SquadPresetCommandsTests : IDisposable
         _state = new FakeSquadStateStore(_paths);
     }
 
-    public void Dispose() => _ansi.Dispose();
+    public void Dispose()
+    {
+        _ansi.Dispose();
+        _streams.Dispose();
+    }
 
     [Fact]
     public void List_PresetWithNoUsers_NamesItsFileAndNone()

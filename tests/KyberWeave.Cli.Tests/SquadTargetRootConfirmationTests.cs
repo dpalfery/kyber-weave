@@ -16,6 +16,7 @@ public sealed class SquadTargetRootConfirmationTests : IDisposable
     public void Dispose()
     {
         _ansi.Dispose();
+        _streams.Dispose();
     }
 
     [Fact]

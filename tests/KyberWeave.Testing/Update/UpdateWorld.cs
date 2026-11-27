@@ -302,7 +302,9 @@ internal sealed class UpdateWorld : IDisposable
         _ = services.AddSingleton<IUpdateFileModes>(new FakeUpdateFileModes());
         _ = services.AddSingleton<ISquadReleaseHttpHandlers>(new UnreachableReleaseHandlers());
         _ = services.AddSingleton<IAnsiConsole>(console);
-        _ = services.AddSingleton<IConsole>(new FakeConsole(isInputRedirected: true));
+        FakeConsole standard = new(isInputRedirected: true);
+        _owned.Add(standard);
+        _ = services.AddSingleton<IConsole>(standard);
         _ = services.AddSingleton<ISquadStateStore>(new SquadStateStore(paths, Files, semantics, Paths, environment, lease));
         configure?.Invoke(services);
         services.TryAddSingleton<IMcpDeclarationReader, McpDeclarationReader>();

@@ -21,7 +21,11 @@ public sealed class SkillCommandConsoleSeamTests : IDisposable
 
     public SkillCommandConsoleSeamTests() => _ansi.Profile.Width = 200;
 
-    public void Dispose() => _ansi.Dispose();
+    public void Dispose()
+    {
+        _ansi.Dispose();
+        _standard.Dispose();
+    }
 
     private static readonly InMemoryGovernanceReaders Governance = new();
 
@@ -258,8 +262,8 @@ public sealed class SkillCommandConsoleSeamTests : IDisposable
         int table = new RouteCommand(_skills, _ansi, _standard)
             .Execute(null!, new RouteSettings { EvalFile = "/kw/eval.yml" }, CancellationToken.None);
 
-        TestConsole jsonAnsi = new();
-        FakeConsole jsonStandard = new();
+        using TestConsole jsonAnsi = new();
+        using FakeConsole jsonStandard = new();
         int json = new RouteCommand(_skills, jsonAnsi, jsonStandard)
             .Execute(null!, new RouteSettings { EvalFile = "/kw/eval.yml", Json = true }, CancellationToken.None);
 
