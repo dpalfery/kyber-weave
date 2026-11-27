@@ -243,7 +243,7 @@ public sealed class AntigravityHookAdapter : IHarnessHookAdapter
                 DispatchInsertion insertion = DispatchPromptInsertion.Expand(prompt, context, subagentType);
                 if (insertion.Kind == DispatchInsertionKind.Stopped)
                 {
-                    return RenderDeny(StopReason(insertion));
+                    return RenderDeny(insertion.StopReason);
                 }
 
                 if (insertion.Kind == DispatchInsertionKind.Inserted)
@@ -270,7 +270,7 @@ public sealed class AntigravityHookAdapter : IHarnessHookAdapter
             DispatchInsertion flat = DispatchPromptInsertion.Expand(flatPrompt, context, flatType);
             if (flat.Kind == DispatchInsertionKind.Stopped)
             {
-                return RenderDeny(StopReason(flat));
+                return RenderDeny(flat.StopReason);
             }
 
             if (flat.Kind == DispatchInsertionKind.Inserted)
@@ -296,7 +296,7 @@ public sealed class AntigravityHookAdapter : IHarnessHookAdapter
         DispatchInsertion insertion = DispatchPromptInsertion.Expand(prompt, context, type);
         return insertion.Kind switch
         {
-            DispatchInsertionKind.Stopped => RenderDeny(StopReason(insertion)),
+            DispatchInsertionKind.Stopped => RenderDeny(insertion.StopReason),
             DispatchInsertionKind.Inserted => new JsonObject
             {
                 ["decision"] = "ask",
@@ -546,11 +546,6 @@ public sealed class AntigravityHookAdapter : IHarnessHookAdapter
             ["decision"] = "deny",
             ["reason"] = reason,
         }.ToJsonString();
-
-    /// <summary>The reason a stopped insertion carries; only a <see cref="DispatchInsertionKind.Stopped"/> asks for one.</summary>
-    private static string StopReason(DispatchInsertion insertion) =>
-        insertion.Reason ?? throw new InvalidOperationException(
-            "A dispatch insertion stopped without a reason.");
 
     /// <summary>The first value that carries text, so an empty <c>error</c> never hides a non-empty <c>result</c>.</summary>
     /// <param name="values">The candidate values, in priority order.</param>

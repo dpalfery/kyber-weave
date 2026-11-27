@@ -296,7 +296,7 @@ public sealed class ClaudeHookAdapter : IHarnessHookAdapter
         return insertion.Kind switch
         {
             DispatchInsertionKind.Inserted => RenderPreAllowPrompt(toolInput, insertion.Text),
-            DispatchInsertionKind.Stopped => RenderPreDeny(StopReason(insertion)),
+            DispatchInsertionKind.Stopped => RenderPreDeny(insertion.StopReason),
             _ => null,
         };
     }
@@ -343,7 +343,7 @@ public sealed class ClaudeHookAdapter : IHarnessHookAdapter
             // A prompt that cannot be built stops the dispatch: no worker starts with only a task id.
             if (insertion.Kind == DispatchInsertionKind.Stopped)
             {
-                return RenderPreDeny(StopReason(insertion));
+                return RenderPreDeny(insertion.StopReason);
             }
 
             bool inserted = insertion.Kind == DispatchInsertionKind.Inserted;
@@ -847,11 +847,6 @@ public sealed class ClaudeHookAdapter : IHarnessHookAdapter
                 ["permissionDecisionReason"] = reason,
             },
         }.ToJsonString();
-
-    /// <summary>The reason a stopped insertion carries; only a <see cref="DispatchInsertionKind.Stopped"/> asks for one.</summary>
-    private static string StopReason(DispatchInsertion insertion) =>
-        insertion.Reason ?? throw new InvalidOperationException(
-            "A dispatch insertion stopped without a reason.");
 
     private static string RenderPreAllowStrip(JsonElement toolInput, string prompt) =>
         RenderPreAllow(JsonNode.Parse(toolInput.GetRawText()) as JsonObject
