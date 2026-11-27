@@ -1,4 +1,3 @@
-using System.ComponentModel;
 using KyberWeave.Data.Arbiter;
 using KyberWeave.Data.Hooks;
 using KyberWeave.Core.Arbiter.Plans;
@@ -214,31 +213,22 @@ public sealed class ArbiterReadersTests : IDisposable
         IReadOnlyList<HunkRange>? hunks = null;
         GitSnapshot? snapshot = null;
         IReadOnlySet<string>? sinceSnapshot = null;
-        Exception? failure = null;
-        try
-        {
-            root = RealGitFacts.Create().GetRoot(plain);
-            head = RealGitFacts.Create().GetHead(plain);
-            dirty = RealGitFacts.Create().GetDirtyStatuses(plain);
-            blobs = RealGitFacts.Create().GetBlobIds(plain, ["nope.txt"]);
-            sinceBase = RealGitFacts.Create().GetChangedPathsSinceBase(plain, "HEAD");
-            hunks = RealGitFacts.Create().GetHunkRanges(plain, "HEAD");
-            snapshot = RealGitFacts.Create().CaptureSnapshot(plain);
+        // Any exception fails the test: every call must report an absent fact, not throw.
+        root = RealGitFacts.Create().GetRoot(plain);
+        head = RealGitFacts.Create().GetHead(plain);
+        dirty = RealGitFacts.Create().GetDirtyStatuses(plain);
+        blobs = RealGitFacts.Create().GetBlobIds(plain, ["nope.txt"]);
+        sinceBase = RealGitFacts.Create().GetChangedPathsSinceBase(plain, "HEAD");
+        hunks = RealGitFacts.Create().GetHunkRanges(plain, "HEAD");
+        snapshot = RealGitFacts.Create().CaptureSnapshot(plain);
 
-            // A missing git binary is the same absent fact, not a crash.
-            head = RealGitFacts.Create().GetHead(plain, gitExecutable: "definitely-missing-git-binary-xyz") ?? head;
-            root = RealGitFacts.Create().GetRoot(plain, gitExecutable: "definitely-missing-git-binary-xyz") ?? root;
-            sinceSnapshot = RealGitFacts.Create().GetChangedPathsSinceSnapshot(
-                plain,
-                new GitSnapshot("deadbeef", new Dictionary<string, string>(), new Dictionary<string, string>()));
-        }
-        catch (Exception ex) when (
-            ex is IOException or UnauthorizedAccessException or InvalidOperationException or TimeoutException or Win32Exception)
-        {
-            failure = ex;
-        }
+        // A missing git binary is the same absent fact, not a crash.
+        head = RealGitFacts.Create().GetHead(plain, gitExecutable: "definitely-missing-git-binary-xyz") ?? head;
+        root = RealGitFacts.Create().GetRoot(plain, gitExecutable: "definitely-missing-git-binary-xyz") ?? root;
+        sinceSnapshot = RealGitFacts.Create().GetChangedPathsSinceSnapshot(
+            plain,
+            new GitSnapshot("deadbeef", new Dictionary<string, string>(), new Dictionary<string, string>()));
 
-        Assert.Null(failure);
         Assert.Null(root);
         Assert.Null(head);
         Assert.NotNull(dirty);
