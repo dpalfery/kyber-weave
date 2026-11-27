@@ -23,21 +23,10 @@ public sealed class SharedSpanWriteParityTests : IDisposable
 
     private readonly TempDirectory directory = new();
 
-    /// <inheritdoc />
+    /// <summary>Deletes the scratch directory when disposing.</summary>
     public void Dispose()
     {
-        Dispose(true);
-        GC.SuppressFinalize(this);
-    }
-
-    /// <summary>Deletes the scratch directory when disposing.</summary>
-    /// <param name="disposing">Whether managed state should be released.</param>
-    private void Dispose(bool disposing)
-    {
-        if (disposing)
-        {
-            directory.Dispose();
-        }
+        directory.Dispose();
     }
 
     /// <summary>

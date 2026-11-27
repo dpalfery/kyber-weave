@@ -30,21 +30,10 @@ public sealed class SessionUsageCostTests : IDisposable
     /// <summary>Both stores the dashboard reads costs from.</summary>
     public static TheoryData<string> Stores => new() { "sqlite", "memory" };
 
-    /// <inheritdoc />
+    /// <summary>Deletes the scratch directory when disposing.</summary>
     public void Dispose()
     {
-        Dispose(true);
-        GC.SuppressFinalize(this);
-    }
-
-    /// <summary>Deletes the scratch directory when disposing.</summary>
-    /// <param name="disposing">Whether managed state should be released.</param>
-    private void Dispose(bool disposing)
-    {
-        if (disposing)
-        {
-            directory.Dispose();
-        }
+        directory.Dispose();
     }
 
     [Theory]
