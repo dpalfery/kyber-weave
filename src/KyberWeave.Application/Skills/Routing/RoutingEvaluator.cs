@@ -7,6 +7,8 @@ public sealed class RoutingEvaluator(IRoutingStrategy strategy)
 {
     public RoutingEvalSummary Evaluate(RoutingEvalFile evalFile, SkillSet skills)
     {
+        ArgumentNullException.ThrowIfNull(evalFile);
+
         List<RoutingCaseResult> results = new List<RoutingCaseResult>();
         foreach (RoutingEvalCase c in evalFile.Cases)
         {

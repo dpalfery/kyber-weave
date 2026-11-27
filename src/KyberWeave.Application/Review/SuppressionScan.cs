@@ -251,6 +251,8 @@ public sealed class SuppressionCandidates
     /// <param name="content">The file's bytes.</param>
     public bool AddUntracked(string path, byte[] content)
     {
+        ArgumentNullException.ThrowIfNull(content);
+
         if (SuppressionScan.LinesOfUntracked(content) is not { } lines)
             return false;
 

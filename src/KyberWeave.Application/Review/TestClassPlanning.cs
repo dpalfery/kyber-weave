@@ -98,6 +98,8 @@ public static class TestClassPlanning
         IReadOnlyList<string> changed,
         IReadOnlyDictionary<string, IReadOnlyList<string>>? declared)
     {
+        ArgumentNullException.ThrowIfNull(changed);
+
         foreach (string path in changed)
         {
             string normalized = Normalize(path);
@@ -195,6 +197,8 @@ public static class TestClassPlanning
     /// <param name="lines">The file's lines, read lazily so the walk stops at the declaration.</param>
     public static string? DeclaredNamespaceOf(IEnumerable<string> lines)
     {
+        ArgumentNullException.ThrowIfNull(lines);
+
         foreach (string line in lines)
         {
             string trimmed = line.TrimStart();

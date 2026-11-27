@@ -12,7 +12,11 @@ public static class ReviewScopeRules
     /// without them the even-split fallback divides with a ceiling to provide scope line-count
     /// metadata.
     /// </remarks>
-    public static int EffectiveChangedLines(this ReviewScope scope) => ComputeEffectiveChangedLines(scope);
+    public static int EffectiveChangedLines(this ReviewScope scope)
+    {
+        ArgumentNullException.ThrowIfNull(scope);
+        return ComputeEffectiveChangedLines(scope);
+    }
 
     /// <summary>Whether a repository-relative path is excluded from the size numerator.</summary>
     /// <param name="path">Repository-relative path with forward slashes.</param>

@@ -128,6 +128,8 @@ public static class InstructionSurfaceScanner
         string filePath,
         InstructionSurfaceRuleCodes codes)
     {
+        ArgumentNullException.ThrowIfNull(codes);
+
         if (metadata is null || !HasKey(metadata, "author"))
         {
             yield return new Diagnostic(codes.MissingAuthor, Severity.Info,

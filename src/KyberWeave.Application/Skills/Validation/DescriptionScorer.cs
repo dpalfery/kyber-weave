@@ -72,6 +72,8 @@ public static partial class DescriptionScorer
 
     public static DescriptionScore Score(Skill skill)
     {
+        ArgumentNullException.ThrowIfNull(skill);
+
         string d = (skill.Frontmatter.Description ?? string.Empty).Trim();
         List<ScoreComponent> components = new List<ScoreComponent>();
 

@@ -15,6 +15,9 @@ public static partial class SkillScaffold
     /// </summary>
     public static string Template(string template, string name, bool includeLicense, bool includeMetadata)
     {
+        ArgumentNullException.ThrowIfNull(template);
+        ArgumentNullException.ThrowIfNull(name);
+
         string title = string.Join(' ', name.Split('-').Select(w => char.ToUpper(w[0], CultureInfo.InvariantCulture) + w[1..]));
         (string description, string instructions) = template.ToUpperInvariant() switch
         {
