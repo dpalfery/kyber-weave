@@ -153,8 +153,9 @@ internal sealed class SquadUninstallCommand : Command<SquadUninstallSettings>
                 .GetAwaiter().GetResult();
             return WriteUninstallResult(result, settings, targetRoot);
         }
-        catch (Exception ex)
+        catch (Exception ex) when (ex is not OutOfMemoryException && ex is not OperationCanceledException)
         {
+            // Command boundary: a failed uninstall is reported as exit 1 rather than crashing the host.
             _output.WriteFailure(ex);
             return 1;
         }

@@ -40,6 +40,7 @@ public class CaptureService : ICaptureService
     private readonly IServerStateRepository serverState;
     private readonly IHarnessFileSystem files;
     private readonly Func<string> homeDirectory;
+    private readonly TimeProvider time;
 
     /// <summary>
     /// Initializes a new <see cref="CaptureService"/>.
@@ -49,12 +50,14 @@ public class CaptureService : ICaptureService
     /// <param name="serverState">Server-state repository supplying the default state directory.</param>
     /// <param name="files">Filesystem seam for harness config probes. The process filesystem is used when omitted.</param>
     /// <param name="homeDirectory">Home directory the probes are rooted at. The operator profile is used when omitted.</param>
+    /// <param name="time">Wall-clock time provider stamping the capture status check; defaults to <see cref="TimeProvider.System"/>.</param>
     public CaptureService(
         ISettingsRepository settings,
         IOperationalStore store,
         IServerStateRepository serverState,
         IHarnessFileSystem? files = null,
-        Func<string>? homeDirectory = null)
+        Func<string>? homeDirectory = null,
+        TimeProvider? time = null)
     {
         ArgumentNullException.ThrowIfNull(settings);
         ArgumentNullException.ThrowIfNull(store);
@@ -65,6 +68,7 @@ public class CaptureService : ICaptureService
         this.serverState = serverState;
         this.files = files ?? PhysicalHarnessFileSystem.Instance;
         this.homeDirectory = homeDirectory ?? (() => Environment.GetFolderPath(Environment.SpecialFolder.UserProfile));
+        this.time = time ?? TimeProvider.System;
     }
 
     /// <inheritdoc />
@@ -105,7 +109,7 @@ public class CaptureService : ICaptureService
 
         var check = new
         {
-            checkedAt = DateTimeOffset.UtcNow.ToString("yyyy-MM-dd'T'HH:mm:ss.fff'Z'", CultureInfo.InvariantCulture),
+            checkedAt = time.GetUtcNow().ToString("yyyy-MM-dd'T'HH:mm:ss.fff'Z'", CultureInfo.InvariantCulture),
             health,
             enabled = enabledCount,
             attention,

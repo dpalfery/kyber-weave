@@ -197,12 +197,14 @@ public static class CodexToolResultMapper
     /// <param name="sourceLocator">Optional source locator override; defaults to the first log's <c>service.name</c> or <c>"otlp"</c>.</param>
     /// <param name="harnessIdOverride">Optional harness identifier override; defaults to <c>codex-cli</c>.</param>
     /// <param name="importedAtUtc">Optional import instant for diagnostic problem timestamps; defaults to now.</param>
+    /// <param name="timeProvider">Clock supplying the default import instant; defaults to <see cref="TimeProvider.System"/>.</param>
     /// <returns>Static <see cref="CollectedBatch"/> for persistence.</returns>
     public static CollectedBatch MapLogs(
         IReadOnlyList<OtlpLog> logs,
         string? sourceLocator = null,
         string? harnessIdOverride = null,
-        DateTimeOffset? importedAtUtc = null)
+        DateTimeOffset? importedAtUtc = null,
+        TimeProvider? timeProvider = null)
     {
         ArgumentNullException.ThrowIfNull(logs);
 
@@ -210,7 +212,7 @@ public static class CodexToolResultMapper
         string locator = SafeOptionalText(sourceLocator)
             ?? (logs.Count > 0 ? ExtractSource(logs[0].Resource) : UnnamedSource);
         CollectedSource source = new(harnessId, SourceKind.Otlp, locator);
-        DateTimeOffset importedAt = importedAtUtc ?? DateTimeOffset.UtcNow;
+        DateTimeOffset importedAt = importedAtUtc ?? (timeProvider ?? TimeProvider.System).GetUtcNow();
 
         Dictionary<string, CollectedSession> sessions = new(StringComparer.Ordinal);
         List<CollectedRecord> records = [];

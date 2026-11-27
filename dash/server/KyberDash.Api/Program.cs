@@ -168,7 +168,13 @@ public static partial class Program
         return DashVersion.Current;
     }
 
-    private static async Task<int> RunAsync(DashRuntimeSettings runtime, CancellationTokenSource shutdown)
+    /// <summary>The host's start stamp, read from the clock the composition root wires.</summary>
+    private static string StartedAtStamp(TimeProvider time) =>
+        time.GetUtcNow().UtcDateTime.ToString("yyyy-MM-dd'T'HH:mm:ss.fff'Z'", CultureInfo.InvariantCulture);
+
+    private static async Task<int> RunAsync(
+        DashRuntimeSettings runtime,
+        CancellationTokenSource shutdown)
     {
         Directory.CreateDirectory(runtime.StateDirectory);
 
@@ -248,7 +254,7 @@ public static partial class Program
                 new ServerInfo(
                     webUri.Port,
                     Environment.ProcessId,
-                    DateTimeOffset.UtcNow.UtcDateTime.ToString("yyyy-MM-dd'T'HH:mm:ss.fff'Z'", CultureInfo.InvariantCulture),
+                    StartedAtStamp(TimeProvider.System),
                     webUri,
                     ApiContractVersion));
 
