@@ -137,7 +137,7 @@ public sealed class ArbiterAuditService(
 
         List<string> attestations = [.. events
             .Where(e => InScope(e, since, session, matchesPlan) && e.Returns?.Attested is { Count: > 0 })
-            .SelectMany(e => (e.Returns!.Attested ?? []).Select(a => (Event: e, Attested: a)))
+            .SelectMany(e => (e.Returns?.Attested ?? []).Select(a => (Event: e, Attested: a)))
             .Select(pair => $"event {pair.Event.Id} attested {pair.Attested}")
             .Distinct(StringComparer.Ordinal)
             .Order(StringComparer.Ordinal)];
@@ -292,7 +292,7 @@ public sealed class ArbiterAuditService(
         // A blank target is flagged as well: a dispatch whose target the harness did not
         // send (Devin with no profile argument) may still be a Squad dispatch.
         bool blankTarget = string.IsNullOrWhiteSpace(ev.Target);
-        if (!blankTarget && !catalog.Agents.ContainsKey(ev.Target!))
+        if (!blankTarget && ev.Target is { } target && !catalog.Agents.ContainsKey(target))
             return;
 
         reported++;
