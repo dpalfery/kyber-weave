@@ -143,6 +143,7 @@ public static class KwSkillLoads
     /// </remarks>
     public static bool IsSkillName(string value)
     {
+        ArgumentNullException.ThrowIfNull(value);
         if (value.Length is 0 or > MaxSkillNameLength)
         {
             return false;
