@@ -397,12 +397,22 @@ public sealed class ReleaseReceiptSkipTests
         Assert.Contains("verification failed", report, StringComparison.Ordinal);
         Assert.Contains("unverified", report, StringComparison.Ordinal);
 
-        // Only a run whose publishing never completed claims it published
-        // nothing, and that claim is the final fail-safe branch.
+        // Only a run whose publishing never completed AND where the release
+        // does not exist claims it published nothing, and that claim is the
+        // final fail-safe branch. If `gh release create` created the release
+        // before failing on an asset upload, `PUBLISH_OUTCOME` is `failure`
+        // while the release already exists on GitHub.
+        int releaseExistsCheck = report.IndexOf("gh release view \"${TAG}\"", StringComparison.Ordinal);
+        Assert.True(
+            releaseExistsCheck > publishOutcome,
+            "the report step must check `gh release view \"${TAG}\"` after PUBLISH_OUTCOME so a partial release (created before an asset upload failed) is not reported as 'published nothing'.");
+        Assert.Contains("TAG: ${{ needs.version.outputs.tag }}", report, StringComparison.Ordinal);
+        Assert.Contains("GH_TOKEN: ${{ github.token }}", report, StringComparison.Ordinal);
+
         int publishedNothing = report.IndexOf("published nothing", StringComparison.Ordinal);
         Assert.True(
-            publishedNothing > publishOutcome,
-            "'published nothing' must be the final, fail-safe branch after the PUBLISH_OUTCOME check.");
+            publishedNothing > releaseExistsCheck,
+            "'published nothing' must be the final, fail-safe branch after the `gh release view` check.");
     }
 
     [Fact]

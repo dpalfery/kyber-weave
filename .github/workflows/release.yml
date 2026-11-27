@@ -1860,9 +1860,10 @@ jobs:
       # Each branch claims only what actually happened: a hit whose receipt
       # recorded no run_url points at the verdict log; a green miss names
       # this run as the publisher; a miss whose publish step completed but
-      # whose verification failed reports a live, unverified release; and
-      # only a miss whose publishing never completed says it published
-      # nothing.
+      # whose verification failed reports a live, unverified release; a miss
+      # whose publish step failed after creating the release reports a live,
+      # incomplete release; and only a miss where no release exists says it
+      # published nothing.
       - name: Report the run that published this release
         if: always()
         env:
@@ -1870,6 +1871,8 @@ jobs:
           CHAIN_HIT: ${{ steps.verdict.outputs.skip }}
           JOB_STATUS: ${{ job.status }}
           PUBLISH_OUTCOME: ${{ steps.publish.outcome }}
+          TAG: ${{ needs.version.outputs.tag }}
+          GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
           if [[ -n "${PRIOR_RUN_URL}" ]]; then
@@ -1882,8 +1885,11 @@ jobs:
           elif [[ "${PUBLISH_OUTCOME}" == "success" ]]; then
             echo "This run published the release but verification failed (${JOB_STATUS}); the release is live and unverified: ${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}"
             echo "Published but unverified by this run: ${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}" >> "${GITHUB_STEP_SUMMARY}"
+          elif gh release view "${TAG}" >/dev/null 2>&1; then
+            echo "This run created release ${TAG} before publishing completed (${JOB_STATUS}, step outcome '${PUBLISH_OUTCOME}'); the release is live and incomplete: ${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}"
+            echo "Published partially (incomplete) by this run: ${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}" >> "${GITHUB_STEP_SUMMARY}"
           else
-            echo "This run published nothing (${JOB_STATUS}): the 'Create tag and GitHub Release' step ended '${PUBLISH_OUTCOME}', so publishing never completed; see the failed steps above."
+            echo "This run published nothing (${JOB_STATUS}): the 'Create tag and GitHub Release' step ended '${PUBLISH_OUTCOME}', and no release exists for ${TAG}; see the failed steps above."
           fi
 
       # Miss-only, and only after the verification above: a hit must never
