@@ -39,8 +39,10 @@ namespace KyberWeave.Tests;
 ///       under <c>if: always()</c>, and
 ///   (j) the report step claims only what happened on every path: a miss
 ///       whose publish step completed but whose verification failed reports
-///       a live, unverified release, and only a miss whose publishing never
-///       completed says it published nothing.
+///       a live, unverified release; a miss whose publish step failed treats
+///       only HTTP 404 as "published nothing", treats a 2xx as "a release
+///       already exists" without claiming this run created it, and treats
+///       every other lookup result as a failed lookup.
 ///
 /// The fail-closed exit behaviour of those shell commands is not statically
 /// observable; it is review scope, not test scope. The structures above —
@@ -397,22 +399,39 @@ public sealed class ReleaseReceiptSkipTests
         Assert.Contains("verification failed", report, StringComparison.Ordinal);
         Assert.Contains("unverified", report, StringComparison.Ordinal);
 
-        // Only a run whose publishing never completed AND where the release
-        // does not exist claims it published nothing, and that claim is the
-        // final fail-safe branch. If `gh release create` created the release
-        // before failing on an asset upload, `PUBLISH_OUTCOME` is `failure`
-        // while the release already exists on GitHub.
-        int releaseExistsCheck = report.IndexOf("gh release view \"${TAG}\"", StringComparison.Ordinal);
-        Assert.True(
-            releaseExistsCheck > publishOutcome,
-            "the report step must check `gh release view \"${TAG}\"` after PUBLISH_OUTCOME so a partial release (created before an asset upload failed) is not reported as 'published nothing'.");
+        // A failed publish looks the tag up by HTTP status. `gh release view`
+        // collapses a failed call and a missing release into one bit, and a
+        // success only proves some release carries the tag. Only 404 means
+        // absent; a 2xx means a release already exists (not that this run
+        // created it); any other status is a failed lookup.
         Assert.Contains("TAG: ${{ needs.version.outputs.tag }}", report, StringComparison.Ordinal);
         Assert.Contains("GH_TOKEN: ${{ github.token }}", report, StringComparison.Ordinal);
-
-        int publishedNothing = report.IndexOf("published nothing", StringComparison.Ordinal);
+        int lookup = report.IndexOf(
+            "gh api --include --silent \"repos/${GITHUB_REPOSITORY}/releases/tags/${TAG}\"",
+            StringComparison.Ordinal);
         Assert.True(
-            publishedNothing > releaseExistsCheck,
-            "'published nothing' must be the final, fail-safe branch after the `gh release view` check.");
+            lookup > publishOutcome,
+            "the report step must look the tag up with `gh api` after PUBLISH_OUTCOME, so a failed call is not read as absence.");
+        Assert.DoesNotContain("gh release view", report, StringComparison.Ordinal);
+
+        int status404 = report.IndexOf("\"${lookup_status}\" == \"404\"", StringComparison.Ordinal);
+        int alreadyExists = report.IndexOf("already exists", StringComparison.Ordinal);
+        int lookupFailed = report.IndexOf(
+            "whether a release exists was not established",
+            StringComparison.Ordinal);
+        int publishedNothing = report.IndexOf("published nothing", StringComparison.Ordinal);
+        int noRelease = report.IndexOf("no release exists", StringComparison.Ordinal);
+        Assert.True(status404 > lookup, "the 404 branch must follow the lookup.");
+        Assert.True(
+            publishedNothing > status404 && noRelease > status404 && noRelease < alreadyExists,
+            "'published nothing' and 'no release exists' belong only to the 404 branch.");
+        Assert.True(alreadyExists > status404, "the 2xx branch follows the 404 branch.");
+        Assert.Contains("did not complete publishing", report, StringComparison.Ordinal);
+        Assert.DoesNotContain("This run created release", report, StringComparison.Ordinal);
+        Assert.DoesNotContain("incomplete", report, StringComparison.Ordinal);
+        Assert.True(
+            lookupFailed > alreadyExists,
+            "a lookup that is neither 404 nor 2xx must say whether a release exists was not established.");
     }
 
     [Fact]

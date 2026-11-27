@@ -1861,9 +1861,12 @@ jobs:
       # recorded no run_url points at the verdict log; a green miss names
       # this run as the publisher; a miss whose publish step completed but
       # whose verification failed reports a live, unverified release; a miss
-      # whose publish step failed after creating the release reports a live,
-      # incomplete release; and only a miss where no release exists says it
-      # published nothing.
+      # whose publish step failed looks the tag up by HTTP status. Only 404
+      # says no release exists. A 2xx says a release for the tag already
+      # exists and this run did not complete publishing it — not that this
+      # run created the release, and not that the release is partial. Any
+      # other status says the lookup failed and does not claim the release
+      # is absent.
       - name: Report the run that published this release
         if: always()
         env:
@@ -1885,11 +1888,22 @@ jobs:
           elif [[ "${PUBLISH_OUTCOME}" == "success" ]]; then
             echo "This run published the release but verification failed (${JOB_STATUS}); the release is live and unverified: ${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}"
             echo "Published but unverified by this run: ${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}" >> "${GITHUB_STEP_SUMMARY}"
-          elif gh release view "${TAG}" >/dev/null 2>&1; then
-            echo "This run created release ${TAG} before publishing completed (${JOB_STATUS}, step outcome '${PUBLISH_OUTCOME}'); the release is live and incomplete: ${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}"
-            echo "Published partially (incomplete) by this run: ${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}" >> "${GITHUB_STEP_SUMMARY}"
           else
-            echo "This run published nothing (${JOB_STATUS}): the 'Create tag and GitHub Release' step ended '${PUBLISH_OUTCOME}', and no release exists for ${TAG}; see the failed steps above."
+            # Only a 404 proves the tag has no release. A 2xx proves some
+            # release carries the tag, not that this run created it. Any other
+            # status, including an empty one when the call never connected,
+            # proves nothing about absence.
+            lookup_headers="$(gh api --include --silent "repos/${GITHUB_REPOSITORY}/releases/tags/${TAG}" || true)"
+            lookup_status="$(printf '%s\n' "${lookup_headers}" | awk 'NR==1 { print $2; exit }')"
+            run_url="${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}"
+            if [[ "${lookup_status}" == "404" ]]; then
+              echo "This run published nothing (${JOB_STATUS}): the 'Create tag and GitHub Release' step ended '${PUBLISH_OUTCOME}', and no release exists for ${TAG}; see the failed steps above."
+            elif [[ "${lookup_status}" =~ ^2[0-9][0-9]$ ]]; then
+              echo "A release for ${TAG} already exists; this run did not complete publishing it (${JOB_STATUS}, step outcome '${PUBLISH_OUTCOME}'): ${run_url}"
+              echo "A release for ${TAG} already exists; this run did not complete publishing it: ${run_url}" >> "${GITHUB_STEP_SUMMARY}"
+            else
+              echo "This run did not complete publishing (${JOB_STATUS}, step outcome '${PUBLISH_OUTCOME}'), and the release lookup for ${TAG} failed (HTTP ${lookup_status:-none}); whether a release exists was not established. See the failed steps above."
+            fi
           fi
 
       # Miss-only, and only after the verification above: a hit must never
