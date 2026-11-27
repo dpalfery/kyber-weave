@@ -55,7 +55,8 @@ rules a workflow edit must keep are in
    narrower universe and hash exactly that: the SBOM job hashes the `changes` job's own SBOM inputs,
    and the dash and tray jobs hash `dash/**` and `dash/tray/**` respectively, each with the root
    `global.json`, `Directory.Build.props`, `dash/.nvmrc` and `ci.yml` where those files are inputs to
-   its verdict.
+   its verdict. The dash set also hashes `analyzers/**`, because `Directory.Build.props` imports
+   those analyzer configs into the KyberDash build.
 4. **The fingerprint enumeration is pinned complete by a test, and cannot rot.** A repository-policy
    test compares the whole-tree argument list against `git ls-tree HEAD`, so a new top-level entry
    fails until the list covers it. A narrower set must still cover every alternation of the
