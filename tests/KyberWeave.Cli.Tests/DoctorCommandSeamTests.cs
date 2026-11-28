@@ -112,7 +112,12 @@ public sealed class DoctorCommandSeamTests : IDisposable
         _ = await Run(new DoctorSettings { Path = ".", Check = true, IndexTimeoutSeconds = 7 });
 
         DoctorRun run = Assert.Single(_doctor.Runs);
-        _ = run.Executor.Run(new ProcessStartInfo("codegraph"), "in");
+        // The doctor drives its children through RunAsync, so the bound is asserted there: a request that names
+        // no timeout gets the index timeout.
+        IProcessRunner runner = Assert.IsAssignableFrom<IProcessRunner>(run.Executor);
+        _ = await runner.RunAsync(
+            new ProcessRunRequest { Program = "codegraph", Arguments = [], StandardInput = "in" },
+            CancellationToken.None);
 
         (ProcessStartInfo start, string input, TimeSpan timeout) = Assert.Single(_processes.Calls);
         Assert.Equal("codegraph", start.FileName);

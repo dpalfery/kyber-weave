@@ -58,7 +58,8 @@ public static class ServiceCollectionExtensions
             sp.GetRequiredService<IPathResolver>(),
             sp.GetRequiredService<IProcessEnvironment>()));
         services.TryAddSingleton<IRepositoryFileStore>(_ => new PhysicalRepositoryFileStore());
-        services.TryAddSingleton<IBoundedProcessExecutor>(_ => new KernelBoundedProcessExecutor());
+        // The runner is also the bounded view, so a consumer moving to its async twin finds an IProcessRunner.
+        services.TryAddSingleton<IBoundedProcessExecutor>(sp => sp.GetRequiredService<IProcessRunner>());
         services.TryAddSingleton<IExclusiveFileWriter>(_ => new ExclusiveFileWriter());
         services.TryAddSingleton<IDoctorFileSystem>(_ => new PhysicalDoctorFileSystem());
     }

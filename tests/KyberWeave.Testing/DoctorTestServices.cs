@@ -47,7 +47,7 @@ internal static class DoctorTestServices
             environment,
             Provider.GetRequiredService<IConsole>(),
             Provider.GetRequiredService<IPathResolver>(),
-            Provider.GetRequiredService<IBoundedProcessExecutor>(),
+            Provider.GetRequiredService<IProcessRunner>(),
             executor,
             mcpExecutable);
 }

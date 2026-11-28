@@ -34,7 +34,7 @@ public sealed class DoctorCommand : AsyncCommand<DoctorSettings>
     private readonly IProcessEnvironment _environment;
     private readonly IConsole _console;
     private readonly IPathResolver _paths;
-    private readonly IBoundedProcessExecutor _processes;
+    private readonly IProcessRunner _processes;
     private readonly IProcessExecutor? _executor;
     private readonly string _mcpExecutable;
 
@@ -51,7 +51,7 @@ public sealed class DoctorCommand : AsyncCommand<DoctorSettings>
         IProcessEnvironment environment,
         IConsole console,
         IPathResolver paths,
-        IBoundedProcessExecutor processes,
+        IProcessRunner processes,
         IProcessExecutor? executor = null,
         string? mcpExecutable = null)
     {
@@ -145,27 +145,28 @@ public sealed class DoctorCommand : AsyncCommand<DoctorSettings>
         return report.ExitCode;
     }
 
+    /// <summary>Bounds every child at the index timeout unless the request names its own.</summary>
     private sealed class BoundedExecutor : IProcessRunner
     {
-        private readonly IBoundedProcessExecutor _process;
         private readonly IProcessRunner _runner;
         private readonly TimeSpan _timeout;
 
-        public BoundedExecutor(IBoundedProcessExecutor process, TimeSpan timeout)
+        public BoundedExecutor(IProcessRunner runner, TimeSpan timeout)
         {
-            ArgumentNullException.ThrowIfNull(process);
+            ArgumentNullException.ThrowIfNull(runner);
 
-            _process = process;
-            _runner = process as IProcessRunner
-                ?? throw new InvalidOperationException("The bounded process executor must also be an IProcessRunner.");
+            _runner = runner;
             _timeout = timeout;
         }
 
         public ProcessResult Run(ProcessStartInfo startInfo, string standardInput) =>
-            _process.Run(startInfo, standardInput, _timeout);
+            ((IBoundedProcessExecutor)_runner).Run(startInfo, standardInput, _timeout);
 
-        public Task<ProcessRunResult> RunAsync(ProcessRunRequest request, CancellationToken cancellationToken = default) =>
-            _runner.RunAsync(request, cancellationToken);
+        public Task<ProcessRunResult> RunAsync(ProcessRunRequest request, CancellationToken cancellationToken = default)
+        {
+            ArgumentNullException.ThrowIfNull(request);
+            return _runner.RunAsync(request with { Timeout = request.Timeout ?? _timeout }, cancellationToken);
+        }
 
         public bool IsAlive(int processId) => _runner.IsAlive(processId);
 
