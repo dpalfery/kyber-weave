@@ -3362,6 +3362,13 @@ jobs:
         if: steps.verdict.outputs.skip != 'true'
         run: npx --prefix dash playwright test --config dash/playwright.isolated.config.ts dash/e2e/harness-collection.spec.ts
 
+      # Cross-harness content parity: collection, projection and display of a
+      # harness's full content against the Copilot baseline. Runs after the
+      # conformance spec so a broken dashboard fails the fast check first.
+      - name: Harness content parity spec
+        if: steps.verdict.outputs.skip != 'true'
+        run: npx --prefix dash playwright test --config dash/playwright.isolated.config.ts dash/e2e/harness-content-parity.spec.ts
+
       - name: Shut down .NET build servers
         if: always() && steps.verdict.outputs.skip != 'true'
         run: dotnet build-server shutdown
