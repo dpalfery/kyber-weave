@@ -272,18 +272,24 @@ public partial class SqliteRelationalStore
         }
     }
 
+    /// <inheritdoc />
+    /// <remarks>
+    /// <c>synchronous</c> and <c>journal_size_limit</c> hold only for the connection that sets them, so every
+    /// connection the store opens applies them before its statements run.
+    /// </remarks>
+    protected override IReadOnlyList<SqlStatement> ConnectionPragmas { get; } =
+    [
+        SqlStatement.Of("PRAGMA synchronous = NORMAL;\n"),
+        SqlStatement.Of($"PRAGMA journal_size_limit = {IntSql(WalSizeLimitBytes)};\n"),
+    ];
+
     private void ApplyWalPragmasAndStoreState()
     {
         string storeStateDdl = SchemaDdlGenerator.GenerateTableDdl(RelationalSchemaCatalog.GetTable("store_state"));
 
-        // Journal mode cannot change inside a transaction, so the pragmas run without one and the
-        // table DDL that follows runs through the transactional statement path.
-        ExecuteStatementsWithoutTransaction(
-        [
-            SqlStatement.Of("PRAGMA journal_mode = WAL;\n"),
-            SqlStatement.Of("PRAGMA synchronous = NORMAL;\n"),
-            SqlStatement.Of($"PRAGMA journal_size_limit = {IntSql(WalSizeLimitBytes)};\n"),
-        ]);
+        // Journal mode cannot change inside a transaction, so it runs without one; it is stored in the
+        // file and holds for every later connection. The per-connection settings are in ConnectionPragmas.
+        ExecuteStatementsWithoutTransaction([SqlStatement.Of("PRAGMA journal_mode = WAL;\n")]);
         ExecuteStatements([SqlStatement.Of(storeStateDdl)]);
     }
 

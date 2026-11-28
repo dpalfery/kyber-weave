@@ -62,6 +62,12 @@ public abstract class BaseSqliteRepository
         this.busyAttempts = busyAttempts;
     }
 
+    /// <summary>
+    /// Per-connection settings applied to every connection this repository opens, before its statements run.
+    /// SQLite keeps settings such as <c>synchronous</c> per connection, and each operation opens its own.
+    /// </summary>
+    protected virtual IReadOnlyList<SqlStatement> ConnectionPragmas => [];
+
     /// <summary>Executes parameterized statements in one immediate transaction through the circuit breaker.</summary>
     /// <param name="statements">Statements to run, each binding its values by <c>$name</c> parameter.</param>
     protected virtual void ExecuteStatements(IReadOnlyList<SqlStatement> statements)
@@ -166,6 +172,11 @@ public abstract class BaseSqliteRepository
             {
                 using SqliteConnection connection = new(connectionString);
                 connection.Open();
+                foreach (SqlStatement pragma in ConnectionPragmas)
+                {
+                    ExecuteCommand(connection, pragma.Sql, pragma.Parameters);
+                }
+
                 return operation(connection);
             }
             catch (SqliteException ex) when (ex.SqliteErrorCode is SqliteBusyResultCode or SqliteLockedResultCode)
