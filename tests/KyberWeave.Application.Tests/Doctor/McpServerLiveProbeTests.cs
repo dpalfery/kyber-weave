@@ -75,11 +75,17 @@ public sealed class McpServerLiveProbeTests
 
         public string? WaitForFirstErrorLine(TimeSpan wait) => null;
 
+        public Task<string?> WaitForFirstErrorLineAsync(TimeSpan wait, CancellationToken cancellationToken = default) =>
+            Task.FromResult<string?>(null);
+
         public void SendLine(string line)
         {
         }
 
         public string ReadLine() => _replies.Dequeue();
+
+        public Task<string> ReadLineAsync(CancellationToken cancellationToken = default) =>
+            Task.FromResult(ReadLine());
 
         public void Dispose()
         {

@@ -23,6 +23,12 @@ public interface IMcpStdioSession : IDisposable
     /// <returns>The first error line, or null.</returns>
     string? WaitForFirstErrorLine(TimeSpan wait);
 
+    /// <summary>Gets <see cref="FirstErrorLine"/> after waiting up to <paramref name="wait"/> for standard error to finish, without blocking a thread.</summary>
+    /// <param name="wait">The longest to wait.</param>
+    /// <param name="cancellationToken">Cancels the wait.</param>
+    /// <returns>The first error line, or null.</returns>
+    Task<string?> WaitForFirstErrorLineAsync(TimeSpan wait, CancellationToken cancellationToken = default);
+
     /// <summary>Writes one line to the child's standard input and flushes it.</summary>
     /// <param name="line">The line, without its terminator.</param>
     void SendLine(string line);
@@ -32,4 +38,11 @@ public interface IMcpStdioSession : IDisposable
     /// <exception cref="TimeoutException">The budget ran out before a line arrived.</exception>
     /// <exception cref="EndOfStreamException">The child closed its standard output.</exception>
     string ReadLine();
+
+    /// <summary>Reads the child's next standard output line without blocking a thread, waiting no longer than the session has left.</summary>
+    /// <param name="cancellationToken">Cancels the read.</param>
+    /// <returns>The line, without its terminator.</returns>
+    /// <exception cref="TimeoutException">The budget ran out before a line arrived.</exception>
+    /// <exception cref="EndOfStreamException">The child closed its standard output.</exception>
+    Task<string> ReadLineAsync(CancellationToken cancellationToken = default);
 }

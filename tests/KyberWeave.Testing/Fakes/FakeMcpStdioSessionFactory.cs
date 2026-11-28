@@ -75,6 +75,9 @@ internal sealed class FakeMcpStdioSessionFactory : IMcpStdioSessionFactory
 
         public string? WaitForFirstErrorLine(TimeSpan wait) => owner.ErrorLine;
 
+        public Task<string?> WaitForFirstErrorLineAsync(TimeSpan wait, CancellationToken cancellationToken = default) =>
+            Task.FromResult(owner.ErrorLine);
+
         public void SendLine(string line)
         {
             owner.Sent.Add(line);
@@ -90,6 +93,9 @@ internal sealed class FakeMcpStdioSessionFactory : IMcpStdioSessionFactory
             object next = owner._replies.Dequeue();
             return next is Exception failure ? throw failure : (string)next;
         }
+
+        public Task<string> ReadLineAsync(CancellationToken cancellationToken = default) =>
+            Task.FromResult(ReadLine());
 
         public void Dispose() => owner.Disposed = true;
     }

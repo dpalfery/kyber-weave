@@ -89,6 +89,38 @@ public sealed partial class McpServerLiveProbe(
         return checks;
     }
 
+    /// <summary>Runs the live proof without blocking a thread and returns the <c>mcp.*</c> checks that ran.</summary>
+    /// <param name="root">The resolved repository root that the server's provenance must name.</param>
+    /// <param name="options">The MCP executable and total session budget.</param>
+    /// <param name="cancellationToken">Cancels the exchange with the server.</param>
+    /// <returns>The <c>mcp.*</c> checks that ran.</returns>
+    public async Task<IReadOnlyList<DoctorCheck>> RunAsync(
+        string root,
+        DoctorOptions options,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(root);
+        ArgumentNullException.ThrowIfNull(options);
+
+        List<DoctorCheck> checks = [];
+        using IMcpStdioSession? session = TryStart(root, options);
+        if (session is null)
+        {
+            // The reason names the executable only. The start failure's text and the environment are never echoed.
+            checks.Add(new DoctorCheck(
+                "mcp.start",
+                false,
+                $"'{options.McpExecutable}' could not be started",
+                "kyber-weave update"));
+            return checks;
+        }
+
+        checks.Add(new DoctorCheck("mcp.start", true, "server process started", null));
+        await ExchangeAsync(session, root, options, checks, cancellationToken).ConfigureAwait(false);
+
+        return checks;
+    }
+
     /// <summary>Starts the session, or returns null when the executable cannot be started. Ownership passes to the caller.</summary>
     private IMcpStdioSession? TryStart(string root, DoctorOptions options)
     {
@@ -210,6 +242,82 @@ public sealed partial class McpServerLiveProbe(
         checks.Add(CheckRoot(text, root));
     }
 
+    private async Task ExchangeAsync(
+        IMcpStdioSession session,
+        string root,
+        DoctorOptions options,
+        List<DoctorCheck> checks,
+        CancellationToken cancellationToken)
+    {
+        string budget = Seconds(options.McpTimeout);
+
+        if (!TrySend(
+                session,
+                "{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"initialize\",\"params\":" +
+                $"{{\"protocolVersion\":\"{ProtocolVersion}\",\"capabilities\":{{}}," +
+                "\"clientInfo\":{\"name\":\"kyber-weave-doctor\",\"version\":\"1\"}}}"))
+        {
+            // A server that exited between starting and the first request is a failed handshake, not a crash.
+            checks.Add(await HandshakeAsync(false, "the server closed its input before the initialize request", session, options, root, cancellationToken).ConfigureAwait(false));
+            return;
+        }
+
+        ReadOutcome initialize = await TryReadAsync(session, cancellationToken).ConfigureAwait(false);
+        if (initialize.Line is not { } initializeReply)
+        {
+            checks.Add(await HandshakeAsync(false, initialize.Failure, session, options, root, cancellationToken).ConfigureAwait(false));
+            return;
+        }
+
+        if (!TryResult(initializeReply, out _))
+        {
+            checks.Add(await HandshakeAsync(false, "initialize did not return a result", session, options, root, cancellationToken).ConfigureAwait(false));
+            return;
+        }
+
+        checks.Add(await HandshakeAsync(true, $"initialize answered within {budget}s", session, options, root, cancellationToken).ConfigureAwait(false));
+
+        if (!TrySend(session, "{\"jsonrpc\":\"2.0\",\"method\":\"notifications/initialized\"}")
+            || !TrySend(
+                session,
+                "{\"jsonrpc\":\"2.0\",\"id\":2,\"method\":\"tools/call\",\"params\":" +
+                "{\"name\":\"docs_answer_question_from_repo_documentation\",\"arguments\":{\"query\":\"README\"}}}"))
+        {
+            checks.Add(new DoctorCheck(
+                "mcp.docs_explore",
+                false,
+                "the server closed its input before docs_answer_question_from_repo_documentation was requested",
+                "stop the kyber-weave-mcp server and re-run: kyber-weave doctor --check"));
+            return;
+        }
+
+        ReadOutcome call = await TryReadAsync(session, cancellationToken).ConfigureAwait(false);
+        if (call.Line is not { } callReply)
+        {
+            checks.Add(new DoctorCheck("mcp.docs_explore", false, call.Failure, TimeoutFix(options)));
+            return;
+        }
+
+        if (!TryResult(callReply, out JsonElement result) || !TryText(result, out string text))
+        {
+            checks.Add(new DoctorCheck("mcp.docs_explore", false, "docs_answer_question_from_repo_documentation reply was not a tool result", "kyber-weave update"));
+            return;
+        }
+
+        if (result.TryGetProperty("isError", out JsonElement isError) && isError.ValueKind == JsonValueKind.True)
+        {
+            checks.Add(new DoctorCheck(
+                "mcp.docs_explore",
+                false,
+                $"docs_answer_question_from_repo_documentation returned an error: {Truncate(FirstLine(text))}",
+                "kyber-weave update"));
+            return;
+        }
+
+        checks.Add(new DoctorCheck("mcp.docs_explore", true, "docs_answer_question_from_repo_documentation answered", null));
+        checks.Add(CheckRoot(text, root));
+    }
+
     private DoctorCheck CheckRoot(string text, string root)
     {
         int index = text.IndexOf(ProvenancePrefix, StringComparison.Ordinal);
@@ -268,6 +376,39 @@ public sealed partial class McpServerLiveProbe(
         return new DoctorCheck("mcp.handshake", false, reason + detail, fix);
     }
 
+    private static async Task<DoctorCheck> HandshakeAsync(
+        bool passed,
+        string reason,
+        IMcpStdioSession session,
+        DoctorOptions options,
+        string root,
+        CancellationToken cancellationToken)
+    {
+        if (passed)
+            return new DoctorCheck("mcp.handshake", true, reason, null);
+
+        bool timedOut = string.Equals(reason, NoAnswerWithinBudget, StringComparison.Ordinal);
+        string? serverError = timedOut
+            ? session.FirstErrorLine
+            : await session.WaitForFirstErrorLineAsync(ServerErrorWait, cancellationToken).ConfigureAwait(false);
+
+        if (serverError?.StartsWith(NoHostConfigurationCode, StringComparison.Ordinal) == true)
+        {
+            return new DoctorCheck(
+                "mcp.handshake",
+                false,
+                "the docs server refused to start because this folder has no .kyber-weave/kyber-weave.yml. " +
+                "A new worktree only has that file if its base branch has it committed",
+                $"kyber-weave docs init {ShellQuote.Quote(root)}");
+        }
+
+        string detail = serverError is { } line ? $" ({Truncate(line)})" : string.Empty;
+        string fix = timedOut
+            ? TimeoutFix(options)
+            : $"read the server's own error: {ShellQuote.Quote(options.McpExecutable)} --repo-root {ShellQuote.Quote(root)}";
+        return new DoctorCheck("mcp.handshake", false, reason + detail, fix);
+    }
+
     /// <summary>
     ///     Reads one reply line, turning a timeout, a closed stream, or a line past the session's cap into a reason
     ///     rather than an exception.
@@ -305,6 +446,39 @@ public sealed partial class McpServerLiveProbe(
             return false;
         }
     }
+
+    /// <summary>
+    ///     Reads one reply line without blocking a thread, turning a timeout, a closed stream, or a line past the
+    ///     session's cap into a reason rather than an exception.
+    /// </summary>
+    private static async Task<ReadOutcome> TryReadAsync(
+        IMcpStdioSession session,
+        CancellationToken cancellationToken)
+    {
+        try
+        {
+            string line = await session.ReadLineAsync(cancellationToken).ConfigureAwait(false);
+            return new ReadOutcome(line, string.Empty);
+        }
+        catch (TimeoutException)
+        {
+            return new ReadOutcome(null, NoAnswerWithinBudget);
+        }
+        catch (EndOfStreamException)
+        {
+            return new ReadOutcome(null, "the server closed its output before answering");
+        }
+        catch (InvalidDataException)
+        {
+            // The session's line cap is how a child that never ends a line gets stopped. The reply is the child's
+            // data, so an over-long one is a failed check, not an exception that skips the renderer. The session is
+            // unusable afterwards, and the caller's `using` disposes it.
+            return new ReadOutcome(null, "the server wrote past the session's line cap without ending the reply");
+        }
+    }
+
+    /// <summary>One reply line, or the reason the read failed.</summary>
+    private readonly record struct ReadOutcome(string? Line, string Failure);
 
     /// <summary>Parses a JSON-RPC reply and returns its <c>result</c> member.</summary>
     private static bool TryResult(string line, out JsonElement result)
