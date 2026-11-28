@@ -118,6 +118,14 @@ public sealed class ReviewIndexTimeoutTests
             Executor = indexExecutor;
             return new ReviewCommandResult(0);
         }
+
+        public Task<ReviewCommandResult> PrepareAsync(
+            ReviewSeatsRequest request,
+            Func<string, KyberWeaveConfig, IReviewDecisionModel> decisionModel,
+            IProcessRunner indexExecutor,
+            TextWriter output,
+            CancellationToken cancellationToken = default) =>
+            Task.FromResult(new ReviewCommandResult(0));
     }
 
     private sealed class NoDecisionModels : IReviewDecisionModelFactory

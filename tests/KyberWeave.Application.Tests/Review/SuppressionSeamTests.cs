@@ -79,6 +79,22 @@ public sealed class SuppressionSeamTests
     }
 
     [Fact]
+    public async Task TheCommandAsyncHandsTheScannerTheDirectoryARelativeSpellingResolvesTo()
+    {
+        _files.CreateDirectory("/work/repo");
+        RecordingScanner scanner = new();
+        ReviewSuppressionsService service = new(
+            scanner, _files, new FakePathResolver(_files), _environment);
+
+        ReviewCommandResult result = await service.RunAsync(
+            new ReviewSuppressionsRequest("repo", "origin/main"), CancellationToken.None);
+
+        Assert.Equal(0, result.ExitCode);
+        Assert.Equal("/work/repo", scanner.ScannedDirectory);
+        Assert.Equal("origin/main", scanner.BaseRef);
+    }
+
+    [Fact]
     public async Task TheScanAsyncRunsGitWithoutBlockingAndReportsCleanChange()
     {
         _files.CreateDirectory("/work/repo");
