@@ -89,35 +89,35 @@ public sealed class RunIntegrateServiceTests : IDisposable
     }
 
     [Fact]
-    public void ATaskWorktreeThatDoesNotExistIsRefused()
+    public async Task ATaskWorktreeThatDoesNotExistIsRefused()
     {
-        RunIntegrateOutcome outcome = Integrate(Request(task: "/work/absent"));
+        RunIntegrateOutcome outcome = await Integrate(Request(task: "/work/absent"));
 
         Assert.Equal(RunIntegrateStatus.RefusedInput, outcome.Status);
         Assert.Contains("/work/absent", outcome.Message, StringComparison.Ordinal);
     }
 
     [Fact]
-    public void TheTaskWorktreeDefaultsToTheWorkingDirectory()
+    public async Task TheTaskWorktreeDefaultsToTheWorkingDirectory()
     {
-        RunIntegrateOutcome outcome = Service().Integrate(new RunIntegrateRequest("T3", null, Run, Task, Home));
+        RunIntegrateOutcome outcome = await Service().IntegrateAsync(new RunIntegrateRequest("T3", null, Run, Task, Home));
 
         Assert.True(outcome.Status == RunIntegrateStatus.Integrated, outcome.Message);
         Assert.True(_git.Called("-C", Task, "rev-parse", "--show-toplevel"));
     }
 
     [Fact]
-    public void TheCanonicalChecksRunBeforeAnyOtherCallInTheTaskWorktree()
+    public async Task TheCanonicalChecksRunBeforeAnyOtherCallInTheTaskWorktree()
     {
-        _ = Integrate(Request());
+        _ = await Integrate(Request());
 
         Assert.Equal("-C " + Task + " rev-parse --absolute-git-dir", FirstCallIn(Task));
     }
 
     [Fact]
-    public void TheRepositorysCanonicalCheckoutIsRefusedAsTheTaskWorktree()
+    public async Task TheRepositorysCanonicalCheckoutIsRefusedAsTheTaskWorktree()
     {
-        RunIntegrateOutcome outcome = Integrate(Request(task: Canonical));
+        RunIntegrateOutcome outcome = await Integrate(Request(task: Canonical));
 
         Assert.Equal(RunIntegrateStatus.RefusedInput, outcome.Status);
         Assert.Contains("canonical checkout", outcome.Message, StringComparison.Ordinal);
@@ -126,32 +126,32 @@ public sealed class RunIntegrateServiceTests : IDisposable
     }
 
     [Fact]
-    public void WithNoLiveRunRecordTheStepRefusesAndNamesTheFlagThatSuppliesOne()
+    public async Task WithNoLiveRunRecordTheStepRefusesAndNamesTheFlagThatSuppliesOne()
     {
         _checkouts.Runs = [];
 
-        RunIntegrateOutcome outcome = Integrate(Request(run: null));
+        RunIntegrateOutcome outcome = await Integrate(Request(run: null));
 
         Assert.Equal(RunIntegrateStatus.RefusedInput, outcome.Status);
         Assert.Contains("--run-worktree", outcome.Message, StringComparison.Ordinal);
     }
 
     [Fact]
-    public void TheLiveRunRecordSuppliesTheRunWorktreeWhenNoneIsNamed()
+    public async Task TheLiveRunRecordSuppliesTheRunWorktreeWhenNoneIsNamed()
     {
         _checkouts.Runs =
         [
             new RunRecord(CanonicalGitDirectory, RunBranch, Run, DateTimeOffset.UnixEpoch)
         ];
 
-        RunIntegrateOutcome outcome = Integrate(Request(run: null));
+        RunIntegrateOutcome outcome = await Integrate(Request(run: null));
 
         Assert.True(outcome.Status == RunIntegrateStatus.Integrated, outcome.Message);
         Assert.True(_git.Called("-C", Run, "merge", "--ff-only", "--end-of-options", TaskBranch));
     }
 
     [Fact]
-    public void TheLiveRunWhoseBranchIsAnAncestorOfTheTaskBranchIsChosenWhenSeveralAreLive()
+    public async Task TheLiveRunWhoseBranchIsAnAncestorOfTheTaskBranchIsChosenWhenSeveralAreLive()
     {
         _ancestorRunBranches = new HashSet<string>(StringComparer.Ordinal) { RunBranch };
         _checkouts.Runs =
@@ -160,7 +160,7 @@ public sealed class RunIntegrateServiceTests : IDisposable
             new RunRecord(CanonicalGitDirectory, RunBranch, Run, DateTimeOffset.UnixEpoch.AddHours(1))
         ];
 
-        RunIntegrateOutcome outcome = Integrate(Request(run: null));
+        RunIntegrateOutcome outcome = await Integrate(Request(run: null));
 
         Assert.True(outcome.Status == RunIntegrateStatus.Integrated, outcome.Message);
         Assert.True(_git.Called("-C", Run, "merge", "--ff-only", "--end-of-options", TaskBranch));
@@ -168,7 +168,7 @@ public sealed class RunIntegrateServiceTests : IDisposable
     }
 
     [Fact]
-    public void SeveralLiveRunsWithNoAncestorRunBranchAreRefusedAndNamed()
+    public async Task SeveralLiveRunsWithNoAncestorRunBranchAreRefusedAndNamed()
     {
         _ancestorRunBranches = [];
         _checkouts.Runs =
@@ -177,7 +177,7 @@ public sealed class RunIntegrateServiceTests : IDisposable
             new RunRecord(CanonicalGitDirectory, RunBranch, Run, DateTimeOffset.UnixEpoch.AddHours(1))
         ];
 
-        RunIntegrateOutcome outcome = Integrate(Request(run: null));
+        RunIntegrateOutcome outcome = await Integrate(Request(run: null));
 
         Assert.Equal(RunIntegrateStatus.RefusedInput, outcome.Status);
         Assert.Contains("run/older", outcome.Message, StringComparison.Ordinal);
@@ -187,7 +187,7 @@ public sealed class RunIntegrateServiceTests : IDisposable
     }
 
     [Fact]
-    public void SeveralLiveRunsWhoseBranchesAreAllAncestorsAreRefusedAsAmbiguous()
+    public async Task SeveralLiveRunsWhoseBranchesAreAllAncestorsAreRefusedAsAmbiguous()
     {
         _ancestorRunBranches = new HashSet<string>(StringComparer.Ordinal) { RunBranch, "run/older" };
         _checkouts.Runs =
@@ -196,16 +196,16 @@ public sealed class RunIntegrateServiceTests : IDisposable
             new RunRecord(CanonicalGitDirectory, RunBranch, Run, DateTimeOffset.UnixEpoch.AddHours(1))
         ];
 
-        RunIntegrateOutcome outcome = Integrate(Request(run: null));
+        RunIntegrateOutcome outcome = await Integrate(Request(run: null));
 
         Assert.Equal(RunIntegrateStatus.RefusedInput, outcome.Status);
         Assert.Contains("--run-worktree", outcome.Message, StringComparison.Ordinal);
     }
 
     [Fact]
-    public void TheRepositorysCanonicalCheckoutIsRefusedAsTheRunWorktree()
+    public async Task TheRepositorysCanonicalCheckoutIsRefusedAsTheRunWorktree()
     {
-        RunIntegrateOutcome outcome = Integrate(Request(run: Canonical));
+        RunIntegrateOutcome outcome = await Integrate(Request(run: Canonical));
 
         Assert.Equal(RunIntegrateStatus.RefusedInput, outcome.Status);
         Assert.Contains("canonical checkout", outcome.Message, StringComparison.Ordinal);
@@ -213,17 +213,17 @@ public sealed class RunIntegrateServiceTests : IDisposable
     }
 
     [Fact]
-    public void TheCanonicalChecksRunBeforeAnyOtherCallInTheRunWorktree()
+    public async Task TheCanonicalChecksRunBeforeAnyOtherCallInTheRunWorktree()
     {
-        _ = Integrate(Request());
+        _ = await Integrate(Request());
 
         Assert.Equal("-C " + Run + " rev-parse --absolute-git-dir", FirstCallIn(Run));
     }
 
     [Fact]
-    public void ATaskWorktreeThatIsTheRunWorktreeReportsTheRunHeadAndChangesNothing()
+    public async Task ATaskWorktreeThatIsTheRunWorktreeReportsTheRunHeadAndChangesNothing()
     {
-        RunIntegrateOutcome outcome = Integrate(Request(task: Run));
+        RunIntegrateOutcome outcome = await Integrate(Request(task: Run));
 
         Assert.True(outcome.Status == RunIntegrateStatus.Integrated, outcome.Message);
         Assert.Equal(BeforeHead, outcome.RunHead);
@@ -232,11 +232,11 @@ public sealed class RunIntegrateServiceTests : IDisposable
     }
 
     [Fact]
-    public void UncommittedTrackedChangesInTheTaskWorktreeAreRefusedWithTheirPaths()
+    public async Task UncommittedTrackedChangesInTheTaskWorktreeAreRefusedWithTheirPaths()
     {
         _dirtyStatus = " M src/Changed.cs\nA  src/New.cs\n";
 
-        RunIntegrateOutcome outcome = Integrate(Request());
+        RunIntegrateOutcome outcome = await Integrate(Request());
 
         Assert.Equal(RunIntegrateStatus.RefusedInput, outcome.Status);
         Assert.Contains("src/Changed.cs", outcome.Message, StringComparison.Ordinal);
@@ -245,12 +245,12 @@ public sealed class RunIntegrateServiceTests : IDisposable
     }
 
     [Fact]
-    public void UncommittedTrackedChangesInTheRunWorktreeAreRefusedBeforeAFastForward()
+    public async Task UncommittedTrackedChangesInTheRunWorktreeAreRefusedBeforeAFastForward()
     {
         _runDirtyStatus = " M src/Run.cs\n";
         _taskChangedPaths = "src/Run.cs";
 
-        RunIntegrateOutcome outcome = Integrate(Request());
+        RunIntegrateOutcome outcome = await Integrate(Request());
 
         Assert.Equal(RunIntegrateStatus.RefusedInput, outcome.Status);
         Assert.Contains("src/Run.cs", outcome.Message, StringComparison.Ordinal);
@@ -259,13 +259,13 @@ public sealed class RunIntegrateServiceTests : IDisposable
     }
 
     [Fact]
-    public void UncommittedTrackedChangesInTheRunWorktreeAreRefusedBeforeACherryPick()
+    public async Task UncommittedTrackedChangesInTheRunWorktreeAreRefusedBeforeACherryPick()
     {
         _runIsAncestor = false;
         _runDirtyStatus = " M src/Run.cs\n";
         _taskChangedPaths = "src/Run.cs";
 
-        RunIntegrateOutcome outcome = Integrate(Request());
+        RunIntegrateOutcome outcome = await Integrate(Request());
 
         Assert.Equal(RunIntegrateStatus.RefusedInput, outcome.Status);
         Assert.Contains("src/Run.cs", outcome.Message, StringComparison.Ordinal);
@@ -274,14 +274,14 @@ public sealed class RunIntegrateServiceTests : IDisposable
     }
 
     [Fact]
-    public void AnUnrelatedUncommittedFileInTheRunWorktreeIsLeftInPlaceAndReported()
+    public async Task AnUnrelatedUncommittedFileInTheRunWorktreeIsLeftInPlaceAndReported()
     {
         _files.CreateDirectory(Run + "/docs/plans");
         _files.WriteAllText(Run + "/docs/plans/hill-climb-run-04.md", "the architect's revision\n");
         _runDirtyStatus = " M docs/plans/hill-climb-run-04.md\n";
         _taskChangedPaths = "src/Task.cs";
 
-        RunIntegrateOutcome outcome = Integrate(Request());
+        RunIntegrateOutcome outcome = await Integrate(Request());
 
         Assert.True(outcome.Status == RunIntegrateStatus.Integrated, outcome.Message);
         Assert.Equal(AfterHead, outcome.RunHead);
@@ -294,11 +294,11 @@ public sealed class RunIntegrateServiceTests : IDisposable
     }
 
     [Fact]
-    public void ATaskWorktreeOnTheRunBranchIsRefusedRatherThanRemoved()
+    public async Task ATaskWorktreeOnTheRunBranchIsRefusedRatherThanRemoved()
     {
         _taskBranch = RunBranch;
 
-        RunIntegrateOutcome outcome = Integrate(Request());
+        RunIntegrateOutcome outcome = await Integrate(Request());
 
         Assert.Equal(RunIntegrateStatus.RefusedInput, outcome.Status);
         Assert.Contains(RunBranch, outcome.Message!, StringComparison.Ordinal);
@@ -307,11 +307,11 @@ public sealed class RunIntegrateServiceTests : IDisposable
     }
 
     [Fact]
-    public void ATaskBranchThatGitWouldReadAsAnOptionFailsTheIntegration()
+    public async Task ATaskBranchThatGitWouldReadAsAnOptionFailsTheIntegration()
     {
         _taskBranch = "-evil";
 
-        RunIntegrateOutcome outcome = Integrate(Request());
+        RunIntegrateOutcome outcome = await Integrate(Request());
 
         Assert.Equal(RunIntegrateStatus.Failed, outcome.Status);
         Assert.Contains("-evil", outcome.Message, StringComparison.Ordinal);
@@ -322,11 +322,11 @@ public sealed class RunIntegrateServiceTests : IDisposable
     }
 
     [Fact]
-    public void ARunBranchThatGitWouldReadAsAnOptionFailsTheIntegration()
+    public async Task ARunBranchThatGitWouldReadAsAnOptionFailsTheIntegration()
     {
         _runBranch = "-evil";
 
-        RunIntegrateOutcome outcome = Integrate(Request());
+        RunIntegrateOutcome outcome = await Integrate(Request());
 
         Assert.Equal(RunIntegrateStatus.Failed, outcome.Status);
         Assert.Contains("-evil", outcome.Message, StringComparison.Ordinal);
@@ -335,12 +335,12 @@ public sealed class RunIntegrateServiceTests : IDisposable
     }
 
     [Fact]
-    public void AMergeBaseFailureIsReportedInsteadOfReadAsNotAnAncestor()
+    public async Task AMergeBaseFailureIsReportedInsteadOfReadAsNotAnAncestor()
     {
         _mergeBaseErrorCode = 128;
         _mergeBaseError = "fatal: Not a valid object name run/main";
 
-        RunIntegrateOutcome outcome = Integrate(Request());
+        RunIntegrateOutcome outcome = await Integrate(Request());
 
         Assert.Equal(RunIntegrateStatus.Failed, outcome.Status);
         Assert.Contains("Not a valid object name", outcome.Message, StringComparison.Ordinal);
@@ -349,7 +349,7 @@ public sealed class RunIntegrateServiceTests : IDisposable
     }
 
     [Fact]
-    public void AMergeBaseFailureWhileChoosingBetweenLiveRunsFailsTheIntegration()
+    public async Task AMergeBaseFailureWhileChoosingBetweenLiveRunsFailsTheIntegration()
     {
         _candidateCheckFails = true;
         _candidateCheckError = "fatal: Not a valid object name run/older";
@@ -359,18 +359,18 @@ public sealed class RunIntegrateServiceTests : IDisposable
             new RunRecord(CanonicalGitDirectory, RunBranch, Run, DateTimeOffset.UnixEpoch.AddHours(1))
         ];
 
-        RunIntegrateOutcome outcome = Integrate(Request(run: null));
+        RunIntegrateOutcome outcome = await Integrate(Request(run: null));
 
         Assert.Equal(RunIntegrateStatus.Failed, outcome.Status);
         Assert.Contains("Not a valid object name", outcome.Message, StringComparison.Ordinal);
     }
 
     [Fact]
-    public void WithNoCommitTheRunLacksTheStepReportsNothingToIntegrate()
+    public async Task WithNoCommitTheRunLacksTheStepReportsNothingToIntegrate()
     {
         _commitsAhead = 0;
 
-        RunIntegrateOutcome outcome = Integrate(Request());
+        RunIntegrateOutcome outcome = await Integrate(Request());
 
         Assert.Equal(RunIntegrateStatus.NothingToIntegrate, outcome.Status);
         Assert.Equal(BeforeHead, outcome.RunHead);
@@ -378,13 +378,13 @@ public sealed class RunIntegrateServiceTests : IDisposable
     }
 
     [Fact]
-    public void ARetryThatFindsNothingLeftToIntegrateStillCopiesEvidenceAndRemovesTheTaskWorktree()
+    public async Task ARetryThatFindsNothingLeftToIntegrateStillCopiesEvidenceAndRemovesTheTaskWorktree()
     {
         _commitsAhead = 0;
         _files.CreateDirectory(Task + "/.agent_scratchpad/T3");
         _files.WriteAllText(Task + "/.agent_scratchpad/T3/report.md", "gate passed");
 
-        RunIntegrateOutcome outcome = Integrate(Request());
+        RunIntegrateOutcome outcome = await Integrate(Request());
 
         Assert.Equal(RunIntegrateStatus.NothingToIntegrate, outcome.Status);
         Assert.True(_files.FileExists(Run + "/.agent_scratchpad/T3/report.md"));
@@ -393,9 +393,9 @@ public sealed class RunIntegrateServiceTests : IDisposable
     }
 
     [Fact]
-    public void TheRunBranchIsFastForwardedWhenItIsAnAncestorOfTheTaskBranch()
+    public async Task TheRunBranchIsFastForwardedWhenItIsAnAncestorOfTheTaskBranch()
     {
-        RunIntegrateOutcome outcome = Integrate(Request());
+        RunIntegrateOutcome outcome = await Integrate(Request());
 
         Assert.True(outcome.Status == RunIntegrateStatus.Integrated, outcome.Message);
         Assert.Equal(AfterHead, outcome.RunHead);
@@ -404,11 +404,11 @@ public sealed class RunIntegrateServiceTests : IDisposable
     }
 
     [Fact]
-    public void TheTaskCommitsAreCherryPickedDroppingCommitsTheRunAlreadyHas()
+    public async Task TheTaskCommitsAreCherryPickedDroppingCommitsTheRunAlreadyHas()
     {
         _runIsAncestor = false;
 
-        RunIntegrateOutcome outcome = Integrate(Request());
+        RunIntegrateOutcome outcome = await Integrate(Request());
 
         Assert.True(outcome.Status == RunIntegrateStatus.Integrated, outcome.Message);
         Assert.True(_git.Called("-C", Run, "cherry-pick", "--empty=drop", "--end-of-options", RunBranch + ".." + TaskBranch));
@@ -416,13 +416,13 @@ public sealed class RunIntegrateServiceTests : IDisposable
     }
 
     [Fact]
-    public void AConflictAbortsTheCherryPickAndLeavesTheTaskWorktreeAlone()
+    public async Task AConflictAbortsTheCherryPickAndLeavesTheTaskWorktreeAlone()
     {
         _runIsAncestor = false;
         _cherryPickSucceeds = false;
         _conflicted = ["src/Left.cs", "src/Right.cs"];
 
-        RunIntegrateOutcome outcome = Integrate(Request());
+        RunIntegrateOutcome outcome = await Integrate(Request());
 
         Assert.Equal(RunIntegrateStatus.Conflict, outcome.Status);
         Assert.Equal(["src/Left.cs", "src/Right.cs"], outcome.Files);
@@ -431,45 +431,45 @@ public sealed class RunIntegrateServiceTests : IDisposable
     }
 
     [Fact]
-    public void ACherryPickThatFailsWithoutAConflictIsAbortedAndTheNextAttemptCanRun()
+    public async Task ACherryPickThatFailsWithoutAConflictIsAbortedAndTheNextAttemptCanRun()
     {
         _runIsAncestor = false;
         _cherryPickSucceeds = false;
         _conflicted = [];
 
-        RunIntegrateOutcome outcome = Integrate(Request());
+        RunIntegrateOutcome outcome = await Integrate(Request());
 
         Assert.Equal(RunIntegrateStatus.Failed, outcome.Status);
         Assert.True(_git.Called("-C", Run, "cherry-pick", "--abort"));
         Assert.DoesNotContain(_git.Calls, call => call.Arguments.Contains("worktree", StringComparer.Ordinal));
 
         _cherryPickSucceeds = true;
-        RunIntegrateOutcome retried = Integrate(Request());
+        RunIntegrateOutcome retried = await Integrate(Request());
 
         Assert.True(retried.Status == RunIntegrateStatus.Integrated, retried.Message);
     }
 
     [Fact]
-    public void ACherryPickAbortThatFailsIsFinishedWithQuit()
+    public async Task ACherryPickAbortThatFailsIsFinishedWithQuit()
     {
         _runIsAncestor = false;
         _cherryPickSucceeds = false;
         _abortSucceeds = false;
 
-        RunIntegrateOutcome outcome = Integrate(Request());
+        RunIntegrateOutcome outcome = await Integrate(Request());
 
         Assert.Equal(RunIntegrateStatus.Failed, outcome.Status);
         Assert.True(_git.Called("-C", Run, "cherry-pick", "--quit"));
     }
 
     [Fact]
-    public void TheScratchpadIsCopiedBeforeTheTaskWorktreeIsRemoved()
+    public async Task TheScratchpadIsCopiedBeforeTheTaskWorktreeIsRemoved()
     {
         _files.CreateDirectory(Task + "/.agent_scratchpad/T3/logs");
         _files.WriteAllText(Task + "/.agent_scratchpad/T3/report.md", "gate passed");
         _files.WriteAllText(Task + "/.agent_scratchpad/T3/logs/tail.txt", "tail");
 
-        RunIntegrateOutcome outcome = Integrate(Request());
+        RunIntegrateOutcome outcome = await Integrate(Request());
 
         Assert.True(outcome.Status == RunIntegrateStatus.Integrated, outcome.Message);
         Assert.True(_files.FileExists(Run + "/.agent_scratchpad/T3/report.md"));
@@ -479,7 +479,7 @@ public sealed class RunIntegrateServiceTests : IDisposable
     }
 
     [Fact]
-    public void ACopyEvidenceFailureStillReportsTheIntegratedCommitsAndKeepsTheTaskWorktree()
+    public async Task ACopyEvidenceFailureStillReportsTheIntegratedCommitsAndKeepsTheTaskWorktree()
     {
         _files.CreateDirectory(Task + "/.agent_scratchpad/T3");
         _files.WriteAllText(Task + "/.agent_scratchpad/T3/report.md", "gate passed");
@@ -487,7 +487,7 @@ public sealed class RunIntegrateServiceTests : IDisposable
             operation.Name == nameof(IWritableFileSystem.WriteAllBytes) &&
             operation.Path == Run + "/.agent_scratchpad/T3/report.md");
 
-        RunIntegrateOutcome outcome = Integrate(Request());
+        RunIntegrateOutcome outcome = await Integrate(Request());
 
         Assert.Equal(RunIntegrateStatus.IntegratedWithoutEvidence, outcome.Status);
         Assert.Equal(AfterHead, outcome.RunHead);
@@ -497,9 +497,9 @@ public sealed class RunIntegrateServiceTests : IDisposable
     }
 
     [Fact]
-    public void TheTaskWorktreeIsRemovedBeforeItsBranchIsDeleted()
+    public async Task TheTaskWorktreeIsRemovedBeforeItsBranchIsDeleted()
     {
-        RunIntegrateOutcome outcome = Integrate(Request());
+        RunIntegrateOutcome outcome = await Integrate(Request());
 
         Assert.True(outcome.Status == RunIntegrateStatus.Integrated, outcome.Message);
         Assert.True(_git.Called("-C", Run, "worktree", "remove", "--force", Task));
@@ -508,29 +508,29 @@ public sealed class RunIntegrateServiceTests : IDisposable
     }
 
     [Fact]
-    public void TheLockIsFreeAfterASuccessfulIntegration()
+    public async Task TheLockIsFreeAfterASuccessfulIntegration()
     {
-        RunIntegrateOutcome outcome = Integrate(Request());
+        RunIntegrateOutcome outcome = await Integrate(Request());
 
         Assert.True(outcome.Status == RunIntegrateStatus.Integrated, outcome.Message);
         Assert.True(LockIsFree());
     }
 
     [Fact]
-    public void TheLockIsFreeWhenTheIntegrationFails()
+    public async Task TheLockIsFreeWhenTheIntegrationFails()
     {
         _mergeSucceeds = false;
 
-        RunIntegrateOutcome outcome = Integrate(Request());
+        RunIntegrateOutcome outcome = await Integrate(Request());
 
         Assert.Equal(RunIntegrateStatus.Failed, outcome.Status);
         Assert.True(LockIsFree());
     }
 
     [Fact]
-    public void TheLockFileHoldsTheHolderTextForDiagnosticsAndIsNeverDeleted()
+    public async Task TheLockFileHoldsTheHolderTextForDiagnosticsAndIsNeverDeleted()
     {
-        RunIntegrateOutcome outcome = Integrate(Request());
+        RunIntegrateOutcome outcome = await Integrate(Request());
 
         Assert.True(outcome.Status == RunIntegrateStatus.Integrated, outcome.Message);
         Assert.True(_files.FileExists(LockPath), "the lock file is reused, so it is never deleted");
@@ -540,12 +540,12 @@ public sealed class RunIntegrateServiceTests : IDisposable
     }
 
     [Fact]
-    public void AWaitingIntegrationProceedsOnceTheHolderReleasesTheLock()
+    public async Task AWaitingIntegrationProceedsOnceTheHolderReleasesTheLock()
     {
         using Stream held = _files.OpenExclusive(LockPath);
 
-        RunIntegrateOutcome outcome = _time.RunAdvancingOnParks(
-            () => Service().Integrate(Request()),
+        RunIntegrateOutcome outcome = await _time.RunAdvancingOnParksAsync(
+            () => Service().IntegrateAsync(Request()),
             TimeSpan.FromMilliseconds(500),
             parkNumber: 1,
             atPark: held.Dispose);
@@ -555,12 +555,12 @@ public sealed class RunIntegrateServiceTests : IDisposable
     }
 
     [Fact]
-    public void ALockThatStaysHeldPastTheWaitFailsAfterTheRetriesAndNamesTheLockFile()
+    public async Task ALockThatStaysHeldPastTheWaitFailsAfterTheRetriesAndNamesTheLockFile()
     {
         using Stream held = _files.OpenExclusive(LockPath);
 
-        RunIntegrateOutcome outcome = _time.RunAdvancingOnParks(
-            () => Service().Integrate(Request()),
+        RunIntegrateOutcome outcome = await _time.RunAdvancingOnParksAsync(
+            () => Service().IntegrateAsync(Request()),
             TimeSpan.FromMilliseconds(500),
             parkNumber: int.MaxValue,
             atPark: null);
@@ -572,11 +572,11 @@ public sealed class RunIntegrateServiceTests : IDisposable
     }
 
     [Fact]
-    public void ARemovalThatFailsKeepsTheBranchAndReportsTheIntegrationItAlreadyMade()
+    public async Task ARemovalThatFailsKeepsTheBranchAndReportsTheIntegrationItAlreadyMade()
     {
         _removeSucceeds = false;
 
-        RunIntegrateOutcome outcome = Integrate(Request());
+        RunIntegrateOutcome outcome = await Integrate(Request());
 
         Assert.Equal(RunIntegrateStatus.Failed, outcome.Status);
         Assert.Contains(AfterHead, outcome.Message!, StringComparison.Ordinal);
@@ -584,11 +584,11 @@ public sealed class RunIntegrateServiceTests : IDisposable
     }
 
     [Fact]
-    public void ABranchDeleteThatThrowsStillReportsTheIntegrationItAlreadyMade()
+    public async Task ABranchDeleteThatThrowsStillReportsTheIntegrationItAlreadyMade()
     {
         _branchDeleteThrows = true;
 
-        RunIntegrateOutcome outcome = Integrate(Request());
+        RunIntegrateOutcome outcome = await Integrate(Request());
 
         Assert.Equal(RunIntegrateStatus.Failed, outcome.Status);
         Assert.Contains("the task is integrated at " + AfterHead, outcome.Message!, StringComparison.Ordinal);
@@ -600,11 +600,11 @@ public sealed class RunIntegrateServiceTests : IDisposable
     }
 
     [Fact]
-    public void AWorktreeRemovalThatThrowsStillReportsTheIntegrationItAlreadyMade()
+    public async Task AWorktreeRemovalThatThrowsStillReportsTheIntegrationItAlreadyMade()
     {
         _worktreeRemoveThrows = true;
 
-        RunIntegrateOutcome outcome = Integrate(Request());
+        RunIntegrateOutcome outcome = await Integrate(Request());
 
         Assert.Equal(RunIntegrateStatus.Failed, outcome.Status);
         Assert.Contains("the task is integrated at " + AfterHead, outcome.Message!, StringComparison.Ordinal);
@@ -614,11 +614,11 @@ public sealed class RunIntegrateServiceTests : IDisposable
     }
 
     [Fact]
-    public void AHeadReadThatThrowsAfterTheApplyStillReportsTheLandedCommits()
+    public async Task AHeadReadThatThrowsAfterTheApplyStillReportsTheLandedCommits()
     {
         _headReadThrows = true;
 
-        RunIntegrateOutcome outcome = Integrate(Request());
+        RunIntegrateOutcome outcome = await Integrate(Request());
 
         Assert.Equal(RunIntegrateStatus.Failed, outcome.Status);
         Assert.Contains("the task commits are on the run branch, but reading its head failed", outcome.Message!, StringComparison.Ordinal);
@@ -629,12 +629,12 @@ public sealed class RunIntegrateServiceTests : IDisposable
     }
 
     [Fact]
-    public void ARetryHeadReadThatThrowsStillReportsTheLandedCommits()
+    public async Task ARetryHeadReadThatThrowsStillReportsTheLandedCommits()
     {
         _commitsAhead = 0;
         _headReadThrows = true;
 
-        RunIntegrateOutcome outcome = Integrate(Request());
+        RunIntegrateOutcome outcome = await Integrate(Request());
 
         Assert.Equal(RunIntegrateStatus.Failed, outcome.Status);
         Assert.Contains("the task commits are on the run branch, but reading its head failed", outcome.Message!, StringComparison.Ordinal);
@@ -645,11 +645,11 @@ public sealed class RunIntegrateServiceTests : IDisposable
     }
 
     [Fact]
-    public void AThrowBeforeAnyCommitLandsStillReportsTheTaskAsNotIntegrated()
+    public async Task AThrowBeforeAnyCommitLandsStillReportsTheTaskAsNotIntegrated()
     {
         _mergeThrows = true;
 
-        RunIntegrateOutcome outcome = Integrate(Request());
+        RunIntegrateOutcome outcome = await Integrate(Request());
 
         Assert.Equal(RunIntegrateStatus.Failed, outcome.Status);
         Assert.Contains("the task could not be integrated", outcome.Message!, StringComparison.Ordinal);
@@ -659,13 +659,13 @@ public sealed class RunIntegrateServiceTests : IDisposable
     [Theory]
     [InlineData("win32")]
     [InlineData("invalid-operation")]
-    public void ALaunchFailureBeforeAnyCommitLandsStillReportsTheTaskAsNotIntegrated(string failureKind)
+    public async Task ALaunchFailureBeforeAnyCommitLandsStillReportsTheTaskAsNotIntegrated(string failureKind)
     {
         Exception failure = LaunchFailure(failureKind);
         _gitLaunchFailure = failure;
         _mergeThrows = true;
 
-        RunIntegrateOutcome outcome = Integrate(Request());
+        RunIntegrateOutcome outcome = await Integrate(Request());
 
         Assert.Equal(RunIntegrateStatus.Failed, outcome.Status);
         Assert.Contains("the task could not be integrated", outcome.Message!, StringComparison.Ordinal);
@@ -676,13 +676,13 @@ public sealed class RunIntegrateServiceTests : IDisposable
     [Theory]
     [InlineData("win32")]
     [InlineData("invalid-operation")]
-    public void ALaunchFailureAtThePostApplyHeadReadStillReportsTheLandedCommits(string failureKind)
+    public async Task ALaunchFailureAtThePostApplyHeadReadStillReportsTheLandedCommits(string failureKind)
     {
         Exception failure = LaunchFailure(failureKind);
         _gitLaunchFailure = failure;
         _headReadThrows = true;
 
-        RunIntegrateOutcome outcome = Integrate(Request());
+        RunIntegrateOutcome outcome = await Integrate(Request());
 
         Assert.Equal(RunIntegrateStatus.Failed, outcome.Status);
         Assert.Contains(
@@ -696,13 +696,13 @@ public sealed class RunIntegrateServiceTests : IDisposable
     [Theory]
     [InlineData("win32")]
     [InlineData("invalid-operation")]
-    public void ALaunchFailureRemovingTheWorktreeStillReportsTheIntegrationItAlreadyMade(string failureKind)
+    public async Task ALaunchFailureRemovingTheWorktreeStillReportsTheIntegrationItAlreadyMade(string failureKind)
     {
         Exception failure = LaunchFailure(failureKind);
         _gitLaunchFailure = failure;
         _worktreeRemoveThrows = true;
 
-        RunIntegrateOutcome outcome = Integrate(Request());
+        RunIntegrateOutcome outcome = await Integrate(Request());
 
         Assert.Equal(RunIntegrateStatus.Failed, outcome.Status);
         Assert.Contains("the task is integrated at " + AfterHead, outcome.Message!, StringComparison.Ordinal);
@@ -714,13 +714,13 @@ public sealed class RunIntegrateServiceTests : IDisposable
     [Theory]
     [InlineData("win32")]
     [InlineData("invalid-operation")]
-    public void ALaunchFailureDeletingTheTaskBranchStillReportsTheIntegrationItAlreadyMade(string failureKind)
+    public async Task ALaunchFailureDeletingTheTaskBranchStillReportsTheIntegrationItAlreadyMade(string failureKind)
     {
         Exception failure = LaunchFailure(failureKind);
         _gitLaunchFailure = failure;
         _branchDeleteThrows = true;
 
-        RunIntegrateOutcome outcome = Integrate(Request());
+        RunIntegrateOutcome outcome = await Integrate(Request());
 
         Assert.Equal(RunIntegrateStatus.Failed, outcome.Status);
         Assert.Contains("the task is integrated at " + AfterHead, outcome.Message!, StringComparison.Ordinal);
@@ -733,13 +733,13 @@ public sealed class RunIntegrateServiceTests : IDisposable
     [InlineData("timeout")]
     [InlineData("canceled")]
     [InlineData("output-limit")]
-    public void AProcessFailureBeforeAnyCommitLandsStillReportsTheTaskAsNotIntegrated(string failureKind)
+    public async Task AProcessFailureBeforeAnyCommitLandsStillReportsTheTaskAsNotIntegrated(string failureKind)
     {
         Exception failure = LaunchFailure(failureKind);
         _gitLaunchFailure = failure;
         _mergeThrows = true;
 
-        RunIntegrateOutcome outcome = Integrate(Request());
+        RunIntegrateOutcome outcome = await Integrate(Request());
 
         Assert.Equal(RunIntegrateStatus.Failed, outcome.Status);
         if (failure is not TimeoutException)
@@ -755,13 +755,13 @@ public sealed class RunIntegrateServiceTests : IDisposable
     [InlineData("timeout")]
     [InlineData("canceled")]
     [InlineData("output-limit")]
-    public void AProcessFailureAtThePostApplyHeadReadStillReportsTheLandedCommits(string failureKind)
+    public async Task AProcessFailureAtThePostApplyHeadReadStillReportsTheLandedCommits(string failureKind)
     {
         Exception failure = LaunchFailure(failureKind);
         _gitLaunchFailure = failure;
         _headReadThrows = true;
 
-        RunIntegrateOutcome outcome = Integrate(Request());
+        RunIntegrateOutcome outcome = await Integrate(Request());
 
         Assert.Equal(RunIntegrateStatus.Failed, outcome.Status);
         Assert.Contains(
@@ -776,13 +776,13 @@ public sealed class RunIntegrateServiceTests : IDisposable
     [InlineData("timeout")]
     [InlineData("canceled")]
     [InlineData("output-limit")]
-    public void AProcessFailureRemovingTheWorktreeStillReportsTheIntegrationItAlreadyMade(string failureKind)
+    public async Task AProcessFailureRemovingTheWorktreeStillReportsTheIntegrationItAlreadyMade(string failureKind)
     {
         Exception failure = LaunchFailure(failureKind);
         _gitLaunchFailure = failure;
         _worktreeRemoveThrows = true;
 
-        RunIntegrateOutcome outcome = Integrate(Request());
+        RunIntegrateOutcome outcome = await Integrate(Request());
 
         Assert.Equal(RunIntegrateStatus.Failed, outcome.Status);
         Assert.Contains("the task is integrated at " + AfterHead, outcome.Message!, StringComparison.Ordinal);
@@ -795,13 +795,13 @@ public sealed class RunIntegrateServiceTests : IDisposable
     [InlineData("timeout")]
     [InlineData("canceled")]
     [InlineData("output-limit")]
-    public void AProcessFailureDeletingTheTaskBranchStillReportsTheIntegrationItAlreadyMade(string failureKind)
+    public async Task AProcessFailureDeletingTheTaskBranchStillReportsTheIntegrationItAlreadyMade(string failureKind)
     {
         Exception failure = LaunchFailure(failureKind);
         _gitLaunchFailure = failure;
         _branchDeleteThrows = true;
 
-        RunIntegrateOutcome outcome = Integrate(Request());
+        RunIntegrateOutcome outcome = await Integrate(Request());
 
         Assert.Equal(RunIntegrateStatus.Failed, outcome.Status);
         Assert.Contains("the task is integrated at " + AfterHead, outcome.Message!, StringComparison.Ordinal);
@@ -814,14 +814,14 @@ public sealed class RunIntegrateServiceTests : IDisposable
     [InlineData("timeout")]
     [InlineData("canceled")]
     [InlineData("output-limit")]
-    public void ARetryHeadReadProcessFailureStillReportsTheLandedCommits(string failureKind)
+    public async Task ARetryHeadReadProcessFailureStillReportsTheLandedCommits(string failureKind)
     {
         Exception failure = LaunchFailure(failureKind);
         _commitsAhead = 0;
         _gitLaunchFailure = failure;
         _headReadThrows = true;
 
-        RunIntegrateOutcome outcome = Integrate(Request());
+        RunIntegrateOutcome outcome = await Integrate(Request());
 
         Assert.Equal(RunIntegrateStatus.Failed, outcome.Status);
         Assert.Contains(
@@ -851,9 +851,9 @@ public sealed class RunIntegrateServiceTests : IDisposable
         Assert.True(RunIntegrateService.IsGitProcessFailure(launch));
     }
 
-    private RunIntegrateOutcome Integrate(RunIntegrateRequest request)
+    private async Task<RunIntegrateOutcome> Integrate(RunIntegrateRequest request)
     {
-        return Service().Integrate(request);
+        return await Service().IntegrateAsync(request);
     }
 
     private RunIntegrateService Service() =>

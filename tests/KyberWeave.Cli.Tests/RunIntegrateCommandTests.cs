@@ -21,11 +21,11 @@ public sealed class RunIntegrateCommandTests : IDisposable
     public void Dispose() => _console.Dispose();
 
     [Fact]
-    public void TheRequestCarriesTheTaskTheCurrentDirectoryAndTheOperatorsHome()
+    public async Task TheRequestCarriesTheTaskTheCurrentDirectoryAndTheOperatorsHome()
     {
         _integrate.Outcome = new RunIntegrateOutcome(RunIntegrateStatus.Integrated, "abc1234");
 
-        int exit = Run(new RunIntegrateSettings { Task = "T3" });
+        int exit = await Run(new RunIntegrateSettings { Task = "T3" });
 
         RunIntegrateRequest request = Assert.Single(_integrate.Requests);
         Assert.Equal("T3", request.TaskId);
@@ -37,11 +37,11 @@ public sealed class RunIntegrateCommandTests : IDisposable
     }
 
     [Fact]
-    public void TheNamedWorktreesArePassedThrough()
+    public async Task TheNamedWorktreesArePassedThrough()
     {
         _integrate.Outcome = new RunIntegrateOutcome(RunIntegrateStatus.Integrated, "abc1234");
 
-        _ = Run(new RunIntegrateSettings { Task = "T3", Path = "../task", RunWorktree = "../run" });
+        _ = await Run(new RunIntegrateSettings { Task = "T3", Path = "../task", RunWorktree = "../run" });
 
         RunIntegrateRequest request = Assert.Single(_integrate.Requests);
         Assert.Equal("../task", request.TaskWorktree);
@@ -49,49 +49,49 @@ public sealed class RunIntegrateCommandTests : IDisposable
     }
 
     [Fact]
-    public void ASuccessfulIntegrationEndsWithTheRunHead()
+    public async Task ASuccessfulIntegrationEndsWithTheRunHead()
     {
         _integrate.Outcome = new RunIntegrateOutcome(RunIntegrateStatus.Integrated, "abc1234");
 
-        int exit = Run(new RunIntegrateSettings { Task = "T3" });
+        int exit = await Run(new RunIntegrateSettings { Task = "T3" });
 
         Assert.Equal(0, exit);
         Assert.Equal("INTEGRATED: abc1234\n", Output());
     }
 
     [Fact]
-    public void NothingToIntegrateStillPrintsTheIntegratedLine()
+    public async Task NothingToIntegrateStillPrintsTheIntegratedLine()
     {
         _integrate.Outcome = new RunIntegrateOutcome(RunIntegrateStatus.NothingToIntegrate, "abc1234");
 
-        int exit = Run(new RunIntegrateSettings { Task = "T3" });
+        int exit = await Run(new RunIntegrateSettings { Task = "T3" });
 
         Assert.Equal(0, exit);
         Assert.Equal("INTEGRATED: abc1234 (nothing to integrate)\n", Output());
     }
 
     [Fact]
-    public void AConflictPrintsTheFilesAndExitsThree()
+    public async Task AConflictPrintsTheFilesAndExitsThree()
     {
         _integrate.Outcome = new RunIntegrateOutcome(
             RunIntegrateStatus.Conflict,
             Message: "stopped at a conflict",
             Files: ["src/Left.cs", "src/Right.cs"]);
 
-        int exit = Run(new RunIntegrateSettings { Task = "T3" });
+        int exit = await Run(new RunIntegrateSettings { Task = "T3" });
 
         Assert.Equal(3, exit);
         Assert.Equal("CONFLICT: src/Left.cs, src/Right.cs\n", Output());
     }
 
     [Fact]
-    public void ARefusalExitsTwoWithOneErrorLine()
+    public async Task ARefusalExitsTwoWithOneErrorLine()
     {
         _integrate.Outcome = new RunIntegrateOutcome(
             RunIntegrateStatus.RefusedInput,
             Message: "the run worktree is the repository's canonical checkout");
 
-        int exit = Run(new RunIntegrateSettings { Task = "T3" });
+        int exit = await Run(new RunIntegrateSettings { Task = "T3" });
 
         Assert.Equal(2, exit);
         Assert.Equal(
@@ -100,14 +100,14 @@ public sealed class RunIntegrateCommandTests : IDisposable
     }
 
     [Fact]
-    public void AnIntegratedTaskWhoseEvidenceCouldNotBeCopiedPrintsTheShaThenTheErrorAndExitsFour()
+    public async Task AnIntegratedTaskWhoseEvidenceCouldNotBeCopiedPrintsTheShaThenTheErrorAndExitsFour()
     {
         _integrate.Outcome = new RunIntegrateOutcome(
             RunIntegrateStatus.IntegratedWithoutEvidence,
             "abc1234",
             Message: "the task's commits are integrated at abc1234, but copying its scratchpad failed: disk full");
 
-        int exit = Run(new RunIntegrateSettings { Task = "T3" });
+        int exit = await Run(new RunIntegrateSettings { Task = "T3" });
 
         Assert.Equal(4, exit);
         Assert.Equal(
@@ -117,27 +117,27 @@ public sealed class RunIntegrateCommandTests : IDisposable
     }
 
     [Fact]
-    public void ALockOrGitFailureExitsOneWithOneErrorLine()
+    public async Task ALockOrGitFailureExitsOneWithOneErrorLine()
     {
         _integrate.Outcome = new RunIntegrateOutcome(
             RunIntegrateStatus.Failed,
             Message: "the run worktree is locked by '/work/run/.git/kyber-weave-run-integrate.lock'");
 
-        int exit = Run(new RunIntegrateSettings { Task = "T3" });
+        int exit = await Run(new RunIntegrateSettings { Task = "T3" });
 
         Assert.Equal(1, exit);
         Assert.StartsWith("kyber-weave run integrate: error: ", Output(), StringComparison.Ordinal);
     }
 
     [Fact]
-    public void NotesArePrintedBeforeTheFinalLine()
+    public async Task NotesArePrintedBeforeTheFinalLine()
     {
         _integrate.Outcome = new RunIntegrateOutcome(
             RunIntegrateStatus.Integrated,
             "abc1234",
             Notes: ["the task's scratchpad was empty."]);
 
-        int exit = Run(new RunIntegrateSettings { Task = "T3" });
+        int exit = await Run(new RunIntegrateSettings { Task = "T3" });
 
         Assert.Equal(0, exit);
         Assert.Equal(
@@ -148,10 +148,10 @@ public sealed class RunIntegrateCommandTests : IDisposable
 
     private string Output() => _console.Output.Replace("\r\n", "\n", StringComparison.Ordinal);
 
-    private int Run(RunIntegrateSettings settings)
+    private async Task<int> Run(RunIntegrateSettings settings)
     {
         RunIntegrateCommand command = new(_integrate, _environment, _console);
-        return command.Execute(null!, settings);
+        return await command.ExecuteAsync(null!, settings, CancellationToken.None);
     }
 
     private sealed class StubIntegrate : IRunIntegrateService
@@ -160,10 +160,12 @@ public sealed class RunIntegrateCommandTests : IDisposable
 
         public RunIntegrateOutcome Outcome { get; set; } = new(RunIntegrateStatus.Integrated, "abc1234");
 
-        public RunIntegrateOutcome Integrate(RunIntegrateRequest request)
+        public Task<RunIntegrateOutcome> IntegrateAsync(
+            RunIntegrateRequest request,
+            CancellationToken cancellationToken = default)
         {
             Requests.Add(request);
-            return Outcome;
+            return Task.FromResult(Outcome);
         }
     }
 }

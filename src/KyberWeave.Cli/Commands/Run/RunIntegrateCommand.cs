@@ -18,7 +18,7 @@ namespace KyberWeave.Cli.Commands.Run;
 /// <c>INTEGRATED: &lt;sha&gt;</c>, which the worker copies into its completion digest as <c>COMMIT</c>.
 /// </remarks>
 public sealed class RunIntegrateCommand(IRunIntegrateService integrate, IProcessEnvironment environment, IAnsiConsole console)
-    : Command<RunIntegrateSettings>
+    : AsyncCommand<RunIntegrateSettings>
 {
     /// <summary>The command description shared by the real registration and the help tests.</summary>
     public const string Description =
@@ -43,13 +43,17 @@ public sealed class RunIntegrateCommand(IRunIntegrateService integrate, IProcess
     private const int EvidenceFailed = 4;
 
     /// <inheritdoc />
-    public override int Execute(CommandContext context, RunIntegrateSettings settings, CancellationToken cancellationToken)
+    public override async Task<int> ExecuteAsync(
+        CommandContext context,
+        RunIntegrateSettings settings,
+        CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(settings);
 
-        RunIntegrateOutcome outcome = integrate.Integrate(
+        RunIntegrateOutcome outcome = await integrate.IntegrateAsync(
             new RunIntegrateRequest(
-                settings.Task, settings.Path, settings.RunWorktree, environment.CurrentDirectory, environment.HomeDirectory));
+                settings.Task, settings.Path, settings.RunWorktree, environment.CurrentDirectory, environment.HomeDirectory),
+            cancellationToken).ConfigureAwait(false);
 
         foreach (string note in outcome.Notes ?? [])
         {
@@ -86,12 +90,6 @@ public sealed class RunIntegrateCommand(IRunIntegrateService integrate, IProcess
                 return Refuse(outcome.Message ?? "the task could not be integrated.");
         }
     }
-
-    /// <summary>The two-argument overload the rest of this branch's commands carry.</summary>
-    /// <param name="context">The command context Spectre supplies.</param>
-    /// <param name="settings">The parsed settings.</param>
-    public int Execute(CommandContext context, RunIntegrateSettings settings) =>
-        Execute(context, settings, CancellationToken.None);
 
     private int Refuse(string message)
     {
