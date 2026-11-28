@@ -5,7 +5,7 @@ doc-type: reference
 status: current
 component: KyberDash
 owner: dpalfery
-last-reviewed: 2026-11-25
+last-reviewed: 2026-11-28
 decided-by:
   - adr/0048-opencode-capture-is-a-v2-only-plugin-pipeline
   - adr/0055-factory-capture-is-a-hooks-plugin-pipeline
@@ -690,12 +690,31 @@ import path.
 |---|---|---|
 | Claude Code / Desktop | **Implemented** | Extracted by `ClaudeTranscriptMapper` (`dash/server/KyberDash.Data/Harnesses/Claude/ClaudeTranscriptMapper.cs`) into child `tool.invoke` spans (and `tool_definition` rows from `api-request-shape` entries when present, leaving older transcripts without request shapes unmeasured for `tool_definitions` and all transcripts unmeasured for `system_prompt`); non-document plain-text results bounded at 64 KiB with `content_part_truncation.original_utf8_bytes` and a `Withheld` continuation part. Structured error status preserved. |
 | Codex | Deferred | Tracked in follow-up issue [#210](https://github.com/dpalfery/kyber-weave/issues/210). |
-| Copilot CLI | **Not ingested** (follow-up) | The `events.jsonl` journal's `toolRequests` are not yet child `tool.invoke` records. Joining them to `tool.execution_complete` on `toolCallId`, on the per-message turns, is the follow-up [copilot-cli-tool-invocations-per-message](../todo/copilot-cli-tool-invocations-per-message.md). Copilot CLI sessions carry no tool records until it lands (see [Copilot CLI journal and system prompt](#copilot-cli-journal-and-system-prompt)). |
+| Copilot CLI | **Implemented** (`CopilotCliMapper.BuildToolInvokeRecord`) | `CopilotCliMapper.BuildToolInvokeRecord` (`dash/server/KyberDash.Data/Harnesses/CopilotCli/CopilotCliMapper.cs`) joins journal `toolRequests`, `tool.execution_start`, and `tool.execution_complete` events into child `RecordOp.ToolInvoke` records (`ToolResultContent` parts, populating `Withheld` and setting `PlainText = null` when `ToolContentMeasurer` classifies a payload as `IsDocument`). See [Copilot CLI journal and system prompt](#copilot-cli-journal-and-system-prompt). |
 | Copilot VS Code | Deferred | Tracked in follow-up issue [#211](https://github.com/dpalfery/kyber-weave/issues/211). |
 | Cursor | Deferred | Tracked in follow-up issue [#212](https://github.com/dpalfery/kyber-weave/issues/212). |
 | Antigravity | **Implemented** (`transcript.jsonl`, paired by `last_step_index`, `.db` sources) | Tool calls come from `PLANNER_RESPONSE.tool_calls` and results from `GENERIC` steps, paired to a model call by the lsi rule in [Antigravity transcript pairing](#antigravity-transcript-pairing). Covers file-based sessions only. The status-line source is a non-goal, and OTLP-only sessions get no transcript activity (residual). Tracked under [#213](https://github.com/dpalfery/kyber-weave/issues/213). |
 | ZCode | Deferred | Tracked in follow-up issue [#214](https://github.com/dpalfery/kyber-weave/issues/214). |
 | OpenCode | **Plugin only** | Listing and invocation come from the V2 plugin's contract-3 spans. File-ingest extraction is not planned: the V1 import was removed ([ADR 0048](../adr/0048-opencode-capture-is-a-v2-only-plugin-pipeline.md)). The earlier tracking reference, [#215](https://github.com/dpalfery/kyber-weave/issues/215), predates that decision. |
+
+## Content collection and display matrix
+
+`HarnessSourceRegistry` (`dash/server/KyberDash.Data/Collector/HarnessSourceRegistry.cs`) registers **`24`** canonical harness IDs across four `HarnessSourceSupport` tiers, and `CodexAdapter` (`dash/server/KyberDash.Domain/CanonAdapters.cs`) adds OTLP `codex` alongside file `codex-cli` for **`25`** canonical harness IDs total (plus `3` excluded IDs `windsurf`, `aider`, and `gemini`, and folded aliases `claude-desktop` → `claude-code`, `cursor-agent` → `cursor`, `copilot-chat` → `copilot-vscode`). In isolated Playwright parity testing (`dash/e2e/harness-content-parity.spec.ts`), **`22`** harnesses are HTTP-testable (`18` `LocalFiles` + `3` OTLP-distinct `copilot`, `opencode`, `codex` + `1` `Unevidenced` `zcode`).
+
+| Support tier (`HarnessSourceSupport`) | Count | Harnesses | Notes |
+|---|---|---|---|
+| `LocalFiles` | `18` | `antigravity`, `antigravity-cli`, `claude-code`, `cline`, `cline-cli`, `codex-cli`, `commandcode`, `copilot-cli`, `copilot-vscode`, `cursor`, `devin`, `droid`, `kilo-shared-runtime`, `kilo-vscode-legacy`, `kimi-code`, `pi`, `roo-code`, `warp` | All `18` have evidenced local readers and file-harness E2E fixtures (`dash/e2e/file-harness-contracts.ts`). |
+| `OtlpOnly` (+ OTLP `codex`) | `3` registry + `codex` | `copilot`, `opencode`, `copilot-agent` (registry); `codex` (mapped by `CodexAdapter`) | `CanonAdapters.DefaultAdapters` also persists OTLP spans for `claude-code`, `droid`, `pi`, and `antigravity` (`copilot-agent` has no separate OTLP adapter in `DefaultAdapters`). |
+| `ClassifiedOnly` (`Reader == null`) | `2` | `claude-unclassified`, `codex-desktop` | Classified fallback IDs with no standalone local reader. |
+| `Unevidenced` (`Reader == null`) | `1` | `zcode` | Emits `SOURCE_FORMAT_UNEVIDENCED` when `.zcode/cli/db/db.sqlite` is discovered on disk. |
+
+Read-only inspection of `canon.db` (`schema_version = 30`, `detector_version = 8`) and cross-checks against `OtlpSpanMapperCore`, `KyberBridgeEngine`, and `HarnessSourceRegistry` establish the baseline collection and display gaps tracked by `HARNESS_PARITY_MATRIX` (`dash/e2e/copilot-parity-baseline.ts`):
+
+- **`copilot` (OTLP baseline):** `100%` session/context/schema/token projection and `system_prompt` carry-forward, but `OtlpSpanMapperCore` (`BuildCollectedParts` / `BuildToolCall`) sets `PlainText = null` and populates `Withheld` whenever `ToolContentMeasurer` classifies JSON payloads as `IsDocument` (`content_part_withheld`, returning empty `text` from `KyberBridgeEngine.ToTurnContentEntry`), oversized `system_prompt` parts truncate at 65,536 bytes, and `tool_call_input_text` / `tool_call_result_text` are absent.
+- **`claude-code`:** Transcripts lack a `system_prompt` bucket (`0` `system_prompt` rows; system text sits in `conversation_history` role `system`), `llm.invoke` spans project partially into `session_context_turn`, and `tool_call_input_text` is absent (`112/978` `tool.invoke` spans lacked `tool_call` rows in the snapshot).
+- **`droid`:** Projected sessions have `0` `session_context` (`no_message_structure`), `0` `tool_definition` rows (`tool_definition_schema_absent`), and `0` `record_token_count` rows (`record_token_count_absent`; counters sit at session usage level), causing per-turn charts to render unmeasurable (`unreachable-drawer`).
+- **`antigravity` & `antigravity-cli`:** OTLP `antigravity` sessions can fail `context_unmeasurable` (`no_message_structure`) and emit `0` `tool.invoke` / `tool_call` rows (`tool_invocations_absent`); `antigravity-cli` records statusline/transcript sessions without per-turn charts when `no_message_structure` applies.
+- **SQLite & unevidenced ingest errors:** Unreadable or malformed local databases emit explicit diagnostic codes without fabricating sessions — `CURSOR_WORKSPACE_UNREADABLE` (`cursor`), `DEVIN_SESSION_UNREADABLE` (`devin`), `SQLITE_SOURCE_UNREADABLE` (`warp`), and `SOURCE_FORMAT_UNEVIDENCED` (`zcode`), alongside `unclaimed` quarantined OTLP spans and `OTLP_LOG_UNATTRIBUTED` log problems.
 
 ## Skill availability by harness
 
@@ -921,24 +940,24 @@ come from `loadCopilotCliCalls`.
 - **Skill listing** is measured from `<available_skills>` in the prompt, names and descriptions alike.
 - **Skill invocations** come from the parser, as on main: a `skill` tool request on an
   `assistant.message` becomes the call's `skills`, stored as `kyber.skills.invoked`.
-- **Tool invocations are not ingested.** Journal `toolRequests` do not yet become child `tool.invoke`
-  records, so a Copilot CLI session has no tool records. The follow-up is
-  [copilot-cli-tool-invocations-per-message](../todo/copilot-cli-tool-invocations-per-message.md). A
-  session whose messages omit `outputTokens` produces no per-message calls at all, so the follow-up
-  also depends on
-  [copilot-cli-output-tokens-skipped-messages](../todo/copilot-cli-output-tokens-skipped-messages.md).
+- **Tool invocations are ingested (`CopilotCliMapper.BuildToolInvokeRecord`).** `CopilotCliMapper`
+  (`dash/server/KyberDash.Data/Harnesses/CopilotCli/CopilotCliMapper.cs`) joins journal
+  `toolRequests`, `tool.execution_start`, and `tool.execution_complete` events on `toolCallId`
+  into child `RecordOp.ToolInvoke` records. Tool results emit `ContentBucket.ToolResultContent`
+  parts (`PlainText` for plain text, or `Withheld` with `PlainText = null` when
+  `ToolContentMeasurer` classifies a payload as `IsDocument`). Every `assistant.message` emits an
+  `llm.invoke` record even when `outputTokens` is absent on Copilot CLI 1.0.81+ (omitting
+  `TokenClass.Output` instead of skipping the message).
 
 Known upstream issues, not fixed by this change. Each is filed as a todo:
 
-- Copilot CLI 1.0.81 and later, as the owner reports, omit `outputTokens`. The parser reads the
-  missing value as 0 and skips the message (`dash/src/providers/copilot.ts`, around lines 1028–1035).
-  Todo [copilot-cli-output-tokens-skipped-messages](../todo/copilot-cli-output-tokens-skipped-messages.md).
+- Copilot CLI 1.0.81 and later omit `outputTokens`; `CopilotCliMapper` emits `llm.invoke`
+  without `TokenClass.Output` rather than fabricating zero. Historical tracking:
+  [copilot-cli-output-tokens-skipped-messages](../todo/copilot-cli-output-tokens-skipped-messages.md).
 - Journal messages outside the refresh window are not read. Todo
   [copilot-cli-journal-refresh-window](../todo/copilot-cli-journal-refresh-window.md).
 - The session store's `sessions` table yields `$0`, `unknown`-model placeholder rows, and `data.db`
   is never discovered. Todo [copilot-cli-placeholder-session-rows](../todo/copilot-cli-placeholder-session-rows.md).
-- Journal tool invocations are not ingested. Todo
-  [copilot-cli-tool-invocations-per-message](../todo/copilot-cli-tool-invocations-per-message.md).
 
 Parser contract `3` (`COPILOT_PARSER_CONTRACT_VERSION` in `dash/src/refresh/registry.ts`). Copilot
 moved to its own contract because the per-record `system_prompt` declaration changed, so stored

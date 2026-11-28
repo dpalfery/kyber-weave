@@ -403,7 +403,7 @@ export async function startIsolatedServer(options?: {
 
     const spawned = spawn(
       command,
-      [...prefixArgs, 'web', '--no-open', '--port', '0', '--db', dbPath, '--state-dir', stateDir],
+      [...prefixArgs, 'web', '--no-open', '--port', '0', '--otlp-port', '0', '--db', dbPath, '--state-dir', stateDir],
       {
         cwd: repoRoot,
         env: {

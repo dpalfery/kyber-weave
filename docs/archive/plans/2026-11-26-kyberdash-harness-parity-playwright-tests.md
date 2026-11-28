@@ -2,10 +2,10 @@
 id: plans/2026-11-26-kyberdash-harness-parity-playwright-tests
 title: KyberDash Copilot Baseline and Cross-Harness Full-Content Playwright Parity Suite
 doc-type: plan
-status: draft
+status: archived
 component: KyberDash
 owner: dpalfery
-last-reviewed: 2026-11-26
+last-reviewed: 2026-11-28
 autonomy: supervised
 development-mode: test-first
 documentation-impact: extends-component
@@ -16,7 +16,7 @@ impact-components:
 
 # KyberDash Copilot Baseline and Cross-Harness Full-Content Playwright Parity Suite
 
-**Status: Draft.**
+**Status: Archived, 2026-11-28.**
 
 ## Request
 
@@ -230,3 +230,33 @@ This plan adds no new application component or C# product API surface; it extend
 ## docs-dev closeout
 
 - After implementation and review pass, dispatch `docs-dev` to harvest the finalized rows from `## Design harvest` into `docs/dash/architecture.md`, `docs/dash/runbook.md`, `docs/dash/telemetry-inventory.md`, and `docs/ci-pipelines/workflows-runbook.md`, verify `kyber-weave docs validate . --merge-ready` and `kyber-weave docs drift .`, and archive this plan into `docs/archive/plans/` removing any transient `.tasks.yml`.
+
+## Closeout mapping
+
+Links are written relative to this plan's current folder (`docs/plans/`); the archive move rebases them. Documentation impact is `extends-component` on `KyberDash` and `CI Pipelines`, `last-reviewed: 2026-11-28` (`status: current` on canonical destinations; this plan transitions to `status: archived` on archive).
+
+| ID | Destination |
+|---|---|
+| D1 | Documentation waiver — `D1` records the run's `test-first` development-mode constraint (`T1`–`T4` RED/GREEN gating) with no surviving architectural, operational, or behavioral invariant. |
+| D2 | [Telemetry Verification and Cross-Harness Parity](../../dash/architecture.md#telemetry-verification-and-cross-harness-parity) and [Content collection and display matrix](../../dash/telemetry-inventory.md#content-collection-and-display-matrix) (distinguishing honest unobservability from collection/projection drops) |
+| D3 | [Sanitized dual Copilot baseline contract](../../dash/architecture.md#sanitized-dual-copilot-baseline-contract) (`assertNoRawCanonDbLeak` non-PII fixture boundary) |
+| D4 | [Sanitized dual Copilot baseline contract](../../dash/architecture.md#sanitized-dual-copilot-baseline-contract) and [Content collection and display matrix](../../dash/telemetry-inventory.md#content-collection-and-display-matrix) (`canon.db` v30 Copilot baseline metrics and `OtlpSpanMapperCore` `content_part_withheld` behavior) |
+| Q1 | [Layer-by-layer parity assertions and two-server isolation](../../dash/architecture.md#layer-by-layer-parity-assertions-and-two-server-isolation) and [Content collection and display matrix](../../dash/telemetry-inventory.md#content-collection-and-display-matrix) (`classifyParityGap` `'annotate-gaps'` mode and `test.info().annotations` diagnostics) |
+| Q2 | [Telemetry Verification and Cross-Harness Parity](../../dash/architecture.md#telemetry-verification-and-cross-harness-parity), [Running tests safely](../../dash/runbook.md#running-tests-safely), and [Content collection and display matrix](../../dash/telemetry-inventory.md#content-collection-and-display-matrix) (`24`-entry `HarnessSourceRegistry` + OTLP `codex` = `25` canonical IDs, `22` HTTP-testable harnesses, `3` non-collectable, `3` excluded) |
+| Q3 | [Layer-by-layer parity assertions and two-server isolation](../../dash/architecture.md#layer-by-layer-parity-assertions-and-two-server-isolation), [Running tests safely](../../dash/runbook.md#running-tests-safely), and [Dash harness-collection e2e (`dash-e2e`)](../../ci-pipelines/workflows-runbook.md#dash-harness-collection-e2e-dash-e2e) (strictly isolated `dash/playwright.isolated.config.ts` servers with `server.dbPath !== USER_CANON` and `!server.url.includes(':4747')`) |
+| `KyberDash` | Design harvest rows harvested into [KyberDash architecture](../../dash/architecture.md#telemetry-verification-and-cross-harness-parity), [KyberDash runbook](../../dash/runbook.md#running-tests-safely), and [Telemetry inventory](../../dash/telemetry-inventory.md#tool-extraction-support-by-harness-issue-180) (plus [Content collection and display matrix](../../dash/telemetry-inventory.md#content-collection-and-display-matrix) and [Copilot CLI journal and system prompt](../../dash/telemetry-inventory.md#copilot-cli-journal-and-system-prompt)) |
+| `CI Pipelines` | Design harvest row harvested into [CI workflows runbook (`dash-e2e`)](../../ci-pipelines/workflows-runbook.md#dash-harness-collection-e2e-dash-e2e) |
+
+No ADR — ADR waiver: Playwright test fixtures, parity assertions, and CI job step wiring follow the existing isolated E2E test architecture (`dash/AGENTS.md` and `dash/playwright.isolated.config.ts`) and CI workflow policy (`docs/standards/github-actions/README.md`) without changing runtime ingestion, schema, or UI architecture.
+
+## Completion summary
+
+- **Implementation commit on `antigravity/feat/kyberdash-harness-parity-playwright-tests` (`b182ff3b`):**
+  - `T1`: added `dash/e2e/copilot-parity-baseline.ts` (`COPILOT_DB_BASELINE_SNAPSHOT`, `HARNESS_PARITY_MATRIX`, `normalizeParityHarnessId`, `listParityExpectations`, `getParityExpectation`, `assertNoRawCanonDbLeak`), `dash/tests/e2e/copilot-parity-baseline.test.ts`, and `buildCopilotBaselineFixture` / `COPILOT_BASELINE_CONTRACT` in `dash/e2e/otel-harness-payloads.ts`.
+  - `T2`: added `assertHarnessFullContentParity`, `inspectTurnFullContent`, and `classifyParityGap` to `dash/e2e/session-dashboard-assertions.ts` alongside `dash/tests/e2e/session-dashboard-assertions.test.ts`.
+  - `T3`: added `dash/e2e/harness-content-parity.spec.ts` (two isolated servers exercising the dual Copilot baseline, all `22` HTTP-testable harnesses, `gemini` exclusion, and separate-instance corrupt SQLite / unclaimed OTLP diagnostics), added `buildCopilotCliParityFixture`, `buildDroidParityFixture`, and `buildClaudeParityFixture` in `dash/e2e/file-harness-jsonl.ts`, added `buildUnreadableSqliteFixtures` in `dash/e2e/file-harness-sqlite.ts`, and registered `harness-content-parity.spec.ts` in `dash/playwright.isolated.config.ts`.
+  - `T4`: wired `dash/e2e/harness-content-parity.spec.ts` into `.github/workflows/ci.yml` (`dash-e2e` job after `Harness-collection conformance spec`) and pinned it in `tests/KyberWeave.RepoPolicy.Tests/DashE2eWorkflowTests.cs`.
+- **Closeout & verification notes:**
+  - Harvested all four `## Design harvest` rows and decisions `D2`–`D4`, `Q1`–`Q3` into `docs/dash/architecture.md`, `docs/dash/runbook.md`, `docs/dash/telemetry-inventory.md`, and `docs/ci-pipelines/workflows-runbook.md` (with `D1` documented as a task-execution waiver and the ADR waiver preserved).
+  - `NOT VERIFIED: live ~/.kyberdash/canon.db mutation or live CI runner execution of dash-e2e` — Playwright parity runs use isolated temporary databases under `dash/playwright.isolated.config.ts`, and CI `dash-e2e` executes on pull request.
+  - Documentation closeout verification (`docs closeout`, `docs validate . --merge-ready`, and `docs drift .`) recorded at closeout execution.

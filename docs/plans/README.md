@@ -64,9 +64,7 @@ its `tasks.yml` is caught rather than carried as dead weight.
 
 ## Active Plans
 
-| Plan | Status | Date | Goal |
-|---|---|---|---|
-| [2026-11-26-kyberdash-harness-parity-playwright-tests.md](2026-11-26-kyberdash-harness-parity-playwright-tests.md) | Draft | 2026-11-26 | Baseline Copilot runs from canon.db and add isolated Playwright parity tests showing where other harnesses fail to collect or display full content in KyberDash |
+No plans are open.
 
 ## Archived Plans
 
