@@ -230,7 +230,7 @@ internal sealed class UpdateWorld : IDisposable
     /// <param name="runProcess">Runs the tray verb; the update system's when null.</param>
     /// <param name="captureProcess">Runs a KyberDash verb; answers success with no output when null.</param>
     /// <returns>The outcome.</returns>
-    internal SelfUpdateOutcome Run(
+    internal async Task<SelfUpdateOutcome> RunAsync(
         HttpMessageHandler handler,
         SelfUpdateHost host,
         SelfUpdateOptions options,
@@ -260,7 +260,7 @@ internal sealed class UpdateWorld : IDisposable
             canWriteDirectory,
             capture,
             finishingProcess: loopback.Invoke);
-        return updater.Run(options);
+        return await updater.RunAsync(options).ConfigureAwait(false);
     }
 
     /// <summary>

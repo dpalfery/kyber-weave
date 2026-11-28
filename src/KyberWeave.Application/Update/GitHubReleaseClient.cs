@@ -70,9 +70,9 @@ internal sealed class GitHubReleaseClient : IDisposable
             _client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", token.Trim());
     }
 
-    internal string ResolveLatestStable()
+    internal async Task<string> ResolveLatestStableAsync(CancellationToken cancellationToken = default)
     {
-        string json = GetString(_latestApi, "the latest stable release");
+        string json = await GetStringAsync(_latestApi, "the latest stable release", cancellationToken).ConfigureAwait(false);
         GitHubRelease payload;
         try
         {
@@ -101,12 +101,12 @@ internal sealed class GitHubReleaseClient : IDisposable
     /// <see cref="MaxReleasePages"/> bounds a server that ignores paging. A tag that is not a
     /// release version is skipped rather than allowed to abort the update.
     /// </remarks>
-    internal string ResolveNewestListed()
+    internal async Task<string> ResolveNewestListedAsync(CancellationToken cancellationToken = default)
     {
         string? newest = null;
         for (int page = 1; page <= MaxReleasePages; page++)
         {
-            GitHubRelease[] payload = ReadReleasesPage(page);
+            GitHubRelease[] payload = await ReadReleasesPageAsync(page, cancellationToken).ConfigureAwait(false);
             foreach (GitHubRelease release in payload)
             {
                 if (release.Draft || string.IsNullOrWhiteSpace(release.TagName))
@@ -139,9 +139,9 @@ internal sealed class GitHubReleaseClient : IDisposable
         new($"{releasesApi.AbsoluteUri}?per_page={ReleasesPerPage}&page={page}");
 
     /// <summary>Fetches and parses one page of the Releases list; a bad page fails the scan.</summary>
-    private GitHubRelease[] ReadReleasesPage(int page)
+    private async Task<GitHubRelease[]> ReadReleasesPageAsync(int page, CancellationToken cancellationToken)
     {
-        string json = GetString(ReleasesPage(_releasesApi, page), "the GitHub Releases list");
+        string json = await GetStringAsync(ReleasesPage(_releasesApi, page), "the GitHub Releases list", cancellationToken).ConfigureAwait(false);
         try
         {
             return JsonSerializer.Deserialize<GitHubRelease[]>(json, JsonOptions)
@@ -153,16 +153,20 @@ internal sealed class GitHubReleaseClient : IDisposable
         }
     }
 
-    internal string DownloadChecksums(string tag)
+    internal Task<string> DownloadChecksumsAsync(string tag, CancellationToken cancellationToken = default)
     {
         Uri uri = AssetUri(_origin, tag, "SHA256SUMS.txt");
-        return GetString(uri, $"SHA256SUMS.txt for {tag}");
+        return GetStringAsync(uri, $"SHA256SUMS.txt for {tag}", cancellationToken);
     }
 
-    internal void DownloadAsset(string tag, string archiveName, Stream destination)
+    internal async Task DownloadAssetAsync(
+        string tag,
+        string archiveName,
+        Stream destination,
+        CancellationToken cancellationToken = default)
     {
         Uri uri = AssetUri(_origin, tag, archiveName);
-        using HttpResponseMessage response = Send(uri);
+        using HttpResponseMessage response = await SendAsync(uri, cancellationToken).ConfigureAwait(false);
         if (response.StatusCode == HttpStatusCode.NotFound)
         {
             throw new SelfUpdateException(
@@ -170,8 +174,8 @@ internal sealed class GitHubReleaseClient : IDisposable
         }
 
         EnsureSuccess(response, $"download failed: {uri}");
-        using Stream stream = response.Content.ReadAsStream();
-        stream.CopyTo(destination);
+        using Stream stream = await response.Content.ReadAsStreamAsync(cancellationToken).ConfigureAwait(false);
+        await stream.CopyToAsync(destination, cancellationToken).ConfigureAwait(false);
     }
 
     public void Dispose() => _client.Dispose();
@@ -199,29 +203,29 @@ internal sealed class GitHubReleaseClient : IDisposable
         return uri;
     }
 
-    private string GetString(Uri uri, string what)
+    private async Task<string> GetStringAsync(Uri uri, string what, CancellationToken cancellationToken)
     {
-        using HttpResponseMessage response = Send(uri);
+        using HttpResponseMessage response = await SendAsync(uri, cancellationToken).ConfigureAwait(false);
         if (response.StatusCode == HttpStatusCode.NotFound)
             throw new SelfUpdateException($"could not download {what}. Does that release exist?");
 
         EnsureSuccess(response, $"could not download {what}");
-        return response.Content.ReadAsStringAsync().GetAwaiter().GetResult();
+        return await response.Content.ReadAsStringAsync(cancellationToken).ConfigureAwait(false);
     }
 
     [SuppressMessage(
         "Reliability",
         "CA2000:Dispose objects before losing scope",
         Justification = "Disposing the request before the response is fully read closes the download stream.")]
-    private HttpResponseMessage Send(Uri uri)
+    private async Task<HttpResponseMessage> SendAsync(Uri uri, CancellationToken cancellationToken)
     {
         _origin.EnsureAllowed(uri);
-        return _client
+        return await _client
             .SendAsync(
                 new HttpRequestMessage(HttpMethod.Get, uri),
-                HttpCompletionOption.ResponseHeadersRead)
-            .GetAwaiter()
-            .GetResult();
+                HttpCompletionOption.ResponseHeadersRead,
+                cancellationToken)
+            .ConfigureAwait(false);
     }
 
     private static void EnsureSuccess(HttpResponseMessage response, string failure)

@@ -41,7 +41,7 @@ public sealed class ArbiterHookRefresherRenameNoticeTests
     /// project's root. A project with no leftover gets no such line.
     /// </summary>
     [Fact]
-    public void TheRefresherLogsTheLeftoverOncePerProjectThatHoldsIt()
+    public async Task TheRefresherLogsTheLeftoverOncePerProjectThatHoldsIt()
     {
         string withLeftover = ProjectRoot("project-with-leftover");
         string clean = ProjectRoot("project-clean");
@@ -51,7 +51,7 @@ public sealed class ArbiterHookRefresherRenameNoticeTests
         List<string> log = [];
 
         ArbiterHookRefresher refresher = Refresher(log);
-        refresher.Refresh([withLeftover, clean]);
+        await refresher.RefreshAsync([withLeftover, clean]);
 
         string[] notices = [.. log.Where(line => line.Contains(WarningCode, StringComparison.Ordinal))];
         Assert.Single(notices);
@@ -63,7 +63,7 @@ public sealed class ArbiterHookRefresherRenameNoticeTests
     /// The refresh leaves the leftover file byte-identical. Naming the rename is the notice's whole job.
     /// </summary>
     [Fact]
-    public void TheRefresherNeverRewritesTheLeftoverFile()
+    public async Task TheRefresherNeverRewritesTheLeftoverFile()
     {
         string project = ProjectRoot("project-read-only");
         ArrangeEnabledProject(project);
@@ -72,7 +72,7 @@ public sealed class ArbiterHookRefresherRenameNoticeTests
         List<string> log = [];
 
         ArbiterHookRefresher refresher = Refresher(log);
-        refresher.Refresh([project]);
+        await refresher.RefreshAsync([project]);
 
         Assert.Contains(log, line => line.Contains(WarningCode, StringComparison.Ordinal));
         Assert.Equal(before, _wiring.Files.ReadAllBytes(Path.Combine(project, ".mcp.json")));

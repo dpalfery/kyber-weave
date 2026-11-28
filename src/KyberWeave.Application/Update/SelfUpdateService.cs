@@ -22,7 +22,10 @@ internal sealed class SelfUpdateService(
     HttpMessageHandler? handler = null) : ISelfUpdateService
 {
     /// <inheritdoc />
-    public SelfUpdateOutcome Run(SelfUpdateOptions options, Action<string> log)
+    public async Task<SelfUpdateOutcome> RunAsync(
+        SelfUpdateOptions options,
+        Action<string> log,
+        CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(log);
 
@@ -44,7 +47,7 @@ internal sealed class SelfUpdateService(
             copilotPrompt: copilotPrompt);
         try
         {
-            return updater.Run(options);
+            return await updater.RunAsync(options, cancellationToken).ConfigureAwait(false);
         }
         finally
         {

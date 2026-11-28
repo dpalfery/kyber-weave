@@ -33,7 +33,9 @@ internal sealed class ArbiterHookRefresher(
     private readonly Func<string, string?> _environmentReader = environment.GetVariable;
 
     /// <inheritdoc />
-    public ArbiterHookRefreshResult Refresh(IReadOnlyList<string> projectRoots)
+    public async Task<ArbiterHookRefreshResult> RefreshAsync(
+        IReadOnlyList<string> projectRoots,
+        CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(projectRoots);
 
@@ -69,7 +71,9 @@ internal sealed class ArbiterHookRefresher(
             {
                 SquadArbiterWiring wiring = Wiring(loaded.Config.Arbiter);
                 SquadUpdateRequest request = new(root, SquadDeploymentScope.Project, Arbiter: wiring);
-                SquadLifecycleResult result = lifecycle.UpdateAsync(request).GetAwaiter().GetResult();
+                SquadLifecycleResult result = await lifecycle
+                    .UpdateAsync(request, cancellationToken)
+                    .ConfigureAwait(false);
                 if (!result.Success)
                 {
                     string reason = result.Errors is { Count: > 0 }

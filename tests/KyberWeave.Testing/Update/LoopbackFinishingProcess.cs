@@ -95,7 +95,7 @@ internal sealed class LoopbackFinishingProcess
             arbiterHookRefresher: _arbiterHookRefresher,
             finishingProcess: null,
             arbiterTargets: _arbiterTargets);
-        SelfUpdateOutcome outcome = updater.Run(new SelfUpdateOptions(
+        SelfUpdateOutcome outcome = updater.RunAsync(new SelfUpdateOptions(
             version,
             ReleaseCandidate: false,
             NoMcp: false,
@@ -103,7 +103,7 @@ internal sealed class LoopbackFinishingProcess
             NoMenubar: arguments.Contains("--no-menubar"),
             NoArbiter: arguments.Contains("--no-arbiter"),
             NoRestart: arguments.Contains("--no-restart"),
-            FinishUpdate: true));
+            FinishUpdate: true)).GetAwaiter().GetResult();
         LastChildOutcome = outcome;
         return outcome.ExitCode;
     }
