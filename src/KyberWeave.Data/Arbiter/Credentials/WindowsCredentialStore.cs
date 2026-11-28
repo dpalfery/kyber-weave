@@ -113,6 +113,29 @@ public sealed partial class WindowsCredentialStore : ICredentialStore
         }
     }
 
+    /// <inheritdoc />
+    public ValueTask<string?> ReadAsync(string origin, CancellationToken cancellationToken = default)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        return new ValueTask<string?>(Read(origin));
+    }
+
+    /// <inheritdoc />
+    public ValueTask WriteAsync(string origin, string key, CancellationToken cancellationToken = default)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        Write(origin, key);
+        return new ValueTask();
+    }
+
+    /// <inheritdoc />
+    public ValueTask DeleteAsync(string origin, CancellationToken cancellationToken = default)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        Delete(origin);
+        return new ValueTask();
+    }
+
     private static string TargetFor(string origin) => $"{Service}:{origin}";
 
     private static void RejectLineBreak(string value, string parameterName)

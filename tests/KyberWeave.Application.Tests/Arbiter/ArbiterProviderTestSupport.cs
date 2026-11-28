@@ -104,4 +104,16 @@ internal sealed class FixedCredentialStore(string? key) : ICredentialStore
 
     /// <inheritdoc />
     public void Delete(string origin) => throw new NotSupportedException();
+
+    /// <inheritdoc />
+    public ValueTask<string?> ReadAsync(string origin, CancellationToken cancellationToken = default) =>
+        new(key);
+
+    /// <inheritdoc />
+    public ValueTask WriteAsync(string origin, string key1, CancellationToken cancellationToken = default) =>
+        throw new NotSupportedException();
+
+    /// <inheritdoc />
+    public ValueTask DeleteAsync(string origin, CancellationToken cancellationToken = default) =>
+        throw new NotSupportedException();
 }

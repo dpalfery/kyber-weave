@@ -104,6 +104,29 @@ public abstract class CredentialStoreContractTests : IDisposable
     }
 
     [Fact]
+    public async Task ReadsBackTheKeyThatWasWrittenAsync()
+    {
+        ICredentialStore store = NewStore();
+        string origin = NewOrigin();
+
+        await store.WriteAsync(origin, "sk-contract-0001");
+
+        Assert.Equal("sk-contract-0001", await store.ReadAsync(origin));
+    }
+
+    [Fact]
+    public async Task DeletingAnOriginRemovesItsKeyAsync()
+    {
+        ICredentialStore store = NewStore();
+        string origin = NewOrigin();
+        await store.WriteAsync(origin, "sk-contract-0002");
+
+        await store.DeleteAsync(origin);
+
+        Assert.Null(await store.ReadAsync(origin));
+    }
+
+    [Fact]
     public void ReadsBackAnyKeyItAccepts()
     {
         ICredentialStore store = NewStore();

@@ -14,4 +14,18 @@ public sealed class ProcessRunnerCredentialProcessRunner : ICredentialProcessRun
         ArgumentNullException.ThrowIfNull(standardInput);
         return ProcessRunner.Run(startInfo, standardInput);
     }
+
+    /// <inheritdoc />
+    public async Task<ProcessResult> RunAsync(
+        ProcessStartInfo startInfo,
+        string standardInput,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(startInfo);
+        ArgumentNullException.ThrowIfNull(standardInput);
+        return await ProcessRunner.RunAsync(
+            startInfo,
+            standardInput,
+            cancellationToken: cancellationToken).ConfigureAwait(false);
+    }
 }

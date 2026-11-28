@@ -16,9 +16,24 @@ internal sealed class MissingExecutableCredentialProcessRunner : ICredentialProc
     {
         ArgumentNullException.ThrowIfNull(startInfo);
         ArgumentNullException.ThrowIfNull(standardInput);
-        throw new Win32Exception(
+        throw Missing(startInfo);
+    }
+
+    /// <inheritdoc/>
+    public Task<ProcessResult> RunAsync(
+        ProcessStartInfo startInfo,
+        string standardInput,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(startInfo);
+        ArgumentNullException.ThrowIfNull(standardInput);
+        cancellationToken.ThrowIfCancellationRequested();
+        throw Missing(startInfo);
+    }
+
+    private static Win32Exception Missing(ProcessStartInfo startInfo) =>
+        new(
             2,
             $"An error occurred trying to start process '{startInfo.FileName}' with working directory " +
             "'/home/runner'. No such file or directory");
-    }
 }
