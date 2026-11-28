@@ -16,7 +16,8 @@ namespace KyberDash.Data.Tests.Repositories;
 /// <see cref="SqliteRelationalStore.SessionListFigures"/> must batch its per-session reads:
 /// one <c>sqlite3</c> batch for sessions, one for the content-free record scalars, one for all
 /// projections, and at most one fallback batch for turns of sessions without a projection,
-/// regardless of session count: the query count for many sessions equals the count for few.
+/// regardless of session count up to one chunk of 240 sessions; past that, each further chunk adds
+/// the same fixed number of statements, never one per session.
 /// </summary>
 public sealed class SqliteRelationalStoreListAggregatesTests : IDisposable
 {
@@ -52,7 +53,7 @@ public sealed class SqliteRelationalStoreListAggregatesTests : IDisposable
         Assert.Equal(
             ["sess-agg-0", "sess-agg-1", "sess-agg-2", "sess-agg-3", "sess-agg-4"],
             figures.Select(static figure => figure.SessionKey).Order(StringComparer.Ordinal));
-        Assert.Equal(BatchesFor(40), batches);
+        Assert.Equal(BatchesFor(240), batches);
 
         foreach (SessionListFigure figure in figures)
         {
@@ -78,12 +79,41 @@ public sealed class SqliteRelationalStoreListAggregatesTests : IDisposable
     }
 
     /// <summary>
-    /// Verifies the list read issues the same number of queries for many sessions as for few: a
-    /// per-session query would make the count grow with the session count.
+    /// Verifies the list read's query count is flat within one 240-session chunk and grows by the
+    /// same step for each further chunk: a per-session query would grow with every session instead.
     /// </summary>
     [Fact]
-    public void SessionListFigures_IssueTheSameQueryCountWhateverTheSessionCount() =>
-        Assert.Equal(BatchesFor(5), BatchesFor(60));
+    public void SessionListFigures_IssueAFixedQueryCountPerChunkOfSessions()
+    {
+        // Two of the seeded sessions have a projection, so the fallback-turn read covers two fewer
+        // keys; 242, 482 and 722 sessions put both key lists at a chunk boundary together.
+        int few = BatchesFor(5);
+        int oneChunk = BatchesFor(240);
+        int twoChunks = BatchesFor(242);
+        int threeChunks = BatchesFor(482);
+        int fourChunks = BatchesFor(722);
+
+        Assert.Equal(few, oneChunk);
+        Assert.True(twoChunks > oneChunk, $"A second chunk issued no extra statement ({twoChunks}).");
+        Assert.Equal(threeChunks - twoChunks, fourChunks - threeChunks);
+    }
+
+    /// <summary>
+    /// Verifies a keyed read of more sessions than one chunk answers every session in storage order,
+    /// the order one statement over all of them returns.
+    /// </summary>
+    [Fact]
+    public void SessionListFigures_ForMoreKeysThanOneChunkKeepStorageOrder()
+    {
+        string dbPath = Path.Combine(directory.Path, "list-figures-keyed", "canon.db");
+        CountingSqliteRelationalStore store = new(dbPath, new SqliteCircuitBreaker());
+        SeedSessions(store, 300);
+        IReadOnlyList<SessionListFigure> scoped = store.SessionListFigures(HarnessId);
+
+        IReadOnlyList<SessionListFigure> keyed = store.SessionListFigures([.. scoped.Select(static figure => figure.SessionKey).Reverse()]);
+
+        Assert.Equal(scoped.Select(static figure => figure.SessionKey), keyed.Select(static figure => figure.SessionKey));
+    }
 
     private int BatchesFor(int sessionCount)
     {

@@ -943,9 +943,49 @@ public partial class SqliteRelationalStore : IRelationalStoreReader
 
     /// <summary>
     /// The most session keys one statement binds. A statement may use its key list twice, so this keeps it
-    /// under SQLite's oldest variable limit of 999 however many sessions the store holds.
+    /// under 500 variables, the limit of the system SQLite macOS ships, however many sessions the store holds.
     /// </summary>
-    private const int MaxKeysPerStatement = 400;
+    private const int MaxKeysPerStatement = 240;
+
+    /// <summary>
+    /// Reads the session rows for <paramref name="keys"/> in storage order, as one statement would, binding at
+    /// most <see cref="MaxKeysPerStatement"/> keys per statement. Past one chunk the keys are first put in storage
+    /// order, so each chunk's rows (read in storage order) concatenate in the order a single read returns.
+    /// </summary>
+    /// <param name="keys">Distinct session keys.</param>
+    /// <returns>The sessions found, in storage order.</returns>
+    private IReadOnlyList<CollectedSession> QuerySessionsByKeys(IReadOnlyList<string> keys)
+    {
+        if (keys.Count <= MaxKeysPerStatement)
+        {
+            return QuerySessionChunk(keys);
+        }
+
+        List<(string Key, long RowId)> stored = [];
+        foreach (string[] chunk in keys.Chunk(MaxKeysPerStatement))
+        {
+            Dictionary<string, object?> parameters = new(StringComparer.Ordinal);
+            stored.AddRange(QueryRows<(string Key, long RowId)>(
+                $"SELECT session_id, rowid FROM session WHERE session_id IN ({SessionKeyListFilter(chunk, parameters)})",
+                parameters,
+                static reader => (reader.GetString(0), reader.GetInt64(1))));
+        }
+
+        List<CollectedSession> sessions = new(stored.Count);
+        foreach (string[] chunk in stored.OrderBy(static row => row.RowId).Select(static row => row.Key).Chunk(MaxKeysPerStatement))
+        {
+            sessions.AddRange(QuerySessionChunk(chunk));
+        }
+
+        return sessions;
+    }
+
+    private IReadOnlyList<CollectedSession> QuerySessionChunk(IReadOnlyCollection<string> keys)
+    {
+        Dictionary<string, object?> parameters = new(StringComparer.Ordinal);
+        string filter = SessionKeyListFilter(keys, parameters);
+        return QuerySessions($"s.session_id IN ({filter})", $"u.session_id IN ({filter})", parameters);
+    }
 
     /// <summary>
     /// Runs a per-session read over <paramref name="sessionKeys"/> in chunks of at most
@@ -1135,16 +1175,20 @@ public partial class SqliteRelationalStore : IRelationalStoreReader
         // The same batches as the harness-scoped read, each bound to the named keys by its own
         // statement: the session rows, the content-free record scalars, what the figures take
         // from the projections, the fallback turns of sessions without a projection, and the
-        // stored ingest problems. No statement lists the store's sessions or projections.
-        Dictionary<string, object?> parameters = new(StringComparer.Ordinal);
-        string filter = SessionKeyListFilter(keys, parameters);
-        IReadOnlyList<CollectedSession> sessions = QuerySessions($"s.session_id IN ({filter})", $"u.session_id IN ({filter})", parameters);
+        // stored ingest problems. No statement lists the store's sessions or projections, and
+        // each binds at most MaxKeysPerStatement keys.
+        IReadOnlyList<CollectedSession> sessions = QuerySessionsByKeys(keys);
         if (sessions.Count == 0)
         {
             return [];
         }
 
-        return BuildSessionListFigures(sessions, QuerySessionListProjectionShapes(filter, parameters), pricing);
+        Dictionary<string, SessionListProjectionShape> shapes = MergeKeyChunks(keys, chunk =>
+        {
+            Dictionary<string, object?> parameters = new(StringComparer.Ordinal);
+            return QuerySessionListProjectionShapes(SessionKeyListFilter(chunk, parameters), parameters);
+        });
+        return BuildSessionListFigures(sessions, shapes, pricing);
     }
 
     /// <summary>
@@ -1266,9 +1310,7 @@ public partial class SqliteRelationalStore : IRelationalStoreReader
         // metadata included — the report prices offered and invoked tools), and their stored
         // turns. The report figures are projection-independent, so no projection, problem, or
         // skill read runs, and no statement lists the store's sessions or projections.
-        Dictionary<string, object?> parameters = new(StringComparer.Ordinal);
-        string filter = SessionKeyListFilter(keys, parameters);
-        IReadOnlyList<CollectedSession> sessions = QuerySessions($"s.session_id IN ({filter})", $"u.session_id IN ({filter})", parameters);
+        IReadOnlyList<CollectedSession> sessions = QuerySessionsByKeys(keys);
         if (sessions.Count == 0)
         {
             return [];
