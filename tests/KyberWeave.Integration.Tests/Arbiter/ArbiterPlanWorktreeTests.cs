@@ -116,7 +116,7 @@ public sealed class ArbiterPlanWorktreeTests
         WritePlan(worktree);
         // run start recorded the run, so KW-ARB-RUN-001 sees it live.
         string? commonDirectory = await RealGitFacts.Create()
-            .GetCommonDirectoryAsync(probe.Root).ConfigureAwait(false);
+            .GetCommonDirectoryAsync(probe.Root);
         RunStartTestServices.RunStateStore().Write(
             home.Path, "run-wt", "origin/main",
             new RunStartPlace(
