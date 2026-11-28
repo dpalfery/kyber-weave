@@ -51,8 +51,9 @@ public sealed class RunStartWorktreeExcludeGitTests : IDisposable
     ///     A folder under a linked worktree is excluded by the exclude file git shares with the main checkout, so
     ///     the linked worktree's status does not list it.
     /// </summary>
+    /// <returns>The completed test.</returns>
     [Fact]
-    public void AWorktreeFolderUnderALinkedWorktreeStaysOutOfItsStatus()
+    public async Task AWorktreeFolderUnderALinkedWorktreeStaysOutOfItsStatus()
     {
         _probe.AddLinkedWorktree(LinkedBranch);
         string linked = LinkedWorktreePath();
@@ -63,18 +64,21 @@ public sealed class RunStartWorktreeExcludeGitTests : IDisposable
             new PhysicalPathResolver(new PhysicalFileSystem()),
             linked);
 
-        GitOutcome excluded = runner.EnsureWorktreeFolderExcluded();
+        GitOutcome excluded = await runner.EnsureWorktreeFolderExcludedAsync(TestContext.Current.CancellationToken);
 
         Assert.True(excluded.Succeeded, excluded.FirstErrorLine);
         string worktree = Path.Combine(linked, Folder, "20261118T010203Z-claude-fix-linked-exclude");
         Directory.CreateDirectory(worktree);
-        File.WriteAllText(Path.Combine(worktree, "marker.txt"), "a worktree\n");
-        GitOutcome status = _git.Run(linked, ["status", "--porcelain"]);
+        await File.WriteAllTextAsync(
+            Path.Combine(worktree, "marker.txt"), "a worktree\n", TestContext.Current.CancellationToken);
+        GitOutcome status = await _git.RunAsync(
+            linked, ["status", "--porcelain"], TestContext.Current.CancellationToken);
         Assert.True(status.Succeeded, status.FirstErrorLine);
         Assert.DoesNotContain(Folder, status.StandardOutput, StringComparison.Ordinal);
         Assert.Contains(
             ".agent_worktrees/",
-            File.ReadAllText(Path.Combine(_probe.Root, ".git", "info", "exclude")),
+            await File.ReadAllTextAsync(
+                Path.Combine(_probe.Root, ".git", "info", "exclude"), TestContext.Current.CancellationToken),
             StringComparison.Ordinal);
     }
 

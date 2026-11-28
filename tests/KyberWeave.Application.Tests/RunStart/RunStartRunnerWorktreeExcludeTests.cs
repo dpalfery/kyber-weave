@@ -35,107 +35,130 @@ public sealed class RunStartRunnerWorktreeExcludeTests
         _files.WriteAllText(ExcludePath, contents);
     }
 
+    /// <summary>An exclude file that does not exist yet is created holding the line.</summary>
+    /// <returns>The completed test.</returns>
     [Fact]
-    public void AnAbsentExcludeFileIsCreatedWithTheLine()
+    public async Task AnAbsentExcludeFileIsCreatedWithTheLine()
     {
         RunStartRunner runner = Runner(ExcludeAnswer);
 
-        GitOutcome outcome = runner.EnsureWorktreeFolderExcluded();
+        GitOutcome outcome = await runner.EnsureWorktreeFolderExcludedAsync(TestContext.Current.CancellationToken);
 
         Assert.True(outcome.Succeeded, outcome.FirstErrorLine);
         Assert.Equal(ExcludeLine + "\n", _files.ReadAllText(ExcludePath));
     }
 
+    /// <summary>An absolute answer, as a linked worktree gets, is written where git named it.</summary>
+    /// <returns>The completed test.</returns>
     [Fact]
-    public void AnAbsoluteAnswerFromALinkedWorktreeIsUsedAsGiven()
+    public async Task AnAbsoluteAnswerFromALinkedWorktreeIsUsedAsGiven()
     {
         string common = Path.Combine(_files.Root, "main", ".git", "info", "exclude");
         RunStartRunner runner = Runner(common);
 
-        GitOutcome outcome = runner.EnsureWorktreeFolderExcluded();
+        GitOutcome outcome = await runner.EnsureWorktreeFolderExcludedAsync(TestContext.Current.CancellationToken);
 
         Assert.True(outcome.Succeeded, outcome.FirstErrorLine);
         Assert.Equal(ExcludeLine + "\n", _files.ReadAllText(common));
         Assert.False(_files.FileExists(ExcludePath));
     }
 
+    /// <summary>An existing file keeps its content and gains the line after it.</summary>
+    /// <returns>The completed test.</returns>
     [Fact]
-    public void AFileWithoutTheLineGetsTheLineAppendedAfterItsContent()
+    public async Task AFileWithoutTheLineGetsTheLineAppendedAfterItsContent()
     {
         SeedExclude("*.log\n");
 
-        GitOutcome outcome = Runner(ExcludeAnswer).EnsureWorktreeFolderExcluded();
+        GitOutcome outcome = await Runner(ExcludeAnswer)
+            .EnsureWorktreeFolderExcludedAsync(TestContext.Current.CancellationToken);
 
         Assert.True(outcome.Succeeded, outcome.FirstErrorLine);
         Assert.Equal("*.log\n" + ExcludeLine + "\n", _files.ReadAllText(ExcludePath));
     }
 
+    /// <summary>A file that ends without a newline gets one before the appended line.</summary>
+    /// <returns>The completed test.</returns>
     [Fact]
-    public void AFileNotEndingInANewlineGetsOneBeforeTheLine()
+    public async Task AFileNotEndingInANewlineGetsOneBeforeTheLine()
     {
         SeedExclude("*.log");
 
-        GitOutcome outcome = Runner(ExcludeAnswer).EnsureWorktreeFolderExcluded();
+        GitOutcome outcome = await Runner(ExcludeAnswer)
+            .EnsureWorktreeFolderExcludedAsync(TestContext.Current.CancellationToken);
 
         Assert.True(outcome.Succeeded, outcome.FirstErrorLine);
         Assert.Equal("*.log\n" + ExcludeLine + "\n", _files.ReadAllText(ExcludePath));
     }
 
+    /// <summary>A line already present, even with surrounding spaces, is left exactly as it is.</summary>
+    /// <returns>The completed test.</returns>
     [Fact]
-    public void AFileAlreadyHoldingTheLineWithSurroundingSpacesIsUnchanged()
+    public async Task AFileAlreadyHoldingTheLineWithSurroundingSpacesIsUnchanged()
     {
         const string original = "*.log\n  .agent_worktrees/  \n";
         SeedExclude(original);
 
-        GitOutcome outcome = Runner(ExcludeAnswer).EnsureWorktreeFolderExcluded();
+        GitOutcome outcome = await Runner(ExcludeAnswer)
+            .EnsureWorktreeFolderExcludedAsync(TestContext.Current.CancellationToken);
 
         Assert.True(outcome.Succeeded, outcome.FirstErrorLine);
         Assert.Equal(original, _files.ReadAllText(ExcludePath));
     }
 
+    /// <summary>A write that fails reports the failure and leaves the file as it was.</summary>
+    /// <returns>The completed test.</returns>
     [Fact]
-    public void AWriteFailureReturnsTheFailure()
+    public async Task AWriteFailureReturnsTheFailure()
     {
         SeedExclude("*.log\n");
         _files.FailWhen(operation => operation.Name == "WriteAllTextAtomic", new IOException("disk full"));
 
-        GitOutcome outcome = Runner(ExcludeAnswer).EnsureWorktreeFolderExcluded();
+        GitOutcome outcome = await Runner(ExcludeAnswer)
+            .EnsureWorktreeFolderExcludedAsync(TestContext.Current.CancellationToken);
 
         Assert.False(outcome.Succeeded);
         Assert.Contains("disk full", outcome.FirstErrorLine, StringComparison.Ordinal);
         Assert.Equal("*.log\n", _files.ReadAllText(ExcludePath));
     }
 
+    /// <summary>A write the file system refuses reports the refusal and leaves the file as it was.</summary>
+    /// <returns>The completed test.</returns>
     [Fact]
-    public void AnUnauthorizedWriteReturnsTheFailure()
+    public async Task AnUnauthorizedWriteReturnsTheFailure()
     {
         SeedExclude("*.log\n");
         _files.FailWhen(operation => operation.Name == "WriteAllTextAtomic", new UnauthorizedAccessException("denied"));
 
-        GitOutcome outcome = Runner(ExcludeAnswer).EnsureWorktreeFolderExcluded();
+        GitOutcome outcome = await Runner(ExcludeAnswer)
+            .EnsureWorktreeFolderExcludedAsync(TestContext.Current.CancellationToken);
 
         Assert.False(outcome.Succeeded);
         Assert.Contains("denied", outcome.FirstErrorLine, StringComparison.Ordinal);
         Assert.Equal("*.log\n", _files.ReadAllText(ExcludePath));
     }
 
+    /// <summary>A git that cannot name the exclude file hands back its own failure.</summary>
+    /// <returns>The completed test.</returns>
     [Fact]
-    public void AGitFailureToNameTheExcludeFileReturnsGitsOutcome()
+    public async Task AGitFailureToNameTheExcludeFileReturnsGitsOutcome()
     {
         RunStartRunner runner = Runner((_, _) => new GitOutcome(128, string.Empty, "fatal: not a git repository"));
 
-        GitOutcome outcome = runner.EnsureWorktreeFolderExcluded();
+        GitOutcome outcome = await runner.EnsureWorktreeFolderExcludedAsync(TestContext.Current.CancellationToken);
 
         Assert.False(outcome.Succeeded);
         Assert.Contains("fatal", outcome.FirstErrorLine, StringComparison.Ordinal);
     }
 
+    /// <summary>The service writes the exclude before it names the worktree folder.</summary>
+    /// <returns>The completed test.</returns>
     [Fact]
-    public void TheServiceWritesTheExcludeBeforeItNamesTheWorktreeFolder()
+    public async Task TheServiceWritesTheExcludeBeforeItNamesTheWorktreeFolder()
     {
         OrderRunner runner = new(Repository) { Dirty = true };
 
-        RunStartOutcome outcome = Service(runner).Start(Request());
+        RunStartOutcome outcome = await Service(runner).StartAsync(Request());
 
         Assert.Equal(RunStartStatus.ToolFailure, outcome.Status);
         int exclude = runner.Calls.IndexOf("EnsureWorktreeFolderExcluded");
@@ -144,8 +167,10 @@ public sealed class RunStartRunnerWorktreeExcludeTests
         Assert.True(folder > exclude, "the folder is named only after the exclude is written");
     }
 
+    /// <summary>A failed exclude stops the run with the remedy and creates no worktree.</summary>
+    /// <returns>The completed test.</returns>
     [Fact]
-    public void AFailedExcludeStopsTheRunWithTheRemedyAndCreatesNoWorktree()
+    public async Task AFailedExcludeStopsTheRunWithTheRemedyAndCreatesNoWorktree()
     {
         OrderRunner runner = new(Repository)
         {
@@ -153,7 +178,7 @@ public sealed class RunStartRunnerWorktreeExcludeTests
             ExcludeResult = new GitOutcome(1, string.Empty, "fatal: cannot write"),
         };
 
-        RunStartOutcome outcome = Service(runner).Start(Request());
+        RunStartOutcome outcome = await Service(runner).StartAsync(Request());
 
         Assert.Equal(RunStartStatus.ToolFailure, outcome.Status);
         Assert.Contains(
@@ -165,8 +190,10 @@ public sealed class RunStartRunnerWorktreeExcludeTests
         Assert.DoesNotContain("CreateBranchInWorktree", runner.Calls);
     }
 
+    /// <summary>An in-place run never writes the exclude, because no worktree folder is made.</summary>
+    /// <returns>The completed test.</returns>
     [Fact]
-    public void AnInPlaceRunNeverWritesTheExclude()
+    public async Task AnInPlaceRunNeverWritesTheExclude()
     {
         OrderRunner runner = new(Repository)
         {
@@ -174,7 +201,7 @@ public sealed class RunStartRunnerWorktreeExcludeTests
             CreateInPlaceResult = new GitOutcome(1, string.Empty, "stop after the branch decision"),
         };
 
-        Service(runner).Start(Request());
+        await Service(runner).StartAsync(Request());
 
         Assert.Contains("CreateBranchInPlace", runner.Calls);
         Assert.DoesNotContain("EnsureWorktreeFolderExcluded", runner.Calls);
@@ -238,10 +265,14 @@ public sealed class RunStartRunnerWorktreeExcludeTests
             throw new NotSupportedException();
     }
 
-    private sealed class NoProcesses : IBoundedProcessExecutor
+    private sealed class NoProcesses : IProcessRunner
     {
-        public ProcessResult Run(ProcessStartInfo startInfo, string standardInput, TimeSpan timeout) =>
+        public Task<ProcessRunResult> RunAsync(ProcessRunRequest request, CancellationToken cancellationToken = default) =>
             throw new NotSupportedException();
+
+        public bool IsAlive(int processId) => false;
+
+        public string? FindOnPath(string program) => null;
     }
 
     /// <summary>A runner that answers the calls Start makes before the folder step, and records the order of the folder steps.</summary>
@@ -257,45 +288,64 @@ public sealed class RunStartRunnerWorktreeExcludeTests
 
         public string RepositoryRoot => root;
 
-        public GitOutcome Git(params string[] arguments) => new(0, string.Empty, string.Empty);
+        public Task<GitOutcome> GitAsync(IReadOnlyList<string> arguments, CancellationToken cancellationToken = default) =>
+            Task.FromResult(new GitOutcome(0, string.Empty, string.Empty));
 
-        public string? DetectRepositoryRoot() => root;
+        public Task<string?> DetectRepositoryRootAsync(CancellationToken cancellationToken = default) =>
+            Task.FromResult<string?>(root);
 
-        public GitOutcome CheckoutStatus() => new(0, Dirty ? " M README.md\n" : string.Empty, string.Empty);
+        public Task<GitOutcome> CheckoutStatusAsync(CancellationToken cancellationToken = default) =>
+            Task.FromResult(new GitOutcome(0, Dirty ? " M README.md\n" : string.Empty, string.Empty));
 
-        public bool? CheckoutIsClean() => !Dirty;
+        public Task<bool?> CheckoutIsCleanAsync(CancellationToken cancellationToken = default) =>
+            Task.FromResult<bool?>(!Dirty);
 
-        public GitOutcome WorktreeList() => new(0, "worktree " + root + "\n", string.Empty);
+        public Task<GitOutcome> WorktreeListAsync(CancellationToken cancellationToken = default) =>
+            Task.FromResult(new GitOutcome(0, "worktree " + root + "\n", string.Empty));
 
-        public bool? AnotherWorktreeIsAttached() => false;
+        public Task<bool?> AnotherWorktreeIsAttachedAsync(CancellationToken cancellationToken = default) =>
+            Task.FromResult<bool?>(false);
 
-        public string? OriginHeadSymbolicRef() => null;
+        public Task<string?> OriginHeadSymbolicRefAsync(CancellationToken cancellationToken = default) =>
+            Task.FromResult<string?>(null);
 
-        public string? ResolveRevision(string revision) => "abc123";
+        public Task<string?> ResolveRevisionAsync(string revision, CancellationToken cancellationToken = default) =>
+            Task.FromResult<string?>("abc123");
 
-        public bool HasLocalBranch(string branch) => false;
+        public Task<bool> HasLocalBranchAsync(string branch, CancellationToken cancellationToken = default) =>
+            Task.FromResult(false);
 
-        public bool HasRemoteBranch(string branch) => false;
+        public Task<bool> HasRemoteBranchAsync(string branch, CancellationToken cancellationToken = default) =>
+            Task.FromResult(false);
 
-        public string? Describe(string revision) => "v1";
+        public Task<string?> DescribeAsync(string revision, CancellationToken cancellationToken = default) =>
+            Task.FromResult<string?>("v1");
 
-        public (int? Ahead, int? Behind) Divergence(string left, string right) => (0, 0);
+        public Task<(int? Ahead, int? Behind)> DivergenceAsync(
+            string left, string right, CancellationToken cancellationToken = default) =>
+            Task.FromResult<(int? Ahead, int? Behind)>((0, 0));
 
-        public GitOutcome CommitMessages(string baseRef, string tip) => throw new NotSupportedException();
+        public Task<GitOutcome> CommitMessagesAsync(
+            string baseRef, string tip, CancellationToken cancellationToken = default) =>
+            throw new NotSupportedException();
 
-        public string? OriginAddress() => null;
+        public Task<string?> OriginAddressAsync(CancellationToken cancellationToken = default) =>
+            Task.FromResult<string?>(null);
 
         public bool CodeGraphBinaryIsAvailable() => true;
 
-        public GitOutcome Fetch() => new(0, string.Empty, string.Empty);
+        public Task<GitOutcome> FetchAsync(CancellationToken cancellationToken = default) =>
+            Task.FromResult(new GitOutcome(0, string.Empty, string.Empty));
 
-        public GitOutcome CreateBranchInPlace(string branch, string startRef)
+        public Task<GitOutcome> CreateBranchInPlaceAsync(
+            string branch, string startRef, CancellationToken cancellationToken = default)
         {
             Calls.Add("CreateBranchInPlace");
-            return CreateInPlaceResult;
+            return Task.FromResult(CreateInPlaceResult);
         }
 
-        public GitOutcome SwitchToBranch(string branch) => throw new NotSupportedException();
+        public Task<GitOutcome> SwitchToBranchAsync(string branch, CancellationToken cancellationToken = default) =>
+            throw new NotSupportedException();
 
         public string WorktreePathFor(string branch, DateTimeOffset startedAt)
         {
@@ -303,23 +353,25 @@ public sealed class RunStartRunnerWorktreeExcludeTests
             return Path.Combine(root, ".agent_worktrees", "folder");
         }
 
-        public GitOutcome EnsureWorktreeFolderExcluded()
+        public Task<GitOutcome> EnsureWorktreeFolderExcludedAsync(CancellationToken cancellationToken = default)
         {
             Calls.Add("EnsureWorktreeFolderExcluded");
-            return ExcludeResult;
+            return Task.FromResult(ExcludeResult);
         }
 
         public void ReleaseWorktreeClaim(string worktreePath)
         {
         }
 
-        public GitOutcome CreateBranchInWorktree(string branch, string startRef, string worktreePath)
+        public Task<GitOutcome> CreateBranchInWorktreeAsync(
+            string branch, string startRef, string worktreePath, CancellationToken cancellationToken = default)
         {
             Calls.Add("CreateBranchInWorktree");
-            return new GitOutcome(1, string.Empty, "stop after the folder decision");
+            return Task.FromResult(new GitOutcome(1, string.Empty, "stop after the folder decision"));
         }
 
-        public GitOutcome AddWorktreeForBranch(string branch, string worktreePath, string? startRef = null) =>
+        public Task<GitOutcome> AddWorktreeForBranchAsync(
+            string branch, string worktreePath, string? startRef = null, CancellationToken cancellationToken = default) =>
             throw new NotSupportedException();
     }
 }

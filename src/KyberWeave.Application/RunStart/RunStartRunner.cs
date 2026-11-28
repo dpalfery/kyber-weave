@@ -57,45 +57,51 @@ public sealed class RunStartRunner : IRunStartRunner
 
     /// <summary>Runs one git command and reports what it wrote.</summary>
     /// <param name="arguments">argv for git, one element per argument.</param>
-    public GitOutcome Git(params string[] arguments)
+    /// <param name="cancellationToken">Cancels the git child.</param>
+    public async Task<GitOutcome> GitAsync(IReadOnlyList<string> arguments, CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(arguments);
 
-        return _git.Run(_repositoryRoot, arguments);
+        return await _git.RunAsync(_repositoryRoot, arguments, cancellationToken).ConfigureAwait(false);
     }
 
     /// <summary>The repository root git reports for the current directory, or null outside a repository.</summary>
-    public string? DetectRepositoryRoot()
+    /// <param name="cancellationToken">Cancels the git child.</param>
+    public async Task<string?> DetectRepositoryRootAsync(CancellationToken cancellationToken = default)
     {
-        GitOutcome outcome = Git("rev-parse", "--show-toplevel");
+        GitOutcome outcome = await GitAsync(["rev-parse", "--show-toplevel"], cancellationToken).ConfigureAwait(false);
         return outcome.Succeeded && outcome.StandardOutput.Trim().Length > 0
             ? outcome.StandardOutput.Trim()
             : null;
     }
 
     /// <summary>The git status outcome for the current checkout.</summary>
-    public GitOutcome CheckoutStatus()
+    /// <param name="cancellationToken">Cancels the git child.</param>
+    public async Task<GitOutcome> CheckoutStatusAsync(CancellationToken cancellationToken = default)
     {
-        return Git("status", "--porcelain");
+        return await GitAsync(["status", "--porcelain"], cancellationToken).ConfigureAwait(false);
     }
 
     /// <summary>Whether the checkout has no uncommitted change, or null when the probe failed.</summary>
-    public bool? CheckoutIsClean()
+    /// <param name="cancellationToken">Cancels the git child.</param>
+    public async Task<bool?> CheckoutIsCleanAsync(CancellationToken cancellationToken = default)
     {
-        GitOutcome outcome = CheckoutStatus();
+        GitOutcome outcome = await CheckoutStatusAsync(cancellationToken).ConfigureAwait(false);
         return outcome.Succeeded ? outcome.StandardOutput.Trim().Length == 0 : null;
     }
 
     /// <summary>The git worktree list outcome for the current repository.</summary>
-    public GitOutcome WorktreeList()
+    /// <param name="cancellationToken">Cancels the git child.</param>
+    public async Task<GitOutcome> WorktreeListAsync(CancellationToken cancellationToken = default)
     {
-        return Git("worktree", "list", "--porcelain");
+        return await GitAsync(["worktree", "list", "--porcelain"], cancellationToken).ConfigureAwait(false);
     }
 
     /// <summary>Whether a second worktree is attached to this repository, or null when the probe failed.</summary>
-    public bool? AnotherWorktreeIsAttached()
+    /// <param name="cancellationToken">Cancels the git child.</param>
+    public async Task<bool?> AnotherWorktreeIsAttachedAsync(CancellationToken cancellationToken = default)
     {
-        GitOutcome outcome = WorktreeList();
+        GitOutcome outcome = await WorktreeListAsync(cancellationToken).ConfigureAwait(false);
         return outcome.Succeeded ? GitWorktreePorcelain.HasMultiple(outcome.StandardOutput) : null;
     }
 
@@ -106,9 +112,11 @@ public sealed class RunStartRunner : IRunStartRunner
     ///     A clone whose <c>origin/HEAD</c> was never set prints the ref's own name rather than a symbolic
     ///     target, and treating that as a branch would name a branch called <c>HEAD</c>.
     /// </remarks>
-    public string? OriginHeadSymbolicRef()
+    /// <param name="cancellationToken">Cancels the git child.</param>
+    public async Task<string?> OriginHeadSymbolicRefAsync(CancellationToken cancellationToken = default)
     {
-        GitOutcome outcome = Git("rev-parse", "--abbrev-ref", RunStartNaming.RemoteHead);
+        GitOutcome outcome = await GitAsync(
+            ["rev-parse", "--abbrev-ref", RunStartNaming.RemoteHead], cancellationToken).ConfigureAwait(false);
         if (!outcome.Succeeded)
             return null;
 
@@ -119,25 +127,35 @@ public sealed class RunStartRunner : IRunStartRunner
     }
 
     /// <summary>The commit a revision resolves to, or null when it does not resolve.</summary>
-    public string? ResolveRevision(string revision)
+    /// <param name="revision">The revision.</param>
+    /// <param name="cancellationToken">Cancels the git child.</param>
+    public async Task<string?> ResolveRevisionAsync(string revision, CancellationToken cancellationToken = default)
     {
-        GitOutcome outcome = Git("rev-parse", "--verify", "--quiet", revision);
+        GitOutcome outcome = await GitAsync(["rev-parse", "--verify", "--quiet", revision], cancellationToken).ConfigureAwait(false);
         return outcome.Succeeded && outcome.StandardOutput.Trim().Length > 0
             ? outcome.StandardOutput.Trim()
             : null;
     }
 
     /// <summary>Whether a local branch of that name exists.</summary>
-    public bool HasLocalBranch(string branch)
+    /// <param name="branch">The branch.</param>
+    /// <param name="cancellationToken">Cancels the git child.</param>
+    public async Task<bool> HasLocalBranchAsync(string branch, CancellationToken cancellationToken = default)
     {
-        return Git("rev-parse", "--verify", "--quiet", "refs/heads/" + branch).Succeeded;
+        GitOutcome outcome = await GitAsync(
+            ["rev-parse", "--verify", "--quiet", "refs/heads/" + branch], cancellationToken).ConfigureAwait(false);
+        return outcome.Succeeded;
     }
 
     /// <summary>Whether the remote has a branch of that name.</summary>
-    public bool HasRemoteBranch(string branch)
+    /// <param name="branch">The branch.</param>
+    /// <param name="cancellationToken">Cancels the git child.</param>
+    public async Task<bool> HasRemoteBranchAsync(string branch, CancellationToken cancellationToken = default)
     {
-        return Git("rev-parse", "--verify", "--quiet", "refs/remotes/" + RunStartNaming.Remote + "/" + branch)
-            .Succeeded;
+        GitOutcome outcome = await GitAsync(
+            ["rev-parse", "--verify", "--quiet", "refs/remotes/" + RunStartNaming.Remote + "/" + branch],
+            cancellationToken).ConfigureAwait(false);
+        return outcome.Succeeded;
     }
 
     /// <summary>
@@ -145,13 +163,14 @@ public sealed class RunStartRunner : IRunStartRunner
     ///     described at all.
     /// </summary>
     /// <param name="revision">The revision to describe.</param>
-    public string? Describe(string revision)
+    /// <param name="cancellationToken">Cancels the git child.</param>
+    public async Task<string?> DescribeAsync(string revision, CancellationToken cancellationToken = default)
     {
-        GitOutcome described = Git("describe", "--tags", "--always", revision);
+        GitOutcome described = await GitAsync(["describe", "--tags", "--always", revision], cancellationToken).ConfigureAwait(false);
         if (described.Succeeded && described.StandardOutput.Trim().Length > 0)
             return described.StandardOutput.Trim();
 
-        GitOutcome abbreviated = Git("rev-parse", "--short", revision);
+        GitOutcome abbreviated = await GitAsync(["rev-parse", "--short", revision], cancellationToken).ConfigureAwait(false);
         return abbreviated.Succeeded && abbreviated.StandardOutput.Trim().Length > 0
             ? abbreviated.StandardOutput.Trim()
             : null;
@@ -163,9 +182,11 @@ public sealed class RunStartRunner : IRunStartRunner
     /// </summary>
     /// <param name="left">The revision counted first, normally <c>HEAD</c>.</param>
     /// <param name="right">The revision counted second, normally the base ref.</param>
-    public (int? Ahead, int? Behind) Divergence(string left, string right)
+    /// <param name="cancellationToken">Cancels the git child.</param>
+    public async Task<(int? Ahead, int? Behind)> DivergenceAsync(string left, string right, CancellationToken cancellationToken = default)
     {
-        GitOutcome outcome = Git("rev-list", "--left-right", "--count", left + "..." + right);
+        GitOutcome outcome = await GitAsync(
+            ["rev-list", "--left-right", "--count", left + "..." + right], cancellationToken).ConfigureAwait(false);
         if (!outcome.Succeeded)
             return (null, null);
 
@@ -187,6 +208,7 @@ public sealed class RunStartRunner : IRunStartRunner
     /// </summary>
     /// <param name="baseRef">The ref the resumed branch started from.</param>
     /// <param name="tip">The resumed branch or its remote-tracking ref.</param>
+    /// <param name="cancellationToken">Cancels the git child.</param>
     /// <remarks>
     ///     One call rather than one per commit: a resume reads every task the branch finished, so a log per
     ///     commit would make resuming cost grow with the length of the run. Records are NUL-separated because
@@ -195,18 +217,20 @@ public sealed class RunStartRunner : IRunStartRunner
     ///     whatever finished it, not to this run. Oldest first, so the last task listed is where the run got
     ///     to and the operator reads the progress in the order it happened.
     /// </remarks>
-    public GitOutcome CommitMessages(string baseRef, string tip)
+    public async Task<GitOutcome> CommitMessagesAsync(string baseRef, string tip, CancellationToken cancellationToken = default)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(baseRef);
         ArgumentException.ThrowIfNullOrWhiteSpace(tip);
 
-        return Git("log", "--reverse", "-z", "--format=%H%n%B", baseRef + ".." + tip, "--");
+        return await GitAsync(
+            ["log", "--reverse", "-z", "--format=%H%n%B", baseRef + ".." + tip, "--"], cancellationToken).ConfigureAwait(false);
     }
 
     /// <summary>The address <c>origin</c> points at, or null when there is no such remote.</summary>
-    public string? OriginAddress()
+    /// <param name="cancellationToken">Cancels the git child.</param>
+    public async Task<string?> OriginAddressAsync(CancellationToken cancellationToken = default)
     {
-        GitOutcome outcome = Git("remote", "get-url", RunStartNaming.Remote);
+        GitOutcome outcome = await GitAsync(["remote", "get-url", RunStartNaming.Remote], cancellationToken).ConfigureAwait(false);
         return outcome.Succeeded && outcome.StandardOutput.Trim().Length > 0
             ? outcome.StandardOutput.Trim()
             : null;
@@ -226,9 +250,10 @@ public sealed class RunStartRunner : IRunStartRunner
     }
 
     /// <summary>Refreshes the remote-tracking refs, refusing to prompt.</summary>
-    public GitOutcome Fetch()
+    /// <param name="cancellationToken">Cancels the git child.</param>
+    public async Task<GitOutcome> FetchAsync(CancellationToken cancellationToken = default)
     {
-        return Git("fetch", RunStartNaming.Remote, "--prune");
+        return await GitAsync(["fetch", RunStartNaming.Remote, "--prune"], cancellationToken).ConfigureAwait(false);
     }
 
     /// <summary>
@@ -237,26 +262,28 @@ public sealed class RunStartRunner : IRunStartRunner
     /// </summary>
     /// <param name="branch">The branch to create.</param>
     /// <param name="startRef">The remote-tracking ref the branch starts at.</param>
-    public GitOutcome CreateBranchInPlace(string branch, string startRef)
+    /// <param name="cancellationToken">Cancels the git child.</param>
+    public async Task<GitOutcome> CreateBranchInPlaceAsync(string branch, string startRef, CancellationToken cancellationToken = default)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(branch);
         ArgumentException.ThrowIfNullOrWhiteSpace(startRef);
 
-        return Git("switch", "-c", branch, NoTrackOption, startRef);
+        return await GitAsync(["switch", "-c", branch, NoTrackOption, startRef], cancellationToken).ConfigureAwait(false);
     }
 
     /// <summary>Checks out an existing branch in the current checkout.</summary>
     /// <param name="branch">The branch to check out.</param>
-    public GitOutcome SwitchToBranch(string branch)
+    /// <param name="cancellationToken">Cancels the git child.</param>
+    public async Task<GitOutcome> SwitchToBranchAsync(string branch, CancellationToken cancellationToken = default)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(branch);
 
-        return Git("switch", branch);
+        return await GitAsync(["switch", branch], cancellationToken).ConfigureAwait(false);
     }
 
     /// <summary>
     ///     The worktree path a branch of that name is created at: inside <c>.agent_worktrees</c> under the
-    ///     repository root, which <see cref="EnsureWorktreeFolderExcluded" /> keeps out of git's status.
+    ///     repository root, which <see cref="EnsureWorktreeFolderExcludedAsync" /> keeps out of git's status.
     /// </summary>
     /// <param name="branch">The branch the worktree holds.</param>
     /// <param name="startedAt">When the run started; the folder name carries it in UTC.</param>
@@ -303,6 +330,7 @@ public sealed class RunStartRunner : IRunStartRunner
     ///     Excludes <see cref="AgentWorktreeFolder.Name" /> from git's status in the local exclude file, writing the
     ///     line only when no line already holds it.
     /// </summary>
+    /// <param name="cancellationToken">Cancels the git child.</param>
     /// <returns>The outcome: succeeded when the file already excludes the folder or now does; failed when git could
     ///     not name the file or the file could not be read or written.</returns>
     /// <remarks>
@@ -311,9 +339,10 @@ public sealed class RunStartRunner : IRunStartRunner
     ///     resolved against the repository root, where git ran. The file is local, so the exclusion never enters a
     ///     commit.
     /// </remarks>
-    public GitOutcome EnsureWorktreeFolderExcluded()
+    public async Task<GitOutcome> EnsureWorktreeFolderExcludedAsync(CancellationToken cancellationToken = default)
     {
-        GitOutcome located = Git("rev-parse", "--git-path", "info/exclude");
+        GitOutcome located = await GitAsync(
+            ["rev-parse", "--git-path", "info/exclude"], cancellationToken).ConfigureAwait(false);
         if (!located.Succeeded)
             return located;
 
@@ -398,13 +427,15 @@ public sealed class RunStartRunner : IRunStartRunner
     /// <param name="branch">The branch to create.</param>
     /// <param name="startRef">The remote-tracking ref the branch starts at.</param>
     /// <param name="worktreePath">The directory the worktree occupies.</param>
-    public GitOutcome CreateBranchInWorktree(string branch, string startRef, string worktreePath)
+    /// <param name="cancellationToken">Cancels the git child.</param>
+    public async Task<GitOutcome> CreateBranchInWorktreeAsync(
+        string branch, string startRef, string worktreePath, CancellationToken cancellationToken = default)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(branch);
         ArgumentException.ThrowIfNullOrWhiteSpace(startRef);
         ArgumentException.ThrowIfNullOrWhiteSpace(worktreePath);
 
-        return AddWorktree(worktreePath, ["-b", branch, NoTrackOption], startRef);
+        return await AddWorktreeAsync(worktreePath, ["-b", branch, NoTrackOption], startRef, cancellationToken).ConfigureAwait(false);
     }
 
     /// <summary>Checks an existing branch out in a worktree at <paramref name="worktreePath" />.</summary>
@@ -415,20 +446,24 @@ public sealed class RunStartRunner : IRunStartRunner
     ///     the branch does not yet exist locally. When null or when the branch already exists locally,
     ///     only the branch name is checked out.
     /// </param>
-    public GitOutcome AddWorktreeForBranch(string branch, string worktreePath, string? startRef = null)
+    /// <param name="cancellationToken">Cancels the git child.</param>
+    public async Task<GitOutcome> AddWorktreeForBranchAsync(
+        string branch, string worktreePath, string? startRef = null, CancellationToken cancellationToken = default)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(branch);
         ArgumentException.ThrowIfNullOrWhiteSpace(worktreePath);
 
-        if (!HasLocalBranch(branch) && !string.IsNullOrWhiteSpace(startRef))
+        if (!await HasLocalBranchAsync(branch, cancellationToken).ConfigureAwait(false)
+            && !string.IsNullOrWhiteSpace(startRef))
         {
-            return AddWorktree(worktreePath, ["-b", branch, TrackOption], startRef);
+            return await AddWorktreeAsync(worktreePath, ["-b", branch, TrackOption], startRef, cancellationToken).ConfigureAwait(false);
         }
 
-        return AddWorktree(worktreePath, [], branch);
+        return await AddWorktreeAsync(worktreePath, [], branch, cancellationToken).ConfigureAwait(false);
     }
 
-    private GitOutcome AddWorktree(string worktreePath, string[] branchOptions, string commitish)
+    private async Task<GitOutcome> AddWorktreeAsync(
+        string worktreePath, string[] branchOptions, string commitish, CancellationToken cancellationToken)
     {
         string? parent = Path.GetDirectoryName(worktreePath);
         if (!string.IsNullOrEmpty(parent))
@@ -439,7 +474,7 @@ public sealed class RunStartRunner : IRunStartRunner
         arguments.Add(worktreePath);
         arguments.Add(commitish);
 
-        return Git([.. arguments]);
+        return await GitAsync(arguments, cancellationToken).ConfigureAwait(false);
     }
 
     /// <summary>
