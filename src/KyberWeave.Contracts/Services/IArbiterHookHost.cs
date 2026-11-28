@@ -16,13 +16,15 @@ public interface IArbiterHookHost
     /// <param name="log">Receives diagnostics: stderr in production.</param>
     /// <param name="scope">The project hook or the user-level hook.</param>
     /// <param name="homeDirectory">The operator's home, or null for the user profile.</param>
+    /// <param name="cancellationToken">Cancels the invocation.</param>
     /// <returns>The process exit code.</returns>
-    int Run(
+    Task<int> RunAsync(
         string harness,
         string? caller,
         string stdin,
         TextWriter stdout,
         TextWriter log,
         HookScope scope = HookScope.Project,
-        string? homeDirectory = null);
+        string? homeDirectory = null,
+        CancellationToken cancellationToken = default);
 }

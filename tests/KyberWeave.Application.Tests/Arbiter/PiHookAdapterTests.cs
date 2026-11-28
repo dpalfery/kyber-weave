@@ -94,7 +94,7 @@ public sealed class PiHookAdapterTests
         ["subagent_type"] = target,
     };
 
-    private static (int Exit, string Stdout) Run(
+    private static async Task<(int Exit, string Stdout)> Run(
         string stdin, string? caller, ScriptedEngine engine)
     {
         PluginHookAdapter adapter = new("pi", "Agent", "subagent_type", "prompt", engine);
@@ -104,16 +104,16 @@ public sealed class PiHookAdapterTests
             () => "decision-test-1");
         using StringWriter stdout = new();
         using StringWriter log = new();
-        int exit = command.Run("pi", caller, stdin, stdout, log);
+        int exit = await command.RunAsync("pi", caller, stdin, stdout, log);
         return (exit, stdout.ToString());
     }
 
     [Fact]
-    public void Before_AgentEnvelope_ClassifiedBySubagentTypeAndPrompt()
+    public async Task Before_AgentEnvelope_ClassifiedBySubagentTypeAndPrompt()
     {
         const string body = "Implement the plan parser.";
         string prompt = "KYBER-ARBITER: true\nPLAN_FILE: docs/plans/x.md\nTASK: 12.1\n\n" + body;
-        (int exit, string stdout) = Run(
+        (int exit, string stdout) = await Run(
             Envelope("before", "Agent", AgentArgs("dev-medium", prompt)), "conductor", new ScriptedEngine());
 
         Assert.Equal(0, exit);
@@ -129,13 +129,13 @@ public sealed class PiHookAdapterTests
     }
 
     [Fact]
-    public void Before_Deny_WritesBlockWithReason()
+    public async Task Before_Deny_WritesBlockWithReason()
     {
         const string envelope =
             "STATUS: ARBITER_ESCALATION\nTRIGGER: delegate\nANSWER: adds-work (step 0)";
         ScriptedEngine engine = new() { PreResult = new HookOutcome(HookOutcomeKind.Deny, envelope) };
 
-        (int exit, string stdout) = Run(
+        (int exit, string stdout) = await Run(
             Envelope("before", "Agent", AgentArgs("dev-medium", "Implement the parser.")),
             "conductor",
             engine);
@@ -148,10 +148,10 @@ public sealed class PiHookAdapterTests
     }
 
     [Fact]
-    public void After_Allow_WritesAllow()
+    public async Task After_Allow_WritesAllow()
     {
         JsonObject args = AgentArgs("dev-medium", "Implement the parser.");
-        (int exit, string stdout) = Run(
+        (int exit, string stdout) = await Run(
             Envelope("after", "Agent", args, new JsonObject { ["output"] = "done" }),
             "conductor",
             new ScriptedEngine());
@@ -163,14 +163,14 @@ public sealed class PiHookAdapterTests
     }
 
     [Fact]
-    public void After_NonAllow_WritesBlockWithEnvelopeAsReason()
+    public async Task After_NonAllow_WritesBlockWithEnvelopeAsReason()
     {
         const string envelope =
             "STATUS: ARBITER_ESCALATION\nTRIGGER: delegate.returned\nANSWER: adds-work (step 0)";
         ScriptedEngine engine = new() { PostResult = new HookOutcome(HookOutcomeKind.PostBlock, envelope) };
         JsonObject args = AgentArgs("dev-medium", "Implement the parser.");
 
-        (int exit, string stdout) = Run(
+        (int exit, string stdout) = await Run(
             Envelope("after", "Agent", args, new JsonObject { ["output"] = "done" }),
             "conductor",
             engine);
@@ -182,13 +182,13 @@ public sealed class PiHookAdapterTests
     }
 
     [Fact]
-    public void After_Annotation_WritesBlockWithNoteAsReason()
+    public async Task After_Annotation_WritesBlockWithNoteAsReason()
     {
         const string note = "STATUS: ARBITER_ANNOTATION\nFINDING: correctness/null-plan-task";
         ScriptedEngine engine = new() { PostResult = new HookOutcome(HookOutcomeKind.PostAnnotation, note) };
         JsonObject args = AgentArgs("dev-medium", "Implement the parser.");
 
-        (int exit, string stdout) = Run(
+        (int exit, string stdout) = await Run(
             Envelope("after", "Agent", args, new JsonObject { ["output"] = "done" }),
             "code-reviewer",
             engine);
@@ -205,7 +205,7 @@ public sealed class PiHookAdapterTests
     [InlineData("")]
     [InlineData("{\"schema\":\"nope\",\"harness\":\"pi\",\"phase\":\"before\",\"tool\":\"Agent\"}")]
     [InlineData("{\"schema\":\"kyber-arbiter.plugin-event/v1\",\"harness\":\"pi\",\"phase\":\"middle\",\"tool\":\"Agent\"}")]
-    public void MalformedEnvelope_AllowsAndLogsWithHarnessToken(string stdin)
+    public async Task MalformedEnvelope_AllowsAndLogsWithHarnessToken(string stdin)
     {
         ScriptedEngine engine = new();
         PluginHookAdapter adapter = new("pi", "Agent", "subagent_type", "prompt", engine);
@@ -216,7 +216,7 @@ public sealed class PiHookAdapterTests
         using StringWriter stdout = new();
         using StringWriter log = new();
 
-        int exit = command.Run("pi", "conductor", stdin, stdout, log);
+        int exit = await command.RunAsync("pi", "conductor", stdin, stdout, log);
 
         // ADR 0072: an envelope the host cannot read allows, with the code and the harness in the log.
         Assert.Equal(0, exit);

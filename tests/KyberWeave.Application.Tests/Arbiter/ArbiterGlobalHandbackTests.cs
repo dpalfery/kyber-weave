@@ -56,11 +56,11 @@ public sealed class ArbiterGlobalHandbackTests : IDisposable
     }
 
     [Fact]
-    public void GlobalScope_WhenNoProjectHookCoversTheHandback_ClaimsAndEvaluatesIt()
+    public async Task GlobalScope_WhenNoProjectHookCoversTheHandback_ClaimsAndEvaluatesIt()
     {
         string payload = HandbackPayload();
 
-        HookRun run = _scenario.RunGlobal(payload);
+        HookRun run = await _scenario.RunGlobal(payload);
 
         Assert.Equal(0, run.Exit);
         Assert.True(_scenario.ClaimExists(ToolUseId, "handback"), $"The user-level hook must claim the hand-back. Stderr: {run.Stderr}");
@@ -68,7 +68,7 @@ public sealed class ArbiterGlobalHandbackTests : IDisposable
     }
 
     [Fact]
-    public void GlobalScope_WhenTheAgentFileRecordsTheHandbackAndClaimedIt_DefersToIt()
+    public async Task GlobalScope_WhenTheAgentFileRecordsTheHandbackAndClaimedIt_DefersToIt()
     {
         _scenario.WriteProjectFile(
             AgentFile,
@@ -78,7 +78,7 @@ public sealed class ArbiterGlobalHandbackTests : IDisposable
                 ("PreToolUse", HandbackMatcher)));
         _scenario.WriteClaim(ToolUseId, "handback", "project");
 
-        HookRun run = _scenario.RunGlobal(HandbackPayload());
+        HookRun run = await _scenario.RunGlobal(HandbackPayload());
 
         Assert.Equal(0, run.Exit);
         Assert.Contains(ArbiterGlobalHookScenario.DeferredLog, run.Stderr, StringComparison.Ordinal);

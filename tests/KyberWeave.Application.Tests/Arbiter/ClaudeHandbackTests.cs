@@ -72,7 +72,7 @@ public sealed class ClaudeHandbackTests
     private static string Fixture(string name) =>
         EmbeddedFixtureText.Read(typeof(ClaudeHandbackTests).Assembly, $"arbiter-hooks/claude/{name}");
 
-    private static (int Exit, string Stdout) Run(
+    private static async Task<(int Exit, string Stdout)> Run(
         string stdin, string? caller, ScriptedEngine engine)
     {
         HookCommand command = ArbiterTestServices.Command(
@@ -81,7 +81,7 @@ public sealed class ClaudeHandbackTests
             () => "decision-test-1");
         using StringWriter stdout = new();
         using StringWriter log = new();
-        int exit = command.Run("claude", caller, stdin, stdout, log);
+        int exit = await command.RunAsync("claude", caller, stdin, stdout, log);
         return (exit, stdout.ToString());
     }
 
@@ -93,12 +93,12 @@ public sealed class ClaudeHandbackTests
             "agent-9", agentId, StringComparison.Ordinal);
 
     [Fact]
-    public void Handback_PlainEngine_RecordsMessageAsPostDispatchOutput()
+    public async Task Handback_PlainEngine_RecordsMessageAsPostDispatchOutput()
     {
         string agentId = UniqueAgentId();
         ScriptedEngine engine = new();
 
-        (int exit, string stdout) = Run(HandbackFor(agentId), "dev-medium", engine);
+        (int exit, string stdout) = await Run(HandbackFor(agentId), "dev-medium", engine);
 
         Assert.Equal(0, exit);
         Assert.Equal(1, engine.PostCalls);
@@ -111,7 +111,7 @@ public sealed class ClaudeHandbackTests
     }
 
     [Fact]
-    public void Handback_NonAllowOutcome_AppendsEnvelopeAfterBlankLineViaCompleteUpdatedInput()
+    public async Task Handback_NonAllowOutcome_AppendsEnvelopeAfterBlankLineViaCompleteUpdatedInput()
     {
         const string envelope =
             "STATUS: ARBITER_ESCALATION\nTRIGGER: delegate.returned\nANSWER: adds-work (step 0)";
@@ -119,7 +119,7 @@ public sealed class ClaudeHandbackTests
         string agentId = UniqueAgentId();
         ScriptedEngine engine = new() { PostResult = new HookOutcome(HookOutcomeKind.PostBlock, envelope) };
 
-        (int exit, string stdout) = Run(HandbackFor(agentId), "dev-medium", engine);
+        (int exit, string stdout) = await Run(HandbackFor(agentId), "dev-medium", engine);
 
         Assert.Equal(0, exit);
         Assert.Equal(1, engine.PostCalls);
@@ -135,14 +135,14 @@ public sealed class ClaudeHandbackTests
     }
 
     [Fact]
-    public void Handback_DenyOutcome_IsNeverDenied()
+    public async Task Handback_DenyOutcome_IsNeverDenied()
     {
         const string envelope =
             "STATUS: ARBITER_ESCALATION\nTRIGGER: delegate.returned\nANSWER: adds-work (step 0)";
         string agentId = UniqueAgentId();
         ScriptedEngine engine = new() { PostResult = new HookOutcome(HookOutcomeKind.Deny, envelope) };
 
-        (int exit, string stdout) = Run(HandbackFor(agentId), "dev-medium", engine);
+        (int exit, string stdout) = await Run(HandbackFor(agentId), "dev-medium", engine);
 
         Assert.Equal(0, exit);
         using JsonDocument doc = JsonDocument.Parse(stdout);
@@ -153,14 +153,14 @@ public sealed class ClaudeHandbackTests
     }
 
     [Fact]
-    public void Handback_AnnotationOutcome_AppendsNoteAfterBlankLine()
+    public async Task Handback_AnnotationOutcome_AppendsNoteAfterBlankLine()
     {
         const string note = "STATUS: ARBITER_ANNOTATION\nFINDING: correctness/null-plan-task";
         const string message = "Implemented the plan parser with tests passing.";
         string agentId = UniqueAgentId();
         ScriptedEngine engine = new() { PostResult = new HookOutcome(HookOutcomeKind.PostAnnotation, note) };
 
-        (int exit, string stdout) = Run(HandbackFor(agentId), "dev-medium", engine);
+        (int exit, string stdout) = await Run(HandbackFor(agentId), "dev-medium", engine);
 
         Assert.Equal(0, exit);
         using JsonDocument doc = JsonDocument.Parse(stdout);
@@ -171,7 +171,7 @@ public sealed class ClaudeHandbackTests
     }
 
     [Fact]
-    public void Handback_SavedDispatch_IsJudgedThroughDecideBackgroundReturn()
+    public async Task Handback_SavedDispatch_IsJudgedThroughDecideBackgroundReturn()
     {
         const string message = "Implemented the plan parser with tests passing.";
         JoiningEngine engine = new();
@@ -182,7 +182,7 @@ public sealed class ClaudeHandbackTests
         using StringWriter stdout = new();
         using StringWriter log = new();
 
-        int exit = command.Run("claude", "dev-medium", HandbackFor("agent-joined"), stdout, log);
+        int exit = await command.RunAsync("claude", "dev-medium", HandbackFor("agent-joined"), stdout, log);
 
         Assert.Equal(0, exit);
         Assert.Equal(0, engine.PostCalls);
@@ -263,12 +263,12 @@ public sealed class ClaudeHandbackTests
     }
 
     [Fact]
-    public void Handback_WithoutJoin_IsRecordedUnpairedAndAllowed()
+    public async Task Handback_WithoutJoin_IsRecordedUnpairedAndAllowed()
     {
         string agentId = UniqueAgentId();
         ScriptedEngine engine = new();
 
-        (int exit, string stdout) = Run(HandbackFor(agentId), "dev-medium", engine);
+        (int exit, string stdout) = await Run(HandbackFor(agentId), "dev-medium", engine);
 
         Assert.Equal(0, exit);
         Assert.Equal(1, engine.PostCalls);
@@ -279,7 +279,7 @@ public sealed class ClaudeHandbackTests
     }
 
     [Fact]
-    public void Handback_IsClassifiedBeforeConfigLoad()
+    public async Task Handback_IsClassifiedBeforeConfigLoad()
     {
         int loads = 0;
         HookCommand command = ArbiterTestServices.Command(
@@ -289,7 +289,7 @@ public sealed class ClaudeHandbackTests
         using StringWriter stdout = new();
         using StringWriter log = new();
 
-        int exit = command.Run("claude", "dev-medium", HandbackFor(UniqueAgentId()), stdout, log);
+        int exit = await command.RunAsync("claude", "dev-medium", HandbackFor(UniqueAgentId()), stdout, log);
 
         Assert.Equal(0, exit);
         Assert.Equal(1, loads);

@@ -95,14 +95,15 @@ public sealed class HookCommand : IArbiterHookHost
     /// and write to the same project ledger. Each event is evaluated once: whichever hook claims the
     /// dispatch first (<see cref="IDispatchClaimStore"/>) decides it, and the other defers or allows.
     /// </remarks>
-    public int Run(
+    public async Task<int> RunAsync(
         string harness,
         string? caller,
         string stdin,
         TextWriter stdout,
         TextWriter log,
         HookScope scope = HookScope.Project,
-        string? homeDirectory = null)
+        string? homeDirectory = null,
+        CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(harness);
         ArgumentNullException.ThrowIfNull(stdin);
@@ -111,10 +112,10 @@ public sealed class HookCommand : IArbiterHookHost
 
         if (!_registry.TryGet(harness, out IHarnessHookAdapter? adapter) || adapter is null)
         {
-            log.WriteLine(
+            await log.WriteLineAsync(
                 $"Unknown harness '{harness}'. Known harnesses: " +
                 $"{string.Join(", ", _registry.Tokens.Order(StringComparer.Ordinal))}. " +
-                "Usage: kyber-weave-arbiter hook --harness <token> [--caller <agent>].");
+                "Usage: kyber-weave-arbiter hook --harness <token> [--caller <agent>].").ConfigureAwait(false);
             return 1;
         }
 
@@ -130,13 +131,14 @@ public sealed class HookCommand : IArbiterHookHost
             string? unconfigured = adapter.AnswerWithoutConfig(payload, caller);
             if (unconfigured is not null)
             {
-                stdout.Write(unconfigured);
+                await stdout.WriteAsync(unconfigured).ConfigureAwait(false);
                 return 0;
             }
 
             string home = _hostConfig.ResolveHomeDirectory(homeDirectory);
             HookEvent hookEvent = HarnessHookEventReader.Read(adapter.HarnessToken, payload, caller);
-            HookRunContext? runContext = ResolveRunContext(hookEvent, home, log);
+            HookRunContext? runContext = await ResolveRunContextAsync(
+                hookEvent, home, log, cancellationToken).ConfigureAwait(false);
             string repoRoot = runContext?.RepositoryRoot ?? FallbackRoot(hookEvent);
             KyberWeaveConfig config;
             HookScope evaluationScope = scope;
@@ -145,7 +147,9 @@ public sealed class HookCommand : IArbiterHookHost
                 KyberWeaveConfig? projectConfig = _hostConfig.LoadProject(repoRoot);
                 if (projectConfig is { Arbiter.ExplicitlyEnabled: false })
                 {
-                    log.WriteLine("Arbiter global scope: deferred-to-project (project opts out: arbiter.enabled: false).");
+                    await log.WriteLineAsync(
+                        "Arbiter global scope: deferred-to-project (project opts out: arbiter.enabled: false).")
+                        .ConfigureAwait(false);
                     // The Arbiter is off, but prompt insertion is not an Arbiter action: the dispatch still gets its
                     // prompt. A project hook may insert it too; a dispatch already carrying the prompt is left alone.
                     return AllowWithoutEvaluation(
@@ -169,9 +173,10 @@ public sealed class HookCommand : IArbiterHookHost
                         {
                             // A present file that cannot be read is not "no hook", and it must not become a bare
                             // allow: the worker would keep only the header lines. Log the failure and insert.
-                            log.WriteLine(
+                            await log.WriteLineAsync(
                                 $"Arbiter global scope: project {adapter.HarnessToken} hook file could not be read " +
-                                $"({OneLine(ex.Message)}); inserting the task prompt without evaluation.");
+                                $"({OneLine(ex.Message)}); inserting the task prompt without evaluation.")
+                                .ConfigureAwait(false);
                             return AllowWithoutEvaluation(
                                 adapter,
                                 payload,
@@ -182,18 +187,18 @@ public sealed class HookCommand : IArbiterHookHost
 
                         if (projectHookCovers)
                         {
-                            log.WriteLine(
+                            await log.WriteLineAsync(
                                 $"Arbiter global scope: deferred-to-project ({adapter.HarnessToken}: no per-dispatch probe; " +
-                                $"the project's own {adapter.HarnessToken} hooks decide).");
+                                $"the project's own {adapter.HarnessToken} hooks decide).").ConfigureAwait(false);
                             return WriteDisabledAllow(adapter, payload, stdout);
                         }
 
                         // The project has no hook of its own for this harness, so deferring would leave the worker
                         // with the header lines only. Prompt insertion is not an Arbiter action: the user-level hook
                         // inserts the prompt here without evaluating the project's rules (ADR 0070 §5).
-                        log.WriteLine(
+                        await log.WriteLineAsync(
                             $"Arbiter global scope: no project {adapter.HarnessToken} hook; " +
-                            "inserting the task prompt without evaluation.");
+                            "inserting the task prompt without evaluation.").ConfigureAwait(false);
                         return AllowWithoutEvaluation(
                             adapter,
                             payload,
@@ -202,18 +207,19 @@ public sealed class HookCommand : IArbiterHookHost
                             stdout);
                     }
 
-                    if (!TakeUserLevelDispatch(adapter, payload, repoRoot, home, log))
+                    if (!await TakeUserLevelDispatchAsync(
+                            adapter, payload, repoRoot, home, log, cancellationToken).ConfigureAwait(false))
                     {
                         return WriteDisabledAllow(adapter, payload, stdout);
                     }
 
-                    log.WriteLine(EvaluatingUnderProjectLine);
+                    await log.WriteLineAsync(EvaluatingUnderProjectLine).ConfigureAwait(false);
                     config = projectConfig;
                     evaluationScope = HookScope.Project;
                 }
                 else
                 {
-                    log.WriteLine("Arbiter global scope: evaluating with the user config.");
+                    await log.WriteLineAsync("Arbiter global scope: evaluating with the user config.").ConfigureAwait(false);
                     config = _hostConfig.Load(repoRoot, scope, home);
                 }
             }
@@ -224,7 +230,8 @@ public sealed class HookCommand : IArbiterHookHost
 
             if (!config.Arbiter.Enabled)
             {
-                log.WriteLine("Arbiter is disabled (arbiter.enabled: false): allowing without evaluation.");
+                await log.WriteLineAsync(
+                    "Arbiter is disabled (arbiter.enabled: false): allowing without evaluation.").ConfigureAwait(false);
                 // Prompt insertion is not an Arbiter action: a host with the Arbiter off still expands the dispatch.
                 // A harness whose protocol has no silent answer (Antigravity writes {} for every event) still
                 // receives its allow document here.
@@ -251,10 +258,11 @@ public sealed class HookCommand : IArbiterHookHost
                 adapter.ModelOverride,
                 BuildDispatchPrompt: PromptExpander(runContext, repoRoot, config, log),
                 RunContext: runContext);
-            string output = adapter.Handle(payload, stdin, caller, config, context);
+            string output = await adapter.HandleAsync(payload, stdin, caller, config, context, cancellationToken)
+                .ConfigureAwait(false);
             if (output.Length > 0)
             {
-                stdout.Write(output);
+                await stdout.WriteAsync(output).ConfigureAwait(false);
             }
 
             return 0;
@@ -264,9 +272,9 @@ public sealed class HookCommand : IArbiterHookHost
             // Hook entry point: fail open so the dispatch continues, and log the failure.
             // Fail open: the host could not reach a decision, so the dispatch continues and the
             // failure is logged with its code. Only a positive finding may block (ADR 0072).
-            log.WriteLine(
+            await log.WriteLineAsync(
                 $"{FailClosedCode}: hook host failed ({_newDecisionId()}) on '{harness}': {OneLine(ex.Message)}. " +
-                "The dispatch continues without an Arbiter decision.");
+                "The dispatch continues without an Arbiter decision.").ConfigureAwait(false);
             return WriteDisabledAllow(adapter, payload, stdout);
         }
     }
@@ -306,7 +314,11 @@ public sealed class HookCommand : IArbiterHookHost
     /// Resolves the invocation's run context once. A resolver that cannot answer, or one that is not installed, leaves
     /// the host reading the payload's own directory, which is the behaviour of a harness with no run record.
     /// </summary>
-    private HookRunContext? ResolveRunContext(HookEvent hookEvent, string home, TextWriter log)
+    private async Task<HookRunContext?> ResolveRunContextAsync(
+        HookEvent hookEvent,
+        string home,
+        TextWriter log,
+        CancellationToken cancellationToken)
     {
         if (_runContexts is null)
         {
@@ -315,22 +327,24 @@ public sealed class HookCommand : IArbiterHookHost
 
         try
         {
-            HookRunContext context = _runContexts.Resolve(new HookRunContextRequest(
-                hookEvent.Harness,
-                hookEvent.WorkspaceRoot,
-                hookEvent.Cwd,
-                _environment.CurrentDirectory,
-                AgentWorktree: null,
-                hookEvent.Prompt,
-                home,
-                WorkerGuardRules.LeadingChangeDirectory(CommandOf(hookEvent.Arguments), home)));
+            HookRunContext context = await _runContexts.ResolveAsync(
+                new HookRunContextRequest(
+                    hookEvent.Harness,
+                    hookEvent.WorkspaceRoot,
+                    hookEvent.Cwd,
+                    _environment.CurrentDirectory,
+                    AgentWorktree: null,
+                    hookEvent.Prompt,
+                    home,
+                    WorkerGuardRules.LeadingChangeDirectory(CommandOf(hookEvent.Arguments), home)),
+                cancellationToken).ConfigureAwait(false);
             if (context.Source == HookRunContextSource.Ambiguous)
             {
                 // Several runs are live and nothing chose one: say so, because every guard now reads the canonical
                 // checkout and no run's plan, and the operator needs to see why a call was judged without one.
                 foreach (string note in context.Notes.Where(note => note.StartsWith("the run is ambiguous", StringComparison.Ordinal)))
                 {
-                    log.WriteLine($"Arbiter guard: {OneLine(note)}");
+                    await log.WriteLineAsync($"Arbiter guard: {OneLine(note)}").ConfigureAwait(false);
                 }
             }
 
@@ -338,9 +352,9 @@ public sealed class HookCommand : IArbiterHookHost
         }
         catch (Exception ex) when (ex is not OutOfMemoryException && ex is not OperationCanceledException)
         {
-            log.WriteLine(
+            await log.WriteLineAsync(
                 $"{FailClosedCode}: the run context could not be resolved ({OneLine(ex.Message)}); " +
-                $"reading paths from '{FallbackRoot(hookEvent)}'.");
+                $"reading paths from '{FallbackRoot(hookEvent)}'.").ConfigureAwait(false);
             return null;
         }
     }
@@ -358,12 +372,13 @@ public sealed class HookCommand : IArbiterHookHost
     /// Arbiter. Returns false when the dispatch is covered: a project hook has claimed it, or one may
     /// still claim it and the claim window closed on it. Logs the reason either way.
     /// </summary>
-    private bool TakeUserLevelDispatch(
+    private async Task<bool> TakeUserLevelDispatchAsync(
         IHarnessHookAdapter adapter,
         JsonElement payload,
         string repoRoot,
         string home,
-        TextWriter log)
+        TextWriter log,
+        CancellationToken cancellationToken)
     {
         HookCoverageQuery? query = adapter.CoverageQuery(payload);
         IReadOnlyList<string>? candidates = query is null
@@ -382,7 +397,9 @@ public sealed class HookCommand : IArbiterHookHost
             ClaimResult taken = TryClaimOrReport(repoRoot, claim, DispatchClaimOwners.Global, log);
             if (taken == ClaimResult.Held)
             {
-                log.WriteLine($"Arbiter global scope: deferred-to-project (claimed by {OwnerOf(repoRoot, claim, log)}).");
+                await log.WriteLineAsync(
+                    $"Arbiter global scope: deferred-to-project (claimed by {OwnerOf(repoRoot, claim, log)}).")
+                    .ConfigureAwait(false);
                 return false;
             }
 
@@ -394,27 +411,33 @@ public sealed class HookCommand : IArbiterHookHost
         // evaluates: at worst a project hook decides it too.
         if (claim is null)
         {
-            log.WriteLine(
-                $"Arbiter global scope: no tool use id to coordinate on; evaluating although project hooks may cover it: {string.Join(", ", candidates)}.");
+            await log.WriteLineAsync(
+                $"Arbiter global scope: no tool use id to coordinate on; evaluating although project hooks may cover it: {string.Join(", ", candidates)}.")
+                .ConfigureAwait(false);
             return true;
         }
 
         // A project hook that can fire will claim within the window; a claim means it did.
-        if (_claims.WaitForClaim(repoRoot, claim))
+        if (await _claims.WaitForClaimAsync(repoRoot, claim, cancellationToken).ConfigureAwait(false))
         {
-            log.WriteLine(
-                $"Arbiter global scope: deferred-to-project (claimed by {OwnerOf(repoRoot, claim, log)}; project hooks that can fire: {string.Join(", ", candidates)}).");
+            await log.WriteLineAsync(
+                $"Arbiter global scope: deferred-to-project (claimed by {OwnerOf(repoRoot, claim, log)}; project hooks that can fire: {string.Join(", ", candidates)}).")
+                .ConfigureAwait(false);
             return false;
         }
 
         if (TryClaimOrReport(repoRoot, claim, DispatchClaimOwners.Global, log) == ClaimResult.Held)
         {
             // A project hook claimed it after the window closed: the same deferral.
-            log.WriteLine($"Arbiter global scope: deferred-to-project (claimed by {OwnerOf(repoRoot, claim, log)}).");
+            await log.WriteLineAsync(
+                $"Arbiter global scope: deferred-to-project (claimed by {OwnerOf(repoRoot, claim, log)}).")
+                .ConfigureAwait(false);
             return false;
         }
 
-        log.WriteLine($"Arbiter global scope: candidate hooks did not fire: {string.Join(", ", candidates)}.");
+        await log.WriteLineAsync(
+            $"Arbiter global scope: candidate hooks did not fire: {string.Join(", ", candidates)}.")
+            .ConfigureAwait(false);
         return true;
     }
 

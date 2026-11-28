@@ -432,7 +432,7 @@ public sealed class DispatchPromptInsertionTests
     /// adapter that actually inserts the prompt, including the aliases no adapter serves.
     /// </summary>
     [Fact]
-    public void EveryRecordedRewriteHarnessIsServedByAnAdapterThatInsertsThePrompt()
+    public async Task EveryRecordedRewriteHarnessIsServedByAnAdapterThatInsertsThePrompt()
     {
         HarnessAdapterRegistry registry = ArbiterTestServices.Registry(new RecordingEngine());
         string expected = TaskPrompt + "\n\nImplement the plan parser.";
@@ -443,7 +443,7 @@ public sealed class DispatchPromptInsertionTests
                 registry.TryGet(token, out IHarnessHookAdapter? adapter),
                 $"Harness '{token}' is recorded as rewriting the dispatch, but no adapter serves it.");
             string payload = Payload(token, TaskDispatch);
-            string stdout = adapter!.Handle(json(payload), payload, "conductor", EnabledConfig(), Context(new ScriptedPrompts()));
+            string stdout = await adapter!.HandleAsync(json(payload), payload, "conductor", EnabledConfig(), Context(new ScriptedPrompts()));
 
             Assert.Equal(expected, TryInsertedPrompt(token, stdout));
         }
@@ -473,7 +473,7 @@ public sealed class DispatchPromptInsertionTests
     }
 
     [Fact]
-    public void EveryServedHarnessEitherRewritesTheDispatchOrTakesThePromptFile()
+    public async Task EveryServedHarnessEitherRewritesTheDispatchOrTakesThePromptFile()
     {
         HarnessAdapterRegistry registry = ArbiterTestServices.Registry(new RecordingEngine());
         string expected = TaskPrompt + "\n\nImplement the plan parser.";
@@ -482,7 +482,7 @@ public sealed class DispatchPromptInsertionTests
         {
             Assert.True(registry.TryGet(token, out IHarnessHookAdapter? adapter), $"No adapter for '{token}'.");
             string payload = Payload(token, TaskDispatch);
-            string stdout = adapter!.Handle(json(payload), payload, "conductor", EnabledConfig(), Context(new ScriptedPrompts()));
+            string stdout = await adapter!.HandleAsync(json(payload), payload, "conductor", EnabledConfig(), Context(new ScriptedPrompts()));
             string? inserted = stdout.Length == 0 ? null : TryInsertedPrompt(token, stdout);
 
             bool rewrites = DispatchPromptInsertion.CanRewriteDispatch(token);
@@ -496,25 +496,25 @@ public sealed class DispatchPromptInsertionTests
 
     [Theory]
     [MemberData(nameof(RewriteHarnesses))]
-    public void EachRewriteHarnessCarriesTheFullPromptInTheFieldItDocuments(string harness)
+    public async Task EachRewriteHarnessCarriesTheFullPromptInTheFieldItDocuments(string harness)
     {
         RecordingEngine engine = new();
         IHarnessHookAdapter adapter = Adapter(engine, harness);
         string payload = Payload(harness, TaskDispatch);
 
-        string stdout = adapter.Handle(json(payload), payload, "conductor", EnabledConfig(), Context(new ScriptedPrompts()));
+        string stdout = await adapter.HandleAsync(json(payload), payload, "conductor", EnabledConfig(), Context(new ScriptedPrompts()));
 
         Assert.Equal(TaskPrompt + "\n\nImplement the plan parser.", InsertedPrompt(harness, stdout));
     }
 
     [Fact]
-    public void ARoleDispatchWithNoHeadersGetsItsRoleSkillsInserted()
+    public async Task ARoleDispatchWithNoHeadersGetsItsRoleSkillsInserted()
     {
         ScriptedPrompts prompts = new() { Prompt = RolePrompt };
         IHarnessHookAdapter adapter = Adapter(new RecordingEngine(), ClaudeHookAdapter.Token);
         string payload = Payload("claude", RoleDispatch).Replace("csharp-dev", "architect", StringComparison.Ordinal);
 
-        string stdout = adapter.Handle(json(payload), payload, "conductor", EnabledConfig(), Context(prompts));
+        string stdout = await adapter.HandleAsync(json(payload), payload, "conductor", EnabledConfig(), Context(prompts));
 
         Assert.Equal(RolePrompt + "\n\n" + RoleDispatch, InsertedPrompt("claude", stdout));
         TaskPromptRequest request = Assert.Single(prompts.Requests);
@@ -586,7 +586,7 @@ public sealed class DispatchPromptInsertionTests
 
     [Theory]
     [MemberData(nameof(RewriteHarnesses))]
-    public void TheTargetReachesThePromptQueryOnEveryRewritingHarness(string harness)
+    public async Task TheTargetReachesThePromptQueryOnEveryRewritingHarness(string harness)
     {
         ScriptedPrompts prompts = new() { Prompt = RolePrompt };
         IHarnessHookAdapter adapter = Adapter(new RecordingEngine(), harness);
@@ -595,20 +595,20 @@ public sealed class DispatchPromptInsertionTests
         string dispatch = harness == "antigravity" ? "KYBER-ARBITER: true\n\n" + RoleDispatch : RoleDispatch;
         string payload = Payload(harness, dispatch);
 
-        string stdout = adapter.Handle(json(payload), payload, "conductor", DisabledConfig(), Context(prompts));
+        string stdout = await adapter.HandleAsync(json(payload), payload, "conductor", DisabledConfig(), Context(prompts));
 
         Assert.Equal(RolePrompt + "\n\n" + dispatch, InsertedPrompt(harness, stdout));
         Assert.Equal("csharp-dev", Assert.Single(prompts.Requests).RoleAgent);
     }
 
     [Fact]
-    public void ATaskDispatchStillExpandsAsBefore()
+    public async Task ATaskDispatchStillExpandsAsBefore()
     {
         ScriptedPrompts prompts = new();
         IHarnessHookAdapter adapter = Adapter(new RecordingEngine(), ClaudeHookAdapter.Token);
         string payload = Payload("claude", TaskDispatch);
 
-        string stdout = adapter.Handle(json(payload), payload, "conductor", EnabledConfig(), Context(prompts));
+        string stdout = await adapter.HandleAsync(json(payload), payload, "conductor", EnabledConfig(), Context(prompts));
 
         Assert.Equal(TaskPrompt + "\n\nImplement the plan parser.", InsertedPrompt("claude", stdout));
         TaskPromptRequest request = Assert.Single(prompts.Requests);
@@ -625,7 +625,7 @@ public sealed class DispatchPromptInsertionTests
     [Theory]
     [InlineData("factory")]
     [InlineData("devin")]
-    public void ARuleDenialOutranksAPromptThatCannotBeBuilt(string harness)
+    public async Task ARuleDenialOutranksAPromptThatCannotBeBuilt(string harness)
     {
         RecordingEngine engine = new()
         {
@@ -635,7 +635,7 @@ public sealed class DispatchPromptInsertionTests
         IHarnessHookAdapter adapter = Adapter(engine, harness);
         string payload = Payload(harness, TaskDispatch);
 
-        string stdout = adapter.Handle(json(payload), payload, "conductor", EnabledConfig(), Context(prompts));
+        string stdout = await adapter.HandleAsync(json(payload), payload, "conductor", EnabledConfig(), Context(prompts));
 
         using JsonDocument document = JsonDocument.Parse(stdout);
         string reason = harness == "devin"
@@ -664,9 +664,9 @@ public sealed class DispatchPromptInsertionTests
     /// the allowed dispatch must still reach the worker.
     /// </summary>
     [Fact]
-    public void AModelWriteOnTheAllowPathKeepsTheInsertedPrompt()
+    public async Task AModelWriteOnTheAllowPathKeepsTheInsertedPrompt()
     {
-        (int exit, string stdout) = Run(
+        (int exit, string stdout) = await Run(
             Host(new ModelAskingEngine(), EnabledConfig(), new ScriptedPrompts()),
             ClaudeHookAdapter.Token,
             Payload("claude", TaskDispatch));
@@ -710,7 +710,7 @@ public sealed class DispatchPromptInsertionTests
     [InlineData("devin", HookOutcomeKind.AllowWithNote)]
     [InlineData("devin", HookOutcomeKind.AllowWithRewrite)]
     [InlineData("devin", HookOutcomeKind.PassThrough)]
-    public void EveryAllowPathDeliversTheInsertedPrompt(string harness, HookOutcomeKind kind)
+    public async Task EveryAllowPathDeliversTheInsertedPrompt(string harness, HookOutcomeKind kind)
     {
         RecordingEngine engine = new()
         {
@@ -719,13 +719,13 @@ public sealed class DispatchPromptInsertionTests
         IHarnessHookAdapter adapter = Adapter(engine, harness);
         string payload = Payload(harness, TaskDispatch);
 
-        string stdout = adapter.Handle(json(payload), payload, "conductor", EnabledConfig(), Context(new ScriptedPrompts()));
+        string stdout = await adapter.HandleAsync(json(payload), payload, "conductor", EnabledConfig(), Context(new ScriptedPrompts()));
 
         Assert.Equal(TaskPrompt + "\n\nImplement the plan parser.", InsertedPrompt(harness, stdout));
     }
 
     [Fact]
-    public void ARetrysFailureReportAndCountersSurviveIntoThePromptAndTheWorker()
+    public async Task ARetrysFailureReportAndCountersSurviveIntoThePromptAndTheWorker()
     {
         const string dispatch =
             "KYBER-ARBITER: true\nPLAN_FILE: docs/plans/plan.md\nTASK: T3\nFAILED_ATTEMPTS: 2\nPRIOR_RESULTS: results.md\n\n" +
@@ -733,7 +733,7 @@ public sealed class DispatchPromptInsertionTests
         ScriptedPrompts prompts = new();
         IHarnessHookAdapter adapter = Adapter(new RecordingEngine(), ClaudeHookAdapter.Token);
 
-        string stdout = adapter.Handle(json(Payload("claude", dispatch)), Payload("claude", dispatch), "conductor",
+        string stdout = await adapter.HandleAsync(json(Payload("claude", dispatch)), Payload("claude", dispatch), "conductor",
             EnabledConfig(), Context(prompts));
 
         TaskPromptRequest request = Assert.Single(prompts.Requests);
@@ -748,13 +748,13 @@ public sealed class DispatchPromptInsertionTests
     }
 
     [Fact]
-    public void ADispatchWithATechnologyAndNoTaskGetsThatTechnologysParts()
+    public async Task ADispatchWithATechnologyAndNoTaskGetsThatTechnologysParts()
     {
         const string dispatch = "TECHNOLOGY: csharp\n\nResearch the caching options for the new endpoint.";
         ScriptedPrompts prompts = new();
         IHarnessHookAdapter adapter = Adapter(new RecordingEngine(), ClaudeHookAdapter.Token);
 
-        string stdout = adapter.Handle(json(Payload("claude", dispatch)), Payload("claude", dispatch), "conductor",
+        string stdout = await adapter.HandleAsync(json(Payload("claude", dispatch)), Payload("claude", dispatch), "conductor",
             EnabledConfig(), Context(prompts));
 
         TaskPromptRequest request = Assert.Single(prompts.Requests);
@@ -764,14 +764,14 @@ public sealed class DispatchPromptInsertionTests
     }
 
     [Fact]
-    public void AnExpandedPromptIsNotExpandedASecondTime()
+    public async Task AnExpandedPromptIsNotExpandedASecondTime()
     {
         ScriptedPrompts prompts = new();
         RecordingEngine engine = new();
         IHarnessHookAdapter adapter = Adapter(engine, ClaudeHookAdapter.Token);
         string payload = Payload("claude", TaskPrompt);
 
-        string stdout = adapter.Handle(json(payload), payload, "conductor", DisabledConfig(), Context(prompts));
+        string stdout = await adapter.HandleAsync(json(payload), payload, "conductor", DisabledConfig(), Context(prompts));
 
         // Nothing is asked of the prompt service, and a document the adapter still writes carries the prompt as it
         // arrived rather than a second copy of it.
@@ -803,27 +803,27 @@ public sealed class DispatchPromptInsertionTests
             runContexts);
     }
 
-    private static (int Exit, string Stdout) Run(HookCommand command, string harness, string payload)
+    private static async Task<(int Exit, string Stdout)> Run(HookCommand command, string harness, string payload)
     {
         using StringWriter stdout = new();
         using StringWriter log = new();
-        int exit = command.Run(harness, "conductor", payload, stdout, log);
+        int exit = await command.RunAsync(harness, "conductor", payload, stdout, log);
         return (exit, stdout.ToString());
     }
 
-    private static (int Exit, string Stdout) RunGlobal(HookCommand command, string harness, string payload)
+    private static async Task<(int Exit, string Stdout)> RunGlobal(HookCommand command, string harness, string payload)
     {
         using StringWriter stdout = new();
         using StringWriter log = new();
-        int exit = command.Run(harness, "conductor", payload, stdout, log, HookScope.Global, "/home/test");
+        int exit = await command.RunAsync(harness, "conductor", payload, stdout, log, HookScope.Global, "/home/test");
         return (exit, stdout.ToString());
     }
 
     [Fact]
-    public void WithTheArbiterOffTheHostStillInsertsThePrompt()
+    public async Task WithTheArbiterOffTheHostStillInsertsThePrompt()
     {
         ScriptedPrompts prompts = new();
-        (int exit, string stdout) = Run(
+        (int exit, string stdout) = await Run(
             Host(new RecordingEngine(), DisabledConfig(), prompts), ClaudeHookAdapter.Token, Payload("claude", TaskDispatch));
 
         Assert.Equal(0, exit);
@@ -837,12 +837,12 @@ public sealed class DispatchPromptInsertionTests
     /// worker dispatch is refused for a task file that exists only there.
     /// </summary>
     [Fact]
-    public void ADispatchForAPlanOnlyTheRunWorktreeHolds_BuildsThePromptAgainstThatWorktree()
+    public async Task ADispatchForAPlanOnlyTheRunWorktreeHolds_BuildsThePromptAgainstThatWorktree()
     {
         const string worktree = "/repo.worktrees/run";
         ScriptedPrompts prompts = new();
 
-        (int exit, string stdout) = Run(
+        (int exit, string stdout) = await Run(
             Host(new RecordingEngine(), DisabledConfig(), prompts, new FixedRunContexts(worktree)),
             "copilot-cli",
             Payload("copilot-cli", TaskDispatch));
@@ -861,7 +861,7 @@ public sealed class DispatchPromptInsertionTests
     /// the repository's own — rather than the user config, which declares no technology gates.
     /// </summary>
     [Fact]
-    public void AGlobalDispatchReadsTheHostFactsGatesFromTheRepositoryConfigNotTheUserConfig()
+    public async Task AGlobalDispatchReadsTheHostFactsGatesFromTheRepositoryConfigNotTheUserConfig()
     {
         const string technology = "data-access-layer";
         KyberWeaveConfig repository = KyberWeaveConfigAssembler.FromYaml($"""
@@ -877,7 +877,7 @@ public sealed class DispatchPromptInsertionTests
         string dispatch =
             $"KYBER-ARBITER: true\nPLAN_FILE: docs/plans/plan.md\nTASK: T1\nTECHNOLOGY: {technology}\n\nImplement the repository.";
 
-        (int exit, string stdout) = RunGlobal(
+        (int exit, string stdout) = await RunGlobal(
             Host(
                 new RecordingEngine(),
                 repository,
@@ -897,12 +897,12 @@ public sealed class DispatchPromptInsertionTests
     /// worktree the dispatch names rather than guessing.
     /// </summary>
     [Fact]
-    public void ThePlanResolutionIsAskedWithTheDispatchedPlanAndBody()
+    public async Task ThePlanResolutionIsAskedWithTheDispatchedPlanAndBody()
     {
         RecordingRunContexts runContexts = new();
         string dispatch = $"KYBER-ARBITER: true\nPLAN_FILE: docs/plans/plan.md\nTASK: T3\n\nRun worktree: /repo.worktrees/run";
 
-        _ = Run(
+        _ = await Run(
             Host(new RecordingEngine(), DisabledConfig(), new ScriptedPrompts(), runContexts),
             "copilot-cli",
             Payload("copilot-cli", dispatch));
@@ -918,11 +918,11 @@ public sealed class DispatchPromptInsertionTests
     /// the repository the dispatch was evaluated in.
     /// </summary>
     [Fact]
-    public void ADispatchForAPlanTheHookCheckoutHolds_BuildsThePromptAgainstTheHookCheckout()
+    public async Task ADispatchForAPlanTheHookCheckoutHolds_BuildsThePromptAgainstTheHookCheckout()
     {
         ScriptedPrompts prompts = new();
 
-        _ = Run(
+        _ = await Run(
             Host(new RecordingEngine(), DisabledConfig(), prompts, new FixedRunContexts("/repo")),
             "copilot-cli",
             Payload("copilot-cli", TaskDispatch));
@@ -931,12 +931,12 @@ public sealed class DispatchPromptInsertionTests
     }
 
     [Fact]
-    public void WithTheArbiterOnTheRulesJudgeTheShortDispatchBeforeThePromptIsInserted()
+    public async Task WithTheArbiterOnTheRulesJudgeTheShortDispatchBeforeThePromptIsInserted()
     {
         RecordingEngine engine = new();
         ScriptedPrompts prompts = new();
 
-        (int exit, string stdout) = Run(
+        (int exit, string stdout) = await Run(
             Host(engine, EnabledConfig(), prompts), ClaudeHookAdapter.Token, Payload("claude", TaskDispatch));
 
         Assert.Equal(0, exit);
@@ -949,14 +949,14 @@ public sealed class DispatchPromptInsertionTests
     /// the dispatch continues unexpanded and the log names the path tried. Only a positive finding stops it.
     /// </summary>
     [Fact]
-    public void AMissingTaskFileWarnsAndTheDispatchContinues()
+    public async Task AMissingTaskFileWarnsAndTheDispatchContinues()
     {
         const string refusal =
             "No prompt: the task file for docs/plans/plan.md is missing or does not match the plan; tried " +
             "'/repo/docs/plans/plan.tasks.yml'. Run 'kyber-weave docs tasks docs/plans/plan.md --write', then build the prompt again.";
         ScriptedPrompts prompts = new() { Refusal = refusal };
 
-        (int exit, string stdout) = Run(
+        (int exit, string stdout) = await Run(
             Host(new RecordingEngine(), DisabledConfig(), prompts), ClaudeHookAdapter.Token, Payload("claude", TaskDispatch));
 
         Assert.Equal(0, exit);
@@ -966,13 +966,13 @@ public sealed class DispatchPromptInsertionTests
 
     /// <summary>A positive finding about the dispatch still stops it, as the security and roster checks do.</summary>
     [Fact]
-    public void APositiveFindingStopsTheDispatchAndNamesTheRepairCommand()
+    public async Task APositiveFindingStopsTheDispatchAndNamesTheRepairCommand()
     {
         const string refusal =
             "No prompt: 'csharp-dev' is a removed technology developer. Dispatch dev-medium.";
         ScriptedPrompts prompts = new() { Refusal = refusal, RefusalKind = TaskPromptRefusalKind.Finding };
 
-        (int exit, string stdout) = Run(
+        (int exit, string stdout) = await Run(
             Host(new RecordingEngine(), DisabledConfig(), prompts), ClaudeHookAdapter.Token, Payload("claude", TaskDispatch));
 
         Assert.Equal(0, exit);
@@ -991,12 +991,12 @@ public sealed class DispatchPromptInsertionTests
     [InlineData("task: T3")]
     [InlineData("TASK: find usages of X")]
     [InlineData("STATUS: blocked")]
-    public void ADispatchThatIsNotATaskDispatchPassesThroughUntouched(string dispatch)
+    public async Task ADispatchThatIsNotATaskDispatchPassesThroughUntouched(string dispatch)
     {
         // The target is a role with no skills, so the role-only query the hook now makes is answered "not built".
         ScriptedPrompts prompts = new() { Refusal = "no skills for this role" };
 
-        (int exit, string stdout) = Run(
+        (int exit, string stdout) = await Run(
             Host(new RecordingEngine(), DisabledConfig(), prompts), ClaudeHookAdapter.Token, Payload("claude", dispatch));
 
         Assert.Equal(0, exit);
@@ -1008,13 +1008,13 @@ public sealed class DispatchPromptInsertionTests
     }
 
     [Fact]
-    public void ARetryFailureLineUnderTheHeadersSurvivesInsteadOfBeingReadAsAHeader()
+    public async Task ARetryFailureLineUnderTheHeadersSurvivesInsteadOfBeingReadAsAHeader()
     {
         const string dispatch =
             "TASK: T3\nPLAN_FILE: docs/plans/plan.md\nFAILED_ATTEMPTS: 2\nError: build failed\n\nFix the build.";
         ScriptedPrompts prompts = new();
 
-        (int exit, string stdout) = Run(
+        (int exit, string stdout) = await Run(
             Host(new RecordingEngine(), DisabledConfig(), prompts), ClaudeHookAdapter.Token, Payload("claude", dispatch));
 
         Assert.Equal(0, exit);

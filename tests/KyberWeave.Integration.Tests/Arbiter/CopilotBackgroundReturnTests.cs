@@ -51,11 +51,11 @@ public sealed class CopilotBackgroundReturnTests : IDisposable
     }
 
     [Fact]
-    public void ABackgroundStart_RecordsNoReturn()
+    public async Task ABackgroundStart_RecordsNoReturn()
     {
-        Run(Pre("dev-medium", "T1"));
+        await Run(Pre("dev-medium", "T1"));
 
-        string stdout = Run(BackgroundStart("dev-medium", "T1", BackendAgent));
+        string stdout = await Run(BackgroundStart("dev-medium", "T1", BackendAgent));
 
         Assert.Empty(stdout);
         Assert.Single(Ledger(), e => e.Phase == ArbiterLedgerPhases.Pre);
@@ -63,24 +63,24 @@ public sealed class CopilotBackgroundReturnTests : IDisposable
     }
 
     [Fact]
-    public void ASyncDispatchMovedToTheBackground_RecordsNoReturnUntilItsTurnEnds()
+    public async Task ASyncDispatchMovedToTheBackground_RecordsNoReturnUntilItsTurnEnds()
     {
-        Run(Pre("dev-medium", "T1"));
+        await Run(Pre("dev-medium", "T1"));
 
-        Run(MovedToBackground("dev-medium", "T1", BackendAgent));
+        await Run(MovedToBackground("dev-medium", "T1", BackendAgent));
         Assert.DoesNotContain(Ledger(), e => e.Phase == ArbiterLedgerPhases.Post);
 
-        Run(Stop(BackendAgent, "dev-medium", PassDigest));
+        await Run(Stop(BackendAgent, "dev-medium", PassDigest));
         Assert.Single(Ledger(), e => e.Phase == ArbiterLedgerPhases.Post);
     }
 
     [Fact]
-    public void TheEndOfABackgroundAgentsTurn_IsRecordedAsItsDispatchsReturn_AndTheReturnRulesRun()
+    public async Task TheEndOfABackgroundAgentsTurn_IsRecordedAsItsDispatchsReturn_AndTheReturnRulesRun()
     {
-        Run(Pre("dev-medium", "T1"));
-        Run(BackgroundStart("dev-medium", "T1", BackendAgent));
+        await Run(Pre("dev-medium", "T1"));
+        await Run(BackgroundStart("dev-medium", "T1", BackendAgent));
 
-        Run(Stop(BackendAgent, "dev-medium", PassDigest));
+        await Run(Stop(BackendAgent, "dev-medium", PassDigest));
 
         ArbiterLedgerEvent pre = Assert.Single(Ledger(), e => e.Phase == ArbiterLedgerPhases.Pre);
         ArbiterLedgerEvent post = Assert.Single(Ledger(), e => e.Phase == ArbiterLedgerPhases.Post);
@@ -93,25 +93,25 @@ public sealed class CopilotBackgroundReturnTests : IDisposable
     }
 
     [Fact]
-    public void TheSameTurnDeliveredTwice_IsRecordedOnce()
+    public async Task TheSameTurnDeliveredTwice_IsRecordedOnce()
     {
-        Run(Pre("dev-medium", "T1"));
-        Run(BackgroundStart("dev-medium", "T1", BackendAgent));
+        await Run(Pre("dev-medium", "T1"));
+        await Run(BackgroundStart("dev-medium", "T1", BackendAgent));
 
-        Run(Stop(BackendAgent, "dev-medium", PassDigest));
-        Run(Stop(BackendAgent, "dev-medium", PassDigest));
+        await Run(Stop(BackendAgent, "dev-medium", PassDigest));
+        await Run(Stop(BackendAgent, "dev-medium", PassDigest));
 
         Assert.Single(Ledger(), e => e.Phase == ArbiterLedgerPhases.Post);
     }
 
     [Fact]
-    public void AReworkTurnOnTheSameAgent_RecordsANewReturnForTheSameTask()
+    public async Task AReworkTurnOnTheSameAgent_RecordsANewReturnForTheSameTask()
     {
-        Run(Pre("dev-medium", "T1"));
-        Run(BackgroundStart("dev-medium", "T1", BackendAgent));
-        Run(Stop(BackendAgent, "dev-medium", "Blocked on the migration.\n\nSTATUS: BLOCKED\nTASK_GATE: FAIL — agent=dev-medium gates=1 failed=build"));
+        await Run(Pre("dev-medium", "T1"));
+        await Run(BackgroundStart("dev-medium", "T1", BackendAgent));
+        await Run(Stop(BackendAgent, "dev-medium", "Blocked on the migration.\n\nSTATUS: BLOCKED\nTASK_GATE: FAIL — agent=dev-medium gates=1 failed=build"));
 
-        Run(Stop(BackendAgent, "dev-medium", PassDigest));
+        await Run(Stop(BackendAgent, "dev-medium", PassDigest));
 
         ArbiterLedgerEvent pre = Assert.Single(Ledger(), e => e.Phase == ArbiterLedgerPhases.Pre);
         List<ArbiterLedgerEvent> posts = [.. Ledger().Where(e => e.Phase == ArbiterLedgerPhases.Post)];
@@ -121,22 +121,22 @@ public sealed class CopilotBackgroundReturnTests : IDisposable
     }
 
     [Fact]
-    public void TheEndOfATurnOfAnAgentWithNoRecordedDispatch_RecordsNothingAndWritesNothing()
+    public async Task TheEndOfATurnOfAnAgentWithNoRecordedDispatch_RecordsNothingAndWritesNothing()
     {
-        string stdout = Run(Stop("70213a24-9085-4edf-a169-44bd0cdfbffc", "research-agent", "SYNC DONE"));
+        string stdout = await Run(Stop("70213a24-9085-4edf-a169-44bd0cdfbffc", "research-agent", "SYNC DONE"));
 
         Assert.Empty(stdout);
         Assert.Empty(Ledger());
     }
 
     [Fact]
-    public void ASynchronousDispatch_IsRecordedOnceFromItsToolResult_ThoughItsTurnEndAlsoFires()
+    public async Task ASynchronousDispatch_IsRecordedOnceFromItsToolResult_ThoughItsTurnEndAlsoFires()
     {
-        Run(Pre("dev-medium", "T1"));
+        await Run(Pre("dev-medium", "T1"));
 
         // Copilot fires subagentStop for a synchronous agent too, before the task's postToolUse.
-        Run(Stop(BackendAgent, "dev-medium", PassDigest));
-        Run(SyncReturn("dev-medium", "T1", BackendAgent, PassDigest));
+        await Run(Stop(BackendAgent, "dev-medium", PassDigest));
+        await Run(SyncReturn("dev-medium", "T1", BackendAgent, PassDigest));
 
         ArbiterLedgerEvent pre = Assert.Single(Ledger(), e => e.Phase == ArbiterLedgerPhases.Pre);
         ArbiterLedgerEvent post = Assert.Single(Ledger(), e => e.Phase == ArbiterLedgerPhases.Post);
@@ -145,17 +145,17 @@ public sealed class CopilotBackgroundReturnTests : IDisposable
     }
 
     [Fact]
-    public void ATaskWhoseDependenciesReturnedPassingDigestsInTheBackground_IsReadyWithoutAskingTheModel()
+    public async Task ATaskWhoseDependenciesReturnedPassingDigestsInTheBackground_IsReadyWithoutAskingTheModel()
     {
-        Run(Pre("dev-medium", "T1"));
-        Run(Pre("dev-medium", "T2"));
-        Run(BackgroundStart("dev-medium", "T1", BackendAgent));
-        Run(BackgroundStart("dev-medium", "T2", FrontendAgent));
-        Run(Stop(FrontendAgent, "dev-medium", PassDigest.Replace("dev-medium", "dev-medium", StringComparison.Ordinal)));
-        Run(Stop(BackendAgent, "dev-medium", PassDigest));
+        await Run(Pre("dev-medium", "T1"));
+        await Run(Pre("dev-medium", "T2"));
+        await Run(BackgroundStart("dev-medium", "T1", BackendAgent));
+        await Run(BackgroundStart("dev-medium", "T2", FrontendAgent));
+        await Run(Stop(FrontendAgent, "dev-medium", PassDigest.Replace("dev-medium", "dev-medium", StringComparison.Ordinal)));
+        await Run(Stop(BackendAgent, "dev-medium", PassDigest));
         _provider.Asked.Clear();
 
-        Run(Pre("dev-medium", "T3"));
+        await Run(Pre("dev-medium", "T3"));
 
         ArbiterDecisionRecord decision = Decisions().Last(d => d.Trigger == "delegate");
         ArbiterDecisionRule ready = Assert.Single(decision.Rules, rule => rule.Id == "KW-ARB-READY-001");
@@ -165,33 +165,33 @@ public sealed class CopilotBackgroundReturnTests : IDisposable
     }
 
     [Fact]
-    public void ATaskWhoseDependencyIsStillRunningInTheBackground_IsNotReadyAtStepZero()
+    public async Task ATaskWhoseDependencyIsStillRunningInTheBackground_IsNotReadyAtStepZero()
     {
-        Run(Pre("dev-medium", "T1"));
-        Run(Pre("dev-medium", "T2"));
-        Run(BackgroundStart("dev-medium", "T1", BackendAgent));
-        Run(BackgroundStart("dev-medium", "T2", FrontendAgent));
-        Run(Stop(BackendAgent, "dev-medium", PassDigest));
+        await Run(Pre("dev-medium", "T1"));
+        await Run(Pre("dev-medium", "T2"));
+        await Run(BackgroundStart("dev-medium", "T1", BackendAgent));
+        await Run(BackgroundStart("dev-medium", "T2", FrontendAgent));
+        await Run(Stop(BackendAgent, "dev-medium", PassDigest));
 
-        Run(Pre("dev-medium", "T3"));
+        await Run(Pre("dev-medium", "T3"));
 
         ArbiterDecisionRecord decision = Decisions().Last(d => d.Trigger == "delegate");
         Assert.DoesNotContain(decision.Rules, rule => rule.Id == "KW-ARB-READY-001" && rule.Answer == "ready");
     }
 
     [Fact]
-    public void ANoteOnABackgroundReturn_IsHandedToItsDispatcherOnce_OnItsNextTaskResult()
+    public async Task ANoteOnABackgroundReturn_IsHandedToItsDispatcherOnce_OnItsNextTaskResult()
     {
-        Run(Pre("dev-medium", "T1"));
-        Run(BackgroundStart("dev-medium", "T1", BackendAgent));
+        await Run(Pre("dev-medium", "T1"));
+        await Run(BackgroundStart("dev-medium", "T1", BackendAgent));
         IBackgroundDispatchStore store = ArbiterTestServices.Get<IBackgroundDispatchStore>();
         BackgroundDispatchRecord record = Assert.Single(store.ForSession(ArbiterDirectory, Session));
         Assert.Equal("unidentified", record.Dispatch.Caller);
         store.Save(ArbiterDirectory, record with { PendingNote = "ARBITER_ESCALATION: the gate report disagrees" });
-        Run(Pre("dev-medium", "T2"));
+        await Run(Pre("dev-medium", "T2"));
 
-        string first = Run(BackgroundStart("dev-medium", "T2", FrontendAgent));
-        string second = Run(SyncReturn("dev-medium", "T2", FrontendAgent, "still here"));
+        string first = await Run(BackgroundStart("dev-medium", "T2", FrontendAgent));
+        string second = await Run(SyncReturn("dev-medium", "T2", FrontendAgent, "still here"));
 
         using JsonDocument document = JsonDocument.Parse(first);
         string context = document.RootElement.GetProperty("additionalContext").GetString()!;
@@ -335,7 +335,7 @@ public sealed class CopilotBackgroundReturnTests : IDisposable
         parentAgentId = Session,
     });
 
-    private string Run(string stdin)
+    private async Task<string> Run(string stdin)
     {
         ArbiterHookDecisionEngine engine = ArbiterTestServices.Engine(
             providerFactory: _ => _provider,
@@ -349,7 +349,7 @@ public sealed class CopilotBackgroundReturnTests : IDisposable
         using StringWriter stdout = new();
         using StringWriter log = new();
 
-        Assert.Equal(0, command.Run("copilot-cli", null, stdin, stdout, log, homeDirectory: _home.Path));
+        Assert.Equal(0, await command.RunAsync("copilot-cli", null, stdin, stdout, log, homeDirectory: _home.Path));
         Assert.DoesNotContain(HookCommand.FailClosedCode, log.ToString(), StringComparison.Ordinal);
         return stdout.ToString();
     }

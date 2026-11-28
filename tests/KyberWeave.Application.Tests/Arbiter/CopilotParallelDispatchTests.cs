@@ -23,7 +23,7 @@ public sealed class CopilotParallelDispatchTests
     /// each records its own pre event under its own call id, so a parallel worker's return can pair.
     /// </summary>
     [Fact]
-    public void ACliBatchEvaluatesEveryTaskCallWithItsOwnCallId()
+    public async Task ACliBatchEvaluatesEveryTaskCallWithItsOwnCallId()
     {
         CapturingEngine engine = new();
         using StringWriter stdout = new();
@@ -33,7 +33,7 @@ public sealed class CopilotParallelDispatchTests
             _ => new KyberWeaveConfig { Arbiter = new ArbiterConfig { Enabled = true } },
             () => "decision-test-1");
 
-        int exit = command.Run("copilot-cli", null, BatchPre(), stdout, log);
+        int exit = await command.RunAsync("copilot-cli", null, BatchPre(), stdout, log);
 
         Assert.Equal(0, exit);
         Assert.Equal([T1Call, T2Call], engine.PreCallIds);
@@ -45,7 +45,7 @@ public sealed class CopilotParallelDispatchTests
     /// alone lost eight of the twelve lens dispatches of the review council that ran in the same session.
     /// </summary>
     [Fact]
-    public void ACliBatchWhoseFirstCallIsNotATaskStillEvaluatesTheMarkedDispatchesBesideIt()
+    public async Task ACliBatchWhoseFirstCallIsNotATaskStillEvaluatesTheMarkedDispatchesBesideIt()
     {
         CapturingEngine engine = new();
         using StringWriter stdout = new();
@@ -55,14 +55,14 @@ public sealed class CopilotParallelDispatchTests
             _ => new KyberWeaveConfig { Arbiter = new ArbiterConfig { Enabled = true } },
             () => "decision-test-2");
 
-        _ = command.Run("copilot-cli", null, LensBatch(), stdout, log);
+        _ = await command.RunAsync("copilot-cli", null, LensBatch(), stdout, log);
 
         Assert.Equal(["call_lens_a", "call_lens_b"], engine.PreCallIds);
     }
 
     /// <summary>A background launch remembers its dispatch by the call id the post carries, not by a rewritten prompt.</summary>
     [Fact]
-    public void ABackgroundLaunchIsTrackedWithTheCallIdTheReturnCanPairWith()
+    public async Task ABackgroundLaunchIsTrackedWithTheCallIdTheReturnCanPairWith()
     {
         CapturingEngine engine = new();
         using StringWriter stdout = new();
@@ -72,7 +72,7 @@ public sealed class CopilotParallelDispatchTests
             _ => new KyberWeaveConfig { Arbiter = new ArbiterConfig { Enabled = true } },
             () => "decision-test-3");
 
-        _ = command.Run("copilot-cli", null, BackgroundLaunch(), stdout, log);
+        _ = await command.RunAsync("copilot-cli", null, BackgroundLaunch(), stdout, log);
 
         BackgroundDispatch tracked = Assert.Single(engine.Tracked);
         Assert.Equal(T1Call, tracked.CallId);

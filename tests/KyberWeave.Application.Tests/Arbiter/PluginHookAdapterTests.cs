@@ -101,7 +101,7 @@ public sealed class PluginHookAdapterTests
         ["subagent_type"] = target,
     };
 
-    private static (int Exit, string Stdout) Run(
+    private static async Task<(int Exit, string Stdout)> Run(
         string stdin, string? caller, ScriptedEngine engine)
     {
         PluginHookAdapter adapter = new("opencode", "task", "subagent_type", "prompt", engine);
@@ -111,11 +111,11 @@ public sealed class PluginHookAdapterTests
             () => "decision-test-1");
         using StringWriter stdout = new();
         using StringWriter log = new();
-        int exit = command.Run("opencode", caller, stdin, stdout, log);
+        int exit = await command.RunAsync("opencode", caller, stdin, stdout, log);
         return (exit, stdout.ToString());
     }
 
-    private static (int Exit, string Stdout) RunProduction(string harness, string stdin, ScriptedEngine engine)
+    private static async Task<(int Exit, string Stdout)> RunProduction(string harness, string stdin, ScriptedEngine engine)
     {
         HookCommand command = ArbiterTestServices.Command(
             new HarnessAdapterRegistry(PluginHookAdapters.All(engine)),
@@ -123,13 +123,13 @@ public sealed class PluginHookAdapterTests
             () => "decision-test-1");
         using StringWriter stdout = new();
         using StringWriter log = new();
-        int exit = command.Run(harness, "conductor", stdin, stdout, log);
+        int exit = await command.RunAsync(harness, "conductor", stdin, stdout, log);
         return (exit, stdout.ToString());
     }
 
     /// <summary>OpenCode 2.2.5 dispatches with tool <c>subagent</c> and <c>args.agent</c>; the Arbiter must gate it.</summary>
     [Fact]
-    public void OpenCode225SubagentShapeIsGatedAndItsHeaderBlockStripped()
+    public async Task OpenCode225SubagentShapeIsGatedAndItsHeaderBlockStripped()
     {
         ScriptedEngine engine = new();
         JsonObject args = new()
@@ -139,7 +139,7 @@ public sealed class PluginHookAdapterTests
             ["agent"] = "dev-medium",
         };
 
-        (int exit, string stdout) = RunProduction("opencode", Envelope("before", "subagent", args), engine);
+        (int exit, string stdout) = await RunProduction("opencode", Envelope("before", "subagent", args), engine);
 
         Assert.Equal(0, exit);
         Assert.Equal("dev-medium", engine.SeenPreTarget);
@@ -150,35 +150,35 @@ public sealed class PluginHookAdapterTests
     }
 
     [Fact]
-    public void OpenCode225SubagentShapeIsBlockedWhenTheEngineDenies()
+    public async Task OpenCode225SubagentShapeIsBlockedWhenTheEngineDenies()
     {
         ScriptedEngine engine = new() { PreResult = new HookOutcome(HookOutcomeKind.Deny, Reason: "not in plan") };
         JsonObject args = new() { ["prompt"] = "Do it.", ["agent"] = "dev-medium" };
 
-        (_, string stdout) = RunProduction("opencode", Envelope("before", "subagent", args), engine);
+        (_, string stdout) = await RunProduction("opencode", Envelope("before", "subagent", args), engine);
 
         using JsonDocument doc = JsonDocument.Parse(stdout);
         Assert.Equal("block", doc.RootElement.GetProperty("decision").GetString());
     }
 
     [Fact]
-    public void OpenCodeStillGatesTheOlderTaskShapeAndKiloKeepsItsOwn()
+    public async Task OpenCodeStillGatesTheOlderTaskShapeAndKiloKeepsItsOwn()
     {
         ScriptedEngine engine = new();
-        RunProduction("opencode", Envelope("before", "task", TaskArgs("dev-medium", "Do it.")), engine);
+        await RunProduction("opencode", Envelope("before", "task", TaskArgs("dev-medium", "Do it.")), engine);
         Assert.Equal("dev-medium", engine.SeenPreTarget);
 
         ScriptedEngine kilo = new();
-        RunProduction("kilo", Envelope("before", "subagent", new JsonObject { ["prompt"] = "Do it.", ["agent"] = "dev-medium" }, harness: "kilo"), kilo);
+        await RunProduction("kilo", Envelope("before", "subagent", new JsonObject { ["prompt"] = "Do it.", ["agent"] = "dev-medium" }, harness: "kilo"), kilo);
         Assert.Null(kilo.SeenPreTarget);
     }
 
     [Fact]
-    public void Before_Allow_SpecialistTarget_StripsHeaderBlockAndReturnsCompleteArgs()
+    public async Task Before_Allow_SpecialistTarget_StripsHeaderBlockAndReturnsCompleteArgs()
     {
         const string body = "Implement the plan parser.";
         string prompt = "KYBER-ARBITER: true\nPLAN_FILE: docs/plans/x.md\nTASK: 4.3\n\n" + body;
-        (int exit, string stdout) = Run(
+        (int exit, string stdout) = await Run(
             Envelope("before", "task", TaskArgs("dev-medium", prompt)), "conductor", new ScriptedEngine());
 
         Assert.Equal(0, exit);
@@ -194,9 +194,9 @@ public sealed class PluginHookAdapterTests
     }
 
     [Fact]
-    public void Before_Allow_NonSpecialistTarget_WritesAllowWithoutArgs()
+    public async Task Before_Allow_NonSpecialistTarget_WritesAllowWithoutArgs()
     {
-        (int exit, string stdout) = Run(
+        (int exit, string stdout) = await Run(
             Envelope("before", "task", TaskArgs("docs-dev", "Write the docs.")),
             "conductor",
             new ScriptedEngine());
@@ -208,13 +208,13 @@ public sealed class PluginHookAdapterTests
     }
 
     [Fact]
-    public void Before_Deny_WritesBlockWithReason()
+    public async Task Before_Deny_WritesBlockWithReason()
     {
         const string envelope =
             "STATUS: ARBITER_ESCALATION\nTRIGGER: delegate\nANSWER: adds-work (step 0)";
         ScriptedEngine engine = new() { PreResult = new HookOutcome(HookOutcomeKind.Deny, envelope) };
 
-        (int exit, string stdout) = Run(
+        (int exit, string stdout) = await Run(
             Envelope("before", "task", TaskArgs("dev-medium", "Implement the parser.")),
             "conductor",
             engine);
@@ -227,10 +227,10 @@ public sealed class PluginHookAdapterTests
     }
 
     [Fact]
-    public void After_Allow_WritesAllow()
+    public async Task After_Allow_WritesAllow()
     {
         JsonObject args = TaskArgs("dev-medium", "Implement the parser.");
-        (int exit, string stdout) = Run(
+        (int exit, string stdout) = await Run(
             Envelope("after", "task", args, new JsonObject { ["output"] = "done" }),
             "conductor",
             new ScriptedEngine());
@@ -242,14 +242,14 @@ public sealed class PluginHookAdapterTests
     }
 
     [Fact]
-    public void After_NonAllow_WritesBlockWithEnvelopeAsReason()
+    public async Task After_NonAllow_WritesBlockWithEnvelopeAsReason()
     {
         const string envelope =
             "STATUS: ARBITER_ESCALATION\nTRIGGER: delegate.returned\nANSWER: adds-work (step 0)";
         ScriptedEngine engine = new() { PostResult = new HookOutcome(HookOutcomeKind.PostBlock, envelope) };
         JsonObject args = TaskArgs("dev-medium", "Implement the parser.");
 
-        (int exit, string stdout) = Run(
+        (int exit, string stdout) = await Run(
             Envelope("after", "task", args, new JsonObject { ["output"] = "done" }),
             "conductor",
             engine);
@@ -261,13 +261,13 @@ public sealed class PluginHookAdapterTests
     }
 
     [Fact]
-    public void After_Annotation_WritesBlockWithNoteAsReason()
+    public async Task After_Annotation_WritesBlockWithNoteAsReason()
     {
         const string note = "STATUS: ARBITER_ANNOTATION\nFINDING: correctness/null-plan-task";
         ScriptedEngine engine = new() { PostResult = new HookOutcome(HookOutcomeKind.PostAnnotation, note) };
         JsonObject args = TaskArgs("dev-medium", "Implement the parser.");
 
-        (int exit, string stdout) = Run(
+        (int exit, string stdout) = await Run(
             Envelope("after", "task", args, new JsonObject { ["output"] = "done" }),
             "code-reviewer",
             engine);
@@ -279,7 +279,7 @@ public sealed class PluginHookAdapterTests
     }
 
     [Fact]
-    public void Before_NonDispatchTool_PassesThroughWithoutLoadingConfig()
+    public async Task Before_NonDispatchTool_PassesThroughWithoutLoadingConfig()
     {
         int loads = 0;
         ScriptedEngine engine = new();
@@ -291,7 +291,7 @@ public sealed class PluginHookAdapterTests
         using StringWriter stdout = new();
         using StringWriter log = new();
 
-        int exit = command.Run(
+        int exit = await command.RunAsync(
             "opencode",
             "conductor",
             Envelope("before", "read", new JsonObject { ["path"] = "x" }),
@@ -304,7 +304,7 @@ public sealed class PluginHookAdapterTests
     }
 
     [Fact]
-    public void Before_DispatchWithoutTarget_PassesThroughWithoutLoadingConfig()
+    public async Task Before_DispatchWithoutTarget_PassesThroughWithoutLoadingConfig()
     {
         int loads = 0;
         ScriptedEngine engine = new();
@@ -316,7 +316,7 @@ public sealed class PluginHookAdapterTests
         using StringWriter stdout = new();
         using StringWriter log = new();
 
-        int exit = command.Run(
+        int exit = await command.RunAsync(
             "opencode",
             "conductor",
             Envelope("before", "task", new JsonObject { ["description"] = "no target" }),
@@ -334,9 +334,9 @@ public sealed class PluginHookAdapterTests
     [InlineData("")]
     [InlineData("{\"schema\":\"nope\",\"harness\":\"opencode\",\"phase\":\"before\",\"tool\":\"task\"}")]
     [InlineData("{\"schema\":\"kyber-arbiter.plugin-event/v1\",\"harness\":\"opencode\",\"phase\":\"middle\",\"tool\":\"task\"}")]
-    public void MalformedEnvelope_AllowsAndLogsWithHarnessToken(string stdin)
+    public async Task MalformedEnvelope_AllowsAndLogsWithHarnessToken(string stdin)
     {
-        (int exit, string stdout) = Run(stdin, "conductor", new ScriptedEngine());
+        (int exit, string stdout) = await Run(stdin, "conductor", new ScriptedEngine());
 
         // ADR 0072: an envelope the host cannot read allows, with the code and the harness in the log.
         Assert.Equal(0, exit);
@@ -360,7 +360,7 @@ public sealed class PluginHookAdapterTests
 
     /// <summary>Command Code dispatches custom agents with tool <c>agent</c> and the target at <c>args.subagent_type</c>; the Arbiter must gate it and strip the header block.</summary>
     [Fact]
-    public void CommandCodeAgentDispatchIsGatedAndItsHeaderBlockStripped()
+    public async Task CommandCodeAgentDispatchIsGatedAndItsHeaderBlockStripped()
     {
         ScriptedEngine engine = new();
         JsonObject args = new()
@@ -370,7 +370,7 @@ public sealed class PluginHookAdapterTests
             ["subagent_type"] = "dev-medium",
         };
 
-        (int exit, string stdout) = RunProduction(
+        (int exit, string stdout) = await RunProduction(
             "commandcode", Envelope("before", "agent", args, harness: "commandcode"), engine);
 
         Assert.Equal(0, exit);
@@ -383,12 +383,12 @@ public sealed class PluginHookAdapterTests
     }
 
     [Fact]
-    public void CommandCodeAgentDispatchIsBlockedWhenTheEngineDenies()
+    public async Task CommandCodeAgentDispatchIsBlockedWhenTheEngineDenies()
     {
         ScriptedEngine engine = new() { PreResult = new HookOutcome(HookOutcomeKind.Deny, Reason: "not in plan") };
         JsonObject args = new() { ["prompt"] = "Do it.", ["subagent_type"] = "dev-medium" };
 
-        (_, string stdout) = RunProduction(
+        (_, string stdout) = await RunProduction(
             "commandcode", Envelope("before", "agent", args, harness: "commandcode"), engine);
 
         using JsonDocument doc = JsonDocument.Parse(stdout);

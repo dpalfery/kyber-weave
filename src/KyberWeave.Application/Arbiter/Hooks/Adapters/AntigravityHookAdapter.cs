@@ -126,12 +126,13 @@ public sealed class AntigravityHookAdapter : IHarnessHookAdapter
     }
 
     /// <inheritdoc/>
-    public string Handle(
+    public async Task<string> HandleAsync(
         JsonElement payload,
         string rawJson,
         string? renderedCaller,
         KyberWeaveConfig config,
-        HookContext context)
+        HookContext context,
+        CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(config);
         ArgumentNullException.ThrowIfNull(context);
@@ -143,19 +144,27 @@ public sealed class AntigravityHookAdapter : IHarnessHookAdapter
 
         if (string.Equals(eventName, "PreToolUse", StringComparison.Ordinal))
         {
-            return HandlePre(payload, tool, caller, config, context);
+            return await HandlePreAsync(payload, tool, caller, config, context, cancellationToken)
+                .ConfigureAwait(false);
         }
 
         if (string.Equals(eventName, "PostToolUse", StringComparison.Ordinal))
         {
-            return HandlePost(payload, tool, caller, config, context);
+            return await HandlePostAsync(payload, tool, caller, config, context, cancellationToken)
+                .ConfigureAwait(false);
         }
 
         throw new InvalidOperationException(
             $"Malformed Antigravity hook event: unknown hookEventName '{eventName ?? "<missing>"}'.");
     }
 
-    private string HandlePre(JsonElement payload, string? tool, string caller, KyberWeaveConfig config, HookContext context)
+    private async Task<string> HandlePreAsync(
+        JsonElement payload,
+        string? tool,
+        string caller,
+        KyberWeaveConfig config,
+        HookContext context,
+        CancellationToken cancellationToken)
     {
         if (!IsDispatchTool(tool))
         {
@@ -175,7 +184,8 @@ public sealed class AntigravityHookAdapter : IHarnessHookAdapter
         string? denial = null;
         foreach (Dispatch dispatch in dispatches)
         {
-            HookOutcome outcome = DecidePre(caller, dispatch, callId, sessionId, config, scoped);
+            HookOutcome outcome = await DecidePreAsync(
+                caller, dispatch, callId, sessionId, config, scoped, cancellationToken).ConfigureAwait(false);
             switch (outcome.Kind)
             {
                 case HookOutcomeKind.PassThrough:
@@ -183,8 +193,8 @@ public sealed class AntigravityHookAdapter : IHarnessHookAdapter
                 case HookOutcomeKind.AllowWithRewrite:
                     break;
                 case HookOutcomeKind.AllowWithNote:
-                    scoped.Log.WriteLine(outcome.Reason ?? throw new InvalidOperationException(
-                        "Hook engine allowed with a note but wrote none."));
+                    await scoped.Log.WriteLineAsync(outcome.Reason ?? throw new InvalidOperationException(
+                        "Hook engine allowed with a note but wrote none.")).ConfigureAwait(false);
                     break;
                 case HookOutcomeKind.Deny:
                     denial ??= outcome.Reason ?? throw new InvalidOperationException(
@@ -306,7 +316,13 @@ public sealed class AntigravityHookAdapter : IHarnessHookAdapter
         };
     }
 
-    private string HandlePost(JsonElement payload, string? tool, string caller, KyberWeaveConfig config, HookContext context)
+    private async Task<string> HandlePostAsync(
+        JsonElement payload,
+        string? tool,
+        string caller,
+        KyberWeaveConfig config,
+        HookContext context,
+        CancellationToken cancellationToken)
     {
         if (!IsDispatchTool(tool))
         {
@@ -325,7 +341,8 @@ public sealed class AntigravityHookAdapter : IHarnessHookAdapter
         }
         catch (InvalidOperationException ex)
         {
-            scoped.Log.WriteLine($"{HookCommand.FailClosedCode}: {ex.Message} The return is not recorded.");
+            await scoped.Log.WriteLineAsync(
+                $"{HookCommand.FailClosedCode}: {ex.Message} The return is not recorded.").ConfigureAwait(false);
             return EmptyDocument();
         }
 
@@ -341,7 +358,9 @@ public sealed class AntigravityHookAdapter : IHarnessHookAdapter
         string toolOutput = FirstNonEmpty(GetString(payload, "error"), GetString(payload, "result"));
         foreach (Dispatch dispatch in dispatches)
         {
-            HookOutcome outcome = DecidePost(caller, dispatch, callId, sessionId, toolOutput, config, scoped);
+            HookOutcome outcome = await DecidePostAsync(
+                caller, dispatch, callId, sessionId, toolOutput, config, scoped, cancellationToken)
+                .ConfigureAwait(false);
             switch (outcome.Kind)
             {
                 case HookOutcomeKind.PassThrough:
@@ -351,8 +370,8 @@ public sealed class AntigravityHookAdapter : IHarnessHookAdapter
                 case HookOutcomeKind.PostBlock:
                 case HookOutcomeKind.PostAnnotation:
                 case HookOutcomeKind.AllowWithNote:
-                    scoped.Log.WriteLine(outcome.Reason ?? throw new InvalidOperationException(
-                        "Hook engine returned a post-dispatch note without text."));
+                    await scoped.Log.WriteLineAsync(outcome.Reason ?? throw new InvalidOperationException(
+                        "Hook engine returned a post-dispatch note without text.")).ConfigureAwait(false);
                     break;
                 default:
                     throw new InvalidOperationException(
@@ -363,39 +382,45 @@ public sealed class AntigravityHookAdapter : IHarnessHookAdapter
         return EmptyDocument();
     }
 
-    private HookOutcome DecidePre(
+    private async Task<HookOutcome> DecidePreAsync(
         string caller,
         Dispatch dispatch,
         string callId,
         string? sessionId,
         KyberWeaveConfig config,
-        HookContext context)
+        HookContext context,
+        CancellationToken cancellationToken)
     {
         if (_engine is IContextualHookDecisionEngine contextual)
         {
-            return contextual.DecidePreDispatch(
-                Token, caller, dispatch.Target, dispatch.Prompt, config, context, callId, sessionId);
+            return await contextual.DecidePreDispatchAsync(
+                Token, caller, dispatch.Target, dispatch.Prompt, config, context, callId, sessionId,
+                cancellationToken).ConfigureAwait(false);
         }
 
-        return _engine.DecidePreDispatch(caller, dispatch.Target, dispatch.Prompt, config);
+        return await _engine.DecidePreDispatchAsync(
+            caller, dispatch.Target, dispatch.Prompt, config, cancellationToken).ConfigureAwait(false);
     }
 
-    private HookOutcome DecidePost(
+    private async Task<HookOutcome> DecidePostAsync(
         string caller,
         Dispatch dispatch,
         string callId,
         string? sessionId,
         string toolOutput,
         KyberWeaveConfig config,
-        HookContext context)
+        HookContext context,
+        CancellationToken cancellationToken)
     {
         if (_engine is IContextualHookDecisionEngine contextual)
         {
-            return contextual.DecidePostDispatch(
-                Token, caller, dispatch.Target, dispatch.Prompt, toolOutput, config, context, callId, sessionId);
+            return await contextual.DecidePostDispatchAsync(
+                Token, caller, dispatch.Target, dispatch.Prompt, toolOutput, config, context, callId, sessionId,
+                cancellationToken).ConfigureAwait(false);
         }
 
-        return _engine.DecidePostDispatch(caller, dispatch.Target, toolOutput, config);
+        return await _engine.DecidePostDispatchAsync(
+            caller, dispatch.Target, toolOutput, config, cancellationToken).ConfigureAwait(false);
     }
 
     private static IReadOnlyList<Dispatch> MarkedDispatchesOf(JsonElement payload) =>

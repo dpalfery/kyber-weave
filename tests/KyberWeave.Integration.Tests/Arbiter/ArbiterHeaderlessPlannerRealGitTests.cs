@@ -36,14 +36,14 @@ public sealed class ArbiterHeaderlessPlannerRealGitTests : IDisposable
     }
 
     [Fact]
-    public void AHeaderlessPlannerThatWroteItsPlan_IsNotEscalatedOnReturn()
+    public async Task AHeaderlessPlannerThatWroteItsPlan_IsNotEscalatedOnReturn()
     {
         const string Prompt = "Plan the status cards.";
-        Run(Payload("architect", Prompt));
+        await Run(Payload("architect", Prompt));
         Directory.CreateDirectory(Path.Combine(_probe.Root, "docs", "plans"));
-        File.WriteAllText(Path.Combine(_probe.Root, "docs", "plans", "cards.md"), "# Plan\n");
+        await File.WriteAllTextAsync(Path.Combine(_probe.Root, "docs", "plans", "cards.md"), "# Plan\n");
 
-        string stdout = Run(Payload(
+        string stdout = await Run(Payload(
             "architect",
             Prompt,
             objects: new Dictionary<string, object> { ["toolResult"] = new { resultType = "success", textResultForLlm = "Plan written." } }));
@@ -76,7 +76,7 @@ public sealed class ArbiterHeaderlessPlannerRealGitTests : IDisposable
         return JsonSerializer.Serialize(payload);
     }
 
-    private string Run(string stdin, IArbiterProvider? provider = null)
+    private async Task<string> Run(string stdin, IArbiterProvider? provider = null)
     {
         ArbiterHookDecisionEngine engine = ArbiterTestServices.Engine(providerFactory: _ => provider ?? new NoneProvider(), homeDirectory: () => _home.Path);
         HookCommand command = ArbiterTestServices.Command(
@@ -87,7 +87,7 @@ public sealed class ArbiterHeaderlessPlannerRealGitTests : IDisposable
         using StringWriter stdout = new();
         using StringWriter log = new();
 
-        Assert.Equal(0, command.Run("copilot-cli", null, stdin, stdout, log, homeDirectory: _home.Path));
+        Assert.Equal(0, await command.RunAsync("copilot-cli", null, stdin, stdout, log, homeDirectory: _home.Path));
         return stdout.ToString();
     }
 

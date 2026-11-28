@@ -43,15 +43,16 @@ public sealed class ModelOverrideCapabilityTests
 
         public bool IsPassThrough(JsonElement payload, string? renderedCaller) => false;
 
-        public string Handle(
+        public Task<string> HandleAsync(
             JsonElement payload,
             string rawJson,
             string? renderedCaller,
             KyberWeaveConfig config,
-            HookContext context)
+            HookContext context,
+            CancellationToken cancellationToken = default)
         {
             SeenContext = context;
-            return string.Empty;
+            return Task.FromResult(string.Empty);
         }
 
     }
@@ -138,7 +139,7 @@ public sealed class ModelOverrideCapabilityTests
     /// the same way it copies <c>ObservesReturns</c>.
     /// </summary>
     [Fact]
-    public void HookCommandCopiesTheDeclarationIntoTheHookContext()
+    public async Task HookCommandCopiesTheDeclarationIntoTheHookContext()
     {
         RecordingAdapter adapter = new();
         HookCommand command = ArbiterTestServices.Command(
@@ -148,7 +149,7 @@ public sealed class ModelOverrideCapabilityTests
         using StringWriter stdout = new();
         using StringWriter log = new();
 
-        int exit = command.Run("recording", null, "{}", stdout, log);
+        int exit = await command.RunAsync("recording", null, "{}", stdout, log);
 
         Assert.Equal(0, exit);
         HookContext seen = adapter.SeenContext
@@ -184,7 +185,7 @@ public sealed class ModelOverrideCapabilityTests
     /// nothing is added to the document for a dispatch that has no override.
     /// </summary>
     [Fact]
-    public void ANullModelTokenLeavesClaudesAllowDocumentUnchanged()
+    public async Task ANullModelTokenLeavesClaudesAllowDocumentUnchanged()
     {
         HookCommand command = ArbiterTestServices.Command(
             ArbiterTestServices.Registry(new AllowEngine()),
@@ -193,7 +194,7 @@ public sealed class ModelOverrideCapabilityTests
         using StringWriter stdout = new();
         using StringWriter log = new();
 
-        int exit = command.Run(
+        int exit = await command.RunAsync(
             "claude",
             "conductor",
             EmbeddedFixtureText.Read(typeof(ModelOverrideCapabilityTests).Assembly, "arbiter-hooks/claude/pre-agent-dispatch.json"),
