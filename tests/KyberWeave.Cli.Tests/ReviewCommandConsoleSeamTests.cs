@@ -339,11 +339,18 @@ public sealed class ReviewCommandConsoleSeamTests
             Output = output;
             return result;
         }
+
+        public Task<ReviewCommandResult> RunAsync(
+            ReviewGatesRequest request, IProcessRunner indexExecutor, TextWriter output, CancellationToken cancellationToken) =>
+            Task.FromResult(result);
     }
 
     private sealed class ScriptedVerdicts(ReviewVerdictResult result) : IReviewVerdictService
     {
         public ReviewVerdictResult Decide(ReviewVerdictRequest request, CancellationToken cancellationToken) => result;
+
+        public Task<ReviewVerdictResult> DecideAsync(ReviewVerdictRequest request, CancellationToken cancellationToken) =>
+            Task.FromResult(result);
     }
 
     private sealed class NoDecisionModels : IReviewDecisionModelFactory
@@ -358,6 +365,14 @@ public sealed class ReviewCommandConsoleSeamTests
 
         public IReviewDecisionModel CreateForRepository(
             string repositoryRoot, KyberWeaveConfig config, bool disabled, string? cachePath) =>
+            throw new NotSupportedException();
+
+        public Task<IReviewDecisionModel> CreateForRepositoryAsync(
+            string repositoryRoot,
+            KyberWeaveConfig config,
+            bool disabled,
+            string? cachePath,
+            CancellationToken cancellationToken = default) =>
             throw new NotSupportedException();
     }
 }

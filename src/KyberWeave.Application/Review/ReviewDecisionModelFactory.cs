@@ -74,4 +74,44 @@ public sealed class ReviewDecisionModelFactory(
             ? Create(null, [], null, clock, "the provider could not be built", cachePath)
             : Create(client, config.Arbiter.Rules, ArbiterStateDirectory.ForProject(repositoryRoot), clock, cachePath: cachePath);
     }
+
+    /// <inheritdoc />
+    public async Task<IReviewDecisionModel> CreateForRepositoryAsync(
+        string repositoryRoot,
+        KyberWeaveConfig config,
+        bool switchedOff,
+        string? cachePath,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(config);
+
+        if (switchedOff)
+            return Create(null, [], null, clock, cachePath: cachePath);
+
+        ArbiterProviderConfig provider = config.Arbiter.Provider;
+        if (provider.Kind == ArbiterProviderKind.None)
+            return Create(null, [], null, clock, cachePath: cachePath);
+
+        if (!Uri.TryCreate(provider.Endpoint, UriKind.Absolute, out Uri? endpoint))
+        {
+            return Create(
+                null, [], null, clock, "arbiter.provider.endpoint is not an absolute URL", cachePath);
+        }
+
+        // A loopback endpoint needs no key, and asking for one first is what keeps a missing key from costing a
+        // request that the provider would have refused anyway.
+        if (!endpoint.IsLoopback
+            && string.IsNullOrWhiteSpace(
+                await keys.TryResolveKeyAsync(config, provider.Endpoint, cancellationToken).ConfigureAwait(false)))
+        {
+            return Create(
+                null, [], null, clock, $"no key for {endpoint.GetLeftPart(UriPartial.Authority)}", cachePath);
+        }
+
+        DiagnosticReport ignored = new();
+        IArbiterProvider? client = arbiter.CreateProvider(config, null, ignored, out _);
+        return client is null
+            ? Create(null, [], null, clock, "the provider could not be built", cachePath)
+            : Create(client, config.Arbiter.Rules, ArbiterStateDirectory.ForProject(repositoryRoot), clock, cachePath: cachePath);
+    }
 }

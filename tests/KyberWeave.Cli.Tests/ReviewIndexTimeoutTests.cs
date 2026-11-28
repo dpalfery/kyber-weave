@@ -102,6 +102,15 @@ public sealed class ReviewIndexTimeoutTests
             Executor = indexExecutor;
             return new ReviewCommandResult(0);
         }
+
+        public Task<ReviewCommandResult> RunAsync(
+            ReviewGatesRequest request, IProcessRunner indexExecutor, TextWriter output, CancellationToken cancellationToken)
+        {
+            ExecutorAsync = indexExecutor;
+            return Task.FromResult(new ReviewCommandResult(0));
+        }
+
+        public IProcessRunner? ExecutorAsync { get; private set; }
     }
 
     private sealed class RecordingSeats : IReviewSeatsService
@@ -140,6 +149,14 @@ public sealed class ReviewIndexTimeoutTests
 
         public IReviewDecisionModel CreateForRepository(
             string repositoryRoot, KyberWeaveConfig config, bool disabled, string? cachePath) =>
+            throw new NotSupportedException();
+
+        public Task<IReviewDecisionModel> CreateForRepositoryAsync(
+            string repositoryRoot,
+            KyberWeaveConfig config,
+            bool disabled,
+            string? cachePath,
+            CancellationToken cancellationToken = default) =>
             throw new NotSupportedException();
     }
 }
