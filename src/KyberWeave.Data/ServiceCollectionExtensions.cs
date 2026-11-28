@@ -104,7 +104,8 @@ public static class ServiceCollectionExtensions
     /// <param name="services">The collection to populate.</param>
     private static void RegisterReviewAndSkillAdapters(IServiceCollection services)
     {
-        services.TryAddSingleton<IProgramRunner>(_ => new ProcessProgramRunner());
+        // As for the bounded view: the runner is also the program-runner view, so async consumers find an IProcessRunner.
+        services.TryAddSingleton<IProgramRunner>(sp => sp.GetRequiredService<IProcessRunner>());
         services.TryAddSingleton<ISeatFolder, FileSeatFolder>();
         services.TryAddSingleton<ISkillArchiveWriter, ZipSkillArchiveWriter>();
         services.TryAddSingleton<IReviewEvidenceStore>(sp => new FileReviewEvidenceStore(sp.GetRequiredService<IWritableFileSystem>()));
