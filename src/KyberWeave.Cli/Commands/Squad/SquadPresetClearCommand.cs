@@ -361,7 +361,7 @@ internal sealed class SquadPresetClearCommand : Command<SquadPresetClearSettings
         {
             transaction.Execute(plan);
         }
-        catch (Exception failure)
+        catch (Exception failure) when (failure is not OutOfMemoryException && failure is not OperationCanceledException)
         {
             // A recovery under this deployment's lease can refuse the stale plan, or fail and name the journal. Both
             // are this command's ordinary error output, not an unhandled exception.

@@ -229,7 +229,7 @@ internal sealed class ArbiterHookRefresher(
                 return Wiring(arbiter).HookTimeoutSeconds;
             }
         }
-        catch
+        catch (Exception ex) when (FileFailure.Is(ex))
         {
             // Fall back to default.
         }

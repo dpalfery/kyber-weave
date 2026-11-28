@@ -5,6 +5,7 @@ using KyberWeave.Cli.Commands.Squad.Infrastructure;
 using KyberWeave.Contracts.Repositories;
 using KyberWeave.Core.Squad.Deployment;
 using KyberWeave.Core.Squad.Model;
+using KyberWeave.Core.Squad.Validation;
 using Spectre.Console;
 using Spectre.Console.Cli;
 
@@ -157,7 +158,8 @@ internal sealed class SquadStatusCommand : Command<SquadStatusSettings>
                 // deployment against the project directory and report every file missing.
                 fullPath = SquadDeploymentPlanRules.ResolveOwnedFilePath(receipt, targetRoot, globalRoots, file, _pathSemantics);
             }
-            catch (Exception)
+            catch (Exception ex) when (
+                ex is InvalidOperationException or ArgumentException or IOException or UnauthorizedAccessException)
             {
                 _output.Ansi.MarkupLine(
                     $"  [red]invalid[/] {Markup.Escape(file.RelativePath)} (outside the deployment root)");
@@ -258,7 +260,8 @@ internal sealed class SquadStatusCommand : Command<SquadStatusSettings>
                 globalRoots,
                 new SquadOwnedFile(block.RelativePath, new string('0', 64), block.Target, false), _pathSemantics);
         }
-        catch (Exception)
+        catch (Exception ex) when (
+            ex is InvalidOperationException or ArgumentException or IOException or UnauthorizedAccessException)
         {
             _output.Ansi.MarkupLine($"  [red]invalid[/] {Markup.Escape(block.RelativePath)} (outside the deployment root)");
             hasIssues = true;
@@ -354,7 +357,7 @@ internal sealed class SquadStatusCommand : Command<SquadStatusSettings>
         {
             squadLock = stateStore.ReadLock(targetRoot, scope);
         }
-        catch (Exception ex)
+        catch (Exception ex) when (FileFailure.Is(ex) || ex is InvalidDataException)
         {
             _output.Ansi.WriteLine();
             _output.Ansi.MarkupLine($"[red]Error reading Squad lock file: {Markup.Escape(ex.Message)}[/]");
@@ -382,7 +385,8 @@ internal sealed class SquadStatusCommand : Command<SquadStatusSettings>
             {
                 loadedPreset = presetStore.TryLoad(presetName);
             }
-            catch (Exception)
+            catch (Exception ex) when (ex is ArgumentException or SquadSourceValidationException
+                                           or IOException or UnauthorizedAccessException)
             {
                 loadedPreset = null;
             }
@@ -488,7 +492,7 @@ internal sealed class SquadStatusCommand : Command<SquadStatusSettings>
                             version = squadLock.SquadVersion;
                         else if (!string.IsNullOrWhiteSpace(squadLock?.CliVersion)) version = squadLock.CliVersion;
                     }
-                    catch (Exception)
+                    catch (Exception ex) when (FileFailure.Is(ex) || ex is InvalidDataException)
                     {
                         // Treat unreadable lock as unknown version
                     }

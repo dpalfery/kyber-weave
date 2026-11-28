@@ -1495,7 +1495,7 @@ public abstract class KyberBridgeEngineHelpers : KyberBridgeEngineRowBuilders
 
             ClearBatchedReadFault();
         }
-        catch (Exception ex)
+        catch (Exception ex) when (IsSessionReadFault(ex))
         {
             // The fault carries no session, so it is recorded in the coverage payload's batch
             // slot rather than the per-session failure map, where it would surface as a
@@ -1904,7 +1904,7 @@ public abstract class KyberBridgeEngineHelpers : KyberBridgeEngineRowBuilders
                 // rows the read model exists to avoid.
                 sessionTurns = reader.SessionTurnFigures(exec.SessionId, lookup)?.Turns ?? [];
             }
-            catch (Exception ex)
+            catch (Exception ex) when (IsSessionReadFault(ex))
             {
                 RecordProjectionFailure(exec.SessionId, ex.Message);
                 continue;
@@ -1950,7 +1950,7 @@ public abstract class KyberBridgeEngineHelpers : KyberBridgeEngineRowBuilders
                 sessionTurns = reader.SessionTurnFigures(exec.SessionId, lookup)?.Turns ?? [];
                 sessionRecords = reader.SessionRecordsContentFree(exec.SessionId);
             }
-            catch (Exception ex)
+            catch (Exception ex) when (IsSessionReadFault(ex))
             {
                 RecordProjectionFailure(exec.SessionId, ex.Message);
                 continue;
@@ -4266,7 +4266,7 @@ public class KyberBridgeEngine : KyberBridgeEngineSections
 
             ClearBatchedReadFault();
         }
-        catch (Exception ex)
+        catch (Exception ex) when (IsSessionReadFault(ex))
         {
             // A faulted batched read degrades to per-session aggregate reads, so one broken
             // session still surfaces as PROJECTION_FAILED while the remaining sessions answer.
@@ -4284,7 +4284,7 @@ public class KyberBridgeEngine : KyberBridgeEngineSections
                         figuresBySession[figure.SessionKey] = figure;
                     }
                 }
-                catch (Exception ex2)
+                catch (Exception ex2) when (IsSessionReadFault(ex2))
                 {
                     RecordProjectionFailure(sessionKey, ex2.Message);
                     faultedSessions.Add(sessionKey);
@@ -4510,7 +4510,7 @@ internal sealed class AnalyticsBridge
                 "The analytics request contains an invalid argument.",
                 "Check the analytics operation name and request payload and retry.");
         }
-        catch (Exception ex)
+        catch (Exception ex) when (ex is DashException or InvalidOperationException or JsonException or InvalidDataException or ObjectDisposedException or UnauthorizedAccessException)
         {
             return BuildAnalyticsErrorResult(
                 500,
@@ -4731,7 +4731,7 @@ internal sealed class AnalyticsBridge
         {
             timestamp = owner.clock();
         }
-        catch (Exception)
+        catch (Exception ex) when (ex is IOException or TimeoutException or UnauthorizedAccessException or InvalidOperationException or ObjectDisposedException)
         {
             timestamp = DateTimeOffset.UtcNow;
         }
@@ -5023,7 +5023,7 @@ internal sealed class ReportBuilder
                 aggregatesById[figure.SessionKey] = figure;
             }
         }
-        catch (Exception ex)
+        catch (Exception ex) when (KyberBridgeEngine.IsSessionReadFault(ex))
         {
             // The window's figures failed as one batch, so every scoped session carries the
             // isolation marker, exactly as each session did when its own read failed.

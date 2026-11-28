@@ -264,7 +264,7 @@ public static class OtlpLogMapper
             {
                 normalized = adapter.Normalize(item.RawSpan);
             }
-            catch (Exception exception)
+            catch (Exception exception) when (CanonAdapters.IsNormalizeRejection(exception))
             {
                 rejected++;
                 problemAssignments.Add((

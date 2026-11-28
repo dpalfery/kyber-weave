@@ -64,3 +64,7 @@ Suggestion is not a suppression: the diagnostic still shows, and the id is not a
 fails the build. A line is never added back. When none remain, the file and its `ItemGroup` in
 `Directory.Build.props` are deleted. That exit is what separates this ratchet from the
 `<NoWarn>` alternative this record rejects.
+
+Status 2026-11-27: the remediation waves brought all seven to zero; the last line, CA1031, went in
+wave C. The ratchet file now holds no id, and it and its `ItemGroup` are deleted once the waves
+land on `main`.

@@ -199,7 +199,9 @@ public sealed class MutexLease : ILease
                 _released.Wait();
                 _mutex.ReleaseMutex();
             }
-            catch (Exception exception)
+            // The owner-thread entry point is a boundary: it reports any failure through _failure rather than
+            // crashing the process on a background thread.
+            catch (Exception exception) when (exception is not OutOfMemoryException && exception is not OperationCanceledException)
             {
                 _failure = exception;
                 _taken.Set();

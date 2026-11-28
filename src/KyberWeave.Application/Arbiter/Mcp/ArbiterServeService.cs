@@ -100,8 +100,9 @@ public sealed class ArbiterServeService(
                     : context.Engine.DecidePreDispatch(
                         Harness, item.Caller, item.Target, item.Prompt, config, hookContext, facts.CallId);
             }
-            catch (Exception ex)
+            catch (Exception ex) when (ex is not OutOfMemoryException && ex is not OperationCanceledException)
             {
+                // Arbiter evaluation boundary: a decision failure answers fail-closed instead of crashing the serve host.
                 return Failure(
                     provenance,
                     $"{HookCommand.FailClosedCode}: the evaluation failed before a decision: {OneLine(ex.Message)}");
@@ -297,8 +298,9 @@ public sealed class ArbiterServeService(
         {
             provider = context.EffectiveProvider?.Invoke(config) ?? config.Arbiter.Provider;
         }
-        catch (Exception ex)
+        catch (Exception ex) when (ex is not OutOfMemoryException && ex is not OperationCanceledException)
         {
+            // Arbiter status boundary: an injected user-override seam fails to a status line, not a crashed host.
             return Failure(provenance, $"The user override could not be applied: {OneLine(ex.Message)}");
         }
 
@@ -318,8 +320,9 @@ public sealed class ArbiterServeService(
                     ? "found"
                     : "missing (KW-ARB-KEY-001)";
         }
-        catch (Exception ex)
+        catch (Exception ex) when (ex is not OutOfMemoryException && ex is not OperationCanceledException)
         {
+            // Arbiter status boundary: the credential-store probe fails to a status line, not a crashed host.
             return Failure(provenance, $"The key presence check failed: {OneLine(ex.Message)}");
         }
 
@@ -533,8 +536,9 @@ public sealed class ArbiterServeService(
         {
             return (context.LoadConfig(context.RepoRoot), null);
         }
-        catch (Exception ex)
+        catch (Exception ex) when (ex is not OutOfMemoryException && ex is not OperationCanceledException)
         {
+            // Arbiter configuration boundary: an unreadable config answers an error line, not a crashed host.
             return (null, OneLine(ex.Message));
         }
     }
