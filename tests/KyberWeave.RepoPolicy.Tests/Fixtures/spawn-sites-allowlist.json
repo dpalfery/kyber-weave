@@ -1100,6 +1100,18 @@
       "bound": "Builds only; the scripted fake starts nothing. It proves the IBoundedProcessExecutor view passes its timeout onto the seam."
     },
     {
+      "file": "tests/KyberWeave.Kernel.Tests/Processes/ProcessRunnerAsyncTests.cs",
+      "text": "ProcessStartInfo startInfo = new(\"dotnet\")",
+      "count": 1,
+      "bound": "Builds the start info for a real probe run compared through both ProcessRunner.Run and RunAsync; the probe writes and exits, and every bounded case passes an explicit 1 s timeout that kills the tree on expiry."
+    },
+    {
+      "file": "tests/KyberWeave.Kernel.Tests/Processes/ProcessRunnerAsyncTests.cs",
+      "text": "ProcessRunner.Run(startInfo, standardInput, timeout, maxOutputBytes, cancellationToken);",
+      "count": 1,
+      "bound": "The synchronous half of the comparison helper; the probe is short-lived and each bounded case passes a 1 s timeout that kills the tree on expiry."
+    },
+    {
       "file": "tests/KyberWeave.Cli.Tests/DoctorCommandSeamTests.cs",
       "text": "_ = run.Executor.Run(new ProcessStartInfo(\"codegraph\"), \"in\");",
       "count": 1,
