@@ -5,7 +5,7 @@ doc-type: runbook
 status: current
 component: CI Pipelines
 owner: dpalfery
-last-reviewed: 2026-11-17
+last-reviewed: 2026-11-28
 ---
 
 # Wiring Kyber-Weave into CI
@@ -215,41 +215,53 @@ enforces the per-harness completeness predicate continuously:
   seeds. None of them is capture proof. Live OpenCode capture is verified only by the OpenCode live gate,
   which runs on the owner's machine and not in CI ([runbook §1b](../dash/runbook.md#1b-opencode-capture-enable-and-verify)).
 - **Steps:** install dash deps (`npm ci`), `npx playwright install
-  --with-deps`, then the conformance spec. The spec runs from the repository
-  root with the pinned `dash` Playwright and the isolated config (`npx
+  --with-deps`, then the conformance spec (`dash/e2e/harness-collection.spec.ts`)
+  followed by the cross-harness content parity spec (`dash/e2e/harness-content-parity.spec.ts`).
+  Both specs run from the repository root with the pinned `dash` Playwright and the isolated config (`npx
   --prefix dash playwright test --config dash/playwright.isolated.config.ts
-  dash/e2e/harness-collection.spec.ts`). That config is the only Playwright
+  dash/e2e/harness-collection.spec.ts` and `npx
+  --prefix dash playwright test --config dash/playwright.isolated.config.ts
+  dash/e2e/harness-content-parity.spec.ts`). That config is the only Playwright
   configuration the job loads, so `dash/playwright.config.ts` — whose
-  `webServer` targets the live host — stays unloaded. The spec boots and tears down its own
-  isolated C# engine, so the job fails when the run leaves its server behind.
+  `webServer` targets the live host — stays unloaded. Running `harness-collection.spec.ts`
+  first ensures a broken dashboard fails the fast check before the full 22-harness parity
+  suite runs; both specs boot and tear down their own isolated C# engines, so the job fails
+  when either run leaves its server behind.
 - **Leftover processes:** no job carries a leftover-process step any more. The
   `scripts/proc-guard.sh check-leftovers` helper and the workflow steps that replaced it went
-  with the Node engine, which was the only thing spawning recursive children. The .NET jobs end
-  with `dotnet build-server shutdown` (`if: always()`) instead, and the conformance spec tears
-  down the isolated engine it booted and fails the job when that server is still running.
+  with the Node engine, which was the only thing spawning recursive children. The CI jobs that
+  carry the step — `build-test`, `integration-test` and `dash-e2e` — end
+  with `dotnet build-server shutdown` (`if: always()`) instead, and the isolated specs tear
+  down the isolated engines they booted and fail the job when a server is still running.
 
-Local equivalent (must stay GREEN; the command runs directly, with no wrapper — see
+Local equivalent (must stay GREEN; the commands run directly, with no wrapper — see
 [Running tests safely](../dash/runbook.md#running-tests-safely)):
 
 ```bash
 npx --prefix dash playwright test --config dash/playwright.isolated.config.ts dash/e2e/harness-collection.spec.ts
+npx --prefix dash playwright test --config dash/playwright.isolated.config.ts dash/e2e/harness-content-parity.spec.ts
 ```
 
 ### Process cleanup steps in `dash-e2e`, `build-test` and `integration-test`
 
 No job inspects the process table for leftovers: there is no wrapper, no start-epoch marker
-and no `check-leftovers` step in `ci.yml`. The two jobs that build .NET end with the same
-`if: always()` step, `dotnet build-server shutdown`, because the MSBuild and `VBCSCompiler`
-servers outlive every build by design:
+and no `check-leftovers` step in `ci.yml`. Three jobs carry the `dotnet build-server shutdown`
+step — `build-test`, `integration-test` and `dash-e2e`, exactly the three in the table below —
+because the MSBuild and `VBCSCompiler` servers outlive every build by design. Only those three
+carry it: the other jobs that build .NET, `squad-filesystem-contract` included, leave the servers
+they start to the runner's own teardown at the end of the job. The step's condition is
+`always() && steps.verdict.outputs.skip != 'true'`: it has to run
+when an earlier step failed, and it must not run when a receipt skipped the build, because then no
+server was ever started. The receipt save follows it in each of the three jobs.
 
 | Job | Steps before the shutdown |
 |---|---|
-| `dash-e2e` | `npx --prefix dash playwright test --config dash/playwright.isolated.config.ts …`, the only Playwright invocation in CI |
+| `dash-e2e` | `npx --prefix dash playwright test --config dash/playwright.isolated.config.ts dash/e2e/harness-collection.spec.ts` and `npx --prefix dash playwright test --config dash/playwright.isolated.config.ts dash/e2e/harness-content-parity.spec.ts`, the only Playwright invocations in CI |
 | `build-test` | `dotnet format`, `dotnet build`, `dotnet test`, `dotnet pack` |
 | `integration-test` | `dotnet build`, the integration test project |
 
 `ts-gates` starts no long-lived server, so it needs no cleanup step. `dash-e2e` also fails on
-its own terms when the isolated C# engine it booted is still running at teardown, because the
+its own terms when an isolated C# engine it booted is still running at teardown, because the
 spec stops that engine and waits for it to empty.
 
 The CI test steps call their tools directly, and so do local runs: nothing wraps them any more,
@@ -258,8 +270,11 @@ gates` is what refuses a full-suite gate outside the council (see the review cou
 architecture). A run that hangs is stopped by you or by the tool's own timeout; there is no
 absolute process cap.
 
-`dash-e2e` runs only `harness-collection.spec.ts`. `refresh-filters.spec.ts` is in the isolated
-config but not in CI, and the other Playwright specs have no sanctioned invocation. That gap is
+`dash-e2e` runs `harness-collection.spec.ts` and `harness-content-parity.spec.ts`, pinned by
+`DashE2eWorkflowTests` (`tests/KyberWeave.RepoPolicy.Tests/DashE2eWorkflowTests.cs`). The
+remaining isolated specs in `dash/playwright.isolated.config.ts` (`file-harness-dashboard.spec.ts`,
+`otel-web-dashboard.spec.ts`, and `otel-tray-dashboard.spec.ts`) are documented in the
+[KyberDash runbook](../dash/runbook.md#running-tests-safely), and non-isolated specs remain
 tracked in [the Playwright webServer specs todo](../todo/kyberdash-playwright-webserver-specs.md).
 
 ## This repository's own CI: path-targeted jobs and the CodeQL neutral check
@@ -339,6 +354,158 @@ docs-only pull request skips both legs. GitHub then reports a neutral
 
 See the `changes` and `codeql` job comments in `.github/workflows/ci.yml` for the gating
 logic.
+
+## Content-hash receipts and skips
+
+Both of this repository's workflows skip work on unchanged inputs. `ci.yml` does it per job, so a
+re-run of one pull request's own commit reuses what that commit already proved instead of redoing
+a build or a scan. `release.yml` does it once for the whole release chain, so a re-run of a release
+that already published verifies the published artifacts instead of rebuilding them.
+
+A **receipt** is a small JSON file a job writes after it passes. It records the job, the
+fingerprint of every input the job read (`input_hash`), the commit and run that wrote it, the
+SHA-256 digests of what it produced, and `saved_at_epoch` — the write time, in seconds, that the
+freshness check reads. The lookup key contains the fingerprint, so a different tree cannot reach
+the receipt. Every way of failing to read one runs the job in full: that is the mechanism's safe
+direction throughout.
+
+### The four receipt steps in a CI job
+
+| Step | What it does |
+|---|---|
+| `Compute input fingerprint` (`id: fp`) | `hashFiles()` over the job's fingerprint set, written to the step outputs as `hash`. An empty fingerprint becomes `empty-<run id>`, which can only miss. |
+| `Look up the receipt` (`id: receipt`) | `actions/cache/restore` of the `.receipt` path under `receipt-<job>-<leg>-<hash>`. Exact key, no `restore-keys`. |
+| `Decide the verdict` (`id: verdict`) | Validates the receipt, compares its age against `RECEIPT_MAX_AGE_SECONDS`, and sets `skip` to `true` only when both hold. |
+| `Save the receipt`, `Store the receipt` | Writes `.receipt/receipt.json` and saves it under the same key. Reached only on the miss path. |
+
+Fourteen jobs carry the pattern: `build-test`, `integration-test`, `squad-filesystem-contract`,
+`sbom`, `publish-smoke`, `update-loop`, `skill-docs-gate`, `ts-gates`, `dash-e2e`, `tray-rust`,
+`codeql`, `trivy`, `semgrep` and `gitleaks`. `changes`, `pr-naming` and `ci-summary` do not: their
+run is decided by the event or by the path filter.
+
+The verdict is one script, repeated verbatim in every job so no job can drift. It checks in this
+order, and each failure writes its own line to the step summary naming why the job runs in full:
+
+1. The restore missed — no prior receipt. A fork pull request says so, naming cache isolation.
+2. `.receipt/receipt.json` is absent, or is not JSON carrying `saved_at_epoch` and `input_hash`.
+3. `saved_at_epoch` is not digits only.
+4. The age is negative: the receipt is dated in the future.
+5. The receipt's `input_hash` is not this run's fingerprint.
+6. The age exceeds `RECEIPT_MAX_AGE_SECONDS`.
+
+A fresh hit writes the receipt as JSON into the step summary and sets `skip=true`. Every step
+after the verdict composes `steps.verdict.outputs.skip != 'true'` onto its own condition, so a hit
+skips the job's work inside a job that still reports success, and `CI Summary` keeps reading a
+success. A step that already had a condition keeps it and gains the skip guard beside it — the
+`codeql` job's `if: matrix.language == 'csharp'` becomes `matrix.language == 'csharp' &&
+steps.verdict.outputs.skip != 'true'`. No job-level `if:` reads a receipt: the
+path filter still decides whether a job starts, and the receipt decides only what happens once it
+has started.
+
+### The fingerprint sets
+
+Four sets, fixed per job, each pinned by `CiContentHashSkipTests`:
+
+| Set | Covers | Jobs |
+|---|---|---|
+| Whole tree | Every tracked top-level entry: 26 directories as `<dir>/**` and 24 root files by exact name | `build-test`, `integration-test`, `squad-filesystem-contract`, `publish-smoke`, `update-loop`, `skill-docs-gate`, `codeql`, `trivy`, `semgrep`, `gitleaks` |
+| SBOM | Every alternation of the `changes` job's sbom filter: the lockfiles, `**/*.csproj`, `**/Directory.*.props`, `global.json`, the three SBOM scripts, `dash/tray/vendor/**` and both workflow files | `sbom` |
+| Dash | `dash/**`, `global.json`, `Directory.Build.props`, `analyzers/**`, `.editorconfig` and `ci.yml` | `ts-gates`, `dash-e2e` |
+| Tray | `dash/tray/**`, `dash/.nvmrc` and `ci.yml` | `tray-rust` |
+
+The whole-tree set names every entry instead of globbing the root: a bare `'*'` or `'**'` hashes
+the same files without proving the list complete, and a missing entry is a silent skip — the job
+would reuse a receipt from a run that never read the file. The test compares the set against
+`git ls-tree HEAD`, so a new top-level directory or file fails until the enumeration is updated.
+
+Every set includes `ci.yml` itself, so any workflow edit invalidates every key. The SBOM set is the
+one that has to track a filter, and the test fails when the `changes` job's sbom alternations and
+the set's arguments disagree.
+
+### Keys, cache scope and the freshness ceiling
+
+A key is `receipt-<job>-<leg>-<hash>`. The leg is the dimension the job varies on:
+`${{ matrix.os }}` for the three multi-OS jobs, `${{ matrix.language }}` for `codeql`, and
+`${{ runner.os }}` otherwise. There are no `restore-keys`: a prefix would hand a job the receipt of
+a different tree, which is the one way this mechanism could skip work over input it never
+fingerprinted. A miss costs one full run, which is the safe direction. The key carries no age and
+no week, so the ceiling can be tightened without invalidating a key.
+
+Cache scope is what makes the mechanism safe on a pull request:
+
+- **A pull request's saves are scoped to that pull request.** Only a later run of the same pull
+  request reads them.
+- **Only default-branch runs populate the scope every workflow and branch can read.** A push to
+  `main` writes a receipt that a pull request branched from it can hit.
+
+`RECEIPT_MAX_AGE_SECONDS` is one workflow variable, `14400` — four hours — in both workflows, and
+no job overrides it. It bounds how long a skip is honoured: a re-run within four hours of a green
+run on the same tracked inputs skips, and a re-run after that pays the full cost again even though
+nothing changed. That is the trade the owner accepted. The fingerprint covers only tracked files,
+so a longer window would let a re-run trust a proof that an upstream change the tree does not
+record — a republished package, a moved toolchain image, a new advisory — has invalidated.
+
+### Scripts run under `bash`
+
+Every receipt script (`id: fp`, `id: verdict`, `id: save`, and the `id: digest` step where a job
+has one) declares `shell: bash`. A job with a Windows leg — `squad-filesystem-contract` and
+`tray-rust` — would run these scripts under `pwsh` by default, where `date +%s` and the verdict's
+integer arithmetic do not work. The policy test fails a receipt step that omits it.
+
+### Fork pull requests
+
+A pull request from a fork reads no cache from the base repository — cache isolation — so its
+restore always misses and its jobs always run in full. The save and the attestation steps carry an
+explicit same-repository guard, `github.event_name != 'pull_request' ||
+github.event.pull_request.head.repo.full_name == github.repository`, so a fork writes neither a
+receipt nor an attestation into the base repository.
+
+### The release chain: one receipt for the whole build
+
+`release.yml` writes a **chain receipt**: one shared, version-bound record for the release being
+built. Nine jobs restore it under the single key `release-chain-<version>` and the
+`.release-chain` path, and run one verdict step — `build`, `build-kyberdash`, `pack-squad`,
+`build-tray`, `sbom`, `artifact-sboms`, `attest-sbom`, `release` and `gh-packages`. Every
+`release-chain-` key line in the file is that same key: one receipt for the chain, not one per
+job.
+
+The seven build and SBOM jobs gate every step on `steps.verdict.outputs.skip != 'true'` except
+four: the checkout, the cache restore, the verdict itself, and `build-tray`'s `if: always()`
+keychain cleanup, which must run even when the build failed. The two publish jobs gate only their
+publishing steps; their verification always runs.
+
+The verdict is slimmer than a CI job's because the key is already bound to one version, so there is
+no `input_hash` to compare: the file must exist, carry a `saved_at_epoch` in digits only and not
+dated in the future, and the age must be at or under the ceiling. An absent, unparsable,
+future-dated or stale receipt rebuilds the chain, and the verdict says which. The receipt
+is recorded only in the `release` job, and only after the release, its asset inventory, its notes,
+its SBOM attestations and its provenance attestations have all verified — a half-published release
+leaves no receipt. It records the version, the tag, the writing run's URL, the published asset
+names, the published `SHA256SUMS.txt` verbatim, and the package versions pushed to GitHub Packages.
+
+On a hit the publish jobs verify instead of re-publishing, and every check fails closed:
+
+| Step | On a hit |
+|---|---|
+| `Verify published release assets` | Compares the published asset names against the receipt's recorded list as sorted sets, so a missing or an extra asset exits `1`. Downloads the published `SHA256SUMS.txt` and `diff`s it against the manifest the receipt recorded. |
+| `Verify SBOM attestations` and `Verify provenance attestations` | Download the published archives with `gh release download`, then verify each one with `gh attestation verify` — pinning `https://cyclonedx.org/bom` and `https://slsa.dev/provenance/v1`. Both exit `1` when no archive was found, so a hit cannot pass vacuously. |
+| `Verify the published package versions` | Looks each recorded `name@version` up through the GitHub Packages API with `gh api`, and exits `1` when a version is absent. |
+| `Report the run that published this release` | Always runs, so a hit still names the proving run after a failed verify step, and it claims only what happened: a hit whose receipt recorded the proving run writes `Published by <url>` to the step summary; a hit whose receipt recorded no run points at the verdict step's log; a green miss names this run as the publisher; a miss whose publish step succeeded but whose verification failed reports a live, unverified release; a miss whose publish step failed and whose tag lookup returns 2xx says a release for the tag already exists and this run did not complete publishing it; only a 404 says it published nothing; and any other lookup result says the lookup failed and does not claim the release is absent. |
+
+What a hit carries rather than re-checks is the signing work. The publishing run verified the
+macOS Developer ID signature, the team and the notarization assertions on the archives it
+published, and the hit path's per-archive `gh attestation verify` proves those archives are still
+the bytes that run attested. The manifest `diff` proves only that `SHA256SUMS.txt` is unchanged.
+`Verify the signature, the team and the notarization` lives in `build-tray` behind the skip guard,
+so it does not run a second time.
+
+The receipt save is miss-only and carries `continue-on-error: true`. Miss-only because a hit that
+refreshed `saved_at_epoch` would make the skip permanent; the ceiling has to expire on its own. The
+failure tolerance covers a cache-reserve race on the shared key: a save that loses that race must
+not fail a publish that already succeeded, and its failure mode is fail-open — the next run
+re-executes. It is the one sanctioned exception to the rule that `continue-on-error` appears only
+on the advisory scans, and the [coding standard](../standards/github-actions/github-actions.standards.md#receipts-and-skips)
+states it as one.
 
 ## Related
 

@@ -5,7 +5,7 @@
 // CursorMapperTests). Timestamps derive from the run clock passed in (D10). A contract states
 // each section as measured or as its explicit not-measurable state, from the mapper tests and
 // docs/dash/telemetry-inventory.md, never from what the screen shows.
-import { mkdirSync, writeFileSync } from 'node:fs'
+import { mkdirSync, rmSync, writeFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import { DatabaseSync } from 'node:sqlite'
 
@@ -472,3 +472,95 @@ export const FILE_HARNESS_SQLITE_FIXTURES: readonly FileHarnessFixture[] = [
     CURSOR_PATH,
   ),
 ]
+
+// ── Unreadable SQLite fixtures ──────────────────────────────────────────────
+//
+// The corrupt/unreadable sources `~/.kyberdash/canon.db` recorded ingest problems for, written into
+// a caller-supplied isolated home so the parity suite can assert the honest diagnostics without
+// overwriting a healthy database. Each path reuses the same platform helper the healthy fixtures do.
+
+/** One unreadable source: the problem code it must raise and the harness id it is recorded under. */
+export type UnreadableSqliteSource = {
+  readonly harness: 'cursor' | 'devin' | 'warp' | 'zcode'
+  readonly code: 'CURSOR_WORKSPACE_UNREADABLE' | 'DEVIN_SESSION_UNREADABLE' | 'SQLITE_SOURCE_UNREADABLE' | 'SOURCE_FORMAT_UNEVIDENCED'
+  /** Relative path under the isolated home the corrupt source is written at. */
+  readonly relativePath: string
+}
+
+/** A non-SQLite file body: SQLite refuses it with "file is not a database". */
+const CORRUPT_DATABASE_BYTES = 'kyber-parity-corrupt-database-body'
+
+/** The fixed workspace hash the corrupt Cursor workspace folder sits under. */
+const CURSOR_UNREADABLE_WORKSPACE_HASH = 'deadbeefdeadbeefdeadbeefdeadbeef'
+
+/**
+ * Writes the corrupt/unreadable SQLite sources the parity suite's second isolated server asserts:
+ * a readable Cursor global `state.vscdb` beside a corrupt workspace `state.vscdb`
+ * (`CURSOR_WORKSPACE_UNREADABLE`), a Devin `sessions.db` whose `last_activity_at` does not parse
+ * (`DEVIN_SESSION_UNREADABLE`, with no transcript JSON beside it), a corrupt `warp.sqlite`
+ * (`SQLITE_SOURCE_UNREADABLE`), and a `zcode` `db.sqlite` the registry cannot evidence
+ * (`SOURCE_FORMAT_UNEVIDENCED`).
+ *
+ * @param homeDir The isolated home directory of the calling server.
+ * @returns The written sources, each naming the problem code it must raise.
+ */
+export function buildUnreadableSqliteFixtures(homeDir: string): readonly UnreadableSqliteSource[] {
+  const cursorWorkspacePath = platformPath({
+    darwin: `Library/Application Support/Cursor/User/workspaceStorage/${CURSOR_UNREADABLE_WORKSPACE_HASH}/state.vscdb`,
+    win32: `AppData/Roaming/Cursor/User/workspaceStorage/${CURSOR_UNREADABLE_WORKSPACE_HASH}/state.vscdb`,
+    other: `.config/Cursor/User/workspaceStorage/${CURSOR_UNREADABLE_WORKSPACE_HASH}/state.vscdb`,
+  })
+
+  // The global database opens cleanly but holds no bubble rows, so it lists no composer and
+  // fabricates no session; the corrupt workspace database is what raises CURSOR_WORKSPACE_UNREADABLE.
+  withDatabase(homeDir, CURSOR_PATH, (db) => {
+    db.exec('CREATE TABLE IF NOT EXISTS cursorDiskKV (key TEXT UNIQUE ON CONFLICT REPLACE, value BLOB)')
+  })
+
+  const corruptTargets: readonly string[] = [
+    cursorWorkspacePath,
+    DEVIN_SESSIONS_PATH,
+    WARP_PATH,
+    '.zcode/cli/db/db.sqlite',
+  ]
+  for (const relativePath of corruptTargets) {
+    const target = join(homeDir, relativePath)
+    mkdirSync(dirname(target), { recursive: true })
+    writeFileSync(target, CORRUPT_DATABASE_BYTES)
+  }
+
+  // The Devin gap is a row whose last_activity_at does not parse, not a corrupt file: the source
+  // opens cleanly and refuses the session, recording DEVIN_SESSION_UNREADABLE.
+  const devinTarget = join(homeDir, DEVIN_SESSIONS_PATH)
+  rmSync(devinTarget, { force: true })
+  withDatabase(homeDir, DEVIN_SESSIONS_PATH, (db) => {
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS sessions (
+        id TEXT PRIMARY KEY, working_directory TEXT, model TEXT, title TEXT, created_at TEXT,
+        last_activity_at TEXT, hidden INTEGER, metadata TEXT
+      );
+      CREATE TABLE IF NOT EXISTS message_nodes (
+        row_id INTEGER PRIMARY KEY, session_id TEXT NOT NULL, node_id TEXT NOT NULL, parent_node_id TEXT,
+        chat_message TEXT NOT NULL, created_at TEXT, metadata TEXT, UNIQUE(session_id, node_id)
+      );
+    `)
+    db.prepare(
+      'INSERT INTO sessions (id, working_directory, model, title, created_at, last_activity_at, hidden, metadata) VALUES (?, ?, ?, ?, ?, ?, 0, NULL)',
+    ).run('parity-devin-unreadable', '/synthetic/workspace', 'claude-sonnet-4-6', 'Synthetic unreadable Devin session', 'not-a-date', 'not-a-date')
+    db.prepare(
+      'INSERT INTO message_nodes (session_id, node_id, parent_node_id, chat_message, created_at, metadata) VALUES (?, ?, NULL, ?, ?, NULL)',
+    ).run(
+      'parity-devin-unreadable',
+      'parity-devin-unreadable-node-1',
+      JSON.stringify({ role: 'user', content: 'Synthetic unreadable Devin session.' }),
+      new Date(0).toISOString(),
+    )
+  })
+
+  return [
+    { harness: 'cursor', code: 'CURSOR_WORKSPACE_UNREADABLE', relativePath: cursorWorkspacePath },
+    { harness: 'devin', code: 'DEVIN_SESSION_UNREADABLE', relativePath: DEVIN_SESSIONS_PATH },
+    { harness: 'warp', code: 'SQLITE_SOURCE_UNREADABLE', relativePath: WARP_PATH },
+    { harness: 'zcode', code: 'SOURCE_FORMAT_UNEVIDENCED', relativePath: '.zcode/cli/db/db.sqlite' },
+  ]
+}

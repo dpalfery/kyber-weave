@@ -6,7 +6,7 @@ status: current
 component: KyberDash
 source-root: dash
 owner: dpalfery
-last-reviewed: 2026-11-25
+last-reviewed: 2026-11-28
 decided-by:
   - adr/0084-kyberdash-csharp-engine
   - adr/0031-kyberdash-capture-command-owns-harness-telemetry-keys
@@ -1416,8 +1416,10 @@ filters, so narrowing one page's scope never touches the A/B selectors.
       `skill` tool requests the parser reads on each message; a session with none shows not measurable.
       (`KyberBridgeEngine.BuildSkillsPayload` does not currently emit `description` or
       `derived_tokens` on `/skills`, so per-row token counts are not shown.)
-      Copilot CLI tool invocations are not ingested yet (todo
-      [copilot-cli-tool-invocations-per-message](../todo/copilot-cli-tool-invocations-per-message.md)).
+      Copilot CLI tool invocations are ingested by `CopilotCliMapper.BuildToolInvokeRecord` as
+      child `tool.invoke` records from journal `toolRequests`, `tool.execution_start`, and
+      `tool.execution_complete` events, storing `ToolResultContent` parts (or `Withheld` metadata
+      when `IsDocument` is true).
     - *Not measurable or empty.* A "Not measurable" card means the source was not read: no transcript
       for an Antigravity session, or no system prompt in the journal for Copilot CLI (a session older than
       the 14-day content purge keeps no prompt). For that
@@ -1638,8 +1640,9 @@ on every invocation, from the repository root:
 npx --prefix dash playwright test --config dash/playwright.isolated.config.ts
 ```
 
-That config runs the four isolated self-booting specs (`harness-collection.spec.ts`,
-`file-harness-dashboard.spec.ts`, `otel-web-dashboard.spec.ts`, and `otel-tray-dashboard.spec.ts`) with one worker. The only Playwright configs in `dash/` are
+That config runs the five isolated self-booting specs (`harness-collection.spec.ts`,
+`file-harness-dashboard.spec.ts`, `otel-web-dashboard.spec.ts`, `otel-tray-dashboard.spec.ts`,
+and `harness-content-parity.spec.ts`) with one worker. The only Playwright configs in `dash/` are
 `playwright.config.ts` and `playwright.isolated.config.ts`: a test pins that set. Do not run
 `dash/playwright.config.ts` by hand. Its `webServer` starts a dashboard on port 4747, the port the
 tray uses, and it is not the isolated path. Which specs have no sanctioned invocation is tracked in
@@ -1672,20 +1675,23 @@ Fixture timestamps are relative to the run's clock (one hour back, floored to th
 | Suite | Harnesses | How the database is loaded |
 |---|---|---|
 | `dash/e2e/otel-web-dashboard.spec.ts` | the 7 OTLP-captured harnesses (`claude-code`, `opencode`, `droid`, `codex`, `copilot`, `pi`, `antigravity`) and the `gemini` exclusion | posts the OTLP payloads from `dash/e2e/otel-harness-payloads.ts` to `/v1/traces` and `/v1/logs`; paired Droid sessions also get their transcript and `<id>.settings.json` under the server's isolated `HOME`, and `POST /api/kyber/refresh` runs the plugin-captured counter pass |
-| `dash/e2e/file-harness-dashboard.spec.ts` | the 13 file-import harnesses, one test each | writes each harness's native files under the isolated `HOME` at the path its registry reader scans (`dash/e2e/file-harness-jsonl.ts`, `file-harness-json.ts`, `file-harness-sqlite.ts`, the last built with Node's `node:sqlite`, Node 22.13 or later), then `POST /api/kyber/import-history` |
+| `dash/e2e/file-harness-dashboard.spec.ts` | the 18 file-import harnesses, one test each | writes each harness's native files under the isolated `HOME` at the path its registry reader scans (`dash/e2e/file-harness-jsonl.ts`, `file-harness-json.ts`, `file-harness-sqlite.ts`, the last built with Node's `node:sqlite`, Node 22.13 or later), then `POST /api/kyber/import-history` |
+| `dash/e2e/harness-content-parity.spec.ts` | the `22` HTTP-testable harnesses (`18` file-import + `3` OTLP-distinct = `21` unique ingestible harnesses, plus `zcode` `SOURCE_FORMAT_UNEVIDENCED`), excluded `gemini`, and separate-instance corrupt SQLite / unclaimed OTLP diagnostics | boots two isolated servers (`startIsolatedServer`): server #1 ingests the dual Copilot baseline (`copilot` OTLP + `copilot-cli` rich file + `copilot-vscode`) plus all 21 ingestible harnesses and verifies API/UI full content via `assertHarnessFullContentParity`; server #2 isolates `buildUnreadableSqliteFixtures` (`cursor`, `devin`, `warp`, `zcode`) and unclaimed/unattributed OTLP telemetry so fixed OS SQLite paths never collide with healthy fixtures |
 
-Both share the section assertions in `dash/e2e/session-dashboard-assertions.ts`, and a dimension a harness does not export is
+Both dashboard specs share the section assertions in `dash/e2e/session-dashboard-assertions.ts` (`assertHarnessSessionDashboard` and `assertHarnessFullContentParity`), and a dimension a harness does not export is
 asserted as its explicit not-measurable state, never skipped. Where a harness cannot reach a section, the contract in
-`dash/e2e/file-harness-contracts.ts` or `otel-harness-payloads.ts` states the gap.
+`dash/e2e/file-harness-contracts.ts`, `dash/e2e/otel-harness-payloads.ts`, or `dash/e2e/copilot-parity-baseline.ts` states the gap.
 
-**Prerequisites.** The boot never uses a `kyberdash-api` found on `PATH`, because that would test an installed engine of
-another schema: `assertKyberdashApiBuilt` throws unless the worktree's own Release build exists. From the repository root:
+**Prerequisites and isolated parity command.** The boot never uses a `kyberdash-api` found on `PATH`, because that would test an installed engine of
+another schema: `assertKyberdashApiBuilt` throws unless the worktree's own Release build exists, and the web SPA must be built cleanly via lockfile-safe `npm ci` (avoiding `npm install`). From the repository root:
 
 ```bash
-dotnet build dash/server/KyberDash.Api -c Release
-dotnet build dash/server/KyberDash.Cli -c Release
-npm --prefix dash run build:web
+dotnet build dash/server/KyberDash.Api -c Release -nr:false -p:UseSharedCompilation=false
+dotnet build dash/server/KyberDash.Cli -c Release -nr:false -p:UseSharedCompilation=false
+npm --prefix dash/web ci --no-audit --no-fund
+npm --prefix dash/web run build
 npx --prefix dash playwright test --config dash/playwright.isolated.config.ts dash/e2e/file-harness-dashboard.spec.ts
+npx --prefix dash playwright test --config dash/playwright.isolated.config.ts dash/e2e/harness-content-parity.spec.ts
 ```
 
 **SQLite harnesses.** The four SQLite-format harnesses (`kilo-shared-runtime`, `warp`, `cursor`, `devin`) are imported by the
