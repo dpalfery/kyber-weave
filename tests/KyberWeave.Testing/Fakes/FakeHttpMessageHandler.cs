@@ -86,6 +86,14 @@ public sealed class FakeHttpMessageHandler : HttpMessageHandler
         new(status) { Content = new StringContent(body, System.Text.Encoding.UTF8, mediaType) };
 
     /// <inheritdoc />
+    /// <remarks>
+    /// Serves the synchronous <see cref="HttpClient.Send(HttpRequestMessage)"/> the sync twins still use until their
+    /// callers move to the async path; it answers exactly as <see cref="SendAsync"/> does.
+    /// </remarks>
+    protected override HttpResponseMessage Send(HttpRequestMessage request, CancellationToken cancellationToken) =>
+        SendAsync(request, cancellationToken).GetAwaiter().GetResult();
+
+    /// <inheritdoc />
     protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
     {
         string body = request.Content is null
