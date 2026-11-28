@@ -31,7 +31,7 @@ public sealed class ArbiterAuditAndTuneUserLevelStoreTests : IDisposable
     public void Dispose() => _host.Dispose();
 
     [Fact]
-    public async Task Audit_ReportsTheDispatchesTheUserLevelHookRecorded()
+    public async Task AuditAsync_ReportsTheDispatchesTheUserLevelHookRecorded()
     {
         string root = Repository();
         string store = UserLevelStoreHolding(root, InFlightLedger.FileName);
@@ -42,7 +42,7 @@ public sealed class ArbiterAuditAndTuneUserLevelStoreTests : IDisposable
             Target = "csharp-dev",
         });
 
-        ArbiterAuditReport? report = _host.Command<ArbiterAuditService>().Audit(
+        ArbiterAuditReport? report = await _host.Command<ArbiterAuditService>().AuditAsync(
             root, KyberWeaveConfigDefaults.Product, null, null, null, new DiagnosticReport());
 
         Assert.NotNull(report);
@@ -50,13 +50,13 @@ public sealed class ArbiterAuditAndTuneUserLevelStoreTests : IDisposable
     }
 
     [Fact]
-    public async Task Tune_ScoresTheDecisionsTheUserLevelHookRecorded()
+    public async Task TuneAsync_ScoresTheDecisionsTheUserLevelHookRecorded()
     {
         string root = Repository();
         string store = UserLevelStoreHolding(root, DecisionLog.FileName);
         await _host.State.Decisions(store).AppendAsync(ScoredDecision());
 
-        ArbiterTuneReport? report = _host.Command<ArbiterTuneService>().Score(root, [0.6], null, new DiagnosticReport());
+        ArbiterTuneReport? report = await _host.Command<ArbiterTuneService>().ScoreAsync(root, [0.6], null, new DiagnosticReport());
 
         Assert.NotNull(report);
         ArbiterTuneRule rule = Assert.Single(report.Rules);

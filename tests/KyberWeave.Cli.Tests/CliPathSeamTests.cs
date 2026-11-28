@@ -159,6 +159,13 @@ public sealed class CliPathSeamTests : IDisposable
             _matches = matchesPlan;
             return new ArbiterAuditReport(0, 0, [], 0, 0);
         }
+
+        public Task<ArbiterAuditReport?> AuditAsync(string repositoryPath, KyberWeaveConfig config, DateTimeOffset? since, string? session, Func<string?, bool>? matchesPlan, DiagnosticReport report, CancellationToken cancellationToken = default)
+        {
+            _matches = matchesPlan;
+            ArbiterAuditReport? audit = new ArbiterAuditReport(0, 0, [], 0, 0);
+            return Task.FromResult<ArbiterAuditReport?>(audit);
+        }
     }
 
     private sealed class RecordingDelivery : IRunDeliveryRunner
