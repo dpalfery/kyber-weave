@@ -40,24 +40,24 @@ public sealed class CliPathSeamTests : IDisposable
     public void Dispose() => _console.Dispose();
 
     [Fact]
-    public void RunDeliver_ARelativePath_IsDeliveredFromTheDirectoryUnderTheEnvironmentsWorkingDirectory()
+    public async Task RunDeliver_ARelativePath_IsDeliveredFromTheDirectoryUnderTheEnvironmentsWorkingDirectory()
     {
         RecordingDelivery delivery = new();
 
-        int exitCode = new RunDeliverCommand(delivery, new AcceptingConfigs(), _paths, _environment, _console)
-            .Execute(null!, new RunDeliverSettings { Path = "repo", Format = "json" }, CancellationToken.None);
+        int exitCode = await new RunDeliverCommand(delivery, new AcceptingConfigs(), _paths, _environment, _console)
+            .ExecuteAsync(null!, new RunDeliverSettings { Path = "repo", Format = "json" }, CancellationToken.None);
 
         Assert.Equal(0, exitCode);
         Assert.Equal(Repo, delivery.RepoRoot);
     }
 
     [Fact]
-    public void RunDeliver_AnAbsolutePath_IsDeliveredFromThatPathNotTheWorkingDirectory()
+    public async Task RunDeliver_AnAbsolutePath_IsDeliveredFromThatPathNotTheWorkingDirectory()
     {
         RecordingDelivery delivery = new();
 
-        _ = new RunDeliverCommand(delivery, new AcceptingConfigs(), _paths, _environment, _console)
-            .Execute(null!, new RunDeliverSettings { Path = "/kw/elsewhere", Format = "json" }, CancellationToken.None);
+        await new RunDeliverCommand(delivery, new AcceptingConfigs(), _paths, _environment, _console)
+            .ExecuteAsync(null!, new RunDeliverSettings { Path = "/kw/elsewhere", Format = "json" }, CancellationToken.None);
 
         Assert.Equal("/kw/elsewhere", delivery.RepoRoot);
     }
@@ -172,10 +172,10 @@ public sealed class CliPathSeamTests : IDisposable
     {
         public string? RepoRoot { get; private set; }
 
-        public DeliveryOutcome Run(string repoRoot, KyberWeaveConfig config, DeliveryRequest request)
+        public Task<DeliveryOutcome> RunAsync(string repoRoot, KyberWeaveConfig config, DeliveryRequest request, CancellationToken cancellationToken = default)
         {
             RepoRoot = repoRoot;
-            return new DeliveryOutcome(new DiagnosticReport(), Delivered: false);
+            return Task.FromResult(new DeliveryOutcome(new DiagnosticReport(), Delivered: false));
         }
     }
 

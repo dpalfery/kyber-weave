@@ -1,19 +1,17 @@
-using KyberWeave.Core;
 using System.ComponentModel;
 using System.Diagnostics;
 using System.Globalization;
 using System.Text.Json;
-using KyberWeave.Contracts.Host;
 using System.Text.RegularExpressions;
+using KyberWeave.Contracts.Host;
 using KyberWeave.Contracts.Repositories;
-using KyberWeave.Contracts.Services;
 using KyberWeave.Core.Configuration;
 using KyberWeave.Core.Diagnostics;
 using KyberWeave.Core.Docs.Closeout;
+using KyberWeave.Core.FileSystem;
 using KyberWeave.Core.Processes;
 using KyberWeave.Core.Review;
 using KyberWeave.Core.RunStart;
-using KyberWeave.Core.FileSystem;
 
 namespace KyberWeave.Core.Docs.Delivery;
 
@@ -85,13 +83,12 @@ public sealed partial class RunDelivery
     private readonly string _repoRoot;
     private readonly IEmbeddedResources _resources;
     private readonly KyberWeaveConfig _config;
-    private readonly IProcessExecutor _executor;
+    private readonly IProcessRunner _executor;
     private readonly string _homeDirectory;
     private readonly ActivePlanFiles _files;
     private readonly IRepositoryFileStore _store;
     private readonly IRunStateStore _runState;
-    private readonly IReviewCycleStore _cycles;
-    private readonly TimeProvider _time;
+    private readonly RunDeliveryEvidence _evidence;
 
     /// <summary>
     /// Test seam, called with the absolute path of the archived plan once it is found and before it is read: the
@@ -108,61 +105,65 @@ public sealed partial class RunDelivery
     /// <param name="executor">Runs git and gh; null for the bounded default.</param>
     /// <param name="homeDirectory">The operator's home, which holds the run records; null for the user profile.</param>
     /// <param name="ports">The ports the run records, review evidence and plan files are read through.</param>
-    public RunDelivery(string repoRoot, KyberWeaveConfig config, IProcessExecutor? executor, string? homeDirectory, RunDeliveryPorts ports)
+    public RunDelivery(string repoRoot, KyberWeaveConfig config, IProcessRunner? executor, string? homeDirectory, RunDeliveryPorts ports)
     {
         ArgumentNullException.ThrowIfNull(ports);
         ArgumentException.ThrowIfNullOrWhiteSpace(repoRoot);
         ArgumentNullException.ThrowIfNull(config);
         _repoRoot = ports.Paths.GetFullPath(repoRoot, ports.Environment.CurrentDirectory);
         _config = config;
-        _executor = executor ?? new BoundedExecutor(ports.Process, TimeSpan.FromMinutes(3));
+        _executor = executor ?? new BoundedDeliveryProcessRunner(ports.Process, TimeSpan.FromMinutes(3));
         _homeDirectory = homeDirectory ?? ports.Environment.HomeDirectory;
         _store = ports.Files;
         _resources = ports.Resources;
         _runState = ports.RunState;
-        _cycles = ports.Cycles;
-        _time = ports.Time;
         _files = new ActivePlanFiles(_repoRoot, config, ports.Files, ports.Process);
+        _evidence = new RunDeliveryEvidence(
+            _repoRoot,
+            config,
+            _homeDirectory,
+            _files,
+            ports.Files,
+            ports.Cycles,
+            ports.Time,
+            (arguments, cancellationToken) => GitAsync(cancellationToken, arguments));
     }
 
     /// <summary>Delivers the run, or refuses and changes nothing.</summary>
-    public DeliveryOutcome Run(DeliveryRequest request)
+    public async Task<DeliveryOutcome> RunAsync(DeliveryRequest request, CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(request);
         DiagnosticReport report = new();
 
-        if (ResolveRequest(
-                request,
-                report,
-                out string summary,
-                out string branch,
-                out string harness,
-                out string type,
-                out string slug,
-                out string baseBranch,
-                out string baseRef) is not null)
+        ResolvedRequest? resolved = await ResolveRequestAsync(request, report, cancellationToken).ConfigureAwait(false);
+        if (resolved is null)
             return new DeliveryOutcome(report, false);
 
-        if (RejectNonGitHubOrigin(report, out string repository) is not null)
+        string summary = resolved.Summary;
+        string branch = resolved.Branch;
+        string harness = resolved.Harness;
+        string type = resolved.Type;
+        string slug = resolved.Slug;
+        string baseBranch = resolved.BaseBranch;
+        string baseRef = resolved.BaseRef;
+
+        string? repository = await RejectNonGitHubOriginAsync(report, cancellationToken).ConfigureAwait(false);
+        if (repository is null)
             return new DeliveryOutcome(report, false);
 
-        if (RejectDirtyWorktree(
-                report,
-                out string plansFolder,
-                out string archiveFolder,
-                out string todoFolder,
-                out IReadOnlyList<string> pendingPlanFiles,
-                out IReadOnlyList<string> pendingTodoFiles,
-                out string statusOutput) is not null)
+        WorktreeState? worktree = await RejectDirtyWorktreeAsync(report, cancellationToken).ConfigureAwait(false);
+        if (worktree is null)
             return new DeliveryOutcome(report, false);
 
-        string mergeBase = Git("merge-base", baseRef, "HEAD").StandardOutput.Trim();
+        string mergeBase = (await GitAsync(cancellationToken, "merge-base", baseRef, "HEAD").ConfigureAwait(false)).StandardOutput.Trim();
         if (mergeBase.Length == 0)
             return Refused(report, NotARunBranch, $"'{branch}' shares no history with its base '{baseRef}'. Nothing was changed.");
 
-        if (!TryFindPlan(request.PlanFile, mergeBase, plansFolder, archiveFolder, statusOutput, report, out string? plan))
+        PlanDiscovery? discovery = await TryFindPlanAsync(request.PlanFile, mergeBase, worktree.PlansFolder, worktree.ArchiveFolder, worktree.StatusOutput, report, cancellationToken).ConfigureAwait(false);
+        if (discovery is null)
             return new DeliveryOutcome(report, false);
 
+        string? plan = discovery.Plan;
         if (plan is not null)
             AfterPlanFound?.Invoke(_files.Absolute(plan));
 
@@ -178,17 +179,17 @@ public sealed partial class RunDelivery
                 "Leave the title out to have it composed, or fix the override.");
         }
 
-        if (CheckGitHubCli(report) is not null)
+        if (await CheckGitHubCliAsync(report, cancellationToken).ConfigureAwait(false) is not null)
             return new DeliveryOutcome(report, false);
 
-        if (pendingPlanFiles.Count > 0 && !CommitPlanFiles([.. new[] { plansFolder, archiveFolder }.Where(folder => _store.DirectoryExists(_files.Absolute(folder)))], plan, report))
+        if (worktree.PendingPlanFiles.Count > 0 && !await CommitPlanFilesAsync([.. new[] { worktree.PlansFolder, worktree.ArchiveFolder }.Where(folder => _store.DirectoryExists(_files.Absolute(folder)))], plan, report, cancellationToken).ConfigureAwait(false))
             return new DeliveryOutcome(report, false);
-        if (pendingTodoFiles.Count > 0 && !CommitTodoFiles(todoFolder, report))
+        if (worktree.PendingTodoFiles.Count > 0 && !await CommitTodoFilesAsync(worktree.TodoFolder, report, cancellationToken).ConfigureAwait(false))
             return new DeliveryOutcome(report, false);
 
-        string body = PreparePullRequest(request, summary, facts, plan, todoFolder, type, slug, branch, mergeBase, report);
+        string body = await PreparePullRequestAsync(request, summary, facts, plan, worktree.TodoFolder, type, slug, branch, mergeBase, report, cancellationToken).ConfigureAwait(false);
 
-        ProcessResult push = Git("push", "--porcelain", Remote, $"refs/heads/{branch}:refs/heads/{branch}");
+        ProcessResult push = await GitAsync(cancellationToken, "push", "--porcelain", Remote, $"refs/heads/{branch}:refs/heads/{branch}").ConfigureAwait(false);
         if (push.ExitCode != 0)
         {
             return Refused(report, PushFailed, $"git push of '{branch}' was refused: {FirstLine(push.StandardError + push.StandardOutput)}.",
@@ -196,127 +197,99 @@ public sealed partial class RunDelivery
         }
 
         Say(report, $"Pushed {branch} to {Remote}.");
-        return PullRequest(report, repository, branch, baseBranch, title, body, request.Draft);
+        return await PullRequestAsync(report, repository, branch, baseBranch, title, body, request.Draft, cancellationToken).ConfigureAwait(false);
     }
 
     /// <summary>
     /// Resolves the request to the run branch it names, refusing a missing or overlong summary, a
     /// branch that is not a run branch, a branch with no recorded base, and a branch that is its
-    /// own base or the default branch. The refusal is recorded in the report; the resolved parts
-    /// are answered through the out parameters, all defaulted when it refuses.
+    /// own base or the default branch. The refusal is recorded in the report; null answers when it
+    /// refuses, the resolved parts otherwise.
     /// </summary>
-    private DeliveryOutcome? ResolveRequest(
-        DeliveryRequest request,
-        DiagnosticReport report,
-        out string summary,
-        out string branch,
-        out string harness,
-        out string type,
-        out string slug,
-        out string baseBranch,
-        out string baseRef)
+    private async Task<ResolvedRequest?> ResolveRequestAsync(DeliveryRequest request, DiagnosticReport report, CancellationToken cancellationToken)
     {
-        summary = string.Empty;
-        branch = string.Empty;
-        harness = string.Empty;
-        type = string.Empty;
-        slug = string.Empty;
-        baseBranch = string.Empty;
-        baseRef = string.Empty;
-
-        summary = request.Summary?.Trim() ?? string.Empty;
+        string summary = request.Summary?.Trim() ?? string.Empty;
         if (summary.Length == 0)
         {
-            return Refused(report, InvalidRequest, "No summary was given. Nothing was changed.", "Pass one to three plain sentences: the problem and the outcome.");
+            Refused(report, InvalidRequest, "No summary was given. Nothing was changed.", "Pass one to three plain sentences: the problem and the outcome.");
+            return null;
         }
         if (summary.Length > MaxSummaryLength)
         {
-            return Refused(report, InvalidRequest, $"The summary is longer than {MaxSummaryLength} characters. Nothing was changed.", "Keep it to one to three sentences.");
+            Refused(report, InvalidRequest, $"The summary is longer than {MaxSummaryLength} characters. Nothing was changed.", "Keep it to one to three sentences.");
+            return null;
         }
 
-        branch = Git("symbolic-ref", "--quiet", "--short", "HEAD").StandardOutput.Trim();
+        string branch = (await GitAsync(cancellationToken, "symbolic-ref", "--quiet", "--short", "HEAD").ConfigureAwait(false)).StandardOutput.Trim();
         if (branch.Length == 0)
         {
-            return Refused(report, NotARunBranch, "The checkout is not on a branch (detached HEAD). Nothing was changed.", "Call this from the run's worktree, on the run branch.");
+            Refused(report, NotARunBranch, "The checkout is not on a branch (detached HEAD). Nothing was changed.", "Call this from the run's worktree, on the run branch.");
+            return null;
         }
-        if (!TryParseRunBranch(branch, out harness, out type, out slug))
+        if (!TryParseRunBranch(branch, out string harness, out string type, out string slug))
         {
-            return Refused(report, NotARunBranch,
+            Refused(report, NotARunBranch,
                 $"'{branch}' is not a run branch: run branches are named [<owner>.<agent>.]<harness>/<type>/<slug>. Nothing was changed.",
                 "Deliver only a branch that kyber-weave run start created.");
+            return null;
         }
 
         if (!_runState.TryReadBaseRef(_homeDirectory, branch, out string? baseRefValue) || baseRefValue is null)
         {
-            return Refused(report, NotARunBranch, $"No run record names the base '{branch}' was started from. Nothing was changed.",
+            Refused(report, NotARunBranch, $"No run record names the base '{branch}' was started from. Nothing was changed.",
                 "Deliver only a branch kyber-weave run start created or resumed (--resume <branch>), which records its base.");
+            return null;
         }
-        baseRef = baseRefValue;
 
-        string? originHead = Git("symbolic-ref", "--quiet", "--short", $"refs/remotes/{Remote}/HEAD") is { ExitCode: 0 } head
+        string? originHead = (await GitAsync(cancellationToken, "symbolic-ref", "--quiet", "--short", $"refs/remotes/{Remote}/HEAD").ConfigureAwait(false)) is { ExitCode: 0 } head
             ? head.StandardOutput.Trim()
             : null;
-        baseBranch = RunStartPlanner.BaseBranchName(baseRef, originHead);
+        string baseBranch = RunStartPlanner.BaseBranchName(baseRefValue, originHead);
         string? defaultBranch = originHead is null ? null : RunStartPlanner.BaseBranchName(originHead, null);
         if (string.Equals(branch, baseBranch, StringComparison.Ordinal) || string.Equals(branch, defaultBranch, StringComparison.Ordinal)
             || string.Equals(baseBranch, "HEAD", StringComparison.Ordinal))
         {
-            return Refused(report, NotARunBranch, $"'{branch}' is the base or default branch, or its base cannot be named. Nothing was changed.",
+            Refused(report, NotARunBranch, $"'{branch}' is the base or default branch, or its base cannot be named. Nothing was changed.",
                 "Deliver only the run's own branch, never the branch it merges into.");
+            return null;
         }
 
-        return null;
+        return new ResolvedRequest(summary, branch, harness, type, slug, baseBranch, baseRefValue);
     }
 
     /// <summary>
     /// Refuses an origin remote that is not a github.com one — the step opens pull requests on
-    /// github.com only — and answers with the owner and repository it is.
+    /// github.com only. Null answers when it refuses, the owner and repository otherwise.
     /// </summary>
-    private DeliveryOutcome? RejectNonGitHubOrigin(DiagnosticReport report, out string repository)
+    private async Task<string?> RejectNonGitHubOriginAsync(DiagnosticReport report, CancellationToken cancellationToken)
     {
-        repository = string.Empty;
-
-        string remoteUrl = Git("remote", "get-url", Remote).StandardOutput.Trim();
+        string remoteUrl = (await GitAsync(cancellationToken, "remote", "get-url", Remote).ConfigureAwait(false)).StandardOutput.Trim();
         if (GitHubRepository(remoteUrl) is not { } found)
         {
             string host = remoteUrl.Contains("dev.azure.com", StringComparison.OrdinalIgnoreCase) || remoteUrl.Contains("visualstudio.com", StringComparison.OrdinalIgnoreCase)
                 ? "Azure DevOps"
                 : remoteUrl.Length == 0 ? "no origin remote" : "a host other than github.com";
-            return Refused(report, ProviderUnavailable, $"The origin remote is {host}; this step opens pull requests on github.com only. Nothing was changed.", DeliveryAgentHint);
+            Refused(report, ProviderUnavailable, $"The origin remote is {host}; this step opens pull requests on github.com only. Nothing was changed.", DeliveryAgentHint);
+            return null;
         }
 
-        repository = found;
-        return null;
+        return found;
     }
 
     /// <summary>
     /// Classifies the uncommitted changes: the plan and todo folders may hold pending changes the
-    /// delivery commits, but anything outside them is someone else's work and refuses. The folders,
-    /// the pending files, and the status output plan discovery reads are answered through the out
-    /// parameters, all defaulted when it refuses.
+    /// delivery commits, but anything outside them is someone else's work and refuses. Null answers
+    /// when it refuses, the classified state otherwise.
     /// </summary>
-    private DeliveryOutcome? RejectDirtyWorktree(
-        DiagnosticReport report,
-        out string plansFolder,
-        out string archiveFolder,
-        out string todoFolder,
-        out IReadOnlyList<string> pendingPlanFiles,
-        out IReadOnlyList<string> pendingTodoFiles,
-        out string statusOutput)
+    private async Task<WorktreeState?> RejectDirtyWorktreeAsync(DiagnosticReport report, CancellationToken cancellationToken)
     {
-        plansFolder = string.Empty;
-        archiveFolder = string.Empty;
-        todoFolder = string.Empty;
-        pendingPlanFiles = [];
-        pendingTodoFiles = [];
-        statusOutput = string.Empty;
-
-        ProcessResult status = Git("status", "--porcelain=v1", "-z", "--untracked-files=all");
+        ProcessResult status = await GitAsync(cancellationToken, "status", "--porcelain=v1", "-z", "--untracked-files=all").ConfigureAwait(false);
         if (status.ExitCode != 0)
-            return Refused(report, UncommittedChanges, $"git status failed: {FirstLine(status.StandardError)}. Nothing was changed.");
+        {
+            Refused(report, UncommittedChanges, $"git status failed: {FirstLine(status.StandardError)}. Nothing was changed.");
+            return null;
+        }
 
-        // The out parameters may not be captured by the lambdas that classify the paths, so the
-        // locals carry the values until the classification is done.
         (string folderPlans, string folderArchive) = PlanFolders();
         string folderTodo = TodoFolder();
         string statusText = status.StandardOutput;
@@ -326,19 +299,13 @@ public sealed partial class RunDelivery
         List<string> foreign = [.. dirty.Except(folderPendingPlans, StringComparer.Ordinal).Except(folderPendingTodos, StringComparer.Ordinal)];
         if (foreign.Count > 0)
         {
-            return Refused(report, UncommittedChanges,
+            Refused(report, UncommittedChanges,
                 $"Uncommitted changes outside the plan and todo files: {string.Join(", ", foreign.Take(5))}{(foreign.Count > 5 ? $" and {foreign.Count - 5} more" : string.Empty)}. Nothing was changed.",
                 "Each worker commits its own changes. Send these to the worker that owns them, or restore files a tool touched by mistake, then call this again.");
+            return null;
         }
 
-        plansFolder = folderPlans;
-        archiveFolder = folderArchive;
-        todoFolder = folderTodo;
-        pendingPlanFiles = folderPendingPlans;
-        pendingTodoFiles = folderPendingTodos;
-        statusOutput = statusText;
-
-        return null;
+        return new WorktreeState(folderPlans, folderArchive, folderTodo, folderPendingPlans, folderPendingTodos, statusText);
     }
 
     /// <summary>
@@ -370,11 +337,11 @@ public sealed partial class RunDelivery
     }
 
     /// <summary>Refuses when the GitHub CLI cannot be run or is not signed in to github.com.</summary>
-    private DeliveryOutcome? CheckGitHubCli(DiagnosticReport report)
+    private async Task<DeliveryOutcome?> CheckGitHubCliAsync(DiagnosticReport report, CancellationToken cancellationToken)
     {
-        if (Gh("--version") is { ExitCode: not 0 } version)
+        if ((await GhAsync(cancellationToken, "--version").ConfigureAwait(false)) is { ExitCode: not 0 } version)
             return Refused(report, ProviderUnavailable, $"The GitHub CLI (gh) could not be run: {FirstLine(version.StandardError)}. Nothing was changed.", DeliveryAgentHint);
-        if (Gh("auth", "status", "--hostname", "github.com") is { ExitCode: not 0 } auth)
+        if ((await GhAsync(cancellationToken, "auth", "status", "--hostname", "github.com").ConfigureAwait(false)) is { ExitCode: not 0 } auth)
             return Refused(report, ProviderUnavailable, $"The GitHub CLI is not signed in to github.com: {FirstLine(auth.StandardError + auth.StandardOutput)}. Nothing was changed.", DeliveryAgentHint);
 
         return null;
@@ -384,7 +351,7 @@ public sealed partial class RunDelivery
     /// The pull request description: the run's content with its filed todos, rendered against the
     /// host's template, naming the templates it could not read.
     /// </summary>
-    private string PreparePullRequest(
+    private async Task<string> PreparePullRequestAsync(
         DeliveryRequest request,
         string summary,
         PlanFacts? facts,
@@ -394,11 +361,12 @@ public sealed partial class RunDelivery
         string slug,
         string branch,
         string mergeBase,
-        DiagnosticReport report)
+        DiagnosticReport report,
+        CancellationToken cancellationToken)
     {
-        PullRequestContent content = Content(request, summary, facts, plan, type, slug, branch, mergeBase, report) with
+        PullRequestContent content = (await ContentAsync(request, summary, facts, plan, type, slug, branch, mergeBase, report, cancellationToken).ConfigureAwait(false)) with
         {
-            FollowUps = FiledTodos(mergeBase, todoFolder, report)
+            FollowUps = await _evidence.FiledTodosAsync(mergeBase, todoFolder, report, cancellationToken).ConfigureAwait(false)
         };
         PullRequestDescription.HostTemplate hostTemplate = PullRequestDescription.ReadHostTemplate(_store, _repoRoot, ReadTemplateFile ?? _store.ReadAllTextBounded);
         foreach (string unreadable in hostTemplate.Unreadable)
@@ -465,24 +433,12 @@ public sealed partial class RunDelivery
         return $"{type}{scope}: {words} [{harness}]";
     }
 
-    private PullRequestContent Content(DeliveryRequest request, string summary, PlanFacts? facts, string? plan, string type, string slug, string branch, string mergeBase, DiagnosticReport report)
+    private async Task<PullRequestContent> ContentAsync(DeliveryRequest request, string summary, PlanFacts? facts, string? plan, string type, string slug, string branch, string mergeBase, DiagnosticReport report, CancellationToken cancellationToken)
     {
         List<string> validation = [];
         List<string> notVerified = [.. (facts?.NotVerified ?? []).Select(item => char.ToUpperInvariant(item[0]) + item[1..])];
 
-        (string? taskLine, IReadOnlyList<string> taskNotVerified) = RunEvidence.SummarizeTaskGates(TaskGateReports(mergeBase, report));
-        if (taskLine is null)
-            notVerified.Add("No per-task check results were recorded for this run.");
-        else
-            validation.Add(taskLine);
-        notVerified.AddRange(taskNotVerified);
-
-        ReviewEvidence? review = Review(branch, mergeBase, report);
-        (string reviewLine, IReadOnlyList<string> pending) = RunEvidence.SummarizeReview(review);
-        if (review is null)
-            notVerified.Add("No code review result was recorded for this branch.");
-        else
-            validation.Add(reviewLine);
+        IReadOnlyList<string> pending = await _evidence.CollectValidationAsync(validation, notVerified, branch, mergeBase, report, cancellationToken).ConfigureAwait(false);
 
         List<string> decisions = [.. facts?.LowConfidenceDecisions ?? []];
         if (decisions.Count > 0 && facts is { } knownFacts && knownFacts.AcceptedRecommendations > 0)
@@ -513,7 +469,7 @@ public sealed partial class RunDelivery
         };
     }
 
-    private DeliveryOutcome PullRequest(DiagnosticReport report, string repository, string branch, string baseBranch, string title, string body, bool draft)
+    private async Task<DeliveryOutcome> PullRequestAsync(DiagnosticReport report, string repository, string branch, string baseBranch, string title, string body, bool draft, CancellationToken cancellationToken)
     {
         DeliveryOutcome Failed(string message)
         {
@@ -522,7 +478,7 @@ public sealed partial class RunDelivery
             return new DeliveryOutcome(report, false, Head: branch, Base: baseBranch, Title: title, Body: body);
         }
 
-        ProcessResult list = Gh("pr", "list", "--repo", repository, "--head", branch, "--state", "open", "--json", "number,url,baseRefName");
+        ProcessResult list = await GhAsync(cancellationToken, "pr", "list", "--repo", repository, "--head", branch, "--state", "open", "--json", "number,url,baseRefName").ConfigureAwait(false);
         if (list.ExitCode != 0)
             return Failed($"gh pr list failed: {FirstLine(list.StandardError)}.");
 
@@ -552,7 +508,7 @@ public sealed partial class RunDelivery
             if (!string.Equals(openBase, baseBranch, StringComparison.Ordinal))
                 return Failed($"Pull request #{number} from '{branch}' is open into '{openBase}', not the run's base '{baseBranch}'. A person decides which base is right; it was not changed.");
 
-            ProcessResult edit = GhWithInput(body, "pr", "edit", number, "--repo", repository, "--title", title, "--body-file", "-");
+            ProcessResult edit = await GhWithInputAsync(body, ["pr", "edit", number, "--repo", repository, "--title", title, "--body-file", "-"], cancellationToken).ConfigureAwait(false);
             if (edit.ExitCode != 0)
                 return Failed($"gh pr edit #{number} failed: {FirstLine(edit.StandardError)}.");
             created = false;
@@ -564,7 +520,7 @@ public sealed partial class RunDelivery
             List<string> arguments = ["pr", "create", "--repo", repository, "--head", branch, "--base", baseBranch, "--title", title, "--body-file", "-", "--assignee", "@me"];
             if (draft)
                 arguments.Add("--draft");
-            ProcessResult create = GhWithInput(body, [.. arguments]);
+            ProcessResult create = await GhWithInputAsync(body, arguments, cancellationToken).ConfigureAwait(false);
             if (create.ExitCode != 0)
                 return Failed($"gh pr create failed: {FirstLine(create.StandardError)}.");
             created = true;
@@ -572,7 +528,7 @@ public sealed partial class RunDelivery
             Say(report, $"Created {(draft ? "a draft" : "a")} pull request from {branch} into {baseBranch}, assigned to the signed-in user.");
         }
 
-        ProcessResult view = Gh("pr", "view", target, "--repo", repository, "--json", "number,url,isDraft,baseRefName,headRefName,title,body,statusCheckRollup");
+        ProcessResult view = await GhAsync(cancellationToken, "pr", "view", target, "--repo", repository, "--json", "number,url,isDraft,baseRefName,headRefName,title,body,statusCheckRollup").ConfigureAwait(false);
         if (view.ExitCode != 0)
             return Failed($"gh pr view failed after the {(created ? "create" : "update")}: {FirstLine(view.StandardError)}.");
 
@@ -635,10 +591,9 @@ public sealed partial class RunDelivery
         return $"{rollup.GetArrayLength().ToString(CultureInfo.InvariantCulture)} CI checks reported: {passed} passed, {failed} failed, {pending} pending";
     }
 
-    private bool TryFindPlan(string? named, string mergeBase, string plansFolder, string archiveFolder, string porcelain, DiagnosticReport report, out string? plan)
+    private async Task<PlanDiscovery?> TryFindPlanAsync(string? named, string mergeBase, string plansFolder, string archiveFolder, string porcelain, DiagnosticReport report, CancellationToken cancellationToken)
     {
-        plan = null;
-        List<string> added = [.. Git("diff", "--name-only", "--diff-filter=A", "-z", mergeBase, "HEAD", "--")
+        List<string> added = [.. (await GitAsync(cancellationToken, "diff", "--name-only", "--diff-filter=A", "-z", mergeBase, "HEAD", "--").ConfigureAwait(false))
             .StandardOutput.Split('\0', StringSplitOptions.RemoveEmptyEntries)];
         added.AddRange(AddedInWorkingTree(porcelain));
 
@@ -648,20 +603,20 @@ public sealed partial class RunDelivery
             report.Add(new Diagnostic(PlanNotDeliverable, Severity.Error,
                 $"The plan this branch added is not archived yet: {string.Join(", ", active)}. Nothing was changed.", "deliver",
                 Hint: "Archive it first with the archive tool, then call this again."));
-            return false;
+            return null;
         }
 
         List<string> archived = [.. added.Where(path => IsPlanFile(path, archiveFolder) && _store.FileExists(_files.Absolute(path))).Distinct(StringComparer.Ordinal)];
         if (!string.IsNullOrWhiteSpace(named))
         {
             string wanted = Path.GetFileName(named.Trim().Replace('\\', '/'));
-            plan = archived.FirstOrDefault(path => string.Equals(Path.GetFileName(path), wanted, StringComparison.OrdinalIgnoreCase)
+            string? namedPlan = archived.FirstOrDefault(path => string.Equals(Path.GetFileName(path), wanted, StringComparison.OrdinalIgnoreCase)
                                                    || string.Equals(Path.GetFileNameWithoutExtension(path), wanted, StringComparison.OrdinalIgnoreCase));
-            if (plan is not null)
-                return true;
+            if (namedPlan is not null)
+                return new PlanDiscovery(namedPlan);
             report.Add(new Diagnostic(PlanNotDeliverable, Severity.Error,
                 $"'{named}' is not a plan this branch archived ({(archived.Count == 0 ? "it archived none" : string.Join(", ", archived))}). Nothing was changed.", "deliver"));
-            return false;
+            return null;
         }
 
         if (archived.Count > 1)
@@ -669,20 +624,19 @@ public sealed partial class RunDelivery
             report.Add(new Diagnostic(PlanNotDeliverable, Severity.Error,
                 $"This branch archived several plans ({string.Join(", ", archived)}). Nothing was changed.", "deliver",
                 Hint: "Name the run's plan with planFile."));
-            return false;
+            return null;
         }
 
-        plan = archived.Count == 1 ? archived[0] : null;
-        return true;
+        return new PlanDiscovery(archived.Count == 1 ? archived[0] : null);
     }
 
     /// <summary>Commits the plan folders, which hold every pending change once the other paths were found clean.</summary>
-    private bool CommitPlanFiles(IReadOnlyList<string> paths, string? plan, DiagnosticReport report)
+    private async Task<bool> CommitPlanFilesAsync(IReadOnlyList<string> paths, string? plan, DiagnosticReport report, CancellationToken cancellationToken)
     {
         string name = plan is null ? "plan" : DatePrefix().Replace(Path.GetFileNameWithoutExtension(plan), string.Empty) + " plan";
         string message = $"docs(plan): archive {name}";
-        ProcessResult add = Git(["add", "-A", "--", .. paths]);
-        ProcessResult commit = add.ExitCode == 0 ? Git(["commit", "-m", message, "--", .. paths]) : add;
+        ProcessResult add = await GitAsync(cancellationToken, ["add", "-A", "--", .. paths]).ConfigureAwait(false);
+        ProcessResult commit = add.ExitCode == 0 ? await GitAsync(cancellationToken, ["commit", "-m", message, "--", .. paths]).ConfigureAwait(false) : add;
         if (commit.ExitCode != 0)
         {
             report.Add(new Diagnostic(UncommittedChanges, Severity.Error,
@@ -695,107 +649,6 @@ public sealed partial class RunDelivery
         return true;
     }
 
-    /// <summary>
-    /// The passing-run gate report of each task, from this run only: written after the run started, or measured against
-    /// this change's base. A test-first failing run is written to <c>task-gate-red.json</c> (or, in older runs, a
-    /// <c>-red</c> folder) and is never read as a failed check.
-    /// </summary>
-    private List<GateReport> TaskGateReports(string mergeBase, DiagnosticReport report)
-    {
-        string scratch = Path.Combine(_repoRoot, ScratchLayout.Root);
-        if (!_store.DirectoryExists(scratch))
-            return [];
-
-        DateTimeOffset? started = RunStartedAt();
-        List<GateReport> reports = [];
-        foreach (string folder in _store.EnumerateDirectories(scratch))
-        {
-            string file = Path.Combine(folder, ScratchLayout.TaskGateFileName);
-            if (!_store.FileExists(file) || Path.GetFileName(folder).EndsWith("-red", StringComparison.OrdinalIgnoreCase))
-                continue;
-            try
-            {
-                GateReport gates = ReviewJson.ReadGates(_store.ReadAllTextBounded(file));
-                bool thisRun = started is { } at
-                    ? _store.GetLastWriteTimeUtc(file) >= at.UtcDateTime
-                    : string.Equals(gates.Base, mergeBase, StringComparison.Ordinal);
-                if (thisRun)
-                    reports.Add(gates);
-            }
-            catch (Exception exception) when (IsEvidenceFailure(exception))
-            {
-                // An unreadable report is evidence the run cannot use; the description then says none was recorded, and
-                // this warning says why, so "never ran" and "could not be read" are not the same silence.
-                WarnUnreadable(report, $"The task gate report '{Path.GetRelativePath(_repoRoot, file).Replace('\\', '/')}'", exception);
-            }
-        }
-
-        return reports;
-    }
-
-    private DateTimeOffset? RunStartedAt()
-    {
-        string branch = Git("symbolic-ref", "--quiet", "--short", "HEAD").StandardOutput.Trim();
-        try
-        {
-            using JsonDocument record = JsonDocument.Parse(_store.ReadAllTextBounded(RunBaseStateFormat.StatePath(_homeDirectory, branch)));
-            return record.RootElement.TryGetProperty("StartedAt", out JsonElement at) && at.ValueKind == JsonValueKind.String
-                   && DateTimeOffset.TryParse(at.GetString(), CultureInfo.InvariantCulture, DateTimeStyles.None, out DateTimeOffset value)
-                ? value
-                : null;
-        }
-        catch (Exception exception) when (IsEvidenceFailure(exception))
-        {
-            // No readable start record: reports are matched to this change by their base. A corrupt record never
-            // reaches here; delivery refuses it earlier (KW-DELIVER-002).
-            return null;
-        }
-    }
-
-    /// <summary>The last review cycle that belongs to this change: this branch, this base, a head HEAD descends from.</summary>
-    private ReviewEvidence? Review(string branch, string mergeBase, DiagnosticReport report)
-    {
-        string scratch = Path.Combine(_repoRoot, ScratchLayout.Root);
-        if (!_store.DirectoryExists(scratch))
-            return null;
-
-        string head = Git("rev-parse", "HEAD").StandardOutput.Trim();
-        ReviewCycleIdentity current = new(branch, mergeBase, head);
-        List<ReviewCycleRecord> belonging = [];
-        foreach (string folder in _store.EnumerateDirectories(scratch))
-        {
-            IReadOnlyList<ReviewCycleRecord> finished = _cycles.ReadFinished(Path.Combine(folder, ScratchLayout.ReviewFolderName));
-            belonging.AddRange(ReviewCyclePlanning.Belonging(finished, current,
-                commit => Git("merge-base", "--is-ancestor", commit, "HEAD").ExitCode == 0).Valid);
-        }
-
-        if (belonging.Count == 0)
-            return null;
-
-        ReviewCycleRecord last = belonging.OrderBy(cycle => cycle.Number).ThenBy(cycle => _store.GetLastWriteTimeUtc(cycle.FindingsPath)).Last();
-        try
-        {
-            FindingsReport findings = ReviewJson.ReadFindings(_store.ReadAllTextBounded(last.FindingsPath));
-            IReadOnlyList<GateResult> gates = last.Gates?.Gates ?? [];
-            ReviewOutcome outcome = VerdictEngine.Evaluate(findings.Findings, gates, _config.Review, DateOnly.FromDateTime(_time.GetUtcNow().UtcDateTime));
-            return new ReviewEvidence(last.Number, outcome, gates);
-        }
-        catch (Exception exception) when (IsEvidenceFailure(exception))
-        {
-            WarnUnreadable(report, $"The findings of review cycle {last.Number.ToString(CultureInfo.InvariantCulture)}", exception);
-            return null;
-        }
-    }
-
-    /// <summary>Whether <paramref name="exception"/> is a way a scratch evidence file can fail to read: I/O, permission, malformed JSON or too large.</summary>
-    private static bool IsEvidenceFailure(Exception exception) =>
-        FileFailure.Is(exception) || exception is JsonException or InvalidDataException;
-
-    /// <summary>Records that a piece of run evidence exists but could not be used, so a reader of the report can tell that from evidence never recorded.</summary>
-    private static void WarnUnreadable(DiagnosticReport report, string what, Exception exception, string? consequence = null) =>
-        report.Add(new Diagnostic(Step, Severity.Warning,
-            $"{what} could not be read ({exception.GetType().Name}: {exception.Message}); {consequence ?? "the description says none was recorded"}.", "deliver"));
-
     /// <summary>The folder the <c>todo-index</c> registry entry lives in, or empty when the host declares none.</summary>
     private string TodoFolder()
     {
@@ -805,47 +658,12 @@ public sealed partial class RunDelivery
         return index is null ? string.Empty : Path.GetDirectoryName(index)?.Replace('\\', '/') ?? string.Empty;
     }
 
-    /// <summary>
-    /// One line per todo this branch added, committed by now: its title and path. These are the follow-up work the run
-    /// filed for what it found outside its scope.
-    /// </summary>
-    private List<string> FiledTodos(string mergeBase, string todoFolder, DiagnosticReport report)
-    {
-        if (todoFolder.Length == 0)
-            return [];
-
-        return [.. Git("diff", "--name-only", "--diff-filter=A", "-z", mergeBase, "HEAD", "--")
-            .StandardOutput.Split('\0', StringSplitOptions.RemoveEmptyEntries)
-            .Where(path => IsPlanFile(path, todoFolder))
-            .Order(StringComparer.Ordinal)
-            .Select(path => (Path: path, Text: ReadTodo(path, report)))
-            .Where(todo => todo.Text is not null)
-            .Select(todo => $"{RunEvidence.DocumentTitle(todo.Text ?? string.Empty) ?? Path.GetFileNameWithoutExtension(todo.Path)} (`{todo.Path}`)")];
-    }
-
-    /// <summary>
-    /// A todo's text, or null when it is gone. One that is there but unreadable is still follow-up work the run filed, so
-    /// it is listed by its file name (empty text) rather than failing the delivery or being left out.
-    /// </summary>
-    private string? ReadTodo(string path, DiagnosticReport report)
-    {
-        try
-        {
-            return _store.ReadTextIfPresent(_files.Absolute(path));
-        }
-        catch (Exception exception) when (FileFailure.Is(exception))
-        {
-            WarnUnreadable(report, $"The filed todo '{path}'", exception, "it is listed by its file name alone");
-            return string.Empty;
-        }
-    }
-
     /// <summary>Commits the todo folder, which the follow-up filing wrote after the review and nobody committed.</summary>
-    private bool CommitTodoFiles(string todoFolder, DiagnosticReport report)
+    private async Task<bool> CommitTodoFilesAsync(string todoFolder, DiagnosticReport report, CancellationToken cancellationToken)
     {
         const string message = "docs(todo): file the follow-up work this run found";
-        ProcessResult add = Git("add", "-A", "--", todoFolder);
-        ProcessResult commit = add.ExitCode == 0 ? Git("commit", "-m", message, "--", todoFolder) : add;
+        ProcessResult add = await GitAsync(cancellationToken, "add", "-A", "--", todoFolder).ConfigureAwait(false);
+        ProcessResult commit = add.ExitCode == 0 ? await GitAsync(cancellationToken, "commit", "-m", message, "--", todoFolder).ConfigureAwait(false) : add;
         if (commit.ExitCode != 0)
         {
             report.Add(new Diagnostic(UncommittedChanges, Severity.Error,
@@ -870,7 +688,7 @@ public sealed partial class RunDelivery
     private static bool IsUnder(string path, string folder) =>
         folder.Length > 0 && path.StartsWith(folder + "/", StringComparison.Ordinal);
 
-    private static bool IsPlanFile(string path, string folder) =>
+    internal static bool IsPlanFile(string path, string folder) =>
         IsUnder(path, folder) && !path[(folder.Length + 1)..].Contains('/', StringComparison.Ordinal)
                               && path.EndsWith(".md", StringComparison.OrdinalIgnoreCase)
                               && !string.Equals(Path.GetFileName(path), "README.md", StringComparison.OrdinalIgnoreCase);
@@ -932,13 +750,13 @@ public sealed partial class RunDelivery
     private static void Say(DiagnosticReport report, string message) =>
         report.Add(new Diagnostic(Step, Severity.Info, message, "deliver"));
 
-    private ProcessResult Git(params string[] arguments) => Start("git", string.Empty, arguments);
+    private Task<ProcessResult> GitAsync(CancellationToken cancellationToken, params string[] arguments) => StartAsync("git", string.Empty, arguments, cancellationToken);
 
-    private ProcessResult Gh(params string[] arguments) => Start("gh", string.Empty, arguments);
+    private Task<ProcessResult> GhAsync(CancellationToken cancellationToken, params string[] arguments) => StartAsync("gh", string.Empty, arguments, cancellationToken);
 
-    private ProcessResult GhWithInput(string standardInput, params string[] arguments) => Start("gh", standardInput, arguments);
+    private Task<ProcessResult> GhWithInputAsync(string standardInput, IReadOnlyList<string> arguments, CancellationToken cancellationToken) => StartAsync("gh", standardInput, arguments, cancellationToken);
 
-    private ProcessResult Start(string program, string standardInput, IEnumerable<string> arguments)
+    private async Task<ProcessResult> StartAsync(string program, string standardInput, IEnumerable<string> arguments, CancellationToken cancellationToken)
     {
         ProcessStartInfo startInfo = new(program)
         {
@@ -957,7 +775,7 @@ public sealed partial class RunDelivery
 
         try
         {
-            return _executor.Run(startInfo, standardInput);
+            return await _executor.RunAsync(startInfo, standardInput, null, cancellationToken).ConfigureAwait(false);
         }
         catch (Exception exception) when (exception is Win32Exception or TimeoutException or InvalidOperationException)
         {
@@ -965,12 +783,28 @@ public sealed partial class RunDelivery
         }
     }
 
-    /// <summary>The production executor: the repository's deadlock-safe runner, under one time limit per call.</summary>
-    private sealed class BoundedExecutor(IBoundedProcessExecutor process, TimeSpan timeout) : IProcessExecutor
-    {
-        public ProcessResult Run(ProcessStartInfo startInfo, string standardInput) =>
-            process.Run(startInfo, standardInput, timeout);
-    }
+    /// <summary>The request resolved to the run branch it names.</summary>
+    /// <param name="Summary">The trimmed summary that describes the change.</param>
+    /// <param name="Branch">The run branch the checkout is on.</param>
+    /// <param name="Harness">The harness word of the branch name.</param>
+    /// <param name="Type">The type word of the branch name.</param>
+    /// <param name="Slug">The slug of the branch name.</param>
+    /// <param name="BaseBranch">The base branch by its conventional name.</param>
+    /// <param name="BaseRef">The ref the run record names as the branch's base.</param>
+    private sealed record ResolvedRequest(string Summary, string Branch, string Harness, string Type, string Slug, string BaseBranch, string BaseRef);
+
+    /// <summary>The classified state of a worktree that holds only changes the delivery owns.</summary>
+    /// <param name="PlansFolder">The folder active plans live in.</param>
+    /// <param name="ArchiveFolder">The folder archived plans live in.</param>
+    /// <param name="TodoFolder">The folder filed todos live in, empty when the host declares none.</param>
+    /// <param name="PendingPlanFiles">The plan files with uncommitted changes the delivery commits.</param>
+    /// <param name="PendingTodoFiles">The todo files with uncommitted changes the delivery commits.</param>
+    /// <param name="StatusOutput">The status output plan discovery reads.</param>
+    private sealed record WorktreeState(string PlansFolder, string ArchiveFolder, string TodoFolder, IReadOnlyList<string> PendingPlanFiles, IReadOnlyList<string> PendingTodoFiles, string StatusOutput);
+
+    /// <summary>The archived plan the branch delivers, or none when it archived no plan.</summary>
+    /// <param name="Plan">The path of the plan to deliver, or null when the branch archived none.</param>
+    private sealed record PlanDiscovery(string? Plan);
 
     [GeneratedRegex(@"^[a-z]+(?:\([^()\s][^()]*\))?!?: \S", RegexOptions.CultureInvariant)]
     private static partial Regex ConventionalTitle();

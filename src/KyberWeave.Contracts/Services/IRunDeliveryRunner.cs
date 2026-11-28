@@ -10,5 +10,6 @@ public interface IRunDeliveryRunner
     /// <param name="repoRoot">The run's worktree.</param>
     /// <param name="config">The repository's effective configuration.</param>
     /// <param name="request">What the conductor asks for.</param>
-    DeliveryOutcome Run(string repoRoot, KyberWeaveConfig config, DeliveryRequest request);
+    /// <param name="cancellationToken">Cancels the git and GitHub CLI runs.</param>
+    Task<DeliveryOutcome> RunAsync(string repoRoot, KyberWeaveConfig config, DeliveryRequest request, CancellationToken cancellationToken = default);
 }

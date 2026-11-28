@@ -13,7 +13,7 @@ public sealed class RunDeliveryRootOverPathSeamTests
     [Theory]
     [InlineData("/kw/work", "/kw/work/repo")]
     [InlineData("/kw/other", "/kw/other/repo")]
-    public void ARelativeWorktreeIsResolvedAgainstTheInjectedWorkingDirectoryAndGitRunsThere(string workingDirectory, string expectedRoot)
+    public async Task ARelativeWorktreeIsResolvedAgainstTheInjectedWorkingDirectoryAndGitRunsThere(string workingDirectory, string expectedRoot)
     {
         InMemoryFileSystem disk = new();
         ScriptedProcessExecutor git = new(_ => new ProcessResult(0, string.Empty, string.Empty));
@@ -27,8 +27,8 @@ public sealed class RunDeliveryRootOverPathSeamTests
             new FakePathResolver(disk),
             new FakeEmbeddedResources());
 
-        DeliveryOutcome outcome = new RunDelivery("repo", KyberWeaveConfigDefaults.Product, git, "/kw/home", ports)
-            .Run(new DeliveryRequest("Lists now export."));
+        DeliveryOutcome outcome = await new RunDelivery("repo", KyberWeaveConfigDefaults.Product, git, "/kw/home", ports)
+            .RunAsync(new DeliveryRequest("Lists now export."));
 
         Assert.False(outcome.Delivered);
         Assert.Equal(expectedRoot, Assert.Single(git.Calls).WorkingDirectory);

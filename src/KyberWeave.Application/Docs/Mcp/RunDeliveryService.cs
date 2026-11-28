@@ -26,7 +26,7 @@ public sealed class RunDeliveryService(
     private readonly IDocsQueryService _query = query ?? throw new ArgumentNullException(nameof(query));
 
     /// <summary>Runs git and gh for the deliver tool; null for the bounded default. Tests set it so nothing leaves the machine.</summary>
-    public IProcessExecutor? DeliveryExecutor { get; set; }
+    public IProcessRunner? DeliveryExecutor { get; set; }
 
     /// <summary>The home directory holding the run records; null for the user profile. Tests point it at a scratch folder.</summary>
     public string? DeliveryHome { get; set; }
@@ -56,8 +56,8 @@ public sealed class RunDeliveryService(
         if (!hostConfiguration.TryLoad(_repositoryRoot, report, out KyberWeaveConfig config))
             return PlanLifecycleService.LifecycleResponse(provenance, "refused", report, null);
 
-        DeliveryOutcome outcome = new RunDelivery(_repositoryRoot, config, DeliveryExecutor, DeliveryHome, ports)
-            .Run(new DeliveryRequest(summary, notes, title, draft, documentationImpact, planFile));
+        DeliveryOutcome outcome = await new RunDelivery(_repositoryRoot, config, DeliveryExecutor, DeliveryHome, ports)
+            .RunAsync(new DeliveryRequest(summary, notes, title, draft, documentationImpact, planFile), cancellationToken).ConfigureAwait(false);
         report.AddRange(outcome.Report.Items);
         if (!outcome.Delivered)
             return PlanLifecycleService.LifecycleResponse(provenance, "refused", report, outcome.NeedsDeliveryAgent ? DeliverFallbackNext : null);
