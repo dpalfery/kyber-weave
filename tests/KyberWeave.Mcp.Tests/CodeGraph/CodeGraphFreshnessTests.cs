@@ -42,7 +42,7 @@ public sealed class CodeGraphFreshnessTests
     [Fact]
     public async Task FirstCallProvisionsTheResolvedRootUnderTheTemporaryDirectory()
     {
-        using CodeGraphFreshness gate = Gate("repo", currentDirectory: Path.GetDirectoryName(Root)!);
+        CodeGraphFreshness gate = Gate("repo", currentDirectory: Path.GetDirectoryName(Root)!);
 
         CodeGraphGate verdict = await gate.EvaluateAsync(Resolver());
 
@@ -55,7 +55,7 @@ public sealed class CodeGraphFreshnessTests
     [Fact]
     public async Task SecondCallInsideTheIntervalReusesTheVerdictWithoutProvisioning()
     {
-        using CodeGraphFreshness gate = Gate();
+        CodeGraphFreshness gate = Gate();
         _ = await gate.EvaluateAsync(Resolver());
 
         _time.Advance(TimeSpan.FromSeconds(59));
@@ -70,12 +70,12 @@ public sealed class CodeGraphFreshnessTests
     [Fact]
     public async Task DisabledRefreshAndUndeclaredCodeGraphNeverProvision()
     {
-        using CodeGraphFreshness disabled = Gate(refreshEnabled: false);
+        CodeGraphFreshness disabled = Gate(refreshEnabled: false);
         Assert.Equal(CodeGraphGate.Clear, await disabled.EvaluateAsync(Resolver()));
 
         FakeKyberWeaveConfigRepository none = new();
         none.WriteRepositoryConfig(Root, "stop-on-tool-failure: true\n");
-        using CodeGraphFreshness undeclared = new(
+        CodeGraphFreshness undeclared = new(
             Root, true, _provisioner, none, _time, _files, _paths, new FakeProcessEnvironment(Work, tempDirectory: Temp),
             _processes, pause: (wait, _) =>
             {
@@ -93,7 +93,7 @@ public sealed class CodeGraphFreshnessTests
         WriteLockFile("4242\n");
         _ = _processes.WithAlive(4242);
 
-        using CodeGraphFreshness gate = Gate();
+        CodeGraphFreshness gate = Gate();
         CodeGraphGate verdict = await gate.EvaluateAsync(Resolver());
 
         Assert.Equal(CodeGraphIndexRules.LockFileWaits, _pauses);
@@ -110,8 +110,8 @@ public sealed class CodeGraphFreshnessTests
         WriteLockFile("4242");
         _ = _processes.WithAlive(4242, alive: false);
 
-        using CodeGraphFreshness posixGate = Gate(operatingSystem: OperatingSystemKind.Linux);
-        using CodeGraphFreshness windowsGate = Gate(operatingSystem: OperatingSystemKind.Windows);
+        CodeGraphFreshness posixGate = Gate(operatingSystem: OperatingSystemKind.Linux);
+        CodeGraphFreshness windowsGate = Gate(operatingSystem: OperatingSystemKind.Windows);
         CodeGraphGate posix = await posixGate.EvaluateAsync(Resolver());
         CodeGraphGate windows = await windowsGate.EvaluateAsync(Resolver());
 
@@ -128,8 +128,8 @@ public sealed class CodeGraphFreshnessTests
         DeclareCodeGraph(spaced, stopOnToolFailure: true);
         WriteLockFileAt(spaced, "no number");
 
-        using CodeGraphFreshness linuxGate = Gate(spaced, operatingSystem: OperatingSystemKind.Linux);
-        using CodeGraphFreshness windowsGate = Gate(spaced, operatingSystem: OperatingSystemKind.Windows);
+        CodeGraphFreshness linuxGate = Gate(spaced, operatingSystem: OperatingSystemKind.Linux);
+        CodeGraphFreshness windowsGate = Gate(spaced, operatingSystem: OperatingSystemKind.Windows);
         CodeGraphGate linux = await linuxGate.EvaluateAsync(Resolver());
         CodeGraphGate windows = await windowsGate.EvaluateAsync(Resolver());
 
@@ -143,7 +143,7 @@ public sealed class CodeGraphFreshnessTests
     {
         WriteLockFile("4242");
         RefusingProcessRunner refusing = new();
-        using CodeGraphFreshness gate = new(
+        CodeGraphFreshness gate = new(
             Root, true, _provisioner, _config, _time, _files, _paths, new FakeProcessEnvironment(Work, tempDirectory: Temp),
             refusing, pause: (wait, _) =>
             {
@@ -160,7 +160,7 @@ public sealed class CodeGraphFreshnessTests
     public async Task LockFileThatClearsDuringTheWaitsLetsTheRefreshProceed()
     {
         WriteLockFile("4242");
-        using CodeGraphFreshness gate = Gate(pause: (wait, _) =>
+        CodeGraphFreshness gate = Gate(pause: (wait, _) =>
         {
             _pauses.Add(wait);
             _files.DeleteFile(Path.Combine(Root, ".codegraph", "codegraph.lock"));
@@ -178,7 +178,7 @@ public sealed class CodeGraphFreshnessTests
     public async Task DefaultPauseWaitsOnTheInjectedClockNotTheWallClock()
     {
         WriteLockFile("4242");
-        using CodeGraphFreshness gate = new(
+        CodeGraphFreshness gate = new(
             Root, true, _provisioner, _config, _time, _files, _paths, new FakeProcessEnvironment(Work, tempDirectory: Temp),
             _processes);
 
@@ -211,7 +211,7 @@ public sealed class CodeGraphFreshnessTests
             return new DoctorCheck("codegraph.index", true, null, null);
         };
 
-        using CodeGraphFreshness gate = Gate();
+        CodeGraphFreshness gate = Gate();
         _ = await gate.EvaluateAsync(Resolver());
 
         ProcessRunRequest request = Assert.Single(_processes.Calls);
@@ -224,13 +224,13 @@ public sealed class CodeGraphFreshnessTests
     {
         _provisioner.OnProvision = (_, _, _, _, _) => Task.FromResult(new DoctorCheck("codegraph.index", false, "codegraph is not installed", "install codegraph"));
 
-        using CodeGraphFreshness blockedGate = Gate();
+        CodeGraphFreshness blockedGate = Gate();
         CodeGraphGate blocked = await blockedGate.EvaluateAsync(Resolver());
         Assert.StartsWith("STATUS: TOOL_FAILURE", blocked.Failure, StringComparison.Ordinal);
         Assert.Contains("reason: codegraph is not installed", blocked.Failure, StringComparison.Ordinal);
 
         DeclareCodeGraph(Root, stopOnToolFailure: false);
-        using CodeGraphFreshness warnedGate = Gate();
+        CodeGraphFreshness warnedGate = Gate();
         CodeGraphGate warned = await warnedGate.EvaluateAsync(Resolver());
         Assert.Null(warned.Failure);
         Assert.StartsWith("warning: codegraph is unavailable: codegraph is not installed", warned.Note, StringComparison.Ordinal);

@@ -61,15 +61,12 @@ public sealed class McpToolFailureTests
         _ = await _host.Services().GetRequiredService<IDocsScaffoldingService>().ScaffoldAsync(_host.Repo);
         MemoryMcpDeclaration.RequireCodeGraph(_host.Files, _host.Repo);
 
-        DocsTools tools = Tools(out CodeGraphFreshness freshness);
-        using (freshness)
-        {
-            string response = await tools.ExploreAsync("anything");
+        DocsTools tools = Tools();
+        string response = await tools.ExploreAsync("anything");
 
-            Assert.Contains(ToolFailure, response, StringComparison.Ordinal);
-            Assert.Contains(FailingToolName, response, StringComparison.OrdinalIgnoreCase);
-            Assert.Contains("kyber-weave doctor", response, StringComparison.Ordinal);
-        }
+        Assert.Contains(ToolFailure, response, StringComparison.Ordinal);
+        Assert.Contains(FailingToolName, response, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("kyber-weave doctor", response, StringComparison.Ordinal);
     }
 
     /// <summary>
@@ -91,15 +88,12 @@ public sealed class McpToolFailureTests
             configPath,
             _host.Files.ReadAllText(configPath) + "\nstop-on-tool-failure: false\n");
 
-        DocsTools tools = Tools(out CodeGraphFreshness freshness);
-        using (freshness)
-        {
-            string response = await tools.ExploreAsync("anything");
+        DocsTools tools = Tools();
+        string response = await tools.ExploreAsync("anything");
 
-            Assert.DoesNotContain(ToolFailure, response, StringComparison.Ordinal);
-            Assert.Contains(FailingToolName, response, StringComparison.OrdinalIgnoreCase);
-            Assert.Contains("warning", response, StringComparison.OrdinalIgnoreCase);
-        }
+        Assert.DoesNotContain(ToolFailure, response, StringComparison.Ordinal);
+        Assert.Contains(FailingToolName, response, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("warning", response, StringComparison.OrdinalIgnoreCase);
     }
 
     /// <summary>
@@ -116,16 +110,13 @@ public sealed class McpToolFailureTests
     {
         _ = await _host.Services().GetRequiredService<IDocsScaffoldingService>().ScaffoldAsync(_host.Repo);
         MemoryMcpDeclaration.RequireCodeGraph(_host.Files, _host.Repo);
-        DocsTools tools = Tools(out CodeGraphFreshness freshness);
-        using (freshness)
-        {
-            string explore = await tools.ExploreAsync("anything");
-            string status = await tools.DocsStatusAsync();
+        DocsTools tools = Tools();
+        string explore = await tools.ExploreAsync("anything");
+        string status = await tools.DocsStatusAsync();
 
-            Assert.Contains(ToolFailure, explore, StringComparison.Ordinal);
-            Assert.DoesNotContain(ToolFailure, status, StringComparison.Ordinal);
-            Assert.StartsWith("provenance:", status, StringComparison.Ordinal);
-        }
+        Assert.Contains(ToolFailure, explore, StringComparison.Ordinal);
+        Assert.DoesNotContain(ToolFailure, status, StringComparison.Ordinal);
+        Assert.StartsWith("provenance:", status, StringComparison.Ordinal);
     }
 
     /// <summary>
@@ -136,7 +127,7 @@ public sealed class McpToolFailureTests
     /// The refresh schedule is asked for explicitly. It is opt-in: tools built without one answer
     /// from the documents on disk, so a test that pins the gate has to be the caller that requests it.
     /// </remarks>
-    private DocsTools Tools(out CodeGraphFreshness ownedFreshness)
+    private DocsTools Tools()
     {
         IServiceProvider services = _host.Services();
         string root = _host.Repo;
@@ -161,7 +152,6 @@ public sealed class McpToolFailureTests
             services.GetRequiredService<IPathResolver>(),
             services.GetRequiredService<IProcessEnvironment>(),
             services.GetRequiredService<IProcessRunner>());
-        ownedFreshness = freshness;
 
         return DocsToolsComposition.Create(host, null, freshness);
     }

@@ -122,7 +122,7 @@ public sealed class McpCodeGraphRefreshTests
             config.Ontology.DocsRoots,
             config.Ontology.ResolvedCatalogPath);
 
-        using CodeGraphFreshness freshness = NewFreshness(Root, ProvisionSucceeds());
+        CodeGraphFreshness freshness = NewFreshness(Root, ProvisionSucceeds());
         DocsTools tools = DocsToolsComposition.Create(
             host,
             null,
