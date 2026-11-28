@@ -78,6 +78,21 @@ public sealed class SuppressionSeamTests
         Assert.Equal("origin/main", scanner.BaseRef);
     }
 
+    [Fact]
+    public async Task TheScanAsyncRunsGitWithoutBlockingAndReportsCleanChange()
+    {
+        _files.CreateDirectory("/work/repo");
+        ScriptedProcessRunner programs = new ScriptedProcessRunner()
+            .Script("git", new ProcessRunResult(0, string.Empty, false), DiffArgv)
+            .Script("git", new ProcessRunResult(0, string.Empty, false), UntrackedArgv);
+
+        SuppressionScanResult result = await Scanner(programs).ScanAsync("repo", "origin/main", CancellationToken.None);
+
+        Assert.True(result.Succeeded);
+        Assert.Empty(result.Findings);
+        Assert.All(programs.Calls, call => Assert.Equal("/work/repo", call.WorkingDirectory));
+    }
+
     /// <summary>A bounded reader the scan never reaches, because every scripted change adds no untracked file.</summary>
     private sealed class NoFileReader : IBoundedFileReader
     {
@@ -96,6 +111,16 @@ public sealed class SuppressionSeamTests
             ScannedDirectory = workingDirectory;
             BaseRef = baseRef;
             return new SuppressionScanResult([], null);
+        }
+
+        public Task<SuppressionScanResult> ScanAsync(
+            string workingDirectory,
+            string baseRef,
+            CancellationToken cancellationToken = default)
+        {
+            ScannedDirectory = workingDirectory;
+            BaseRef = baseRef;
+            return Task.FromResult(new SuppressionScanResult([], null));
         }
     }
 }

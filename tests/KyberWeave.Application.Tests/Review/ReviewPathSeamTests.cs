@@ -88,6 +88,20 @@ public sealed class ReviewPathSeamTests
     }
 
     [Fact]
+    public async Task TheCatalogueCommandLoadsTheConfigurationForTheResolvedRootAsync()
+    {
+        RecordingConfigs configs = new();
+        ReviewCatalogueService service = new(
+            configs, new UnusedLister(), _files, Paths, _environment, new KyberStandardsTemplateReader(_resources));
+
+        ReviewCommandResult result = await service.RunAsync(
+            new ReviewCatalogueRequest("repo", null, []), TextWriter.Null, CancellationToken.None);
+
+        Assert.Equal(1, result.ExitCode);
+        Assert.Equal("/work/repo", configs.Root);
+    }
+
+    [Fact]
     public void AnEarlierGateReportSpelledRelativelyIsMergedIntoThisRun()
     {
         _files.CreateDirectory("/work/out");
@@ -174,6 +188,10 @@ public sealed class ReviewPathSeamTests
     private sealed class UnusedLister : IRepositoryFileLister
     {
         public IReadOnlyList<string> List(string repositoryRoot) => throw new InvalidOperationException("unexpected call");
+
+        public Task<IReadOnlyList<string>> ListAsync(
+            string repositoryRoot,
+            CancellationToken cancellationToken = default) => throw new InvalidOperationException("unexpected call");
     }
 
     private sealed class UnusedDetector : IDuplicateDetectionService

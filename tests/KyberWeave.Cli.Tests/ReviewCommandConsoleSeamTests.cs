@@ -281,6 +281,15 @@ public sealed class ReviewCommandConsoleSeamTests
             return result;
         }
 
+        public Task<ReviewCommandResult> RunAsync(
+            ReviewCatalogueRequest request,
+            TextWriter output,
+            CancellationToken cancellationToken = default)
+        {
+            Output = output;
+            return Task.FromResult(result);
+        }
+
         public ReviewCommandResult Run(ReviewCycleRequest request, TextWriter output, CancellationToken cancellationToken)
         {
             Output = output;

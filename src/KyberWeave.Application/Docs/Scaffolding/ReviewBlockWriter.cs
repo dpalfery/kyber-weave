@@ -87,6 +87,27 @@ public sealed partial class ReviewBlockWriter : IReviewGateCatalogue
     }
 
     /// <summary>
+    /// Renders the catalogue for <paramref name="declaredTechnologies"/> without blocking a thread,
+    /// detecting each family's project roots under <paramref name="repoRoot"/> with that family's
+    /// own root rules.
+    /// </summary>
+    public async Task<ReviewGatesPlan> PlanAsync(
+        string repoRoot,
+        IReadOnlyList<string> declaredTechnologies,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(repoRoot);
+        ArgumentNullException.ThrowIfNull(declaredTechnologies);
+
+        IReadOnlyList<string> repositoryFiles = await _lister.ListAsync(repoRoot, cancellationToken).ConfigureAwait(false);
+        return ReviewCataloguePlanner.Plan(
+            repoRoot,
+            declaredTechnologies,
+            repositoryFiles,
+            new GateCatalogueFacts(_files.FileExists, _files.ReadAllText));
+    }
+
+    /// <summary>
     /// The rendered block with its top-level <c>review:</c> key line first and the header
     /// comment directly beneath it, so the appended section opens with the key.
     /// </summary>

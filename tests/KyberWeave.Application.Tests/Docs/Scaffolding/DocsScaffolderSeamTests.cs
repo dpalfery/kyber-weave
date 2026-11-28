@@ -102,9 +102,25 @@ public sealed class DocsScaffolderSeamTests
         Assert.False(_disk.DirectoryExists($"{Root}/docs/standards/skills/never-shipped"));
     }
 
+    [Fact]
+    public async Task ReviewBlockWriterPlanAsyncRendersWithoutBlocking()
+    {
+        _disk.CreateDirectory(Root);
+        ReviewBlockWriter writer = new(_store, new NoFiles(), new NoProbe(), _paths, _environment);
+
+        ReviewGatesPlan plan = await writer.PlanAsync(Root, ["csharp"], CancellationToken.None);
+
+        Assert.NotNull(plan);
+        Assert.True(plan.ShouldWrite);
+    }
+
     private sealed class NoFiles : IRepositoryFileLister
     {
         public IReadOnlyList<string> List(string repositoryRoot) => [];
+
+        public Task<IReadOnlyList<string>> ListAsync(
+            string repositoryRoot,
+            CancellationToken cancellationToken = default) => Task.FromResult<IReadOnlyList<string>>([]);
     }
 
     private sealed class NoProbe : IRepositoryTreeProbe
