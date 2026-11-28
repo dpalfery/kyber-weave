@@ -67,12 +67,12 @@ public sealed class ArbiterCommentShadowToolTests : IDisposable
 
     /// <summary>An inline answer in shadow reports class real, shadow true, and the nitpick it would have given.</summary>
     [Fact]
-    public void AnInlineAnswerInShadowReportsRealShadowAndTheWouldClass()
+    public async Task AnInlineAnswerInShadowReportsRealShadowAndTheWouldClass()
     {
         WriteCitedFile();
 
-        using JsonDocument json = JsonDocument.Parse(Tools(FakeArbiterProvider.AnsweringRule(CommentTriageService.CommentRuleId, "nitpick"))
-            .ClassifyBotReviewComment(CitedPath, 12, "Rename this.", null));
+        using JsonDocument json = JsonDocument.Parse(await Tools(FakeArbiterProvider.AnsweringRule(CommentTriageService.CommentRuleId, "nitpick"))
+            .ClassifyBotReviewCommentAsync(CitedPath, 12, "Rename this.", null));
 
         Assert.Equal("real", json.RootElement.GetProperty("class").GetString());
         Assert.True(json.RootElement.GetProperty("shadow").GetBoolean());
@@ -81,10 +81,10 @@ public sealed class ArbiterCommentShadowToolTests : IDisposable
 
     /// <summary>The inline JSON always carries the shadow keys, so a reader can rely on them; wouldClass is null when nothing was answered.</summary>
     [Fact]
-    public void TheInlineJsonAlwaysCarriesShadowAndWouldClassKeys()
+    public async Task TheInlineJsonAlwaysCarriesShadowAndWouldClassKeys()
     {
-        using JsonDocument json = JsonDocument.Parse(Tools(FakeArbiterProvider.AnsweringRule(CommentTriageService.CommentRuleId, "nitpick"))
-            .ClassifyBotReviewComment("src/Missing.cs", 12, "Rename this.", null));
+        using JsonDocument json = JsonDocument.Parse(await Tools(FakeArbiterProvider.AnsweringRule(CommentTriageService.CommentRuleId, "nitpick"))
+            .ClassifyBotReviewCommentAsync("src/Missing.cs", 12, "Rename this.", null));
 
         Assert.True(json.RootElement.TryGetProperty("shadow", out JsonElement shadow));
         Assert.Equal(JsonValueKind.True, shadow.ValueKind);
@@ -95,12 +95,12 @@ public sealed class ArbiterCommentShadowToolTests : IDisposable
 
     /// <summary>Each summary item carries shadow and wouldClass, and the class stays real.</summary>
     [Fact]
-    public void EachSummaryItemCarriesShadowAndWouldClass()
+    public async Task EachSummaryItemCarriesShadowAndWouldClass()
     {
         WriteCitedFile();
 
-        using JsonDocument json = JsonDocument.Parse(Tools(FakeArbiterProvider.AnsweringRule(CommentTriageService.CommentRuleId, "nitpick"))
-            .ClassifyBotReviewComment(string.Empty, 0, Summary, null, summary: true, author: BotLogin));
+        using JsonDocument json = JsonDocument.Parse(await Tools(FakeArbiterProvider.AnsweringRule(CommentTriageService.CommentRuleId, "nitpick"))
+            .ClassifyBotReviewCommentAsync(string.Empty, 0, Summary, null, summary: true, author: BotLogin));
 
         JsonElement item = json.RootElement.GetProperty("items")[0];
         Assert.Equal("real", item.GetProperty("class").GetString());
@@ -110,13 +110,13 @@ public sealed class ArbiterCommentShadowToolTests : IDisposable
 
     /// <summary>A human author's summary item is real, shadow, with no would-class, and the provider is not asked.</summary>
     [Fact]
-    public void AHumanSummaryItemIsShadowWithANullWouldClass()
+    public async Task AHumanSummaryItemIsShadowWithANullWouldClass()
     {
         WriteCitedFile();
         FakeArbiterProvider provider = FakeArbiterProvider.AnsweringRule(CommentTriageService.CommentRuleId, "nitpick");
 
-        using JsonDocument json = JsonDocument.Parse(Tools(provider)
-            .ClassifyBotReviewComment(string.Empty, 0, Summary, null, summary: true, author: HumanLogin));
+        using JsonDocument json = JsonDocument.Parse(await Tools(provider)
+            .ClassifyBotReviewCommentAsync(string.Empty, 0, Summary, null, summary: true, author: HumanLogin));
 
         JsonElement item = json.RootElement.GetProperty("items")[0];
         Assert.Equal("real", item.GetProperty("class").GetString());
@@ -127,12 +127,12 @@ public sealed class ArbiterCommentShadowToolTests : IDisposable
 
     /// <summary>A host override that switches shadow off is honoured: the model's class is returned with shadow false and no would-class.</summary>
     [Fact]
-    public void AHostOverrideSwitchingShadowOffReturnsTheModelsClass()
+    public async Task AHostOverrideSwitchingShadowOffReturnsTheModelsClass()
     {
         WriteCitedFile();
 
-        using JsonDocument json = JsonDocument.Parse(Tools(FakeArbiterProvider.AnsweringRule(CommentTriageService.CommentRuleId, "nitpick"), ConfigWithCommentShadow(shadow: false))
-            .ClassifyBotReviewComment(CitedPath, 12, "Rename this.", null));
+        using JsonDocument json = JsonDocument.Parse(await Tools(FakeArbiterProvider.AnsweringRule(CommentTriageService.CommentRuleId, "nitpick"), ConfigWithCommentShadow(shadow: false))
+            .ClassifyBotReviewCommentAsync(CitedPath, 12, "Rename this.", null));
 
         Assert.Equal("nitpick", json.RootElement.GetProperty("class").GetString());
         Assert.False(json.RootElement.GetProperty("shadow").GetBoolean());
@@ -141,12 +141,12 @@ public sealed class ArbiterCommentShadowToolTests : IDisposable
 
     /// <summary>With shadow switched off by configuration, every summary item carries the model's class.</summary>
     [Fact]
-    public void AHostOverrideSwitchingShadowOffReturnsTheModelsClassForEverySummaryItem()
+    public async Task AHostOverrideSwitchingShadowOffReturnsTheModelsClassForEverySummaryItem()
     {
         WriteCitedFile();
 
-        using JsonDocument json = JsonDocument.Parse(Tools(FakeArbiterProvider.AnsweringRule(CommentTriageService.CommentRuleId, "nitpick"), ConfigWithCommentShadow(shadow: false))
-            .ClassifyBotReviewComment(string.Empty, 0, Summary, null, summary: true, author: BotLogin));
+        using JsonDocument json = JsonDocument.Parse(await Tools(FakeArbiterProvider.AnsweringRule(CommentTriageService.CommentRuleId, "nitpick"), ConfigWithCommentShadow(shadow: false))
+            .ClassifyBotReviewCommentAsync(string.Empty, 0, Summary, null, summary: true, author: BotLogin));
 
         JsonElement item = json.RootElement.GetProperty("items")[0];
         Assert.Equal("nitpick", item.GetProperty("class").GetString());

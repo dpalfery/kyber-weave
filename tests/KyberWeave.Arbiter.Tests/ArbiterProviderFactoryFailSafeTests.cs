@@ -39,12 +39,12 @@ public sealed class ArbiterProviderFactoryFailSafeTests : IDisposable
 
     /// <summary>A factory that fails with a type outside the transport and decoding set is still a fail-safe answer.</summary>
     [Fact]
-    public void AProviderFactoryFailureOutsideTheNamedTypesIsAFailSafeAnswer()
+    public async Task AProviderFactoryFailureOutsideTheNamedTypesIsAFailSafeAnswer()
     {
         WriteCitedFile();
         ArbiterTools tools = Tools(_ => throw new NotSupportedException("the configured provider kind is not built here"));
 
-        string json = tools.ClassifyBotReviewComment("docs/guide.md", 2, "Shorten this heading.", null);
+        string json = await tools.ClassifyBotReviewCommentAsync("docs/guide.md", 2, "Shorten this heading.", null);
 
         using JsonDocument document = JsonDocument.Parse(json);
         Assert.False(document.RootElement.TryGetProperty("error", out _), $"expected a class answer, got: {json}");
@@ -53,12 +53,12 @@ public sealed class ArbiterProviderFactoryFailSafeTests : IDisposable
 
     /// <summary>A cancellation raised while building the provider propagates; it is never absorbed into an answer.</summary>
     [Fact]
-    public void ACancellationWhileBuildingTheProviderPropagates()
+    public async Task ACancellationWhileBuildingTheProviderPropagates()
     {
         WriteCitedFile();
         ArbiterTools tools = Tools(_ => throw new OperationCanceledException("cancelled while building the provider"));
 
-        Assert.Throws<OperationCanceledException>(() =>
-            tools.ClassifyBotReviewComment("docs/guide.md", 2, "Shorten this heading.", null));
+        await Assert.ThrowsAsync<OperationCanceledException>(() =>
+            tools.ClassifyBotReviewCommentAsync("docs/guide.md", 2, "Shorten this heading.", null));
     }
 }

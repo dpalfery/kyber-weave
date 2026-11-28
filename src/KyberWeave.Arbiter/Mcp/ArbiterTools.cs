@@ -52,14 +52,15 @@ public sealed class ArbiterTools(IArbiterServeService service)
     [Description("""
         Lists the sections of one repository markdown document that a task needs, each with its id, title and line range, so a worker reads only the sections that bear on the task. Fails safe: when the Arbiter is not configured, unsure, or its provider fails, every section is listed. Returns JSON; a missing document is an error.
         """)]
-    public string SelectRelevantDocumentSections(
+    public async Task<string> SelectRelevantDocumentSectionsAsync(
         [Description("The repository-relative path of the markdown document.")]
         string path,
         [Description("The task the worker is about to do, in plain words.")]
         string task,
         [Description("The most sections to list. Omit to list every selected section.")]
-        int? maxSections = null)
-        => service.SelectRelevantDocumentSections(path, task, maxSections);
+        int? maxSections = null,
+        CancellationToken cancellationToken = default)
+        => await service.SelectRelevantDocumentSectionsAsync(path, task, maxSections, cancellationToken).ConfigureAwait(false);
 
     /// <summary>
     /// Classifies one bot review comment as <c>real</c>, <c>nitpick</c> or <c>already-fixed</c> against the code at the
@@ -77,7 +78,7 @@ public sealed class ArbiterTools(IArbiterServeService service)
     [Description("""
         Classifies one bot review comment as real, nitpick or already-fixed, judging the code at the cited line as it is now. Use before fixing a bot review comment, to skip one that is already fixed or a nitpick. Fails safe to real: any answer that is unsure, below the floor, or not obtained keeps the comment real. Each call records a decision and returns its id. While the rule is in shadow (log-only), class is always real and wouldClass gives the class the model would have returned; shadow true says so. With summary true, the body is a bot's PR-level summary and each row of its findings table is classified; the answer carries items, each with the same fields. Returns JSON.
         """)]
-    public string ClassifyBotReviewComment(
+    public async Task<string> ClassifyBotReviewCommentAsync(
         [Description("The repository-relative path the comment cites. Ignored when summary is true.")]
         string path,
         [Description("The 1-based line the comment cites. Ignored when summary is true.")]
@@ -89,6 +90,7 @@ public sealed class ArbiterTools(IArbiterServeService service)
         [Description("True when the body is a PR-level summary with a findings table.")]
         bool summary = false,
         [Description("The login that posted the summary, when known.")]
-        string? author = null)
-        => service.ClassifyBotReviewComment(path, line, body, commitSha, summary, author);
+        string? author = null,
+        CancellationToken cancellationToken = default)
+        => await service.ClassifyBotReviewCommentAsync(path, line, body, commitSha, summary, author, cancellationToken).ConfigureAwait(false);
 }

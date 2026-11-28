@@ -17,7 +17,7 @@ namespace KyberWeave.Tests.Arbiter;
 /// <c>summary</c> (bool) and <c>author</c>. With <c>summary: true</c> the body is a PR-level summary and the JSON answer
 /// carries <c>items[]</c>, each with <c>path</c>, <c>line</c>, <c>issue</c>, <c>class</c>, <c>confidence</c> and
 /// <c>decisionId</c>. The tool name is unchanged; the pinned tool set stays at five.
-/// RED: <c>ArbiterTools.ClassifyBotReviewComment</c> has no <c>summary</c> or <c>author</c> parameter yet.
+/// RED: <c>ArbiterTools.ClassifyBotReviewCommentAsync</c> has no <c>summary</c> or <c>author</c> parameter yet.
 /// </summary>
 /// <remarks>
 /// Names (GREEN must match): the parameters are appended to the existing signature as
@@ -65,12 +65,12 @@ public sealed class ArbiterSummaryCommentTriageToolTests : IDisposable
 
     /// <summary>A configured bot's summary yields one item per table row, each with the fields the caller needs.</summary>
     [Fact]
-    public void ASummaryFromAConfiguredBotReturnsItemsWithTheirFields()
+    public async Task ASummaryFromAConfiguredBotReturnsItemsWithTheirFields()
     {
         WriteCitedFiles();
 
-        using JsonDocument json = JsonDocument.Parse(Tools(FakeArbiterProvider.AnsweringRule(CommentTriageService.CommentRuleId, "nitpick"), [BotLogin])
-            .ClassifyBotReviewComment(string.Empty, 0, KiloSummary, null, summary: true, author: BotLogin));
+        using JsonDocument json = JsonDocument.Parse(await Tools(FakeArbiterProvider.AnsweringRule(CommentTriageService.CommentRuleId, "nitpick"), [BotLogin])
+            .ClassifyBotReviewCommentAsync(string.Empty, 0, KiloSummary, null, summary: true, author: BotLogin));
 
         JsonElement items = json.RootElement.GetProperty("items");
         Assert.Equal(3, items.GetArrayLength());
@@ -84,13 +84,13 @@ public sealed class ArbiterSummaryCommentTriageToolTests : IDisposable
 
     /// <summary>A human author's summary is answered with real items and the provider is not asked.</summary>
     [Fact]
-    public void ASummaryFromAHumanAuthorReturnsRealItemsWithoutAProviderCall()
+    public async Task ASummaryFromAHumanAuthorReturnsRealItemsWithoutAProviderCall()
     {
         WriteCitedFiles();
         FakeArbiterProvider provider = FakeArbiterProvider.AnsweringRule(CommentTriageService.CommentRuleId, "nitpick");
 
-        using JsonDocument json = JsonDocument.Parse(Tools(provider, [BotLogin])
-            .ClassifyBotReviewComment(string.Empty, 0, KiloSummary, null, summary: true, author: "dave"));
+        using JsonDocument json = JsonDocument.Parse(await Tools(provider, [BotLogin])
+            .ClassifyBotReviewCommentAsync(string.Empty, 0, KiloSummary, null, summary: true, author: "dave"));
 
         JsonElement items = json.RootElement.GetProperty("items");
         Assert.Equal(3, items.GetArrayLength());
@@ -104,12 +104,12 @@ public sealed class ArbiterSummaryCommentTriageToolTests : IDisposable
 
     /// <summary>A summary with no author is real when bot logins are configured, never assumed to be a bot.</summary>
     [Fact]
-    public void ASummaryWithNoAuthorIsRealWhenBotLoginsAreConfigured()
+    public async Task ASummaryWithNoAuthorIsRealWhenBotLoginsAreConfigured()
     {
         WriteCitedFiles();
 
-        using JsonDocument json = JsonDocument.Parse(Tools(FakeArbiterProvider.AnsweringRule(CommentTriageService.CommentRuleId, "nitpick"), [BotLogin])
-            .ClassifyBotReviewComment(string.Empty, 0, KiloSummary, null, summary: true, author: null));
+        using JsonDocument json = JsonDocument.Parse(await Tools(FakeArbiterProvider.AnsweringRule(CommentTriageService.CommentRuleId, "nitpick"), [BotLogin])
+            .ClassifyBotReviewCommentAsync(string.Empty, 0, KiloSummary, null, summary: true, author: null));
 
         JsonElement items = json.RootElement.GetProperty("items");
         Assert.Equal(3, items.GetArrayLength());
@@ -118,10 +118,10 @@ public sealed class ArbiterSummaryCommentTriageToolTests : IDisposable
 
     /// <summary>A summary-mode call with a null body is an error answer, not a thrown exception.</summary>
     [Fact]
-    public void ASummaryWithANullBodyReturnsAnErrorAnswer()
+    public async Task ASummaryWithANullBodyReturnsAnErrorAnswer()
     {
-        using JsonDocument json = JsonDocument.Parse(Tools(FakeArbiterProvider.AnsweringRule(CommentTriageService.CommentRuleId, "nitpick"), [BotLogin])
-            .ClassifyBotReviewComment(string.Empty, 0, null!, null, summary: true, author: BotLogin));
+        using JsonDocument json = JsonDocument.Parse(await Tools(FakeArbiterProvider.AnsweringRule(CommentTriageService.CommentRuleId, "nitpick"), [BotLogin])
+            .ClassifyBotReviewCommentAsync(string.Empty, 0, null!, null, summary: true, author: BotLogin));
 
         Assert.True(json.RootElement.TryGetProperty("error", out _));
         Assert.False(json.RootElement.TryGetProperty("items", out _));
@@ -129,12 +129,12 @@ public sealed class ArbiterSummaryCommentTriageToolTests : IDisposable
 
     /// <summary>The inline call is unchanged: with summary left false it still answers class and decision id, not items.</summary>
     [Fact]
-    public void AnInlineCallStillAnswersClassAndNoItems()
+    public async Task AnInlineCallStillAnswersClassAndNoItems()
     {
         WriteCitedFiles();
 
-        using JsonDocument json = JsonDocument.Parse(Tools(FakeArbiterProvider.AnsweringRule(CommentTriageService.CommentRuleId, "nitpick"), [BotLogin])
-            .ClassifyBotReviewComment("src/Widget.cs", 12, "Rename this.", null));
+        using JsonDocument json = JsonDocument.Parse(await Tools(FakeArbiterProvider.AnsweringRule(CommentTriageService.CommentRuleId, "nitpick"), [BotLogin])
+            .ClassifyBotReviewCommentAsync("src/Widget.cs", 12, "Rename this.", null));
 
         Assert.True(json.RootElement.TryGetProperty("class", out _));
         Assert.False(json.RootElement.TryGetProperty("items", out _));
