@@ -415,15 +415,7 @@ test('server #2: corrupt SQLite sources and unclaimed OTLP produce honest diagno
   // collector's drain loop to flush /healthz pendingCount to 0 before reading problems/quarantine.
   await postOtlpTraces(baseUrl, unclaimedSpanPayload())
   await postOtlpLogs(baseUrl, unattributedLogPayload())
-  const drainDeadline = Date.now() + 30_000
-  while (Date.now() < drainDeadline) {
-    const health = await page.request.get(`${baseUrl}/healthz`)
-    if (health.ok()) {
-      const body = (await health.json()) as { pendingCount?: number }
-      if ((body.pendingCount ?? 0) === 0) break
-    }
-    await new Promise<void>((resolveWait) => setTimeout(resolveWait, 200))
-  }
+  await waitForOtlpIngest(baseUrl, [], { timeoutMs: 30_000, pollIntervalMs: 200 })
   await postImportHistory(baseUrl)
 
   const unfiltered = await readProblems(page, baseUrl, '')
