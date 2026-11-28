@@ -102,22 +102,11 @@ public sealed class McpProjectPathTests : IDisposable
         foreach (string worktree in worktrees) await tools.DocsStatusAsync(worktree);
         Assert.Equal(DocsRootRegistry.Capacity, registry.Count);
 
-        Assert.True(TryResolve(registry, worktrees[4], out DocsTools? first, out _));
-        Assert.True(TryResolve(registry, worktrees[4], out DocsTools? again, out _));
-        Assert.Same(first, again);
-    }
-
-    private static bool TryResolve(
-        DocsRootRegistry registry,
-        string projectPath,
-        out DocsTools? tools,
-        out string? refusal)
-    {
-        DocsRootRegistry.DocsRootResolution resolution =
-            registry.TryResolveAsync(projectPath).GetAwaiter().GetResult();
-        tools = resolution.Tools;
-        refusal = resolution.Refusal;
-        return resolution.Resolved;
+        DocsRootRegistry.DocsRootResolution first = await registry.TryResolveAsync(worktrees[4]);
+        Assert.True(first.Resolved, first.Refusal);
+        DocsRootRegistry.DocsRootResolution again = await registry.TryResolveAsync(worktrees[4]);
+        Assert.True(again.Resolved, again.Refusal);
+        Assert.Same(first.Tools, again.Tools);
     }
 
     private static DocsRootRegistry Registry(string repo) =>
