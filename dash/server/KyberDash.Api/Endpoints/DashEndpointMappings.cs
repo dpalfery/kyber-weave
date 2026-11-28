@@ -850,7 +850,7 @@ public static class DashEndpointMappings
         try
         {
             cancellationToken.ThrowIfCancellationRequested();
-        return DashHttp.NoStoreJson(StatusCodes.Status200OK, settings.UpdateSettings(patch));
+            return DashHttp.NoStoreJson(StatusCodes.Status200OK, settings.UpdateSettings(patch));
         }
         catch (DashValidationException ex)
         {
