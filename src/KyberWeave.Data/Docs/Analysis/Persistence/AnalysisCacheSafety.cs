@@ -202,8 +202,9 @@ public sealed class AnalysisCacheSafety
 
     private async Task<bool> HasTrackedCacheEntryAsync(string repositoryRoot, CancellationToken cancellationToken)
     {
-        IProcessRunner processesAsync = _processesAsync
-            ?? throw new InvalidOperationException("The cache-safety check needs a process runner that can read git without blocking.");
+        // Built over a bounded-only executor there is no async runner: answer as the sync twin does when git
+        // cannot answer (the cache cannot be proved untracked, so it is treated as unsafe), never throw.
+        if (_processesAsync is not { } processesAsync) return true;
         ProcessStartInfo startInfo = GitStartInfo(repositoryRoot);
 
         try

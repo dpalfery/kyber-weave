@@ -162,8 +162,8 @@ public sealed class CodeGraphIndexStaleness
         string? indexedCommit,
         CancellationToken cancellationToken)
     {
-        IProcessRunner gitAsync = _gitAsync
-            ?? throw new InvalidOperationException("The staleness rule needs a process runner that can read git without blocking.");
+        // Without an async runner, git cannot say, which the rule reports as nothing to describe, like the sync twin.
+        if (_gitAsync is not { } gitAsync) return new GitFacts(null, null, string.Empty);
         string? head = await GitAsync(gitAsync, repositoryRoot, ["rev-parse", "HEAD"], cancellationToken).ConfigureAwait(false);
         if (head is null) return new GitFacts(null, null, string.Empty);
 

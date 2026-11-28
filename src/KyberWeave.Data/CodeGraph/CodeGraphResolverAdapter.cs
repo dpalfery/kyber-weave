@@ -283,12 +283,17 @@ public sealed class CodeGraphResolverAdapter : ICodeGraphResolver, ICodeGraphNei
 
         // The checkout is the folder that holds the index folder: <root>/.codegraph/codegraph.db.
         string? root = Path.GetDirectoryName(Path.GetDirectoryName(DatabasePath));
-        _stalenessRead = true;
-        if (root is null) return _staleness = null;
+        if (root is null)
+        {
+            _stalenessRead = true;
+            return _staleness = null;
+        }
 
         (string? indexedCommit, IReadOnlyDictionary<string, (long ModifiedMilliseconds, int NodeCount)> files) =
             await ReadStalenessFactsAsync(cancellationToken).ConfigureAwait(false);
         _staleness = await _stalenessRule.DescribeAsync(root, indexedCommit, files, cancellationToken).ConfigureAwait(false);
+        // Marked read only once the answer is in: a read that threw or was cancelled is retried, not cached as current.
+        _stalenessRead = true;
         return _staleness;
     }
 
@@ -399,8 +404,9 @@ public sealed class CodeGraphResolverAdapter : ICodeGraphResolver, ICodeGraphNei
 
     private async Task<IEnumerable<string>> RunSqliteAsync(string sql, CancellationToken cancellationToken)
     {
-        IProcessRunner processesAsync = _processesAsync
-            ?? throw new InvalidOperationException("The CodeGraph index read needs a process runner that can run sqlite3 without blocking.");
+        // Built over a bounded-only executor there is no async runner: the read answers nothing, so the caller
+        // treats the facts as unknown rather than failing with an exception the sync twin never raised.
+        if (_processesAsync is not { } processesAsync) return [];
         ProcessStartInfo startInfo = SqliteStartInfo(sql);
         ProcessResult result = await processesAsync.RunAsync(
             startInfo,
