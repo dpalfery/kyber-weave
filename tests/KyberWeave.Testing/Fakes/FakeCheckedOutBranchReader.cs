@@ -11,10 +11,18 @@ public sealed class FakeCheckedOutBranchReader : ICheckedOutBranchReader
     /// <inheritdoc />
     public string? Read(string workingDirectory) => Branches.GetValueOrDefault(workingDirectory);
 
+    /// <inheritdoc />
+    public Task<string?> ReadAsync(string workingDirectory, CancellationToken cancellationToken = default) =>
+        Task.FromResult(Read(workingDirectory));
+
     /// <summary>Gets the ancestry answers a test scripts, keyed by ancestor and descendant branch; unscripted pairs answer null.</summary>
     public Dictionary<(string Ancestor, string Descendant), bool?> Ancestry { get; } = [];
 
     /// <inheritdoc />
     public bool? IsAncestor(string workingDirectory, string ancestor, string descendant) =>
         Ancestry.GetValueOrDefault((ancestor, descendant));
+
+    /// <inheritdoc />
+    public Task<bool?> IsAncestorAsync(string workingDirectory, string ancestor, string descendant, CancellationToken cancellationToken = default) =>
+        Task.FromResult(IsAncestor(workingDirectory, ancestor, descendant));
 }

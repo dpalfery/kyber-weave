@@ -24,6 +24,24 @@ public sealed class GitCheckedOutBranchReader(IGitCommandRunner git) : ICheckedO
     }
 
     /// <inheritdoc />
+    public async Task<string?> ReadAsync(string workingDirectory, CancellationToken cancellationToken = default)
+    {
+        try
+        {
+            GitOutcome outcome = await git.RunAsync(
+                workingDirectory,
+                ["branch", "--show-current"],
+                cancellationToken).ConfigureAwait(false);
+            string branch = outcome.Succeeded ? outcome.StandardOutput.Trim() : string.Empty;
+            return string.IsNullOrWhiteSpace(branch) ? null : branch;
+        }
+        catch (Exception ex) when (FileFailure.Is(ex) || ex is Win32Exception or InvalidOperationException or TimeoutException)
+        {
+            return null;
+        }
+    }
+
+    /// <inheritdoc />
     /// <remarks>
     /// The same question <c>run integrate</c> asks, with the same exit-code reading: 0 is an ancestor, 1 is not, and
     /// anything else is git failing to answer.
@@ -35,6 +53,32 @@ public sealed class GitCheckedOutBranchReader(IGitCommandRunner git) : ICheckedO
             GitOutcome outcome = git.Run(
                 workingDirectory,
                 ["-C", workingDirectory, "merge-base", "--is-ancestor", "--end-of-options", ancestor, descendant]);
+            return outcome.ExitCode switch
+            {
+                0 => true,
+                1 => false,
+                _ => null,
+            };
+        }
+        catch (Exception ex) when (FileFailure.Is(ex) || ex is Win32Exception or InvalidOperationException or TimeoutException)
+        {
+            return null;
+        }
+    }
+
+    /// <inheritdoc />
+    /// <remarks>
+    /// The same question <c>run integrate</c> asks, with the same exit-code reading: 0 is an ancestor, 1 is not, and
+    /// anything else is git failing to answer.
+    /// </remarks>
+    public async Task<bool?> IsAncestorAsync(string workingDirectory, string ancestor, string descendant, CancellationToken cancellationToken = default)
+    {
+        try
+        {
+            GitOutcome outcome = await git.RunAsync(
+                workingDirectory,
+                ["-C", workingDirectory, "merge-base", "--is-ancestor", "--end-of-options", ancestor, descendant],
+                cancellationToken).ConfigureAwait(false);
             return outcome.ExitCode switch
             {
                 0 => true,
