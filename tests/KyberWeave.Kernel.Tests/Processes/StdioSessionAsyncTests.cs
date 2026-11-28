@@ -55,10 +55,12 @@ public sealed class StdioSessionAsyncTests
     public async Task ReadLineAsyncReportsTheSameTimeoutAsReadLine()
     {
         SkipUnlessPosix();
+        // Each session's budget starts when it is created, so the second one is created only after the first
+        // read has used up its own budget; created together, the second would already be exhausted.
         using StdioSession syncSession = new("/bin/sleep", ["600"], TimeSpan.FromMilliseconds(500), TimeProvider.System);
-        using StdioSession asyncSession = new("/bin/sleep", ["600"], TimeSpan.FromMilliseconds(500), TimeProvider.System);
-
         TimeoutException sync = Assert.Throws<TimeoutException>(() => ReadLineSynchronously(syncSession));
+
+        using StdioSession asyncSession = new("/bin/sleep", ["600"], TimeSpan.FromMilliseconds(500), TimeProvider.System);
         TimeoutException async = await Assert.ThrowsAsync<TimeoutException>(() => asyncSession.ReadLineAsync());
 
         Assert.Equal(sync.Message, async.Message);
