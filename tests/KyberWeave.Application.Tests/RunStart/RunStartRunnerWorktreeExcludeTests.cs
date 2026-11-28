@@ -224,6 +224,15 @@ public sealed class RunStartRunnerWorktreeExcludeTests
             string lockDirectory,
             CodeGraphRestore restore = CodeGraphRestore.AllWrittenFiles) =>
             throw new NotSupportedException();
+
+        public Task<WorktreeIndexOutcome> EnsureAsync(
+            string root,
+            DoctorOptions options,
+            IProcessRunner executor,
+            string lockDirectory,
+            CodeGraphRestore restore = CodeGraphRestore.AllWrittenFiles,
+            CancellationToken cancellationToken = default) =>
+            throw new NotSupportedException();
     }
 
     private sealed class NoProcesses : IBoundedProcessExecutor

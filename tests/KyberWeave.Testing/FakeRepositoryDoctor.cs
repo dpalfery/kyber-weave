@@ -48,4 +48,30 @@ internal sealed class FakeRepositoryDoctor : IRepositoryDoctor
         _runs.Add(new DoctorRun(root, DoctorMode.Ensure, options, executor, _ => null, lockDirectory));
         return Report with { Root = root, Mode = DoctorMode.Ensure };
     }
+
+    /// <inheritdoc />
+    public Task<DoctorReport> RunAsync(
+        string root,
+        DoctorMode mode,
+        DoctorOptions options,
+        IProcessRunner executor,
+        Func<string, string?> environment,
+        string? lockDirectory = null,
+        CancellationToken cancellationToken = default)
+    {
+        _runs.Add(new DoctorRun(root, mode, options, executor, environment, lockDirectory));
+        return Task.FromResult(Report with { Root = root, Mode = mode });
+    }
+
+    /// <inheritdoc />
+    public Task<DoctorReport> RunPostCheckoutAsync(
+        string root,
+        DoctorOptions options,
+        IProcessRunner executor,
+        string? lockDirectory = null,
+        CancellationToken cancellationToken = default)
+    {
+        _runs.Add(new DoctorRun(root, DoctorMode.Ensure, options, executor, _ => null, lockDirectory));
+        return Task.FromResult(Report with { Root = root, Mode = DoctorMode.Ensure });
+    }
 }

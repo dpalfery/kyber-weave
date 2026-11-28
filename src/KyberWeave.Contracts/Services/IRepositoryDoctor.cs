@@ -27,6 +27,24 @@ public interface IRepositoryDoctor
         Func<string, string?> environment,
         string? lockDirectory = null);
 
+    /// <summary>Runs the doctor against a directory without blocking a thread.</summary>
+    /// <param name="root">The directory to check. The git toplevel of this directory becomes the repository root.</param>
+    /// <param name="mode">Read-only, provisioning, or the ensure run that leaves the index and both tools proved.</param>
+    /// <param name="options">The budgets and executable names.</param>
+    /// <param name="executor">Runs git and CodeGraph children, bounded by <see cref="DoctorOptions.IndexTimeout"/>.</param>
+    /// <param name="environment">Reads one environment variable. Injected so the home-directory refusal is testable.</param>
+    /// <param name="lockDirectory">Where the index lock file lives. Null uses the OS temp directory.</param>
+    /// <param name="cancellationToken">Cancels the git and CodeGraph children.</param>
+    /// <returns>The report.</returns>
+    Task<DoctorReport> RunAsync(
+        string root,
+        DoctorMode mode,
+        DoctorOptions options,
+        IProcessRunner executor,
+        Func<string, string?> environment,
+        string? lockDirectory = null,
+        CancellationToken cancellationToken = default);
+
     /// <summary>
     /// Runs the doctor for the git post-checkout hook: indexes a new worktree without restoring the tracked edits the
     /// index run would otherwise revert.
@@ -37,4 +55,18 @@ public interface IRepositoryDoctor
     /// <param name="lockDirectory">Where the index lock file lives. Null uses the OS temp directory.</param>
     /// <returns>The report.</returns>
     DoctorReport RunPostCheckout(string root, DoctorOptions options, IProcessExecutor executor, string? lockDirectory = null);
+
+    /// <summary>Runs the doctor for the git post-checkout hook without blocking a thread.</summary>
+    /// <param name="root">The worktree root the hook was fired in.</param>
+    /// <param name="options">The index budget and executable names.</param>
+    /// <param name="executor">Runs git and CodeGraph children.</param>
+    /// <param name="lockDirectory">Where the index lock file lives. Null uses the OS temp directory.</param>
+    /// <param name="cancellationToken">Cancels the git and CodeGraph children.</param>
+    /// <returns>The report.</returns>
+    Task<DoctorReport> RunPostCheckoutAsync(
+        string root,
+        DoctorOptions options,
+        IProcessRunner executor,
+        string? lockDirectory = null,
+        CancellationToken cancellationToken = default);
 }

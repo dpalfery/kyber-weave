@@ -57,6 +57,84 @@ public sealed class PostCheckoutHookInstaller(
     public DoctorCheck? Ensure(string repositoryRoot, IProcessExecutor executor) =>
         Apply(repositoryRoot, executor, write: true);
 
+    /// <summary>
+    ///     Reads the hook file without blocking a thread and reports whether the marked block is present and current.
+    /// </summary>
+    /// <param name="repositoryRoot">The repository root whose shared hook is inspected.</param>
+    /// <param name="executor">Runs git, which resolves the shared hooks directory.</param>
+    /// <param name="cancellationToken">Cancels the git children.</param>
+    /// <returns>The <c>githook.post-checkout</c> check, or null when there is nothing to report.</returns>
+    public async Task<DoctorCheck?> InspectAsync(
+        string repositoryRoot,
+        IProcessRunner executor,
+        CancellationToken cancellationToken = default) =>
+        await ApplyAsync(repositoryRoot, executor, write: false, cancellationToken).ConfigureAwait(false);
+
+    /// <summary>
+    ///     Installs or refreshes the marked block in the shared post-checkout hook without blocking a thread, or removes
+    ///     it when the repository sets <c>worktree-index-hook: false</c>.
+    /// </summary>
+    /// <param name="repositoryRoot">The repository root whose shared hook is written.</param>
+    /// <param name="executor">Runs git, which resolves the shared hooks directory.</param>
+    /// <param name="cancellationToken">Cancels the git children.</param>
+    /// <returns>The <c>githook.post-checkout</c> check describing what was done, or null when there is nothing to report.</returns>
+    public async Task<DoctorCheck?> EnsureAsync(
+        string repositoryRoot,
+        IProcessRunner executor,
+        CancellationToken cancellationToken = default) =>
+        await ApplyAsync(repositoryRoot, executor, write: true, cancellationToken).ConfigureAwait(false);
+
+    private async Task<DoctorCheck?> ApplyAsync(
+        string root,
+        IProcessRunner executor,
+        bool write,
+        CancellationToken cancellationToken)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(root);
+        ArgumentNullException.ThrowIfNull(executor);
+
+        // A repository without governed docs has no index to keep, so it gets no hook and no status line.
+        if (!DocsEnabled.IsEnabled(root, ReadText, files.DirectoryExists))
+            return null;
+
+        try
+        {
+            return await ApplyToHookAsync(root, executor, write, cancellationToken).ConfigureAwait(false);
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            return Warn($"the post-checkout hook could not be read or written: {ex.Message}", null);
+        }
+    }
+
+    private async Task<DoctorCheck> ApplyToHookAsync(
+        string root,
+        IProcessRunner executor,
+        bool write,
+        CancellationToken cancellationToken)
+    {
+        (string? folder, DoctorCheck? problem) = await ResolveHooksFolderAsync(root, executor, cancellationToken).ConfigureAwait(false);
+        if (problem is not null || folder is null)
+            return problem ?? Warn("the git hooks folder could not be found", null);
+
+        string hook = Path.Combine(folder, HookName);
+        bool exists = hooks.Exists(hook);
+        if (exists && !hooks.IsExecutable(hook))
+            return Warn(
+                "the post-checkout hook exists without the executable bit, so kyber-weave left it alone; " +
+                "add the executable bit or remove the hook, then " + EnsureHint,
+                null);
+
+        string? existing = exists ? hooks.ReadAllText(hook) : null;
+
+        // An unreadable config counts as on: a broken file must not be the thing that removes the index hook.
+        bool wanted = settings.Read(root).WorktreeIndexHook;
+
+        return wanted
+            ? InstallBlock(hook, existing, write)
+            : RemoveBlock(hook, existing, write);
+    }
+
     /// <summary>The shared flow behind <see cref="Inspect"/> and <see cref="Ensure"/>: the same decisions, with writes only when asked.</summary>
     private DoctorCheck? Apply(string root, IProcessExecutor executor, bool write)
     {
@@ -224,6 +302,41 @@ public sealed class PostCheckoutHookInstaller(
         return (folder, null);
     }
 
+    private async Task<(string? Folder, DoctorCheck? Problem)> ResolveHooksFolderAsync(
+        string root,
+        IProcessRunner executor,
+        CancellationToken cancellationToken)
+    {
+        ProcessResult? hooks = await GitAsync(root, executor, cancellationToken, "rev-parse", "--git-path", "hooks").ConfigureAwait(false);
+        string answer = hooks is { ExitCode: 0 } ? hooks.Value.StandardOutput.Trim() : string.Empty;
+        if (answer.Length == 0)
+            return (null, Warn("git could not say where its hooks folder is", null));
+
+        string folder = paths.GetFullPath(Path.Combine(root, answer), environment.CurrentDirectory);
+        if (!IsInside(root, folder))
+            return (folder, null);
+
+        ProcessResult? configured = await GitAsync(root, executor, cancellationToken, "config", "--get", "core.hooksPath").ConfigureAwait(false);
+        bool redirected = configured is { ExitCode: 0 } && configured.Value.StandardOutput.Trim().Length > 0;
+        if (!redirected)
+            return (folder, null);
+
+        string relative = Path.GetRelativePath(paths.GetFullPath(root, environment.CurrentDirectory), folder).Replace('\\', '/');
+        ProcessResult? tracked = await GitAsync(root, executor, cancellationToken, "ls-files", "--", relative).ConfigureAwait(false);
+        if (tracked is null || tracked.Value.ExitCode != 0)
+            return (null, Warn($"git could not say whether the hooks folder '{relative}' is tracked", null));
+
+        if (tracked.Value.StandardOutput.Trim().Length > 0)
+        {
+            return (null, Warn(
+                $"core.hooksPath points at '{relative}', which git tracks, so kyber-weave will not write into it; " +
+                "point core.hooksPath at a folder outside the repository, or untrack it",
+                null));
+        }
+
+        return (folder, null);
+    }
+
     /// <summary>Whether <paramref name="path"/> is inside <paramref name="root"/>, by its relative path rather than a string prefix.</summary>
     private bool IsInside(string root, string path)
     {
@@ -251,6 +364,33 @@ public sealed class PostCheckoutHookInstaller(
         try
         {
             return executor.Run(startInfo, string.Empty);
+        }
+        catch (Exception ex) when (ex is Win32Exception or IOException or InvalidOperationException or TimeoutException or UnauthorizedAccessException)
+        {
+            return null;
+        }
+    }
+
+    private static async Task<ProcessResult?> GitAsync(
+        string root,
+        IProcessRunner executor,
+        CancellationToken cancellationToken,
+        params string[] arguments)
+    {
+        ProcessStartInfo startInfo = new("git")
+        {
+            UseShellExecute = false,
+            RedirectStandardInput = true,
+            RedirectStandardOutput = true,
+            RedirectStandardError = true,
+            WorkingDirectory = root
+        };
+        foreach (string argument in arguments)
+            startInfo.ArgumentList.Add(argument);
+
+        try
+        {
+            return await executor.RunAsync(startInfo, string.Empty, timeout: null, cancellationToken).ConfigureAwait(false);
         }
         catch (Exception ex) when (ex is Win32Exception or IOException or InvalidOperationException or TimeoutException or UnauthorizedAccessException)
         {

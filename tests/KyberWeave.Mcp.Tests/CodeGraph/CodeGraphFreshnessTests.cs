@@ -286,6 +286,25 @@ public sealed class CodeGraphFreshnessTests
             return OnProvision?.Invoke(root, options, executor, lockDirectory)
                 ?? new DoctorCheck("codegraph.index", true, null, null);
         }
+
+        public Task<CodeGraphOutcome> RunAsync(
+            string root,
+            DoctorMode mode,
+            DoctorOptions options,
+            IProcessRunner executor,
+            string lockDirectory,
+            CodeGraphRestore restore = CodeGraphRestore.AllWrittenFiles,
+            CancellationToken cancellationToken = default) =>
+            throw new NotSupportedException("The refresh uses Provision only.");
+
+        public Task<DoctorCheck> ProvisionAsync(
+            string root,
+            DoctorOptions options,
+            IProcessRunner executor,
+            string lockDirectory,
+            TimeSpan lockWait,
+            CancellationToken cancellationToken = default) =>
+            throw new NotSupportedException("The refresh uses Provision only.");
     }
 
     private sealed class RefusingProcessRunner : IProcessRunner

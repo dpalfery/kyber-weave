@@ -145,11 +145,11 @@ public sealed class RepositoryDoctorTests
     /// against the Core seam. It needs a <c>DoctorCommand</c> seam for stdin-is-TTY and the environment (D11).
     /// </remarks>
     [Fact]
-    public void Doctor_NonInteractive_Bare_BehavesAsCheck_PrintsHint()
+    public async Task Doctor_NonInteractive_Bare_BehavesAsCheck_PrintsHint()
     {
         ScriptedProcessExecutor executor = DoctorHarness.Executor(Root);
         DoctorCommand command = _world.Command(false, executor, "kyber-weave-mcp-absent");
-        _ = command.Execute(null!, new DoctorSettings { Path = Root }, CancellationToken.None);
+        _ = await command.ExecuteAsync(null!, new DoctorSettings { Path = Root }, CancellationToken.None);
 
         Assert.Contains("provisioning skipped: non-interactive; rerun with --provision", _world.Console.Output, StringComparison.Ordinal);
         DoctorHarness.AssertNoCall(executor, "init");
@@ -278,11 +278,11 @@ public sealed class RepositoryDoctorTests
     }
 
     [Fact]
-    public void Doctor_BlankPath_Exits2()
+    public async Task Doctor_BlankPath_Exits2()
     {
         ScriptedProcessExecutor executor = DoctorHarness.Executor(Root);
         DoctorCommand command = _world.Command(false, executor, "kyber-weave-mcp-absent");
-        int exitCode = command.Execute(null!, new DoctorSettings { Path = string.Empty }, CancellationToken.None);
+        int exitCode = await command.ExecuteAsync(null!, new DoctorSettings { Path = string.Empty }, CancellationToken.None);
 
         Assert.Equal(2, exitCode);
         Assert.Empty(executor.Calls);
