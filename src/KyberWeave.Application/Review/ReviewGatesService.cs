@@ -96,6 +96,46 @@ public sealed class ReviewGatesService(
                 taskGates).Run(request, indexExecutor, output);
     }
 
+    /// <inheritdoc />
+    public async Task<ReviewCommandResult> RunAsync(
+        ReviewGatesRequest request,
+        IProcessRunner indexExecutor,
+        TextWriter output,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+        ArgumentNullException.ThrowIfNull(indexExecutor);
+        ArgumentNullException.ThrowIfNull(output);
+
+        return request.Agent is { } agent
+            ? await new AgentGateRun(
+                configs,
+                git,
+                gateRunner,
+                projectFiles,
+                files,
+                environment,
+                pathResolver,
+                taskGates,
+                targets).RunAsync(request, agent, output, cancellationToken).ConfigureAwait(false)
+            : await new RepositoryGateRun(
+                trees,
+                cycles,
+                git,
+                evidenceWriter,
+                notSeatedStore,
+                gateRunner,
+                duplicateDetection,
+                graphs,
+                worktreeIndex,
+                files,
+                environment,
+                pathResolver,
+                selector,
+                configs,
+                taskGates).RunAsync(request, indexExecutor, output, cancellationToken).ConfigureAwait(false);
+    }
+
     /// <summary>
     ///     The report already at <paramref name="path"/>, merged into this run's, or this run's alone when the file is
     ///     missing or unreadable. The path is resolved the same way it is written, so a relative <c>--out</c> reads
@@ -227,6 +267,22 @@ public sealed class ReviewGatesService(
             return Report(inputs, executed, request, output, report);
         }
 
+        private CycleRun Cycle => new(
+            this, trees, cycles, selector, files, pathResolver, environment, graphs, duplicateDetection, notSeatedStore, evidenceWriter);
+
+        /// <summary>Runs the repository gate suite without blocking a thread.</summary>
+        /// <param name="request">The options the command parsed.</param>
+        /// <param name="indexExecutor">Runs the CodeGraph index child, bounded by the entry point.</param>
+        /// <param name="output">Receives the lines a run prints before and after the report, in order.</param>
+        /// <param name="cancellationToken">Cancels the index child and the gate run.</param>
+        public Task<ReviewCommandResult> RunAsync(
+            ReviewGatesRequest request,
+            IProcessRunner indexExecutor,
+            TextWriter output,
+            CancellationToken cancellationToken) =>
+            new AsyncRun(this, files, environment, pathResolver, gateRunner, worktreeIndex, taskGates)
+                .RunAsync(request, indexExecutor, output, cancellationToken);
+
         /// <summary>
         /// Checks the inputs, selects the gates and finds the cycle before any gate starts. Returns null with the
         /// refusal in <paramref name="failure"/> when the run cannot continue.
@@ -299,7 +355,7 @@ public sealed class ReviewGatesService(
             // itself decides which gates still need to run and carries the rest, instead of relying on the reviewer to ask.
             // The header is printed before any gate starts, so the reviewer can re-check findings while the gates run.
             CouncilCycle? cycle = request.Council && !request.All && request.Gates.Count == 0
-                ? DetectCycle(root, config, request, report)
+                ? Cycle.DetectCycle(root, config, request, report)
                 : null;
             if (cycle is not null)
             {
@@ -309,7 +365,7 @@ public sealed class ReviewGatesService(
                 if (request.HumanOutput)
                     WriteCycleHeader(cycle, output);
 
-                RecordCycleIdentity(cycle, report);
+                Cycle.RecordCycleIdentity(cycle, report);
                 report.AddMetric("cycle", cycle.Plan.Number);
                 report.AddMetric("mode", cycle.Mode);
             }
@@ -429,6 +485,7 @@ public sealed class ReviewGatesService(
             return new Execution(inputs, changed, fullSuite.Admitted);
         }
 
+
         /// <summary>Runs the admitted gates, carries a verifier cycle's gates and merges an earlier report.</summary>
         private Executed Execute(
             Execution execution, ReviewGatesRequest request, DiagnosticReport report)
@@ -483,6 +540,7 @@ public sealed class ReviewGatesService(
             return new Executed(gates, written);
         }
 
+
         /// <summary>Writes the report, the evidence and the gate-proven skips, and builds the reviewer-facing epilogue.</summary>
         private ReviewCommandResult Report(
             Inputs inputs,
@@ -501,9 +559,9 @@ public sealed class ReviewGatesService(
             IReadOnlyDictionary<string, string>? gateProven = null;
             if (cycle is { WritesIdentity: true, Folder: { } cycleFolder } && request.Out is { } outPath)
             {
-                evidence = WriteEvidence(cycleFolder, outPath, cycle, inputs.Root, request, written, inputs.Config, report);
+                evidence = Cycle.WriteEvidence(cycleFolder, outPath, cycle, inputs.Root, request, written, inputs.Config, report);
                 if (evidence is not null)
-                    gateProven = GateProvenSkips(cycleFolder, inputs.Root, inputs.Config, request, written, report);
+                    gateProven = Cycle.GateProvenSkips(cycleFolder, inputs.Root, inputs.Config, request, written, report);
             }
 
             List<string> epilogue = [];
@@ -562,6 +620,389 @@ public sealed class ReviewGatesService(
             return ReviewCommandResultFactory.Reported(1, report);
         }
 
+        /// <summary>The cycle detection, evidence and identity steps the gate run wraps around its gates.</summary>
+        private sealed class CycleRun(
+            RepositoryGateRun owner,
+            IReviewWorkTreeService trees,
+            IReviewCycleStore cycles,
+            IReviewCycleSelector selector,
+            IWritableFileSystem files,
+            IPathResolver pathResolver,
+            IProcessEnvironment environment,
+            ICodeGraphPortsFactory graphs,
+            IDuplicateDetectionService duplicateDetection,
+            INotSeatedStore notSeatedStore,
+            IReviewEvidenceService evidenceWriter)
+        {
+            /// <summary>
+            ///     The cycle this council run is in, or null when no review folder can be named. The review folder comes from the
+            ///     <c>--out</c> path when it sits in <c>review/cycle-&lt;n&gt;</c>, else from the task's only review folder in
+            ///     the git work tree the command was run against. A cycle counts as prior only when it belongs to this change
+            ///     (<c>ReviewCyclePlanning.Belonging</c>); one that is finished, this one included, or that belongs to another
+            ///     change is never counted. When nothing says this is a later cycle, the run is a full one, which is the safe answer.
+            /// </summary>
+            internal CouncilCycle? DetectCycle(
+                string root, KyberWeaveConfig config, ReviewGatesRequest request, DiagnosticReport report)
+            {
+                string tree = trees.Containing(root);
+                List<string> notes = [];
+                if (trees.LiveRunNote(tree, trees.HomeDirectory()) is { } liveRun)
+                    notes.Add(liveRun);
+
+                string reviewFolder;
+                int? thisCycle = null;
+                string? folder = null;
+                string scratchpad = ReviewWorkTree.Scratchpad(tree);
+                ReviewTaskChoice choice = selector.ChooseTask(tree, scratchpad, null);
+                if (request.Out is not null
+                    && ReviewCycleView.TryFromOutPath(pathResolver, environment, request.Out, out string fromOut, out int number))
+                {
+                    reviewFolder = fromOut;
+                    thisCycle = number;
+                    folder = Path.GetDirectoryName(GatePaths.FullPath(pathResolver, environment, request.Out));
+                    if (!ReviewCycleView.IsUnder(pathResolver, environment, tree, fromOut))
+                        notes.Add($"worktree: --out is outside {tree}, so this review writes to {folder}; use {ReviewWorkTree.Scratchpad(tree)} for this worktree's review folders.");
+                }
+                else if (choice.Chosen)
+                {
+                    reviewFolder = Path.Combine(scratchpad, choice.Task, ScratchLayout.ReviewFolderName);
+                }
+                else
+                {
+                    return null;
+                }
+
+                PriorCycles prior = trees.Prior(
+                    tree,
+                    request.BaseRef,
+                    [.. cycles.ReadFinished(reviewFolder).Where(record => thisCycle is null || record.Number < thisCycle)]);
+                IReadOnlyList<ReviewCycleRecord> finished = prior.Valid;
+
+                ReviewCyclePlan plan = ReviewCyclePlanning.Plan(
+                    finished, config.Review.Gates, ReviewGateReporting.CurrentOs(environment), commit => selector.ChangedSince(tree, commit));
+                folder ??= Path.Combine(reviewFolder, ScratchLayout.CycleFolder(plan.Number));
+                IReadOnlyList<ReviewFinding> recheck = [];
+                if (plan.Prior is { } priorCycle)
+                {
+                    (_, IReadOnlyList<ReviewFinding> found) = selector.ReadRecheck(
+                        priorCycle, config.Review.Policy, report, ReviewDiagnosticCodes.UnreadableInput, Severity.Warning, "review gates");
+                    recheck = found;
+                }
+
+                return new CouncilCycle(
+                    plan,
+                    recheck,
+                    [.. plan.Gates.Where(gate => gate.Action == GateCycleAction.Rerun).Select(gate => gate.GateId)],
+                    prior.Ignored,
+                    tree,
+                    folder,
+                    notes,
+                    plan.IsVerifier && !request.Full,
+                    thisCycle is not null,
+                    request.BaseRef);
+            }
+
+            /// <summary>
+            ///     Writes the diff, the changed files and the gate results into the cycle folder, so the seats and the lead
+            ///     reviewer start from them instead of re-running a gate or rediscovering the change.
+            /// </summary>
+            /// <returns>The evidence file's path, or null when it could not be written.</returns>
+            internal string? WriteEvidence(
+                string folder,
+                string outPath,
+                CouncilCycle cycle,
+                string root,
+                ReviewGatesRequest request,
+                GateReport written,
+                KyberWeaveConfig config,
+                DiagnosticReport report)
+            {
+                try
+                {
+                    string path = evidenceWriter.Write(
+                        folder,
+                        root,
+                        request.BaseRef ?? ReviewGateReporting.CouncilDefaultBase,
+                        written,
+                        outPath,
+                        cycle.Verifier ? cycle.Plan.Prior?.Head : null,
+                        config.Review.Coverage);
+                    report.AddMetric("evidence", path);
+                    return path;
+                }
+                catch (Exception ex) when (FileFailure.Is(ex))
+                {
+                    report.Add(new Diagnostic(
+                        ReviewDiagnosticCodes.ReportWriteFailed,
+                        Severity.Warning,
+                        $"Could not write the review evidence to '{cycle.Folder}': {ex.Message}",
+                        "review gates",
+                        Hint: "The seats then have no diff or gate summary to start from; fix the folder and run the gates again."));
+                    return null;
+                }
+            }
+
+            /// <summary>
+            ///     Writes the duplicates report into the cycle folder and decides the two gate-proven skips from it and the gate
+            ///     report, so the reviewer seats <c>static-analysis-triage</c> and <c>duplicate-implementation</c> only when a gate
+            ///     leaves them something to say.
+            /// </summary>
+            internal IReadOnlyDictionary<string, string> GateProvenSkips(
+                string folder,
+                string root,
+                KyberWeaveConfig config,
+                ReviewGatesRequest request,
+                GateReport written,
+                DiagnosticReport report)
+            {
+                CodeGraphPorts graph = graphs.ForRepository(root);
+                DuplicateReport duplicates = duplicateDetection.Analyze(root, graph.Resolver, graph.Enumerator, config.Review.Duplicates);
+                ReviewReportWriter.TryWrite(
+                    files,
+                    pathResolver,
+                    environment,
+                    Path.Combine(folder, "duplicates.json"),
+                    ReviewJson.Write(duplicates),
+                    ReviewDiagnosticCodes.ReportWriteFailed,
+                    report);
+                (IReadOnlyList<string>? changed, _) = owner.ResolveCouncilChangedSet(root, request);
+                IReadOnlyDictionary<string, string> skips = CouncilSeating.GateProvenSkips(written, duplicates, changed);
+                try
+                {
+                    notSeatedStore.Replace(folder, CouncilSeating.GateProvenLenses, skips);
+                }
+                catch (Exception ex) when (FileFailure.Is(ex))
+                {
+                    // The printed not-seated lines still carry the decisions; the verdict asks for any it cannot read.
+                }
+
+                return skips;
+            }
+
+            /// <summary>Records the branch, base and head this cycle reviews, so a later cycle can tell the cycle belongs to its change.</summary>
+            internal void RecordCycleIdentity(CouncilCycle cycle, DiagnosticReport report)
+            {
+                if (!cycle.WritesIdentity || cycle.Folder is null || trees.IdentityOf(cycle.Tree, cycle.BaseRef) is not { } identity)
+                    return;
+
+                try
+                {
+                    cycles.WriteIdentity(cycle.Folder, identity);
+                }
+                catch (Exception ex) when (FileFailure.Is(ex))
+                {
+                    report.Add(new Diagnostic(
+                        ReviewDiagnosticCodes.ReportWriteFailed,
+                        Severity.Warning,
+                        $"Could not record the change in '{cycle.Folder}': {ex.Message}",
+                        "review gates",
+                        Hint: "Without it the next cycle cannot tell this folder belongs to the change, and runs in full."));
+                }
+            }
+
+        }
+
+        /// <summary>The asynchronous gate run, kept apart so the synchronous run stays a separate, small type.</summary>
+        private sealed class AsyncRun(
+            RepositoryGateRun owner,
+            IWritableFileSystem files,
+            IProcessEnvironment environment,
+            IPathResolver pathResolver,
+            IGateRunService gateRunner,
+            IWorktreeIndexGuard worktreeIndex,
+            ITaskGateSelectionService taskGates)
+        {
+            /// <summary>Runs the repository gate suite without blocking a thread.</summary>
+            /// <param name="request">The options the command parsed.</param>
+            /// <param name="indexExecutor">Runs the CodeGraph index child, bounded by the entry point.</param>
+            /// <param name="output">Receives the lines a run prints before and after the report, in order.</param>
+            /// <param name="cancellationToken">Cancels the index child and the gate run.</param>
+            public async Task<ReviewCommandResult> RunAsync(
+                ReviewGatesRequest request,
+                IProcessRunner indexExecutor,
+                TextWriter output,
+                CancellationToken cancellationToken)
+            {
+                DiagnosticReport report = new();
+                string root = GatePaths.FullPath(pathResolver, environment, request.Path);
+
+                Inputs? inputs = owner.Prepare(root, request, report, output, out ReviewCommandResult? prepareFailure);
+                if (inputs is null)
+                    return prepareFailure ?? ReviewCommandResultFactory.Reported(1, report);
+
+                (Execution? execution, ReviewCommandResult? failure) =
+                    await PlanAsync(inputs, request, indexExecutor, report, cancellationToken).ConfigureAwait(false);
+                if (execution is null)
+                    return failure ?? ReviewCommandResultFactory.Reported(1, report);
+
+                Executed executed = await ExecuteAsync(execution, request, report, cancellationToken).ConfigureAwait(false);
+                return owner.Report(inputs, executed, request, output, report);
+            }
+
+            /// <summary>
+            /// Resolves the changed set the include patterns are matched against, admits the full-suite gates, refuses a run
+            /// that cannot start and syncs the index, without blocking a thread.
+            /// </summary>
+            internal async Task<(Execution? Execution, ReviewCommandResult? Failure)> PlanAsync(
+                Inputs inputs,
+                ReviewGatesRequest request,
+                IProcessRunner indexExecutor,
+                DiagnosticReport report,
+                CancellationToken cancellationToken)
+            {
+                string root = inputs.Root;
+                IReadOnlyList<string>? changed = null;
+                string? unknownReason = null;
+
+                // The changed set is only needed when a gate is scoped by include; it is never computed for gates alone.
+                if (!request.All && ReviewGateReporting.NeedsChangedSet(inputs.Declared))
+                {
+                    (changed, unknownReason) = owner.ResolveCouncilChangedSet(root, request);
+                    if (changed is null)
+                    {
+                        // Fail closed: every gate runs, and the report says why none was skipped for include.
+                        report.Add(new Diagnostic(
+                            ReviewGateReporting.ChangedSetUnknown,
+                            Severity.Info,
+                            $"changed set unknown ({unknownReason}); gates with include ran unscoped.",
+                            "review.gates",
+                            Hint: "Fetch the full history, or name a base that exists with --base."));
+                    }
+                    else
+                    {
+                        List<string> changedRefusals = [];
+                        foreach (string path in changed)
+                            if (taskGates.ValidatePath(root, path) is { } changedProblem)
+                                changedRefusals.Add(changedProblem);
+
+                        if (changedRefusals.Count > 0)
+                            return (null, ReviewGatesService.RefuseInput(report, changedRefusals));
+                    }
+                }
+
+                CouncilGatePlan plan = CouncilGateSelection.Plan(inputs.Declared, changed, ReviewGateReporting.CurrentOs(environment));
+                ReviewGateReporting.AddSkips(report, plan.Skipped);
+
+                // Full-suite gates run only for the council or CI, or for a person at a terminal. A refusal is a blocking
+                // error that never starts its gate, so it is reported as not started, never as a gate that ran and failed.
+                FullSuiteSelection fullSuite = FullSuiteGate.Select(plan.Run, request.Council, request.Interactive);
+                foreach (FullSuiteRefusal refusal in fullSuite.Refused)
+                    report.Add(new Diagnostic(
+                        ReviewGateReporting.GateNotStarted,
+                        Severity.Error,
+                        $"{refusal.GateId}: refused. {refusal.Message}",
+                        refusal.GateId));
+
+                // --all asks for the whole declared suite at once, so once one of its gates is refused the suite cannot be
+                // delivered and no gate starts: running the rest would spend the run on a review the caller was just told
+                // it may not have, and the report would read as a review that ran. A scoped run is the opposite case — the
+                // pre-push self-review reads the other gates as its evidence — so it keeps running them.
+                if (request.All && fullSuite.Refused.Count > 0)
+                    return (null, owner.RefuseWithEmptyReport(request, report));
+
+                // A council or --all run is the whole review: a gate that cannot start for a missing path leaves a report the
+                // caller would have to read as incomplete, after paying for the index sync and every other gate. The runner
+                // itself says which required paths are missing (same applies-when, same path resolution), so the refusal
+                // lists exactly what the run would have reported as not started. A scoped run keeps going: the pre-push
+                // self-review reads the other gates as its evidence, and the missing one is reported not started as before.
+                if (request.Council || request.All)
+                {
+                    IReadOnlyList<MissingGateRequirement> missing = gateRunner.MissingRequirements(
+                        new ReviewConfig { Gates = fullSuite.Admitted, Parallelism = inputs.Config.Review.Parallelism },
+                        root,
+                        changed);
+                    if (missing.Count > 0)
+                    {
+                        foreach (MissingGateRequirement requirement in missing)
+                            report.Add(new Diagnostic(
+                                ReviewGateReporting.GateNotStarted,
+                                Severity.Error,
+                                $"{requirement.GateId}: required path '{requirement.Path}' is missing, so the gate cannot start. {requirement.Fix}, then run the review again.",
+                                requirement.GateId));
+
+                        // Only the empty report is written here: no evidence and no finished-cycle record. The cycle folder and
+                        // its identity.json were already written when the cycle was detected above; that record names this
+                        // change's branch, base and head, so a rerun with the same --out reads it as the same cycle, in the
+                        // same mode.
+                        return (null, owner.RefuseWithEmptyReport(request, report));
+                    }
+                }
+
+                // Before any gate process starts, so a review in a fresh worktree gets an index instead of silently having
+                // none. A repository without governed docs has no index to keep and is not checked.
+                // The index belongs to the tree, so a run pointed at a subdirectory still checks the tree's root.
+                string indexRoot = GatePaths.EnclosingRepositoryRoot(files, pathResolver, environment, root);
+                WorktreeIndexOutcome index = await worktreeIndex.EnsureAsync(
+                    indexRoot,
+                    DoctorOptions.Defaults,
+                    indexExecutor,
+                    environment.TempDirectory,
+                    cancellationToken: cancellationToken).ConfigureAwait(false);
+                if (index.Status is not WorktreeIndexStatus.NotGoverned)
+                    ReviewGateReporting.AddIndexDiagnostic(report, indexRoot, index);
+
+                return (new Execution(inputs, changed, fullSuite.Admitted), null);
+            }
+
+            /// <summary>Runs the admitted gates, carries a verifier cycle's gates and merges an earlier report, without blocking a thread.</summary>
+            internal async Task<Executed> ExecuteAsync(
+                Execution execution,
+                ReviewGatesRequest request,
+                DiagnosticReport report,
+                CancellationToken cancellationToken)
+            {
+                string root = execution.Inputs.Root;
+                ReviewConfig config = new()
+                {
+                    Gates = execution.Admitted,
+                    Parallelism = execution.Inputs.Config.Review.Parallelism,
+                };
+
+                // The run deadline is opt-in with --deadline, so CI, task gates and pre-push keep their behaviour: there, a
+                // blocking gate stopped by its own timeout is a failure. --deadline is refused with --gate before this.
+                TimeSpan? deadline = request.Deadline
+                    ? TimeSpan.FromSeconds(execution.Inputs.Config.Review.CouncilDeadlineSeconds)
+                    : null;
+                GateReport gates = await gateRunner.RunAsync(
+                    config,
+                    root,
+                    request.StopOnFailure,
+                    execution.Changed,
+                    ReviewGatesService.BaseRef(request.BaseRef),
+                    deadline,
+                    cancellationToken).ConfigureAwait(false);
+
+                foreach (GateResult gate in gates.Gates)
+                    ReviewGateReporting.AddGateDiagnostic(report, gate, request.Deadline);
+
+                GateReport written = gates;
+                CouncilCycle? cycle = execution.Inputs.Cycle;
+                if (cycle is { Verifier: true })
+                {
+                    written = ReviewGateReporting.WithCarriedGates(execution.Inputs.Config.Review.Gates, gates, cycle.Plan, report);
+                    report.AddMetric("carried", written.Gates.Count - gates.Gates.Count);
+                }
+
+                // Gates named one run at a time into the same report add to it. Replacing the file would lose the earlier
+                // runs' results, so a reviewer could never finish a verifier cycle gate by gate.
+                if (request.Gates.Count > 0 && request.Out is not null)
+                {
+                    written = ReviewGatesService.MergedWithExisting(
+                        files, pathResolver, environment, execution.Inputs.Config.Review.Gates, written, request.Out);
+                    report.AddMetric("kept", written.Gates.Count - gates.Gates.Count);
+                }
+
+                report.AddMetric("gates", gates.Gates.Count);
+                report.AddMetric("failed", gates.Gates.Count(g => !g.Passed && g.NotApplicableReason is null
+                                                                 && !(request.Deadline && VerdictEngine.IsStoppedForTime(g))));
+                report.AddMetric("not-applicable", gates.Gates.Count(g => g.NotApplicableReason is not null));
+                if (request.Deadline)
+                    report.AddMetric("not-run", gates.Gates.Count(VerdictEngine.IsStoppedForTime));
+
+                return new Executed(gates, written);
+            }
+        }
+
         /// <summary>The cycle a council run found itself in, and what that decides for each declared gate.</summary>
         /// <param name="Plan">The cycle number, the prior cycle and the decision for each gate.</param>
         /// <param name="Recheck">The prior cycle's findings to re-check.</param>
@@ -586,172 +1027,6 @@ public sealed class ReviewGatesService(
             string? BaseRef)
         {
             public string Mode => Verifier ? "verifier" : "full";
-        }
-
-        /// <summary>
-        ///     The cycle this council run is in, or null when no review folder can be named. The review folder comes from the
-        ///     <c>--out</c> path when it sits in <c>review/cycle-&lt;n&gt;</c>, else from the task's only review folder in
-        ///     the git work tree the command was run against. A cycle counts as prior only when it belongs to this change
-        ///     (<c>ReviewCyclePlanning.Belonging</c>); one that is finished, this one included, or that belongs to another
-        ///     change is never counted. When nothing says this is a later cycle, the run is a full one, which is the safe answer.
-        /// </summary>
-        private CouncilCycle? DetectCycle(
-            string root, KyberWeaveConfig config, ReviewGatesRequest request, DiagnosticReport report)
-        {
-            string tree = trees.Containing(root);
-            List<string> notes = [];
-            if (trees.LiveRunNote(tree, trees.HomeDirectory()) is { } liveRun)
-                notes.Add(liveRun);
-
-            string reviewFolder;
-            int? thisCycle = null;
-            string? folder = null;
-            string scratchpad = ReviewWorkTree.Scratchpad(tree);
-            ReviewTaskChoice choice = selector.ChooseTask(tree, scratchpad, null);
-            if (request.Out is not null
-                && ReviewCycleView.TryFromOutPath(pathResolver, environment, request.Out, out string fromOut, out int number))
-            {
-                reviewFolder = fromOut;
-                thisCycle = number;
-                folder = Path.GetDirectoryName(GatePaths.FullPath(pathResolver, environment, request.Out));
-                if (!ReviewCycleView.IsUnder(pathResolver, environment, tree, fromOut))
-                    notes.Add($"worktree: --out is outside {tree}, so this review writes to {folder}; use {ReviewWorkTree.Scratchpad(tree)} for this worktree's review folders.");
-            }
-            else if (choice.Chosen)
-            {
-                reviewFolder = Path.Combine(scratchpad, choice.Task, ScratchLayout.ReviewFolderName);
-            }
-            else
-            {
-                return null;
-            }
-
-            PriorCycles prior = trees.Prior(
-                tree,
-                request.BaseRef,
-                [.. cycles.ReadFinished(reviewFolder).Where(record => thisCycle is null || record.Number < thisCycle)]);
-            IReadOnlyList<ReviewCycleRecord> finished = prior.Valid;
-
-            ReviewCyclePlan plan = ReviewCyclePlanning.Plan(
-                finished, config.Review.Gates, ReviewGateReporting.CurrentOs(environment), commit => selector.ChangedSince(tree, commit));
-            folder ??= Path.Combine(reviewFolder, ScratchLayout.CycleFolder(plan.Number));
-            IReadOnlyList<ReviewFinding> recheck = [];
-            if (plan.Prior is { } priorCycle)
-            {
-                (_, IReadOnlyList<ReviewFinding> found) = selector.ReadRecheck(
-                    priorCycle, config.Review.Policy, report, ReviewDiagnosticCodes.UnreadableInput, Severity.Warning, "review gates");
-                recheck = found;
-            }
-
-            return new CouncilCycle(
-                plan,
-                recheck,
-                [.. plan.Gates.Where(gate => gate.Action == GateCycleAction.Rerun).Select(gate => gate.GateId)],
-                prior.Ignored,
-                tree,
-                folder,
-                notes,
-                plan.IsVerifier && !request.Full,
-                thisCycle is not null,
-                request.BaseRef);
-        }
-
-        /// <summary>
-        ///     Writes the diff, the changed files and the gate results into the cycle folder, so the seats and the lead
-        ///     reviewer start from them instead of re-running a gate or rediscovering the change.
-        /// </summary>
-        /// <returns>The evidence file's path, or null when it could not be written.</returns>
-        private string? WriteEvidence(
-            string folder,
-            string outPath,
-            CouncilCycle cycle,
-            string root,
-            ReviewGatesRequest request,
-            GateReport written,
-            KyberWeaveConfig config,
-            DiagnosticReport report)
-        {
-            try
-            {
-                string path = evidenceWriter.Write(
-                    folder,
-                    root,
-                    request.BaseRef ?? ReviewGateReporting.CouncilDefaultBase,
-                    written,
-                    outPath,
-                    cycle.Verifier ? cycle.Plan.Prior?.Head : null,
-                    config.Review.Coverage);
-                report.AddMetric("evidence", path);
-                return path;
-            }
-            catch (Exception ex) when (FileFailure.Is(ex))
-            {
-                report.Add(new Diagnostic(
-                    ReviewDiagnosticCodes.ReportWriteFailed,
-                    Severity.Warning,
-                    $"Could not write the review evidence to '{cycle.Folder}': {ex.Message}",
-                    "review gates",
-                    Hint: "The seats then have no diff or gate summary to start from; fix the folder and run the gates again."));
-                return null;
-            }
-        }
-
-        /// <summary>
-        ///     Writes the duplicates report into the cycle folder and decides the two gate-proven skips from it and the gate
-        ///     report, so the reviewer seats <c>static-analysis-triage</c> and <c>duplicate-implementation</c> only when a gate
-        ///     leaves them something to say.
-        /// </summary>
-        private IReadOnlyDictionary<string, string> GateProvenSkips(
-            string folder,
-            string root,
-            KyberWeaveConfig config,
-            ReviewGatesRequest request,
-            GateReport written,
-            DiagnosticReport report)
-        {
-            CodeGraphPorts graph = graphs.ForRepository(root);
-            DuplicateReport duplicates = duplicateDetection.Analyze(root, graph.Resolver, graph.Enumerator, config.Review.Duplicates);
-            ReviewReportWriter.TryWrite(
-                files,
-                pathResolver,
-                environment,
-                Path.Combine(folder, "duplicates.json"),
-                ReviewJson.Write(duplicates),
-                ReviewDiagnosticCodes.ReportWriteFailed,
-                report);
-            (IReadOnlyList<string>? changed, _) = ResolveCouncilChangedSet(root, request);
-            IReadOnlyDictionary<string, string> skips = CouncilSeating.GateProvenSkips(written, duplicates, changed);
-            try
-            {
-                notSeatedStore.Replace(folder, CouncilSeating.GateProvenLenses, skips);
-            }
-            catch (Exception ex) when (FileFailure.Is(ex))
-            {
-                // The printed not-seated lines still carry the decisions; the verdict asks for any it cannot read.
-            }
-
-            return skips;
-        }
-
-        /// <summary>Records the branch, base and head this cycle reviews, so a later cycle can tell the cycle belongs to its change.</summary>
-        private void RecordCycleIdentity(CouncilCycle cycle, DiagnosticReport report)
-        {
-            if (!cycle.WritesIdentity || cycle.Folder is null || trees.IdentityOf(cycle.Tree, cycle.BaseRef) is not { } identity)
-                return;
-
-            try
-            {
-                cycles.WriteIdentity(cycle.Folder, identity);
-            }
-            catch (Exception ex) when (FileFailure.Is(ex))
-            {
-                report.Add(new Diagnostic(
-                    ReviewDiagnosticCodes.ReportWriteFailed,
-                    Severity.Warning,
-                    $"Could not record the change in '{cycle.Folder}': {ex.Message}",
-                    "review gates",
-                    Hint: "Without it the next cycle cannot tell this folder belongs to the change, and runs in full."));
-            }
         }
 
         /// <summary>The cycle, mode, folder, ignored cycles, findings to re-check and gate plan, at the top of the output a reviewer reads first.</summary>
@@ -892,6 +1167,11 @@ public sealed class ReviewGatesService(
             Dictionary<string, string> Outputs,
             TaskGateObserver Observer);
 
+        /// <summary>The validated agent setup, or the refusal that ended the run before any gate started.</summary>
+        /// <param name="Setup">The validated setup, or null when the run was refused.</param>
+        /// <param name="Failure">The refusal's result, or null when the run can continue.</param>
+        private sealed record AgentPrepared(AgentSetup? Setup, ReviewCommandResult? Failure);
+
         public ReviewCommandResult Run(ReviewGatesRequest request, string agent, TextWriter output)
         {
             DiagnosticReport report = new();
@@ -907,6 +1187,32 @@ public sealed class ReviewGatesService(
                 return failure ?? ReviewCommandResultFactory.Reported(1, report);
 
             return Execute(setup, plan, changed, request, output, report);
+        }
+
+        /// <summary>Runs one developer agent's task gates without blocking a thread.</summary>
+        /// <param name="request">The options the command parsed.</param>
+        /// <param name="agent">The developer agent whose task gates run.</param>
+        /// <param name="output">Receives the lines a run prints after the report.</param>
+        /// <param name="cancellationToken">Cancels the task lookup and the gate run.</param>
+        public async Task<ReviewCommandResult> RunAsync(
+            ReviewGatesRequest request,
+            string agent,
+            TextWriter output,
+            CancellationToken cancellationToken)
+        {
+            DiagnosticReport report = new();
+            AgentPrepared prepared = await PrepareAsync(request, agent, report, cancellationToken).ConfigureAwait(false);
+            if (prepared.Setup is null)
+                return prepared.Failure ?? ReviewCommandResultFactory.Reported(1, report);
+
+            if (!TryResolveChanged(prepared.Setup, report, out IReadOnlyList<string> changed, out ReviewCommandResult? failure))
+                return failure ?? ReviewCommandResultFactory.Reported(1, report);
+
+            AgentPlan? plan = PlanGates(prepared.Setup, changed, request, report, out failure);
+            if (plan is null)
+                return failure ?? ReviewCommandResultFactory.Reported(1, report);
+
+            return await ExecuteAsync(prepared.Setup, plan, changed, request, output, report, cancellationToken).ConfigureAwait(false);
         }
 
         /// <summary>
@@ -998,6 +1304,99 @@ public sealed class ReviewGatesService(
             }
 
             return new AgentSetup(root, config, baseRef, target, targetMissing, taskSlug, paths, outPath, agentGates, repoRoot, agent);
+        }
+
+        /// <summary>
+        /// Checks every input and resolves the agent's gates before any process starts, without blocking a thread.
+        /// </summary>
+        private async Task<AgentPrepared> PrepareAsync(
+            ReviewGatesRequest request,
+            string agent,
+            DiagnosticReport report,
+            CancellationToken cancellationToken)
+        {
+            string root = GatePaths.FullPath(pathResolver, environment, request.Path);
+
+            if (!configs.TryLoad(root, request.Config, report, out KyberWeaveConfig config, out _))
+                return new AgentPrepared(null, ReviewCommandResultFactory.Reported(1, report));
+
+            // Every input is checked before the agent is looked up, so an unsafe path or slug is refused
+            // the same way whether or not the agent declares gates.
+            List<string> refusals = [];
+            string baseRef = request.BaseRef ?? GitChangeParsing.DefaultBase;
+            if (request.BaseRef is not null && GitChangeParsing.ValidateBase(request.BaseRef) is { } baseProblem)
+                refusals.Add(baseProblem);
+
+            string repoRoot = GatePaths.EnclosingRepositoryRoot(files, pathResolver, environment, root);
+
+            // With --task and no --paths, the task's own files and declared test classes come from the active plan, the
+            // lookup docs packet prints its test command from, so the worker passes nothing it could get wrong.
+            PlanTaskTargetMatch? target = null;
+            string? targetMissing = null;
+            if (request.TaskSlug is not null && request.Paths.Count == 0)
+            {
+                PlanTaskTargetLookup lookup = await targets.FindAsync(
+                    repoRoot, config, request.TaskSlug, cancellationToken).ConfigureAwait(false);
+                target = lookup.Match;
+                targetMissing = lookup.Reason;
+            }
+
+            string? taskSlug = request.TaskSlug;
+            if (taskSlug is not null && TaskSlug.Normalise(taskSlug) is { Length: > 0 } normalised)
+                taskSlug = normalised;
+
+            IReadOnlyList<string> paths = request.Paths;
+            if (target is not null)
+                paths = [.. targets.Files(root, target.Entry, target.Row)];
+
+            // The report goes where the Arbiter reads the evidence. A --fix run that changes a task file never counts,
+            // so it writes none by default; one that changes nothing counts, and writes the passing report below.
+            // The task is validated before its report path is built: a punctuation-only id normalises to nothing,
+            // so building the path first would throw instead of refusing the run with the bad --task message.
+            string? taskProblem = taskGates.ValidateTask(taskSlug);
+            if (taskProblem is not null)
+                refusals.Add(taskProblem);
+
+            string? outPath = request.Out;
+            if (outPath is null && taskSlug is not null && !request.Fix && taskProblem is null)
+                outPath = Path.Combine(root, request.Red ? TaskGateNextStep.FailingReportPath(taskSlug) : TaskGateNextStep.PassingReportPath(taskSlug));
+
+            foreach (string path in paths)
+                if (taskGates.ValidatePath(root, path) is { } pathProblem)
+                    refusals.Add(pathProblem);
+
+            if (refusals.Count > 0)
+                return new AgentPrepared(null, ReviewGatesService.RefuseInput(report, refusals));
+
+            List<string> unreadableStandards = [];
+            string? parentTechnology = TaskGateResolver.ParentTechnologyOrNone(
+                files, repoRoot, config, target?.Entry.Technology, unreadableStandards);
+            if (unreadableStandards.Count > 0)
+            {
+                // The task's gates may be keyed on the parent technology, so a standard this process may not read
+                // makes the run's evidence unreliable. Refuse before any gate starts and name the file.
+                return new AgentPrepared(
+                    null,
+                    ReviewGatesService.RefuseInput(
+                        report,
+                        unreadableStandards,
+                        "Make the standard readable, then run the command again."));
+            }
+
+            TaskGateResolution resolved = TaskGateResolver.Resolve(
+                config.Review,
+                agent,
+                target?.Entry.Technology,
+                parentTechnology);
+
+            IReadOnlyList<ReviewTaskGate> agentGates = resolved.Gates;
+            if (agentGates.Count == 0)
+                return new AgentPrepared(
+                    null, NoGates(request, agent, root, taskSlug, paths, outPath, resolved, report));
+
+            return new AgentPrepared(
+                new AgentSetup(root, config, baseRef, target, targetMissing, taskSlug, paths, outPath, agentGates, repoRoot, agent),
+                null);
         }
 
         /// <summary>
@@ -1154,6 +1553,52 @@ public sealed class ReviewGatesService(
             Dictionary<string, string?> before = request.Fix ? Snapshot(root, changed) : new(StringComparer.Ordinal);
             TaskGateRun run = gateRunner.RunTaskGates(
                 plan.Plan.Gates, root, request.Fix, request.StopOnFailure && !request.Red, plan.Observer);
+            bool fixChangedFiles = request.Fix && Snapshot(root, changed).Any(file => file.Value != before[file.Key]);
+
+            // The counting --fix run writes the report a plain run writes, because the report reader finds the task's
+            // evidence there. An explicit --out names an extra file, not a replacement, so the rule holds either way.
+            string? countingReport = !fixChangedFiles && setup.TaskSlug is not null && !request.Red
+                ? Path.Combine(root, TaskGateNextStep.PassingReportPath(setup.TaskSlug))
+                : null;
+            string? outPath = setup.OutPath ?? countingReport;
+
+            GateReport finalReport = run.Report;
+            RedOutcome? redOutcome = null;
+            if (request.Red)
+            {
+                (finalReport, redOutcome) = ReviewGateReporting.ApplyRed(
+                    run.Report, plan.Plan.Gates, plan.Outputs, changed, file => projectFiles.NearestProjectFile(setup.RepoRoot, file), report, root, plan.CanonicalRoot, plan.CaseInsensitivePaths);
+            }
+
+            foreach (GateResult gate in finalReport.Gates)
+                ReviewGateReporting.AddGateDiagnostic(report, gate, timeIsNotRun: false);
+
+            if (!request.Red)
+            {
+                ReviewGateReporting.AddSiblingNotes(report, plan.Plan.Gates, run.Report, plan.Outputs, changed, root, plan.CanonicalRoot, plan.CaseInsensitivePaths);
+            }
+
+            return Report(setup, plan, changed, request, output, report, run, finalReport, redOutcome, fixChangedFiles, countingReport, outPath);
+        }
+
+        /// <summary>Runs the gates, applies the RED judgement, and writes the report, without blocking a thread.</summary>
+        private async Task<ReviewCommandResult> ExecuteAsync(
+            AgentSetup setup,
+            AgentPlan plan,
+            IReadOnlyList<string> changed,
+            ReviewGatesRequest request,
+            TextWriter output,
+            DiagnosticReport report,
+            CancellationToken cancellationToken)
+        {
+            string root = setup.Root;
+
+            // A --fix run whose fix commands changed no task file is the verification run, so it is judged as one: the
+            // content of each changed file is taken before the gates run and compared after.
+            Dictionary<string, string?> before = request.Fix ? Snapshot(root, changed) : new(StringComparer.Ordinal);
+            TaskGateRun run = await gateRunner.RunTaskGatesAsync(
+                plan.Plan.Gates, root, request.Fix, request.StopOnFailure && !request.Red, plan.Observer, cancellationToken)
+                .ConfigureAwait(false);
             bool fixChangedFiles = request.Fix && Snapshot(root, changed).Any(file => file.Value != before[file.Key]);
 
             // The counting --fix run writes the report a plain run writes, because the report reader finds the task's

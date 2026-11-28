@@ -132,6 +132,47 @@ public sealed class ReviewServiceSeamTests
     }
 
     [Fact]
+    public async Task TheGatesCommandAsyncLoadsTheConfigurationForTheRootARelativePathResolvesTo()
+    {
+        RecordingConfigs configs = new();
+
+        ReviewCommandResult result = await Gates(configs).RunAsync(
+            new ReviewGatesRequest(
+                "repo", null, null, null, null, [], [], false, false, false, false, false, null, false, false, false, false),
+            new ScriptedProcessRunner(),
+            TextWriter.Null,
+            CancellationToken.None);
+
+        Assert.Equal(1, result.ExitCode);
+        Assert.Equal("/work/repo", configs.Root);
+    }
+
+    [Fact]
+    public async Task TheVerdictCommandAsyncLoadsTheConfigurationForTheRootARelativePathResolvesTo()
+    {
+        RecordingConfigs configs = new();
+
+        ReviewVerdictResult result = await Verdict(configs).DecideAsync(
+            new ReviewVerdictRequest(
+                "repo", null, null, null, null, null, null, null, null, [], [], false, false, "kyber-weave review verdict ."),
+            CancellationToken.None);
+
+        Assert.Equal(1, result.ExitCode);
+        Assert.Equal("/work/repo", configs.Root);
+    }
+
+    [Fact]
+    public async Task TheDecisionModelFactoryAsyncSwitchesOffWithoutAskingForKey()
+    {
+        ReviewDecisionModelFactory factory = new(null!, null!, null!, null!, TimeProvider.System, new FakeIdGenerator());
+
+        IReviewDecisionModel model = await factory.CreateForRepositoryAsync(
+            "/work/repo", Config(), switchedOff: true, cachePath: null, CancellationToken.None);
+
+        Assert.False(model.Configured);
+    }
+
+    [Fact]
     public async Task ATaskInAnotherWorktreeIsFoundAsyncWhenTheWorktreeIsSpelledRelativeToTheWorkingDirectory()
     {
         _files.CreateDirectory("/work/wt");
@@ -249,6 +290,16 @@ public sealed class ReviewServiceSeamTests
 
     private ReviewSeatsService Seats(IConfigLoadService configs) =>
         new(null!, null!, null!, null!, null!, null!, null!, _files, _environment, null!, configs, null!, Paths);
+
+    private ReviewGatesService Gates(IConfigLoadService configs) =>
+        new(
+            null!, null!, null!, null!, null!, null!, null!, null!, null!, null!,
+            _files, _environment, Paths, null!, configs, null!, null!);
+
+    private ReviewVerdictService Verdict(IConfigLoadService configs) =>
+        new(
+            configs, null!, null!, null!, null!, null!, null!, _files, null!, null!, null!,
+            Paths, _environment, TimeProvider.System);
 
     /// <summary>
     /// A target service over the shared fakes. The fake worktree list answers for the checkout named
