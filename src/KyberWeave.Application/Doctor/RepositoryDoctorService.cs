@@ -1,3 +1,4 @@
+using KyberWeave.Core.CodeGraph;
 using System.ComponentModel;
 using System.Diagnostics;
 using System.Runtime.InteropServices;
@@ -164,7 +165,8 @@ public sealed class RepositoryDoctorService(
             cancellationToken: cancellationToken).ConfigureAwait(false);
 
         IReadOnlyList<DoctorCheck> mcpChecks = await mcpProbe.RunAsync(repositoryRoot, options, cancellationToken).ConfigureAwait(false);
-        List<DoctorCheck> checks = [.. codegraph.Checks, NestedWorktreesCheck(repositoryRoot), .. mcpChecks];
+        DoctorCheck nested = await NestedWorktreesCheckAsync(repositoryRoot, cancellationToken).ConfigureAwait(false);
+        List<DoctorCheck> checks = [.. codegraph.Checks, nested, .. mcpChecks];
 
         // D1: a repository may set `stop-on-tool-failure: false` to be told about a broken tool and carry on. The exit
         // code is what a caller branches on, so the opt-out has to change the code and not only the wording. It applies
@@ -328,9 +330,18 @@ public sealed class RepositoryDoctorService(
     ///     the same finding. The check sits before the <c>stop-on-tool-failure</c> downgrade, so the opt-out turns it
     ///     into a warning in the ensure run exactly as it does the other CodeGraph checks.
     /// </remarks>
-    private DoctorCheck NestedWorktreesCheck(string repositoryRoot)
+    private DoctorCheck NestedWorktreesCheck(string repositoryRoot) =>
+        NestedWorktreesResult(codeGraph.ForRepository(repositoryRoot).Resolver);
+
+    /// <summary>The nested-worktrees check, reading the index without blocking a thread.</summary>
+    private async Task<DoctorCheck> NestedWorktreesCheckAsync(string repositoryRoot, CancellationToken cancellationToken)
     {
-        ICodeGraphResolver resolver = codeGraph.ForRepository(repositoryRoot).Resolver;
+        CodeGraphPorts ports = await codeGraph.ForRepositoryAsync(repositoryRoot, cancellationToken).ConfigureAwait(false);
+        return NestedWorktreesResult(ports.Resolver);
+    }
+
+    private static DoctorCheck NestedWorktreesResult(ICodeGraphResolver resolver)
+    {
         if (!resolver.IsAvailable || !resolver.HasFilesUnder(AgentWorktreeFolder.Name))
             return new DoctorCheck(NestedWorktreesCheckId, true, null, null);
 
