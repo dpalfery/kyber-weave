@@ -86,25 +86,6 @@ public sealed class FileDispatchClaimStore(IWritableFileSystem files, TimeProvid
     }
 
     /// <inheritdoc/>
-    public bool WaitForClaim(string projectRoot, DispatchClaimKey key)
-    {
-        ArgumentNullException.ThrowIfNull(key);
-        string path = ClaimPath(projectRoot, key);
-        long started = time.GetTimestamp();
-        while (!files.FileExists(path))
-        {
-            if (time.GetElapsedTime(started) >= WaitWindow)
-            {
-                return false;
-            }
-
-            Task.Delay(PollInterval, time).GetAwaiter().GetResult();
-        }
-
-        return true;
-    }
-
-    /// <inheritdoc/>
     public async Task<bool> WaitForClaimAsync(string projectRoot, DispatchClaimKey key, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(key);

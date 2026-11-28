@@ -265,7 +265,7 @@ public sealed class ArbiterMcpPackagingTests : IDisposable
         Assert.StartsWith(prefix, await tools.StatusAsync(), StringComparison.Ordinal);
         Assert.StartsWith(
             prefix,
-            tools.Evaluate("lens.spawn", new ArbiterFacts { Target = "review-lens", Lens = ["security"] }),
+            await tools.EvaluateAsync("lens.spawn", new ArbiterFacts { Target = "review-lens", Lens = ["security"] }),
             StringComparison.Ordinal);
     }
 
@@ -292,13 +292,13 @@ public sealed class ArbiterMcpPackagingTests : IDisposable
     }
 
     [Fact]
-    public void EvaluateReturnsTheOutcomeTheHookEngineReturnsForTheSameEvent()
+    public async Task EvaluateReturnsTheOutcomeTheHookEngineReturnsForTheSameEvent()
     {
         string root = _host.RepoRoot;
         RecordingEngine engine = new() { Outcome = new HookOutcome(HookOutcomeKind.Deny, "ENVELOPE-BODY") };
         ArbiterTools tools = _host.Tools(Context(root, engine));
 
-        string response = tools.Evaluate(
+        string response = await tools.EvaluateAsync(
             "lens.spawn",
             new ArbiterFacts { Target = "review-lens", Lens = ["security"], Prompt = "Review the diff." });
 
@@ -312,7 +312,7 @@ public sealed class ArbiterMcpPackagingTests : IDisposable
     }
 
     [Fact]
-    public void Evaluate_ClassifiesAFallbackRefutationCallWithFindingOnly()
+    public async Task Evaluate_ClassifiesAFallbackRefutationCallWithFindingOnly()
     {
         // The shipped contract tells a fallback code-reviewer to pass `finding` and
         // never names `target` or the trigger header, so the tool must synthesize the
@@ -330,7 +330,7 @@ public sealed class ArbiterMcpPackagingTests : IDisposable
             "  claim: The key reaches the log.\n" +
             "  evidence: it is interpolated\n" +
             "  failure_scenario: secrets leak";
-        string response = tools.Evaluate("refute.spawn", new ArbiterFacts { Finding = finding });
+        string response = await tools.EvaluateAsync("refute.spawn", new ArbiterFacts { Finding = finding });
 
         Assert.Contains("outcome: allow", response, StringComparison.Ordinal);
         (string harness, string caller, string? target, string prompt) = Assert.Single(engine.PreDispatches);
@@ -341,13 +341,13 @@ public sealed class ArbiterMcpPackagingTests : IDisposable
     }
 
     [Fact]
-    public void Evaluate_ClassifiesAFallbackLensCallWithoutTarget()
+    public async Task Evaluate_ClassifiesAFallbackLensCallWithoutTarget()
     {
         string root = _host.RepoRoot;
         RecordingEngine engine = new() { Outcome = new HookOutcome(HookOutcomeKind.Allow) };
         ArbiterTools tools = _host.Tools(Context(root, engine));
 
-        string response = tools.Evaluate("lens.spawn", new ArbiterFacts { Lens = ["security", "test-adequacy"] });
+        string response = await tools.EvaluateAsync("lens.spawn", new ArbiterFacts { Lens = ["security", "test-adequacy"] });
 
         Assert.Contains("outcome: allow", response, StringComparison.Ordinal);
         Assert.Equal(2, engine.PreDispatches.Count);
@@ -364,13 +364,13 @@ public sealed class ArbiterMcpPackagingTests : IDisposable
     [Theory]
     [InlineData("lens.spawn")]
     [InlineData("refute.spawn")]
-    public void Evaluate_WithoutLensOrFinding_SaysWhatToPass(string trigger)
+    public async Task Evaluate_WithoutLensOrFinding_SaysWhatToPass(string trigger)
     {
         string root = _host.RepoRoot;
         RecordingEngine engine = new();
         ArbiterTools tools = _host.Tools(Context(root, engine));
 
-        string response = tools.Evaluate(trigger, new ArbiterFacts { Target = "review-lens" });
+        string response = await tools.EvaluateAsync(trigger, new ArbiterFacts { Target = "review-lens" });
 
         Assert.Contains("outcome: error", response, StringComparison.Ordinal);
         Assert.Contains("lens", response, StringComparison.Ordinal);
@@ -379,7 +379,7 @@ public sealed class ArbiterMcpPackagingTests : IDisposable
     }
 
     [Fact]
-    public void Evaluate_RefutationCallThroughTheRealEngine_DecidesAndRecords()
+    public async Task Evaluate_RefutationCallThroughTheRealEngine_DecidesAndRecords()
     {
         string root = _host.RepoRoot;
         _ = _host.WriteRepoConfig("arbiter:\n  enabled: true\n  provider:\n    kind: none\n");
@@ -396,7 +396,7 @@ public sealed class ArbiterMcpPackagingTests : IDisposable
             "  claim: The key reaches the log.\n" +
             "  evidence: it is interpolated\n" +
             "  failure_scenario: secrets leak";
-        string response = tools.Evaluate("refute.spawn", new ArbiterFacts { Finding = finding });
+        string response = await tools.EvaluateAsync("refute.spawn", new ArbiterFacts { Finding = finding });
 
         // The real evaluator re-classifies from the synthesized headers and records:
         // the decision log holds the refute.spawn decision, the ledger its headers.
@@ -408,13 +408,13 @@ public sealed class ArbiterMcpPackagingTests : IDisposable
     }
 
     [Fact]
-    public void RefuteBatch_TwoFindingsBothAllowed_ReturnsAllowAndDecidesEachFinding()
+    public async Task RefuteBatch_TwoFindingsBothAllowed_ReturnsAllowAndDecidesEachFinding()
     {
         string root = _host.RepoRoot;
         ScriptedClaimProvider provider = new("contradicts");
         ArbiterTools tools = RealEngineTools(root, provider);
 
-        string response = tools.Evaluate(
+        string response = await tools.EvaluateAsync(
             "refute.spawn",
             new ArbiterFacts { Finding = Finding("security/key-in-argv") + "\n" + Finding("correctness/off-by-one") });
 
@@ -426,13 +426,13 @@ public sealed class ArbiterMcpPackagingTests : IDisposable
     }
 
     [Fact]
-    public void RefuteBatch_SecondFindingEscalates_NamesThatFindingInTheOutcome()
+    public async Task RefuteBatch_SecondFindingEscalates_NamesThatFindingInTheOutcome()
     {
         string root = _host.RepoRoot;
         ScriptedClaimProvider provider = new("contradicts", "supports");
         ArbiterTools tools = RealEngineTools(root, provider);
 
-        string response = tools.Evaluate(
+        string response = await tools.EvaluateAsync(
             "refute.spawn",
             new ArbiterFacts { Finding = Finding("security/key-in-argv") + "\n" + Finding("correctness/off-by-one") });
 
@@ -443,13 +443,13 @@ public sealed class ArbiterMcpPackagingTests : IDisposable
     }
 
     [Fact]
-    public void RefuteBatch_ThreeFindings_ThirdEscalatesAndNamesItself()
+    public async Task RefuteBatch_ThreeFindings_ThirdEscalatesAndNamesItself()
     {
         string root = _host.RepoRoot;
         ScriptedClaimProvider provider = new("contradicts", "contradicts", "supports");
         ArbiterTools tools = RealEngineTools(root, provider);
 
-        string response = tools.Evaluate(
+        string response = await tools.EvaluateAsync(
             "refute.spawn",
             new ArbiterFacts
             {
@@ -469,13 +469,13 @@ public sealed class ArbiterMcpPackagingTests : IDisposable
     [InlineData("empty")]
     [InlineData("duplicate")]
     [InlineData("no-id")]
-    public void RefuteBatch_InvalidFindingIds_FailWithWhatToPassAndDecideNothing(string kind)
+    public async Task RefuteBatch_InvalidFindingIds_FailWithWhatToPassAndDecideNothing(string kind)
     {
         string root = _host.RepoRoot;
         ScriptedClaimProvider provider = new("contradicts");
         ArbiterTools tools = RealEngineTools(root, provider);
 
-        string response = tools.Evaluate("refute.spawn", new ArbiterFacts { Finding = BadFindings(kind) });
+        string response = await tools.EvaluateAsync("refute.spawn", new ArbiterFacts { Finding = BadFindings(kind) });
 
         Assert.Contains("outcome: error", response, StringComparison.Ordinal);
         Assert.Contains("lens/slug", response, StringComparison.Ordinal);
@@ -485,13 +485,13 @@ public sealed class ArbiterMcpPackagingTests : IDisposable
     }
 
     [Fact]
-    public void EvaluateAllowsWhenTheHookEngineAllows()
+    public async Task EvaluateAllowsWhenTheHookEngineAllows()
     {
         string root = _host.RepoRoot;
         RecordingEngine engine = new() { Outcome = new HookOutcome(HookOutcomeKind.Allow) };
         ArbiterTools tools = _host.Tools(Context(root, engine));
 
-        string response = tools.Evaluate(
+        string response = await tools.EvaluateAsync(
             "lens.spawn",
             new ArbiterFacts { Target = "review-lens", Lens = ["security"] });
 
@@ -499,13 +499,13 @@ public sealed class ArbiterMcpPackagingTests : IDisposable
     }
 
     [Fact]
-    public void EvaluateRefusesATriggerTheFactsDoNotClassifyAs()
+    public async Task EvaluateRefusesATriggerTheFactsDoNotClassifyAs()
     {
         string root = _host.RepoRoot;
         RecordingEngine engine = new();
         ArbiterTools tools = _host.Tools(Context(root, engine));
 
-        string response = tools.Evaluate(
+        string response = await tools.EvaluateAsync(
             "delegate",
             new ArbiterFacts { Target = "review-lens", Lens = ["security"] });
 

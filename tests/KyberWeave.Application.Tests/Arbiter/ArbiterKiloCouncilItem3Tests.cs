@@ -130,7 +130,7 @@ public sealed class ArbiterKiloCouncilItem3Tests : IDisposable
     /// the repeated attempt runs on the wrong model with no record of why.
     /// </summary>
     [Fact]
-    public void ASameFailureAdvisoryKeepsTheResolvedModelOnTheRework()
+    public async Task ASameFailureAdvisoryKeepsTheResolvedModelOnTheRework()
     {
         WriteTable();
         FakeArbiterProvider provider = new FakeArbiterProvider
@@ -141,7 +141,7 @@ public sealed class ArbiterKiloCouncilItem3Tests : IDisposable
         };
         KyberWeaveConfig config = EnforcedConfig();
 
-        HookOutcome first = Engine(provider).DecidePreDispatch(
+        HookOutcome first = await Engine(provider).DecidePreDispatchAsync(
             "claude", "conductor", "dev-medium", Rework, config, Context(),
             toolCallId: "tool-27", sessionId: "s1", dispatchModel: null);
         Assert.True(
@@ -149,11 +149,11 @@ public sealed class ArbiterKiloCouncilItem3Tests : IDisposable
             $"expected the first rework to be allowed, got {first.Kind}: {first.Reason}");
 
         // The worker returned, which closes the first rework's in-flight entry; without this the repeat overlaps it.
-        Engine(provider).DecidePostDispatch(
+        await Engine(provider).DecidePostDispatchAsync(
             "claude", "conductor", "dev-medium", Rework, FirstReturn, config, Context(),
             toolCallId: "tool-27", sessionId: "s1");
 
-        HookOutcome repeat = Engine(provider).DecidePreDispatch(
+        HookOutcome repeat = await Engine(provider).DecidePreDispatchAsync(
             "claude", "conductor", "dev-medium", Rework, config, Context(),
             toolCallId: "tool-28", sessionId: "s1", dispatchModel: null);
 

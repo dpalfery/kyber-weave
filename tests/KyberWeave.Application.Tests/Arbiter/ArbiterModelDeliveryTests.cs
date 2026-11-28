@@ -117,8 +117,8 @@ public sealed class ArbiterModelDeliveryTests : IDisposable
             System.Text.Json.JsonSerializer.Serialize(table));
     }
 
-    private HookOutcome Decide(IArbiterProvider provider, string mode, string? dispatchModel = null) =>
-        Engine(provider).DecidePreDispatch(
+    private async Task<HookOutcome> Decide(IArbiterProvider provider, string mode, string? dispatchModel = null) =>
+        await Engine(provider).DecidePreDispatchAsync(
             "claude",
             "conductor",
             "dev-medium",
@@ -133,11 +133,11 @@ public sealed class ArbiterModelDeliveryTests : IDisposable
         Assert.Single(_host.Decisions, record => record.Trigger == ModelTrigger);
 
     [Fact]
-    public void EnforceWithADeliveringResolver_CarriesTheResolvedTokenOnAllow()
+    public async Task EnforceWithADeliveringResolver_CarriesTheResolvedTokenOnAllow()
     {
         WriteTable();
 
-        HookOutcome outcome = Decide(
+        HookOutcome outcome = await Decide(
             new FakeArbiterProvider
             {
                 Answers = { [ScopeRule] = "within-task", [DifficultyRule] = "hard" },
@@ -150,11 +150,11 @@ public sealed class ArbiterModelDeliveryTests : IDisposable
     }
 
     [Fact]
-    public void CallerNamedModel_IsHandedToTheDecisionAsDispatchModel_AndTheTokenIsNotDelivered()
+    public async Task CallerNamedModel_IsHandedToTheDecisionAsDispatchModel_AndTheTokenIsNotDelivered()
     {
         WriteTable();
 
-        HookOutcome outcome = Decide(
+        HookOutcome outcome = await Decide(
             new FakeArbiterProvider
             {
                 Answers = { [ScopeRule] = "within-task", [DifficultyRule] = "hard" },
@@ -170,11 +170,11 @@ public sealed class ArbiterModelDeliveryTests : IDisposable
     }
 
     [Fact]
-    public void ModeShadow_HookOutcomeCarriesNoToken_ButTheDecisionStillHoldsTheModelBlock()
+    public async Task ModeShadow_HookOutcomeCarriesNoToken_ButTheDecisionStillHoldsTheModelBlock()
     {
         WriteTable();
 
-        HookOutcome outcome = Decide(
+        HookOutcome outcome = await Decide(
             new FakeArbiterProvider
             {
                 Answers = { [ScopeRule] = "within-task", [DifficultyRule] = "hard" },
@@ -193,12 +193,12 @@ public sealed class ArbiterModelDeliveryTests : IDisposable
     // Delivered truthfulness: the decision says delivered only for a token the adapter writes.
 
     [Fact]
-    public void ATokenTheHarnessDoesNotAccept_IsNotRecordedDelivered()
+    public async Task ATokenTheHarnessDoesNotAccept_IsNotRecordedDelivered()
     {
         // t-deep is not an alias the Agent tool accepts, so no adapter writes it. The decision must not claim it was delivered.
         WriteTable("t-deep");
 
-        HookOutcome outcome = Decide(
+        HookOutcome outcome = await Decide(
             new FakeArbiterProvider
             {
                 Answers = { [ScopeRule] = "within-task", [DifficultyRule] = "hard" },
@@ -213,11 +213,11 @@ public sealed class ArbiterModelDeliveryTests : IDisposable
     }
 
     [Fact]
-    public void AnAcceptedAlias_UnderEnforce_IsRecordedDelivered()
+    public async Task AnAcceptedAlias_UnderEnforce_IsRecordedDelivered()
     {
         WriteTable("haiku");
 
-        HookOutcome outcome = Decide(
+        HookOutcome outcome = await Decide(
             new FakeArbiterProvider
             {
                 Answers = { [ScopeRule] = "within-task", [DifficultyRule] = "hard" },

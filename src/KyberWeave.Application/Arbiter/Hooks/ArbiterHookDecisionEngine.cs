@@ -147,107 +147,6 @@ public sealed class ArbiterHookDecisionEngine : IContextualHookDecisionEngine, I
     }
 
     /// <inheritdoc/>
-    public HookOutcome DecidePreDispatch(string caller, string? target, string prompt, KyberWeaveConfig config) =>
-        DecidePreDispatch(
-            HarnessRegistry.ClaudeToken,
-            caller,
-            target,
-            prompt,
-            config,
-            new HookContext(_process.CurrentDirectory, () => _ids.NewGuid().ToString("N"), TextWriter.Null));
-
-    /// <inheritdoc/>
-    public HookOutcome DecidePostDispatch(string caller, string? target, string toolOutput, KyberWeaveConfig config) =>
-        DecidePostDispatch(
-            HarnessRegistry.ClaudeToken,
-            caller,
-            target,
-            string.Empty,
-            toolOutput,
-            config,
-            new HookContext(_process.CurrentDirectory, () => _ids.NewGuid().ToString("N"), TextWriter.Null));
-
-    /// <inheritdoc/>
-    public HookOutcome DecidePreDispatch(
-        string harness,
-        string caller,
-        string? target,
-        string prompt,
-        KyberWeaveConfig config,
-        HookContext context,
-        string? toolCallId = null,
-        string? sessionId = null) =>
-        DecidePreDispatch(harness, caller, target, prompt, config, context, toolCallId, sessionId, dispatchModel: null);
-
-    /// <inheritdoc/>
-    public HookOutcome DecidePreDispatch(
-        string harness,
-        string caller,
-        string? target,
-        string prompt,
-        KyberWeaveConfig config,
-        HookContext context,
-        string? toolCallId,
-        string? sessionId,
-        string? dispatchModel)
-    {
-        ArgumentException.ThrowIfNullOrWhiteSpace(harness);
-        ArgumentNullException.ThrowIfNull(caller);
-        ArgumentNullException.ThrowIfNull(prompt);
-        ArgumentNullException.ThrowIfNull(config);
-        ArgumentNullException.ThrowIfNull(context);
-
-        return Decide(
-            harness, caller, target, prompt, null, isPost: false, config, context, toolCallId, sessionId, dispatchModel);
-    }
-
-    /// <inheritdoc/>
-    public HookOutcome DecidePreDispatch(
-        string harness,
-        string caller,
-        string? target,
-        string prompt,
-        KyberWeaveConfig config,
-        HookContext context,
-        string? toolCallId,
-        string? sessionId,
-        string? dispatchModel,
-        string? deliveredPrompt)
-    {
-        ArgumentException.ThrowIfNullOrWhiteSpace(harness);
-        ArgumentNullException.ThrowIfNull(caller);
-        ArgumentNullException.ThrowIfNull(prompt);
-        ArgumentNullException.ThrowIfNull(config);
-        ArgumentNullException.ThrowIfNull(context);
-
-        return Decide(
-            harness, caller, target, prompt, null, isPost: false, config, context, toolCallId, sessionId, dispatchModel,
-            deliveredPrompt: deliveredPrompt);
-    }
-
-    /// <inheritdoc/>
-    public HookOutcome DecidePostDispatch(
-        string harness,
-        string caller,
-        string? target,
-        string prompt,
-        string toolOutput,
-        KyberWeaveConfig config,
-        HookContext context,
-        string? toolCallId = null,
-        string? sessionId = null)
-    {
-        ArgumentException.ThrowIfNullOrWhiteSpace(harness);
-        ArgumentNullException.ThrowIfNull(caller);
-        ArgumentNullException.ThrowIfNull(prompt);
-        ArgumentNullException.ThrowIfNull(toolOutput);
-        ArgumentNullException.ThrowIfNull(config);
-        ArgumentNullException.ThrowIfNull(context);
-
-        return Decide(harness, caller, target, prompt, toolOutput, isPost: true, config, context, toolCallId, sessionId);
-    }
-
-    /// <inheritdoc/>
     public Task<HookOutcome> DecidePreDispatchAsync(
         string caller,
         string? target,
@@ -311,7 +210,7 @@ public sealed class ArbiterHookDecisionEngine : IContextualHookDecisionEngine, I
         HookContext context,
         string? toolCallId,
         string? sessionId,
-        string? dispatchModel = null,
+        string? dispatchModel,
         CancellationToken cancellationToken = default) =>
         DecidePreDispatchAsync(
             harness, caller, target, prompt, config, context, toolCallId, sessionId,
@@ -376,48 +275,6 @@ public sealed class ArbiterHookDecisionEngine : IContextualHookDecisionEngine, I
         _dispatch.Find(sessionId, agentId, context);
 
     /// <inheritdoc/>
-    public HookOutcome DecideBackgroundReturn(
-        string harness,
-        string sessionId,
-        string agentId,
-        string response,
-        KyberWeaveConfig config,
-        HookContext context)
-    {
-        ArgumentException.ThrowIfNullOrWhiteSpace(harness);
-        ArgumentNullException.ThrowIfNull(sessionId);
-        ArgumentNullException.ThrowIfNull(agentId);
-        ArgumentNullException.ThrowIfNull(response);
-        ArgumentNullException.ThrowIfNull(config);
-        ArgumentNullException.ThrowIfNull(context);
-
-        string arbiterDirectory = ResolveArbiterDirectory(context.RepoRoot, context.Scope, context.HomeDirectory);
-        BackgroundDispatchRecord? record = _dispatch.Find(sessionId, agentId, context);
-        if (record is null)
-        {
-            return new HookOutcome(HookOutcomeKind.PassThrough);
-        }
-
-        string digest = Convert.ToHexStringLower(
-            System.Security.Cryptography.SHA256.HashData(System.Text.Encoding.UTF8.GetBytes(response)));
-        if (string.Equals(record.LastResponseDigest, digest, StringComparison.Ordinal))
-        {
-            context.Log.WriteLine($"Arbiter: this turn of background agent '{agentId}' is already recorded.");
-            return new HookOutcome(HookOutcomeKind.PassThrough);
-        }
-
-        BackgroundDispatch dispatch = record.Dispatch;
-        HookOutcome outcome = Decide(
-            harness, dispatch.Caller, dispatch.Target, _dispatch.ReturnPrompt(dispatch.Prompt, record.PreId, arbiterDirectory, context), response,
-            isPost: true, config, context,
-            toolCallId: null, sessionId: dispatch.SessionId, preId: record.PreId);
-        _dispatch.Save(
-            arbiterDirectory,
-            record with { LastResponseDigest = digest, PendingNote = string.IsNullOrWhiteSpace(outcome.Reason) ? null : outcome.Reason });
-        return outcome;
-    }
-
-    /// <inheritdoc/>
     public async Task<HookOutcome> DecideBackgroundReturnAsync(
         string harness,
         string sessionId,
@@ -475,16 +332,6 @@ public sealed class ArbiterHookDecisionEngine : IContextualHookDecisionEngine, I
         _dispatch.TakePendingNotes(sessionId, caller, context);
 
     /// <inheritdoc/>
-    public int RecoverLostReturn(
-        string harness,
-        string? sessionId,
-        IReadOnlyList<string> agentNames,
-        HookContext context,
-        string? agentId = null,
-        string? stopEvent = null) =>
-        _dispatch.RecoverLostReturn(harness, sessionId, agentNames, context, agentId, stopEvent);
-
-    /// <inheritdoc/>
     public Task<int> RecoverLostReturnAsync(
         string harness,
         string? sessionId,
@@ -501,149 +348,6 @@ public sealed class ArbiterHookDecisionEngine : IContextualHookDecisionEngine, I
         return _dispatch.RecoverLostReturnAsync(
             harness, sessionId, agentNames, context, agentId, stopEvent, cancellationToken);
     }
-
-    private HookOutcome Decide(
-        string harness,
-        string caller,
-        string? target,
-        string prompt,
-        string? toolOutput,
-        bool isPost,
-        KyberWeaveConfig config,
-        HookContext context,
-        string? toolCallId,
-        string? sessionId,
-        string? dispatchModel = null,
-        string? preId = null,
-        string? deliveredPrompt = null)
-    {
-        if (isPost && toolOutput is not null)
-        {
-            RecordReviewSeat(prompt, toolOutput, context);
-        }
-
-        string? resolved = string.IsNullOrWhiteSpace(caller) || IsUnidentified(caller) ? null : caller;
-
-        // A serve event arrives with no harness hook: the whole event is the MCP
-        // client's assertion (design 'Fact labels': derived vs asserted, R7), so a
-        // caller it names records as asserted. A hook event keeps the harness label —
-        // there the caller is what the harness payload itself reported.
-        bool asserted = resolved is not null
-            && string.Equals(harness, ArbiterServeToken.Harness, StringComparison.Ordinal);
-        string repoRoot = context.RepoRoot;
-        string arbiterDirectory = ResolveArbiterDirectory(repoRoot, context.Scope, context.HomeDirectory);
-        KyberWeaveConfig effective;
-        try
-        {
-            effective = _composer.ApplyUserProvider(config);
-        }
-        catch (InvalidOperationException ex)
-        {
-            // A malformed user override leaves no provider to decide with: the dispatch continues loudly.
-            return AllowLoudly(harness, ex.Message, context.NewDecisionId(), context);
-        }
-
-        foreach (Diagnostic warning in RuleValidator.CheckProviderTimeout(config.Arbiter.Provider, effective.Arbiter.Provider))
-        {
-            context.Log.WriteLine($"{warning.Code}: {warning.Message} {warning.Hint}");
-        }
-
-        IArbiterProvider provider = _providerFactory(effective);
-        IDisposable? owned = provider as IDisposable;
-        try
-        {
-            // The plan, its task file and the git facts are read in the worktree that holds the plan, which in a
-            // conductor run is often not the checkout the hook runs in. The invocation resolved that worktree once
-            // through the run-context resolver; the resolver call here is the fallback for a caller outside the hook.
-            // The ledger stays with the hook's directory so a dispatch and its return still pair.
-            string evaluationRoot = EvaluationRootFor(context, repoRoot, prompt, _planRoots);
-            if (!string.Equals(evaluationRoot, repoRoot, StringComparison.Ordinal))
-            {
-                context.Log.WriteLine($"Arbiter: evaluating against worktree '{evaluationRoot}', which holds the dispatch's plan.");
-            }
-
-            IArbiterGitFacts gitFacts = _gitFactsFactory is not null
-                ? _gitFactsFactory(evaluationRoot)
-                : _hookGitFacts.Create(evaluationRoot, _homeDirectory(), arbiterDirectory);
-            IArbiterEvaluator evaluator = _evaluators.Create(
-                provider,
-                _composer.KeyResolverFor(effective),
-                arbiterDirectory,
-                gitFacts,
-                _planReaderFactory(evaluationRoot),
-                _clock,
-                _modelTargets.Resolve(harness, context));
-            ArbiterEvent ev = EventFor(
-                harness, resolved, asserted, target, prompt, deliveredPrompt, toolCallId, preId, sessionId,
-                evaluationRoot, context, dispatchModel, toolOutput, isPost);
-            ArbiterEvaluationResult result = evaluator.EvaluateAsync(
-                ev, effective,
-                new ArbiterEvaluatorOptions(Source: ArbiterSources.Hook, ConfirmModelWrite: context.ConfirmModelWrite))
-                .GetAwaiter().GetResult();
-            if (isPost)
-            {
-                LogUnpairedReturn(result, ev, arbiterDirectory, context);
-            }
-
-            HookOutcome mapped = _outcomes.Map(result, harness, resolved, prompt, effective, arbiterDirectory, context, toolOutput, isPost);
-            return isPost
-                ? WithAutonomousPlanNote(mapped, result, target, toolOutput, toolCallId, preId is null, arbiterDirectory, context)
-                : StopUnbuildableDispatch(mapped, result, prompt, target, arbiterDirectory, context);
-        }
-        catch (Exception exception) when (exception is not OperationCanceledException)
-        {
-            // A broken decision model lets the dispatch continue loudly: the failure is
-            // written to the log and the chat-visible note, never a block. Cancellation
-            // stays a cancellation: the harness timed out the hook, not the model.
-            return AllowLoudly(harness, exception.Message, context.NewDecisionId(), context);
-        }
-        finally
-        {
-            owned?.Dispose();
-        }
-    }
-
-    /// <summary>The classified event the evaluator judges, built from what the hook invocation knows.</summary>
-    private static ArbiterEvent EventFor(
-        string harness,
-        string? resolved,
-        bool asserted,
-        string? target,
-        string prompt,
-        string? deliveredPrompt,
-        string? toolCallId,
-        string? preId,
-        string? sessionId,
-        string evaluationRoot,
-        HookContext context,
-        string? dispatchModel,
-        string? toolOutput,
-        bool isPost) =>
-        new()
-        {
-            Harness = harness,
-            Phase = isPost ? "post" : "pre",
-            Caller = resolved,
-            CallerSource = resolved is null
-                ? ArbiterCallerSources.None
-                : asserted ? ArbiterCallerSources.Asserted : ArbiterCallerSources.Harness,
-            HarnessCaller = asserted ? null : resolved,
-            RenderedCaller = asserted ? null : resolved,
-            AssertedCaller = asserted ? resolved : null,
-            Target = target,
-            Prompt = prompt,
-            DeliveredPrompt = deliveredPrompt,
-            ToolCallId = toolCallId,
-            PreId = preId,
-            Session = sessionId,
-            Cwd = evaluationRoot,
-            ObservesReturns = context.ObservesReturns,
-            ModelOverrideField = context.ModelOverride is { Supported: true } capability ? capability.Field : null,
-            ModelOverrideAliases = context.ModelOverride is { Supported: true } aliases ? aliases.AcceptedAliases : null,
-            Model = dispatchModel,
-            ToolOutput = toolOutput,
-            IsDispatch = true,
-        };
 
     /// <summary>
     /// Decides an event without blocking a thread: the evaluator's model call is awaited, and the dispatch
@@ -728,7 +432,8 @@ public sealed class ArbiterHookDecisionEngine : IContextualHookDecisionEngine, I
             HookOutcome mapped = _outcomes.Map(result, harness, resolved, prompt, effective, arbiterDirectory, context, toolOutput, isPost);
             return isPost
                 ? WithAutonomousPlanNote(mapped, result, target, toolOutput, toolCallId, preId is null, arbiterDirectory, context)
-                : StopUnbuildableDispatch(mapped, result, prompt, target, arbiterDirectory, context);
+                : await StopUnbuildableDispatchAsync(mapped, result, prompt, target, arbiterDirectory, context, cancellationToken)
+                    .ConfigureAwait(false);
         }
         catch (Exception exception) when (exception is not OperationCanceledException)
         {
@@ -743,6 +448,48 @@ public sealed class ArbiterHookDecisionEngine : IContextualHookDecisionEngine, I
         }
     }
 
+    /// <summary>The classified event the evaluator judges, built from what the hook invocation knows.</summary>
+    private static ArbiterEvent EventFor(
+        string harness,
+        string? resolved,
+        bool asserted,
+        string? target,
+        string prompt,
+        string? deliveredPrompt,
+        string? toolCallId,
+        string? preId,
+        string? sessionId,
+        string evaluationRoot,
+        HookContext context,
+        string? dispatchModel,
+        string? toolOutput,
+        bool isPost) =>
+        new()
+        {
+            Harness = harness,
+            Phase = isPost ? "post" : "pre",
+            Caller = resolved,
+            CallerSource = resolved is null
+                ? ArbiterCallerSources.None
+                : asserted ? ArbiterCallerSources.Asserted : ArbiterCallerSources.Harness,
+            HarnessCaller = asserted ? null : resolved,
+            RenderedCaller = asserted ? null : resolved,
+            AssertedCaller = asserted ? resolved : null,
+            Target = target,
+            Prompt = prompt,
+            DeliveredPrompt = deliveredPrompt,
+            ToolCallId = toolCallId,
+            PreId = preId,
+            Session = sessionId,
+            Cwd = evaluationRoot,
+            ObservesReturns = context.ObservesReturns,
+            ModelOverrideField = context.ModelOverride is { Supported: true } capability ? capability.Field : null,
+            ModelOverrideAliases = context.ModelOverride is { Supported: true } aliases ? aliases.AcceptedAliases : null,
+            Model = dispatchModel,
+            ToolOutput = toolOutput,
+            IsDispatch = true,
+        };
+
     /// <summary>
     /// Stops a dispatch the rules let through when its task prompt cannot be built, and closes its pre event.
     /// </summary>
@@ -753,13 +500,14 @@ public sealed class ArbiterHookDecisionEngine : IContextualHookDecisionEngine, I
     /// unreturned horizon. The prompt is built here instead, through the same insertion the adapters use, and a
     /// stop closes the pre with a recovered row and denies with the stop's own text.
     /// </remarks>
-    private HookOutcome StopUnbuildableDispatch(
+    private async Task<HookOutcome> StopUnbuildableDispatchAsync(
         HookOutcome outcome,
         ArbiterEvaluationResult result,
         string prompt,
         string? target,
         string arbiterDirectory,
-        HookContext context)
+        HookContext context,
+        CancellationToken cancellationToken)
     {
         if (outcome.Kind == HookOutcomeKind.Deny || string.IsNullOrEmpty(result.LedgerId))
         {
@@ -781,14 +529,17 @@ public sealed class ArbiterHookDecisionEngine : IContextualHookDecisionEngine, I
                 e.Phase == ArbiterLedgerPhases.Pre && string.Equals(e.Id, result.LedgerId, StringComparison.Ordinal));
             if (pre is not null)
             {
-                _ = _dispatch.AppendRecovery(ledger, pre, ArbiterRecoveries.PromptStopped, target ?? "unknown", _clock.GetUtcNow(), context);
+                _ = await _dispatch.AppendRecoveryAsync(
+                    ledger, pre, ArbiterRecoveries.PromptStopped, target ?? "unknown", _clock.GetUtcNow(), context,
+                    cancellationToken).ConfigureAwait(false);
             }
         }
         catch (Exception exception) when (FileFailure.Is(exception))
         {
-            context.Log.WriteLine(
+            await context.Log.WriteLineAsync(
                 $"Arbiter: dispatch {result.LedgerId} was stopped before its worker started, but its close was not " +
-                $"written ({OneLine(exception.Message)}); it still looks in flight until the unreturned horizon.");
+                $"written ({OneLine(exception.Message)}); it still looks in flight until the unreturned horizon.")
+                .ConfigureAwait(false);
         }
 
         return new HookOutcome(HookOutcomeKind.Deny, insertion.StopReason);
@@ -1726,114 +1477,6 @@ internal sealed class ArbiterBackgroundDispatch
         return notes;
     }
 
-    internal int RecoverLostReturn(
-        string harness,
-        string? sessionId,
-        IReadOnlyList<string> agentNames,
-        HookContext context,
-        string? agentId = null,
-        string? stopEvent = null)
-    {
-        ArgumentException.ThrowIfNullOrWhiteSpace(harness);
-        ArgumentNullException.ThrowIfNull(agentNames);
-        ArgumentNullException.ThrowIfNull(context);
-
-        string arbiterDirectory = _resolveDirectory(context);
-        IArbiterLedger ledger = _state.OpenLedger(arbiterDirectory);
-        IReadOnlyList<ArbiterLedgerEvent> events = ledger.ReadAll();
-        stopEvent ??= StopEventOf(harness);
-        string agent = agentNames.Count > 0 ? agentNames[0] : "(unnamed)";
-
-        // A pre row written before the hook recorded the session names none, and no stop event can be matched to
-        // it: closing one would guess which session's agent it belonged to.
-        if (string.IsNullOrWhiteSpace(sessionId))
-        {
-            context.Log.WriteLine(
-                $"Arbiter: the {stopEvent} of '{agent}' names no session, so no dispatch is closed. " +
-                "Only a stop event from the same session as the dispatch is evidence about it.");
-            return 0;
-        }
-
-        // The pre must have been written before the stop event: a later row cannot be the dispatch that ended.
-        DateTimeOffset now = _clock.GetUtcNow();
-        HashSet<string> paired = [.. events
-            .Where(e => e.Phase == ArbiterLedgerPhases.Post && e.PreId is not null)
-            .Select(e => e.PreId)
-            .OfType<string>()];
-
-        // A followed background agent names its own dispatch: the saved record holds the pre event it answers, so no
-        // name match, no multiple-match refusal and no late-stop check applies. Anything else uses the name rule.
-        if (!string.IsNullOrWhiteSpace(agentId)
-            && _background.Find(arbiterDirectory, sessionId, agentId) is { } followed)
-        {
-            return RecoverFollowedDispatch(
-                ledger, events, paired, followed, sessionId, agentId, harness, stopEvent, agent, now, arbiterDirectory, context);
-        }
-
-        List<ArbiterLedgerEvent> open = [.. events.Where(e =>
-            e.Phase == ArbiterLedgerPhases.Pre
-            && e.At < now
-            && !string.IsNullOrWhiteSpace(e.Target)
-            && !paired.Contains(e.Id)
-            && string.Equals(e.Harness, harness, StringComparison.Ordinal)
-            && string.Equals(e.Session, sessionId, StringComparison.Ordinal))];
-
-        if (open.Count == 0)
-        {
-            return 0;
-        }
-
-        if (agentNames.Count == 0)
-        {
-            // Without a name the stop event says only that some agent finished, and closing one of several open
-            // dispatches would attribute work that may not be over.
-            context.Log.WriteLine(
-                $"Arbiter: the {stopEvent} names no agent, so none of the {open.Count} dispatch(es) still in flight " +
-                "is closed. A stop event that cannot name its agent is no evidence about any of them.");
-            return 0;
-        }
-
-        open.RemoveAll(e => !agentNames.Any(name => NamesAgent(e, name)));
-        if (open.Count == 0)
-        {
-            return 0;
-        }
-
-        // A dispatch the rules refused appended its pre event but never ran a worker, so it is not a return waiting
-        // to be closed. The same set keeps it out of the in-flight paths a later dispatch is gated against.
-        if (LedgerFacts.NotDispatchedLedgerIds(_state.OpenDecisionLog(arbiterDirectory)) is { Count: > 0 } notDispatched)
-        {
-            open.RemoveAll(e => notDispatched.Contains(e.Id));
-        }
-
-        if (open.Count == 0)
-        {
-            return 0;
-        }
-
-        if (open.Count > 1)
-        {
-            context.Log.WriteLine(
-                $"Arbiter: the {stopEvent} of '{agent}' matches {open.Count} dispatches still in flight " +
-                $"({string.Join(", ", open.Select(e => $"{e.Target ?? "unknown"} {e.Id}"))}); closing none. " +
-                "A stop event that cannot name one dispatch is no evidence about any of them.");
-            return 0;
-        }
-
-        ArbiterLedgerEvent pre = open[0];
-
-        if (FinishedAfter(events, pre) is { } finished)
-        {
-            context.Log.WriteLine(
-                $"Arbiter: the {stopEvent} of '{agent}' is late: dispatch '{finished.Target ?? "unknown"}' " +
-                $"({finished.Id}) returned after '{pre.Target}' ({pre.Id}) was written, so no dispatch is closed. " +
-                "A stop that follows a finished same-target dispatch is evidence about that dispatch alone.");
-            return 0;
-        }
-
-        return AppendRecovery(ledger, pre, stopEvent, agent, now, context);
-    }
-
     internal async Task<int> RecoverLostReturnAsync(
         string harness,
         string? sessionId,
@@ -1976,43 +1619,6 @@ internal sealed class ArbiterBackgroundDispatch
     }
 
     /// <summary>
-    /// Closes the dispatch a followed background agent names, or refuses when its saved pre is not an open one of
-    /// this session.
-    /// </summary>
-    private int RecoverFollowedDispatch(
-        IArbiterLedger ledger,
-        IReadOnlyList<ArbiterLedgerEvent> events,
-        HashSet<string> paired,
-        BackgroundDispatchRecord followed,
-        string sessionId,
-        string? agentId,
-        string harness,
-        string stopEvent,
-        string agent,
-        DateTimeOffset now,
-        string arbiterDirectory,
-        HookContext context)
-    {
-        ArbiterLedgerEvent? own = events.FirstOrDefault(e =>
-            e.Phase == ArbiterLedgerPhases.Pre
-            && e.At < now
-            && string.Equals(e.Id, followed.PreId, StringComparison.Ordinal)
-            && !paired.Contains(e.Id)
-            && string.Equals(e.Harness, harness, StringComparison.Ordinal)
-            && string.Equals(e.Session, sessionId, StringComparison.Ordinal));
-        if (own is null
-            || LedgerFacts.NotDispatchedLedgerIds(_state.OpenDecisionLog(arbiterDirectory)).Contains(own.Id))
-        {
-            context.Log.WriteLine(
-                $"Arbiter: the {stopEvent} of agent '{agentId}' follows a saved dispatch, " +
-                "but that dispatch is not an open pre of this session, so nothing is closed.");
-            return 0;
-        }
-
-        return AppendRecovery(ledger, own, stopEvent, agent, now, context);
-    }
-
-    /// <summary>
     /// A same-target post written after this pre is a dispatch that already finished. A stop event that arrives
     /// after it is the late signal for that finished dispatch, not evidence about the one still open. Only a post
     /// that claims a pre counts: an unpaired one can be the return this very stop handler just wrote, and the
@@ -2025,55 +1631,6 @@ internal sealed class ArbiterBackgroundDispatch
             && e.At > pre.At
             && string.Equals(e.Session, pre.Session, StringComparison.Ordinal)
             && string.Equals(e.Target, pre.Target, StringComparison.OrdinalIgnoreCase));
-
-    internal int AppendRecovery(
-        IArbiterLedger ledger,
-        ArbiterLedgerEvent pre,
-        string stopEvent,
-        string agent,
-        DateTimeOffset now,
-        HookContext context)
-    {
-        // The recovery runs on the stop hook, which the harness kills at its timeout: the row it exists to write
-        // must not be what pushes the hook past it. The hook path is synchronous end to end (the adapters are, so
-        // the engine is), and making it async would change the recovery interface, every adapter and the host for
-        // one append. The wait is bounded to the headroom the rendered hook keeps past the provider budget instead,
-        // and a wait that runs out of it closes nothing loudly rather than throwing out of the hook.
-        try
-        {
-            using CancellationTokenSource remaining = new();
-            remaining.CancelAfter(TimeSpan.FromSeconds(ArbiterHookTimeout.HeadroomSeconds));
-            ledger.AppendAsync(
-                new ArbiterLedgerEvent(
-                    _ids.NewSortableId(now),
-                    now,
-                    ArbiterSources.Hook,
-                    pre.Harness,
-                    pre.Session,
-                    ArbiterLedgerPhases.Post)
-                {
-                    PreId = pre.Id,
-                    Caller = pre.Caller,
-                    CallerSource = pre.CallerSource,
-                    Target = pre.Target,
-                    Headers = pre.Headers,
-                    Recovered = stopEvent,
-                },
-                remaining.Token)
-                .GetAwaiter().GetResult();
-        }
-        catch (OperationCanceledException)
-        {
-            context.Log.WriteLine(
-                $"Arbiter: the {stopEvent} of '{agent}' closed nothing: the recovery row was not written within " +
-                $"the hook's remaining time, so dispatch '{pre.Target ?? "unknown"}' ({pre.Id}) still looks in flight.");
-            return 0;
-        }
-        context.Log.WriteLine(
-            $"Arbiter: closed dispatch '{pre.Target ?? "unknown"}' ({pre.Id}) from the {stopEvent} of '{agent}'; " +
-            "it no longer holds its files. A report that arrives later still pairs with it, and this row marks no task complete.");
-        return 1;
-    }
 
     internal async Task<int> AppendRecoveryAsync(
         IArbiterLedger ledger,

@@ -47,9 +47,10 @@ public sealed class ArbiterServeService(
     /// <summary>The largest client text one MCP call may embed, in characters: the shared Arbiter limit.</summary>
     private const int MaxTextChars = ArbiterTextLimits.MaxTextChars;
 
-    public string Evaluate(
+    public async Task<string> EvaluateAsync(
         string trigger,
-        ArbiterFacts facts)
+        ArbiterFacts facts,
+        CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(facts);
 
@@ -94,11 +95,12 @@ public sealed class ArbiterServeService(
             try
             {
                 outcome = post
-                    ? context.Engine.DecidePostDispatch(
+                    ? await context.Engine.DecidePostDispatchAsync(
                         Harness, item.Caller, item.Target, item.Prompt, facts.Output ?? string.Empty,
-                        config, hookContext, facts.CallId)
-                    : context.Engine.DecidePreDispatch(
-                        Harness, item.Caller, item.Target, item.Prompt, config, hookContext, facts.CallId);
+                        config, hookContext, facts.CallId, cancellationToken: cancellationToken).ConfigureAwait(false)
+                    : await context.Engine.DecidePreDispatchAsync(
+                        Harness, item.Caller, item.Target, item.Prompt, config, hookContext, facts.CallId,
+                        cancellationToken: cancellationToken).ConfigureAwait(false);
             }
             catch (Exception ex) when (ex is not OutOfMemoryException && ex is not OperationCanceledException)
             {

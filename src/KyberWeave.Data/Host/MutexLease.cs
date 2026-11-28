@@ -150,6 +150,7 @@ public sealed class MutexLease : ILease
         public bool Take()
         {
             _thread.Start();
+            // The named Mutex needs its owner thread, so the caller waits on the owner's event.
             _taken.Wait();
             if (_failure is not null)
             {
@@ -196,6 +197,7 @@ public sealed class MutexLease : ILease
                     return;
                 }
 
+                // The named Mutex needs its owner thread, so the owner waits here for the release signal.
                 _released.Wait();
                 _mutex.ReleaseMutex();
             }

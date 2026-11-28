@@ -83,12 +83,6 @@ internal sealed class UnavailableDecisionEngine : IHookDecisionEngine, IFactoryT
 {
     internal static UnavailableDecisionEngine Instance { get; } = new();
 
-    public HookOutcome DecidePreDispatch(string caller, string? target, string prompt, KyberWeave.Core.Configuration.KyberWeaveConfig config) =>
-        throw new InvalidOperationException("No decision engine is available.");
-
-    public HookOutcome DecidePostDispatch(string caller, string? target, string toolOutput, KyberWeave.Core.Configuration.KyberWeaveConfig config) =>
-        throw new InvalidOperationException("No decision engine is available.");
-
     public Task<HookOutcome> DecidePreDispatchAsync(
         string caller,
         string? target,

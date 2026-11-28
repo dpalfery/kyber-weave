@@ -45,7 +45,7 @@ public sealed class ArbiterServeCallerSourceTests : IDisposable
     {
         ArbiterTools tools = CreateTools();
 
-        string response = tools.Evaluate(
+        string response = await tools.EvaluateAsync(
             "delegate",
             new ArbiterFacts
             {

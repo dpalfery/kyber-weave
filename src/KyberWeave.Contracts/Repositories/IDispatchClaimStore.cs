@@ -21,12 +21,6 @@ public interface IDispatchClaimStore
     /// <returns>The owner, or null when there is no claim.</returns>
     string? ReadOwner(string projectRoot, DispatchClaimKey key);
 
-    /// <summary>Waits, polling, for a claim to appear for <paramref name="key"/>.</summary>
-    /// <param name="projectRoot">The repository root that holds the claim.</param>
-    /// <param name="key">The dispatch event.</param>
-    /// <returns>True as soon as a claim exists; false when the wait window closes first.</returns>
-    bool WaitForClaim(string projectRoot, DispatchClaimKey key);
-
     /// <summary>Waits, polling asynchronously, for a claim to appear for <paramref name="key"/>.</summary>
     /// <param name="projectRoot">The repository root that holds the claim.</param>
     /// <param name="key">The dispatch event.</param>

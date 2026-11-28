@@ -616,7 +616,7 @@ public sealed class ClaudeHookAdapter : IHarnessHookAdapter
     /// denied: a return with no join is recorded unpaired and allowed.
     /// </summary>
     /// <remarks>
-    /// A followed dispatch is evaluated by <see cref="IBackgroundDispatchEngine.DecideBackgroundReturn"/> with the
+    /// A followed dispatch is evaluated by <see cref="IBackgroundDispatchEngine.DecideBackgroundReturnAsync"/> with the
     /// dispatch's own caller, target and prompt, as a foreground return is. An agent with no saved record is
     /// evaluated through the same contextual path with the returning agent as both caller and target and an empty
     /// prompt, and its row carries no <c>pre-id</c>. A plain <see cref="IHookDecisionEngine"/> falls back to the

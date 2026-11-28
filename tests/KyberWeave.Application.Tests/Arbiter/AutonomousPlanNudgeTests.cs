@@ -64,16 +64,16 @@ public sealed class AutonomousPlanNudgeTests : IDisposable
         return new HookContext(root, () => "decision-nudge", TextWriter.Null, RunContext: runContext);
     }
 
-    private HookOutcome Return(ArbiterHookDecisionEngine engine, HookContext context, string output, string target = "architect", string callId = "call-1")
+    private async Task<HookOutcome> Return(ArbiterHookDecisionEngine engine, HookContext context, string output, string target = "architect", string callId = "call-1")
     {
-        engine.DecidePreDispatch(Harness, Caller, target, Prompt, Config(), context, callId, "s1");
-        return engine.DecidePostDispatch(Harness, Caller, target, Prompt, output, Config(), context, callId, "s1");
+        await engine.DecidePreDispatchAsync(Harness, Caller, target, Prompt, Config(), context, callId, "s1");
+        return await engine.DecidePostDispatchAsync(Harness, Caller, target, Prompt, output, Config(), context, callId, "s1");
     }
 
     [Fact]
-    public void AnAutonomousPlanReadyReturnCarriesTheNote()
+    public async Task AnAutonomousPlanReadyReturnCarriesTheNote()
     {
-        HookOutcome outcome = Return(Engine(), Context("autonomous"), Ready);
+        HookOutcome outcome = await Return(Engine(), Context("autonomous"), Ready);
 
         Assert.Equal(HookOutcomeKind.PostAnnotation, outcome.Kind);
         Assert.Equal(Note, outcome.Reason);
@@ -82,67 +82,67 @@ public sealed class AutonomousPlanNudgeTests : IDisposable
     [Theory]
     [InlineData("supervised")]
     [InlineData(null)]
-    public void SupervisedOrUnknownAutonomyGetsNoNote(string? autonomy)
+    public async Task SupervisedOrUnknownAutonomyGetsNoNote(string? autonomy)
     {
-        HookOutcome outcome = Return(Engine(), Context(autonomy), Ready);
+        HookOutcome outcome = await Return(Engine(), Context(autonomy), Ready);
 
         Assert.Null(outcome.Reason);
     }
 
     [Fact]
-    public void ARunWithNoRecordGetsNoNote()
+    public async Task ARunWithNoRecordGetsNoNote()
     {
-        HookOutcome outcome = Return(Engine(), Context(null, withRun: false), Ready);
+        HookOutcome outcome = await Return(Engine(), Context(null, withRun: false), Ready);
 
         Assert.Null(outcome.Reason);
     }
 
     /// <summary>Several live runs with no signal choosing one leave no run to read the autonomy from, so no note is added.</summary>
     [Fact]
-    public void AnAmbiguousRunContextGetsNoNote()
+    public async Task AnAmbiguousRunContextGetsNoNote()
     {
         string root = _host.RepoRoot;
         HookRunContext ambiguous = new(
             root, null, null, root, [root], null, null, null, false, HookRunContextSource.Ambiguous, []);
         HookContext context = new(root, () => "decision-nudge", TextWriter.Null, RunContext: ambiguous);
 
-        HookOutcome outcome = Return(Engine(), context, Ready);
+        HookOutcome outcome = await Return(Engine(), context, Ready);
 
         Assert.Null(outcome.Reason);
     }
 
     [Fact]
-    public void APlannerReturnWithoutPlanReadyGetsNoNote()
+    public async Task APlannerReturnWithoutPlanReadyGetsNoNote()
     {
-        HookOutcome outcome = Return(Engine(), Context("autonomous"), "Need answers.\nSTATUS: NEEDS_INPUT");
+        HookOutcome outcome = await Return(Engine(), Context("autonomous"), "Need answers.\nSTATUS: NEEDS_INPUT");
 
         Assert.Null(outcome.Reason);
     }
 
     [Fact]
-    public void ANonPlannerReturnGetsNoNote()
+    public async Task ANonPlannerReturnGetsNoNote()
     {
-        HookOutcome outcome = Return(Engine(), Context("autonomous"), Ready, target: "dev-medium");
+        HookOutcome outcome = await Return(Engine(), Context("autonomous"), Ready, target: "dev-medium");
 
         Assert.Null(outcome.Reason);
     }
 
     [Fact]
-    public void TheSameReturnRecordedTwiceIsNudgedOnce()
+    public async Task TheSameReturnRecordedTwiceIsNudgedOnce()
     {
         ArbiterHookDecisionEngine engine = Engine();
         HookContext context = Context("autonomous");
-        engine.DecidePreDispatch(Harness, Caller, "architect", Prompt, Config(), context, "call-1", "s1");
+        await engine.DecidePreDispatchAsync(Harness, Caller, "architect", Prompt, Config(), context, "call-1", "s1");
 
-        HookOutcome first = engine.DecidePostDispatch(Harness, Caller, "architect", Prompt, Ready, Config(), context, "call-1", "s1");
-        HookOutcome second = engine.DecidePostDispatch(Harness, Caller, "architect", Prompt, Ready, Config(), context, "call-1", "s1");
+        HookOutcome first = await engine.DecidePostDispatchAsync(Harness, Caller, "architect", Prompt, Ready, Config(), context, "call-1", "s1");
+        HookOutcome second = await engine.DecidePostDispatchAsync(Harness, Caller, "architect", Prompt, Ready, Config(), context, "call-1", "s1");
 
         Assert.Equal(Note, first.Reason);
         Assert.Null(second.Reason);
     }
 
     [Fact]
-    public void ADuplicateReturnWithoutACallIdIsFoundByItsPreDispatch()
+    public async Task ADuplicateReturnWithoutACallIdIsFoundByItsPreDispatch()
     {
         // A harness that reports no tool-call id leaves CallId null on the ledger event, so the
         // repeat is recognised by the pre event both returns were matched to.
@@ -153,7 +153,7 @@ public sealed class AutonomousPlanNudgeTests : IDisposable
     }
 
     [Fact]
-    public void AReturnFromADifferentPreDispatchIsStillNudged()
+    public async Task AReturnFromADifferentPreDispatchIsStillNudged()
     {
         ArbiterLedgerEvent earlier = PostEvent("post-1", callId: "call-1", preId: "pre-1");
         ArbiterLedgerEvent current = PostEvent("post-2", callId: null, preId: "pre-2");
@@ -177,14 +177,14 @@ public sealed class AutonomousPlanNudgeTests : IDisposable
     };
 
     [Fact]
-    public void ABackgroundPlanReadyReturnHandsTheNoteOverOnTheNextDispatch()
+    public async Task ABackgroundPlanReadyReturnHandsTheNoteOverOnTheNextDispatch()
     {
         ArbiterHookDecisionEngine engine = Engine();
         HookContext context = Context("autonomous");
-        engine.DecidePreDispatch(Harness, Caller, "architect", Prompt, Config(), context, "call-1", "s1");
+        await engine.DecidePreDispatchAsync(Harness, Caller, "architect", Prompt, Config(), context, "call-1", "s1");
         engine.TrackBackgroundDispatch(new BackgroundDispatch(Harness, "s1", "agent-1", Caller, "architect", Prompt, "call-1"), context);
 
-        engine.DecideBackgroundReturn(Harness, "s1", "agent-1", Ready, Config(), context);
+        await engine.DecideBackgroundReturnAsync(Harness, "s1", "agent-1", Ready, Config(), context);
         IReadOnlyList<string> notes = engine.TakePendingNotes("s1", Caller, context);
 
         string text = Assert.Single(notes);
@@ -193,14 +193,14 @@ public sealed class AutonomousPlanNudgeTests : IDisposable
     }
 
     [Fact]
-    public void ASupervisedBackgroundPlanReadyReturnLeavesNoNote()
+    public async Task ASupervisedBackgroundPlanReadyReturnLeavesNoNote()
     {
         ArbiterHookDecisionEngine engine = Engine();
         HookContext context = Context("supervised");
-        engine.DecidePreDispatch(Harness, Caller, "architect", Prompt, Config(), context, "call-1", "s1");
+        await engine.DecidePreDispatchAsync(Harness, Caller, "architect", Prompt, Config(), context, "call-1", "s1");
         engine.TrackBackgroundDispatch(new BackgroundDispatch(Harness, "s1", "agent-1", Caller, "architect", Prompt, "call-1"), context);
 
-        engine.DecideBackgroundReturn(Harness, "s1", "agent-1", Ready, Config(), context);
+        await engine.DecideBackgroundReturnAsync(Harness, "s1", "agent-1", Ready, Config(), context);
 
         Assert.Empty(engine.TakePendingNotes("s1", Caller, context));
     }

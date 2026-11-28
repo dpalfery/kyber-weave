@@ -87,13 +87,13 @@ public sealed class ArbiterLostReturnRecoveryTests : IDisposable
     /// <summary>Moves the host clock on, so a later event is measurably later than the rows already written.</summary>
     private void Advance() => _host.Clock.Advance(TimeSpan.FromSeconds(1));
 
-    private void Dispatch(string target, string task, string toolCallId, TextWriter log) =>
-        Engine().DecidePreDispatch(
+    private async Task Dispatch(string target, string task, string toolCallId, TextWriter log) =>
+        await Engine().DecidePreDispatchAsync(
             "copilot-cli", "conductor", target, Prompt(task), Config(), Context(log),
             toolCallId, sessionId: "session-1", dispatchModel: null);
 
-    private void Return(string task, string toolCallId, TextWriter log) =>
-        Engine().DecidePostDispatch(
+    private async Task Return(string task, string toolCallId, TextWriter log) =>
+        await Engine().DecidePostDispatchAsync(
             "copilot-cli", "conductor", "dev-easy", Prompt(task), "All done.\nSTATUS: PASS\nRESULT: PASS\n",
             Config(), Context(log), toolCallId, sessionId: "session-1");
 
@@ -195,14 +195,14 @@ public sealed class ArbiterLostReturnRecoveryTests : IDisposable
         [.. Events().Where(e => e.Phase == ArbiterLedgerPhases.Post && e.Recovered is not null)];
 
     [Fact]
-    public void WithoutTheStopEvent_TheFixRoundIsRefusedBecauseTheLostDispatchLooksInFlight()
+    public async Task WithoutTheStopEvent_TheFixRoundIsRefusedBecauseTheLostDispatchLooksInFlight()
     {
         TextWriter log = TextWriter.Null;
-        Dispatch("dev-easy", "T2", "call-1", log);
+        await Dispatch("dev-easy", "T2", "call-1", log);
 
         // This is the live failure, reproduced without the stop event: the earlier pre has no post, so its task
         // files still look held by a worker that finished long ago.
-        Dispatch("dev-easy", "T2", "call-2", log);
+        await Dispatch("dev-easy", "T2", "call-2", log);
 
         Assert.Equal("overlaps-in-flight", Answer("KW-ARB-READY-001"));
         Assert.Empty(RecoveredPosts());
@@ -212,7 +212,7 @@ public sealed class ArbiterLostReturnRecoveryTests : IDisposable
     public async Task TheStopEvent_ClosesTheLostDispatch_AndTheFixRoundIsAllowed()
     {
         StringWriter log = new();
-        Dispatch("dev-easy", "T2", "call-1", log);
+        await Dispatch("dev-easy", "T2", "call-1", log);
         ArbiterLedgerEvent lost = Assert.Single(Events(), e => e.Phase == ArbiterLedgerPhases.Pre);
 
         Advance();
@@ -227,7 +227,7 @@ public sealed class ArbiterLostReturnRecoveryTests : IDisposable
         Assert.Contains("subagentStop", recovered.Recovered, StringComparison.Ordinal);
         Assert.Contains("closed", log.ToString(), StringComparison.OrdinalIgnoreCase);
 
-        Dispatch("dev-easy", "T2", "call-2", log);
+        await Dispatch("dev-easy", "T2", "call-2", log);
 
         Assert.Equal("ready", Answer("KW-ARB-READY-001"));
     }
@@ -243,11 +243,11 @@ public sealed class ArbiterLostReturnRecoveryTests : IDisposable
     /// be built, and its open pre held the task's files against every later dispatch for hours.
     /// </summary>
     [Fact]
-    public void AnAllowedDispatchWhosePromptCannotBeBuilt_IsDeniedAndHoldsNoFiles()
+    public async Task AnAllowedDispatchWhosePromptCannotBeBuilt_IsDeniedAndHoldsNoFiles()
     {
         StringWriter log = new();
 
-        HookOutcome stopped = Engine().DecidePreDispatch(
+        HookOutcome stopped = await Engine().DecidePreDispatchAsync(
             "claude", "conductor", "dev-easy", Prompt("T2"), Config(), UnbuildableContext(log),
             "call-1", sessionId: "session-1", dispatchModel: null);
 
@@ -259,7 +259,7 @@ public sealed class ArbiterLostReturnRecoveryTests : IDisposable
         Assert.Equal("prompt-stopped", closed.Recovered);
 
         Advance();
-        Engine().DecidePreDispatch(
+        await Engine().DecidePreDispatchAsync(
             "claude", "conductor", "dev-easy", Prompt("T2"), Config(), Context(log),
             "call-2", sessionId: "session-1", dispatchModel: null);
 
@@ -271,20 +271,20 @@ public sealed class ArbiterLostReturnRecoveryTests : IDisposable
     /// dispatch and its retry share that digest, so the retry's return must pair with the retry, not the dead one.
     /// </summary>
     [Fact]
-    public void ARetrysReturnPairsWithTheRetry_NotWithTheStoppedDispatchOfTheSamePrompt()
+    public async Task ARetrysReturnPairsWithTheRetry_NotWithTheStoppedDispatchOfTheSamePrompt()
     {
         TextWriter log = TextWriter.Null;
-        Engine().DecidePreDispatch(
+        await Engine().DecidePreDispatchAsync(
             "copilot-cli", "conductor", "dev-easy", Prompt("T2"), Config(), UnbuildableContext(log),
             toolCallId: null, sessionId: "session-1", dispatchModel: null);
         Advance();
-        Engine().DecidePreDispatch(
+        await Engine().DecidePreDispatchAsync(
             "copilot-cli", "conductor", "dev-easy", Prompt("T2"), Config(), Context(log),
             toolCallId: null, sessionId: "session-1", dispatchModel: null);
         ArbiterLedgerEvent retry = Events().Last(e => e.Phase == ArbiterLedgerPhases.Pre);
         Advance();
 
-        Engine().DecidePostDispatch(
+        await Engine().DecidePostDispatchAsync(
             "copilot-cli", "conductor", "dev-easy", Prompt("T2"), "All done.\nSTATUS: PASS\nRESULT: PASS\n",
             Config(), Context(log), toolCallId: null, sessionId: "session-1");
 
@@ -297,7 +297,7 @@ public sealed class ArbiterLostReturnRecoveryTests : IDisposable
     /// log line says it still looks in flight.
     /// </summary>
     [Fact]
-    public void APromptStoppedDispatchWhoseCloseCannotBeWritten_IsStillDenied()
+    public async Task APromptStoppedDispatchWhoseCloseCannotBeWritten_IsStillDenied()
     {
         StringWriter log = new();
         HookContext context = Context(log) with
@@ -310,7 +310,7 @@ public sealed class ArbiterLostReturnRecoveryTests : IDisposable
             },
         };
 
-        HookOutcome stopped = Engine().DecidePreDispatch(
+        HookOutcome stopped = await Engine().DecidePreDispatchAsync(
             "claude", "conductor", "dev-easy", Prompt("T2"), Config(), context,
             "call-1", sessionId: "session-1", dispatchModel: null);
 
@@ -322,12 +322,12 @@ public sealed class ArbiterLostReturnRecoveryTests : IDisposable
 
     /// <summary>A rule's refusal still outranks a prompt that cannot be built, and writes no closing row.</summary>
     [Fact]
-    public void ARefusedDispatchWhosePromptCannotBeBuilt_KeepsTheRulesDenial()
+    public async Task ARefusedDispatchWhosePromptCannotBeBuilt_KeepsTheRulesDenial()
     {
         TextWriter log = TextWriter.Null;
-        Dispatch("dev-easy", "T2", "call-1", log);
+        await Dispatch("dev-easy", "T2", "call-1", log);
 
-        HookOutcome refused = Engine().DecidePreDispatch(
+        HookOutcome refused = await Engine().DecidePreDispatchAsync(
             "copilot-cli", "conductor", "dev-easy", Prompt("T2"), Config(), UnbuildableContext(log),
             "call-2", sessionId: "session-1", dispatchModel: null);
 
@@ -343,7 +343,7 @@ public sealed class ArbiterLostReturnRecoveryTests : IDisposable
         // The stop closes the dispatch first; the real post must still claim it and carry the report, or every
         // healthy synchronous dispatch would lose its task completion.
         StringWriter log = new();
-        Dispatch("dev-easy", "T2", "call-1", log);
+        await Dispatch("dev-easy", "T2", "call-1", log);
         ArbiterLedgerEvent lost = Assert.Single(Events(), e => e.Phase == ArbiterLedgerPhases.Pre);
         Advance();
         await Stop("dev-easy", log);
@@ -364,8 +364,8 @@ public sealed class ArbiterLostReturnRecoveryTests : IDisposable
     public async Task TwoDispatchesOfTheSameAgentStillOpen_CloseNone_AndLogOneLine()
     {
         StringWriter log = new();
-        Dispatch("dev-easy", "T2", "call-1", log);
-        Dispatch("dev-easy", "T5", "call-2", log);
+        await Dispatch("dev-easy", "T2", "call-1", log);
+        await Dispatch("dev-easy", "T5", "call-2", log);
 
         Advance();
         await Stop("dev-easy", log);
@@ -390,7 +390,7 @@ public sealed class ArbiterLostReturnRecoveryTests : IDisposable
         // A dispatch's target is its identity. The stop event of a sibling agent, and one naming the dispatcher
         // itself (the pre row's caller), are no evidence that this worker's turn is over.
         StringWriter log = new();
-        Dispatch("dev-easy", "T2", "call-1", log);
+        await Dispatch("dev-easy", "T2", "call-1", log);
         ArbiterLedgerEvent pre = Assert.Single(Events(), e => e.Phase == ArbiterLedgerPhases.Pre);
 
         Advance();
@@ -409,11 +409,11 @@ public sealed class ArbiterLostReturnRecoveryTests : IDisposable
         // agent arrive. That stop is a late signal for the dispatch that already returned; the still-open dispatch
         // beside it may be a different worker that is still running.
         StringWriter log = new();
-        Dispatch("dev-easy", "T2", "call-1", log);
+        await Dispatch("dev-easy", "T2", "call-1", log);
         Advance();
-        Dispatch("dev-easy", "T5", "call-2", log);
+        await Dispatch("dev-easy", "T5", "call-2", log);
         Advance();
-        Return("T2", "call-1", log);
+        await Return("T2", "call-1", log);
         Advance();
         await Stop("dev-easy", log);
 
@@ -431,7 +431,7 @@ public sealed class ArbiterLostReturnRecoveryTests : IDisposable
         // Factory's stop path records the return before it asks for recovery. A return that pairs with nothing is not
         // evidence of some other finished dispatch: it is the lost return this recovery exists for.
         StringWriter log = new();
-        Dispatch("dev-easy", "T2", "call-1", log);
+        await Dispatch("dev-easy", "T2", "call-1", log);
         ArbiterLedgerEvent lost = Assert.Single(Events(), e => e.Phase == ArbiterLedgerPhases.Pre);
 
         Advance();
@@ -448,7 +448,7 @@ public sealed class ArbiterLostReturnRecoveryTests : IDisposable
     public async Task AStopFromAnotherSession_ClosesNothing()
     {
         StringWriter log = new();
-        Dispatch("dev-easy", "T2", "call-1", log);
+        await Dispatch("dev-easy", "T2", "call-1", log);
 
         Advance();
         await Stop("dev-easy", log, sessionId: "session-2");
@@ -457,17 +457,17 @@ public sealed class ArbiterLostReturnRecoveryTests : IDisposable
     }
 
     [Fact]
-    public void ACancelledRecoveryAppend_ClosesNothing_AndLogsOneLine()
+    public async Task ACancelledRecoveryAppend_ClosesNothing_AndLogsOneLine()
     {
         // The recovery row is written on the stop hook, which the harness kills at its timeout. When the append
         // cannot finish, the recovery closes nothing loudly instead of throwing out of the hook.
         StringWriter log = new();
-        Dispatch("dev-easy", "T2", "call-1", log);
+        await Dispatch("dev-easy", "T2", "call-1", log);
         ArbiterLedgerEvent pre = Assert.Single(Events(), e => e.Phase == ArbiterLedgerPhases.Pre);
 
         Advance();
         _host.State.Log.AppendFailure = new OperationCanceledException();
-        int closed = Engine().RecoverLostReturn("copilot-cli", "session-1", ["dev-easy"], Context(log));
+        int closed = await Engine().RecoverLostReturnAsync("copilot-cli", "session-1", ["dev-easy"], Context(log));
 
         Assert.Equal(0, closed);
         Assert.Empty(RecoveredPosts());
@@ -485,12 +485,12 @@ public sealed class ArbiterLostReturnRecoveryTests : IDisposable
         // A recovery whose ledger append never answers must not hold the stop hook past its timeout: the harness
         // kills a hook past its budget, which would lose the very row the recovery exists to write.
         StringWriter log = new();
-        Dispatch("dev-easy", "T2", "call-1", log);
+        await Dispatch("dev-easy", "T2", "call-1", log);
 
         Advance();
         ArbiterHookDecisionEngine engine = EngineOver(new NeverAnsweringLogStore(_host.State.Log));
         Task<int> recovery = Task.Run(
-            () => engine.RecoverLostReturn("copilot-cli", "session-1", ["dev-easy"], Context(log)));
+            () => engine.RecoverLostReturnAsync("copilot-cli", "session-1", ["dev-easy"], Context(log)));
         Task finished = await Task.WhenAny(recovery, Task.Delay(TimeSpan.FromSeconds(15)));
 
         Assert.Same(recovery, finished);
@@ -561,18 +561,18 @@ public sealed class ArbiterLostReturnRecoveryTests : IDisposable
             Context(log));
 
     [Fact]
-    public void AStopThatNamesAFollowedAgentId_ClosesThatDispatchAmongSeveralOfTheSameName()
+    public async Task AStopThatNamesAFollowedAgentId_ClosesThatDispatchAmongSeveralOfTheSameName()
     {
         StringWriter log = new();
-        Dispatch("dev-easy", "T2", "call-1", log);
+        await Dispatch("dev-easy", "T2", "call-1", log);
         Advance();
-        Dispatch("dev-easy", "T5", "call-2", log);
+        await Dispatch("dev-easy", "T5", "call-2", log);
         Follow("T2", "call-1", "agent-a", log);
         Follow("T5", "call-2", "agent-b", log);
         ArbiterLedgerEvent second = Assert.Single(Events(), e => e.Phase == ArbiterLedgerPhases.Pre && e.CallId == "call-2");
 
         Advance();
-        int closed = Engine().RecoverLostReturn("copilot-cli", "session-1", ["dev-easy"], Context(log), "agent-b");
+        int closed = await Engine().RecoverLostReturnAsync("copilot-cli", "session-1", ["dev-easy"], Context(log), "agent-b");
 
         Assert.Equal(1, closed);
         ArbiterLedgerEvent recovered = Assert.Single(RecoveredPosts());
@@ -581,54 +581,54 @@ public sealed class ArbiterLostReturnRecoveryTests : IDisposable
     }
 
     [Fact]
-    public void AStopThatNamesAnAgentIdWhosePreIsAlreadyPaired_ClosesNothing()
+    public async Task AStopThatNamesAnAgentIdWhosePreIsAlreadyPaired_ClosesNothing()
     {
         StringWriter log = new();
-        Dispatch("dev-easy", "T2", "call-1", log);
-        Dispatch("dev-easy", "T5", "call-2", log);
+        await Dispatch("dev-easy", "T2", "call-1", log);
+        await Dispatch("dev-easy", "T5", "call-2", log);
         Follow("T2", "call-1", "agent-a", log);
         Follow("T5", "call-2", "agent-b", log);
         Advance();
-        Return("T2", "call-1", log);
+        await Return("T2", "call-1", log);
 
         Advance();
-        int closed = Engine().RecoverLostReturn("copilot-cli", "session-1", ["dev-easy"], Context(log), "agent-a");
+        int closed = await Engine().RecoverLostReturnAsync("copilot-cli", "session-1", ["dev-easy"], Context(log), "agent-a");
 
         Assert.Equal(0, closed);
         Assert.Empty(RecoveredPosts());
     }
 
     [Fact]
-    public void AStopThatNamesAnUnknownAgentId_FallsBackToTheNameRule()
+    public async Task AStopThatNamesAnUnknownAgentId_FallsBackToTheNameRule()
     {
         StringWriter log = new();
-        Dispatch("dev-easy", "T2", "call-1", log);
+        await Dispatch("dev-easy", "T2", "call-1", log);
         ArbiterLedgerEvent only = Assert.Single(Events(), e => e.Phase == ArbiterLedgerPhases.Pre);
 
         Advance();
-        int closed = Engine().RecoverLostReturn("copilot-cli", "session-1", ["dev-easy"], Context(log), "agent-unknown");
+        int closed = await Engine().RecoverLostReturnAsync("copilot-cli", "session-1", ["dev-easy"], Context(log), "agent-unknown");
 
         Assert.Equal(1, closed);
         Assert.Equal(only.Id, Assert.Single(RecoveredPosts()).PreId);
     }
 
     [Fact]
-    public void AStopThatNamesAFollowedAgentId_IsNotHeldBackByASiblingThatAlreadyReturned()
+    public async Task AStopThatNamesAFollowedAgentId_IsNotHeldBackByASiblingThatAlreadyReturned()
     {
         // The name rule treats this stop as the late signal of the sibling that returned and closes nothing. An agent
         // id says exactly which dispatch ended, so the late-stop check does not apply.
         StringWriter log = new();
-        Dispatch("dev-easy", "T2", "call-1", log);
+        await Dispatch("dev-easy", "T2", "call-1", log);
         Advance();
-        Dispatch("dev-easy", "T5", "call-2", log);
+        await Dispatch("dev-easy", "T5", "call-2", log);
         Follow("T2", "call-1", "agent-a", log);
         Follow("T5", "call-2", "agent-b", log);
         ArbiterLedgerEvent open = Assert.Single(Events(), e => e.Phase == ArbiterLedgerPhases.Pre && e.CallId == "call-2");
         Advance();
-        Return("T2", "call-1", log);
+        await Return("T2", "call-1", log);
 
         Advance();
-        int closed = Engine().RecoverLostReturn("copilot-cli", "session-1", ["dev-easy"], Context(log), "agent-b");
+        int closed = await Engine().RecoverLostReturnAsync("copilot-cli", "session-1", ["dev-easy"], Context(log), "agent-b");
 
         Assert.Equal(1, closed);
         Assert.Equal(open.Id, Assert.Single(RecoveredPosts()).PreId);
