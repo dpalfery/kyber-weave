@@ -387,13 +387,15 @@ function apiRouter(options: {
       return json(200, { session_id: SESSION_ID, harness: 'copilot' })
     }
     if (path.endsWith('/requests')) {
+      const requestRows = [
+        { request: 'req-1', prompt: 'Do the thing', turns: 1, model: null, timestamp: null },
+        { request: 'req-2', prompt: null, turns: 1, model: null, timestamp: null },
+      ]
       return json(
         200,
         options.requests ?? {
-          entries: [
-            { request: 'req-1', prompt: 'Do the thing', turns: 1, model: null, timestamp: null },
-            { request: 'req-2', prompt: null, turns: 1, model: null, timestamp: null },
-          ],
+          requests: requestRows,
+          data: requestRows,
           total: 2,
           page: 1,
           limit: 25,
@@ -402,12 +404,14 @@ function apiRouter(options: {
       )
     }
     if (path.endsWith('/tools')) {
+      const toolRows = [
+        { name: 'read_file', server: null, invocations: 1, invoked: true, in_definitions: true, is_mcp: false },
+      ]
       return json(
         200,
         options.tools ?? {
-          entries: [
-            { name: 'read_file', server: null, invocations: 1, invoked: true, in_definitions: true, is_mcp: false },
-          ],
+          tools: toolRows,
+          data: toolRows,
           aggregate: {
             maxCost: 10,
             residentCostTotal: 10,
@@ -514,7 +518,7 @@ describe('classifyParityGap', () => {
 
   it('refuses an unannotated content drop', () => {
     expect(() =>
-      classifyParityGap(baseGap({ code: 'content-part-drop', documentedGaps: ['content_part_withheld'] })),
+      classifyParityGap(baseGap({ code: 'content-part-drop', documentedGaps: ['no_message_structure'] })),
     ).toThrow(/Unannotated content drop/)
   })
 
@@ -742,6 +746,8 @@ describe('assertHarnessFullContentParity', () => {
   it('refuses an unannotated content drop when served parts render as empty blocks', async () => {
     const { page, world } = buildPage(apiRouter({}))
     wireDashboard(world)
+    world.add({ testId: 'harness-tab-pi' })
+    wireTimeline(world, { tool: 'span-tool', llm: 'span-llm' })
     // Every block renders empty although the API served a non-empty system_prompt part.
     world.handle('turn-bar-', () => {
       world.add(...turnDrawerElements({ emptyBlocks: [...CANONICAL_BLOCK_KEYS] }))
@@ -749,7 +755,106 @@ describe('assertHarnessFullContentParity', () => {
     world.handle('drawer-close-button', () => {})
 
     await expect(
-      assertHarnessFullContentParity(page, contract(), BASE_URL, { includeTurnDetail: false }),
+      assertHarnessFullContentParity(page, { ...contract(), harness: 'pi' }, BASE_URL, { includeTurnDetail: false }),
     ).rejects.toThrow(/Unannotated content drop \[content-part-drop\]/)
+  })
+
+  it('maps matrix gap markers like content_part_withheld to content-part-drop', () => {
+    const annotation = classifyParityGap({
+      code: 'content-part-drop',
+      harness: 'copilot',
+      sessionId: SESSION_ID,
+      dimension: 'context-content',
+      detail: 'withheld part',
+      documentedGaps: ['content_part_withheld'],
+    })
+    expect(annotation.documented).toBe(true)
+    expect(annotation.code).toBe('content-part-drop')
+  })
+
+  it('detects a single-part drop even when other blocks render content', async () => {
+    const { page, world } = buildPage(
+      apiRouter({
+        turnParts: [
+          { part: 'system_prompt', text: 'System prompt' },
+          { part: 'conversation_history', text: 'User asked a question' },
+        ],
+      }),
+    )
+    wireDashboard(world)
+    world.add({ testId: 'harness-tab-pi' })
+    wireTimeline(world, { tool: 'span-tool', llm: 'span-llm' })
+    // system_prompt renders, but conversation_history renders empty despite a non-empty part.
+    world.handle('turn-bar-', () => {
+      world.add(
+        ...turnDrawerElements({
+          emptyBlocks: ['instruction_context', 'conversation_history', 'tool_definitions', 'tool_result_content'],
+        }),
+      )
+    })
+    world.handle('turn-block-system_prompt-view-raw', () => {
+      world.add({ testId: 'turn-block-system_prompt-raw' })
+    })
+    world.handle('drawer-close-button', () => {})
+
+    await expect(
+      assertHarnessFullContentParity(page, { ...contract(), harness: 'pi' }, BASE_URL, { includeTurnDetail: false }),
+    ).rejects.toThrow(/Unannotated content drop \[content-part-drop\]/)
+  })
+
+  it('treats requests total > 0 with empty rows as a content-part-drop rather than requests-empty', async () => {
+    const { page, world } = buildPage(
+      apiRouter({
+        requests: { requests: [], data: [], total: 3, page: 1, limit: 25, offset: 0 },
+      }),
+    )
+    wireDashboard(world)
+    world.add({ testId: 'harness-tab-pi' }, { testId: 'requests-empty' })
+    wireTurnDrawer(world)
+    wireTimeline(world, { tool: 'span-tool', llm: 'span-llm' })
+
+    await expect(
+      assertHarnessFullContentParity(page, { ...contract(), harness: 'pi' }, BASE_URL, { includeTurnDetail: false }),
+    ).rejects.toThrow(/Unannotated content drop \[content-part-drop\]/)
+  })
+
+  it('records content-part-drop when timeline span drawer shows drawer-content-fallback-note', async () => {
+    const { page, world } = buildPage(apiRouter({}))
+    wireDashboard(world)
+    world.add({ testId: 'harness-tab-pi' })
+    wireTurnDrawer(world)
+    wireTimeline(world, { tool: 'span-tool', llm: 'span-llm' })
+    world.handle('timeline-bar-span-tool', () => {
+      world.add(
+        { testId: 'span-inspector' },
+        { testId: 'drawer-content-fallback-note' },
+        { testId: 'drawer-close-button' },
+      )
+    })
+
+    await expect(
+      assertHarnessFullContentParity(page, { ...contract(), harness: 'pi' }, BASE_URL, { includeTurnDetail: false }),
+    ).rejects.toThrow(/Unannotated content drop \[content-part-drop\]/)
+  })
+
+  it('annotates a faulted projection turn when turn-section-error renders instead of turn-content-full', async () => {
+    const { page, world } = buildPage(
+      apiRouter({
+        projectionFailed: true,
+      }),
+    )
+    wireDashboard(world)
+    wireTimeline(world, { tool: 'span-tool', llm: 'span-llm' })
+    world.handle('turn-bar-', () => {
+      world.add(
+        { testId: 'session-inspector-drawer' },
+        { testId: 'turn-section-error' },
+        { testId: 'drawer-close-button' },
+      )
+    })
+
+    const result = await assertHarnessFullContentParity(page, contract(), BASE_URL, { includeTurnDetail: false })
+    expect(result.drawer?.turnContentEmpty).toBe(true)
+    expect(result.gaps.map((gap) => gap.code)).toContain('turn-content-empty')
   })
 })

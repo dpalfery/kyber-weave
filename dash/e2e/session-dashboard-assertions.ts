@@ -269,6 +269,16 @@ const INTRINSIC_GAP_CODES: ReadonlySet<ParityGapCode> = new Set<ParityGapCode>([
   'tool-invocation-absent',
 ])
 
+/** Matrix gap markers (`HARNESS_PARITY_MATRIX.knownGaps`) that document a `content-part-drop`. */
+const CONTENT_DROP_MARKERS: ReadonlySet<string> = new Set<string>([
+  'content-part-drop',
+  'content_part_withheld',
+  'system_prompt_bucket_absent',
+  'partial_turn_projection',
+  'tool_call_input_text_absent',
+  'tool_call_result_text_absent',
+])
+
 /** One piece of parity-gap evidence, before it is classified. */
 export type ParityGapEvidence = {
   readonly code: ParityGapCode
@@ -317,8 +327,11 @@ export function classifyParityGap(
       `Parity gap [${evidence.code}] for ${evidence.harness} session ${evidence.sessionId}: ${evidence.detail}`,
     )
   }
+  const documentedGaps = evidence.documentedGaps ?? []
   const documented =
-    INTRINSIC_GAP_CODES.has(evidence.code) || (evidence.documentedGaps ?? []).includes(evidence.code)
+    INTRINSIC_GAP_CODES.has(evidence.code) ||
+    documentedGaps.includes(evidence.code) ||
+    (evidence.code === 'content-part-drop' && documentedGaps.some((marker) => CONTENT_DROP_MARKERS.has(marker)))
   if (!documented) {
     throw new Error(
       `Unannotated content drop [${evidence.code}] for ${evidence.harness} session ${evidence.sessionId}: ${evidence.detail} is not listed in the harness parity matrix`,
@@ -742,13 +755,15 @@ async function inspectChartDrawer(
     await firstBar.click()
     clicked = true
   } else if ((await countTestIdPrefix(spend, 'context-turn-')) > 0) {
-    // The stacked-bar row's labelled header opens the full-context drawer; the row div itself is
-    // the click target here, so the open is verified below rather than assumed.
-    const exactRow = spend.getByTestId(`context-turn-${preferredTurnIndex}`)
+    // `context-turn-<n>` carries the 1-based composition index, and its click handler lives on
+    // the inner `[role="button"]` header span (`SessionSpendCharts.tsx:1718-1730`).
+    const exactRow = spend.getByTestId(`context-turn-${preferredTurnIndex + 1}`)
     const row = (await exactRow.count()) > 0 ? exactRow.first() : spend.locator('[data-testid^="context-turn-"]').first()
     const parsed = Number((await row.getAttribute('data-testid'))?.slice('context-turn-'.length) ?? NaN)
-    if (Number.isInteger(parsed) && parsed >= 0) inspectedTurn = parsed
-    await row.click()
+    if (Number.isInteger(parsed) && parsed >= 1) inspectedTurn = parsed - 1
+    const button = row.locator('[role="button"]').first()
+    if ((await button.count()) > 0) await button.click()
+    else await row.click()
     clicked = true
   }
   if (!clicked) return null
@@ -757,20 +772,27 @@ async function inspectChartDrawer(
 
   const drawer = page.getByTestId('session-inspector-drawer')
   await mustBeVisible(drawer, 'session inspector drawer')
-  await mustBeVisible(page.getByTestId('turn-content-full'), 'turn full-content panel')
 
   const { parts, projectionFailed } = await readTurnParts(page, baseUrl, sessionId, inspectedTurn)
-  const turnContentEmpty = (await page.getByTestId('turn-content-empty').count()) > 0
+  const sectionErrorVisible = (await page.getByTestId('turn-section-error').count()) > 0
   if (projectionFailed) {
-    if (!turnContentEmpty) {
-      throw new Error(`turn ${inspectedTurn} of ${sessionId} faulted its projection without the empty-turn state`)
+    if (!sectionErrorVisible && (await page.getByTestId('turn-content-empty').count()) === 0) {
+      throw new Error(`turn ${inspectedTurn} of ${sessionId} faulted its projection without rendering an error or empty-turn state`)
     }
     record({
       code: 'turn-content-empty',
       dimension: 'turn-projection',
       detail: `turn ${inspectedTurn} projection faulted; the drawer stated it instead of rendering content`,
     })
-  } else if (turnContentEmpty) {
+    const close = page.getByTestId('drawer-close-button')
+    await mustBeVisible(close, 'drawer close button')
+    await close.click()
+    return { reachable: true, blocks: [], turnContentEmpty: true }
+  }
+
+  await mustBeVisible(page.getByTestId('turn-content-full'), 'turn full-content panel')
+  const turnContentEmpty = (await page.getByTestId('turn-content-empty').count()) > 0
+  if (turnContentEmpty) {
     throw new Error(`turn ${inspectedTurn} of ${sessionId} rendered the empty-turn state for a projected turn`)
   }
 
@@ -804,11 +826,24 @@ async function inspectChartDrawer(
     throw new Error(`turn ${inspectedTurn} of ${sessionId} rendered its full content without a copy-turn button`)
   }
 
-  if (canonicalNonEmptyPartCount(parts) > 0 && blocks.every((block) => block.empty)) {
+  const nonEmptyByKey = new Set(
+    parts
+      .filter(
+        (part) =>
+          isRecord(part) &&
+          CANONICAL_TURN_PART_KEYS.has(stringOrEmpty(part.part)) &&
+          stringOrEmpty(part.text).trim() !== '',
+      )
+      .map((part) => stringOrEmpty((part as JsonObject).part)),
+  )
+  const droppedKeys = blocks
+    .filter((block) => block.empty && nonEmptyByKey.has(block.key))
+    .map((block) => block.key)
+  if (droppedKeys.length > 0) {
     record({
       code: 'content-part-drop',
       dimension: 'context-content',
-      detail: `turn ${inspectedTurn} served non-empty canonical parts but every block rendered empty`,
+      detail: `turn ${inspectedTurn} served non-empty canonical parts for [${droppedKeys.join(', ')}] that rendered empty`,
     })
   }
 
@@ -894,7 +929,15 @@ async function inspectTimelineSpans(
 
   const barsTab = page.getByTestId('timeline-tab-bars')
   if ((await barsTab.count()) > 0) await barsTab.click()
-  const bar = page.getByTestId(`timeline-bar-${spanId}`)
+  let bar = page.getByTestId(`timeline-bar-${spanId}`)
+  if ((await bar.count()) === 0 && nestedRoots.length > 0) {
+    const expandButtons = section.locator('[data-testid="timeline-node-expand"][aria-expanded="false"]')
+    const expandCount = await expandButtons.count()
+    for (let i = 0; i < expandCount; i += 1) {
+      await expandButtons.first().click()
+    }
+    bar = page.getByTestId(`timeline-bar-${spanId}`)
+  }
   await mustBeVisible(bar, `timeline bar for span ${spanId}`)
   await bar.click()
   await mustBeVisible(page.getByTestId('span-inspector'), `span inspector for span ${spanId}`)
@@ -914,6 +957,12 @@ async function inspectTimelineSpans(
       code: 'tool-invocation-absent',
       dimension: 'tool-invocations',
       detail: `span ${spanId} opened no full-content drawer view`,
+    })
+  } else if (drawerContent === 'fallback-note') {
+    record({
+      code: 'content-part-drop',
+      dimension: 'tool-invocations',
+      detail: `span ${spanId} rendered drawer-content-fallback-note instead of full content`,
     })
   }
 
@@ -943,7 +992,16 @@ async function assertSessionRequests(
   const total = numberOr(requests.total, rows.length)
   const offset = numberOr(requests.offset, 0)
 
-  if (total === 0 || rows.length === 0) {
+  if (total > 0 && rows.length === 0) {
+    record({
+      code: 'content-part-drop',
+      dimension: 'user-requests',
+      detail: `session ${sessionId} reported total=${total} requests but served 0 rows on page 1`,
+    })
+    return { total, rowsOnPage: 0 }
+  }
+
+  if (total === 0) {
     await mustBeVisible(page.getByTestId('requests-empty'), 'empty user-requests note')
     if ((await countTestIdPrefix(page, 'request-row-')) !== 0) {
       throw new Error(`session ${sessionId} rendered request rows while the route served none`)
