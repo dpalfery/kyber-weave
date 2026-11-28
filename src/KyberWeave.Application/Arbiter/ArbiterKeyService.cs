@@ -77,6 +77,71 @@ public sealed class ArbiterKeyService(
         return uri => ArbiterKeyResolver.Resolve(uri.ToString(), store, environment.GetVariable, userOverrideEndpoint);
     }
 
+    /// <inheritdoc />
+    public async Task<string?> ResolveKeyAsync(KyberWeaveConfig config, string endpoint, CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(config);
+        ArgumentException.ThrowIfNullOrWhiteSpace(endpoint);
+        return await ArbiterKeyResolver.ResolveAsync(
+            ArbiterUserSettings.NormalizeEndpoint(endpoint), store, environment.GetVariable, UserOverrideEndpoint(config), cancellationToken).ConfigureAwait(false);
+    }
+
+    /// <inheritdoc />
+    public async Task<string?> ResolveKeyAsync(
+        KyberWeaveConfig config, ArbiterProviderConfig effectiveProvider, string endpoint, CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(config);
+        ArgumentNullException.ThrowIfNull(effectiveProvider);
+        ArgumentException.ThrowIfNullOrWhiteSpace(endpoint);
+        return await ArbiterKeyResolver.ResolveAsync(
+            ArbiterUserSettings.NormalizeEndpoint(endpoint),
+            store,
+            environment.GetVariable,
+            UserOverrideEndpoint(config.Arbiter.Provider, effectiveProvider),
+            cancellationToken).ConfigureAwait(false);
+    }
+
+    /// <inheritdoc />
+    public async Task<string?> TryResolveKeyAsync(KyberWeaveConfig config, string endpoint, CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(config);
+        ArgumentException.ThrowIfNullOrWhiteSpace(endpoint);
+        try
+        {
+            return await ResolveKeyAsync(config, endpoint, cancellationToken).ConfigureAwait(false);
+        }
+        catch (Exception exception) when (FileFailure.Is(exception) || exception is InvalidOperationException or System.ComponentModel.Win32Exception)
+        {
+            return null;
+        }
+    }
+
+    /// <inheritdoc />
+    public async Task<string?> TryResolveKeyAsync(
+        KyberWeaveConfig config, ArbiterProviderConfig effectiveProvider, string endpoint, CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(config);
+        ArgumentNullException.ThrowIfNull(effectiveProvider);
+        ArgumentException.ThrowIfNullOrWhiteSpace(endpoint);
+        try
+        {
+            return await ResolveKeyAsync(config, effectiveProvider, endpoint, cancellationToken).ConfigureAwait(false);
+        }
+        catch (Exception exception) when (FileFailure.Is(exception) || exception is InvalidOperationException or System.ComponentModel.Win32Exception)
+        {
+            return null;
+        }
+    }
+
+    /// <inheritdoc />
+    public Func<Uri, CancellationToken, Task<string?>> CreateKeyResolverAsync(KyberWeaveConfig config)
+    {
+        ArgumentNullException.ThrowIfNull(config);
+        string? userOverrideEndpoint = UserOverrideEndpoint(config);
+        return (uri, cancellationToken) => ArbiterKeyResolver.ResolveAsync(
+            uri.ToString(), store, environment.GetVariable, userOverrideEndpoint, cancellationToken);
+    }
+
     private string? UserOverrideEndpoint(KyberWeaveConfig config)
     {
         try

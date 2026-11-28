@@ -263,6 +263,23 @@ public sealed class ArbiterConsoleSeamTests
         public string? TryResolveKey(KyberWeaveConfig config, ArbiterProviderConfig effectiveProvider, string endpoint) => null;
 
         public Func<Uri, string?> CreateKeyResolver(KyberWeaveConfig config) => _ => null;
+
+        public Task<string?> ResolveKeyAsync(KyberWeaveConfig config, string endpoint, CancellationToken cancellationToken) =>
+            Task.FromResult<string?>(null);
+
+        public Task<string?> ResolveKeyAsync(
+            KyberWeaveConfig config, ArbiterProviderConfig effectiveProvider, string endpoint, CancellationToken cancellationToken) =>
+            Task.FromResult<string?>(null);
+
+        public Task<string?> TryResolveKeyAsync(KyberWeaveConfig config, string endpoint, CancellationToken cancellationToken) =>
+            Task.FromResult<string?>(null);
+
+        public Task<string?> TryResolveKeyAsync(
+            KyberWeaveConfig config, ArbiterProviderConfig effectiveProvider, string endpoint, CancellationToken cancellationToken) =>
+            Task.FromResult<string?>(null);
+
+        public Func<Uri, CancellationToken, Task<string?>> CreateKeyResolverAsync(KyberWeaveConfig config) =>
+            (_, _) => Task.FromResult<string?>(null);
     }
 
     /// <summary>Holds no global targets, so the status report's GLOBAL section is the empty notice.</summary>

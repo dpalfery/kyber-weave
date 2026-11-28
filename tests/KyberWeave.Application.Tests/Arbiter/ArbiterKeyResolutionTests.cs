@@ -336,4 +336,84 @@ public sealed class ArbiterKeyResolutionTests
 
         Assert.Null(resolved);
     }
+
+    [Fact]
+    public async Task KeyService_WithPreResolvedEffectiveProvider_AsyncUsesBindingWithoutReReadingOverride()
+    {
+        int applyCount = 0;
+        FakeArbiterUserSettings userSettings = new()
+        {
+            Override = (repository, _) =>
+            {
+                applyCount++;
+                return repository;
+            },
+        };
+        FakeCredentialStore store = new();
+        FakeProcessEnvironment environment = new(
+            homeDirectory: ArbiterTestRoots.Under("home"),
+            readVariable: EnvReader(SentinelKey));
+        ArbiterKeyService service = new(store, environment, userSettings);
+        KyberWeaveConfig config = KyberWeaveConfigDefaults.Product;
+        ArbiterProviderConfig effectiveProvider = config.Arbiter.Provider with
+        {
+            Kind = ArbiterProviderKind.Systemone,
+            Endpoint = "https://openrouter.ai/api/v1",
+        };
+
+        string? resolved = await service.ResolveKeyAsync(config, effectiveProvider, effectiveProvider.Endpoint, CancellationToken.None);
+        string? tryResolved = await service.TryResolveKeyAsync(config, effectiveProvider, effectiveProvider.Endpoint, CancellationToken.None);
+
+        Assert.Equal(SentinelKey, resolved);
+        Assert.Equal(SentinelKey, tryResolved);
+        Assert.Equal(0, applyCount);
+    }
+
+    [Fact]
+    public async Task KeyService_Async_OverrideEndpointWithSurroundingWhitespace_HonorsEnvKey()
+    {
+        string home = ArbiterTestRoots.Under("home");
+        _state.Files.CreateDirectory(Path.Combine(home, ".config", "kyber-weave"));
+        _state.Files.WriteAllText(
+            ArbiterUserSettings.GetPath(home),
+            "provider:\n  kind: systemone\n  endpoint: \"https://openrouter.ai/api/v1 \"\n");
+        FileArbiterUserSettings userSettings = new(_state.Files);
+        FakeCredentialStore store = new();
+        FakeProcessEnvironment environment = new(
+            homeDirectory: home,
+            readVariable: EnvReader(SentinelKey));
+        ArbiterKeyService service = new(store, environment, userSettings);
+        KyberWeaveConfig config = KyberWeaveConfigDefaults.Product;
+        ArbiterProviderConfig effective = userSettings.ApplyTo(config.Arbiter.Provider, home);
+
+        Assert.Equal(SentinelKey, await service.ResolveKeyAsync(config, "https://openrouter.ai/api/v1", CancellationToken.None));
+        Assert.Equal(SentinelKey, await service.ResolveKeyAsync(config, effective, "https://openrouter.ai/api/v1", CancellationToken.None));
+        Assert.Equal(SentinelKey, await service.TryResolveKeyAsync(config, effective, "https://openrouter.ai/api/v1", CancellationToken.None));
+
+        Func<Uri, CancellationToken, Task<string?>> resolver = service.CreateKeyResolverAsync(config);
+        Assert.Equal(SentinelKey, await resolver(new Uri("https://openrouter.ai/api/v1"), CancellationToken.None));
+    }
+
+    [Fact]
+    public async Task KeyService_Async_OverrideDiffersOnlyByWhitespaceFromRepository_DoesNotHonorEnvKey()
+    {
+        FakeCredentialStore store = new();
+        FakeProcessEnvironment environment = new(
+            homeDirectory: ArbiterTestRoots.Under("home"),
+            readVariable: EnvReader(SentinelKey));
+        ArbiterKeyService service = new(store, environment, new FakeArbiterUserSettings());
+        KyberWeaveConfig config = new()
+        {
+            Arbiter = new ArbiterConfig
+            {
+                Enabled = true,
+                Provider = new ArbiterProviderConfig(ArbiterProviderKind.Systemone, "https://repo.example.com/v1", "jev-1.14.0", 3000),
+            },
+        };
+        ArbiterProviderConfig effective = config.Arbiter.Provider with { Endpoint = " https://repo.example.com/v1 " };
+
+        string? resolved = await service.TryResolveKeyAsync(config, effective, "https://repo.example.com/v1", CancellationToken.None);
+
+        Assert.Null(resolved);
+    }
 }
