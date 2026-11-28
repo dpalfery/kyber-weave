@@ -83,4 +83,19 @@ public interface IArbiterDoctorService
     /// <param name="report">Receives the findings.</param>
     /// <returns>What the run found, for the host to print.</returns>
     ArbiterDoctorReport Inspect(string repositoryPath, string? configFile, DiagnosticReport report);
+
+    /// <summary>
+    /// The same checks without blocking a thread: the repository root, the key and the git ignore check are awaited
+    /// rather than waited on. A malformed override still leaves the product defaults to diagnose. Writes nothing.
+    /// </summary>
+    /// <param name="repositoryPath">The repository path the command was pointed at.</param>
+    /// <param name="configFile">The <c>--config</c> path, or null.</param>
+    /// <param name="report">Receives the findings.</param>
+    /// <param name="cancellationToken">Cancels the git run, the credential-store lookup and kills the process tree.</param>
+    /// <returns>What the run found, for the host to print.</returns>
+    Task<ArbiterDoctorReport> InspectAsync(
+        string repositoryPath,
+        string? configFile,
+        DiagnosticReport report,
+        CancellationToken cancellationToken = default);
 }

@@ -62,9 +62,7 @@ public sealed class ArbiterDoctorService(
         HarnessGatingReport gatingReport = gating.Build(root, home, config, globalTargets);
 
         List<ArbiterDoctorLine> lines = [];
-        report.AddRange(RuleValidator.Validate(config.Arbiter, configPath));
-        report.AddRange(RuleValidator.CheckModelTuning(config.Arbiter));
-        CheckProviderTimeout(config, home, report);
+        BeginChecks(config, configPath, home, report);
         CheckKey(config, report, lines);
         CheckLogIgnored(root, report, lines);
         CheckBinary(report, lines);
@@ -73,6 +71,52 @@ public sealed class ArbiterDoctorService(
         CheckModelTargets(config, home, globalTargets, report, lines);
         CheckAdvisoryPostDispatchTargets(lines);
 
+        return Report(config, globalTargets, gatingReport, lines);
+    }
+
+    /// <inheritdoc />
+    public async Task<ArbiterDoctorReport> InspectAsync(
+        string repositoryPath,
+        string? configFile,
+        DiagnosticReport report,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(report);
+
+        _ = configs.TryResolve(repositoryPath, configFile, report, out KyberWeaveConfig config, out string? configPath);
+        string home = environment.HomeDirectory;
+        IReadOnlyList<string> globalTargets = userConfig.ReadGlobalTargets(home);
+        string root = await locator.ResolveRepositoryRootAsync(repositoryPath, cancellationToken).ConfigureAwait(false);
+        HarnessGatingReport gatingReport = gating.Build(root, home, config, globalTargets);
+
+        List<ArbiterDoctorLine> lines = [];
+        BeginChecks(config, configPath, home, report);
+        await CheckKeyAsync(config, report, lines, cancellationToken).ConfigureAwait(false);
+        await CheckLogIgnoredAsync(root, report, lines, cancellationToken).ConfigureAwait(false);
+        CheckBinary(report, lines);
+        CheckGuard(config, root, report, lines);
+        CheckProjectHooks(gatingReport, report, lines);
+        CheckModelTargets(config, home, globalTargets, report, lines);
+        CheckAdvisoryPostDispatchTargets(lines);
+
+        return Report(config, globalTargets, gatingReport, lines);
+    }
+
+    /// <summary>The checks that read no outside state beyond the loaded configuration.</summary>
+    private void BeginChecks(KyberWeaveConfig config, string? configPath, string home, DiagnosticReport report)
+    {
+        report.AddRange(RuleValidator.Validate(config.Arbiter, configPath));
+        report.AddRange(RuleValidator.CheckModelTuning(config.Arbiter));
+        CheckProviderTimeout(config, home, report);
+    }
+
+    /// <summary>What a run found, assembled from the lines every check wrote.</summary>
+    private static ArbiterDoctorReport Report(
+        KyberWeaveConfig config,
+        IReadOnlyList<string> globalTargets,
+        HarnessGatingReport gatingReport,
+        IReadOnlyList<ArbiterDoctorLine> lines)
+    {
         IReadOnlyList<ArbiterDoctorScopeTarget> scope = [.. globalTargets.Select(token => new ArbiterDoctorScopeTarget(TargetDisplayName(token), GlobalReason(token)))];
         return new ArbiterDoctorReport(config.Arbiter.Enabled, scope, gatingReport, lines);
     }
@@ -364,7 +408,6 @@ public sealed class ArbiterDoctorService(
             return;
         }
 
-        string? origin = ArbiterKeyResolver.GetOrigin(provider.Endpoint);
         string? key;
         try
         {
@@ -372,17 +415,7 @@ public sealed class ArbiterDoctorService(
         }
         catch (SecretServiceUnavailableException exception)
         {
-            // The store cannot run on this host: the finding carries the remedy, not a generic "no key".
-            lines.Add(new ArbiterDoctorLine(
-                ArbiterDoctorStatus.Warn,
-                "Key",
-                ArbiterKeyResolver.MissingKeyCode,
-                exception.Message));
-            report.Add(new Diagnostic(
-                ArbiterKeyResolver.MissingKeyCode,
-                Severity.Warning,
-                exception.Message,
-                "arbiter.provider"));
+            ReportKeyStoreUnavailable(exception, report, lines);
             return;
         }
         catch (Exception exception) when (FileFailure.Is(exception) || exception is InvalidOperationException or System.ComponentModel.Win32Exception)
@@ -390,6 +423,48 @@ public sealed class ArbiterDoctorService(
             key = null;
         }
 
+        ReportKey(key, provider, report, lines);
+    }
+
+    private async Task CheckKeyAsync(
+        KyberWeaveConfig config,
+        DiagnosticReport report,
+        List<ArbiterDoctorLine> lines,
+        CancellationToken cancellationToken)
+    {
+        ArbiterProviderConfig provider = config.Arbiter.Provider;
+        if (provider.Kind == ArbiterProviderKind.None || ArbiterKeyResolver.IsLoopbackEndpoint(provider.Endpoint))
+        {
+            lines.Add(new ArbiterDoctorLine(ArbiterDoctorStatus.Ok, "Key", null, "none needed (none or loopback provider)."));
+            return;
+        }
+
+        string? key;
+        try
+        {
+            key = await keys.ResolveKeyAsync(config, provider.Endpoint, cancellationToken).ConfigureAwait(false);
+        }
+        catch (SecretServiceUnavailableException exception)
+        {
+            ReportKeyStoreUnavailable(exception, report, lines);
+            return;
+        }
+        catch (Exception exception) when (FileFailure.Is(exception) || exception is InvalidOperationException or System.ComponentModel.Win32Exception)
+        {
+            key = null;
+        }
+
+        ReportKey(key, provider, report, lines);
+    }
+
+    /// <summary>The line and finding for a key that did or did not resolve.</summary>
+    private static void ReportKey(
+        string? key,
+        ArbiterProviderConfig provider,
+        DiagnosticReport report,
+        List<ArbiterDoctorLine> lines)
+    {
+        string? origin = ArbiterKeyResolver.GetOrigin(provider.Endpoint);
         if (key is not null)
         {
             lines.Add(new ArbiterDoctorLine(
@@ -413,9 +488,38 @@ public sealed class ArbiterDoctorService(
             Hint: $"Run 'arbiter setup' or export {ArbiterKeyResolver.EnvVarName}."));
     }
 
-    private void CheckLogIgnored(string root, DiagnosticReport report, List<ArbiterDoctorLine> lines)
+    /// <summary>The finding for a credential store that cannot run on this host: it carries the remedy, not a generic "no key".</summary>
+    private static void ReportKeyStoreUnavailable(
+        SecretServiceUnavailableException exception,
+        DiagnosticReport report,
+        List<ArbiterDoctorLine> lines)
     {
-        if (IsIgnoredByGit(root))
+        lines.Add(new ArbiterDoctorLine(
+            ArbiterDoctorStatus.Warn,
+            "Key",
+            ArbiterKeyResolver.MissingKeyCode,
+            exception.Message));
+        report.Add(new Diagnostic(
+            ArbiterKeyResolver.MissingKeyCode,
+            Severity.Warning,
+            exception.Message,
+            "arbiter.provider"));
+    }
+
+    private void CheckLogIgnored(string root, DiagnosticReport report, List<ArbiterDoctorLine> lines) =>
+        ReportLogIgnored(IsIgnoredByGit(root), report, lines);
+
+    private async Task CheckLogIgnoredAsync(
+        string root,
+        DiagnosticReport report,
+        List<ArbiterDoctorLine> lines,
+        CancellationToken cancellationToken) =>
+        ReportLogIgnored(await IsIgnoredByGitAsync(root, cancellationToken).ConfigureAwait(false), report, lines);
+
+    /// <summary>The line and finding for the arbiter state directory, ignored by git or not.</summary>
+    private static void ReportLogIgnored(bool ignored, DiagnosticReport report, List<ArbiterDoctorLine> lines)
+    {
+        if (ignored)
         {
             lines.Add(new ArbiterDoctorLine(
                 ArbiterDoctorStatus.Ok,
@@ -443,6 +547,21 @@ public sealed class ArbiterDoctorService(
         try
         {
             GitOutcome result = git.Run(root, ["check-ignore", "-q", ArbiterStateDirectory.ProjectRelativeDirectory]);
+            return result.ExitCode == 0;
+        }
+        catch (Exception exception) when (FileFailure.Is(exception) || exception is InvalidOperationException or System.ComponentModel.Win32Exception or TimeoutException)
+        {
+            // Without git there is no evidence the log is ignored: warn, the safe direction.
+            return false;
+        }
+    }
+
+    private async Task<bool> IsIgnoredByGitAsync(string root, CancellationToken cancellationToken)
+    {
+        try
+        {
+            GitOutcome result = await git.RunAsync(
+                root, ["check-ignore", "-q", ArbiterStateDirectory.ProjectRelativeDirectory], cancellationToken).ConfigureAwait(false);
             return result.ExitCode == 0;
         }
         catch (Exception exception) when (FileFailure.Is(exception) || exception is InvalidOperationException or System.ComponentModel.Win32Exception or TimeoutException)

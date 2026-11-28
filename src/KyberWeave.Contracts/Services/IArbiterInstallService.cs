@@ -148,9 +148,27 @@ public interface IArbiterInstallService
     /// <returns>The events so far, and the plan the host confirms and applies.</returns>
     ArbiterInstallPrepared Prepare(ArbiterInstallRequest request);
 
+    /// <summary>
+    /// The same preparation without blocking a thread: the docs scaffold, the credential-store lookup and the key
+    /// resolution are awaited rather than waited on.
+    /// </summary>
+    /// <param name="request">What the command was asked to do.</param>
+    /// <param name="cancellationToken">Cancels the scaffold and the credential-store lookups.</param>
+    /// <returns>The events so far, and the plan the host confirms and applies.</returns>
+    Task<ArbiterInstallPrepared> PrepareAsync(ArbiterInstallRequest request, CancellationToken cancellationToken = default);
+
     /// <summary>Writes the plan, installs the deployment and verifies the result.</summary>
     /// <param name="plan">The plan <see cref="Prepare"/> produced.</param>
     /// <param name="cancellationToken">Cancels the deployment.</param>
     /// <returns>The events, and the exit code the host returns.</returns>
     ArbiterInstallApplied Apply(ArbiterInstallPlan plan, CancellationToken cancellationToken);
+
+    /// <summary>
+    /// The same write, install and verify without blocking a thread: the credential-store write and the deployment
+    /// are awaited rather than waited on.
+    /// </summary>
+    /// <param name="plan">The plan <see cref="PrepareAsync"/> produced.</param>
+    /// <param name="cancellationToken">Cancels the credential-store write, the deployment and the verification.</param>
+    /// <returns>The events, and the exit code the host returns.</returns>
+    Task<ArbiterInstallApplied> ApplyAsync(ArbiterInstallPlan plan, CancellationToken cancellationToken = default);
 }

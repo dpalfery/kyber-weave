@@ -58,6 +58,74 @@ public sealed class ArbiterInstallServiceSeamsTests
         Assert.Equal(WorkingDirectory + "/repo", prepared.Plan.Root);
     }
 
+    /// <summary>
+    /// The asynchronous preparation resolves the same root as the synchronous one, so a caller moving to it keeps the
+    /// behaviour it had.
+    /// </summary>
+    [Fact]
+    public async Task PrepareAsync_ResolvesTheSameRelativeProjectPath()
+    {
+        ArbiterInstallService service = Service();
+
+        ArbiterInstallPrepared prepared = await service.PrepareAsync(
+            Request(pathOption: "repo", projectScope: true), TestContext.Current.CancellationToken);
+
+        Assert.Equal(0, prepared.ExitCode);
+        Assert.NotNull(prepared.Plan);
+        Assert.Equal(WorkingDirectory + "/repo", prepared.Plan.Root);
+    }
+
+    /// <summary>
+    /// The asynchronous application writes the key through the store's asynchronous member and verifies the install,
+    /// so the credential write never blocks a thread.
+    /// </summary>
+    [Fact]
+    public async Task ApplyAsync_WritesTheKeyThroughTheAsyncStoreAndVerifies()
+    {
+        RecordingStore store = new();
+        FakeArbiterUserSettings settings = OverrideToSystemone();
+        IArbiterConfigResolver configs = new RepositoryEndpointConfigs(ArbiterProviderConfig.DefaultNone.Endpoint);
+        ArbiterInstallService service = Service(
+            settings,
+            configs: configs,
+            lifecycle: new SucceedingLifecycle(),
+            store: store);
+
+        ArbiterInstallPrepared prepared = await service.PrepareAsync(
+            Request(pathOption: null, projectScope: false, providerOption: "systemone", arbiterKey: "typed-key", dryRun: false),
+            TestContext.Current.CancellationToken);
+        Assert.NotNull(prepared.Plan);
+
+        ArbiterInstallApplied applied = await service.ApplyAsync(prepared.Plan, TestContext.Current.CancellationToken);
+
+        Assert.Equal(0, applied.ExitCode);
+        Assert.Empty(applied.Events.OfType<ArbiterInstallError>());
+        Assert.Equal(1, store.AsyncWrites);
+        Assert.Equal(0, store.SyncWrites);
+        Assert.Equal("typed-key", await store.ReadAsync(OverrideOrigin, TestContext.Current.CancellationToken));
+    }
+
+    /// <summary>
+    /// The asynchronous preparation reads the credential store through its asynchronous member, and does not touch the
+    /// synchronous one, so no thread blocks on the store.
+    /// </summary>
+    [Fact]
+    public async Task PrepareAsync_ReadsTheStoredKeyThroughTheAsyncStore()
+    {
+        RecordingStore store = new();
+        store.Seed(OverrideOrigin, "override-key");
+        IArbiterConfigResolver configs = new RepositoryEndpointConfigs(ArbiterProviderConfig.DefaultNone.Endpoint);
+        ArbiterInstallService service = Service(OverrideToSystemone(), configs: configs, store: store);
+
+        ArbiterInstallPrepared prepared = await service.PrepareAsync(
+            Request(pathOption: null, projectScope: true, providerOption: "systemone"),
+            TestContext.Current.CancellationToken);
+
+        Assert.Equal(0, prepared.ExitCode);
+        Assert.True(store.AsyncReads > 0, "The asynchronous preparation must read the store through ReadAsync.");
+        Assert.Equal(0, store.SyncReads);
+    }
+
     /// <summary>An absolute option is its own root, whatever the working directory is.</summary>
     [Fact]
     public void Prepare_KeepsAnAbsoluteProjectPathUnchanged()
@@ -1062,7 +1130,8 @@ public sealed class ArbiterInstallServiceSeamsTests
         IArbiterKeyService? keys = null,
         IArbiterConfigResolver? configs = null,
         Func<string, string?>? readVariable = null,
-        IArbiterInstallLifecycle? lifecycle = null)
+        IArbiterInstallLifecycle? lifecycle = null,
+        ICredentialStore? store = null)
     {
         IArbiterUserSettings effectiveSettings = userSettings ?? new NoOverride();
         FakeProcessEnvironment environment = readVariable is null
@@ -1071,6 +1140,7 @@ public sealed class ArbiterInstallServiceSeamsTests
                 currentDirectory: WorkingDirectory,
                 homeDirectory: Home,
                 readVariable: readVariable);
+        ICredentialStore credentials = store ?? _store;
         return new ArbiterInstallService(
             environment,
             _paths,
@@ -1078,14 +1148,14 @@ public sealed class ArbiterInstallServiceSeamsTests
             configs ?? new ProductConfigs(),
             effectiveSettings,
             new NoKeyInput(),
-            _store,
+            credentials,
             _files,
             new FakeSquadStateStore(new FakeSquadUserPaths(Home)),
             lifecycle ?? new NoLifecycle(),
             new FakeSquadGlobalRootResolver(Home),
             new PresentBinary(),
             new NoScaffolder(),
-            keys ?? new ArbiterKeyService(_store, environment, effectiveSettings));
+            keys ?? new ArbiterKeyService(credentials, environment, effectiveSettings));
     }
 
     /// <summary>The shipped provider config, with no per-user override over it.</summary>
@@ -1235,5 +1305,45 @@ public sealed class ArbiterInstallServiceSeamsTests
             IReadOnlyList<string>? standards = null,
             CancellationToken cancellationToken = default) =>
             throw new InvalidOperationException("A preparation must not scaffold.");
+    }
+
+    /// <summary>A credential store that reports which member was used, so a test can prove the async path took the async one.</summary>
+    private sealed class RecordingStore : ICredentialStore
+    {
+        private readonly FakeCredentialStore _inner = new();
+
+        public int SyncReads { get; private set; }
+
+        public int AsyncReads { get; private set; }
+
+        public int SyncWrites { get; private set; }
+
+        public int AsyncWrites { get; private set; }
+
+        public void Seed(string origin, string key) => _inner.Seed(origin, key);
+
+        public string? Read(string origin)
+        {
+            SyncReads++;
+            return _inner.Read(origin);
+        }
+
+        public void Write(string origin, string key)
+        {
+            SyncWrites++;
+            _inner.Write(origin, key);
+        }
+
+        public ValueTask<string?> ReadAsync(string origin, CancellationToken cancellationToken = default)
+        {
+            AsyncReads++;
+            return _inner.ReadAsync(origin, cancellationToken);
+        }
+
+        public ValueTask WriteAsync(string origin, string key, CancellationToken cancellationToken = default)
+        {
+            AsyncWrites++;
+            return _inner.WriteAsync(origin, key, cancellationToken);
+        }
     }
 }
