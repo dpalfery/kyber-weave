@@ -68,44 +68,6 @@ public sealed class RepositoryDocsAnalysisReader : IDocsAnalysisReader
     }
 
     /// <inheritdoc />
-    public DocumentationAnalysisResult Analyze(CancellationToken cancellationToken = default)
-    {
-        cancellationToken.ThrowIfCancellationRequested();
-        KyberWeaveConfig config = LoadConfig();
-        DocumentSet documents = _documents.Create(_repositoryRoot, config.Ontology).Load();
-        cancellationToken.ThrowIfCancellationRequested();
-        ICodeGraphResolver codeGraph = _codeGraph.ForRepository(_repositoryRoot).Resolver;
-        DocGraphProjection graph = DocGraphProjectionBuilder.Build(
-            documents,
-            codeGraph,
-            config.DocsAnalysis.Search.MaxCodeNeighbors);
-        cancellationToken.ThrowIfCancellationRequested();
-        IAnalysisPersistence persistence = _persistence.Open(_repositoryRoot);
-        IEmbeddingGenerator? embeddingGenerator = config.DocsAnalysis.Embeddings.Mode == DocsAnalysisEmbeddingMode.Off
-            ? null
-            : _embeddings.Create();
-        using IDisposable? embeddingOwner = embeddingGenerator as IDisposable;
-        IEmbeddingResolver? embeddingResolver = embeddingGenerator is null
-            ? null
-            : new EmbeddingCoordinator(embeddingGenerator, persistence);
-        DocumentationAnalyzer analyzer = new DocumentationAnalyzer(
-            new ClaimExtractor(),
-            [new GraphClaimCandidateSource(), new SparseLexicalCandidateSource()],
-            embeddingResolver,
-            persistence);
-        ManagedGlossaryLoadResult glossary = _glossaries.Open(_repositoryRoot, config).Load();
-
-        DocumentationAnalysisResult result = analyzer.Analyze(
-            documents,
-            graph,
-            config.DocsAnalysis,
-            glossary.AnalysisGlossary,
-            cancellationToken);
-        AddCodeGraphUnavailable(result.Diagnostics, codeGraph);
-        return result;
-    }
-
-    /// <inheritdoc />
     public async Task<DocumentationAnalysisResult> AnalyzeAsync(CancellationToken cancellationToken = default)
     {
         cancellationToken.ThrowIfCancellationRequested();

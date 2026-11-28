@@ -50,7 +50,7 @@ public sealed class McpDocsProvenanceTests
     [Fact]
     public async Task EachDocsToolLeadsWithProvenanceForItsOwnRepositoryRoot()
     {
-        (string rootA, _) = CreateTwoCorpora();
+        (string rootA, _) = await CreateTwoCorporaAsync();
         DocsTools tools = CreateTools(rootA);
         int expectedDocuments = CreateHost(rootA).Current().DocumentCount;
 
@@ -65,7 +65,7 @@ public sealed class McpDocsProvenanceTests
     [Fact]
     public async Task MissAndEmptyResponsesStillLeadWithProvenance()
     {
-        (string rootA, _) = CreateTwoCorpora();
+        (string rootA, _) = await CreateTwoCorporaAsync();
         DocsTools tools = CreateTools(rootA);
 
         string miss = await tools.ExploreAsync("zzz-no-such-subject-zzz");
@@ -84,7 +84,7 @@ public sealed class McpDocsProvenanceTests
     [Fact]
     public async Task ProvenanceDocumentCountsDifferBetweenTwoCorpora()
     {
-        (string rootA, string rootB) = CreateTwoCorpora();
+        (string rootA, string rootB) = await CreateTwoCorporaAsync();
         int countA = CreateHost(rootA).Current().DocumentCount;
         int countB = CreateHost(rootB).Current().DocumentCount;
 
@@ -100,7 +100,7 @@ public sealed class McpDocsProvenanceTests
     [Fact]
     public async Task NeitherRootsProvenanceAppearsInTheOtherRootsResponses()
     {
-        (string rootA, string rootB) = CreateTwoCorpora();
+        (string rootA, string rootB) = await CreateTwoCorporaAsync();
         string responseA = await CreateTools(rootA).ExploreAsync("documentation");
         string responseB = await CreateTools(rootB).ExploreAsync("documentation");
 
@@ -113,7 +113,7 @@ public sealed class McpDocsProvenanceTests
     [Fact]
     public async Task FixturesWithoutGitRenderUnavailableRevisionAndUnknownDirty()
     {
-        (string rootA, string rootB) = CreateTwoCorpora();
+        (string rootA, string rootB) = await CreateTwoCorporaAsync();
 
         ProvenanceLine lineA = ParseProvenance(await CreateTools(rootA).ExploreAsync("documentation"));
         ProvenanceLine lineB = ParseProvenance(await CreateTools(rootB).ExploreAsync("documentation"));
@@ -139,7 +139,7 @@ public sealed class McpDocsProvenanceTests
     [Fact]
     public async Task DocsStatusReturnsExactlyTheProvenanceLineTheDocsToolsLeadWith()
     {
-        (string rootA, _) = CreateTwoCorpora();
+        (string rootA, _) = await CreateTwoCorporaAsync();
         DocsTools tools = CreateTools(rootA);
         MethodInfo status = FindMcpTool("docs_get_source_repository_and_revision");
 
@@ -154,15 +154,15 @@ public sealed class McpDocsProvenanceTests
     /// Two initialized roots whose corpora differ by exactly one document, so a header that
     /// did not actually reflect the live index could not report the same count for both.
     /// </summary>
-    private (string RootA, string RootB) CreateTwoCorpora()
+    private async Task<(string RootA, string RootB)> CreateTwoCorporaAsync()
     {
         string rootA = Path.Combine(_host.Files.Root, "repo-a");
         string rootB = Path.Combine(_host.Files.Root, "repo-b");
         _host.Files.CreateDirectory(rootA);
         _host.Files.CreateDirectory(rootB);
         IDocsScaffoldingService scaffolding = _host.Services().GetRequiredService<IDocsScaffoldingService>();
-        scaffolding.Scaffold(rootA, owner: "alpha-team");
-        scaffolding.Scaffold(rootB, owner: "beta-team");
+        await scaffolding.ScaffoldAsync(rootA, owner: "alpha-team");
+        await scaffolding.ScaffoldAsync(rootB, owner: "beta-team");
         _host.WriteText(
             rootB,
             "docs/second-only.md",

@@ -89,8 +89,9 @@ public sealed class TaskGateTierResolutionTests : IDisposable
                 _repo, null, null, agent, null, [], [], All: false, Deadline: false, Council: false,
                 StopOnFailure: false, Full: false, TaskSlug: "T2", Fix: false, Red: false,
                 HumanOutput: true, Interactive: false),
-            new FakeProcessExecutor(),
-            TextWriter.Null);
+            new ScriptedProcessRunner(),
+            TextWriter.Null,
+            CancellationToken.None);
 
     /// <summary>Writes the fixture plan as a react plan carrying <paramref name="status"/> as its body status.</summary>
     private static void WritePlan(InMemoryReviewServices services, string status)

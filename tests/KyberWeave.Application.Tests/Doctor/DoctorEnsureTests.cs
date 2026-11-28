@@ -380,7 +380,7 @@ public sealed class DoctorEnsureTests
     /// shell command.
     /// </summary>
     [Fact]
-    public void EnsureRemedyQuotesPathsWithSpacesWhenRestoreFails()
+    public async Task EnsureRemedyQuotesPathsWithSpacesWhenRestoreFails()
     {
         const string fileWithSpace = "src/My File.cs";
         bool initialised = false;
@@ -421,7 +421,7 @@ public sealed class DoctorEnsureTests
         });
 
         _world.HealthyMcp(Root);
-        DoctorReport report = _world.Doctor.Run(
+        DoctorReport report = await _world.Doctor.RunAsync(
             Root,
             DoctorMode.Ensure,
             DoctorHarness.Options(McpExecutable),
@@ -440,7 +440,7 @@ public sealed class DoctorEnsureTests
     /// the remedy wraps the path in single quotes with escaped quotes to prevent shell expansion.
     /// </summary>
     [Fact]
-    public void EnsureRemedySingleQuotesShellMetacharactersWhenRestoreFails()
+    public async Task EnsureRemedySingleQuotesShellMetacharactersWhenRestoreFails()
     {
         const string evilFile = "src/$evil'quote.cs";
         bool initialised = false;
@@ -481,7 +481,7 @@ public sealed class DoctorEnsureTests
         });
 
         _world.HealthyMcp(Root);
-        DoctorReport report = _world.Doctor.Run(
+        DoctorReport report = await _world.Doctor.RunAsync(
             Root,
             DoctorMode.Ensure,
             DoctorHarness.Options(McpExecutable),
@@ -500,7 +500,7 @@ public sealed class DoctorEnsureTests
     /// the remedy emits the path without quotes so Windows and POSIX shells both accept it.
     /// </summary>
     [Fact]
-    public void EnsureRemedyDoesNotQuoteCleanPathsWhenRestoreFails()
+    public async Task EnsureRemedyDoesNotQuoteCleanPathsWhenRestoreFails()
     {
         const string cleanFile = "src/foo.cs";
         bool initialised = false;
@@ -541,7 +541,7 @@ public sealed class DoctorEnsureTests
         });
 
         _world.HealthyMcp(Root);
-        DoctorReport report = _world.Doctor.Run(
+        DoctorReport report = await _world.Doctor.RunAsync(
             Root,
             DoctorMode.Ensure,
             DoctorHarness.Options(McpExecutable),
@@ -586,14 +586,14 @@ public sealed class DoctorEnsureTests
     }
 
     [Fact]
-    public void EnsureDoesNotRepairAnIndexWhoseLockIsHeldAndPassesWithAWarning()
+    public async Task EnsureDoesNotRepairAnIndexWhoseLockIsHeldAndPassesWithAWarning()
     {
         _world.Files.CreateDirectory(IndexDirectory);
         ScriptedProcessExecutor executor = DoctorHarness.Executor(
             Root,
             arguments => arguments.Contains("sync", StringComparer.Ordinal) ? HeldIndexLock : DoctorHarness.Ok());
 
-        DoctorReport report = RunEnsureWithoutWaiting(executor);
+        DoctorReport report = await RunEnsureWithoutWaitingAsync(executor);
 
         DoctorHarness.AssertNoCall(executor, "index");
         Assert.Equal(3, CodeGraphCalls(executor, "sync"));
@@ -610,7 +610,7 @@ public sealed class DoctorEnsureTests
     /// no warning.
     /// </summary>
     [Fact]
-    public void EnsureRetriesASyncThatFoundTheLockHeldAndPassesNormally()
+    public async Task EnsureRetriesASyncThatFoundTheLockHeldAndPassesNormally()
     {
         _world.Files.CreateDirectory(IndexDirectory);
         int syncCalls = 0;
@@ -620,7 +620,7 @@ public sealed class DoctorEnsureTests
                 ? HeldIndexLock
                 : DoctorHarness.Ok());
 
-        DoctorReport report = RunEnsureWithoutWaiting(executor);
+        DoctorReport report = await RunEnsureWithoutWaitingAsync(executor);
 
         DoctorHarness.AssertNoCall(executor, "index");
         Assert.Equal(2, CodeGraphCalls(executor, "sync"));
@@ -640,10 +640,10 @@ public sealed class DoctorEnsureTests
         executor.CallsTo("codegraph").Count(call => call.ArgumentList.Contains(verb, StringComparer.Ordinal));
 
     /// <summary>Runs the ensure doctor with the pauses between sync attempts set to nothing.</summary>
-    private DoctorReport RunEnsureWithoutWaiting(ScriptedProcessExecutor executor)
+    private Task<DoctorReport> RunEnsureWithoutWaitingAsync(ScriptedProcessExecutor executor)
     {
         _world.HealthyMcp(Root);
-        return _world.Doctor.Run(
+        return _world.Doctor.RunAsync(
             Root,
             DoctorMode.Ensure,
             DoctorHarness.Options(McpExecutable) with

@@ -113,13 +113,13 @@ public sealed class DoctorCommandTests
     ///     ensuring that DoctorReport.Root reflects the canonical repository and all checks pass.
     /// </summary>
     [Fact]
-    public void RepositoryDoctor_Run_WithExplicitCanonicalPath_InspectsCanonicalRootAndPassesChecks()
+    public async Task RepositoryDoctor_Run_WithExplicitCanonicalPath_InspectsCanonicalRootAndPassesChecks()
     {
         _world.Files.CreateDirectory(Path.Combine(CanonicalPath, ".codegraph"));
         _world.HealthyMcp(CanonicalPath);
         ScriptedProcessExecutor executor = DoctorHarness.Executor(CanonicalPath);
 
-        DoctorReport report = _world.Doctor.Run(
+        DoctorReport report = await _world.Doctor.RunAsync(
             CanonicalPath,
             DoctorMode.Check,
             DoctorHarness.Options(McpExecutable),
@@ -169,13 +169,13 @@ public sealed class DoctorCommandTests
     ///     failed ensure performs once.
     /// </remarks>
     [Fact]
-    public void DoctorCommand_ProvisionWithAnExistingIndex_SyncsAndNeverInitialises()
+    public async Task DoctorCommand_ProvisionWithAnExistingIndex_SyncsAndNeverInitialises()
     {
         _world.Files.CreateDirectory(Path.Combine(CanonicalPath, ".codegraph"));
         _world.HealthyMcp(CanonicalPath);
         ScriptedProcessExecutor executor = DoctorHarness.Executor(CanonicalPath);
 
-        DoctorReport report = _world.Doctor.Run(
+        DoctorReport report = await _world.Doctor.RunAsync(
             CanonicalPath,
             DoctorMode.Provision,
             DoctorHarness.Options(McpExecutable),

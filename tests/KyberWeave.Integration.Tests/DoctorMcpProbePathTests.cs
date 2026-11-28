@@ -11,7 +11,7 @@ namespace KyberWeave.Integration.Tests;
 public sealed class DoctorMcpProbePathTests
 {
     [Fact]
-    public void Item11_McpLiveProbe_PathContainingRevMarker_MatchesCorrectRoot()
+    public async Task Item11_McpLiveProbe_PathContainingRevMarker_MatchesCorrectRoot()
     {
         using TempDirectory root = new();
         using TempDirectory stubs = new();
@@ -28,7 +28,7 @@ public sealed class DoctorMcpProbePathTests
             "read _tool\n" +
             "echo '{\"jsonrpc\":\"2.0\",\"id\":2,\"result\":{\"isError\":false,\"content\":[{\"type\":\"text\",\"text\":\"provenance: root=" + dirWithRev + " rev=abc1234 dirty=false documents=7\"}]}}'\n");
 
-        DoctorReport report = DoctorTestServices.Doctor.Run(
+        DoctorReport report = await DoctorTestServices.Doctor.RunAsync(
             dirWithRev,
             DoctorMode.Check,
             DoctorHarness.Options(stub),

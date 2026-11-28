@@ -1202,7 +1202,6 @@ public sealed class ReviewGatesService(
             return new AgentPlan(plan, runCount, canonicalRoot, caseInsensitivePaths, outputs, observer);
         }
 
-        /// <summary>Runs the gates, applies the RED judgement, and writes the report.</summary>
         /// <summary>Runs the gates, applies the RED judgement, and writes the report, without blocking a thread.</summary>
         private async Task<ReviewCommandResult> ExecuteAsync(
             AgentSetup setup,

@@ -28,7 +28,7 @@ public sealed class DocumentationAnalysisScaleTests(ITestOutputHelper output)
 
     [Fact]
     [Trait("Category", "Scale")]
-    public void AnalyzeDefaultHybridTenThousandClaimsRemainsBoundedAndWithinReleaseEnvelope()
+    public async Task AnalyzeDefaultHybridTenThousandClaimsRemainsBoundedAndWithinReleaseEnvelope()
     {
         DocumentSet documents = ScaleCorpus.Create(DocumentCount, ClaimsPerDocument);
         DocGraphProjection graph = DocGraphProjectionBuilder.Build(documents, FakeCodeGraphResolver.WithSymbols());
@@ -42,7 +42,7 @@ public sealed class DocumentationAnalysisScaleTests(ITestOutputHelper output)
             persistence: null);
 
         WarmCandidateGeneration();
-        Measurement<DocumentationAnalysisResult> measurement = Measure(() => analyzer.Analyze(documents, graph, config));
+        Measurement<DocumentationAnalysisResult> measurement = await MeasureAsync(() => analyzer.AnalyzeAsync(documents, graph, config));
         DocumentationAnalysisResult result = measurement.Value;
         long allPairs = (long)ClaimCount * (ClaimCount - 1) / 2;
         long configuredBound = (long)ClaimCount * config.Search.MaxNeighborsPerClaim;
@@ -180,7 +180,7 @@ public sealed class DocumentationAnalysisScaleTests(ITestOutputHelper output)
         _ = new SparseLexicalCandidateSource().FindCandidates(request);
     }
 
-    private static Measurement<T> Measure<T>(Func<T> action)
+    private static async Task<Measurement<T>> MeasureAsync<T>(Func<Task<T>> action)
     {
         GC.Collect();
         GC.WaitForPendingFinalizers();
@@ -209,11 +209,11 @@ public sealed class DocumentationAnalysisScaleTests(ITestOutputHelper output)
 
         long allocatedBefore = GC.GetAllocatedBytesForCurrentThread();
         Stopwatch stopwatch = Stopwatch.StartNew();
-        T value = action();
+        T value = await action();
         stopwatch.Stop();
         long allocated = GC.GetAllocatedBytesForCurrentThread() - allocatedBefore;
-        samplingCancellation.Cancel();
-        sampler.GetAwaiter().GetResult();
+        await samplingCancellation.CancelAsync();
+        await sampler;
         samplerState.Sample();
         return new Measurement<T>(
             value,

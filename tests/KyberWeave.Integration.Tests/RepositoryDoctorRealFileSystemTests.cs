@@ -35,7 +35,7 @@ public sealed class RepositoryDoctorRealFileSystemTests : IDisposable
     /// exposed or injected.
     /// </remarks>
     [Fact]
-    public void Doctor_ConcurrentLockBusy_Exits1Busy()
+    public async Task Doctor_ConcurrentLockBusy_Exits1Busy()
     {
         Directory.CreateDirectory(IndexDirectory);
         string lockDirectory = Path.GetTempPath();
@@ -44,7 +44,7 @@ public sealed class RepositoryDoctorRealFileSystemTests : IDisposable
 
         using (new FileStream(lockPath, FileMode.OpenOrCreate, FileAccess.ReadWrite, FileShare.None))
         {
-            DoctorReport report = DoctorTestServices.Doctor.Run(
+            DoctorReport report = await DoctorTestServices.Doctor.RunAsync(
                 Root,
                 DoctorMode.Provision,
                 new DoctorOptions(TimeSpan.FromSeconds(1), TimeSpan.FromSeconds(20), "codegraph", "kyber-weave-mcp-absent"),
@@ -79,7 +79,7 @@ public sealed class RepositoryDoctorRealFileSystemTests : IDisposable
     /// still write there — a root user ignores the mode — and restores the mode before the temp directory is removed.
     /// </remarks>
     [Fact]
-    public void Doctor_LockFileUnopenable_Exits1WithReason()
+    public async Task Doctor_LockFileUnopenable_Exits1WithReason()
     {
         if (OperatingSystem.IsWindows())
         {
@@ -97,7 +97,7 @@ public sealed class RepositoryDoctorRealFileSystemTests : IDisposable
             string probe = Path.Combine(lockDirectory.Path, "probe");
             try
             {
-                File.Create(probe).Dispose();
+                await File.Create(probe).DisposeAsync();
                 File.Delete(probe);
                 Assert.Skip("This process can write to a read-only directory (running as root), so the lock cannot fail.");
             }
@@ -107,7 +107,7 @@ public sealed class RepositoryDoctorRealFileSystemTests : IDisposable
             }
 
             ScriptedProcessExecutor executor = DoctorHarness.Executor(Root);
-            DoctorReport report = DoctorTestServices.Doctor.Run(
+            DoctorReport report = await DoctorTestServices.Doctor.RunAsync(
                 Root,
                 DoctorMode.Provision,
                 DoctorHarness.Options("kyber-weave-mcp-absent"),
@@ -149,7 +149,7 @@ public sealed class RepositoryDoctorRealFileSystemTests : IDisposable
     /// is for a human to run, not for doctor to do.
     /// </remarks>
     [Fact]
-    public void Doctor_CodegraphDirUnwritable_Exits1WithRemedy_DoesNotDelete()
+    public async Task Doctor_CodegraphDirUnwritable_Exits1WithRemedy_DoesNotDelete()
     {
         if (OperatingSystem.IsWindows())
         {
@@ -166,7 +166,7 @@ public sealed class RepositoryDoctorRealFileSystemTests : IDisposable
         {
             ScriptedProcessExecutor executor = DoctorHarness.Executor(Root);
 
-            DoctorReport report = DoctorTestServices.Doctor.Run(
+            DoctorReport report = await DoctorTestServices.Doctor.RunAsync(
                 Root,
                 DoctorMode.Provision,
                 DoctorHarness.Options("kyber-weave-mcp-absent"),

@@ -327,7 +327,7 @@ public sealed class DeveloperTierSelectionTests
     /// <c>dev-medium</c> never stands in for an easy task's <c>dev-easy</c>.
     /// </summary>
     [Fact]
-    public void AConfidentPickRecordsTheTierTheRatingGives()
+    public async Task AConfidentPickRecordsTheTierTheRatingGives()
     {
         using DocFixture fixture = PlanTaskFileProbe.CorpusInMemory(PlanMarkdown("easy"));
         _ = fixture.EnsureDirectory(".git");
@@ -335,8 +335,8 @@ public sealed class DeveloperTierSelectionTests
         using PlanTaskAgentPick picker = new(
             provider, PlanTaskAgentPick.ImplementationAgents(WorkerRosters.Tiered), Resources);
 
-        PlanTaskFileOutcome outcome = new PlanTaskFileGenerator(fixture.Root, Tiered, fixture.Store, picker)
-            .Run(Plan, PlanTaskFileMode.Write);
+        PlanTaskFileOutcome outcome = await new PlanTaskFileGenerator(fixture.Root, Tiered, fixture.Store, picker)
+            .RunAsync(Plan, PlanTaskFileMode.Write);
 
         Assert.False(outcome.Report.HasErrors, string.Join("; ", outcome.Report.Items.Select(item => item.Message)));
         Assert.Equal("dev-easy", outcome.File!.Tasks![0].Agent);
@@ -350,7 +350,7 @@ public sealed class DeveloperTierSelectionTests
     /// beside <c>worker-roster: tiered</c>.
     /// </summary>
     [Fact]
-    public void ARewriteOfAStaleTaskFileRepicksEveryAgentForTheOneRoster()
+    public async Task ARewriteOfAStaleTaskFileRepicksEveryAgentForTheOneRoster()
     {
         using DocFixture fixture = Ready(Tiered, "easy");
         string path = PlanTaskFileProbe.TaskFilePath;
@@ -365,8 +365,8 @@ public sealed class DeveloperTierSelectionTests
         using PlanTaskAgentPick picker = new(
             new StubProvider("dev-medium"),
             PlanTaskAgentPick.ImplementationAgents(WorkerRosters.Tiered), Resources);
-        PlanTaskFileOutcome second = new PlanTaskFileGenerator(fixture.Root, Tiered, fixture.Store, picker)
-            .Run(Plan, PlanTaskFileMode.Write);
+        PlanTaskFileOutcome second = await new PlanTaskFileGenerator(fixture.Root, Tiered, fixture.Store, picker)
+            .RunAsync(Plan, PlanTaskFileMode.Write);
 
         Assert.False(second.Report.HasErrors, string.Join("; ", second.Report.Items.Select(item => item.Message)));
         Assert.Equal(WorkerRosters.Tiered, second.File!.WorkerRoster);
@@ -378,15 +378,15 @@ public sealed class DeveloperTierSelectionTests
     /// the harness, and a rewrite must replace it; a check must report it.
     /// </summary>
     [Fact]
-    public void AnUnknownAgentNameIsReplacedByTheTierAndReportedByCheck()
+    public async Task AnUnknownAgentNameIsReplacedByTheTierAndReportedByCheck()
     {
         using DocFixture fixture = PlanTaskFileProbe.CorpusInMemory(PlanMarkdown("easy"));
         _ = fixture.EnsureDirectory(".git");
         using PlanTaskAgentPick picker = new(
             new StubProvider("dev-medium"),
             PlanTaskAgentPick.ImplementationAgents(WorkerRosters.Tiered), Resources);
-        PlanTaskFileOutcome written = new PlanTaskFileGenerator(fixture.Root, Tiered, fixture.Store, picker)
-            .Run(Plan, PlanTaskFileMode.Write);
+        PlanTaskFileOutcome written = await new PlanTaskFileGenerator(fixture.Root, Tiered, fixture.Store, picker)
+            .RunAsync(Plan, PlanTaskFileMode.Write);
         Assert.False(written.Report.HasErrors, string.Join("; ", written.Report.Items.Select(item => item.Message)));
 
         // A dispatch that names a name shipping nowhere falls back to the tier; the file is still valid here.
@@ -399,8 +399,8 @@ public sealed class DeveloperTierSelectionTests
             taskPath,
             fixture.ReadText(taskPath).Replace("agent: dev-easy", "agent: my-wrapper", StringComparison.Ordinal));
 
-        PlanTaskFileOutcome check = new PlanTaskFileGenerator(fixture.Root, Tiered, fixture.Store)
-            .Run(Plan, PlanTaskFileMode.Check);
+        PlanTaskFileOutcome check = await new PlanTaskFileGenerator(fixture.Root, Tiered, fixture.Store)
+            .RunAsync(Plan, PlanTaskFileMode.Check);
         Assert.Contains(
             check.Report.Items,
             item => item.Code == PlanTaskFileRules.DiffersFromPlan
@@ -414,8 +414,8 @@ public sealed class DeveloperTierSelectionTests
         using PlanTaskAgentPick repick = new(
             new StubProvider("dev-medium"),
             PlanTaskAgentPick.ImplementationAgents(WorkerRosters.Tiered), Resources);
-        PlanTaskFileOutcome rewritten = new PlanTaskFileGenerator(fixture.Root, Tiered, fixture.Store, repick)
-            .Run(Plan, PlanTaskFileMode.Write);
+        PlanTaskFileOutcome rewritten = await new PlanTaskFileGenerator(fixture.Root, Tiered, fixture.Store, repick)
+            .RunAsync(Plan, PlanTaskFileMode.Write);
         Assert.False(rewritten.Report.HasErrors, string.Join("; ", rewritten.Report.Items.Select(item => item.Message)));
         Assert.Equal("dev-easy", rewritten.File!.Tasks![0].Agent);
     }

@@ -20,67 +20,6 @@ public sealed class EmbeddingCoordinator(IEmbeddingGenerator generator, IAnalysi
         new EmbeddingCoordinator(generator, persistence);
 
     /// <inheritdoc />
-    public EmbeddingResolutionResult Resolve(
-        IReadOnlyCollection<EmbeddingWorkItem> workItems,
-        DocsAnalysisEmbeddingConfig config)
-    {
-        ArgumentNullException.ThrowIfNull(workItems);
-        ArgumentNullException.ThrowIfNull(config);
-
-        if (config.Mode == DocsAnalysisEmbeddingMode.Off)
-            return Empty();
-        if (!_persistence.IsAvailable)
-        {
-            return EmbeddingResolutionResults.Unavailable(config.Mode,
-                "Embedding generation was skipped because the analysis cache is not safely ignored.");
-        }
-
-        try
-        {
-            return ResolveFromCacheOrProvider(workItems, config);
-        }
-        catch (HttpRequestException ex)
-        {
-            return EmbeddingResolutionResults.Unavailable(config.Mode, ex.Message);
-        }
-        catch (IOException ex)
-        {
-            return EmbeddingResolutionResults.Unavailable(config.Mode, ex.Message);
-        }
-        catch (InvalidDataException ex)
-        {
-            return EmbeddingResolutionResults.Unavailable(config.Mode, ex.Message);
-        }
-        catch (InvalidOperationException ex)
-        {
-            return EmbeddingResolutionResults.Unavailable(config.Mode, ex.Message);
-        }
-        catch (ArgumentException ex)
-        {
-            return EmbeddingResolutionResults.Unavailable(config.Mode, ex.Message);
-        }
-        catch (OperationCanceledException ex)
-        {
-            return EmbeddingResolutionResults.Unavailable(config.Mode, ex.Message);
-        }
-        catch (JsonException ex)
-        {
-            return EmbeddingResolutionResults.Unavailable(config.Mode, ex.Message);
-        }
-        catch (OverflowException ex)
-        {
-            return EmbeddingResolutionResults.Unavailable(config.Mode, ex.Message);
-        }
-        catch (FormatException)
-        {
-            // Header parsing is the only provider-boundary FormatException expected here.
-            // Use a fixed reason so malformed secret text can never reach diagnostics.
-            return EmbeddingResolutionResults.Unavailable(config.Mode,
-                "The configured embedding credential is not a valid HTTP bearer token.");
-        }
-    }
-
-    /// <inheritdoc />
     public async Task<EmbeddingResolutionResult> ResolveAsync(
         IReadOnlyCollection<EmbeddingWorkItem> workItems,
         DocsAnalysisEmbeddingConfig config,
@@ -141,20 +80,6 @@ public sealed class EmbeddingCoordinator(IEmbeddingGenerator generator, IAnalysi
             return EmbeddingResolutionResults.Unavailable(config.Mode,
                 "The configured embedding credential is not a valid HTTP bearer token.");
         }
-    }
-
-    private EmbeddingResolutionResult ResolveFromCacheOrProvider(
-        IReadOnlyCollection<EmbeddingWorkItem> workItems,
-        DocsAnalysisEmbeddingConfig config)
-    {
-        PreparedResolution? prepared = PrepareResolution(workItems, config);
-        if (prepared is null)
-            return Empty();
-
-        EmbeddingGenerationResult? generated = prepared.Misses.Count > 0
-            ? _generator.Generate(prepared.Misses, prepared.Inputs, config)
-            : null;
-        return FinalizeResolution(prepared, generated);
     }
 
     private async Task<EmbeddingResolutionResult> ResolveFromCacheOrProviderAsync(

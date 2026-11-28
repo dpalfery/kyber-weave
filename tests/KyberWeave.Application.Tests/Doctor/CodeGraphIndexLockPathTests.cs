@@ -59,13 +59,6 @@ public sealed class CodeGraphIndexLockPathTests
     {
         public List<string> Paths { get; } = [];
 
-        public IDisposable? TryAcquireLock(string path, TimeSpan wait, out string? failure)
-        {
-            Paths.Add(path);
-            failure = "refused for the test";
-            return null;
-        }
-
         public Task<CodeGraphIndexLockAttempt> TryAcquireLockAsync(
             string path,
             TimeSpan wait,

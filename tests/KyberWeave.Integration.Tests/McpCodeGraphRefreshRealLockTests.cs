@@ -92,7 +92,7 @@ public sealed class McpCodeGraphRefreshRealLockTests : IDisposable
     [Fact]
     public async Task TheFirstToolCallRefreshesCodeGraph()
     {
-        DocsTools tools = ToolsRequiringCodeGraph(Root);
+        DocsTools tools = await ToolsRequiringCodeGraphAsync(Root);
         string lockPath = LockPath(Root);
         RemoveStaleLock(lockPath);
 
@@ -116,7 +116,7 @@ public sealed class McpCodeGraphRefreshRealLockTests : IDisposable
     [Fact]
     public async Task ABusyRefreshLockAnswersOneNoteInsteadOfFailingOrWaiting()
     {
-        DocsTools tools = ToolsRequiringCodeGraph(Root);
+        DocsTools tools = await ToolsRequiringCodeGraphAsync(Root);
         string lockPath = LockPath(Root);
         Directory.CreateDirectory(Path.GetDirectoryName(lockPath)!);
 
@@ -153,7 +153,7 @@ public sealed class McpCodeGraphRefreshRealLockTests : IDisposable
     [Fact]
     public async Task TheRefreshIntervalSuppressesASecondAttempt()
     {
-        DocsTools tools = ToolsRequiringCodeGraph(Root);
+        DocsTools tools = await ToolsRequiringCodeGraphAsync(Root);
         string lockPath = LockPath(Root);
         RemoveStaleLock(lockPath);
 
@@ -246,9 +246,9 @@ public sealed class McpCodeGraphRefreshRealLockTests : IDisposable
     /// Tools over a repository that requires CodeGraph: the scaffold as it comes, plus the CodeGraph
     /// entry it leaves commented out. This is the repository the refresh applies to.
     /// </summary>
-    private static DocsTools ToolsRequiringCodeGraph(string root)
+    private static async Task<DocsTools> ToolsRequiringCodeGraphAsync(string root)
     {
-        DocsTestCommands.Scaffolding.Scaffold(root);
+        await DocsTestCommands.Scaffolding.ScaffoldAsync(root);
         McpDeclarationFixture.RequireCodeGraph(root);
         return ScaffoldedTools(root, () => FakeCodeGraphResolver.WithSymbols());
     }

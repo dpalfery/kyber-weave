@@ -40,11 +40,11 @@ public sealed class DocsInitReviewGatesTests
     /// </summary>
     [Theory]
     [MemberData(nameof(FamilyFixtureNames))]
-    public void DocsInitWritesTheApprovedReviewBlock(string family)
+    public async Task DocsInitWritesTheApprovedReviewBlock(string family)
     {
         NewFixtureRepo(family, TechnologiesFor(family));
 
-        _host.Scaffold();
+        await _host.ScaffoldAsync();
 
         string written = NormalizeVersionStamp(ReadReviewSection());
         string expected = NormalizeVersionStamp(Corpus.ReadText(ExpectedReviewPath(family)));
@@ -59,7 +59,7 @@ public sealed class DocsInitReviewGatesTests
     [Theory]
     [InlineData(false)]
     [InlineData(true)]
-    public void AnExistingReviewSectionSurvivesDocsInitUnchanged(bool force)
+    public async Task AnExistingReviewSectionSurvivesDocsInitUnchanged(bool force)
     {
         NewFixtureRepo("go", ["go"]);
         string original = HandOwnedConfigWithReview();
@@ -71,7 +71,7 @@ public sealed class DocsInitReviewGatesTests
         Assert.Contains(
             loaded.Review.Gates, gate => string.Equals(gate.Id, "hand-owned-council", StringComparison.Ordinal));
 
-        _host.Scaffold(force: force);
+        await _host.ScaffoldAsync(force: force);
 
         // The operator's file, hand-owned review section included, is an exact prefix of what
         // was written; the declaration is the only thing appended after it.
@@ -84,14 +84,14 @@ public sealed class DocsInitReviewGatesTests
     ///     look perpetually dirty.
     /// </summary>
     [Fact]
-    public void RunningDocsInitTwiceLeavesTheHostConfigByteIdentical()
+    public async Task RunningDocsInitTwiceLeavesTheHostConfigByteIdentical()
     {
         NewFixtureRepo("go", ["go"]);
 
-        _host.Scaffold();
+        await _host.ScaffoldAsync();
         string first = _host.Read(ConfigRelativePath);
 
-        _host.Scaffold();
+        await _host.ScaffoldAsync();
         string second = _host.Read(ConfigRelativePath);
 
         Assert.False(
@@ -110,7 +110,7 @@ public sealed class DocsInitReviewGatesTests
     [Theory]
     [InlineData("\n")]
     [InlineData("\r\n")]
-    public void AnExistingConfigWithoutAReviewSectionKeepsEveryOtherByte(string newline)
+    public async Task AnExistingConfigWithoutAReviewSectionKeepsEveryOtherByte(string newline)
     {
         NewFixtureRepo("go", ["go"]);
         string original = string.Join(
@@ -118,7 +118,7 @@ public sealed class DocsInitReviewGatesTests
             string.Empty);
         _host.Write(ConfigRelativePath, original);
 
-        _host.Scaffold();
+        await _host.ScaffoldAsync();
 
         string updated = _host.Read(ConfigRelativePath);
         Assert.Contains(newline + "review:", updated, StringComparison.Ordinal);
@@ -134,11 +134,11 @@ public sealed class DocsInitReviewGatesTests
     ///     first, not the host's first review.
     /// </summary>
     [Fact]
-    public void TheWrittenHostConfigLoadsWithoutAConfigurationError()
+    public async Task TheWrittenHostConfigLoadsWithoutAConfigurationError()
     {
         NewFixtureRepo("go", ["go"]);
 
-        _host.Scaffold();
+        await _host.ScaffoldAsync();
 
         KyberWeaveConfigLoadResult loaded = _host.Configs.TryLoad(_host.Root);
         Assert.True(
@@ -163,11 +163,11 @@ public sealed class DocsInitReviewGatesTests
     /// </remarks>
     [Theory]
     [MemberData(nameof(FamilyFixtureNames))]
-    public void DocsInitWritesFullSuiteOnTheWholeSuiteGateAndOnNoOther(string family)
+    public async Task DocsInitWritesFullSuiteOnTheWholeSuiteGateAndOnNoOther(string family)
     {
         NewFixtureRepo(family, TechnologiesFor(family));
 
-        _host.Scaffold();
+        await _host.ScaffoldAsync();
 
         GateCatalogueFamily catalogue = GateCatalogueRenderer.LoadEmbedded()
             .Single(candidate => string.Equals(candidate.Family, family, StringComparison.Ordinal));
@@ -206,11 +206,11 @@ public sealed class DocsInitReviewGatesTests
     /// </remarks>
     [Theory]
     [MemberData(nameof(FamilyFixtureNames))]
-    public void EveryKeyTheGeneratedReviewBlockCarriesIsOneThisReleaseReads(string family)
+    public async Task EveryKeyTheGeneratedReviewBlockCarriesIsOneThisReleaseReads(string family)
     {
         NewFixtureRepo(family, TechnologiesFor(family));
 
-        _host.Scaffold();
+        await _host.ScaffoldAsync();
 
         KyberWeaveConfig config = _host.LoadConfig();
 

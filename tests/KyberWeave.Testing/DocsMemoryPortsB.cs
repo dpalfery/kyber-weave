@@ -86,13 +86,14 @@ internal sealed class MemoryScaffoldHost
     public AnalysisCacheSafety CacheSafety { get; }
 
     /// <summary>Scaffolds <see cref="Root"/>.</summary>
-    public ScaffoldResult Scaffold(
+    public Task<ScaffoldResult> ScaffoldAsync(
         string? docsRoot = null,
         string owner = "unassigned",
         bool force = false,
         bool kyberStandards = false,
-        bool reviewGates = true) =>
-        Scaffolder.Scaffold(Root, docsRoot, owner, force, kyberStandards, reviewGates);
+        bool reviewGates = true,
+        CancellationToken cancellationToken = default) =>
+        Scaffolder.ScaffoldAsync(Root, docsRoot, owner, force, kyberStandards, reviewGates, cancellationToken: cancellationToken);
 
     /// <summary>Loads the host configuration of <see cref="Root"/>.</summary>
     public KyberWeaveConfig LoadConfig() => Configs.Load(Root);

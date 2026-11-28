@@ -190,5 +190,6 @@ public sealed class ReviewGatesRequiredPathsPreflightTests : IDisposable
                 StopOnFailure: false, Full: false, TaskSlug: null, Fix: false, Red: false,
                 HumanOutput: false, Interactive: false),
             _index,
-            TextWriter.Null);
+            TextWriter.Null,
+            CancellationToken.None);
 }

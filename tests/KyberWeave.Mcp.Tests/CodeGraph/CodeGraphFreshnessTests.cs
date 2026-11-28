@@ -287,15 +287,6 @@ public sealed class CodeGraphFreshnessTests
 
         public Func<string, DoctorOptions, IProcessRunner, string, CancellationToken, Task<DoctorCheck>>? OnProvision { get; set; }
 
-        public CodeGraphOutcome Run(
-            string root,
-            DoctorMode mode,
-            DoctorOptions options,
-            IProcessExecutor executor,
-            string lockDirectory,
-            CodeGraphRestore restore = CodeGraphRestore.AllWrittenFiles) =>
-            throw new NotSupportedException("The refresh uses Provision only.");
-
         public Task<CodeGraphOutcome> RunAsync(
             string root,
             DoctorMode mode,

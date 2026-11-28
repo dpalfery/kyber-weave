@@ -1,5 +1,4 @@
 using System.ComponentModel;
-using System.Diagnostics.CodeAnalysis;
 using System.Text.Json;
 using System.Text.RegularExpressions;
 using KyberWeave.Contracts.Paths;
@@ -61,33 +60,6 @@ public sealed partial class McpServerLiveProbe(
 
     /// <summary>How long to let stderr finish once a server has closed its output.</summary>
     private static readonly TimeSpan ServerErrorWait = TimeSpan.FromSeconds(1);
-
-    /// <summary>Runs the live proof and returns the <c>mcp.*</c> checks that ran.</summary>
-    /// <param name="root">The resolved repository root that the server's provenance must name.</param>
-    /// <param name="options">The MCP executable and total session budget.</param>
-    public IReadOnlyList<DoctorCheck> Run(string root, DoctorOptions options)
-    {
-        ArgumentException.ThrowIfNullOrWhiteSpace(root);
-        ArgumentNullException.ThrowIfNull(options);
-
-        List<DoctorCheck> checks = [];
-        using IMcpStdioSession? session = TryStart(root, options);
-        if (session is null)
-        {
-            // The reason names the executable only. The start failure's text and the environment are never echoed.
-            checks.Add(new DoctorCheck(
-                "mcp.start",
-                false,
-                $"'{options.McpExecutable}' could not be started",
-                "kyber-weave update"));
-            return checks;
-        }
-
-        checks.Add(new DoctorCheck("mcp.start", true, "server process started", null));
-        Exchange(session, root, options, checks);
-
-        return checks;
-    }
 
     /// <summary>Runs the live proof without blocking a thread and returns the <c>mcp.*</c> checks that ran.</summary>
     /// <param name="root">The resolved repository root that the server's provenance must name.</param>
@@ -171,75 +143,6 @@ public sealed partial class McpServerLiveProbe(
         long seconds = Math.Max(1L, (long)Math.Ceiling(options.McpTimeout.TotalSeconds));
         long suggested = Math.Min(seconds * 2L, int.MaxValue);
         return $"kyber-weave doctor --check --mcp-timeout {suggested}";
-    }
-
-    private void Exchange(IMcpStdioSession session, string root, DoctorOptions options, List<DoctorCheck> checks)
-    {
-        string budget = Seconds(options.McpTimeout);
-
-        if (!TrySend(
-                session,
-                "{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"initialize\",\"params\":" +
-                $"{{\"protocolVersion\":\"{ProtocolVersion}\",\"capabilities\":{{}}," +
-                "\"clientInfo\":{\"name\":\"kyber-weave-doctor\",\"version\":\"1\"}}}"))
-        {
-            // A server that exited between starting and the first request is a failed handshake, not a crash.
-            checks.Add(Handshake(false, "the server closed its input before the initialize request", session, options, root));
-            return;
-        }
-
-        if (!TryRead(session, out string? initializeReply, out string? handshakeFailure))
-        {
-            checks.Add(Handshake(false, handshakeFailure, session, options, root));
-            return;
-        }
-
-        if (!TryResult(initializeReply, out _))
-        {
-            checks.Add(Handshake(false, "initialize did not return a result", session, options, root));
-            return;
-        }
-
-        checks.Add(Handshake(true, $"initialize answered within {budget}s", session, options, root));
-
-        if (!TrySend(session, "{\"jsonrpc\":\"2.0\",\"method\":\"notifications/initialized\"}")
-            || !TrySend(
-                session,
-                "{\"jsonrpc\":\"2.0\",\"id\":2,\"method\":\"tools/call\",\"params\":" +
-                "{\"name\":\"docs_answer_question_from_repo_documentation\",\"arguments\":{\"query\":\"README\"}}}"))
-        {
-            checks.Add(new DoctorCheck(
-                "mcp.docs_explore",
-                false,
-                "the server closed its input before docs_answer_question_from_repo_documentation was requested",
-                "stop the kyber-weave-mcp server and re-run: kyber-weave doctor --check"));
-            return;
-        }
-
-        if (!TryRead(session, out string? callReply, out string? callFailure))
-        {
-            checks.Add(new DoctorCheck("mcp.docs_explore", false, callFailure, TimeoutFix(options)));
-            return;
-        }
-
-        if (!TryResult(callReply, out JsonElement result) || !TryText(result, out string text))
-        {
-            checks.Add(new DoctorCheck("mcp.docs_explore", false, "docs_answer_question_from_repo_documentation reply was not a tool result", "kyber-weave update"));
-            return;
-        }
-
-        if (result.TryGetProperty("isError", out JsonElement isError) && isError.ValueKind == JsonValueKind.True)
-        {
-            checks.Add(new DoctorCheck(
-                "mcp.docs_explore",
-                false,
-                $"docs_answer_question_from_repo_documentation returned an error: {Truncate(FirstLine(text))}",
-                "kyber-weave update"));
-            return;
-        }
-
-        checks.Add(new DoctorCheck("mcp.docs_explore", true, "docs_answer_question_from_repo_documentation answered", null));
-        checks.Add(CheckRoot(text, root));
     }
 
     private async Task ExchangeAsync(
@@ -346,36 +249,6 @@ public sealed partial class McpServerLiveProbe(
                 "stop the stale kyber-weave-mcp server and re-run: kyber-weave doctor --check");
     }
 
-    private static DoctorCheck Handshake(
-        bool passed,
-        string reason,
-        IMcpStdioSession session,
-        DoctorOptions options,
-        string root)
-    {
-        if (passed)
-            return new DoctorCheck("mcp.handshake", true, reason, null);
-
-        bool timedOut = string.Equals(reason, NoAnswerWithinBudget, StringComparison.Ordinal);
-        string? serverError = timedOut ? session.FirstErrorLine : session.WaitForFirstErrorLine(ServerErrorWait);
-
-        if (serverError?.StartsWith(NoHostConfigurationCode, StringComparison.Ordinal) == true)
-        {
-            return new DoctorCheck(
-                "mcp.handshake",
-                false,
-                "the docs server refused to start because this folder has no .kyber-weave/kyber-weave.yml. " +
-                "A new worktree only has that file if its base branch has it committed",
-                $"kyber-weave docs init {ShellQuote.Quote(root)}");
-        }
-
-        string detail = serverError is { } line ? $" ({Truncate(line)})" : string.Empty;
-        string fix = timedOut
-            ? TimeoutFix(options)
-            : $"read the server's own error: {ShellQuote.Quote(options.McpExecutable)} --repo-root {ShellQuote.Quote(root)}";
-        return new DoctorCheck("mcp.handshake", false, reason + detail, fix);
-    }
-
     private static async Task<DoctorCheck> HandshakeAsync(
         bool passed,
         string reason,
@@ -407,44 +280,6 @@ public sealed partial class McpServerLiveProbe(
             ? TimeoutFix(options)
             : $"read the server's own error: {ShellQuote.Quote(options.McpExecutable)} --repo-root {ShellQuote.Quote(root)}";
         return new DoctorCheck("mcp.handshake", false, reason + detail, fix);
-    }
-
-    /// <summary>
-    ///     Reads one reply line, turning a timeout, a closed stream, or a line past the session's cap into a reason
-    ///     rather than an exception.
-    /// </summary>
-    private static bool TryRead(
-        IMcpStdioSession session,
-        [NotNullWhen(true)] out string? line,
-        [NotNullWhen(false)] out string? failure)
-    {
-        try
-        {
-            line = session.ReadLine();
-            failure = null;
-            return true;
-        }
-        catch (TimeoutException)
-        {
-            line = null;
-            failure = NoAnswerWithinBudget;
-            return false;
-        }
-        catch (EndOfStreamException)
-        {
-            line = null;
-            failure = "the server closed its output before answering";
-            return false;
-        }
-        catch (InvalidDataException)
-        {
-            // The session's line cap is how a child that never ends a line gets stopped. The reply is the child's
-            // data, so an over-long one is a failed check, not an exception that skips the renderer. The session is
-            // unusable afterwards, and the caller's `using` disposes it.
-            line = null;
-            failure = "the server wrote past the session's line cap without ending the reply";
-            return false;
-        }
     }
 
     /// <summary>

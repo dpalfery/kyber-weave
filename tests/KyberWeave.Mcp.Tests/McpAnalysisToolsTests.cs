@@ -217,7 +217,7 @@ public sealed class McpAnalysisToolsTests
     }
 
     [Fact]
-    public void RepositoryAnalysisReaderUsesConfiguredRootAndDoesNotCreateUnsafeCacheState()
+    public async Task RepositoryAnalysisReaderUsesConfiguredRootAndDoesNotCreateUnsafeCacheState()
     {
         Write(".kyber-weave/kyber-weave.yml", """
             ontology:
@@ -232,7 +232,7 @@ public sealed class McpAnalysisToolsTests
         Write("knowledge/terms.md", GlossaryMarkdown());
         RepositoryDocsAnalysisReader reader = DocsToolsComposition.AnalysisReader(_host.Services(), _host.Repo);
 
-        DocumentationAnalysisResult analysis = reader.Analyze();
+        DocumentationAnalysisResult analysis = await reader.AnalyzeAsync();
         GlossaryLookupResult glossary = reader.LookupGlossary("loop");
 
         Assert.Equal(2, analysis.Metrics.ExtractedClaims);
@@ -243,7 +243,7 @@ public sealed class McpAnalysisToolsTests
     }
 
     [Fact]
-    public void RepositoryAnalysisReaderUnavailableCodeGraphReportsOneDegradedWarning()
+    public async Task RepositoryAnalysisReaderUnavailableCodeGraphReportsOneDegradedWarning()
     {
         Write(".kyber-weave/kyber-weave.yml", """
             ontology:
@@ -254,7 +254,7 @@ public sealed class McpAnalysisToolsTests
         Write("knowledge/first.md", Document("reference/first", "current"));
         RepositoryDocsAnalysisReader reader = DocsToolsComposition.AnalysisReader(_host.Services(), _host.Repo);
 
-        DocumentationAnalysisResult analysis = reader.Analyze();
+        DocumentationAnalysisResult analysis = await reader.AnalyzeAsync();
 
         Diagnostic warning = Assert.Single(analysis.Diagnostics.Items, finding =>
             finding.Code == DocumentationAnalyzer.CodeGraphUnavailableRuleCode);
@@ -383,10 +383,8 @@ public sealed class McpAnalysisToolsTests
         DocumentationAnalysisResult result,
         IReadOnlyDictionary<string, GlossaryLookupResult>? glossary = null) : IDocsAnalysisReader
     {
-        public DocumentationAnalysisResult Analyze(CancellationToken cancellationToken = default) => result;
-
-        public async Task<DocumentationAnalysisResult> AnalyzeAsync(CancellationToken cancellationToken = default) =>
-            await Task.FromResult(Analyze(cancellationToken)).ConfigureAwait(false);
+        public Task<DocumentationAnalysisResult> AnalyzeAsync(CancellationToken cancellationToken = default) =>
+            Task.FromResult(result);
 
         [SuppressMessage(
             "Globalization",

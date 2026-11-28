@@ -28,10 +28,10 @@ public sealed class McpStdioTransportExecutableTests
     /// writes nothing to stdout.
     /// </summary>
     [Fact]
-    public void TheExecutableAnswersRequestsPipedInBeforeStdinCloses()
+    public async Task TheExecutableAnswersRequestsPipedInBeforeStdinCloses()
     {
         using TempDirectory repository = new TempDirectory();
-        DocsTestCommands.Scaffolding.Scaffold(repository.Path);
+        await DocsTestCommands.Scaffolding.ScaffoldAsync(repository.Path);
         ProcessStartInfo startInfo = new ProcessStartInfo("dotnet")
         {
             RedirectStandardInput = true,
@@ -44,7 +44,7 @@ public sealed class McpStdioTransportExecutableTests
         startInfo.ArgumentList.Add("--repo-root");
         startInfo.ArgumentList.Add(repository.Path);
 
-        ProcessResult result = ProcessRunner.Run(startInfo, ExecutableRequests, TimeSpan.FromSeconds(30));
+        ProcessResult result = await ProcessRunner.RunAsync(startInfo, ExecutableRequests, TimeSpan.FromSeconds(30));
 
         List<long> answered = AnsweredIds(result.StandardOutput);
         Assert.True(

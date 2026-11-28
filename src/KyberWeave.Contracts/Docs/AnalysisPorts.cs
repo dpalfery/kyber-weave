@@ -14,11 +14,6 @@ public interface IEmbeddingGenerator
     /// </summary>
     string GetProviderFingerprint(DocsAnalysisEmbeddingConfig config);
 
-    EmbeddingGenerationResult Generate(
-        IReadOnlyCollection<EmbeddingCacheKey> keys,
-        IReadOnlyCollection<string> inputs,
-        DocsAnalysisEmbeddingConfig config);
-
     /// <summary>
     /// Generates a vector for every input without blocking a thread.
     /// </summary>

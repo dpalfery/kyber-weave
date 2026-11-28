@@ -359,7 +359,7 @@ public sealed class MultipleDocsRootTests
     /// leaves the sequence, its comment, and its order exactly as they were.
     /// </summary>
     [Fact]
-    public void ScaffoldingLeavesAMultiRootSequenceIntactAndAppendsOnlyTheDeclaration()
+    public async Task ScaffoldingLeavesAMultiRootSequenceIntactAndAppendsOnlyTheDeclaration()
     {
         string configPath = WriteHostConfig("""
             ontology:
@@ -370,19 +370,19 @@ public sealed class MultipleDocsRootTests
             """);
         string before = _fixture.Memory!.ReadAllText(configPath);
 
-        ScaffoldResult result = _fixture.Scaffolder().Scaffold(_fixture.Root);
+        ScaffoldResult result = await _fixture.Scaffolder().ScaffoldAsync(_fixture.Root);
 
         Assert.Equal("docs", result.DocsRoot);
         Assert.Equal(before.TrimEnd('\r', '\n') + McpWiringFixture.AppendedDeclaration(), _fixture.Memory!.ReadAllText(configPath));
     }
 
     [Fact]
-    public void ScaffoldingIntoAListedRootLeavesTheConfigOtherwiseAlone()
+    public async Task ScaffoldingIntoAListedRootLeavesTheConfigOtherwiseAlone()
     {
         string configPath = WriteHostConfig("ontology:\n  docs-root: [docs, automation]\n");
         string before = _fixture.Memory!.ReadAllText(configPath);
 
-        _fixture.Scaffolder().Scaffold(_fixture.Root, "automation");
+        await _fixture.Scaffolder().ScaffoldAsync(_fixture.Root, "automation");
 
         Assert.Equal(before.TrimEnd('\r', '\n') + McpWiringFixture.AppendedDeclaration(), _fixture.Memory!.ReadAllText(configPath));
     }
@@ -391,7 +391,7 @@ public sealed class MultipleDocsRootTests
     /// Ordering a host's roots is a decision this command does not get to make for them.
     /// </summary>
     [Fact]
-    public void ScaffoldingIntoAnUnlistedRootReportsRatherThanRewriting()
+    public async Task ScaffoldingIntoAnUnlistedRootReportsRatherThanRewriting()
     {
         string configPath = WriteHostConfig("""
             ontology:
@@ -401,8 +401,8 @@ public sealed class MultipleDocsRootTests
             """);
         string before = _fixture.Memory!.ReadAllText(configPath);
 
-        InvalidDataException ex = Assert.Throws<InvalidDataException>(
-            () => _fixture.Scaffolder().Scaffold(_fixture.Root, "handbook"));
+        InvalidDataException ex = await Assert.ThrowsAsync<InvalidDataException>(
+            () => _fixture.Scaffolder().ScaffoldAsync(_fixture.Root, "handbook"));
 
         Assert.Contains("handbook", ex.Message, StringComparison.Ordinal);
         Assert.Contains("docs, automation", ex.Message, StringComparison.Ordinal);
@@ -411,11 +411,11 @@ public sealed class MultipleDocsRootTests
 
     /// <summary>A key with no value at all is still a scalar the scaffolder may fill in.</summary>
     [Fact]
-    public void AnEmptyDocsRootKeyIsFilledInRatherThanTreatedAsAList()
+    public async Task AnEmptyDocsRootKeyIsFilledInRatherThanTreatedAsAList()
     {
         string configPath = WriteHostConfig("ontology:\n  docs-root:\n  excluded-files: []\n");
 
-        _fixture.Scaffolder().Scaffold(_fixture.Root, "handbook");
+        await _fixture.Scaffolder().ScaffoldAsync(_fixture.Root, "handbook");
 
         Assert.Equal("handbook", _fixture.Config().Load(_fixture.Root).Ontology.DocsRoot);
         Assert.Contains("excluded-files: []", _fixture.Memory!.ReadAllText(configPath), StringComparison.Ordinal);
@@ -427,7 +427,7 @@ public sealed class MultipleDocsRootTests
     /// corruption multi-root scaffolding exists to prevent.
     /// </summary>
     [Fact]
-    public void ScaffoldingLeavesAMultiLineFlowSequenceAlone()
+    public async Task ScaffoldingLeavesAMultiLineFlowSequenceAlone()
     {
         string configPath = WriteHostConfig("""
             ontology:
@@ -438,13 +438,13 @@ public sealed class MultipleDocsRootTests
             """);
         string before = _fixture.Memory!.ReadAllText(configPath);
 
-        _fixture.Scaffolder().Scaffold(_fixture.Root, "docs");
+        await _fixture.Scaffolder().ScaffoldAsync(_fixture.Root, "docs");
 
         Assert.Equal(before.TrimEnd('\r', '\n') + McpWiringFixture.AppendedDeclaration(), _fixture.Memory!.ReadAllText(configPath));
     }
 
     [Fact]
-    public void ScaffoldingIntoAnUnlistedRootOfAMultiLineFlowSequenceReports()
+    public async Task ScaffoldingIntoAnUnlistedRootOfAMultiLineFlowSequenceReports()
     {
         string configPath = WriteHostConfig("""
             ontology:
@@ -455,8 +455,8 @@ public sealed class MultipleDocsRootTests
             """);
         string before = _fixture.Memory!.ReadAllText(configPath);
 
-        InvalidDataException ex = Assert.Throws<InvalidDataException>(
-            () => _fixture.Scaffolder().Scaffold(_fixture.Root, "handbook"));
+        InvalidDataException ex = await Assert.ThrowsAsync<InvalidDataException>(
+            () => _fixture.Scaffolder().ScaffoldAsync(_fixture.Root, "handbook"));
 
         Assert.Contains("handbook", ex.Message, StringComparison.Ordinal);
         Assert.Equal(before, _fixture.Memory!.ReadAllText(configPath));

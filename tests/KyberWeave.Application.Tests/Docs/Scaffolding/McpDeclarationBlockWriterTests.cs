@@ -70,9 +70,9 @@ public sealed class McpDeclarationBlockWriterTests
     ///     repository has not made.
     /// </summary>
     [Fact]
-    public void AFreshHostConfigDeclaresExactlyTheFirstPartyServer()
+    public async Task AFreshHostConfigDeclaresExactlyTheFirstPartyServer()
     {
-        _host.Scaffold();
+        await _host.ScaffoldAsync();
 
         KyberWeaveConfig config = _host.LoadConfig();
         KeyValuePair<string, RequiredMcpServer> declared = Assert.Single(config.Mcp.RequiredServers);
@@ -93,9 +93,9 @@ public sealed class McpDeclarationBlockWriterTests
     ///     review policies.
     /// </summary>
     [Fact]
-    public void ScaffoldedMcpDeclarationDoesNotCiteRetiredAlwaysHumanOrNeedsHumanPolicy()
+    public async Task ScaffoldedMcpDeclarationDoesNotCiteRetiredAlwaysHumanOrNeedsHumanPolicy()
     {
-        _host.Scaffold();
+        await _host.ScaffoldAsync();
 
         string configContent = _host.Read(ConfigPath);
 
@@ -136,13 +136,13 @@ public sealed class McpDeclarationBlockWriterTests
     ///     original file, unchanged.
     /// </summary>
     [Fact]
-    public void DocsInitAppendsTheDeclarationWhenTheHostConfigHasNone()
+    public async Task DocsInitAppendsTheDeclarationWhenTheHostConfigHasNone()
     {
         string original = HandMaintainedConfig + "\n";
         WriteHostConfig(original);
         byte[] originalBytes = _host.Memory.ReadAllBytes(_host.FullPath(ConfigPath));
 
-        _host.Scaffold(reviewGates: false);
+        await _host.ScaffoldAsync(reviewGates: false);
 
         byte[] appended = Encoding.UTF8.GetBytes("\n" + DeclarationBlock + "\n");
         Assert.Equal(originalBytes.Concat(appended), _host.Memory.ReadAllBytes(_host.FullPath(ConfigPath)));
@@ -159,7 +159,7 @@ public sealed class McpDeclarationBlockWriterTests
     [Theory]
     [InlineData(false)]
     [InlineData(true)]
-    public void AnExistingDeclarationSurvivesDocsInitUnchanged(bool force)
+    public async Task AnExistingDeclarationSurvivesDocsInitUnchanged(bool force)
     {
         const string handOwned =
             """
@@ -181,7 +181,7 @@ public sealed class McpDeclarationBlockWriterTests
             "codegraph",
             Assert.Single(_host.LoadConfig().Mcp.RequiredServers).Key);
 
-        _host.Scaffold(force: force, reviewGates: false);
+        await _host.ScaffoldAsync(force: force, reviewGates: false);
 
         Assert.Equal(handOwned, _host.Read(ConfigPath));
     }
@@ -216,9 +216,9 @@ public sealed class McpDeclarationBlockWriterTests
     ///     version control would be a machine-local record committed as if it were a decision.
     /// </summary>
     [Fact]
-    public void AFreshScaffoldIgnoresBothLocalStateDirectories()
+    public async Task AFreshScaffoldIgnoresBothLocalStateDirectories()
     {
-        _host.Scaffold(reviewGates: false);
+        await _host.ScaffoldAsync(reviewGates: false);
 
         string[] lines = Lines(IgnorePath);
         Assert.Single(lines, line => string.Equals(line, "cache/", StringComparison.Ordinal));
@@ -231,13 +231,13 @@ public sealed class McpDeclarationBlockWriterTests
     ///     second entry without regenerating the first.
     /// </summary>
     [Fact]
-    public void TheIgnoreMergeAddsReceiptsAndKeepsEveryOperatorEntry()
+    public async Task TheIgnoreMergeAddsReceiptsAndKeepsEveryOperatorEntry()
     {
         const string existing = "# operator entry\nlocal-notes/\ncache/\n";
         WriteIgnoreFile(existing);
         byte[] originalBytes = _host.Memory.ReadAllBytes(_host.FullPath(IgnorePath));
 
-        _host.Scaffold(force: true, reviewGates: false);
+        await _host.ScaffoldAsync(force: true, reviewGates: false);
 
         Assert.Equal(originalBytes, _host.Memory.ReadAllBytes(_host.FullPath(IgnorePath)).Take(originalBytes.Length));
         string[] lines = Lines(IgnorePath);
@@ -253,13 +253,13 @@ public sealed class McpDeclarationBlockWriterTests
     ///     and would escalate the host configuration for review every time.
     /// </summary>
     [Fact]
-    public void ReRunningDocsInitChangesNeitherTheDeclarationNorTheIgnoreFile()
+    public async Task ReRunningDocsInitChangesNeitherTheDeclarationNorTheIgnoreFile()
     {
-        _host.Scaffold(reviewGates: false);
+        await _host.ScaffoldAsync(reviewGates: false);
         string configAfterFirstRun = _host.Read(ConfigPath);
         string ignoreAfterFirstRun = _host.Read(IgnorePath);
 
-        _host.Scaffold(force: true, reviewGates: false);
+        await _host.ScaffoldAsync(force: true, reviewGates: false);
 
         Assert.Equal(configAfterFirstRun, _host.Read(ConfigPath));
         Assert.Equal(ignoreAfterFirstRun, _host.Read(IgnorePath));

@@ -125,7 +125,7 @@ public sealed class McpDocsGateToolsTests
     [Fact]
     public async Task DocsValidateFailsOnUngovernedMarkdownWithSpec001AndFixtureProvenance()
     {
-        string root = CreateScaffoldedRoot();
+        string root = await CreateScaffoldedRootAsync();
         _host.Files.WriteAllText(
             Path.Combine(root, "docs", "ungoverned.md"),
             "# No frontmatter\n\nThis file is not governed.\n");
@@ -142,7 +142,7 @@ public sealed class McpDocsGateToolsTests
     [Fact]
     public async Task DocsValidatePassesConformantCorpusWhenMergeReadyIsFalse()
     {
-        string root = CreateScaffoldedRoot();
+        string root = await CreateScaffoldedRootAsync();
         AddActivePlan(root);
 
         DocsTools tools = CreateTools(root, () => FakeCodeGraphResolver.WithSymbols());
@@ -156,7 +156,7 @@ public sealed class McpDocsGateToolsTests
     [Fact]
     public async Task DocsValidateReportsLifecycle003OnlyWhenMergeReadyIsTrue()
     {
-        string root = CreateScaffoldedRoot();
+        string root = await CreateScaffoldedRootAsync();
         AddActivePlan(root);
 
         DocsTools tools = CreateTools(root, () => FakeCodeGraphResolver.WithSymbols());
@@ -177,7 +177,7 @@ public sealed class McpDocsGateToolsTests
     [Fact]
     public async Task DocsDriftFailsOnUnresolvedCodeRefWithPathAndHint()
     {
-        string root = CreateScaffoldedRoot();
+        string root = await CreateScaffoldedRootAsync();
         const string relativePath = "docs/reference/drift-target.md";
         WriteDriftDocument(root, relativePath, "MissingSymbolForDriftGate", null);
 
@@ -193,7 +193,7 @@ public sealed class McpDocsGateToolsTests
     [Fact]
     public async Task DocsDriftFailsWhenResolverIsUnavailableRatherThanPassing()
     {
-        string root = CreateScaffoldedRoot();
+        string root = await CreateScaffoldedRootAsync();
         WriteDriftDocument(root, "docs/reference/drift-target.md", "AnySymbol", null);
 
         DocsTools tools = CreateTools(root, () => new UnavailableCodeGraphResolver());
@@ -207,7 +207,7 @@ public sealed class McpDocsGateToolsTests
     [Fact]
     public async Task DocsDriftPassesWithWarning003StillPresent()
     {
-        string root = CreateScaffoldedRoot();
+        string root = await CreateScaffoldedRootAsync();
         const string sourceRoot = "1-Presentation/Api";
         _host.Files.CreateDirectory(Path.Combine(root, sourceRoot.Replace('/', Path.DirectorySeparatorChar)));
         WriteDriftDocument(
@@ -229,7 +229,7 @@ public sealed class McpDocsGateToolsTests
     [Fact]
     public async Task TruncatedGateResponseLeadsWithProvenanceAndResultThenErrorsBeforeWarnings()
     {
-        string root = CreateScaffoldedRoot();
+        string root = await CreateScaffoldedRootAsync();
         for (int index = 0; index < 6; index++)
             WriteDriftDocument(
                 root,
@@ -294,7 +294,7 @@ public sealed class McpDocsGateToolsTests
     [Fact]
     public async Task MinimumCharBudgetStillShowsFirstFindingRuleIdAndOmittedCount()
     {
-        string root = CreateScaffoldedRoot();
+        string root = await CreateScaffoldedRootAsync();
         const string relativePath = "docs/reference/budget-floor.md";
         string longSymbol = new('M', 900);
         WriteDriftDocument(root, relativePath, longSymbol, null);
@@ -320,10 +320,10 @@ public sealed class McpDocsGateToolsTests
             StringComparison.Ordinal);
     }
 
-    private string CreateScaffoldedRoot()
+    private async Task<string> CreateScaffoldedRootAsync()
     {
         string root = _host.Repo;
-        _host.Services().GetRequiredService<IDocsScaffoldingService>().Scaffold(root, owner: "gate-fixture");
+        await _host.Services().GetRequiredService<IDocsScaffoldingService>().ScaffoldAsync(root, owner: "gate-fixture");
         return root;
     }
 

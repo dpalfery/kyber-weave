@@ -42,7 +42,7 @@ public sealed class CodeGraphNeverInitialisedDoctorTests
     [Theory]
     [InlineData(DoctorMode.Ensure)]
     [InlineData(DoctorMode.Provision)]
-    public void FolderNeverInitialised_IsSetUpWithInit(DoctorMode mode)
+    public async Task FolderNeverInitialised_IsSetUpWithInit(DoctorMode mode)
     {
         _world.Files.CreateDirectory(IndexDirectory);
         ScriptedProcessExecutor executor = DoctorHarness.Executor(
@@ -51,7 +51,7 @@ public sealed class CodeGraphNeverInitialisedDoctorTests
                 ? new ProcessResult(1, string.Empty, "✗ CodeGraph not initialized in " + Root)
                 : DoctorHarness.Ok("1.5.0"));
 
-        DoctorReport report = Run(mode, executor);
+        DoctorReport report = await RunAsync(mode, executor);
 
         Assert.True(DoctorHarness.CheckNamed(report, "codegraph.index").Passed);
         Assert.Single(
@@ -67,7 +67,7 @@ public sealed class CodeGraphNeverInitialisedDoctorTests
     /// doctor prints must be the one that works, <c>codegraph init .</c>, not the command that just failed.
     /// </summary>
     [Fact]
-    public void Ensure_FolderNeverInitialised_PrintsInitAsTheFix()
+    public async Task Ensure_FolderNeverInitialised_PrintsInitAsTheFix()
     {
         _world.Files.CreateDirectory(IndexDirectory);
         ScriptedProcessExecutor executor = DoctorHarness.Executor(
@@ -81,7 +81,7 @@ public sealed class CodeGraphNeverInitialisedDoctorTests
                     : new ProcessResult(1, string.Empty, "✗ CodeGraph not initialized in " + Root);
             });
 
-        DoctorReport report = Run(DoctorMode.Ensure, executor);
+        DoctorReport report = await RunAsync(DoctorMode.Ensure, executor);
 
         DoctorCheck index = DoctorHarness.CheckNamed(report, "codegraph.index");
         Assert.False(index.Passed);
@@ -95,7 +95,7 @@ public sealed class CodeGraphNeverInitialisedDoctorTests
     /// hide the real error behind advice about a folder that is fine.
     /// </summary>
     [Fact]
-    public void Provision_UnrelatedNotInitializedMessage_DoesNotRunInit()
+    public async Task Provision_UnrelatedNotInitializedMessage_DoesNotRunInit()
     {
         _world.Files.CreateDirectory(IndexDirectory);
         ScriptedProcessExecutor executor = DoctorHarness.Executor(
@@ -104,7 +104,7 @@ public sealed class CodeGraphNeverInitialisedDoctorTests
                 ? new ProcessResult(1, string.Empty, "telemetry not initialized, sync failed")
                 : DoctorHarness.Ok("1.5.0"));
 
-        DoctorReport report = Run(DoctorMode.Provision, executor);
+        DoctorReport report = await RunAsync(DoctorMode.Provision, executor);
 
         Assert.Equal("codegraph sync .", DoctorHarness.CheckNamed(report, "codegraph.index").Fix);
         Assert.DoesNotContain(
@@ -112,10 +112,10 @@ public sealed class CodeGraphNeverInitialisedDoctorTests
             call => call.ArgumentList.Contains("init", StringComparer.Ordinal));
     }
 
-    private DoctorReport Run(DoctorMode mode, ScriptedProcessExecutor executor)
+    private Task<DoctorReport> RunAsync(DoctorMode mode, ScriptedProcessExecutor executor)
     {
         _world.HealthyMcp(Root);
-        return _world.Doctor.Run(
+        return _world.Doctor.RunAsync(
             Root,
             mode,
             DoctorHarness.Options(McpExecutable),
