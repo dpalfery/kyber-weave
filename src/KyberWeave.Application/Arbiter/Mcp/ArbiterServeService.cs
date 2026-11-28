@@ -60,72 +60,14 @@ public sealed class ArbiterServeService(
             return Failure(provenance, error ?? "The host configuration could not be loaded.");
         }
 
-        if (string.IsNullOrWhiteSpace(trigger) || !KnownTrigger(trigger))
-        {
-            return Failure(provenance, UnknownTrigger(trigger));
-        }
-
         if (!config.Arbiter.Enabled)
         {
             return provenance + "\noutcome: allow\nArbiter is disabled (arbiter.enabled: false): allowing without evaluation.";
         }
 
-        if (!TryPhase(facts.Phase, out bool post))
+        if (ValidateRequest(trigger, facts, out bool post, out List<FindingBlock>? findingBlocks) is { } problem)
         {
-            return Failure(provenance, $"Unknown phase '{OneLine(facts.Phase)}'. Use pre, post or return.");
-        }
-
-        // A refutation or lens fan-out call carries its routing in the structured
-        // fields, never in a hand-written header: a call with neither says what to
-        // pass instead of failing classification (review 20.1, Major 2).
-        bool fanOut = string.Equals(trigger, ArbiterTriggers.LensSpawn, StringComparison.Ordinal)
-            || string.Equals(trigger, ArbiterTriggers.RefuteSpawn, StringComparison.Ordinal);
-        if (fanOut && facts.Lens is not { Count: > 0 } && !Present(facts.Finding))
-        {
-            return Failure(
-                provenance,
-                $"The facts carry no routing for '{trigger}': pass the lens names as `lens`, or the findings to be refuted as `finding`.");
-        }
-
-        // A single call is bounded in both count and bytes: each unit is a provider
-        // call and a ledger append, and a client-supplied finding or prompt is copied
-        // into every unit's prompt.
-        if (facts.Prompt is { Length: > MaxTextChars })
-        {
-            return Failure(provenance, $"The prompt is larger than {MaxTextChars} characters.");
-        }
-
-        if (facts.Finding is { Length: > MaxTextChars })
-        {
-            return Failure(provenance, $"The finding is larger than {MaxTextChars} characters.");
-        }
-
-        if (facts.Lens is { Count: > MaxFanOutUnits })
-        {
-            return Failure(
-                provenance,
-                $"A lens fan-out carries at most {MaxFanOutUnits} units; split the call.");
-        }
-
-        // A refutation call is one evaluation per finding id, because a REFUTE header
-        // names one finding. Ids are checked before any evaluation, on the lens+finding
-        // path too, so a bad id records nothing (review 20.1-2, Major).
-        List<FindingBlock>? findingBlocks = null;
-        if (Present(facts.Finding))
-        {
-            findingBlocks = FindingBlocks(facts.Finding!);
-            if (findingBlocks.Count > MaxFanOutUnits)
-            {
-                return Failure(
-                    provenance,
-                    $"A refutation carries at most {MaxFanOutUnits} findings; split the call.");
-            }
-
-            string? problem = FindingIdProblem(findingBlocks);
-            if (problem is not null)
-            {
-                return Failure(provenance, problem);
-            }
+            return Failure(provenance, problem);
         }
 
         List<EvaluationUnit> units = [];
@@ -139,31 +81,9 @@ public sealed class ArbiterServeService(
         }
 
         string? target = facts.Target ?? RoutingTarget(facts);
-        List<PendingEvaluation> pending = [];
-        foreach (EvaluationUnit unit in units)
+        if (ClassifyUnits(trigger, facts, units, target, post, out List<PendingEvaluation> pending) is { } classificationProblem)
         {
-            string prompt = PromptFor(facts, unit);
-            ArbiterEvent ev = new()
-            {
-                Harness = Harness,
-                Phase = post ? "post" : "pre",
-                Cwd = context.RepoRoot,
-                Target = target,
-                Prompt = prompt,
-                ToolCallId = facts.CallId,
-                ToolOutput = facts.Output,
-                IsDispatch = true,
-            };
-            TriggerClassification classification = TriggerClassifier.ClassifySingle(ev, target, prompt);
-            if (!string.Equals(classification.Trigger, trigger, StringComparison.Ordinal))
-            {
-                return Failure(
-                    provenance,
-                    $"The facts classify as '{OneLine(classification.Trigger) ?? "no trigger"}', not '{OneLine(trigger)}'. " +
-                    "Pass the trigger the event classifies as.");
-            }
-
-            pending.Add(new PendingEvaluation(classification.Caller ?? UnidentifiedCaller, target, prompt, unit.Refute));
+            return Failure(provenance, classificationProblem);
         }
 
         HookContext hookContext = new(context.RepoRoot, () => ids.NewSortableId(clock.GetUtcNow()), context.Log);
@@ -199,6 +119,116 @@ public sealed class ArbiterServeService(
         return retarget is null
             ? provenance + "\noutcome: allow"
             : provenance + "\noutcome: allow\n" + RetargetAdvisory(retarget);
+    }
+
+    /// <summary>
+    /// Checks the request shape before anything is evaluated, returning the failure text or null. A refutation or
+    /// lens fan-out call carries its routing in the structured fields, never in a hand-written header.
+    /// </summary>
+    private static string? ValidateRequest(
+        string trigger,
+        ArbiterFacts facts,
+        out bool post,
+        out List<FindingBlock>? findingBlocks)
+    {
+        post = false;
+        findingBlocks = null;
+        if (string.IsNullOrWhiteSpace(trigger) || !KnownTrigger(trigger))
+        {
+            return UnknownTrigger(trigger);
+        }
+
+        if (!TryPhase(facts.Phase, out post))
+        {
+            return $"Unknown phase '{OneLine(facts.Phase)}'. Use pre, post or return.";
+        }
+
+        // A refutation or lens fan-out call carries its routing in the structured
+        // fields, never in a hand-written header: a call with neither says what to
+        // pass instead of failing classification (review 20.1, Major 2).
+        bool fanOut = string.Equals(trigger, ArbiterTriggers.LensSpawn, StringComparison.Ordinal)
+            || string.Equals(trigger, ArbiterTriggers.RefuteSpawn, StringComparison.Ordinal);
+        if (fanOut && facts.Lens is not { Count: > 0 } && !Present(facts.Finding))
+        {
+            return $"The facts carry no routing for '{trigger}': pass the lens names as `lens`, or the findings to be refuted as `finding`.";
+        }
+
+        // A single call is bounded in both count and bytes: each unit is a provider
+        // call and a ledger append, and a client-supplied finding or prompt is copied
+        // into every unit's prompt.
+        if (facts.Prompt is { Length: > MaxTextChars })
+        {
+            return $"The prompt is larger than {MaxTextChars} characters.";
+        }
+
+        if (facts.Finding is { Length: > MaxTextChars })
+        {
+            return $"The finding is larger than {MaxTextChars} characters.";
+        }
+
+        if (facts.Lens is { Count: > MaxFanOutUnits })
+        {
+            return $"A lens fan-out carries at most {MaxFanOutUnits} units; split the call.";
+        }
+
+        // A refutation call is one evaluation per finding id, because a REFUTE header
+        // names one finding. Ids are checked before any evaluation, on the lens+finding
+        // path too, so a bad id records nothing (review 20.1-2, Major).
+        if (Present(facts.Finding))
+        {
+            findingBlocks = FindingBlocks(facts.Finding!);
+            if (findingBlocks.Count > MaxFanOutUnits)
+            {
+                return $"A refutation carries at most {MaxFanOutUnits} findings; split the call.";
+            }
+
+            string? problem = FindingIdProblem(findingBlocks);
+            if (problem is not null)
+            {
+                return problem;
+            }
+        }
+
+        return null;
+    }
+
+    /// <summary>
+    /// Classifies every unit with the same trigger the request named, returning the failure text or null.
+    /// </summary>
+    private string? ClassifyUnits(
+        string trigger,
+        ArbiterFacts facts,
+        IReadOnlyList<EvaluationUnit> units,
+        string? target,
+        bool post,
+        out List<PendingEvaluation> pending)
+    {
+        pending = [];
+        foreach (EvaluationUnit unit in units)
+        {
+            string prompt = PromptFor(facts, unit);
+            ArbiterEvent ev = new()
+            {
+                Harness = Harness,
+                Phase = post ? "post" : "pre",
+                Cwd = context.RepoRoot,
+                Target = target,
+                Prompt = prompt,
+                ToolCallId = facts.CallId,
+                ToolOutput = facts.Output,
+                IsDispatch = true,
+            };
+            TriggerClassification classification = TriggerClassifier.ClassifySingle(ev, target, prompt);
+            if (!string.Equals(classification.Trigger, trigger, StringComparison.Ordinal))
+            {
+                return $"The facts classify as '{OneLine(classification.Trigger) ?? "no trigger"}', not '{OneLine(trigger)}'. " +
+                    "Pass the trigger the event classifies as.";
+            }
+
+            pending.Add(new PendingEvaluation(classification.Caller ?? UnidentifiedCaller, target, prompt, unit.Refute));
+        }
+
+        return null;
     }
 
     /// <summary>

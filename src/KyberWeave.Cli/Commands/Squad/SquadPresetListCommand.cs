@@ -70,6 +70,21 @@ internal sealed class SquadPresetListCommand : Command<SquadPresetListSettings>
 
         Dictionary<string, HashSet<string>> usages = new(StringComparer.Ordinal);
 
+        CollectLockUsages(stateStore, effectivePath, projectRoot, selectionStores, usages);
+        CollectRegistryUsages(stateStore, projectRoot, selectionStores, usages);
+        CollectSelectionDirectoryUsages(userPaths, selectionStores, usages);
+        WritePresetLines(userPaths, presetNames, usages);
+
+        return 0;
+    }
+
+    private void CollectLockUsages(
+        ISquadStateStore stateStore,
+        string? effectivePath,
+        string projectRoot,
+        IReadOnlyList<ISquadModelPresetSelectionStore> selectionStores,
+        Dictionary<string, HashSet<string>> usages)
+    {
         string globalAnchor = _roots.ResolveGlobalAnchorRoot(stateStore, effectivePath, dryRun: false);
         SquadLock? globalLock = stateStore.ReadLock(globalAnchor, SquadDeploymentScope.Global);
         if (globalLock?.ModelPresets is not null)
@@ -103,7 +118,14 @@ internal sealed class SquadPresetListCommand : Command<SquadPresetListSettings>
                 }
             }
         }
+    }
 
+    private static void CollectRegistryUsages(
+        ISquadStateStore stateStore,
+        string projectRoot,
+        IReadOnlyList<ISquadModelPresetSelectionStore> selectionStores,
+        Dictionary<string, HashSet<string>> usages)
+    {
         List<SquadProjectRegistryEntry> allProjects = [.. stateStore.ListProjects()];
 
         foreach (SquadProjectRegistryEntry project in allProjects)
@@ -136,47 +158,63 @@ internal sealed class SquadPresetListCommand : Command<SquadPresetListSettings>
                 }
             }
         }
+    }
 
+    private void CollectSelectionDirectoryUsages(
+        ISquadUserPaths userPaths,
+        IReadOnlyList<ISquadModelPresetSelectionStore> selectionStores,
+        Dictionary<string, HashSet<string>> usages)
+    {
         string selectionsDir = UserStatePaths.SquadSelectionsDirectory(userPaths.HomeDirectory);
-        if (_files.DirectoryExists(selectionsDir))
+        if (!_files.DirectoryExists(selectionsDir))
         {
-            foreach (string file in _files.EnumerateFiles(selectionsDir, "*.yml", recursive: false))
-            {
-                try
-                {
-                    IEnumerable<string> lines = _files.ReadLines(file);
-                    string? root = null;
-                    foreach (string line in lines)
-                    {
-                        if (line.StartsWith("root: ", StringComparison.Ordinal))
-                        {
-                            root = line["root: ".Length..].Trim();
-                            break;
-                        }
-                    }
-
-                    if (!string.IsNullOrWhiteSpace(root))
-                    {
-                        foreach (ISquadModelPresetSelectionStore store in selectionStores)
-                        {
-                            SquadModelPresetSelection? sel = store.Read(root);
-                            if (sel?.ModelPresets is not null)
-                            {
-                                foreach (KeyValuePair<SquadTarget, string> kvp in sel.ModelPresets)
-                                {
-                                    string token = $"project:{SquadTargetCatalog.GetToken(kvp.Key)}";
-                                    AddUsage(usages, kvp.Value, token);
-                                }
-                            }
-                        }
-                    }
-                }
-                catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or InvalidDataException)
-                {
-                }
-            }
+            return;
         }
 
+        foreach (string file in _files.EnumerateFiles(selectionsDir, "*.yml", recursive: false))
+        {
+            try
+            {
+                IEnumerable<string> lines = _files.ReadLines(file);
+                string? root = null;
+                foreach (string line in lines)
+                {
+                    if (line.StartsWith("root: ", StringComparison.Ordinal))
+                    {
+                        root = line["root: ".Length..].Trim();
+                        break;
+                    }
+                }
+
+                if (string.IsNullOrWhiteSpace(root))
+                {
+                    continue;
+                }
+
+                foreach (ISquadModelPresetSelectionStore store in selectionStores)
+                {
+                    SquadModelPresetSelection? sel = store.Read(root);
+                    if (sel?.ModelPresets is not null)
+                    {
+                        foreach (KeyValuePair<SquadTarget, string> kvp in sel.ModelPresets)
+                        {
+                            string token = $"project:{SquadTargetCatalog.GetToken(kvp.Key)}";
+                            AddUsage(usages, kvp.Value, token);
+                        }
+                    }
+                }
+            }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or InvalidDataException)
+            {
+            }
+        }
+    }
+
+    private void WritePresetLines(
+        ISquadUserPaths userPaths,
+        IReadOnlyList<string> presetNames,
+        Dictionary<string, HashSet<string>> usages)
+    {
         string presetsDir = UserStatePaths.SquadPresetsDirectory(userPaths.HomeDirectory);
         foreach (string name in presetNames)
         {
@@ -190,8 +228,6 @@ internal sealed class SquadPresetListCommand : Command<SquadPresetListSettings>
 
             _output.WriteLine($"{name}  {presetPath}  used by: {usedByText}");
         }
-
-        return 0;
     }
 
     private static void AddUsage(Dictionary<string, HashSet<string>> usages, string presetName, string token)

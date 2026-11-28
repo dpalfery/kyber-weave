@@ -35,34 +35,29 @@ public static class SquadInstanceLinkPlanner
         ArgumentNullException.ThrowIfNull(instanceListing);
 
         HashSet<string> normalizedRendered = new(renderedPaths.Select(NormalizeRelativePath), StringComparer.Ordinal);
-        HashSet<string> neverLinkedExact = new(StringComparer.Ordinal);
-        List<string> neverLinkedPrefixes = [];
-        foreach (string never in row.NeverLinked)
-        {
-            string norm = NormalizeRelativePath(never);
-            neverLinkedExact.Add(norm);
-            neverLinkedPrefixes.Add(norm + "/");
-        }
+        NeverLinkedMatcher neverLinked = new(row.NeverLinked);
+        HashSet<string> renderedAncestors = CollectRenderedAncestors(normalizedRendered);
 
-        bool IsNeverLinked(string relativePath)
-        {
-            string normalized = NormalizeRelativePath(relativePath);
-            if (neverLinkedExact.Contains(normalized))
-            {
-                return true;
-            }
+        List<SquadLinkRecord> candidateDirs = CollectCandidateDirs(mainListing, neverLinked, normalizedRendered, renderedAncestors);
+        HashSet<string> candidateDirNorms = new(candidateDirs.Select(d => NormalizeRelativePath(d.RelativePath)), StringComparer.Ordinal);
+        HashSet<string> outermostDirNorms = CollectOutermostDirNorms(candidateDirs, candidateDirNorms);
 
-            foreach (string prefix in neverLinkedPrefixes)
-            {
-                if (normalized.StartsWith(prefix, StringComparison.Ordinal))
-                {
-                    return true;
-                }
-            }
+        List<SquadLinkAction> actions = [];
+        HashSet<string> addedPaths = new(StringComparer.Ordinal);
+        Dictionary<string, SquadLinkRecord> mainByRelative = new(mainListing.Count, StringComparer.Ordinal);
+        Dictionary<string, string> mainLookup = new(mainListing.Count, StringComparer.Ordinal);
+        BuildMainLookups(mainListing, mainByRelative, mainLookup);
 
-            return false;
-        }
+        AddPlannedLinkActions(mainListing, neverLinked, normalizedRendered, outermostDirNorms, actions, addedPaths);
+        AddExtraLinkActions(row.ExtraLinks, mainByRelative, actions, addedPaths);
+        AddRemoveActions(recordedLinks, mainLookup, actions);
+        AddKeepActions(recordedLinks, instanceListing, actions);
 
+        return actions;
+    }
+
+    private static HashSet<string> CollectRenderedAncestors(HashSet<string> normalizedRendered)
+    {
         HashSet<string> renderedAncestors = new(StringComparer.Ordinal);
         foreach (string rendered in normalizedRendered)
         {
@@ -74,63 +69,92 @@ public static class SquadInstanceLinkPlanner
             }
         }
 
-        bool ContainsRendered(string dirRelativePath)
-        {
-            string normalizedDir = NormalizeRelativePath(dirRelativePath);
-            return normalizedRendered.Contains(normalizedDir) || renderedAncestors.Contains(normalizedDir);
-        }
+        return renderedAncestors;
+    }
 
+    private static List<SquadLinkRecord> CollectCandidateDirs(
+        IReadOnlyList<SquadLinkRecord> mainListing,
+        NeverLinkedMatcher neverLinked,
+        HashSet<string> normalizedRendered,
+        HashSet<string> renderedAncestors)
+    {
         List<SquadLinkRecord> candidateDirs = [];
         foreach (SquadLinkRecord record in mainListing)
         {
             if (record.Kind == SquadLinkKind.Directory &&
-                !IsNeverLinked(record.RelativePath) &&
-                !ContainsRendered(record.RelativePath))
+                !neverLinked.IsNeverLinked(record.RelativePath) &&
+                !ContainsRendered(record.RelativePath, normalizedRendered, renderedAncestors))
             {
                 candidateDirs.Add(record);
             }
         }
 
-        HashSet<string> candidateDirNorms = new(candidateDirs.Select(d => NormalizeRelativePath(d.RelativePath)), StringComparer.Ordinal);
-        List<SquadLinkRecord> outermostDirs = [];
-        HashSet<string> outermostDirNorms = new(StringComparer.Ordinal);
+        return candidateDirs;
+    }
 
+    private static bool ContainsRendered(
+        string dirRelativePath,
+        HashSet<string> normalizedRendered,
+        HashSet<string> renderedAncestors)
+    {
+        string normalizedDir = NormalizeRelativePath(dirRelativePath);
+        return normalizedRendered.Contains(normalizedDir) || renderedAncestors.Contains(normalizedDir);
+    }
+
+    private static HashSet<string> CollectOutermostDirNorms(
+        List<SquadLinkRecord> candidateDirs,
+        HashSet<string> candidateDirNorms)
+    {
+        HashSet<string> outermostDirNorms = new(StringComparer.Ordinal);
         foreach (SquadLinkRecord dir in candidateDirs)
         {
             string normDir = NormalizeRelativePath(dir.RelativePath);
-            bool hasAncestor = false;
-            int slash = normDir.LastIndexOf('/');
-            while (slash > 0)
+            if (!HasAncestorIn(normDir, candidateDirNorms))
             {
-                string ancestor = normDir[..slash];
-                if (candidateDirNorms.Contains(ancestor))
-                {
-                    hasAncestor = true;
-                    break;
-                }
-
-                slash = normDir.LastIndexOf('/', slash - 1);
-            }
-
-            if (!hasAncestor)
-            {
-                outermostDirs.Add(dir);
                 outermostDirNorms.Add(normDir);
             }
         }
 
-        List<SquadLinkAction> actions = [];
-        HashSet<string> addedPaths = new(StringComparer.Ordinal);
-        Dictionary<string, SquadLinkRecord> mainByRelative = new(mainListing.Count, StringComparer.Ordinal);
-        Dictionary<string, string> mainLookup = new(mainListing.Count, StringComparer.Ordinal);
+        return outermostDirNorms;
+    }
 
+    private static bool HasAncestorIn(string normalizedPath, HashSet<string> ancestors)
+    {
+        int slash = normalizedPath.LastIndexOf('/');
+        while (slash > 0)
+        {
+            if (ancestors.Contains(normalizedPath[..slash]))
+            {
+                return true;
+            }
+
+            slash = normalizedPath.LastIndexOf('/', slash - 1);
+        }
+
+        return false;
+    }
+
+    private static void BuildMainLookups(
+        IReadOnlyList<SquadLinkRecord> mainListing,
+        Dictionary<string, SquadLinkRecord> mainByRelative,
+        Dictionary<string, string> mainLookup)
+    {
         foreach (SquadLinkRecord m in mainListing)
         {
             string key = NormalizeRelativePath(m.RelativePath);
             mainByRelative.TryAdd(key, m);
             mainLookup.TryAdd(key, NormalizeTargetPath(m.TargetPath));
         }
+    }
 
+    private static void AddPlannedLinkActions(
+        IReadOnlyList<SquadLinkRecord> mainListing,
+        NeverLinkedMatcher neverLinked,
+        HashSet<string> normalizedRendered,
+        HashSet<string> outermostDirNorms,
+        List<SquadLinkAction> actions,
+        HashSet<string> addedPaths)
+    {
         // 1. Add actions for planned links
         foreach (SquadLinkRecord record in mainListing)
         {
@@ -151,35 +175,28 @@ public static class SquadInstanceLinkPlanner
                     continue;
                 }
 
-                if (IsNeverLinked(record.RelativePath))
+                if (neverLinked.IsNeverLinked(record.RelativePath))
                 {
                     continue;
                 }
 
-                bool coveredByLinkedDirectory = false;
-                int slash = normFile.LastIndexOf('/');
-                while (slash > 0)
-                {
-                    string ancestor = normFile[..slash];
-                    if (outermostDirNorms.Contains(ancestor))
-                    {
-                        coveredByLinkedDirectory = true;
-                        break;
-                    }
-
-                    slash = normFile.LastIndexOf('/', slash - 1);
-                }
-
-                if (!coveredByLinkedDirectory)
+                if (!HasAncestorIn(normFile, outermostDirNorms))
                 {
                     actions.Add(new SquadLinkAction.Add(record));
                     addedPaths.Add(normFile);
                 }
             }
         }
+    }
 
+    private static void AddExtraLinkActions(
+        IReadOnlyList<string> extraLinks,
+        Dictionary<string, SquadLinkRecord> mainByRelative,
+        List<SquadLinkAction> actions,
+        HashSet<string> addedPaths)
+    {
         // 1b. ExtraLinks from catalog row: guarantee an Add action for each extra link present in mainListing
-        foreach (string extraLink in row.ExtraLinks)
+        foreach (string extraLink in extraLinks)
         {
             string normExtra = NormalizeRelativePath(extraLink);
             if (!addedPaths.Contains(normExtra) && mainByRelative.TryGetValue(normExtra, out SquadLinkRecord? match))
@@ -188,7 +205,13 @@ public static class SquadInstanceLinkPlanner
                 addedPaths.Add(normExtra);
             }
         }
+    }
 
+    private static void AddRemoveActions(
+        IReadOnlyList<SquadLinkRecord> recordedLinks,
+        Dictionary<string, string> mainLookup,
+        List<SquadLinkAction> actions)
+    {
         // 2. Remove actions for stale recorded links whose target in main home no longer exists
         foreach (SquadLinkRecord recorded in recordedLinks)
         {
@@ -203,7 +226,13 @@ public static class SquadInstanceLinkPlanner
                 actions.Add(new SquadLinkAction.Remove(recorded));
             }
         }
+    }
 
+    private static void AddKeepActions(
+        IReadOnlyList<SquadLinkRecord> recordedLinks,
+        IReadOnlyList<string> instanceListing,
+        List<SquadLinkAction> actions)
+    {
         // 3. Keep actions for existing instance entries that are not recorded links
         HashSet<string> recordedLinksSet = new(recordedLinks.Select(r => NormalizeRelativePath(r.RelativePath)), StringComparer.Ordinal);
         HashSet<string> seenKept = new(StringComparer.Ordinal);
@@ -215,8 +244,6 @@ public static class SquadInstanceLinkPlanner
                 actions.Add(new SquadLinkAction.Keep(instanceEntry, InstanceCopyKeptWarning));
             }
         }
-
-        return actions;
     }
 
     private static string NormalizeRelativePath(string path)
@@ -227,5 +254,42 @@ public static class SquadInstanceLinkPlanner
     private static string NormalizeTargetPath(string path)
     {
         return path.Replace('\\', '/').TrimEnd('/');
+    }
+
+    private sealed class NeverLinkedMatcher
+    {
+        private readonly HashSet<string> _exact;
+        private readonly List<string> _prefixes;
+
+        public NeverLinkedMatcher(IEnumerable<string> neverLinked)
+        {
+            _exact = new HashSet<string>(StringComparer.Ordinal);
+            _prefixes = [];
+            foreach (string never in neverLinked)
+            {
+                string norm = NormalizeRelativePath(never);
+                _exact.Add(norm);
+                _prefixes.Add(norm + "/");
+            }
+        }
+
+        public bool IsNeverLinked(string relativePath)
+        {
+            string normalized = NormalizeRelativePath(relativePath);
+            if (_exact.Contains(normalized))
+            {
+                return true;
+            }
+
+            foreach (string prefix in _prefixes)
+            {
+                if (normalized.StartsWith(prefix, StringComparison.Ordinal))
+                {
+                    return true;
+                }
+            }
+
+            return false;
+        }
     }
 }

@@ -207,9 +207,30 @@ public static partial class RelationalSchemaCatalog
         if (table.PrimaryKeyColumns.Count == 0)
             throw new ArgumentException($"Table '{table.Name}' must define a primary key.", nameof(table));
 
+        Dictionary<string, ColumnDefinition> columnsByName = ValidateTableColumns(table, out bool hasEavKey, out bool hasEavValue);
+
+        if (hasEavKey && hasEavValue)
+        {
+            throw new ArgumentException(
+                $"Table '{table.Name}' uses a forbidden Entity-Attribute-Value (EAV) key/value shape.",
+                nameof(table));
+        }
+
+        HashSet<string> pkSet = ValidatePrimaryKey(table, columnsByName);
+        ValidateRepeatedItem(table, columnsByName, pkSet);
+        ValidateForeignKeys(table, columnsByName);
+        ValidateIndexes(table, columnsByName);
+        ValidateCheckConstraints(table);
+    }
+
+    private static Dictionary<string, ColumnDefinition> ValidateTableColumns(
+        TableDefinition table,
+        out bool hasEavKey,
+        out bool hasEavValue)
+    {
         Dictionary<string, ColumnDefinition> columnsByName = new(table.Columns.Count, StringComparer.Ordinal);
-        bool hasEavKey = false;
-        bool hasEavValue = false;
+        hasEavKey = false;
+        hasEavValue = false;
 
         foreach (ColumnDefinition column in table.Columns)
         {
@@ -241,13 +262,13 @@ public static partial class RelationalSchemaCatalog
                 hasEavValue = true;
         }
 
-        if (hasEavKey && hasEavValue)
-        {
-            throw new ArgumentException(
-                $"Table '{table.Name}' uses a forbidden Entity-Attribute-Value (EAV) key/value shape.",
-                nameof(table));
-        }
+        return columnsByName;
+    }
 
+    private static HashSet<string> ValidatePrimaryKey(
+        TableDefinition table,
+        Dictionary<string, ColumnDefinition> columnsByName)
+    {
         HashSet<string> pkSet = new(StringComparer.Ordinal);
         foreach (string pkColumn in table.PrimaryKeyColumns)
         {
@@ -258,30 +279,43 @@ public static partial class RelationalSchemaCatalog
                 throw new ArgumentException($"Table '{table.Name}' primary key repeats column '{pkColumn}'.", nameof(table));
         }
 
-        if (table.IsRepeatedItem)
+        return pkSet;
+    }
+
+    private static void ValidateRepeatedItem(
+        TableDefinition table,
+        Dictionary<string, ColumnDefinition> columnsByName,
+        HashSet<string> pkSet)
+    {
+        if (!table.IsRepeatedItem)
+            return;
+
+        if (!columnsByName.TryGetValue("position", out ColumnDefinition? position))
         {
-            if (!columnsByName.TryGetValue("position", out ColumnDefinition? position))
-            {
-                throw new ArgumentException(
-                    $"Repeated-item table '{table.Name}' must declare an INTEGER NOT NULL 'position' column.",
-                    nameof(table));
-            }
-
-            if (position.Type != SqliteColumnType.SqliteInteger || !position.IsNotNull)
-            {
-                throw new ArgumentException(
-                    $"Repeated-item table '{table.Name}' column 'position' must be INTEGER NOT NULL.",
-                    nameof(table));
-            }
-
-            if (table.PrimaryKeyColumns.Count > 1 && !pkSet.Contains("position"))
-            {
-                throw new ArgumentException(
-                    $"Composite-key repeated-item table '{table.Name}' must include 'position' in its primary key.",
-                    nameof(table));
-            }
+            throw new ArgumentException(
+                $"Repeated-item table '{table.Name}' must declare an INTEGER NOT NULL 'position' column.",
+                nameof(table));
         }
 
+        if (position.Type != SqliteColumnType.SqliteInteger || !position.IsNotNull)
+        {
+            throw new ArgumentException(
+                $"Repeated-item table '{table.Name}' column 'position' must be INTEGER NOT NULL.",
+                nameof(table));
+        }
+
+        if (table.PrimaryKeyColumns.Count > 1 && !pkSet.Contains("position"))
+        {
+            throw new ArgumentException(
+                $"Composite-key repeated-item table '{table.Name}' must include 'position' in its primary key.",
+                nameof(table));
+        }
+    }
+
+    private static void ValidateForeignKeys(
+        TableDefinition table,
+        Dictionary<string, ColumnDefinition> columnsByName)
+    {
         foreach (ForeignKeyDefinition fk in table.ForeignKeys)
         {
             ArgumentNullException.ThrowIfNull(fk);
@@ -310,7 +344,12 @@ public static partial class RelationalSchemaCatalog
             foreach (string refCol in fk.ReferencedColumns)
                 ValidateIdentifier(refCol, $"referenced column on '{table.Name}'");
         }
+    }
 
+    private static void ValidateIndexes(
+        TableDefinition table,
+        Dictionary<string, ColumnDefinition> columnsByName)
+    {
         HashSet<string> indexNames = new(StringComparer.Ordinal);
         foreach (IndexDefinition index in table.Indexes)
         {
@@ -334,14 +373,17 @@ public static partial class RelationalSchemaCatalog
                 }
             }
         }
+    }
 
-        if (table.CheckConstraints is not null)
+    private static void ValidateCheckConstraints(TableDefinition table)
+    {
+        if (table.CheckConstraints is null)
+            return;
+
+        foreach (string check in table.CheckConstraints)
         {
-            foreach (string check in table.CheckConstraints)
-            {
-                if (string.IsNullOrWhiteSpace(check))
-                    throw new ArgumentException($"Table '{table.Name}' declares an empty CHECK constraint.", nameof(table));
-            }
+            if (string.IsNullOrWhiteSpace(check))
+                throw new ArgumentException($"Table '{table.Name}' declares an empty CHECK constraint.", nameof(table));
         }
     }
 

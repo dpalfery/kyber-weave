@@ -156,45 +156,11 @@ public sealed class TaskPromptService(
         PlanTaskFileEntry? entry = null;
         if (taskId is not null)
         {
-            string? plan = Clean(request.Plan);
-            if (plan is null)
+            TaskPromptResult? entryRefusal = ResolveEntry(request, config, root, taskId, out entry);
+            if (entryRefusal is not null)
             {
-                IReadOnlyList<string> active = tasks.ActivePlans(root, config);
-                if (active.Count != 1)
-                {
-                    return TaskPromptResult.NotBuilt(active.Count == 0
-                        ? $"No prompt: no plan is {PlanStatus.ActiveWords} in this checkout. Approve a plan, or name the plan."
-                        : $"No prompt: {active.Count} plans are {PlanStatus.ActiveWords} ({string.Join(", ", active)}). Name one plan.");
-                }
-
-                plan = active[0];
+                return entryRefusal;
             }
-
-            // The task file is checked against its plan before anything is read from it, so a stale file never
-            // becomes half a prompt. The refusal names the path it tried, because a conductor run reads the plan
-            // from its worktree and a reader needs to see which one was checked.
-            PlanTaskFileOutcome outcome = tasks.Run(root, config, plan, PlanTaskFileMode.Check);
-            if (outcome.File is null || outcome.Report.HasErrors)
-            {
-                string taskFile = Path.Combine(
-                    root,
-                    PlanTaskFileRules.TaskFilePathFor(plan, PlanTaskFileRules.IsSpecTaskListPath(plan))
-                        .Replace('/', Path.DirectorySeparatorChar));
-                return TaskPromptResult.NotBuilt(
-                    $"No prompt: the task file for {plan} is missing or does not match the plan; tried '{taskFile}'. Run " +
-                    $"'kyber-weave docs tasks {plan} --write', then build the prompt again.");
-            }
-
-            entry = PlanTaskPacket.FindTask(outcome.File, taskId);
-            if (entry is null)
-            {
-                string ids = string.Join(", ", (outcome.File.Tasks ?? []).Select(task => task.Id));
-                return TaskPromptResult.NotBuilt(
-                    $"No prompt: '{taskId}' names no one task in {plan} ('{outcome.TaskFilePath}'). Its tasks are: {ids}.");
-            }
-
-            // There is one roster, so the file's recorded value selects nothing here: the validator reports a
-            // value that is not `tiered` and reads the file as tiered, and this service does the same.
         }
 
         string? technology = Clean(entry?.Technology) ?? Clean(request.Technology);
@@ -212,27 +178,11 @@ public sealed class TaskPromptService(
                 : RoleOnlyPrompt(roleAgent, config, reserve);
         }
 
-        string? priorResults = null;
-        if (Clean(request.PriorResultsPath) is { } priorPath)
+        string? priorResults;
+        TaskPromptResult? priorRefusal = TryReadPriorResults(request, root, out priorResults);
+        if (priorRefusal is not null)
         {
-            if (!ScratchFile(files, root, priorPath, request.ScratchRoots, out string absolute))
-            {
-                return TaskPromptResult.NotBuilt(
-                    $"No prompt: the prior-results file '{priorPath}' is outside this run's scratch area. " +
-                    ScratchAreaHint(root, request.ScratchRoots),
-                    TaskPromptRefusalKind.Finding);
-            }
-
-            try
-            {
-                priorResults = files.ReadAllText(absolute);
-            }
-            catch (Exception ex) when (FileFailure.Is(ex))
-            {
-                return TaskPromptResult.NotBuilt(
-                    $"No prompt: the prior-results file '{priorPath}' could not be read ({ex.Message}). " +
-                    "Name a file that exists, or leave it out.");
-            }
+            return priorRefusal;
         }
 
         string? requested = Clean(request.Agent) ?? Clean(entry?.Role);
@@ -248,36 +198,21 @@ public sealed class TaskPromptService(
         RemovedAgentResolution? removed = PlanTaskAgentPick.ResolveRemovedAgent(
             requested ?? recorded, entry?.Difficulty, request.FailedAttempts);
         string? agent = TieredAgent(requested, recorded, entry, technology, request.FailedAttempts, removed);
-        string? taskText = entry is null ? null : PlanTaskPacket.Fill(entry, root, priorResults);
-        // The dispatch header is routing metadata, so the count is put back where the worker reads it: a retry
-        // starts knowing how many attempts already failed.
-        if (taskText is not null && request.FailedAttempts > 0)
-        {
-            taskText = string.Create(
-                CultureInfo.InvariantCulture,
-                $"FAILED_ATTEMPTS: {request.FailedAttempts}\n\n{taskText}");
-        }
-        string? hostText = entry is null
-            ? null
-            : hostFacts.Render(root, config, agent, taskId, null, technology);
+        (string? taskText, string? hostText) =
+            RenderTaskTexts(root, config, taskId, technology, agent, priorResults, entry, request.FailedAttempts);
 
         IReadOnlyList<KwSkillEntry> kwSkills = skills.SkillsFor(technology, roleAgent).Entries;
         PromptContent content = ContentOf(taskText, hostText, technology, config.Ontology, root, kwSkills);
         int budget = config.TaskPromptBudget > 0 ? config.TaskPromptBudget : KyberWeaveConfig.DefaultTaskPromptBudget;
         (string prompt, IReadOnlyList<string> leftOut) = Fit(content, budget, reserve);
 
-        string? promptFile = null;
-        string? harness = Clean(request.Harness);
         // A dispatch that names only a technology gets a file too, keyed by that technology: on a fallback harness
         // it has no other way to reach the worker, and the tool's reply must not claim a hook inserts it.
-        string? slugSource = taskId ?? technology;
-        if (slugSource is not null && harness is not null && !DispatchPromptInsertion.CanRewriteDispatch(harness))
+        string? promptFile;
+        TaskPromptResult? unwritten = WritePromptFileIfNeeded(request, root, taskId, technology, prompt, out promptFile);
+        if (unwritten is not null)
         {
-            TaskPromptResult? unwritten = WritePromptFile(files, root, slugSource, prompt, out promptFile);
-            if (unwritten is not null)
-            {
-                return unwritten;
-            }
+            return unwritten;
         }
 
         return new TaskPromptResult(
@@ -291,6 +226,149 @@ public sealed class TaskPromptService(
             null,
             promptFile,
             removed?.Report);
+    }
+
+    /// <summary>
+    /// Resolves the request's task id to the checked task file's entry, or a refusal when the plan cannot be
+    /// singled out, the task file is missing or stale, or the id names no task.
+    /// </summary>
+    private TaskPromptResult? ResolveEntry(
+        TaskPromptRequest request,
+        KyberWeaveConfig config,
+        string root,
+        string taskId,
+        out PlanTaskFileEntry? entry)
+    {
+        entry = null;
+        string? plan = Clean(request.Plan);
+        if (plan is null)
+        {
+            IReadOnlyList<string> active = tasks.ActivePlans(root, config);
+            if (active.Count != 1)
+            {
+                return TaskPromptResult.NotBuilt(active.Count == 0
+                    ? $"No prompt: no plan is {PlanStatus.ActiveWords} in this checkout. Approve a plan, or name the plan."
+                    : $"No prompt: {active.Count} plans are {PlanStatus.ActiveWords} ({string.Join(", ", active)}). Name one plan.");
+            }
+
+            plan = active[0];
+        }
+
+        // The task file is checked against its plan before anything is read from it, so a stale file never
+        // becomes half a prompt. The refusal names the path it tried, because a conductor run reads the plan
+        // from its worktree and a reader needs to see which one was checked.
+        PlanTaskFileOutcome outcome = tasks.Run(root, config, plan, PlanTaskFileMode.Check);
+        if (outcome.File is null || outcome.Report.HasErrors)
+        {
+            string taskFile = Path.Combine(
+                root,
+                PlanTaskFileRules.TaskFilePathFor(plan, PlanTaskFileRules.IsSpecTaskListPath(plan))
+                    .Replace('/', Path.DirectorySeparatorChar));
+            return TaskPromptResult.NotBuilt(
+                $"No prompt: the task file for {plan} is missing or does not match the plan; tried '{taskFile}'. Run " +
+                $"'kyber-weave docs tasks {plan} --write', then build the prompt again.");
+        }
+
+        entry = PlanTaskPacket.FindTask(outcome.File, taskId);
+        if (entry is null)
+        {
+            string ids = string.Join(", ", (outcome.File.Tasks ?? []).Select(task => task.Id));
+            return TaskPromptResult.NotBuilt(
+                $"No prompt: '{taskId}' names no one task in {plan} ('{outcome.TaskFilePath}'). Its tasks are: {ids}.");
+        }
+
+        // There is one roster, so the file's recorded value selects nothing here: the validator reports a
+        // value that is not `tiered` and reads the file as tiered, and this service does the same.
+        return null;
+    }
+
+    /// <summary>
+    /// Reads the prior-results file a retry names, refusing a path outside the run's scratch area or a read that
+    /// fails. Null out values when no file was named.
+    /// </summary>
+    private TaskPromptResult? TryReadPriorResults(
+        TaskPromptRequest request,
+        string root,
+        out string? priorResults)
+    {
+        priorResults = null;
+        if (Clean(request.PriorResultsPath) is not { } priorPath)
+        {
+            return null;
+        }
+
+        if (!ScratchFile(files, root, priorPath, request.ScratchRoots, out string absolute))
+        {
+            return TaskPromptResult.NotBuilt(
+                $"No prompt: the prior-results file '{priorPath}' is outside this run's scratch area. " +
+                ScratchAreaHint(root, request.ScratchRoots),
+                TaskPromptRefusalKind.Finding);
+        }
+
+        try
+        {
+            priorResults = files.ReadAllText(absolute);
+        }
+        catch (Exception ex) when (FileFailure.Is(ex))
+        {
+            return TaskPromptResult.NotBuilt(
+                $"No prompt: the prior-results file '{priorPath}' could not be read ({ex.Message}). " +
+                "Name a file that exists, or leave it out.");
+        }
+
+        return null;
+    }
+
+    /// <summary>
+    /// The task text with the retry's failed-attempt count re-joined, and the host facts for the resolved agent.
+    /// </summary>
+    private (string? TaskText, string? HostText) RenderTaskTexts(
+        string root,
+        KyberWeaveConfig config,
+        string? taskId,
+        string? technology,
+        string? agent,
+        string? priorResults,
+        PlanTaskFileEntry? entry,
+        int failedAttempts)
+    {
+        string? taskText = entry is null ? null : PlanTaskPacket.Fill(entry, root, priorResults);
+        // The dispatch header is routing metadata, so the count is put back where the worker reads it: a retry
+        // starts knowing how many attempts already failed.
+        if (taskText is not null && failedAttempts > 0)
+        {
+            taskText = string.Create(
+                CultureInfo.InvariantCulture,
+                $"FAILED_ATTEMPTS: {failedAttempts}\n\n{taskText}");
+        }
+
+        string? hostText = entry is null
+            ? null
+            : hostFacts.Render(root, config, agent, taskId, null, technology);
+        return (taskText, hostText);
+    }
+
+    /// <summary>
+    /// Writes the prompt to the fallback harness's one file under the run's scratch folder, and returns the
+    /// write's refusal. Nothing is written on a harness that rewrites the dispatch itself.
+    /// </summary>
+    private TaskPromptResult? WritePromptFileIfNeeded(
+        TaskPromptRequest request,
+        string root,
+        string? taskId,
+        string? technology,
+        string prompt,
+        out string? promptFile)
+    {
+        promptFile = null;
+        string? harness = Clean(request.Harness);
+        string? slugSource = taskId ?? technology;
+        if (slugSource is null || harness is null || DispatchPromptInsertion.CanRewriteDispatch(harness))
+        {
+            return null;
+        }
+
+        return WritePromptFile(files, root, slugSource, prompt, out promptFile);
     }
 
     /// <summary>

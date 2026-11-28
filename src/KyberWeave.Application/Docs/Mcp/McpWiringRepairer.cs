@@ -258,17 +258,7 @@ public sealed class McpWiringRepairer(
         }
         catch (Exception exception) when (exception is FileNotFoundException or DirectoryNotFoundException)
         {
-            // A record for a file the repair never created is the other half of the interrupted-write
-            // window: the record is persisted first, so a run killed before the rename leaves it
-            // behind with nothing on disk.
-            if (record.Mode == McpWiringWriteMode.Created)
-            {
-                records.RemoveAll(candidate => McpWiringReceipt.SamePath(candidate.Path, path));
-
-                return (NeverWritten(harness, path, record), true);
-            }
-
-            return (MissingOnRemoval(harness, path, record), false);
+            return FileMissingOnRemoval(harness, path, record, records);
         }
         catch (IOException exception)
         {
@@ -283,25 +273,7 @@ public sealed class McpWiringRepairer(
 
         if (!string.Equals(digest, record.PostSha256, StringComparison.OrdinalIgnoreCase))
         {
-            // The bytes on disk are the bytes the receipt captured before the write, so the write
-            // never landed: the state the removal was asked for is already there.
-            if (record.Mode == McpWiringWriteMode.Inserted
-                && string.Equals(digest, record.PreSha256, StringComparison.OrdinalIgnoreCase))
-            {
-                records.RemoveAll(candidate => McpWiringReceipt.SamePath(candidate.Path, path));
-
-                return (NeverWritten(harness, path, record), true);
-            }
-
-            return (Refused(
-                harness,
-                path,
-                record.Servers,
-                McpWiringReceipt.DriftCode,
-                $"{path} changed after the repair, so restoring over the change would discard someone else's edit",
-                $"The receipt recorded {record.PostSha256} and the file now digests {digest}. Decide which version to "
-                    + "keep by hand; the receipt still records what was written."),
-                false);
+            return DigestMismatchOnRemoval(harness, path, record, digest, records);
         }
 
         bool restored = record.Mode == McpWiringWriteMode.Inserted;
@@ -1215,6 +1187,63 @@ public sealed class McpWiringRepairer(
         {
             return null;
         }
+    }
+
+    /// <summary>
+    /// The answer to a file that is gone or no longer reachable: a created file with a record is an
+    /// interrupted write that needed no undo, so its record is dropped and the removal is done;
+    /// an inserted file, or one that cannot be read at all, is a refusal.
+    /// </summary>
+    private static (McpWiringFileChange Change, bool Removed) FileMissingOnRemoval(
+        string harness,
+        string path,
+        McpWiringReceiptRecord record,
+        List<McpWiringReceiptRecord> records)
+    {
+        // A record for a file the repair never created is the other half of the interrupted-write
+        // window: the record is persisted first, so a run killed before the rename leaves it
+        // behind with nothing on disk.
+        if (record.Mode == McpWiringWriteMode.Created)
+        {
+            records.RemoveAll(candidate => McpWiringReceipt.SamePath(candidate.Path, path));
+
+            return (NeverWritten(harness, path, record), true);
+        }
+
+        return (MissingOnRemoval(harness, path, record), false);
+    }
+
+    /// <summary>
+    /// The answer to bytes that differ from the receipt's post-write digest: when the file still
+    /// holds the bytes the receipt captured before the write, the write never landed, so the record
+    /// is dropped and the removal is done; any other difference is a foreign edit and a refusal.
+    /// </summary>
+    private static (McpWiringFileChange Change, bool Removed) DigestMismatchOnRemoval(
+        string harness,
+        string path,
+        McpWiringReceiptRecord record,
+        string digest,
+        List<McpWiringReceiptRecord> records)
+    {
+        // The bytes on disk are the bytes the receipt captured before the write, so the write
+        // never landed: the state the removal was asked for is already there.
+        if (record.Mode == McpWiringWriteMode.Inserted
+            && string.Equals(digest, record.PreSha256, StringComparison.OrdinalIgnoreCase))
+        {
+            records.RemoveAll(candidate => McpWiringReceipt.SamePath(candidate.Path, path));
+
+            return (NeverWritten(harness, path, record), true);
+        }
+
+        return (Refused(
+            harness,
+            path,
+            record.Servers,
+            McpWiringReceipt.DriftCode,
+            $"{path} changed after the repair, so restoring over the change would discard someone else's edit",
+            $"The receipt recorded {record.PostSha256} and the file now digests {digest}. Decide which version to "
+                + "keep by hand; the receipt still records what was written."),
+            false);
     }
 
     /// <summary>The refusal for a record whose file is no longer on disk.</summary>

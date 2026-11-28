@@ -274,247 +274,13 @@ public class CommandCodeMapper : IHarnessMapper
         }
 
         CommandCodeDocument document = Parse(unit.RawText, unit.Unit.SourceKey);
-        string sessionId = ResolveSessionId(document.SessionId, unit.Unit.SourceKey);
-        string traceId = string.Create(CultureInfo.InvariantCulture, $"{CanonSynth.SynthSpanPrefix}{CommandCodeHarnessId}:{sessionId}");
-
-        string resolvedModel = string.Empty;
-        string pendingUserMessage = string.Empty;
-        string? sessionTimestamp = null;
-        string? workingDirectory = document.WorkingDirectory;
-
-        List<CollectedRecord> records = [];
-        HashSet<string> seenAnchors = new(StringComparer.Ordinal);
-        HashSet<string> seenRecordIds = new(StringComparer.Ordinal);
-
+        MapAccumulator accumulator = new(document, unit.Unit.SourceKey, importedAtUtc);
         foreach (CommandCodeEntry entry in document.Entries)
         {
-            if (string.Equals(entry.EntryType, "session", StringComparison.Ordinal))
-            {
-                if (!string.IsNullOrWhiteSpace(entry.Timestamp))
-                {
-                    sessionTimestamp = entry.Timestamp;
-                }
-
-                if (SafeOptionalText(entry.WorkingDirectory) is string nextCwd)
-                {
-                    workingDirectory = nextCwd;
-                }
-
-                continue;
-            }
-
-            if (string.Equals(entry.EntryType, "model_change", StringComparison.Ordinal))
-            {
-                if (!string.IsNullOrWhiteSpace(entry.Model))
-                {
-                    resolvedModel = entry.Model.Trim();
-                }
-
-                continue;
-            }
-
-            if (!string.Equals(entry.EntryType, "message", StringComparison.Ordinal) || entry.Message is null)
-            {
-                continue;
-            }
-
-            CommandCodeMessage msg = entry.Message;
-
-            if (string.Equals(msg.Role, "user", StringComparison.Ordinal))
-            {
-                List<string> texts = [];
-                foreach (CommandCodeContentBlock block in msg.Blocks)
-                {
-                    if (string.Equals(block.BlockType, "text", StringComparison.Ordinal)
-                        && !string.IsNullOrEmpty(block.Text))
-                    {
-                        texts.Add(block.Text);
-                    }
-                }
-
-                if (texts.Count > 0)
-                {
-                    pendingUserMessage = string.Join(' ', texts);
-                }
-
-                continue;
-            }
-
-            if (!string.Equals(msg.Role, "assistant", StringComparison.Ordinal) || entry.Usage is null)
-            {
-                continue;
-            }
-
-            CommandCodeUsage usage = entry.Usage;
-            long cacheRead = usage.CacheReadTokens ?? 0L;
-            long cacheWrite = usage.CacheWriteTokens ?? 0L;
-            long input = Math.Max(0L, (usage.InputTokens ?? 0L) - cacheRead - cacheWrite);
-            long output = usage.OutputTokens ?? 0L;
-            if (input == 0L && output == 0L && cacheRead == 0L && cacheWrite == 0L)
-            {
-                continue;
-            }
-
-            DateTimeOffset? startedAt = TryParseTimestamp(entry.Timestamp)
-                ?? TryParseTimestamp(sessionTimestamp);
-            if (!startedAt.HasValue)
-            {
-                continue;
-            }
-
-            string anchor = SafeOptionalText(entry.Id)
-                ?? SafeOptionalText(entry.Timestamp)
-                ?? string.Create(CultureInfo.InvariantCulture, $"line-{entry.LineNumber}");
-            if (!seenAnchors.Add(anchor))
-            {
-                continue;
-            }
-
-            string parentRecordId = EnsureUniqueRecordId(
-                seenRecordIds,
-                string.Create(CultureInfo.InvariantCulture, $"{CanonSynth.SynthSpanPrefix}{CommandCodeHarnessId}:{sessionId}:{anchor}"),
-                entry.LineNumber);
-
-            string model = ResolveMessageModel(msg.Model, entry.Model, resolvedModel);
-
-            List<CollectedContentPart> parts = [];
-            int position = 0;
-            string? correctionRule = null;
-
-            if (!string.IsNullOrEmpty(pendingUserMessage))
-            {
-                CorrectionDetectionResult check = CanonFindings.DetectUserCorrection(pendingUserMessage);
-                if (check.Matched)
-                {
-                    correctionRule = check.Rule;
-                }
-
-                parts.Add(ToolContentMeasurer.BuildContentPart(position++, ContentBucket.UserMessage, pendingUserMessage, "user", model));
-            }
-
-            foreach (CommandCodeContentBlock block in msg.Blocks)
-            {
-                if (string.Equals(block.BlockType, "text", StringComparison.Ordinal)
-                    && !string.IsNullOrEmpty(block.Text))
-                {
-                    parts.Add(ToolContentMeasurer.BuildContentPart(position++, ContentBucket.ConversationHistory, block.Text, "assistant", model));
-                }
-            }
-
-            List<string> skillsInvoked = [];
-            HashSet<string> seenSkills = new(StringComparer.Ordinal);
-            List<(CommandCodeToolCall Call, string NormalizedToolName)> toolCallsToEmit = [];
-
-            foreach (CommandCodeContentBlock block in msg.Blocks)
-            {
-                if (!string.Equals(block.BlockType, "tool_use", StringComparison.Ordinal)
-                    || block.ToolCall is null)
-                {
-                    continue;
-                }
-
-                CommandCodeToolCall toolCall = block.ToolCall;
-                if (string.Equals(toolCall.Name, "activate_skill", StringComparison.Ordinal)
-                    && SafeOptionalText(toolCall.SkillName) is string skill
-                    && seenSkills.Add(skill))
-                {
-                    skillsInvoked.Add(skill);
-                }
-
-                toolCallsToEmit.Add((toolCall, MapToolName(toolCall.Name)));
-            }
-
-            List<CollectedTokenCount> tokens = [];
-            if (usage.InputTokens.HasValue)
-            {
-                tokens.Add(new CollectedTokenCount(TokenClass.Input, input));
-            }
-
-            if (usage.CacheReadTokens.HasValue)
-            {
-                tokens.Add(new CollectedTokenCount(TokenClass.CacheRead, cacheRead));
-            }
-
-            if (usage.CacheWriteTokens.HasValue)
-            {
-                tokens.Add(new CollectedTokenCount(TokenClass.CacheWrite, cacheWrite));
-            }
-
-            if (usage.OutputTokens.HasValue)
-            {
-                tokens.Add(new CollectedTokenCount(TokenClass.Output, output));
-            }
-
-            CollectedCost? reportedCost = usage.ReportedCostUsd is > 0 && double.IsFinite(usage.ReportedCostUsd.Value)
-                ? new CollectedCost(usage.ReportedCostUsd.Value, "USD")
-                : null;
-
-            CollectedRecord parentRecord = new(
-                RecordId: parentRecordId,
-                HarnessId: CommandCodeHarnessId,
-                Op: RecordOp.LlmInvoke,
-                Kind: RecordKind.Internal,
-                Name: $"{CommandCodeHarnessId}:{model}",
-                StartedAt: startedAt.Value,
-                Status: RecordStatus.Ok,
-                SessionKey: sessionId,
-                ParentRecordId: null,
-                TraceId: traceId,
-                Model: model,
-                EndedAt: null,
-                ReportedDurationMs: null,
-                Tokens: tokens,
-                ReportedCost: reportedCost,
-                Parts: parts,
-                Tool: null,
-                Agent: null,
-                SkillsInvoked: skillsInvoked,
-                AgentInstanceId: null,
-                ToolDefinitions: [],
-                Signals: new CollectedRecordSignals(
-                    ErrorMessage: null,
-                    EditFailures: null,
-                    CorrectionRule: correctionRule,
-                    DeclaredContextWindow: null),
-                ReportedInputTokens: usage.InputTokens,
-                ReportedOutputTokens: usage.OutputTokens);
-
-            records.Add(parentRecord);
-
-            for (int t = 0; t < toolCallsToEmit.Count; t++)
-            {
-                (CommandCodeToolCall toolCall, string normalizedToolName) = toolCallsToEmit[t];
-                records.Add(BuildToolInvokeRecord(
-                    parentRecord,
-                    sessionId,
-                    traceId,
-                    toolCall,
-                    normalizedToolName,
-                    t,
-                    seenRecordIds));
-            }
-
-            pendingUserMessage = string.Empty;
+            accumulator.Apply(entry);
         }
 
-        List<CollectedSession> sessions = [];
-        if (records.Count > 0 || document.Entries.Count > 0)
-        {
-            CollectedWorkspace? workspace = workingDirectory is not null
-                ? new CollectedWorkspace(workingDirectory, null, null)
-                : null;
-
-            sessions.Add(new CollectedSession(
-                SessionKey: sessionId,
-                HarnessId: CommandCodeHarnessId,
-                NativeSessionId: sessionId,
-                Workspace: workspace,
-                Title: null,
-                ReportedUsage: []));
-        }
-
-        List<CollectedProblem> problems = BuildProblems(document.ParseProblems, unit.Unit.SourceKey, sessionId, importedAtUtc);
-        return new CollectedBatch(source, sessions, records, problems);
+        return accumulator.ToBatch(source);
     }
 
     /// <summary>
@@ -764,4 +530,346 @@ public class CommandCodeMapper : IHarnessMapper
 
     private static string? SafeOptionalText(string? value) =>
         HarnessJson.SafeOptionalText(value);
+
+    /// <summary>
+    /// Carries the per-transcript state <see cref="Map"/> threads through every entry, keeping the entry dispatch
+    /// and the record construction separate from the mapper's public surface.
+    /// </summary>
+    private sealed class MapAccumulator
+    {
+        private readonly CommandCodeDocument _document;
+        private readonly string _sourceKey;
+        private readonly DateTimeOffset _importedAtUtc;
+        private readonly string _sessionId;
+        private readonly string _traceId;
+        private readonly List<CollectedRecord> _records = [];
+        private readonly HashSet<string> _seenAnchors = new(StringComparer.Ordinal);
+        private readonly HashSet<string> _seenRecordIds = new(StringComparer.Ordinal);
+        private string _resolvedModel = string.Empty;
+        private string _pendingUserMessage = string.Empty;
+        private string? _sessionTimestamp;
+        private string? _workingDirectory;
+
+        public MapAccumulator(CommandCodeDocument document, string sourceKey, DateTimeOffset importedAtUtc)
+        {
+            _document = document;
+            _sourceKey = sourceKey;
+            _importedAtUtc = importedAtUtc;
+            _sessionId = ResolveSessionId(document.SessionId, sourceKey);
+            _traceId = string.Create(CultureInfo.InvariantCulture, $"{CanonSynth.SynthSpanPrefix}{CommandCodeHarnessId}:{_sessionId}");
+            _workingDirectory = document.WorkingDirectory;
+        }
+
+        public void Apply(CommandCodeEntry entry)
+        {
+            if (string.Equals(entry.EntryType, "session", StringComparison.Ordinal))
+            {
+                ApplySession(entry);
+                return;
+            }
+
+            if (string.Equals(entry.EntryType, "model_change", StringComparison.Ordinal))
+            {
+                ApplyModelChange(entry);
+                return;
+            }
+
+            if (!string.Equals(entry.EntryType, "message", StringComparison.Ordinal) || entry.Message is null)
+            {
+                return;
+            }
+
+            ApplyMessage(entry, entry.Message);
+        }
+
+        public CollectedBatch ToBatch(CollectedSource source)
+        {
+            List<CollectedSession> sessions = [];
+            if (_records.Count > 0 || _document.Entries.Count > 0)
+            {
+                CollectedWorkspace? workspace = _workingDirectory is not null
+                    ? new CollectedWorkspace(_workingDirectory, null, null)
+                    : null;
+
+                sessions.Add(new CollectedSession(
+                    SessionKey: _sessionId,
+                    HarnessId: CommandCodeHarnessId,
+                    NativeSessionId: _sessionId,
+                    Workspace: workspace,
+                    Title: null,
+                    ReportedUsage: []));
+            }
+
+            List<CollectedProblem> problems = BuildProblems(_document.ParseProblems, _sourceKey, _sessionId, _importedAtUtc);
+            return new CollectedBatch(source, sessions, _records, problems);
+        }
+
+        private static string JoinUserTexts(IReadOnlyList<CommandCodeContentBlock> blocks)
+        {
+            List<string> texts = [];
+            foreach (CommandCodeContentBlock block in blocks)
+            {
+                if (string.Equals(block.BlockType, "text", StringComparison.Ordinal)
+                    && !string.IsNullOrEmpty(block.Text))
+                {
+                    texts.Add(block.Text);
+                }
+            }
+
+            return texts.Count > 0 ? string.Join(' ', texts) : string.Empty;
+        }
+
+        private static List<(CommandCodeToolCall Call, string NormalizedToolName)> BuildToolCalls(
+            CommandCodeMessage message,
+            List<string> skillsInvoked,
+            HashSet<string> seenSkills)
+        {
+            List<(CommandCodeToolCall Call, string NormalizedToolName)> toolCallsToEmit = [];
+            foreach (CommandCodeContentBlock block in message.Blocks)
+            {
+                if (!string.Equals(block.BlockType, "tool_use", StringComparison.Ordinal)
+                    || block.ToolCall is null)
+                {
+                    continue;
+                }
+
+                CommandCodeToolCall toolCall = block.ToolCall;
+                if (string.Equals(toolCall.Name, "activate_skill", StringComparison.Ordinal)
+                    && SafeOptionalText(toolCall.SkillName) is string skill
+                    && seenSkills.Add(skill))
+                {
+                    skillsInvoked.Add(skill);
+                }
+
+                toolCallsToEmit.Add((toolCall, MapToolName(toolCall.Name)));
+            }
+
+            return toolCallsToEmit;
+        }
+
+        private static List<CollectedTokenCount> BuildTokens(
+            CommandCodeUsage usage,
+            long input,
+            long cacheRead,
+            long cacheWrite,
+            long output)
+        {
+            List<CollectedTokenCount> tokens = [];
+            if (usage.InputTokens.HasValue)
+            {
+                tokens.Add(new CollectedTokenCount(TokenClass.Input, input));
+            }
+
+            if (usage.CacheReadTokens.HasValue)
+            {
+                tokens.Add(new CollectedTokenCount(TokenClass.CacheRead, cacheRead));
+            }
+
+            if (usage.CacheWriteTokens.HasValue)
+            {
+                tokens.Add(new CollectedTokenCount(TokenClass.CacheWrite, cacheWrite));
+            }
+
+            if (usage.OutputTokens.HasValue)
+            {
+                tokens.Add(new CollectedTokenCount(TokenClass.Output, output));
+            }
+
+            return tokens;
+        }
+
+        private static CollectedCost? BuildReportedCost(CommandCodeUsage usage) =>
+            usage.ReportedCostUsd is > 0 && double.IsFinite(usage.ReportedCostUsd.Value)
+                ? new CollectedCost(usage.ReportedCostUsd.Value, "USD")
+                : null;
+
+        private static CollectedRecord BuildParentRecord(
+            string parentRecordId,
+            string sessionId,
+            string traceId,
+            string model,
+            DateTimeOffset startedAt,
+            CommandCodeUsage usage,
+            long input,
+            long cacheRead,
+            long cacheWrite,
+            long output,
+            IReadOnlyList<CollectedContentPart> parts,
+            IReadOnlyList<string> skillsInvoked,
+            string? correctionRule)
+        {
+            List<CollectedTokenCount> tokens = BuildTokens(usage, input, cacheRead, cacheWrite, output);
+            CollectedCost? reportedCost = BuildReportedCost(usage);
+
+            return new CollectedRecord(
+                RecordId: parentRecordId,
+                HarnessId: CommandCodeHarnessId,
+                Op: RecordOp.LlmInvoke,
+                Kind: RecordKind.Internal,
+                Name: $"{CommandCodeHarnessId}:{model}",
+                StartedAt: startedAt,
+                Status: RecordStatus.Ok,
+                SessionKey: sessionId,
+                ParentRecordId: null,
+                TraceId: traceId,
+                Model: model,
+                EndedAt: null,
+                ReportedDurationMs: null,
+                Tokens: tokens,
+                ReportedCost: reportedCost,
+                Parts: parts,
+                Tool: null,
+                Agent: null,
+                SkillsInvoked: skillsInvoked,
+                AgentInstanceId: null,
+                ToolDefinitions: [],
+                Signals: new CollectedRecordSignals(
+                    ErrorMessage: null,
+                    EditFailures: null,
+                    CorrectionRule: correctionRule,
+                    DeclaredContextWindow: null),
+                ReportedInputTokens: usage.InputTokens,
+                ReportedOutputTokens: usage.OutputTokens);
+        }
+
+        private void ApplySession(CommandCodeEntry entry)
+        {
+            if (!string.IsNullOrWhiteSpace(entry.Timestamp))
+            {
+                _sessionTimestamp = entry.Timestamp;
+            }
+
+            if (SafeOptionalText(entry.WorkingDirectory) is string nextCwd)
+            {
+                _workingDirectory = nextCwd;
+            }
+        }
+
+        private void ApplyModelChange(CommandCodeEntry entry)
+        {
+            if (!string.IsNullOrWhiteSpace(entry.Model))
+            {
+                _resolvedModel = entry.Model.Trim();
+            }
+        }
+
+        private void ApplyMessage(CommandCodeEntry entry, CommandCodeMessage message)
+        {
+            if (string.Equals(message.Role, "user", StringComparison.Ordinal))
+            {
+                string userMessage = JoinUserTexts(message.Blocks);
+                if (userMessage.Length > 0)
+                {
+                    _pendingUserMessage = userMessage;
+                }
+
+                return;
+            }
+
+            if (!string.Equals(message.Role, "assistant", StringComparison.Ordinal) || entry.Usage is null)
+            {
+                return;
+            }
+
+            CommandCodeUsage usage = entry.Usage;
+            long cacheRead = usage.CacheReadTokens ?? 0L;
+            long cacheWrite = usage.CacheWriteTokens ?? 0L;
+            long input = Math.Max(0L, (usage.InputTokens ?? 0L) - cacheRead - cacheWrite);
+            long output = usage.OutputTokens ?? 0L;
+            if (input == 0L && output == 0L && cacheRead == 0L && cacheWrite == 0L)
+            {
+                return;
+            }
+
+            DateTimeOffset? startedAt = TryParseTimestamp(entry.Timestamp)
+                ?? TryParseTimestamp(_sessionTimestamp);
+            if (!startedAt.HasValue)
+            {
+                return;
+            }
+
+            string anchor = SafeOptionalText(entry.Id)
+                ?? SafeOptionalText(entry.Timestamp)
+                ?? string.Create(CultureInfo.InvariantCulture, $"line-{entry.LineNumber}");
+            if (!_seenAnchors.Add(anchor))
+            {
+                return;
+            }
+
+            string parentRecordId = EnsureUniqueRecordId(
+                _seenRecordIds,
+                string.Create(CultureInfo.InvariantCulture, $"{CanonSynth.SynthSpanPrefix}{CommandCodeHarnessId}:{_sessionId}:{anchor}"),
+                entry.LineNumber);
+
+            string model = ResolveMessageModel(message.Model, entry.Model, _resolvedModel);
+            (List<CollectedContentPart> parts, string? correctionRule) = BuildParts(message, model);
+
+            List<string> skillsInvoked = [];
+            HashSet<string> seenSkills = new(StringComparer.Ordinal);
+            List<(CommandCodeToolCall Call, string NormalizedToolName)> toolCallsToEmit =
+                BuildToolCalls(message, skillsInvoked, seenSkills);
+
+            CollectedRecord parentRecord = BuildParentRecord(
+                parentRecordId,
+                _sessionId,
+                _traceId,
+                model,
+                startedAt.Value,
+                usage,
+                input,
+                cacheRead,
+                cacheWrite,
+                output,
+                parts,
+                skillsInvoked,
+                correctionRule);
+            _records.Add(parentRecord);
+
+            for (int t = 0; t < toolCallsToEmit.Count; t++)
+            {
+                (CommandCodeToolCall toolCall, string normalizedToolName) = toolCallsToEmit[t];
+                _records.Add(BuildToolInvokeRecord(
+                    parentRecord,
+                    _sessionId,
+                    _traceId,
+                    toolCall,
+                    normalizedToolName,
+                    t,
+                    _seenRecordIds));
+            }
+
+            _pendingUserMessage = string.Empty;
+        }
+
+        private (List<CollectedContentPart> Parts, string? CorrectionRule) BuildParts(
+            CommandCodeMessage message,
+            string model)
+        {
+            List<CollectedContentPart> parts = [];
+            int position = 0;
+            string? correctionRule = null;
+
+            if (!string.IsNullOrEmpty(_pendingUserMessage))
+            {
+                CorrectionDetectionResult check = CanonFindings.DetectUserCorrection(_pendingUserMessage);
+                if (check.Matched)
+                {
+                    correctionRule = check.Rule;
+                }
+
+                parts.Add(ToolContentMeasurer.BuildContentPart(position++, ContentBucket.UserMessage, _pendingUserMessage, "user", model));
+            }
+
+            foreach (CommandCodeContentBlock block in message.Blocks)
+            {
+                if (string.Equals(block.BlockType, "text", StringComparison.Ordinal)
+                    && !string.IsNullOrEmpty(block.Text))
+                {
+                    parts.Add(ToolContentMeasurer.BuildContentPart(position++, ContentBucket.ConversationHistory, block.Text, "assistant", model));
+                }
+            }
+
+            return (parts, correctionRule);
+        }
+    }
 }

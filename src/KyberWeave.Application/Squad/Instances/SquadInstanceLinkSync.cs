@@ -130,33 +130,12 @@ public sealed class SquadInstanceLinkSync(
             instanceListing);
 
         // 1. Apply Remove actions for stale recorded links whose target in main home no longer exists
-        List<SquadLinkRecord> retainedStaleLinks = [];
         List<string> warnings = [];
-
-        foreach (SquadLinkAction.Remove remove in actions.OfType<SquadLinkAction.Remove>())
-        {
-            string linkPath = Path.Combine(instanceRoot, remove.Record.RelativePath);
-            try
-            {
-                if (fileSystem.IsLink(linkPath))
-                {
-                    if (remove.Record.Kind == SquadLinkKind.Directory)
-                        fileSystem.DeleteTreeNoFollow(linkPath);
-                    else
-                        files.DeleteFile(linkPath);
-                }
-                else if (files.FileExists(linkPath) || files.DirectoryExists(linkPath))
-                {
-                    // The harness or the person replaced the link with a real copy; it may be the only one.
-                    warnings.Add($"Recorded link '{remove.Record.RelativePath}' is now the instance's own copy and was kept.");
-                }
-            }
-            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
-            {
-                warnings.Add($"Failed to remove stale link '{remove.Record.RelativePath}': {ex.Message}");
-                retainedStaleLinks.Add(remove.Record);
-            }
-        }
+        List<SquadLinkRecord> retainedStaleLinks = RemoveStaleLinks(
+            instanceRoot,
+            actions,
+            fileSystem,
+            warnings);
 
         // 2. Record warnings for unmanaged instance copies kept by planner
         HashSet<string> keptPaths = new(StringComparer.Ordinal);
@@ -274,6 +253,42 @@ public sealed class SquadInstanceLinkSync(
         DeletePlannedLinks(instanceStateDirectory);
 
         return new SquadInstanceLinkSyncResult(sortedLinks, warnings);
+    }
+
+    private List<SquadLinkRecord> RemoveStaleLinks(
+        string instanceRoot,
+        IReadOnlyList<SquadLinkAction> actions,
+        ISquadLinkFileSystem fileSystem,
+        List<string> warnings)
+    {
+        List<SquadLinkRecord> retainedStaleLinks = [];
+
+        foreach (SquadLinkAction.Remove remove in actions.OfType<SquadLinkAction.Remove>())
+        {
+            string linkPath = Path.Combine(instanceRoot, remove.Record.RelativePath);
+            try
+            {
+                if (fileSystem.IsLink(linkPath))
+                {
+                    if (remove.Record.Kind == SquadLinkKind.Directory)
+                        fileSystem.DeleteTreeNoFollow(linkPath);
+                    else
+                        files.DeleteFile(linkPath);
+                }
+                else if (files.FileExists(linkPath) || files.DirectoryExists(linkPath))
+                {
+                    // The harness or the person replaced the link with a real copy; it may be the only one.
+                    warnings.Add($"Recorded link '{remove.Record.RelativePath}' is now the instance's own copy and was kept.");
+                }
+            }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+            {
+                warnings.Add($"Failed to remove stale link '{remove.Record.RelativePath}': {ex.Message}");
+                retainedStaleLinks.Add(remove.Record);
+            }
+        }
+
+        return retainedStaleLinks;
     }
 
     private bool PathHoldsRealCopy(string path, ISquadLinkFileSystem fileSystem) =>

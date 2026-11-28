@@ -178,56 +178,8 @@ public sealed class DocsScaffolder : IDocsScaffoldingService
                 DocsScaffoldTemplates.FolderIndex(folder, resolvedOwner, Today), force));
         }
 
-        foreach (string technology in ontology.Technologies)
-        {
-            // A technology folder holds four files. A shipped template supplies all four; a
-            // declared technology with no template gets four stubs, so the folder check has
-            // the same shape to grade either way.
-            foreach (KyberStandardsTemplates.Part part in Enum.GetValues<KyberStandardsTemplates.Part>())
-            {
-                string path =
-                    $"{resolvedDocsRoot}/{DocsLayout.Standards}/{technology}/{KyberStandardsTemplates.FileName(technology, part)}";
-                if (part == KyberStandardsTemplates.Part.Standard
-                    && HasLegacyStandard(root, resolvedDocsRoot, technology, path))
-                {
-                    files.Add(new ScaffoldedFile(
-                        path, ScaffoldOutcome.Skipped, LegacyStandardNote));
-                    continue;
-                }
-
-                string content =
-                    templatedTechnologies.Contains(technology)
-                    && _templates.TryRenderPart(
-                        technology, part, resolvedOwner, Today, out string? rendered)
-                        ? rendered
-                        : TechnologyStub(technology, part, resolvedOwner);
-
-                files.Add(Write(root, path, content, force));
-            }
-        }
-
-        foreach (string role in ontology.Roles)
-        {
-            foreach (KyberStandardsTemplates.Part part in Enum.GetValues<KyberStandardsTemplates.Part>())
-            {
-                string path =
-                    $"{resolvedDocsRoot}/{DocsLayout.Standards}/{role}/{KyberStandardsTemplates.FileName(role, part)}";
-                if (part == KyberStandardsTemplates.Part.Standard
-                    && HasLegacyStandard(root, resolvedDocsRoot, role, path))
-                {
-                    files.Add(new ScaffoldedFile(
-                        path, ScaffoldOutcome.Skipped, LegacyStandardNote));
-                    continue;
-                }
-
-                string content =
-                    _templates.TryRenderPart(role, part, resolvedOwner, Today, out string? rendered)
-                        ? rendered
-                        : RoleStub(role, part, resolvedOwner);
-
-                files.Add(Write(root, path, content, force));
-            }
-        }
+        files.AddRange(WriteStandardScopes(
+            root, resolvedDocsRoot, resolvedOwner, ontology, templatedTechnologies, force));
 
         files.AddRange(CopyShippedSkills(
             root,
@@ -252,6 +204,26 @@ public sealed class DocsScaffolder : IDocsScaffoldingService
             ReviewGates = BuildReviewOutcome(root, reviewPlan, hadReviewSection, loadedConfig.Config?.Review)
         };
     }
+
+    /// <summary>
+    /// Writes the four standards files for every technology and role the host declares, and returns
+    /// them in the order the scopes were declared.
+    /// </summary>
+    private List<ScaffoldedFile> WriteStandardScopes(
+        string repoRoot,
+        string docsRoot,
+        string owner,
+        OntologyConfig ontology,
+        HashSet<string> templatedTechnologies,
+        bool force) => new StandardsFolderWriter(_files, _paths, _environment, _templates).WriteScopes(
+        repoRoot,
+        docsRoot,
+        owner,
+        () => Today,
+        ontology.Technologies,
+        ontology.Roles,
+        templatedTechnologies,
+        force);
 
     /// <summary>
     /// Copies the shipped KW skills the written lists name, and each scope's parent's, into the repository's
@@ -363,41 +335,6 @@ public sealed class DocsScaffolder : IDocsScaffoldingService
     }
 
     /// <summary>
-    /// True when a scope folder still holds its standard as <c>README.md</c> and the prefixed
-    /// standard does not exist yet. Scaffolding a stub beside it would give the folder two
-    /// standards carrying the same id; the migration command is what names the standard.
-    /// </summary>
-    private bool HasLegacyStandard(
-        string repoRoot,
-        string docsRoot,
-        string scope,
-        string standardPath)
-    {
-        if (_files.FileExists(RequireContained(repoRoot, standardPath, nameof(standardPath))))
-            return false;
-
-        string legacy = $"{docsRoot}/{DocsLayout.Standards}/{scope}/README.md";
-        return _files.FileExists(RequireContained(repoRoot, legacy, nameof(scope)));
-    }
-
-    /// <summary>The stub written for a role part a shipped template does not supply.</summary>
-    private string RoleStub(
-        string role,
-        KyberStandardsTemplates.Part part,
-        string owner) => part switch
-        {
-            KyberStandardsTemplates.Part.Standard =>
-                DocsScaffoldTemplates.RoleStandard(role, owner, Today),
-            KyberStandardsTemplates.Part.Rules =>
-                DocsScaffoldTemplates.RoleRules(role, owner, Today),
-            KyberStandardsTemplates.Part.Skills =>
-                DocsScaffoldTemplates.SkillsList(),
-            KyberStandardsTemplates.Part.ArbiterRules =>
-                DocsScaffoldTemplates.TechnologyArbiterRules(role),
-            _ => throw new ArgumentOutOfRangeException(nameof(part))
-        };
-
-    /// <summary>
     /// Declares exactly the folders the operator named: a technology or platform name joins
     /// <c>ontology.technologies</c>, a role name joins <c>ontology.roles</c>. An unknown name
     /// is refused with the nearest known one rather than creating a folder nothing scopes.
@@ -434,22 +371,6 @@ public sealed class DocsScaffolder : IDocsScaffoldingService
 
         return ontology.Clone(technologies: technologies, roles: roles);
     }
-
-    /// <summary>The stub written for a folder part a shipped template does not supply.</summary>
-    private string TechnologyStub(string technology,
-        KyberStandardsTemplates.Part part,
-        string owner) => part switch
-        {
-            KyberStandardsTemplates.Part.Standard =>
-                DocsScaffoldTemplates.TechnologyStandard(technology, owner, Today),
-            KyberStandardsTemplates.Part.Rules =>
-                DocsScaffoldTemplates.TechnologyRules(technology, owner, Today),
-            KyberStandardsTemplates.Part.Skills =>
-                DocsScaffoldTemplates.SkillsList(),
-            KyberStandardsTemplates.Part.ArbiterRules =>
-                DocsScaffoldTemplates.TechnologyArbiterRules(technology),
-            _ => throw new ArgumentOutOfRangeException(nameof(part))
-        };
 
     /// <summary>The rendered block to write, or null when there is nothing to write.</summary>
     private RenderedReviewBlock? ReviewBlockFor(ReviewGatesPlan? reviewPlan) =>
@@ -934,4 +855,189 @@ public sealed class DocsScaffolder : IDocsScaffoldingService
     private string Today =>
         _time.GetUtcNow().UtcDateTime.ToString(
             "yyyy-MM-dd", System.Globalization.CultureInfo.InvariantCulture);
+
+    /// <summary>
+    /// The standards folder files: the standard, rules, skills list and arbiter rules for every
+    /// technology and role the host declares. A shipped template supplies a part; a scope with no
+    /// template gets a stub, so the folder check has the same shape to grade either way.
+    /// </summary>
+    private sealed class StandardsFolderWriter
+    {
+        private readonly IRepositoryFileStore _files;
+        private readonly IPathResolver _paths;
+        private readonly IProcessEnvironment _environment;
+        private readonly IKyberStandardsTemplates _templates;
+
+        public StandardsFolderWriter(
+            IRepositoryFileStore files,
+            IPathResolver paths,
+            IProcessEnvironment environment,
+            IKyberStandardsTemplates templates)
+        {
+            _files = files;
+            _paths = paths;
+            _environment = environment;
+            _templates = templates;
+        }
+
+        /// <summary>
+        /// The four files of every standards folder, in the order the scopes are declared.
+        /// </summary>
+        public List<ScaffoldedFile> WriteScopes(
+            string repoRoot,
+            string docsRoot,
+            string owner,
+            Func<string> today,
+            IReadOnlyList<string> technologies,
+            IReadOnlyList<string> roles,
+            HashSet<string> templatedTechnologies,
+            bool force)
+        {
+            List<ScaffoldedFile> written = [];
+            foreach (string technology in technologies)
+            {
+                foreach (KyberStandardsTemplates.Part part in Enum.GetValues<KyberStandardsTemplates.Part>())
+                {
+                    string path =
+                        $"{docsRoot}/{DocsLayout.Standards}/{technology}/{KyberStandardsTemplates.FileName(technology, part)}";
+                    if (part == KyberStandardsTemplates.Part.Standard
+                        && HasLegacyStandard(repoRoot, docsRoot, technology, path))
+                    {
+                        written.Add(new ScaffoldedFile(
+                            path, ScaffoldOutcome.Skipped, LegacyStandardNote));
+                        continue;
+                    }
+
+                    string content =
+                        templatedTechnologies.Contains(technology)
+                        && _templates.TryRenderPart(
+                            technology, part, owner, today(), out string? rendered)
+                            ? rendered
+                            : TechnologyStub(technology, part, owner, today());
+
+                    written.Add(Write(repoRoot, path, content, force));
+                }
+            }
+
+            foreach (string role in roles)
+            {
+                foreach (KyberStandardsTemplates.Part part in Enum.GetValues<KyberStandardsTemplates.Part>())
+                {
+                    string path =
+                        $"{docsRoot}/{DocsLayout.Standards}/{role}/{KyberStandardsTemplates.FileName(role, part)}";
+                    if (part == KyberStandardsTemplates.Part.Standard
+                        && HasLegacyStandard(repoRoot, docsRoot, role, path))
+                    {
+                        written.Add(new ScaffoldedFile(
+                            path, ScaffoldOutcome.Skipped, LegacyStandardNote));
+                        continue;
+                    }
+
+                    string content =
+                        _templates.TryRenderPart(role, part, owner, today(), out string? rendered)
+                            ? rendered
+                            : RoleStub(role, part, owner, today());
+
+                    written.Add(Write(repoRoot, path, content, force));
+                }
+            }
+
+            return written;
+        }
+
+        /// <summary>
+        /// True when a scope folder still holds its standard as <c>README.md</c> and the prefixed
+        /// standard does not exist yet. Scaffolding a stub beside it would give the folder two
+        /// standards carrying the same id; the migration command is what names the standard.
+        /// </summary>
+        private bool HasLegacyStandard(
+            string repoRoot,
+            string docsRoot,
+            string scope,
+            string standardPath)
+        {
+            if (_files.FileExists(RequireContained(repoRoot, standardPath, nameof(standardPath))))
+                return false;
+
+            string legacy = $"{docsRoot}/{DocsLayout.Standards}/{scope}/README.md";
+            return _files.FileExists(RequireContained(repoRoot, legacy, nameof(scope)));
+        }
+
+        /// <summary>The stub written for a role part a shipped template does not supply.</summary>
+        private string RoleStub(
+            string role,
+            KyberStandardsTemplates.Part part,
+            string owner,
+            string today) => part switch
+            {
+                KyberStandardsTemplates.Part.Standard =>
+                    DocsScaffoldTemplates.RoleStandard(role, owner, today),
+                KyberStandardsTemplates.Part.Rules =>
+                    DocsScaffoldTemplates.RoleRules(role, owner, today),
+                KyberStandardsTemplates.Part.Skills =>
+                    DocsScaffoldTemplates.SkillsList(),
+                KyberStandardsTemplates.Part.ArbiterRules =>
+                    DocsScaffoldTemplates.TechnologyArbiterRules(role),
+                _ => throw new ArgumentOutOfRangeException(nameof(part))
+            };
+
+        /// <summary>The stub written for a folder part a shipped template does not supply.</summary>
+        private string TechnologyStub(string technology,
+            KyberStandardsTemplates.Part part,
+            string owner,
+            string today) => part switch
+            {
+                KyberStandardsTemplates.Part.Standard =>
+                    DocsScaffoldTemplates.TechnologyStandard(technology, owner, today),
+                KyberStandardsTemplates.Part.Rules =>
+                    DocsScaffoldTemplates.TechnologyRules(technology, owner, today),
+                KyberStandardsTemplates.Part.Skills =>
+                    DocsScaffoldTemplates.SkillsList(),
+                KyberStandardsTemplates.Part.ArbiterRules =>
+                    DocsScaffoldTemplates.TechnologyArbiterRules(technology),
+                _ => throw new ArgumentOutOfRangeException(nameof(part))
+            };
+
+        /// <summary>
+        /// Resolves <paramref name="relativePath"/> under <paramref name="repoRoot"/>, refusing
+        /// anything that lands outside it.
+        /// </summary>
+        /// <remarks>
+        /// <see cref="Path.Combine(string, string)"/> returns its second argument outright when
+        /// that argument is rooted, and <c>..</c> segments walk upward, so an unchecked
+        /// operator-supplied path places files anywhere the process can reach.
+        /// </remarks>
+        private string RequireContained(string repoRoot, string relativePath, string parameterName)
+        {
+            string absolute = _paths.GetFullPath(
+                Path.Combine(repoRoot, relativePath.Replace('/', Path.DirectorySeparatorChar)),
+                repoRoot);
+
+            string boundary = RepositoryBoundary.For(repoRoot, Path.DirectorySeparatorChar);
+            if (!RepositoryBoundary.IsWithin(absolute, boundary, _environment.IsFileSystemCaseInsensitive))
+            {
+                throw new ArgumentException(
+                    $"Refusing to write outside the repository root: '{relativePath}' resolves to '{absolute}'.",
+                    parameterName);
+            }
+
+            return absolute;
+        }
+
+        private ScaffoldedFile Write(string repoRoot, string relativePath, string content, bool force)
+        {
+            // Enforced per write as well as up front, so the invariant holds for every path
+            // this type will ever emit, not only the ones routed through the docs root.
+            string absolute = RequireContained(repoRoot, relativePath, nameof(relativePath));
+
+            bool existed = _files.FileExists(absolute);
+            if (existed && !force)
+                return new ScaffoldedFile(relativePath, ScaffoldOutcome.Skipped);
+
+            _files.CreateDirectory(Path.GetDirectoryName(absolute)!);
+            _files.WriteAllText(absolute, content);
+            return new ScaffoldedFile(
+                relativePath, existed ? ScaffoldOutcome.Updated : ScaffoldOutcome.Created);
+        }
+    }
 }

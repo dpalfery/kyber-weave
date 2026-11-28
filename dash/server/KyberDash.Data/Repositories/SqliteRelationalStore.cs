@@ -21,7 +21,7 @@ namespace KyberDash.Data.Repositories;
 /// <see cref="IProjectionStore"/>, executing DDL initialization and transactional parameterized
 /// SQL statement batches through the base repository.
 /// </summary>
-public partial class SqliteRelationalStore : BaseSqliteRepository, IRelationalStoreWriter, IProjectionStore
+public partial class SqliteRelationalStore : SqliteRelationalStoreWriteBase, IRelationalStoreWriter, IProjectionStore
 {
     /// <summary>Current normalized relational schema version stamped in <c>store_state</c>.</summary>
     /// <remarks>
@@ -48,31 +48,6 @@ public partial class SqliteRelationalStore : BaseSqliteRepository, IRelationalSt
 
     /// <summary>Maximum retained WAL journal size in bytes after checkpoint (32 MiB).</summary>
     public const int WalSizeLimitBytes = 32 * 1024 * 1024;
-
-    /// <summary>Error code raised when a relational or domain constraint invariant is violated.</summary>
-    public const string ConstraintViolatedCode = "STORE_CONSTRAINT_VIOLATED";
-
-    /// <summary>Error code raised when standalone JSON object or array text is passed for a plain-text column.</summary>
-    public const string JsonTextRefusedCode = "STORE_JSON_TEXT_REFUSED";
-
-    private const int BusyTimeoutMilliseconds = 5000;
-    private const int BusyAttempts = 3;
-
-    private static readonly string[] ProblemChildTables =
-    [
-        "ingest_problem_span",
-        "ingest_problem_location",
-        "ingest_problem_session",
-        "ingest_problem_harness",
-        "ingest_problem_timestamp",
-        "ingest_problem_stack",
-    ];
-
-    private readonly Lock writeGate = new();
-    private readonly IRelationalStoreFileSystem fileSystem;
-    private readonly Action? onRebuiltFromOlderSchema;
-    private readonly Action<string> log;
-    private bool initialized;
 
     /// <summary>
     /// Initializes or opens the relational SQLite store at <paramref name="databasePath"/> and
@@ -163,17 +138,10 @@ public partial class SqliteRelationalStore : BaseSqliteRepository, IRelationalSt
         : base(
             ValidateDatabasePath(databasePath),
             circuitBreaker,
-            batchTimeout: TimeSpan.FromSeconds(120),
-            busyTimeoutMilliseconds: BusyTimeoutMilliseconds,
-            busyAttempts: BusyAttempts)
+            fileSystem,
+            onRebuiltFromOlderSchema,
+            log)
     {
-        this.fileSystem = fileSystem ?? PhysicalRelationalStoreFileSystem.Instance;
-        this.onRebuiltFromOlderSchema = onRebuiltFromOlderSchema;
-
-        // D15: the diagnostic log defaults to Console.Error so a destructive rebuild is never
-        // silent, even when a host or test wires the store without a logger.
-        this.log = log ?? Console.Error.WriteLine;
-
         if (initialize)
         {
             EnsureInitialized();
@@ -646,28 +614,6 @@ public partial class SqliteRelationalStore : BaseSqliteRepository, IRelationalSt
     /// <summary>Filesystem seam used for existence checks, directory creation, and rebuild cleanup.</summary>
     protected IRelationalStoreFileSystem FileSystem => fileSystem;
 
-    /// <summary>Ensures the parent directory of <see cref="BaseSqliteRepository.DatabasePath"/> exists via the filesystem seam.</summary>
-    protected void EnsureDatabaseDirectory()
-    {
-        string? directory = Path.GetDirectoryName(DatabasePath);
-        if (!string.IsNullOrEmpty(directory))
-        {
-            fileSystem.CreateDirectory(directory);
-        }
-    }
-
-    /// <summary>
-    /// Ensures the parent directory exists before a statement or query opens the database file, so
-    /// a read or write on a store whose file does not yet exist never fails on a missing directory.
-    /// </summary>
-    protected void EnsureDatabaseDirectoryIfMissing()
-    {
-        if (!fileSystem.FileExists(DatabasePath))
-        {
-            EnsureDatabaseDirectory();
-        }
-    }
-
     /// <inheritdoc />
     protected override void ExecuteStatements(IReadOnlyList<SqlStatement> statements)
     {
@@ -682,13 +628,98 @@ public partial class SqliteRelationalStore : BaseSqliteRepository, IRelationalSt
         base.ExecuteStatementsWithoutTransaction(statements);
     }
 
-    private static string ResolveDatabasePath(DashOptions options)
+
+    private protected void ExecuteTransaction(IReadOnlyList<SqlStatement> statements)
+    {
+        Action? rebuildCallback = null;
+        lock (writeGate)
+        {
+            if (!initialized)
+            {
+                rebuildCallback = Initialize();
+                initialized = true;
+            }
+
+            ExecuteStatements(statements);
+        }
+
+        rebuildCallback?.Invoke();
+    }
+
+    private protected void ExecuteTransaction(string bodySql)
+    {
+        ArgumentNullException.ThrowIfNull(bodySql);
+        Action? rebuildCallback = null;
+        lock (writeGate)
+        {
+            if (!initialized)
+            {
+                rebuildCallback = Initialize();
+                initialized = true;
+            }
+
+            ExecuteStatements([SqlStatement.Of(bodySql)]);
+        }
+
+        rebuildCallback?.Invoke();
+    }
+
+}
+
+/// <summary>
+/// Write-side SQL construction and transactional helpers shared by <see cref="SqliteRelationalStore"/>.
+/// </summary>
+public abstract class SqliteRelationalStoreWriteBase : SqliteRelationalStoreReaderBase
+{
+    /// <summary>Error code raised when a relational or domain constraint invariant is violated.</summary>
+    public const string ConstraintViolatedCode = "STORE_CONSTRAINT_VIOLATED";
+
+    /// <summary>Error code raised when standalone JSON object or array text is passed for a plain-text column.</summary>
+    public const string JsonTextRefusedCode = "STORE_JSON_TEXT_REFUSED";
+
+    private protected static readonly string[] ProblemChildTables =
+    [
+        "ingest_problem_span",
+        "ingest_problem_location",
+        "ingest_problem_session",
+        "ingest_problem_harness",
+        "ingest_problem_timestamp",
+        "ingest_problem_stack",
+    ];
+
+    private protected readonly Lock writeGate = new();
+    private protected readonly Action? onRebuiltFromOlderSchema;
+    private protected readonly Action<string> log;
+    private protected bool initialized;
+
+    /// <summary>Initializes the write-side helpers over <paramref name="databasePath"/>.</summary>
+    /// <param name="databasePath">Path to the SQLite database file.</param>
+    /// <param name="circuitBreaker">Circuit breaker guarding every <c>sqlite3</c> invocation.</param>
+    /// <param name="fileSystem">Filesystem seam; defaults to <see cref="PhysicalRelationalStoreFileSystem.Instance"/> when <see langword="null"/>.</param>
+    /// <param name="onRebuiltFromOlderSchema">Optional callback invoked after an older schema is rebuilt.</param>
+    /// <param name="log">Optional diagnostic logger; defaults to <c>Console.Error.WriteLine</c> when <see langword="null"/>.</param>
+    protected SqliteRelationalStoreWriteBase(
+        string databasePath,
+        ICircuitBreaker circuitBreaker,
+        IRelationalStoreFileSystem? fileSystem,
+        Action? onRebuiltFromOlderSchema,
+        Action<string>? log)
+        : base(databasePath, circuitBreaker, fileSystem)
+    {
+        this.onRebuiltFromOlderSchema = onRebuiltFromOlderSchema;
+
+        // D15: the diagnostic log defaults to Console.Error so a destructive rebuild is never
+        // silent, even when a host or test wires the store without a logger.
+        this.log = log ?? Console.Error.WriteLine;
+    }
+
+    private protected static string ResolveDatabasePath(DashOptions options)
     {
         ArgumentNullException.ThrowIfNull(options);
         return CanonDbPath.Resolve(options.DatabasePath, null, null);
     }
 
-    private static string ValidateDatabasePath(string databasePath)
+    private protected static string ValidateDatabasePath(string databasePath)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(databasePath);
         return databasePath;
@@ -698,7 +729,7 @@ public partial class SqliteRelationalStore : BaseSqliteRepository, IRelationalSt
     /// Returns the session keys a batch marks dirty: every session key and every record session
     /// key, or <see langword="null"/> (wildcard) when any record carries no session key.
     /// </summary>
-    private static SortedSet<string>? DirtySessionKeysOf(CollectedBatch batch)
+    private protected static SortedSet<string>? DirtySessionKeysOf(CollectedBatch batch)
     {
         SortedSet<string> keys = new(StringComparer.Ordinal);
         foreach (CollectedSession session in batch.Sessions)
@@ -744,7 +775,7 @@ public partial class SqliteRelationalStore : BaseSqliteRepository, IRelationalSt
     /// read the old range and marker before replacing either, and the marker moves last.
     /// </para>
     /// </remarks>
-    private static void AppendWriteMarkerAdvance(SqlBatch batch, SortedSet<string>? dirtyKeys)
+    private protected static void AppendWriteMarkerAdvance(SqlBatch batch, SortedSet<string>? dirtyKeys)
     {
         const string PrevExpr =
             "(SELECT COALESCE((SELECT records_write_seq FROM store_write_marker WHERE singleton_id = 1), 0))";
@@ -776,43 +807,8 @@ public partial class SqliteRelationalStore : BaseSqliteRepository, IRelationalSt
             "INSERT OR REPLACE INTO store_write_marker (singleton_id, records_write_seq) SELECT 1, " + PrevExpr + " + 1;\n");
     }
 
-    private void ExecuteTransaction(IReadOnlyList<SqlStatement> statements)
-    {
-        Action? rebuildCallback = null;
-        lock (writeGate)
-        {
-            if (!initialized)
-            {
-                rebuildCallback = Initialize();
-                initialized = true;
-            }
-
-            ExecuteStatements(statements);
-        }
-
-        rebuildCallback?.Invoke();
-    }
-
-    private void ExecuteTransaction(string bodySql)
-    {
-        ArgumentNullException.ThrowIfNull(bodySql);
-        Action? rebuildCallback = null;
-        lock (writeGate)
-        {
-            if (!initialized)
-            {
-                rebuildCallback = Initialize();
-                initialized = true;
-            }
-
-            ExecuteStatements([SqlStatement.Of(bodySql)]);
-        }
-
-        rebuildCallback?.Invoke();
-    }
-
     /// <summary>Accumulates parameterized statements, each binding its values by generated <c>$name</c> marker.</summary>
-    private sealed class SqlBatch
+    private protected sealed class SqlBatch
     {
         private readonly List<SqlStatement> statements = [];
         private readonly Dictionary<string, object?> parameters = new(StringComparer.Ordinal);
@@ -859,7 +855,7 @@ public partial class SqliteRelationalStore : BaseSqliteRepository, IRelationalSt
         }
     }
 
-    private static string GuardedText(string tableName, string columnName, string? value)
+    private protected static string GuardedText(string tableName, string columnName, string? value)
     {
         if (value is null)
         {
@@ -878,7 +874,7 @@ public partial class SqliteRelationalStore : BaseSqliteRepository, IRelationalSt
         return value;
     }
 
-    private static string GuardedNonEmptyText(string tableName, string columnName, string? value)
+    private protected static string GuardedNonEmptyText(string tableName, string columnName, string? value)
     {
         string text = GuardedText(tableName, columnName, value);
         if (text.Length == 0)
@@ -891,16 +887,14 @@ public partial class SqliteRelationalStore : BaseSqliteRepository, IRelationalSt
         return text;
     }
 
-    private static string IntSql(int value) => value.ToString(CultureInfo.InvariantCulture);
+    private protected static string LongSql(long value) => value.ToString(CultureInfo.InvariantCulture);
 
-    private static string LongSql(long value) => value.ToString(CultureInfo.InvariantCulture);
+    private protected static string BoolSql(bool value) => value ? "1" : "0";
 
-    private static string BoolSql(bool value) => value ? "1" : "0";
-
-    private static string RealSql(string tableName, string columnName, double value) =>
+    private protected static string RealSql(string tableName, string columnName, double value) =>
         RequireFiniteReal(tableName, columnName, value).ToString("G17", CultureInfo.InvariantCulture);
 
-    private static double RequireFiniteReal(string tableName, string columnName, double value)
+    private protected static double RequireFiniteReal(string tableName, string columnName, double value)
     {
         if (double.IsNaN(value) || double.IsInfinity(value))
         {
@@ -912,7 +906,7 @@ public partial class SqliteRelationalStore : BaseSqliteRepository, IRelationalSt
         return value;
     }
 
-    private static void RequireMatchedPair(
+    private protected static void RequireMatchedPair(
         bool hasFirst,
         bool hasSecond,
         string tableName,
@@ -927,7 +921,7 @@ public partial class SqliteRelationalStore : BaseSqliteRepository, IRelationalSt
         }
     }
 
-    private static void AppendOptionalTextChild(
+    private protected static void AppendOptionalTextChild(
         SqlBatch batch,
         string tableName,
         string keyColumn,
@@ -946,7 +940,7 @@ public partial class SqliteRelationalStore : BaseSqliteRepository, IRelationalSt
         batch.Append($"INSERT INTO {tableName} ({keyColumn}, {valueColumn}) VALUES ({keyParam}, {valueParam});\n");
     }
 
-    private static void AppendOptionalLongChild(
+    private protected static void AppendOptionalLongChild(
         SqlBatch batch,
         string tableName,
         string keyColumn,
@@ -964,7 +958,7 @@ public partial class SqliteRelationalStore : BaseSqliteRepository, IRelationalSt
         batch.Append($"INSERT INTO {tableName} ({keyColumn}, {valueColumn}) VALUES ({keyParam}, {valueParam});\n");
     }
 
-    private static void AppendHarnessInsert(SqlBatch batch, HashSet<string> seenHarnesses, string harnessId)
+    private protected static void AppendHarnessInsert(SqlBatch batch, HashSet<string> seenHarnesses, string harnessId)
     {
         string harnessValue = GuardedText("harness", "harness_id", harnessId);
         if (seenHarnesses.Add(harnessId))
@@ -978,7 +972,7 @@ public partial class SqliteRelationalStore : BaseSqliteRepository, IRelationalSt
     /// Deletes one source and the records it owns, after handing each record another source still claims
     /// (<c>record_source_claim</c>) to that source, so a span shared with another transcript survives.
     /// </summary>
-    private static void AppendSourceDelete(SqlBatch batch, string sourceId)
+    private protected static void AppendSourceDelete(SqlBatch batch, string sourceId)
     {
         string updateSourceIdParam = batch.Add(sourceId);
         string otherClaim =
@@ -990,14 +984,14 @@ public partial class SqliteRelationalStore : BaseSqliteRepository, IRelationalSt
         batch.Append($"DELETE FROM source WHERE source_id = {deleteSourceIdParam};\n");
     }
 
-    private static string SourceIdOf(CollectedSource source)
+    private protected static string SourceIdOf(CollectedSource source)
     {
         string kindText = FormatSourceKind(source.Kind);
         byte[] digest = SHA256.HashData(Encoding.UTF8.GetBytes($"{source.HarnessId}\0{kindText}\0{source.Locator}"));
         return $"src-{Convert.ToHexStringLower(digest)[..16]}";
     }
 
-    private static string AppendSourceInsert(SqlBatch batch, CollectedSource source)
+    private protected static string AppendSourceInsert(SqlBatch batch, CollectedSource source)
     {
         string kindText = FormatSourceKind(source.Kind);
         string sourceId = SourceIdOf(source);
@@ -1015,7 +1009,7 @@ public partial class SqliteRelationalStore : BaseSqliteRepository, IRelationalSt
         return sourceId;
     }
 
-    private static void AppendSessionUpsert(SqlBatch batch, CollectedSession session)
+    private protected static void AppendSessionUpsert(SqlBatch batch, CollectedSession session)
     {
         string sessionId = GuardedNonEmptyText("session", "session_id", session.SessionKey);
         string harnessId = GuardedText("session", "harness_id", session.HarnessId);
@@ -1061,13 +1055,13 @@ public partial class SqliteRelationalStore : BaseSqliteRepository, IRelationalSt
         }
     }
 
-    private static void AppendSessionIdDelete(SqlBatch batch, string tableName, string sessionId)
+    private protected static void AppendSessionIdDelete(SqlBatch batch, string tableName, string sessionId)
     {
         string sessionIdParam = batch.Add(sessionId);
         batch.Append($"DELETE FROM {tableName} WHERE session_id = {sessionIdParam};\n");
     }
 
-    private static void AppendRecordInsert(SqlBatch batch, string sourceId, CollectedRecord record)
+    private protected static void AppendRecordInsert(SqlBatch batch, string sourceId, CollectedRecord record)
     {
         if (record.Signals is null)
         {
@@ -1224,7 +1218,7 @@ public partial class SqliteRelationalStore : BaseSqliteRepository, IRelationalSt
         AppendRecordAgentInvocation(batch, spanId, record.Agent);
     }
 
-    private static void AppendRecordParts(SqlBatch batch, string spanId, CollectedRecord record)
+    private protected static void AppendRecordParts(SqlBatch batch, string spanId, CollectedRecord record)
     {
         if (record.Parts is null)
         {
@@ -1331,7 +1325,7 @@ public partial class SqliteRelationalStore : BaseSqliteRepository, IRelationalSt
         }
     }
 
-    private static void AppendRecordToolDefinitions(SqlBatch batch, string spanId, CollectedRecord record)
+    private protected static void AppendRecordToolDefinitions(SqlBatch batch, string spanId, CollectedRecord record)
     {
         if (record.ToolDefinitions is null)
         {
@@ -1380,7 +1374,7 @@ public partial class SqliteRelationalStore : BaseSqliteRepository, IRelationalSt
         }
     }
 
-    private static void AppendRecordToolCall(SqlBatch batch, string spanId, CollectedToolCall? tool)
+    private protected static void AppendRecordToolCall(SqlBatch batch, string spanId, CollectedToolCall? tool)
     {
         if (tool is null)
         {
@@ -1434,7 +1428,7 @@ public partial class SqliteRelationalStore : BaseSqliteRepository, IRelationalSt
         AppendOptionalLongChild(batch, "tool_call_exit_code", "span_id", spanId, "exit_code", tool.ExitCode);
     }
 
-    private static void AppendToolContent(
+    private protected static void AppendToolContent(
         SqlBatch batch,
         string spanId,
         CollectedToolContent? content,
@@ -1460,7 +1454,7 @@ public partial class SqliteRelationalStore : BaseSqliteRepository, IRelationalSt
         AppendOptionalLongChild(batch, $"{tablePrefix}_truncation", "span_id", spanId, "original_utf8_bytes", content.OriginalUtf8BytesWhenTruncated);
     }
 
-    private static void AppendRecordAgentInvocation(SqlBatch batch, string spanId, CollectedAgentInvocation? agent)
+    private protected static void AppendRecordAgentInvocation(SqlBatch batch, string spanId, CollectedAgentInvocation? agent)
     {
         if (agent is null)
         {
@@ -1485,7 +1479,7 @@ public partial class SqliteRelationalStore : BaseSqliteRepository, IRelationalSt
         AppendOptionalTextChild(batch, "agent_invocation_error", "span_id", spanId, "message", agent.Error);
     }
 
-    private static void AppendOptionalNonEmptyTextChild(
+    private protected static void AppendOptionalNonEmptyTextChild(
         SqlBatch batch,
         string tableName,
         string keyColumn,
@@ -1504,7 +1498,7 @@ public partial class SqliteRelationalStore : BaseSqliteRepository, IRelationalSt
         batch.Append($"INSERT INTO {tableName} ({keyColumn}, {valueColumn}) VALUES ({keyParam}, {valueParam});\n");
     }
 
-    private static void AppendProblemUpsert(SqlBatch batch, CollectedProblem problem)
+    private protected static void AppendProblemUpsert(SqlBatch batch, CollectedProblem problem)
     {
         string problemKeyValue = GuardedText("ingest_problem", "problem_key", problem.ProblemKey);
         string severityValue = GuardedText("ingest_problem", "severity", problem.Severity);
@@ -1534,7 +1528,7 @@ public partial class SqliteRelationalStore : BaseSqliteRepository, IRelationalSt
         AppendProblemOptionalChild(batch, problemKeyValue, "ingest_problem_stack", "stack", problem.Stack);
     }
 
-    private static void AppendProblemOptionalChild(
+    private protected static void AppendProblemOptionalChild(
         SqlBatch batch,
         string problemKeyValue,
         string tableName,
@@ -1553,7 +1547,7 @@ public partial class SqliteRelationalStore : BaseSqliteRepository, IRelationalSt
             $"INSERT INTO {tableName} (problem_id, {columnName}) SELECT problem_id, {valueParam} FROM ingest_problem WHERE problem_key = {problemKeyParam};\n");
     }
 
-    private static void AppendSessionProjectionReplace(SqlBatch batch, StoredSessionProjection projection)
+    private protected static void AppendSessionProjectionReplace(SqlBatch batch, StoredSessionProjection projection)
     {
         if (projection.Context is not null && projection.ContextUnmeasurableReason is not null)
         {
@@ -1670,7 +1664,7 @@ public partial class SqliteRelationalStore : BaseSqliteRepository, IRelationalSt
         }
     }
 
-    private static void AppendSessionContext(SqlBatch batch, string sessionId, StoredSessionContext context)
+    private protected static void AppendSessionContext(SqlBatch batch, string sessionId, StoredSessionContext context)
     {
         string sourceValue = GuardedText("session_context", "context_limit_source", context.ContextLimitSource);
         double freshJumpFactor = RequireFiniteReal("session_context", "fresh_jump_factor", context.FreshJumpFactor);
@@ -1730,7 +1724,7 @@ public partial class SqliteRelationalStore : BaseSqliteRepository, IRelationalSt
         }
     }
 
-    private static void AppendSessionContextTurn(SqlBatch batch, string sessionId, StoredSessionContextTurn turn)
+    private protected static void AppendSessionContextTurn(SqlBatch batch, string sessionId, StoredSessionContextTurn turn)
     {
         string attributionValue = GuardedText("session_context_turn", "residual_attribution", turn.ResidualAttribution);
 
@@ -1853,7 +1847,7 @@ public partial class SqliteRelationalStore : BaseSqliteRepository, IRelationalSt
         }
     }
 
-    private static void AppendSessionSchema(SqlBatch batch, string sessionId, StoredSessionSchema schema)
+    private protected static void AppendSessionSchema(SqlBatch batch, string sessionId, StoredSessionSchema schema)
     {
         string schemaSessionIdParam = batch.Add(sessionId);
         string invocationCountParam = batch.Add(schema.InvocationCount);
@@ -1904,7 +1898,7 @@ public partial class SqliteRelationalStore : BaseSqliteRepository, IRelationalSt
         AppendOptionalLongChild(batch, "session_schema_unused", "session_id", sessionId, "token_residencies", schema.UnusedTokenResidencies);
     }
 
-    private static void AppendRunUpsert(SqlBatch batch, StoredRun run)
+    private protected static void AppendRunUpsert(SqlBatch batch, StoredRun run)
     {
         RequireMatchedPair(run.StartedAtUtc is not null, run.EndedAtUtc is not null, "run_bounds", "started_at_utc", "ended_at_utc");
 
@@ -1943,7 +1937,7 @@ public partial class SqliteRelationalStore : BaseSqliteRepository, IRelationalSt
         }
     }
 
-    private static void AppendHarnessRollupReplace(SqlBatch batch, StoredHarnessRollup rollup)
+    private protected static void AppendHarnessRollupReplace(SqlBatch batch, StoredHarnessRollup rollup)
     {
         string harnessId = GuardedText("harness_rollup", "harness_id", rollup.HarnessId);
 
@@ -1978,7 +1972,7 @@ public partial class SqliteRelationalStore : BaseSqliteRepository, IRelationalSt
         }
     }
 
-    private static void AppendFindingReplace(SqlBatch batch, StoredFinding finding)
+    private protected static void AppendFindingReplace(SqlBatch batch, StoredFinding finding)
     {
         string findingId = GuardedText("finding", "finding_id", finding.FindingId);
         string detectorId = GuardedText("finding", "detector_id", finding.DetectorId);
@@ -2051,7 +2045,7 @@ public partial class SqliteRelationalStore : BaseSqliteRepository, IRelationalSt
         }
     }
 
-    private static void AppendPredictionReplace(SqlBatch batch, StoredPrediction prediction)
+    private protected static void AppendPredictionReplace(SqlBatch batch, StoredPrediction prediction)
     {
         string predictionId = GuardedText("prediction", "prediction_id", prediction.PredictionId);
         string findingId = GuardedText("prediction", "finding_id", prediction.FindingId);
@@ -2086,17 +2080,14 @@ public partial class SqliteRelationalStore : BaseSqliteRepository, IRelationalSt
         }
     }
 
-    private static string FormatTimestamp(DateTimeOffset value) =>
-        value.ToUniversalTime().ToString("O", CultureInfo.InvariantCulture);
-
-    private static string FormatSourceKind(SourceKind kind) => kind switch
+    private protected static string FormatSourceKind(SourceKind kind) => kind switch
     {
         SourceKind.File => "file",
         SourceKind.Otlp => "otlp",
         _ => throw new DashValidationException(ConstraintViolatedCode, $"Unsupported SourceKind '{kind}'."),
     };
 
-    private static string FormatRecordOp(RecordOp op) => op switch
+    private protected static string FormatRecordOp(RecordOp op) => op switch
     {
         RecordOp.LlmInvoke => "llm.invoke",
         RecordOp.ToolInvoke => "tool.invoke",
@@ -2105,7 +2096,7 @@ public partial class SqliteRelationalStore : BaseSqliteRepository, IRelationalSt
         _ => throw new DashValidationException(ConstraintViolatedCode, $"Unsupported RecordOp '{op}'."),
     };
 
-    private static string FormatRecordKind(RecordKind kind) => kind switch
+    private protected static string FormatRecordKind(RecordKind kind) => kind switch
     {
         RecordKind.Unspecified => "unspecified",
         RecordKind.Internal => "internal",
@@ -2116,7 +2107,7 @@ public partial class SqliteRelationalStore : BaseSqliteRepository, IRelationalSt
         _ => throw new DashValidationException(ConstraintViolatedCode, $"Unsupported RecordKind '{kind}'."),
     };
 
-    private static string FormatRecordStatus(RecordStatus status) => status switch
+    private protected static string FormatRecordStatus(RecordStatus status) => status switch
     {
         RecordStatus.Unset => "unset",
         RecordStatus.Ok => "ok",
@@ -2125,7 +2116,7 @@ public partial class SqliteRelationalStore : BaseSqliteRepository, IRelationalSt
         _ => throw new DashValidationException(ConstraintViolatedCode, $"Unsupported RecordStatus '{status}'."),
     };
 
-    private static string FormatTokenClass(TokenClass tokenClass) => tokenClass switch
+    private protected static string FormatTokenClass(TokenClass tokenClass) => tokenClass switch
     {
         TokenClass.Input => "input",
         TokenClass.CacheRead => "cache_read",
@@ -2136,7 +2127,7 @@ public partial class SqliteRelationalStore : BaseSqliteRepository, IRelationalSt
         _ => throw new DashValidationException(ConstraintViolatedCode, $"Unsupported TokenClass '{tokenClass}'."),
     };
 
-    private static string FormatContentBucket(ContentBucket bucket) => bucket switch
+    private protected static string FormatContentBucket(ContentBucket bucket) => bucket switch
     {
         ContentBucket.SystemPrompt => "system_prompt",
         ContentBucket.ToolDefinitions => "tool_definitions",

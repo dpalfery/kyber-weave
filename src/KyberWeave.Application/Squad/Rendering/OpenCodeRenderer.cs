@@ -207,6 +207,24 @@ public sealed class OpenCodeRenderer : SquadHarnessRenderer
         bool arbiterEnforced)
     {
         HashSet<string> granted = new(BaseUngovernedPermissions, StringComparer.Ordinal);
+        object? taskPermissionValue = ApplyProfilePermissions(
+            agent,
+            capabilityProfiles,
+            suppressedSkillIdentities,
+            codeGraphServerNames,
+            arbiterEnforced,
+            granted);
+        return BuildOrderedPermissions(granted, codeGraphServerNames, taskPermissionValue);
+    }
+
+    private static object? ApplyProfilePermissions(
+        SquadAgent agent,
+        IReadOnlyDictionary<string, SquadCapabilityProfile> capabilityProfiles,
+        IReadOnlySet<string> suppressedSkillIdentities,
+        IReadOnlyList<string> codeGraphServerNames,
+        bool arbiterEnforced,
+        HashSet<string> granted)
+    {
         object? taskPermissionValue = null;
 
         // An unresolvable profile grants nothing beyond the ungoverned permissions. Falling back
@@ -278,6 +296,14 @@ public sealed class OpenCodeRenderer : SquadHarnessRenderer
             }
         }
 
+        return taskPermissionValue;
+    }
+
+    private static Dictionary<string, object> BuildOrderedPermissions(
+        HashSet<string> granted,
+        IReadOnlyList<string> codeGraphServerNames,
+        object? taskPermissionValue)
+    {
         Dictionary<string, object> ordered = new(StringComparer.Ordinal);
         foreach (string key in PermissionOrder)
         {

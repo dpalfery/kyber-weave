@@ -17,7 +17,7 @@ using ModelContextProtocol.Server;
 
 if (args.Contains("--version", StringComparer.OrdinalIgnoreCase) || args.Contains("-v", StringComparer.OrdinalIgnoreCase))
 {
-    Console.WriteLine($"kyber-weave-mcp {GetVersion()}");
+    Console.WriteLine($"kyber-weave-mcp {McpHostStartup.GetVersion()}");
     return 0;
 }
 
@@ -51,121 +51,150 @@ if (mode.ConflictDiagnostic is { } conflict)
 
 bool anyRepo = mode.AnyRepo;
 builder.Services.AddWeaveApplication();
-if (anyRepo)
+int? docsHostExitCode = await McpHostStartup.ConfigureDocsHostAsync(builder, anyRepo, codeGraphRefreshEnabled, args).ConfigureAwait(false);
+if (docsHostExitCode is { } exitCode)
 {
-    builder.Services.AddAnyRepoDocsHostServices(codeGraphRefreshEnabled);
-}
-else
-{
-    string workingDirectory = Directory.GetCurrentDirectory();
-    string? expectRootEnvironment = Environment.GetEnvironmentVariable(
-        RepositoryRootResolver.ExpectRootEnvironmentVariable);
-    bool expectRootFromFlag = RepositoryRootResolver.HasExpectRootArgument(args);
-
-    RepositoryRootResolver rootResolver = RealRootResolver();
-    string repoRoot;
-    try
-    {
-        repoRoot = rootResolver.Resolve(
-            args,
-            workingDirectory,
-            Environment.GetEnvironmentVariable(RepositoryRootResolver.EnvironmentVariable));
-    }
-    catch (ExpectedRootMismatchException ex)
-    {
-        // A client-asserted root that does not match is a refuse-to-serve, distinct from an
-        // unbound root: KW-MCP-ROOT-002 says the binding was intentional but wrong.
-        await Console.Error.WriteLineAsync($"KW-MCP-ROOT-002: {ex.Message}").ConfigureAwait(false);
-        return 1;
-    }
-    catch (Exception ex) when (ex is ArgumentException or InvalidOperationException)
-    {
-        // stdout is the JSON-RPC transport; startup diagnostics belong on stderr.
-        await Console.Error.WriteLineAsync($"KW-MCP-ROOT-001: {ex.Message}").ConfigureAwait(false);
-        return 1;
-    }
-
-    // The environment assertion is honoured only when the flag is absent: an explicit CLI
-    // expectation wins over the ambient one, so a shell export cannot override a project pin.
-    if (!expectRootFromFlag && !string.IsNullOrWhiteSpace(expectRootEnvironment))
-    {
-        string expectedRoot;
-        try
-        {
-            expectedRoot = Path.GetFullPath(expectRootEnvironment, workingDirectory);
-        }
-        catch (Exception ex) when (ex is ArgumentException or NotSupportedException or PathTooLongException)
-        {
-            await Console.Error.WriteLineAsync(
-                "KW-MCP-ROOT-002: The KYBER_WEAVE_EXPECT_ROOT value is not a valid path. " +
-                "Refusing to serve.")
-                .ConfigureAwait(false);
-            return 1;
-        }
-
-        if (!rootResolver.PathsEqual(expectedRoot, repoRoot))
-        {
-            await Console.Error.WriteLineAsync(
-                $"KW-MCP-ROOT-002: The KYBER_WEAVE_EXPECT_ROOT value '{expectedRoot}' does not match " +
-                $"the resolved MCP root '{repoRoot}'. Refusing to serve because the client expects " +
-                "a different repository and answers would come from the wrong corpus.")
-                .ConfigureAwait(false);
-            return 1;
-        }
-    }
-
-    // Composition root. The shared layers register their own services first; AddDocsHostServices adds every
-    // registration below it that is a host decision made once from this process's own argv and root. Core never
-    // invents these collaborators. The composition-root test builds the same container, so a tool whose constructor
-    // asks for a service this root does not register fails there rather than on its first call.
-    builder.Services.AddDocsHostServices(repoRoot, codeGraphRefreshEnabled);
+    return exitCode;
 }
 
-builder.Services
-    .AddMcpServer(options => DocsServerInstructions.Configure(options, anyRepo))
-    .WithStdioServerTransport()
-    .WithToolsFromAssembly();
-
-// The SDK registers its single-session hosting only through its transport extensions, and
-// WithStreamServerTransport would construct a transport of its own on the spot. So the stdio
-// extension supplies the hosting, and its ITransport is swapped for one that still answers
-// requests read before stdin closed, which the SDK transport silently drops. See
-// DrainingStreamServerTransport for why. The SDK's factory is replaced before anything resolves
-// it, so its transport is never constructed and never starts reading stdin.
-builder.Services.Replace(ServiceDescriptor.Singleton<ITransport>(services =>
-    DrainingStreamServerTransport.ForStandardStreams(
-        services.GetRequiredService<IOptions<McpServerOptions>>().Value.ServerInfo?.Name ?? "kyber-weave-mcp",
-        services.GetService<ILoggerFactory>())));
+McpHostStartup.AddServer(builder, anyRepo);
 
 await builder.Build().RunAsync().ConfigureAwait(false);
 return 0;
 
-static RepositoryRootResolver RealRootResolver()
+/// <summary>The startup steps of the MCP server entry point, each small enough to stay loosely coupled.</summary>
+internal static class McpHostStartup
 {
-    PhysicalFileSystem files = new();
-    PhysicalPathResolver paths = new(files);
-    ProcessEnvironment environment = new();
-    return new RepositoryRootResolver(
-        new FileKyberWeaveConfigRepository(new FileRepositoryTreeProbe(files, paths, environment), files, paths, environment),
-        paths,
-        environment);
-}
-
-static string GetVersion()
-{
-    Assembly assembly = typeof(Program).Assembly;
-    string? infoVersion = assembly.GetCustomAttribute<AssemblyInformationalVersionAttribute>()?.InformationalVersion;
-    if (!string.IsNullOrWhiteSpace(infoVersion))
+    /// <summary>
+    /// Resolves the served root (or the any-repo mode) and registers the docs host services.
+    /// </summary>
+    /// <returns>Null when the host is configured, or the process exit code to return instead.</returns>
+    public static async Task<int?> ConfigureDocsHostAsync(
+        HostApplicationBuilder builder,
+        bool anyRepo,
+        bool codeGraphRefreshEnabled,
+        string[] args)
     {
-        int plusIndex = infoVersion.IndexOf('+', StringComparison.Ordinal);
-        return plusIndex >= 0 ? infoVersion[..plusIndex] : infoVersion;
+        if (anyRepo)
+        {
+            builder.Services.AddAnyRepoDocsHostServices(codeGraphRefreshEnabled);
+            return null;
+        }
+
+        string workingDirectory = Directory.GetCurrentDirectory();
+        string? expectRootEnvironment = Environment.GetEnvironmentVariable(
+            RepositoryRootResolver.ExpectRootEnvironmentVariable);
+        bool expectRootFromFlag = RepositoryRootResolver.HasExpectRootArgument(args);
+
+        RepositoryRootResolver rootResolver = RealRootResolver();
+        string repoRoot;
+        try
+        {
+            repoRoot = rootResolver.Resolve(
+                args,
+                workingDirectory,
+                Environment.GetEnvironmentVariable(RepositoryRootResolver.EnvironmentVariable));
+        }
+        catch (ExpectedRootMismatchException ex)
+        {
+            // A client-asserted root that does not match is a refuse-to-serve, distinct from an
+            // unbound root: KW-MCP-ROOT-002 says the binding was intentional but wrong.
+            await Console.Error.WriteLineAsync($"KW-MCP-ROOT-002: {ex.Message}").ConfigureAwait(false);
+            return 1;
+        }
+        catch (Exception ex) when (ex is ArgumentException or InvalidOperationException)
+        {
+            // stdout is the JSON-RPC transport; startup diagnostics belong on stderr.
+            await Console.Error.WriteLineAsync($"KW-MCP-ROOT-001: {ex.Message}").ConfigureAwait(false);
+            return 1;
+        }
+
+        // The environment assertion is honoured only when the flag is absent: an explicit CLI
+        // expectation wins over the ambient one, so a shell export cannot override a project pin.
+        if (!expectRootFromFlag && !string.IsNullOrWhiteSpace(expectRootEnvironment))
+        {
+            string expectedRoot;
+            try
+            {
+                expectedRoot = Path.GetFullPath(expectRootEnvironment, workingDirectory);
+            }
+            catch (Exception ex) when (ex is ArgumentException or NotSupportedException or PathTooLongException)
+            {
+                await Console.Error.WriteLineAsync(
+                    "KW-MCP-ROOT-002: The KYBER_WEAVE_EXPECT_ROOT value is not a valid path. " +
+                    "Refusing to serve.")
+                    .ConfigureAwait(false);
+                return 1;
+            }
+
+            if (!rootResolver.PathsEqual(expectedRoot, repoRoot))
+            {
+                await Console.Error.WriteLineAsync(
+                    $"KW-MCP-ROOT-002: The KYBER_WEAVE_EXPECT_ROOT value '{expectedRoot}' does not match " +
+                    $"the resolved MCP root '{repoRoot}'. Refusing to serve because the client expects " +
+                    "a different repository and answers would come from the wrong corpus.")
+                    .ConfigureAwait(false);
+                return 1;
+            }
+        }
+
+        // Composition root. The shared layers register their own services first; AddDocsHostServices adds every
+        // registration below it that is a host decision made once from this process's own argv and root. Core never
+        // invents these collaborators. The composition-root test builds the same container, so a tool whose constructor
+        // asks for a service this root does not register fails there rather than on its first call.
+        builder.Services.AddDocsHostServices(repoRoot, codeGraphRefreshEnabled);
+        return null;
     }
 
-    Version? nameVersion = assembly.GetName().Version;
-    if (nameVersion is not null)
+    /// <summary>Registers the MCP server, its stdio transport and the tool types.</summary>
+    public static void AddServer(HostApplicationBuilder builder, bool anyRepo)
     {
-        return nameVersion.ToString();
+        builder.Services
+            .AddMcpServer(options => DocsServerInstructions.Configure(options, anyRepo))
+            .WithStdioServerTransport()
+            .WithToolsFromAssembly();
+
+        // The SDK registers its single-session hosting only through its transport extensions, and
+        // WithStreamServerTransport would construct a transport of its own on the spot. So the stdio
+        // extension supplies the hosting, and its ITransport is swapped for one that still answers
+        // requests read before stdin closed, which the SDK transport silently drops. See
+        // DrainingStreamServerTransport for why. The SDK's factory is replaced before anything resolves
+        // it, so its transport is never constructed and never starts reading stdin.
+        builder.Services.Replace(ServiceDescriptor.Singleton<ITransport>(services =>
+            DrainingStreamServerTransport.ForStandardStreams(
+                services.GetRequiredService<IOptions<McpServerOptions>>().Value.ServerInfo?.Name ?? "kyber-weave-mcp",
+                services.GetService<ILoggerFactory>())));
     }
 
-    return "0.0.0";
+    /// <summary>The root resolver over the physical file system, path resolver and process environment.</summary>
+    public static RepositoryRootResolver RealRootResolver()
+    {
+        PhysicalFileSystem files = new();
+        PhysicalPathResolver paths = new(files);
+        ProcessEnvironment environment = new();
+        return new RepositoryRootResolver(
+            new FileKyberWeaveConfigRepository(new FileRepositoryTreeProbe(files, paths, environment), files, paths, environment),
+            paths,
+            environment);
+    }
+
+    /// <summary>The assembly's informational version without build metadata, or the assembly version.</summary>
+    public static string GetVersion()
+    {
+        Assembly assembly = typeof(Program).Assembly;
+        string? infoVersion = assembly.GetCustomAttribute<AssemblyInformationalVersionAttribute>()?.InformationalVersion;
+        if (!string.IsNullOrWhiteSpace(infoVersion))
+        {
+            int plusIndex = infoVersion.IndexOf('+', StringComparison.Ordinal);
+            return plusIndex >= 0 ? infoVersion[..plusIndex] : infoVersion;
+        }
+
+        Version? nameVersion = assembly.GetName().Version;
+        if (nameVersion is not null)
+        {
+            return nameVersion.ToString();
+        }
+
+        return "0.0.0";
+    }
 }

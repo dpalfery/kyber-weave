@@ -153,390 +153,8 @@ public class CodexRolloutMapper : IHarnessMapper
         ArgumentNullException.ThrowIfNull(unit);
         ArgumentNullException.ThrowIfNull(unit.Unit);
 
-        string harnessId = ResolveHarnessId(unit.Unit.HarnessId);
-        string importedAtText = FormatUtc(importedAtUtc);
-
-        string? sessionId = null;
-        string? systemPrompt = null;
-        string? instructionContext = null;
-        string? workingDirectory = null;
-        string currentModel = DefaultModel;
-
-        List<CodexRolloutMessage> pendingMessages = [];
-        List<CodexRolloutToolCall> pendingCalls = [];
-        List<CodexRolloutToolResult> pendingResults = [];
-        List<CodexRolloutToolResult> allResults = [];
-        string? terminationReason = null;
-        int? exitCode = null;
-        string? turnTimestamp = null;
-        bool dirty = false;
-        int turnIndex = 0;
-
-        List<CodexRolloutTurn> turns = [];
-        List<CollectedProblem> problems = [];
-
-        CodexRolloutTurn FlushTurn(string? fallbackTimestamp, CodexRolloutUsage? usage)
-        {
-            turnIndex++;
-            CodexRolloutTurn turn = new(
-                TurnIndex: turnIndex,
-                Timestamp: turnTimestamp ?? fallbackTimestamp,
-                Model: usage?.Model ?? currentModel,
-                TerminationReason: terminationReason,
-                ExitCode: exitCode,
-                Usage: usage,
-                Messages: [.. pendingMessages],
-                ToolCalls: [.. pendingCalls],
-                ToolResults: [.. pendingResults]);
-
-            pendingMessages.Clear();
-            pendingCalls.Clear();
-            pendingResults.Clear();
-            terminationReason = null;
-            exitCode = null;
-            turnTimestamp = null;
-            dirty = false;
-            return turn;
-        }
-
-        using StringReader reader = new(unit.RawText ?? string.Empty);
-        string? line;
-        int lineNumber = 0;
-        while ((line = reader.ReadLine()) is not null)
-        {
-            lineNumber++;
-            if (string.IsNullOrWhiteSpace(line))
-            {
-                continue;
-            }
-
-            JsonDocument doc;
-            try
-            {
-                doc = JsonDocument.Parse(line);
-            }
-            catch (JsonException)
-            {
-                problems.Add(new CollectedProblem(
-                    ProblemKey: string.Create(CultureInfo.InvariantCulture, $"malformed-json:{unit.Unit.SourceKey}:{lineNumber}"),
-                    Severity: "warning",
-                    Code: MalformedJsonCode,
-                    Message: string.Create(CultureInfo.InvariantCulture, $"Skipped malformed JSONL entry at line {lineNumber}."),
-                    Location: unit.Unit.SourceKey,
-                    HarnessId: harnessId,
-                    TimestampUtc: importedAtText));
-                continue;
-            }
-
-            using (doc)
-            {
-                if (doc.RootElement.ValueKind != JsonValueKind.Object)
-                {
-                    problems.Add(new CollectedProblem(
-                        ProblemKey: string.Create(CultureInfo.InvariantCulture, $"malformed-json:{unit.Unit.SourceKey}:{lineNumber}"),
-                        Severity: "warning",
-                        Code: MalformedJsonCode,
-                        Message: string.Create(CultureInfo.InvariantCulture, $"Skipped non-object JSONL entry at line {lineNumber}."),
-                        Location: unit.Unit.SourceKey,
-                        HarnessId: harnessId,
-                        TimestampUtc: importedAtText));
-                    continue;
-                }
-
-                JsonElement entry = doc.RootElement;
-                string? entryType = ReadString(entry, "type");
-                string? entryTimestamp = ReadString(entry, "timestamp");
-
-                if (!IsKnownTopLevelEntryType(entryType))
-                {
-                    string safeType = SafeEventTypeLabel(entryType);
-                    problems.Add(new CollectedProblem(
-                        ProblemKey: string.Create(CultureInfo.InvariantCulture, $"unknown-event:{unit.Unit.SourceKey}:{lineNumber}"),
-                        Severity: "warning",
-                        Code: UnknownEventTypeCode,
-                        Message: string.Create(CultureInfo.InvariantCulture, $"Skipped unknown Codex rollout entry type '{safeType}' at line {lineNumber}."),
-                        Location: unit.Unit.SourceKey,
-                        HarnessId: harnessId,
-                        TimestampUtc: importedAtText));
-                    continue;
-                }
-
-                if (!entry.TryGetProperty("payload", out JsonElement payload) || payload.ValueKind != JsonValueKind.Object)
-                {
-                    continue;
-                }
-
-                if (string.Equals(entryType, "session_meta", StringComparison.Ordinal))
-                {
-                    string? sid = ReadString(payload, "session_id") ?? ReadString(payload, "id");
-                    if (!string.IsNullOrEmpty(sid))
-                    {
-                        sessionId = sid;
-                    }
-
-                    string? prompt = ReadCodexSystemPrompt(payload);
-                    if (!string.IsNullOrEmpty(prompt))
-                    {
-                        systemPrompt = prompt;
-                    }
-
-                    string? modelFromMeta = ReadString(payload, "model");
-                    if (!string.IsNullOrEmpty(modelFromMeta))
-                    {
-                        currentModel = modelFromMeta;
-                    }
-
-                    string? cwd = ReadString(payload, "cwd");
-                    if (!string.IsNullOrEmpty(cwd))
-                    {
-                        workingDirectory = cwd;
-                    }
-
-                    turnTimestamp ??= entryTimestamp;
-                    dirty = true;
-                    continue;
-                }
-
-                if (string.Equals(entryType, "world_state", StringComparison.Ordinal))
-                {
-                    string? agentsMd = ReadCodexAgentsMd(payload);
-                    if (!string.IsNullOrEmpty(agentsMd))
-                    {
-                        instructionContext = agentsMd;
-                        turnTimestamp ??= entryTimestamp;
-                        dirty = true;
-                    }
-
-                    continue;
-                }
-
-                if (string.Equals(entryType, "turn_context", StringComparison.Ordinal))
-                {
-                    string? contextModel = ReadString(payload, "model");
-                    if (!string.IsNullOrEmpty(contextModel))
-                    {
-                        currentModel = contextModel;
-                    }
-
-                    string? cwd = ReadString(payload, "cwd");
-                    if (!string.IsNullOrEmpty(cwd))
-                    {
-                        workingDirectory = cwd;
-                    }
-
-                    continue;
-                }
-
-                if (string.Equals(entryType, "compacted", StringComparison.Ordinal))
-                {
-                    continue;
-                }
-
-                if (string.Equals(entryType, "event_msg", StringComparison.Ordinal))
-                {
-                    string? eventType = ReadString(payload, "type");
-                    if (string.Equals(eventType, "task_complete", StringComparison.Ordinal))
-                    {
-                        if (!dirty && turns.Count > 0)
-                        {
-                            CodexRolloutTurn last = turns[^1];
-                            turns[^1] = last with { TerminationReason = "task_complete", ExitCode = 0 };
-                        }
-                        else
-                        {
-                            terminationReason = "task_complete";
-                            exitCode = 0;
-                            dirty = true;
-                        }
-                    }
-                    else if (eventType is "task_failed" or "error")
-                    {
-                        int failCode = TryReadInt(payload, "exit_code", out int parsedCode) ? parsedCode : 1;
-                        if (!dirty && turns.Count > 0)
-                        {
-                            CodexRolloutTurn last = turns[^1];
-                            turns[^1] = last with { TerminationReason = eventType, ExitCode = failCode };
-                        }
-                        else
-                        {
-                            terminationReason = eventType;
-                            exitCode = failCode;
-                            dirty = true;
-                        }
-                    }
-                    else if (eventType is "turn_aborted" or "cancelled")
-                    {
-                        if (!dirty && turns.Count > 0)
-                        {
-                            CodexRolloutTurn last = turns[^1];
-                            turns[^1] = last with { TerminationReason = "aborted" };
-                        }
-                        else
-                        {
-                            terminationReason = "aborted";
-                            dirty = true;
-                        }
-                    }
-                    else if (string.Equals(eventType, "token_count", StringComparison.Ordinal))
-                    {
-                        CodexRolloutUsage? usage = TryExtractUsage(payload, currentModel, out string? detectedModel);
-                        if (!string.IsNullOrEmpty(detectedModel))
-                        {
-                            currentModel = detectedModel;
-                        }
-
-                        turns.Add(FlushTurn(entryTimestamp, usage));
-                    }
-
-                    continue;
-                }
-
-                if (!string.Equals(entryType, "response_item", StringComparison.Ordinal))
-                {
-                    continue;
-                }
-
-                string? itemType = ReadString(payload, "type");
-                if (string.Equals(itemType, "message", StringComparison.Ordinal))
-                {
-                    string? text = ReadCodexMessageText(payload);
-                    if (string.IsNullOrEmpty(text))
-                    {
-                        continue;
-                    }
-
-                    string? role = ReadString(payload, "role");
-                    CorrectionDetectionResult correction = CanonFindings.DetectUserCorrection(text);
-                    pendingMessages.Add(new CodexRolloutMessage(
-                        Role: role,
-                        Text: text,
-                        CorrectionRule: correction.Matched ? correction.Rule : null,
-                        Timestamp: entryTimestamp));
-                    turnTimestamp ??= entryTimestamp;
-                    dirty = true;
-                }
-                else if (string.Equals(itemType, "function_call", StringComparison.Ordinal))
-                {
-                    string callId = ReadString(payload, "call_id") ?? ReadString(payload, "id") ?? string.Empty;
-                    string? name = ReadString(payload, "name");
-                    if (string.IsNullOrEmpty(name))
-                    {
-                        continue;
-                    }
-
-                    string rawArgs = ReadStringOrRawJson(payload, "arguments")
-                        ?? ReadStringOrRawJson(payload, "input")
-                        ?? "{}";
-                    pendingCalls.Add(new CodexRolloutToolCall(
-                        CallId: callId,
-                        ToolName: name,
-                        RawInputText: rawArgs,
-                        IsCustomTool: false,
-                        Timestamp: entryTimestamp));
-                    turnTimestamp ??= entryTimestamp;
-                    dirty = true;
-                }
-                else if (string.Equals(itemType, "custom_tool_call", StringComparison.Ordinal))
-                {
-                    string callId = ReadString(payload, "call_id") ?? ReadString(payload, "id") ?? string.Empty;
-                    string? name = ReadString(payload, "name");
-                    if (string.IsNullOrEmpty(name))
-                    {
-                        continue;
-                    }
-
-                    string rawInput = ReadStringOrRawJson(payload, "input")
-                        ?? ReadStringOrRawJson(payload, "arguments")
-                        ?? string.Empty;
-                    pendingCalls.Add(new CodexRolloutToolCall(
-                        CallId: callId,
-                        ToolName: name,
-                        RawInputText: rawInput,
-                        IsCustomTool: true,
-                        Timestamp: entryTimestamp));
-                    turnTimestamp ??= entryTimestamp;
-                    dirty = true;
-                }
-                else if (string.Equals(itemType, "local_shell_call", StringComparison.Ordinal))
-                {
-                    string callId = ReadString(payload, "call_id") ?? ReadString(payload, "id") ?? string.Empty;
-                    string rawAction = ReadStringOrRawJson(payload, "action") ?? "{}";
-                    string? rawStatus = ReadString(payload, "status");
-                    string? normalizedStatus = NormalizeLocalShellStatus(rawStatus);
-                    if (rawStatus is not null && normalizedStatus is null)
-                    {
-                        string safeStatus = SafeEventTypeLabel(rawStatus);
-                        problems.Add(new CollectedProblem(
-                            ProblemKey: string.Create(CultureInfo.InvariantCulture, $"unknown-local-shell-status:{unit.Unit.SourceKey}:{lineNumber}"),
-                            Severity: "warning",
-                            Code: UnknownEventTypeCode,
-                            Message: string.Create(CultureInfo.InvariantCulture, $"Skipped unrecognized local_shell_call status '{safeStatus}' at line {lineNumber}."),
-                            Location: unit.Unit.SourceKey,
-                            HarnessId: harnessId,
-                            TimestampUtc: importedAtText));
-                    }
-
-                    pendingCalls.Add(new CodexRolloutToolCall(
-                        CallId: callId,
-                        ToolName: LocalShellToolName,
-                        RawInputText: rawAction,
-                        IsCustomTool: false,
-                        Timestamp: entryTimestamp,
-                        Status: normalizedStatus,
-                        WithholdInputPlainText: true));
-                    turnTimestamp ??= entryTimestamp;
-                    dirty = true;
-                }
-                else if (itemType is "function_call_output" or "custom_tool_call_output" or "local_shell_call_output")
-                {
-                    string callId = ReadString(payload, "call_id") ?? ReadString(payload, "id") ?? string.Empty;
-                    string? toolName = ReadString(payload, "name");
-                    string? outputText = ReadCodexToolResultText(payload);
-                    long? toolExitCode = TryReadLong(payload, "exit_code", out long ec)
-                        ? ec
-                        : TryReadNestedExitCode(payload);
-                    string? statusText = ReadString(payload, "status");
-                    bool isError = ReadBool(payload, "is_error") == true
-                        || string.Equals(statusText, "error", StringComparison.OrdinalIgnoreCase)
-                        || string.Equals(statusText, "failed", StringComparison.OrdinalIgnoreCase)
-                        || string.Equals(statusText, "incomplete", StringComparison.OrdinalIgnoreCase)
-                        || (toolExitCode.HasValue && toolExitCode.Value != 0);
-
-                    if (!string.IsNullOrEmpty(callId))
-                    {
-                        CodexRolloutToolResult result = new(
-                            CallId: callId,
-                            ToolName: toolName,
-                            OutputText: outputText,
-                            IsError: isError,
-                            ExitCode: toolExitCode,
-                            Timestamp: entryTimestamp);
-                        pendingResults.Add(result);
-                        allResults.Add(result);
-                    }
-
-                    if (turns.Count == 0 && !dirty)
-                    {
-                        turnTimestamp ??= entryTimestamp;
-                    }
-                }
-            }
-        }
-
-        if (dirty || (turns.Count == 0 && (systemPrompt is not null || instructionContext is not null)))
-        {
-            turns.Add(FlushTurn(null, null));
-        }
-
-        return new CodexRolloutDocument(
-            SessionId: sessionId,
-            Model: currentModel,
-            SystemPrompt: systemPrompt,
-            InstructionContext: instructionContext,
-            WorkingDirectory: workingDirectory,
-            Turns: turns,
-            AllToolResults: allResults,
-            Problems: problems);
+        RolloutParser parser = new(unit, importedAtUtc);
+        return parser.Parse();
     }
 
     private static CollectedBatch MapDocument(
@@ -1173,5 +791,458 @@ public class CodexRolloutMapper : IHarnessMapper
         }
 
         return null;
+    }
+
+    /// <summary>
+    /// Reads one rollout source unit line by line, keeping the mutable parse state and the per-entry handlers
+    /// out of the mapper's public <see cref="Parse"/> entry point.
+    /// </summary>
+    private sealed class RolloutParser
+    {
+        private readonly NativeSourceUnit _unit;
+        private readonly string _harnessId;
+        private readonly string _importedAtText;
+        private readonly List<CodexRolloutMessage> _pendingMessages = [];
+        private readonly List<CodexRolloutToolCall> _pendingCalls = [];
+        private readonly List<CodexRolloutToolResult> _pendingResults = [];
+        private readonly List<CodexRolloutToolResult> _allResults = [];
+        private readonly List<CodexRolloutTurn> _turns = [];
+        private readonly List<CollectedProblem> _problems = [];
+        private string? _sessionId;
+        private string? _systemPrompt;
+        private string? _instructionContext;
+        private string? _workingDirectory;
+        private string _currentModel = DefaultModel;
+        private string? _terminationReason;
+        private int? _exitCode;
+        private string? _turnTimestamp;
+        private bool _dirty;
+        private int _turnIndex;
+
+        public RolloutParser(NativeSourceUnit unit, DateTimeOffset importedAtUtc)
+        {
+            _unit = unit;
+            _harnessId = ResolveHarnessId(unit.Unit.HarnessId);
+            _importedAtText = FormatUtc(importedAtUtc);
+        }
+
+        public CodexRolloutDocument Parse()
+        {
+            using StringReader reader = new(_unit.RawText ?? string.Empty);
+            string? line;
+            int lineNumber = 0;
+            while ((line = reader.ReadLine()) is not null)
+            {
+                lineNumber++;
+                if (string.IsNullOrWhiteSpace(line))
+                {
+                    continue;
+                }
+
+                ProcessLine(line, lineNumber);
+            }
+
+            if (_dirty || (_turns.Count == 0 && (_systemPrompt is not null || _instructionContext is not null)))
+            {
+                _turns.Add(FlushTurn(null, null));
+            }
+
+            return new CodexRolloutDocument(
+                SessionId: _sessionId,
+                Model: _currentModel,
+                SystemPrompt: _systemPrompt,
+                InstructionContext: _instructionContext,
+                WorkingDirectory: _workingDirectory,
+                Turns: _turns,
+                AllToolResults: _allResults,
+                Problems: _problems);
+        }
+
+        private void ProcessLine(string line, int lineNumber)
+        {
+            JsonDocument doc;
+            try
+            {
+                doc = JsonDocument.Parse(line);
+            }
+            catch (JsonException)
+            {
+                AddMalformedProblem(lineNumber, "Skipped malformed JSONL entry at line {0}.");
+                return;
+            }
+
+            using (doc)
+            {
+                if (doc.RootElement.ValueKind != JsonValueKind.Object)
+                {
+                    AddMalformedProblem(lineNumber, "Skipped non-object JSONL entry at line {0}.");
+                    return;
+                }
+
+                JsonElement entry = doc.RootElement;
+                string? entryType = ReadString(entry, "type");
+                string? entryTimestamp = ReadString(entry, "timestamp");
+
+                if (!IsKnownTopLevelEntryType(entryType))
+                {
+                    string safeType = SafeEventTypeLabel(entryType);
+                    AddProblem(
+                        "unknown-event",
+                        UnknownEventTypeCode,
+                        string.Create(CultureInfo.InvariantCulture, $"Skipped unknown Codex rollout entry type '{safeType}' at line {lineNumber}."),
+                        lineNumber);
+                    return;
+                }
+
+                if (!entry.TryGetProperty("payload", out JsonElement payload) || payload.ValueKind != JsonValueKind.Object)
+                {
+                    return;
+                }
+
+                if (string.Equals(entryType, "session_meta", StringComparison.Ordinal))
+                {
+                    ApplySessionMeta(payload, entryTimestamp);
+                }
+                else if (string.Equals(entryType, "world_state", StringComparison.Ordinal))
+                {
+                    ApplyWorldState(payload, entryTimestamp);
+                }
+                else if (string.Equals(entryType, "turn_context", StringComparison.Ordinal))
+                {
+                    ApplyTurnContext(payload);
+                }
+                else if (string.Equals(entryType, "event_msg", StringComparison.Ordinal))
+                {
+                    ApplyEventMessage(payload, entryTimestamp);
+                }
+                else if (string.Equals(entryType, "response_item", StringComparison.Ordinal))
+                {
+                    ApplyResponseItem(payload, entryTimestamp, lineNumber);
+                }
+            }
+        }
+
+        private void ApplySessionMeta(JsonElement payload, string? entryTimestamp)
+        {
+            string? sid = ReadString(payload, "session_id") ?? ReadString(payload, "id");
+            if (!string.IsNullOrEmpty(sid))
+            {
+                _sessionId = sid;
+            }
+
+            string? prompt = ReadCodexSystemPrompt(payload);
+            if (!string.IsNullOrEmpty(prompt))
+            {
+                _systemPrompt = prompt;
+            }
+
+            string? modelFromMeta = ReadString(payload, "model");
+            if (!string.IsNullOrEmpty(modelFromMeta))
+            {
+                _currentModel = modelFromMeta;
+            }
+
+            string? cwd = ReadString(payload, "cwd");
+            if (!string.IsNullOrEmpty(cwd))
+            {
+                _workingDirectory = cwd;
+            }
+
+            _turnTimestamp ??= entryTimestamp;
+            _dirty = true;
+        }
+
+        private void ApplyWorldState(JsonElement payload, string? entryTimestamp)
+        {
+            string? agentsMd = ReadCodexAgentsMd(payload);
+            if (!string.IsNullOrEmpty(agentsMd))
+            {
+                _instructionContext = agentsMd;
+                _turnTimestamp ??= entryTimestamp;
+                _dirty = true;
+            }
+        }
+
+        private void ApplyTurnContext(JsonElement payload)
+        {
+            string? contextModel = ReadString(payload, "model");
+            if (!string.IsNullOrEmpty(contextModel))
+            {
+                _currentModel = contextModel;
+            }
+
+            string? cwd = ReadString(payload, "cwd");
+            if (!string.IsNullOrEmpty(cwd))
+            {
+                _workingDirectory = cwd;
+            }
+        }
+
+        private void ApplyEventMessage(JsonElement payload, string? entryTimestamp)
+        {
+            string? eventType = ReadString(payload, "type");
+            if (string.Equals(eventType, "task_complete", StringComparison.Ordinal))
+            {
+                ApplyTaskComplete();
+            }
+            else if (eventType is "task_failed" or "error")
+            {
+                int failCode = TryReadInt(payload, "exit_code", out int parsedCode) ? parsedCode : 1;
+                ApplyTaskFailure(eventType, failCode);
+            }
+            else if (eventType is "turn_aborted" or "cancelled")
+            {
+                ApplyTurnAborted();
+            }
+            else if (string.Equals(eventType, "token_count", StringComparison.Ordinal))
+            {
+                CodexRolloutUsage? usage = TryExtractUsage(payload, _currentModel, out string? detectedModel);
+                if (!string.IsNullOrEmpty(detectedModel))
+                {
+                    _currentModel = detectedModel;
+                }
+
+                _turns.Add(FlushTurn(entryTimestamp, usage));
+            }
+        }
+
+        private void ApplyTaskComplete()
+        {
+            if (!_dirty && _turns.Count > 0)
+            {
+                CodexRolloutTurn last = _turns[^1];
+                _turns[^1] = last with { TerminationReason = "task_complete", ExitCode = 0 };
+            }
+            else
+            {
+                _terminationReason = "task_complete";
+                _exitCode = 0;
+                _dirty = true;
+            }
+        }
+
+        private void ApplyTaskFailure(string reason, int failCode)
+        {
+            if (!_dirty && _turns.Count > 0)
+            {
+                CodexRolloutTurn last = _turns[^1];
+                _turns[^1] = last with { TerminationReason = reason, ExitCode = failCode };
+            }
+            else
+            {
+                _terminationReason = reason;
+                _exitCode = failCode;
+                _dirty = true;
+            }
+        }
+
+        private void ApplyTurnAborted()
+        {
+            if (!_dirty && _turns.Count > 0)
+            {
+                CodexRolloutTurn last = _turns[^1];
+                _turns[^1] = last with { TerminationReason = "aborted" };
+            }
+            else
+            {
+                _terminationReason = "aborted";
+                _dirty = true;
+            }
+        }
+
+        private void ApplyResponseItem(JsonElement payload, string? entryTimestamp, int lineNumber)
+        {
+            string? itemType = ReadString(payload, "type");
+            if (string.Equals(itemType, "message", StringComparison.Ordinal))
+            {
+                ApplyMessageItem(payload, entryTimestamp);
+            }
+            else if (string.Equals(itemType, "function_call", StringComparison.Ordinal))
+            {
+                ApplyFunctionCall(payload, entryTimestamp);
+            }
+            else if (string.Equals(itemType, "custom_tool_call", StringComparison.Ordinal))
+            {
+                ApplyCustomToolCall(payload, entryTimestamp);
+            }
+            else if (string.Equals(itemType, "local_shell_call", StringComparison.Ordinal))
+            {
+                ApplyLocalShellCall(payload, entryTimestamp, lineNumber);
+            }
+            else if (itemType is "function_call_output" or "custom_tool_call_output" or "local_shell_call_output")
+            {
+                ApplyToolOutput(payload, entryTimestamp);
+            }
+        }
+
+        private void ApplyMessageItem(JsonElement payload, string? entryTimestamp)
+        {
+            string? text = ReadCodexMessageText(payload);
+            if (string.IsNullOrEmpty(text))
+            {
+                return;
+            }
+
+            string? role = ReadString(payload, "role");
+            CorrectionDetectionResult correction = CanonFindings.DetectUserCorrection(text);
+            _pendingMessages.Add(new CodexRolloutMessage(
+                Role: role,
+                Text: text,
+                CorrectionRule: correction.Matched ? correction.Rule : null,
+                Timestamp: entryTimestamp));
+            _turnTimestamp ??= entryTimestamp;
+            _dirty = true;
+        }
+
+        private void ApplyFunctionCall(JsonElement payload, string? entryTimestamp)
+        {
+            string callId = ReadString(payload, "call_id") ?? ReadString(payload, "id") ?? string.Empty;
+            string? name = ReadString(payload, "name");
+            if (string.IsNullOrEmpty(name))
+            {
+                return;
+            }
+
+            string rawArgs = ReadStringOrRawJson(payload, "arguments")
+                ?? ReadStringOrRawJson(payload, "input")
+                ?? "{}";
+            _pendingCalls.Add(new CodexRolloutToolCall(
+                CallId: callId,
+                ToolName: name,
+                RawInputText: rawArgs,
+                IsCustomTool: false,
+                Timestamp: entryTimestamp));
+            _turnTimestamp ??= entryTimestamp;
+            _dirty = true;
+        }
+
+        private void ApplyCustomToolCall(JsonElement payload, string? entryTimestamp)
+        {
+            string callId = ReadString(payload, "call_id") ?? ReadString(payload, "id") ?? string.Empty;
+            string? name = ReadString(payload, "name");
+            if (string.IsNullOrEmpty(name))
+            {
+                return;
+            }
+
+            string rawInput = ReadStringOrRawJson(payload, "input")
+                ?? ReadStringOrRawJson(payload, "arguments")
+                ?? string.Empty;
+            _pendingCalls.Add(new CodexRolloutToolCall(
+                CallId: callId,
+                ToolName: name,
+                RawInputText: rawInput,
+                IsCustomTool: true,
+                Timestamp: entryTimestamp));
+            _turnTimestamp ??= entryTimestamp;
+            _dirty = true;
+        }
+
+        private void ApplyLocalShellCall(JsonElement payload, string? entryTimestamp, int lineNumber)
+        {
+            string callId = ReadString(payload, "call_id") ?? ReadString(payload, "id") ?? string.Empty;
+            string rawAction = ReadStringOrRawJson(payload, "action") ?? "{}";
+            string? rawStatus = ReadString(payload, "status");
+            string? normalizedStatus = NormalizeLocalShellStatus(rawStatus);
+            if (rawStatus is not null && normalizedStatus is null)
+            {
+                string safeStatus = SafeEventTypeLabel(rawStatus);
+                AddProblem(
+                    "unknown-local-shell-status",
+                    UnknownEventTypeCode,
+                    string.Create(CultureInfo.InvariantCulture, $"Skipped unrecognized local_shell_call status '{safeStatus}' at line {lineNumber}."),
+                    lineNumber);
+            }
+
+            _pendingCalls.Add(new CodexRolloutToolCall(
+                CallId: callId,
+                ToolName: LocalShellToolName,
+                RawInputText: rawAction,
+                IsCustomTool: false,
+                Timestamp: entryTimestamp,
+                Status: normalizedStatus,
+                WithholdInputPlainText: true));
+            _turnTimestamp ??= entryTimestamp;
+            _dirty = true;
+        }
+
+        private void ApplyToolOutput(JsonElement payload, string? entryTimestamp)
+        {
+            string callId = ReadString(payload, "call_id") ?? ReadString(payload, "id") ?? string.Empty;
+            string? toolName = ReadString(payload, "name");
+            string? outputText = ReadCodexToolResultText(payload);
+            long? toolExitCode = TryReadLong(payload, "exit_code", out long ec)
+                ? ec
+                : TryReadNestedExitCode(payload);
+            string? statusText = ReadString(payload, "status");
+            bool isError = ReadBool(payload, "is_error") == true
+                || string.Equals(statusText, "error", StringComparison.OrdinalIgnoreCase)
+                || string.Equals(statusText, "failed", StringComparison.OrdinalIgnoreCase)
+                || string.Equals(statusText, "incomplete", StringComparison.OrdinalIgnoreCase)
+                || (toolExitCode.HasValue && toolExitCode.Value != 0);
+
+            if (!string.IsNullOrEmpty(callId))
+            {
+                CodexRolloutToolResult result = new(
+                    CallId: callId,
+                    ToolName: toolName,
+                    OutputText: outputText,
+                    IsError: isError,
+                    ExitCode: toolExitCode,
+                    Timestamp: entryTimestamp);
+                _pendingResults.Add(result);
+                _allResults.Add(result);
+            }
+
+            if (_turns.Count == 0 && !_dirty)
+            {
+                _turnTimestamp ??= entryTimestamp;
+            }
+        }
+
+        private CodexRolloutTurn FlushTurn(string? fallbackTimestamp, CodexRolloutUsage? usage)
+        {
+            _turnIndex++;
+            CodexRolloutTurn turn = new(
+                TurnIndex: _turnIndex,
+                Timestamp: _turnTimestamp ?? fallbackTimestamp,
+                Model: usage?.Model ?? _currentModel,
+                TerminationReason: _terminationReason,
+                ExitCode: _exitCode,
+                Usage: usage,
+                Messages: [.. _pendingMessages],
+                ToolCalls: [.. _pendingCalls],
+                ToolResults: [.. _pendingResults]);
+
+            _pendingMessages.Clear();
+            _pendingCalls.Clear();
+            _pendingResults.Clear();
+            _terminationReason = null;
+            _exitCode = null;
+            _turnTimestamp = null;
+            _dirty = false;
+            return turn;
+        }
+
+        private void AddMalformedProblem(int lineNumber, string messageTemplate)
+        {
+            AddProblem(
+                "malformed-json",
+                MalformedJsonCode,
+                string.Format(CultureInfo.InvariantCulture, messageTemplate, lineNumber),
+                lineNumber);
+        }
+
+        private void AddProblem(string keyPrefix, string code, string message, int lineNumber)
+        {
+            _problems.Add(new CollectedProblem(
+                ProblemKey: string.Create(CultureInfo.InvariantCulture, $"{keyPrefix}:{_unit.Unit.SourceKey}:{lineNumber}"),
+                Severity: "warning",
+                Code: code,
+                Message: message,
+                Location: _unit.Unit.SourceKey,
+                HarnessId: _harnessId,
+                TimestampUtc: _importedAtText));
+        }
     }
 }

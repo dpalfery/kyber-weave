@@ -565,63 +565,83 @@ public sealed partial class CopilotHookAdapter : IHarnessHookAdapter
         bool isPost = payload.TryGetProperty("toolResult", out _)
             || (FirstCliCall(payload) is { } call && call.TryGetProperty("result", out _));
 
-        if (!isPost)
+        return isPost
+            ? HandleCliPostCall(payload, caller, target, prompt, config, context)
+            : HandleCliPreCall(payload, args, caller, target, prompt, config, context);
+    }
+
+    private string HandleCliPreCall(
+        JsonElement payload,
+        JsonObject args,
+        string caller,
+        string? target,
+        string prompt,
+        KyberWeaveConfig config,
+        HookContext context)
+    {
+        // The rules judge the short dispatch; the insertion is computed first because the ledger pairs the return
+        // with the prompt the worker runs, and an inserted packet replaces the dispatch the post event carries.
+        DispatchInsertion insertion = DispatchPromptInsertion.Expand(prompt, context, target);
+        HookOutcome outcome = DecidePre(
+            _harnessToken,
+            payload,
+            caller,
+            target,
+            prompt,
+            config,
+            context,
+            insertion.Kind == DispatchInsertionKind.Inserted ? insertion.Text : null);
+
+        // The prompt is inserted only for a dispatch the rules allowed.
+        if (outcome.Kind == HookOutcomeKind.Deny)
         {
-            // The rules judge the short dispatch; the insertion is computed first because the ledger pairs the return
-            // with the prompt the worker runs, and an inserted packet replaces the dispatch the post event carries.
-            DispatchInsertion insertion = DispatchPromptInsertion.Expand(prompt, context, target);
-            HookOutcome outcome = DecidePre(
-                _harnessToken,
-                payload,
-                caller,
-                target,
-                prompt,
-                config,
-                context,
-                insertion.Kind == DispatchInsertionKind.Inserted ? insertion.Text : null);
-
-            // The prompt is inserted only for a dispatch the rules allowed.
-            if (outcome.Kind == HookOutcomeKind.Deny)
-            {
-                return RenderCliDeny(
-                    outcome.Reason ?? throw new InvalidOperationException(
-                        "Hook engine denied without a reason."));
-            }
-
-            if (insertion.Kind == DispatchInsertionKind.Stopped)
-            {
-                return RenderCliDeny(insertion.Reason!);
-            }
-
-            bool inserted = insertion.Kind == DispatchInsertionKind.Inserted;
-            return outcome.Kind switch
-            {
-                HookOutcomeKind.PassThrough => inserted
-                    ? RenderCliAllowPrompt(args, insertion.Text)
-                    : string.Empty,
-                HookOutcomeKind.Allow => inserted
-                    ? RenderCliAllowPrompt(args, insertion.Text)
-                    : ReadGuard.IsImplementationSpecialist(target)
-                        && !string.Equals(HeaderBlock.Strip(prompt), prompt, StringComparison.Ordinal)
-                            ? RenderCliAllowStrip(args, prompt)
-                            : string.Empty,
-                HookOutcomeKind.AllowWithRewrite => RenderCliAllowRewritten(
-                    outcome.RewrittenInputJson ?? throw new InvalidOperationException(
-                        "Hook engine returned allow-with-rewrite without rewritten input."),
-                    inserted ? insertion.Text : null),
-                HookOutcomeKind.Deny => RenderCliDeny(
-                    outcome.Reason ?? throw new InvalidOperationException(
-                        "Hook engine denied without a reason.")),
-                HookOutcomeKind.AllowWithNote => RenderCliAllowNote(
-                    args,
-                    inserted ? insertion.Text : null,
-                    outcome.Reason ?? throw new InvalidOperationException(
-                        "Hook engine allowed with a note but wrote none.")),
-                _ => throw new InvalidOperationException(
-                    $"Hook engine returned post-dispatch outcome '{outcome.Kind}' for a pre-dispatch event."),
-            };
+            return RenderCliDeny(
+                outcome.Reason ?? throw new InvalidOperationException(
+                    "Hook engine denied without a reason."));
         }
 
+        if (insertion.Kind == DispatchInsertionKind.Stopped)
+        {
+            return RenderCliDeny(insertion.Reason!);
+        }
+
+        bool inserted = insertion.Kind == DispatchInsertionKind.Inserted;
+        return outcome.Kind switch
+        {
+            HookOutcomeKind.PassThrough => inserted
+                ? RenderCliAllowPrompt(args, insertion.Text)
+                : string.Empty,
+            HookOutcomeKind.Allow => inserted
+                ? RenderCliAllowPrompt(args, insertion.Text)
+                : ReadGuard.IsImplementationSpecialist(target)
+                    && !string.Equals(HeaderBlock.Strip(prompt), prompt, StringComparison.Ordinal)
+                        ? RenderCliAllowStrip(args, prompt)
+                        : string.Empty,
+            HookOutcomeKind.AllowWithRewrite => RenderCliAllowRewritten(
+                outcome.RewrittenInputJson ?? throw new InvalidOperationException(
+                    "Hook engine returned allow-with-rewrite without rewritten input."),
+                inserted ? insertion.Text : null),
+            HookOutcomeKind.Deny => RenderCliDeny(
+                outcome.Reason ?? throw new InvalidOperationException(
+                    "Hook engine denied without a reason.")),
+            HookOutcomeKind.AllowWithNote => RenderCliAllowNote(
+                args,
+                inserted ? insertion.Text : null,
+                outcome.Reason ?? throw new InvalidOperationException(
+                    "Hook engine allowed with a note but wrote none.")),
+            _ => throw new InvalidOperationException(
+                $"Hook engine returned post-dispatch outcome '{outcome.Kind}' for a pre-dispatch event."),
+        };
+    }
+
+    private string HandleCliPostCall(
+        JsonElement payload,
+        string caller,
+        string? target,
+        string prompt,
+        KyberWeaveConfig config,
+        HookContext context)
+    {
         if (!payload.TryGetProperty("toolResult", out JsonElement result)
             || result.ValueKind != JsonValueKind.Object)
         {
@@ -653,7 +673,13 @@ public sealed partial class CopilotHookAdapter : IHarnessHookAdapter
 
         HookOutcome postOutcome = DecidePost(
             _harnessToken, payload, caller, target, prompt, result.GetRawText(), config, context);
-        string? note = postOutcome.Kind switch
+        string? note = PostCallNote(postOutcome);
+        string combined = string.Join("\n\n", new[] { note, pending }.Where(text => !string.IsNullOrEmpty(text)));
+        return combined.Length > 0 ? RenderCliPostAnnotation(combined) : string.Empty;
+    }
+
+    private static string? PostCallNote(HookOutcome postOutcome) =>
+        postOutcome.Kind switch
         {
             HookOutcomeKind.PassThrough => null,
             HookOutcomeKind.Allow => null,
@@ -668,9 +694,6 @@ public sealed partial class CopilotHookAdapter : IHarnessHookAdapter
             _ => throw new InvalidOperationException(
                 $"Hook engine returned pre-dispatch outcome '{postOutcome.Kind}' for a post-dispatch event."),
         };
-        string combined = string.Join("\n\n", new[] { note, pending }.Where(text => !string.IsNullOrEmpty(text)));
-        return combined.Length > 0 ? RenderCliPostAnnotation(combined) : string.Empty;
-    }
 
     private static bool IsLocalPassThrough(JsonElement payload, string? renderedCaller)
     {

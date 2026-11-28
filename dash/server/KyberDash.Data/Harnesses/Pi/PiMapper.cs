@@ -284,239 +284,317 @@ public class PiMapper : IHarnessMapper
         string sessionId = ResolveSessionId(document.SessionId, unit.Unit.SourceKey);
         string traceId = $"{CanonSynth.SynthSpanPrefix}{harnessId}:{sessionId}";
 
-        string resolvedModel = string.Empty;
-        string pendingUserMessage = string.Empty;
-        string? sessionTimestamp = null;
-        string? pendingUserTimestamp = null;
-        string? workingDirectory = document.WorkingDirectory;
-        string? sessionTitle = document.Title;
-
-        List<CollectedRecord> records = [];
-        HashSet<string> seenAnchors = new(StringComparer.Ordinal);
-        HashSet<string> seenRecordIds = new(StringComparer.Ordinal);
+        MapState state = new()
+        {
+            WorkingDirectory = document.WorkingDirectory,
+            SessionTitle = document.Title,
+        };
 
         foreach (PiEntry entry in document.Entries)
         {
-            if (string.Equals(entry.EntryType, "title", StringComparison.Ordinal))
-            {
-                if (SafeOptionalText(entry.Title) is string nextTitle)
-                {
-                    sessionTitle = nextTitle;
-                }
-
-                continue;
-            }
-
-            if (string.Equals(entry.EntryType, "session", StringComparison.Ordinal))
-            {
-                if (!string.IsNullOrWhiteSpace(entry.Timestamp))
-                {
-                    sessionTimestamp = entry.Timestamp;
-                }
-
-                if (SafeOptionalText(entry.WorkingDirectory) is string nextCwd)
-                {
-                    workingDirectory = nextCwd;
-                }
-
-                continue;
-            }
-
-            if (string.Equals(entry.EntryType, "model_change", StringComparison.Ordinal))
-            {
-                if (!string.IsNullOrWhiteSpace(entry.Model))
-                {
-                    resolvedModel = entry.Model.Trim();
-                }
-
-                continue;
-            }
-
-            if (!string.Equals(entry.EntryType, "message", StringComparison.Ordinal) || entry.Message is null)
-            {
-                continue;
-            }
-
-            PiMessage msg = entry.Message;
-
-            if (string.Equals(msg.Role, "user", StringComparison.Ordinal))
-            {
-                if (!string.IsNullOrWhiteSpace(entry.Timestamp))
-                {
-                    pendingUserTimestamp = entry.Timestamp;
-                }
-                else if (msg.AttributionTimestampMs.HasValue)
-                {
-                    pendingUserTimestamp = DateTimeOffset
-                        .FromUnixTimeMilliseconds(msg.AttributionTimestampMs.Value)
-                        .ToUniversalTime()
-                        .ToString("yyyy-MM-dd'T'HH:mm:ss.fff'Z'", CultureInfo.InvariantCulture);
-                }
-
-                List<string> texts = [];
-                foreach (PiContentBlock block in msg.Blocks)
-                {
-                    if (string.Equals(block.BlockType, "text", StringComparison.Ordinal)
-                        && !string.IsNullOrEmpty(block.Text))
-                    {
-                        texts.Add(block.Text);
-                    }
-                }
-
-                if (texts.Count > 0)
-                {
-                    pendingUserMessage = string.Join(' ', texts);
-                }
-
-                continue;
-            }
-
-            if (!string.Equals(msg.Role, "assistant", StringComparison.Ordinal) || msg.Usage is null)
-            {
-                continue;
-            }
-
-            long inputCount = msg.Usage.InputTokens ?? 0L;
-            long outputCount = msg.Usage.OutputTokens ?? 0L;
-            if (inputCount == 0L && outputCount == 0L)
-            {
-                continue;
-            }
-
-            DateTimeOffset? startedAt = TryParseTimestamp(entry.Timestamp)
-                ?? TryParseTimestamp(pendingUserTimestamp)
-                ?? TryParseTimestamp(sessionTimestamp);
-            if (!startedAt.HasValue)
-            {
-                continue;
-            }
-
-            string anchor = SafeOptionalText(msg.ResponseId)
-                ?? SafeOptionalText(entry.Id)
-                ?? SafeOptionalText(entry.Timestamp)
-                ?? string.Create(CultureInfo.InvariantCulture, $"line-{entry.LineNumber}");
-            if (!seenAnchors.Add(anchor))
-            {
-                continue;
-            }
-
-            string parentRecordId = EnsureUniqueRecordId(
-                seenRecordIds,
-                string.Create(CultureInfo.InvariantCulture, $"{CanonSynth.SynthSpanPrefix}{harnessId}:{sessionId}:{anchor}"),
-                entry.LineNumber);
-
-            string model = ResolveMessageModel(msg.Model, resolvedModel);
-
-            List<CollectedContentPart> parts = [];
-            int position = 0;
-            string? correctionRule = null;
-
-            if (!string.IsNullOrEmpty(pendingUserMessage))
-            {
-                CorrectionDetectionResult check = CanonFindings.DetectUserCorrection(pendingUserMessage);
-                if (check.Matched)
-                {
-                    correctionRule = check.Rule;
-                }
-
-                parts.Add(ToolContentMeasurer.BuildContentPart(position++, ContentBucket.UserMessage, pendingUserMessage, "user", model));
-            }
-
-            List<string> skillsInvoked = [];
-            HashSet<string> seenSkills = new(StringComparer.Ordinal);
-            List<(PiToolCall Call, string NormalizedToolName)> toolCallsToEmit = [];
-
-            foreach (PiContentBlock block in msg.Blocks)
-            {
-                if (string.Equals(block.BlockType, "text", StringComparison.Ordinal)
-                    && !string.IsNullOrEmpty(block.Text))
-                {
-                    parts.Add(ToolContentMeasurer.BuildContentPart(position++, ContentBucket.ConversationHistory, block.Text, "assistant", model));
-                    continue;
-                }
-
-                if (string.Equals(block.BlockType, "toolCall", StringComparison.Ordinal)
-                    && block.ToolCall is not null)
-                {
-                    string? skill = ExtractSkillLoadName(
-                        block.ToolCall.Name,
-                        block.ToolCall.Path,
-                        block.ToolCall.FilePath);
-                    if (skill is not null)
-                    {
-                        if (seenSkills.Add(skill))
-                        {
-                            skillsInvoked.Add(skill);
-                        }
-
-                        toolCallsToEmit.Add((block.ToolCall, "Skill"));
-                    }
-                    else
-                    {
-                        toolCallsToEmit.Add((block.ToolCall, MapToolName(block.ToolCall.Name)));
-                    }
-                }
-            }
-
-            (IReadOnlyList<CollectedTokenCount> tokens, long? reportedInput, long? reportedOutput) = BuildTokens(msg.Usage);
-            CollectedCost? reportedCost = msg.Usage.ReportedCostUsd is > 0 && double.IsFinite(msg.Usage.ReportedCostUsd.Value)
-                ? new CollectedCost(msg.Usage.ReportedCostUsd.Value, "USD")
-                : null;
-
-            CollectedRecord parentRecord = new(
-                RecordId: parentRecordId,
-                HarnessId: harnessId,
-                Op: RecordOp.LlmInvoke,
-                Kind: RecordKind.Internal,
-                Name: $"{harnessId}:{model}",
-                StartedAt: startedAt.Value,
-                Status: RecordStatus.Ok,
-                SessionKey: sessionId,
-                ParentRecordId: null,
-                TraceId: traceId,
-                Model: model,
-                EndedAt: null,
-                ReportedDurationMs: null,
-                Tokens: tokens,
-                ReportedCost: reportedCost,
-                Parts: parts,
-                Tool: null,
-                Agent: null,
-                SkillsInvoked: skillsInvoked,
-                AgentInstanceId: null,
-                ToolDefinitions: [],
-                Signals: new CollectedRecordSignals(
-                    ErrorMessage: null,
-                    EditFailures: null,
-                    CorrectionRule: correctionRule,
-                    DeclaredContextWindow: null),
-                ReportedInputTokens: reportedInput,
-                ReportedOutputTokens: reportedOutput);
-
-            records.Add(parentRecord);
-
-            for (int t = 0; t < toolCallsToEmit.Count; t++)
-            {
-                (PiToolCall toolCall, string normalizedToolName) = toolCallsToEmit[t];
-                records.Add(BuildToolInvokeRecord(
-                    parentRecord,
-                    harnessId,
-                    sessionId,
-                    traceId,
-                    toolCall,
-                    normalizedToolName,
-                    t,
-                    seenRecordIds));
-            }
-
-            pendingUserMessage = string.Empty;
+            ProcessEntry(entry, state, harnessId, sessionId, traceId);
         }
 
-        List<CollectedSession> sessions = [];
-        if (records.Count > 0 || document.Entries.Count > 0)
+        List<CollectedSession> sessions = BuildSessions(state, document.Entries.Count, sessionId, harnessId);
+        List<CollectedProblem> problems = BuildProblems(document.ParseProblems, unit.Unit.SourceKey, sessionId, harnessId, importedAtUtc);
+        return new CollectedBatch(source, sessions, state.Records, problems);
+    }
+
+    private sealed class MapState
+    {
+        public string ResolvedModel { get; set; } = string.Empty;
+        public string PendingUserMessage { get; set; } = string.Empty;
+        public string? SessionTimestamp { get; set; }
+        public string? PendingUserTimestamp { get; set; }
+        public string? WorkingDirectory { get; set; }
+        public string? SessionTitle { get; set; }
+        public List<CollectedRecord> Records { get; } = [];
+        public HashSet<string> SeenAnchors { get; } = new(StringComparer.Ordinal);
+        public HashSet<string> SeenRecordIds { get; } = new(StringComparer.Ordinal);
+    }
+
+    private sealed record AssistantBlocks(
+        List<CollectedContentPart> Parts,
+        List<string> SkillsInvoked,
+        List<(PiToolCall Call, string NormalizedToolName)> ToolCalls,
+        string? CorrectionRule);
+
+    private static void ProcessEntry(
+        PiEntry entry,
+        MapState state,
+        string harnessId,
+        string sessionId,
+        string traceId)
+    {
+        if (string.Equals(entry.EntryType, "title", StringComparison.Ordinal))
         {
-            CollectedWorkspace? workspace = workingDirectory is not null
-                ? new CollectedWorkspace(workingDirectory, null, null)
+            if (SafeOptionalText(entry.Title) is string nextTitle)
+            {
+                state.SessionTitle = nextTitle;
+            }
+
+            return;
+        }
+
+        if (string.Equals(entry.EntryType, "session", StringComparison.Ordinal))
+        {
+            ApplySessionEntry(entry, state);
+            return;
+        }
+
+        if (string.Equals(entry.EntryType, "model_change", StringComparison.Ordinal))
+        {
+            if (!string.IsNullOrWhiteSpace(entry.Model))
+            {
+                state.ResolvedModel = entry.Model.Trim();
+            }
+
+            return;
+        }
+
+        if (string.Equals(entry.EntryType, "message", StringComparison.Ordinal) && entry.Message is PiMessage message)
+        {
+            ProcessMessageEntry(entry, message, state, harnessId, sessionId, traceId);
+        }
+    }
+
+    private static void ApplySessionEntry(PiEntry entry, MapState state)
+    {
+        if (!string.IsNullOrWhiteSpace(entry.Timestamp))
+        {
+            state.SessionTimestamp = entry.Timestamp;
+        }
+
+        if (SafeOptionalText(entry.WorkingDirectory) is string nextCwd)
+        {
+            state.WorkingDirectory = nextCwd;
+        }
+    }
+
+    private static void ProcessMessageEntry(
+        PiEntry entry,
+        PiMessage msg,
+        MapState state,
+        string harnessId,
+        string sessionId,
+        string traceId)
+    {
+        if (string.Equals(msg.Role, "user", StringComparison.Ordinal))
+        {
+            ApplyUserMessage(entry, msg, state);
+            return;
+        }
+
+        if (!string.Equals(msg.Role, "assistant", StringComparison.Ordinal) || msg.Usage is not PiUsage usage)
+        {
+            return;
+        }
+
+        long inputCount = usage.InputTokens ?? 0L;
+        long outputCount = usage.OutputTokens ?? 0L;
+        if (inputCount == 0L && outputCount == 0L)
+        {
+            return;
+        }
+
+        DateTimeOffset? startedAt = TryParseTimestamp(entry.Timestamp)
+            ?? TryParseTimestamp(state.PendingUserTimestamp)
+            ?? TryParseTimestamp(state.SessionTimestamp);
+        if (!startedAt.HasValue)
+        {
+            return;
+        }
+
+        string anchor = SafeOptionalText(msg.ResponseId)
+            ?? SafeOptionalText(entry.Id)
+            ?? SafeOptionalText(entry.Timestamp)
+            ?? string.Create(CultureInfo.InvariantCulture, $"line-{entry.LineNumber}");
+        if (!state.SeenAnchors.Add(anchor))
+        {
+            return;
+        }
+
+        string parentRecordId = EnsureUniqueRecordId(
+            state.SeenRecordIds,
+            string.Create(CultureInfo.InvariantCulture, $"{CanonSynth.SynthSpanPrefix}{harnessId}:{sessionId}:{anchor}"),
+            entry.LineNumber);
+
+        string model = ResolveMessageModel(msg.Model, state.ResolvedModel);
+        AssistantBlocks blocks = BuildAssistantBlocks(msg.Blocks, model, state.PendingUserMessage);
+        CollectedRecord parentRecord = BuildParentRecord(
+            usage,
+            blocks,
+            harnessId,
+            sessionId,
+            traceId,
+            parentRecordId,
+            model,
+            startedAt.Value);
+        state.Records.Add(parentRecord);
+
+        for (int t = 0; t < blocks.ToolCalls.Count; t++)
+        {
+            (PiToolCall toolCall, string normalizedToolName) = blocks.ToolCalls[t];
+            state.Records.Add(BuildToolInvokeRecord(
+                parentRecord,
+                harnessId,
+                sessionId,
+                traceId,
+                toolCall,
+                normalizedToolName,
+                t,
+                state.SeenRecordIds));
+        }
+
+        state.PendingUserMessage = string.Empty;
+    }
+
+    private static void ApplyUserMessage(PiEntry entry, PiMessage msg, MapState state)
+    {
+        if (!string.IsNullOrWhiteSpace(entry.Timestamp))
+        {
+            state.PendingUserTimestamp = entry.Timestamp;
+        }
+        else if (msg.AttributionTimestampMs.HasValue)
+        {
+            state.PendingUserTimestamp = DateTimeOffset
+                .FromUnixTimeMilliseconds(msg.AttributionTimestampMs.Value)
+                .ToUniversalTime()
+                .ToString("yyyy-MM-dd'T'HH:mm:ss.fff'Z'", CultureInfo.InvariantCulture);
+        }
+
+        List<string> texts = [];
+        foreach (PiContentBlock block in msg.Blocks)
+        {
+            if (string.Equals(block.BlockType, "text", StringComparison.Ordinal)
+                && !string.IsNullOrEmpty(block.Text))
+            {
+                texts.Add(block.Text);
+            }
+        }
+
+        if (texts.Count > 0)
+        {
+            state.PendingUserMessage = string.Join(' ', texts);
+        }
+    }
+
+    private static AssistantBlocks BuildAssistantBlocks(
+        IReadOnlyList<PiContentBlock> blocks,
+        string model,
+        string pendingUserMessage)
+    {
+        List<CollectedContentPart> parts = [];
+        int position = 0;
+        string? correctionRule = null;
+
+        if (!string.IsNullOrEmpty(pendingUserMessage))
+        {
+            CorrectionDetectionResult check = CanonFindings.DetectUserCorrection(pendingUserMessage);
+            if (check.Matched)
+            {
+                correctionRule = check.Rule;
+            }
+
+            parts.Add(ToolContentMeasurer.BuildContentPart(position++, ContentBucket.UserMessage, pendingUserMessage, "user", model));
+        }
+
+        List<string> skillsInvoked = [];
+        HashSet<string> seenSkills = new(StringComparer.Ordinal);
+        List<(PiToolCall Call, string NormalizedToolName)> toolCallsToEmit = [];
+
+        foreach (PiContentBlock block in blocks)
+        {
+            if (string.Equals(block.BlockType, "text", StringComparison.Ordinal)
+                && !string.IsNullOrEmpty(block.Text))
+            {
+                parts.Add(ToolContentMeasurer.BuildContentPart(position++, ContentBucket.ConversationHistory, block.Text, "assistant", model));
+                continue;
+            }
+
+            if (string.Equals(block.BlockType, "toolCall", StringComparison.Ordinal)
+                && block.ToolCall is not null)
+            {
+                string? skill = ExtractSkillLoadName(
+                    block.ToolCall.Name,
+                    block.ToolCall.Path,
+                    block.ToolCall.FilePath);
+                if (skill is not null)
+                {
+                    if (seenSkills.Add(skill))
+                    {
+                        skillsInvoked.Add(skill);
+                    }
+
+                    toolCallsToEmit.Add((block.ToolCall, "Skill"));
+                }
+                else
+                {
+                    toolCallsToEmit.Add((block.ToolCall, MapToolName(block.ToolCall.Name)));
+                }
+            }
+        }
+
+        return new AssistantBlocks(parts, skillsInvoked, toolCallsToEmit, correctionRule);
+    }
+
+    private static CollectedRecord BuildParentRecord(
+        PiUsage usage,
+        AssistantBlocks blocks,
+        string harnessId,
+        string sessionId,
+        string traceId,
+        string parentRecordId,
+        string model,
+        DateTimeOffset startedAt)
+    {
+        (IReadOnlyList<CollectedTokenCount> tokens, long? reportedInput, long? reportedOutput) = BuildTokens(usage);
+        CollectedCost? reportedCost = usage.ReportedCostUsd is > 0 && double.IsFinite(usage.ReportedCostUsd.Value)
+            ? new CollectedCost(usage.ReportedCostUsd.Value, "USD")
+            : null;
+
+        return new CollectedRecord(
+            RecordId: parentRecordId,
+            HarnessId: harnessId,
+            Op: RecordOp.LlmInvoke,
+            Kind: RecordKind.Internal,
+            Name: $"{harnessId}:{model}",
+            StartedAt: startedAt,
+            Status: RecordStatus.Ok,
+            SessionKey: sessionId,
+            ParentRecordId: null,
+            TraceId: traceId,
+            Model: model,
+            EndedAt: null,
+            ReportedDurationMs: null,
+            Tokens: tokens,
+            ReportedCost: reportedCost,
+            Parts: blocks.Parts,
+            Tool: null,
+            Agent: null,
+            SkillsInvoked: blocks.SkillsInvoked,
+            AgentInstanceId: null,
+            ToolDefinitions: [],
+            Signals: new CollectedRecordSignals(
+                ErrorMessage: null,
+                EditFailures: null,
+                CorrectionRule: blocks.CorrectionRule,
+                DeclaredContextWindow: null),
+            ReportedInputTokens: reportedInput,
+            ReportedOutputTokens: reportedOutput);
+    }
+
+    private static List<CollectedSession> BuildSessions(
+        MapState state,
+        int entryCount,
+        string sessionId,
+        string harnessId)
+    {
+        List<CollectedSession> sessions = [];
+        if (state.Records.Count > 0 || entryCount > 0)
+        {
+            CollectedWorkspace? workspace = state.WorkingDirectory is not null
+                ? new CollectedWorkspace(state.WorkingDirectory, null, null)
                 : null;
 
             sessions.Add(new CollectedSession(
@@ -524,12 +602,11 @@ public class PiMapper : IHarnessMapper
                 HarnessId: harnessId,
                 NativeSessionId: sessionId,
                 Workspace: workspace,
-                Title: sessionTitle,
+                Title: state.SessionTitle,
                 ReportedUsage: []));
         }
 
-        List<CollectedProblem> problems = BuildProblems(document.ParseProblems, unit.Unit.SourceKey, sessionId, harnessId, importedAtUtc);
-        return new CollectedBatch(source, sessions, records, problems);
+        return sessions;
     }
 
     /// <summary>
@@ -585,110 +662,141 @@ public class PiMapper : IHarnessMapper
 
     private static PiMessage ParseMessage(JsonElement msgEl)
     {
-        string? role = ReadSafeString(msgEl, "role");
-        string? model = ReadSafeString(msgEl, "model");
-        string? responseId = ReadSafeString(msgEl, "responseId");
+        return new PiMessage(
+            Role: ReadSafeString(msgEl, "role"),
+            Model: ReadSafeString(msgEl, "model"),
+            ResponseId: ReadSafeString(msgEl, "responseId"),
+            AttributionTimestampMs: ReadAttributionTimestamp(msgEl),
+            Usage: ParseUsage(msgEl),
+            Blocks: ParseContentBlocks(msgEl));
+    }
 
-        long? attributionTimestampMs = null;
-        if (msgEl.TryGetProperty("attribution", out JsonElement attrEl)
-            && attrEl.ValueKind == JsonValueKind.Object
-            && attrEl.TryGetProperty("timestamp", out JsonElement tsEl)
-            && tsEl.ValueKind == JsonValueKind.Number)
+    private static long? ReadAttributionTimestamp(JsonElement msgEl)
+    {
+        if (!msgEl.TryGetProperty("attribution", out JsonElement attrEl)
+            || attrEl.ValueKind != JsonValueKind.Object
+            || !attrEl.TryGetProperty("timestamp", out JsonElement tsEl)
+            || tsEl.ValueKind != JsonValueKind.Number)
         {
-            if (tsEl.TryGetInt64(out long tsInt))
-            {
-                attributionTimestampMs = tsInt;
-            }
-            else if (tsEl.TryGetDouble(out double tsDouble) && double.IsFinite(tsDouble))
-            {
-                attributionTimestampMs = (long)tsDouble;
-            }
+            return null;
         }
 
-        PiUsage? usage = null;
-        if (msgEl.TryGetProperty("usage", out JsonElement usageEl) && usageEl.ValueKind == JsonValueKind.Object)
+        if (tsEl.TryGetInt64(out long tsInt))
         {
-            double? reportedCostUsd = null;
-            if (usageEl.TryGetProperty("cost", out JsonElement costEl)
-                && costEl.ValueKind == JsonValueKind.Object
-                && costEl.TryGetProperty("total", out JsonElement totalEl)
-                && totalEl.ValueKind == JsonValueKind.Number
-                && totalEl.TryGetDouble(out double totalVal)
-                && double.IsFinite(totalVal))
-            {
-                reportedCostUsd = totalVal;
-            }
-
-            usage = new PiUsage(
-                InputTokens: ReadOptionalNonNegativeLong(usageEl, "input"),
-                OutputTokens: ReadOptionalNonNegativeLong(usageEl, "output"),
-                CacheReadTokens: ReadOptionalNonNegativeLong(usageEl, "cacheRead"),
-                CacheWriteTokens: ReadOptionalNonNegativeLong(usageEl, "cacheWrite"),
-                ReportedCostUsd: reportedCostUsd);
+            return tsInt;
         }
 
+        return tsEl.TryGetDouble(out double tsDouble) && double.IsFinite(tsDouble) ? (long)tsDouble : null;
+    }
+
+    private static PiUsage? ParseUsage(JsonElement msgEl)
+    {
+        if (!msgEl.TryGetProperty("usage", out JsonElement usageEl) || usageEl.ValueKind != JsonValueKind.Object)
+        {
+            return null;
+        }
+
+        double? reportedCostUsd = null;
+        if (usageEl.TryGetProperty("cost", out JsonElement costEl)
+            && costEl.ValueKind == JsonValueKind.Object
+            && costEl.TryGetProperty("total", out JsonElement totalEl)
+            && totalEl.ValueKind == JsonValueKind.Number
+            && totalEl.TryGetDouble(out double totalVal)
+            && double.IsFinite(totalVal))
+        {
+            reportedCostUsd = totalVal;
+        }
+
+        return new PiUsage(
+            InputTokens: ReadOptionalNonNegativeLong(usageEl, "input"),
+            OutputTokens: ReadOptionalNonNegativeLong(usageEl, "output"),
+            CacheReadTokens: ReadOptionalNonNegativeLong(usageEl, "cacheRead"),
+            CacheWriteTokens: ReadOptionalNonNegativeLong(usageEl, "cacheWrite"),
+            ReportedCostUsd: reportedCostUsd);
+    }
+
+    private static List<PiContentBlock> ParseContentBlocks(JsonElement msgEl)
+    {
         List<PiContentBlock> blocks = [];
-        if (msgEl.TryGetProperty("content", out JsonElement contentEl))
+        if (!msgEl.TryGetProperty("content", out JsonElement contentEl))
         {
-            if (contentEl.ValueKind == JsonValueKind.String)
+            return blocks;
+        }
+
+        if (contentEl.ValueKind == JsonValueKind.String)
+        {
+            string? scalarText = contentEl.GetString();
+            if (scalarText is not null)
             {
-                string? scalarText = contentEl.GetString();
-                if (scalarText is not null)
-                {
-                    blocks.Add(new PiContentBlock("text", scalarText, null));
-                }
+                blocks.Add(new PiContentBlock("text", scalarText, null));
             }
-            else if (contentEl.ValueKind == JsonValueKind.Array)
+
+            return blocks;
+        }
+
+        if (contentEl.ValueKind != JsonValueKind.Array)
+        {
+            return blocks;
+        }
+
+        foreach (JsonElement blockEl in contentEl.EnumerateArray())
+        {
+            PiContentBlock? block = ParseContentBlock(blockEl);
+            if (block is not null)
             {
-                foreach (JsonElement blockEl in contentEl.EnumerateArray())
-                {
-                    if (blockEl.ValueKind != JsonValueKind.Object)
-                    {
-                        continue;
-                    }
-
-                    string? blockType = ReadSafeString(blockEl, "type");
-                    if (string.Equals(blockType, "text", StringComparison.Ordinal))
-                    {
-                        string? text = ReadStringOnly(blockEl, "text");
-                        blocks.Add(new PiContentBlock("text", text, null));
-                    }
-                    else if (string.Equals(blockType, "toolCall", StringComparison.Ordinal))
-                    {
-                        string? name = ReadSafeString(blockEl, "name");
-                        if (name is null)
-                        {
-                            continue;
-                        }
-
-                        string? callId = ReadSafeString(blockEl, "id");
-                        string? rawInputText = null;
-                        string? path = null;
-                        string? filePath = null;
-                        string? command = null;
-
-                        if (blockEl.TryGetProperty("arguments", out JsonElement argsEl)
-                            && argsEl.ValueKind is not (JsonValueKind.Null or JsonValueKind.Undefined))
-                        {
-                            rawInputText = argsEl.GetRawText();
-                            if (argsEl.ValueKind == JsonValueKind.Object)
-                            {
-                                path = ReadStringOnly(argsEl, "path");
-                                filePath = ReadStringOnly(argsEl, "file_path");
-                                command = ReadStringOnly(argsEl, "command");
-                            }
-                        }
-
-                        blocks.Add(new PiContentBlock(
-                            BlockType: "toolCall",
-                            Text: null,
-                            ToolCall: new PiToolCall(callId, name, rawInputText, path, filePath, command)));
-                    }
-                }
+                blocks.Add(block);
             }
         }
 
-        return new PiMessage(role, model, responseId, attributionTimestampMs, usage, blocks);
+        return blocks;
+    }
+
+    private static PiContentBlock? ParseContentBlock(JsonElement blockEl)
+    {
+        if (blockEl.ValueKind != JsonValueKind.Object)
+        {
+            return null;
+        }
+
+        string? blockType = ReadSafeString(blockEl, "type");
+        if (string.Equals(blockType, "text", StringComparison.Ordinal))
+        {
+            return new PiContentBlock("text", ReadStringOnly(blockEl, "text"), null);
+        }
+
+        if (!string.Equals(blockType, "toolCall", StringComparison.Ordinal))
+        {
+            return null;
+        }
+
+        string? name = ReadSafeString(blockEl, "name");
+        if (name is null)
+        {
+            return null;
+        }
+
+        string? callId = ReadSafeString(blockEl, "id");
+        string? rawInputText = null;
+        string? path = null;
+        string? filePath = null;
+        string? command = null;
+
+        if (blockEl.TryGetProperty("arguments", out JsonElement argsEl)
+            && argsEl.ValueKind is not (JsonValueKind.Null or JsonValueKind.Undefined))
+        {
+            rawInputText = argsEl.GetRawText();
+            if (argsEl.ValueKind == JsonValueKind.Object)
+            {
+                path = ReadStringOnly(argsEl, "path");
+                filePath = ReadStringOnly(argsEl, "file_path");
+                command = ReadStringOnly(argsEl, "command");
+            }
+        }
+
+        return new PiContentBlock(
+            BlockType: "toolCall",
+            Text: null,
+            ToolCall: new PiToolCall(callId, name, rawInputText, path, filePath, command));
     }
 
     private static CollectedRecord BuildToolInvokeRecord(

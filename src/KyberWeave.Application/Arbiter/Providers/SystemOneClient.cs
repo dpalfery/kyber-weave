@@ -126,29 +126,9 @@ public sealed class SystemOneClient : IArbiterProvider, IDisposable
         int attempt = 0;
         while (true)
         {
-            using HttpRequestMessage request = new(HttpMethod.Post, requestUri)
-            {
-                Content = new StringContent(built.BodyJson, Encoding.UTF8, "application/json"),
-            };
-            // Origin-bound: the key goes out only for a remote endpoint whose
-            // origin resolved one. A loopback endpoint therefore sends none.
-            string? key = _keyResolver?.Invoke(requestUri);
-            if (!requestUri.IsLoopback && !string.IsNullOrWhiteSpace(key))
-            {
-                request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", key);
-            }
-
-            HttpResponseMessage response;
-            try
-            {
-                response = await _client.SendAsync(
-                    request, HttpCompletionOption.ResponseHeadersRead, timeout.Token).ConfigureAwait(false);
-            }
-            catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
-            {
-                return UndecidableAll(askRules, null, null, true);
-            }
-            catch (HttpRequestException)
+            using HttpRequestMessage request = CreateRequest(requestUri, built.BodyJson);
+            HttpResponseMessage? response = await SendAsync(request, timeout.Token, cancellationToken).ConfigureAwait(false);
+            if (response is null)
             {
                 return UndecidableAll(askRules, null, null, true);
             }
@@ -187,39 +167,9 @@ public sealed class SystemOneClient : IArbiterProvider, IDisposable
                     return UndecidableAll(askRules, null, null, true);
                 }
 
-                string body;
-                try
-                {
-                    using Stream stream = await response.Content.ReadAsStreamAsync(timeout.Token).ConfigureAwait(false);
-                    using MemoryStream buffer = new();
-                    byte[] chunk = new byte[8192];
-                    int read;
-                    while ((read = await stream.ReadAsync(chunk, timeout.Token).ConfigureAwait(false)) > 0)
-                    {
-                        if (buffer.Length + read > MaxResponseBytes)
-                        {
-                            return UndecidableAll(askRules, null, null, true);
-                        }
-
-                        await buffer.WriteAsync(chunk.AsMemory(0, read), timeout.Token).ConfigureAwait(false);
-                    }
-
-                    body = Encoding.UTF8.GetString(buffer.GetBuffer(), 0, (int)buffer.Length);
-                }
-                catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
-                {
-                    return UndecidableAll(askRules, null, null, true);
-                }
-                catch (HttpRequestException)
-                {
-                    return UndecidableAll(askRules, null, null, true);
-                }
-                catch (IOException)
-                {
-                    return UndecidableAll(askRules, null, null, true);
-                }
-
-                if (!SystemOneContracts.TryParseResponse(body, out SystemOneParsedResponse? parsed)
+                string? body = await ReadBodyAsync(response, timeout.Token, cancellationToken).ConfigureAwait(false);
+                if (body is null
+                    || !SystemOneContracts.TryParseResponse(body, out SystemOneParsedResponse? parsed)
                     || parsed is null)
                 {
                     return UndecidableAll(askRules, null, null, true);
@@ -227,6 +177,80 @@ public sealed class SystemOneClient : IArbiterProvider, IDisposable
 
                 return ApplyAnswers(askRules, parsed);
             }
+        }
+    }
+
+    private HttpRequestMessage CreateRequest(Uri requestUri, string bodyJson)
+    {
+        HttpRequestMessage request = new(HttpMethod.Post, requestUri)
+        {
+            Content = new StringContent(bodyJson, Encoding.UTF8, "application/json"),
+        };
+        // Origin-bound: the key goes out only for a remote endpoint whose
+        // origin resolved one. A loopback endpoint therefore sends none.
+        string? key = _keyResolver?.Invoke(requestUri);
+        if (!requestUri.IsLoopback && !string.IsNullOrWhiteSpace(key))
+        {
+            request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", key);
+        }
+
+        return request;
+    }
+
+    private async Task<HttpResponseMessage?> SendAsync(
+        HttpRequestMessage request,
+        CancellationToken timeoutToken,
+        CancellationToken cancellationToken)
+    {
+        try
+        {
+            return await _client.SendAsync(
+                request, HttpCompletionOption.ResponseHeadersRead, timeoutToken).ConfigureAwait(false);
+        }
+        catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
+        {
+            return null;
+        }
+        catch (HttpRequestException)
+        {
+            return null;
+        }
+    }
+
+    private static async Task<string?> ReadBodyAsync(
+        HttpResponseMessage response,
+        CancellationToken timeoutToken,
+        CancellationToken cancellationToken)
+    {
+        try
+        {
+            using Stream stream = await response.Content.ReadAsStreamAsync(timeoutToken).ConfigureAwait(false);
+            using MemoryStream buffer = new();
+            byte[] chunk = new byte[8192];
+            int read;
+            while ((read = await stream.ReadAsync(chunk, timeoutToken).ConfigureAwait(false)) > 0)
+            {
+                if (buffer.Length + read > MaxResponseBytes)
+                {
+                    return null;
+                }
+
+                await buffer.WriteAsync(chunk.AsMemory(0, read), timeoutToken).ConfigureAwait(false);
+            }
+
+            return Encoding.UTF8.GetString(buffer.GetBuffer(), 0, (int)buffer.Length);
+        }
+        catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
+        {
+            return null;
+        }
+        catch (HttpRequestException)
+        {
+            return null;
+        }
+        catch (IOException)
+        {
+            return null;
         }
     }
 

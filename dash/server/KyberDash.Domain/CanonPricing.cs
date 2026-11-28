@@ -1140,27 +1140,8 @@ public static partial class CanonPricing
         long billedCacheRead = cacheRead ?? 0L;
         long billedCacheCreation = cacheCreation ?? 0L;
         decimal knownInput = (decimal)billedFresh + billedCacheRead + billedCacheCreation;
-        bool inputComplete = reportedInput is not null
-            ? canPriceInput && knownInput == reportedInput.Value
-            : canPriceInput;
-
-        long billedOutput;
-        bool outputComplete;
-        if (output is not null)
-        {
-            billedOutput = output.Value;
-            outputComplete = reportedOutput is null || reportedOutput.Value == output.Value;
-        }
-        else if (reportedOutput is not null)
-        {
-            billedOutput = reportedOutput.Value;
-            outputComplete = true;
-        }
-        else
-        {
-            billedOutput = 0L;
-            outputComplete = false;
-        }
+        bool inputComplete = IsStoredInputComplete(reportedInput, canPriceInput, knownInput);
+        (long billedOutput, bool outputComplete) = ResolveStoredOutput(output, reportedOutput);
 
         TokenUsage usage = new(
             FreshInput: billedFresh,
@@ -1188,6 +1169,25 @@ public static partial class CanonPricing
 
             return (long)total;
         }
+    }
+
+    private static bool IsStoredInputComplete(long? reportedInput, bool canPriceInput, decimal knownInput)
+    {
+        if (reportedInput is null)
+            return canPriceInput;
+
+        return canPriceInput && knownInput == reportedInput.Value;
+    }
+
+    private static (long BilledOutput, bool Complete) ResolveStoredOutput(long? output, long? reportedOutput)
+    {
+        if (output is not null)
+            return (output.Value, reportedOutput is null || reportedOutput.Value == output.Value);
+
+        if (reportedOutput is not null)
+            return (reportedOutput.Value, true);
+
+        return (0L, false);
     }
 
     /// <summary>Extracts a validated non-negative finite integer/double measurement from JSON or numeric values.</summary>

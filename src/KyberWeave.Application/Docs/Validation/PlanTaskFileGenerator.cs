@@ -578,24 +578,50 @@ public sealed partial class PlanTaskFileGenerator
         List<PlanTaskFileEntry> entries = new(tasks.Count);
         foreach (PlanTaskFileEntry task in tasks)
         {
-            PlanTaskFileEntry kept = task;
-            if (task.Role is null && task.Id is not null
-                && onDisk.TryGetValue(task.Id, out PlanTaskFileEntry? old)
-                && old.Agent is not null && old.Role is null
-                && ServesConfiguredRoster(old.Agent)
-                && string.Equals(old.Capabilities, task.Capabilities, StringComparison.Ordinal)
-                && string.Equals(old.Prompt, task.Prompt, StringComparison.Ordinal))
-            {
-                kept = task with
-                {
-                    Agent = old.Agent,
-                    AgentConfidence = old.AgentConfidence,
-                };
-            }
-
-            entries.Add(kept);
+            entries.Add(KeepStoredPick(task, onDisk));
         }
 
+        Dictionary<string, PlanTaskAgentChoice> picks = ApplyPicks(entries, mode);
+
+        if (mode is PlanTaskFileMode.Write or PlanTaskFileMode.Convert)
+        {
+            difficultyChecks = Checks(entries, picks, PlanPacketContext.Parse(markdown), artifact, report);
+        }
+
+        ApplyDeveloperTiers(entries);
+
+        return file with { Tasks = entries };
+    }
+
+    /// <summary>
+    /// A pick the file on disk recorded for a task whose role, capabilities and prompt are
+    /// unchanged is kept, so checking the file never asks the model and a rewrite does not move a pick.
+    /// </summary>
+    private PlanTaskFileEntry KeepStoredPick(PlanTaskFileEntry task, Dictionary<string, PlanTaskFileEntry> onDisk)
+    {
+        if (task.Role is null && task.Id is not null
+            && onDisk.TryGetValue(task.Id, out PlanTaskFileEntry? old)
+            && old.Agent is not null && old.Role is null
+            && ServesConfiguredRoster(old.Agent)
+            && string.Equals(old.Capabilities, task.Capabilities, StringComparison.Ordinal)
+            && string.Equals(old.Prompt, task.Prompt, StringComparison.Ordinal))
+        {
+            return task with
+            {
+                Agent = old.Agent,
+                AgentConfidence = old.AgentConfidence,
+            };
+        }
+
+        return task;
+    }
+
+    /// <summary>
+    /// Asks the picker for each task still without an agent, on a write or convert, and records the picks
+    /// on those tasks. Tasks the plan assigned a role never get a pick.
+    /// </summary>
+    private Dictionary<string, PlanTaskAgentChoice> ApplyPicks(List<PlanTaskFileEntry> entries, PlanTaskFileMode mode)
+    {
         Dictionary<string, PlanTaskAgentChoice> picks = new(StringComparer.Ordinal);
         if ((mode is PlanTaskFileMode.Write or PlanTaskFileMode.Convert) && _picker is not null)
         {
@@ -624,14 +650,16 @@ public sealed partial class PlanTaskFileGenerator
             }
         }
 
-        if (mode is PlanTaskFileMode.Write or PlanTaskFileMode.Convert)
-        {
-            difficultyChecks = Checks(entries, picks, PlanPacketContext.Parse(markdown), artifact, report);
-        }
+        return picks;
+    }
 
-        // A developer task's rating in use decides its tier, so the file names that tier: a hard task written as
-        // the generic developer kind would dispatch dev-medium from the file alone. A pick for a documentation or
-        // delivery agent is not a developer tier and stays as it is.
+    /// <summary>
+    /// A developer task's rating in use decides its tier, so the file names that tier: a hard task written as
+    /// the generic developer kind would dispatch dev-medium from the file alone. A pick for a documentation or
+    /// delivery agent is not a developer tier and stays as it is.
+    /// </summary>
+    private static void ApplyDeveloperTiers(List<PlanTaskFileEntry> entries)
+    {
         for (int index = 0; index < entries.Count; index++)
         {
             PlanTaskFileEntry entry = entries[index];
@@ -643,8 +671,6 @@ public sealed partial class PlanTaskFileGenerator
                 entries[index] = entry with { Agent = DeveloperTiers.For(entry.Difficulty, 0) };
             }
         }
-
-        return file with { Tasks = entries };
     }
 
     /// <summary>

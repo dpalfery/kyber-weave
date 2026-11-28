@@ -221,93 +221,127 @@ public sealed partial class DocumentMarkdown
         string normalized = body.Replace("\r\n", "\n", StringComparison.Ordinal);
         MarkdownDocument document = Markdown.Parse(normalized, LeafPipeline);
         Dictionary<HeadingBlock, string> headingIds = BuildHeadingIds(document, docId);
+        LeafAccumulator accumulator = new(normalized, docId, headingIds);
+        return accumulator.Build(document);
+    }
 
-        List<DocumentLeaf> leaves = new();
-        string? topicId = null;
-        StringBuilder? leadBuffer = null;
-        StringBuilder? leafBuffer = null;
-        string? leafId = null;
+    /// <summary>
+    ///     Gathers the retrieval leaves while the block tree is walked: the current <c>##</c> topic, the
+    ///     text accumulated before a topic's first <c>###</c> leaf, and the current leaf's buffer.
+    /// </summary>
+    private sealed class LeafAccumulator
+    {
+        private readonly string _normalized;
+        private readonly string _docId;
+        private readonly Dictionary<HeadingBlock, string> _headingIds;
+        private readonly List<DocumentLeaf> _leaves = new();
 
-        void FlushLeaf()
+        private string? _topicId;
+        private StringBuilder? _leadBuffer;
+        private string? _leafId;
+        private StringBuilder? _leafBuffer;
+
+        public LeafAccumulator(string normalized, string docId, Dictionary<HeadingBlock, string> headingIds)
         {
-            if (leafId is null || leafBuffer is null) return;
-
-            string text = leafBuffer.ToString().Trim('\n');
-            if (text.Length == 0) return;
-
-            leaves.Add(new DocumentLeaf(leafId, text));
-            leafId = null;
-            leafBuffer = null;
+            _normalized = normalized;
+            _docId = docId;
+            _headingIds = headingIds;
         }
 
-        void StartLeaf(string id)
+        public IReadOnlyList<DocumentLeaf> Build(MarkdownDocument document)
+        {
+            foreach (Block block in document) VisitBlock(block);
+
+            if (_leadBuffer is not null)
+            {
+                string lead = _leadBuffer.ToString().Trim('\n');
+                if (HasProseLines(lead) && _topicId is not null) _leaves.Add(new DocumentLeaf(_topicId, lead));
+            }
+
+            FlushLeaf();
+            return _leaves;
+        }
+
+        private void FlushLeaf()
+        {
+            if (_leafId is null || _leafBuffer is null) return;
+
+            string text = _leafBuffer.ToString().Trim('\n');
+            if (text.Length == 0) return;
+
+            _leaves.Add(new DocumentLeaf(_leafId, text));
+            _leafId = null;
+            _leafBuffer = null;
+        }
+
+        private void StartLeaf(string id)
         {
             FlushLeaf();
-            leafId = id;
-            leafBuffer = new StringBuilder();
+            _leafId = id;
+            _leafBuffer = new StringBuilder();
         }
 
-        void AppendContent(string text)
+        private void AppendContent(string text)
         {
             if (text.Length == 0) return;
 
-            if (topicId is null)
+            if (_topicId is null)
             {
-                if (leafId is null) StartLeaf($"{docId}#");
+                if (_leafId is null) StartLeaf($"{_docId}#");
 
-                AppendWithNewline(leafBuffer, text);
+                AppendWithNewline(_leafBuffer, text);
                 return;
             }
 
-            if (leafId is null)
+            if (_leafId is null)
             {
-                leadBuffer ??= new StringBuilder();
-                AppendWithNewline(leadBuffer, text);
+                _leadBuffer ??= new StringBuilder();
+                AppendWithNewline(_leadBuffer, text);
             }
             else
             {
-                AppendWithNewline(leafBuffer, text);
+                AppendWithNewline(_leafBuffer, text);
             }
         }
 
-        void HandleHeading(HeadingBlock heading)
+        private void HandleHeading(HeadingBlock heading)
         {
             if (heading.Level == 1) return;
 
             if (heading.Level == 2)
             {
                 FlushLeaf();
-                topicId = headingIds[heading];
-                leadBuffer = new StringBuilder();
+                _topicId = _headingIds[heading];
+                _leadBuffer = new StringBuilder();
                 return;
             }
 
             if (heading.Level == 3)
             {
-                if (leadBuffer is not null)
+                if (_leadBuffer is not null)
                 {
-                    string lead = leadBuffer.ToString().Trim('\n');
-                    if (HasProseLines(lead) && topicId is not null) leaves.Add(new DocumentLeaf(topicId, lead));
+                    string lead = _leadBuffer.ToString().Trim('\n');
+                    if (HasProseLines(lead) && _topicId is not null) _leaves.Add(new DocumentLeaf(_topicId, lead));
 
-                    leadBuffer = null;
+                    _leadBuffer = null;
                 }
 
-                StartLeaf(headingIds[heading]);
+                StartLeaf(_headingIds[heading]);
                 return;
             }
 
-            if (leafId is not null)
+            if (_leafId is not null)
             {
-                AppendWithNewline(leafBuffer, Slice(normalized, heading.Span));
+                AppendWithNewline(_leafBuffer, Slice(_normalized, heading.Span));
             }
-            else if (topicId is not null)
+            else if (_topicId is not null)
             {
-                leadBuffer ??= new StringBuilder();
-                AppendWithNewline(leadBuffer, Slice(normalized, heading.Span));
+                _leadBuffer ??= new StringBuilder();
+                AppendWithNewline(_leadBuffer, Slice(_normalized, heading.Span));
             }
         }
 
-        void VisitBlock(Block block)
+        private void VisitBlock(Block block)
         {
             switch (block)
             {
@@ -319,7 +353,7 @@ public sealed partial class DocumentMarkdown
                 case HtmlBlock:
                 case ThematicBreakBlock:
                 case CodeBlock:
-                    AppendContent(Slice(normalized, block.Span));
+                    AppendContent(Slice(_normalized, block.Span));
                     return;
                 case ContainerBlock container:
                     foreach (Block child in container) VisitBlock(child);
@@ -327,17 +361,6 @@ public sealed partial class DocumentMarkdown
                     return;
             }
         }
-
-        foreach (Block block in document) VisitBlock(block);
-
-        if (leadBuffer is not null)
-        {
-            string lead = leadBuffer.ToString().Trim('\n');
-            if (HasProseLines(lead) && topicId is not null) leaves.Add(new DocumentLeaf(topicId, lead));
-        }
-
-        FlushLeaf();
-        return leaves;
     }
 
     /// <summary>

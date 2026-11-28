@@ -5,6 +5,8 @@ using System.Linq;
 using System.Text;
 using KyberDash.Contracts.Repositories;
 using KyberDash.Core.Exceptions;
+using KyberDash.Core.Repositories;
+using KyberDash.Core.Resilience;
 using KyberDash.Data.Collector;
 using KyberDash.Domain;
 using KyberDash.Domain.Schema;
@@ -12,17 +14,1076 @@ using Microsoft.Data.Sqlite;
 
 namespace KyberDash.Data.Repositories;
 
-public partial class SqliteRelationalStore : IRelationalStoreReader
+/// <summary>
+/// Low-level read helpers shared by the relational store's reader: row mapping, parsing, and the
+/// parameterized read seam.
+/// </summary>
+public abstract class SqliteRelationalStoreReadBase : BaseSqliteRepository
 {
+    private protected const int BusyTimeoutMilliseconds = 5000;
+    private protected const int BusyAttempts = 3;
+
+    private protected IRelationalStoreFileSystem fileSystem { get; }
+
+    /// <summary>Initializes the read half over <paramref name="databasePath"/>.</summary>
+    /// <param name="databasePath">Path to the SQLite database file.</param>
+    /// <param name="circuitBreaker">Circuit breaker guarding every <c>sqlite3</c> invocation.</param>
+    /// <param name="fileSystem">Filesystem seam; defaults to <see cref="PhysicalRelationalStoreFileSystem.Instance"/> when <see langword="null"/>.</param>
+    protected SqliteRelationalStoreReadBase(
+        string databasePath,
+        ICircuitBreaker circuitBreaker,
+        IRelationalStoreFileSystem? fileSystem)
+        : base(
+            databasePath,
+            circuitBreaker,
+            batchTimeout: TimeSpan.FromSeconds(120),
+            busyTimeoutMilliseconds: BusyTimeoutMilliseconds,
+            busyAttempts: BusyAttempts)
+    {
+        this.fileSystem = fileSystem ?? PhysicalRelationalStoreFileSystem.Instance;
+    }
+
+    /// <summary>Ensures the parent directory of <see cref="BaseSqliteRepository.DatabasePath"/> exists via the filesystem seam.</summary>
+    private protected void EnsureDatabaseDirectory()
+    {
+        string? directory = Path.GetDirectoryName(DatabasePath);
+        if (!string.IsNullOrEmpty(directory))
+        {
+            fileSystem.CreateDirectory(directory);
+        }
+    }
+
+    /// <summary>
+    /// Ensures the parent directory exists before a statement or query opens the database file, so
+    /// a read or write on a store whose file does not yet exist never fails on a missing directory.
+    /// </summary>
+    private protected void EnsureDatabaseDirectoryIfMissing()
+    {
+        if (!fileSystem.FileExists(DatabasePath))
+        {
+            EnsureDatabaseDirectory();
+        }
+    }
+
+    /// <summary>Formats a timestamp as the round-trip ISO-8601 text the store writes.</summary>
+    private protected static string FormatTimestamp(DateTimeOffset value) =>
+        value.ToUniversalTime().ToString("O", CultureInfo.InvariantCulture);
+
+    /// <summary>Formats an integer as invariant SQL text.</summary>
+    private protected static string IntSql(int value) => value.ToString(CultureInfo.InvariantCulture);
+
+    private protected static List<(int Position, CollectedRecord Record)> ResolveSessionTurnEntriesForReader(
+        IReadOnlyList<StoredSessionTurn> projectedTurns,
+        IReadOnlyList<CollectedRecord> records)
+    {
+        Dictionary<string, CollectedRecord> bySpan = new(records.Count, StringComparer.Ordinal);
+        foreach (CollectedRecord record in records)
+        {
+            bySpan[record.RecordId] = record;
+        }
+
+        if (projectedTurns.Count > 0)
+        {
+            List<(int Position, CollectedRecord Record)> resolved = new(projectedTurns.Count);
+            foreach (StoredSessionTurn turn in projectedTurns)
+            {
+                if (bySpan.TryGetValue(turn.SpanId, out CollectedRecord? record))
+                {
+                    resolved.Add((turn.Position, record));
+                }
+            }
+
+            return resolved;
+        }
+
+        List<CollectedRecord> llmRecords =
+        [
+            .. records
+                .Where(static r => r.Op == RecordOp.LlmInvoke)
+                .OrderBy(static r => r.StartedAt)
+                .ThenBy(static r => r.RecordId, StringComparer.Ordinal),
+        ];
+
+        List<(int Position, CollectedRecord Record)> fallback = new(llmRecords.Count);
+        for (int index = 0; index < llmRecords.Count; index++)
+        {
+            fallback.Add((index, llmRecords[index]));
+        }
+
+        return fallback;
+    }
+
+    private protected static ReadTimeTurnSummary BuildReaderTurnSummary(
+        CollectedRecord record,
+        int position,
+        string harnessId,
+        IModelPricingLookup? pricing,
+        out CostBlock publishedBlock,
+        out CostBlock? harnessBlock)
+    {
+        long? freshInput = TryFindReaderTokenCount(record.Tokens, TokenClass.Input);
+        long? cacheRead = TryFindReaderTokenCount(record.Tokens, TokenClass.CacheRead);
+        long? cacheCreation = TryFindReaderTokenCount(record.Tokens, TokenClass.CacheWrite);
+        long? output = TryFindReaderTokenCount(record.Tokens, TokenClass.Output);
+        long? reasoning = TryFindReaderTokenCount(record.Tokens, TokenClass.Reasoning);
+
+        long? inputTokens = freshInput.HasValue || cacheRead.HasValue || cacheCreation.HasValue
+            ? (freshInput ?? 0L) + (cacheRead ?? 0L) + (cacheCreation ?? 0L)
+            : null;
+
+        long? durationMs = ComputeReaderDurationMs(record);
+
+        ReadTimeCostSummary? reportedCost = null;
+        harnessBlock = null;
+        if (record.ReportedCost is not null)
+        {
+            IReadOnlyDictionary<string, double>? byModel = !string.IsNullOrEmpty(record.Model)
+                ? new Dictionary<string, double>(StringComparer.Ordinal) { [record.Model] = record.ReportedCost.Amount }
+                : null;
+            harnessBlock = new CostBlock(
+                CostBasis.Harness,
+                CostStatus.Priced,
+                record.ReportedCost.Amount,
+                record.ReportedCost.Currency,
+                byModel);
+            reportedCost = ToReaderCostSummary(harnessBlock);
+        }
+
+        publishedBlock = PriceReportedTokens(freshInput, cacheRead, cacheCreation, output, reasoning, record, harnessId, pricing);
+
+        return new ReadTimeTurnSummary(
+            Position: position,
+            SpanId: record.RecordId,
+            TimestampUtc: FormatTimestamp(record.StartedAt),
+            Model: record.Model,
+            InputTokens: inputTokens,
+            OutputTokens: output,
+            FreshInputTokens: freshInput,
+            CacheReadTokens: cacheRead,
+            CacheCreationTokens: cacheCreation,
+            ReasoningTokens: reasoning,
+            DurationMs: durationMs,
+            ReportedCost: reportedCost,
+            PublishedCost: ToReaderCostSummary(publishedBlock));
+    }
+
+    private protected static long? TryFindReaderTokenCount(IReadOnlyList<CollectedTokenCount> tokens, TokenClass tokenClass)
+    {
+        foreach (CollectedTokenCount entry in tokens)
+        {
+            if (entry.TokenClass == tokenClass)
+            {
+                return entry.Count;
+            }
+        }
+
+        return null;
+    }
+
+    private protected static long? ComputeReaderDurationMs(CollectedRecord record)
+    {
+        if (record.EndedAt.HasValue)
+        {
+            return Math.Max(0L, (long)Math.Round((record.EndedAt.Value - record.StartedAt).TotalMilliseconds));
+        }
+
+        return record.ReportedDurationMs;
+    }
+
+    private protected static ReadTimeCostSummary ToReaderCostSummary(CostBlock block)
+    {
+        List<ReadTimeModelCost> byModel = block.ByModel is null
+            ? []
+            :
+            [
+                .. block.ByModel
+                    .OrderBy(static kv => kv.Key, StringComparer.Ordinal)
+                    .Select(static kv => new ReadTimeModelCost(kv.Key, kv.Value)),
+            ];
+
+        return new ReadTimeCostSummary(block.Basis, block.Status, block.Value, block.Currency, byModel);
+    }
+
+    private protected static ReadTimeCostSummary AggregateReaderCostBlocks(
+        IReadOnlyList<CostBlock> blocks,
+        CostBasis fallbackBasis,
+        List<Problem> problems)
+    {
+        CostTotalResult result = CanonPricing.SumCosts(blocks);
+        if (result.Ok && result.Total is not null)
+        {
+            return ToReaderCostSummary(result.Total);
+        }
+
+        if (result.Problem is not null)
+        {
+            problems.Add(result.Problem);
+        }
+
+        return new ReadTimeCostSummary(fallbackBasis, CostStatus.Partial, null, null, []);
+    }
+
+    private protected static List<ReadTimeSessionToolSummary> BuildReaderToolSummaries(
+        StoredSessionProjection? projection,
+        int turnCount,
+        IReadOnlyDictionary<string, (long SchemaTokens, string? Server, HashSet<string> SpanIds)> defStats,
+        IReadOnlyList<string> toolsInvoked,
+        IReadOnlyDictionary<string, int> invCounts,
+        IReadOnlyDictionary<string, int> errCounts)
+    {
+        List<ReadTimeSessionToolSummary> result = [];
+        HashSet<string> seenNames = new(StringComparer.Ordinal);
+
+        if (projection?.Schema is not null)
+        {
+            foreach (StoredSchemaRankedTool ranked in projection.Schema.RankedTools)
+            {
+                _ = seenNames.Add(ranked.ToolName);
+                bool hasDef = defStats.TryGetValue(ranked.ToolName, out (long SchemaTokens, string? Server, HashSet<string> SpanIds) def);
+                long schemaTokens = hasDef ? def.SchemaTokens : 0L;
+                string? server = ranked.ServerName ?? (hasDef ? def.Server : null);
+                int invocations = invCounts.GetValueOrDefault(ranked.ToolName);
+                int errors = errCounts.GetValueOrDefault(ranked.ToolName);
+                int turnsResident = hasDef && schemaTokens > 0 && ranked.CostTokens >= schemaTokens
+                    ? (int)Math.Min(int.MaxValue, Math.Max(def.SpanIds.Count, ranked.CostTokens / schemaTokens))
+                    : (turnCount > 0 ? turnCount : (hasDef ? def.SpanIds.Count : 0));
+                result.Add(new ReadTimeSessionToolSummary(
+                    Name: ranked.ToolName,
+                    Server: server,
+                    SchemaTokens: schemaTokens,
+                    Invocations: invocations,
+                    TurnsResident: turnsResident,
+                    Errors: errors,
+                    TotalSchemaCost: ranked.CostTokens,
+                    Invoked: ranked.Invoked || invocations > 0));
+            }
+        }
+
+        List<ReadTimeSessionToolSummary> remainingDefinitions = [];
+        foreach (KeyValuePair<string, (long SchemaTokens, string? Server, HashSet<string> SpanIds)> kv in defStats)
+        {
+            if (!seenNames.Add(kv.Key))
+            {
+                continue;
+            }
+
+            int turnsResident = turnCount > 0 ? turnCount : kv.Value.SpanIds.Count;
+            long totalSchemaCost = kv.Value.SchemaTokens * turnsResident;
+            int invocations = invCounts.GetValueOrDefault(kv.Key);
+            int errors = errCounts.GetValueOrDefault(kv.Key);
+            remainingDefinitions.Add(new ReadTimeSessionToolSummary(
+                Name: kv.Key,
+                Server: kv.Value.Server,
+                SchemaTokens: kv.Value.SchemaTokens,
+                Invocations: invocations,
+                TurnsResident: turnsResident,
+                Errors: errors,
+                TotalSchemaCost: totalSchemaCost,
+                Invoked: invocations > 0));
+        }
+
+        remainingDefinitions.Sort(static (left, right) =>
+        {
+            int cmp = right.TotalSchemaCost.CompareTo(left.TotalSchemaCost);
+            return cmp != 0 ? cmp : string.CompareOrdinal(left.Name, right.Name);
+        });
+        result.AddRange(remainingDefinitions);
+
+        foreach (string invokedName in toolsInvoked)
+        {
+            if (!seenNames.Add(invokedName))
+            {
+                continue;
+            }
+
+            result.Add(new ReadTimeSessionToolSummary(
+                Name: invokedName,
+                Server: null,
+                SchemaTokens: 0L,
+                Invocations: invCounts.GetValueOrDefault(invokedName),
+                TurnsResident: 0,
+                Errors: errCounts.GetValueOrDefault(invokedName),
+                TotalSchemaCost: 0L,
+                Invoked: true));
+        }
+
+        return result;
+    }
+
+    private protected static List<ReadTimeSessionServerSummary> BuildReaderServerSummaries(
+        StoredSessionProjection? projection,
+        IReadOnlyList<ReadTimeSessionToolSummary> tools)
+    {
+        List<string> orderedServers = [];
+        HashSet<string> seenServers = new(StringComparer.Ordinal);
+
+        if (projection?.Schema is not null)
+        {
+            foreach (StoredSchemaServerTokens server in projection.Schema.Servers)
+            {
+                if (seenServers.Add(server.ServerName))
+                {
+                    orderedServers.Add(server.ServerName);
+                }
+            }
+        }
+
+        Dictionary<string, long> remainingByCost = new(StringComparer.Ordinal);
+        foreach (ReadTimeSessionToolSummary tool in tools)
+        {
+            if (tool.Server is null || seenServers.Contains(tool.Server))
+            {
+                continue;
+            }
+
+            remainingByCost[tool.Server] = remainingByCost.GetValueOrDefault(tool.Server) + tool.TotalSchemaCost;
+        }
+
+        foreach (KeyValuePair<string, long> pair in remainingByCost
+            .OrderByDescending(static kv => kv.Value)
+            .ThenBy(static kv => kv.Key, StringComparer.Ordinal))
+        {
+            if (seenServers.Add(pair.Key))
+            {
+                orderedServers.Add(pair.Key);
+            }
+        }
+
+        List<ReadTimeSessionServerSummary> summaries = new(orderedServers.Count);
+        foreach (string server in orderedServers)
+        {
+            int toolCount = 0;
+            long schemaTokens = 0;
+            int invocations = 0;
+            int unusedTools = 0;
+            long unusedCost = 0;
+
+            foreach (ReadTimeSessionToolSummary tool in tools)
+            {
+                if (!string.Equals(tool.Server, server, StringComparison.Ordinal))
+                {
+                    continue;
+                }
+
+                toolCount++;
+                schemaTokens += tool.SchemaTokens;
+                invocations += tool.Invocations;
+                if (!tool.Invoked)
+                {
+                    unusedTools++;
+                    unusedCost += tool.TotalSchemaCost;
+                }
+            }
+
+            summaries.Add(new ReadTimeSessionServerSummary(
+                Server: server,
+                IsMcp: true,
+                Tools: toolCount,
+                SchemaTokens: schemaTokens,
+                Invocations: invocations,
+                UnusedTools: unusedTools,
+                UnusedCost: unusedCost));
+        }
+
+        return summaries;
+    }
+
+    private protected static List<ReadTimeSessionRequestSummary> BuildReaderRequestSummaries(
+        IReadOnlyList<string> requestSpanIds,
+        IReadOnlyList<CollectedRecord> records,
+        IReadOnlyDictionary<string, CollectedRecord> recordsBySpanId,
+        IReadOnlyList<(int Position, CollectedRecord Record)> turnEntries)
+    {
+        List<ReadTimeSessionRequestSummary> summaries = new(requestSpanIds.Count);
+        foreach (string requestSpanId in requestSpanIds)
+        {
+            HashSet<string> subtree = CollectReaderDescendantSpanIds(requestSpanId, records);
+            List<CollectedRecord> ownedTurns = [];
+            foreach ((int _, CollectedRecord turnRecord) in turnEntries)
+            {
+                if (subtree.Contains(turnRecord.RecordId))
+                {
+                    ownedTurns.Add(turnRecord);
+                }
+            }
+
+            CollectedRecord? requestRecord = recordsBySpanId.GetValueOrDefault(requestSpanId);
+            string? model = requestRecord?.Model;
+            if (string.IsNullOrEmpty(model))
+            {
+                foreach (CollectedRecord ownedTurn in ownedTurns)
+                {
+                    if (!string.IsNullOrEmpty(ownedTurn.Model))
+                    {
+                        model = ownedTurn.Model;
+                        break;
+                    }
+                }
+            }
+
+            string timestampUtc = requestRecord is not null
+                ? FormatTimestamp(requestRecord.StartedAt)
+                : (ownedTurns.Count > 0 ? FormatTimestamp(ownedTurns[0].StartedAt) : string.Empty);
+
+            string? promptPreview = ExtractReaderPromptPreview(requestRecord, ownedTurns);
+            summaries.Add(new ReadTimeSessionRequestSummary(
+                RequestSpanId: requestSpanId,
+                TimestampUtc: timestampUtc,
+                Turns: ownedTurns.Count,
+                Model: model,
+                PromptPreview: promptPreview));
+        }
+
+        return summaries;
+    }
+
+    private protected static HashSet<string> CollectReaderDescendantSpanIds(string rootSpanId, IReadOnlyList<CollectedRecord> records)
+    {
+        Dictionary<string, List<string>> childrenByParent = new(StringComparer.Ordinal);
+        foreach (CollectedRecord record in records)
+        {
+            if (string.IsNullOrEmpty(record.ParentRecordId))
+            {
+                continue;
+            }
+
+            if (!childrenByParent.TryGetValue(record.ParentRecordId, out List<string>? children))
+            {
+                children = [];
+                childrenByParent[record.ParentRecordId] = children;
+            }
+
+            children.Add(record.RecordId);
+        }
+
+        HashSet<string> visited = new(StringComparer.Ordinal) { rootSpanId };
+        Queue<string> pending = new();
+        pending.Enqueue(rootSpanId);
+
+        while (pending.Count > 0)
+        {
+            string current = pending.Dequeue();
+            if (!childrenByParent.TryGetValue(current, out List<string>? children))
+            {
+                continue;
+            }
+
+            foreach (string child in children)
+            {
+                if (visited.Add(child))
+                {
+                    pending.Enqueue(child);
+                }
+            }
+        }
+
+        return visited;
+    }
+
+    private protected static string? ExtractReaderPromptPreview(
+        CollectedRecord? requestRecord,
+        IReadOnlyList<CollectedRecord> ownedTurns)
+    {
+        if (requestRecord is not null && HasReaderPromptParts(requestRecord.Parts))
+        {
+            return ExtractReaderPromptFromParts(requestRecord.Parts);
+        }
+
+        foreach (CollectedRecord ownedTurn in ownedTurns)
+        {
+            if (HasReaderPromptParts(ownedTurn.Parts))
+            {
+                return ExtractReaderPromptFromParts(ownedTurn.Parts);
+            }
+        }
+
+        return null;
+    }
+
+    private protected static bool HasReaderPromptParts(IReadOnlyList<CollectedContentPart> parts)
+    {
+        foreach (CollectedContentPart part in parts)
+        {
+            if (part.Bucket is ContentBucket.UserPrompt or ContentBucket.UserMessage or ContentBucket.ConversationHistory)
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    private protected static string? ExtractReaderPromptFromParts(IReadOnlyList<CollectedContentPart> parts)
+    {
+        ContentBucket[] priorityBuckets =
+        [
+            ContentBucket.UserPrompt,
+            ContentBucket.UserMessage,
+            ContentBucket.ConversationHistory,
+        ];
+
+        foreach (ContentBucket targetBucket in priorityBuckets)
+        {
+            foreach (CollectedContentPart part in parts)
+            {
+                if (part.Bucket != targetBucket)
+                {
+                    continue;
+                }
+
+                if (part.PlainText is null)
+                {
+                    return null;
+                }
+
+                string trimmed = part.PlainText.Trim();
+                if (trimmed.Length == 0)
+                {
+                    continue;
+                }
+
+                return TruncateReaderSurrogateSafe(trimmed, 200);
+            }
+        }
+
+        return null;
+    }
+
+    private protected static string TruncateReaderSurrogateSafe(string text, int maxLength)
+    {
+        if (text.Length <= maxLength)
+        {
+            return text;
+        }
+
+        int cut = maxLength;
+        if (cut > 0 && char.IsHighSurrogate(text[cut - 1]))
+        {
+            cut--;
+        }
+
+        return text[..cut];
+    }
+
+    private protected static List<SubagentSession> BuildReaderSubagentSummaries(
+        StoredSessionProjection? projection,
+        IReadOnlyList<CollectedRecord> records,
+        IReadOnlyDictionary<string, CollectedRecord> recordsBySpanId)
+    {
+        if (projection is not null)
+        {
+            if (projection.TimelineSubagentSpanIds is null || projection.TimelineSubagentSpanIds.Count == 0)
+            {
+                return [];
+            }
+
+            List<SubagentSession> projected = new(projection.TimelineSubagentSpanIds.Count);
+            foreach (string spanId in projection.TimelineSubagentSpanIds)
+            {
+                if (recordsBySpanId.TryGetValue(spanId, out CollectedRecord? record))
+                {
+                    projected.Add(new SubagentSession(
+                        SpanId: record.RecordId,
+                        ParentSpanId: record.Agent?.SpawningCallId ?? record.ParentRecordId,
+                        Name: record.Agent?.AgentName ?? record.Name));
+                }
+            }
+
+            return projected;
+        }
+
+        return
+        [
+            .. records
+                .Where(static r => r.Op == RecordOp.AgentInvoke)
+                .OrderBy(static r => r.StartedAt)
+                .ThenBy(static r => r.RecordId, StringComparer.Ordinal)
+                .Select(static r => new SubagentSession(
+                    SpanId: r.RecordId,
+                    ParentSpanId: r.Agent?.SpawningCallId ?? r.ParentRecordId,
+                    Name: r.Agent?.AgentName ?? r.Name)),
+        ];
+    }
+
+    private protected static ReadTimeAuxiliarySummary BuildReaderAuxiliarySummary(
+        StoredSessionProjection? projection,
+        IReadOnlyList<CollectedRecord> records,
+        IReadOnlyDictionary<string, CollectedRecord> recordsBySpanId,
+        string harnessId,
+        IModelPricingLookup? pricing,
+        List<Problem> problems)
+    {
+        List<string> spanIds;
+        if (projection is not null)
+        {
+            spanIds = projection.TimelineAuxiliarySpanIds is { Count: > 0 }
+                ? [.. projection.TimelineAuxiliarySpanIds]
+                : [];
+        }
+        else
+        {
+            spanIds =
+            [
+                .. records
+                    .Where(static r => IsReaderAuxiliaryRecord(r))
+                    .OrderBy(static r => r.StartedAt)
+                    .ThenBy(static r => r.RecordId, StringComparer.Ordinal)
+                    .Select(static r => r.RecordId),
+            ];
+        }
+
+        List<CostBlock> reportedBlocks = [];
+        List<CostBlock> publishedBlocks = [];
+        foreach (string spanId in spanIds)
+        {
+            if (!recordsBySpanId.TryGetValue(spanId, out CollectedRecord? record))
+            {
+                continue;
+            }
+
+            if (record.ReportedCost is not null)
+            {
+                IReadOnlyDictionary<string, double>? byModel = !string.IsNullOrEmpty(record.Model)
+                    ? new Dictionary<string, double>(StringComparer.Ordinal) { [record.Model] = record.ReportedCost.Amount }
+                    : null;
+                reportedBlocks.Add(new CostBlock(
+                    CostBasis.Harness,
+                    CostStatus.Priced,
+                    record.ReportedCost.Amount,
+                    record.ReportedCost.Currency,
+                    byModel));
+            }
+
+            long? freshInput = TryFindReaderTokenCount(record.Tokens, TokenClass.Input);
+            long? cacheRead = TryFindReaderTokenCount(record.Tokens, TokenClass.CacheRead);
+            long? cacheCreation = TryFindReaderTokenCount(record.Tokens, TokenClass.CacheWrite);
+            long? output = TryFindReaderTokenCount(record.Tokens, TokenClass.Output);
+            long? reasoning = TryFindReaderTokenCount(record.Tokens, TokenClass.Reasoning);
+            publishedBlocks.Add(PriceReportedTokens(freshInput, cacheRead, cacheCreation, output, reasoning, record, harnessId, pricing));
+        }
+
+        ReadTimeCostSummary? reportedCost = reportedBlocks.Count > 0
+            ? AggregateReaderCostBlocks(reportedBlocks, CostBasis.Harness, problems)
+            : null;
+        ReadTimeCostSummary publishedCost = publishedBlocks.Count > 0
+            ? AggregateReaderCostBlocks(publishedBlocks, CostBasis.Published, problems)
+            : new ReadTimeCostSummary(CostBasis.Unknown, CostStatus.NoRate, null, null, []);
+
+        return new ReadTimeAuxiliarySummary(spanIds, reportedCost, publishedCost);
+    }
+
+    private protected static bool IsReaderAuxiliaryRecord(CollectedRecord record)
+    {
+        string trimmed = record.Name.Trim();
+        if (string.Equals(trimmed, "title", StringComparison.OrdinalIgnoreCase) ||
+            trimmed.Contains("xtabprovider", StringComparison.OrdinalIgnoreCase))
+        {
+            return true;
+        }
+
+        string? agentName = record.Agent?.AgentName;
+        return !string.IsNullOrEmpty(agentName) &&
+               (string.Equals(agentName.Trim(), "title", StringComparison.OrdinalIgnoreCase) ||
+                agentName.Contains("xtabprovider", StringComparison.OrdinalIgnoreCase));
+    }
+
+    private protected static ReadTimeContextBucketSummary BuildReaderContextBucketSummary(
+        StoredSessionContextTurn contextTurn,
+        IReadOnlyList<(int Position, CollectedRecord Record)> turnEntries)
+    {
+        long? reportedInput = null;
+        foreach ((int position, CollectedRecord record) in turnEntries)
+        {
+            if (position == contextTurn.Position)
+            {
+                reportedInput = record.ReportedInputTokens;
+                break;
+            }
+        }
+
+        List<ReadTimeContextBucketTokens> buckets =
+        [
+            .. contextTurn.Buckets.Select(static b => new ReadTimeContextBucketTokens(b.Bucket, b.Tokens)),
+        ];
+
+        return new ReadTimeContextBucketSummary(buckets, reportedInput);
+    }
+
+    private protected static UnusedSchemaRange? ResolveReaderUnusedRange(
+        StoredSessionProjection? projection,
+        string harnessId,
+        IReadOnlyList<string> models,
+        IModelPricingLookup? pricing)
+    {
+        if (projection?.Schema?.UnusedTokenResidencies is not long residencies)
+        {
+            return null;
+        }
+
+        string? primaryModel = models.Count > 0 ? models[0] : null;
+        if (!string.IsNullOrEmpty(primaryModel))
+        {
+            UnusedSchemaRange? resolved = CanonPricing.IsCopilotHarness(harnessId)
+                ? ResolveCopilotUnusedRange(primaryModel, residencies)
+                : CanonPricing.IsPublishedTableHarness(harnessId) && !CanonPricing.IsFlatRateModel(primaryModel)
+                    ? ResolvePublishedUnusedRange(primaryModel, residencies, pricing)
+                    : null;
+            if (resolved is not null)
+            {
+                return resolved;
+            }
+        }
+
+        return new UnusedSchemaRange(residencies, 0, residencies, null);
+    }
+
+    private protected static UnusedSchemaRange? ResolveCopilotUnusedRange(string primaryModel, long residencies)
+    {
+        if (CanonPricing.CopilotCreditsTable.PublishedRates is not null &&
+            CanonPricing.CopilotCreditsTable.PublishedRates.TryGetValue(primaryModel, out TableRate? tableRate) &&
+            tableRate.Billed)
+        {
+            RateTier? firstTier = tableRate.Tiers is { Count: > 0 } ? tableRate.Tiers[0] : null;
+            double freshRate = firstTier?.InputRate ?? tableRate.InputRate;
+            double cacheReadRate = (firstTier?.CacheReadRate ?? tableRate.CacheReadRate) ?? freshRate;
+            if (freshRate > 0 || cacheReadRate > 0)
+            {
+                double cacheBound = (residencies * cacheReadRate) / CanonPricing.TokensPerMillion;
+                double freshBound = (residencies * freshRate) / CanonPricing.TokensPerMillion;
+                return new UnusedSchemaRange(
+                    TokenResidencies: residencies,
+                    Floor: Math.Min(cacheBound, freshBound),
+                    Ceiling: Math.Max(cacheBound, freshBound),
+                    Currency: CanonPricing.CopilotCreditsTable.Currency ?? "USD");
+            }
+        }
+
+        return null;
+    }
+
+    private protected static UnusedSchemaRange? ResolvePublishedUnusedRange(
+        string primaryModel,
+        long residencies,
+        IModelPricingLookup? pricing)
+    {
+        ModelCosts? costs = CanonPricing.GetModelCosts(primaryModel, pricing);
+        if (costs is not null && (costs.InputCostPerToken > 0 || costs.CacheReadCostPerToken > 0))
+        {
+            double cacheRate = costs.CacheReadCostPerToken > 0 ? costs.CacheReadCostPerToken : costs.InputCostPerToken;
+            double freshRate = costs.InputCostPerToken > 0 ? costs.InputCostPerToken : costs.CacheReadCostPerToken;
+            double cacheBound = residencies * cacheRate;
+            double freshBound = residencies * freshRate;
+            return new UnusedSchemaRange(
+                TokenResidencies: residencies,
+                Floor: Math.Min(cacheBound, freshBound),
+                Ceiling: Math.Max(cacheBound, freshBound),
+                Currency: "USD");
+        }
+
+        return null;
+    }
+
+    /// <summary>Executes a parameterized read; a seam for observing the statements a read issues.</summary>
+    /// <typeparam name="T">Mapped row type.</typeparam>
+    /// <param name="sql">SQL text whose values are supplied as <c>$name</c> parameters.</param>
+    /// <param name="parameters">Parameter values keyed by their <c>$name</c> marker.</param>
+    /// <param name="map">Maps one row.</param>
+    protected virtual IReadOnlyList<T> QueryRows<T>(
+        string sql,
+        IReadOnlyDictionary<string, object?> parameters,
+        Func<SqliteDataReader, T> map)
+    {
+        ArgumentNullException.ThrowIfNull(sql);
+        ArgumentNullException.ThrowIfNull(parameters);
+        ArgumentNullException.ThrowIfNull(map);
+        EnsureDatabaseDirectoryIfMissing();
+        return Query(sql, parameters, map);
+    }
+
+    /// <summary>Binds one value to the query and returns its <c>$pN</c> marker.</summary>
+    private protected static string Bind(Dictionary<string, object?> parameters, object? value)
+    {
+        ArgumentNullException.ThrowIfNull(parameters);
+        string name = "$p" + parameters.Count.ToString(CultureInfo.InvariantCulture);
+        parameters.Add(name, value);
+        return name;
+    }
+
+    private protected static int ParseInt32Required(string cell, string columnName)
+    {
+        if (int.TryParse(cell, NumberStyles.Integer, CultureInfo.InvariantCulture, out int value))
+        {
+            return value;
+        }
+
+        throw new StoredDataException($"Invalid 32-bit integer value '{cell}' for '{columnName}'.");
+    }
+
+    private protected static bool ParseBoolFlag(string cell, string columnName) => cell switch
+    {
+        "0" => false,
+        "1" => true,
+        _ => throw new StoredDataException($"Invalid boolean flag '{cell}' for '{columnName}'."),
+    };
+
+    private protected static string? ReadNullableString(SqliteDataReader reader, string columnName)
+    {
+        int ordinal = reader.GetOrdinal(columnName);
+        return reader.IsDBNull(ordinal) ? null : reader.GetString(ordinal);
+    }
+
+    private protected static long? ReadNullableInt64(SqliteDataReader reader, string columnName)
+    {
+        int ordinal = reader.GetOrdinal(columnName);
+        return reader.IsDBNull(ordinal) ? null : reader.GetInt64(ordinal);
+    }
+
+    private protected static double? ReadNullableDouble(SqliteDataReader reader, string columnName)
+    {
+        int ordinal = reader.GetOrdinal(columnName);
+        return reader.IsDBNull(ordinal) ? null : reader.GetDouble(ordinal);
+    }
+
+    private protected static DateTimeOffset ParseTimestampRequired(string text, string columnName)
+    {
+        if (DateTimeOffset.TryParse(text, CultureInfo.InvariantCulture, DateTimeStyles.RoundtripKind, out DateTimeOffset parsed))
+        {
+            return parsed.ToUniversalTime();
+        }
+
+        throw new StoredDataException($"Invalid ISO-8601 timestamp '{text}' for '{columnName}'.");
+    }
+
+    private protected static SourceKind ParseSourceKind(string value) => value switch
+    {
+        "file" => SourceKind.File,
+        "otlp" => SourceKind.Otlp,
+        _ => throw new StoredDataException($"Unrecognized source_kind '{value}'."),
+    };
+
+    private protected static RecordOp ParseRecordOp(string value) => value switch
+    {
+        "llm.invoke" => RecordOp.LlmInvoke,
+        "tool.invoke" => RecordOp.ToolInvoke,
+        "agent.invoke" => RecordOp.AgentInvoke,
+        "unspecified" => RecordOp.Unspecified,
+        _ => throw new StoredDataException($"Unrecognized record.op '{value}'."),
+    };
+
+    private protected static RecordKind ParseRecordKind(string value) => value switch
+    {
+        "unspecified" => RecordKind.Unspecified,
+        "internal" => RecordKind.Internal,
+        "server" => RecordKind.Server,
+        "client" => RecordKind.Client,
+        "producer" => RecordKind.Producer,
+        "consumer" => RecordKind.Consumer,
+        _ => throw new StoredDataException($"Unrecognized record.kind '{value}'."),
+    };
+
+    private protected static RecordStatus ParseRecordStatus(string value) => value switch
+    {
+        "unset" => RecordStatus.Unset,
+        "ok" => RecordStatus.Ok,
+        "error" => RecordStatus.Error,
+        "unspecified" => RecordStatus.Unspecified,
+        _ => throw new StoredDataException($"Unrecognized record.status '{value}'."),
+    };
+
+    private protected static TokenClass ParseTokenClass(string value) => value switch
+    {
+        "input" => TokenClass.Input,
+        "cache_read" => TokenClass.CacheRead,
+        "cache_write" => TokenClass.CacheWrite,
+        "output" => TokenClass.Output,
+        "reasoning" => TokenClass.Reasoning,
+        "total" => TokenClass.Total,
+        _ => throw new StoredDataException($"Unrecognized token_class '{value}'."),
+    };
+
+    private protected static ContentBucket ParseContentBucket(string value) => value switch
+    {
+        "system_prompt" => ContentBucket.SystemPrompt,
+        "tool_definitions" => ContentBucket.ToolDefinitions,
+        "tool_definition" => ContentBucket.ToolDefinition,
+        "instruction_context" => ContentBucket.InstructionContext,
+        "conversation_history" => ContentBucket.ConversationHistory,
+        "tool_result_content" => ContentBucket.ToolResultContent,
+        "user_prompt" => ContentBucket.UserPrompt,
+        "user_message" => ContentBucket.UserMessage,
+        "reasoning" => ContentBucket.Reasoning,
+        _ => throw new StoredDataException($"Unrecognized content_part.bucket '{value}'."),
+    };
+
+    private protected static ReportedTotalDirection ParseReportedDirection(string value) => value switch
+    {
+        "input" => ReportedTotalDirection.Input,
+        "output" => ReportedTotalDirection.Output,
+        _ => throw new StoredDataException($"Unrecognized record_reported_total.direction '{value}'."),
+    };
+
+    private protected static ProblemSeverity ParseProblemSeverityValue(string value)
+    {
+        if (string.Equals(value, "error", StringComparison.OrdinalIgnoreCase))
+        {
+            return ProblemSeverity.Error;
+        }
+
+        if (string.Equals(value, "warning", StringComparison.OrdinalIgnoreCase))
+        {
+            return ProblemSeverity.Warning;
+        }
+
+        throw new StoredDataException($"Unrecognized ingest_problem.severity '{value}'.");
+    }
+
+    private protected static List<T> GetOrCreateList<TKey, T>(Dictionary<TKey, List<T>> map, TKey key)
+        where TKey : notnull
+    {
+        if (!map.TryGetValue(key, out List<T>? list))
+        {
+            list = [];
+            map[key] = list;
+        }
+
+        return list;
+    }
+
+    /// <summary>
+    /// Prices a turn from the classes and reported totals that were stored.
+    /// The rule lives in <see cref="CanonPricing.PriceStoredTokens"/> so the
+    /// in-memory store prices the same way.
+    /// </summary>
+    private protected static CostBlock PriceReportedTokens(
+        long? freshInput,
+        long? cacheRead,
+        long? cacheCreation,
+        long? output,
+        long? reasoning,
+        CollectedRecord record,
+        string harnessId,
+        IModelPricingLookup? pricing)
+    {
+        return CanonPricing.PriceStoredTokens(
+            freshInput,
+            cacheRead,
+            cacheCreation,
+            output,
+            reasoning,
+            record.ReportedInputTokens,
+            record.ReportedOutputTokens,
+            record.Model,
+            harnessId,
+            pricing);
+    }
+
+    private protected record RawRecordHeader(
+        string SpanId,
+        string HarnessId,
+        RecordOp Op,
+        RecordKind Kind,
+        string Name,
+        DateTimeOffset StartedAt,
+        RecordStatus Status,
+        string? SessionKey,
+        string? ParentSpanId,
+        string? TraceId,
+        string? Model,
+        DateTimeOffset? EndedAt,
+        long? ReportedDurationMs,
+        CollectedCost? ReportedCost,
+        string? AgentInstanceId,
+        CollectedRecordSignals Signals,
+        long? ReportedInputTokens,
+        long? ReportedOutputTokens,
+        string SourceName,
+        string? ResponseId,
+        string? RequestId);
+
+    private protected record RawSessionHeader(
+        string SessionId,
+        string HarnessId,
+        string NativeId,
+        CollectedWorkspace? Workspace,
+        string? Title);
+
+    /// <summary>
+    /// What a session's list figure takes from its projection: the number of request spans, which
+    /// a figure prefers over its record-derived request count, and the stored turn entries.
+    /// </summary>
+    private protected record SessionListProjectionShape(
+        int RequestSpanCount,
+        IReadOnlyList<StoredSessionTurn> Turns);
+
+    private protected record RawContextHeader(
+        long ContextLimit,
+        string ContextLimitSource,
+        long ResidualTotal,
+        double FreshJumpFactor,
+        double AccumulationRate);
+
+    private protected record RawFindingHeader(
+        string FindingId,
+        string DetectorId,
+        string Title,
+        string Mechanism,
+        string Confidence,
+        string Recommendation,
+        string OutcomeRiskCaveat,
+        double RankScore,
+        long? EstimatedWasteTokens,
+        FindingErrorBar? ErrorBar,
+        string? RunId,
+        string? SessionId,
+        string? MeasurementClass,
+        string? ConfidenceBasis,
+        string? WhatWouldRaiseIt,
+        StoredCompactionHazard? CompactionHazard);
+
+    private protected record RawContextTurnHeader(
+        int Position,
+        long InputTokens,
+        long BucketedTokens,
+        long ResidualTokens,
+        string ResidualAttribution,
+        long BuiltinToolDefinitionTokens,
+        long FreshInput,
+        long? Headroom,
+        double? Pressure,
+        double? AccumulationRate,
+        long? StrippedBlockCount,
+        long? StrippedTokens,
+        long? PreviousFreshInput,
+        double? FreshJumpFactor,
+        long? NonResidentTokens);
+}
+
+/// <summary>
+/// Session, record, projection, and aggregate queries over a SQLite relational store.
+/// </summary>
+public abstract class SqliteRelationalStoreReadQueryBase : SqliteRelationalStoreReadBase
+{
+    /// <summary>Initializes the query half over <paramref name="databasePath"/>.</summary>
+    /// <param name="databasePath">Path to the SQLite database file.</param>
+    /// <param name="circuitBreaker">Circuit breaker guarding every <c>sqlite3</c> invocation.</param>
+    /// <param name="fileSystem">Filesystem seam; defaults to <see cref="PhysicalRelationalStoreFileSystem.Instance"/> when <see langword="null"/>.</param>
+    protected SqliteRelationalStoreReadQueryBase(
+        string databasePath,
+        ICircuitBreaker circuitBreaker,
+        IRelationalStoreFileSystem? fileSystem)
+        : base(databasePath, circuitBreaker, fileSystem)
+    {
+    }
+
     /// <summary>
     /// Joins a record (alias <c>r</c>) to its source row. An inner join, because
     /// <c>record.source_id</c> is a required foreign key: a record always has a source, and one
     /// whose source is deleted is cascaded away with it.
     /// </summary>
-    private const string RecordSourceJoin = "JOIN source src ON src.source_id = r.source_id ";
+    private protected const string RecordSourceJoin = "JOIN source src ON src.source_id = r.source_id ";
 
     /// <summary>Left-joins a record (alias <c>r</c>) to its optional response-id and request-id rows.</summary>
-    private const string RecordJoinIdJoin =
+    private protected const string RecordJoinIdJoin =
         "LEFT JOIN record_response_id rrid ON rrid.span_id = r.span_id " +
         "LEFT JOIN record_request_id rqid ON rqid.span_id = r.span_id ";
 
@@ -31,7 +1092,7 @@ public partial class SqliteRelationalStore : IRelationalStoreReader
     /// satellites, with no child collection. The full projection read and the paged header reads
     /// select the same fifteen columns, so both parse one row shape.
     /// </summary>
-    private const string SessionProjectionHeaderColumns =
+    private protected const string SessionProjectionHeaderColumns =
         "sp.session_id, sp.label, sp.is_subagent, sp.span_count, " +
         "sp.started_at_utc, sp.ended_at_utc, " +
         "spp.parent_session_id, " +
@@ -41,7 +1102,7 @@ public partial class SqliteRelationalStore : IRelationalStoreReader
         "ssu.reason";
 
     /// <summary>The single-row satellites <see cref="SessionProjectionHeaderColumns"/> reads, joined on <c>sp.session_id</c>.</summary>
-    private const string SessionProjectionHeaderJoins =
+    private protected const string SessionProjectionHeaderJoins =
         "LEFT JOIN session_projection_parent spp ON spp.session_id = sp.session_id " +
         "LEFT JOIN session_projection_agent spa ON spa.session_id = sp.session_id " +
         "LEFT JOIN session_projection_included_in_parent spip ON spip.session_id = sp.session_id " +
@@ -49,7 +1110,7 @@ public partial class SqliteRelationalStore : IRelationalStoreReader
         "LEFT JOIN session_schema_unmeasurable ssu ON ssu.session_id = sp.session_id";
 
     /// <summary>The scalar record columns the broad and content-free record reads select.</summary>
-    private const string RecordReadColumns =
+    private protected const string RecordReadColumns =
         "r.span_id, r.harness_id, r.op, r.kind, r.name, r.started_at_utc, r.status, " +
         "rsl.session_key, rp.parent_span_id, rt.trace_id, rm.model_id, re.ended_at_utc, rrd.duration_ms, " +
         "rrc.amount, rrc.currency, rai.agent_instance_id, rerr.message AS error_message, " +
@@ -59,7 +1120,7 @@ public partial class SqliteRelationalStore : IRelationalStoreReader
         "src.source_kind, src.harness_id AS source_harness_id, src.locator";
 
     /// <summary>The joins <see cref="RecordReadColumns"/> needs, from <c>record r</c>.</summary>
-    private const string RecordReadFrom =
+    private protected const string RecordReadFrom =
         "FROM record r " +
         RecordSourceJoin +
         RecordJoinIdJoin +
@@ -83,8 +1144,2379 @@ public partial class SqliteRelationalStore : IRelationalStoreReader
     /// parent chain that loops back to itself. No acyclic session outlives as many rounds as the
     /// store has projections.
     /// </summary>
-    private const string CyclicSessionSet =
+    private protected const string CyclicSessionSet =
         "(SELECT session_id FROM keep WHERE round = (SELECT COUNT(*) FROM session_projection) + 1)";
+
+    /// <summary>
+    /// Reads the eleven projection header columns <see cref="SessionProjectionHeaderColumns"/>
+    /// selects, starting at <paramref name="startIndex"/>.
+    /// </summary>
+    /// <param name="reader">Reader positioned on a header row.</param>
+    /// <param name="startIndex">Index of the session id column.</param>
+    /// <returns>The projection header.</returns>
+    private protected static StoredSessionHeader ReadSessionHeader(SqliteDataReader reader, int startIndex) => new(
+        reader.GetString(startIndex),
+        reader.GetString(startIndex + 1),
+        reader.GetInt64(startIndex + 2) == 1L,
+        reader.GetInt32(startIndex + 3),
+        reader.GetString(startIndex + 4),
+        reader.GetString(startIndex + 5),
+        reader.IsDBNull(startIndex + 6) ? null : reader.GetString(startIndex + 6),
+        reader.IsDBNull(startIndex + 7) ? null : reader.GetString(startIndex + 7),
+        reader.GetInt64(startIndex + 8) == 1L,
+        reader.IsDBNull(startIndex + 9) ? null : reader.GetString(startIndex + 9),
+        reader.IsDBNull(startIndex + 10) ? null : reader.GetString(startIndex + 10));
+
+    /// <summary>Builds the <c>IN (…)</c> list that binds <paramref name="keys"/> as parameters.</summary>
+    /// <param name="keys">Text keys to bind; never empty.</param>
+    /// <param name="parameters">Parameter values the list binds.</param>
+    /// <returns>The comma-separated parameter markers.</returns>
+    private protected static string SessionKeyListFilter(IReadOnlyCollection<string> keys, Dictionary<string, object?> parameters) =>
+        string.Join(", ", keys.Select(key => Bind(parameters, key)));
+
+    /// <summary>
+    /// The most session keys one statement binds. A statement may use its key list twice, so this keeps it
+    /// under 500 variables, the limit of the system SQLite macOS ships, however many sessions the store holds.
+    /// </summary>
+    private protected const int MaxKeysPerStatement = 240;
+
+    /// <summary>
+    /// Reads the session rows for <paramref name="keys"/> in storage order, as one statement would, binding at
+    /// most <see cref="MaxKeysPerStatement"/> keys per statement. Past one chunk the keys are first put in storage
+    /// order, so each chunk's rows (read in storage order) concatenate in the order a single read returns.
+    /// </summary>
+    /// <param name="keys">Distinct session keys.</param>
+    /// <returns>The sessions found, in storage order.</returns>
+    private protected IReadOnlyList<CollectedSession> QuerySessionsByKeys(IReadOnlyList<string> keys)
+    {
+        if (keys.Count <= MaxKeysPerStatement)
+        {
+            return QuerySessionChunk(keys);
+        }
+
+        List<(string Key, long RowId)> stored = [];
+        foreach (string[] chunk in keys.Chunk(MaxKeysPerStatement))
+        {
+            Dictionary<string, object?> parameters = new(StringComparer.Ordinal);
+            stored.AddRange(QueryRows<(string Key, long RowId)>(
+                $"SELECT session_id, rowid FROM session WHERE session_id IN ({SessionKeyListFilter(chunk, parameters)})",
+                parameters,
+                static reader => (reader.GetString(0), reader.GetInt64(1))));
+        }
+
+        List<CollectedSession> sessions = new(stored.Count);
+        foreach (string[] chunk in stored.OrderBy(static row => row.RowId).Select(static row => row.Key).Chunk(MaxKeysPerStatement))
+        {
+            sessions.AddRange(QuerySessionChunk(chunk));
+        }
+
+        return sessions;
+    }
+
+    private IReadOnlyList<CollectedSession> QuerySessionChunk(IReadOnlyCollection<string> keys)
+    {
+        Dictionary<string, object?> parameters = new(StringComparer.Ordinal);
+        string filter = SessionKeyListFilter(keys, parameters);
+        return QuerySessions($"s.session_id IN ({filter})", $"u.session_id IN ({filter})", parameters);
+    }
+
+    /// <summary>
+    /// Runs a per-session read over <paramref name="sessionKeys"/> in chunks of at most
+    /// <see cref="MaxKeysPerStatement"/> and merges the per-session results. Each session's rows come from
+    /// one chunk, so merging never splits a session.
+    /// </summary>
+    /// <typeparam name="TValue">What the read returns per session.</typeparam>
+    /// <param name="sessionKeys">Session keys to read.</param>
+    /// <param name="read">The read for one chunk of keys.</param>
+    /// <returns>The merged results, by session key.</returns>
+    private protected static Dictionary<string, TValue> MergeKeyChunks<TValue>(
+        IReadOnlyList<string> sessionKeys,
+        Func<IReadOnlyList<string>, Dictionary<string, TValue>> read)
+    {
+        if (sessionKeys.Count <= MaxKeysPerStatement)
+        {
+            return read(sessionKeys);
+        }
+
+        Dictionary<string, TValue> merged = new(StringComparer.Ordinal);
+        foreach (string[] chunk in sessionKeys.Distinct(StringComparer.Ordinal).Chunk(MaxKeysPerStatement))
+        {
+            foreach (KeyValuePair<string, TValue> entry in read(chunk))
+            {
+                merged[entry.Key] = entry.Value;
+            }
+        }
+
+        return merged;
+    }
+
+    private protected List<Problem> QuerySessionIngestProblems(string sessionKey)
+    {
+        Dictionary<string, List<Problem>> grouped = QuerySessionIngestProblemsBySession([sessionKey]);
+        return grouped.TryGetValue(sessionKey, out List<Problem>? problems) ? problems : [];
+    }
+
+    private protected Dictionary<string, IReadOnlyList<StoredSessionTurn>> QuerySessionTurnsBySession(IReadOnlyList<string> sessionKeys) =>
+        MergeKeyChunks(sessionKeys, QuerySessionTurnsBySessionChunk);
+
+    private Dictionary<string, IReadOnlyList<StoredSessionTurn>> QuerySessionTurnsBySessionChunk(IReadOnlyList<string> sessionKeys)
+    {
+        Dictionary<string, IReadOnlyList<StoredSessionTurn>> turnsBySession = new(StringComparer.Ordinal);
+        if (sessionKeys.Count == 0)
+        {
+            return turnsBySession;
+        }
+
+        Dictionary<string, object?> parameters = new(StringComparer.Ordinal);
+        string filter = SessionKeyListFilter(sessionKeys, parameters);
+        string sql =
+            "SELECT session_id, position, span_id FROM session_turn " +
+            $"WHERE session_id IN ({filter}) ORDER BY session_id ASC, position ASC";
+        Dictionary<string, List<StoredSessionTurn>> grouped = new(StringComparer.Ordinal);
+        foreach (StoredSessionTurn turn in QueryRows<StoredSessionTurn>(
+                     sql,
+                     parameters,
+                     static reader => new StoredSessionTurn(
+                         reader.GetString(reader.GetOrdinal("session_id")),
+                         reader.GetInt32(reader.GetOrdinal("position")),
+                         reader.GetString(reader.GetOrdinal("span_id")))))
+        {
+            GetOrCreateList(grouped, turn.SessionId).Add(turn);
+        }
+
+        foreach (KeyValuePair<string, List<StoredSessionTurn>> entry in grouped)
+        {
+            turnsBySession[entry.Key] = entry.Value;
+        }
+
+        return turnsBySession;
+    }
+
+    private protected Dictionary<string, List<Problem>> QuerySessionIngestProblemsBySession(IReadOnlyList<string> sessionKeys) =>
+        MergeKeyChunks(sessionKeys, QuerySessionIngestProblemsBySessionChunk);
+
+    private Dictionary<string, List<Problem>> QuerySessionIngestProblemsBySessionChunk(IReadOnlyList<string> sessionKeys)
+    {
+        Dictionary<string, List<Problem>> problemsBySession = new(StringComparer.Ordinal);
+        if (sessionKeys.Count == 0)
+        {
+            return problemsBySession;
+        }
+
+        Dictionary<string, object?> parameters = new(StringComparer.Ordinal);
+        string filter = SessionKeyListFilter(sessionKeys, parameters);
+        string sql =
+            "SELECT att.session_key, " +
+            "ip.severity, ip.code, ip.message, " +
+            "ipl.location, ips.span_id AS problem_span_id, ipst.stack " +
+            "FROM ingest_problem ip " +
+            "LEFT JOIN ingest_problem_location ipl ON ipl.problem_id = ip.problem_id " +
+            "LEFT JOIN ingest_problem_span ips ON ips.problem_id = ip.problem_id " +
+            "LEFT JOIN ingest_problem_stack ipst ON ipst.problem_id = ip.problem_id " +
+            "JOIN (" +
+            $"SELECT session_id AS session_key, problem_id FROM ingest_problem_session WHERE session_id IN ({filter}) UNION " +
+            $"SELECT rsl.session_key AS session_key, psp.problem_id FROM ingest_problem_span psp JOIN record_session_link rsl ON rsl.span_id = psp.span_id WHERE rsl.session_key IN ({filter})" +
+            ") att ON att.problem_id = ip.problem_id " +
+            "ORDER BY att.session_key ASC, ip.problem_id ASC";
+
+        foreach ((string SessionId, Problem Problem) row in QueryRows<(string SessionId, Problem Problem)>(
+                     sql,
+                     parameters,
+                     static reader =>
+                     {
+                         string? location = ReadNullableString(reader, "location") ?? ReadNullableString(reader, "problem_span_id");
+                         return (
+                             reader.GetString(reader.GetOrdinal("session_key")),
+                             new Problem(
+                                 ParseProblemSeverityValue(reader.GetString(reader.GetOrdinal("severity"))),
+                                 reader.GetString(reader.GetOrdinal("code")),
+                                 reader.GetString(reader.GetOrdinal("message")),
+                                 location,
+                                 ReadNullableString(reader, "stack")));
+                     }))
+        {
+            GetOrCreateList(problemsBySession, row.SessionId).Add(row.Problem);
+        }
+
+        return problemsBySession;
+    }
+
+    /// <summary>
+    /// Reads one record row of a record query into a raw record header — the shared parse behind
+    /// both the broad record read and the content-free sessions-list read, so both derive from the
+    /// same scalar columns.
+    /// </summary>
+    /// <param name="reader">Reader positioned on a <see cref="RecordReadColumns"/> row.</param>
+    private protected static RawRecordHeader ReadRawRecordHeader(SqliteDataReader reader)
+    {
+        string? endedRaw = ReadNullableString(reader, "ended_at_utc");
+        DateTimeOffset? endedAt = endedRaw is null ? null : ParseTimestampRequired(endedRaw, "record_end.ended_at_utc");
+        double? costAmount = ReadNullableDouble(reader, "amount");
+        string? costCurrency = ReadNullableString(reader, "currency");
+        CollectedCost? reportedCost = costAmount.HasValue && costCurrency is not null
+            ? new CollectedCost(costAmount.Value, costCurrency)
+            : costAmount.HasValue || costCurrency is not null
+                ? throw new StoredDataException("Partial record_reported_cost row returned.")
+                : null;
+
+        return new RawRecordHeader(
+            reader.GetString(reader.GetOrdinal("span_id")),
+            reader.GetString(reader.GetOrdinal("harness_id")),
+            ParseRecordOp(reader.GetString(reader.GetOrdinal("op"))),
+            ParseRecordKind(reader.GetString(reader.GetOrdinal("kind"))),
+            reader.GetString(reader.GetOrdinal("name")),
+            ParseTimestampRequired(reader.GetString(reader.GetOrdinal("started_at_utc")), "record.started_at_utc"),
+            ParseRecordStatus(reader.GetString(reader.GetOrdinal("status"))),
+            ReadNullableString(reader, "session_key"),
+            ReadNullableString(reader, "parent_span_id"),
+            ReadNullableString(reader, "trace_id"),
+            ReadNullableString(reader, "model_id"),
+            endedAt,
+            ReadNullableInt64(reader, "duration_ms"),
+            reportedCost,
+            ReadNullableString(reader, "agent_instance_id"),
+            new CollectedRecordSignals(
+                ReadNullableString(reader, "error_message"),
+                ReadNullableInt64(reader, "failure_count"),
+                ReadNullableString(reader, "correction_rule"),
+                ReadNullableInt64(reader, "declared_context_window")),
+            ReadNullableInt64(reader, "reported_input"),
+            ReadNullableInt64(reader, "reported_output"),
+            ReadRecordSourceName(reader),
+            ReadNullableString(reader, "response_id"),
+            ReadNullableString(reader, "request_id"));
+    }
+
+    /// <summary>
+    /// Reads the three <see cref="RecordSourceColumns"/> of a record row into the record's source
+    /// name as the projection rules read it: the locator for an OTLP source, or
+    /// <see cref="CanonSynth.FileSourcePrefix"/> followed by the source's harness for a file source.
+    /// </summary>
+    /// <remarks>
+    /// The name comes from the stored <c>source</c> row alone, never from record attributes, so a
+    /// record's source is exactly the batch source it was written under. The file form uses the
+    /// same prefix constant the file synthesizer stamps, which is what the projector's file-source
+    /// test reads.
+    /// </remarks>
+    /// <param name="reader">Reader positioned on a <see cref="RecordReadColumns"/> row.</param>
+    private protected static string ReadRecordSourceName(SqliteDataReader reader)
+    {
+        SourceKind kind = ParseSourceKind(reader.GetString(reader.GetOrdinal("source_kind")));
+        string harnessId = reader.GetString(reader.GetOrdinal("source_harness_id"));
+        string locator = reader.GetString(reader.GetOrdinal("locator"));
+        return kind == SourceKind.File ? CanonSynth.FileSourcePrefix + harnessId : locator;
+    }
+
+    /// <summary>
+    /// Reads every record linked to <paramref name="sessionKeys"/> in one batched, content-free
+    /// pass: the same <c>REC</c> and <c>TOK</c> selects the broad record read runs, plus the
+    /// tool-definition and tool-call metadata selects when
+    /// <paramref name="includeToolMetadata"/> asks for them, with no <c>content_part</c>, tool
+    /// input text, tool result text, agent-invocation, or skill select.
+    /// </summary>
+    /// <param name="sessionKeys">Canonical session keys whose records are read.</param>
+    /// <param name="includeToolMetadata">
+    /// Whether to read the tool-definition and tool-call metadata rows. The session detail and
+    /// summary figures need them; the session list does not, and its payload is answered from
+    /// the projection's ranked schema, so its read stays off the tool tables entirely.
+    /// </param>
+    private protected Dictionary<string, List<CollectedRecord>> QueryContentFreeRecordsBySession(
+        IReadOnlyList<string> sessionKeys,
+        bool includeToolMetadata = false,
+        string? scopedSpanId = null) =>
+        scopedSpanId is not null
+            ? QueryContentFreeRecordsBySessionChunk(sessionKeys, includeToolMetadata, scopedSpanId)
+            : MergeKeyChunks(sessionKeys, chunk => QueryContentFreeRecordsBySessionChunk(chunk, includeToolMetadata, scopedSpanId: null));
+
+    private Dictionary<string, List<CollectedRecord>> QueryContentFreeRecordsBySessionChunk(
+        IReadOnlyList<string> sessionKeys,
+        bool includeToolMetadata,
+        string? scopedSpanId)
+    {
+        Dictionary<string, List<CollectedRecord>> recordsBySession = new(StringComparer.Ordinal);
+        if (sessionKeys.Count == 0 && scopedSpanId is null)
+        {
+            return recordsBySession;
+        }
+
+        // A span-scoped read filters the record tables by that span alone, so the span inspector
+        // pays for one record rather than its session's whole conversation metadata.
+        Dictionary<string, object?> parameters = new(StringComparer.Ordinal);
+        string? spanMarker = scopedSpanId is null ? null : Bind(parameters, scopedSpanId);
+        string keyFilter = SessionKeyListFilter(sessionKeys, parameters);
+        string recordFilter = spanMarker is null
+            ? $" WHERE rsl.session_key IN ({keyFilter})"
+            : $" WHERE r.span_id = {spanMarker}";
+        string tokenFilter = spanMarker is null
+            ? $" WHERE r.span_id IN (SELECT rsl.span_id FROM record_session_link rsl WHERE rsl.session_key IN ({keyFilter}))"
+            : $" WHERE r.span_id = {spanMarker}";
+        string linkedSpanIds = spanMarker is null
+            ? $"(SELECT rsl.span_id FROM record_session_link rsl WHERE rsl.session_key IN ({keyFilter}))"
+            : $"({spanMarker})";
+
+        string recordSql = "SELECT " + RecordReadColumns + " " + RecordReadFrom + recordFilter + " ORDER BY r.rowid ASC";
+        List<RawRecordHeader> rawRecords = [.. QueryRows(recordSql, parameters, ReadRawRecordHeader)];
+
+        Dictionary<string, List<CollectedTokenCount>> tokensBySpan = new(StringComparer.Ordinal);
+        foreach ((string SpanId, TokenClass TokenClass, long Count) row in QueryRows<(string SpanId, TokenClass TokenClass, long Count)>(
+                     "SELECT r.span_id, r.token_class, r.token_count " +
+                     $"FROM record_token_count r{tokenFilter} ORDER BY r.rowid ASC",
+                     parameters,
+                     static reader => (
+                         reader.GetString(reader.GetOrdinal("span_id")),
+                         ParseTokenClass(reader.GetString(reader.GetOrdinal("token_class"))),
+                         reader.GetInt64(reader.GetOrdinal("token_count")))))
+        {
+            GetOrCreateList(tokensBySpan, row.SpanId).Add(new CollectedTokenCount(row.TokenClass, row.Count));
+        }
+
+        Dictionary<string, List<CollectedToolDefinition>> defsBySpan = new(StringComparer.Ordinal);
+        Dictionary<string, CollectedToolCall> toolCallsBySpan = new(StringComparer.Ordinal);
+        if (includeToolMetadata)
+        {
+            foreach ((string SpanId, CollectedToolDefinition Definition) row in QueryRows<(string SpanId, CollectedToolDefinition Definition)>(
+                         "SELECT td.span_id, td.position, td.tool_name, tds.server_name, td.schema_tokens, " +
+                         "tdt.tokenizer, tdt.is_model_own " +
+                         "FROM tool_definition td " +
+                         "LEFT JOIN tool_definition_server tds ON tds.span_id = td.span_id AND tds.position = td.position " +
+                         "LEFT JOIN tool_definition_tokenizer tdt ON tdt.span_id = td.span_id AND tdt.position = td.position" +
+                         $" WHERE td.span_id IN {linkedSpanIds} ORDER BY td.span_id ASC, td.position ASC",
+                         parameters,
+                         static reader => (
+                             reader.GetString(reader.GetOrdinal("span_id")),
+                             new CollectedToolDefinition(
+                                 reader.GetInt32(reader.GetOrdinal("position")),
+                                 reader.GetString(reader.GetOrdinal("tool_name")),
+                                 ReadNullableString(reader, "server_name"),
+                                 reader.GetInt64(reader.GetOrdinal("schema_tokens")),
+                                 ReadNullableString(reader, "tokenizer"),
+                                 !reader.IsDBNull(reader.GetOrdinal("is_model_own")) && reader.GetInt64(reader.GetOrdinal("is_model_own")) == 1L))))
+            {
+                GetOrCreateList(defsBySpan, row.SpanId).Add(row.Definition);
+            }
+
+            // The tool-call metadata joins deliberately omit tool_call_input_text and
+            // tool_call_result_text: sizes, fingerprints, outcomes, errors, and exit codes are
+            // metadata, and those two tables hold the only tool content.
+            string toolCallSql =
+                "SELECT tc.span_id, " + BuildToolCallMetadataColumns("tc") +
+                " FROM tool_call tc " +
+                "LEFT JOIN tool_call_mcp tcm ON tcm.span_id = tc.span_id " +
+                "LEFT JOIN tool_call_input_size tcis ON tcis.span_id = tc.span_id " +
+                "LEFT JOIN tool_call_input_fingerprint tcif ON tcif.span_id = tc.span_id " +
+                "LEFT JOIN tool_call_input_truncation tcitrc ON tcitrc.span_id = tc.span_id " +
+                "LEFT JOIN tool_call_result_size tcrs ON tcrs.span_id = tc.span_id " +
+                "LEFT JOIN tool_call_result_truncation tcrtrc ON tcrtrc.span_id = tc.span_id " +
+                "LEFT JOIN tool_call_outcome tco ON tco.span_id = tc.span_id " +
+                "LEFT JOIN tool_call_error tce ON tce.span_id = tc.span_id " +
+                "LEFT JOIN tool_call_error_code tcec ON tcec.span_id = tc.span_id " +
+                "LEFT JOIN tool_call_exit_code tcex ON tcex.span_id = tc.span_id" +
+                $" WHERE tc.span_id IN {linkedSpanIds} ORDER BY tc.rowid ASC";
+            foreach ((string SpanId, CollectedToolCall Call) row in QueryRows<(string SpanId, CollectedToolCall Call)>(
+                         toolCallSql,
+                         parameters,
+                         static reader => (reader.GetString(reader.GetOrdinal("span_id")), ReadToolCallColumns(reader))))
+            {
+                toolCallsBySpan[row.SpanId] = row.Call;
+            }
+        }
+
+        foreach (RawRecordHeader header in rawRecords)
+        {
+            CollectedRecord record = new(
+                header.SpanId,
+                header.HarnessId,
+                header.Op,
+                header.Kind,
+                header.Name,
+                header.StartedAt,
+                header.Status,
+                header.SessionKey,
+                header.ParentSpanId,
+                header.TraceId,
+                header.Model,
+                header.EndedAt,
+                header.ReportedDurationMs,
+                tokensBySpan.TryGetValue(header.SpanId, out List<CollectedTokenCount>? tokens) ? tokens : [],
+                header.ReportedCost,
+                Parts: [],
+                Tool: toolCallsBySpan.GetValueOrDefault(header.SpanId),
+                Agent: null,
+                SkillsInvoked: [],
+                header.AgentInstanceId,
+                defsBySpan.TryGetValue(header.SpanId, out List<CollectedToolDefinition>? defs) ? defs : [],
+                header.Signals,
+                header.ReportedInputTokens,
+                header.ReportedOutputTokens,
+                header.SourceName,
+                header.ResponseId,
+                header.RequestId);
+            // A record with no session link is grouped under the empty key rather than dropped,
+            // so a span-scoped read still answers it. A session key is never empty, so the
+            // session-scoped callers are unaffected.
+            string groupingKey = record.SessionKey ?? string.Empty;
+            if (!recordsBySession.TryGetValue(groupingKey, out List<CollectedRecord>? sessionRecords))
+            {
+                sessionRecords = [];
+                recordsBySession[groupingKey] = sessionRecords;
+            }
+
+            sessionRecords.Add(record);
+        }
+
+        return recordsBySession;
+    }
+
+    private protected IReadOnlyList<CollectedRecord> QueryRecords(string? wherePredicate, Dictionary<string, object?> parameters)
+    {
+        string recordFilter = wherePredicate is null ? string.Empty : $" WHERE {wherePredicate}";
+        string childSpanFilter = wherePredicate is null
+            ? string.Empty
+            : $" WHERE r.span_id IN (SELECT r.span_id FROM record r WHERE {wherePredicate})";
+        string partFilter = wherePredicate is null
+            ? string.Empty
+            : $" WHERE cp.span_id IN (SELECT r.span_id FROM record r WHERE {wherePredicate})";
+        string defFilter = wherePredicate is null
+            ? string.Empty
+            : $" WHERE td.span_id IN (SELECT r.span_id FROM record r WHERE {wherePredicate})";
+        string tcFilter = wherePredicate is null
+            ? string.Empty
+            : $" WHERE tc.span_id IN (SELECT r.span_id FROM record r WHERE {wherePredicate})";
+        string aiFilter = wherePredicate is null
+            ? string.Empty
+            : $" WHERE ai.span_id IN (SELECT r.span_id FROM record r WHERE {wherePredicate})";
+
+        string recordSql = "SELECT " + RecordReadColumns + " " + RecordReadFrom + recordFilter + " ORDER BY r.rowid ASC";
+        List<RawRecordHeader> rawRecords = [.. QueryRows(recordSql, parameters, ReadRawRecordHeader)];
+
+        Dictionary<string, List<CollectedTokenCount>> tokensBySpan = new(StringComparer.Ordinal);
+        foreach ((string SpanId, TokenClass TokenClass, long Count) row in QueryRows<(string SpanId, TokenClass TokenClass, long Count)>(
+                     "SELECT r.span_id, r.token_class, r.token_count " +
+                     $"FROM record_token_count r{childSpanFilter} ORDER BY r.rowid ASC",
+                     parameters,
+                     static reader => (
+                         reader.GetString(reader.GetOrdinal("span_id")),
+                         ParseTokenClass(reader.GetString(reader.GetOrdinal("token_class"))),
+                         reader.GetInt64(reader.GetOrdinal("token_count")))))
+        {
+            GetOrCreateList(tokensBySpan, row.SpanId).Add(new CollectedTokenCount(row.TokenClass, row.Count));
+        }
+
+        Dictionary<string, List<string>> skillsBySpan = new(StringComparer.Ordinal);
+        foreach ((string SpanId, string SkillName) row in QueryRows<(string SpanId, string SkillName)>(
+                     "SELECT r.span_id, r.skill_name " +
+                     $"FROM record_skill_invocation r{childSpanFilter} ORDER BY r.rowid ASC",
+                     parameters,
+                     static reader => (reader.GetString(0), reader.GetString(1))))
+        {
+            GetOrCreateList(skillsBySpan, row.SpanId).Add(row.SkillName);
+        }
+
+        Dictionary<string, List<string>> listedBySpan = new(StringComparer.Ordinal);
+        foreach ((string SpanId, string SkillName) row in QueryRows<(string SpanId, string SkillName)>(
+                     "SELECT r.span_id, r.skill_name " +
+                     $"FROM record_skill_listing r{childSpanFilter} ORDER BY r.span_id ASC, r.position ASC",
+                     parameters,
+                     static reader => (reader.GetString(0), reader.GetString(1))))
+        {
+            GetOrCreateList(listedBySpan, row.SpanId).Add(row.SkillName);
+        }
+
+        Dictionary<string, List<CollectedContentPart>> partsBySpan = new(StringComparer.Ordinal);
+        string partSql =
+            "SELECT cp.span_id, " + BuildContentPartColumns("cp") +
+            " FROM content_part cp " +
+            "LEFT JOIN content_part_text cpt ON cpt.span_id = cp.span_id AND cpt.position = cp.position " +
+            "LEFT JOIN content_part_withheld cpw ON cpw.span_id = cp.span_id AND cpw.position = cp.position " +
+            "LEFT JOIN content_part_withheld_tokenizer cpwt ON cpwt.span_id = cp.span_id AND cpwt.position = cp.position " +
+            "LEFT JOIN content_part_reported_tokens cprt ON cprt.span_id = cp.span_id AND cprt.position = cp.position " +
+            "LEFT JOIN content_part_server cps ON cps.span_id = cp.span_id AND cps.position = cp.position " +
+            "LEFT JOIN content_part_role cpr ON cpr.span_id = cp.span_id AND cpr.position = cp.position " +
+            "LEFT JOIN content_part_residency cpres ON cpres.span_id = cp.span_id AND cpres.position = cp.position " +
+            "LEFT JOIN content_part_truncation cptr ON cptr.span_id = cp.span_id AND cptr.position = cp.position" +
+            $"{partFilter} ORDER BY cp.span_id ASC, cp.position ASC";
+        foreach ((string SpanId, CollectedContentPart Part) row in QueryRows<(string SpanId, CollectedContentPart Part)>(
+                     partSql,
+                     parameters,
+                     static reader => (reader.GetString(reader.GetOrdinal("span_id")), ReadContentPartColumns(reader))))
+        {
+            GetOrCreateList(partsBySpan, row.SpanId).Add(row.Part);
+        }
+
+        Dictionary<string, List<CollectedToolDefinition>> defsBySpan = new(StringComparer.Ordinal);
+        foreach ((string SpanId, CollectedToolDefinition Definition) row in QueryRows<(string SpanId, CollectedToolDefinition Definition)>(
+                     "SELECT td.span_id, td.position, td.tool_name, tds.server_name, td.schema_tokens, " +
+                     "tdt.tokenizer, tdt.is_model_own " +
+                     "FROM tool_definition td " +
+                     "LEFT JOIN tool_definition_server tds ON tds.span_id = td.span_id AND tds.position = td.position " +
+                     "LEFT JOIN tool_definition_tokenizer tdt ON tdt.span_id = td.span_id AND tdt.position = td.position" +
+                     $"{defFilter} ORDER BY td.span_id ASC, td.position ASC",
+                     parameters,
+                     static reader => (
+                         reader.GetString(reader.GetOrdinal("span_id")),
+                         new CollectedToolDefinition(
+                             reader.GetInt32(reader.GetOrdinal("position")),
+                             reader.GetString(reader.GetOrdinal("tool_name")),
+                             ReadNullableString(reader, "server_name"),
+                             reader.GetInt64(reader.GetOrdinal("schema_tokens")),
+                             ReadNullableString(reader, "tokenizer"),
+                             !reader.IsDBNull(reader.GetOrdinal("is_model_own")) && reader.GetInt64(reader.GetOrdinal("is_model_own")) == 1L))))
+        {
+            GetOrCreateList(defsBySpan, row.SpanId).Add(row.Definition);
+        }
+
+        Dictionary<string, CollectedToolCall> toolCallsBySpan = new(StringComparer.Ordinal);
+        string toolCallSql =
+            "SELECT tc.span_id, " + BuildToolCallColumns("tc") +
+            " FROM tool_call tc " +
+            "LEFT JOIN tool_call_mcp tcm ON tcm.span_id = tc.span_id " +
+            "LEFT JOIN tool_call_input_size tcis ON tcis.span_id = tc.span_id " +
+            "LEFT JOIN tool_call_input_text tcit ON tcit.span_id = tc.span_id " +
+            "LEFT JOIN tool_call_input_fingerprint tcif ON tcif.span_id = tc.span_id " +
+            "LEFT JOIN tool_call_input_truncation tcitrc ON tcitrc.span_id = tc.span_id " +
+            "LEFT JOIN tool_call_result_size tcrs ON tcrs.span_id = tc.span_id " +
+            "LEFT JOIN tool_call_result_text tcrt ON tcrt.span_id = tc.span_id " +
+            "LEFT JOIN tool_call_result_truncation tcrtrc ON tcrtrc.span_id = tc.span_id " +
+            "LEFT JOIN tool_call_outcome tco ON tco.span_id = tc.span_id " +
+            "LEFT JOIN tool_call_error tce ON tce.span_id = tc.span_id " +
+            "LEFT JOIN tool_call_error_code tcec ON tcec.span_id = tc.span_id " +
+            "LEFT JOIN tool_call_exit_code tcex ON tcex.span_id = tc.span_id" +
+            $"{tcFilter} ORDER BY tc.rowid ASC";
+        foreach ((string SpanId, CollectedToolCall Call) row in QueryRows<(string SpanId, CollectedToolCall Call)>(
+                     toolCallSql,
+                     parameters,
+                     static reader => (reader.GetString(reader.GetOrdinal("span_id")), ReadToolCallColumns(reader))))
+        {
+            toolCallsBySpan[row.SpanId] = row.Call;
+        }
+
+        Dictionary<string, CollectedAgentInvocation> agentCallsBySpan = new(StringComparer.Ordinal);
+        string agentSql =
+            "SELECT ai.span_id, " + BuildAgentInvocationColumns("ai") +
+            " FROM agent_invocation ai " +
+            "LEFT JOIN agent_invocation_spawn ais ON ais.span_id = ai.span_id " +
+            "LEFT JOIN agent_invocation_outcome aio ON aio.span_id = ai.span_id " +
+            "LEFT JOIN agent_invocation_error aie ON aie.span_id = ai.span_id" +
+            $"{aiFilter} ORDER BY ai.rowid ASC";
+        foreach ((string SpanId, CollectedAgentInvocation Invocation) row in QueryRows<(string SpanId, CollectedAgentInvocation Invocation)>(
+                     agentSql,
+                     parameters,
+                     static reader => (reader.GetString(reader.GetOrdinal("span_id")), ReadAgentInvocationColumns(reader))))
+        {
+            agentCallsBySpan[row.SpanId] = row.Invocation;
+        }
+
+        List<CollectedRecord> materialized = new(rawRecords.Count);
+        foreach (RawRecordHeader header in rawRecords)
+        {
+            materialized.Add(new CollectedRecord(
+                header.SpanId,
+                header.HarnessId,
+                header.Op,
+                header.Kind,
+                header.Name,
+                header.StartedAt,
+                header.Status,
+                header.SessionKey,
+                header.ParentSpanId,
+                header.TraceId,
+                header.Model,
+                header.EndedAt,
+                header.ReportedDurationMs,
+                tokensBySpan.TryGetValue(header.SpanId, out List<CollectedTokenCount>? tok) ? tok : [],
+                header.ReportedCost,
+                partsBySpan.TryGetValue(header.SpanId, out List<CollectedContentPart>? prt) ? prt : [],
+                toolCallsBySpan.GetValueOrDefault(header.SpanId),
+                agentCallsBySpan.GetValueOrDefault(header.SpanId),
+                skillsBySpan.TryGetValue(header.SpanId, out List<string>? skl) ? skl : [],
+                header.AgentInstanceId,
+                defsBySpan.TryGetValue(header.SpanId, out List<CollectedToolDefinition>? def) ? def : [],
+                header.Signals,
+                header.ReportedInputTokens,
+                header.ReportedOutputTokens,
+                header.SourceName,
+                header.ResponseId,
+                header.RequestId,
+                // No listing rows reads back as null: the store cannot tell "listed nothing" from "no listing".
+                listedBySpan.GetValueOrDefault(header.SpanId)));
+        }
+
+        return materialized;
+    }
+
+    private protected IReadOnlyList<CollectedSession> QuerySessions(string? sessionPredicate, string? usagePredicate, Dictionary<string, object?> parameters)
+    {
+        string sessionFilter = sessionPredicate is null ? string.Empty : $" WHERE {sessionPredicate}";
+        string usageFilter = usagePredicate is null ? string.Empty : $" WHERE {usagePredicate}";
+
+        string sessionSql =
+            "SELECT s.session_id, s.harness_id, s.native_session_id, " +
+            "sw.working_directory, sr.repo_name, sb.branch_name, st.title " +
+            "FROM session s " +
+            "LEFT JOIN session_workspace sw ON sw.session_id = s.session_id " +
+            "LEFT JOIN session_repository sr ON sr.session_id = s.session_id " +
+            "LEFT JOIN session_branch sb ON sb.session_id = s.session_id " +
+            "LEFT JOIN session_title st ON st.session_id = s.session_id" +
+            $"{sessionFilter} ORDER BY s.rowid ASC";
+        List<RawSessionHeader> headers = [.. QueryRows<RawSessionHeader>(
+            sessionSql,
+            parameters,
+            static reader =>
+            {
+                string? workingDir = ReadNullableString(reader, "working_directory");
+                string? repo = ReadNullableString(reader, "repo_name");
+                string? branch = ReadNullableString(reader, "branch_name");
+                CollectedWorkspace? workspace = workingDir is null && repo is null && branch is null
+                    ? null
+                    : new CollectedWorkspace(workingDir, repo, branch);
+                return new RawSessionHeader(
+                    reader.GetString(reader.GetOrdinal("session_id")),
+                    reader.GetString(reader.GetOrdinal("harness_id")),
+                    reader.GetString(reader.GetOrdinal("native_session_id")),
+                    workspace,
+                    ReadNullableString(reader, "title"));
+            })];
+
+        Dictionary<string, List<CollectedModelUsage>> usagesBySession = new(StringComparer.Ordinal);
+        string usageSql =
+            "SELECT u.session_id, u.snapshot_position, u.model_id, u.token_class, u.token_count " +
+            $"FROM session_model_usage u{usageFilter} ORDER BY u.session_id ASC, u.snapshot_position ASC, u.model_id ASC, u.token_class ASC";
+        foreach ((string SessionId, CollectedModelUsage Usage) row in QueryRows<(string SessionId, CollectedModelUsage Usage)>(
+                     usageSql,
+                     parameters,
+                     static reader => (
+                         reader.GetString(reader.GetOrdinal("session_id")),
+                         new CollectedModelUsage(
+                             reader.GetInt32(reader.GetOrdinal("snapshot_position")),
+                             reader.GetString(reader.GetOrdinal("model_id")),
+                             ParseTokenClass(reader.GetString(reader.GetOrdinal("token_class"))),
+                             reader.GetInt64(reader.GetOrdinal("token_count"))))))
+        {
+            GetOrCreateList(usagesBySession, row.SessionId).Add(row.Usage);
+        }
+
+        List<CollectedSession> sessions = new(headers.Count);
+        foreach (RawSessionHeader header in headers)
+        {
+            sessions.Add(new CollectedSession(
+                header.SessionId,
+                header.HarnessId,
+                header.NativeId,
+                header.Workspace,
+                header.Title,
+                usagesBySession.TryGetValue(header.SessionId, out List<CollectedModelUsage>? usages) ? usages : []));
+        }
+
+        return sessions;
+    }
+
+    private protected IReadOnlyList<StoredSessionProjection> QuerySessionProjections(string? filterPredicate, Dictionary<string, object?> parameters)
+    {
+        string projWhere = filterPredicate is null ? string.Empty : $" WHERE {filterPredicate}";
+        string subSelect = filterPredicate is null
+            ? "SELECT session_id FROM session_projection"
+            : $"SELECT sp.session_id FROM session_projection sp WHERE {filterPredicate}";
+        string childWhere = filterPredicate is null ? string.Empty : $" WHERE session_id IN ({subSelect})";
+        string childAliasedWhere = filterPredicate is null ? string.Empty : $" WHERE t.session_id IN ({subSelect})";
+
+        List<StoredSessionHeader> projHeaders = [.. QueryRows<StoredSessionHeader>(
+            "SELECT " + SessionProjectionHeaderColumns + " " +
+            "FROM session_projection sp " + SessionProjectionHeaderJoins +
+            $"{projWhere} ORDER BY sp.started_at_utc DESC, sp.rowid ASC",
+            parameters,
+            static reader => ReadSessionHeader(reader, 0))];
+
+        Dictionary<string, List<string>> requestsBySess = new(StringComparer.Ordinal);
+        foreach ((string SessionId, string RequestSpanId) row in QueryRows<(string SessionId, string RequestSpanId)>(
+                     $"SELECT session_id, request_span_id FROM session_request{childWhere} ORDER BY session_id ASC, position ASC",
+                     parameters,
+                     static reader => (reader.GetString(0), reader.GetString(1))))
+        {
+            GetOrCreateList(requestsBySess, row.SessionId).Add(row.RequestSpanId);
+        }
+
+        Dictionary<string, List<StoredSessionTurn>> turnsBySess = new(StringComparer.Ordinal);
+        foreach ((string SessionId, int Position, string SpanId) row in QueryRows<(string SessionId, int Position, string SpanId)>(
+                     $"SELECT session_id, position, span_id FROM session_turn{childWhere} ORDER BY session_id ASC, position ASC",
+                     parameters,
+                     static reader => (reader.GetString(0), reader.GetInt32(1), reader.GetString(2))))
+        {
+            GetOrCreateList(turnsBySess, row.SessionId).Add(new StoredSessionTurn(row.SessionId, row.Position, row.SpanId));
+        }
+
+        Dictionary<string, RawContextHeader> ctxHeadersBySess = new(StringComparer.Ordinal);
+        foreach ((string SessionId, RawContextHeader Header) row in QueryRows<(string SessionId, RawContextHeader Header)>(
+                     $"SELECT session_id, context_limit, context_limit_source, residual_total, fresh_jump_factor, accumulation_rate FROM session_context{childWhere}",
+                     parameters,
+                     static reader => (
+                         reader.GetString(reader.GetOrdinal("session_id")),
+                         new RawContextHeader(
+                             reader.GetInt64(reader.GetOrdinal("context_limit")),
+                             reader.GetString(reader.GetOrdinal("context_limit_source")),
+                             reader.GetInt64(reader.GetOrdinal("residual_total")),
+                             reader.GetDouble(reader.GetOrdinal("fresh_jump_factor")),
+                             reader.GetDouble(reader.GetOrdinal("accumulation_rate"))))))
+        {
+            ctxHeadersBySess[row.SessionId] = row.Header;
+        }
+
+        Dictionary<string, List<string>> obsBucketsBySess = new(StringComparer.Ordinal);
+        foreach ((string SessionId, string Bucket) row in QueryRows<(string SessionId, string Bucket)>(
+                     $"SELECT session_id, bucket FROM session_context_observed_part{childWhere} ORDER BY session_id ASC, rowid ASC",
+                     parameters,
+                     static reader => (reader.GetString(0), reader.GetString(1))))
+        {
+            GetOrCreateList(obsBucketsBySess, row.SessionId).Add(row.Bucket);
+        }
+
+        Dictionary<string, List<StoredSessionContextDerivedCount>> derivedBySess = new(StringComparer.Ordinal);
+        foreach ((string SessionId, StoredSessionContextDerivedCount Count) row in QueryRows<(string SessionId, StoredSessionContextDerivedCount Count)>(
+                     $"SELECT session_id, counter, count FROM session_context_derived_count{childWhere} ORDER BY session_id ASC, rowid ASC",
+                     parameters,
+                     static reader => (
+                         reader.GetString(reader.GetOrdinal("session_id")),
+                         new StoredSessionContextDerivedCount(
+                             reader.GetString(reader.GetOrdinal("counter")),
+                             reader.GetInt64(reader.GetOrdinal("count"))))))
+        {
+            GetOrCreateList(derivedBySess, row.SessionId).Add(row.Count);
+        }
+
+        Dictionary<string, List<int>> flaggedBySess = new(StringComparer.Ordinal);
+        foreach ((string SessionId, int TurnIndex) row in QueryRows<(string SessionId, int TurnIndex)>(
+                     $"SELECT session_id, turn_index FROM session_context_flagged_turn{childWhere} ORDER BY session_id ASC, turn_index ASC",
+                     parameters,
+                     static reader => (reader.GetString(0), reader.GetInt32(1))))
+        {
+            GetOrCreateList(flaggedBySess, row.SessionId).Add(row.TurnIndex);
+        }
+
+        Dictionary<string, List<RawContextTurnHeader>> ctxTurnsBySess = new(StringComparer.Ordinal);
+        string ctxTurnSql =
+            "SELECT t.session_id, t.position, t.input_tokens, t.bucketed_tokens, t.residual_tokens, " +
+            "t.residual_attribution, t.builtin_tool_definition_tokens, t.fresh_input, " +
+            "h.headroom, h.pressure, a.rate, si.block_count, si.tokens, " +
+            "fj.previous_fresh_input, fj.factor, nr.tokens AS non_resident_tokens " +
+            "FROM session_context_turn t " +
+            "LEFT JOIN session_context_turn_headroom h ON h.session_id = t.session_id AND h.position = t.position " +
+            "LEFT JOIN session_context_turn_accumulation a ON a.session_id = t.session_id AND a.position = t.position " +
+            "LEFT JOIN session_context_turn_stripped_instructions si ON si.session_id = t.session_id AND si.position = t.position " +
+            "LEFT JOIN session_context_turn_fresh_jump fj ON fj.session_id = t.session_id AND fj.position = t.position " +
+            "LEFT JOIN session_context_turn_non_resident nr ON nr.session_id = t.session_id AND nr.position = t.position" +
+            $"{childAliasedWhere} ORDER BY t.session_id ASC, t.position ASC";
+        foreach ((string SessionId, RawContextTurnHeader Header) row in QueryRows<(string SessionId, RawContextTurnHeader Header)>(
+                     ctxTurnSql,
+                     parameters,
+                     static reader => (
+                         reader.GetString(reader.GetOrdinal("session_id")),
+                         new RawContextTurnHeader(
+                             reader.GetInt32(reader.GetOrdinal("position")),
+                             reader.GetInt64(reader.GetOrdinal("input_tokens")),
+                             reader.GetInt64(reader.GetOrdinal("bucketed_tokens")),
+                             reader.GetInt64(reader.GetOrdinal("residual_tokens")),
+                             reader.GetString(reader.GetOrdinal("residual_attribution")),
+                             reader.GetInt64(reader.GetOrdinal("builtin_tool_definition_tokens")),
+                             reader.GetInt64(reader.GetOrdinal("fresh_input")),
+                             ReadNullableInt64(reader, "headroom"),
+                             ReadNullableDouble(reader, "pressure"),
+                             ReadNullableDouble(reader, "rate"),
+                             ReadNullableInt64(reader, "block_count"),
+                             ReadNullableInt64(reader, "tokens"),
+                             ReadNullableInt64(reader, "previous_fresh_input"),
+                             ReadNullableDouble(reader, "factor"),
+                             ReadNullableInt64(reader, "non_resident_tokens")))))
+        {
+            GetOrCreateList(ctxTurnsBySess, row.SessionId).Add(row.Header);
+        }
+
+        Dictionary<(string SessionId, int Position), List<StoredTurnBucketTokens>> ctxBucketsByTurn = [];
+        foreach ((string SessionId, int Position, StoredTurnBucketTokens Bucket) row in QueryRows<(string SessionId, int Position, StoredTurnBucketTokens Bucket)>(
+                     $"SELECT session_id, position, bucket, tokens FROM session_context_turn_bucket{childWhere} ORDER BY session_id ASC, position ASC, rowid ASC",
+                     parameters,
+                     static reader => (
+                         reader.GetString(reader.GetOrdinal("session_id")),
+                         reader.GetInt32(reader.GetOrdinal("position")),
+                         new StoredTurnBucketTokens(
+                             reader.GetString(reader.GetOrdinal("bucket")),
+                             reader.GetInt64(reader.GetOrdinal("tokens"))))))
+        {
+            GetOrCreateList(ctxBucketsByTurn, (row.SessionId, row.Position)).Add(row.Bucket);
+        }
+
+        Dictionary<(string SessionId, int Position), List<StoredTurnServerDefinitionTokens>> ctxServersByTurn = [];
+        foreach ((string SessionId, int Position, StoredTurnServerDefinitionTokens Server) row in QueryRows<(string SessionId, int Position, StoredTurnServerDefinitionTokens Server)>(
+                     $"SELECT session_id, position, server, tokens FROM session_context_turn_server_definitions{childWhere} ORDER BY session_id ASC, position ASC, rowid ASC",
+                     parameters,
+                     static reader => (
+                         reader.GetString(reader.GetOrdinal("session_id")),
+                         reader.GetInt32(reader.GetOrdinal("position")),
+                         new StoredTurnServerDefinitionTokens(
+                             reader.GetString(reader.GetOrdinal("server")),
+                             reader.GetInt64(reader.GetOrdinal("tokens"))))))
+        {
+            GetOrCreateList(ctxServersByTurn, (row.SessionId, row.Position)).Add(row.Server);
+        }
+
+        Dictionary<(string SessionId, int Position), List<TokenizerLabel>> ctxTokenizersByTurn = [];
+        foreach ((string SessionId, int Position, TokenizerLabel Label) row in QueryRows<(string SessionId, int Position, TokenizerLabel Label)>(
+                     $"SELECT session_id, position, tokenizer, is_model_own FROM session_context_turn_tokenizer{childWhere} ORDER BY session_id ASC, position ASC, tokenizer ASC",
+                     parameters,
+                     static reader => (
+                         reader.GetString(reader.GetOrdinal("session_id")),
+                         reader.GetInt32(reader.GetOrdinal("position")),
+                         new TokenizerLabel(
+                             reader.GetString(reader.GetOrdinal("tokenizer")),
+                             reader.GetInt64(reader.GetOrdinal("is_model_own")) == 1L))))
+        {
+            GetOrCreateList(ctxTokenizersByTurn, (row.SessionId, row.Position)).Add(row.Label);
+        }
+
+        Dictionary<string, (int InvocationCount, int TurnCount, long? Unused)> schemaHeadersBySess = new(StringComparer.Ordinal);
+        foreach ((string SessionId, int InvocationCount, int TurnCount, long? Unused) row in QueryRows<(string SessionId, int InvocationCount, int TurnCount, long? Unused)>(
+                     "SELECT t.session_id, t.invocation_count, t.turn_count, u.token_residencies " +
+                     "FROM session_schema t " +
+                     $"LEFT JOIN session_schema_unused u ON u.session_id = t.session_id{childAliasedWhere}",
+                     parameters,
+                     static reader => (
+                         reader.GetString(reader.GetOrdinal("session_id")),
+                         reader.GetInt32(reader.GetOrdinal("invocation_count")),
+                         reader.GetInt32(reader.GetOrdinal("turn_count")),
+                         ReadNullableInt64(reader, "token_residencies"))))
+        {
+            schemaHeadersBySess[row.SessionId] = (row.InvocationCount, row.TurnCount, row.Unused);
+        }
+
+        Dictionary<string, List<StoredSchemaRankedTool>> rankedToolsBySess = new(StringComparer.Ordinal);
+        foreach ((string SessionId, StoredSchemaRankedTool Tool) row in QueryRows<(string SessionId, StoredSchemaRankedTool Tool)>(
+                     "SELECT t.session_id, t.position, t.tool_name, t.cost_tokens, t.invoked, s.server_name " +
+                     "FROM session_schema_ranked_tool t " +
+                     $"LEFT JOIN session_schema_ranked_tool_server s ON s.session_id = t.session_id AND s.position = t.position{childAliasedWhere} ORDER BY t.session_id ASC, t.position ASC",
+                     parameters,
+                     static reader => (
+                         reader.GetString(reader.GetOrdinal("session_id")),
+                         new StoredSchemaRankedTool(
+                             reader.GetInt32(reader.GetOrdinal("position")),
+                             reader.GetString(reader.GetOrdinal("tool_name")),
+                             reader.GetInt64(reader.GetOrdinal("cost_tokens")),
+                             reader.GetInt64(reader.GetOrdinal("invoked")) == 1L,
+                             ReadNullableString(reader, "server_name")))))
+        {
+            GetOrCreateList(rankedToolsBySess, row.SessionId).Add(row.Tool);
+        }
+
+        Dictionary<string, List<StoredSchemaServerTokens>> schemaServersBySess = new(StringComparer.Ordinal);
+        foreach ((string SessionId, StoredSchemaServerTokens Server) row in QueryRows<(string SessionId, StoredSchemaServerTokens Server)>(
+                     $"SELECT session_id, server_name, tokens FROM session_schema_server{childWhere} ORDER BY session_id ASC, rowid ASC",
+                     parameters,
+                     static reader => (
+                         reader.GetString(reader.GetOrdinal("session_id")),
+                         new StoredSchemaServerTokens(
+                             reader.GetString(reader.GetOrdinal("server_name")),
+                             reader.GetInt64(reader.GetOrdinal("tokens"))))))
+        {
+            GetOrCreateList(schemaServersBySess, row.SessionId).Add(row.Server);
+        }
+
+        Dictionary<string, List<string>> subagentsBySess = new(StringComparer.Ordinal);
+        foreach ((string SessionId, string SpanId) row in QueryRows<(string SessionId, string SpanId)>(
+                     $"SELECT session_id, span_id FROM session_timeline_subagent{childWhere} ORDER BY session_id ASC, rowid ASC",
+                     parameters,
+                     static reader => (reader.GetString(0), reader.GetString(1))))
+        {
+            GetOrCreateList(subagentsBySess, row.SessionId).Add(row.SpanId);
+        }
+
+        Dictionary<string, List<string>> auxiliariesBySess = new(StringComparer.Ordinal);
+        foreach ((string SessionId, string SpanId) row in QueryRows<(string SessionId, string SpanId)>(
+                     $"SELECT session_id, span_id FROM session_timeline_auxiliary{childWhere} ORDER BY session_id ASC, rowid ASC",
+                     parameters,
+                     static reader => (reader.GetString(0), reader.GetString(1))))
+        {
+            GetOrCreateList(auxiliariesBySess, row.SessionId).Add(row.SpanId);
+        }
+
+        SessionProjectionRowSets rows = new(
+            requestsBySess,
+            turnsBySess,
+            ctxHeadersBySess,
+            obsBucketsBySess,
+            derivedBySess,
+            flaggedBySess,
+            ctxTurnsBySess,
+            ctxBucketsByTurn,
+            ctxServersByTurn,
+            ctxTokenizersByTurn,
+            schemaHeadersBySess,
+            rankedToolsBySess,
+            schemaServersBySess,
+            subagentsBySess,
+            auxiliariesBySess);
+        return BuildSessionProjections(projHeaders, rows);
+    }
+
+    private protected static List<StoredSessionProjection> BuildSessionProjections(
+        List<StoredSessionHeader> projHeaders,
+        SessionProjectionRowSets rows)
+    {
+        List<StoredSessionProjection> projections = new(projHeaders.Count);
+        foreach (StoredSessionHeader header in projHeaders)
+        {
+            StoredSessionContext? context = null;
+            if (rows.CtxHeadersBySess.TryGetValue(header.SessionId, out RawContextHeader? ctxHeader))
+            {
+                List<RawContextTurnHeader> rawTurns = rows.CtxTurnsBySess.TryGetValue(header.SessionId, out List<RawContextTurnHeader>? ct)
+                    ? ct
+                    : [];
+                List<StoredSessionContextTurn> ctxTurns = new(rawTurns.Count);
+                foreach (RawContextTurnHeader rt in rawTurns)
+                {
+                    (string, int) turnKey = (header.SessionId, rt.Position);
+                    // A turn with no label rows means its figures came only from harness-reported
+                    // counts — the schema-29 rebuild leaves no unlabelled measured row — so it is
+                    // shown as reported, never as not measured.
+                    ctxTurns.Add(new StoredSessionContextTurn(
+                        rt.Position,
+                        rt.InputTokens,
+                        rt.BucketedTokens,
+                        rt.ResidualTokens,
+                        rt.ResidualAttribution,
+                        rt.BuiltinToolDefinitionTokens,
+                        rt.FreshInput,
+                        rows.CtxBucketsByTurn.TryGetValue(turnKey, out List<StoredTurnBucketTokens>? bkts) ? bkts : [],
+                        rows.CtxServersByTurn.TryGetValue(turnKey, out List<StoredTurnServerDefinitionTokens>? srvs) ? srvs : [],
+                        rt.Headroom,
+                        rt.Pressure,
+                        rt.AccumulationRate,
+                        rt.StrippedBlockCount,
+                        rt.StrippedTokens,
+                        rt.PreviousFreshInput,
+                        rt.FreshJumpFactor,
+                        rt.NonResidentTokens)
+                    {
+                        Tokenizers = rows.CtxTokenizersByTurn.TryGetValue(turnKey, out List<TokenizerLabel>? labels) ? labels : [],
+                    });
+                }
+
+                context = new StoredSessionContext(
+                    ctxHeader.ContextLimit,
+                    ctxHeader.ContextLimitSource,
+                    ctxHeader.ResidualTotal,
+                    ctxHeader.FreshJumpFactor,
+                    ctxHeader.AccumulationRate,
+                    rows.ObsBucketsBySess.TryGetValue(header.SessionId, out List<string>? obs) ? obs : [],
+                    rows.DerivedBySess.TryGetValue(header.SessionId, out List<StoredSessionContextDerivedCount>? der) ? der : [],
+                    rows.FlaggedBySess.TryGetValue(header.SessionId, out List<int>? flg) ? flg : [],
+                    ctxTurns);
+            }
+
+            StoredSessionSchema? schema = null;
+            if (rows.SchemaHeadersBySess.TryGetValue(header.SessionId, out (int InvocationCount, int TurnCount, long? Unused) schHeader))
+            {
+                schema = new StoredSessionSchema(
+                    schHeader.InvocationCount,
+                    schHeader.TurnCount,
+                    rows.RankedToolsBySess.TryGetValue(header.SessionId, out List<StoredSchemaRankedTool>? rtList) ? rtList : [],
+                    rows.SchemaServersBySess.TryGetValue(header.SessionId, out List<StoredSchemaServerTokens>? ssList) ? ssList : [],
+                    schHeader.Unused);
+            }
+
+            IReadOnlyList<string>? timelineSubagents = rows.SubagentsBySess.TryGetValue(header.SessionId, out List<string>? subList) && subList.Count > 0
+                ? subList
+                : null;
+            IReadOnlyList<string>? timelineAuxiliaries = rows.AuxiliariesBySess.TryGetValue(header.SessionId, out List<string>? auxList) && auxList.Count > 0
+                ? auxList
+                : null;
+
+            projections.Add(new StoredSessionProjection(
+                header.SessionId,
+                header.Label,
+                header.IsSubagent,
+                header.SpanCount,
+                header.StartedAtUtc,
+                header.EndedAtUtc,
+                header.ParentSessionId,
+                header.AgentName,
+                header.IncludedInParent,
+                rows.RequestsBySess.TryGetValue(header.SessionId, out List<string>? reqList) ? reqList : [],
+                rows.TurnsBySess.TryGetValue(header.SessionId, out List<StoredSessionTurn>? turnList) ? turnList : [],
+                context,
+                header.ContextUnmeasurableReason,
+                schema,
+                header.SchemaUnmeasurableReason,
+                timelineSubagents,
+                timelineAuxiliaries));
+        }
+
+        return projections;
+    }
+
+    private protected sealed record SessionProjectionRowSets(
+        Dictionary<string, List<string>> RequestsBySess,
+        Dictionary<string, List<StoredSessionTurn>> TurnsBySess,
+        Dictionary<string, RawContextHeader> CtxHeadersBySess,
+        Dictionary<string, List<string>> ObsBucketsBySess,
+        Dictionary<string, List<StoredSessionContextDerivedCount>> DerivedBySess,
+        Dictionary<string, List<int>> FlaggedBySess,
+        Dictionary<string, List<RawContextTurnHeader>> CtxTurnsBySess,
+        Dictionary<(string SessionId, int Position), List<StoredTurnBucketTokens>> CtxBucketsByTurn,
+        Dictionary<(string SessionId, int Position), List<StoredTurnServerDefinitionTokens>> CtxServersByTurn,
+        Dictionary<(string SessionId, int Position), List<TokenizerLabel>> CtxTokenizersByTurn,
+        Dictionary<string, (int InvocationCount, int TurnCount, long? Unused)> SchemaHeadersBySess,
+        Dictionary<string, List<StoredSchemaRankedTool>> RankedToolsBySess,
+        Dictionary<string, List<StoredSchemaServerTokens>> SchemaServersBySess,
+        Dictionary<string, List<string>> SubagentsBySess,
+        Dictionary<string, List<string>> AuxiliariesBySess);
+
+    private protected IReadOnlyList<StoredRun> QueryRuns(string? filterPredicate, Dictionary<string, object?> parameters)
+    {
+        string whereClause = filterPredicate is null ? string.Empty : $" WHERE {filterPredicate}";
+        string sql =
+            "SELECT r.run_id, r.harness_id, r.grouping_basis, r.grouping_rule, r.execution_count, " +
+            "rl.label, rw.working_directory, rb.started_at_utc, rb.ended_at_utc " +
+            "FROM run r " +
+            "LEFT JOIN run_label rl ON rl.run_id = r.run_id " +
+            "LEFT JOIN run_working_directory rw ON rw.run_id = r.run_id " +
+            $"LEFT JOIN run_bounds rb ON rb.run_id = r.run_id{whereClause} ORDER BY r.rowid ASC";
+        return QueryRows<StoredRun>(sql, parameters, static reader => new StoredRun(
+            reader.GetString(reader.GetOrdinal("run_id")),
+            reader.GetString(reader.GetOrdinal("harness_id")),
+            reader.GetString(reader.GetOrdinal("grouping_basis")),
+            reader.GetString(reader.GetOrdinal("grouping_rule")),
+            reader.GetInt32(reader.GetOrdinal("execution_count")),
+            ReadNullableString(reader, "label"),
+            ReadNullableString(reader, "working_directory"),
+            ReadNullableString(reader, "started_at_utc"),
+            ReadNullableString(reader, "ended_at_utc")));
+    }
+
+    private protected IReadOnlyList<StoredExecution> QueryExecutions(string? filterPredicate, Dictionary<string, object?> parameters)
+    {
+        string whereClause = filterPredicate is null ? string.Empty : $" WHERE {filterPredicate}";
+        string sql =
+            "SELECT e.execution_id, e.run_id, e.harness_id, e.is_root, " +
+            "es.session_id, ep.parent_execution_id, ea.agent_name, eb.started_at_utc, eb.ended_at_utc " +
+            "FROM execution e " +
+            "LEFT JOIN execution_session es ON es.execution_id = e.execution_id " +
+            "LEFT JOIN execution_parent ep ON ep.execution_id = e.execution_id " +
+            "LEFT JOIN execution_agent ea ON ea.execution_id = e.execution_id " +
+            $"LEFT JOIN execution_bounds eb ON eb.execution_id = e.execution_id{whereClause} ORDER BY e.rowid ASC";
+        return QueryRows<StoredExecution>(sql, parameters, static reader => new StoredExecution(
+            reader.GetString(reader.GetOrdinal("execution_id")),
+            reader.GetString(reader.GetOrdinal("run_id")),
+            reader.GetString(reader.GetOrdinal("harness_id")),
+            reader.GetInt64(reader.GetOrdinal("is_root")) == 1L,
+            ReadNullableString(reader, "session_id"),
+            ReadNullableString(reader, "parent_execution_id"),
+            ReadNullableString(reader, "agent_name"),
+            ReadNullableString(reader, "started_at_utc"),
+            ReadNullableString(reader, "ended_at_utc")));
+    }
+
+    private protected IReadOnlyList<StoredHarnessRollup> QueryHarnessRollups(string? filterPredicate, Dictionary<string, object?> parameters)
+    {
+        string whereClause = filterPredicate is null ? string.Empty : $" WHERE {filterPredicate}";
+        List<(string HarnessId, int Sessions, int Runs, int Executions, int Unknown, int Total)> headers =
+            [.. QueryRows<(string HarnessId, int Sessions, int Runs, int Executions, int Unknown, int Total)>(
+                "SELECT harness_id, session_count, run_count, execution_count, unknown_window_sessions, window_sessions_total " +
+                $"FROM harness_rollup{whereClause} ORDER BY harness_id ASC",
+                parameters,
+                static reader => (
+                    reader.GetString(reader.GetOrdinal("harness_id")),
+                    reader.GetInt32(reader.GetOrdinal("session_count")),
+                    reader.GetInt32(reader.GetOrdinal("run_count")),
+                    reader.GetInt32(reader.GetOrdinal("execution_count")),
+                    reader.GetInt32(reader.GetOrdinal("unknown_window_sessions")),
+                    reader.GetInt32(reader.GetOrdinal("window_sessions_total"))))];
+
+        Dictionary<string, List<StoredHarnessRollupMetric>> metricsByHarness = new(StringComparer.Ordinal);
+        foreach ((string HarnessId, StoredHarnessRollupMetric Metric) row in QueryRows<(string HarnessId, StoredHarnessRollupMetric Metric)>(
+                     "SELECT harness_id, metric, value, basis " +
+                     $"FROM harness_rollup_metric{whereClause} ORDER BY harness_id ASC, rowid ASC",
+                     parameters,
+                     static reader => (
+                         reader.GetString(reader.GetOrdinal("harness_id")),
+                         new StoredHarnessRollupMetric(
+                             reader.GetString(reader.GetOrdinal("metric")),
+                             reader.GetDouble(reader.GetOrdinal("value")),
+                             reader.GetString(reader.GetOrdinal("basis"))))))
+        {
+            GetOrCreateList(metricsByHarness, row.HarnessId).Add(row.Metric);
+        }
+
+        List<StoredHarnessRollup> rollups = new(headers.Count);
+        foreach ((string harnessId, int sess, int runs, int execs, int unk, int tot) in headers)
+        {
+            rollups.Add(new StoredHarnessRollup(
+                harnessId,
+                sess,
+                runs,
+                execs,
+                unk,
+                tot,
+                metricsByHarness.TryGetValue(harnessId, out List<StoredHarnessRollupMetric>? metrics) ? metrics : []));
+        }
+
+        return rollups;
+    }
+
+    private protected IReadOnlyList<StoredFinding> QueryFindings(string? filterPredicate, Dictionary<string, object?> parameters)
+    {
+        string whereClause = filterPredicate is null ? string.Empty : $" WHERE {filterPredicate}";
+        string linkFilter = filterPredicate is null
+            ? string.Empty
+            : " WHERE fel.finding_id IN (SELECT f.finding_id FROM finding f LEFT JOIN finding_run fr ON fr.finding_id = f.finding_id LEFT JOIN finding_session fs ON fs.finding_id = f.finding_id WHERE " + filterPredicate + ")";
+
+        string findSql =
+            "SELECT f.finding_id, f.detector_id, f.title, f.mechanism, f.confidence, f.recommendation, " +
+            "f.outcome_risk_caveat, f.rank_score, few.tokens, feb.lower, feb.upper, fr.run_id, fs.session_id, " +
+            "fmc.measurement_class, fcb.confidence_basis, fww.text, fch.context_limit, fch.context_limit_source " +
+            "FROM finding f " +
+            "LEFT JOIN finding_estimated_waste few ON few.finding_id = f.finding_id " +
+            "LEFT JOIN finding_error_bar feb ON feb.finding_id = f.finding_id " +
+            "LEFT JOIN finding_run fr ON fr.finding_id = f.finding_id " +
+            "LEFT JOIN finding_session fs ON fs.finding_id = f.finding_id " +
+            "LEFT JOIN finding_measurement_class fmc ON fmc.finding_id = f.finding_id " +
+            "LEFT JOIN finding_confidence_basis fcb ON fcb.finding_id = f.finding_id " +
+            "LEFT JOIN finding_what_would_raise_it fww ON fww.finding_id = f.finding_id " +
+            $"LEFT JOIN finding_compaction_hazard fch ON fch.finding_id = f.finding_id{whereClause} " +
+            "ORDER BY f.rank_score DESC, f.rowid ASC";
+        List<RawFindingHeader> headers = [.. QueryRows<RawFindingHeader>(
+            findSql,
+            parameters,
+            static reader =>
+            {
+                double? lower = ReadNullableDouble(reader, "lower");
+                double? upper = ReadNullableDouble(reader, "upper");
+                FindingErrorBar? errorBar = lower.HasValue && upper.HasValue
+                    ? new FindingErrorBar((long)lower.Value, (long)upper.Value)
+                    : lower.HasValue || upper.HasValue
+                        ? throw new StoredDataException("Partial finding_error_bar row returned.")
+                        : null;
+
+                long? hazardLimit = ReadNullableInt64(reader, "context_limit");
+                string? hazardSource = ReadNullableString(reader, "context_limit_source");
+                StoredCompactionHazard? hazard = hazardLimit.HasValue && hazardSource is not null
+                    ? new StoredCompactionHazard(hazardLimit.Value, hazardSource)
+                    : hazardLimit.HasValue || hazardSource is not null
+                        ? throw new StoredDataException("Partial finding_compaction_hazard row returned.")
+                        : null;
+
+                return new RawFindingHeader(
+                    reader.GetString(reader.GetOrdinal("finding_id")),
+                    reader.GetString(reader.GetOrdinal("detector_id")),
+                    reader.GetString(reader.GetOrdinal("title")),
+                    reader.GetString(reader.GetOrdinal("mechanism")),
+                    reader.GetString(reader.GetOrdinal("confidence")),
+                    reader.GetString(reader.GetOrdinal("recommendation")),
+                    reader.GetString(reader.GetOrdinal("outcome_risk_caveat")),
+                    reader.GetDouble(reader.GetOrdinal("rank_score")),
+                    ReadNullableInt64(reader, "tokens"),
+                    errorBar,
+                    ReadNullableString(reader, "run_id"),
+                    ReadNullableString(reader, "session_id"),
+                    ReadNullableString(reader, "measurement_class"),
+                    ReadNullableString(reader, "confidence_basis"),
+                    ReadNullableString(reader, "text"),
+                    hazard);
+            })];
+
+        Dictionary<string, List<FindingEvidenceLink>> linksByFinding = new(StringComparer.Ordinal);
+        foreach ((string FindingId, FindingEvidenceLink Link) row in QueryRows<(string FindingId, FindingEvidenceLink Link)>(
+                     "SELECT fel.finding_id, fel.span_id, fel.turn_index, fel.description " +
+                     $"FROM finding_evidence_link fel{linkFilter} ORDER BY fel.finding_id ASC, fel.position ASC",
+                     parameters,
+                     static reader => (
+                         reader.GetString(reader.GetOrdinal("finding_id")),
+                         new FindingEvidenceLink(
+                             reader.GetString(reader.GetOrdinal("span_id")),
+                             reader.GetInt32(reader.GetOrdinal("turn_index")),
+                             reader.GetString(reader.GetOrdinal("description"))))))
+        {
+            GetOrCreateList(linksByFinding, row.FindingId).Add(row.Link);
+        }
+
+        List<StoredFinding> findings = new(headers.Count);
+        foreach (RawFindingHeader h in headers)
+        {
+            findings.Add(new StoredFinding(
+                h.FindingId,
+                h.DetectorId,
+                h.Title,
+                h.Mechanism,
+                h.Confidence,
+                h.Recommendation,
+                h.OutcomeRiskCaveat,
+                h.RankScore,
+                linksByFinding.TryGetValue(h.FindingId, out List<FindingEvidenceLink>? links) ? links : [],
+                h.EstimatedWasteTokens,
+                h.ErrorBar,
+                h.RunId,
+                h.SessionId,
+                h.MeasurementClass,
+                h.ConfidenceBasis,
+                h.WhatWouldRaiseIt,
+                h.CompactionHazard));
+        }
+
+        return findings;
+    }
+
+    private protected IReadOnlyList<StoredPrediction> QueryPredictions(string? filterPredicate, Dictionary<string, object?> parameters)
+    {
+        string whereClause = filterPredicate is null ? string.Empty : $" WHERE {filterPredicate}";
+        string sql =
+            "SELECT p.prediction_id, p.finding_id, p.run_id, p.predicted_waste_tokens, p.confidence, " +
+            "p.confidence_tier, p.created_at_utc, pc.comparison_run_id, pod.tokens, pcal.score " +
+            "FROM prediction p " +
+            "LEFT JOIN prediction_comparison pc ON pc.prediction_id = p.prediction_id " +
+            "LEFT JOIN prediction_observed_delta pod ON pod.prediction_id = p.prediction_id " +
+            $"LEFT JOIN prediction_calibration pcal ON pcal.prediction_id = p.prediction_id{whereClause} " +
+            "ORDER BY p.rowid ASC";
+        return QueryRows<StoredPrediction>(sql, parameters, static reader => new StoredPrediction(
+            reader.GetString(reader.GetOrdinal("prediction_id")),
+            reader.GetString(reader.GetOrdinal("finding_id")),
+            reader.GetString(reader.GetOrdinal("run_id")),
+            reader.GetInt64(reader.GetOrdinal("predicted_waste_tokens")),
+            reader.GetDouble(reader.GetOrdinal("confidence")),
+            reader.GetString(reader.GetOrdinal("confidence_tier")),
+            reader.GetString(reader.GetOrdinal("created_at_utc")),
+            ReadNullableString(reader, "comparison_run_id"),
+            ReadNullableInt64(reader, "tokens"),
+            ReadNullableDouble(reader, "score")));
+    }
+
+    private protected static string BuildSpanFilterWhere(string alias, string? spanId, string? sessionKey, Dictionary<string, object?> parameters)
+    {
+        List<string> predicates = [];
+        if (spanId is not null)
+        {
+            predicates.Add($"{alias}.span_id = {Bind(parameters, spanId)}");
+        }
+
+        if (sessionKey is not null)
+        {
+            predicates.Add($"EXISTS (SELECT 1 FROM record_session_link rsl WHERE rsl.span_id = {alias}.span_id AND rsl.session_key = {Bind(parameters, sessionKey)})");
+        }
+
+        return predicates.Count > 0 ? " WHERE " + string.Join(" AND ", predicates) : string.Empty;
+    }
+
+    private protected static string BuildContentPartSelect(string alias, string whereClause, string orderBy) =>
+        $"SELECT {alias}.span_id, {BuildContentPartColumns(alias)} " +
+        BuildContentPartFrom(alias) +
+        $"{whereClause} {orderBy}";
+
+    /// <summary>
+    /// Builds the budgeted content-part read: the scoped rows are wrapped in a subquery whose
+    /// window totals the UTF-8 bytes of every part before each row, so SQLite returns only the
+    /// rows whose preceding parts stay under <paramref name="budget"/> plus the one row that
+    /// crosses it — the same prefix an in-memory cut kept — and the text past the budget never
+    /// leaves the database.
+    /// </summary>
+    /// <param name="alias">Content-part table alias.</param>
+    /// <param name="whereClause">Scoped predicate clause, starting with WHERE.</param>
+    /// <param name="budget">Maximum UTF-8 bytes of part text to keep.</param>
+    private protected static string BuildBudgetedContentPartSelect(string alias, string whereClause, int budget) =>
+        "SELECT * FROM (" +
+        $"SELECT {alias}.span_id AS span_id, {BuildContentPartColumns(alias)}, " +
+        "COALESCE(SUM(COALESCE(length(CAST(cpt.part_text AS BLOB)), 0)) OVER (" +
+        $"ORDER BY {alias}.span_id ASC, {alias}.position ASC " +
+        "ROWS BETWEEN UNBOUNDED PRECEDING AND 1 PRECEDING), 0) AS bytes_before " +
+        BuildContentPartFrom(alias) +
+        $"{whereClause}) WHERE bytes_before < {budget.ToString(CultureInfo.InvariantCulture)} " +
+        "ORDER BY span_id ASC, position ASC";
+
+    private protected static string BuildContentPartFrom(string alias) =>
+        $"FROM content_part {alias} " +
+        $"LEFT JOIN content_part_text cpt ON cpt.span_id = {alias}.span_id AND cpt.position = {alias}.position " +
+        $"LEFT JOIN content_part_withheld cpw ON cpw.span_id = {alias}.span_id AND cpw.position = {alias}.position " +
+        $"LEFT JOIN content_part_withheld_tokenizer cpwt ON cpwt.span_id = {alias}.span_id AND cpwt.position = {alias}.position " +
+        $"LEFT JOIN content_part_reported_tokens cprt ON cprt.span_id = {alias}.span_id AND cprt.position = {alias}.position " +
+        $"LEFT JOIN content_part_server cps ON cps.span_id = {alias}.span_id AND cps.position = {alias}.position " +
+        $"LEFT JOIN content_part_role cpr ON cpr.span_id = {alias}.span_id AND cpr.position = {alias}.position " +
+        $"LEFT JOIN content_part_residency cpres ON cpres.span_id = {alias}.span_id AND cpres.position = {alias}.position " +
+        $"LEFT JOIN content_part_truncation cptr ON cptr.span_id = {alias}.span_id AND cptr.position = {alias}.position";
+
+    private protected static string BuildContentPartColumns(string alias) =>
+        $"{alias}.position, {alias}.bucket, " +
+        "cpt.part_text, " +
+        "cpw.utf8_bytes, " +
+        "cpw.characters, " +
+        "cpw.measured_tokens, " +
+        "cprt.token_count, " +
+        "cps.server_name, " +
+        "cpr.role_name, " +
+        "cpres.is_resident, " +
+        "cptr.original_utf8_bytes, " +
+        "cpwt.tokenizer, " +
+        "cpwt.is_model_own";
+
+    private protected static CollectedContentPart ReadContentPartColumns(SqliteDataReader reader)
+    {
+        int position = reader.GetInt32(reader.GetOrdinal("position"));
+        ContentBucket bucket = ParseContentBucket(reader.GetString(reader.GetOrdinal("bucket")));
+        string? plainText = ReadNullableString(reader, "part_text");
+        long? wBytes = ReadNullableInt64(reader, "utf8_bytes");
+        long? wChars = ReadNullableInt64(reader, "characters");
+        long? wTokens = ReadNullableInt64(reader, "measured_tokens");
+        string? wTokenizer = ReadNullableString(reader, "tokenizer");
+        long? wModelOwnRaw = ReadNullableInt64(reader, "is_model_own");
+        bool wModelOwn = wModelOwnRaw switch
+        {
+            null => false,
+            0L => false,
+            1L => true,
+            _ => throw new StoredDataException($"Invalid boolean flag '{wModelOwnRaw.Value.ToString(CultureInfo.InvariantCulture)}' in content_part_withheld_tokenizer.is_model_own."),
+        };
+        if ((wTokenizer is null) != (wModelOwnRaw is null))
+        {
+            throw new StoredDataException("Partial content_part_withheld_tokenizer row returned.");
+        }
+
+        CollectedWithheldText? withheld = wBytes.HasValue && wChars.HasValue && wTokens.HasValue
+            ? new CollectedWithheldText(wBytes.Value, wChars.Value, wTokens.Value, wTokenizer, wModelOwn)
+            : wBytes.HasValue || wChars.HasValue || wTokens.HasValue
+                ? throw new StoredDataException("Partial content_part_withheld row returned.")
+                : null;
+        long? reportedTokens = ReadNullableInt64(reader, "token_count");
+        string? server = ReadNullableString(reader, "server_name");
+        string? role = ReadNullableString(reader, "role_name");
+        long? residentRaw = ReadNullableInt64(reader, "is_resident");
+        bool? resident = residentRaw.HasValue
+            ? residentRaw.Value switch
+            {
+                0L => false,
+                1L => true,
+                _ => throw new StoredDataException($"Invalid boolean flag '{residentRaw.Value.ToString(CultureInfo.InvariantCulture)}' in content_part_residency.is_resident."),
+            }
+            : null;
+        long? originalBytes = ReadNullableInt64(reader, "original_utf8_bytes");
+
+        return new CollectedContentPart(position, bucket, plainText, withheld, reportedTokens, server, role, resident, originalBytes);
+    }
+
+    private protected static string BuildToolCallSelect(string alias, string whereClause, string orderBy) =>
+        $"SELECT {alias}.span_id, {BuildToolCallColumns(alias)} " +
+        $"FROM tool_call {alias} " +
+        $"LEFT JOIN tool_call_mcp tcm ON tcm.span_id = {alias}.span_id " +
+        $"LEFT JOIN tool_call_input_size tcis ON tcis.span_id = {alias}.span_id " +
+        $"LEFT JOIN tool_call_input_text tcit ON tcit.span_id = {alias}.span_id " +
+        $"LEFT JOIN tool_call_input_fingerprint tcif ON tcif.span_id = {alias}.span_id " +
+        $"LEFT JOIN tool_call_input_truncation tcitrc ON tcitrc.span_id = {alias}.span_id " +
+        $"LEFT JOIN tool_call_result_size tcrs ON tcrs.span_id = {alias}.span_id " +
+        $"LEFT JOIN tool_call_result_text tcrt ON tcrt.span_id = {alias}.span_id " +
+        $"LEFT JOIN tool_call_result_truncation tcrtrc ON tcrtrc.span_id = {alias}.span_id " +
+        $"LEFT JOIN tool_call_outcome tco ON tco.span_id = {alias}.span_id " +
+        $"LEFT JOIN tool_call_error tce ON tce.span_id = {alias}.span_id " +
+        $"LEFT JOIN tool_call_error_code tcec ON tcec.span_id = {alias}.span_id " +
+        $"LEFT JOIN tool_call_exit_code tcex ON tcex.span_id = {alias}.span_id" +
+        $"{whereClause} {orderBy}";
+
+    private protected static string BuildToolCallColumns(string alias) =>
+        $"{alias}.call_id, {alias}.tool_name, " +
+        "tcm.server_name, " +
+        "tcm.server_tool_name, " +
+        "tcis.utf8_bytes AS input_utf8_bytes, " +
+        "tcis.characters AS input_characters, " +
+        "tcit.text AS input_text, " +
+        "tcif.sha256 AS input_sha256, " +
+        "tcitrc.original_utf8_bytes AS input_original_utf8_bytes, " +
+        "tcrs.utf8_bytes AS result_utf8_bytes, " +
+        "tcrs.characters AS result_characters, " +
+        "tcrt.text AS result_text, " +
+        "tcrtrc.original_utf8_bytes AS result_original_utf8_bytes, " +
+        "tco.succeeded, " +
+        "tce.message AS error_message, " +
+        "tcec.code AS error_code, " +
+        "tcex.exit_code";
+
+    /// <summary>
+    /// Tool-call columns without the two content-bearing text expressions, in the same shape as
+    /// <see cref="BuildToolCallColumns"/> so both parses share one reader.
+    /// </summary>
+    private protected static string BuildToolCallMetadataColumns(string alias) =>
+        $"{alias}.call_id, {alias}.tool_name, " +
+        "tcm.server_name, " +
+        "tcm.server_tool_name, " +
+        "tcis.utf8_bytes AS input_utf8_bytes, " +
+        "tcis.characters AS input_characters, " +
+        "NULL AS input_text, " +
+        "tcif.sha256 AS input_sha256, " +
+        "tcitrc.original_utf8_bytes AS input_original_utf8_bytes, " +
+        "tcrs.utf8_bytes AS result_utf8_bytes, " +
+        "tcrs.characters AS result_characters, " +
+        "NULL AS result_text, " +
+        "tcrtrc.original_utf8_bytes AS result_original_utf8_bytes, " +
+        "tco.succeeded, " +
+        "tce.message AS error_message, " +
+        "tcec.code AS error_code, " +
+        "tcex.exit_code";
+
+    private protected static CollectedToolCall ReadToolCallColumns(SqliteDataReader reader)
+    {
+        string callId = reader.GetString(reader.GetOrdinal("call_id"));
+        string toolName = reader.GetString(reader.GetOrdinal("tool_name"));
+        string? mcpServer = ReadNullableString(reader, "server_name");
+        string? mcpTool = ReadNullableString(reader, "server_tool_name");
+
+        long? inBytes = ReadNullableInt64(reader, "input_utf8_bytes");
+        long? inChars = ReadNullableInt64(reader, "input_characters");
+        string? inText = ReadNullableString(reader, "input_text");
+        string? inSha = ReadNullableString(reader, "input_sha256");
+        long? inTrunc = ReadNullableInt64(reader, "input_original_utf8_bytes");
+        CollectedToolContent? input = inBytes.HasValue && inChars.HasValue
+            ? new CollectedToolContent(inText, inBytes.Value, inChars.Value, inSha, inTrunc)
+            : null;
+
+        long? resBytes = ReadNullableInt64(reader, "result_utf8_bytes");
+        long? resChars = ReadNullableInt64(reader, "result_characters");
+        string? resText = ReadNullableString(reader, "result_text");
+        long? resTrunc = ReadNullableInt64(reader, "result_original_utf8_bytes");
+        CollectedToolContent? result = resBytes.HasValue && resChars.HasValue
+            ? new CollectedToolContent(resText, resBytes.Value, resChars.Value, null, resTrunc)
+            : null;
+
+        long? succeededRaw = ReadNullableInt64(reader, "succeeded");
+        bool? succeeded = succeededRaw.HasValue
+            ? succeededRaw.Value switch
+            {
+                0L => false,
+                1L => true,
+                _ => throw new StoredDataException($"Invalid boolean flag '{succeededRaw.Value.ToString(CultureInfo.InvariantCulture)}' in tool_call_outcome.succeeded."),
+            }
+            : null;
+
+        string? errorMsg = ReadNullableString(reader, "error_message");
+        string? errorCode = ReadNullableString(reader, "error_code");
+        CollectedError? error = errorMsg is not null ? new CollectedError(errorMsg, errorCode) : null;
+
+        long? exitCode = ReadNullableInt64(reader, "exit_code");
+        return new CollectedToolCall(callId, toolName, mcpServer, mcpTool, input, result, succeeded, error, exitCode);
+    }
+
+    private protected static string BuildAgentInvocationSelect(string alias, string whereClause, string orderBy) =>
+        $"SELECT {alias}.span_id, {BuildAgentInvocationColumns(alias)} " +
+        $"FROM agent_invocation {alias} " +
+        $"LEFT JOIN agent_invocation_spawn ais ON ais.span_id = {alias}.span_id " +
+        $"LEFT JOIN agent_invocation_outcome aio ON aio.span_id = {alias}.span_id " +
+        $"LEFT JOIN agent_invocation_error aie ON aie.span_id = {alias}.span_id" +
+        $"{whereClause} {orderBy}";
+
+    private protected static string BuildAgentInvocationColumns(string alias) =>
+        $"{alias}.agent_name, " +
+        "ais.spawning_record_id, " +
+        "aio.succeeded, " +
+        "aie.message AS error_message";
+
+    private protected static CollectedAgentInvocation ReadAgentInvocationColumns(SqliteDataReader reader)
+    {
+        string agentName = reader.GetString(reader.GetOrdinal("agent_name"));
+        string? spawnId = ReadNullableString(reader, "spawning_record_id");
+        long? succeededRaw = ReadNullableInt64(reader, "succeeded");
+        bool? succeeded = succeededRaw.HasValue
+            ? succeededRaw.Value switch
+            {
+                0L => false,
+                1L => true,
+                _ => throw new StoredDataException($"Invalid boolean flag '{succeededRaw.Value.ToString(CultureInfo.InvariantCulture)}' in agent_invocation_outcome.succeeded."),
+            }
+            : null;
+        string? error = ReadNullableString(reader, "error_message");
+        return new CollectedAgentInvocation(agentName, spawnId, succeeded, error);
+    }
+
+    private protected static string? BuildStoredFieldsScopeWhere(TableDefinition table, string sessionExpr)
+    {
+        string tableName = table.Name;
+        if (string.Equals(tableName, "harness", StringComparison.Ordinal) ||
+            tableName.StartsWith("harness_rollup", StringComparison.Ordinal))
+        {
+            return $"harness_id IN (SELECT harness_id FROM session WHERE session_id = {sessionExpr} UNION SELECT r.harness_id FROM record r JOIN record_session_link rsl ON rsl.span_id = r.span_id WHERE rsl.session_key = {sessionExpr})";
+        }
+
+        if (string.Equals(tableName, "source", StringComparison.Ordinal))
+        {
+            return $"source_id IN (SELECT DISTINCT r.source_id FROM record r JOIN record_session_link rsl ON rsl.span_id = r.span_id WHERE rsl.session_key = {sessionExpr})";
+        }
+
+        if (string.Equals(tableName, "session", StringComparison.Ordinal) ||
+            tableName.StartsWith("session_", StringComparison.Ordinal))
+        {
+            return table.Columns.Any(static c => string.Equals(c.Name, "session_id", StringComparison.Ordinal))
+                ? $"session_id = {sessionExpr}"
+                : null;
+        }
+
+        if (tableName.StartsWith("run", StringComparison.Ordinal))
+        {
+            return $"run_id IN (SELECT DISTINCT e.run_id FROM execution e JOIN execution_session es ON es.execution_id = e.execution_id WHERE es.session_id = {sessionExpr})";
+        }
+
+        if (tableName.StartsWith("execution", StringComparison.Ordinal))
+        {
+            return $"execution_id IN (SELECT execution_id FROM execution_session WHERE session_id = {sessionExpr})";
+        }
+
+        if (tableName.StartsWith("finding", StringComparison.Ordinal))
+        {
+            return $"finding_id IN (SELECT finding_id FROM finding_session WHERE session_id = {sessionExpr})";
+        }
+
+        if (tableName.StartsWith("prediction", StringComparison.Ordinal))
+        {
+            return $"prediction_id IN (SELECT p.prediction_id FROM prediction p WHERE p.finding_id IN (SELECT finding_id FROM finding_session WHERE session_id = {sessionExpr}) OR p.run_id IN (SELECT e.run_id FROM execution e JOIN execution_session es ON es.execution_id = e.execution_id WHERE es.session_id = {sessionExpr}))";
+        }
+
+        if (tableName.StartsWith("ingest_problem", StringComparison.Ordinal))
+        {
+            return $"problem_id IN (SELECT problem_id FROM ingest_problem_session WHERE session_id = {sessionExpr})";
+        }
+
+        if (string.Equals(tableName, "projection_dirty_session", StringComparison.Ordinal))
+        {
+            return $"session_id = {sessionExpr}";
+        }
+
+        if (table.Columns.Any(static c => string.Equals(c.Name, "span_id", StringComparison.Ordinal)))
+        {
+            return $"span_id IN (SELECT span_id FROM record_session_link WHERE session_key = {sessionExpr})";
+        }
+
+        return null;
+    }
+
+    /// <summary>Reads one row, in catalog column order, from the raw column values.</summary>
+    private protected static StoredFieldRow ReadStoredFieldRow(SqliteDataReader reader, TableDefinition table)
+    {
+        List<StoredFieldCell> cells = new(table.Columns.Count);
+        for (int colIndex = 0; colIndex < table.Columns.Count; colIndex++)
+        {
+            cells.Add(ReadStoredFieldCell(reader, table.Columns[colIndex]));
+        }
+
+        return new StoredFieldRow(cells);
+    }
+
+    private protected static StoredFieldCell ReadStoredFieldCell(SqliteDataReader reader, ColumnDefinition column)
+    {
+        int ordinal = reader.GetOrdinal(column.Name);
+        if (reader.IsDBNull(ordinal))
+        {
+            return new StoredFieldCell(column.Name, column.Type);
+        }
+
+        object value = reader.GetValue(ordinal);
+        string site = column.Name;
+        return column.Type switch
+        {
+            SqliteColumnType.SqliteText => value is string text
+                ? new StoredFieldCell(column.Name, column.Type, TextValue: text)
+                : throw new StoredDataException($"Unexpected SQLite storage type for text column '{site}'."),
+            SqliteColumnType.SqliteInteger => value is long integer
+                ? new StoredFieldCell(column.Name, column.Type, IntegerValue: integer)
+                : throw new StoredDataException($"Unexpected SQLite storage type for integer column '{site}'."),
+            SqliteColumnType.SqliteReal => value switch
+            {
+                long integer => new StoredFieldCell(column.Name, column.Type, RealValue: integer),
+                double real => new StoredFieldCell(column.Name, column.Type, RealValue: real),
+                _ => throw new StoredDataException($"Unexpected SQLite storage type for real column '{site}'."),
+            },
+            _ => throw new StoredDataException($"Unsupported column type '{column.Type}' on '{site}'."),
+        };
+    }
+
+    /// <summary>
+    /// The key columns each table's missing-parent-key computation reads: a qualifying child (one
+    /// foreign key whose columns are its primary key) reads its own key columns, and the parent
+    /// such a child references reads the referenced columns. Every other column stays unread.
+    /// </summary>
+    private protected static Dictionary<string, List<ColumnDefinition>> StoredFieldsKeyColumns(IReadOnlyList<TableDefinition> tables)
+    {
+        Dictionary<string, HashSet<string>> keyNamesByTable = new(tables.Count, StringComparer.Ordinal);
+        foreach (TableDefinition table in tables)
+        {
+            keyNamesByTable[table.Name] = new HashSet<string>(StringComparer.Ordinal);
+        }
+
+        foreach (TableDefinition child in tables)
+        {
+            if (child.ForeignKeys.Count != 1 ||
+                !child.ForeignKeys[0].Columns.SequenceEqual(child.PrimaryKeyColumns, StringComparer.Ordinal))
+            {
+                continue;
+            }
+
+            ForeignKeyDefinition foreignKey = child.ForeignKeys[0];
+            HashSet<string> childKeys = keyNamesByTable[child.Name];
+            foreach (string column in foreignKey.Columns)
+            {
+                childKeys.Add(column);
+            }
+
+            HashSet<string> parentKeys = keyNamesByTable[RelationalSchemaCatalog.GetTable(foreignKey.ReferencedTable).Name];
+            foreach (string column in foreignKey.ReferencedColumns)
+            {
+                parentKeys.Add(column);
+            }
+        }
+
+        Dictionary<string, List<ColumnDefinition>> keyColumnsByTable = new(tables.Count, StringComparer.Ordinal);
+        foreach (TableDefinition table in tables)
+        {
+            keyColumnsByTable[table.Name] =
+                [.. table.Columns.Where(column => keyNamesByTable[table.Name].Contains(column.Name))];
+        }
+
+        return keyColumnsByTable;
+    }
+
+    private protected static List<string> ComputeStoredFieldsMissingParentKeys(
+        TableDefinition table,
+        List<StoredFieldRow> childRows,
+        IReadOnlyDictionary<string, List<StoredFieldRow>> rowsByTable)
+    {
+        if (table.ForeignKeys.Count != 1)
+        {
+            return [];
+        }
+
+        ForeignKeyDefinition fk = table.ForeignKeys[0];
+        if (!fk.Columns.SequenceEqual(table.PrimaryKeyColumns, StringComparer.Ordinal))
+        {
+            return [];
+        }
+
+        if (!rowsByTable.TryGetValue(fk.ReferencedTable, out List<StoredFieldRow>? parentRows) || parentRows.Count == 0)
+        {
+            return [];
+        }
+
+        TableDefinition parentTable = RelationalSchemaCatalog.GetTable(fk.ReferencedTable);
+        int[] childKeyIndices = ResolveColumnIndices(table, fk.Columns);
+        int[] parentKeyIndices = ResolveColumnIndices(parentTable, fk.ReferencedColumns);
+
+        HashSet<string> presentChildKeys = new(StringComparer.Ordinal);
+        foreach (StoredFieldRow childRow in childRows)
+        {
+            _ = presentChildKeys.Add(FormatStoredRowKey(childRow, childKeyIndices));
+        }
+
+        List<string> missing = [];
+        foreach (StoredFieldRow parentRow in parentRows)
+        {
+            string key = FormatStoredRowKey(parentRow, parentKeyIndices);
+            if (!presentChildKeys.Contains(key))
+            {
+                missing.Add(key);
+            }
+        }
+
+        return missing;
+    }
+
+    private protected static int[] ResolveColumnIndices(TableDefinition table, IReadOnlyList<string> columnNames)
+    {
+        int[] indices = new int[columnNames.Count];
+        for (int index = 0; index < columnNames.Count; index++)
+        {
+            string target = columnNames[index];
+            int found = -1;
+            for (int colIndex = 0; colIndex < table.Columns.Count; colIndex++)
+            {
+                if (string.Equals(table.Columns[colIndex].Name, target, StringComparison.Ordinal))
+                {
+                    found = colIndex;
+                    break;
+                }
+            }
+
+            if (found < 0)
+            {
+                throw new StoredDataException($"Column '{target}' not found on table '{table.Name}'.");
+            }
+
+            indices[index] = found;
+        }
+
+        return indices;
+    }
+
+    private protected static string FormatStoredRowKey(StoredFieldRow row, int[] keyIndices)
+    {
+        if (keyIndices.Length == 1)
+        {
+            return FormatStoredCellValue(row.Cells[keyIndices[0]]);
+        }
+
+        string[] parts = new string[keyIndices.Length];
+        for (int index = 0; index < keyIndices.Length; index++)
+        {
+            parts[index] = FormatStoredCellValue(row.Cells[keyIndices[index]]);
+        }
+
+        return string.Join(":", parts);
+    }
+
+    private protected static string FormatStoredCellValue(StoredFieldCell cell) => cell.ColumnType switch
+    {
+        SqliteColumnType.SqliteText => cell.TextValue ?? string.Empty,
+        SqliteColumnType.SqliteInteger => cell.IntegerValue.HasValue
+            ? cell.IntegerValue.Value.ToString(CultureInfo.InvariantCulture)
+            : string.Empty,
+        SqliteColumnType.SqliteReal => cell.RealValue.HasValue
+            ? cell.RealValue.Value.ToString(CultureInfo.InvariantCulture)
+            : string.Empty,
+        _ => string.Empty,
+    };
+}
+
+/// <summary>
+/// Session figure reads over a SQLite relational store.
+/// </summary>
+public abstract class SqliteRelationalStoreReadCore : SqliteRelationalStoreReadQueryBase
+{
+    /// <summary>Initializes the figure reads over <paramref name="databasePath"/>.</summary>
+    /// <param name="databasePath">Path to the SQLite database file.</param>
+    /// <param name="circuitBreaker">Circuit breaker guarding every <c>sqlite3</c> invocation.</param>
+    /// <param name="fileSystem">Filesystem seam; defaults to <see cref="PhysicalRelationalStoreFileSystem.Instance"/> when <see langword="null"/>.</param>
+    protected SqliteRelationalStoreReadCore(
+        string databasePath,
+        ICircuitBreaker circuitBreaker,
+        IRelationalStoreFileSystem? fileSystem)
+        : base(databasePath, circuitBreaker, fileSystem)
+    {
+    }
+
+    private protected static IReadOnlyList<ReadTimeTurnSummary> BuildContentFreeTurnSummaries(
+        IReadOnlyList<StoredSessionTurn> projectedTurns,
+        IReadOnlyList<CollectedRecord> records,
+        string harnessId,
+        IModelPricingLookup? pricing)
+    {
+        List<(int Position, CollectedRecord Record)> turnEntries = ResolveSessionTurnEntriesForReader(projectedTurns, records);
+        List<ReadTimeTurnSummary> summaries = new(turnEntries.Count);
+        foreach ((int position, CollectedRecord turnRecord) in turnEntries)
+        {
+            summaries.Add(BuildReaderTurnSummary(turnRecord, position, harnessId, pricing, out _, out _));
+        }
+
+        return summaries;
+    }
+
+    /// <summary>
+    /// Derives one session's bounded summary figures, tool residency rows, and request metadata
+    /// from content-free record scalars, its stored projection, and ingest diagnostics: token
+    /// counts, reported costs, models, timestamps, projection metadata, and tool metadata, with
+    /// no content column read.
+    /// </summary>
+    private protected static SessionFigureSet BuildSessionFigures(
+        CollectedSession session,
+        IReadOnlyList<CollectedRecord> records,
+        StoredSessionProjection? projection,
+        IReadOnlyList<StoredSessionTurn> projectedTurns,
+        IReadOnlyList<Problem> storedProblems,
+        IModelPricingLookup? pricing)
+    {
+        string sessionKey = session.SessionKey;
+        string harnessId = session.HarnessId;
+
+        HashSet<string> sessionSpanIds = new(StringComparer.Ordinal);
+        Dictionary<string, CollectedRecord> recordsBySpanId = new(records.Count, StringComparer.Ordinal);
+        foreach (CollectedRecord record in records)
+        {
+            _ = sessionSpanIds.Add(record.RecordId);
+            recordsBySpanId[record.RecordId] = record;
+        }
+
+        List<(int Position, CollectedRecord Record)> turnEntries = ResolveSessionTurnEntriesForReader(projectedTurns, records);
+        SessionTurnAccumulation turns = AccumulateSessionTurns(turnEntries, harnessId, pricing);
+
+        List<CollectedRecord> rootRecords = ResolveSessionRootRecords(records, sessionSpanIds);
+        bool hasNesting = records.Any(r =>
+            r.ParentRecordId is not null &&
+            !string.Equals(r.ParentRecordId, r.RecordId, StringComparison.Ordinal) &&
+            sessionSpanIds.Contains(r.ParentRecordId));
+
+        IReadOnlyList<CollectedRecord> durationCandidates = hasNesting ? rootRecords : records;
+        (long totalDuration, bool hasDuration) = ComputeSessionDuration(durationCandidates);
+
+        List<Problem> extraProblems = [];
+        ReadTimeCostSummary? sessionReportedCost = ResolveSessionReportedCost(records, extraProblems);
+
+        // A session whose records carry no tokens is priced from the usage the harness reported
+        // for the whole session, per model; records with tokens keep pricing per turn.
+        ReportedUsageCost? reportedUsageCost = ReportedSessionUsage.Price(session, records, pricing);
+        if (reportedUsageCost is not null)
+        {
+            extraProblems.AddRange(reportedUsageCost.Problems);
+        }
+
+        ReadTimeCostSummary sessionPublishedCost = ResolveSessionPublishedCost(
+            reportedUsageCost,
+            turns.TurnPublishedBlocks,
+            extraProblems);
+        ReadTimeCostBasisMismatch? basisMismatch = ResolveSessionCostBasisMismatch(
+            turns.ValuedTurnHarnessBlocks,
+            turns.ValuedTurnPublishedBlocks,
+            extraProblems);
+
+        long? nullableTotalInput = turns.TotalInput;
+        long? nullableTotalOutput = turns.TotalOutput;
+        long? nullableTotalCacheRead = turns.TotalCacheRead;
+        long? nullableTotalCacheCreation = turns.TotalCacheCreation;
+
+        ReportedSessionUsageTotals? reportedUsageTotals = ReportedSessionUsage.Resolve(session, records);
+        if (reportedUsageTotals is not null)
+        {
+            nullableTotalInput = reportedUsageTotals.CombinedInput;
+            nullableTotalOutput = reportedUsageTotals.Output;
+            nullableTotalCacheRead = reportedUsageTotals.CacheRead;
+            nullableTotalCacheCreation = reportedUsageTotals.CacheWrite;
+        }
+
+        double? cacheHitRatio = nullableTotalInput is > 0 && nullableTotalCacheRead.HasValue
+            ? (double)nullableTotalCacheRead.Value / nullableTotalInput.Value
+            : null;
+
+        // Cache-creation coverage counts turns; reported session usage has no per-turn figures.
+        int? cacheCreationCoverage = reportedUsageTotals is null && nullableTotalInput is > 0 && nullableTotalCacheCreation.HasValue && turnEntries.Count > 0
+            ? turns.CacheCreationTurns
+            : null;
+
+        // Tool figures come from the metadata tables the content-free record read carries:
+        // tool names, servers, definition schema sizes, and outcomes are metadata, while the
+        // tool input and result text tables are never selected.
+        SessionToolAggregation toolAggregation = AggregateSessionTools(records);
+        int? toolCalls = toolAggregation.ToolCallTotal > 0 ? toolAggregation.ToolCallTotal : null;
+
+        List<ReadTimeSessionToolSummary> tools = BuildReaderToolSummaries(
+            projection,
+            turnEntries.Count,
+            toolAggregation.DefStats,
+            toolAggregation.ToolsInvoked,
+            toolAggregation.InvCounts,
+            toolAggregation.ErrCounts);
+        (int reconciliationTotal, int reconciliationMismatched) = CountReconciliation(turns.Reconciliation);
+
+        IReadOnlyList<string> requestSpanIds = projection is not null && projection.RequestSpanIds.Count > 0
+            ? projection.RequestSpanIds
+            : [.. rootRecords.Select(static r => r.RecordId)];
+        int requestCount = requestSpanIds.Count;
+        List<ReadTimeSessionRequestSummary> requests = BuildReaderRequestSummaries(
+            requestSpanIds,
+            records,
+            recordsBySpanId,
+            turnEntries);
+
+        // Server rows, context buckets, and the unused-schema range all price the stored
+        // projection and the content-free tool metadata above, so no content column is read.
+        List<ReadTimeSessionServerSummary> servers = BuildReaderServerSummaries(projection, tools);
+        (ReadTimeContextBucketSummary? firstContextBucket, ReadTimeContextBucketSummary? lastContextBucket) =
+            BuildSessionContextBuckets(projection, turnEntries);
+        UnusedSchemaRange? unusedRange = ResolveReaderUnusedRange(projection, harnessId, turns.Models, pricing);
+
+        List<Problem> problems = [.. storedProblems, .. extraProblems];
+
+        return new SessionFigureSet(
+            new SessionSummaryFigure(
+                SessionKey: sessionKey,
+                HarnessId: harnessId,
+                TurnCount: turnEntries.Count,
+                RequestCount: requestCount,
+                TotalInput: nullableTotalInput,
+                TotalOutput: nullableTotalOutput,
+                TotalCacheRead: nullableTotalCacheRead,
+                TotalCacheCreation: nullableTotalCacheCreation,
+                DurationMs: hasDuration ? totalDuration : null,
+                Models: turns.Models,
+                CacheHitRatio: cacheHitRatio,
+                CacheCreationCoverage: cacheCreationCoverage,
+                ToolCalls: toolCalls,
+                ToolsInvoked: toolAggregation.ToolsInvoked,
+                HasToolDefinitions: toolAggregation.ToolDefinitionRowCount > 0,
+                ToolsOffered: toolAggregation.ToolsOffered,
+                ReportedCost: sessionReportedCost,
+                PublishedCost: sessionPublishedCost,
+                CostBasisMismatch: basisMismatch,
+                Coverage: BuildSessionCoverage(projection),
+                Problems: problems,
+                SkillInvocations: [],
+                ToolRowsCount: tools.Count,
+                UnmeasuredInputTurns: turns.UnmeasuredInputTurns,
+                ReconciliationTotal: reconciliationTotal,
+                ReconciliationMismatched: reconciliationMismatched,
+                ReportedTotalTokens: reportedUsageTotals?.Total),
+            tools,
+            requests,
+            servers,
+            turns.Reconciliation,
+            firstContextBucket,
+            lastContextBucket,
+            unusedRange);
+    }
+
+    private protected static SessionTurnAccumulation AccumulateSessionTurns(
+        IReadOnlyList<(int Position, CollectedRecord Record)> turnEntries,
+        string harnessId,
+        IModelPricingLookup? pricing)
+    {
+        List<CostBlock> turnPublishedBlocks = new(turnEntries.Count);
+        List<CostBlock> valuedTurnPublishedBlocks = [];
+        List<CostBlock> valuedTurnHarnessBlocks = [];
+        List<string> models = [];
+        HashSet<string> seenModels = new(StringComparer.Ordinal);
+        long totalInput = 0;
+        bool hasInput = false;
+        long totalOutput = 0;
+        bool hasOutput = false;
+        long totalCacheRead = 0;
+        bool hasCacheRead = false;
+        long totalCacheCreation = 0;
+        bool hasCacheCreation = false;
+        int cacheCreationTurns = 0;
+        List<ReadTimeTurnReconciliation> reconciliation = new(turnEntries.Count);
+        int unmeasuredInputTurns = 0;
+
+        foreach ((int position, CollectedRecord turnRecord) in turnEntries)
+        {
+            ReadTimeTurnSummary turnSummary = BuildReaderTurnSummary(
+                turnRecord,
+                position,
+                harnessId,
+                pricing,
+                out CostBlock publishedBlock,
+                out CostBlock? harnessBlock);
+
+            if (!turnSummary.InputTokens.HasValue)
+            {
+                unmeasuredInputTurns++;
+            }
+
+            turnPublishedBlocks.Add(publishedBlock);
+            if (publishedBlock.Value is double publishedValue && double.IsFinite(publishedValue))
+            {
+                valuedTurnPublishedBlocks.Add(publishedBlock);
+            }
+
+            if (harnessBlock is not null && harnessBlock.Value is double harnessValue && double.IsFinite(harnessValue))
+            {
+                valuedTurnHarnessBlocks.Add(harnessBlock);
+            }
+
+            if (!string.IsNullOrEmpty(turnRecord.Model) && seenModels.Add(turnRecord.Model))
+            {
+                models.Add(turnRecord.Model);
+            }
+
+            if (turnSummary.InputTokens.HasValue)
+            {
+                totalInput += turnSummary.InputTokens.Value;
+                hasInput = true;
+            }
+
+            if (turnSummary.OutputTokens.HasValue)
+            {
+                totalOutput += turnSummary.OutputTokens.Value;
+                hasOutput = true;
+            }
+
+            if (turnSummary.CacheReadTokens.HasValue)
+            {
+                totalCacheRead += turnSummary.CacheReadTokens.Value;
+                hasCacheRead = true;
+            }
+
+            if (turnSummary.CacheCreationTokens.HasValue)
+            {
+                totalCacheCreation += turnSummary.CacheCreationTokens.Value;
+                hasCacheCreation = true;
+                if (turnSummary.CacheCreationTokens.Value > 0)
+                {
+                    cacheCreationTurns++;
+                }
+            }
+
+            bool? inputMatch = turnRecord.ReportedInputTokens.HasValue && turnSummary.InputTokens.HasValue
+                ? turnRecord.ReportedInputTokens.Value == turnSummary.InputTokens.Value
+                : null;
+            bool? outputMatch = turnRecord.ReportedOutputTokens.HasValue && turnSummary.OutputTokens.HasValue
+                ? turnRecord.ReportedOutputTokens.Value == turnSummary.OutputTokens.Value
+                : null;
+            reconciliation.Add(new ReadTimeTurnReconciliation(
+                turnRecord.RecordId,
+                turnRecord.ReportedInputTokens,
+                turnSummary.InputTokens,
+                inputMatch,
+                turnRecord.ReportedOutputTokens,
+                turnSummary.OutputTokens,
+                outputMatch));
+        }
+
+        return new SessionTurnAccumulation(
+            turnPublishedBlocks,
+            valuedTurnPublishedBlocks,
+            valuedTurnHarnessBlocks,
+            models,
+            hasInput ? totalInput : null,
+            hasOutput ? totalOutput : null,
+            hasCacheRead ? totalCacheRead : null,
+            hasCacheCreation ? totalCacheCreation : null,
+            cacheCreationTurns,
+            reconciliation,
+            unmeasuredInputTurns);
+    }
+
+    private protected static List<CollectedRecord> ResolveSessionRootRecords(
+        IReadOnlyList<CollectedRecord> records,
+        HashSet<string> sessionSpanIds)
+    {
+        return
+        [
+            .. records
+                .Where(r => r.ParentRecordId is null ||
+                            string.Equals(r.ParentRecordId, r.RecordId, StringComparison.Ordinal) ||
+                            !sessionSpanIds.Contains(r.ParentRecordId))
+                .OrderBy(static r => r.StartedAt)
+                .ThenBy(static r => r.RecordId, StringComparer.Ordinal),
+        ];
+    }
+
+    private protected static (long TotalDuration, bool HasDuration) ComputeSessionDuration(IReadOnlyList<CollectedRecord> durationCandidates)
+    {
+        long totalDuration = 0;
+        bool hasDuration = false;
+        foreach (CollectedRecord candidate in durationCandidates)
+        {
+            long? ms = ComputeReaderDurationMs(candidate);
+            if (ms.HasValue)
+            {
+                totalDuration += ms.Value;
+                hasDuration = true;
+            }
+        }
+
+        return (totalDuration, hasDuration);
+    }
+
+    private protected static List<CostBlock> BuildReportedRecordBlocks(IReadOnlyList<CollectedRecord> records)
+    {
+        List<CostBlock> reportedRecordBlocks = [];
+        foreach (CollectedRecord record in records)
+        {
+            if (record.ReportedCost is null)
+            {
+                continue;
+            }
+
+            IReadOnlyDictionary<string, double>? byModel = !string.IsNullOrEmpty(record.Model)
+                ? new Dictionary<string, double>(StringComparer.Ordinal) { [record.Model] = record.ReportedCost.Amount }
+                : null;
+            reportedRecordBlocks.Add(new CostBlock(
+                CostBasis.Harness,
+                CostStatus.Priced,
+                record.ReportedCost.Amount,
+                record.ReportedCost.Currency,
+                byModel));
+        }
+
+        return reportedRecordBlocks;
+    }
+
+    private protected static ReadTimeCostSummary? ResolveSessionReportedCost(
+        IReadOnlyList<CollectedRecord> records,
+        List<Problem> extraProblems)
+    {
+        List<CostBlock> reportedRecordBlocks = BuildReportedRecordBlocks(records);
+        return reportedRecordBlocks.Count > 0
+            ? AggregateReaderCostBlocks(reportedRecordBlocks, CostBasis.Harness, extraProblems)
+            : null;
+    }
+
+    private protected static ReadTimeCostSummary ResolveSessionPublishedCost(
+        ReportedUsageCost? reportedUsageCost,
+        List<CostBlock> turnPublishedBlocks,
+        List<Problem> extraProblems)
+    {
+        if (reportedUsageCost is not null)
+        {
+            return ToReaderCostSummary(reportedUsageCost.Cost);
+        }
+
+        return turnPublishedBlocks.Count > 0
+            ? AggregateReaderCostBlocks(turnPublishedBlocks, CostBasis.Published, extraProblems)
+            : new ReadTimeCostSummary(CostBasis.Unknown, CostStatus.NoRate, null, null, []);
+    }
+
+    private protected static ReadTimeCostBasisMismatch? ResolveSessionCostBasisMismatch(
+        List<CostBlock> valuedTurnHarnessBlocks,
+        List<CostBlock> valuedTurnPublishedBlocks,
+        List<Problem> extraProblems)
+    {
+        if (valuedTurnHarnessBlocks.Count == 0 || valuedTurnPublishedBlocks.Count == 0)
+        {
+            return null;
+        }
+
+        List<CostBlock> combined = [.. valuedTurnHarnessBlocks, .. valuedTurnPublishedBlocks];
+        CostTotalResult mismatchTotal = CanonPricing.SumCosts(combined);
+        CostBasisMismatch? domainMismatch = CanonPricing.CostBasisMismatchOf(combined, mismatchTotal);
+        ReadTimeCostBasisMismatch? basisMismatch = null;
+        if (domainMismatch is not null)
+        {
+            List<ReadTimeBasisTotal> totalsByBasis =
+            [
+                .. domainMismatch.TotalsByBasis
+                    .OrderBy(static kv => kv.Key, StringComparer.Ordinal)
+                    .Select(static kv => new ReadTimeBasisTotal(kv.Key, kv.Value)),
+            ];
+            basisMismatch = new ReadTimeCostBasisMismatch(
+                domainMismatch.Code,
+                domainMismatch.Message,
+                domainMismatch.Bases,
+                totalsByBasis);
+        }
+
+        if (mismatchTotal.Problem is not null)
+        {
+            extraProblems.Add(mismatchTotal.Problem);
+        }
+
+        return basisMismatch;
+    }
+
+    private protected static SessionToolAggregation AggregateSessionTools(IReadOnlyList<CollectedRecord> records)
+    {
+        int toolCallTotal = 0;
+        List<string> toolsInvoked = [];
+        HashSet<string> seenInvokedTools = new(StringComparer.Ordinal);
+        Dictionary<string, int> invCounts = new(StringComparer.Ordinal);
+        Dictionary<string, int> errCounts = new(StringComparer.Ordinal);
+        foreach (CollectedRecord record in records)
+        {
+            if (record.Tool is null)
+            {
+                continue;
+            }
+
+            toolCallTotal++;
+            string toolName = record.Tool.ToolName;
+            if (seenInvokedTools.Add(toolName))
+            {
+                toolsInvoked.Add(toolName);
+            }
+
+            invCounts[toolName] = invCounts.GetValueOrDefault(toolName) + 1;
+            if (record.Status == RecordStatus.Error ||
+                record.Tool.Succeeded == false ||
+                record.Tool.Error is not null)
+            {
+                errCounts[toolName] = errCounts.GetValueOrDefault(toolName) + 1;
+            }
+        }
+
+        List<string> toolsOffered = [];
+        HashSet<string> seenOfferedTools = new(StringComparer.Ordinal);
+        Dictionary<string, (long SchemaTokens, string? Server, HashSet<string> SpanIds)> defStats = new(StringComparer.Ordinal);
+        int toolDefinitionRowCount = 0;
+        foreach (CollectedRecord record in records)
+        {
+            foreach (CollectedToolDefinition def in record.ToolDefinitions)
+            {
+                toolDefinitionRowCount++;
+                if (seenOfferedTools.Add(def.ToolName))
+                {
+                    toolsOffered.Add(def.ToolName);
+                }
+
+                if (!defStats.TryGetValue(def.ToolName, out (long SchemaTokens, string? Server, HashSet<string> SpanIds) existing))
+                {
+                    defStats[def.ToolName] = (
+                        def.SchemaTokens,
+                        def.Server,
+                        new HashSet<string>(StringComparer.Ordinal) { record.RecordId });
+                }
+                else
+                {
+                    _ = existing.SpanIds.Add(record.RecordId);
+                    defStats[def.ToolName] = (existing.SchemaTokens, existing.Server ?? def.Server, existing.SpanIds);
+                }
+            }
+        }
+
+        return new SessionToolAggregation(
+            toolCallTotal,
+            toolsInvoked,
+            invCounts,
+            errCounts,
+            toolsOffered,
+            defStats,
+            toolDefinitionRowCount);
+    }
+
+    private protected static (int Total, int Mismatched) CountReconciliation(
+        IReadOnlyList<ReadTimeTurnReconciliation> reconciliation)
+    {
+        int reconciliationTotal = 0;
+        int reconciliationMismatched = 0;
+        foreach (ReadTimeTurnReconciliation row in reconciliation)
+        {
+            if (!row.InputMatch.HasValue || !row.OutputMatch.HasValue)
+            {
+                continue;
+            }
+
+            reconciliationTotal++;
+            if (!row.InputMatch.Value || !row.OutputMatch.Value)
+            {
+                reconciliationMismatched++;
+            }
+        }
+
+        return (reconciliationTotal, reconciliationMismatched);
+    }
+
+    private protected static ReadTimeSessionCoverage BuildSessionCoverage(StoredSessionProjection? projection) =>
+        new(
+            SchemaMeasurable: projection?.Schema is not null,
+            ContextMeasurable: projection?.Context is not null);
+
+    private protected static (ReadTimeContextBucketSummary? First, ReadTimeContextBucketSummary? Last) BuildSessionContextBuckets(
+        StoredSessionProjection? projection,
+        IReadOnlyList<(int Position, CollectedRecord Record)> turnEntries)
+    {
+        if (projection?.Context?.Turns is not { Count: > 0 } contextTurns)
+        {
+            return (null, null);
+        }
+
+        List<StoredSessionContextTurn> orderedContext = [.. contextTurns.OrderBy(static t => t.Position)];
+        return (
+            BuildReaderContextBucketSummary(orderedContext[0], turnEntries),
+            BuildReaderContextBucketSummary(orderedContext[^1], turnEntries));
+    }
+
+    private protected sealed record SessionTurnAccumulation(
+        List<CostBlock> TurnPublishedBlocks,
+        List<CostBlock> ValuedTurnPublishedBlocks,
+        List<CostBlock> ValuedTurnHarnessBlocks,
+        List<string> Models,
+        long? TotalInput,
+        long? TotalOutput,
+        long? TotalCacheRead,
+        long? TotalCacheCreation,
+        int CacheCreationTurns,
+        List<ReadTimeTurnReconciliation> Reconciliation,
+        int UnmeasuredInputTurns);
+
+    private protected sealed record SessionToolAggregation(
+        int ToolCallTotal,
+        List<string> ToolsInvoked,
+        Dictionary<string, int> InvCounts,
+        Dictionary<string, int> ErrCounts,
+        List<string> ToolsOffered,
+        Dictionary<string, (long SchemaTokens, string? Server, HashSet<string> SpanIds)> DefStats,
+        int ToolDefinitionRowCount);
+
+    /// <summary>One session's content-free figures with the detail page's tool and request rows.</summary>
+    private protected sealed record SessionFigureSet(
+        SessionSummaryFigure Summary,
+        IReadOnlyList<ReadTimeSessionToolSummary> Tools,
+        IReadOnlyList<ReadTimeSessionRequestSummary> Requests,
+        IReadOnlyList<ReadTimeSessionServerSummary> Servers,
+        IReadOnlyList<ReadTimeTurnReconciliation> Reconciliation,
+        ReadTimeContextBucketSummary? FirstContextBucket,
+        ReadTimeContextBucketSummary? LastContextBucket,
+        UnusedSchemaRange? UnusedRange);
+
+    /// <summary>
+    /// Derives one session's sessions-list figures from its session row, content-free records,
+    /// stored projection, and ingest problems. The turn loop walks the same scalar columns the
+    /// retired session-aggregate read walked; the fields the sessions list renders are kept and
+    /// the content-bearing aggregate fields are deliberately absent.
+    /// </summary>
+    private protected static SessionListFigure BuildSessionListFigure(
+        CollectedSession session,
+        IReadOnlyList<CollectedRecord> records,
+        int? projectionRequestCount,
+        IReadOnlyList<StoredSessionTurn> projectedTurns,
+        IReadOnlyList<Problem> storedProblems,
+        IModelPricingLookup? pricing)
+    {
+        string sessionKey = session.SessionKey;
+        string harnessId = session.HarnessId;
+
+        HashSet<string> sessionSpanIds = new(StringComparer.Ordinal);
+        foreach (CollectedRecord record in records)
+        {
+            _ = sessionSpanIds.Add(record.RecordId);
+        }
+
+        List<(int Position, CollectedRecord Record)> turnEntries = ResolveSessionTurnEntriesForReader(projectedTurns, records);
+        SessionTurnAccumulation turns = AccumulateSessionTurns(turnEntries, harnessId, pricing);
+        List<CollectedRecord> rootRecords = ResolveSessionRootRecords(records, sessionSpanIds);
+
+        List<Problem> extraProblems = [];
+        List<CostBlock> reportedRecordBlocks = BuildReportedRecordBlocks(records);
+        ReadTimeCostSummary? sessionReportedCost = reportedRecordBlocks.Count > 0
+            ? AggregateReaderCostBlocks(reportedRecordBlocks, CostBasis.Harness, extraProblems)
+            : null;
+
+        // A session whose records carry no tokens is priced from the usage the harness reported
+        // for the whole session, per model; records with tokens keep pricing per turn.
+        ReportedUsageCost? reportedUsageCost = ReportedSessionUsage.Price(session, records, pricing);
+        if (reportedUsageCost is not null)
+        {
+            extraProblems.AddRange(reportedUsageCost.Problems);
+        }
+
+        ReadTimeCostSummary sessionPublishedCost = ResolveSessionPublishedCost(
+            reportedUsageCost,
+            turns.TurnPublishedBlocks,
+            extraProblems);
+        ReadTimeCostBasisMismatch? basisMismatch = ResolveSessionCostBasisMismatch(
+            turns.ValuedTurnHarnessBlocks,
+            turns.ValuedTurnPublishedBlocks,
+            extraProblems);
+
+        int requestCount = projectionRequestCount is > 0 ? projectionRequestCount.Value : rootRecords.Count;
+
+        ReportedSessionUsageTotals? listUsageTotals = ReportedSessionUsage.Resolve(session, records);
+        return new SessionListFigure(
+            SessionKey: sessionKey,
+            HarnessId: harnessId,
+            Repo: session.Workspace?.Repository,
+            Branch: session.Workspace?.Branch,
+            TurnCount: turnEntries.Count,
+            RequestCount: requestCount,
+            TotalInput: listUsageTotals is not null ? listUsageTotals.CombinedInput : turns.TotalInput,
+            TotalOutput: listUsageTotals is not null ? listUsageTotals.Output : turns.TotalOutput,
+            ReportedCost: sessionReportedCost,
+            PublishedCost: sessionPublishedCost,
+            CostBasisMismatch: basisMismatch,
+            Models: turns.Models,
+            ProblemsCount: storedProblems.Count + extraProblems.Count,
+            ReportedTotalTokens: listUsageTotals?.Total);
+    }
+}
+
+/// <summary>
+/// The read half of <see cref="SqliteRelationalStore"/>: schema reads, session projections, and
+/// content-free figures over a SQLite relational store.
+/// </summary>
+public abstract class SqliteRelationalStoreReaderBase : SqliteRelationalStoreReadFigureBase, IRelationalStoreReader
+{
+
+    /// <summary>Initializes the read half over <paramref name="databasePath"/>.</summary>
+    /// <param name="databasePath">Path to the SQLite database file.</param>
+    /// <param name="circuitBreaker">Circuit breaker guarding every <c>sqlite3</c> invocation.</param>
+    /// <param name="fileSystem">Filesystem seam; defaults to <see cref="PhysicalRelationalStoreFileSystem.Instance"/> when <see langword="null"/>.</param>
+    protected SqliteRelationalStoreReaderBase(
+        string databasePath,
+        ICircuitBreaker circuitBreaker,
+        IRelationalStoreFileSystem? fileSystem)
+        : base(databasePath, circuitBreaker, fileSystem)
+    {
+    }
 
     /// <inheritdoc />
     public IReadOnlyList<string> Harnesses()
@@ -305,19 +3737,6 @@ public partial class SqliteRelationalStore : IRelationalStoreReader
     }
 
     /// <inheritdoc />
-    public IReadOnlyList<StoredSkillInvocation> SkillsInvoked(string? spanId = null, string? sessionKey = null)
-    {
-        Dictionary<string, object?> parameters = new(StringComparer.Ordinal);
-        string whereClause = BuildSpanFilterWhere("rsi", spanId, sessionKey, parameters);
-        string sql =
-            "SELECT rsi.span_id, rsi.skill_name " +
-            $"FROM record_skill_invocation rsi{whereClause} ORDER BY rsi.rowid ASC";
-        return QueryRows<StoredSkillInvocation>(sql, parameters, static reader => new StoredSkillInvocation(
-            reader.GetString(reader.GetOrdinal("span_id")),
-            reader.GetString(reader.GetOrdinal("skill_name"))));
-    }
-
-    /// <inheritdoc />
     public IReadOnlyList<StoredToolCall> ToolCalls(string? spanId = null, string? sessionKey = null)
     {
         Dictionary<string, object?> parameters = new(StringComparer.Ordinal);
@@ -501,16 +3920,6 @@ public partial class SqliteRelationalStore : IRelationalStoreReader
     }
 
     /// <inheritdoc />
-    public CollectedSession? GetSession(string sessionKey)
-    {
-        ArgumentException.ThrowIfNullOrWhiteSpace(sessionKey);
-        Dictionary<string, object?> parameters = new(StringComparer.Ordinal);
-        string marker = Bind(parameters, sessionKey);
-        IReadOnlyList<CollectedSession> sessions = QuerySessions($"s.session_id = {marker}", $"u.session_id = {marker}", parameters);
-        return sessions.Count == 0 ? null : sessions[0];
-    }
-
-    /// <inheritdoc />
     public IReadOnlyList<CollectedSession> Sessions(string? harnessId = null)
     {
         Dictionary<string, object?> parameters = new(StringComparer.Ordinal);
@@ -666,16 +4075,6 @@ public partial class SqliteRelationalStore : IRelationalStoreReader
         IReadOnlyList<StoredFieldRow> rows = QueryRows<StoredFieldRow>(sql, parameters, reader => ReadStoredFieldRow(reader, definition));
 
         return new StoredTableRows(definition.Name, columnNames, totalRows, page, limit, offset, [.. rows]);
-    }
-
-    /// <inheritdoc />
-    public StoredSessionProjection? GetSessionProjection(string sessionId)
-    {
-        ArgumentException.ThrowIfNullOrWhiteSpace(sessionId);
-        Dictionary<string, object?> parameters = new(StringComparer.Ordinal);
-        string marker = Bind(parameters, sessionId);
-        IReadOnlyList<StoredSessionProjection> projections = QuerySessionProjections($"sp.session_id = {marker}", parameters);
-        return projections.Count == 0 ? null : projections[0];
     }
 
     /// <inheritdoc />
@@ -904,26 +4303,6 @@ public partial class SqliteRelationalStore : IRelationalStoreReader
     }
 
     /// <summary>
-    /// Reads the eleven projection header columns <see cref="SessionProjectionHeaderColumns"/>
-    /// selects, starting at <paramref name="startIndex"/>.
-    /// </summary>
-    /// <param name="reader">Reader positioned on a header row.</param>
-    /// <param name="startIndex">Index of the session id column.</param>
-    /// <returns>The projection header.</returns>
-    private static StoredSessionHeader ReadSessionHeader(SqliteDataReader reader, int startIndex) => new(
-        reader.GetString(startIndex),
-        reader.GetString(startIndex + 1),
-        reader.GetInt64(startIndex + 2) == 1L,
-        reader.GetInt32(startIndex + 3),
-        reader.GetString(startIndex + 4),
-        reader.GetString(startIndex + 5),
-        reader.IsDBNull(startIndex + 6) ? null : reader.GetString(startIndex + 6),
-        reader.IsDBNull(startIndex + 7) ? null : reader.GetString(startIndex + 7),
-        reader.GetInt64(startIndex + 8) == 1L,
-        reader.IsDBNull(startIndex + 9) ? null : reader.GetString(startIndex + 9),
-        reader.IsDBNull(startIndex + 10) ? null : reader.GetString(startIndex + 10));
-
-    /// <summary>
     /// Escapes search text for a SQLite <c>LIKE</c> pattern read with <c>ESCAPE '\'</c>, so a
     /// <c>%</c>, <c>_</c> or backslash in the text matches itself.
     /// </summary>
@@ -933,102 +4312,6 @@ public partial class SqliteRelationalStore : IRelationalStoreReader
         .Replace("\\", "\\\\", StringComparison.Ordinal)
         .Replace("%", "\\%", StringComparison.Ordinal)
         .Replace("_", "\\_", StringComparison.Ordinal);
-
-    /// <summary>Builds the <c>IN (…)</c> list that binds <paramref name="keys"/> as parameters.</summary>
-    /// <param name="keys">Text keys to bind; never empty.</param>
-    /// <param name="parameters">Parameter values the list binds.</param>
-    /// <returns>The comma-separated parameter markers.</returns>
-    private static string SessionKeyListFilter(IReadOnlyCollection<string> keys, Dictionary<string, object?> parameters) =>
-        string.Join(", ", keys.Select(key => Bind(parameters, key)));
-
-    /// <summary>
-    /// The most session keys one statement binds. A statement may use its key list twice, so this keeps it
-    /// under 500 variables, the limit of the system SQLite macOS ships, however many sessions the store holds.
-    /// </summary>
-    private const int MaxKeysPerStatement = 240;
-
-    /// <summary>
-    /// Reads the session rows for <paramref name="keys"/> in storage order, as one statement would, binding at
-    /// most <see cref="MaxKeysPerStatement"/> keys per statement. Past one chunk the keys are first put in storage
-    /// order, so each chunk's rows (read in storage order) concatenate in the order a single read returns.
-    /// </summary>
-    /// <param name="keys">Distinct session keys.</param>
-    /// <returns>The sessions found, in storage order.</returns>
-    private IReadOnlyList<CollectedSession> QuerySessionsByKeys(IReadOnlyList<string> keys)
-    {
-        if (keys.Count <= MaxKeysPerStatement)
-        {
-            return QuerySessionChunk(keys);
-        }
-
-        List<(string Key, long RowId)> stored = [];
-        foreach (string[] chunk in keys.Chunk(MaxKeysPerStatement))
-        {
-            Dictionary<string, object?> parameters = new(StringComparer.Ordinal);
-            stored.AddRange(QueryRows<(string Key, long RowId)>(
-                $"SELECT session_id, rowid FROM session WHERE session_id IN ({SessionKeyListFilter(chunk, parameters)})",
-                parameters,
-                static reader => (reader.GetString(0), reader.GetInt64(1))));
-        }
-
-        List<CollectedSession> sessions = new(stored.Count);
-        foreach (string[] chunk in stored.OrderBy(static row => row.RowId).Select(static row => row.Key).Chunk(MaxKeysPerStatement))
-        {
-            sessions.AddRange(QuerySessionChunk(chunk));
-        }
-
-        return sessions;
-    }
-
-    private IReadOnlyList<CollectedSession> QuerySessionChunk(IReadOnlyCollection<string> keys)
-    {
-        Dictionary<string, object?> parameters = new(StringComparer.Ordinal);
-        string filter = SessionKeyListFilter(keys, parameters);
-        return QuerySessions($"s.session_id IN ({filter})", $"u.session_id IN ({filter})", parameters);
-    }
-
-    /// <summary>
-    /// Runs a per-session read over <paramref name="sessionKeys"/> in chunks of at most
-    /// <see cref="MaxKeysPerStatement"/> and merges the per-session results. Each session's rows come from
-    /// one chunk, so merging never splits a session.
-    /// </summary>
-    /// <typeparam name="TValue">What the read returns per session.</typeparam>
-    /// <param name="sessionKeys">Session keys to read.</param>
-    /// <param name="read">The read for one chunk of keys.</param>
-    /// <returns>The merged results, by session key.</returns>
-    private static Dictionary<string, TValue> MergeKeyChunks<TValue>(
-        IReadOnlyList<string> sessionKeys,
-        Func<IReadOnlyList<string>, Dictionary<string, TValue>> read)
-    {
-        if (sessionKeys.Count <= MaxKeysPerStatement)
-        {
-            return read(sessionKeys);
-        }
-
-        Dictionary<string, TValue> merged = new(StringComparer.Ordinal);
-        foreach (string[] chunk in sessionKeys.Distinct(StringComparer.Ordinal).Chunk(MaxKeysPerStatement))
-        {
-            foreach (KeyValuePair<string, TValue> entry in read(chunk))
-            {
-                merged[entry.Key] = entry.Value;
-            }
-        }
-
-        return merged;
-    }
-
-    /// <inheritdoc />
-    public IReadOnlyList<StoredSessionTurn> GetSessionTurns(string sessionId)
-    {
-        ArgumentException.ThrowIfNullOrWhiteSpace(sessionId);
-        Dictionary<string, object?> parameters = new(StringComparer.Ordinal);
-        string marker = Bind(parameters, sessionId);
-        string sql = $"SELECT session_id, position, span_id FROM session_turn WHERE session_id = {marker} ORDER BY position ASC";
-        return QueryRows<StoredSessionTurn>(sql, parameters, static reader => new StoredSessionTurn(
-            reader.GetString(reader.GetOrdinal("session_id")),
-            reader.GetInt32(reader.GetOrdinal("position")),
-            reader.GetString(reader.GetOrdinal("span_id"))));
-    }
 
     /// <inheritdoc />
     public StoredRun? GetRun(string runId)
@@ -1191,6 +4474,71 @@ public partial class SqliteRelationalStore : IRelationalStoreReader
         return BuildSessionListFigures(sessions, shapes, pricing);
     }
 
+}
+
+/// <summary>
+/// Session figure and section reads over a SQLite relational store.
+/// </summary>
+public abstract class SqliteRelationalStoreReadFigureBase : SqliteRelationalStoreReadCore
+{
+    /// <summary>Initializes the figure and section reads over <paramref name="databasePath"/>.</summary>
+    /// <param name="databasePath">Path to the SQLite database file.</param>
+    /// <param name="circuitBreaker">Circuit breaker guarding every <c>sqlite3</c> invocation.</param>
+    /// <param name="fileSystem">Filesystem seam; defaults to <see cref="PhysicalRelationalStoreFileSystem.Instance"/> when <see langword="null"/>.</param>
+    protected SqliteRelationalStoreReadFigureBase(
+        string databasePath,
+        ICircuitBreaker circuitBreaker,
+        IRelationalStoreFileSystem? fileSystem)
+        : base(databasePath, circuitBreaker, fileSystem)
+    {
+    }
+
+    /// <inheritdoc />
+    public IReadOnlyList<StoredSkillInvocation> SkillsInvoked(string? spanId = null, string? sessionKey = null)
+    {
+        Dictionary<string, object?> parameters = new(StringComparer.Ordinal);
+        string whereClause = BuildSpanFilterWhere("rsi", spanId, sessionKey, parameters);
+        string sql =
+            "SELECT rsi.span_id, rsi.skill_name " +
+            $"FROM record_skill_invocation rsi{whereClause} ORDER BY rsi.rowid ASC";
+        return QueryRows<StoredSkillInvocation>(sql, parameters, static reader => new StoredSkillInvocation(
+            reader.GetString(reader.GetOrdinal("span_id")),
+            reader.GetString(reader.GetOrdinal("skill_name"))));
+    }
+
+    /// <inheritdoc />
+    public CollectedSession? GetSession(string sessionKey)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(sessionKey);
+        Dictionary<string, object?> parameters = new(StringComparer.Ordinal);
+        string marker = Bind(parameters, sessionKey);
+        IReadOnlyList<CollectedSession> sessions = QuerySessions($"s.session_id = {marker}", $"u.session_id = {marker}", parameters);
+        return sessions.Count == 0 ? null : sessions[0];
+    }
+
+    /// <inheritdoc />
+    public StoredSessionProjection? GetSessionProjection(string sessionId)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(sessionId);
+        Dictionary<string, object?> parameters = new(StringComparer.Ordinal);
+        string marker = Bind(parameters, sessionId);
+        IReadOnlyList<StoredSessionProjection> projections = QuerySessionProjections($"sp.session_id = {marker}", parameters);
+        return projections.Count == 0 ? null : projections[0];
+    }
+
+    /// <inheritdoc />
+    public IReadOnlyList<StoredSessionTurn> GetSessionTurns(string sessionId)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(sessionId);
+        Dictionary<string, object?> parameters = new(StringComparer.Ordinal);
+        string marker = Bind(parameters, sessionId);
+        string sql = $"SELECT session_id, position, span_id FROM session_turn WHERE session_id = {marker} ORDER BY position ASC";
+        return QueryRows<StoredSessionTurn>(sql, parameters, static reader => new StoredSessionTurn(
+            reader.GetString(reader.GetOrdinal("session_id")),
+            reader.GetInt32(reader.GetOrdinal("position")),
+            reader.GetString(reader.GetOrdinal("span_id"))));
+    }
+
     /// <summary>
     /// Builds one sessions-list figure per session from the batched reads both figures passes
     /// share: content-free record scalars, the stored turns a session without a projection falls
@@ -1200,7 +4548,7 @@ public partial class SqliteRelationalStore : IRelationalStoreReader
     /// <param name="shapesBySession">What each projected session's figure takes from its projection, by session id.</param>
     /// <param name="pricing">Optional pricing lookup overriding default bundled rate tables.</param>
     /// <returns>One figure per session, in the order the sessions were read.</returns>
-    private IReadOnlyList<SessionListFigure> BuildSessionListFigures(
+    private protected IReadOnlyList<SessionListFigure> BuildSessionListFigures(
         IReadOnlyList<CollectedSession> sessions,
         IReadOnlyDictionary<string, SessionListProjectionShape> shapesBySession,
         IModelPricingLookup? pricing)
@@ -1235,7 +4583,7 @@ public partial class SqliteRelationalStore : IRelationalStoreReader
     /// <param name="filter">The <c>IN (…)</c> list binding the session keys.</param>
     /// <param name="parameters">Parameter values the read binds.</param>
     /// <returns>Each named session that has a projection, by session id.</returns>
-    private Dictionary<string, SessionListProjectionShape> QuerySessionListProjectionShapes(string filter, Dictionary<string, object?> parameters)
+    private protected Dictionary<string, SessionListProjectionShape> QuerySessionListProjectionShapes(string filter, Dictionary<string, object?> parameters)
     {
         HashSet<string> projectedSessionIds = [];
         foreach (string sessionId in QueryRows<string>(
@@ -1342,7 +4690,7 @@ public partial class SqliteRelationalStore : IRelationalStoreReader
     /// the batched read answers exactly what <see cref="SessionSummaryFigures"/> answers for the
     /// session, byte for byte.
     /// </summary>
-    private static SessionReportFigure BuildSessionReportFigure(
+    private protected static SessionReportFigure BuildSessionReportFigure(
         CollectedSession session,
         IReadOnlyList<CollectedRecord> records,
         IReadOnlyList<StoredSessionTurn> projectedTurns,
@@ -1483,7 +4831,7 @@ public partial class SqliteRelationalStore : IRelationalStoreReader
         return new SessionRequestFigurePageResult(rows, total);
     }
 
-    private static string NormalizeSortOrderSql(string order) => SectionSortOrder.ToSqlDirection(order);
+    private protected static string NormalizeSortOrderSql(string order) => SectionSortOrder.ToSqlDirection(order);
 
     /// <inheritdoc />
     public SessionReconciliationFigurePageResult SessionReconciliationFigures(string sessionKey, int page, int limit, string order = "desc")
@@ -1620,21 +4968,72 @@ public partial class SqliteRelationalStore : IRelationalStoreReader
         // resolves (the session's harness and its first turn model), the tool-call metadata, the
         // tool-definition metadata, and the stored schema projection. No content column, no
         // content-text table, no timeline, and no context row is touched.
-        IReadOnlyList<string?> harnessRows = QueryRows<string?>(
+        string? harnessId = QuerySingleNullableString(
             $"SELECT s.harness_id FROM session s WHERE s.session_id = {key}",
-            parameters,
-            static reader => reader.IsDBNull(0) ? null : reader.GetString(0));
-        string? harnessId = harnessRows.Count == 0 ? null : harnessRows[0];
-
-        IReadOnlyList<string?> modelRows = QueryRows<string?>(
+            parameters);
+        string? primaryModel = QuerySingleNullableString(
             "SELECT rm.model_id FROM record_session_link rsl JOIN record r ON r.span_id = rsl.span_id " +
             "JOIN record_model rm ON rm.span_id = r.span_id " +
             $"WHERE rsl.session_key = {key} AND r.op = 'llm.invoke' " +
             "ORDER BY r.started_at_utc ASC, r.span_id ASC LIMIT 1",
+            parameters);
+
+        SessionToolCallAggregate toolCalls = ReadSessionToolCalls(parameters, key);
+        SessionToolDefinitionAggregate definitions = ReadSessionToolDefinitions(parameters, key);
+        List<StoredSchemaRankedTool> rankedTools = ReadSessionSchemaRankedTools(parameters, key);
+        List<StoredSchemaServerTokens> schemaServers = ReadSessionSchemaServers(parameters, key);
+        (StoredSessionSchema? schema, string? schemaUnmeasurableReason) = ReadSessionSchema(
+            parameters,
+            key,
+            rankedTools,
+            schemaServers);
+
+        // The residency helpers price the stored schema only, so the read carries the schema in a
+        // minimal projection shape instead of reading the session's whole projection.
+        StoredSessionProjection? projection = BuildSessionSchemaProjection(sessionKey, schema);
+
+        List<ReadTimeSessionToolSummary> tools = BuildReaderToolSummaries(
+            projection,
+            schema?.TurnCount ?? 0,
+            definitions.DefStats,
+            toolCalls.ToolsInvoked,
+            toolCalls.InvCounts,
+            toolCalls.ErrCounts);
+        List<ReadTimeSessionServerSummary> servers = BuildReaderServerSummaries(projection, tools);
+        UnusedSchemaRange? unusedRange = ResolveReaderUnusedRange(
+            projection,
+            harnessId ?? string.Empty,
+            primaryModel is null ? [] : [primaryModel],
+            pricing);
+        List<StoredSchemaServerTokens> byServer = BuildSessionToolServerTokens(schema, tools);
+        (long? maxCost, long residentCostTotal, int unusedCount) = SummarizeSessionTools(tools);
+
+        return new SessionToolFigureSet(
+            Tools: tools,
+            Servers: servers,
+            ToolsOffered: definitions.ToolsOffered,
+            UnusedRange: unusedRange,
+            ByServer: byServer,
+            MaxCost: maxCost,
+            ResidentCostTotal: residentCostTotal,
+            InvocationCount: toolCalls.ToolCallTotal,
+            UnusedCount: unusedCount,
+            DefinitionsSpanId: definitions.DefinitionsSpanId,
+            SchemaMeasurable: schema is not null,
+            SchemaUnmeasurableReason: schemaUnmeasurableReason);
+    }
+
+    private protected string? QuerySingleNullableString(string sql, Dictionary<string, object?> parameters)
+    {
+        IReadOnlyList<string?> rows = QueryRows<string?>(
+            sql,
             parameters,
             static reader => reader.IsDBNull(0) ? null : reader.GetString(0));
-        string? primaryModel = modelRows.Count == 0 ? null : modelRows[0];
+        return rows.Count == 0 ? null : rows[0];
+    }
 
+    private protected SessionToolCallAggregate ReadSessionToolCalls(Dictionary<string, object?> parameters, string key)
+    {
         int toolCallTotal = 0;
         List<string> toolsInvoked = [];
         HashSet<string> seenInvokedTools = new(StringComparer.Ordinal);
@@ -1664,6 +5063,11 @@ public partial class SqliteRelationalStore : IRelationalStoreReader
             }
         }
 
+        return new SessionToolCallAggregate(toolCallTotal, toolsInvoked, invCounts, errCounts);
+    }
+
+    private protected SessionToolDefinitionAggregate ReadSessionToolDefinitions(Dictionary<string, object?> parameters, string key)
+    {
         Dictionary<string, (long SchemaTokens, string? Server, HashSet<string> SpanIds)> defStats = new(StringComparer.Ordinal);
         List<string> toolsOffered = [];
         HashSet<string> seenOfferedTools = new(StringComparer.Ordinal);
@@ -1698,6 +5102,11 @@ public partial class SqliteRelationalStore : IRelationalStoreReader
             }
         }
 
+        return new SessionToolDefinitionAggregate(toolsOffered, defStats, definitionsSpanId);
+    }
+
+    private protected List<StoredSchemaRankedTool> ReadSessionSchemaRankedTools(Dictionary<string, object?> parameters, string key)
+    {
         List<StoredSchemaRankedTool> rankedTools = [];
         foreach (StoredSchemaRankedTool ranked in QueryRows<StoredSchemaRankedTool>(
                      "SELECT t.position, t.tool_name, t.cost_tokens, t.invoked, s.server_name " +
@@ -1715,6 +5124,11 @@ public partial class SqliteRelationalStore : IRelationalStoreReader
             rankedTools.Add(ranked);
         }
 
+        return rankedTools;
+    }
+
+    private protected List<StoredSchemaServerTokens> ReadSessionSchemaServers(Dictionary<string, object?> parameters, string key)
+    {
         List<StoredSchemaServerTokens> schemaServers = [];
         foreach (StoredSchemaServerTokens server in QueryRows<StoredSchemaServerTokens>(
                      "SELECT t.server_name, t.tokens FROM session_schema_server t " +
@@ -1727,6 +5141,15 @@ public partial class SqliteRelationalStore : IRelationalStoreReader
             schemaServers.Add(server);
         }
 
+        return schemaServers;
+    }
+
+    private protected (StoredSessionSchema? Schema, string? UnmeasurableReason) ReadSessionSchema(
+        Dictionary<string, object?> parameters,
+        string key,
+        List<StoredSchemaRankedTool> rankedTools,
+        List<StoredSchemaServerTokens> schemaServers)
+    {
         StoredSessionSchema? schema = null;
         IReadOnlyList<(int InvocationCount, int TurnCount, long? Unused)> schemaRows = QueryRows<(int InvocationCount, int TurnCount, long? Unused)>(
             "SELECT t.invocation_count, t.turn_count, u.token_residencies FROM session_schema t " +
@@ -1750,11 +5173,12 @@ public partial class SqliteRelationalStore : IRelationalStoreReader
             $"SELECT r.reason FROM session_schema_unmeasurable r WHERE r.session_id = {key}",
             parameters,
             static reader => reader.IsDBNull(0) ? null : reader.GetString(0));
-        string? schemaUnmeasurableReason = reasonRows.Count == 0 ? null : reasonRows[0];
+        return (schema, reasonRows.Count == 0 ? null : reasonRows[0]);
+    }
 
-        // The residency helpers price the stored schema only, so the read carries the schema in a
-        // minimal projection shape instead of reading the session's whole projection.
-        StoredSessionProjection? projection = schema is null
+    private protected static StoredSessionProjection? BuildSessionSchemaProjection(string sessionKey, StoredSessionSchema? schema)
+    {
+        return schema is null
             ? null
             : new StoredSessionProjection(
                 SessionId: sessionKey,
@@ -1769,21 +5193,12 @@ public partial class SqliteRelationalStore : IRelationalStoreReader
                 RequestSpanIds: [],
                 Turns: [],
                 Schema: schema);
+    }
 
-        List<ReadTimeSessionToolSummary> tools = BuildReaderToolSummaries(
-            projection,
-            schema?.TurnCount ?? 0,
-            defStats,
-            toolsInvoked,
-            invCounts,
-            errCounts);
-        List<ReadTimeSessionServerSummary> servers = BuildReaderServerSummaries(projection, tools);
-        UnusedSchemaRange? unusedRange = ResolveReaderUnusedRange(
-            projection,
-            harnessId ?? string.Empty,
-            primaryModel is null ? [] : [primaryModel],
-            pricing);
-
+    private protected static List<StoredSchemaServerTokens> BuildSessionToolServerTokens(
+        StoredSessionSchema? schema,
+        IReadOnlyList<ReadTimeSessionToolSummary> tools)
+    {
         List<StoredSchemaServerTokens> byServer = [];
         if (schema is not null)
         {
@@ -1814,6 +5229,12 @@ public partial class SqliteRelationalStore : IRelationalStoreReader
                 .Select(static kv => new StoredSchemaServerTokens(kv.Key, kv.Value)));
         }
 
+        return byServer;
+    }
+
+    private protected static (long? MaxCost, long ResidentCostTotal, int UnusedCount) SummarizeSessionTools(
+        IReadOnlyList<ReadTimeSessionToolSummary> tools)
+    {
         long? maxCost = null;
         long residentCostTotal = 0;
         int unusedCount = 0;
@@ -1831,20 +5252,19 @@ public partial class SqliteRelationalStore : IRelationalStoreReader
             }
         }
 
-        return new SessionToolFigureSet(
-            Tools: tools,
-            Servers: servers,
-            ToolsOffered: toolsOffered,
-            UnusedRange: unusedRange,
-            ByServer: byServer,
-            MaxCost: maxCost,
-            ResidentCostTotal: residentCostTotal,
-            InvocationCount: toolCallTotal,
-            UnusedCount: unusedCount,
-            DefinitionsSpanId: definitionsSpanId,
-            SchemaMeasurable: schema is not null,
-            SchemaUnmeasurableReason: schemaUnmeasurableReason);
+        return (maxCost, residentCostTotal, unusedCount);
     }
+
+    private protected sealed record SessionToolCallAggregate(
+        int ToolCallTotal,
+        List<string> ToolsInvoked,
+        Dictionary<string, int> InvCounts,
+        Dictionary<string, int> ErrCounts);
+
+    private protected sealed record SessionToolDefinitionAggregate(
+        List<string> ToolsOffered,
+        Dictionary<string, (long SchemaTokens, string? Server, HashSet<string> SpanIds)> DefStats,
+        string? DefinitionsSpanId);
 
     /// <inheritdoc />
     public IReadOnlyList<StoredSkillInvocation> SessionSkillFigures(string sessionKey)
@@ -1890,7 +5310,7 @@ public partial class SqliteRelationalStore : IRelationalStoreReader
     /// split rule in <see cref="AppendSessionKwLoadPredicate"/>, this list is the statement's
     /// whole load filter, so the page and the total answer from SQL.
     /// </summary>
-    private static readonly string[] KwSkillLoadToolNames =
+    private protected static readonly string[] KwSkillLoadToolNames =
     [
         "mcp__kw-docs__load_skill",
         "mcp__kw_docs__load_skill",
@@ -1970,7 +5390,7 @@ public partial class SqliteRelationalStore : IRelationalStoreReader
     /// is not a load (D17), so the page and the total count loads only. The application
     /// recognizer keeps the final word on each row the page returns.
     /// </remarks>
-    private static void AppendSessionKwLoadPredicate(StringBuilder sql, string sessionMarker, Dictionary<string, object?> parameters)
+    private protected static void AppendSessionKwLoadPredicate(StringBuilder sql, string sessionMarker, Dictionary<string, object?> parameters)
     {
         string unsplitNames = string.Join(", ", KwSkillLoadToolNames.Select(name => Bind(parameters, name)));
         sql.Append(CultureInfo.InvariantCulture, $"WHERE EXISTS (SELECT 1 FROM record_session_link rsl WHERE rsl.span_id = tc.span_id AND rsl.session_key = {sessionMarker}) ");
@@ -2043,7 +5463,7 @@ public partial class SqliteRelationalStore : IRelationalStoreReader
     /// <param name="root">Request span the preview answers.</param>
     /// <param name="partRows">The read's ordered part rows across every requested root.</param>
     /// <returns>The truncated preview, or <see langword="null"/> when no candidate carries one.</returns>
-    private static string? ExtractRequestPreviewFromRows(
+    private protected static string? ExtractRequestPreviewFromRows(
         string root,
         List<(string Root, int Ord, string Span, int PartPosition, ContentBucket Bucket, string? PlainText)> partRows)
     {
@@ -2064,7 +5484,7 @@ public partial class SqliteRelationalStore : IRelationalStoreReader
     /// <summary>Extracts one candidate record's preview from its part rows, the rule <see cref="ExtractReaderPromptFromParts"/> applies.</summary>
     /// <param name="parts">The candidate's part rows, in part order.</param>
     /// <returns>The truncated preview, or <see langword="null"/> when the prompt parts carry none.</returns>
-    private static string? ExtractReaderPreview(
+    private protected static string? ExtractReaderPreview(
         IEnumerable<(string Root, int Ord, string Span, int PartPosition, ContentBucket Bucket, string? PlainText)> parts)
     {
         ContentBucket[] priorityBuckets =
@@ -2114,7 +5534,7 @@ public partial class SqliteRelationalStore : IRelationalStoreReader
     /// predicates leave exactly one branch non-empty.
     /// </para>
     /// </remarks>
-    private static void AppendSessionSectionCtes(StringBuilder sql, string keyExpr)
+    private protected static void AppendSessionSectionCtes(StringBuilder sql, string keyExpr)
     {
         sql.Append(CultureInfo.InvariantCulture, $"spans(span_id) AS (SELECT rsl.span_id FROM record_session_link rsl WHERE rsl.session_key = {keyExpr}), ");
         sql.Append("roots(span_id) AS (SELECT r.span_id FROM record r LEFT JOIN record_parent rp ON rp.span_id = r.span_id WHERE r.span_id IN (SELECT span_id FROM spans) AND (rp.parent_span_id IS NULL OR rp.parent_span_id = r.span_id OR rp.parent_span_id NOT IN (SELECT span_id FROM spans))), ");
@@ -2138,7 +5558,7 @@ public partial class SqliteRelationalStore : IRelationalStoreReader
     /// <param name="displayName">Name the parse errors carry.</param>
     /// <param name="parameters">Parameter values the count binds.</param>
     /// <returns>The set's row count.</returns>
-    private int ReadSessionSectionTotal(StringBuilder ctes, string setName, string displayName, Dictionary<string, object?> parameters)
+    private protected int ReadSessionSectionTotal(StringBuilder ctes, string setName, string displayName, Dictionary<string, object?> parameters)
     {
         StringBuilder countSql = new();
         countSql.Append(ctes);
@@ -2158,7 +5578,7 @@ public partial class SqliteRelationalStore : IRelationalStoreReader
     /// </summary>
     /// <param name="sql">Script the select is appended to.</param>
     /// <param name="key">Session key bound as one parameter marker.</param>
-    private static void AppendSessionProblemAttachment(StringBuilder sql, string key)
+    private protected static void AppendSessionProblemAttachment(StringBuilder sql, string key)
     {
         sql.Append("SELECT problem_id FROM ingest_problem_session WHERE session_id = ");
         sql.Append(key);
@@ -2250,3137 +5670,4 @@ public partial class SqliteRelationalStore : IRelationalStoreReader
                     RequestId: ReadNullableString(reader, "request_id"));
             });
     }
-
-    private static IReadOnlyList<ReadTimeTurnSummary> BuildContentFreeTurnSummaries(
-        IReadOnlyList<StoredSessionTurn> projectedTurns,
-        IReadOnlyList<CollectedRecord> records,
-        string harnessId,
-        IModelPricingLookup? pricing)
-    {
-        List<(int Position, CollectedRecord Record)> turnEntries = ResolveSessionTurnEntriesForReader(projectedTurns, records);
-        List<ReadTimeTurnSummary> summaries = new(turnEntries.Count);
-        foreach ((int position, CollectedRecord turnRecord) in turnEntries)
-        {
-            summaries.Add(BuildReaderTurnSummary(turnRecord, position, harnessId, pricing, out _, out _));
-        }
-
-        return summaries;
-    }
-
-    /// <summary>
-    /// Derives one session's bounded summary figures, tool residency rows, and request metadata
-    /// from content-free record scalars, its stored projection, and ingest diagnostics: token
-    /// counts, reported costs, models, timestamps, projection metadata, and tool metadata, with
-    /// no content column read.
-    /// </summary>
-    private static SessionFigureSet BuildSessionFigures(
-        CollectedSession session,
-        IReadOnlyList<CollectedRecord> records,
-        StoredSessionProjection? projection,
-        IReadOnlyList<StoredSessionTurn> projectedTurns,
-        IReadOnlyList<Problem> storedProblems,
-        IModelPricingLookup? pricing)
-    {
-        string sessionKey = session.SessionKey;
-        string harnessId = session.HarnessId;
-
-        HashSet<string> sessionSpanIds = new(StringComparer.Ordinal);
-        Dictionary<string, CollectedRecord> recordsBySpanId = new(records.Count, StringComparer.Ordinal);
-        foreach (CollectedRecord record in records)
-        {
-            _ = sessionSpanIds.Add(record.RecordId);
-            recordsBySpanId[record.RecordId] = record;
-        }
-
-        List<(int Position, CollectedRecord Record)> turnEntries = ResolveSessionTurnEntriesForReader(projectedTurns, records);
-
-        List<CostBlock> turnPublishedBlocks = new(turnEntries.Count);
-        List<CostBlock> valuedTurnPublishedBlocks = [];
-        List<CostBlock> valuedTurnHarnessBlocks = [];
-        List<string> models = [];
-        HashSet<string> seenModels = new(StringComparer.Ordinal);
-        long totalInput = 0;
-        bool hasInput = false;
-        long totalOutput = 0;
-        bool hasOutput = false;
-        long totalCacheRead = 0;
-        bool hasCacheRead = false;
-        long totalCacheCreation = 0;
-        bool hasCacheCreation = false;
-        int cacheCreationTurns = 0;
-        List<ReadTimeTurnReconciliation> reconciliation = new(turnEntries.Count);
-        int unmeasuredInputTurns = 0;
-
-        foreach ((int position, CollectedRecord turnRecord) in turnEntries)
-        {
-            ReadTimeTurnSummary turnSummary = BuildReaderTurnSummary(
-                turnRecord,
-                position,
-                harnessId,
-                pricing,
-                out CostBlock publishedBlock,
-                out CostBlock? harnessBlock);
-
-            if (!turnSummary.InputTokens.HasValue)
-            {
-                unmeasuredInputTurns++;
-            }
-
-            turnPublishedBlocks.Add(publishedBlock);
-            if (publishedBlock.Value is double publishedValue && double.IsFinite(publishedValue))
-            {
-                valuedTurnPublishedBlocks.Add(publishedBlock);
-            }
-
-            if (harnessBlock is not null && harnessBlock.Value is double harnessValue && double.IsFinite(harnessValue))
-            {
-                valuedTurnHarnessBlocks.Add(harnessBlock);
-            }
-
-            if (!string.IsNullOrEmpty(turnRecord.Model) && seenModels.Add(turnRecord.Model))
-            {
-                models.Add(turnRecord.Model);
-            }
-
-            if (turnSummary.InputTokens.HasValue)
-            {
-                totalInput += turnSummary.InputTokens.Value;
-                hasInput = true;
-            }
-
-            if (turnSummary.OutputTokens.HasValue)
-            {
-                totalOutput += turnSummary.OutputTokens.Value;
-                hasOutput = true;
-            }
-
-            if (turnSummary.CacheReadTokens.HasValue)
-            {
-                totalCacheRead += turnSummary.CacheReadTokens.Value;
-                hasCacheRead = true;
-            }
-
-            if (turnSummary.CacheCreationTokens.HasValue)
-            {
-                totalCacheCreation += turnSummary.CacheCreationTokens.Value;
-                hasCacheCreation = true;
-                if (turnSummary.CacheCreationTokens.Value > 0)
-                {
-                    cacheCreationTurns++;
-                }
-            }
-
-            bool? inputMatch = turnRecord.ReportedInputTokens.HasValue && turnSummary.InputTokens.HasValue
-                ? turnRecord.ReportedInputTokens.Value == turnSummary.InputTokens.Value
-                : null;
-            bool? outputMatch = turnRecord.ReportedOutputTokens.HasValue && turnSummary.OutputTokens.HasValue
-                ? turnRecord.ReportedOutputTokens.Value == turnSummary.OutputTokens.Value
-                : null;
-            reconciliation.Add(new ReadTimeTurnReconciliation(
-                turnRecord.RecordId,
-                turnRecord.ReportedInputTokens,
-                turnSummary.InputTokens,
-                inputMatch,
-                turnRecord.ReportedOutputTokens,
-                turnSummary.OutputTokens,
-                outputMatch));
-        }
-
-        List<CollectedRecord> rootRecords =
-        [
-            .. records
-                .Where(r => r.ParentRecordId is null ||
-                            string.Equals(r.ParentRecordId, r.RecordId, StringComparison.Ordinal) ||
-                            !sessionSpanIds.Contains(r.ParentRecordId))
-                .OrderBy(static r => r.StartedAt)
-                .ThenBy(static r => r.RecordId, StringComparer.Ordinal),
-        ];
-
-        bool hasNesting = records.Any(r =>
-            r.ParentRecordId is not null &&
-            !string.Equals(r.ParentRecordId, r.RecordId, StringComparison.Ordinal) &&
-            sessionSpanIds.Contains(r.ParentRecordId));
-
-        IReadOnlyList<CollectedRecord> durationCandidates = hasNesting ? rootRecords : records;
-        long totalDuration = 0;
-        bool hasDuration = false;
-        foreach (CollectedRecord candidate in durationCandidates)
-        {
-            long? ms = ComputeReaderDurationMs(candidate);
-            if (ms.HasValue)
-            {
-                totalDuration += ms.Value;
-                hasDuration = true;
-            }
-        }
-
-        List<Problem> extraProblems = [];
-
-        List<CostBlock> reportedRecordBlocks = [];
-        foreach (CollectedRecord record in records)
-        {
-            if (record.ReportedCost is null)
-            {
-                continue;
-            }
-
-            IReadOnlyDictionary<string, double>? byModel = !string.IsNullOrEmpty(record.Model)
-                ? new Dictionary<string, double>(StringComparer.Ordinal) { [record.Model] = record.ReportedCost.Amount }
-                : null;
-            reportedRecordBlocks.Add(new CostBlock(
-                CostBasis.Harness,
-                CostStatus.Priced,
-                record.ReportedCost.Amount,
-                record.ReportedCost.Currency,
-                byModel));
-        }
-
-        ReadTimeCostSummary? sessionReportedCost = reportedRecordBlocks.Count > 0
-            ? AggregateReaderCostBlocks(reportedRecordBlocks, CostBasis.Harness, extraProblems)
-            : null;
-
-        // A session whose records carry no tokens is priced from the usage the harness reported
-        // for the whole session, per model; records with tokens keep pricing per turn.
-        ReportedUsageCost? reportedUsageCost = ReportedSessionUsage.Price(session, records, pricing);
-        if (reportedUsageCost is not null)
-        {
-            extraProblems.AddRange(reportedUsageCost.Problems);
-        }
-
-        ReadTimeCostSummary sessionPublishedCost = reportedUsageCost is not null
-            ? ToReaderCostSummary(reportedUsageCost.Cost)
-            : turnPublishedBlocks.Count > 0
-                ? AggregateReaderCostBlocks(turnPublishedBlocks, CostBasis.Published, extraProblems)
-                : new ReadTimeCostSummary(CostBasis.Unknown, CostStatus.NoRate, null, null, []);
-
-        ReadTimeCostBasisMismatch? basisMismatch = null;
-        if (valuedTurnHarnessBlocks.Count > 0 && valuedTurnPublishedBlocks.Count > 0)
-        {
-            List<CostBlock> combined = [.. valuedTurnHarnessBlocks, .. valuedTurnPublishedBlocks];
-            CostTotalResult mismatchTotal = CanonPricing.SumCosts(combined);
-            CostBasisMismatch? domainMismatch = CanonPricing.CostBasisMismatchOf(combined, mismatchTotal);
-            if (domainMismatch is not null)
-            {
-                List<ReadTimeBasisTotal> totalsByBasis =
-                [
-                    .. domainMismatch.TotalsByBasis
-                        .OrderBy(static kv => kv.Key, StringComparer.Ordinal)
-                        .Select(static kv => new ReadTimeBasisTotal(kv.Key, kv.Value)),
-                ];
-                basisMismatch = new ReadTimeCostBasisMismatch(
-                    domainMismatch.Code,
-                    domainMismatch.Message,
-                    domainMismatch.Bases,
-                    totalsByBasis);
-            }
-
-            if (mismatchTotal.Problem is not null)
-            {
-                extraProblems.Add(mismatchTotal.Problem);
-            }
-        }
-
-        long? nullableTotalInput = hasInput ? totalInput : null;
-        long? nullableTotalOutput = hasOutput ? totalOutput : null;
-        long? nullableTotalCacheRead = hasCacheRead ? totalCacheRead : null;
-        long? nullableTotalCacheCreation = hasCacheCreation ? totalCacheCreation : null;
-
-        ReportedSessionUsageTotals? reportedUsageTotals = ReportedSessionUsage.Resolve(session, records);
-        if (reportedUsageTotals is not null)
-        {
-            nullableTotalInput = reportedUsageTotals.CombinedInput;
-            nullableTotalOutput = reportedUsageTotals.Output;
-            nullableTotalCacheRead = reportedUsageTotals.CacheRead;
-            nullableTotalCacheCreation = reportedUsageTotals.CacheWrite;
-        }
-
-        double? cacheHitRatio = nullableTotalInput is > 0 && nullableTotalCacheRead.HasValue
-            ? (double)nullableTotalCacheRead.Value / nullableTotalInput.Value
-            : null;
-
-        // Cache-creation coverage counts turns; reported session usage has no per-turn figures.
-        int? cacheCreationCoverage = reportedUsageTotals is null && nullableTotalInput is > 0 && nullableTotalCacheCreation.HasValue && turnEntries.Count > 0
-            ? cacheCreationTurns
-            : null;
-
-        // Tool figures come from the metadata tables the content-free record read carries:
-        // tool names, servers, definition schema sizes, and outcomes are metadata, while the
-        // tool input and result text tables are never selected.
-        int toolCallTotal = 0;
-        List<string> toolsInvoked = [];
-        HashSet<string> seenInvokedTools = new(StringComparer.Ordinal);
-        Dictionary<string, int> invCounts = new(StringComparer.Ordinal);
-        Dictionary<string, int> errCounts = new(StringComparer.Ordinal);
-        foreach (CollectedRecord record in records)
-        {
-            if (record.Tool is null)
-            {
-                continue;
-            }
-
-            toolCallTotal++;
-            string toolName = record.Tool.ToolName;
-            if (seenInvokedTools.Add(toolName))
-            {
-                toolsInvoked.Add(toolName);
-            }
-
-            invCounts[toolName] = invCounts.GetValueOrDefault(toolName) + 1;
-            if (record.Status == RecordStatus.Error ||
-                record.Tool.Succeeded == false ||
-                record.Tool.Error is not null)
-            {
-                errCounts[toolName] = errCounts.GetValueOrDefault(toolName) + 1;
-            }
-        }
-
-        int? toolCalls = toolCallTotal > 0 ? toolCallTotal : null;
-
-        List<string> toolsOffered = [];
-        HashSet<string> seenOfferedTools = new(StringComparer.Ordinal);
-        Dictionary<string, (long SchemaTokens, string? Server, HashSet<string> SpanIds)> defStats = new(StringComparer.Ordinal);
-        int toolDefinitionRowCount = 0;
-        foreach (CollectedRecord record in records)
-        {
-            foreach (CollectedToolDefinition def in record.ToolDefinitions)
-            {
-                toolDefinitionRowCount++;
-                if (seenOfferedTools.Add(def.ToolName))
-                {
-                    toolsOffered.Add(def.ToolName);
-                }
-
-                if (!defStats.TryGetValue(def.ToolName, out (long SchemaTokens, string? Server, HashSet<string> SpanIds) existing))
-                {
-                    defStats[def.ToolName] = (
-                        def.SchemaTokens,
-                        def.Server,
-                        new HashSet<string>(StringComparer.Ordinal) { record.RecordId });
-                }
-                else
-                {
-                    _ = existing.SpanIds.Add(record.RecordId);
-                    defStats[def.ToolName] = (existing.SchemaTokens, existing.Server ?? def.Server, existing.SpanIds);
-                }
-            }
-        }
-
-        List<ReadTimeSessionToolSummary> tools = BuildReaderToolSummaries(
-            projection,
-            turnEntries.Count,
-            defStats,
-            toolsInvoked,
-            invCounts,
-            errCounts);
-        int reconciliationTotal = 0;
-        int reconciliationMismatched = 0;
-        foreach (ReadTimeTurnReconciliation row in reconciliation)
-        {
-            if (!row.InputMatch.HasValue || !row.OutputMatch.HasValue)
-            {
-                continue;
-            }
-
-            reconciliationTotal++;
-            if (!row.InputMatch.Value || !row.OutputMatch.Value)
-            {
-                reconciliationMismatched++;
-            }
-        }
-
-        IReadOnlyList<string> requestSpanIds = projection is not null && projection.RequestSpanIds.Count > 0
-            ? projection.RequestSpanIds
-            : [.. rootRecords.Select(static r => r.RecordId)];
-        int requestCount = requestSpanIds.Count;
-        List<ReadTimeSessionRequestSummary> requests = BuildReaderRequestSummaries(
-            requestSpanIds,
-            records,
-            recordsBySpanId,
-            turnEntries);
-
-        ReadTimeSessionCoverage coverage = new(
-            SchemaMeasurable: projection?.Schema is not null,
-            ContextMeasurable: projection?.Context is not null);
-
-        // Server rows, context buckets, and the unused-schema range all price the stored
-        // projection and the content-free tool metadata above, so no content column is read.
-        List<ReadTimeSessionServerSummary> servers = BuildReaderServerSummaries(projection, tools);
-        ReadTimeContextBucketSummary? firstContextBucket = null;
-        ReadTimeContextBucketSummary? lastContextBucket = null;
-        if (projection?.Context?.Turns is { Count: > 0 } contextTurns)
-        {
-            List<StoredSessionContextTurn> orderedContext = [.. contextTurns.OrderBy(static t => t.Position)];
-            firstContextBucket = BuildReaderContextBucketSummary(orderedContext[0], turnEntries);
-            lastContextBucket = BuildReaderContextBucketSummary(orderedContext[^1], turnEntries);
-        }
-
-        UnusedSchemaRange? unusedRange = ResolveReaderUnusedRange(projection, harnessId, models, pricing);
-
-        List<Problem> problems = [.. storedProblems];
-        problems.AddRange(extraProblems);
-
-        return new SessionFigureSet(
-            new SessionSummaryFigure(
-                SessionKey: sessionKey,
-                HarnessId: harnessId,
-                TurnCount: turnEntries.Count,
-                RequestCount: requestCount,
-                TotalInput: nullableTotalInput,
-                TotalOutput: nullableTotalOutput,
-                TotalCacheRead: nullableTotalCacheRead,
-                TotalCacheCreation: nullableTotalCacheCreation,
-                DurationMs: hasDuration ? totalDuration : null,
-                Models: models,
-                CacheHitRatio: cacheHitRatio,
-                CacheCreationCoverage: cacheCreationCoverage,
-                ToolCalls: toolCalls,
-                ToolsInvoked: toolsInvoked,
-                HasToolDefinitions: toolDefinitionRowCount > 0,
-                ToolsOffered: toolsOffered,
-                ReportedCost: sessionReportedCost,
-                PublishedCost: sessionPublishedCost,
-                CostBasisMismatch: basisMismatch,
-                Coverage: coverage,
-                Problems: problems,
-                SkillInvocations: [],
-                ToolRowsCount: tools.Count,
-                UnmeasuredInputTurns: unmeasuredInputTurns,
-                ReconciliationTotal: reconciliationTotal,
-                ReconciliationMismatched: reconciliationMismatched,
-                ReportedTotalTokens: reportedUsageTotals?.Total),
-            tools,
-            requests,
-            servers,
-            reconciliation,
-            firstContextBucket,
-            lastContextBucket,
-            unusedRange);
-    }
-
-    /// <summary>One session's content-free figures with the detail page's tool and request rows.</summary>
-    private sealed record SessionFigureSet(
-        SessionSummaryFigure Summary,
-        IReadOnlyList<ReadTimeSessionToolSummary> Tools,
-        IReadOnlyList<ReadTimeSessionRequestSummary> Requests,
-        IReadOnlyList<ReadTimeSessionServerSummary> Servers,
-        IReadOnlyList<ReadTimeTurnReconciliation> Reconciliation,
-        ReadTimeContextBucketSummary? FirstContextBucket,
-        ReadTimeContextBucketSummary? LastContextBucket,
-        UnusedSchemaRange? UnusedRange);
-
-    /// <summary>
-    /// Derives one session's sessions-list figures from its session row, content-free records,
-    /// stored projection, and ingest problems. The turn loop walks the same scalar columns the
-    /// retired session-aggregate read walked; the fields the sessions list renders are kept and
-    /// the content-bearing aggregate fields are deliberately absent.
-    /// </summary>
-    private static SessionListFigure BuildSessionListFigure(
-        CollectedSession session,
-        IReadOnlyList<CollectedRecord> records,
-        int? projectionRequestCount,
-        IReadOnlyList<StoredSessionTurn> projectedTurns,
-        IReadOnlyList<Problem> storedProblems,
-        IModelPricingLookup? pricing)
-    {
-        string sessionKey = session.SessionKey;
-        string harnessId = session.HarnessId;
-
-        HashSet<string> sessionSpanIds = new(StringComparer.Ordinal);
-        foreach (CollectedRecord record in records)
-        {
-            _ = sessionSpanIds.Add(record.RecordId);
-        }
-
-        List<(int Position, CollectedRecord Record)> turnEntries = ResolveSessionTurnEntriesForReader(projectedTurns, records);
-
-        List<CostBlock> turnPublishedBlocks = new(turnEntries.Count);
-        List<CostBlock> valuedTurnPublishedBlocks = [];
-        List<CostBlock> valuedTurnHarnessBlocks = [];
-        List<string> models = [];
-        HashSet<string> seenModels = new(StringComparer.Ordinal);
-        long totalInput = 0;
-        bool hasInput = false;
-        long totalOutput = 0;
-        bool hasOutput = false;
-
-        foreach ((int position, CollectedRecord turnRecord) in turnEntries)
-        {
-            ReadTimeTurnSummary turnSummary = BuildReaderTurnSummary(
-                turnRecord,
-                position,
-                harnessId,
-                pricing,
-                out CostBlock publishedBlock,
-                out CostBlock? harnessBlock);
-
-            turnPublishedBlocks.Add(publishedBlock);
-            if (publishedBlock.Value is double publishedValue && double.IsFinite(publishedValue))
-            {
-                valuedTurnPublishedBlocks.Add(publishedBlock);
-            }
-
-            if (harnessBlock is not null && harnessBlock.Value is double harnessValue && double.IsFinite(harnessValue))
-            {
-                valuedTurnHarnessBlocks.Add(harnessBlock);
-            }
-
-            if (!string.IsNullOrEmpty(turnRecord.Model) && seenModels.Add(turnRecord.Model))
-            {
-                models.Add(turnRecord.Model);
-            }
-
-            if (turnSummary.InputTokens.HasValue)
-            {
-                totalInput += turnSummary.InputTokens.Value;
-                hasInput = true;
-            }
-
-            if (turnSummary.OutputTokens.HasValue)
-            {
-                totalOutput += turnSummary.OutputTokens.Value;
-                hasOutput = true;
-            }
-        }
-
-        List<CollectedRecord> rootRecords =
-        [
-            .. records
-                .Where(r => r.ParentRecordId is null ||
-                            string.Equals(r.ParentRecordId, r.RecordId, StringComparison.Ordinal) ||
-                            !sessionSpanIds.Contains(r.ParentRecordId))
-                .OrderBy(static r => r.StartedAt)
-                .ThenBy(static r => r.RecordId, StringComparer.Ordinal),
-        ];
-
-        List<Problem> extraProblems = [];
-
-        List<CostBlock> reportedRecordBlocks = [];
-        foreach (CollectedRecord record in records)
-        {
-            if (record.ReportedCost is null)
-            {
-                continue;
-            }
-
-            IReadOnlyDictionary<string, double>? byModel = !string.IsNullOrEmpty(record.Model)
-                ? new Dictionary<string, double>(StringComparer.Ordinal) { [record.Model] = record.ReportedCost.Amount }
-                : null;
-            reportedRecordBlocks.Add(new CostBlock(
-                CostBasis.Harness,
-                CostStatus.Priced,
-                record.ReportedCost.Amount,
-                record.ReportedCost.Currency,
-                byModel));
-        }
-
-        ReadTimeCostSummary? sessionReportedCost = reportedRecordBlocks.Count > 0
-            ? AggregateReaderCostBlocks(reportedRecordBlocks, CostBasis.Harness, extraProblems)
-            : null;
-
-        // A session whose records carry no tokens is priced from the usage the harness reported
-        // for the whole session, per model; records with tokens keep pricing per turn.
-        ReportedUsageCost? reportedUsageCost = ReportedSessionUsage.Price(session, records, pricing);
-        if (reportedUsageCost is not null)
-        {
-            extraProblems.AddRange(reportedUsageCost.Problems);
-        }
-
-        ReadTimeCostSummary sessionPublishedCost = reportedUsageCost is not null
-            ? ToReaderCostSummary(reportedUsageCost.Cost)
-            : turnPublishedBlocks.Count > 0
-                ? AggregateReaderCostBlocks(turnPublishedBlocks, CostBasis.Published, extraProblems)
-                : new ReadTimeCostSummary(CostBasis.Unknown, CostStatus.NoRate, null, null, []);
-
-        ReadTimeCostBasisMismatch? basisMismatch = null;
-        if (valuedTurnHarnessBlocks.Count > 0 && valuedTurnPublishedBlocks.Count > 0)
-        {
-            List<CostBlock> combined = [.. valuedTurnHarnessBlocks, .. valuedTurnPublishedBlocks];
-            CostTotalResult mismatchTotal = CanonPricing.SumCosts(combined);
-            CostBasisMismatch? domainMismatch = CanonPricing.CostBasisMismatchOf(combined, mismatchTotal);
-            if (domainMismatch is not null)
-            {
-                List<ReadTimeBasisTotal> totalsByBasis =
-                [
-                    .. domainMismatch.TotalsByBasis
-                        .OrderBy(static kv => kv.Key, StringComparer.Ordinal)
-                        .Select(static kv => new ReadTimeBasisTotal(kv.Key, kv.Value)),
-                ];
-                basisMismatch = new ReadTimeCostBasisMismatch(
-                    domainMismatch.Code,
-                    domainMismatch.Message,
-                    domainMismatch.Bases,
-                    totalsByBasis);
-            }
-
-            if (mismatchTotal.Problem is not null)
-            {
-                extraProblems.Add(mismatchTotal.Problem);
-            }
-        }
-
-        int requestCount = projectionRequestCount is > 0 ? projectionRequestCount.Value : rootRecords.Count;
-
-        ReportedSessionUsageTotals? listUsageTotals = ReportedSessionUsage.Resolve(session, records);
-        return new SessionListFigure(
-            SessionKey: sessionKey,
-            HarnessId: harnessId,
-            Repo: session.Workspace?.Repository,
-            Branch: session.Workspace?.Branch,
-            TurnCount: turnEntries.Count,
-            RequestCount: requestCount,
-            TotalInput: listUsageTotals is not null ? listUsageTotals.CombinedInput : hasInput ? totalInput : null,
-            TotalOutput: listUsageTotals is not null ? listUsageTotals.Output : hasOutput ? totalOutput : null,
-            ReportedCost: sessionReportedCost,
-            PublishedCost: sessionPublishedCost,
-            CostBasisMismatch: basisMismatch,
-            Models: models,
-            ProblemsCount: storedProblems.Count + extraProblems.Count,
-            ReportedTotalTokens: listUsageTotals?.Total);
-    }
-
-    private List<Problem> QuerySessionIngestProblems(string sessionKey)
-    {
-        Dictionary<string, List<Problem>> grouped = QuerySessionIngestProblemsBySession([sessionKey]);
-        return grouped.TryGetValue(sessionKey, out List<Problem>? problems) ? problems : [];
-    }
-
-    private Dictionary<string, IReadOnlyList<StoredSessionTurn>> QuerySessionTurnsBySession(IReadOnlyList<string> sessionKeys) =>
-        MergeKeyChunks(sessionKeys, QuerySessionTurnsBySessionChunk);
-
-    private Dictionary<string, IReadOnlyList<StoredSessionTurn>> QuerySessionTurnsBySessionChunk(IReadOnlyList<string> sessionKeys)
-    {
-        Dictionary<string, IReadOnlyList<StoredSessionTurn>> turnsBySession = new(StringComparer.Ordinal);
-        if (sessionKeys.Count == 0)
-        {
-            return turnsBySession;
-        }
-
-        Dictionary<string, object?> parameters = new(StringComparer.Ordinal);
-        string filter = SessionKeyListFilter(sessionKeys, parameters);
-        string sql =
-            "SELECT session_id, position, span_id FROM session_turn " +
-            $"WHERE session_id IN ({filter}) ORDER BY session_id ASC, position ASC";
-        Dictionary<string, List<StoredSessionTurn>> grouped = new(StringComparer.Ordinal);
-        foreach (StoredSessionTurn turn in QueryRows<StoredSessionTurn>(
-                     sql,
-                     parameters,
-                     static reader => new StoredSessionTurn(
-                         reader.GetString(reader.GetOrdinal("session_id")),
-                         reader.GetInt32(reader.GetOrdinal("position")),
-                         reader.GetString(reader.GetOrdinal("span_id")))))
-        {
-            GetOrCreateList(grouped, turn.SessionId).Add(turn);
-        }
-
-        foreach (KeyValuePair<string, List<StoredSessionTurn>> entry in grouped)
-        {
-            turnsBySession[entry.Key] = entry.Value;
-        }
-
-        return turnsBySession;
-    }
-
-    private Dictionary<string, List<Problem>> QuerySessionIngestProblemsBySession(IReadOnlyList<string> sessionKeys) =>
-        MergeKeyChunks(sessionKeys, QuerySessionIngestProblemsBySessionChunk);
-
-    private Dictionary<string, List<Problem>> QuerySessionIngestProblemsBySessionChunk(IReadOnlyList<string> sessionKeys)
-    {
-        Dictionary<string, List<Problem>> problemsBySession = new(StringComparer.Ordinal);
-        if (sessionKeys.Count == 0)
-        {
-            return problemsBySession;
-        }
-
-        Dictionary<string, object?> parameters = new(StringComparer.Ordinal);
-        string filter = SessionKeyListFilter(sessionKeys, parameters);
-        string sql =
-            "SELECT att.session_key, " +
-            "ip.severity, ip.code, ip.message, " +
-            "ipl.location, ips.span_id AS problem_span_id, ipst.stack " +
-            "FROM ingest_problem ip " +
-            "LEFT JOIN ingest_problem_location ipl ON ipl.problem_id = ip.problem_id " +
-            "LEFT JOIN ingest_problem_span ips ON ips.problem_id = ip.problem_id " +
-            "LEFT JOIN ingest_problem_stack ipst ON ipst.problem_id = ip.problem_id " +
-            "JOIN (" +
-            $"SELECT session_id AS session_key, problem_id FROM ingest_problem_session WHERE session_id IN ({filter}) UNION " +
-            $"SELECT rsl.session_key AS session_key, psp.problem_id FROM ingest_problem_span psp JOIN record_session_link rsl ON rsl.span_id = psp.span_id WHERE rsl.session_key IN ({filter})" +
-            ") att ON att.problem_id = ip.problem_id " +
-            "ORDER BY att.session_key ASC, ip.problem_id ASC";
-
-        foreach ((string SessionId, Problem Problem) row in QueryRows<(string SessionId, Problem Problem)>(
-                     sql,
-                     parameters,
-                     static reader =>
-                     {
-                         string? location = ReadNullableString(reader, "location") ?? ReadNullableString(reader, "problem_span_id");
-                         return (
-                             reader.GetString(reader.GetOrdinal("session_key")),
-                             new Problem(
-                                 ParseProblemSeverityValue(reader.GetString(reader.GetOrdinal("severity"))),
-                                 reader.GetString(reader.GetOrdinal("code")),
-                                 reader.GetString(reader.GetOrdinal("message")),
-                                 location,
-                                 ReadNullableString(reader, "stack")));
-                     }))
-        {
-            GetOrCreateList(problemsBySession, row.SessionId).Add(row.Problem);
-        }
-
-        return problemsBySession;
-    }
-
-    /// <summary>
-    /// Reads one record row of a record query into a raw record header — the shared parse behind
-    /// both the broad record read and the content-free sessions-list read, so both derive from the
-    /// same scalar columns.
-    /// </summary>
-    /// <param name="reader">Reader positioned on a <see cref="RecordReadColumns"/> row.</param>
-    private static RawRecordHeader ReadRawRecordHeader(SqliteDataReader reader)
-    {
-        string? endedRaw = ReadNullableString(reader, "ended_at_utc");
-        DateTimeOffset? endedAt = endedRaw is null ? null : ParseTimestampRequired(endedRaw, "record_end.ended_at_utc");
-        double? costAmount = ReadNullableDouble(reader, "amount");
-        string? costCurrency = ReadNullableString(reader, "currency");
-        CollectedCost? reportedCost = costAmount.HasValue && costCurrency is not null
-            ? new CollectedCost(costAmount.Value, costCurrency)
-            : costAmount.HasValue || costCurrency is not null
-                ? throw new StoredDataException("Partial record_reported_cost row returned.")
-                : null;
-
-        return new RawRecordHeader(
-            reader.GetString(reader.GetOrdinal("span_id")),
-            reader.GetString(reader.GetOrdinal("harness_id")),
-            ParseRecordOp(reader.GetString(reader.GetOrdinal("op"))),
-            ParseRecordKind(reader.GetString(reader.GetOrdinal("kind"))),
-            reader.GetString(reader.GetOrdinal("name")),
-            ParseTimestampRequired(reader.GetString(reader.GetOrdinal("started_at_utc")), "record.started_at_utc"),
-            ParseRecordStatus(reader.GetString(reader.GetOrdinal("status"))),
-            ReadNullableString(reader, "session_key"),
-            ReadNullableString(reader, "parent_span_id"),
-            ReadNullableString(reader, "trace_id"),
-            ReadNullableString(reader, "model_id"),
-            endedAt,
-            ReadNullableInt64(reader, "duration_ms"),
-            reportedCost,
-            ReadNullableString(reader, "agent_instance_id"),
-            new CollectedRecordSignals(
-                ReadNullableString(reader, "error_message"),
-                ReadNullableInt64(reader, "failure_count"),
-                ReadNullableString(reader, "correction_rule"),
-                ReadNullableInt64(reader, "declared_context_window")),
-            ReadNullableInt64(reader, "reported_input"),
-            ReadNullableInt64(reader, "reported_output"),
-            ReadRecordSourceName(reader),
-            ReadNullableString(reader, "response_id"),
-            ReadNullableString(reader, "request_id"));
-    }
-
-    /// <summary>
-    /// Reads the three <see cref="RecordSourceColumns"/> of a record row into the record's source
-    /// name as the projection rules read it: the locator for an OTLP source, or
-    /// <see cref="CanonSynth.FileSourcePrefix"/> followed by the source's harness for a file source.
-    /// </summary>
-    /// <remarks>
-    /// The name comes from the stored <c>source</c> row alone, never from record attributes, so a
-    /// record's source is exactly the batch source it was written under. The file form uses the
-    /// same prefix constant the file synthesizer stamps, which is what the projector's file-source
-    /// test reads.
-    /// </remarks>
-    /// <param name="reader">Reader positioned on a <see cref="RecordReadColumns"/> row.</param>
-    private static string ReadRecordSourceName(SqliteDataReader reader)
-    {
-        SourceKind kind = ParseSourceKind(reader.GetString(reader.GetOrdinal("source_kind")));
-        string harnessId = reader.GetString(reader.GetOrdinal("source_harness_id"));
-        string locator = reader.GetString(reader.GetOrdinal("locator"));
-        return kind == SourceKind.File ? CanonSynth.FileSourcePrefix + harnessId : locator;
-    }
-
-    /// <summary>
-    /// Reads every record linked to <paramref name="sessionKeys"/> in one batched, content-free
-    /// pass: the same <c>REC</c> and <c>TOK</c> selects the broad record read runs, plus the
-    /// tool-definition and tool-call metadata selects when
-    /// <paramref name="includeToolMetadata"/> asks for them, with no <c>content_part</c>, tool
-    /// input text, tool result text, agent-invocation, or skill select.
-    /// </summary>
-    /// <param name="sessionKeys">Canonical session keys whose records are read.</param>
-    /// <param name="includeToolMetadata">
-    /// Whether to read the tool-definition and tool-call metadata rows. The session detail and
-    /// summary figures need them; the session list does not, and its payload is answered from
-    /// the projection's ranked schema, so its read stays off the tool tables entirely.
-    /// </param>
-    private Dictionary<string, List<CollectedRecord>> QueryContentFreeRecordsBySession(
-        IReadOnlyList<string> sessionKeys,
-        bool includeToolMetadata = false,
-        string? scopedSpanId = null) =>
-        scopedSpanId is not null
-            ? QueryContentFreeRecordsBySessionChunk(sessionKeys, includeToolMetadata, scopedSpanId)
-            : MergeKeyChunks(sessionKeys, chunk => QueryContentFreeRecordsBySessionChunk(chunk, includeToolMetadata, scopedSpanId: null));
-
-    private Dictionary<string, List<CollectedRecord>> QueryContentFreeRecordsBySessionChunk(
-        IReadOnlyList<string> sessionKeys,
-        bool includeToolMetadata,
-        string? scopedSpanId)
-    {
-        Dictionary<string, List<CollectedRecord>> recordsBySession = new(StringComparer.Ordinal);
-        if (sessionKeys.Count == 0 && scopedSpanId is null)
-        {
-            return recordsBySession;
-        }
-
-        // A span-scoped read filters the record tables by that span alone, so the span inspector
-        // pays for one record rather than its session's whole conversation metadata.
-        Dictionary<string, object?> parameters = new(StringComparer.Ordinal);
-        string? spanMarker = scopedSpanId is null ? null : Bind(parameters, scopedSpanId);
-        string keyFilter = SessionKeyListFilter(sessionKeys, parameters);
-        string recordFilter = spanMarker is null
-            ? $" WHERE rsl.session_key IN ({keyFilter})"
-            : $" WHERE r.span_id = {spanMarker}";
-        string tokenFilter = spanMarker is null
-            ? $" WHERE r.span_id IN (SELECT rsl.span_id FROM record_session_link rsl WHERE rsl.session_key IN ({keyFilter}))"
-            : $" WHERE r.span_id = {spanMarker}";
-        string linkedSpanIds = spanMarker is null
-            ? $"(SELECT rsl.span_id FROM record_session_link rsl WHERE rsl.session_key IN ({keyFilter}))"
-            : $"({spanMarker})";
-
-        string recordSql = "SELECT " + RecordReadColumns + " " + RecordReadFrom + recordFilter + " ORDER BY r.rowid ASC";
-        List<RawRecordHeader> rawRecords = [.. QueryRows(recordSql, parameters, ReadRawRecordHeader)];
-
-        Dictionary<string, List<CollectedTokenCount>> tokensBySpan = new(StringComparer.Ordinal);
-        foreach ((string SpanId, TokenClass TokenClass, long Count) row in QueryRows<(string SpanId, TokenClass TokenClass, long Count)>(
-                     "SELECT r.span_id, r.token_class, r.token_count " +
-                     $"FROM record_token_count r{tokenFilter} ORDER BY r.rowid ASC",
-                     parameters,
-                     static reader => (
-                         reader.GetString(reader.GetOrdinal("span_id")),
-                         ParseTokenClass(reader.GetString(reader.GetOrdinal("token_class"))),
-                         reader.GetInt64(reader.GetOrdinal("token_count")))))
-        {
-            GetOrCreateList(tokensBySpan, row.SpanId).Add(new CollectedTokenCount(row.TokenClass, row.Count));
-        }
-
-        Dictionary<string, List<CollectedToolDefinition>> defsBySpan = new(StringComparer.Ordinal);
-        Dictionary<string, CollectedToolCall> toolCallsBySpan = new(StringComparer.Ordinal);
-        if (includeToolMetadata)
-        {
-            foreach ((string SpanId, CollectedToolDefinition Definition) row in QueryRows<(string SpanId, CollectedToolDefinition Definition)>(
-                         "SELECT td.span_id, td.position, td.tool_name, tds.server_name, td.schema_tokens, " +
-                         "tdt.tokenizer, tdt.is_model_own " +
-                         "FROM tool_definition td " +
-                         "LEFT JOIN tool_definition_server tds ON tds.span_id = td.span_id AND tds.position = td.position " +
-                         "LEFT JOIN tool_definition_tokenizer tdt ON tdt.span_id = td.span_id AND tdt.position = td.position" +
-                         $" WHERE td.span_id IN {linkedSpanIds} ORDER BY td.span_id ASC, td.position ASC",
-                         parameters,
-                         static reader => (
-                             reader.GetString(reader.GetOrdinal("span_id")),
-                             new CollectedToolDefinition(
-                                 reader.GetInt32(reader.GetOrdinal("position")),
-                                 reader.GetString(reader.GetOrdinal("tool_name")),
-                                 ReadNullableString(reader, "server_name"),
-                                 reader.GetInt64(reader.GetOrdinal("schema_tokens")),
-                                 ReadNullableString(reader, "tokenizer"),
-                                 !reader.IsDBNull(reader.GetOrdinal("is_model_own")) && reader.GetInt64(reader.GetOrdinal("is_model_own")) == 1L))))
-            {
-                GetOrCreateList(defsBySpan, row.SpanId).Add(row.Definition);
-            }
-
-            // The tool-call metadata joins deliberately omit tool_call_input_text and
-            // tool_call_result_text: sizes, fingerprints, outcomes, errors, and exit codes are
-            // metadata, and those two tables hold the only tool content.
-            string toolCallSql =
-                "SELECT tc.span_id, " + BuildToolCallMetadataColumns("tc") +
-                " FROM tool_call tc " +
-                "LEFT JOIN tool_call_mcp tcm ON tcm.span_id = tc.span_id " +
-                "LEFT JOIN tool_call_input_size tcis ON tcis.span_id = tc.span_id " +
-                "LEFT JOIN tool_call_input_fingerprint tcif ON tcif.span_id = tc.span_id " +
-                "LEFT JOIN tool_call_input_truncation tcitrc ON tcitrc.span_id = tc.span_id " +
-                "LEFT JOIN tool_call_result_size tcrs ON tcrs.span_id = tc.span_id " +
-                "LEFT JOIN tool_call_result_truncation tcrtrc ON tcrtrc.span_id = tc.span_id " +
-                "LEFT JOIN tool_call_outcome tco ON tco.span_id = tc.span_id " +
-                "LEFT JOIN tool_call_error tce ON tce.span_id = tc.span_id " +
-                "LEFT JOIN tool_call_error_code tcec ON tcec.span_id = tc.span_id " +
-                "LEFT JOIN tool_call_exit_code tcex ON tcex.span_id = tc.span_id" +
-                $" WHERE tc.span_id IN {linkedSpanIds} ORDER BY tc.rowid ASC";
-            foreach ((string SpanId, CollectedToolCall Call) row in QueryRows<(string SpanId, CollectedToolCall Call)>(
-                         toolCallSql,
-                         parameters,
-                         static reader => (reader.GetString(reader.GetOrdinal("span_id")), ReadToolCallColumns(reader))))
-            {
-                toolCallsBySpan[row.SpanId] = row.Call;
-            }
-        }
-
-        foreach (RawRecordHeader header in rawRecords)
-        {
-            CollectedRecord record = new(
-                header.SpanId,
-                header.HarnessId,
-                header.Op,
-                header.Kind,
-                header.Name,
-                header.StartedAt,
-                header.Status,
-                header.SessionKey,
-                header.ParentSpanId,
-                header.TraceId,
-                header.Model,
-                header.EndedAt,
-                header.ReportedDurationMs,
-                tokensBySpan.TryGetValue(header.SpanId, out List<CollectedTokenCount>? tokens) ? tokens : [],
-                header.ReportedCost,
-                Parts: [],
-                Tool: toolCallsBySpan.GetValueOrDefault(header.SpanId),
-                Agent: null,
-                SkillsInvoked: [],
-                header.AgentInstanceId,
-                defsBySpan.TryGetValue(header.SpanId, out List<CollectedToolDefinition>? defs) ? defs : [],
-                header.Signals,
-                header.ReportedInputTokens,
-                header.ReportedOutputTokens,
-                header.SourceName,
-                header.ResponseId,
-                header.RequestId);
-            // A record with no session link is grouped under the empty key rather than dropped,
-            // so a span-scoped read still answers it. A session key is never empty, so the
-            // session-scoped callers are unaffected.
-            string groupingKey = record.SessionKey ?? string.Empty;
-            if (!recordsBySession.TryGetValue(groupingKey, out List<CollectedRecord>? sessionRecords))
-            {
-                sessionRecords = [];
-                recordsBySession[groupingKey] = sessionRecords;
-            }
-
-            sessionRecords.Add(record);
-        }
-
-        return recordsBySession;
-    }
-
-    private IReadOnlyList<CollectedRecord> QueryRecords(string? wherePredicate, Dictionary<string, object?> parameters)
-    {
-        string recordFilter = wherePredicate is null ? string.Empty : $" WHERE {wherePredicate}";
-        string childSpanFilter = wherePredicate is null
-            ? string.Empty
-            : $" WHERE r.span_id IN (SELECT r.span_id FROM record r WHERE {wherePredicate})";
-        string partFilter = wherePredicate is null
-            ? string.Empty
-            : $" WHERE cp.span_id IN (SELECT r.span_id FROM record r WHERE {wherePredicate})";
-        string defFilter = wherePredicate is null
-            ? string.Empty
-            : $" WHERE td.span_id IN (SELECT r.span_id FROM record r WHERE {wherePredicate})";
-        string tcFilter = wherePredicate is null
-            ? string.Empty
-            : $" WHERE tc.span_id IN (SELECT r.span_id FROM record r WHERE {wherePredicate})";
-        string aiFilter = wherePredicate is null
-            ? string.Empty
-            : $" WHERE ai.span_id IN (SELECT r.span_id FROM record r WHERE {wherePredicate})";
-
-        string recordSql = "SELECT " + RecordReadColumns + " " + RecordReadFrom + recordFilter + " ORDER BY r.rowid ASC";
-        List<RawRecordHeader> rawRecords = [.. QueryRows(recordSql, parameters, ReadRawRecordHeader)];
-
-        Dictionary<string, List<CollectedTokenCount>> tokensBySpan = new(StringComparer.Ordinal);
-        foreach ((string SpanId, TokenClass TokenClass, long Count) row in QueryRows<(string SpanId, TokenClass TokenClass, long Count)>(
-                     "SELECT r.span_id, r.token_class, r.token_count " +
-                     $"FROM record_token_count r{childSpanFilter} ORDER BY r.rowid ASC",
-                     parameters,
-                     static reader => (
-                         reader.GetString(reader.GetOrdinal("span_id")),
-                         ParseTokenClass(reader.GetString(reader.GetOrdinal("token_class"))),
-                         reader.GetInt64(reader.GetOrdinal("token_count")))))
-        {
-            GetOrCreateList(tokensBySpan, row.SpanId).Add(new CollectedTokenCount(row.TokenClass, row.Count));
-        }
-
-        Dictionary<string, List<string>> skillsBySpan = new(StringComparer.Ordinal);
-        foreach ((string SpanId, string SkillName) row in QueryRows<(string SpanId, string SkillName)>(
-                     "SELECT r.span_id, r.skill_name " +
-                     $"FROM record_skill_invocation r{childSpanFilter} ORDER BY r.rowid ASC",
-                     parameters,
-                     static reader => (reader.GetString(0), reader.GetString(1))))
-        {
-            GetOrCreateList(skillsBySpan, row.SpanId).Add(row.SkillName);
-        }
-
-        Dictionary<string, List<string>> listedBySpan = new(StringComparer.Ordinal);
-        foreach ((string SpanId, string SkillName) row in QueryRows<(string SpanId, string SkillName)>(
-                     "SELECT r.span_id, r.skill_name " +
-                     $"FROM record_skill_listing r{childSpanFilter} ORDER BY r.span_id ASC, r.position ASC",
-                     parameters,
-                     static reader => (reader.GetString(0), reader.GetString(1))))
-        {
-            GetOrCreateList(listedBySpan, row.SpanId).Add(row.SkillName);
-        }
-
-        Dictionary<string, List<CollectedContentPart>> partsBySpan = new(StringComparer.Ordinal);
-        string partSql =
-            "SELECT cp.span_id, " + BuildContentPartColumns("cp") +
-            " FROM content_part cp " +
-            "LEFT JOIN content_part_text cpt ON cpt.span_id = cp.span_id AND cpt.position = cp.position " +
-            "LEFT JOIN content_part_withheld cpw ON cpw.span_id = cp.span_id AND cpw.position = cp.position " +
-            "LEFT JOIN content_part_withheld_tokenizer cpwt ON cpwt.span_id = cp.span_id AND cpwt.position = cp.position " +
-            "LEFT JOIN content_part_reported_tokens cprt ON cprt.span_id = cp.span_id AND cprt.position = cp.position " +
-            "LEFT JOIN content_part_server cps ON cps.span_id = cp.span_id AND cps.position = cp.position " +
-            "LEFT JOIN content_part_role cpr ON cpr.span_id = cp.span_id AND cpr.position = cp.position " +
-            "LEFT JOIN content_part_residency cpres ON cpres.span_id = cp.span_id AND cpres.position = cp.position " +
-            "LEFT JOIN content_part_truncation cptr ON cptr.span_id = cp.span_id AND cptr.position = cp.position" +
-            $"{partFilter} ORDER BY cp.span_id ASC, cp.position ASC";
-        foreach ((string SpanId, CollectedContentPart Part) row in QueryRows<(string SpanId, CollectedContentPart Part)>(
-                     partSql,
-                     parameters,
-                     static reader => (reader.GetString(reader.GetOrdinal("span_id")), ReadContentPartColumns(reader))))
-        {
-            GetOrCreateList(partsBySpan, row.SpanId).Add(row.Part);
-        }
-
-        Dictionary<string, List<CollectedToolDefinition>> defsBySpan = new(StringComparer.Ordinal);
-        foreach ((string SpanId, CollectedToolDefinition Definition) row in QueryRows<(string SpanId, CollectedToolDefinition Definition)>(
-                     "SELECT td.span_id, td.position, td.tool_name, tds.server_name, td.schema_tokens, " +
-                     "tdt.tokenizer, tdt.is_model_own " +
-                     "FROM tool_definition td " +
-                     "LEFT JOIN tool_definition_server tds ON tds.span_id = td.span_id AND tds.position = td.position " +
-                     "LEFT JOIN tool_definition_tokenizer tdt ON tdt.span_id = td.span_id AND tdt.position = td.position" +
-                     $"{defFilter} ORDER BY td.span_id ASC, td.position ASC",
-                     parameters,
-                     static reader => (
-                         reader.GetString(reader.GetOrdinal("span_id")),
-                         new CollectedToolDefinition(
-                             reader.GetInt32(reader.GetOrdinal("position")),
-                             reader.GetString(reader.GetOrdinal("tool_name")),
-                             ReadNullableString(reader, "server_name"),
-                             reader.GetInt64(reader.GetOrdinal("schema_tokens")),
-                             ReadNullableString(reader, "tokenizer"),
-                             !reader.IsDBNull(reader.GetOrdinal("is_model_own")) && reader.GetInt64(reader.GetOrdinal("is_model_own")) == 1L))))
-        {
-            GetOrCreateList(defsBySpan, row.SpanId).Add(row.Definition);
-        }
-
-        Dictionary<string, CollectedToolCall> toolCallsBySpan = new(StringComparer.Ordinal);
-        string toolCallSql =
-            "SELECT tc.span_id, " + BuildToolCallColumns("tc") +
-            " FROM tool_call tc " +
-            "LEFT JOIN tool_call_mcp tcm ON tcm.span_id = tc.span_id " +
-            "LEFT JOIN tool_call_input_size tcis ON tcis.span_id = tc.span_id " +
-            "LEFT JOIN tool_call_input_text tcit ON tcit.span_id = tc.span_id " +
-            "LEFT JOIN tool_call_input_fingerprint tcif ON tcif.span_id = tc.span_id " +
-            "LEFT JOIN tool_call_input_truncation tcitrc ON tcitrc.span_id = tc.span_id " +
-            "LEFT JOIN tool_call_result_size tcrs ON tcrs.span_id = tc.span_id " +
-            "LEFT JOIN tool_call_result_text tcrt ON tcrt.span_id = tc.span_id " +
-            "LEFT JOIN tool_call_result_truncation tcrtrc ON tcrtrc.span_id = tc.span_id " +
-            "LEFT JOIN tool_call_outcome tco ON tco.span_id = tc.span_id " +
-            "LEFT JOIN tool_call_error tce ON tce.span_id = tc.span_id " +
-            "LEFT JOIN tool_call_error_code tcec ON tcec.span_id = tc.span_id " +
-            "LEFT JOIN tool_call_exit_code tcex ON tcex.span_id = tc.span_id" +
-            $"{tcFilter} ORDER BY tc.rowid ASC";
-        foreach ((string SpanId, CollectedToolCall Call) row in QueryRows<(string SpanId, CollectedToolCall Call)>(
-                     toolCallSql,
-                     parameters,
-                     static reader => (reader.GetString(reader.GetOrdinal("span_id")), ReadToolCallColumns(reader))))
-        {
-            toolCallsBySpan[row.SpanId] = row.Call;
-        }
-
-        Dictionary<string, CollectedAgentInvocation> agentCallsBySpan = new(StringComparer.Ordinal);
-        string agentSql =
-            "SELECT ai.span_id, " + BuildAgentInvocationColumns("ai") +
-            " FROM agent_invocation ai " +
-            "LEFT JOIN agent_invocation_spawn ais ON ais.span_id = ai.span_id " +
-            "LEFT JOIN agent_invocation_outcome aio ON aio.span_id = ai.span_id " +
-            "LEFT JOIN agent_invocation_error aie ON aie.span_id = ai.span_id" +
-            $"{aiFilter} ORDER BY ai.rowid ASC";
-        foreach ((string SpanId, CollectedAgentInvocation Invocation) row in QueryRows<(string SpanId, CollectedAgentInvocation Invocation)>(
-                     agentSql,
-                     parameters,
-                     static reader => (reader.GetString(reader.GetOrdinal("span_id")), ReadAgentInvocationColumns(reader))))
-        {
-            agentCallsBySpan[row.SpanId] = row.Invocation;
-        }
-
-        List<CollectedRecord> materialized = new(rawRecords.Count);
-        foreach (RawRecordHeader header in rawRecords)
-        {
-            materialized.Add(new CollectedRecord(
-                header.SpanId,
-                header.HarnessId,
-                header.Op,
-                header.Kind,
-                header.Name,
-                header.StartedAt,
-                header.Status,
-                header.SessionKey,
-                header.ParentSpanId,
-                header.TraceId,
-                header.Model,
-                header.EndedAt,
-                header.ReportedDurationMs,
-                tokensBySpan.TryGetValue(header.SpanId, out List<CollectedTokenCount>? tok) ? tok : [],
-                header.ReportedCost,
-                partsBySpan.TryGetValue(header.SpanId, out List<CollectedContentPart>? prt) ? prt : [],
-                toolCallsBySpan.GetValueOrDefault(header.SpanId),
-                agentCallsBySpan.GetValueOrDefault(header.SpanId),
-                skillsBySpan.TryGetValue(header.SpanId, out List<string>? skl) ? skl : [],
-                header.AgentInstanceId,
-                defsBySpan.TryGetValue(header.SpanId, out List<CollectedToolDefinition>? def) ? def : [],
-                header.Signals,
-                header.ReportedInputTokens,
-                header.ReportedOutputTokens,
-                header.SourceName,
-                header.ResponseId,
-                header.RequestId,
-                // No listing rows reads back as null: the store cannot tell "listed nothing" from "no listing".
-                listedBySpan.GetValueOrDefault(header.SpanId)));
-        }
-
-        return materialized;
-    }
-
-    private IReadOnlyList<CollectedSession> QuerySessions(string? sessionPredicate, string? usagePredicate, Dictionary<string, object?> parameters)
-    {
-        string sessionFilter = sessionPredicate is null ? string.Empty : $" WHERE {sessionPredicate}";
-        string usageFilter = usagePredicate is null ? string.Empty : $" WHERE {usagePredicate}";
-
-        string sessionSql =
-            "SELECT s.session_id, s.harness_id, s.native_session_id, " +
-            "sw.working_directory, sr.repo_name, sb.branch_name, st.title " +
-            "FROM session s " +
-            "LEFT JOIN session_workspace sw ON sw.session_id = s.session_id " +
-            "LEFT JOIN session_repository sr ON sr.session_id = s.session_id " +
-            "LEFT JOIN session_branch sb ON sb.session_id = s.session_id " +
-            "LEFT JOIN session_title st ON st.session_id = s.session_id" +
-            $"{sessionFilter} ORDER BY s.rowid ASC";
-        List<RawSessionHeader> headers = [.. QueryRows<RawSessionHeader>(
-            sessionSql,
-            parameters,
-            static reader =>
-            {
-                string? workingDir = ReadNullableString(reader, "working_directory");
-                string? repo = ReadNullableString(reader, "repo_name");
-                string? branch = ReadNullableString(reader, "branch_name");
-                CollectedWorkspace? workspace = workingDir is null && repo is null && branch is null
-                    ? null
-                    : new CollectedWorkspace(workingDir, repo, branch);
-                return new RawSessionHeader(
-                    reader.GetString(reader.GetOrdinal("session_id")),
-                    reader.GetString(reader.GetOrdinal("harness_id")),
-                    reader.GetString(reader.GetOrdinal("native_session_id")),
-                    workspace,
-                    ReadNullableString(reader, "title"));
-            })];
-
-        Dictionary<string, List<CollectedModelUsage>> usagesBySession = new(StringComparer.Ordinal);
-        string usageSql =
-            "SELECT u.session_id, u.snapshot_position, u.model_id, u.token_class, u.token_count " +
-            $"FROM session_model_usage u{usageFilter} ORDER BY u.session_id ASC, u.snapshot_position ASC, u.model_id ASC, u.token_class ASC";
-        foreach ((string SessionId, CollectedModelUsage Usage) row in QueryRows<(string SessionId, CollectedModelUsage Usage)>(
-                     usageSql,
-                     parameters,
-                     static reader => (
-                         reader.GetString(reader.GetOrdinal("session_id")),
-                         new CollectedModelUsage(
-                             reader.GetInt32(reader.GetOrdinal("snapshot_position")),
-                             reader.GetString(reader.GetOrdinal("model_id")),
-                             ParseTokenClass(reader.GetString(reader.GetOrdinal("token_class"))),
-                             reader.GetInt64(reader.GetOrdinal("token_count"))))))
-        {
-            GetOrCreateList(usagesBySession, row.SessionId).Add(row.Usage);
-        }
-
-        List<CollectedSession> sessions = new(headers.Count);
-        foreach (RawSessionHeader header in headers)
-        {
-            sessions.Add(new CollectedSession(
-                header.SessionId,
-                header.HarnessId,
-                header.NativeId,
-                header.Workspace,
-                header.Title,
-                usagesBySession.TryGetValue(header.SessionId, out List<CollectedModelUsage>? usages) ? usages : []));
-        }
-
-        return sessions;
-    }
-
-    private IReadOnlyList<StoredSessionProjection> QuerySessionProjections(string? filterPredicate, Dictionary<string, object?> parameters)
-    {
-        string projWhere = filterPredicate is null ? string.Empty : $" WHERE {filterPredicate}";
-        string subSelect = filterPredicate is null
-            ? "SELECT session_id FROM session_projection"
-            : $"SELECT sp.session_id FROM session_projection sp WHERE {filterPredicate}";
-        string childWhere = filterPredicate is null ? string.Empty : $" WHERE session_id IN ({subSelect})";
-        string childAliasedWhere = filterPredicate is null ? string.Empty : $" WHERE t.session_id IN ({subSelect})";
-
-        List<StoredSessionHeader> projHeaders = [.. QueryRows<StoredSessionHeader>(
-            "SELECT " + SessionProjectionHeaderColumns + " " +
-            "FROM session_projection sp " + SessionProjectionHeaderJoins +
-            $"{projWhere} ORDER BY sp.started_at_utc DESC, sp.rowid ASC",
-            parameters,
-            static reader => ReadSessionHeader(reader, 0))];
-
-        Dictionary<string, List<string>> requestsBySess = new(StringComparer.Ordinal);
-        foreach ((string SessionId, string RequestSpanId) row in QueryRows<(string SessionId, string RequestSpanId)>(
-                     $"SELECT session_id, request_span_id FROM session_request{childWhere} ORDER BY session_id ASC, position ASC",
-                     parameters,
-                     static reader => (reader.GetString(0), reader.GetString(1))))
-        {
-            GetOrCreateList(requestsBySess, row.SessionId).Add(row.RequestSpanId);
-        }
-
-        Dictionary<string, List<StoredSessionTurn>> turnsBySess = new(StringComparer.Ordinal);
-        foreach ((string SessionId, int Position, string SpanId) row in QueryRows<(string SessionId, int Position, string SpanId)>(
-                     $"SELECT session_id, position, span_id FROM session_turn{childWhere} ORDER BY session_id ASC, position ASC",
-                     parameters,
-                     static reader => (reader.GetString(0), reader.GetInt32(1), reader.GetString(2))))
-        {
-            GetOrCreateList(turnsBySess, row.SessionId).Add(new StoredSessionTurn(row.SessionId, row.Position, row.SpanId));
-        }
-
-        Dictionary<string, RawContextHeader> ctxHeadersBySess = new(StringComparer.Ordinal);
-        foreach ((string SessionId, RawContextHeader Header) row in QueryRows<(string SessionId, RawContextHeader Header)>(
-                     $"SELECT session_id, context_limit, context_limit_source, residual_total, fresh_jump_factor, accumulation_rate FROM session_context{childWhere}",
-                     parameters,
-                     static reader => (
-                         reader.GetString(reader.GetOrdinal("session_id")),
-                         new RawContextHeader(
-                             reader.GetInt64(reader.GetOrdinal("context_limit")),
-                             reader.GetString(reader.GetOrdinal("context_limit_source")),
-                             reader.GetInt64(reader.GetOrdinal("residual_total")),
-                             reader.GetDouble(reader.GetOrdinal("fresh_jump_factor")),
-                             reader.GetDouble(reader.GetOrdinal("accumulation_rate"))))))
-        {
-            ctxHeadersBySess[row.SessionId] = row.Header;
-        }
-
-        Dictionary<string, List<string>> obsBucketsBySess = new(StringComparer.Ordinal);
-        foreach ((string SessionId, string Bucket) row in QueryRows<(string SessionId, string Bucket)>(
-                     $"SELECT session_id, bucket FROM session_context_observed_part{childWhere} ORDER BY session_id ASC, rowid ASC",
-                     parameters,
-                     static reader => (reader.GetString(0), reader.GetString(1))))
-        {
-            GetOrCreateList(obsBucketsBySess, row.SessionId).Add(row.Bucket);
-        }
-
-        Dictionary<string, List<StoredSessionContextDerivedCount>> derivedBySess = new(StringComparer.Ordinal);
-        foreach ((string SessionId, StoredSessionContextDerivedCount Count) row in QueryRows<(string SessionId, StoredSessionContextDerivedCount Count)>(
-                     $"SELECT session_id, counter, count FROM session_context_derived_count{childWhere} ORDER BY session_id ASC, rowid ASC",
-                     parameters,
-                     static reader => (
-                         reader.GetString(reader.GetOrdinal("session_id")),
-                         new StoredSessionContextDerivedCount(
-                             reader.GetString(reader.GetOrdinal("counter")),
-                             reader.GetInt64(reader.GetOrdinal("count"))))))
-        {
-            GetOrCreateList(derivedBySess, row.SessionId).Add(row.Count);
-        }
-
-        Dictionary<string, List<int>> flaggedBySess = new(StringComparer.Ordinal);
-        foreach ((string SessionId, int TurnIndex) row in QueryRows<(string SessionId, int TurnIndex)>(
-                     $"SELECT session_id, turn_index FROM session_context_flagged_turn{childWhere} ORDER BY session_id ASC, turn_index ASC",
-                     parameters,
-                     static reader => (reader.GetString(0), reader.GetInt32(1))))
-        {
-            GetOrCreateList(flaggedBySess, row.SessionId).Add(row.TurnIndex);
-        }
-
-        Dictionary<string, List<RawContextTurnHeader>> ctxTurnsBySess = new(StringComparer.Ordinal);
-        string ctxTurnSql =
-            "SELECT t.session_id, t.position, t.input_tokens, t.bucketed_tokens, t.residual_tokens, " +
-            "t.residual_attribution, t.builtin_tool_definition_tokens, t.fresh_input, " +
-            "h.headroom, h.pressure, a.rate, si.block_count, si.tokens, " +
-            "fj.previous_fresh_input, fj.factor, nr.tokens AS non_resident_tokens " +
-            "FROM session_context_turn t " +
-            "LEFT JOIN session_context_turn_headroom h ON h.session_id = t.session_id AND h.position = t.position " +
-            "LEFT JOIN session_context_turn_accumulation a ON a.session_id = t.session_id AND a.position = t.position " +
-            "LEFT JOIN session_context_turn_stripped_instructions si ON si.session_id = t.session_id AND si.position = t.position " +
-            "LEFT JOIN session_context_turn_fresh_jump fj ON fj.session_id = t.session_id AND fj.position = t.position " +
-            "LEFT JOIN session_context_turn_non_resident nr ON nr.session_id = t.session_id AND nr.position = t.position" +
-            $"{childAliasedWhere} ORDER BY t.session_id ASC, t.position ASC";
-        foreach ((string SessionId, RawContextTurnHeader Header) row in QueryRows<(string SessionId, RawContextTurnHeader Header)>(
-                     ctxTurnSql,
-                     parameters,
-                     static reader => (
-                         reader.GetString(reader.GetOrdinal("session_id")),
-                         new RawContextTurnHeader(
-                             reader.GetInt32(reader.GetOrdinal("position")),
-                             reader.GetInt64(reader.GetOrdinal("input_tokens")),
-                             reader.GetInt64(reader.GetOrdinal("bucketed_tokens")),
-                             reader.GetInt64(reader.GetOrdinal("residual_tokens")),
-                             reader.GetString(reader.GetOrdinal("residual_attribution")),
-                             reader.GetInt64(reader.GetOrdinal("builtin_tool_definition_tokens")),
-                             reader.GetInt64(reader.GetOrdinal("fresh_input")),
-                             ReadNullableInt64(reader, "headroom"),
-                             ReadNullableDouble(reader, "pressure"),
-                             ReadNullableDouble(reader, "rate"),
-                             ReadNullableInt64(reader, "block_count"),
-                             ReadNullableInt64(reader, "tokens"),
-                             ReadNullableInt64(reader, "previous_fresh_input"),
-                             ReadNullableDouble(reader, "factor"),
-                             ReadNullableInt64(reader, "non_resident_tokens")))))
-        {
-            GetOrCreateList(ctxTurnsBySess, row.SessionId).Add(row.Header);
-        }
-
-        Dictionary<(string SessionId, int Position), List<StoredTurnBucketTokens>> ctxBucketsByTurn = [];
-        foreach ((string SessionId, int Position, StoredTurnBucketTokens Bucket) row in QueryRows<(string SessionId, int Position, StoredTurnBucketTokens Bucket)>(
-                     $"SELECT session_id, position, bucket, tokens FROM session_context_turn_bucket{childWhere} ORDER BY session_id ASC, position ASC, rowid ASC",
-                     parameters,
-                     static reader => (
-                         reader.GetString(reader.GetOrdinal("session_id")),
-                         reader.GetInt32(reader.GetOrdinal("position")),
-                         new StoredTurnBucketTokens(
-                             reader.GetString(reader.GetOrdinal("bucket")),
-                             reader.GetInt64(reader.GetOrdinal("tokens"))))))
-        {
-            GetOrCreateList(ctxBucketsByTurn, (row.SessionId, row.Position)).Add(row.Bucket);
-        }
-
-        Dictionary<(string SessionId, int Position), List<StoredTurnServerDefinitionTokens>> ctxServersByTurn = [];
-        foreach ((string SessionId, int Position, StoredTurnServerDefinitionTokens Server) row in QueryRows<(string SessionId, int Position, StoredTurnServerDefinitionTokens Server)>(
-                     $"SELECT session_id, position, server, tokens FROM session_context_turn_server_definitions{childWhere} ORDER BY session_id ASC, position ASC, rowid ASC",
-                     parameters,
-                     static reader => (
-                         reader.GetString(reader.GetOrdinal("session_id")),
-                         reader.GetInt32(reader.GetOrdinal("position")),
-                         new StoredTurnServerDefinitionTokens(
-                             reader.GetString(reader.GetOrdinal("server")),
-                             reader.GetInt64(reader.GetOrdinal("tokens"))))))
-        {
-            GetOrCreateList(ctxServersByTurn, (row.SessionId, row.Position)).Add(row.Server);
-        }
-
-        Dictionary<(string SessionId, int Position), List<TokenizerLabel>> ctxTokenizersByTurn = [];
-        foreach ((string SessionId, int Position, TokenizerLabel Label) row in QueryRows<(string SessionId, int Position, TokenizerLabel Label)>(
-                     $"SELECT session_id, position, tokenizer, is_model_own FROM session_context_turn_tokenizer{childWhere} ORDER BY session_id ASC, position ASC, tokenizer ASC",
-                     parameters,
-                     static reader => (
-                         reader.GetString(reader.GetOrdinal("session_id")),
-                         reader.GetInt32(reader.GetOrdinal("position")),
-                         new TokenizerLabel(
-                             reader.GetString(reader.GetOrdinal("tokenizer")),
-                             reader.GetInt64(reader.GetOrdinal("is_model_own")) == 1L))))
-        {
-            GetOrCreateList(ctxTokenizersByTurn, (row.SessionId, row.Position)).Add(row.Label);
-        }
-
-        Dictionary<string, (int InvocationCount, int TurnCount, long? Unused)> schemaHeadersBySess = new(StringComparer.Ordinal);
-        foreach ((string SessionId, int InvocationCount, int TurnCount, long? Unused) row in QueryRows<(string SessionId, int InvocationCount, int TurnCount, long? Unused)>(
-                     "SELECT t.session_id, t.invocation_count, t.turn_count, u.token_residencies " +
-                     "FROM session_schema t " +
-                     $"LEFT JOIN session_schema_unused u ON u.session_id = t.session_id{childAliasedWhere}",
-                     parameters,
-                     static reader => (
-                         reader.GetString(reader.GetOrdinal("session_id")),
-                         reader.GetInt32(reader.GetOrdinal("invocation_count")),
-                         reader.GetInt32(reader.GetOrdinal("turn_count")),
-                         ReadNullableInt64(reader, "token_residencies"))))
-        {
-            schemaHeadersBySess[row.SessionId] = (row.InvocationCount, row.TurnCount, row.Unused);
-        }
-
-        Dictionary<string, List<StoredSchemaRankedTool>> rankedToolsBySess = new(StringComparer.Ordinal);
-        foreach ((string SessionId, StoredSchemaRankedTool Tool) row in QueryRows<(string SessionId, StoredSchemaRankedTool Tool)>(
-                     "SELECT t.session_id, t.position, t.tool_name, t.cost_tokens, t.invoked, s.server_name " +
-                     "FROM session_schema_ranked_tool t " +
-                     $"LEFT JOIN session_schema_ranked_tool_server s ON s.session_id = t.session_id AND s.position = t.position{childAliasedWhere} ORDER BY t.session_id ASC, t.position ASC",
-                     parameters,
-                     static reader => (
-                         reader.GetString(reader.GetOrdinal("session_id")),
-                         new StoredSchemaRankedTool(
-                             reader.GetInt32(reader.GetOrdinal("position")),
-                             reader.GetString(reader.GetOrdinal("tool_name")),
-                             reader.GetInt64(reader.GetOrdinal("cost_tokens")),
-                             reader.GetInt64(reader.GetOrdinal("invoked")) == 1L,
-                             ReadNullableString(reader, "server_name")))))
-        {
-            GetOrCreateList(rankedToolsBySess, row.SessionId).Add(row.Tool);
-        }
-
-        Dictionary<string, List<StoredSchemaServerTokens>> schemaServersBySess = new(StringComparer.Ordinal);
-        foreach ((string SessionId, StoredSchemaServerTokens Server) row in QueryRows<(string SessionId, StoredSchemaServerTokens Server)>(
-                     $"SELECT session_id, server_name, tokens FROM session_schema_server{childWhere} ORDER BY session_id ASC, rowid ASC",
-                     parameters,
-                     static reader => (
-                         reader.GetString(reader.GetOrdinal("session_id")),
-                         new StoredSchemaServerTokens(
-                             reader.GetString(reader.GetOrdinal("server_name")),
-                             reader.GetInt64(reader.GetOrdinal("tokens"))))))
-        {
-            GetOrCreateList(schemaServersBySess, row.SessionId).Add(row.Server);
-        }
-
-        Dictionary<string, List<string>> subagentsBySess = new(StringComparer.Ordinal);
-        foreach ((string SessionId, string SpanId) row in QueryRows<(string SessionId, string SpanId)>(
-                     $"SELECT session_id, span_id FROM session_timeline_subagent{childWhere} ORDER BY session_id ASC, rowid ASC",
-                     parameters,
-                     static reader => (reader.GetString(0), reader.GetString(1))))
-        {
-            GetOrCreateList(subagentsBySess, row.SessionId).Add(row.SpanId);
-        }
-
-        Dictionary<string, List<string>> auxiliariesBySess = new(StringComparer.Ordinal);
-        foreach ((string SessionId, string SpanId) row in QueryRows<(string SessionId, string SpanId)>(
-                     $"SELECT session_id, span_id FROM session_timeline_auxiliary{childWhere} ORDER BY session_id ASC, rowid ASC",
-                     parameters,
-                     static reader => (reader.GetString(0), reader.GetString(1))))
-        {
-            GetOrCreateList(auxiliariesBySess, row.SessionId).Add(row.SpanId);
-        }
-
-        List<StoredSessionProjection> projections = new(projHeaders.Count);
-        foreach (StoredSessionHeader header in projHeaders)
-        {
-            StoredSessionContext? context = null;
-            if (ctxHeadersBySess.TryGetValue(header.SessionId, out RawContextHeader? ctxHeader))
-            {
-                List<RawContextTurnHeader> rawTurns = ctxTurnsBySess.TryGetValue(header.SessionId, out List<RawContextTurnHeader>? ct)
-                    ? ct
-                    : [];
-                List<StoredSessionContextTurn> ctxTurns = new(rawTurns.Count);
-                foreach (RawContextTurnHeader rt in rawTurns)
-                {
-                    (string, int) turnKey = (header.SessionId, rt.Position);
-                    // A turn with no label rows means its figures came only from harness-reported
-                    // counts — the schema-29 rebuild leaves no unlabelled measured row — so it is
-                    // shown as reported, never as not measured.
-                    ctxTurns.Add(new StoredSessionContextTurn(
-                        rt.Position,
-                        rt.InputTokens,
-                        rt.BucketedTokens,
-                        rt.ResidualTokens,
-                        rt.ResidualAttribution,
-                        rt.BuiltinToolDefinitionTokens,
-                        rt.FreshInput,
-                        ctxBucketsByTurn.TryGetValue(turnKey, out List<StoredTurnBucketTokens>? bkts) ? bkts : [],
-                        ctxServersByTurn.TryGetValue(turnKey, out List<StoredTurnServerDefinitionTokens>? srvs) ? srvs : [],
-                        rt.Headroom,
-                        rt.Pressure,
-                        rt.AccumulationRate,
-                        rt.StrippedBlockCount,
-                        rt.StrippedTokens,
-                        rt.PreviousFreshInput,
-                        rt.FreshJumpFactor,
-                        rt.NonResidentTokens)
-                    {
-                        Tokenizers = ctxTokenizersByTurn.TryGetValue(turnKey, out List<TokenizerLabel>? labels) ? labels : [],
-                    });
-                }
-
-                context = new StoredSessionContext(
-                    ctxHeader.ContextLimit,
-                    ctxHeader.ContextLimitSource,
-                    ctxHeader.ResidualTotal,
-                    ctxHeader.FreshJumpFactor,
-                    ctxHeader.AccumulationRate,
-                    obsBucketsBySess.TryGetValue(header.SessionId, out List<string>? obs) ? obs : [],
-                    derivedBySess.TryGetValue(header.SessionId, out List<StoredSessionContextDerivedCount>? der) ? der : [],
-                    flaggedBySess.TryGetValue(header.SessionId, out List<int>? flg) ? flg : [],
-                    ctxTurns);
-            }
-
-            StoredSessionSchema? schema = null;
-            if (schemaHeadersBySess.TryGetValue(header.SessionId, out (int InvocationCount, int TurnCount, long? Unused) schHeader))
-            {
-                schema = new StoredSessionSchema(
-                    schHeader.InvocationCount,
-                    schHeader.TurnCount,
-                    rankedToolsBySess.TryGetValue(header.SessionId, out List<StoredSchemaRankedTool>? rtList) ? rtList : [],
-                    schemaServersBySess.TryGetValue(header.SessionId, out List<StoredSchemaServerTokens>? ssList) ? ssList : [],
-                    schHeader.Unused);
-            }
-
-            IReadOnlyList<string>? timelineSubagents = subagentsBySess.TryGetValue(header.SessionId, out List<string>? subList) && subList.Count > 0
-                ? subList
-                : null;
-            IReadOnlyList<string>? timelineAuxiliaries = auxiliariesBySess.TryGetValue(header.SessionId, out List<string>? auxList) && auxList.Count > 0
-                ? auxList
-                : null;
-
-            projections.Add(new StoredSessionProjection(
-                header.SessionId,
-                header.Label,
-                header.IsSubagent,
-                header.SpanCount,
-                header.StartedAtUtc,
-                header.EndedAtUtc,
-                header.ParentSessionId,
-                header.AgentName,
-                header.IncludedInParent,
-                requestsBySess.TryGetValue(header.SessionId, out List<string>? reqList) ? reqList : [],
-                turnsBySess.TryGetValue(header.SessionId, out List<StoredSessionTurn>? turnList) ? turnList : [],
-                context,
-                header.ContextUnmeasurableReason,
-                schema,
-                header.SchemaUnmeasurableReason,
-                timelineSubagents,
-                timelineAuxiliaries));
-        }
-
-        return projections;
-    }
-
-    private IReadOnlyList<StoredRun> QueryRuns(string? filterPredicate, Dictionary<string, object?> parameters)
-    {
-        string whereClause = filterPredicate is null ? string.Empty : $" WHERE {filterPredicate}";
-        string sql =
-            "SELECT r.run_id, r.harness_id, r.grouping_basis, r.grouping_rule, r.execution_count, " +
-            "rl.label, rw.working_directory, rb.started_at_utc, rb.ended_at_utc " +
-            "FROM run r " +
-            "LEFT JOIN run_label rl ON rl.run_id = r.run_id " +
-            "LEFT JOIN run_working_directory rw ON rw.run_id = r.run_id " +
-            $"LEFT JOIN run_bounds rb ON rb.run_id = r.run_id{whereClause} ORDER BY r.rowid ASC";
-        return QueryRows<StoredRun>(sql, parameters, static reader => new StoredRun(
-            reader.GetString(reader.GetOrdinal("run_id")),
-            reader.GetString(reader.GetOrdinal("harness_id")),
-            reader.GetString(reader.GetOrdinal("grouping_basis")),
-            reader.GetString(reader.GetOrdinal("grouping_rule")),
-            reader.GetInt32(reader.GetOrdinal("execution_count")),
-            ReadNullableString(reader, "label"),
-            ReadNullableString(reader, "working_directory"),
-            ReadNullableString(reader, "started_at_utc"),
-            ReadNullableString(reader, "ended_at_utc")));
-    }
-
-    private IReadOnlyList<StoredExecution> QueryExecutions(string? filterPredicate, Dictionary<string, object?> parameters)
-    {
-        string whereClause = filterPredicate is null ? string.Empty : $" WHERE {filterPredicate}";
-        string sql =
-            "SELECT e.execution_id, e.run_id, e.harness_id, e.is_root, " +
-            "es.session_id, ep.parent_execution_id, ea.agent_name, eb.started_at_utc, eb.ended_at_utc " +
-            "FROM execution e " +
-            "LEFT JOIN execution_session es ON es.execution_id = e.execution_id " +
-            "LEFT JOIN execution_parent ep ON ep.execution_id = e.execution_id " +
-            "LEFT JOIN execution_agent ea ON ea.execution_id = e.execution_id " +
-            $"LEFT JOIN execution_bounds eb ON eb.execution_id = e.execution_id{whereClause} ORDER BY e.rowid ASC";
-        return QueryRows<StoredExecution>(sql, parameters, static reader => new StoredExecution(
-            reader.GetString(reader.GetOrdinal("execution_id")),
-            reader.GetString(reader.GetOrdinal("run_id")),
-            reader.GetString(reader.GetOrdinal("harness_id")),
-            reader.GetInt64(reader.GetOrdinal("is_root")) == 1L,
-            ReadNullableString(reader, "session_id"),
-            ReadNullableString(reader, "parent_execution_id"),
-            ReadNullableString(reader, "agent_name"),
-            ReadNullableString(reader, "started_at_utc"),
-            ReadNullableString(reader, "ended_at_utc")));
-    }
-
-    private IReadOnlyList<StoredHarnessRollup> QueryHarnessRollups(string? filterPredicate, Dictionary<string, object?> parameters)
-    {
-        string whereClause = filterPredicate is null ? string.Empty : $" WHERE {filterPredicate}";
-        List<(string HarnessId, int Sessions, int Runs, int Executions, int Unknown, int Total)> headers =
-            [.. QueryRows<(string HarnessId, int Sessions, int Runs, int Executions, int Unknown, int Total)>(
-                "SELECT harness_id, session_count, run_count, execution_count, unknown_window_sessions, window_sessions_total " +
-                $"FROM harness_rollup{whereClause} ORDER BY harness_id ASC",
-                parameters,
-                static reader => (
-                    reader.GetString(reader.GetOrdinal("harness_id")),
-                    reader.GetInt32(reader.GetOrdinal("session_count")),
-                    reader.GetInt32(reader.GetOrdinal("run_count")),
-                    reader.GetInt32(reader.GetOrdinal("execution_count")),
-                    reader.GetInt32(reader.GetOrdinal("unknown_window_sessions")),
-                    reader.GetInt32(reader.GetOrdinal("window_sessions_total"))))];
-
-        Dictionary<string, List<StoredHarnessRollupMetric>> metricsByHarness = new(StringComparer.Ordinal);
-        foreach ((string HarnessId, StoredHarnessRollupMetric Metric) row in QueryRows<(string HarnessId, StoredHarnessRollupMetric Metric)>(
-                     "SELECT harness_id, metric, value, basis " +
-                     $"FROM harness_rollup_metric{whereClause} ORDER BY harness_id ASC, rowid ASC",
-                     parameters,
-                     static reader => (
-                         reader.GetString(reader.GetOrdinal("harness_id")),
-                         new StoredHarnessRollupMetric(
-                             reader.GetString(reader.GetOrdinal("metric")),
-                             reader.GetDouble(reader.GetOrdinal("value")),
-                             reader.GetString(reader.GetOrdinal("basis"))))))
-        {
-            GetOrCreateList(metricsByHarness, row.HarnessId).Add(row.Metric);
-        }
-
-        List<StoredHarnessRollup> rollups = new(headers.Count);
-        foreach ((string harnessId, int sess, int runs, int execs, int unk, int tot) in headers)
-        {
-            rollups.Add(new StoredHarnessRollup(
-                harnessId,
-                sess,
-                runs,
-                execs,
-                unk,
-                tot,
-                metricsByHarness.TryGetValue(harnessId, out List<StoredHarnessRollupMetric>? metrics) ? metrics : []));
-        }
-
-        return rollups;
-    }
-
-    private IReadOnlyList<StoredFinding> QueryFindings(string? filterPredicate, Dictionary<string, object?> parameters)
-    {
-        string whereClause = filterPredicate is null ? string.Empty : $" WHERE {filterPredicate}";
-        string linkFilter = filterPredicate is null
-            ? string.Empty
-            : " WHERE fel.finding_id IN (SELECT f.finding_id FROM finding f LEFT JOIN finding_run fr ON fr.finding_id = f.finding_id LEFT JOIN finding_session fs ON fs.finding_id = f.finding_id WHERE " + filterPredicate + ")";
-
-        string findSql =
-            "SELECT f.finding_id, f.detector_id, f.title, f.mechanism, f.confidence, f.recommendation, " +
-            "f.outcome_risk_caveat, f.rank_score, few.tokens, feb.lower, feb.upper, fr.run_id, fs.session_id, " +
-            "fmc.measurement_class, fcb.confidence_basis, fww.text, fch.context_limit, fch.context_limit_source " +
-            "FROM finding f " +
-            "LEFT JOIN finding_estimated_waste few ON few.finding_id = f.finding_id " +
-            "LEFT JOIN finding_error_bar feb ON feb.finding_id = f.finding_id " +
-            "LEFT JOIN finding_run fr ON fr.finding_id = f.finding_id " +
-            "LEFT JOIN finding_session fs ON fs.finding_id = f.finding_id " +
-            "LEFT JOIN finding_measurement_class fmc ON fmc.finding_id = f.finding_id " +
-            "LEFT JOIN finding_confidence_basis fcb ON fcb.finding_id = f.finding_id " +
-            "LEFT JOIN finding_what_would_raise_it fww ON fww.finding_id = f.finding_id " +
-            $"LEFT JOIN finding_compaction_hazard fch ON fch.finding_id = f.finding_id{whereClause} " +
-            "ORDER BY f.rank_score DESC, f.rowid ASC";
-        List<RawFindingHeader> headers = [.. QueryRows<RawFindingHeader>(
-            findSql,
-            parameters,
-            static reader =>
-            {
-                double? lower = ReadNullableDouble(reader, "lower");
-                double? upper = ReadNullableDouble(reader, "upper");
-                FindingErrorBar? errorBar = lower.HasValue && upper.HasValue
-                    ? new FindingErrorBar((long)lower.Value, (long)upper.Value)
-                    : lower.HasValue || upper.HasValue
-                        ? throw new StoredDataException("Partial finding_error_bar row returned.")
-                        : null;
-
-                long? hazardLimit = ReadNullableInt64(reader, "context_limit");
-                string? hazardSource = ReadNullableString(reader, "context_limit_source");
-                StoredCompactionHazard? hazard = hazardLimit.HasValue && hazardSource is not null
-                    ? new StoredCompactionHazard(hazardLimit.Value, hazardSource)
-                    : hazardLimit.HasValue || hazardSource is not null
-                        ? throw new StoredDataException("Partial finding_compaction_hazard row returned.")
-                        : null;
-
-                return new RawFindingHeader(
-                    reader.GetString(reader.GetOrdinal("finding_id")),
-                    reader.GetString(reader.GetOrdinal("detector_id")),
-                    reader.GetString(reader.GetOrdinal("title")),
-                    reader.GetString(reader.GetOrdinal("mechanism")),
-                    reader.GetString(reader.GetOrdinal("confidence")),
-                    reader.GetString(reader.GetOrdinal("recommendation")),
-                    reader.GetString(reader.GetOrdinal("outcome_risk_caveat")),
-                    reader.GetDouble(reader.GetOrdinal("rank_score")),
-                    ReadNullableInt64(reader, "tokens"),
-                    errorBar,
-                    ReadNullableString(reader, "run_id"),
-                    ReadNullableString(reader, "session_id"),
-                    ReadNullableString(reader, "measurement_class"),
-                    ReadNullableString(reader, "confidence_basis"),
-                    ReadNullableString(reader, "text"),
-                    hazard);
-            })];
-
-        Dictionary<string, List<FindingEvidenceLink>> linksByFinding = new(StringComparer.Ordinal);
-        foreach ((string FindingId, FindingEvidenceLink Link) row in QueryRows<(string FindingId, FindingEvidenceLink Link)>(
-                     "SELECT fel.finding_id, fel.span_id, fel.turn_index, fel.description " +
-                     $"FROM finding_evidence_link fel{linkFilter} ORDER BY fel.finding_id ASC, fel.position ASC",
-                     parameters,
-                     static reader => (
-                         reader.GetString(reader.GetOrdinal("finding_id")),
-                         new FindingEvidenceLink(
-                             reader.GetString(reader.GetOrdinal("span_id")),
-                             reader.GetInt32(reader.GetOrdinal("turn_index")),
-                             reader.GetString(reader.GetOrdinal("description"))))))
-        {
-            GetOrCreateList(linksByFinding, row.FindingId).Add(row.Link);
-        }
-
-        List<StoredFinding> findings = new(headers.Count);
-        foreach (RawFindingHeader h in headers)
-        {
-            findings.Add(new StoredFinding(
-                h.FindingId,
-                h.DetectorId,
-                h.Title,
-                h.Mechanism,
-                h.Confidence,
-                h.Recommendation,
-                h.OutcomeRiskCaveat,
-                h.RankScore,
-                linksByFinding.TryGetValue(h.FindingId, out List<FindingEvidenceLink>? links) ? links : [],
-                h.EstimatedWasteTokens,
-                h.ErrorBar,
-                h.RunId,
-                h.SessionId,
-                h.MeasurementClass,
-                h.ConfidenceBasis,
-                h.WhatWouldRaiseIt,
-                h.CompactionHazard));
-        }
-
-        return findings;
-    }
-
-    private IReadOnlyList<StoredPrediction> QueryPredictions(string? filterPredicate, Dictionary<string, object?> parameters)
-    {
-        string whereClause = filterPredicate is null ? string.Empty : $" WHERE {filterPredicate}";
-        string sql =
-            "SELECT p.prediction_id, p.finding_id, p.run_id, p.predicted_waste_tokens, p.confidence, " +
-            "p.confidence_tier, p.created_at_utc, pc.comparison_run_id, pod.tokens, pcal.score " +
-            "FROM prediction p " +
-            "LEFT JOIN prediction_comparison pc ON pc.prediction_id = p.prediction_id " +
-            "LEFT JOIN prediction_observed_delta pod ON pod.prediction_id = p.prediction_id " +
-            $"LEFT JOIN prediction_calibration pcal ON pcal.prediction_id = p.prediction_id{whereClause} " +
-            "ORDER BY p.rowid ASC";
-        return QueryRows<StoredPrediction>(sql, parameters, static reader => new StoredPrediction(
-            reader.GetString(reader.GetOrdinal("prediction_id")),
-            reader.GetString(reader.GetOrdinal("finding_id")),
-            reader.GetString(reader.GetOrdinal("run_id")),
-            reader.GetInt64(reader.GetOrdinal("predicted_waste_tokens")),
-            reader.GetDouble(reader.GetOrdinal("confidence")),
-            reader.GetString(reader.GetOrdinal("confidence_tier")),
-            reader.GetString(reader.GetOrdinal("created_at_utc")),
-            ReadNullableString(reader, "comparison_run_id"),
-            ReadNullableInt64(reader, "tokens"),
-            ReadNullableDouble(reader, "score")));
-    }
-
-    private static string BuildSpanFilterWhere(string alias, string? spanId, string? sessionKey, Dictionary<string, object?> parameters)
-    {
-        List<string> predicates = [];
-        if (spanId is not null)
-        {
-            predicates.Add($"{alias}.span_id = {Bind(parameters, spanId)}");
-        }
-
-        if (sessionKey is not null)
-        {
-            predicates.Add($"EXISTS (SELECT 1 FROM record_session_link rsl WHERE rsl.span_id = {alias}.span_id AND rsl.session_key = {Bind(parameters, sessionKey)})");
-        }
-
-        return predicates.Count > 0 ? " WHERE " + string.Join(" AND ", predicates) : string.Empty;
-    }
-
-    private static string BuildContentPartSelect(string alias, string whereClause, string orderBy) =>
-        $"SELECT {alias}.span_id, {BuildContentPartColumns(alias)} " +
-        BuildContentPartFrom(alias) +
-        $"{whereClause} {orderBy}";
-
-    /// <summary>
-    /// Builds the budgeted content-part read: the scoped rows are wrapped in a subquery whose
-    /// window totals the UTF-8 bytes of every part before each row, so SQLite returns only the
-    /// rows whose preceding parts stay under <paramref name="budget"/> plus the one row that
-    /// crosses it — the same prefix an in-memory cut kept — and the text past the budget never
-    /// leaves the database.
-    /// </summary>
-    /// <param name="alias">Content-part table alias.</param>
-    /// <param name="whereClause">Scoped predicate clause, starting with WHERE.</param>
-    /// <param name="budget">Maximum UTF-8 bytes of part text to keep.</param>
-    private static string BuildBudgetedContentPartSelect(string alias, string whereClause, int budget) =>
-        "SELECT * FROM (" +
-        $"SELECT {alias}.span_id AS span_id, {BuildContentPartColumns(alias)}, " +
-        "COALESCE(SUM(COALESCE(length(CAST(cpt.part_text AS BLOB)), 0)) OVER (" +
-        $"ORDER BY {alias}.span_id ASC, {alias}.position ASC " +
-        "ROWS BETWEEN UNBOUNDED PRECEDING AND 1 PRECEDING), 0) AS bytes_before " +
-        BuildContentPartFrom(alias) +
-        $"{whereClause}) WHERE bytes_before < {budget.ToString(CultureInfo.InvariantCulture)} " +
-        "ORDER BY span_id ASC, position ASC";
-
-    private static string BuildContentPartFrom(string alias) =>
-        $"FROM content_part {alias} " +
-        $"LEFT JOIN content_part_text cpt ON cpt.span_id = {alias}.span_id AND cpt.position = {alias}.position " +
-        $"LEFT JOIN content_part_withheld cpw ON cpw.span_id = {alias}.span_id AND cpw.position = {alias}.position " +
-        $"LEFT JOIN content_part_withheld_tokenizer cpwt ON cpwt.span_id = {alias}.span_id AND cpwt.position = {alias}.position " +
-        $"LEFT JOIN content_part_reported_tokens cprt ON cprt.span_id = {alias}.span_id AND cprt.position = {alias}.position " +
-        $"LEFT JOIN content_part_server cps ON cps.span_id = {alias}.span_id AND cps.position = {alias}.position " +
-        $"LEFT JOIN content_part_role cpr ON cpr.span_id = {alias}.span_id AND cpr.position = {alias}.position " +
-        $"LEFT JOIN content_part_residency cpres ON cpres.span_id = {alias}.span_id AND cpres.position = {alias}.position " +
-        $"LEFT JOIN content_part_truncation cptr ON cptr.span_id = {alias}.span_id AND cptr.position = {alias}.position";
-
-    private static string BuildContentPartColumns(string alias) =>
-        $"{alias}.position, {alias}.bucket, " +
-        "cpt.part_text, " +
-        "cpw.utf8_bytes, " +
-        "cpw.characters, " +
-        "cpw.measured_tokens, " +
-        "cprt.token_count, " +
-        "cps.server_name, " +
-        "cpr.role_name, " +
-        "cpres.is_resident, " +
-        "cptr.original_utf8_bytes, " +
-        "cpwt.tokenizer, " +
-        "cpwt.is_model_own";
-
-    private static CollectedContentPart ReadContentPartColumns(SqliteDataReader reader)
-    {
-        int position = reader.GetInt32(reader.GetOrdinal("position"));
-        ContentBucket bucket = ParseContentBucket(reader.GetString(reader.GetOrdinal("bucket")));
-        string? plainText = ReadNullableString(reader, "part_text");
-        long? wBytes = ReadNullableInt64(reader, "utf8_bytes");
-        long? wChars = ReadNullableInt64(reader, "characters");
-        long? wTokens = ReadNullableInt64(reader, "measured_tokens");
-        string? wTokenizer = ReadNullableString(reader, "tokenizer");
-        long? wModelOwnRaw = ReadNullableInt64(reader, "is_model_own");
-        bool wModelOwn = wModelOwnRaw switch
-        {
-            null => false,
-            0L => false,
-            1L => true,
-            _ => throw new StoredDataException($"Invalid boolean flag '{wModelOwnRaw.Value.ToString(CultureInfo.InvariantCulture)}' in content_part_withheld_tokenizer.is_model_own."),
-        };
-        if ((wTokenizer is null) != (wModelOwnRaw is null))
-        {
-            throw new StoredDataException("Partial content_part_withheld_tokenizer row returned.");
-        }
-
-        CollectedWithheldText? withheld = wBytes.HasValue && wChars.HasValue && wTokens.HasValue
-            ? new CollectedWithheldText(wBytes.Value, wChars.Value, wTokens.Value, wTokenizer, wModelOwn)
-            : wBytes.HasValue || wChars.HasValue || wTokens.HasValue
-                ? throw new StoredDataException("Partial content_part_withheld row returned.")
-                : null;
-        long? reportedTokens = ReadNullableInt64(reader, "token_count");
-        string? server = ReadNullableString(reader, "server_name");
-        string? role = ReadNullableString(reader, "role_name");
-        long? residentRaw = ReadNullableInt64(reader, "is_resident");
-        bool? resident = residentRaw.HasValue
-            ? residentRaw.Value switch
-            {
-                0L => false,
-                1L => true,
-                _ => throw new StoredDataException($"Invalid boolean flag '{residentRaw.Value.ToString(CultureInfo.InvariantCulture)}' in content_part_residency.is_resident."),
-            }
-            : null;
-        long? originalBytes = ReadNullableInt64(reader, "original_utf8_bytes");
-
-        return new CollectedContentPart(position, bucket, plainText, withheld, reportedTokens, server, role, resident, originalBytes);
-    }
-
-    private static string BuildToolCallSelect(string alias, string whereClause, string orderBy) =>
-        $"SELECT {alias}.span_id, {BuildToolCallColumns(alias)} " +
-        $"FROM tool_call {alias} " +
-        $"LEFT JOIN tool_call_mcp tcm ON tcm.span_id = {alias}.span_id " +
-        $"LEFT JOIN tool_call_input_size tcis ON tcis.span_id = {alias}.span_id " +
-        $"LEFT JOIN tool_call_input_text tcit ON tcit.span_id = {alias}.span_id " +
-        $"LEFT JOIN tool_call_input_fingerprint tcif ON tcif.span_id = {alias}.span_id " +
-        $"LEFT JOIN tool_call_input_truncation tcitrc ON tcitrc.span_id = {alias}.span_id " +
-        $"LEFT JOIN tool_call_result_size tcrs ON tcrs.span_id = {alias}.span_id " +
-        $"LEFT JOIN tool_call_result_text tcrt ON tcrt.span_id = {alias}.span_id " +
-        $"LEFT JOIN tool_call_result_truncation tcrtrc ON tcrtrc.span_id = {alias}.span_id " +
-        $"LEFT JOIN tool_call_outcome tco ON tco.span_id = {alias}.span_id " +
-        $"LEFT JOIN tool_call_error tce ON tce.span_id = {alias}.span_id " +
-        $"LEFT JOIN tool_call_error_code tcec ON tcec.span_id = {alias}.span_id " +
-        $"LEFT JOIN tool_call_exit_code tcex ON tcex.span_id = {alias}.span_id" +
-        $"{whereClause} {orderBy}";
-
-    private static string BuildToolCallColumns(string alias) =>
-        $"{alias}.call_id, {alias}.tool_name, " +
-        "tcm.server_name, " +
-        "tcm.server_tool_name, " +
-        "tcis.utf8_bytes AS input_utf8_bytes, " +
-        "tcis.characters AS input_characters, " +
-        "tcit.text AS input_text, " +
-        "tcif.sha256 AS input_sha256, " +
-        "tcitrc.original_utf8_bytes AS input_original_utf8_bytes, " +
-        "tcrs.utf8_bytes AS result_utf8_bytes, " +
-        "tcrs.characters AS result_characters, " +
-        "tcrt.text AS result_text, " +
-        "tcrtrc.original_utf8_bytes AS result_original_utf8_bytes, " +
-        "tco.succeeded, " +
-        "tce.message AS error_message, " +
-        "tcec.code AS error_code, " +
-        "tcex.exit_code";
-
-    /// <summary>
-    /// Tool-call columns without the two content-bearing text expressions, in the same shape as
-    /// <see cref="BuildToolCallColumns"/> so both parses share one reader.
-    /// </summary>
-    private static string BuildToolCallMetadataColumns(string alias) =>
-        $"{alias}.call_id, {alias}.tool_name, " +
-        "tcm.server_name, " +
-        "tcm.server_tool_name, " +
-        "tcis.utf8_bytes AS input_utf8_bytes, " +
-        "tcis.characters AS input_characters, " +
-        "NULL AS input_text, " +
-        "tcif.sha256 AS input_sha256, " +
-        "tcitrc.original_utf8_bytes AS input_original_utf8_bytes, " +
-        "tcrs.utf8_bytes AS result_utf8_bytes, " +
-        "tcrs.characters AS result_characters, " +
-        "NULL AS result_text, " +
-        "tcrtrc.original_utf8_bytes AS result_original_utf8_bytes, " +
-        "tco.succeeded, " +
-        "tce.message AS error_message, " +
-        "tcec.code AS error_code, " +
-        "tcex.exit_code";
-
-    private static CollectedToolCall ReadToolCallColumns(SqliteDataReader reader)
-    {
-        string callId = reader.GetString(reader.GetOrdinal("call_id"));
-        string toolName = reader.GetString(reader.GetOrdinal("tool_name"));
-        string? mcpServer = ReadNullableString(reader, "server_name");
-        string? mcpTool = ReadNullableString(reader, "server_tool_name");
-
-        long? inBytes = ReadNullableInt64(reader, "input_utf8_bytes");
-        long? inChars = ReadNullableInt64(reader, "input_characters");
-        string? inText = ReadNullableString(reader, "input_text");
-        string? inSha = ReadNullableString(reader, "input_sha256");
-        long? inTrunc = ReadNullableInt64(reader, "input_original_utf8_bytes");
-        CollectedToolContent? input = inBytes.HasValue && inChars.HasValue
-            ? new CollectedToolContent(inText, inBytes.Value, inChars.Value, inSha, inTrunc)
-            : null;
-
-        long? resBytes = ReadNullableInt64(reader, "result_utf8_bytes");
-        long? resChars = ReadNullableInt64(reader, "result_characters");
-        string? resText = ReadNullableString(reader, "result_text");
-        long? resTrunc = ReadNullableInt64(reader, "result_original_utf8_bytes");
-        CollectedToolContent? result = resBytes.HasValue && resChars.HasValue
-            ? new CollectedToolContent(resText, resBytes.Value, resChars.Value, null, resTrunc)
-            : null;
-
-        long? succeededRaw = ReadNullableInt64(reader, "succeeded");
-        bool? succeeded = succeededRaw.HasValue
-            ? succeededRaw.Value switch
-            {
-                0L => false,
-                1L => true,
-                _ => throw new StoredDataException($"Invalid boolean flag '{succeededRaw.Value.ToString(CultureInfo.InvariantCulture)}' in tool_call_outcome.succeeded."),
-            }
-            : null;
-
-        string? errorMsg = ReadNullableString(reader, "error_message");
-        string? errorCode = ReadNullableString(reader, "error_code");
-        CollectedError? error = errorMsg is not null ? new CollectedError(errorMsg, errorCode) : null;
-
-        long? exitCode = ReadNullableInt64(reader, "exit_code");
-        return new CollectedToolCall(callId, toolName, mcpServer, mcpTool, input, result, succeeded, error, exitCode);
-    }
-
-    private static string BuildAgentInvocationSelect(string alias, string whereClause, string orderBy) =>
-        $"SELECT {alias}.span_id, {BuildAgentInvocationColumns(alias)} " +
-        $"FROM agent_invocation {alias} " +
-        $"LEFT JOIN agent_invocation_spawn ais ON ais.span_id = {alias}.span_id " +
-        $"LEFT JOIN agent_invocation_outcome aio ON aio.span_id = {alias}.span_id " +
-        $"LEFT JOIN agent_invocation_error aie ON aie.span_id = {alias}.span_id" +
-        $"{whereClause} {orderBy}";
-
-    private static string BuildAgentInvocationColumns(string alias) =>
-        $"{alias}.agent_name, " +
-        "ais.spawning_record_id, " +
-        "aio.succeeded, " +
-        "aie.message AS error_message";
-
-    private static CollectedAgentInvocation ReadAgentInvocationColumns(SqliteDataReader reader)
-    {
-        string agentName = reader.GetString(reader.GetOrdinal("agent_name"));
-        string? spawnId = ReadNullableString(reader, "spawning_record_id");
-        long? succeededRaw = ReadNullableInt64(reader, "succeeded");
-        bool? succeeded = succeededRaw.HasValue
-            ? succeededRaw.Value switch
-            {
-                0L => false,
-                1L => true,
-                _ => throw new StoredDataException($"Invalid boolean flag '{succeededRaw.Value.ToString(CultureInfo.InvariantCulture)}' in agent_invocation_outcome.succeeded."),
-            }
-            : null;
-        string? error = ReadNullableString(reader, "error_message");
-        return new CollectedAgentInvocation(agentName, spawnId, succeeded, error);
-    }
-
-    private static string? BuildStoredFieldsScopeWhere(TableDefinition table, string sessionExpr)
-    {
-        string tableName = table.Name;
-        if (string.Equals(tableName, "harness", StringComparison.Ordinal) ||
-            tableName.StartsWith("harness_rollup", StringComparison.Ordinal))
-        {
-            return $"harness_id IN (SELECT harness_id FROM session WHERE session_id = {sessionExpr} UNION SELECT r.harness_id FROM record r JOIN record_session_link rsl ON rsl.span_id = r.span_id WHERE rsl.session_key = {sessionExpr})";
-        }
-
-        if (string.Equals(tableName, "source", StringComparison.Ordinal))
-        {
-            return $"source_id IN (SELECT DISTINCT r.source_id FROM record r JOIN record_session_link rsl ON rsl.span_id = r.span_id WHERE rsl.session_key = {sessionExpr})";
-        }
-
-        if (string.Equals(tableName, "session", StringComparison.Ordinal) ||
-            tableName.StartsWith("session_", StringComparison.Ordinal))
-        {
-            return table.Columns.Any(static c => string.Equals(c.Name, "session_id", StringComparison.Ordinal))
-                ? $"session_id = {sessionExpr}"
-                : null;
-        }
-
-        if (tableName.StartsWith("run", StringComparison.Ordinal))
-        {
-            return $"run_id IN (SELECT DISTINCT e.run_id FROM execution e JOIN execution_session es ON es.execution_id = e.execution_id WHERE es.session_id = {sessionExpr})";
-        }
-
-        if (tableName.StartsWith("execution", StringComparison.Ordinal))
-        {
-            return $"execution_id IN (SELECT execution_id FROM execution_session WHERE session_id = {sessionExpr})";
-        }
-
-        if (tableName.StartsWith("finding", StringComparison.Ordinal))
-        {
-            return $"finding_id IN (SELECT finding_id FROM finding_session WHERE session_id = {sessionExpr})";
-        }
-
-        if (tableName.StartsWith("prediction", StringComparison.Ordinal))
-        {
-            return $"prediction_id IN (SELECT p.prediction_id FROM prediction p WHERE p.finding_id IN (SELECT finding_id FROM finding_session WHERE session_id = {sessionExpr}) OR p.run_id IN (SELECT e.run_id FROM execution e JOIN execution_session es ON es.execution_id = e.execution_id WHERE es.session_id = {sessionExpr}))";
-        }
-
-        if (tableName.StartsWith("ingest_problem", StringComparison.Ordinal))
-        {
-            return $"problem_id IN (SELECT problem_id FROM ingest_problem_session WHERE session_id = {sessionExpr})";
-        }
-
-        if (string.Equals(tableName, "projection_dirty_session", StringComparison.Ordinal))
-        {
-            return $"session_id = {sessionExpr}";
-        }
-
-        if (table.Columns.Any(static c => string.Equals(c.Name, "span_id", StringComparison.Ordinal)))
-        {
-            return $"span_id IN (SELECT span_id FROM record_session_link WHERE session_key = {sessionExpr})";
-        }
-
-        return null;
-    }
-
-    /// <summary>Reads one row, in catalog column order, from the raw column values.</summary>
-    private static StoredFieldRow ReadStoredFieldRow(SqliteDataReader reader, TableDefinition table)
-    {
-        List<StoredFieldCell> cells = new(table.Columns.Count);
-        for (int colIndex = 0; colIndex < table.Columns.Count; colIndex++)
-        {
-            cells.Add(ReadStoredFieldCell(reader, table.Columns[colIndex]));
-        }
-
-        return new StoredFieldRow(cells);
-    }
-
-    private static StoredFieldCell ReadStoredFieldCell(SqliteDataReader reader, ColumnDefinition column)
-    {
-        int ordinal = reader.GetOrdinal(column.Name);
-        if (reader.IsDBNull(ordinal))
-        {
-            return new StoredFieldCell(column.Name, column.Type);
-        }
-
-        object value = reader.GetValue(ordinal);
-        string site = column.Name;
-        return column.Type switch
-        {
-            SqliteColumnType.SqliteText => value is string text
-                ? new StoredFieldCell(column.Name, column.Type, TextValue: text)
-                : throw new StoredDataException($"Unexpected SQLite storage type for text column '{site}'."),
-            SqliteColumnType.SqliteInteger => value is long integer
-                ? new StoredFieldCell(column.Name, column.Type, IntegerValue: integer)
-                : throw new StoredDataException($"Unexpected SQLite storage type for integer column '{site}'."),
-            SqliteColumnType.SqliteReal => value switch
-            {
-                long integer => new StoredFieldCell(column.Name, column.Type, RealValue: integer),
-                double real => new StoredFieldCell(column.Name, column.Type, RealValue: real),
-                _ => throw new StoredDataException($"Unexpected SQLite storage type for real column '{site}'."),
-            },
-            _ => throw new StoredDataException($"Unsupported column type '{column.Type}' on '{site}'."),
-        };
-    }
-
-    /// <summary>
-    /// The key columns each table's missing-parent-key computation reads: a qualifying child (one
-    /// foreign key whose columns are its primary key) reads its own key columns, and the parent
-    /// such a child references reads the referenced columns. Every other column stays unread.
-    /// </summary>
-    private static Dictionary<string, List<ColumnDefinition>> StoredFieldsKeyColumns(IReadOnlyList<TableDefinition> tables)
-    {
-        Dictionary<string, HashSet<string>> keyNamesByTable = new(tables.Count, StringComparer.Ordinal);
-        foreach (TableDefinition table in tables)
-        {
-            keyNamesByTable[table.Name] = new HashSet<string>(StringComparer.Ordinal);
-        }
-
-        foreach (TableDefinition child in tables)
-        {
-            if (child.ForeignKeys.Count != 1 ||
-                !child.ForeignKeys[0].Columns.SequenceEqual(child.PrimaryKeyColumns, StringComparer.Ordinal))
-            {
-                continue;
-            }
-
-            ForeignKeyDefinition foreignKey = child.ForeignKeys[0];
-            HashSet<string> childKeys = keyNamesByTable[child.Name];
-            foreach (string column in foreignKey.Columns)
-            {
-                childKeys.Add(column);
-            }
-
-            HashSet<string> parentKeys = keyNamesByTable[RelationalSchemaCatalog.GetTable(foreignKey.ReferencedTable).Name];
-            foreach (string column in foreignKey.ReferencedColumns)
-            {
-                parentKeys.Add(column);
-            }
-        }
-
-        Dictionary<string, List<ColumnDefinition>> keyColumnsByTable = new(tables.Count, StringComparer.Ordinal);
-        foreach (TableDefinition table in tables)
-        {
-            keyColumnsByTable[table.Name] =
-                [.. table.Columns.Where(column => keyNamesByTable[table.Name].Contains(column.Name))];
-        }
-
-        return keyColumnsByTable;
-    }
-
-    private static List<string> ComputeStoredFieldsMissingParentKeys(
-        TableDefinition table,
-        List<StoredFieldRow> childRows,
-        IReadOnlyDictionary<string, List<StoredFieldRow>> rowsByTable)
-    {
-        if (table.ForeignKeys.Count != 1)
-        {
-            return [];
-        }
-
-        ForeignKeyDefinition fk = table.ForeignKeys[0];
-        if (!fk.Columns.SequenceEqual(table.PrimaryKeyColumns, StringComparer.Ordinal))
-        {
-            return [];
-        }
-
-        if (!rowsByTable.TryGetValue(fk.ReferencedTable, out List<StoredFieldRow>? parentRows) || parentRows.Count == 0)
-        {
-            return [];
-        }
-
-        TableDefinition parentTable = RelationalSchemaCatalog.GetTable(fk.ReferencedTable);
-        int[] childKeyIndices = ResolveColumnIndices(table, fk.Columns);
-        int[] parentKeyIndices = ResolveColumnIndices(parentTable, fk.ReferencedColumns);
-
-        HashSet<string> presentChildKeys = new(StringComparer.Ordinal);
-        foreach (StoredFieldRow childRow in childRows)
-        {
-            _ = presentChildKeys.Add(FormatStoredRowKey(childRow, childKeyIndices));
-        }
-
-        List<string> missing = [];
-        foreach (StoredFieldRow parentRow in parentRows)
-        {
-            string key = FormatStoredRowKey(parentRow, parentKeyIndices);
-            if (!presentChildKeys.Contains(key))
-            {
-                missing.Add(key);
-            }
-        }
-
-        return missing;
-    }
-
-    private static int[] ResolveColumnIndices(TableDefinition table, IReadOnlyList<string> columnNames)
-    {
-        int[] indices = new int[columnNames.Count];
-        for (int index = 0; index < columnNames.Count; index++)
-        {
-            string target = columnNames[index];
-            int found = -1;
-            for (int colIndex = 0; colIndex < table.Columns.Count; colIndex++)
-            {
-                if (string.Equals(table.Columns[colIndex].Name, target, StringComparison.Ordinal))
-                {
-                    found = colIndex;
-                    break;
-                }
-            }
-
-            if (found < 0)
-            {
-                throw new StoredDataException($"Column '{target}' not found on table '{table.Name}'.");
-            }
-
-            indices[index] = found;
-        }
-
-        return indices;
-    }
-
-    private static string FormatStoredRowKey(StoredFieldRow row, int[] keyIndices)
-    {
-        if (keyIndices.Length == 1)
-        {
-            return FormatStoredCellValue(row.Cells[keyIndices[0]]);
-        }
-
-        string[] parts = new string[keyIndices.Length];
-        for (int index = 0; index < keyIndices.Length; index++)
-        {
-            parts[index] = FormatStoredCellValue(row.Cells[keyIndices[index]]);
-        }
-
-        return string.Join(":", parts);
-    }
-
-    private static string FormatStoredCellValue(StoredFieldCell cell) => cell.ColumnType switch
-    {
-        SqliteColumnType.SqliteText => cell.TextValue ?? string.Empty,
-        SqliteColumnType.SqliteInteger => cell.IntegerValue.HasValue
-            ? cell.IntegerValue.Value.ToString(CultureInfo.InvariantCulture)
-            : string.Empty,
-        SqliteColumnType.SqliteReal => cell.RealValue.HasValue
-            ? cell.RealValue.Value.ToString(CultureInfo.InvariantCulture)
-            : string.Empty,
-        _ => string.Empty,
-    };
-
-    private static List<(int Position, CollectedRecord Record)> ResolveSessionTurnEntriesForReader(
-        IReadOnlyList<StoredSessionTurn> projectedTurns,
-        IReadOnlyList<CollectedRecord> records)
-    {
-        Dictionary<string, CollectedRecord> bySpan = new(records.Count, StringComparer.Ordinal);
-        foreach (CollectedRecord record in records)
-        {
-            bySpan[record.RecordId] = record;
-        }
-
-        if (projectedTurns.Count > 0)
-        {
-            List<(int Position, CollectedRecord Record)> resolved = new(projectedTurns.Count);
-            foreach (StoredSessionTurn turn in projectedTurns)
-            {
-                if (bySpan.TryGetValue(turn.SpanId, out CollectedRecord? record))
-                {
-                    resolved.Add((turn.Position, record));
-                }
-            }
-
-            return resolved;
-        }
-
-        List<CollectedRecord> llmRecords =
-        [
-            .. records
-                .Where(static r => r.Op == RecordOp.LlmInvoke)
-                .OrderBy(static r => r.StartedAt)
-                .ThenBy(static r => r.RecordId, StringComparer.Ordinal),
-        ];
-
-        List<(int Position, CollectedRecord Record)> fallback = new(llmRecords.Count);
-        for (int index = 0; index < llmRecords.Count; index++)
-        {
-            fallback.Add((index, llmRecords[index]));
-        }
-
-        return fallback;
-    }
-
-    private static ReadTimeTurnSummary BuildReaderTurnSummary(
-        CollectedRecord record,
-        int position,
-        string harnessId,
-        IModelPricingLookup? pricing,
-        out CostBlock publishedBlock,
-        out CostBlock? harnessBlock)
-    {
-        long? freshInput = TryFindReaderTokenCount(record.Tokens, TokenClass.Input);
-        long? cacheRead = TryFindReaderTokenCount(record.Tokens, TokenClass.CacheRead);
-        long? cacheCreation = TryFindReaderTokenCount(record.Tokens, TokenClass.CacheWrite);
-        long? output = TryFindReaderTokenCount(record.Tokens, TokenClass.Output);
-        long? reasoning = TryFindReaderTokenCount(record.Tokens, TokenClass.Reasoning);
-
-        long? inputTokens = freshInput.HasValue || cacheRead.HasValue || cacheCreation.HasValue
-            ? (freshInput ?? 0L) + (cacheRead ?? 0L) + (cacheCreation ?? 0L)
-            : null;
-
-        long? durationMs = ComputeReaderDurationMs(record);
-
-        ReadTimeCostSummary? reportedCost = null;
-        harnessBlock = null;
-        if (record.ReportedCost is not null)
-        {
-            IReadOnlyDictionary<string, double>? byModel = !string.IsNullOrEmpty(record.Model)
-                ? new Dictionary<string, double>(StringComparer.Ordinal) { [record.Model] = record.ReportedCost.Amount }
-                : null;
-            harnessBlock = new CostBlock(
-                CostBasis.Harness,
-                CostStatus.Priced,
-                record.ReportedCost.Amount,
-                record.ReportedCost.Currency,
-                byModel);
-            reportedCost = ToReaderCostSummary(harnessBlock);
-        }
-
-        publishedBlock = PriceReportedTokens(freshInput, cacheRead, cacheCreation, output, reasoning, record, harnessId, pricing);
-
-        return new ReadTimeTurnSummary(
-            Position: position,
-            SpanId: record.RecordId,
-            TimestampUtc: FormatTimestamp(record.StartedAt),
-            Model: record.Model,
-            InputTokens: inputTokens,
-            OutputTokens: output,
-            FreshInputTokens: freshInput,
-            CacheReadTokens: cacheRead,
-            CacheCreationTokens: cacheCreation,
-            ReasoningTokens: reasoning,
-            DurationMs: durationMs,
-            ReportedCost: reportedCost,
-            PublishedCost: ToReaderCostSummary(publishedBlock));
-    }
-
-    private static long? TryFindReaderTokenCount(IReadOnlyList<CollectedTokenCount> tokens, TokenClass tokenClass)
-    {
-        foreach (CollectedTokenCount entry in tokens)
-        {
-            if (entry.TokenClass == tokenClass)
-            {
-                return entry.Count;
-            }
-        }
-
-        return null;
-    }
-
-    private static long? ComputeReaderDurationMs(CollectedRecord record)
-    {
-        if (record.EndedAt.HasValue)
-        {
-            return Math.Max(0L, (long)Math.Round((record.EndedAt.Value - record.StartedAt).TotalMilliseconds));
-        }
-
-        return record.ReportedDurationMs;
-    }
-
-    private static ReadTimeCostSummary ToReaderCostSummary(CostBlock block)
-    {
-        List<ReadTimeModelCost> byModel = block.ByModel is null
-            ? []
-            :
-            [
-                .. block.ByModel
-                    .OrderBy(static kv => kv.Key, StringComparer.Ordinal)
-                    .Select(static kv => new ReadTimeModelCost(kv.Key, kv.Value)),
-            ];
-
-        return new ReadTimeCostSummary(block.Basis, block.Status, block.Value, block.Currency, byModel);
-    }
-
-    private static ReadTimeCostSummary AggregateReaderCostBlocks(
-        IReadOnlyList<CostBlock> blocks,
-        CostBasis fallbackBasis,
-        List<Problem> problems)
-    {
-        CostTotalResult result = CanonPricing.SumCosts(blocks);
-        if (result.Ok && result.Total is not null)
-        {
-            return ToReaderCostSummary(result.Total);
-        }
-
-        if (result.Problem is not null)
-        {
-            problems.Add(result.Problem);
-        }
-
-        return new ReadTimeCostSummary(fallbackBasis, CostStatus.Partial, null, null, []);
-    }
-
-    private static List<ReadTimeSessionToolSummary> BuildReaderToolSummaries(
-        StoredSessionProjection? projection,
-        int turnCount,
-        IReadOnlyDictionary<string, (long SchemaTokens, string? Server, HashSet<string> SpanIds)> defStats,
-        IReadOnlyList<string> toolsInvoked,
-        IReadOnlyDictionary<string, int> invCounts,
-        IReadOnlyDictionary<string, int> errCounts)
-    {
-        List<ReadTimeSessionToolSummary> result = [];
-        HashSet<string> seenNames = new(StringComparer.Ordinal);
-
-        if (projection?.Schema is not null)
-        {
-            foreach (StoredSchemaRankedTool ranked in projection.Schema.RankedTools)
-            {
-                _ = seenNames.Add(ranked.ToolName);
-                bool hasDef = defStats.TryGetValue(ranked.ToolName, out (long SchemaTokens, string? Server, HashSet<string> SpanIds) def);
-                long schemaTokens = hasDef ? def.SchemaTokens : 0L;
-                string? server = ranked.ServerName ?? (hasDef ? def.Server : null);
-                int invocations = invCounts.GetValueOrDefault(ranked.ToolName);
-                int errors = errCounts.GetValueOrDefault(ranked.ToolName);
-                int turnsResident = hasDef && schemaTokens > 0 && ranked.CostTokens >= schemaTokens
-                    ? (int)Math.Min(int.MaxValue, Math.Max(def.SpanIds.Count, ranked.CostTokens / schemaTokens))
-                    : (turnCount > 0 ? turnCount : (hasDef ? def.SpanIds.Count : 0));
-                result.Add(new ReadTimeSessionToolSummary(
-                    Name: ranked.ToolName,
-                    Server: server,
-                    SchemaTokens: schemaTokens,
-                    Invocations: invocations,
-                    TurnsResident: turnsResident,
-                    Errors: errors,
-                    TotalSchemaCost: ranked.CostTokens,
-                    Invoked: ranked.Invoked || invocations > 0));
-            }
-        }
-
-        List<ReadTimeSessionToolSummary> remainingDefinitions = [];
-        foreach (KeyValuePair<string, (long SchemaTokens, string? Server, HashSet<string> SpanIds)> kv in defStats)
-        {
-            if (!seenNames.Add(kv.Key))
-            {
-                continue;
-            }
-
-            int turnsResident = turnCount > 0 ? turnCount : kv.Value.SpanIds.Count;
-            long totalSchemaCost = kv.Value.SchemaTokens * turnsResident;
-            int invocations = invCounts.GetValueOrDefault(kv.Key);
-            int errors = errCounts.GetValueOrDefault(kv.Key);
-            remainingDefinitions.Add(new ReadTimeSessionToolSummary(
-                Name: kv.Key,
-                Server: kv.Value.Server,
-                SchemaTokens: kv.Value.SchemaTokens,
-                Invocations: invocations,
-                TurnsResident: turnsResident,
-                Errors: errors,
-                TotalSchemaCost: totalSchemaCost,
-                Invoked: invocations > 0));
-        }
-
-        remainingDefinitions.Sort(static (left, right) =>
-        {
-            int cmp = right.TotalSchemaCost.CompareTo(left.TotalSchemaCost);
-            return cmp != 0 ? cmp : string.CompareOrdinal(left.Name, right.Name);
-        });
-        result.AddRange(remainingDefinitions);
-
-        foreach (string invokedName in toolsInvoked)
-        {
-            if (!seenNames.Add(invokedName))
-            {
-                continue;
-            }
-
-            result.Add(new ReadTimeSessionToolSummary(
-                Name: invokedName,
-                Server: null,
-                SchemaTokens: 0L,
-                Invocations: invCounts.GetValueOrDefault(invokedName),
-                TurnsResident: 0,
-                Errors: errCounts.GetValueOrDefault(invokedName),
-                TotalSchemaCost: 0L,
-                Invoked: true));
-        }
-
-        return result;
-    }
-
-    private static List<ReadTimeSessionServerSummary> BuildReaderServerSummaries(
-        StoredSessionProjection? projection,
-        IReadOnlyList<ReadTimeSessionToolSummary> tools)
-    {
-        List<string> orderedServers = [];
-        HashSet<string> seenServers = new(StringComparer.Ordinal);
-
-        if (projection?.Schema is not null)
-        {
-            foreach (StoredSchemaServerTokens server in projection.Schema.Servers)
-            {
-                if (seenServers.Add(server.ServerName))
-                {
-                    orderedServers.Add(server.ServerName);
-                }
-            }
-        }
-
-        Dictionary<string, long> remainingByCost = new(StringComparer.Ordinal);
-        foreach (ReadTimeSessionToolSummary tool in tools)
-        {
-            if (tool.Server is null || seenServers.Contains(tool.Server))
-            {
-                continue;
-            }
-
-            remainingByCost[tool.Server] = remainingByCost.GetValueOrDefault(tool.Server) + tool.TotalSchemaCost;
-        }
-
-        foreach (KeyValuePair<string, long> pair in remainingByCost
-            .OrderByDescending(static kv => kv.Value)
-            .ThenBy(static kv => kv.Key, StringComparer.Ordinal))
-        {
-            if (seenServers.Add(pair.Key))
-            {
-                orderedServers.Add(pair.Key);
-            }
-        }
-
-        List<ReadTimeSessionServerSummary> summaries = new(orderedServers.Count);
-        foreach (string server in orderedServers)
-        {
-            int toolCount = 0;
-            long schemaTokens = 0;
-            int invocations = 0;
-            int unusedTools = 0;
-            long unusedCost = 0;
-
-            foreach (ReadTimeSessionToolSummary tool in tools)
-            {
-                if (!string.Equals(tool.Server, server, StringComparison.Ordinal))
-                {
-                    continue;
-                }
-
-                toolCount++;
-                schemaTokens += tool.SchemaTokens;
-                invocations += tool.Invocations;
-                if (!tool.Invoked)
-                {
-                    unusedTools++;
-                    unusedCost += tool.TotalSchemaCost;
-                }
-            }
-
-            summaries.Add(new ReadTimeSessionServerSummary(
-                Server: server,
-                IsMcp: true,
-                Tools: toolCount,
-                SchemaTokens: schemaTokens,
-                Invocations: invocations,
-                UnusedTools: unusedTools,
-                UnusedCost: unusedCost));
-        }
-
-        return summaries;
-    }
-
-    private static List<ReadTimeSessionRequestSummary> BuildReaderRequestSummaries(
-        IReadOnlyList<string> requestSpanIds,
-        IReadOnlyList<CollectedRecord> records,
-        IReadOnlyDictionary<string, CollectedRecord> recordsBySpanId,
-        IReadOnlyList<(int Position, CollectedRecord Record)> turnEntries)
-    {
-        List<ReadTimeSessionRequestSummary> summaries = new(requestSpanIds.Count);
-        foreach (string requestSpanId in requestSpanIds)
-        {
-            HashSet<string> subtree = CollectReaderDescendantSpanIds(requestSpanId, records);
-            List<CollectedRecord> ownedTurns = [];
-            foreach ((int _, CollectedRecord turnRecord) in turnEntries)
-            {
-                if (subtree.Contains(turnRecord.RecordId))
-                {
-                    ownedTurns.Add(turnRecord);
-                }
-            }
-
-            CollectedRecord? requestRecord = recordsBySpanId.GetValueOrDefault(requestSpanId);
-            string? model = requestRecord?.Model;
-            if (string.IsNullOrEmpty(model))
-            {
-                foreach (CollectedRecord ownedTurn in ownedTurns)
-                {
-                    if (!string.IsNullOrEmpty(ownedTurn.Model))
-                    {
-                        model = ownedTurn.Model;
-                        break;
-                    }
-                }
-            }
-
-            string timestampUtc = requestRecord is not null
-                ? FormatTimestamp(requestRecord.StartedAt)
-                : (ownedTurns.Count > 0 ? FormatTimestamp(ownedTurns[0].StartedAt) : string.Empty);
-
-            string? promptPreview = ExtractReaderPromptPreview(requestRecord, ownedTurns);
-            summaries.Add(new ReadTimeSessionRequestSummary(
-                RequestSpanId: requestSpanId,
-                TimestampUtc: timestampUtc,
-                Turns: ownedTurns.Count,
-                Model: model,
-                PromptPreview: promptPreview));
-        }
-
-        return summaries;
-    }
-
-    private static HashSet<string> CollectReaderDescendantSpanIds(string rootSpanId, IReadOnlyList<CollectedRecord> records)
-    {
-        Dictionary<string, List<string>> childrenByParent = new(StringComparer.Ordinal);
-        foreach (CollectedRecord record in records)
-        {
-            if (string.IsNullOrEmpty(record.ParentRecordId))
-            {
-                continue;
-            }
-
-            if (!childrenByParent.TryGetValue(record.ParentRecordId, out List<string>? children))
-            {
-                children = [];
-                childrenByParent[record.ParentRecordId] = children;
-            }
-
-            children.Add(record.RecordId);
-        }
-
-        HashSet<string> visited = new(StringComparer.Ordinal) { rootSpanId };
-        Queue<string> pending = new();
-        pending.Enqueue(rootSpanId);
-
-        while (pending.Count > 0)
-        {
-            string current = pending.Dequeue();
-            if (!childrenByParent.TryGetValue(current, out List<string>? children))
-            {
-                continue;
-            }
-
-            foreach (string child in children)
-            {
-                if (visited.Add(child))
-                {
-                    pending.Enqueue(child);
-                }
-            }
-        }
-
-        return visited;
-    }
-
-    private static string? ExtractReaderPromptPreview(
-        CollectedRecord? requestRecord,
-        IReadOnlyList<CollectedRecord> ownedTurns)
-    {
-        if (requestRecord is not null && HasReaderPromptParts(requestRecord.Parts))
-        {
-            return ExtractReaderPromptFromParts(requestRecord.Parts);
-        }
-
-        foreach (CollectedRecord ownedTurn in ownedTurns)
-        {
-            if (HasReaderPromptParts(ownedTurn.Parts))
-            {
-                return ExtractReaderPromptFromParts(ownedTurn.Parts);
-            }
-        }
-
-        return null;
-    }
-
-    private static bool HasReaderPromptParts(IReadOnlyList<CollectedContentPart> parts)
-    {
-        foreach (CollectedContentPart part in parts)
-        {
-            if (part.Bucket is ContentBucket.UserPrompt or ContentBucket.UserMessage or ContentBucket.ConversationHistory)
-            {
-                return true;
-            }
-        }
-
-        return false;
-    }
-
-    private static string? ExtractReaderPromptFromParts(IReadOnlyList<CollectedContentPart> parts)
-    {
-        ContentBucket[] priorityBuckets =
-        [
-            ContentBucket.UserPrompt,
-            ContentBucket.UserMessage,
-            ContentBucket.ConversationHistory,
-        ];
-
-        foreach (ContentBucket targetBucket in priorityBuckets)
-        {
-            foreach (CollectedContentPart part in parts)
-            {
-                if (part.Bucket != targetBucket)
-                {
-                    continue;
-                }
-
-                if (part.PlainText is null)
-                {
-                    return null;
-                }
-
-                string trimmed = part.PlainText.Trim();
-                if (trimmed.Length == 0)
-                {
-                    continue;
-                }
-
-                return TruncateReaderSurrogateSafe(trimmed, 200);
-            }
-        }
-
-        return null;
-    }
-
-    private static string TruncateReaderSurrogateSafe(string text, int maxLength)
-    {
-        if (text.Length <= maxLength)
-        {
-            return text;
-        }
-
-        int cut = maxLength;
-        if (cut > 0 && char.IsHighSurrogate(text[cut - 1]))
-        {
-            cut--;
-        }
-
-        return text[..cut];
-    }
-
-    private static List<SubagentSession> BuildReaderSubagentSummaries(
-        StoredSessionProjection? projection,
-        IReadOnlyList<CollectedRecord> records,
-        IReadOnlyDictionary<string, CollectedRecord> recordsBySpanId)
-    {
-        if (projection is not null)
-        {
-            if (projection.TimelineSubagentSpanIds is null || projection.TimelineSubagentSpanIds.Count == 0)
-            {
-                return [];
-            }
-
-            List<SubagentSession> projected = new(projection.TimelineSubagentSpanIds.Count);
-            foreach (string spanId in projection.TimelineSubagentSpanIds)
-            {
-                if (recordsBySpanId.TryGetValue(spanId, out CollectedRecord? record))
-                {
-                    projected.Add(new SubagentSession(
-                        SpanId: record.RecordId,
-                        ParentSpanId: record.Agent?.SpawningCallId ?? record.ParentRecordId,
-                        Name: record.Agent?.AgentName ?? record.Name));
-                }
-            }
-
-            return projected;
-        }
-
-        return
-        [
-            .. records
-                .Where(static r => r.Op == RecordOp.AgentInvoke)
-                .OrderBy(static r => r.StartedAt)
-                .ThenBy(static r => r.RecordId, StringComparer.Ordinal)
-                .Select(static r => new SubagentSession(
-                    SpanId: r.RecordId,
-                    ParentSpanId: r.Agent?.SpawningCallId ?? r.ParentRecordId,
-                    Name: r.Agent?.AgentName ?? r.Name)),
-        ];
-    }
-
-    private static ReadTimeAuxiliarySummary BuildReaderAuxiliarySummary(
-        StoredSessionProjection? projection,
-        IReadOnlyList<CollectedRecord> records,
-        IReadOnlyDictionary<string, CollectedRecord> recordsBySpanId,
-        string harnessId,
-        IModelPricingLookup? pricing,
-        List<Problem> problems)
-    {
-        List<string> spanIds;
-        if (projection is not null)
-        {
-            spanIds = projection.TimelineAuxiliarySpanIds is { Count: > 0 }
-                ? [.. projection.TimelineAuxiliarySpanIds]
-                : [];
-        }
-        else
-        {
-            spanIds =
-            [
-                .. records
-                    .Where(static r => IsReaderAuxiliaryRecord(r))
-                    .OrderBy(static r => r.StartedAt)
-                    .ThenBy(static r => r.RecordId, StringComparer.Ordinal)
-                    .Select(static r => r.RecordId),
-            ];
-        }
-
-        List<CostBlock> reportedBlocks = [];
-        List<CostBlock> publishedBlocks = [];
-        foreach (string spanId in spanIds)
-        {
-            if (!recordsBySpanId.TryGetValue(spanId, out CollectedRecord? record))
-            {
-                continue;
-            }
-
-            if (record.ReportedCost is not null)
-            {
-                IReadOnlyDictionary<string, double>? byModel = !string.IsNullOrEmpty(record.Model)
-                    ? new Dictionary<string, double>(StringComparer.Ordinal) { [record.Model] = record.ReportedCost.Amount }
-                    : null;
-                reportedBlocks.Add(new CostBlock(
-                    CostBasis.Harness,
-                    CostStatus.Priced,
-                    record.ReportedCost.Amount,
-                    record.ReportedCost.Currency,
-                    byModel));
-            }
-
-            long? freshInput = TryFindReaderTokenCount(record.Tokens, TokenClass.Input);
-            long? cacheRead = TryFindReaderTokenCount(record.Tokens, TokenClass.CacheRead);
-            long? cacheCreation = TryFindReaderTokenCount(record.Tokens, TokenClass.CacheWrite);
-            long? output = TryFindReaderTokenCount(record.Tokens, TokenClass.Output);
-            long? reasoning = TryFindReaderTokenCount(record.Tokens, TokenClass.Reasoning);
-            publishedBlocks.Add(PriceReportedTokens(freshInput, cacheRead, cacheCreation, output, reasoning, record, harnessId, pricing));
-        }
-
-        ReadTimeCostSummary? reportedCost = reportedBlocks.Count > 0
-            ? AggregateReaderCostBlocks(reportedBlocks, CostBasis.Harness, problems)
-            : null;
-        ReadTimeCostSummary publishedCost = publishedBlocks.Count > 0
-            ? AggregateReaderCostBlocks(publishedBlocks, CostBasis.Published, problems)
-            : new ReadTimeCostSummary(CostBasis.Unknown, CostStatus.NoRate, null, null, []);
-
-        return new ReadTimeAuxiliarySummary(spanIds, reportedCost, publishedCost);
-    }
-
-    private static bool IsReaderAuxiliaryRecord(CollectedRecord record)
-    {
-        string trimmed = record.Name.Trim();
-        if (string.Equals(trimmed, "title", StringComparison.OrdinalIgnoreCase) ||
-            trimmed.Contains("xtabprovider", StringComparison.OrdinalIgnoreCase))
-        {
-            return true;
-        }
-
-        string? agentName = record.Agent?.AgentName;
-        return !string.IsNullOrEmpty(agentName) &&
-               (string.Equals(agentName.Trim(), "title", StringComparison.OrdinalIgnoreCase) ||
-                agentName.Contains("xtabprovider", StringComparison.OrdinalIgnoreCase));
-    }
-
-    private static ReadTimeContextBucketSummary BuildReaderContextBucketSummary(
-        StoredSessionContextTurn contextTurn,
-        IReadOnlyList<(int Position, CollectedRecord Record)> turnEntries)
-    {
-        long? reportedInput = null;
-        foreach ((int position, CollectedRecord record) in turnEntries)
-        {
-            if (position == contextTurn.Position)
-            {
-                reportedInput = record.ReportedInputTokens;
-                break;
-            }
-        }
-
-        List<ReadTimeContextBucketTokens> buckets =
-        [
-            .. contextTurn.Buckets.Select(static b => new ReadTimeContextBucketTokens(b.Bucket, b.Tokens)),
-        ];
-
-        return new ReadTimeContextBucketSummary(buckets, reportedInput);
-    }
-
-    private static UnusedSchemaRange? ResolveReaderUnusedRange(
-        StoredSessionProjection? projection,
-        string harnessId,
-        IReadOnlyList<string> models,
-        IModelPricingLookup? pricing)
-    {
-        if (projection?.Schema?.UnusedTokenResidencies is not long residencies)
-        {
-            return null;
-        }
-
-        string? primaryModel = models.Count > 0 ? models[0] : null;
-        if (!string.IsNullOrEmpty(primaryModel))
-        {
-            if (CanonPricing.IsCopilotHarness(harnessId))
-            {
-                if (CanonPricing.CopilotCreditsTable.PublishedRates is not null &&
-                    CanonPricing.CopilotCreditsTable.PublishedRates.TryGetValue(primaryModel, out TableRate? tableRate) &&
-                    tableRate.Billed)
-                {
-                    RateTier? firstTier = tableRate.Tiers is { Count: > 0 } ? tableRate.Tiers[0] : null;
-                    double freshRate = firstTier?.InputRate ?? tableRate.InputRate;
-                    double cacheReadRate = (firstTier?.CacheReadRate ?? tableRate.CacheReadRate) ?? freshRate;
-                    if (freshRate > 0 || cacheReadRate > 0)
-                    {
-                        double cacheBound = (residencies * cacheReadRate) / CanonPricing.TokensPerMillion;
-                        double freshBound = (residencies * freshRate) / CanonPricing.TokensPerMillion;
-                        return new UnusedSchemaRange(
-                            TokenResidencies: residencies,
-                            Floor: Math.Min(cacheBound, freshBound),
-                            Ceiling: Math.Max(cacheBound, freshBound),
-                            Currency: CanonPricing.CopilotCreditsTable.Currency ?? "USD");
-                    }
-                }
-            }
-            else if (CanonPricing.IsPublishedTableHarness(harnessId) && !CanonPricing.IsFlatRateModel(primaryModel))
-            {
-                ModelCosts? costs = CanonPricing.GetModelCosts(primaryModel, pricing);
-                if (costs is not null && (costs.InputCostPerToken > 0 || costs.CacheReadCostPerToken > 0))
-                {
-                    double cacheRate = costs.CacheReadCostPerToken > 0 ? costs.CacheReadCostPerToken : costs.InputCostPerToken;
-                    double freshRate = costs.InputCostPerToken > 0 ? costs.InputCostPerToken : costs.CacheReadCostPerToken;
-                    double cacheBound = residencies * cacheRate;
-                    double freshBound = residencies * freshRate;
-                    return new UnusedSchemaRange(
-                        TokenResidencies: residencies,
-                        Floor: Math.Min(cacheBound, freshBound),
-                        Ceiling: Math.Max(cacheBound, freshBound),
-                        Currency: "USD");
-                }
-            }
-        }
-
-        return new UnusedSchemaRange(residencies, 0, residencies, null);
-    }
-
-    /// <summary>Executes a parameterized read; a seam for observing the statements a read issues.</summary>
-    /// <typeparam name="T">Mapped row type.</typeparam>
-    /// <param name="sql">SQL text whose values are supplied as <c>$name</c> parameters.</param>
-    /// <param name="parameters">Parameter values keyed by their <c>$name</c> marker.</param>
-    /// <param name="map">Maps one row.</param>
-    protected virtual IReadOnlyList<T> QueryRows<T>(
-        string sql,
-        IReadOnlyDictionary<string, object?> parameters,
-        Func<SqliteDataReader, T> map)
-    {
-        ArgumentNullException.ThrowIfNull(sql);
-        ArgumentNullException.ThrowIfNull(parameters);
-        ArgumentNullException.ThrowIfNull(map);
-        EnsureDatabaseDirectoryIfMissing();
-        return Query(sql, parameters, map);
-    }
-
-    /// <summary>Binds one value to the query and returns its <c>$pN</c> marker.</summary>
-    private static string Bind(Dictionary<string, object?> parameters, object? value)
-    {
-        ArgumentNullException.ThrowIfNull(parameters);
-        string name = "$p" + parameters.Count.ToString(CultureInfo.InvariantCulture);
-        parameters.Add(name, value);
-        return name;
-    }
-
-    private static int ParseInt32Required(string cell, string columnName)
-    {
-        if (int.TryParse(cell, NumberStyles.Integer, CultureInfo.InvariantCulture, out int value))
-        {
-            return value;
-        }
-
-        throw new StoredDataException($"Invalid 32-bit integer value '{cell}' for '{columnName}'.");
-    }
-
-    private static bool ParseBoolFlag(string cell, string columnName) => cell switch
-    {
-        "0" => false,
-        "1" => true,
-        _ => throw new StoredDataException($"Invalid boolean flag '{cell}' for '{columnName}'."),
-    };
-
-    private static string? ReadNullableString(SqliteDataReader reader, string columnName)
-    {
-        int ordinal = reader.GetOrdinal(columnName);
-        return reader.IsDBNull(ordinal) ? null : reader.GetString(ordinal);
-    }
-
-    private static long? ReadNullableInt64(SqliteDataReader reader, string columnName)
-    {
-        int ordinal = reader.GetOrdinal(columnName);
-        return reader.IsDBNull(ordinal) ? null : reader.GetInt64(ordinal);
-    }
-
-    private static double? ReadNullableDouble(SqliteDataReader reader, string columnName)
-    {
-        int ordinal = reader.GetOrdinal(columnName);
-        return reader.IsDBNull(ordinal) ? null : reader.GetDouble(ordinal);
-    }
-
-    private static DateTimeOffset ParseTimestampRequired(string text, string columnName)
-    {
-        if (DateTimeOffset.TryParse(text, CultureInfo.InvariantCulture, DateTimeStyles.RoundtripKind, out DateTimeOffset parsed))
-        {
-            return parsed.ToUniversalTime();
-        }
-
-        throw new StoredDataException($"Invalid ISO-8601 timestamp '{text}' for '{columnName}'.");
-    }
-
-    private static SourceKind ParseSourceKind(string value) => value switch
-    {
-        "file" => SourceKind.File,
-        "otlp" => SourceKind.Otlp,
-        _ => throw new StoredDataException($"Unrecognized source_kind '{value}'."),
-    };
-
-    private static RecordOp ParseRecordOp(string value) => value switch
-    {
-        "llm.invoke" => RecordOp.LlmInvoke,
-        "tool.invoke" => RecordOp.ToolInvoke,
-        "agent.invoke" => RecordOp.AgentInvoke,
-        "unspecified" => RecordOp.Unspecified,
-        _ => throw new StoredDataException($"Unrecognized record.op '{value}'."),
-    };
-
-    private static RecordKind ParseRecordKind(string value) => value switch
-    {
-        "unspecified" => RecordKind.Unspecified,
-        "internal" => RecordKind.Internal,
-        "server" => RecordKind.Server,
-        "client" => RecordKind.Client,
-        "producer" => RecordKind.Producer,
-        "consumer" => RecordKind.Consumer,
-        _ => throw new StoredDataException($"Unrecognized record.kind '{value}'."),
-    };
-
-    private static RecordStatus ParseRecordStatus(string value) => value switch
-    {
-        "unset" => RecordStatus.Unset,
-        "ok" => RecordStatus.Ok,
-        "error" => RecordStatus.Error,
-        "unspecified" => RecordStatus.Unspecified,
-        _ => throw new StoredDataException($"Unrecognized record.status '{value}'."),
-    };
-
-    private static TokenClass ParseTokenClass(string value) => value switch
-    {
-        "input" => TokenClass.Input,
-        "cache_read" => TokenClass.CacheRead,
-        "cache_write" => TokenClass.CacheWrite,
-        "output" => TokenClass.Output,
-        "reasoning" => TokenClass.Reasoning,
-        "total" => TokenClass.Total,
-        _ => throw new StoredDataException($"Unrecognized token_class '{value}'."),
-    };
-
-    private static ContentBucket ParseContentBucket(string value) => value switch
-    {
-        "system_prompt" => ContentBucket.SystemPrompt,
-        "tool_definitions" => ContentBucket.ToolDefinitions,
-        "tool_definition" => ContentBucket.ToolDefinition,
-        "instruction_context" => ContentBucket.InstructionContext,
-        "conversation_history" => ContentBucket.ConversationHistory,
-        "tool_result_content" => ContentBucket.ToolResultContent,
-        "user_prompt" => ContentBucket.UserPrompt,
-        "user_message" => ContentBucket.UserMessage,
-        "reasoning" => ContentBucket.Reasoning,
-        _ => throw new StoredDataException($"Unrecognized content_part.bucket '{value}'."),
-    };
-
-    private static ReportedTotalDirection ParseReportedDirection(string value) => value switch
-    {
-        "input" => ReportedTotalDirection.Input,
-        "output" => ReportedTotalDirection.Output,
-        _ => throw new StoredDataException($"Unrecognized record_reported_total.direction '{value}'."),
-    };
-
-    private static ProblemSeverity ParseProblemSeverityValue(string value)
-    {
-        if (string.Equals(value, "error", StringComparison.OrdinalIgnoreCase))
-        {
-            return ProblemSeverity.Error;
-        }
-
-        if (string.Equals(value, "warning", StringComparison.OrdinalIgnoreCase))
-        {
-            return ProblemSeverity.Warning;
-        }
-
-        throw new StoredDataException($"Unrecognized ingest_problem.severity '{value}'.");
-    }
-
-    private static List<T> GetOrCreateList<TKey, T>(Dictionary<TKey, List<T>> map, TKey key)
-        where TKey : notnull
-    {
-        if (!map.TryGetValue(key, out List<T>? list))
-        {
-            list = [];
-            map[key] = list;
-        }
-
-        return list;
-    }
-
-    /// <summary>
-    /// Prices a turn from the classes and reported totals that were stored.
-    /// The rule lives in <see cref="CanonPricing.PriceStoredTokens"/> so the
-    /// in-memory store prices the same way.
-    /// </summary>
-    private static CostBlock PriceReportedTokens(
-        long? freshInput,
-        long? cacheRead,
-        long? cacheCreation,
-        long? output,
-        long? reasoning,
-        CollectedRecord record,
-        string harnessId,
-        IModelPricingLookup? pricing)
-    {
-        return CanonPricing.PriceStoredTokens(
-            freshInput,
-            cacheRead,
-            cacheCreation,
-            output,
-            reasoning,
-            record.ReportedInputTokens,
-            record.ReportedOutputTokens,
-            record.Model,
-            harnessId,
-            pricing);
-    }
-
-    private record RawRecordHeader(
-        string SpanId,
-        string HarnessId,
-        RecordOp Op,
-        RecordKind Kind,
-        string Name,
-        DateTimeOffset StartedAt,
-        RecordStatus Status,
-        string? SessionKey,
-        string? ParentSpanId,
-        string? TraceId,
-        string? Model,
-        DateTimeOffset? EndedAt,
-        long? ReportedDurationMs,
-        CollectedCost? ReportedCost,
-        string? AgentInstanceId,
-        CollectedRecordSignals Signals,
-        long? ReportedInputTokens,
-        long? ReportedOutputTokens,
-        string SourceName,
-        string? ResponseId,
-        string? RequestId);
-
-    private record RawSessionHeader(
-        string SessionId,
-        string HarnessId,
-        string NativeId,
-        CollectedWorkspace? Workspace,
-        string? Title);
-
-    /// <summary>
-    /// What a session's list figure takes from its projection: the number of request spans, which
-    /// a figure prefers over its record-derived request count, and the stored turn entries.
-    /// </summary>
-    private record SessionListProjectionShape(
-        int RequestSpanCount,
-        IReadOnlyList<StoredSessionTurn> Turns);
-
-    private record RawContextHeader(
-        long ContextLimit,
-        string ContextLimitSource,
-        long ResidualTotal,
-        double FreshJumpFactor,
-        double AccumulationRate);
-
-    private record RawFindingHeader(
-        string FindingId,
-        string DetectorId,
-        string Title,
-        string Mechanism,
-        string Confidence,
-        string Recommendation,
-        string OutcomeRiskCaveat,
-        double RankScore,
-        long? EstimatedWasteTokens,
-        FindingErrorBar? ErrorBar,
-        string? RunId,
-        string? SessionId,
-        string? MeasurementClass,
-        string? ConfidenceBasis,
-        string? WhatWouldRaiseIt,
-        StoredCompactionHazard? CompactionHazard);
-
-    private record RawContextTurnHeader(
-        int Position,
-        long InputTokens,
-        long BucketedTokens,
-        long ResidualTokens,
-        string ResidualAttribution,
-        long BuiltinToolDefinitionTokens,
-        long FreshInput,
-        long? Headroom,
-        double? Pressure,
-        double? AccumulationRate,
-        long? StrippedBlockCount,
-        long? StrippedTokens,
-        long? PreviousFreshInput,
-        double? FreshJumpFactor,
-        long? NonResidentTokens);
 }

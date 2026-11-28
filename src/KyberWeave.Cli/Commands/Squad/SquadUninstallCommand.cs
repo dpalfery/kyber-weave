@@ -72,54 +72,14 @@ internal sealed class SquadUninstallCommand : Command<SquadUninstallSettings>
         ISquadStateStore stateStore = _stateStore;
 
         // Invalid client input returns exit code 2 before any resolution or work.
-        if (settings.Project && settings.Global)
+        if (!TryResolveTarget(settings, out SquadTarget? target))
         {
-            _output.WriteClientInputError(
-                "--global and --project are mutually exclusive. Omit both to use the default scope.");
             return 2;
-        }
-
-        SquadTarget? target = null;
-        if (settings.Harness is not null)
-        {
-            IReadOnlyList<SquadTarget> parsed;
-            try
-            {
-                parsed = SquadTargetCatalog.Parse([settings.Harness]);
-            }
-            catch (ArgumentException ex)
-            {
-                _output.WriteClientInputError(
-                    $"{ex.Message} The argument names a harness, not a directory: to uninstall a project directory, " +
-                    "use `--project` for the current directory or `--project --path <dir>`.");
-                return 2;
-            }
-
-            if (parsed.Count != 1)
-            {
-                _output.WriteClientInputError(
-                    "Name exactly one harness to uninstall, or omit it to remove every harness in the receipt.");
-                return 2;
-            }
-
-            target = parsed[0];
         }
 
         // A named harness defaults to the global scope, as `squad install --target ... -g` does; --project
         // selects the local project. With no harness the project stays the default, as it always was.
         bool isGlobal = settings.Global || (target is not null && !settings.Project);
-        if (!string.IsNullOrWhiteSpace(settings.PathOption) && target is not null && !settings.Project)
-        {
-            _output.WriteClientInputError(
-                "--path is only valid with --project when a harness is named. Add --project to target a project root.");
-            return 2;
-        }
-
-        if (settings.PathOption is not null && string.IsNullOrWhiteSpace(settings.PathOption))
-        {
-            _output.WriteClientInputError("--path must not be blank. Give a directory, or omit the option.");
-            return 2;
-        }
 
         string? effectivePath = settings.PathOption;
         SquadDeploymentScope scope = SquadCommandComposition.ResolveScope(isGlobal);
@@ -191,51 +151,7 @@ internal sealed class SquadUninstallCommand : Command<SquadUninstallSettings>
         {
             SquadLifecycleResult result = lifecycleService.UninstallAsync(uninstallRequest, cancellationToken)
                 .GetAwaiter().GetResult();
-            if (result.Success)
-            {
-                if (result.Plan is null)
-                {
-                    _output.Ansi.MarkupLine(
-                        $"[grey]No Kyber-Squad deployment found at [bold]{Markup.Escape(targetRoot)}[/]. Nothing to uninstall.[/]");
-                    _output.WriteTransactionWarnings(result.Warnings);
-                    return 0;
-                }
-
-                if (settings.DryRun)
-                {
-                    // An uninstall plan's receipt holds only the files it retains; the
-                    // removals are the plan's Delete changes, which also carry the target
-                    // a global deployment removes each path from.
-                    IReadOnlyList<SquadPlannedFileChange> removals = result.Plan.PlannedFileChanges
-                        .Where(change => change.Kind == SquadFileMutationKind.Delete)
-                        .ToArray();
-                    _output.Ansi.MarkupLine(
-                        $"[bold]Dry-run:[/] would uninstall {removals.Count} files from [bold]{Markup.Escape(targetRoot)}[/]:");
-                    foreach (SquadPlannedFileChange removal in removals)
-                    {
-                        _output.Ansi.MarkupLine(
-                            $"  [red]remove[/] {Markup.Escape(removal.RelativePath)} ({Markup.Escape(removal.Target)})");
-                    }
-
-                    _output.WriteTransactionWarnings(result.Warnings);
-                    return 0;
-                }
-
-                _output.WriteLine(
-                    $"[green]Successfully uninstalled Kyber-Squad from [bold]{Markup.Escape(targetRoot)}[/].[/]");
-                _output.WriteTransactionWarnings(result.Warnings);
-                return 0;
-            }
-
-            if (result.Errors is { Count: > 0 })
-            {
-                foreach (string error in result.Errors)
-                {
-                    _output.Ansi.MarkupLine($"[red]kyber-weave squad: error: {Markup.Escape(error)}[/]");
-                }
-            }
-
-            return 1;
+            return WriteUninstallResult(result, settings, targetRoot);
         }
         catch (Exception ex)
         {
@@ -247,5 +163,109 @@ internal sealed class SquadUninstallCommand : Command<SquadUninstallSettings>
     public int Execute(CommandContext context, SquadUninstallSettings settings)
     {
         return Execute(context, settings, CancellationToken.None);
+    }
+
+    private bool TryResolveTarget(SquadUninstallSettings settings, out SquadTarget? target)
+    {
+        target = null;
+
+        if (settings.Project && settings.Global)
+        {
+            _output.WriteClientInputError(
+                "--global and --project are mutually exclusive. Omit both to use the default scope.");
+            return false;
+        }
+
+        if (settings.Harness is not null)
+        {
+            IReadOnlyList<SquadTarget> parsed;
+            try
+            {
+                parsed = SquadTargetCatalog.Parse([settings.Harness]);
+            }
+            catch (ArgumentException ex)
+            {
+                _output.WriteClientInputError(
+                    $"{ex.Message} The argument names a harness, not a directory: to uninstall a project directory, " +
+                    "use `--project` for the current directory or `--project --path <dir>`.");
+                return false;
+            }
+
+            if (parsed.Count != 1)
+            {
+                _output.WriteClientInputError(
+                    "Name exactly one harness to uninstall, or omit it to remove every harness in the receipt.");
+                return false;
+            }
+
+            target = parsed[0];
+        }
+
+        if (!string.IsNullOrWhiteSpace(settings.PathOption) && target is not null && !settings.Project)
+        {
+            _output.WriteClientInputError(
+                "--path is only valid with --project when a harness is named. Add --project to target a project root.");
+            return false;
+        }
+
+        if (settings.PathOption is not null && string.IsNullOrWhiteSpace(settings.PathOption))
+        {
+            _output.WriteClientInputError("--path must not be blank. Give a directory, or omit the option.");
+            return false;
+        }
+
+        return true;
+    }
+
+    private int WriteUninstallResult(
+        SquadLifecycleResult result,
+        SquadUninstallSettings settings,
+        string targetRoot)
+    {
+        if (result.Success)
+        {
+            if (result.Plan is null)
+            {
+                _output.Ansi.MarkupLine(
+                    $"[grey]No Kyber-Squad deployment found at [bold]{Markup.Escape(targetRoot)}[/]. Nothing to uninstall.[/]");
+                _output.WriteTransactionWarnings(result.Warnings);
+                return 0;
+            }
+
+            if (settings.DryRun)
+            {
+                // An uninstall plan's receipt holds only the files it retains; the
+                // removals are the plan's Delete changes, which also carry the target
+                // a global deployment removes each path from.
+                IReadOnlyList<SquadPlannedFileChange> removals = result.Plan.PlannedFileChanges
+                    .Where(change => change.Kind == SquadFileMutationKind.Delete)
+                    .ToArray();
+                _output.Ansi.MarkupLine(
+                    $"[bold]Dry-run:[/] would uninstall {removals.Count} files from [bold]{Markup.Escape(targetRoot)}[/]:");
+                foreach (SquadPlannedFileChange removal in removals)
+                {
+                    _output.Ansi.MarkupLine(
+                        $"  [red]remove[/] {Markup.Escape(removal.RelativePath)} ({Markup.Escape(removal.Target)})");
+                }
+
+                _output.WriteTransactionWarnings(result.Warnings);
+                return 0;
+            }
+
+            _output.WriteLine(
+                $"[green]Successfully uninstalled Kyber-Squad from [bold]{Markup.Escape(targetRoot)}[/].[/]");
+            _output.WriteTransactionWarnings(result.Warnings);
+            return 0;
+        }
+
+        if (result.Errors is { Count: > 0 })
+        {
+            foreach (string error in result.Errors)
+            {
+                _output.Ansi.MarkupLine($"[red]kyber-weave squad: error: {Markup.Escape(error)}[/]");
+            }
+        }
+
+        return 1;
     }
 }

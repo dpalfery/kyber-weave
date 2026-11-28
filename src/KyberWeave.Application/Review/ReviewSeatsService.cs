@@ -66,15 +66,71 @@ public sealed class ReviewSeatsService(
         if (!configs.TryLoad(root, request.Config, report, out KyberWeaveConfig config, out _))
             return ReviewCommandResultFactory.Reported(1, report);
 
+        SeatSetup? setup = ResolveSetup(root, request, config, report, out ReviewCommandResult? failure);
+        if (setup is null)
+            return failure ?? ReviewCommandResultFactory.Reported(1, report);
+
+        // The index is synced before any seat starts, so no seat reads an index older than the diff.
+        WorktreeIndexOutcome index = worktreeIndex.Ensure(
+            setup.Tree,
+            DoctorOptions.Defaults,
+            indexExecutor,
+            environment.TempDirectory);
+
+        string folder = Path.Combine(setup.ReviewFolder, ScratchLayout.CycleFolder(setup.Plan.Number));
+        string gatesPath = Path.Combine(folder, ScratchLayout.GatesFileName);
+        string baseRef = request.BaseRef ?? DefaultBase;
+        IReadOnlyList<string>? changed = ChangedPaths(root, baseRef);
+
+        IReviewDecisionModel model = decisionModel(root, config);
+        CouncilSeatPlan seats = setup.Plan.Prior is { } verified && !request.Full
+            ? VerifierSeats(setup.Tree, verified, setup.Recheck)
+            : WithDecisionModel(root, baseRef, changed, CouncilSeating.Plan(changed), model, cancellationToken);
+
+        if (!WriteSeats(folder, root, baseRef, gatesPath, setup, changed, seats, index, report, out string evidence))
+            return ReviewCommandResultFactory.Reported(1, report);
+
+        PrintDispatch(output, request, setup, seats, model, index, root, folder, gatesPath, evidence);
+        return new ReviewCommandResult(0);
+    }
+
+    /// <summary>The cycle a seats run found itself in, and where it writes.</summary>
+    /// <param name="Tree">The git work tree the review belongs to.</param>
+    /// <param name="Task">The task id whose review folder this cycle belongs to.</param>
+    /// <param name="Config">The loaded host configuration.</param>
+    /// <param name="ReviewFolder">The review folder the cycle belongs to.</param>
+    /// <param name="Plan">The cycle number, the prior cycle and the decision for each gate.</param>
+    /// <param name="Recheck">The prior cycle's findings to re-check.</param>
+    private sealed record SeatSetup(
+        string Tree,
+        string Task,
+        KyberWeaveConfig Config,
+        string ReviewFolder,
+        ReviewCyclePlan Plan,
+        IReadOnlyList<ReviewFinding> Recheck);
+
+    /// <summary>
+    /// Names the cycle this run prepares: the task's review folder, the prior cycle and the findings to re-check.
+    /// Returns null with the refusal in <paramref name="failure"/> when no cycle can be named.
+    /// </summary>
+    private SeatSetup? ResolveSetup(
+        string root,
+        ReviewSeatsRequest request,
+        KyberWeaveConfig config,
+        DiagnosticReport report,
+        out ReviewCommandResult? failure)
+    {
+        failure = null;
         string tree = trees.Containing(root);
         string scratchpad = ReviewWorkTree.Scratchpad(tree);
         ReviewTaskChoice choice = selector.ChooseTask(tree, scratchpad, request.Task);
         if (!choice.Chosen)
-            return ReviewCommandResultFactory.Refused(choice.Error!);
+        {
+            failure = ReviewCommandResultFactory.Refused(choice.Error!);
+            return null;
+        }
 
-        string task = choice.Task;
-
-        string reviewFolder = Path.Combine(scratchpad, task, ScratchLayout.ReviewFolderName);
+        string reviewFolder = Path.Combine(scratchpad, choice.Task, ScratchLayout.ReviewFolderName);
         PriorCycles prior = trees.Prior(tree, request.BaseRef, cycles.ReadFinished(reviewFolder));
         ReviewCyclePlan plan = ReviewCyclePlanning.Plan(
             prior.Valid,
@@ -87,50 +143,56 @@ public sealed class ReviewSeatsService(
             (bool ok, IReadOnlyList<ReviewFinding> found) = selector.ReadRecheck(
                 priorCycle, config.Review.Policy, report, ReviewDiagnosticCodes.UnreadableInput, Severity.Error, "review seats");
             if (!ok)
-                return ReviewCommandResultFactory.Reported(1, report);
+            {
+                failure = ReviewCommandResultFactory.Reported(1, report);
+                return null;
+            }
 
             recheck = found;
         }
 
-        // The index is synced before any seat starts, so no seat reads an index older than the diff.
-        WorktreeIndexOutcome index = worktreeIndex.Ensure(
-            tree,
-            DoctorOptions.Defaults,
-            indexExecutor,
-            environment.TempDirectory);
-        bool indexReady = index.Status is WorktreeIndexStatus.Ready or WorktreeIndexStatus.NotGoverned;
+        return new SeatSetup(tree, choice.Task, config, reviewFolder, plan, recheck);
+    }
 
-        string folder = Path.Combine(reviewFolder, ScratchLayout.CycleFolder(plan.Number));
-        string gatesPath = Path.Combine(folder, ScratchLayout.GatesFileName);
-        string baseRef = request.BaseRef ?? DefaultBase;
-        IReadOnlyList<string>? changed = ChangedPaths(root, baseRef);
-
-        string evidence;
-        IReviewDecisionModel model = decisionModel(root, config);
-        CouncilSeatPlan seats = plan.Prior is { } verified && !request.Full
-            ? VerifierSeats(tree, verified, recheck)
-            : WithDecisionModel(root, baseRef, changed, CouncilSeating.Plan(changed), model, cancellationToken);
+    /// <summary>
+    /// Writes the evidence, the seat packets and the not-seated record into the cycle folder. Returns whether they were
+    /// written; a folder this process may not write is reported and the run ends.
+    /// </summary>
+    private bool WriteSeats(
+        string folder,
+        string root,
+        string baseRef,
+        string gatesPath,
+        SeatSetup setup,
+        IReadOnlyList<string>? changed,
+        CouncilSeatPlan seats,
+        WorktreeIndexOutcome index,
+        DiagnosticReport report,
+        out string evidence)
+    {
+        evidence = string.Empty;
         try
         {
             evidence = evidenceWriter.Write(
-                folder, root, baseRef, null, gatesPath, plan.Prior?.Head, config.Review.Coverage);
+                folder, root, baseRef, null, gatesPath, setup.Plan.Prior?.Head, setup.Config.Review.Coverage);
             CouncilSeatContext context = new(
-                tree,
+                setup.Tree,
                 evidence,
-                indexReady,
-                StrictnessName(config.Review.Policy.Strictness),
-                config.Review.Policy.MinConfidence,
-                config.Review.Policy.FixLevelName,
-                severityOverrides.GuidancePath(root, config.ConfigReg),
+                index.Status is WorktreeIndexStatus.Ready or WorktreeIndexStatus.NotGoverned,
+                StrictnessName(setup.Config.Review.Policy.Strictness),
+                setup.Config.Review.Policy.MinConfidence,
+                setup.Config.Review.Policy.FixLevelName,
+                severityOverrides.GuidancePath(root, setup.Config.ConfigReg),
                 Path.Combine(folder, "duplicates.json"),
-                severityOverrides.Load(root, config.ConfigReg),
+                severityOverrides.Load(root, setup.Config.ConfigReg),
                 changed);
             IReadOnlyList<string> plans = ChangePlanLookup.Find(
                 changed,
-                ChangePlanLookup.PlanFolder(config),
-                relative => ReadPlanText(tree, relative));
+                ChangePlanLookup.PlanFolder(setup.Config),
+                relative => ReadPlanText(setup.Tree, relative));
             WritePackets(folder, seats, ChangePlanLookup.WithPlan(context, plans));
             notSeatedStore.Replace(folder, ReviewLensCatalogue.Names, seats.NotSeated);
+            return true;
         }
         catch (Exception ex) when (FileFailure.Is(ex))
         {
@@ -139,10 +201,26 @@ public sealed class ReviewSeatsService(
                 Severity.Error,
                 $"Could not write the evidence or packets to '{folder}': {ex.Message}",
                 "review seats"));
-            return ReviewCommandResultFactory.Reported(1, report);
+            return false;
         }
+    }
 
-        string reviewRun = ScratchLayout.ReviewRun(task, plan.Number);
+    /// <summary>Prints the cycle header, the index state, the not-seated lines and every seat's dispatch block.</summary>
+    private void PrintDispatch(
+        TextWriter output,
+        ReviewSeatsRequest request,
+        SeatSetup setup,
+        CouncilSeatPlan seats,
+        IReviewDecisionModel model,
+        WorktreeIndexOutcome index,
+        string root,
+        string folder,
+        string gatesPath,
+        string evidence)
+    {
+        ReviewCyclePlan plan = setup.Plan;
+        string tree = setup.Tree;
+        string reviewRun = ScratchLayout.ReviewRun(setup.Task, plan.Number);
         output.WriteLine($"cycle: {plan.Number} mode: {ReviewCycleView.Mode(plan)}");
         output.WriteLine($"folder: {folder}");
         output.WriteLine($"evidence: {evidence}");
@@ -154,7 +232,7 @@ public sealed class ReviewSeatsService(
         });
         if (plan.Prior is not null)
         {
-            foreach (string line in ReviewCycleView.VerifierLines(plan, recheck))
+            foreach (string line in ReviewCycleView.VerifierLines(plan, setup.Recheck))
                 output.WriteLine(line);
             string[] seated = [.. seats.Now.Concat(seats.AfterGates)];
             output.WriteLine(request.Full
@@ -180,7 +258,6 @@ public sealed class ReviewSeatsService(
 
         output.WriteLine($"next: {ReviewSeatsCommandVerdictLine(request.Task)} --candidates");
         output.Flush();
-        return new ReviewCommandResult(0);
     }
 
     /// <summary>The verdict command line the reviewer copies; it needs no other argument, since the cycle folder records the rest.</summary>

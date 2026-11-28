@@ -38,13 +38,7 @@ public sealed class SquadStateStore : ISquadStateStore
 
     private static readonly JsonSerializerOptions JsonOptions = CreateJsonOptions();
 
-    private static readonly IReadOnlySet<string> CanonicalTargetTokens =
-        SquadTargetCatalog.All
-            .Select(SquadTargetCatalog.GetToken)
-            .ToHashSet(StringComparer.Ordinal);
 
-    private static readonly IReadOnlyDictionary<string, SquadTarget> TargetsByCanonicalToken =
-        SquadTargetCatalog.All.ToDictionary(SquadTargetCatalog.GetToken, t => t, StringComparer.Ordinal);
 
     private readonly IWritableFileSystem _files;
     private readonly IFileSystemPathSemantics _semantics;
@@ -91,28 +85,6 @@ public sealed class SquadStateStore : ISquadStateStore
     ///     from here, so a store built over a fake home never reaches the real profile.
     /// </summary>
     public ISquadUserPaths UserPaths { get; }
-
-    private static bool TryGetTarget(string token, out SquadTarget target)
-    {
-        if (TargetsByCanonicalToken.TryGetValue(token, out target))
-            return true;
-
-        try
-        {
-            IReadOnlyList<SquadTarget> parsed = SquadTargetCatalog.Parse([token]);
-            if (parsed.Count == 1)
-            {
-                target = parsed[0];
-                return true;
-            }
-        }
-        catch (ArgumentException)
-        {
-        }
-
-        target = default;
-        return false;
-    }
 
     /// <summary>Returns the state directory for the requested deployment scope.</summary>
     public string ResolveStateDirectory(string targetRoot, SquadDeploymentScope scope)
@@ -356,112 +328,9 @@ public sealed class SquadStateStore : ISquadStateStore
     public SquadLock DeserializeLock(string yaml)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(yaml);
-        try
-        {
-            RejectYamlIndirection(yaml);
-            YamlStream stream = new();
-            stream.Load(new StringReader(yaml));
-            if (stream.Documents.Count != 1 ||
-                stream.Documents[0].RootNode is not YamlMappingNode root)
-                throw new InvalidDataException(
-                    "Squad lock YAML must contain exactly one mapping document.");
-
-            string schema = RequireYamlScalar(root, "schema", "lock");
-            bool isV1 = string.Equals(schema, LockSchemaV1, StringComparison.Ordinal);
-            bool isV2 = string.Equals(schema, LockSchemaV2, StringComparison.Ordinal);
-            if (!isV1 && !isV2)
-                throw new InvalidDataException(
-                    $"Squad lock schema must be '{LockSchemaV1}' or '{LockSchemaV2}'.");
-
-            if (isV1)
-                RequireExactYamlFields(
-                    root,
-                    [
-                        "schema", "squad-version", "cli-version", "mcp-version", "bundle",
-                        "targets", "exclusions", "translation", "bundle-digest",
-                        "asset-digest", "apm"
-                    ],
-                    "lock");
-            else
-                RequireExactYamlFields(
-                    root,
-                    [
-                        "schema", "squad-version", "cli-version", "mcp-version", "bundle",
-                        "targets", "exclusions", "translation", "bundle-digest",
-                        "asset-digest", "apm", "model-presets"
-                    ],
-                    "lock");
-
-            YamlMappingNode apm = RequireYamlMapping(root, "apm", "lock");
-            RequireExactYamlFields(
-                apm,
-                ["version", "tag-commit", "asset-sha256"],
-                "lock apm identity");
-
-            Dictionary<SquadTarget, SquadAppliedPreset>? modelPresets = null;
-            if (isV2)
-            {
-                YamlMappingNode presetsNode = RequireYamlMapping(root, "model-presets", "lock");
-                modelPresets = new Dictionary<SquadTarget, SquadAppliedPreset>();
-                foreach (KeyValuePair<YamlNode, YamlNode> entry in presetsNode.Children)
-                {
-                    if (entry.Key is not YamlScalarNode { Value: not null } targetKey ||
-                        string.IsNullOrWhiteSpace(targetKey.Value))
-                        throw new InvalidDataException(
-                            "Squad lock model-presets contains a non-scalar or blank target key.");
-
-                    if (!TryGetTarget(targetKey.Value, out SquadTarget target))
-                        throw new InvalidDataException(
-                            $"Squad lock model-presets contains unknown target '{targetKey.Value}'.");
-
-                    if (entry.Value is not YamlMappingNode presetNode)
-                        throw new InvalidDataException(
-                            $"Squad lock model-presets for target '{targetKey.Value}' must be a mapping.");
-
-                    RequireExactYamlFields(
-                        presetNode,
-                        ["name", "digest"],
-                        $"lock model preset '{targetKey.Value}'");
-
-                    string presetName = RequireYamlScalar(presetNode, "name", "lock model preset");
-                    string presetDigest = RequireYamlScalar(presetNode, "digest", "lock model preset");
-
-                    if (!modelPresets.TryAdd(target, new SquadAppliedPreset(presetName, presetDigest)))
-                        throw new InvalidDataException(
-                            $"Squad lock model-presets contains duplicate target '{targetKey.Value}'.");
-                }
-            }
-
-            SquadLock squadLock = new(
-                schema,
-                RequireYamlScalar(root, "squad-version", "lock"),
-                RequireYamlScalar(root, "cli-version", "lock"),
-                RequireYamlScalar(root, "mcp-version", "lock"),
-                RequireYamlScalar(root, "bundle", "lock"),
-                RequireYamlSequence(root, "targets", "lock"),
-                RequireYamlSequence(root, "exclusions", "lock"),
-                RequireYamlScalar(root, "translation", "lock"),
-                RequireYamlScalar(root, "bundle-digest", "lock"),
-                RequireYamlScalar(root, "asset-digest", "lock"),
-                new SquadApmIdentity(
-                    RequireYamlScalar(apm, "version", "lock apm identity"),
-                    RequireYamlScalar(apm, "tag-commit", "lock apm identity"),
-                    RequireYamlScalar(apm, "asset-sha256", "lock apm identity")),
-                modelPresets);
-            ValidateLock(squadLock);
-            return squadLock;
-        }
-        catch (InvalidDataException)
-        {
-            throw;
-        }
-        catch (Exception exception) when (
-            exception is YamlException or ArgumentException or InvalidOperationException)
-        {
-            throw new InvalidDataException(
-                $"Squad lock YAML is invalid: {exception.Message}",
-                exception);
-        }
+        SquadLock squadLock = SquadStateValidation.DeserializeLock(yaml);
+        ValidateLock(squadLock);
+        return squadLock;
     }
 
     /// <summary>
@@ -479,7 +348,7 @@ public sealed class SquadStateStore : ISquadStateStore
     public string SerializeReceipt(SquadReceipt receipt)
     {
         ArgumentNullException.ThrowIfNull(receipt);
-        ValidateReceipt(receipt);
+        SquadStateValidation.ValidateReceipt(receipt);
 
         bool isGlobal = receipt.Scope == SquadDeploymentScope.Global;
         bool isV3 = receipt.Blocks.Count > 0 && receipt.Scope != SquadDeploymentScope.Instance;
@@ -546,9 +415,9 @@ public sealed class SquadStateStore : ISquadStateStore
         try
         {
             using JsonDocument document = JsonDocument.Parse(json);
-            ValidateReceiptJsonShape(document.RootElement);
+            SquadStateValidation.ValidateReceiptJsonShape(document.RootElement);
             SquadReceipt receipt = BuildReceiptFromJson(document.RootElement);
-            ValidateReceipt(receipt);
+            SquadStateValidation.ValidateReceipt(receipt);
             return receipt;
         }
         catch (InvalidDataException)
@@ -1199,8 +1068,8 @@ public sealed class SquadStateStore : ISquadStateStore
         foreach (string exclusion in squadLock.Exclusions)
             ValidateRequiredLockValue(exclusion, "exclusion");
 
-        ValidateDigest(squadLock.BundleDigest, "bundle digest");
-        ValidateDigest(squadLock.AssetDigest, "asset digest");
+        SquadStateValidation.ValidateDigest(squadLock.BundleDigest, "bundle digest");
+        SquadStateValidation.ValidateDigest(squadLock.AssetDigest, "asset digest");
         if (squadLock.Apm is null)
             throw new InvalidDataException("Squad lock is missing the apm identity.");
 
@@ -1214,7 +1083,7 @@ public sealed class SquadStateStore : ISquadStateStore
         // toolchain.yml pins no upstream build, so SquadApmIdentity.None is what a real
         // install produces. Requiring 64 hex here rejected every such install outright.
         if (!string.Equals(squadLock.Apm.AssetSha256, SquadApmIdentity.Unverified, StringComparison.Ordinal))
-            ValidateDigest(squadLock.Apm.AssetSha256, "apm digest");
+            SquadStateValidation.ValidateDigest(squadLock.Apm.AssetSha256, "apm digest");
 
         if (squadLock.ModelPresets is not null)
             foreach (KeyValuePair<SquadTarget, SquadAppliedPreset> entry in squadLock.ModelPresets)
@@ -1224,7 +1093,7 @@ public sealed class SquadStateStore : ISquadStateStore
                         $"Squad lock model preset for target '{SquadTargetCatalog.GetToken(entry.Key)}' cannot be null.");
 
                 ValidateRequiredLockValue(entry.Value.Name, "model preset name");
-                ValidateDigest(entry.Value.Digest, "model preset digest");
+                SquadStateValidation.ValidateDigest(entry.Value.Digest, "model preset digest");
             }
     }
 
@@ -1235,7 +1104,66 @@ public sealed class SquadStateStore : ISquadStateStore
                 $"Squad lock {fieldName} must be a non-blank value.");
     }
 
-    private static void ValidateReceipt(SquadReceipt receipt)
+    /// <summary>
+    /// Validates the receipt's raw JSON field shape, before any object binding: schema v1 keeps
+    /// today's exact field set; schema v2 is that same set with <c>scope</c> made optional
+    /// (present only if the receipt was hand-authored to include it — always Global, per A3)
+    /// and a required <c>layout</c> added, restricted to its two canonical tokens; schema v3
+    /// is the v1 field set plus a required <c>blocks</c>, with <c>scope</c> allowed to be
+    /// <c>project</c> or <c>global</c>, <c>layout</c> and <c>homeFiles</c> permitted beside it,
+    /// and a canonical <c>layout</c> required once the scope is <c>global</c> — the shape rc.20
+    /// writes for a global install that owns hook blocks. A reader that predates v3 falls into
+    /// the v1 branch and refuses the unknown <c>blocks</c> field outright rather than misreading
+    /// it.
+    /// </summary>
+    /// <summary>One registry entry as stored on disk, before stale checks are applied.</summary>
+    private sealed record RegistryRecord(
+        string Path,
+        DateTimeOffset LastUpdatedUtc,
+        IReadOnlyList<string> Targets);
+
+    private sealed class UtcDateTimeOffsetConverter : JsonConverter<DateTimeOffset>
+    {
+        public override DateTimeOffset Read(
+            ref Utf8JsonReader reader,
+            Type typeToConvert,
+            JsonSerializerOptions options)
+        {
+            string value = reader.GetString()
+                           ?? throw new JsonException("Expected a UTC timestamp string.");
+            return DateTimeOffset.Parse(
+                value,
+                CultureInfo.InvariantCulture,
+                DateTimeStyles.RoundtripKind);
+        }
+
+        public override void Write(
+            Utf8JsonWriter writer,
+            DateTimeOffset value,
+            JsonSerializerOptions options)
+        {
+            writer.WriteStringValue(value.UtcDateTime.ToString("O", CultureInfo.InvariantCulture));
+        }
+    }
+}
+/// <summary>Validates the portable receipt a deployment writes and later reads.</summary>
+internal static class SquadStateValidation
+{
+    private static readonly IReadOnlySet<string> CanonicalTargetTokens =
+        SquadTargetCatalog.All
+            .Select(SquadTargetCatalog.GetToken)
+            .ToHashSet(StringComparer.Ordinal);
+
+    internal static void ValidateReceipt(SquadReceipt receipt)
+    {
+        ValidateReceiptSchema(receipt);
+        ValidateReceiptDegradations(receipt);
+        ValidateReceiptFiles(receipt);
+        ValidateReceiptHomeFiles(receipt);
+        ValidateReceiptBlocks(receipt);
+    }
+
+    private static void ValidateReceiptSchema(SquadReceipt receipt)
     {
         bool isKnownSchema =
             string.Equals(receipt.Schema, ReceiptSchemaV1, StringComparison.Ordinal) ||
@@ -1278,7 +1206,10 @@ public sealed class SquadStateStore : ISquadStateStore
             throw new InvalidDataException("Squad receipt files are required.");
         if (receipt.Degradations is null)
             throw new InvalidDataException("Squad receipt degradations are required.");
+    }
 
+    private static void ValidateReceiptDegradations(SquadReceipt receipt)
+    {
         foreach (SquadDegradation? degradation in receipt.Degradations)
         {
             if (degradation is null)
@@ -1289,7 +1220,10 @@ public sealed class SquadStateStore : ISquadStateStore
             ValidateRequiredReceiptValue(degradation.Subject, "degradation subject");
             ValidateRequiredReceiptValue(degradation.Code, "degradation code");
         }
+    }
 
+    private static void ValidateReceiptFiles(SquadReceipt receipt)
+    {
         // Uniqueness is scoped the way the deployment engine scopes physical files. Project and
         // instance scope write every target beneath the one deployment root, so two targets
         // claiming one path would claim one physical file and the path alone must be unique.
@@ -1333,7 +1267,10 @@ public sealed class SquadStateStore : ISquadStateStore
                     $"Squad receipt file path '{file.RelativePath}' for target '{file.Target}' " +
                     "is not a unique portable deployment path.");
         }
+    }
 
+    private static void ValidateReceiptHomeFiles(SquadReceipt receipt)
+    {
         // Home-owned files live under one root for every harness, so their paths are unique on the
         // path alone — there is no target to scope the identity by, and only a global receipt has a
         // home to own anything in.
@@ -1376,8 +1313,6 @@ public sealed class SquadStateStore : ISquadStateStore
                 throw new InvalidDataException(
                     $"Squad receipt home file path '{homeFile.RelativePath}' is not a unique portable path.");
         }
-
-        ValidateReceiptBlocks(receipt);
     }
 
     /// <summary>
@@ -1486,7 +1421,7 @@ public sealed class SquadStateStore : ISquadStateStore
                 $"Squad receipt {fieldName} must be a non-blank value.");
     }
 
-    private static void ValidateDigest(string? digest, string fieldName)
+    internal static void ValidateDigest(string? digest, string fieldName)
     {
         if (digest is null ||
             digest.Length != 64 ||
@@ -1495,7 +1430,6 @@ public sealed class SquadStateStore : ISquadStateStore
             throw new InvalidDataException(
                 $"Squad {fieldName} must be a lowercase SHA-256 digest.");
     }
-
     private static void RejectYamlIndirection(string yaml)
     {
         if (yaml.Contains('&', StringComparison.Ordinal) ||
@@ -1581,19 +1515,7 @@ public sealed class SquadStateStore : ISquadStateStore
         }).ToArray();
     }
 
-    /// <summary>
-    /// Validates the receipt's raw JSON field shape, before any object binding: schema v1 keeps
-    /// today's exact field set; schema v2 is that same set with <c>scope</c> made optional
-    /// (present only if the receipt was hand-authored to include it — always Global, per A3)
-    /// and a required <c>layout</c> added, restricted to its two canonical tokens; schema v3
-    /// is the v1 field set plus a required <c>blocks</c>, with <c>scope</c> allowed to be
-    /// <c>project</c> or <c>global</c>, <c>layout</c> and <c>homeFiles</c> permitted beside it,
-    /// and a canonical <c>layout</c> required once the scope is <c>global</c> — the shape rc.20
-    /// writes for a global install that owns hook blocks. A reader that predates v3 falls into
-    /// the v1 branch and refuses the unknown <c>blocks</c> field outright rather than misreading
-    /// it.
-    /// </summary>
-    private static void ValidateReceiptJsonShape(JsonElement root)
+    internal static void ValidateReceiptJsonShape(JsonElement root)
     {
         if (root.ValueKind != JsonValueKind.Object)
             throw new InvalidDataException("Squad receipt must be an object.");
@@ -1771,33 +1693,142 @@ public sealed class SquadStateStore : ISquadStateStore
                 $"Squad {subject} field '{propertyName}' must use its canonical enum token.");
     }
 
-    /// <summary>One registry entry as stored on disk, before stale checks are applied.</summary>
-    private sealed record RegistryRecord(
-        string Path,
-        DateTimeOffset LastUpdatedUtc,
-        IReadOnlyList<string> Targets);
 
-    private sealed class UtcDateTimeOffsetConverter : JsonConverter<DateTimeOffset>
+    private static readonly IReadOnlyDictionary<string, SquadTarget> TargetsByCanonicalToken =
+        SquadTargetCatalog.All.ToDictionary(SquadTargetCatalog.GetToken, t => t, StringComparer.Ordinal);
+
+    private static bool TryGetTarget(string token, out SquadTarget target)
     {
-        public override DateTimeOffset Read(
-            ref Utf8JsonReader reader,
-            Type typeToConvert,
-            JsonSerializerOptions options)
+        if (TargetsByCanonicalToken.TryGetValue(token, out target))
+            return true;
+
+        try
         {
-            string value = reader.GetString()
-                           ?? throw new JsonException("Expected a UTC timestamp string.");
-            return DateTimeOffset.Parse(
-                value,
-                CultureInfo.InvariantCulture,
-                DateTimeStyles.RoundtripKind);
+            IReadOnlyList<SquadTarget> parsed = SquadTargetCatalog.Parse([token]);
+            if (parsed.Count == 1)
+            {
+                target = parsed[0];
+                return true;
+            }
+        }
+        catch (ArgumentException)
+        {
         }
 
-        public override void Write(
-            Utf8JsonWriter writer,
-            DateTimeOffset value,
-            JsonSerializerOptions options)
+        target = default;
+        return false;
+    }
+
+    /// <summary>Deserializes a Squad lock from YAML.</summary>
+    internal static SquadLock DeserializeLock(string yaml)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(yaml);
+        try
         {
-            writer.WriteStringValue(value.UtcDateTime.ToString("O", CultureInfo.InvariantCulture));
+            RejectYamlIndirection(yaml);
+            YamlStream stream = new();
+            stream.Load(new StringReader(yaml));
+            if (stream.Documents.Count != 1 ||
+                stream.Documents[0].RootNode is not YamlMappingNode root)
+                throw new InvalidDataException(
+                    "Squad lock YAML must contain exactly one mapping document.");
+
+            string schema = RequireYamlScalar(root, "schema", "lock");
+            bool isV1 = string.Equals(schema, LockSchemaV1, StringComparison.Ordinal);
+            bool isV2 = string.Equals(schema, LockSchemaV2, StringComparison.Ordinal);
+            if (!isV1 && !isV2)
+                throw new InvalidDataException(
+                    $"Squad lock schema must be '{LockSchemaV1}' or '{LockSchemaV2}'.");
+
+            if (isV1)
+                RequireExactYamlFields(
+                    root,
+                    [
+                        "schema", "squad-version", "cli-version", "mcp-version", "bundle",
+                        "targets", "exclusions", "translation", "bundle-digest",
+                        "asset-digest", "apm"
+                    ],
+                    "lock");
+            else
+                RequireExactYamlFields(
+                    root,
+                    [
+                        "schema", "squad-version", "cli-version", "mcp-version", "bundle",
+                        "targets", "exclusions", "translation", "bundle-digest",
+                        "asset-digest", "apm", "model-presets"
+                    ],
+                    "lock");
+
+            YamlMappingNode apm = RequireYamlMapping(root, "apm", "lock");
+            RequireExactYamlFields(
+                apm,
+                ["version", "tag-commit", "asset-sha256"],
+                "lock apm identity");
+
+            Dictionary<SquadTarget, SquadAppliedPreset>? modelPresets = null;
+            if (isV2)
+            {
+                YamlMappingNode presetsNode = RequireYamlMapping(root, "model-presets", "lock");
+                modelPresets = new Dictionary<SquadTarget, SquadAppliedPreset>();
+                foreach (KeyValuePair<YamlNode, YamlNode> entry in presetsNode.Children)
+                {
+                    if (entry.Key is not YamlScalarNode { Value: not null } targetKey ||
+                        string.IsNullOrWhiteSpace(targetKey.Value))
+                        throw new InvalidDataException(
+                            "Squad lock model-presets contains a non-scalar or blank target key.");
+
+                    if (!TryGetTarget(targetKey.Value, out SquadTarget target))
+                        throw new InvalidDataException(
+                            $"Squad lock model-presets contains unknown target '{targetKey.Value}'.");
+
+                    if (entry.Value is not YamlMappingNode presetNode)
+                        throw new InvalidDataException(
+                            $"Squad lock model-presets for target '{targetKey.Value}' must be a mapping.");
+
+                    RequireExactYamlFields(
+                        presetNode,
+                        ["name", "digest"],
+                        $"lock model preset '{targetKey.Value}'");
+
+                    string presetName = RequireYamlScalar(presetNode, "name", "lock model preset");
+                    string presetDigest = RequireYamlScalar(presetNode, "digest", "lock model preset");
+
+                    if (!modelPresets.TryAdd(target, new SquadAppliedPreset(presetName, presetDigest)))
+                        throw new InvalidDataException(
+                            $"Squad lock model-presets contains duplicate target '{targetKey.Value}'.");
+                }
+            }
+
+            SquadLock squadLock = new(
+                schema,
+                RequireYamlScalar(root, "squad-version", "lock"),
+                RequireYamlScalar(root, "cli-version", "lock"),
+                RequireYamlScalar(root, "mcp-version", "lock"),
+                RequireYamlScalar(root, "bundle", "lock"),
+                RequireYamlSequence(root, "targets", "lock"),
+                RequireYamlSequence(root, "exclusions", "lock"),
+                RequireYamlScalar(root, "translation", "lock"),
+                RequireYamlScalar(root, "bundle-digest", "lock"),
+                RequireYamlScalar(root, "asset-digest", "lock"),
+                new SquadApmIdentity(
+                    RequireYamlScalar(apm, "version", "lock apm identity"),
+                    RequireYamlScalar(apm, "tag-commit", "lock apm identity"),
+                    RequireYamlScalar(apm, "asset-sha256", "lock apm identity")),
+                modelPresets);
+            return squadLock;
+        }
+        catch (InvalidDataException)
+        {
+            throw;
+        }
+        catch (Exception exception) when (
+            exception is YamlException or ArgumentException or InvalidOperationException)
+        {
+            throw new InvalidDataException(
+                $"Squad lock YAML is invalid: {exception.Message}",
+                exception);
         }
     }
+
+
 }

@@ -362,38 +362,10 @@ public static class CanonContextAnalysis
 
         AvailabilityResult availability = CanonPricing.ContextCompositionAvailability(options.Measurability);
         bool declaredNotMeasurable = !availability.IsMeasured;
-        bool hasStructure = false;
-        foreach (ContextTurn turn in turns)
-        {
-            foreach (ContextPart part in turn.Parts)
-            {
-                if (!string.IsNullOrEmpty(part.Text) || part.Tokens.HasValue)
-                {
-                    hasStructure = true;
-                    break;
-                }
-            }
-
-            if (hasStructure)
-                break;
-        }
+        bool hasStructure = HasMessageStructure(turns);
 
         if (declaredNotMeasurable || !hasStructure)
-        {
-            return new ContextAnalysis(
-                Measurable: false,
-                Reason: declaredNotMeasurable ? "declared_not_measurable" : "no_message_structure",
-                ContextLimit: options.ContextLimit,
-                ContextLimitSource: options.ContextLimitSource,
-                TurnCount: turns.Count,
-                Turns: [],
-                ObservedParts: [],
-                ResidualTotal: 0,
-                DerivedCounts: false,
-                FreshJumpFactor: options.FreshJumpFactor,
-                FlaggedTurns: [],
-                SessionAccumulationRate: 0);
-        }
+            return NotMeasurableAnalysis(turns, options, declaredNotMeasurable);
 
         List<TurnPressure> perTurn = new(turns.Count);
         List<int> flaggedTurns = [];
@@ -404,132 +376,32 @@ public static class CanonContextAnalysis
         for (int position = 0; position < turns.Count; position++)
         {
             ContextTurn turn = turns[position];
-            Dictionary<string, long> buckets = new(StringComparer.Ordinal);
-            foreach (string key in CanonValidation.CanonicalContentKeys)
-                buckets[key] = 0;
-
-            Dictionary<string, long> toolDefsByServer = new(StringComparer.Ordinal);
-            long builtinToolDefTokens = 0;
-            int strippedCount = 0;
-            long strippedTokens = 0;
-            bool derivedThisTurn = false;
-            int nonResidentCount = 0;
-            HashSet<TokenizerLabel> turnLabels = [];
-
+            TurnAccumulator accumulator = new(markers, countTokens, observed);
             foreach (ContextPart part in turn.Parts)
-            {
-                if (part.Resident == false)
-                {
-                    nonResidentCount++;
-                    continue;
-                }
+                accumulator.Add(part);
 
-                string text = part.Text ?? string.Empty;
-                long? measured = CanonPricing.MeasuredCount(part.Tokens);
-                if (text.Length > 0 || measured.HasValue)
-                    observed.Add(part.Part);
-
-                bool strippable = string.Equals(part.Part, "conversation_history", StringComparison.Ordinal) ||
-                                  string.Equals(part.Part, "tool_result_content", StringComparison.Ordinal);
-
-                long partTokens;
-                if (strippable &&
-                    text.Contains(markers.Open, StringComparison.Ordinal) &&
-                    text.Contains(markers.Close, StringComparison.Ordinal))
-                {
-                    (List<string> blocks, string remainder) = StripInstructionBlocks(text, markers);
-                    TokenCount remainderCount = countTokens(remainder, part.Model);
-                    turnLabels.Add(new TokenizerLabel(remainderCount.Tokenizer, remainderCount.IsModelOwn));
-                    long remainderTokens = remainderCount.Count;
-                    buckets[part.Part] = buckets.GetValueOrDefault(part.Part) + remainderTokens;
-                    derivedThisTurn = true;
-                    partTokens = remainderTokens;
-                    foreach (string block in blocks)
-                    {
-                        TokenCount blockCount = countTokens(block, part.Model);
-                        turnLabels.Add(new TokenizerLabel(blockCount.Tokenizer, blockCount.IsModelOwn));
-                        long blockTokens = blockCount.Count;
-                        buckets["instruction_context"] = buckets.GetValueOrDefault("instruction_context") + blockTokens;
-                        strippedCount++;
-                        strippedTokens += blockTokens;
-                        partTokens += blockTokens;
-                    }
-                }
-                else
-                {
-                    if (measured.HasValue)
-                    {
-                        partTokens = measured.Value;
-                        if (part.Label is TokenizerLabel measuredLabel)
-                            turnLabels.Add(measuredLabel);
-                    }
-                    else
-                    {
-                        TokenCount counted = countTokens(text, part.Model);
-                        turnLabels.Add(new TokenizerLabel(counted.Tokenizer, counted.IsModelOwn));
-                        partTokens = counted.Count;
-                    }
-
-                    if (!measured.HasValue || part.Derived)
-                        derivedThisTurn = true;
-
-                    buckets[part.Part] = buckets.GetValueOrDefault(part.Part) + partTokens;
-                    if (part.InstructionTokens.HasValue)
-                    {
-                        buckets["instruction_context"] = buckets.GetValueOrDefault("instruction_context") + part.InstructionTokens.Value;
-                        strippedCount += part.StrippedCount ?? 0;
-                        strippedTokens += part.InstructionTokens.Value;
-                    }
-                }
-
-                if (string.Equals(part.Part, "tool_definitions", StringComparison.Ordinal))
-                {
-                    if (part.Server is null)
-                        builtinToolDefTokens += partTokens;
-                    else
-                        toolDefsByServer[part.Server] = toolDefsByServer.GetValueOrDefault(part.Server) + partTokens;
-                }
-            }
-
+            Dictionary<string, long> buckets = accumulator.Buckets;
             long bucketedTokens = 0;
             foreach (string key in CanonValidation.CanonicalContentKeys)
                 bucketedTokens += buckets[key];
 
             long residual = turn.InputTokens - bucketedTokens;
-            string attribution = derivedThisTurn ? ResidualTokenizerDrift : ResidualUnattributed;
-            if (derivedThisTurn)
+            string attribution = accumulator.DerivedThisTurn ? ResidualTokenizerDrift : ResidualUnattributed;
+            if (accumulator.DerivedThisTurn)
                 derivedCounts = true;
             residualTotal += residual;
 
             ContextTurn? previous = position > 0 ? turns[position - 1] : null;
             long accumulationRate = previous is null ? turn.InputTokens : turn.InputTokens - previous.InputTokens;
-
-            // The baseline is the nearest earlier turn whose fresh input was measured: an unmeasured
-            // turn is not a zero, so no jump is ever flagged against it.
-            FreshInputJump? freshInputJump = null;
-            long? previousFresh = null;
-            for (int back = position - 1; back >= 0 && !previousFresh.HasValue; back--)
-                previousFresh = turns[back].FreshInput;
-
-            if (turn.FreshInput is > 0 and long currentFresh && previousFresh.HasValue)
-            {
-                bool sharpRise = (previousFresh.Value > 0 && currentFresh >= options.FreshJumpFactor * previousFresh.Value) ||
-                                 (previousFresh.Value == 0 && currentFresh >= options.ZeroPreviousFloor);
-                if (sharpRise)
-                {
-                    freshInputJump = new FreshInputJump(
-                        Previous: previousFresh.Value,
-                        Factor: previousFresh.Value > 0 ? (double)currentFresh / previousFresh.Value : double.PositiveInfinity);
-                }
-            }
+            FreshInputJump? freshInputJump = DetectFreshInputJump(turns, position, options);
 
             perTurn.Add(new TurnPressure(
                 Index: position + 1,
                 InputTokens: turn.InputTokens,
                 Buckets: buckets,
-                ToolDefinitionsByServer: toolDefsByServer,
-                BuiltinToolDefinitionTokens: builtinToolDefTokens,
-                StrippedInstructionBlocks: new StrippedInstructionSummary(strippedCount, strippedTokens),
+                ToolDefinitionsByServer: accumulator.ToolDefinitionsByServer,
+                BuiltinToolDefinitionTokens: accumulator.BuiltinToolDefinitionTokens,
+                StrippedInstructionBlocks: new StrippedInstructionSummary(accumulator.StrippedCount, accumulator.StrippedTokens),
                 BucketedTokens: bucketedTokens,
                 Residual: new TurnResidual(residual, attribution),
                 Headroom: options.ContextLimit - turn.InputTokens,
@@ -537,9 +409,9 @@ public static class CanonContextAnalysis
                 AccumulationRate: accumulationRate,
                 FreshInput: turn.FreshInput,
                 FreshInputJump: freshInputJump,
-                NonResidentToolDefinitions: nonResidentCount > 0 ? nonResidentCount : null)
+                NonResidentToolDefinitions: accumulator.NonResidentCount > 0 ? accumulator.NonResidentCount : null)
             {
-                Tokenizers = TokenizerLabel.Ordered(turnLabels),
+                Tokenizers = TokenizerLabel.Ordered(accumulator.TurnLabels),
             });
 
             if (freshInputJump is not null)
@@ -573,6 +445,176 @@ public static class CanonContextAnalysis
         {
             Tokenizers = TokenizerLabel.Ordered(perTurn.SelectMany(static turn => turn.Tokenizers)),
         };
+    }
+
+    private static bool HasMessageStructure(IReadOnlyList<ContextTurn> turns)
+    {
+        foreach (ContextTurn turn in turns)
+        {
+            foreach (ContextPart part in turn.Parts)
+            {
+                if (!string.IsNullOrEmpty(part.Text) || part.Tokens.HasValue)
+                    return true;
+            }
+        }
+
+        return false;
+    }
+
+    private static ContextAnalysis NotMeasurableAnalysis(
+        IReadOnlyList<ContextTurn> turns,
+        ContextCountOptions options,
+        bool declaredNotMeasurable)
+    {
+        return new ContextAnalysis(
+            Measurable: false,
+            Reason: declaredNotMeasurable ? "declared_not_measurable" : "no_message_structure",
+            ContextLimit: options.ContextLimit,
+            ContextLimitSource: options.ContextLimitSource,
+            TurnCount: turns.Count,
+            Turns: [],
+            ObservedParts: [],
+            ResidualTotal: 0,
+            DerivedCounts: false,
+            FreshJumpFactor: options.FreshJumpFactor,
+            FlaggedTurns: [],
+            SessionAccumulationRate: 0);
+    }
+
+    private static FreshInputJump? DetectFreshInputJump(
+        IReadOnlyList<ContextTurn> turns,
+        int position,
+        ContextCountOptions options)
+    {
+        // The baseline is the nearest earlier turn whose fresh input was measured: an unmeasured
+        // turn is not a zero, so no jump is ever flagged against it.
+        long? previousFresh = null;
+        for (int back = position - 1; back >= 0 && !previousFresh.HasValue; back--)
+            previousFresh = turns[back].FreshInput;
+
+        ContextTurn turn = turns[position];
+        if (turn.FreshInput is not (> 0 and long currentFresh) || !previousFresh.HasValue)
+            return null;
+
+        bool sharpRise = (previousFresh.Value > 0 && currentFresh >= options.FreshJumpFactor * previousFresh.Value) ||
+                         (previousFresh.Value == 0 && currentFresh >= options.ZeroPreviousFloor);
+        if (!sharpRise)
+            return null;
+
+        return new FreshInputJump(
+            Previous: previousFresh.Value,
+            Factor: previousFresh.Value > 0 ? (double)currentFresh / previousFresh.Value : double.PositiveInfinity);
+    }
+
+    private sealed class TurnAccumulator
+    {
+        private readonly InstructionBlockMarkers _markers;
+        private readonly TextTokenCounter _countTokens;
+        private readonly HashSet<string> _observed;
+
+        public TurnAccumulator(
+            InstructionBlockMarkers markers,
+            TextTokenCounter countTokens,
+            HashSet<string> observed)
+        {
+            _markers = markers;
+            _countTokens = countTokens;
+            _observed = observed;
+            Buckets = new Dictionary<string, long>(StringComparer.Ordinal);
+            foreach (string key in CanonValidation.CanonicalContentKeys)
+                Buckets[key] = 0;
+        }
+
+        public Dictionary<string, long> Buckets { get; }
+
+        public Dictionary<string, long> ToolDefinitionsByServer { get; } = new(StringComparer.Ordinal);
+
+        public long BuiltinToolDefinitionTokens { get; private set; }
+
+        public int StrippedCount { get; private set; }
+
+        public long StrippedTokens { get; private set; }
+
+        public bool DerivedThisTurn { get; private set; }
+
+        public int NonResidentCount { get; private set; }
+
+        public HashSet<TokenizerLabel> TurnLabels { get; } = [];
+
+        public void Add(ContextPart part)
+        {
+            if (part.Resident == false)
+            {
+                NonResidentCount++;
+                return;
+            }
+
+            string text = part.Text ?? string.Empty;
+            long? measured = CanonPricing.MeasuredCount(part.Tokens);
+            if (text.Length > 0 || measured.HasValue)
+                _observed.Add(part.Part);
+
+            bool strippable = string.Equals(part.Part, "conversation_history", StringComparison.Ordinal) ||
+                              string.Equals(part.Part, "tool_result_content", StringComparison.Ordinal);
+
+            long partTokens;
+            if (strippable &&
+                text.Contains(_markers.Open, StringComparison.Ordinal) &&
+                text.Contains(_markers.Close, StringComparison.Ordinal))
+            {
+                (List<string> blocks, string remainder) = StripInstructionBlocks(text, _markers);
+                TokenCount remainderCount = _countTokens(remainder, part.Model);
+                TurnLabels.Add(new TokenizerLabel(remainderCount.Tokenizer, remainderCount.IsModelOwn));
+                long remainderTokens = remainderCount.Count;
+                Buckets[part.Part] = Buckets.GetValueOrDefault(part.Part) + remainderTokens;
+                DerivedThisTurn = true;
+                partTokens = remainderTokens;
+                foreach (string block in blocks)
+                {
+                    TokenCount blockCount = _countTokens(block, part.Model);
+                    TurnLabels.Add(new TokenizerLabel(blockCount.Tokenizer, blockCount.IsModelOwn));
+                    long blockTokens = blockCount.Count;
+                    Buckets["instruction_context"] = Buckets.GetValueOrDefault("instruction_context") + blockTokens;
+                    StrippedCount++;
+                    StrippedTokens += blockTokens;
+                    partTokens += blockTokens;
+                }
+            }
+            else
+            {
+                if (measured.HasValue)
+                {
+                    partTokens = measured.Value;
+                    if (part.Label is TokenizerLabel measuredLabel)
+                        TurnLabels.Add(measuredLabel);
+                }
+                else
+                {
+                    TokenCount counted = _countTokens(text, part.Model);
+                    TurnLabels.Add(new TokenizerLabel(counted.Tokenizer, counted.IsModelOwn));
+                    partTokens = counted.Count;
+                }
+
+                if (!measured.HasValue || part.Derived)
+                    DerivedThisTurn = true;
+
+                Buckets[part.Part] = Buckets.GetValueOrDefault(part.Part) + partTokens;
+                if (part.InstructionTokens.HasValue)
+                {
+                    Buckets["instruction_context"] = Buckets.GetValueOrDefault("instruction_context") + part.InstructionTokens.Value;
+                    StrippedCount += part.StrippedCount ?? 0;
+                    StrippedTokens += part.InstructionTokens.Value;
+                }
+            }
+
+            if (string.Equals(part.Part, "tool_definitions", StringComparison.Ordinal))
+            {
+                if (part.Server is null)
+                    BuiltinToolDefinitionTokens += partTokens;
+                else
+                    ToolDefinitionsByServer[part.Server] = ToolDefinitionsByServer.GetValueOrDefault(part.Server) + partTokens;
+            }
+        }
     }
 
     /// <summary>
@@ -668,9 +710,71 @@ public static class CanonContextAnalysis
     {
         ArgumentNullException.ThrowIfNull(spans);
 
-        long sessionStart = long.MaxValue;
         long[] timestamps = new long[spans.Count];
         bool[] hasTimestamp = new bool[spans.Count];
+        long sessionStart = ResolveSessionStart(spans, timestamps, hasTimestamp);
+
+        List<TimelineEntry> entries = BuildEntries(spans, timestamps, hasTimestamp, sessionStart);
+        List<TimelineEntry> primary = [];
+        List<TimelineEntry> auxiliaryEntries = [];
+        foreach (TimelineEntry entry in entries)
+        {
+            if (entry.Auxiliary)
+                auxiliaryEntries.Add(entry);
+            else
+                primary.Add(entry);
+        }
+
+        HashSet<string> reachable = LinkPrimary(primary, out Dictionary<string, TimelineNode> parentOf);
+        List<TimelineEntry> orphaned = DetachOrphans(primary, parentOf, reachable);
+
+        foreach (TimelineEntry entry in primary)
+        {
+            if (reachable.Contains(entry.Record.SpanId))
+                SortChildren(entry.Node);
+        }
+
+        Dictionary<string, TimelineNode> orphanGroups = BuildOrphanGroups(orphaned);
+        TimelineNode auxiliaryGroup = BuildAuxiliaryGroup(auxiliaryEntries);
+
+        TimelineNode root = new()
+        {
+            SpanId = SessionRootId,
+            ParentId = null,
+            Kind = SyntheticKind,
+            Name = "session",
+            Attributes = new Dictionary<string, JsonElement>(StringComparer.Ordinal),
+            IsSubagent = false,
+            IsAuxiliary = false,
+            Cost = UnpricedCost,
+        };
+
+        foreach (TimelineEntry entry in primary)
+        {
+            if (entry.Record.ParentSpanId is null)
+                root.Children.Add(entry.Node);
+        }
+
+        foreach (TimelineNode orphanGroup in orphanGroups.Values)
+            root.Children.Add(orphanGroup);
+        if (auxiliaryGroup.Children.Count > 0)
+            root.Children.Add(auxiliaryGroup);
+
+        SortChildren(root);
+        List<CostBlock> allCosts = new(entries.Count);
+        foreach (TimelineEntry entry in entries)
+            allCosts.Add(entry.Record.Cost);
+        FinalizeSynthetic(root, allCosts);
+
+        return root;
+    }
+
+    private static long ResolveSessionStart(
+        IReadOnlyList<CanonicalRecord> spans,
+        long[] timestamps,
+        bool[] hasTimestamp)
+    {
+        long sessionStart = long.MaxValue;
         for (int i = 0; i < spans.Count; i++)
         {
             if (TryParseTimestampMs(spans[i].Timestamp, out long ms))
@@ -682,9 +786,15 @@ public static class CanonContextAnalysis
             }
         }
 
-        if (sessionStart == long.MaxValue)
-            sessionStart = 0;
+        return sessionStart == long.MaxValue ? 0 : sessionStart;
+    }
 
+    private static List<TimelineEntry> BuildEntries(
+        IReadOnlyList<CanonicalRecord> spans,
+        long[] timestamps,
+        bool[] hasTimestamp,
+        long sessionStart)
+    {
         List<TimelineEntry> entries = new(spans.Count);
         for (int i = 0; i < spans.Count; i++)
         {
@@ -713,21 +823,18 @@ public static class CanonContextAnalysis
             entries.Add(new TimelineEntry(record, node, auxiliary));
         }
 
-        List<TimelineEntry> primary = [];
-        List<TimelineEntry> auxiliaryEntries = [];
-        foreach (TimelineEntry entry in entries)
-        {
-            if (entry.Auxiliary)
-                auxiliaryEntries.Add(entry);
-            else
-                primary.Add(entry);
-        }
+        return entries;
+    }
 
+    private static HashSet<string> LinkPrimary(
+        List<TimelineEntry> primary,
+        out Dictionary<string, TimelineNode> parentOf)
+    {
         Dictionary<string, TimelineEntry> primaryById = new(StringComparer.Ordinal);
         foreach (TimelineEntry entry in primary)
             primaryById[entry.Record.SpanId] = entry;
 
-        Dictionary<string, TimelineNode> parentOf = new(StringComparer.Ordinal);
+        parentOf = new(StringComparer.Ordinal);
         foreach (TimelineEntry entry in primary)
         {
             if (entry.Record.ParentSpanId is string parentId &&
@@ -740,43 +847,53 @@ public static class CanonContextAnalysis
         }
 
         HashSet<string> reachable = new(StringComparer.Ordinal);
-        void Visit(TimelineNode node)
-        {
-            if (!reachable.Add(node.SpanId))
-                return;
-            foreach (TimelineNode child in node.Children)
-                Visit(child);
-        }
-
         foreach (TimelineEntry entry in primary)
         {
             if (entry.Record.ParentSpanId is null)
-                Visit(entry.Node);
+                VisitNode(entry.Node, reachable);
         }
 
+        return reachable;
+    }
+
+    private static void VisitNode(TimelineNode node, HashSet<string> reachable)
+    {
+        if (!reachable.Add(node.SpanId))
+            return;
+        foreach (TimelineNode child in node.Children)
+            VisitNode(child, reachable);
+    }
+
+    private static List<TimelineEntry> DetachOrphans(
+        List<TimelineEntry> primary,
+        Dictionary<string, TimelineNode> parentOf,
+        HashSet<string> reachable)
+    {
         List<TimelineEntry> orphaned = [];
         foreach (TimelineEntry entry in primary)
         {
-            if (!reachable.Contains(entry.Record.SpanId))
-            {
-                orphaned.Add(entry);
-                if (parentOf.TryGetValue(entry.Record.SpanId, out TimelineNode? cycleParent))
-                {
-                    for (int i = cycleParent.Children.Count - 1; i >= 0; i--)
-                    {
-                        if (string.Equals(cycleParent.Children[i].SpanId, entry.Record.SpanId, StringComparison.Ordinal))
-                            cycleParent.Children.RemoveAt(i);
-                    }
-                }
-            }
-        }
-
-        foreach (TimelineEntry entry in primary)
-        {
             if (reachable.Contains(entry.Record.SpanId))
-                SortChildren(entry.Node);
+                continue;
+
+            orphaned.Add(entry);
+            if (parentOf.TryGetValue(entry.Record.SpanId, out TimelineNode? cycleParent))
+                RemoveChild(cycleParent, entry.Record.SpanId);
         }
 
+        return orphaned;
+    }
+
+    private static void RemoveChild(TimelineNode parent, string spanId)
+    {
+        for (int i = parent.Children.Count - 1; i >= 0; i--)
+        {
+            if (string.Equals(parent.Children[i].SpanId, spanId, StringComparison.Ordinal))
+                parent.Children.RemoveAt(i);
+        }
+    }
+
+    private static Dictionary<string, TimelineNode> BuildOrphanGroups(List<TimelineEntry> orphaned)
+    {
         Dictionary<string, TimelineNode> orphanGroups = new(StringComparer.Ordinal);
         Dictionary<string, List<CostBlock>> orphanGroupCosts = new(StringComparer.Ordinal);
         foreach (TimelineEntry entry in orphaned)
@@ -809,6 +926,11 @@ public static class CanonContextAnalysis
             FinalizeSynthetic(pair.Value, orphanGroupCosts[pair.Key]);
         }
 
+        return orphanGroups;
+    }
+
+    private static TimelineNode BuildAuxiliaryGroup(List<TimelineEntry> auxiliaryEntries)
+    {
         Dictionary<string, TimelineEntry> auxiliaryById = new(StringComparer.Ordinal);
         foreach (TimelineEntry entry in auxiliaryEntries)
             auxiliaryById[entry.Record.SpanId] = entry;
@@ -849,36 +971,7 @@ public static class CanonContextAnalysis
             FinalizeSynthetic(auxiliaryGroup, auxCosts);
         }
 
-        TimelineNode root = new()
-        {
-            SpanId = SessionRootId,
-            ParentId = null,
-            Kind = SyntheticKind,
-            Name = "session",
-            Attributes = new Dictionary<string, JsonElement>(StringComparer.Ordinal),
-            IsSubagent = false,
-            IsAuxiliary = false,
-            Cost = UnpricedCost,
-        };
-
-        foreach (TimelineEntry entry in primary)
-        {
-            if (entry.Record.ParentSpanId is null)
-                root.Children.Add(entry.Node);
-        }
-
-        foreach (TimelineNode orphanGroup in orphanGroups.Values)
-            root.Children.Add(orphanGroup);
-        if (auxiliaryGroup.Children.Count > 0)
-            root.Children.Add(auxiliaryGroup);
-
-        SortChildren(root);
-        List<CostBlock> allCosts = new(entries.Count);
-        foreach (TimelineEntry entry in entries)
-            allCosts.Add(entry.Record.Cost);
-        FinalizeSynthetic(root, allCosts);
-
-        return root;
+        return auxiliaryGroup;
     }
 
     /// <summary>Extracts every identified subagent invocation node and its spawning parent ID.</summary>

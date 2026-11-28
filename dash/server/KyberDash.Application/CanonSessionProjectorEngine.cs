@@ -6,6 +6,10 @@ using KyberDash.Contracts.Repositories;
 using KyberDash.Data.Collector;
 using KyberDash.Data.Repositories;
 using KyberDash.Domain;
+using static KyberDash.Application.CanonSessionProjectorEngine;
+using static KyberDash.Application.TwinDeduplicator;
+using static KyberDash.Application.SessionProjectionHelpers;
+using static KyberDash.Application.StoredProjectionHelpers;
 
 namespace KyberDash.Application;
 
@@ -45,16 +49,16 @@ public partial class CanonSessionProjectorEngine
     /// </remarks>
     public const int DefaultReadPathPassRecordBudget = 20_000;
 
-    private const int PromptPreviewLength = 200;
-    private const string DroidHarness = "droid";
-    private const string DroidPluginSource = "kyberdash-factory-plugin";
-    private const string SessionLabelKey = "kyber.session.label";
-    private const string NoMessageStructureReason = "no_message_structure";
-    private const string NoToolDefinitionSchemaReason = "The source did not provide tool-definition schema data.";
-    private const string DefaultContextLimitSource = "default";
-    private const string SubagentSessionKeyMarker = "#agent-";
+    internal const int PromptPreviewLength = 200;
+    internal const string DroidHarness = "droid";
+    internal const string DroidPluginSource = "kyberdash-factory-plugin";
+    internal const string SessionLabelKey = "kyber.session.label";
+    internal const string NoMessageStructureReason = "no_message_structure";
+    internal const string NoToolDefinitionSchemaReason = "The source did not provide tool-definition schema data.";
+    internal const string DefaultContextLimitSource = "default";
+    internal const string SubagentSessionKeyMarker = "#agent-";
 
-    private static readonly HashSet<string> ClaudeCumulativeBuckets = new(StringComparer.Ordinal)
+    internal static readonly HashSet<string> ClaudeCumulativeBuckets = new(StringComparer.Ordinal)
     {
         "system_prompt",
         "instruction_context",
@@ -62,24 +66,24 @@ public partial class CanonSessionProjectorEngine
         "tool_result_content",
     };
 
-    private static readonly string[] AgentNameKeys = ["gen_ai.agent.name", "agent.name"];
-    private static readonly string[] RepoKeys = ["vcs.repository.name", "repo"];
-    private static readonly string[] BranchKeys = ["vcs.ref.head.name", "branch"];
-    private static readonly string[] ModelKeys = ["gen_ai.response.model", "gen_ai.request.model", "model"];
-    private static readonly string[] ParentSessionKeys = ["parent_session", "parent_session_id", "gen_ai.parent_session_id", "parentSession"];
+    internal static readonly string[] AgentNameKeys = ["gen_ai.agent.name", "agent.name"];
+    internal static readonly string[] RepoKeys = ["vcs.repository.name", "repo"];
+    internal static readonly string[] BranchKeys = ["vcs.ref.head.name", "branch"];
+    internal static readonly string[] ModelKeys = ["gen_ai.response.model", "gen_ai.request.model", "model"];
+    internal static readonly string[] ParentSessionKeys = ["parent_session", "parent_session_id", "gen_ai.parent_session_id", "parentSession"];
 
     /// <summary>
     /// The harness ids a Codex record can carry: the OTLP log path names Codex <c>codex</c>
     /// (CanonAdapters' CodexAdapter), the OTLP span and rollout-file paths <c>codex-cli</c>
     /// (<c>TranscriptReaderRepository.CodexHarnessId</c>).
     /// </summary>
-    private static readonly HashSet<string> CodexHarnessIds = new(StringComparer.Ordinal)
+    internal static readonly HashSet<string> CodexHarnessIds = new(StringComparer.Ordinal)
     {
         "codex",
         "codex-cli",
     };
 
-    private static readonly HashSet<string> SideAgentNames = new(StringComparer.Ordinal)
+    internal static readonly HashSet<string> SideAgentNames = new(StringComparer.Ordinal)
     {
         "backgroundTodoAgent",
         "progressMessages",
@@ -87,7 +91,7 @@ public partial class CanonSessionProjectorEngine
         "gitCommitMessageGenerator",
     };
 
-    private static readonly JsonSerializerOptions ProjectionJsonOptions = new()
+    internal static readonly JsonSerializerOptions ProjectionJsonOptions = new()
     {
         PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
         PropertyNameCaseInsensitive = true,
@@ -141,7 +145,7 @@ public partial class CanonSessionProjectorEngine
     }
 
     [GeneratedRegex(@"^invoke_agent(?:[ :]|$)", RegexOptions.CultureInvariant, matchTimeoutMilliseconds: 1000)]
-    private static partial Regex InvokeAgentNameRegex();
+    internal static partial Regex InvokeAgentNameRegex();
 
     /// <summary>
     /// Collapses same-turn twin observations across ID joins, one-to-one Codex counter pairs,
@@ -214,62 +218,9 @@ public partial class CanonSessionProjectorEngine
         Dictionary<CanonicalRecord, TokenUsage> tokenOverride = new(ReferenceEqualityComparer.Instance);
         CollapseOverlapFileJoins(records, shareKey, dropped, transplant, tokenOverride);
 
-        List<CanonicalRecord> output = new(records.Count);
-        foreach (CanonicalRecord record in records)
-        {
-            if (dropped.Contains(record))
-            {
-                continue;
-            }
-
-            TokenUsage tokens = tokenOverride.GetValueOrDefault(record, record.Tokens);
-            if (!transplant.TryGetValue(record, out CanonicalRecord? donor))
-            {
-                output.Add(ReferenceEquals(tokens, record.Tokens) ? record : record with { Tokens = tokens });
-                continue;
-            }
-
-            if (!IsFileSource(record.Source))
-            {
-                CanonicalRecord mergedOtel = WithDonorSkills(MergeOtelFirst(record, donor), donor);
-                output.Add(ReferenceEquals(tokens, record.Tokens) ? mergedOtel : mergedOtel with { Tokens = tokens });
-                continue;
-            }
-
-            IReadOnlyList<ContentPart> keeperParts = record.Parts ?? [];
-            HashSet<string> seen = new(StringComparer.Ordinal);
-            foreach (ContentPart part in keeperParts)
-            {
-                seen.Add($"{part.Part}\u0000{part.Text}");
-            }
-
-            List<ContentPart> extraParts = [];
-            foreach (ContentPart part in donor.Parts ?? [])
-            {
-                if (seen.Add($"{part.Part}\u0000{part.Text}"))
-                {
-                    extraParts.Add(part);
-                }
-            }
-
-            List<ContentPart> newParts = [.. keeperParts, .. extraParts];
-            Dictionary<string, string> mergedContent = MergeDictionaries(donor.Content, record.Content);
-            if (newParts.Count > 0)
-            {
-                mergedContent = MergeDictionaries(mergedContent, CanonValidation.ContentFromParts(newParts));
-            }
-
-            bool keepParts = (donor.Parts is { Count: > 0 }) || extraParts.Count > 0 || (record.Parts is { Count: > 0 });
-            output.Add(WithDonorSkills(record, donor) with
-            {
-                Tokens = tokens,
-                Parts = keepParts ? newParts : record.Parts,
-                Content = mergedContent,
-            });
-        }
-
-        return output;
+        return MergeDedupedOutput(records, dropped, transplant, tokenOverride);
     }
+
 
     /// <summary>
     /// Derives a complete <see cref="SessionSummaryRow"/> using this engine's cached token counter.
@@ -320,443 +271,17 @@ public partial class CanonSessionProjectorEngine
         string? parentSession = null,
         string? agentName = null,
         string? label = null,
-        bool includedInParent = false)
-    {
-        ArgumentException.ThrowIfNullOrWhiteSpace(sessionId);
-        ArgumentNullException.ThrowIfNull(records);
-        ArgumentNullException.ThrowIfNull(countTokens);
-        if (records.Count == 0)
-        {
-            throw new ArgumentException("At least one record is required to build a session summary.", nameof(records));
-        }
+        bool includedInParent = false) =>
+        SessionSummaryBuilder.Build(
+            sessionId,
+            records,
+            countTokens,
+            isSubagent,
+            parentSession,
+            agentName,
+            label,
+            includedInParent);
 
-        DroidSessionSplit split = SplitDroidSessionRecords(records);
-        bool paired = split.TurnRecords.Count > 0 && split.CounterRecords.Count > 0;
-        List<CanonicalRecord> turnRecords = paired ? TurnsOf(split.TurnRecords) : TurnsOf(records);
-        IReadOnlyList<CanonicalRecord> structureRecords = paired ? split.TurnRecords : records;
-        List<CanonicalRecord> counterRecords = paired
-            ? split.CounterRecords.Where(static r => !string.Equals(r.Op, "tool.invoke", StringComparison.Ordinal)).ToList()
-            : [];
-
-        CanonicalRecord first = records[0];
-        string harness = CanonPricing.NormalizeHarnessName(first.Harness);
-
-        List<CanonicalRecord> mainThreadRecords = turnRecords.Where(static r => !IsSideAgentTurn(r)).ToList();
-        List<CanonicalRecord> contextRecords = mainThreadRecords.Count > 0 ? mainThreadRecords : turnRecords;
-        List<CanonicalRecord> measuredTurns = contextRecords.Where(static r => CanonPricing.MeasuredInput(r.Tokens) > 0).ToList();
-        int unmeasuredTurns = contextRecords.Count - measuredTurns.Count;
-
-        long? counterInput = counterRecords.Count > 0
-            ? counterRecords.Sum(static r => CanonPricing.MeasuredInput(r.Tokens))
-            : null;
-
-        List<ContextPart> lastSystem = [];
-        List<ContextTurn> contextTurns = new(measuredTurns.Count);
-        foreach (CanonicalRecord record in measuredTurns)
-        {
-            List<ContextPart> parts = PartsOf(record);
-            List<ContextPart> ownSystem = parts.Where(static p => string.Equals(p.Part, "system_prompt", StringComparison.Ordinal)).ToList();
-            if (ownSystem.Count > 0)
-            {
-                lastSystem = ownSystem;
-            }
-
-            IReadOnlyList<ContextPart> effective = ownSystem.Count > 0 ? parts : [.. CarriedTo(lastSystem, record), .. parts];
-            contextTurns.Add(new ContextTurn(
-                Parts: effective,
-                InputTokens: CanonPricing.MeasuredInput(record.Tokens),
-                FreshInput: MeasuredFreshInput(record.Tokens)));
-        }
-
-        IReadOnlyList<CanonicalRecord> windowRecords = contextRecords.Count > 0 ? contextRecords : records;
-        ContextWindowResult window = CanonPricing.ContextLimitOf(windowRecords);
-        long analysisLimit = window.ContextLimit > 0 ? window.ContextLimit : CanonPricing.DefaultContextLimit;
-
-        Dictionary<string, JsonElement>? measurability = MergeMeasurability(records);
-        IReadOnlyList<CanonicalRecord> totalRecords = counterRecords.Count > 0 ? counterRecords : turnRecords;
-        Dictionary<string, JsonElement>? totalMeasurability = MergeMeasurability(totalRecords);
-        HashSet<string> carriedBuckets = CarriedBucketsOf(records);
-        IReadOnlyDictionary<string, JsonElement>? compMeasurability = CompositionDeclaration(measurability, carriedBuckets);
-
-        ContextAnalysis context = CanonContextAnalysis.AnalyzeContext(
-            contextTurns,
-            new ContextCountOptions(
-                ContextLimit: analysisLimit,
-                ContextLimitSource: window.ContextLimitSource,
-                Measurability: compMeasurability),
-            countTokens);
-
-        List<ToolDefinition> definitions = ToolDefinitionsOf(records, countTokens);
-        IReadOnlyList<CanonicalRecord> toolSourceRecords = paired && split.FileToolRecords.Count > 0
-            ? split.FileToolRecords
-            : structureRecords;
-        SchemaCostAnalysis schema = CanonContextAnalysis.RankSchemas(
-            definitions,
-            turnRecords.Count,
-            InvocationsOf(toolSourceRecords),
-            measurability: measurability);
-
-        List<CanonicalRecord> toolRecords = toolSourceRecords.Where(static r => string.Equals(r.Op, "tool.invoke", StringComparison.Ordinal)).ToList();
-        Dictionary<string, int> invocationCounts = new(StringComparer.Ordinal);
-        Dictionary<string, int> errorCounts = new(StringComparer.Ordinal);
-        foreach (CanonicalRecord toolRecord in toolRecords)
-        {
-            string toolName = (AttributeOf(toolRecord, ["gen_ai.tool.name", "tool.name", "tool_name"]) ?? toolRecord.Name).Trim();
-            if (toolName.Length == 0 || string.Equals(toolName, "tool.invoke", StringComparison.Ordinal))
-            {
-                continue;
-            }
-
-            invocationCounts[toolName] = invocationCounts.GetValueOrDefault(toolName) + 1;
-            if (IsToolError(toolRecord))
-            {
-                errorCounts[toolName] = errorCounts.GetValueOrDefault(toolName) + 1;
-            }
-        }
-
-        Dictionary<string, ToolDefinition> definitionsByName = new(StringComparer.Ordinal);
-        foreach (ToolDefinition def in definitions)
-        {
-            definitionsByName.TryAdd(def.Name, def);
-        }
-
-        List<RankedTool> rankedTools = schema.Measurable
-            ? [.. schema.Ranked]
-            : definitions.Select(d => new RankedTool(d.Name, d.Server, d.Tokens * (d.TurnsResident ?? turnRecords.Count), false)).ToList();
-
-        List<Dictionary<string, object?>> toolsPayload = [];
-        HashSet<string> seenToolNames = new(StringComparer.Ordinal);
-        foreach (RankedTool ranked in rankedTools)
-        {
-            seenToolNames.Add(ranked.Name);
-            definitionsByName.TryGetValue(ranked.Name, out ToolDefinition? def);
-            long schemaTokens = def?.Tokens ?? 0;
-            int turnsResident = def?.TurnsResident ?? turnRecords.Count;
-            int inv = invocationCounts.GetValueOrDefault(ranked.Name);
-            int errs = errorCounts.GetValueOrDefault(ranked.Name);
-            Dictionary<string, object?> entry = new(StringComparer.Ordinal)
-            {
-                ["name"] = ranked.Name,
-                ["schema_tokens"] = schemaTokens,
-                ["invocations"] = inv,
-                ["turns_resident"] = turnsResident,
-                ["errors"] = errs,
-                ["total_schema_cost"] = ranked.Cost,
-            };
-            if (def?.Server is not null)
-            {
-                entry["server"] = def.Server;
-            }
-
-            toolsPayload.Add(entry);
-        }
-
-        foreach (KeyValuePair<string, int> kv in invocationCounts)
-        {
-            if (!seenToolNames.Add(kv.Key))
-            {
-                continue;
-            }
-
-            toolsPayload.Add(new Dictionary<string, object?>(StringComparer.Ordinal)
-            {
-                ["name"] = kv.Key,
-                ["schema_tokens"] = 0L,
-                ["invocations"] = kv.Value,
-                ["turns_resident"] = 0,
-                ["errors"] = errorCounts.GetValueOrDefault(kv.Key),
-            });
-        }
-
-        List<Dictionary<string, object?>> serversPayload = [];
-        if (schema.Measurable)
-        {
-            foreach (string server in schema.ByServer.Keys)
-            {
-                List<RankedTool> serverTools = rankedTools.Where(t => string.Equals(t.Server, server, StringComparison.Ordinal)).ToList();
-                serversPayload.Add(new Dictionary<string, object?>(StringComparer.Ordinal)
-                {
-                    ["server"] = server,
-                    ["is_mcp"] = true,
-                    ["tools"] = serverTools.Count,
-                    ["schema_tokens"] = serverTools.Sum(t => definitionsByName.GetValueOrDefault(t.Name)?.Tokens ?? 0),
-                    ["invocations"] = serverTools.Sum(t => invocationCounts.GetValueOrDefault(t.Name)),
-                    ["unused_tools"] = serverTools.Count(t => invocationCounts.GetValueOrDefault(t.Name) == 0),
-                    ["unused_cost"] = serverTools.Where(t => invocationCounts.GetValueOrDefault(t.Name) == 0).Sum(t => t.Cost),
-                });
-            }
-        }
-
-        List<CostBlock> costBlocks = [.. turnRecords.Select(static r => r.Cost), .. counterRecords.Select(static r => r.Cost)];
-        List<CostBlock> pricedBlocks = costBlocks.Where(static b => b.Value.HasValue && double.IsFinite(b.Value.Value)).ToList();
-        CostTotalResult costResult = CanonPricing.SumCosts(paired && pricedBlocks.Count > 0 ? pricedBlocks : costBlocks);
-        CostBasisMismatch? costBasisMismatch = CanonPricing.CostBasisMismatchOf(costBlocks, costResult);
-
-        long totalInput = 0;
-        long totalOutput = 0;
-        long totalCacheRead = 0;
-        long totalCacheCreation = 0;
-        foreach (CanonicalRecord r in totalRecords)
-        {
-            totalInput += CanonPricing.MeasuredInput(r.Tokens);
-            totalOutput += r.Tokens.Output;
-            totalCacheRead += r.Tokens.CacheRead;
-            totalCacheCreation += r.Tokens.CacheCreation;
-        }
-
-        List<string> turnModels = ModelsOf(turnRecords);
-        List<string> models = turnModels.Count > 0 ? turnModels : ModelsOf(counterRecords);
-        (string started, string ended) = TimestampBounds(records);
-
-        int? toolCalls = null;
-        List<string>? toolsInvoked = null;
-        if (toolRecords.Count > 0)
-        {
-            bool lowerBound = toolRecords.Any(static r => IsNotMeasurableElement(r.Measurability, "tool_calls"));
-            if (!lowerBound)
-            {
-                toolCalls = toolRecords.Count;
-            }
-
-            toolsInvoked = [.. InvocationsOf(toolSourceRecords).Distinct(StringComparer.Ordinal)];
-        }
-        else if (IsMeasuredOrDerived(measurability, "tool_calls") || CanonPricing.SurveyFamily(harness) == "claude-code")
-        {
-            toolCalls = 0;
-            toolsInvoked = [];
-        }
-
-        List<string> offeredTools = [];
-        HashSet<string> seenOfferedTools = new(StringComparer.Ordinal);
-        bool hasDefParts = false;
-        foreach (CanonicalRecord record in records)
-        {
-            foreach (ToolDefinition def in ToolDefinitionsOf([record], countTokens))
-            {
-                hasDefParts = true;
-                if (seenOfferedTools.Add(def.Name))
-                {
-                    offeredTools.Add(def.Name);
-                }
-            }
-
-            if (record.Parts is not null && record.Parts.Any(static p => string.Equals(p.Part, "tool_definitions", StringComparison.Ordinal) || string.Equals(p.Part, "tool_definition", StringComparison.Ordinal)))
-            {
-                hasDefParts = true;
-            }
-        }
-
-        List<CanonicalRecord> requestRoots = structureRecords.Where(static r => r.ParentSpanId is null).ToList();
-        Dictionary<string, List<CanonicalRecord>> turnsByRoot = TurnsByRequestRoot(structureRecords, turnRecords);
-        bool isNested = requestRoots.Count > 0 && HasNesting(structureRecords);
-        IReadOnlyList<CanonicalRecord> durationRecords = paired ? counterRecords : isNested ? requestRoots : structureRecords;
-        long totalDurationMs = durationRecords.Sum(static r => r.DurationMs);
-
-        TimelineNode timeline = CanonContextAnalysis.BuildTimeline(structureRecords);
-        IReadOnlyList<SubagentSession> subagents = CanonContextAnalysis.SubagentSessions(timeline);
-        CostBlock auxiliary = CanonContextAnalysis.AuxiliarySpend(timeline);
-
-        string? resolvedAgentName = agentName ?? AttributeOf(first, AgentNameKeys);
-        string resolvedLabel = SessionLabelOf(records, label ?? first.Name, harness, sessionId);
-        string? repo = AttributeOf(first, RepoKeys);
-        string? branch = AttributeOf(first, BranchKeys);
-
-        string? parentAttr = AttributeOf(first, ParentSessionKeys);
-        bool resolvedIsSubagent = isSubagent || parentAttr is not null || AttributeOf(first, ["gen_ai.is_subagent", "is_subagent"]) is not null;
-        string? resolvedParent = parentSession ?? parentAttr;
-
-        object? summaryTotalInput = UnavailableOrValue(totalMeasurability, ["token_usage"], totalInput);
-        object? summaryTotalOutput = UnavailableOrValue(totalMeasurability, ["output", "output_tokens"], totalOutput);
-        object? summaryTotalCacheRead = UnavailableOrValue(totalMeasurability, ["cache_read"], totalCacheRead);
-        object? summaryTotalCacheCreation = UnavailableOrValue(totalMeasurability, ["cache_creation"], totalCacheCreation);
-
-        Dictionary<string, object?> summaryDict = new(StringComparer.Ordinal)
-        {
-            ["turn_count"] = turnRecords.Count,
-            ["request_count"] = requestRoots.Count,
-            ["total_input"] = summaryTotalInput,
-            ["total_output"] = summaryTotalOutput,
-            ["total_cache_read"] = summaryTotalCacheRead,
-            ["total_cache_creation"] = summaryTotalCacheCreation,
-            ["duration_ms"] = totalDurationMs,
-            ["models"] = models,
-            ["cost"] = costResult.Ok && costResult.Total is not null
-                ? costResult.Total
-                : new CostBlock(CostBasis.Unknown, CostStatus.NoRate),
-        };
-
-        if (summaryTotalInput is long numIn && numIn > 0 && summaryTotalCacheRead is long numCr)
-        {
-            summaryDict["cache_hit_ratio"] = (double)numCr / numIn;
-        }
-
-        if (summaryTotalInput is long && totalRecords.Count > 0 && summaryTotalInput is long numIn2 && numIn2 > 0 && summaryTotalCacheCreation is long && turnRecords.Count > 0)
-        {
-            summaryDict["cache_creation_coverage"] = totalRecords.Count(static r => r.Tokens.CacheCreation > 0);
-        }
-
-        if (toolCalls.HasValue)
-        {
-            summaryDict["tool_calls"] = toolCalls.Value;
-        }
-
-        if (toolsInvoked is not null)
-        {
-            summaryDict["tools_invoked"] = toolsInvoked;
-        }
-
-        if (hasDefParts)
-        {
-            summaryDict["tools_offered"] = offeredTools;
-        }
-        else if (TryUnavailable(measurability, "tool_definitions", out JsonElement toolDefUnavail))
-        {
-            summaryDict["tools_offered"] = toolDefUnavail;
-        }
-
-        if (includedInParent)
-        {
-            summaryDict["included_in_parent"] = true;
-        }
-
-        Dictionary<string, object?> contextDict = SerializeContextPayload(
-            context,
-            window.ContextLimitSource,
-            measuredTurns,
-            counterInput,
-            unmeasuredTurns,
-            totalMeasurability);
-
-        List<Dictionary<string, object?>> turnEntries = [];
-        for (int i = 0; i < turnRecords.Count; i++)
-        {
-            CanonicalRecord tr = turnRecords[i];
-            turnEntries.Add(new Dictionary<string, object?>(StringComparer.Ordinal)
-            {
-                ["index"] = i,
-                ["spanId"] = tr.SpanId,
-                ["timestamp"] = tr.Timestamp,
-                ["model"] = AttributeOf(tr, ModelKeys),
-                ["input"] = CanonPricing.MeasuredInput(tr.Tokens),
-                ["output"] = tr.Tokens.Output,
-                ["fresh"] = tr.Tokens.FreshInput,
-                ["cache_read"] = tr.Tokens.CacheRead,
-                ["cache_creation"] = tr.Tokens.CacheCreation,
-                ["reasoning"] = tr.Tokens.Reasoning,
-            });
-        }
-
-        List<Dictionary<string, object?>> requestEntries = [];
-        foreach (CanonicalRecord req in requestRoots)
-        {
-            turnsByRoot.TryGetValue(req.SpanId, out List<CanonicalRecord>? ownedTurns);
-            string? reqModel = AttributeOf(req, ModelKeys)
-                ?? ownedTurns?.Select(static t => AttributeOf(t, ModelKeys)).FirstOrDefault(static m => m is not null);
-            object? promptValue = PromptPreviewOf(req);
-            if (promptValue is null && TryUnavailable(req.Measurability, "user_prompt", out JsonElement promptUnavail))
-            {
-                promptValue = promptUnavail;
-            }
-
-            requestEntries.Add(new Dictionary<string, object?>(StringComparer.Ordinal)
-            {
-                ["request"] = req.SpanId,
-                ["timestamp"] = req.Timestamp,
-                ["turns"] = ownedTurns?.Count ?? 0,
-                ["model"] = reqModel,
-                ["prompt"] = promptValue,
-            });
-        }
-
-        List<Dictionary<string, object?>> reconciliation = turnRecords.Select(static r =>
-        {
-            long measuredIn = CanonPricing.MeasuredInput(r.Tokens);
-            return new Dictionary<string, object?>(StringComparer.Ordinal)
-            {
-                ["request"] = r.SpanId,
-                ["root_input"] = r.Tokens.ReportedInput,
-                ["sum_chat_input"] = measuredIn,
-                ["input_match"] = r.Tokens.ReportedInput == measuredIn,
-                ["root_output"] = r.Tokens.ReportedOutput,
-                ["sum_chat_output"] = r.Tokens.Output,
-                ["output_match"] = r.Tokens.ReportedOutput == r.Tokens.Output,
-            };
-        }).ToList();
-
-        object timelinePayload = TryUnavailable(measurability, "execution_structure", out JsonElement timelineUnavail)
-            ? timelineUnavail
-            : timeline.Children.Select(WithoutAttributes).ToList();
-
-        object schemaPayload = schema.Measurable
-            ? new Dictionary<string, object?>(StringComparer.Ordinal)
-            {
-                ["measurable"] = true,
-                ["byServer"] = schema.ByServer,
-                ["neverInvoked"] = schema.NeverInvoked,
-                ["unusedRange"] = schema.UnusedRange,
-                ["turns"] = schema.Turns,
-            }
-            : TryUnavailable(measurability, "schema_cost", out JsonElement schemaUnavail)
-                ? schemaUnavail
-                : new Dictionary<string, object?>(StringComparer.Ordinal)
-                {
-                    ["availability"] = "not_measurable",
-                    ["reason"] = "The source did not provide tool-definition schema data.",
-                };
-
-        Problem[] problems = costResult.Ok || costResult.Problem is null ? [] : [costResult.Problem];
-
-        Dictionary<string, object?> payloadDict = new(StringComparer.Ordinal)
-        {
-            ["id"] = sessionId,
-            ["session_id"] = sessionId,
-            ["harness"] = harness,
-            ["label"] = resolvedLabel,
-            ["agent_name"] = resolvedAgentName,
-            ["repo"] = repo,
-            ["branch"] = branch,
-            ["span_count"] = records.Count,
-            ["summary"] = summaryDict,
-            ["context"] = contextDict,
-            ["tools"] = toolsPayload,
-            ["schema"] = schemaPayload,
-            ["turns"] = turnEntries,
-            ["timeline"] = timelinePayload,
-            ["requests"] = requestEntries,
-            ["servers"] = serversPayload,
-            ["coverage"] = new Dictionary<string, int>(StringComparer.Ordinal)
-            {
-                ["schema"] = schema.Measurable ? 1 : 0,
-                ["context"] = context.Measurable ? 1 : 0,
-            },
-            ["problems"] = problems,
-            ["costBasisMismatch"] = costBasisMismatch,
-            ["reconciliation"] = reconciliation,
-            ["subagents"] = subagents,
-            ["auxiliary"] = auxiliary,
-            ["measurability"] = measurability ?? new Dictionary<string, JsonElement>(StringComparer.Ordinal),
-        };
-
-        string payloadJson = JsonSerializer.Serialize(payloadDict, ProjectionJsonOptions);
-        JsonElement payloadElement = JsonSerializer.Deserialize<JsonElement>(payloadJson);
-        string summaryJson = JsonSerializer.Serialize(summaryDict, ProjectionJsonOptions);
-
-        return new SessionSummaryRow(
-            SessionId: sessionId,
-            Harness: harness,
-            Label: resolvedLabel,
-            IsSubagent: resolvedIsSubagent,
-            ParentSession: resolvedParent,
-            AgentName: resolvedAgentName,
-            Repo: repo,
-            Branch: branch,
-            Started: started,
-            Ended: ended,
-            SummaryJson: summaryJson,
-            ProblemsCount: problems.Length,
-            ContextLimitSource: window.ContextLimitSource,
-            Payload: payloadElement);
-    }
 
     /// <summary>
     /// Returns <see langword="true"/> when the backing store already holds a complete, current
@@ -949,1798 +474,6 @@ public partial class CanonSessionProjectorEngine
         }
     }
 
-    private static Dictionary<string, object?> SerializeContextPayload(
-        ContextAnalysis context,
-        string? contextLimitSource,
-        IReadOnlyList<CanonicalRecord> measuredTurns,
-        long? counterInput,
-        int unmeasuredTurns,
-        IReadOnlyDictionary<string, JsonElement>? totalMeasurability)
-    {
-        Dictionary<string, string> bucketMap = new(StringComparer.Ordinal)
-        {
-            ["system_prompt"] = "system_prompt",
-            ["conversation_history"] = "conversation_history",
-            ["tool_definitions"] = "tool_definitions",
-            ["tool_results"] = "tool_result_content",
-            ["response"] = "response",
-        };
-
-        bool hideLimit = string.Equals(contextLimitSource, "absent", StringComparison.Ordinal);
-        List<Dictionary<string, object?>> serializedTurns = [];
-        if (context.Measurable)
-        {
-            foreach (TurnPressure turn in context.Turns)
-            {
-                Dictionary<string, object?> entry = new(StringComparer.Ordinal)
-                {
-                    ["index"] = turn.Index,
-                    ["inputTokens"] = turn.InputTokens,
-                    ["reported_input"] = turn.InputTokens,
-                    ["buckets"] = turn.Buckets,
-                    ["toolDefinitionsByServer"] = turn.ToolDefinitionsByServer,
-                    ["builtinToolDefinitionTokens"] = turn.BuiltinToolDefinitionTokens,
-                    ["strippedInstructionBlocks"] = turn.StrippedInstructionBlocks,
-                    ["bucketedTokens"] = turn.BucketedTokens,
-                    ["residual"] = turn.Residual,
-                    ["accumulationRate"] = turn.AccumulationRate,
-                    ["freshInput"] = turn.FreshInput,
-                };
-
-                if (!hideLimit)
-                {
-                    entry["headroom"] = turn.Headroom;
-                    entry["pressure"] = turn.Pressure;
-                }
-
-                if (turn.FreshInputJump is not null)
-                {
-                    entry["freshInputJump"] = new Dictionary<string, object?>(StringComparer.Ordinal)
-                    {
-                        ["previous"] = turn.FreshInputJump.Previous,
-                        ["factor"] = double.IsFinite(turn.FreshInputJump.Factor) ? turn.FreshInputJump.Factor : null,
-                    };
-                }
-
-                if (turn.NonResidentToolDefinitions.HasValue)
-                {
-                    entry["nonResidentToolDefinitions"] = turn.NonResidentToolDefinitions.Value;
-                }
-
-                serializedTurns.Add(entry);
-            }
-        }
-
-        Dictionary<string, object?> firstBucket = BuildContextBucket(
-            context.Measurable && context.Turns.Count > 0 ? context.Turns[0] : null,
-            measuredTurns.Count > 0 ? measuredTurns[0].Tokens.ReportedInput : (counterInput ?? 0),
-            bucketMap,
-            totalMeasurability);
-        Dictionary<string, object?> lastBucket = BuildContextBucket(
-            context.Measurable && context.Turns.Count > 0 ? context.Turns[^1] : null,
-            measuredTurns.Count > 0 ? measuredTurns[^1].Tokens.ReportedInput : (counterInput ?? 0),
-            bucketMap,
-            totalMeasurability);
-
-        return new Dictionary<string, object?>(StringComparer.Ordinal)
-        {
-            ["measurable"] = context.Measurable,
-            ["reason"] = context.Reason,
-            ["contextLimit"] = hideLimit ? 0L : context.ContextLimit,
-            ["contextLimitSource"] = contextLimitSource,
-            ["turnCount"] = context.TurnCount,
-            ["turns"] = serializedTurns,
-            ["observedParts"] = context.ObservedParts,
-            ["residualTotal"] = context.ResidualTotal,
-            ["derivedCounts"] = context.DerivedCounts,
-            ["freshJumpFactor"] = context.FreshJumpFactor,
-            ["flaggedTurns"] = context.FlaggedTurns,
-            ["sessionAccumulationRate"] = context.SessionAccumulationRate,
-            ["first"] = firstBucket,
-            ["last"] = lastBucket,
-            ["unmeasuredTurns"] = unmeasuredTurns,
-        };
-    }
-
-    private static Dictionary<string, object?> BuildContextBucket(
-        TurnPressure? turn,
-        long reportedInput,
-        Dictionary<string, string> bucketMap,
-        IReadOnlyDictionary<string, JsonElement>? totalMeasurability)
-    {
-        Dictionary<string, object?> buckets = new(StringComparer.Ordinal);
-        if (turn is not null)
-        {
-            foreach (KeyValuePair<string, long> kv in turn.Buckets)
-            {
-                buckets[kv.Key] = kv.Value;
-            }
-        }
-        else if (totalMeasurability is not null)
-        {
-            foreach (KeyValuePair<string, string> kv in bucketMap)
-            {
-                if (TryUnavailable(totalMeasurability, kv.Value, out JsonElement unavail))
-                {
-                    buckets[kv.Value] = unavail;
-                    buckets[kv.Key] = unavail;
-                }
-            }
-        }
-
-        object reported = TryUnavailable(totalMeasurability, "token_usage", out JsonElement tokUnavail)
-            ? tokUnavail
-            : reportedInput;
-
-        return new Dictionary<string, object?>(StringComparer.Ordinal)
-        {
-            ["buckets"] = buckets,
-            ["reported_input"] = reported,
-        };
-    }
-
-    private static Dictionary<string, object?> WithoutAttributes(TimelineNode node) =>
-        new(StringComparer.Ordinal)
-        {
-            ["spanId"] = node.SpanId,
-            ["parentId"] = node.ParentId,
-            ["startMs"] = node.StartMs,
-            ["durationMs"] = node.DurationMs,
-            ["kind"] = node.Kind,
-            ["name"] = node.Name,
-            ["status"] = node.Status,
-            ["attributes"] = new Dictionary<string, object?>(StringComparer.Ordinal),
-            ["isSubagent"] = node.IsSubagent,
-            ["isAuxiliary"] = node.IsAuxiliary,
-            ["cost"] = node.Cost,
-            ["children"] = node.Children.Select(WithoutAttributes).ToList(),
-        };
-
-    private static HashSet<CanonicalRecord> CollapseIdJoins(
-        IReadOnlyList<CanonicalRecord> records,
-        string? shareKey,
-        HashSet<CanonicalRecord> dropped,
-        Dictionary<CanonicalRecord, CanonicalRecord> transplant)
-    {
-        HashSet<CanonicalRecord> joined = new(ReferenceEqualityComparer.Instance);
-        Dictionary<string, CanonicalRecord> keeperByMessageId = new(StringComparer.Ordinal);
-        Dictionary<string, CanonicalRecord> keeperByRequestId = new(StringComparer.Ordinal);
-
-        void RememberEarliest(Dictionary<string, CanonicalRecord> map, string key, CanonicalRecord record)
-        {
-            if (!map.TryGetValue(key, out CanonicalRecord? known)
-                || RecordTimestampMs(record) < RecordTimestampMs(known))
-            {
-                map[key] = record;
-            }
-        }
-
-        foreach (CanonicalRecord record in records)
-        {
-            if (!string.Equals(record.Op, "llm.invoke", StringComparison.Ordinal) || IsFileSource(record.Source))
-            {
-                continue;
-            }
-
-            string session = SessionKeyOf(record, shareKey);
-            string? messageId = OtelMessageIdOf(record);
-            if (messageId is not null)
-            {
-                RememberEarliest(keeperByMessageId, $"{session}\u0000{messageId}", record);
-            }
-
-            string? requestId = OtelRequestJoinId(record);
-            if (requestId is not null)
-            {
-                RememberEarliest(keeperByRequestId, $"{session}\u0000{requestId}", record);
-            }
-        }
-
-        if (keeperByMessageId.Count == 0 && keeperByRequestId.Count == 0)
-        {
-            return joined;
-        }
-
-        void Adopt(CanonicalRecord keeper, CanonicalRecord file)
-        {
-            dropped.Add(file);
-            joined.Add(file);
-            joined.Add(keeper);
-            if (!IsDonor(file))
-            {
-                return;
-            }
-
-            transplant[keeper] = transplant.TryGetValue(keeper, out CanonicalRecord? existing)
-                ? MergeDonors(existing, file)
-                : file;
-        }
-
-        foreach (CanonicalRecord record in records)
-        {
-            if (!string.Equals(record.Op, "llm.invoke", StringComparison.Ordinal) || !IsFileSource(record.Source))
-            {
-                continue;
-            }
-
-            string session = SessionKeyOf(record, shareKey);
-            string? messageId = FileNativeIdOf(record);
-            if (messageId is not null && keeperByMessageId.TryGetValue($"{session}\u0000{messageId}", out CanonicalRecord? byMessage))
-            {
-                Adopt(byMessage, record);
-                continue;
-            }
-
-            string? requestId = FileRequestIdOf(record);
-            if (requestId is not null && keeperByRequestId.TryGetValue($"{session}\u0000{requestId}", out CanonicalRecord? byRequest))
-            {
-                Adopt(byRequest, record);
-            }
-        }
-
-        return joined;
-    }
-
-    /// <summary>
-    /// Pairs Codex rollout-file model calls with the OTLP model calls that observed the same turn,
-    /// on data both sources carry (D21). Codex OTel carries no per-model-call id — its
-    /// <c>auth.request_id</c> names an auth request — so the pairing data is the reported counters:
-    /// same session, equal <see cref="CounterKey"/>, timestamps within
-    /// <see cref="TwinTurnMaxSkewMs"/>, and strictly one OTLP call per file call. Within each
-    /// counter group, each file call in timestamp order pairs with the earliest unpaired OTLP call
-    /// within the skew. A paired file call is dropped and, when it has parts, donates them to its
-    /// OTLP call (the OTel row is the turn; the file row supplies only what OTLP lacks). An unpaired
-    /// call of either source stays a turn; nothing pairs by timestamp or turn order alone.
-    /// </summary>
-    /// <param name="records">Candidate canonical records.</param>
-    /// <param name="shareKey">Fallback session key used when a record has no <see cref="CanonicalRecord.SessionId"/>.</param>
-    /// <param name="dropped">Receives each paired file model call.</param>
-    /// <param name="transplant">Receives each paired file model call with parts, keyed by its OTLP call.</param>
-    /// <returns>Every Codex model call with reported counters, paired or not, so the shared counter-cluster path skips it.</returns>
-    private static HashSet<CanonicalRecord> PairCodexFileModelCalls(
-        IReadOnlyList<CanonicalRecord> records,
-        string? shareKey,
-        HashSet<CanonicalRecord> dropped,
-        Dictionary<CanonicalRecord, CanonicalRecord> transplant)
-    {
-        HashSet<CanonicalRecord> handled = new(ReferenceEqualityComparer.Instance);
-        Dictionary<string, (List<CanonicalRecord> Otels, List<CanonicalRecord> Files)> groups = new(StringComparer.Ordinal);
-        foreach (CanonicalRecord record in records)
-        {
-            if (!IsCodexModelCall(record) || IsUnreportedCounters(record.Tokens))
-            {
-                continue;
-            }
-
-            handled.Add(record);
-            string key = CounterKey(record, shareKey);
-            if (!groups.TryGetValue(key, out (List<CanonicalRecord> Otels, List<CanonicalRecord> Files) group))
-            {
-                group = ([], []);
-                groups[key] = group;
-            }
-
-            (IsFileSource(record.Source) ? group.Files : group.Otels).Add(record);
-        }
-
-        foreach ((List<CanonicalRecord> otels, List<CanonicalRecord> files) in groups.Values)
-        {
-            if (otels.Count == 0 || files.Count == 0)
-            {
-                continue;
-            }
-
-            otels.Sort(CompareRecordTimestamps);
-            files.Sort(CompareRecordTimestamps);
-            HashSet<CanonicalRecord> pairedOtels = new(ReferenceEqualityComparer.Instance);
-            foreach (CanonicalRecord file in files)
-            {
-                double moment = RecordTimestampMs(file);
-                CanonicalRecord? otel = otels.Find(o =>
-                    !pairedOtels.Contains(o) && Math.Abs(RecordTimestampMs(o) - moment) <= TwinTurnMaxSkewMs);
-                if (otel is null)
-                {
-                    continue;
-                }
-
-                pairedOtels.Add(otel);
-                dropped.Add(file);
-                if (IsDonor(file))
-                {
-                    transplant[otel] = transplant.TryGetValue(otel, out CanonicalRecord? existing)
-                        ? MergeDonors(existing, file)
-                        : file;
-                }
-            }
-        }
-
-        return handled;
-    }
-
-    private static bool IsCodexModelCall(CanonicalRecord record) =>
-        CodexHarnessIds.Contains(record.Harness)
-        && string.Equals(record.Op, "llm.invoke", StringComparison.Ordinal);
-
-    private static void CollapseCluster(
-        IReadOnlyList<CanonicalRecord> cluster,
-        HashSet<CanonicalRecord> dropped,
-        Dictionary<CanonicalRecord, CanonicalRecord> transplant)
-    {
-        if (cluster.Count == 0)
-        {
-            return;
-        }
-
-        List<CanonicalRecord> otels = cluster.Where(static r => !IsFileSource(r.Source)).ToList();
-        List<CanonicalRecord> files = cluster.Where(static r => IsFileSource(r.Source)).ToList();
-        if (otels.Count == 0)
-        {
-            if (files.Count <= 1)
-            {
-                return;
-            }
-
-            if (!files.All(static f => string.Equals(f.Source, CanonSynth.FileSourcePrefix + "claude-desktop", StringComparison.Ordinal)
-                    || string.Equals(f.Harness, "claude-desktop", StringComparison.Ordinal)))
-            {
-                return;
-            }
-
-            files.Sort(CompareRecordTimestamps);
-            CanonicalRecord keeper = files[0];
-            CanonicalRecord? donor = null;
-            for (int i = 1; i < files.Count; i++)
-            {
-                CanonicalRecord file = files[i];
-                dropped.Add(file);
-                if (IsDonor(file))
-                {
-                    donor = donor is null ? file : MergeDonors(donor, file);
-                }
-            }
-
-            if (donor is not null)
-            {
-                transplant[keeper] = donor;
-            }
-
-            return;
-        }
-
-        if (files.Count == 0)
-        {
-            return;
-        }
-
-        foreach (CanonicalRecord file in files)
-        {
-            dropped.Add(file);
-        }
-
-        List<CanonicalRecord> donors = files.Where(IsDonor).OrderBy(RecordTimestampMs).ToList();
-        HashSet<CanonicalRecord> free = new(donors, ReferenceEqualityComparer.Instance);
-
-        List<CanonicalRecord> keepers =
-        [
-            .. otels.Where(static o => !HasParts(o)).OrderBy(RecordTimestampMs),
-            .. otels.Where(HasParts).OrderBy(RecordTimestampMs),
-        ];
-
-        foreach (CanonicalRecord keeper in keepers)
-        {
-            double moment = RecordTimestampMs(keeper);
-            CanonicalRecord? best = null;
-            double bestDist = double.PositiveInfinity;
-            foreach (CanonicalRecord donor in donors)
-            {
-                if (!free.Contains(donor))
-                {
-                    continue;
-                }
-
-                double dist = Math.Abs(RecordTimestampMs(donor) - moment);
-                if (best is null || dist < bestDist)
-                {
-                    best = donor;
-                    bestDist = dist;
-                }
-            }
-
-            if (best is null)
-            {
-                break;
-            }
-
-            free.Remove(best);
-            transplant[keeper] = best;
-        }
-
-        foreach (CanonicalRecord donor in donors.Where(free.Contains))
-        {
-            double donorMoment = RecordTimestampMs(donor);
-            CanonicalRecord nearest = otels[0];
-            double bestDist = Math.Abs(RecordTimestampMs(nearest) - donorMoment);
-            foreach (CanonicalRecord candidate in otels.Skip(1))
-            {
-                double dist = Math.Abs(RecordTimestampMs(candidate) - donorMoment);
-                if (dist < bestDist)
-                {
-                    nearest = candidate;
-                    bestDist = dist;
-                }
-            }
-
-            transplant[nearest] = transplant.TryGetValue(nearest, out CanonicalRecord? existing)
-                ? MergeDonors(existing, donor)
-                : donor;
-        }
-    }
-
-    private static void CollapseOverlapFileJoins(
-        IReadOnlyList<CanonicalRecord> records,
-        string? shareKey,
-        HashSet<CanonicalRecord> dropped,
-        Dictionary<CanonicalRecord, CanonicalRecord> transplant,
-        Dictionary<CanonicalRecord, TokenUsage> tokenOverride)
-    {
-        Dictionary<string, List<CanonicalRecord>> bySession = new(StringComparer.Ordinal);
-        foreach (CanonicalRecord record in records)
-        {
-            if (dropped.Contains(record))
-            {
-                continue;
-            }
-
-            if (!string.Equals(record.Op, "llm.invoke", StringComparison.Ordinal))
-            {
-                continue;
-            }
-
-            if (!IsFileSource(record.Source) || IsUnreportedCounters(record.Tokens))
-            {
-                continue;
-            }
-
-            string key = SessionKeyOf(record, shareKey);
-            if (!bySession.TryGetValue(key, out List<CanonicalRecord>? list))
-            {
-                list = [];
-                bySession[key] = list;
-            }
-
-            list.Add(record);
-        }
-
-        foreach (List<CanonicalRecord> turns in bySession.Values)
-        {
-            if (!HasEvidencedCursorTwinShare(turns))
-            {
-                continue;
-            }
-
-            turns.Sort(CompareRecordTimestamps);
-            List<CanonicalRecord> cluster = [];
-            foreach (CanonicalRecord record in turns)
-            {
-                if (cluster.Count > 0 && RecordTimestampMs(record) - RecordTimestampMs(cluster[0]) > TwinTurnMaxSkewMs)
-                {
-                    CollapseOverlapCluster(cluster, dropped, transplant, tokenOverride);
-                    cluster.Clear();
-                }
-
-                cluster.Add(record);
-            }
-
-            CollapseOverlapCluster(cluster, dropped, transplant, tokenOverride);
-        }
-    }
-
-    private static void CollapseOverlapCluster(
-        IReadOnlyList<CanonicalRecord> cluster,
-        HashSet<CanonicalRecord> dropped,
-        Dictionary<CanonicalRecord, CanonicalRecord> transplant,
-        Dictionary<CanonicalRecord, TokenUsage> tokenOverride)
-    {
-        if (cluster.Count < 2)
-        {
-            return;
-        }
-
-        List<CanonicalRecord> completes = cluster.Where(IsCompleteCursorAgentObservation).ToList();
-        if (completes.Count == 0)
-        {
-            return;
-        }
-
-        Dictionary<CanonicalRecord, List<CanonicalRecord>> groups = new(ReferenceEqualityComparer.Instance);
-        foreach (CanonicalRecord complete in completes)
-        {
-            groups[complete] = [complete];
-        }
-
-        List<CanonicalRecord> partials = cluster
-            .Where(static r => !IsCompleteCursorAgentObservation(r) && !IsCompleteCursorIdeObservation(r))
-            .OrderBy(RecordTimestampMs)
-            .ToList();
-
-        foreach (CanonicalRecord partial in partials)
-        {
-            CanonicalRecord? best = null;
-            double bestDist = double.PositiveInfinity;
-            double partialTime = RecordTimestampMs(partial);
-            foreach (CanonicalRecord complete in completes)
-            {
-                if (!CanJoinDistinctCounters(partial.Tokens, complete.Tokens))
-                {
-                    continue;
-                }
-
-                double completeTime = RecordTimestampMs(complete);
-                double dist = Math.Abs(partialTime - completeTime);
-                if (best is null || dist < bestDist || (dist == bestDist && completeTime < RecordTimestampMs(best)))
-                {
-                    best = complete;
-                    bestDist = dist;
-                }
-            }
-
-            if (best is not null)
-            {
-                groups[best].Add(partial);
-            }
-        }
-
-        HashSet<CanonicalRecord> availableIdes = new(cluster.Where(IsCompleteCursorIdeObservation), ReferenceEqualityComparer.Instance);
-        foreach (CanonicalRecord complete in completes.OrderBy(RecordTimestampMs))
-        {
-            CanonicalRecord? best = null;
-            double bestDist = double.PositiveInfinity;
-            double completeTime = RecordTimestampMs(complete);
-            foreach (CanonicalRecord ide in availableIdes)
-            {
-                if (!CanJoinDistinctCounters(ide.Tokens, complete.Tokens))
-                {
-                    continue;
-                }
-
-                double ideTime = RecordTimestampMs(ide);
-                double dist = Math.Abs(ideTime - completeTime);
-                if (best is null || dist < bestDist || (dist == bestDist && ideTime < RecordTimestampMs(best)))
-                {
-                    best = ide;
-                    bestDist = dist;
-                }
-            }
-
-            if (best is not null)
-            {
-                availableIdes.Remove(best);
-                groups[complete].Add(best);
-            }
-        }
-
-        foreach (List<CanonicalRecord> members in groups.Values)
-        {
-            if (members.Count < 2)
-            {
-                continue;
-            }
-
-            CanonicalRecord keeper = members[0];
-            for (int i = 1; i < members.Count; i++)
-            {
-                keeper = PreferFullerKeeper(keeper, members[i]);
-            }
-
-            TokenUsage mergedTokens = keeper.Tokens;
-            foreach (CanonicalRecord member in members)
-            {
-                if (ReferenceEquals(member, keeper))
-                {
-                    continue;
-                }
-
-                mergedTokens = MaxTokens(mergedTokens, member.Tokens);
-                dropped.Add(member);
-                if (!IsDonor(member))
-                {
-                    continue;
-                }
-
-                transplant[keeper] = transplant.TryGetValue(keeper, out CanonicalRecord? existing)
-                    ? MergeDonors(existing, member)
-                    : member;
-            }
-
-            if (mergedTokens != keeper.Tokens)
-            {
-                tokenOverride[keeper] = mergedTokens;
-            }
-        }
-    }
-
-    private static CanonicalRecord MergeOtelFirst(CanonicalRecord record, CanonicalRecord donor)
-    {
-        IReadOnlyList<ContentPart> keeperParts = record.Parts ?? [];
-        HashSet<string> keeperBuckets = new(keeperParts.Select(static p => p.Part), StringComparer.Ordinal);
-        HashSet<string> held = new([.. keeperBuckets, .. record.Content.Keys], StringComparer.Ordinal);
-
-        List<ContentPart> fillParts = (donor.Parts ?? []).Where(p => !held.Contains(p.Part)).ToList();
-        Dictionary<string, string> fillContent = new(StringComparer.Ordinal);
-        foreach (KeyValuePair<string, string> kv in donor.Content)
-        {
-            if (!held.Contains(kv.Key))
-            {
-                fillContent[kv.Key] = kv.Value;
-            }
-        }
-
-        if (keeperParts.Count == 0 && fillParts.Count == 0)
-        {
-            return record with { Content = MergeDictionaries(fillContent, record.Content) };
-        }
-
-        HashSet<string> fillBuckets = new(fillParts.Select(static p => p.Part), StringComparer.Ordinal);
-        List<ContentPart> otelFlatParts = record.Content
-            .Where(kv => !keeperBuckets.Contains(kv.Key))
-            .Select(static kv => new ContentPart(kv.Key, kv.Value))
-            .ToList();
-        List<ContentPart> fileFlatParts = fillContent
-            .Where(kv => !fillBuckets.Contains(kv.Key))
-            .Select(static kv => new ContentPart(kv.Key, kv.Value))
-            .ToList();
-
-        List<ContentPart> parts = [.. keeperParts, .. otelFlatParts, .. fillParts, .. fileFlatParts];
-        Dictionary<string, string> mergedContent = MergeDictionaries(fillContent, record.Content);
-        mergedContent = MergeDictionaries(mergedContent, CanonValidation.ContentFromParts(parts));
-        return record with { Parts = parts, Content = mergedContent };
-    }
-
-    private static CanonicalRecord MergeDonors(CanonicalRecord first, CanonicalRecord second)
-    {
-        List<ContentPart> parts = [.. first.Parts ?? [], .. second.Parts ?? []];
-        Dictionary<string, string> merged = MergeDictionaries(first.Content, second.Content);
-        if (parts.Count > 0)
-        {
-            merged = MergeDictionaries(merged, CanonValidation.ContentFromParts(parts));
-        }
-
-        return WithDonorSkills(first, second) with { Parts = parts, Content = merged };
-    }
-
-    /// <summary>Raw attributes a twin keeps from the observation it absorbed when it has none of its own.</summary>
-    private static readonly string[] DonorSkillKeys = [CanonSynth.SkillsListedKey, CanonSynth.SkillsInvokedKey];
-
-    /// <summary>Raw attributes a kept twin must inherit from an absorbed twin: skills and the compaction boundary.</summary>
-    private static readonly string[] DonorKeys = [.. DonorSkillKeys, CanonRecordHydration.CompactBoundaryRawKey];
-
-    /// <summary>
-    /// Carries the skill listing and skill invocations of an absorbed twin onto the kept record: a
-    /// Claude Code listing is stored only on the transcript turn, so an OTLP keeper would otherwise drop
-    /// it and the inactive-skill-reference detector would not see it. The keeper's own listing wins;
-    /// invoked names are unioned, keeper's first. The compaction boundary marker is carried too, so the
-    /// projection still resets its cumulative context when the post-compaction turn joins an OTLP twin.
-    /// </summary>
-    private static CanonicalRecord WithDonorSkills(CanonicalRecord keeper, CanonicalRecord donor)
-    {
-        if (donor.Raw is null)
-        {
-            return keeper;
-        }
-
-        Dictionary<string, JsonElement>? raw = null;
-        Dictionary<string, JsonElement> Writable() =>
-            raw ??= keeper.Raw is null ? new(StringComparer.Ordinal) : new(keeper.Raw, StringComparer.Ordinal);
-
-        if (donor.Raw.TryGetValue(CanonRecordHydration.CompactBoundaryRawKey, out JsonElement boundary)
-            && (keeper.Raw is null || !keeper.Raw.ContainsKey(CanonRecordHydration.CompactBoundaryRawKey)))
-        {
-            Writable()[CanonRecordHydration.CompactBoundaryRawKey] = boundary;
-        }
-
-        if (donor.Raw.TryGetValue(CanonSynth.SkillsListedKey, out JsonElement listed)
-            && (keeper.Raw is null || !keeper.Raw.ContainsKey(CanonSynth.SkillsListedKey)))
-        {
-            Writable()[CanonSynth.SkillsListedKey] = listed;
-        }
-
-        if (donor.Raw.TryGetValue(CanonSynth.SkillsInvokedKey, out JsonElement donorInvoked))
-        {
-            if (keeper.Raw is null || !keeper.Raw.TryGetValue(CanonSynth.SkillsInvokedKey, out JsonElement keeperInvoked))
-            {
-                Writable()[CanonSynth.SkillsInvokedKey] = donorInvoked;
-            }
-            else if (keeperInvoked.ValueKind == JsonValueKind.Array && donorInvoked.ValueKind == JsonValueKind.Array)
-            {
-                List<string> names = [];
-                foreach (JsonElement name in keeperInvoked.EnumerateArray().Concat(donorInvoked.EnumerateArray()))
-                {
-                    if (name.ValueKind == JsonValueKind.String && name.GetString() is { Length: > 0 } text && !names.Contains(text, StringComparer.Ordinal))
-                    {
-                        names.Add(text);
-                    }
-                }
-
-                if (names.Count != keeperInvoked.GetArrayLength())
-                {
-                    Writable()[CanonSynth.SkillsInvokedKey] = JsonSerializer.SerializeToElement(names);
-                }
-            }
-        }
-
-        return raw is null ? keeper : keeper with { Raw = raw };
-    }
-
-    private static bool IsFileSource(string source) =>
-        source.StartsWith(CanonSynth.FileSourcePrefix, StringComparison.Ordinal);
-
-    private static string SessionKeyOf(CanonicalRecord record, string? shareKey) =>
-        record.SessionId ?? shareKey ?? string.Empty;
-
-    private static string CounterKey(CanonicalRecord record, string? shareKey)
-    {
-        TokenUsage t = record.Tokens;
-        return string.Create(
-            CultureInfo.InvariantCulture,
-            $"{SessionKeyOf(record, shareKey)}:{t.FreshInput}:{t.CacheRead}:{t.CacheCreation}:{t.Output}:{t.ReportedInput}:{t.ReportedOutput}");
-    }
-
-    private static bool IsUnreportedCounters(TokenUsage tokens) =>
-        tokens.FreshInput == 0
-        && tokens.CacheRead == 0
-        && tokens.CacheCreation == 0
-        && tokens.Output == 0
-        && tokens.ReportedInput == 0
-        && tokens.ReportedOutput == 0;
-
-    private static long[] TokenDims(TokenUsage tokens) =>
-    [
-        tokens.FreshInput,
-        tokens.CacheRead,
-        tokens.CacheCreation,
-        tokens.Output,
-        tokens.ReportedInput,
-        tokens.ReportedOutput,
-    ];
-
-    private static bool CanJoinDistinctCounters(TokenUsage a, TokenUsage b)
-    {
-        long[] da = TokenDims(a);
-        long[] db = TokenDims(b);
-        bool equal = true;
-        bool aSubB = true;
-        bool bSubA = true;
-        bool comp = true;
-
-        for (int i = 0; i < da.Length; i++)
-        {
-            if (da[i] != db[i])
-            {
-                equal = false;
-            }
-
-            if (da[i] > db[i])
-            {
-                aSubB = false;
-            }
-
-            if (db[i] > da[i])
-            {
-                bSubA = false;
-            }
-
-            if (da[i] != 0 && db[i] != 0 && da[i] != db[i])
-            {
-                comp = false;
-            }
-        }
-
-        return !equal && (comp || aSubB || bSubA);
-    }
-
-    private static TokenUsage MaxTokens(TokenUsage a, TokenUsage b)
-    {
-        long? reasoning = a.Reasoning.HasValue || b.Reasoning.HasValue
-            ? Math.Max(a.Reasoning ?? 0, b.Reasoning ?? 0)
-            : null;
-        return new TokenUsage(
-            FreshInput: Math.Max(a.FreshInput, b.FreshInput),
-            CacheRead: Math.Max(a.CacheRead, b.CacheRead),
-            CacheCreation: Math.Max(a.CacheCreation, b.CacheCreation),
-            Output: Math.Max(a.Output, b.Output),
-            ReportedInput: Math.Max(a.ReportedInput, b.ReportedInput),
-            ReportedOutput: Math.Max(a.ReportedOutput, b.ReportedOutput),
-            Reasoning: reasoning);
-    }
-
-    private static CanonicalRecord PreferFullerKeeper(CanonicalRecord a, CanonicalRecord b)
-    {
-        (int nonZeroA, long magA) = CounterFullness(a.Tokens);
-        (int nonZeroB, long magB) = CounterFullness(b.Tokens);
-        if (nonZeroA != nonZeroB)
-        {
-            return nonZeroA > nonZeroB ? a : b;
-        }
-
-        if (magA != magB)
-        {
-            return magA > magB ? a : b;
-        }
-
-        return RecordTimestampMs(a) <= RecordTimestampMs(b) ? a : b;
-    }
-
-    private static (int NonZero, long Magnitude) CounterFullness(TokenUsage tokens)
-    {
-        int nonZero = 0;
-        long mag = 0;
-        foreach (long v in TokenDims(tokens))
-        {
-            if (v > 0)
-            {
-                nonZero++;
-            }
-
-            mag += v;
-        }
-
-        return (nonZero, mag);
-    }
-
-    private static bool IsCursorCollector(CanonicalRecord record) =>
-        !string.Equals(record.Harness, "cursor-agent", StringComparison.Ordinal)
-        && (string.Equals(record.Harness, "cursor", StringComparison.Ordinal)
-            || string.Equals(record.Source, CanonSynth.FileSourcePrefix + "cursor", StringComparison.Ordinal));
-
-    private static bool IsCursorAgentCollector(CanonicalRecord record) =>
-        string.Equals(record.Harness, "cursor-agent", StringComparison.Ordinal)
-        || record.Source.Contains("cursor-agent", StringComparison.Ordinal);
-
-    private static bool HasEvidencedCursorTwinShare(IReadOnlyList<CanonicalRecord> records)
-    {
-        bool cursor = false;
-        bool agent = false;
-        foreach (CanonicalRecord record in records)
-        {
-            if (IsCursorAgentCollector(record))
-            {
-                agent = true;
-            }
-            else if (IsCursorCollector(record))
-            {
-                cursor = true;
-            }
-
-            if (cursor && agent)
-            {
-                return true;
-            }
-        }
-
-        return false;
-    }
-
-    private static bool HasCompleteCounters(CanonicalRecord record) =>
-        (record.Tokens.FreshInput > 0 || record.Tokens.ReportedInput > 0)
-        && (record.Tokens.Output > 0 || record.Tokens.ReportedOutput > 0);
-
-    private static bool IsCompleteCursorAgentObservation(CanonicalRecord record) =>
-        IsCursorAgentCollector(record) && HasCompleteCounters(record);
-
-    private static bool IsCompleteCursorIdeObservation(CanonicalRecord record) =>
-        IsCursorCollector(record) && HasCompleteCounters(record);
-
-    private static string? OtelMessageIdOf(CanonicalRecord record) => RawString(record, "message.id");
-
-    private static string? OtelRequestJoinId(CanonicalRecord record) => RawString(record, "request_id");
-
-    private static string? FileRequestIdOf(CanonicalRecord record) => RawString(record, "requestId");
-
-    private static string? FileNativeIdOf(CanonicalRecord record)
-    {
-        if (record.Raw is null
-            || !record.Raw.TryGetValue("provenance", out JsonElement provEl)
-            || provEl.ValueKind != JsonValueKind.Object)
-        {
-            return null;
-        }
-
-        if (provEl.TryGetProperty("recordDigest", out JsonElement digestEl) && digestEl.ValueKind != JsonValueKind.Undefined && digestEl.ValueKind != JsonValueKind.Null)
-        {
-            return null;
-        }
-
-        if (provEl.TryGetProperty("nativeRecordId", out JsonElement idEl) && idEl.ValueKind == JsonValueKind.String)
-        {
-            string? val = idEl.GetString();
-            return string.IsNullOrEmpty(val) ? null : val;
-        }
-
-        return null;
-    }
-
-    private static string? RawString(CanonicalRecord record, string key)
-    {
-        if (record.Raw is null || !record.Raw.TryGetValue(key, out JsonElement el) || el.ValueKind != JsonValueKind.String)
-        {
-            return null;
-        }
-
-        string? val = el.GetString();
-        return string.IsNullOrEmpty(val) ? null : val;
-    }
-
-    /// <summary>
-    /// Whether an absorbed twin has anything to hand its keeper: content, or a skill listing or skill
-    /// invocations or compaction boundary the keeper would otherwise lose (<see cref="WithDonorSkills"/>).
-    /// </summary>
-    private static bool IsDonor(CanonicalRecord record) =>
-        HasParts(record) || (record.Raw is not null && DonorKeys.Any(record.Raw.ContainsKey));
-
-    private static bool HasParts(CanonicalRecord record) =>
-        (record.Parts is { Count: > 0 }) || record.Content.Count > 0;
-
-    private static Dictionary<string, string> MergeDictionaries(
-        IReadOnlyDictionary<string, string> first,
-        IReadOnlyDictionary<string, string> second)
-    {
-        Dictionary<string, string> result = new(first.Count + second.Count, StringComparer.Ordinal);
-        foreach (KeyValuePair<string, string> kv in first)
-        {
-            result[kv.Key] = kv.Value;
-        }
-
-        foreach (KeyValuePair<string, string> kv in second)
-        {
-            result[kv.Key] = kv.Value;
-        }
-
-        return result;
-    }
-
-    private static double RecordTimestampMs(CanonicalRecord record) =>
-        DateTimeOffset.TryParse(record.Timestamp, CultureInfo.InvariantCulture, DateTimeStyles.RoundtripKind, out DateTimeOffset dto)
-            ? dto.ToUnixTimeMilliseconds()
-            : double.NaN;
-
-    private static int CompareRecordTimestamps(CanonicalRecord a, CanonicalRecord b)
-    {
-        double ta = RecordTimestampMs(a);
-        double tb = RecordTimestampMs(b);
-        bool aOk = double.IsFinite(ta);
-        bool bOk = double.IsFinite(tb);
-        if (aOk && bOk)
-        {
-            return ta.CompareTo(tb);
-        }
-
-        if (aOk)
-        {
-            return -1;
-        }
-
-        return bOk ? 1 : 0;
-    }
-
-    private static DroidSessionSplit SplitDroidSessionRecords(IReadOnlyList<CanonicalRecord> records)
-    {
-        List<CanonicalRecord> turnRecords = [];
-        List<CanonicalRecord> counterRecords = [];
-        List<CanonicalRecord> fileToolRecords = [];
-
-        foreach (CanonicalRecord record in records)
-        {
-            if (!string.Equals(record.Harness, DroidHarness, StringComparison.Ordinal))
-            {
-                continue;
-            }
-
-            if (string.Equals(record.Source, DroidPluginSource, StringComparison.Ordinal))
-            {
-                turnRecords.Add(record);
-                continue;
-            }
-
-            if (IsFileSource(record.Source))
-            {
-                counterRecords.Add(record);
-                if (string.Equals(record.Op, "tool.invoke", StringComparison.Ordinal))
-                {
-                    fileToolRecords.Add(record);
-                }
-
-                continue;
-            }
-
-            turnRecords.Add(record);
-        }
-
-        return new DroidSessionSplit(turnRecords, counterRecords, fileToolRecords);
-    }
-
-    private static bool IsRollup(CanonicalRecord record) =>
-        string.Equals(record.Op, "agent.invoke", StringComparison.Ordinal)
-        || (string.Equals(record.Op, "llm.invoke", StringComparison.Ordinal)
-            && string.Equals(AttributeOf(record, ["gen_ai.operation.name"]), "invoke_agent", StringComparison.Ordinal));
-
-    private static List<CanonicalRecord> TurnsOf(IReadOnlyList<CanonicalRecord> records)
-    {
-        List<CanonicalRecord> calls = records
-            .Where(static r => string.Equals(r.Op, "llm.invoke", StringComparison.Ordinal) && !IsRollup(r))
-            .ToList();
-        if (calls.Count > 0)
-        {
-            return calls;
-        }
-
-        return records
-            .Where(static r => IsRollup(r) && (CanonPricing.MeasuredInput(r.Tokens) > 0 || r.Tokens.Output > 0))
-            .ToList();
-    }
-
-    private static bool IsSideAgentTurn(CanonicalRecord record)
-    {
-        string? agentName = AttributeOf(record, ["gen_ai.agent.name", "agent.name", "agentName"]);
-        return agentName is not null && SideAgentNames.Contains(agentName);
-    }
-
-    /// <summary>
-    /// The analysis parts of <paramref name="record"/>, each stamped with the model the record was
-    /// sent to so its text counts under that model's tokenizer (decision D17).
-    /// </summary>
-    private static List<ContextPart> PartsOf(CanonicalRecord record)
-    {
-        string? model = ModelOf(record);
-        if (record.Parts is { Count: > 0 })
-        {
-            return record.Parts.Select(part => ContextPart.FromContentPart(part, model)).ToList();
-        }
-
-        return record.Content.Select(kv => new ContextPart(kv.Key, kv.Value, Model: model)).ToList();
-    }
-
-    /// <summary>
-    /// Re-stamps system-prompt parts carried forward from an earlier turn with the model of
-    /// <paramref name="record"/>: the carried prompt is sent again to this turn's model, so this
-    /// turn's tokenizer counts it.
-    /// </summary>
-    private static IEnumerable<ContextPart> CarriedTo(IReadOnlyList<ContextPart> carried, CanonicalRecord record)
-    {
-        string? model = ModelOf(record);
-        return carried.Select(part => part with { Model = model });
-    }
-
-    /// <summary>The model <paramref name="record"/> was sent to, or <see langword="null"/> when it names none.</summary>
-    private static string? ModelOf(CanonicalRecord record) => AttributeOf(record, ModelKeys);
-
-    private static HashSet<string> CarriedBucketsOf(IReadOnlyList<CanonicalRecord> records)
-    {
-        HashSet<string> carried = new(StringComparer.Ordinal);
-        foreach (CanonicalRecord record in records)
-        {
-            foreach (ContextPart part in PartsOf(record))
-            {
-                if (part.Text.Length > 0)
-                {
-                    carried.Add(part.Part);
-                }
-            }
-        }
-
-        return carried;
-    }
-
-    private static Dictionary<string, JsonElement>? MergeMeasurability(IReadOnlyList<CanonicalRecord> records)
-    {
-        Dictionary<string, List<JsonElement>> seen = new(StringComparer.Ordinal);
-        foreach (CanonicalRecord record in records)
-        {
-            if (record.Measurability is null)
-            {
-                continue;
-            }
-
-            foreach (KeyValuePair<string, JsonElement> kv in record.Measurability)
-            {
-                if (!seen.TryGetValue(kv.Key, out List<JsonElement>? list))
-                {
-                    list = [];
-                    seen[kv.Key] = list;
-                }
-
-                list.Add(kv.Value);
-            }
-        }
-
-        if (seen.Count == 0)
-        {
-            return null;
-        }
-
-        Dictionary<string, JsonElement> merged = new(StringComparer.Ordinal);
-        foreach (KeyValuePair<string, List<JsonElement>> kv in seen)
-        {
-            JsonElement? measured = null;
-            JsonElement? derived = null;
-            JsonElement? notMeasurable = null;
-            foreach (JsonElement el in kv.Value)
-            {
-                if (el.ValueKind == JsonValueKind.String)
-                {
-                    string? s = el.GetString();
-                    if (string.Equals(s, "measured", StringComparison.Ordinal))
-                    {
-                        measured ??= el.Clone();
-                    }
-                    else if (string.Equals(s, "derived", StringComparison.Ordinal))
-                    {
-                        derived ??= el.Clone();
-                    }
-                }
-                else if (el.ValueKind == JsonValueKind.Object
-                         && el.TryGetProperty("availability", out JsonElement avail)
-                         && string.Equals(avail.GetString(), "not_measurable", StringComparison.Ordinal))
-                {
-                    notMeasurable ??= el.Clone();
-                }
-            }
-
-            merged[kv.Key] = measured ?? derived ?? notMeasurable
-                ?? JsonSerializer.Deserialize<JsonElement>("{\"availability\":\"not_measurable\",\"reason\":\"The source did not provide this metric.\"}");
-        }
-
-        return merged;
-    }
-
-    private static IReadOnlyDictionary<string, JsonElement>? CompositionDeclaration(
-        Dictionary<string, JsonElement>? measurability,
-        HashSet<string> carriedBuckets)
-    {
-        if (measurability is null)
-        {
-            return null;
-        }
-
-        Dictionary<string, JsonElement> adjusted = new(measurability, StringComparer.Ordinal);
-        foreach (string key in carriedBuckets)
-        {
-            if (adjusted.TryGetValue(key, out JsonElement el)
-                && el.ValueKind == JsonValueKind.Object
-                && el.TryGetProperty("availability", out JsonElement avail)
-                && string.Equals(avail.GetString(), "not_measurable", StringComparison.Ordinal))
-            {
-                adjusted.Remove(key);
-            }
-        }
-
-        return adjusted;
-    }
-
-    private static List<ToolDefinition> ToolDefinitionsOf(IReadOnlyList<CanonicalRecord> records, TextTokenCounter countTokens)
-    {
-        Dictionary<string, (string? Server, TokenCount Count, int TurnsResident)> byName = new(StringComparer.Ordinal);
-        foreach (CanonicalRecord record in records)
-        {
-            string? model = ModelOf(record);
-            List<(string Text, string? Server, bool Catalogue)> rawDefs = [];
-            if (record.Parts is { Count: > 0 })
-            {
-                foreach (ContentPart p in record.Parts)
-                {
-                    bool isDefs = string.Equals(p.Part, "tool_definitions", StringComparison.Ordinal);
-                    bool isDef = string.Equals(p.Part, "tool_definition", StringComparison.Ordinal);
-                    if (!isDefs && !isDef)
-                    {
-                        continue;
-                    }
-
-                    rawDefs.Add((p.Text, p.Server, isDefs));
-                }
-            }
-            else
-            {
-                if (record.Content.TryGetValue("tool_definitions", out string? td))
-                {
-                    rawDefs.Add((td, null, false));
-                }
-
-                if (record.Content.TryGetValue("tool_definition", out string? t))
-                {
-                    rawDefs.Add((t, null, false));
-                }
-            }
-
-            foreach ((string text, string? server, bool catalogue) in rawDefs)
-            {
-                if (!catalogue || string.IsNullOrWhiteSpace(text))
-                {
-                    continue;
-                }
-
-                foreach ((string name, string itemText) in SplitToolDefinitionsText(text))
-                {
-                    if (string.IsNullOrWhiteSpace(name))
-                    {
-                        continue;
-                    }
-
-                    string trimmed = name.Trim();
-                    if (!byName.TryGetValue(trimmed, out (string? Server, TokenCount Count, int TurnsResident) existing))
-                    {
-                        byName[trimmed] = (server, countTokens(itemText, model), 1);
-                    }
-                    else
-                    {
-                        byName[trimmed] = existing with { TurnsResident = existing.TurnsResident + 1 };
-                    }
-                }
-            }
-        }
-
-        return byName.Select(kv => new ToolDefinition(kv.Key, kv.Value.Server, kv.Value.Count.Count, kv.Value.TurnsResident, kv.Value.Count.Tokenizer, kv.Value.Count.IsModelOwn)).ToList();
-    }
-
-    private static List<(string Name, string Text)> SplitToolDefinitionsText(string text)
-    {
-        if (string.IsNullOrWhiteSpace(text))
-        {
-            return [];
-        }
-
-        try
-        {
-            using JsonDocument doc = JsonDocument.Parse(text);
-            JsonElement root = doc.RootElement;
-            IEnumerable<JsonElement> items = root.ValueKind == JsonValueKind.Array
-                ? root.EnumerateArray()
-                : root.ValueKind == JsonValueKind.Object && root.TryGetProperty("tools", out JsonElement toolsEl) && toolsEl.ValueKind == JsonValueKind.Array
-                    ? toolsEl.EnumerateArray()
-                    : [root];
-
-            List<(string Name, string Text)> result = [];
-            foreach (JsonElement item in items)
-            {
-                if (item.ValueKind == JsonValueKind.String)
-                {
-                    string? s = item.GetString();
-                    if (!string.IsNullOrWhiteSpace(s))
-                    {
-                        result.Add((s.Trim(), s));
-                    }
-                }
-                else if (item.ValueKind == JsonValueKind.Object)
-                {
-                    string itemText = item.GetRawText();
-                    string name = string.Empty;
-                    if (item.TryGetProperty("name", out JsonElement n) && n.ValueKind == JsonValueKind.String && !string.IsNullOrWhiteSpace(n.GetString()))
-                    {
-                        name = n.GetString()!.Trim();
-                    }
-                    else if (item.TryGetProperty("function", out JsonElement fn) && fn.ValueKind == JsonValueKind.Object
-                             && fn.TryGetProperty("name", out JsonElement fnName) && fnName.ValueKind == JsonValueKind.String && !string.IsNullOrWhiteSpace(fnName.GetString()))
-                    {
-                        name = fnName.GetString()!.Trim();
-                    }
-
-                    result.Add((name, itemText));
-                }
-            }
-
-            return result;
-        }
-        catch (JsonException)
-        {
-            return [(string.Empty, text)];
-        }
-    }
-
-    private static List<string> InvocationsOf(IReadOnlyList<CanonicalRecord> records)
-    {
-        List<string> result = [];
-        foreach (CanonicalRecord record in records)
-        {
-            if (!string.Equals(record.Op, "tool.invoke", StringComparison.Ordinal))
-            {
-                continue;
-            }
-
-            string name = (AttributeOf(record, ["gen_ai.tool.name", "tool.name", "tool_name"]) ?? record.Name).Trim();
-            if (name.Length > 0 && !string.Equals(name, "tool.invoke", StringComparison.Ordinal))
-            {
-                result.Add(name);
-            }
-        }
-
-        return result;
-    }
-
-    private static bool IsToolError(CanonicalRecord record)
-    {
-        if (string.Equals(record.Status, "error", StringComparison.Ordinal))
-        {
-            return true;
-        }
-
-        if (string.Equals(AttributeOf(record, ["gen_ai.tool.status", "status"]), "error", StringComparison.Ordinal))
-        {
-            return true;
-        }
-
-        if (record.Raw is not null)
-        {
-            if (record.Raw.TryGetValue("gen_ai.tool.status", out JsonElement st) && st.ValueKind == JsonValueKind.String && string.Equals(st.GetString(), "error", StringComparison.Ordinal))
-            {
-                return true;
-            }
-
-            if (record.Raw.TryGetValue("is_error", out JsonElement ie) && ie.ValueKind == JsonValueKind.True)
-            {
-                return true;
-            }
-
-            if (record.Raw.TryGetValue("isError", out JsonElement ie2) && ie2.ValueKind == JsonValueKind.True)
-            {
-                return true;
-            }
-        }
-
-        return false;
-    }
-
-    private static List<string> ModelsOf(IReadOnlyList<CanonicalRecord> records)
-    {
-        HashSet<string> seen = new(StringComparer.Ordinal);
-        List<string> list = [];
-        foreach (CanonicalRecord record in records)
-        {
-            string? model = AttributeOf(record, ModelKeys);
-            if (model is not null && seen.Add(model))
-            {
-                list.Add(model);
-            }
-        }
-
-        return list;
-    }
-
-    private static (string Started, string Ended) TimestampBounds(IReadOnlyList<CanonicalRecord> records)
-    {
-        string? minTs = null;
-        string? maxTs = null;
-        double minMs = double.PositiveInfinity;
-        double maxMs = double.NegativeInfinity;
-
-        foreach (CanonicalRecord record in records)
-        {
-            double ms = RecordTimestampMs(record);
-            if (!double.IsFinite(ms))
-            {
-                continue;
-            }
-
-            if (minTs is null || ms < minMs)
-            {
-                minTs = record.Timestamp;
-                minMs = ms;
-            }
-
-            if (maxTs is null || ms >= maxMs)
-            {
-                maxTs = record.Timestamp;
-                maxMs = ms;
-            }
-        }
-
-        return (minTs ?? records[0].Timestamp, maxTs ?? records[^1].Timestamp);
-    }
-
-    private static string SessionLabelOf(
-        IReadOnlyList<CanonicalRecord> records,
-        string fallbackNamed,
-        string harness,
-        string sessionId)
-    {
-        string? bestLabel = null;
-        double bestTime = double.NegativeInfinity;
-        foreach (CanonicalRecord record in records)
-        {
-            string? label = AttributeOf(record, [SessionLabelKey])?.Trim();
-            if (string.IsNullOrEmpty(label))
-            {
-                continue;
-            }
-
-            double time = RecordTimestampMs(record);
-            bool later = bestLabel is null
-                || (double.IsFinite(time) && (!double.IsFinite(bestTime) || time >= bestTime))
-                || (!double.IsFinite(time) && !double.IsFinite(bestTime));
-            if (later)
-            {
-                bestLabel = label;
-                bestTime = time;
-            }
-        }
-
-        return bestLabel ?? CanonPricing.FormatSessionTitle(new SessionTitleInput(
-            Label: fallbackNamed,
-            Harness: harness,
-            SessionId: sessionId));
-    }
-
-    private static Dictionary<string, List<CanonicalRecord>> TurnsByRequestRoot(
-        IReadOnlyList<CanonicalRecord> records,
-        IReadOnlyList<CanonicalRecord> turnRecords)
-    {
-        Dictionary<string, CanonicalRecord> bySpan = new(StringComparer.Ordinal);
-        foreach (CanonicalRecord r in records)
-        {
-            bySpan.TryAdd(r.SpanId, r);
-        }
-
-        Dictionary<string, string?> rootOf = new(StringComparer.Ordinal);
-        string? Resolve(CanonicalRecord start)
-        {
-            List<string> path = [];
-            HashSet<string> onPath = new(StringComparer.Ordinal);
-            string? root = null;
-            CanonicalRecord? cursor = start;
-            while (cursor is not null)
-            {
-                if (rootOf.TryGetValue(cursor.SpanId, out string? known))
-                {
-                    root = known;
-                    break;
-                }
-
-                if (!onPath.Add(cursor.SpanId))
-                {
-                    break;
-                }
-
-                path.Add(cursor.SpanId);
-                if (cursor.ParentSpanId is null)
-                {
-                    root = cursor.SpanId;
-                    break;
-                }
-
-                bySpan.TryGetValue(cursor.ParentSpanId, out cursor);
-            }
-
-            foreach (string id in path)
-            {
-                rootOf[id] = root;
-            }
-
-            return root;
-        }
-
-        Dictionary<string, List<CanonicalRecord>> owned = new(StringComparer.Ordinal);
-        foreach (CanonicalRecord turn in turnRecords)
-        {
-            string? root = Resolve(turn);
-            if (root is null)
-            {
-                continue;
-            }
-
-            if (!owned.TryGetValue(root, out List<CanonicalRecord>? list))
-            {
-                list = [];
-                owned[root] = list;
-            }
-
-            list.Add(turn);
-        }
-
-        return owned;
-    }
-
-    private static bool HasNesting(IReadOnlyList<CanonicalRecord> records)
-    {
-        HashSet<string> ids = new(records.Select(static r => r.SpanId), StringComparer.Ordinal);
-        return records.Any(r => r.ParentSpanId is not null && !string.Equals(r.ParentSpanId, r.SpanId, StringComparison.Ordinal) && ids.Contains(r.ParentSpanId));
-    }
-
-    private static string? PromptPreviewOf(CanonicalRecord record)
-    {
-        string? history = null;
-        if (record.Parts is { Count: > 0 })
-        {
-            history = record.Parts
-                .Where(static p => string.Equals(p.Part, "conversation_history", StringComparison.Ordinal) && !string.IsNullOrWhiteSpace(p.Text))
-                .Select(static p => p.Text)
-                .FirstOrDefault();
-        }
-        else if (record.Content.TryGetValue("conversation_history", out string? flat) && !string.IsNullOrWhiteSpace(flat))
-        {
-            history = flat;
-        }
-
-        if (history is null)
-        {
-            return null;
-        }
-
-        if (history.Length <= PromptPreviewLength)
-        {
-            return history;
-        }
-
-        int end = char.IsHighSurrogate(history[PromptPreviewLength - 1]) ? PromptPreviewLength - 1 : PromptPreviewLength;
-        return history[..end];
-    }
-
-    private static Dictionary<string, List<CanonicalRecord>> GroupByCanonicalHarness(IReadOnlyList<CanonicalRecord> records)
-    {
-        Dictionary<string, List<CanonicalRecord>> groups = new(StringComparer.Ordinal);
-        foreach (CanonicalRecord record in records)
-        {
-            string? id = CanonPricing.CanonicalHarnessId(record.Harness);
-            if (id is null)
-            {
-                continue;
-            }
-
-            if (!groups.TryGetValue(id, out List<CanonicalRecord>? list))
-            {
-                list = [];
-                groups[id] = list;
-            }
-
-            list.Add(record);
-        }
-
-        return groups;
-    }
-
-    private static bool HasEvidence(IReadOnlyList<CanonicalRecord> records) =>
-        TurnsOf(records).Any(static r =>
-            !string.Equals(CanonPricing.NormalizeHarnessName(r.Harness), "unattributed", StringComparison.Ordinal)
-            || CanonPricing.MeasuredInput(r.Tokens) > 0
-            || r.Tokens.Output > 0
-            || (r.Parts is { Count: > 0 } && r.Parts.Any(static p => p.Text.Length > 0))
-            || ((r.Parts is null || r.Parts.Count == 0) && r.Content.Count > 0));
-
-    private static bool IsInvokeAgentSpan(CanonicalRecord record) =>
-        string.Equals(record.Op, "agent.invoke", StringComparison.Ordinal)
-        || string.Equals(AttributeOf(record, ["gen_ai.operation.name"]), "invoke_agent", StringComparison.Ordinal)
-        || InvokeAgentNameRegex().IsMatch(record.Name)
-        || string.Equals(AttributeOf(record, ["gen_ai.tool.name", "tool.name", "tool_name"]), "invoke_agent", StringComparison.Ordinal);
-
-    private static List<CanonicalRecord> CollectDescendantRecords(string rootSpanId, IReadOnlyList<CanonicalRecord> records)
-    {
-        Dictionary<string, List<CanonicalRecord>> byParent = new(StringComparer.Ordinal);
-        foreach (CanonicalRecord r in records)
-        {
-            if (string.IsNullOrEmpty(r.ParentSpanId))
-            {
-                continue;
-            }
-
-            if (!byParent.TryGetValue(r.ParentSpanId, out List<CanonicalRecord>? list))
-            {
-                list = [];
-                byParent[r.ParentSpanId] = list;
-            }
-
-            list.Add(r);
-        }
-
-        List<CanonicalRecord> result = [];
-        Queue<string> queue = new();
-        HashSet<string> seen = new(StringComparer.Ordinal) { rootSpanId };
-        queue.Enqueue(rootSpanId);
-
-        while (queue.Count > 0)
-        {
-            string current = queue.Dequeue();
-            if (!byParent.TryGetValue(current, out List<CanonicalRecord>? children))
-            {
-                continue;
-            }
-
-            foreach (CanonicalRecord child in children)
-            {
-                if (!seen.Add(child.SpanId))
-                {
-                    continue;
-                }
-
-                result.Add(child);
-                if (!IsInvokeAgentSpan(child))
-                {
-                    queue.Enqueue(child.SpanId);
-                }
-            }
-        }
-
-        return result;
-    }
-
-    private static string? ExtractAgentName(CanonicalRecord invokeSpan)
-    {
-        string? attr = AttributeOf(invokeSpan, AgentNameKeys)?.Trim();
-        if (!string.IsNullOrEmpty(attr))
-        {
-            return attr;
-        }
-
-        const string prefix = "invoke_agent ";
-        if (invokeSpan.Name.StartsWith(prefix, StringComparison.Ordinal))
-        {
-            string candidate = invokeSpan.Name[prefix.Length..].Trim();
-            if (candidate.Length > 0)
-            {
-                return candidate;
-            }
-        }
-
-        return null;
-    }
-
-    private static string? ExtractTaskSummary(IReadOnlyList<CanonicalRecord> subagentRecords)
-    {
-        foreach (CanonicalRecord r in subagentRecords)
-        {
-            string? promptAttr = AttributeOf(r, ["gen_ai.prompt", "prompt", "task.description"]);
-            if (!string.IsNullOrWhiteSpace(promptAttr))
-            {
-                return promptAttr.Trim();
-            }
-
-            string? preview = PromptPreviewOf(r);
-            if (!string.IsNullOrWhiteSpace(preview))
-            {
-                return preview;
-            }
-        }
-
-        return null;
-    }
-
-    private static bool IsClaudeHarness(string harness)
-    {
-        string norm = CanonPricing.NormalizeHarnessName(harness);
-        return string.Equals(norm, "claude", StringComparison.Ordinal)
-            || string.Equals(norm, "claude-code", StringComparison.Ordinal)
-            || string.Equals(CanonPricing.SurveyFamily(harness), "claude-code", StringComparison.Ordinal);
-    }
-
-    private static string? ExtractClaudeAgentId(CanonicalRecord record)
-    {
-        string? fromAttr = AttributeOf(record, ["agent_id", "agentId", "subagent_id", "subagentId", "agent.id", "gen_ai.agent.id"])?.Trim();
-        if (!string.IsNullOrEmpty(fromAttr))
-        {
-            return fromAttr;
-        }
-
-        return record.SpanId.StartsWith("agent-", StringComparison.Ordinal) ? record.SpanId : null;
-    }
-
-    private static string ClaudeSubagentSessionId(string parentSessionId, string agentId)
-    {
-        string trimmed = agentId.Trim();
-        string bare = trimmed.StartsWith("agent-", StringComparison.Ordinal) ? trimmed["agent-".Length..] : trimmed;
-        return $"{parentSessionId}#agent-{bare}";
-    }
-
-    private static string? ExtractClaudeAgentName(IReadOnlyList<CanonicalRecord> records)
-    {
-        foreach (CanonicalRecord record in records)
-        {
-            string? attr = AttributeOf(record, ["agent_type", "agentType", "gen_ai.agent.name", "gen_ai.agent.type", "agent_name", "agentName", "agent.name", "agent"])?.Trim();
-            if (!string.IsNullOrEmpty(attr))
-            {
-                return attr;
-            }
-        }
-
-        foreach (CanonicalRecord record in records)
-        {
-            string? name = ExtractAgentName(record);
-            if (!string.IsNullOrEmpty(name))
-            {
-                return name;
-            }
-        }
-
-        return null;
-    }
-
-    private static string? ExtractClaudeDescription(IReadOnlyList<CanonicalRecord> records)
-    {
-        foreach (CanonicalRecord record in records)
-        {
-            string? attr = AttributeOf(record, ["description", "task_description", "taskDescription", "task", "gen_ai.agent.description", "summary", "prompt"])?.Trim();
-            if (!string.IsNullOrEmpty(attr))
-            {
-                return attr;
-            }
-        }
-
-        return ExtractTaskSummary(records);
-    }
-
-    private static string? AttributeOf(CanonicalRecord record, IReadOnlyList<string> keys)
-    {
-        if (record.Raw is null)
-        {
-            return null;
-        }
-
-        foreach (string key in keys)
-        {
-            if (!record.Raw.TryGetValue(key, out JsonElement el))
-            {
-                continue;
-            }
-
-            if (el.ValueKind == JsonValueKind.String)
-            {
-                string? s = el.GetString();
-                if (!string.IsNullOrEmpty(s))
-                {
-                    return s;
-                }
-            }
-            else if (el.ValueKind == JsonValueKind.Number && el.TryGetDouble(out double d) && double.IsFinite(d))
-            {
-                return d.ToString(CultureInfo.InvariantCulture);
-            }
-        }
-
-        return null;
-    }
-
-    private static bool IsNotMeasurableElement(IReadOnlyDictionary<string, JsonElement>? measurability, string key) =>
-        measurability is not null
-        && measurability.TryGetValue(key, out JsonElement el)
-        && el.ValueKind == JsonValueKind.Object
-        && el.TryGetProperty("availability", out JsonElement avail)
-        && string.Equals(avail.GetString(), "not_measurable", StringComparison.Ordinal);
-
-    private static bool IsMeasuredOrDerived(IReadOnlyDictionary<string, JsonElement>? measurability, string key) =>
-        measurability is not null
-        && measurability.TryGetValue(key, out JsonElement el)
-        && el.ValueKind == JsonValueKind.String
-        && (string.Equals(el.GetString(), "measured", StringComparison.Ordinal)
-            || string.Equals(el.GetString(), "derived", StringComparison.Ordinal));
-
-    private static bool TryUnavailable(
-        IReadOnlyDictionary<string, JsonElement>? measurability,
-        string key,
-        out JsonElement element)
-    {
-        if (measurability is not null
-            && measurability.TryGetValue(key, out JsonElement el)
-            && el.ValueKind == JsonValueKind.Object
-            && el.TryGetProperty("availability", out JsonElement avail)
-            && string.Equals(avail.GetString(), "not_measurable", StringComparison.Ordinal))
-        {
-            element = el;
-            return true;
-        }
-
-        element = default;
-        return false;
-    }
-
-    private static object UnavailableOrValue(
-        IReadOnlyDictionary<string, JsonElement>? measurability,
-        IReadOnlyList<string> keys,
-        long value)
-    {
-        foreach (string key in keys)
-        {
-            if (TryUnavailable(measurability, key, out JsonElement el))
-            {
-                return el;
-            }
-        }
-
-        return value;
-    }
 
     /// <summary>
     /// Runs an incremental relational session projection pass: rebuilds typed
@@ -2771,6 +504,54 @@ public partial class CanonSessionProjectorEngine
         long currentMarker = operationalStore!.GetWriteMarker();
         ProjectionStateView? previousState = operationalStore.GetProjectionState();
         DirtyProjectionState? dirtyState = operationalStore.GetProjectionDirtyState();
+        IncrementalPlan incremental = ResolveIncrementalPlan(forReads, previousState, dirtyState, currentMarker);
+
+        ProjectionPlan plan = BuildProjectionPlan(forReads, incremental.CanIncremental, incremental.DirtySet);
+
+        CachedTokenCounter counter = new(operationalStore, tokenizer);
+        (int builtCount, int skippedCount, int findingsCount, List<string> rebuiltKeys) = RebuildPlannedSessions(plan, counter);
+        counter.Flush();
+
+        int prunedCount = PruneMissingProjections(plan.LiveSessionIds);
+
+        RebuildRunExecutionProjection();
+
+        long finalMarker = operationalStore.GetWriteMarker();
+        if (finalMarker > currentMarker)
+        {
+            StampMidPassWrites(currentMarker, finalMarker, plan.DeferredKeys, incremental.StampDetector);
+        }
+        else
+        {
+            CompleteProjectionPass(finalMarker, plan.DeferredKeys, incremental.StampDetector);
+        }
+
+        return new ProjectionPassReport(
+            Built: builtCount,
+            Skipped: skippedCount,
+            Pruned: prunedCount,
+            Findings: findingsCount,
+            RebuiltKeys: rebuiltKeys,
+            SkippedKeys: plan.SkippedKeys,
+            DeferredKeys: forReads ? plan.DeferredKeys : null);
+    }
+
+    private sealed record IncrementalPlan(bool CanIncremental, HashSet<string>? DirtySet, bool StampDetector);
+
+    private sealed record ProjectionPlan(
+        SessionIdentities Identities,
+        Dictionary<string, CollectedSession> SessionsByKey,
+        List<string> RebuildKeys,
+        List<string> DeferredKeys,
+        List<string> SkippedKeys,
+        HashSet<string> LiveSessionIds);
+
+    private IncrementalPlan ResolveIncrementalPlan(
+        bool forReads,
+        ProjectionStateView? previousState,
+        DirtyProjectionState? dirtyState,
+        long currentMarker)
+    {
         // A maintenance pass on a stale detector stamp rebuilds every session; a read pass only
         // needs the projection schema to match, so a stale stamp never makes a request restart a
         // whole-store rebuild from the first session.
@@ -2801,6 +582,11 @@ public partial class CanonSessionProjectorEngine
         // Only a full maintenance pass rebuilt every session under this build's detectors.
         bool stampDetector = !forReads && !canIncremental;
 
+        return new IncrementalPlan(canIncremental, dirtySet, stampDetector);
+    }
+
+    private ProjectionPlan BuildProjectionPlan(bool forReads, bool canIncremental, HashSet<string>? dirtySet)
+    {
         // Attribution rows replace the whole-store record read: identities, skip decisions, and
         // the per-session and per-pass record budgets are planned from (session key, harness,
         // count) rows, and full records are read only for the keys this pass actually rebuilds.
@@ -2892,19 +678,28 @@ public partial class CanonSessionProjectorEngine
             }
         }
 
-        CachedTokenCounter counter = new(operationalStore, tokenizer);
+        return new ProjectionPlan(identities, sessionsByKey, rebuildKeys, deferredKeys, skippedKeys, liveSessionIds);
+    }
 
+    private (
+        int BuiltCount,
+        int SkippedCount,
+        int FindingsCount,
+        List<string> RebuiltKeys) RebuildPlannedSessions(
+        ProjectionPlan plan,
+        CachedTokenCounter counter)
+    {
         int builtCount = 0;
-        int skippedCount = skippedKeys.Count;
+        int skippedCount = plan.SkippedKeys.Count;
         int findingsCount = 0;
         List<string> rebuiltKeys = [];
 
-        foreach (string key in rebuildKeys)
+        foreach (string key in plan.RebuildKeys)
         {
             // Each session's records are read when its turn comes and released after it is built:
             // reading the whole store at once outgrew the sqlite3 output a string can hold on a
             // real store, and held every session's text in memory for the length of the pass.
-            List<CanonicalRecord> hydrated = [.. reader.SessionRecordsForRebuild(key).Select(CanonRecordHydration.Hydrate)];
+            List<CanonicalRecord> hydrated = [.. reader!.SessionRecordsForRebuild(key).Select(CanonRecordHydration.Hydrate)];
             hydrated.Sort(CompareRecordTimestamps);
             Dictionary<string, List<CanonicalRecord>> grouped = GroupByCanonicalHarness(hydrated);
             if (grouped.Count == 0)
@@ -2930,8 +725,8 @@ public partial class CanonSessionProjectorEngine
                     continue;
                 }
 
-                string sessionId = identities.Claim(key, harness);
-                if (!sessionsByKey.ContainsKey(sessionId))
+                string sessionId = plan.Identities.Claim(key, harness);
+                if (!plan.SessionsByKey.ContainsKey(sessionId))
                 {
                     skippedCount++;
                     continue;
@@ -2943,20 +738,23 @@ public partial class CanonSessionProjectorEngine
                     sessionId,
                     merged,
                     counter.Count,
-                    sessionsByKey[sessionId].Title);
-                projections.ReplaceSessionProjection(projection);
+                    plan.SessionsByKey[sessionId].Title);
+                projections!.ReplaceSessionProjection(projection);
                 builtCount++;
 
-                findingsCount += RebuildSessionFindingsRelational(sessionId, merged, identities);
+                findingsCount += RebuildSessionFindingsRelational(sessionId, merged, plan.Identities);
             }
 
             rebuiltKeys.Add(key);
         }
 
-        counter.Flush();
+        return (builtCount, skippedCount, findingsCount, rebuiltKeys);
+    }
 
+    private int PruneMissingProjections(HashSet<string> liveSessionIds)
+    {
         int prunedCount = 0;
-        foreach (StoredSessionProjection stored in projections.ListSessionProjections())
+        foreach (StoredSessionProjection stored in projections!.ListSessionProjections())
         {
             if (liveSessionIds.Contains(stored.SessionId))
             {
@@ -2968,14 +766,12 @@ public partial class CanonSessionProjectorEngine
             prunedCount++;
         }
 
-        RebuildRunExecutionProjection();
+        return prunedCount;
+    }
 
-        long finalMarker = operationalStore.GetWriteMarker();
-        if (finalMarker > currentMarker)
-        {
-            StampMidPassWrites(currentMarker, finalMarker, deferredKeys, stampDetector);
-        }
-        else if (deferredKeys.Count > 0)
+    private void CompleteProjectionPass(long finalMarker, List<string> deferredKeys, bool stampDetector)
+    {
+        if (deferredKeys.Count > 0)
         {
             // Deferred keys stay dirty at the watermark this pass then writes, so the next read
             // pass continues with them and the maintenance pass sees the projection as not
@@ -2983,30 +779,22 @@ public partial class CanonSessionProjectorEngine
             // detector version. The dirty state is written before the watermark: a crash between
             // the two leaves a range that does not start at the stored watermark, which forces a
             // full pass, never a watermark that hides the deferred keys.
-            operationalStore.SetProjectionDirtyState(new DirtyProjectionState(
+            operationalStore!.SetProjectionDirtyState(new DirtyProjectionState(
                 FromSeq: finalMarker,
                 ToSeq: finalMarker,
                 Keys: [.. deferredKeys.Order(StringComparer.Ordinal)],
                 IsWildcard: false));
-            StampProjectionState(finalMarker, stampDetector);
         }
         else
         {
             // Dirty state before the watermark, as above: a crash between them leaves the old
             // watermark with nothing dirty, which forces a full pass.
-            operationalStore.ClearProjectionDirtyState();
-            StampProjectionState(finalMarker, stampDetector);
+            operationalStore!.ClearProjectionDirtyState();
         }
 
-        return new ProjectionPassReport(
-            Built: builtCount,
-            Skipped: skippedCount,
-            Pruned: prunedCount,
-            Findings: findingsCount,
-            RebuiltKeys: rebuiltKeys,
-            SkippedKeys: skippedKeys,
-            DeferredKeys: forReads ? deferredKeys : null);
+        StampProjectionState(finalMarker, stampDetector);
     }
+
 
     /// <summary>
     /// Ends a pass during which a record-changing write moved the marker: stamps the marker the
@@ -3212,18 +1000,98 @@ public partial class CanonSessionProjectorEngine
     /// <param name="Session">Relational session metadata.</param>
     private sealed record RunMember(StoredSessionProjection Projection, CollectedSession Session);
 
-    private static IEnumerable<string> PriorIdsOf(
-        string key,
-        IReadOnlyList<string> harnessIds,
-        SessionIdentities identities)
+
+    internal sealed record DroidSessionSplit(
+        List<CanonicalRecord> TurnRecords,
+        List<CanonicalRecord> CounterRecords,
+        List<CanonicalRecord> FileToolRecords);
+
+    internal class SessionIdentities
     {
-        foreach (string harness in harnessIds)
+        private readonly Dictionary<string, Dictionary<string, string>> ids = new(StringComparer.Ordinal);
+        private readonly HashSet<string> assignedSessionIds = new(StringComparer.Ordinal);
+
+        public SessionIdentities(IEnumerable<(string Key, string Harness)> pairs)
         {
-            string? id = identities.IdFor(key, harness);
-            if (id is not null)
+            Dictionary<string, HashSet<string>> harnessesByKey = new(StringComparer.Ordinal);
+            foreach ((string key, string rawHarness) in pairs)
             {
-                yield return id;
+                string? harness = CanonPricing.CanonicalHarnessId(rawHarness);
+                if (harness is null)
+                {
+                    continue;
+                }
+
+                if (!harnessesByKey.TryGetValue(key, out HashSet<string>? harnesses))
+                {
+                    harnesses = new HashSet<string>(StringComparer.Ordinal);
+                    harnessesByKey[key] = harnesses;
+                }
+
+                harnesses.Add(harness);
             }
+
+            List<(string Key, List<string> Harnesses)> split = [];
+            foreach (KeyValuePair<string, HashSet<string>> kv in harnessesByKey)
+            {
+                if (kv.Value.Count == 1)
+                {
+                    Assign(kv.Key, kv.Value.First(), kv.Key);
+                }
+                else
+                {
+                    split.Add((kv.Key, kv.Value.OrderBy(static h => h, StringComparer.Ordinal).ToList()));
+                }
+            }
+
+            split.Sort(static (a, b) => string.CompareOrdinal(a.Key, b.Key));
+            foreach ((string key, List<string> harnesses) in split)
+            {
+                foreach (string harness in harnesses)
+                {
+                    Claim(key, harness);
+                }
+            }
+        }
+
+        public string? IdFor(string key, string harness)
+        {
+            string canonical = CanonPricing.NormalizeHarnessName(harness);
+            return ids.TryGetValue(key, out Dictionary<string, string>? byHarness)
+                && byHarness.TryGetValue(canonical, out string? id)
+                ? id
+                : null;
+        }
+
+        public string Claim(string key, string harness)
+        {
+            string canonical = CanonPricing.NormalizeHarnessName(harness);
+            string? existing = IdFor(key, canonical);
+            if (existing is not null)
+            {
+                return existing;
+            }
+
+            string candidate = $"{canonical}:{key}";
+            while (assignedSessionIds.Contains(candidate))
+            {
+                candidate = $"{canonical}:{candidate}";
+            }
+
+            Assign(key, canonical, candidate);
+            return candidate;
+        }
+
+        private void Assign(string key, string harness, string id)
+        {
+            if (!ids.TryGetValue(key, out Dictionary<string, string>? byHarness))
+            {
+                byHarness = new Dictionary<string, string>(StringComparer.Ordinal);
+                ids[key] = byHarness;
+            }
+
+            byHarness[harness] = id;
+            assignedSessionIds.Add(id);
         }
     }
 
@@ -3247,8 +1115,2593 @@ public partial class CanonSessionProjectorEngine
 
         return findings.Count;
     }
+}
 
-    private static StoredFinding ToStoredFinding(Finding finding)
+/// <summary>Builds a session summary row from one session's records.</summary>
+internal static class SessionSummaryBuilder
+{
+    internal static SessionSummaryRow Build(
+        string sessionId,
+        IReadOnlyList<CanonicalRecord> records,
+        TextTokenCounter countTokens,
+        bool isSubagent,
+        string? parentSession,
+        string? agentName,
+        string? label,
+        bool includedInParent)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(sessionId);
+        ArgumentNullException.ThrowIfNull(records);
+        ArgumentNullException.ThrowIfNull(countTokens);
+        if (records.Count == 0)
+        {
+            throw new ArgumentException("At least one record is required to build a session summary.", nameof(records));
+        }
+
+        SummaryInputs inputs = PrepareInputs(records);
+        bool paired = inputs.Paired;
+        List<CanonicalRecord> turnRecords = inputs.TurnRecords;
+        IReadOnlyList<CanonicalRecord> structureRecords = inputs.StructureRecords;
+        List<CanonicalRecord> counterRecords = inputs.CounterRecords;
+        string harness = inputs.Harness;
+        List<CanonicalRecord> measuredTurns = inputs.MeasuredTurns;
+
+        List<ContextTurn> contextTurns = BuildContextTurns(measuredTurns);
+
+        ContextParts contextParts = BuildContextParts(records, inputs, contextTurns, countTokens);
+
+        ToolsParts tools = BuildToolsParts(records, inputs, contextParts.Measurability, countTokens);
+
+        CostParts cost = BuildCostParts(paired, turnRecords, counterRecords);
+
+        (long totalInput, long totalOutput, long totalCacheRead, long totalCacheCreation) = SumTokenTotals(contextParts.TotalRecords);
+
+        List<string> turnModels = ModelsOf(turnRecords);
+        List<string> models = turnModels.Count > 0 ? turnModels : ModelsOf(counterRecords);
+        (string started, string ended) = TimestampBounds(records);
+
+        (int? toolCalls, List<string>? toolsInvoked) = ResolveToolUsage(
+            tools.ToolRecords,
+            tools.ToolSourceRecords,
+            contextParts.Measurability,
+            harness);
+
+        (List<string> offeredTools, bool hasDefParts) = CollectOfferedTools(records, countTokens);
+
+        List<CanonicalRecord> requestRoots = structureRecords.Where(static r => r.ParentSpanId is null).ToList();
+        Dictionary<string, List<CanonicalRecord>> turnsByRoot = TurnsByRequestRoot(structureRecords, turnRecords);
+        bool isNested = requestRoots.Count > 0 && HasNesting(structureRecords);
+        IReadOnlyList<CanonicalRecord> durationRecords = paired ? counterRecords : isNested ? requestRoots : structureRecords;
+        long totalDurationMs = durationRecords.Sum(static r => r.DurationMs);
+
+        TimelineParts timelineParts = BuildTimelineParts(structureRecords);
+
+        SummaryIdentity identity = ResolveIdentity(records, sessionId, harness, isSubagent, parentSession, agentName, label);
+
+        Dictionary<string, object?> summaryDict = BuildSummaryDict(
+            turnRecords.Count,
+            requestRoots.Count,
+            totalDurationMs,
+            models,
+            cost.Result,
+            contextParts.TotalRecords,
+            contextParts.TotalMeasurability,
+            totalInput,
+            totalOutput,
+            totalCacheRead,
+            totalCacheCreation,
+            toolCalls,
+            toolsInvoked,
+            hasDefParts,
+            offeredTools,
+            contextParts.Measurability,
+            includedInParent);
+
+        Dictionary<string, object?> contextDict = SerializeContextPayload(
+            contextParts.Context,
+            contextParts.Window.ContextLimitSource,
+            measuredTurns,
+            inputs.CounterInput,
+            inputs.UnmeasuredTurns,
+            contextParts.TotalMeasurability);
+
+        List<Dictionary<string, object?>> turnEntries = BuildTurnEntries(turnRecords);
+        List<Dictionary<string, object?>> requestEntries = BuildRequestEntries(requestRoots, turnsByRoot);
+        List<Dictionary<string, object?>> reconciliation = BuildReconciliation(turnRecords);
+
+        (object timelinePayload, object schemaPayload) = BuildAvailabilityPayloads(timelineParts.Timeline, tools.Schema, contextParts.Measurability);
+
+        Problem[] problems = cost.Result.Ok || cost.Result.Problem is null ? [] : [cost.Result.Problem];
+
+        Dictionary<string, object?> payloadDict = new(StringComparer.Ordinal)
+        {
+            ["id"] = sessionId,
+            ["session_id"] = sessionId,
+            ["harness"] = harness,
+            ["label"] = identity.Label,
+            ["agent_name"] = identity.AgentName,
+            ["repo"] = identity.Repo,
+            ["branch"] = identity.Branch,
+            ["span_count"] = records.Count,
+            ["summary"] = summaryDict,
+            ["context"] = contextDict,
+            ["tools"] = tools.ToolsPayload,
+            ["schema"] = schemaPayload,
+            ["turns"] = turnEntries,
+            ["timeline"] = timelinePayload,
+            ["requests"] = requestEntries,
+            ["servers"] = tools.ServersPayload,
+            ["coverage"] = new Dictionary<string, int>(StringComparer.Ordinal)
+            {
+                ["schema"] = tools.Schema.Measurable ? 1 : 0,
+                ["context"] = contextParts.Context.Measurable ? 1 : 0,
+            },
+            ["problems"] = problems,
+            ["costBasisMismatch"] = cost.BasisMismatch,
+            ["reconciliation"] = reconciliation,
+            ["subagents"] = timelineParts.Subagents,
+            ["auxiliary"] = timelineParts.Auxiliary,
+            ["measurability"] = contextParts.Measurability ?? new Dictionary<string, JsonElement>(StringComparer.Ordinal),
+        };
+
+        string payloadJson = JsonSerializer.Serialize(payloadDict, ProjectionJsonOptions);
+        JsonElement payloadElement = JsonSerializer.Deserialize<JsonElement>(payloadJson);
+        string summaryJson = JsonSerializer.Serialize(summaryDict, ProjectionJsonOptions);
+
+        return new SessionSummaryRow(
+            SessionId: sessionId,
+            Harness: harness,
+            Label: identity.Label,
+            IsSubagent: identity.IsSubagent,
+            ParentSession: identity.ParentSession,
+            AgentName: identity.AgentName,
+            Repo: identity.Repo,
+            Branch: identity.Branch,
+            Started: started,
+            Ended: ended,
+            SummaryJson: summaryJson,
+            ProblemsCount: problems.Length,
+            ContextLimitSource: contextParts.Window.ContextLimitSource,
+            Payload: payloadElement);
+    }
+
+    private sealed record ContextParts(
+        ContextWindowResult Window,
+        ContextAnalysis Context,
+        Dictionary<string, JsonElement>? Measurability,
+        IReadOnlyList<CanonicalRecord> TotalRecords,
+        Dictionary<string, JsonElement>? TotalMeasurability);
+
+    private static ContextParts BuildContextParts(
+        IReadOnlyList<CanonicalRecord> records,
+        SummaryInputs inputs,
+        List<ContextTurn> contextTurns,
+        TextTokenCounter countTokens)
+    {
+        IReadOnlyList<CanonicalRecord> windowRecords = inputs.ContextRecords.Count > 0 ? inputs.ContextRecords : records;
+        ContextWindowResult window = CanonPricing.ContextLimitOf(windowRecords);
+        long analysisLimit = window.ContextLimit > 0 ? window.ContextLimit : CanonPricing.DefaultContextLimit;
+
+        Dictionary<string, JsonElement>? measurability = MergeMeasurability(records);
+        IReadOnlyList<CanonicalRecord> totalRecords = inputs.CounterRecords.Count > 0 ? inputs.CounterRecords : inputs.TurnRecords;
+        Dictionary<string, JsonElement>? totalMeasurability = MergeMeasurability(totalRecords);
+        HashSet<string> carriedBuckets = CarriedBucketsOf(records);
+        IReadOnlyDictionary<string, JsonElement>? compMeasurability = CompositionDeclaration(measurability, carriedBuckets);
+
+        ContextAnalysis context = CanonContextAnalysis.AnalyzeContext(
+            contextTurns,
+            new ContextCountOptions(
+                ContextLimit: analysisLimit,
+                ContextLimitSource: window.ContextLimitSource,
+                Measurability: compMeasurability),
+            countTokens);
+
+        return new ContextParts(window, context, measurability, totalRecords, totalMeasurability);
+    }
+
+    private sealed record ToolsParts(
+        IReadOnlyList<CanonicalRecord> ToolSourceRecords,
+        List<CanonicalRecord> ToolRecords,
+        SchemaCostAnalysis Schema,
+        List<Dictionary<string, object?>> ToolsPayload,
+        List<Dictionary<string, object?>> ServersPayload);
+
+    private static ToolsParts BuildToolsParts(
+        IReadOnlyList<CanonicalRecord> records,
+        SummaryInputs inputs,
+        Dictionary<string, JsonElement>? measurability,
+        TextTokenCounter countTokens)
+    {
+        List<ToolDefinition> definitions = ToolDefinitionsOf(records, countTokens);
+        IReadOnlyList<CanonicalRecord> toolSourceRecords = inputs.Paired && inputs.Split.FileToolRecords.Count > 0
+            ? inputs.Split.FileToolRecords
+            : inputs.StructureRecords;
+        SchemaCostAnalysis schema = CanonContextAnalysis.RankSchemas(
+            definitions,
+            inputs.TurnRecords.Count,
+            InvocationsOf(toolSourceRecords),
+            measurability: measurability);
+
+        List<CanonicalRecord> toolRecords = toolSourceRecords.Where(static r => string.Equals(r.Op, "tool.invoke", StringComparison.Ordinal)).ToList();
+        (Dictionary<string, int> invocationCounts, Dictionary<string, int> errorCounts) = CountToolInvocations(toolRecords);
+
+        Dictionary<string, ToolDefinition> definitionsByName = new(StringComparer.Ordinal);
+        foreach (ToolDefinition def in definitions)
+        {
+            definitionsByName.TryAdd(def.Name, def);
+        }
+
+        List<RankedTool> rankedTools = schema.Measurable
+            ? [.. schema.Ranked]
+            : definitions.Select(d => new RankedTool(d.Name, d.Server, d.Tokens * (d.TurnsResident ?? inputs.TurnRecords.Count), false)).ToList();
+
+        List<Dictionary<string, object?>> toolsPayload = BuildToolsPayload(
+            rankedTools,
+            definitionsByName,
+            invocationCounts,
+            errorCounts,
+            inputs.TurnRecords.Count);
+        List<Dictionary<string, object?>> serversPayload = BuildServersPayload(
+            schema,
+            rankedTools,
+            definitionsByName,
+            invocationCounts);
+
+        return new ToolsParts(toolSourceRecords, toolRecords, schema, toolsPayload, serversPayload);
+    }
+
+    private sealed record CostParts(CostTotalResult Result, CostBasisMismatch? BasisMismatch);
+
+    private static CostParts BuildCostParts(
+        bool paired,
+        List<CanonicalRecord> turnRecords,
+        List<CanonicalRecord> counterRecords)
+    {
+        List<CostBlock> costBlocks = [.. turnRecords.Select(static r => r.Cost), .. counterRecords.Select(static r => r.Cost)];
+        List<CostBlock> pricedBlocks = costBlocks.Where(static b => b.Value.HasValue && double.IsFinite(b.Value.Value)).ToList();
+        CostTotalResult costResult = CanonPricing.SumCosts(paired && pricedBlocks.Count > 0 ? pricedBlocks : costBlocks);
+        CostBasisMismatch? costBasisMismatch = CanonPricing.CostBasisMismatchOf(costBlocks, costResult);
+        return new CostParts(costResult, costBasisMismatch);
+    }
+
+    private sealed record TimelineParts(
+        TimelineNode Timeline,
+        IReadOnlyList<SubagentSession> Subagents,
+        CostBlock Auxiliary);
+
+    private static TimelineParts BuildTimelineParts(IReadOnlyList<CanonicalRecord> structureRecords)
+    {
+        TimelineNode timeline = CanonContextAnalysis.BuildTimeline(structureRecords);
+        IReadOnlyList<SubagentSession> subagents = CanonContextAnalysis.SubagentSessions(timeline);
+        CostBlock auxiliary = CanonContextAnalysis.AuxiliarySpend(timeline);
+        return new TimelineParts(timeline, subagents, auxiliary);
+    }
+
+    private sealed record SummaryIdentity(
+        string? AgentName,
+        string Label,
+        string? Repo,
+        string? Branch,
+        bool IsSubagent,
+        string? ParentSession);
+
+    private static SummaryIdentity ResolveIdentity(
+        IReadOnlyList<CanonicalRecord> records,
+        string sessionId,
+        string harness,
+        bool isSubagent,
+        string? parentSession,
+        string? agentName,
+        string? label)
+    {
+        string? resolvedAgentName = agentName ?? AttributeOf(records[0], AgentNameKeys);
+        string resolvedLabel = SessionLabelOf(records, label ?? records[0].Name, harness, sessionId);
+        string? repo = AttributeOf(records[0], RepoKeys);
+        string? branch = AttributeOf(records[0], BranchKeys);
+
+        string? parentAttr = AttributeOf(records[0], ParentSessionKeys);
+        bool resolvedIsSubagent = isSubagent || parentAttr is not null || AttributeOf(records[0], ["gen_ai.is_subagent", "is_subagent"]) is not null;
+        string? resolvedParent = parentSession ?? parentAttr;
+        return new SummaryIdentity(resolvedAgentName, resolvedLabel, repo, branch, resolvedIsSubagent, resolvedParent);
+    }
+
+    private sealed record SummaryInputs(
+        DroidSessionSplit Split,
+        bool Paired,
+        List<CanonicalRecord> TurnRecords,
+        IReadOnlyList<CanonicalRecord> StructureRecords,
+        List<CanonicalRecord> CounterRecords,
+        string Harness,
+        List<CanonicalRecord> ContextRecords,
+        List<CanonicalRecord> MeasuredTurns,
+        int UnmeasuredTurns,
+        long? CounterInput);
+
+    private static SummaryInputs PrepareInputs(IReadOnlyList<CanonicalRecord> records)
+    {
+        DroidSessionSplit split = SplitDroidSessionRecords(records);
+        bool paired = split.TurnRecords.Count > 0 && split.CounterRecords.Count > 0;
+        List<CanonicalRecord> turnRecords = paired ? TurnsOf(split.TurnRecords) : TurnsOf(records);
+        IReadOnlyList<CanonicalRecord> structureRecords = paired ? split.TurnRecords : records;
+        List<CanonicalRecord> counterRecords = paired
+            ? split.CounterRecords.Where(static r => !string.Equals(r.Op, "tool.invoke", StringComparison.Ordinal)).ToList()
+            : [];
+
+        string harness = CanonPricing.NormalizeHarnessName(records[0].Harness);
+
+        List<CanonicalRecord> mainThreadRecords = turnRecords.Where(static r => !IsSideAgentTurn(r)).ToList();
+        List<CanonicalRecord> contextRecords = mainThreadRecords.Count > 0 ? mainThreadRecords : turnRecords;
+        List<CanonicalRecord> measuredTurns = contextRecords.Where(static r => CanonPricing.MeasuredInput(r.Tokens) > 0).ToList();
+        int unmeasuredTurns = contextRecords.Count - measuredTurns.Count;
+
+        long? counterInput = counterRecords.Count > 0
+            ? counterRecords.Sum(static r => CanonPricing.MeasuredInput(r.Tokens))
+            : null;
+
+        return new SummaryInputs(
+            split,
+            paired,
+            turnRecords,
+            structureRecords,
+            counterRecords,
+            harness,
+            contextRecords,
+            measuredTurns,
+            unmeasuredTurns,
+            counterInput);
+    }
+
+    private static List<ContextTurn> BuildContextTurns(List<CanonicalRecord> measuredTurns)
+    {
+        List<ContextPart> lastSystem = [];
+        List<ContextTurn> contextTurns = new(measuredTurns.Count);
+        foreach (CanonicalRecord record in measuredTurns)
+        {
+            List<ContextPart> parts = PartsOf(record);
+            List<ContextPart> ownSystem = parts.Where(static p => string.Equals(p.Part, "system_prompt", StringComparison.Ordinal)).ToList();
+            if (ownSystem.Count > 0)
+            {
+                lastSystem = ownSystem;
+            }
+
+            IReadOnlyList<ContextPart> effective = ownSystem.Count > 0 ? parts : [.. CarriedTo(lastSystem, record), .. parts];
+            contextTurns.Add(new ContextTurn(
+                Parts: effective,
+                InputTokens: CanonPricing.MeasuredInput(record.Tokens),
+                FreshInput: MeasuredFreshInput(record.Tokens)));
+        }
+
+        return contextTurns;
+    }
+
+    private static (Dictionary<string, int> InvocationCounts, Dictionary<string, int> ErrorCounts) CountToolInvocations(
+        List<CanonicalRecord> toolRecords)
+    {
+        Dictionary<string, int> invocationCounts = new(StringComparer.Ordinal);
+        Dictionary<string, int> errorCounts = new(StringComparer.Ordinal);
+        foreach (CanonicalRecord toolRecord in toolRecords)
+        {
+            string toolName = (AttributeOf(toolRecord, ["gen_ai.tool.name", "tool.name", "tool_name"]) ?? toolRecord.Name).Trim();
+            if (toolName.Length == 0 || string.Equals(toolName, "tool.invoke", StringComparison.Ordinal))
+            {
+                continue;
+            }
+
+            invocationCounts[toolName] = invocationCounts.GetValueOrDefault(toolName) + 1;
+            if (IsToolError(toolRecord))
+            {
+                errorCounts[toolName] = errorCounts.GetValueOrDefault(toolName) + 1;
+            }
+        }
+
+        return (invocationCounts, errorCounts);
+    }
+
+    private static List<Dictionary<string, object?>> BuildToolsPayload(
+        List<RankedTool> rankedTools,
+        Dictionary<string, ToolDefinition> definitionsByName,
+        Dictionary<string, int> invocationCounts,
+        Dictionary<string, int> errorCounts,
+        int turnCount)
+    {
+        List<Dictionary<string, object?>> toolsPayload = [];
+        HashSet<string> seenToolNames = new(StringComparer.Ordinal);
+        foreach (RankedTool ranked in rankedTools)
+        {
+            seenToolNames.Add(ranked.Name);
+            definitionsByName.TryGetValue(ranked.Name, out ToolDefinition? def);
+            long schemaTokens = def?.Tokens ?? 0;
+            int turnsResident = def?.TurnsResident ?? turnCount;
+            int inv = invocationCounts.GetValueOrDefault(ranked.Name);
+            int errs = errorCounts.GetValueOrDefault(ranked.Name);
+            Dictionary<string, object?> entry = new(StringComparer.Ordinal)
+            {
+                ["name"] = ranked.Name,
+                ["schema_tokens"] = schemaTokens,
+                ["invocations"] = inv,
+                ["turns_resident"] = turnsResident,
+                ["errors"] = errs,
+                ["total_schema_cost"] = ranked.Cost,
+            };
+            if (def?.Server is not null)
+            {
+                entry["server"] = def.Server;
+            }
+
+            toolsPayload.Add(entry);
+        }
+
+        foreach (KeyValuePair<string, int> kv in invocationCounts)
+        {
+            if (!seenToolNames.Add(kv.Key))
+            {
+                continue;
+            }
+
+            toolsPayload.Add(new Dictionary<string, object?>(StringComparer.Ordinal)
+            {
+                ["name"] = kv.Key,
+                ["schema_tokens"] = 0L,
+                ["invocations"] = kv.Value,
+                ["turns_resident"] = 0,
+                ["errors"] = errorCounts.GetValueOrDefault(kv.Key),
+            });
+        }
+
+        return toolsPayload;
+    }
+
+    private static List<Dictionary<string, object?>> BuildServersPayload(
+        SchemaCostAnalysis schema,
+        List<RankedTool> rankedTools,
+        Dictionary<string, ToolDefinition> definitionsByName,
+        Dictionary<string, int> invocationCounts)
+    {
+        List<Dictionary<string, object?>> serversPayload = [];
+        if (!schema.Measurable)
+        {
+            return serversPayload;
+        }
+
+        foreach (string server in schema.ByServer.Keys)
+        {
+            List<RankedTool> serverTools = rankedTools.Where(t => string.Equals(t.Server, server, StringComparison.Ordinal)).ToList();
+            serversPayload.Add(new Dictionary<string, object?>(StringComparer.Ordinal)
+            {
+                ["server"] = server,
+                ["is_mcp"] = true,
+                ["tools"] = serverTools.Count,
+                ["schema_tokens"] = serverTools.Sum(t => definitionsByName.GetValueOrDefault(t.Name)?.Tokens ?? 0),
+                ["invocations"] = serverTools.Sum(t => invocationCounts.GetValueOrDefault(t.Name)),
+                ["unused_tools"] = serverTools.Count(t => invocationCounts.GetValueOrDefault(t.Name) == 0),
+                ["unused_cost"] = serverTools.Where(t => invocationCounts.GetValueOrDefault(t.Name) == 0).Sum(t => t.Cost),
+            });
+        }
+
+        return serversPayload;
+    }
+
+    private static (
+        long TotalInput,
+        long TotalOutput,
+        long TotalCacheRead,
+        long TotalCacheCreation) SumTokenTotals(IReadOnlyList<CanonicalRecord> totalRecords)
+    {
+        long totalInput = 0;
+        long totalOutput = 0;
+        long totalCacheRead = 0;
+        long totalCacheCreation = 0;
+        foreach (CanonicalRecord r in totalRecords)
+        {
+            totalInput += CanonPricing.MeasuredInput(r.Tokens);
+            totalOutput += r.Tokens.Output;
+            totalCacheRead += r.Tokens.CacheRead;
+            totalCacheCreation += r.Tokens.CacheCreation;
+        }
+
+        return (totalInput, totalOutput, totalCacheRead, totalCacheCreation);
+    }
+
+    private static (int? ToolCalls, List<string>? ToolsInvoked) ResolveToolUsage(
+        List<CanonicalRecord> toolRecords,
+        IReadOnlyList<CanonicalRecord> toolSourceRecords,
+        IReadOnlyDictionary<string, JsonElement>? measurability,
+        string harness)
+    {
+        int? toolCalls = null;
+        List<string>? toolsInvoked = null;
+        if (toolRecords.Count > 0)
+        {
+            bool lowerBound = toolRecords.Any(static r => IsNotMeasurableElement(r.Measurability, "tool_calls"));
+            if (!lowerBound)
+            {
+                toolCalls = toolRecords.Count;
+            }
+
+            toolsInvoked = [.. InvocationsOf(toolSourceRecords).Distinct(StringComparer.Ordinal)];
+        }
+        else if (IsMeasuredOrDerived(measurability, "tool_calls") || CanonPricing.SurveyFamily(harness) == "claude-code")
+        {
+            toolCalls = 0;
+            toolsInvoked = [];
+        }
+
+        return (toolCalls, toolsInvoked);
+    }
+
+    private static (List<string> OfferedTools, bool HasDefParts) CollectOfferedTools(
+        IReadOnlyList<CanonicalRecord> records,
+        TextTokenCounter countTokens)
+    {
+        List<string> offeredTools = [];
+        HashSet<string> seenOfferedTools = new(StringComparer.Ordinal);
+        bool hasDefParts = false;
+        foreach (CanonicalRecord record in records)
+        {
+            foreach (ToolDefinition def in ToolDefinitionsOf([record], countTokens))
+            {
+                hasDefParts = true;
+                if (seenOfferedTools.Add(def.Name))
+                {
+                    offeredTools.Add(def.Name);
+                }
+            }
+
+            if (record.Parts is not null && record.Parts.Any(static p => string.Equals(p.Part, "tool_definitions", StringComparison.Ordinal) || string.Equals(p.Part, "tool_definition", StringComparison.Ordinal)))
+            {
+                hasDefParts = true;
+            }
+        }
+
+        return (offeredTools, hasDefParts);
+    }
+
+    private static Dictionary<string, object?> BuildSummaryDict(
+        int turnCount,
+        int requestCount,
+        long totalDurationMs,
+        List<string> models,
+        CostTotalResult costResult,
+        IReadOnlyList<CanonicalRecord> totalRecords,
+        IReadOnlyDictionary<string, JsonElement>? totalMeasurability,
+        long totalInput,
+        long totalOutput,
+        long totalCacheRead,
+        long totalCacheCreation,
+        int? toolCalls,
+        List<string>? toolsInvoked,
+        bool hasDefParts,
+        List<string> offeredTools,
+        IReadOnlyDictionary<string, JsonElement>? measurability,
+        bool includedInParent)
+    {
+        object? summaryTotalInput = UnavailableOrValue(totalMeasurability, ["token_usage"], totalInput);
+        object? summaryTotalOutput = UnavailableOrValue(totalMeasurability, ["output", "output_tokens"], totalOutput);
+        object? summaryTotalCacheRead = UnavailableOrValue(totalMeasurability, ["cache_read"], totalCacheRead);
+        object? summaryTotalCacheCreation = UnavailableOrValue(totalMeasurability, ["cache_creation"], totalCacheCreation);
+
+        Dictionary<string, object?> summaryDict = new(StringComparer.Ordinal)
+        {
+            ["turn_count"] = turnCount,
+            ["request_count"] = requestCount,
+            ["total_input"] = summaryTotalInput,
+            ["total_output"] = summaryTotalOutput,
+            ["total_cache_read"] = summaryTotalCacheRead,
+            ["total_cache_creation"] = summaryTotalCacheCreation,
+            ["duration_ms"] = totalDurationMs,
+            ["models"] = models,
+            ["cost"] = costResult.Ok && costResult.Total is not null
+                ? costResult.Total
+                : new CostBlock(CostBasis.Unknown, CostStatus.NoRate),
+        };
+
+        if (summaryTotalInput is long numIn && numIn > 0 && summaryTotalCacheRead is long numCr)
+        {
+            summaryDict["cache_hit_ratio"] = (double)numCr / numIn;
+        }
+
+        if (summaryTotalInput is long && totalRecords.Count > 0 && summaryTotalInput is long numIn2 && numIn2 > 0 && summaryTotalCacheCreation is long && turnCount > 0)
+        {
+            summaryDict["cache_creation_coverage"] = totalRecords.Count(static r => r.Tokens.CacheCreation > 0);
+        }
+
+        if (toolCalls.HasValue)
+        {
+            summaryDict["tool_calls"] = toolCalls.Value;
+        }
+
+        if (toolsInvoked is not null)
+        {
+            summaryDict["tools_invoked"] = toolsInvoked;
+        }
+
+        if (hasDefParts)
+        {
+            summaryDict["tools_offered"] = offeredTools;
+        }
+        else if (TryUnavailable(measurability, "tool_definitions", out JsonElement toolDefUnavail))
+        {
+            summaryDict["tools_offered"] = toolDefUnavail;
+        }
+
+        if (includedInParent)
+        {
+            summaryDict["included_in_parent"] = true;
+        }
+
+        return summaryDict;
+    }
+
+    private static List<Dictionary<string, object?>> BuildTurnEntries(List<CanonicalRecord> turnRecords)
+    {
+        List<Dictionary<string, object?>> turnEntries = [];
+        for (int i = 0; i < turnRecords.Count; i++)
+        {
+            CanonicalRecord tr = turnRecords[i];
+            turnEntries.Add(new Dictionary<string, object?>(StringComparer.Ordinal)
+            {
+                ["index"] = i,
+                ["spanId"] = tr.SpanId,
+                ["timestamp"] = tr.Timestamp,
+                ["model"] = AttributeOf(tr, ModelKeys),
+                ["input"] = CanonPricing.MeasuredInput(tr.Tokens),
+                ["output"] = tr.Tokens.Output,
+                ["fresh"] = tr.Tokens.FreshInput,
+                ["cache_read"] = tr.Tokens.CacheRead,
+                ["cache_creation"] = tr.Tokens.CacheCreation,
+                ["reasoning"] = tr.Tokens.Reasoning,
+            });
+        }
+
+        return turnEntries;
+    }
+
+    private static List<Dictionary<string, object?>> BuildRequestEntries(
+        List<CanonicalRecord> requestRoots,
+        Dictionary<string, List<CanonicalRecord>> turnsByRoot)
+    {
+        List<Dictionary<string, object?>> requestEntries = [];
+        foreach (CanonicalRecord req in requestRoots)
+        {
+            turnsByRoot.TryGetValue(req.SpanId, out List<CanonicalRecord>? ownedTurns);
+            string? reqModel = AttributeOf(req, ModelKeys)
+                ?? ownedTurns?.Select(static t => AttributeOf(t, ModelKeys)).FirstOrDefault(static m => m is not null);
+            object? promptValue = PromptPreviewOf(req);
+            if (promptValue is null && TryUnavailable(req.Measurability, "user_prompt", out JsonElement promptUnavail))
+            {
+                promptValue = promptUnavail;
+            }
+
+            requestEntries.Add(new Dictionary<string, object?>(StringComparer.Ordinal)
+            {
+                ["request"] = req.SpanId,
+                ["timestamp"] = req.Timestamp,
+                ["turns"] = ownedTurns?.Count ?? 0,
+                ["model"] = reqModel,
+                ["prompt"] = promptValue,
+            });
+        }
+
+        return requestEntries;
+    }
+
+    private static List<Dictionary<string, object?>> BuildReconciliation(List<CanonicalRecord> turnRecords) =>
+        turnRecords.Select(static r =>
+        {
+            long measuredIn = CanonPricing.MeasuredInput(r.Tokens);
+            return new Dictionary<string, object?>(StringComparer.Ordinal)
+            {
+                ["request"] = r.SpanId,
+                ["root_input"] = r.Tokens.ReportedInput,
+                ["sum_chat_input"] = measuredIn,
+                ["input_match"] = r.Tokens.ReportedInput == measuredIn,
+                ["root_output"] = r.Tokens.ReportedOutput,
+                ["sum_chat_output"] = r.Tokens.Output,
+                ["output_match"] = r.Tokens.ReportedOutput == r.Tokens.Output,
+            };
+        }).ToList();
+
+    private static (object TimelinePayload, object SchemaPayload) BuildAvailabilityPayloads(
+        TimelineNode timeline,
+        SchemaCostAnalysis schema,
+        IReadOnlyDictionary<string, JsonElement>? measurability)
+    {
+        object timelinePayload = TryUnavailable(measurability, "execution_structure", out JsonElement timelineUnavail)
+            ? timelineUnavail
+            : timeline.Children.Select(WithoutAttributes).ToList();
+
+        object schemaPayload = schema.Measurable
+            ? new Dictionary<string, object?>(StringComparer.Ordinal)
+            {
+                ["measurable"] = true,
+                ["byServer"] = schema.ByServer,
+                ["neverInvoked"] = schema.NeverInvoked,
+                ["unusedRange"] = schema.UnusedRange,
+                ["turns"] = schema.Turns,
+            }
+            : TryUnavailable(measurability, "schema_cost", out JsonElement schemaUnavail)
+                ? schemaUnavail
+                : new Dictionary<string, object?>(StringComparer.Ordinal)
+                {
+                    ["availability"] = "not_measurable",
+                    ["reason"] = "The source did not provide tool-definition schema data.",
+                };
+
+        return (timelinePayload, schemaPayload);
+    }
+}
+
+internal static class TwinDeduplicator
+{
+    internal static List<CanonicalRecord> MergeDedupedOutput(
+        IReadOnlyList<CanonicalRecord> records,
+        HashSet<CanonicalRecord> dropped,
+        Dictionary<CanonicalRecord, CanonicalRecord> transplant,
+        Dictionary<CanonicalRecord, TokenUsage> tokenOverride)
+    {
+        List<CanonicalRecord> output = new(records.Count);
+        foreach (CanonicalRecord record in records)
+        {
+            if (dropped.Contains(record))
+            {
+                continue;
+            }
+
+            TokenUsage tokens = tokenOverride.GetValueOrDefault(record, record.Tokens);
+            if (!transplant.TryGetValue(record, out CanonicalRecord? donor))
+            {
+                output.Add(ReferenceEquals(tokens, record.Tokens) ? record : record with { Tokens = tokens });
+                continue;
+            }
+
+            if (!IsFileSource(record.Source))
+            {
+                CanonicalRecord mergedOtel = WithDonorSkills(MergeOtelFirst(record, donor), donor);
+                output.Add(ReferenceEquals(tokens, record.Tokens) ? mergedOtel : mergedOtel with { Tokens = tokens });
+                continue;
+            }
+
+            IReadOnlyList<ContentPart> keeperParts = record.Parts ?? [];
+            HashSet<string> seen = new(StringComparer.Ordinal);
+            foreach (ContentPart part in keeperParts)
+            {
+                seen.Add($"{part.Part}\u0000{part.Text}");
+            }
+
+            List<ContentPart> extraParts = [];
+            foreach (ContentPart part in donor.Parts ?? [])
+            {
+                if (seen.Add($"{part.Part}\u0000{part.Text}"))
+                {
+                    extraParts.Add(part);
+                }
+            }
+
+            List<ContentPart> newParts = [.. keeperParts, .. extraParts];
+            Dictionary<string, string> mergedContent = MergeDictionaries(donor.Content, record.Content);
+            if (newParts.Count > 0)
+            {
+                mergedContent = MergeDictionaries(mergedContent, CanonValidation.ContentFromParts(newParts));
+            }
+
+            bool keepParts = (donor.Parts is { Count: > 0 }) || extraParts.Count > 0 || (record.Parts is { Count: > 0 });
+            output.Add(WithDonorSkills(record, donor) with
+            {
+                Tokens = tokens,
+                Parts = keepParts ? newParts : record.Parts,
+                Content = mergedContent,
+            });
+        }
+
+        return output;
+    }
+
+    internal static HashSet<CanonicalRecord> CollapseIdJoins(
+        IReadOnlyList<CanonicalRecord> records,
+        string? shareKey,
+        HashSet<CanonicalRecord> dropped,
+        Dictionary<CanonicalRecord, CanonicalRecord> transplant)
+    {
+        HashSet<CanonicalRecord> joined = new(ReferenceEqualityComparer.Instance);
+        Dictionary<string, CanonicalRecord> keeperByMessageId = new(StringComparer.Ordinal);
+        Dictionary<string, CanonicalRecord> keeperByRequestId = new(StringComparer.Ordinal);
+
+        void RememberEarliest(Dictionary<string, CanonicalRecord> map, string key, CanonicalRecord record)
+        {
+            if (!map.TryGetValue(key, out CanonicalRecord? known)
+                || RecordTimestampMs(record) < RecordTimestampMs(known))
+            {
+                map[key] = record;
+            }
+        }
+
+        foreach (CanonicalRecord record in records)
+        {
+            if (!string.Equals(record.Op, "llm.invoke", StringComparison.Ordinal) || IsFileSource(record.Source))
+            {
+                continue;
+            }
+
+            string session = SessionKeyOf(record, shareKey);
+            string? messageId = OtelMessageIdOf(record);
+            if (messageId is not null)
+            {
+                RememberEarliest(keeperByMessageId, $"{session}\u0000{messageId}", record);
+            }
+
+            string? requestId = OtelRequestJoinId(record);
+            if (requestId is not null)
+            {
+                RememberEarliest(keeperByRequestId, $"{session}\u0000{requestId}", record);
+            }
+        }
+
+        if (keeperByMessageId.Count == 0 && keeperByRequestId.Count == 0)
+        {
+            return joined;
+        }
+
+        void Adopt(CanonicalRecord keeper, CanonicalRecord file)
+        {
+            dropped.Add(file);
+            joined.Add(file);
+            joined.Add(keeper);
+            if (!IsDonor(file))
+            {
+                return;
+            }
+
+            transplant[keeper] = transplant.TryGetValue(keeper, out CanonicalRecord? existing)
+                ? MergeDonors(existing, file)
+                : file;
+        }
+
+        foreach (CanonicalRecord record in records)
+        {
+            if (!string.Equals(record.Op, "llm.invoke", StringComparison.Ordinal) || !IsFileSource(record.Source))
+            {
+                continue;
+            }
+
+            string session = SessionKeyOf(record, shareKey);
+            string? messageId = FileNativeIdOf(record);
+            if (messageId is not null && keeperByMessageId.TryGetValue($"{session}\u0000{messageId}", out CanonicalRecord? byMessage))
+            {
+                Adopt(byMessage, record);
+                continue;
+            }
+
+            string? requestId = FileRequestIdOf(record);
+            if (requestId is not null && keeperByRequestId.TryGetValue($"{session}\u0000{requestId}", out CanonicalRecord? byRequest))
+            {
+                Adopt(byRequest, record);
+            }
+        }
+
+        return joined;
+    }
+
+    /// <summary>
+    /// Pairs Codex rollout-file model calls with the OTLP model calls that observed the same turn,
+    /// on data both sources carry (D21). Codex OTel carries no per-model-call id — its
+    /// <c>auth.request_id</c> names an auth request — so the pairing data is the reported counters:
+    /// same session, equal <see cref="CounterKey"/>, timestamps within
+    /// <see cref="TwinTurnMaxSkewMs"/>, and strictly one OTLP call per file call. Within each
+    /// counter group, each file call in timestamp order pairs with the earliest unpaired OTLP call
+    /// within the skew. A paired file call is dropped and, when it has parts, donates them to its
+    /// OTLP call (the OTel row is the turn; the file row supplies only what OTLP lacks). An unpaired
+    /// call of either source stays a turn; nothing pairs by timestamp or turn order alone.
+    /// </summary>
+    /// <param name="records">Candidate canonical records.</param>
+    /// <param name="shareKey">Fallback session key used when a record has no <see cref="CanonicalRecord.SessionId"/>.</param>
+    /// <param name="dropped">Receives each paired file model call.</param>
+    /// <param name="transplant">Receives each paired file model call with parts, keyed by its OTLP call.</param>
+    /// <returns>Every Codex model call with reported counters, paired or not, so the shared counter-cluster path skips it.</returns>
+    internal static HashSet<CanonicalRecord> PairCodexFileModelCalls(
+        IReadOnlyList<CanonicalRecord> records,
+        string? shareKey,
+        HashSet<CanonicalRecord> dropped,
+        Dictionary<CanonicalRecord, CanonicalRecord> transplant)
+    {
+        HashSet<CanonicalRecord> handled = new(ReferenceEqualityComparer.Instance);
+        Dictionary<string, (List<CanonicalRecord> Otels, List<CanonicalRecord> Files)> groups = new(StringComparer.Ordinal);
+        foreach (CanonicalRecord record in records)
+        {
+            if (!IsCodexModelCall(record) || IsUnreportedCounters(record.Tokens))
+            {
+                continue;
+            }
+
+            handled.Add(record);
+            string key = CounterKey(record, shareKey);
+            if (!groups.TryGetValue(key, out (List<CanonicalRecord> Otels, List<CanonicalRecord> Files) group))
+            {
+                group = ([], []);
+                groups[key] = group;
+            }
+
+            (IsFileSource(record.Source) ? group.Files : group.Otels).Add(record);
+        }
+
+        foreach ((List<CanonicalRecord> otels, List<CanonicalRecord> files) in groups.Values)
+        {
+            if (otels.Count == 0 || files.Count == 0)
+            {
+                continue;
+            }
+
+            otels.Sort(CompareRecordTimestamps);
+            files.Sort(CompareRecordTimestamps);
+            HashSet<CanonicalRecord> pairedOtels = new(ReferenceEqualityComparer.Instance);
+            foreach (CanonicalRecord file in files)
+            {
+                double moment = RecordTimestampMs(file);
+                CanonicalRecord? otel = otels.Find(o =>
+                    !pairedOtels.Contains(o) && Math.Abs(RecordTimestampMs(o) - moment) <= TwinTurnMaxSkewMs);
+                if (otel is null)
+                {
+                    continue;
+                }
+
+                pairedOtels.Add(otel);
+                dropped.Add(file);
+                if (IsDonor(file))
+                {
+                    transplant[otel] = transplant.TryGetValue(otel, out CanonicalRecord? existing)
+                        ? MergeDonors(existing, file)
+                        : file;
+                }
+            }
+        }
+
+        return handled;
+    }
+
+    internal static bool IsCodexModelCall(CanonicalRecord record) =>
+        CodexHarnessIds.Contains(record.Harness)
+        && string.Equals(record.Op, "llm.invoke", StringComparison.Ordinal);
+
+    internal static void CollapseCluster(
+        IReadOnlyList<CanonicalRecord> cluster,
+        HashSet<CanonicalRecord> dropped,
+        Dictionary<CanonicalRecord, CanonicalRecord> transplant)
+    {
+        if (cluster.Count == 0)
+        {
+            return;
+        }
+
+        List<CanonicalRecord> otels = cluster.Where(static r => !IsFileSource(r.Source)).ToList();
+        List<CanonicalRecord> files = cluster.Where(static r => IsFileSource(r.Source)).ToList();
+        if (otels.Count == 0)
+        {
+            if (files.Count <= 1)
+            {
+                return;
+            }
+
+            if (!files.All(static f => string.Equals(f.Source, CanonSynth.FileSourcePrefix + "claude-desktop", StringComparison.Ordinal)
+                    || string.Equals(f.Harness, "claude-desktop", StringComparison.Ordinal)))
+            {
+                return;
+            }
+
+            files.Sort(CompareRecordTimestamps);
+            CanonicalRecord keeper = files[0];
+            CanonicalRecord? donor = null;
+            for (int i = 1; i < files.Count; i++)
+            {
+                CanonicalRecord file = files[i];
+                dropped.Add(file);
+                if (IsDonor(file))
+                {
+                    donor = donor is null ? file : MergeDonors(donor, file);
+                }
+            }
+
+            if (donor is not null)
+            {
+                transplant[keeper] = donor;
+            }
+
+            return;
+        }
+
+        if (files.Count == 0)
+        {
+            return;
+        }
+
+        foreach (CanonicalRecord file in files)
+        {
+            dropped.Add(file);
+        }
+
+        List<CanonicalRecord> donors = files.Where(IsDonor).OrderBy(RecordTimestampMs).ToList();
+        HashSet<CanonicalRecord> free = new(donors, ReferenceEqualityComparer.Instance);
+
+        List<CanonicalRecord> keepers =
+        [
+            .. otels.Where(static o => !HasParts(o)).OrderBy(RecordTimestampMs),
+            .. otels.Where(HasParts).OrderBy(RecordTimestampMs),
+        ];
+
+        foreach (CanonicalRecord keeper in keepers)
+        {
+            double moment = RecordTimestampMs(keeper);
+            CanonicalRecord? best = null;
+            double bestDist = double.PositiveInfinity;
+            foreach (CanonicalRecord donor in donors)
+            {
+                if (!free.Contains(donor))
+                {
+                    continue;
+                }
+
+                double dist = Math.Abs(RecordTimestampMs(donor) - moment);
+                if (best is null || dist < bestDist)
+                {
+                    best = donor;
+                    bestDist = dist;
+                }
+            }
+
+            if (best is null)
+            {
+                break;
+            }
+
+            free.Remove(best);
+            transplant[keeper] = best;
+        }
+
+        foreach (CanonicalRecord donor in donors.Where(free.Contains))
+        {
+            double donorMoment = RecordTimestampMs(donor);
+            CanonicalRecord nearest = otels[0];
+            double bestDist = Math.Abs(RecordTimestampMs(nearest) - donorMoment);
+            foreach (CanonicalRecord candidate in otels.Skip(1))
+            {
+                double dist = Math.Abs(RecordTimestampMs(candidate) - donorMoment);
+                if (dist < bestDist)
+                {
+                    nearest = candidate;
+                    bestDist = dist;
+                }
+            }
+
+            transplant[nearest] = transplant.TryGetValue(nearest, out CanonicalRecord? existing)
+                ? MergeDonors(existing, donor)
+                : donor;
+        }
+    }
+
+    internal static void CollapseOverlapFileJoins(
+        IReadOnlyList<CanonicalRecord> records,
+        string? shareKey,
+        HashSet<CanonicalRecord> dropped,
+        Dictionary<CanonicalRecord, CanonicalRecord> transplant,
+        Dictionary<CanonicalRecord, TokenUsage> tokenOverride)
+    {
+        Dictionary<string, List<CanonicalRecord>> bySession = new(StringComparer.Ordinal);
+        foreach (CanonicalRecord record in records)
+        {
+            if (dropped.Contains(record))
+            {
+                continue;
+            }
+
+            if (!string.Equals(record.Op, "llm.invoke", StringComparison.Ordinal))
+            {
+                continue;
+            }
+
+            if (!IsFileSource(record.Source) || IsUnreportedCounters(record.Tokens))
+            {
+                continue;
+            }
+
+            string key = SessionKeyOf(record, shareKey);
+            if (!bySession.TryGetValue(key, out List<CanonicalRecord>? list))
+            {
+                list = [];
+                bySession[key] = list;
+            }
+
+            list.Add(record);
+        }
+
+        foreach (List<CanonicalRecord> turns in bySession.Values)
+        {
+            if (!HasEvidencedCursorTwinShare(turns))
+            {
+                continue;
+            }
+
+            turns.Sort(CompareRecordTimestamps);
+            List<CanonicalRecord> cluster = [];
+            foreach (CanonicalRecord record in turns)
+            {
+                if (cluster.Count > 0 && RecordTimestampMs(record) - RecordTimestampMs(cluster[0]) > TwinTurnMaxSkewMs)
+                {
+                    CollapseOverlapCluster(cluster, dropped, transplant, tokenOverride);
+                    cluster.Clear();
+                }
+
+                cluster.Add(record);
+            }
+
+            CollapseOverlapCluster(cluster, dropped, transplant, tokenOverride);
+        }
+    }
+
+    internal static void CollapseOverlapCluster(
+        IReadOnlyList<CanonicalRecord> cluster,
+        HashSet<CanonicalRecord> dropped,
+        Dictionary<CanonicalRecord, CanonicalRecord> transplant,
+        Dictionary<CanonicalRecord, TokenUsage> tokenOverride)
+    {
+        if (cluster.Count < 2)
+        {
+            return;
+        }
+
+        List<CanonicalRecord> completes = cluster.Where(IsCompleteCursorAgentObservation).ToList();
+        if (completes.Count == 0)
+        {
+            return;
+        }
+
+        Dictionary<CanonicalRecord, List<CanonicalRecord>> groups = new(ReferenceEqualityComparer.Instance);
+        foreach (CanonicalRecord complete in completes)
+        {
+            groups[complete] = [complete];
+        }
+
+        List<CanonicalRecord> partials = cluster
+            .Where(static r => !IsCompleteCursorAgentObservation(r) && !IsCompleteCursorIdeObservation(r))
+            .OrderBy(RecordTimestampMs)
+            .ToList();
+
+        foreach (CanonicalRecord partial in partials)
+        {
+            CanonicalRecord? best = FindBestJoin(partial, completes);
+            if (best is not null)
+            {
+                groups[best].Add(partial);
+            }
+        }
+
+        HashSet<CanonicalRecord> availableIdes = new(cluster.Where(IsCompleteCursorIdeObservation), ReferenceEqualityComparer.Instance);
+        foreach (CanonicalRecord complete in completes.OrderBy(RecordTimestampMs))
+        {
+            CanonicalRecord? best = FindBestJoin(complete, availableIdes);
+            if (best is not null)
+            {
+                availableIdes.Remove(best);
+                groups[complete].Add(best);
+            }
+        }
+
+        foreach (List<CanonicalRecord> members in groups.Values)
+        {
+            if (members.Count < 2)
+            {
+                continue;
+            }
+
+            CanonicalRecord keeper = members[0];
+            for (int i = 1; i < members.Count; i++)
+            {
+                keeper = PreferFullerKeeper(keeper, members[i]);
+            }
+
+            TokenUsage mergedTokens = keeper.Tokens;
+            foreach (CanonicalRecord member in members)
+            {
+                if (ReferenceEquals(member, keeper))
+                {
+                    continue;
+                }
+
+                mergedTokens = MaxTokens(mergedTokens, member.Tokens);
+                dropped.Add(member);
+                if (!IsDonor(member))
+                {
+                    continue;
+                }
+
+                transplant[keeper] = transplant.TryGetValue(keeper, out CanonicalRecord? existing)
+                    ? MergeDonors(existing, member)
+                    : member;
+            }
+
+            if (mergedTokens != keeper.Tokens)
+            {
+                tokenOverride[keeper] = mergedTokens;
+            }
+        }
+    }
+
+    internal static CanonicalRecord? FindBestJoin(CanonicalRecord source, IEnumerable<CanonicalRecord> candidates)
+    {
+        CanonicalRecord? best = null;
+        double bestDist = double.PositiveInfinity;
+        double sourceTime = RecordTimestampMs(source);
+        foreach (CanonicalRecord candidate in candidates)
+        {
+            if (!CanJoinDistinctCounters(source.Tokens, candidate.Tokens))
+            {
+                continue;
+            }
+
+            double candidateTime = RecordTimestampMs(candidate);
+            double dist = Math.Abs(sourceTime - candidateTime);
+            if (best is null || dist < bestDist || (dist == bestDist && candidateTime < RecordTimestampMs(best)))
+            {
+                best = candidate;
+                bestDist = dist;
+            }
+        }
+
+        return best;
+    }
+
+    internal static CanonicalRecord MergeOtelFirst(CanonicalRecord record, CanonicalRecord donor)
+    {
+        IReadOnlyList<ContentPart> keeperParts = record.Parts ?? [];
+        HashSet<string> keeperBuckets = new(keeperParts.Select(static p => p.Part), StringComparer.Ordinal);
+        HashSet<string> held = new([.. keeperBuckets, .. record.Content.Keys], StringComparer.Ordinal);
+
+        List<ContentPart> fillParts = (donor.Parts ?? []).Where(p => !held.Contains(p.Part)).ToList();
+        Dictionary<string, string> fillContent = new(StringComparer.Ordinal);
+        foreach (KeyValuePair<string, string> kv in donor.Content)
+        {
+            if (!held.Contains(kv.Key))
+            {
+                fillContent[kv.Key] = kv.Value;
+            }
+        }
+
+        if (keeperParts.Count == 0 && fillParts.Count == 0)
+        {
+            return record with { Content = MergeDictionaries(fillContent, record.Content) };
+        }
+
+        HashSet<string> fillBuckets = new(fillParts.Select(static p => p.Part), StringComparer.Ordinal);
+        List<ContentPart> otelFlatParts = record.Content
+            .Where(kv => !keeperBuckets.Contains(kv.Key))
+            .Select(static kv => new ContentPart(kv.Key, kv.Value))
+            .ToList();
+        List<ContentPart> fileFlatParts = fillContent
+            .Where(kv => !fillBuckets.Contains(kv.Key))
+            .Select(static kv => new ContentPart(kv.Key, kv.Value))
+            .ToList();
+
+        List<ContentPart> parts = [.. keeperParts, .. otelFlatParts, .. fillParts, .. fileFlatParts];
+        Dictionary<string, string> mergedContent = MergeDictionaries(fillContent, record.Content);
+        mergedContent = MergeDictionaries(mergedContent, CanonValidation.ContentFromParts(parts));
+        return record with { Parts = parts, Content = mergedContent };
+    }
+
+    internal static CanonicalRecord MergeDonors(CanonicalRecord first, CanonicalRecord second)
+    {
+        List<ContentPart> parts = [.. first.Parts ?? [], .. second.Parts ?? []];
+        Dictionary<string, string> merged = MergeDictionaries(first.Content, second.Content);
+        if (parts.Count > 0)
+        {
+            merged = MergeDictionaries(merged, CanonValidation.ContentFromParts(parts));
+        }
+
+        return WithDonorSkills(first, second) with { Parts = parts, Content = merged };
+    }
+
+    /// <summary>Raw attributes a twin keeps from the observation it absorbed when it has none of its own.</summary>
+    internal static readonly string[] DonorSkillKeys = [CanonSynth.SkillsListedKey, CanonSynth.SkillsInvokedKey];
+
+    /// <summary>Raw attributes a kept twin must inherit from an absorbed twin: skills and the compaction boundary.</summary>
+    internal static readonly string[] DonorKeys = [.. DonorSkillKeys, CanonRecordHydration.CompactBoundaryRawKey];
+
+    /// <summary>
+    /// Carries the skill listing and skill invocations of an absorbed twin onto the kept record: a
+    /// Claude Code listing is stored only on the transcript turn, so an OTLP keeper would otherwise drop
+    /// it and the inactive-skill-reference detector would not see it. The keeper's own listing wins;
+    /// invoked names are unioned, keeper's first. The compaction boundary marker is carried too, so the
+    /// projection still resets its cumulative context when the post-compaction turn joins an OTLP twin.
+    /// </summary>
+    internal static CanonicalRecord WithDonorSkills(CanonicalRecord keeper, CanonicalRecord donor)
+    {
+        if (donor.Raw is null)
+        {
+            return keeper;
+        }
+
+        Dictionary<string, JsonElement>? raw = null;
+        Dictionary<string, JsonElement> Writable() =>
+            raw ??= keeper.Raw is null ? new(StringComparer.Ordinal) : new(keeper.Raw, StringComparer.Ordinal);
+
+        if (donor.Raw.TryGetValue(CanonRecordHydration.CompactBoundaryRawKey, out JsonElement boundary)
+            && (keeper.Raw is null || !keeper.Raw.ContainsKey(CanonRecordHydration.CompactBoundaryRawKey)))
+        {
+            Writable()[CanonRecordHydration.CompactBoundaryRawKey] = boundary;
+        }
+
+        if (donor.Raw.TryGetValue(CanonSynth.SkillsListedKey, out JsonElement listed)
+            && (keeper.Raw is null || !keeper.Raw.ContainsKey(CanonSynth.SkillsListedKey)))
+        {
+            Writable()[CanonSynth.SkillsListedKey] = listed;
+        }
+
+        if (donor.Raw.TryGetValue(CanonSynth.SkillsInvokedKey, out JsonElement donorInvoked))
+        {
+            if (keeper.Raw is null || !keeper.Raw.TryGetValue(CanonSynth.SkillsInvokedKey, out JsonElement keeperInvoked))
+            {
+                Writable()[CanonSynth.SkillsInvokedKey] = donorInvoked;
+            }
+            else if (keeperInvoked.ValueKind == JsonValueKind.Array && donorInvoked.ValueKind == JsonValueKind.Array)
+            {
+                List<string> names = [];
+                foreach (JsonElement name in keeperInvoked.EnumerateArray().Concat(donorInvoked.EnumerateArray()))
+                {
+                    if (name.ValueKind == JsonValueKind.String && name.GetString() is { Length: > 0 } text && !names.Contains(text, StringComparer.Ordinal))
+                    {
+                        names.Add(text);
+                    }
+                }
+
+                if (names.Count != keeperInvoked.GetArrayLength())
+                {
+                    Writable()[CanonSynth.SkillsInvokedKey] = JsonSerializer.SerializeToElement(names);
+                }
+            }
+        }
+
+        return raw is null ? keeper : keeper with { Raw = raw };
+    }
+
+    internal static bool IsFileSource(string source) =>
+        source.StartsWith(CanonSynth.FileSourcePrefix, StringComparison.Ordinal);
+
+    internal static string SessionKeyOf(CanonicalRecord record, string? shareKey) =>
+        record.SessionId ?? shareKey ?? string.Empty;
+
+    internal static string CounterKey(CanonicalRecord record, string? shareKey)
+    {
+        TokenUsage t = record.Tokens;
+        return string.Create(
+            CultureInfo.InvariantCulture,
+            $"{SessionKeyOf(record, shareKey)}:{t.FreshInput}:{t.CacheRead}:{t.CacheCreation}:{t.Output}:{t.ReportedInput}:{t.ReportedOutput}");
+    }
+
+    internal static bool IsUnreportedCounters(TokenUsage tokens) =>
+        tokens.FreshInput == 0
+        && tokens.CacheRead == 0
+        && tokens.CacheCreation == 0
+        && tokens.Output == 0
+        && tokens.ReportedInput == 0
+        && tokens.ReportedOutput == 0;
+
+    internal static long[] TokenDims(TokenUsage tokens) =>
+    [
+        tokens.FreshInput,
+        tokens.CacheRead,
+        tokens.CacheCreation,
+        tokens.Output,
+        tokens.ReportedInput,
+        tokens.ReportedOutput,
+    ];
+
+    internal static bool CanJoinDistinctCounters(TokenUsage a, TokenUsage b)
+    {
+        long[] da = TokenDims(a);
+        long[] db = TokenDims(b);
+        bool equal = true;
+        bool aSubB = true;
+        bool bSubA = true;
+        bool comp = true;
+
+        for (int i = 0; i < da.Length; i++)
+        {
+            if (da[i] != db[i])
+            {
+                equal = false;
+            }
+
+            if (da[i] > db[i])
+            {
+                aSubB = false;
+            }
+
+            if (db[i] > da[i])
+            {
+                bSubA = false;
+            }
+
+            if (da[i] != 0 && db[i] != 0 && da[i] != db[i])
+            {
+                comp = false;
+            }
+        }
+
+        return !equal && (comp || aSubB || bSubA);
+    }
+
+    internal static TokenUsage MaxTokens(TokenUsage a, TokenUsage b)
+    {
+        long? reasoning = a.Reasoning.HasValue || b.Reasoning.HasValue
+            ? Math.Max(a.Reasoning ?? 0, b.Reasoning ?? 0)
+            : null;
+        return new TokenUsage(
+            FreshInput: Math.Max(a.FreshInput, b.FreshInput),
+            CacheRead: Math.Max(a.CacheRead, b.CacheRead),
+            CacheCreation: Math.Max(a.CacheCreation, b.CacheCreation),
+            Output: Math.Max(a.Output, b.Output),
+            ReportedInput: Math.Max(a.ReportedInput, b.ReportedInput),
+            ReportedOutput: Math.Max(a.ReportedOutput, b.ReportedOutput),
+            Reasoning: reasoning);
+    }
+
+    internal static CanonicalRecord PreferFullerKeeper(CanonicalRecord a, CanonicalRecord b)
+    {
+        (int nonZeroA, long magA) = CounterFullness(a.Tokens);
+        (int nonZeroB, long magB) = CounterFullness(b.Tokens);
+        if (nonZeroA != nonZeroB)
+        {
+            return nonZeroA > nonZeroB ? a : b;
+        }
+
+        if (magA != magB)
+        {
+            return magA > magB ? a : b;
+        }
+
+        return RecordTimestampMs(a) <= RecordTimestampMs(b) ? a : b;
+    }
+
+    internal static (int NonZero, long Magnitude) CounterFullness(TokenUsage tokens)
+    {
+        int nonZero = 0;
+        long mag = 0;
+        foreach (long v in TokenDims(tokens))
+        {
+            if (v > 0)
+            {
+                nonZero++;
+            }
+
+            mag += v;
+        }
+
+        return (nonZero, mag);
+    }
+
+    internal static bool IsCursorCollector(CanonicalRecord record) =>
+        !string.Equals(record.Harness, "cursor-agent", StringComparison.Ordinal)
+        && (string.Equals(record.Harness, "cursor", StringComparison.Ordinal)
+            || string.Equals(record.Source, CanonSynth.FileSourcePrefix + "cursor", StringComparison.Ordinal));
+
+    internal static bool IsCursorAgentCollector(CanonicalRecord record) =>
+        string.Equals(record.Harness, "cursor-agent", StringComparison.Ordinal)
+        || record.Source.Contains("cursor-agent", StringComparison.Ordinal);
+
+    internal static bool HasEvidencedCursorTwinShare(IReadOnlyList<CanonicalRecord> records)
+    {
+        bool cursor = false;
+        bool agent = false;
+        foreach (CanonicalRecord record in records)
+        {
+            if (IsCursorAgentCollector(record))
+            {
+                agent = true;
+            }
+            else if (IsCursorCollector(record))
+            {
+                cursor = true;
+            }
+
+            if (cursor && agent)
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    internal static bool HasCompleteCounters(CanonicalRecord record) =>
+        (record.Tokens.FreshInput > 0 || record.Tokens.ReportedInput > 0)
+        && (record.Tokens.Output > 0 || record.Tokens.ReportedOutput > 0);
+
+    internal static bool IsCompleteCursorAgentObservation(CanonicalRecord record) =>
+        IsCursorAgentCollector(record) && HasCompleteCounters(record);
+
+    internal static bool IsCompleteCursorIdeObservation(CanonicalRecord record) =>
+        IsCursorCollector(record) && HasCompleteCounters(record);
+
+    internal static string? OtelMessageIdOf(CanonicalRecord record) => RawString(record, "message.id");
+
+    internal static string? OtelRequestJoinId(CanonicalRecord record) => RawString(record, "request_id");
+
+    internal static string? FileRequestIdOf(CanonicalRecord record) => RawString(record, "requestId");
+
+    internal static string? FileNativeIdOf(CanonicalRecord record)
+    {
+        if (record.Raw is null
+            || !record.Raw.TryGetValue("provenance", out JsonElement provEl)
+            || provEl.ValueKind != JsonValueKind.Object)
+        {
+            return null;
+        }
+
+        if (provEl.TryGetProperty("recordDigest", out JsonElement digestEl) && digestEl.ValueKind != JsonValueKind.Undefined && digestEl.ValueKind != JsonValueKind.Null)
+        {
+            return null;
+        }
+
+        if (provEl.TryGetProperty("nativeRecordId", out JsonElement idEl) && idEl.ValueKind == JsonValueKind.String)
+        {
+            string? val = idEl.GetString();
+            return string.IsNullOrEmpty(val) ? null : val;
+        }
+
+        return null;
+    }
+
+    internal static string? RawString(CanonicalRecord record, string key)
+    {
+        if (record.Raw is null || !record.Raw.TryGetValue(key, out JsonElement el) || el.ValueKind != JsonValueKind.String)
+        {
+            return null;
+        }
+
+        string? val = el.GetString();
+        return string.IsNullOrEmpty(val) ? null : val;
+    }
+
+    /// <summary>
+    /// Whether an absorbed twin has anything to hand its keeper: content, or a skill listing or skill
+    /// invocations or compaction boundary the keeper would otherwise lose (<see cref="WithDonorSkills"/>).
+    /// </summary>
+    internal static bool IsDonor(CanonicalRecord record) =>
+        HasParts(record) || (record.Raw is not null && DonorKeys.Any(record.Raw.ContainsKey));
+
+    internal static bool HasParts(CanonicalRecord record) =>
+        (record.Parts is { Count: > 0 }) || record.Content.Count > 0;
+
+    internal static Dictionary<string, string> MergeDictionaries(
+        IReadOnlyDictionary<string, string> first,
+        IReadOnlyDictionary<string, string> second)
+    {
+        Dictionary<string, string> result = new(first.Count + second.Count, StringComparer.Ordinal);
+        foreach (KeyValuePair<string, string> kv in first)
+        {
+            result[kv.Key] = kv.Value;
+        }
+
+        foreach (KeyValuePair<string, string> kv in second)
+        {
+            result[kv.Key] = kv.Value;
+        }
+
+        return result;
+    }
+
+    internal static double RecordTimestampMs(CanonicalRecord record) =>
+        DateTimeOffset.TryParse(record.Timestamp, CultureInfo.InvariantCulture, DateTimeStyles.RoundtripKind, out DateTimeOffset dto)
+            ? dto.ToUnixTimeMilliseconds()
+            : double.NaN;
+
+    internal static int CompareRecordTimestamps(CanonicalRecord a, CanonicalRecord b)
+    {
+        double ta = RecordTimestampMs(a);
+        double tb = RecordTimestampMs(b);
+        bool aOk = double.IsFinite(ta);
+        bool bOk = double.IsFinite(tb);
+        if (aOk && bOk)
+        {
+            return ta.CompareTo(tb);
+        }
+
+        if (aOk)
+        {
+            return -1;
+        }
+
+        return bOk ? 1 : 0;
+    }
+}
+
+internal static class SessionProjectionHelpers
+{
+    internal static Dictionary<string, object?> SerializeContextPayload(
+        ContextAnalysis context,
+        string? contextLimitSource,
+        IReadOnlyList<CanonicalRecord> measuredTurns,
+        long? counterInput,
+        int unmeasuredTurns,
+        IReadOnlyDictionary<string, JsonElement>? totalMeasurability)
+    {
+        Dictionary<string, string> bucketMap = new(StringComparer.Ordinal)
+        {
+            ["system_prompt"] = "system_prompt",
+            ["conversation_history"] = "conversation_history",
+            ["tool_definitions"] = "tool_definitions",
+            ["tool_results"] = "tool_result_content",
+            ["response"] = "response",
+        };
+
+        bool hideLimit = string.Equals(contextLimitSource, "absent", StringComparison.Ordinal);
+        List<Dictionary<string, object?>> serializedTurns = [];
+        if (context.Measurable)
+        {
+            foreach (TurnPressure turn in context.Turns)
+            {
+                Dictionary<string, object?> entry = new(StringComparer.Ordinal)
+                {
+                    ["index"] = turn.Index,
+                    ["inputTokens"] = turn.InputTokens,
+                    ["reported_input"] = turn.InputTokens,
+                    ["buckets"] = turn.Buckets,
+                    ["toolDefinitionsByServer"] = turn.ToolDefinitionsByServer,
+                    ["builtinToolDefinitionTokens"] = turn.BuiltinToolDefinitionTokens,
+                    ["strippedInstructionBlocks"] = turn.StrippedInstructionBlocks,
+                    ["bucketedTokens"] = turn.BucketedTokens,
+                    ["residual"] = turn.Residual,
+                    ["accumulationRate"] = turn.AccumulationRate,
+                    ["freshInput"] = turn.FreshInput,
+                };
+
+                if (!hideLimit)
+                {
+                    entry["headroom"] = turn.Headroom;
+                    entry["pressure"] = turn.Pressure;
+                }
+
+                if (turn.FreshInputJump is not null)
+                {
+                    entry["freshInputJump"] = new Dictionary<string, object?>(StringComparer.Ordinal)
+                    {
+                        ["previous"] = turn.FreshInputJump.Previous,
+                        ["factor"] = double.IsFinite(turn.FreshInputJump.Factor) ? turn.FreshInputJump.Factor : null,
+                    };
+                }
+
+                if (turn.NonResidentToolDefinitions.HasValue)
+                {
+                    entry["nonResidentToolDefinitions"] = turn.NonResidentToolDefinitions.Value;
+                }
+
+                serializedTurns.Add(entry);
+            }
+        }
+
+        Dictionary<string, object?> firstBucket = BuildContextBucket(
+            context.Measurable && context.Turns.Count > 0 ? context.Turns[0] : null,
+            measuredTurns.Count > 0 ? measuredTurns[0].Tokens.ReportedInput : (counterInput ?? 0),
+            bucketMap,
+            totalMeasurability);
+        Dictionary<string, object?> lastBucket = BuildContextBucket(
+            context.Measurable && context.Turns.Count > 0 ? context.Turns[^1] : null,
+            measuredTurns.Count > 0 ? measuredTurns[^1].Tokens.ReportedInput : (counterInput ?? 0),
+            bucketMap,
+            totalMeasurability);
+
+        return new Dictionary<string, object?>(StringComparer.Ordinal)
+        {
+            ["measurable"] = context.Measurable,
+            ["reason"] = context.Reason,
+            ["contextLimit"] = hideLimit ? 0L : context.ContextLimit,
+            ["contextLimitSource"] = contextLimitSource,
+            ["turnCount"] = context.TurnCount,
+            ["turns"] = serializedTurns,
+            ["observedParts"] = context.ObservedParts,
+            ["residualTotal"] = context.ResidualTotal,
+            ["derivedCounts"] = context.DerivedCounts,
+            ["freshJumpFactor"] = context.FreshJumpFactor,
+            ["flaggedTurns"] = context.FlaggedTurns,
+            ["sessionAccumulationRate"] = context.SessionAccumulationRate,
+            ["first"] = firstBucket,
+            ["last"] = lastBucket,
+            ["unmeasuredTurns"] = unmeasuredTurns,
+        };
+    }
+
+    internal static Dictionary<string, object?> BuildContextBucket(
+        TurnPressure? turn,
+        long reportedInput,
+        Dictionary<string, string> bucketMap,
+        IReadOnlyDictionary<string, JsonElement>? totalMeasurability)
+    {
+        Dictionary<string, object?> buckets = new(StringComparer.Ordinal);
+        if (turn is not null)
+        {
+            foreach (KeyValuePair<string, long> kv in turn.Buckets)
+            {
+                buckets[kv.Key] = kv.Value;
+            }
+        }
+        else if (totalMeasurability is not null)
+        {
+            foreach (KeyValuePair<string, string> kv in bucketMap)
+            {
+                if (TryUnavailable(totalMeasurability, kv.Value, out JsonElement unavail))
+                {
+                    buckets[kv.Value] = unavail;
+                    buckets[kv.Key] = unavail;
+                }
+            }
+        }
+
+        object reported = TryUnavailable(totalMeasurability, "token_usage", out JsonElement tokUnavail)
+            ? tokUnavail
+            : reportedInput;
+
+        return new Dictionary<string, object?>(StringComparer.Ordinal)
+        {
+            ["buckets"] = buckets,
+            ["reported_input"] = reported,
+        };
+    }
+
+    internal static Dictionary<string, object?> WithoutAttributes(TimelineNode node) =>
+        new(StringComparer.Ordinal)
+        {
+            ["spanId"] = node.SpanId,
+            ["parentId"] = node.ParentId,
+            ["startMs"] = node.StartMs,
+            ["durationMs"] = node.DurationMs,
+            ["kind"] = node.Kind,
+            ["name"] = node.Name,
+            ["status"] = node.Status,
+            ["attributes"] = new Dictionary<string, object?>(StringComparer.Ordinal),
+            ["isSubagent"] = node.IsSubagent,
+            ["isAuxiliary"] = node.IsAuxiliary,
+            ["cost"] = node.Cost,
+            ["children"] = node.Children.Select(WithoutAttributes).ToList(),
+        };
+
+
+    internal static DroidSessionSplit SplitDroidSessionRecords(IReadOnlyList<CanonicalRecord> records)
+    {
+        List<CanonicalRecord> turnRecords = [];
+        List<CanonicalRecord> counterRecords = [];
+        List<CanonicalRecord> fileToolRecords = [];
+
+        foreach (CanonicalRecord record in records)
+        {
+            if (!string.Equals(record.Harness, DroidHarness, StringComparison.Ordinal))
+            {
+                continue;
+            }
+
+            if (string.Equals(record.Source, DroidPluginSource, StringComparison.Ordinal))
+            {
+                turnRecords.Add(record);
+                continue;
+            }
+
+            if (IsFileSource(record.Source))
+            {
+                counterRecords.Add(record);
+                if (string.Equals(record.Op, "tool.invoke", StringComparison.Ordinal))
+                {
+                    fileToolRecords.Add(record);
+                }
+
+                continue;
+            }
+
+            turnRecords.Add(record);
+        }
+
+        return new DroidSessionSplit(turnRecords, counterRecords, fileToolRecords);
+    }
+
+    internal static bool IsRollup(CanonicalRecord record) =>
+        string.Equals(record.Op, "agent.invoke", StringComparison.Ordinal)
+        || (string.Equals(record.Op, "llm.invoke", StringComparison.Ordinal)
+            && string.Equals(AttributeOf(record, ["gen_ai.operation.name"]), "invoke_agent", StringComparison.Ordinal));
+
+    internal static List<CanonicalRecord> TurnsOf(IReadOnlyList<CanonicalRecord> records)
+    {
+        List<CanonicalRecord> calls = records
+            .Where(static r => string.Equals(r.Op, "llm.invoke", StringComparison.Ordinal) && !IsRollup(r))
+            .ToList();
+        if (calls.Count > 0)
+        {
+            return calls;
+        }
+
+        return records
+            .Where(static r => IsRollup(r) && (CanonPricing.MeasuredInput(r.Tokens) > 0 || r.Tokens.Output > 0))
+            .ToList();
+    }
+
+    internal static bool IsSideAgentTurn(CanonicalRecord record)
+    {
+        string? agentName = AttributeOf(record, ["gen_ai.agent.name", "agent.name", "agentName"]);
+        return agentName is not null && SideAgentNames.Contains(agentName);
+    }
+
+    /// <summary>
+    /// The analysis parts of <paramref name="record"/>, each stamped with the model the record was
+    /// sent to so its text counts under that model's tokenizer (decision D17).
+    /// </summary>
+    internal static List<ContextPart> PartsOf(CanonicalRecord record)
+    {
+        string? model = ModelOf(record);
+        if (record.Parts is { Count: > 0 })
+        {
+            return record.Parts.Select(part => ContextPart.FromContentPart(part, model)).ToList();
+        }
+
+        return record.Content.Select(kv => new ContextPart(kv.Key, kv.Value, Model: model)).ToList();
+    }
+
+    /// <summary>
+    /// Re-stamps system-prompt parts carried forward from an earlier turn with the model of
+    /// <paramref name="record"/>: the carried prompt is sent again to this turn's model, so this
+    /// turn's tokenizer counts it.
+    /// </summary>
+    internal static IEnumerable<ContextPart> CarriedTo(IReadOnlyList<ContextPart> carried, CanonicalRecord record)
+    {
+        string? model = ModelOf(record);
+        return carried.Select(part => part with { Model = model });
+    }
+
+    /// <summary>The model <paramref name="record"/> was sent to, or <see langword="null"/> when it names none.</summary>
+    internal static string? ModelOf(CanonicalRecord record) => AttributeOf(record, ModelKeys);
+
+    internal static HashSet<string> CarriedBucketsOf(IReadOnlyList<CanonicalRecord> records)
+    {
+        HashSet<string> carried = new(StringComparer.Ordinal);
+        foreach (CanonicalRecord record in records)
+        {
+            foreach (ContextPart part in PartsOf(record))
+            {
+                if (part.Text.Length > 0)
+                {
+                    carried.Add(part.Part);
+                }
+            }
+        }
+
+        return carried;
+    }
+
+    internal static Dictionary<string, JsonElement>? MergeMeasurability(IReadOnlyList<CanonicalRecord> records)
+    {
+        Dictionary<string, List<JsonElement>> seen = new(StringComparer.Ordinal);
+        foreach (CanonicalRecord record in records)
+        {
+            if (record.Measurability is null)
+            {
+                continue;
+            }
+
+            foreach (KeyValuePair<string, JsonElement> kv in record.Measurability)
+            {
+                if (!seen.TryGetValue(kv.Key, out List<JsonElement>? list))
+                {
+                    list = [];
+                    seen[kv.Key] = list;
+                }
+
+                list.Add(kv.Value);
+            }
+        }
+
+        if (seen.Count == 0)
+        {
+            return null;
+        }
+
+        Dictionary<string, JsonElement> merged = new(StringComparer.Ordinal);
+        foreach (KeyValuePair<string, List<JsonElement>> kv in seen)
+        {
+            JsonElement? measured = null;
+            JsonElement? derived = null;
+            JsonElement? notMeasurable = null;
+            foreach (JsonElement el in kv.Value)
+            {
+                if (el.ValueKind == JsonValueKind.String)
+                {
+                    string? s = el.GetString();
+                    if (string.Equals(s, "measured", StringComparison.Ordinal))
+                    {
+                        measured ??= el.Clone();
+                    }
+                    else if (string.Equals(s, "derived", StringComparison.Ordinal))
+                    {
+                        derived ??= el.Clone();
+                    }
+                }
+                else if (el.ValueKind == JsonValueKind.Object
+                         && el.TryGetProperty("availability", out JsonElement avail)
+                         && string.Equals(avail.GetString(), "not_measurable", StringComparison.Ordinal))
+                {
+                    notMeasurable ??= el.Clone();
+                }
+            }
+
+            merged[kv.Key] = measured ?? derived ?? notMeasurable
+                ?? JsonSerializer.Deserialize<JsonElement>("{\"availability\":\"not_measurable\",\"reason\":\"The source did not provide this metric.\"}");
+        }
+
+        return merged;
+    }
+
+    internal static IReadOnlyDictionary<string, JsonElement>? CompositionDeclaration(
+        Dictionary<string, JsonElement>? measurability,
+        HashSet<string> carriedBuckets)
+    {
+        if (measurability is null)
+        {
+            return null;
+        }
+
+        Dictionary<string, JsonElement> adjusted = new(measurability, StringComparer.Ordinal);
+        foreach (string key in carriedBuckets)
+        {
+            if (adjusted.TryGetValue(key, out JsonElement el)
+                && el.ValueKind == JsonValueKind.Object
+                && el.TryGetProperty("availability", out JsonElement avail)
+                && string.Equals(avail.GetString(), "not_measurable", StringComparison.Ordinal))
+            {
+                adjusted.Remove(key);
+            }
+        }
+
+        return adjusted;
+    }
+
+    internal static List<ToolDefinition> ToolDefinitionsOf(IReadOnlyList<CanonicalRecord> records, TextTokenCounter countTokens)
+    {
+        Dictionary<string, (string? Server, TokenCount Count, int TurnsResident)> byName = new(StringComparer.Ordinal);
+        foreach (CanonicalRecord record in records)
+        {
+            string? model = ModelOf(record);
+            List<(string Text, string? Server, bool Catalogue)> rawDefs = [];
+            if (record.Parts is { Count: > 0 })
+            {
+                foreach (ContentPart p in record.Parts)
+                {
+                    bool isDefs = string.Equals(p.Part, "tool_definitions", StringComparison.Ordinal);
+                    bool isDef = string.Equals(p.Part, "tool_definition", StringComparison.Ordinal);
+                    if (!isDefs && !isDef)
+                    {
+                        continue;
+                    }
+
+                    rawDefs.Add((p.Text, p.Server, isDefs));
+                }
+            }
+            else
+            {
+                if (record.Content.TryGetValue("tool_definitions", out string? td))
+                {
+                    rawDefs.Add((td, null, false));
+                }
+
+                if (record.Content.TryGetValue("tool_definition", out string? t))
+                {
+                    rawDefs.Add((t, null, false));
+                }
+            }
+
+            foreach ((string text, string? server, bool catalogue) in rawDefs)
+            {
+                if (!catalogue || string.IsNullOrWhiteSpace(text))
+                {
+                    continue;
+                }
+
+                foreach ((string name, string itemText) in SplitToolDefinitionsText(text))
+                {
+                    if (string.IsNullOrWhiteSpace(name))
+                    {
+                        continue;
+                    }
+
+                    string trimmed = name.Trim();
+                    if (!byName.TryGetValue(trimmed, out (string? Server, TokenCount Count, int TurnsResident) existing))
+                    {
+                        byName[trimmed] = (server, countTokens(itemText, model), 1);
+                    }
+                    else
+                    {
+                        byName[trimmed] = existing with { TurnsResident = existing.TurnsResident + 1 };
+                    }
+                }
+            }
+        }
+
+        return byName.Select(kv => new ToolDefinition(kv.Key, kv.Value.Server, kv.Value.Count.Count, kv.Value.TurnsResident, kv.Value.Count.Tokenizer, kv.Value.Count.IsModelOwn)).ToList();
+    }
+
+    internal static List<(string Name, string Text)> SplitToolDefinitionsText(string text)
+    {
+        if (string.IsNullOrWhiteSpace(text))
+        {
+            return [];
+        }
+
+        try
+        {
+            using JsonDocument doc = JsonDocument.Parse(text);
+            JsonElement root = doc.RootElement;
+            IEnumerable<JsonElement> items = root.ValueKind == JsonValueKind.Array
+                ? root.EnumerateArray()
+                : root.ValueKind == JsonValueKind.Object && root.TryGetProperty("tools", out JsonElement toolsEl) && toolsEl.ValueKind == JsonValueKind.Array
+                    ? toolsEl.EnumerateArray()
+                    : [root];
+
+            List<(string Name, string Text)> result = [];
+            foreach (JsonElement item in items)
+            {
+                if (item.ValueKind == JsonValueKind.String)
+                {
+                    string? s = item.GetString();
+                    if (!string.IsNullOrWhiteSpace(s))
+                    {
+                        result.Add((s.Trim(), s));
+                    }
+                }
+                else if (item.ValueKind == JsonValueKind.Object)
+                {
+                    string itemText = item.GetRawText();
+                    string name = string.Empty;
+                    if (item.TryGetProperty("name", out JsonElement n) && n.ValueKind == JsonValueKind.String && !string.IsNullOrWhiteSpace(n.GetString()))
+                    {
+                        name = n.GetString()!.Trim();
+                    }
+                    else if (item.TryGetProperty("function", out JsonElement fn) && fn.ValueKind == JsonValueKind.Object
+                             && fn.TryGetProperty("name", out JsonElement fnName) && fnName.ValueKind == JsonValueKind.String && !string.IsNullOrWhiteSpace(fnName.GetString()))
+                    {
+                        name = fnName.GetString()!.Trim();
+                    }
+
+                    result.Add((name, itemText));
+                }
+            }
+
+            return result;
+        }
+        catch (JsonException)
+        {
+            return [(string.Empty, text)];
+        }
+    }
+
+    internal static List<string> InvocationsOf(IReadOnlyList<CanonicalRecord> records)
+    {
+        List<string> result = [];
+        foreach (CanonicalRecord record in records)
+        {
+            if (!string.Equals(record.Op, "tool.invoke", StringComparison.Ordinal))
+            {
+                continue;
+            }
+
+            string name = (AttributeOf(record, ["gen_ai.tool.name", "tool.name", "tool_name"]) ?? record.Name).Trim();
+            if (name.Length > 0 && !string.Equals(name, "tool.invoke", StringComparison.Ordinal))
+            {
+                result.Add(name);
+            }
+        }
+
+        return result;
+    }
+
+    internal static bool IsToolError(CanonicalRecord record)
+    {
+        if (string.Equals(record.Status, "error", StringComparison.Ordinal))
+        {
+            return true;
+        }
+
+        if (string.Equals(AttributeOf(record, ["gen_ai.tool.status", "status"]), "error", StringComparison.Ordinal))
+        {
+            return true;
+        }
+
+        if (record.Raw is not null)
+        {
+            if (record.Raw.TryGetValue("gen_ai.tool.status", out JsonElement st) && st.ValueKind == JsonValueKind.String && string.Equals(st.GetString(), "error", StringComparison.Ordinal))
+            {
+                return true;
+            }
+
+            if (record.Raw.TryGetValue("is_error", out JsonElement ie) && ie.ValueKind == JsonValueKind.True)
+            {
+                return true;
+            }
+
+            if (record.Raw.TryGetValue("isError", out JsonElement ie2) && ie2.ValueKind == JsonValueKind.True)
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    internal static List<string> ModelsOf(IReadOnlyList<CanonicalRecord> records)
+    {
+        HashSet<string> seen = new(StringComparer.Ordinal);
+        List<string> list = [];
+        foreach (CanonicalRecord record in records)
+        {
+            string? model = AttributeOf(record, ModelKeys);
+            if (model is not null && seen.Add(model))
+            {
+                list.Add(model);
+            }
+        }
+
+        return list;
+    }
+
+    internal static (string Started, string Ended) TimestampBounds(IReadOnlyList<CanonicalRecord> records)
+    {
+        string? minTs = null;
+        string? maxTs = null;
+        double minMs = double.PositiveInfinity;
+        double maxMs = double.NegativeInfinity;
+
+        foreach (CanonicalRecord record in records)
+        {
+            double ms = RecordTimestampMs(record);
+            if (!double.IsFinite(ms))
+            {
+                continue;
+            }
+
+            if (minTs is null || ms < minMs)
+            {
+                minTs = record.Timestamp;
+                minMs = ms;
+            }
+
+            if (maxTs is null || ms >= maxMs)
+            {
+                maxTs = record.Timestamp;
+                maxMs = ms;
+            }
+        }
+
+        return (minTs ?? records[0].Timestamp, maxTs ?? records[^1].Timestamp);
+    }
+
+    internal static string SessionLabelOf(
+        IReadOnlyList<CanonicalRecord> records,
+        string fallbackNamed,
+        string harness,
+        string sessionId)
+    {
+        string? bestLabel = null;
+        double bestTime = double.NegativeInfinity;
+        foreach (CanonicalRecord record in records)
+        {
+            string? label = AttributeOf(record, [SessionLabelKey])?.Trim();
+            if (string.IsNullOrEmpty(label))
+            {
+                continue;
+            }
+
+            double time = RecordTimestampMs(record);
+            bool later = bestLabel is null
+                || (double.IsFinite(time) && (!double.IsFinite(bestTime) || time >= bestTime))
+                || (!double.IsFinite(time) && !double.IsFinite(bestTime));
+            if (later)
+            {
+                bestLabel = label;
+                bestTime = time;
+            }
+        }
+
+        return bestLabel ?? CanonPricing.FormatSessionTitle(new SessionTitleInput(
+            Label: fallbackNamed,
+            Harness: harness,
+            SessionId: sessionId));
+    }
+
+    internal static Dictionary<string, List<CanonicalRecord>> TurnsByRequestRoot(
+        IReadOnlyList<CanonicalRecord> records,
+        IReadOnlyList<CanonicalRecord> turnRecords)
+    {
+        Dictionary<string, CanonicalRecord> bySpan = new(StringComparer.Ordinal);
+        foreach (CanonicalRecord r in records)
+        {
+            bySpan.TryAdd(r.SpanId, r);
+        }
+
+        Dictionary<string, string?> rootOf = new(StringComparer.Ordinal);
+        string? Resolve(CanonicalRecord start)
+        {
+            List<string> path = [];
+            HashSet<string> onPath = new(StringComparer.Ordinal);
+            string? root = null;
+            CanonicalRecord? cursor = start;
+            while (cursor is not null)
+            {
+                if (rootOf.TryGetValue(cursor.SpanId, out string? known))
+                {
+                    root = known;
+                    break;
+                }
+
+                if (!onPath.Add(cursor.SpanId))
+                {
+                    break;
+                }
+
+                path.Add(cursor.SpanId);
+                if (cursor.ParentSpanId is null)
+                {
+                    root = cursor.SpanId;
+                    break;
+                }
+
+                bySpan.TryGetValue(cursor.ParentSpanId, out cursor);
+            }
+
+            foreach (string id in path)
+            {
+                rootOf[id] = root;
+            }
+
+            return root;
+        }
+
+        Dictionary<string, List<CanonicalRecord>> owned = new(StringComparer.Ordinal);
+        foreach (CanonicalRecord turn in turnRecords)
+        {
+            string? root = Resolve(turn);
+            if (root is null)
+            {
+                continue;
+            }
+
+            if (!owned.TryGetValue(root, out List<CanonicalRecord>? list))
+            {
+                list = [];
+                owned[root] = list;
+            }
+
+            list.Add(turn);
+        }
+
+        return owned;
+    }
+
+    internal static bool HasNesting(IReadOnlyList<CanonicalRecord> records)
+    {
+        HashSet<string> ids = new(records.Select(static r => r.SpanId), StringComparer.Ordinal);
+        return records.Any(r => r.ParentSpanId is not null && !string.Equals(r.ParentSpanId, r.SpanId, StringComparison.Ordinal) && ids.Contains(r.ParentSpanId));
+    }
+
+    internal static string? PromptPreviewOf(CanonicalRecord record)
+    {
+        string? history = null;
+        if (record.Parts is { Count: > 0 })
+        {
+            history = record.Parts
+                .Where(static p => string.Equals(p.Part, "conversation_history", StringComparison.Ordinal) && !string.IsNullOrWhiteSpace(p.Text))
+                .Select(static p => p.Text)
+                .FirstOrDefault();
+        }
+        else if (record.Content.TryGetValue("conversation_history", out string? flat) && !string.IsNullOrWhiteSpace(flat))
+        {
+            history = flat;
+        }
+
+        if (history is null)
+        {
+            return null;
+        }
+
+        if (history.Length <= PromptPreviewLength)
+        {
+            return history;
+        }
+
+        int end = char.IsHighSurrogate(history[PromptPreviewLength - 1]) ? PromptPreviewLength - 1 : PromptPreviewLength;
+        return history[..end];
+    }
+
+    internal static Dictionary<string, List<CanonicalRecord>> GroupByCanonicalHarness(IReadOnlyList<CanonicalRecord> records)
+    {
+        Dictionary<string, List<CanonicalRecord>> groups = new(StringComparer.Ordinal);
+        foreach (CanonicalRecord record in records)
+        {
+            string? id = CanonPricing.CanonicalHarnessId(record.Harness);
+            if (id is null)
+            {
+                continue;
+            }
+
+            if (!groups.TryGetValue(id, out List<CanonicalRecord>? list))
+            {
+                list = [];
+                groups[id] = list;
+            }
+
+            list.Add(record);
+        }
+
+        return groups;
+    }
+
+    internal static bool HasEvidence(IReadOnlyList<CanonicalRecord> records) =>
+        TurnsOf(records).Any(static r =>
+            !string.Equals(CanonPricing.NormalizeHarnessName(r.Harness), "unattributed", StringComparison.Ordinal)
+            || CanonPricing.MeasuredInput(r.Tokens) > 0
+            || r.Tokens.Output > 0
+            || (r.Parts is { Count: > 0 } && r.Parts.Any(static p => p.Text.Length > 0))
+            || ((r.Parts is null || r.Parts.Count == 0) && r.Content.Count > 0));
+
+    internal static bool IsInvokeAgentSpan(CanonicalRecord record) =>
+        string.Equals(record.Op, "agent.invoke", StringComparison.Ordinal)
+        || string.Equals(AttributeOf(record, ["gen_ai.operation.name"]), "invoke_agent", StringComparison.Ordinal)
+        || InvokeAgentNameRegex().IsMatch(record.Name)
+        || string.Equals(AttributeOf(record, ["gen_ai.tool.name", "tool.name", "tool_name"]), "invoke_agent", StringComparison.Ordinal);
+
+    internal static List<CanonicalRecord> CollectDescendantRecords(string rootSpanId, IReadOnlyList<CanonicalRecord> records)
+    {
+        Dictionary<string, List<CanonicalRecord>> byParent = new(StringComparer.Ordinal);
+        foreach (CanonicalRecord r in records)
+        {
+            if (string.IsNullOrEmpty(r.ParentSpanId))
+            {
+                continue;
+            }
+
+            if (!byParent.TryGetValue(r.ParentSpanId, out List<CanonicalRecord>? list))
+            {
+                list = [];
+                byParent[r.ParentSpanId] = list;
+            }
+
+            list.Add(r);
+        }
+
+        List<CanonicalRecord> result = [];
+        Queue<string> queue = new();
+        HashSet<string> seen = new(StringComparer.Ordinal) { rootSpanId };
+        queue.Enqueue(rootSpanId);
+
+        while (queue.Count > 0)
+        {
+            string current = queue.Dequeue();
+            if (!byParent.TryGetValue(current, out List<CanonicalRecord>? children))
+            {
+                continue;
+            }
+
+            foreach (CanonicalRecord child in children)
+            {
+                if (!seen.Add(child.SpanId))
+                {
+                    continue;
+                }
+
+                result.Add(child);
+                if (!IsInvokeAgentSpan(child))
+                {
+                    queue.Enqueue(child.SpanId);
+                }
+            }
+        }
+
+        return result;
+    }
+
+    internal static string? ExtractAgentName(CanonicalRecord invokeSpan)
+    {
+        string? attr = AttributeOf(invokeSpan, AgentNameKeys)?.Trim();
+        if (!string.IsNullOrEmpty(attr))
+        {
+            return attr;
+        }
+
+        const string prefix = "invoke_agent ";
+        if (invokeSpan.Name.StartsWith(prefix, StringComparison.Ordinal))
+        {
+            string candidate = invokeSpan.Name[prefix.Length..].Trim();
+            if (candidate.Length > 0)
+            {
+                return candidate;
+            }
+        }
+
+        return null;
+    }
+
+    internal static string? ExtractTaskSummary(IReadOnlyList<CanonicalRecord> subagentRecords)
+    {
+        foreach (CanonicalRecord r in subagentRecords)
+        {
+            string? promptAttr = AttributeOf(r, ["gen_ai.prompt", "prompt", "task.description"]);
+            if (!string.IsNullOrWhiteSpace(promptAttr))
+            {
+                return promptAttr.Trim();
+            }
+
+            string? preview = PromptPreviewOf(r);
+            if (!string.IsNullOrWhiteSpace(preview))
+            {
+                return preview;
+            }
+        }
+
+        return null;
+    }
+
+    internal static bool IsClaudeHarness(string harness)
+    {
+        string norm = CanonPricing.NormalizeHarnessName(harness);
+        return string.Equals(norm, "claude", StringComparison.Ordinal)
+            || string.Equals(norm, "claude-code", StringComparison.Ordinal)
+            || string.Equals(CanonPricing.SurveyFamily(harness), "claude-code", StringComparison.Ordinal);
+    }
+
+    internal static string? ExtractClaudeAgentId(CanonicalRecord record)
+    {
+        string? fromAttr = AttributeOf(record, ["agent_id", "agentId", "subagent_id", "subagentId", "agent.id", "gen_ai.agent.id"])?.Trim();
+        if (!string.IsNullOrEmpty(fromAttr))
+        {
+            return fromAttr;
+        }
+
+        return record.SpanId.StartsWith("agent-", StringComparison.Ordinal) ? record.SpanId : null;
+    }
+
+    internal static string ClaudeSubagentSessionId(string parentSessionId, string agentId)
+    {
+        string trimmed = agentId.Trim();
+        string bare = trimmed.StartsWith("agent-", StringComparison.Ordinal) ? trimmed["agent-".Length..] : trimmed;
+        return $"{parentSessionId}#agent-{bare}";
+    }
+
+    internal static string? ExtractClaudeAgentName(IReadOnlyList<CanonicalRecord> records)
+    {
+        foreach (CanonicalRecord record in records)
+        {
+            string? attr = AttributeOf(record, ["agent_type", "agentType", "gen_ai.agent.name", "gen_ai.agent.type", "agent_name", "agentName", "agent.name", "agent"])?.Trim();
+            if (!string.IsNullOrEmpty(attr))
+            {
+                return attr;
+            }
+        }
+
+        foreach (CanonicalRecord record in records)
+        {
+            string? name = ExtractAgentName(record);
+            if (!string.IsNullOrEmpty(name))
+            {
+                return name;
+            }
+        }
+
+        return null;
+    }
+
+    internal static string? ExtractClaudeDescription(IReadOnlyList<CanonicalRecord> records)
+    {
+        foreach (CanonicalRecord record in records)
+        {
+            string? attr = AttributeOf(record, ["description", "task_description", "taskDescription", "task", "gen_ai.agent.description", "summary", "prompt"])?.Trim();
+            if (!string.IsNullOrEmpty(attr))
+            {
+                return attr;
+            }
+        }
+
+        return ExtractTaskSummary(records);
+    }
+
+    internal static string? AttributeOf(CanonicalRecord record, IReadOnlyList<string> keys)
+    {
+        if (record.Raw is null)
+        {
+            return null;
+        }
+
+        foreach (string key in keys)
+        {
+            if (!record.Raw.TryGetValue(key, out JsonElement el))
+            {
+                continue;
+            }
+
+            if (el.ValueKind == JsonValueKind.String)
+            {
+                string? s = el.GetString();
+                if (!string.IsNullOrEmpty(s))
+                {
+                    return s;
+                }
+            }
+            else if (el.ValueKind == JsonValueKind.Number && el.TryGetDouble(out double d) && double.IsFinite(d))
+            {
+                return d.ToString(CultureInfo.InvariantCulture);
+            }
+        }
+
+        return null;
+    }
+
+    internal static bool IsNotMeasurableElement(IReadOnlyDictionary<string, JsonElement>? measurability, string key) =>
+        measurability is not null
+        && measurability.TryGetValue(key, out JsonElement el)
+        && el.ValueKind == JsonValueKind.Object
+        && el.TryGetProperty("availability", out JsonElement avail)
+        && string.Equals(avail.GetString(), "not_measurable", StringComparison.Ordinal);
+
+    internal static bool IsMeasuredOrDerived(IReadOnlyDictionary<string, JsonElement>? measurability, string key) =>
+        measurability is not null
+        && measurability.TryGetValue(key, out JsonElement el)
+        && el.ValueKind == JsonValueKind.String
+        && (string.Equals(el.GetString(), "measured", StringComparison.Ordinal)
+            || string.Equals(el.GetString(), "derived", StringComparison.Ordinal));
+
+    internal static bool TryUnavailable(
+        IReadOnlyDictionary<string, JsonElement>? measurability,
+        string key,
+        out JsonElement element)
+    {
+        if (measurability is not null
+            && measurability.TryGetValue(key, out JsonElement el)
+            && el.ValueKind == JsonValueKind.Object
+            && el.TryGetProperty("availability", out JsonElement avail)
+            && string.Equals(avail.GetString(), "not_measurable", StringComparison.Ordinal))
+        {
+            element = el;
+            return true;
+        }
+
+        element = default;
+        return false;
+    }
+
+    internal static object UnavailableOrValue(
+        IReadOnlyDictionary<string, JsonElement>? measurability,
+        IReadOnlyList<string> keys,
+        long value)
+    {
+        foreach (string key in keys)
+        {
+            if (TryUnavailable(measurability, key, out JsonElement el))
+            {
+                return el;
+            }
+        }
+
+        return value;
+    }
+
+}
+
+internal static class StoredProjectionHelpers
+{
+    internal static IEnumerable<string> PriorIdsOf(
+        string key,
+        IReadOnlyList<string> harnessIds,
+        SessionIdentities identities)
+    {
+        foreach (string harness in harnessIds)
+        {
+            string? id = identities.IdFor(key, harness);
+            if (id is not null)
+            {
+                yield return id;
+            }
+        }
+    }
+
+
+    internal static StoredFinding ToStoredFinding(Finding finding)
     {
         StoredCompactionHazard? hazard = null;
         if (finding.Payload is not null
@@ -3285,7 +3738,7 @@ public partial class CanonSessionProjectorEngine
     /// none. A zero fresh class carries no evidence the harness measured it (the canonical record holds
     /// unreported classes as zero), so it is not-measured rather than a measured zero (D15).
     /// </summary>
-    private static long? MeasuredFreshInput(TokenUsage tokens) => tokens.FreshInput > 0 ? tokens.FreshInput : null;
+    internal static long? MeasuredFreshInput(TokenUsage tokens) => tokens.FreshInput > 0 ? tokens.FreshInput : null;
 
     /// <summary>
     /// Rebuilds one typed <see cref="StoredSessionProjection"/> from a session's deduplicated
@@ -3297,7 +3750,7 @@ public partial class CanonSessionProjectorEngine
     /// <param name="countTokens">Counts a text with the tokenizer of the model it was sent to.</param>
     /// <param name="title">Session title from the relational <c>session</c> row, when present.</param>
     /// <returns>Projected typed session row.</returns>
-    private static StoredSessionProjection BuildStoredSessionProjection(
+    internal static StoredSessionProjection BuildStoredSessionProjection(
         string sessionId,
         IReadOnlyList<CanonicalRecord> records,
         TextTokenCounter countTokens,
@@ -3390,7 +3843,7 @@ public partial class CanonSessionProjectorEngine
             TimelineAuxiliarySpanIds: TimelineAuxiliarySpanIdsOf(timeline));
     }
 
-    private static List<ContextTurn> BuildStandardContextTurns(IReadOnlyList<CanonicalRecord> measuredTurns)
+    internal static List<ContextTurn> BuildStandardContextTurns(IReadOnlyList<CanonicalRecord> measuredTurns)
     {
         List<ContextTurn> contextTurns = new(measuredTurns.Count);
         List<ContextPart> lastSystem = [];
@@ -3413,7 +3866,7 @@ public partial class CanonSessionProjectorEngine
         return contextTurns;
     }
 
-    private static List<ContextTurn> BuildClaudeContextTurns(
+    internal static List<ContextTurn> BuildClaudeContextTurns(
         IReadOnlyList<CanonicalRecord> contextRecords,
         TextTokenCounter countTokens)
     {
@@ -3480,7 +3933,7 @@ public partial class CanonSessionProjectorEngine
         return contextTurns;
     }
 
-    private static (List<ContextPart> OwnInputParts, List<ContextPart> OwnAssistantParts) SplitClaudeTurnParts(CanonicalRecord record)
+    internal static (List<ContextPart> OwnInputParts, List<ContextPart> OwnAssistantParts) SplitClaudeTurnParts(CanonicalRecord record)
     {
         string? model = ModelOf(record);
         List<ContextPart> ownInputParts = [];
@@ -3515,7 +3968,7 @@ public partial class CanonSessionProjectorEngine
         return (ownInputParts, ownAssistantParts);
     }
 
-    private static void AccumulateClaudeSummaryParts(
+    internal static void AccumulateClaudeSummaryParts(
         Dictionary<CumulativeSummaryKey, CumulativeBucketEntry> cumulative,
         IReadOnlyList<ContextPart> parts)
     {
@@ -3559,12 +4012,12 @@ public partial class CanonSessionProjectorEngine
         }
     }
 
-    private static bool HasCompactBoundary(CanonicalRecord record) =>
+    internal static bool HasCompactBoundary(CanonicalRecord record) =>
         record.Raw is not null
         && record.Raw.TryGetValue(CanonRecordHydration.CompactBoundaryRawKey, out JsonElement element)
         && element.ValueKind == JsonValueKind.True;
 
-    private static string? TryExtractSubagentParentId(string? sessionKey)
+    internal static string? TryExtractSubagentParentId(string? sessionKey)
     {
         if (string.IsNullOrWhiteSpace(sessionKey))
         {
@@ -3581,12 +4034,12 @@ public partial class CanonSessionProjectorEngine
         return string.IsNullOrWhiteSpace(parent) ? null : parent;
     }
 
-    private readonly record struct CumulativeSummaryKey(
+    internal readonly record struct CumulativeSummaryKey(
         string Part,
         string? Tokenizer,
         bool? TokenizerIsModelOwn);
 
-    private sealed class CumulativeBucketEntry
+    internal sealed class CumulativeBucketEntry
     {
         public long Tokens { get; set; }
 
@@ -3601,7 +4054,7 @@ public partial class CanonSessionProjectorEngine
         public bool HasStrippedCount { get; set; }
     }
 
-    private static StoredSessionContext ToStoredContext(ContextAnalysis context)
+    internal static StoredSessionContext ToStoredContext(ContextAnalysis context)
     {
         List<StoredSessionContextTurn> turns = new(context.Turns.Count);
         foreach (TurnPressure turn in context.Turns)
@@ -3650,7 +4103,7 @@ public partial class CanonSessionProjectorEngine
             Turns: turns);
     }
 
-    private static StoredSessionSchema ToStoredSchema(SchemaCostAnalysis schema)
+    internal static StoredSessionSchema ToStoredSchema(SchemaCostAnalysis schema)
     {
         List<StoredSchemaRankedTool> rankedTools = new(schema.Ranked.Count);
         for (int position = 0; position < schema.Ranked.Count; position++)
@@ -3672,7 +4125,7 @@ public partial class CanonSessionProjectorEngine
             UnusedTokenResidencies: schema.UnusedRange?.TokenResidencies);
     }
 
-    private static IReadOnlyList<string> TimelineSubagentSpanIdsOf(TimelineNode root)
+    internal static IReadOnlyList<string> TimelineSubagentSpanIdsOf(TimelineNode root)
     {
         List<string> spanIds = [];
         void Walk(TimelineNode node)
@@ -3692,7 +4145,7 @@ public partial class CanonSessionProjectorEngine
         return spanIds;
     }
 
-    private static IReadOnlyList<string> TimelineAuxiliarySpanIdsOf(TimelineNode root)
+    internal static IReadOnlyList<string> TimelineAuxiliarySpanIdsOf(TimelineNode root)
     {
         List<string> spanIds = [];
         void Walk(TimelineNode node)
@@ -3712,7 +4165,7 @@ public partial class CanonSessionProjectorEngine
         return spanIds;
     }
 
-    private static bool IsSyntheticTimelineId(string spanId) => spanId.StartsWith('(');
+    internal static bool IsSyntheticTimelineId(string spanId) => spanId.StartsWith('(');
 
     /// <summary>
     /// Collects the typed tool definitions carried on hydrated records: each relational
@@ -3721,7 +4174,7 @@ public partial class CanonSessionProjectorEngine
     /// </summary>
     /// <param name="records">Hydrated session records.</param>
     /// <returns>Distinct tool definitions with residency counts.</returns>
-    private static List<ToolDefinition> TypedToolDefinitionsOf(IReadOnlyList<CanonicalRecord> records)
+    internal static List<ToolDefinition> TypedToolDefinitionsOf(IReadOnlyList<CanonicalRecord> records)
     {
         Dictionary<string, (string? Server, long Tokens, int TurnsResident)> byName = new(StringComparer.Ordinal);
         foreach (CanonicalRecord record in records)
@@ -3752,99 +4205,5 @@ public partial class CanonSessionProjectorEngine
         }
 
         return [.. byName.Select(static entry => new ToolDefinition(entry.Key, entry.Value.Server, entry.Value.Tokens, entry.Value.TurnsResident))];
-    }
-
-    private sealed record DroidSessionSplit(
-        List<CanonicalRecord> TurnRecords,
-        List<CanonicalRecord> CounterRecords,
-        List<CanonicalRecord> FileToolRecords);
-
-    private class SessionIdentities
-    {
-        private readonly Dictionary<string, Dictionary<string, string>> ids = new(StringComparer.Ordinal);
-        private readonly HashSet<string> assignedSessionIds = new(StringComparer.Ordinal);
-
-        public SessionIdentities(IEnumerable<(string Key, string Harness)> pairs)
-        {
-            Dictionary<string, HashSet<string>> harnessesByKey = new(StringComparer.Ordinal);
-            foreach ((string key, string rawHarness) in pairs)
-            {
-                string? harness = CanonPricing.CanonicalHarnessId(rawHarness);
-                if (harness is null)
-                {
-                    continue;
-                }
-
-                if (!harnessesByKey.TryGetValue(key, out HashSet<string>? harnesses))
-                {
-                    harnesses = new HashSet<string>(StringComparer.Ordinal);
-                    harnessesByKey[key] = harnesses;
-                }
-
-                harnesses.Add(harness);
-            }
-
-            List<(string Key, List<string> Harnesses)> split = [];
-            foreach (KeyValuePair<string, HashSet<string>> kv in harnessesByKey)
-            {
-                if (kv.Value.Count == 1)
-                {
-                    Assign(kv.Key, kv.Value.First(), kv.Key);
-                }
-                else
-                {
-                    split.Add((kv.Key, kv.Value.OrderBy(static h => h, StringComparer.Ordinal).ToList()));
-                }
-            }
-
-            split.Sort(static (a, b) => string.CompareOrdinal(a.Key, b.Key));
-            foreach ((string key, List<string> harnesses) in split)
-            {
-                foreach (string harness in harnesses)
-                {
-                    Claim(key, harness);
-                }
-            }
-        }
-
-        public string? IdFor(string key, string harness)
-        {
-            string canonical = CanonPricing.NormalizeHarnessName(harness);
-            return ids.TryGetValue(key, out Dictionary<string, string>? byHarness)
-                && byHarness.TryGetValue(canonical, out string? id)
-                ? id
-                : null;
-        }
-
-        public string Claim(string key, string harness)
-        {
-            string canonical = CanonPricing.NormalizeHarnessName(harness);
-            string? existing = IdFor(key, canonical);
-            if (existing is not null)
-            {
-                return existing;
-            }
-
-            string candidate = $"{canonical}:{key}";
-            while (assignedSessionIds.Contains(candidate))
-            {
-                candidate = $"{canonical}:{candidate}";
-            }
-
-            Assign(key, canonical, candidate);
-            return candidate;
-        }
-
-        private void Assign(string key, string harness, string id)
-        {
-            if (!ids.TryGetValue(key, out Dictionary<string, string>? byHarness))
-            {
-                byHarness = new Dictionary<string, string>(StringComparer.Ordinal);
-                ids[key] = byHarness;
-            }
-
-            byHarness[harness] = id;
-            assignedSessionIds.Add(id);
-        }
     }
 }

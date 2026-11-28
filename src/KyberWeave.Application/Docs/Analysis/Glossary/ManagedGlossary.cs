@@ -262,21 +262,76 @@ public class ManagedGlossary : IManagedGlossary
         ParsedSection section = ParseSection(term, sectionLines, 0, sectionLines.Count);
         if (!section.HasTable)
         {
-            if (proposals.Count == 0) return sectionLines;
-            if (sectionLines.Count > 0 && sectionLines[^1].Length != 0) sectionLines.Add(string.Empty);
-            sectionLines.Add(Header);
-            sectionLines.Add(Separator);
-            foreach (GlossaryProposal proposal in proposals)
-            {
-                string id = SenseId(proposal);
-                sectionLines.Add(RowMarkdown(id, proposal));
-                sectionLines.Add(string.Empty);
-                sectionLines.AddRange(EvidenceLines(id, proposal));
-            }
-
-            return sectionLines;
+            return AddNewTable(sectionLines, proposals);
         }
 
+        int insertAt = section.Rows.Count > 0
+            ? section.Rows.Max(row => row.LineIndex) + 1
+            : section.TableSeparatorLine + 1;
+        (HashSet<int> removals, Dictionary<int, string> replacements, List<string> evidenceToAppend, string[] newRows) =
+            PlanRowChanges(section, proposals);
+
+        List<string> merged = new List<string>();
+        for (int index = 0; index < sectionLines.Count; index++)
+        {
+            if (index == insertAt) merged.AddRange(newRows);
+            if (removals.Contains(index)) continue;
+            merged.Add(replacements.TryGetValue(index, out string? replacement)
+                ? replacement
+                : sectionLines[index]);
+        }
+
+        if (insertAt == sectionLines.Count) merged.AddRange(newRows);
+        if (evidenceToAppend.Count > 0)
+        {
+            if (merged.Count > 0 && merged[^1].Length != 0) merged.Add(string.Empty);
+            foreach (IReadOnlyList<string> evidence in ChunkEvidence(evidenceToAppend))
+            {
+                merged.AddRange(evidence);
+                merged.Add(string.Empty);
+            }
+
+            if (merged.Count > 0 && merged[^1].Length == 0) merged.RemoveAt(merged.Count - 1);
+        }
+
+        return merged;
+    }
+
+    /// <summary>
+    /// A section without a sense table: the proposals become the whole table, or the section
+    /// stands alone when nothing proposes one.
+    /// </summary>
+    private static List<string> AddNewTable(
+        List<string> sectionLines,
+        IReadOnlyList<GlossaryProposal> proposals)
+    {
+        if (proposals.Count == 0) return sectionLines;
+        if (sectionLines.Count > 0 && sectionLines[^1].Length != 0) sectionLines.Add(string.Empty);
+        sectionLines.Add(Header);
+        sectionLines.Add(Separator);
+        foreach (GlossaryProposal proposal in proposals)
+        {
+            string id = SenseId(proposal);
+            sectionLines.Add(RowMarkdown(id, proposal));
+            sectionLines.Add(string.Empty);
+            sectionLines.AddRange(EvidenceLines(id, proposal));
+        }
+
+        return sectionLines;
+    }
+
+    /// <summary>
+    /// The row-level changes a section with a table receives: which rows to replace or remove,
+    /// which evidence to append, and the rows to add for the proposals no existing row matches.
+    /// </summary>
+    private static (
+        HashSet<int> Removals,
+        Dictionary<int, string> Replacements,
+        List<string> EvidenceToAppend,
+        string[] NewRows) PlanRowChanges(
+        ParsedSection section,
+        IReadOnlyList<GlossaryProposal> proposals)
+    {
         HashSet<int> removals = new HashSet<int>();
         Dictionary<int, string> replacements = new Dictionary<int, string>();
         List<string> evidenceToAppend = new List<string>();
@@ -307,9 +362,6 @@ public class ManagedGlossary : IManagedGlossary
             }
         }
 
-        int insertAt = section.Rows.Count > 0
-            ? section.Rows.Max(row => row.LineIndex) + 1
-            : section.TableSeparatorLine + 1;
         string[] newRows = proposals.Where(proposal => !used.Contains(proposal)).Select(proposal =>
         {
             string id = SenseId(proposal);
@@ -317,30 +369,7 @@ public class ManagedGlossary : IManagedGlossary
             return RowMarkdown(id, proposal);
         }).ToArray();
 
-        List<string> merged = new List<string>();
-        for (int index = 0; index < sectionLines.Count; index++)
-        {
-            if (index == insertAt) merged.AddRange(newRows);
-            if (removals.Contains(index)) continue;
-            merged.Add(replacements.TryGetValue(index, out string? replacement)
-                ? replacement
-                : sectionLines[index]);
-        }
-
-        if (insertAt == sectionLines.Count) merged.AddRange(newRows);
-        if (evidenceToAppend.Count > 0)
-        {
-            if (merged.Count > 0 && merged[^1].Length != 0) merged.Add(string.Empty);
-            foreach (IReadOnlyList<string> evidence in ChunkEvidence(evidenceToAppend))
-            {
-                merged.AddRange(evidence);
-                merged.Add(string.Empty);
-            }
-
-            if (merged.Count > 0 && merged[^1].Length == 0) merged.RemoveAt(merged.Count - 1);
-        }
-
-        return merged;
+        return (removals, replacements, evidenceToAppend, newRows);
     }
 
     private static IEnumerable<IReadOnlyList<string>> ChunkEvidence(IReadOnlyList<string> lines)

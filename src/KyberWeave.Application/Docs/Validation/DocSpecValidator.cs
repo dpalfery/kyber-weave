@@ -206,6 +206,41 @@ public sealed class DocSpecValidator
         Dictionary<string, List<string>> idOwners,
         DiagnosticReport report)
     {
+        if (ReportFrontmatterErrors(doc, report))
+            return;
+
+        DocumentFrontmatter fm = doc.Frontmatter;
+
+        // --- KW-DOC-SPEC-003: base keys -------------------------------------------------
+        ValidateBaseRequiredKeys(fm, doc, report);
+
+        // --- KW-DOC-SPEC-002: closed vocabularies ---------------------------------------
+        ValidateClosedVocabularies(fm, doc, report);
+
+        // --- KW-DOC-SPEC-003: per-doc-type requirements ---------------------------------
+        ValidateRequiredForType(doc, report);
+
+        // --- KW-DOC-SPEC-002 / -007: the technology or role declaration -------------------
+        ValidateScope(doc, report);
+
+        // --- KW-DOC-SPEC-004: catalog vocabularies --------------------------------------
+        ValidateCatalogValues(fm, doc, set, report);
+
+        // --- KW-DOC-SPEC-005: source-root exists ----------------------------------------
+        ValidateSourceRoot(fm, doc, report);
+
+        // --- KW-DOC-SPEC-006: identity and cross-references ------------------------------
+        ValidateReferences(fm, doc, knownIds, idOwners, report);
+
+        ValidateSectionFrontmatter(doc, report);
+    }
+
+    /// <summary>
+    /// Reports a missing or unparseable frontmatter block, and the <c>sections</c> shape error
+    /// when the block itself parsed. True when the document cannot be validated further.
+    /// </summary>
+    private bool ReportFrontmatterErrors(DocumentModel doc, DiagnosticReport report)
+    {
         if (!doc.HasFrontmatter)
         {
             report.Add(new Diagnostic(
@@ -213,7 +248,7 @@ public sealed class DocSpecValidator
                 "Document has no YAML frontmatter block.",
                 doc.Subject, doc.RelativePath,
                 $"Add a frontmatter block per {_config.DocsRoot}/documentation-ontology.md."));
-            return;
+            return true;
         }
 
         if (doc.ParseError is not null)
@@ -229,7 +264,7 @@ public sealed class DocSpecValidator
                     $"Section frontmatter could not be parsed: {doc.SectionFrontmatterError}",
                     doc.Subject, doc.RelativePath,
                     "Use a mapping for sections and list values for keywords and code-refs."));
-                return;
+                return true;
             }
 
             report.Add(new Diagnostic(
@@ -237,7 +272,7 @@ public sealed class DocSpecValidator
                 $"Frontmatter block could not be parsed: {doc.ParseError}",
                 doc.Subject, doc.RelativePath,
                 "Check YAML indentation and that list values use '- ' items."));
-            return;
+            return true;
         }
 
         if (doc.SectionFrontmatterError is not null)
@@ -249,9 +284,12 @@ public sealed class DocSpecValidator
                 "Use a mapping for sections and list values for keywords and code-refs."));
         }
 
-        DocumentFrontmatter fm = doc.Frontmatter;
+        return false;
+    }
 
-        // --- KW-DOC-SPEC-003: base keys -------------------------------------------------
+    /// <summary>Every base required key must carry a value; the two vocabulary keys are checked with the vocabulary.</summary>
+    private void ValidateBaseRequiredKeys(DocumentFrontmatter fm, DocumentModel doc, DiagnosticReport report)
+    {
         foreach (string key in _config.BaseRequiredKeys)
         {
             if (key is "doc-type" or "status")
@@ -259,8 +297,11 @@ public sealed class DocSpecValidator
 
             RequireValue(GetFrontmatterValue(fm, key), key, doc, report);
         }
+    }
 
-        // --- KW-DOC-SPEC-002: closed vocabularies ---------------------------------------
+    /// <summary>The closed-vocabulary keys: the doc-type, the status, the date and the word lists.</summary>
+    private void ValidateClosedVocabularies(DocumentFrontmatter fm, DocumentModel doc, DiagnosticReport report)
+    {
         if (string.IsNullOrWhiteSpace(fm.DocType))
         {
             if (_config.IsRequiredForAll("doc-type"))
@@ -328,14 +369,15 @@ public sealed class DocSpecValidator
                 }
             }
         }
+    }
 
-        // --- KW-DOC-SPEC-003: per-doc-type requirements ---------------------------------
-        ValidateRequiredForType(doc, report);
-
-        // --- KW-DOC-SPEC-002 / -007: the technology or role declaration -------------------
-        ValidateScope(doc, report);
-
-        // --- KW-DOC-SPEC-004: catalog vocabularies --------------------------------------
+    /// <summary>A component or owner named in frontmatter must be a row of the catalog.</summary>
+    private void ValidateCatalogValues(
+        DocumentFrontmatter fm,
+        DocumentModel doc,
+        DocumentSet set,
+        DiagnosticReport report)
+    {
         if (!string.IsNullOrWhiteSpace(fm.Component) &&
             set.Components.Count > 0 &&
             !set.Components.Contains(fm.Component))
@@ -361,8 +403,11 @@ public sealed class DocSpecValidator
                     ? $"Closest catalog owner: '{nearO}'."
                     : null));
         }
+    }
 
-        // --- KW-DOC-SPEC-005: source-root exists ----------------------------------------
+    /// <summary>A declared <c>source-root</c> must name a directory or file in the checkout.</summary>
+    private void ValidateSourceRoot(DocumentFrontmatter fm, DocumentModel doc, DiagnosticReport report)
+    {
         if (!string.IsNullOrWhiteSpace(fm.SourceRoot))
         {
             string full = Path.Combine(_repoRoot, fm.SourceRoot.Replace('/', Path.DirectorySeparatorChar));
@@ -375,8 +420,19 @@ public sealed class DocSpecValidator
                     "Use a repository-relative path to the component's source root."));
             }
         }
+    }
 
-        // --- KW-DOC-SPEC-006: identity and cross-references ------------------------------
+    /// <summary>
+    /// The document's own id may be declared by no other document, and its <c>decided-by</c> and
+    /// <c>supersedes</c> references must name ids the corpus holds.
+    /// </summary>
+    private void ValidateReferences(
+        DocumentFrontmatter fm,
+        DocumentModel doc,
+        HashSet<string> knownIds,
+        Dictionary<string, List<string>> idOwners,
+        DiagnosticReport report)
+    {
         if (!string.IsNullOrWhiteSpace(fm.Id) &&
             idOwners.TryGetValue(fm.Id, out List<string>? owners) &&
             owners.Count > 1)
@@ -411,8 +467,6 @@ public sealed class DocSpecValidator
                     StringDistance.Nearest(reference, knownIds) is { } near ? $"Closest known id: '{near}'." : null));
             }
         }
-
-        ValidateSectionFrontmatter(doc, report);
     }
 
     private void ValidateRequiredForType(DocumentModel doc, DiagnosticReport report)

@@ -552,65 +552,19 @@ public partial class McpStdioHost
 
         if (string.Equals(toolName, "dash_search_sessions_by_text_and_scope", StringComparison.Ordinal))
         {
-            if (!body.ContainsKey("query") && body.TryGetPropertyValue("text", out JsonNode? textNode) && textNode is not null)
-            {
-                body.Remove("text");
-                body["query"] = textNode.DeepClone();
-            }
-
-            ApplyWindowDays(body);
+            ApplySearchSessionsBody(body);
             return body;
         }
 
         if (string.Equals(toolName, "dash_read_captured_run_session_or_turn_context", StringComparison.Ordinal))
         {
-            if (body.ContainsKey("mode") || body.ContainsKey("target") || body.ContainsKey("kind"))
-                return body;
-
-            if (body.TryGetPropertyValue("sessionId", out JsonNode? sessionId) && sessionId is not null)
-            {
-                body.Remove("sessionId");
-                body["kind"] = "session";
-                body["id"] = sessionId.DeepClone();
-            }
-
+            ApplyReadCapturedContextBody(body);
             return body;
         }
 
         if (string.Equals(toolName, "dash_query_session_cost_tokens_and_duration", StringComparison.Ordinal))
         {
-            if (body.TryGetPropertyValue("metrics", out JsonNode? metricsNode) && metricsNode is JsonArray metrics)
-            {
-                bool allStrings = true;
-                foreach (JsonNode? metric in metrics)
-                {
-                    if (metric?.GetValueKind() != JsonValueKind.String)
-                    {
-                        allStrings = false;
-                        break;
-                    }
-                }
-
-                if (allStrings)
-                {
-                    JsonArray mapped = [];
-                    foreach (JsonNode? metric in metrics)
-                        mapped.Add(new JsonObject { ["id"] = metric?.GetValue<string>() ?? string.Empty });
-
-                    body["metrics"] = mapped;
-                }
-            }
-
-            if (body.TryGetPropertyValue("groups", out JsonNode? groupsNode) && groupsNode is not null)
-            {
-                body.Remove("groups");
-                body["groupBy"] = groupsNode.DeepClone();
-            }
-
-            ApplyWindowDays(body);
-            if (!body.ContainsKey("catalogVersion"))
-                body["catalogVersion"] = 1;
-
+            ApplySessionCostBody(body);
             return body;
         }
 
@@ -622,6 +576,62 @@ public partial class McpStdioHost
         }
 
         return body;
+    }
+
+    private static void ApplySearchSessionsBody(JsonObject body)
+    {
+        if (!body.ContainsKey("query") && body.TryGetPropertyValue("text", out JsonNode? textNode) && textNode is not null)
+        {
+            body.Remove("text");
+            body["query"] = textNode.DeepClone();
+        }
+
+        ApplyWindowDays(body);
+    }
+
+    private static void ApplyReadCapturedContextBody(JsonObject body)
+    {
+        if (body.ContainsKey("mode") || body.ContainsKey("target") || body.ContainsKey("kind"))
+            return;
+
+        if (body.TryGetPropertyValue("sessionId", out JsonNode? sessionId) && sessionId is not null)
+        {
+            body.Remove("sessionId");
+            body["kind"] = "session";
+            body["id"] = sessionId.DeepClone();
+        }
+    }
+
+    private static void ApplySessionCostBody(JsonObject body)
+    {
+        MapMetricIds(body);
+        if (body.TryGetPropertyValue("groups", out JsonNode? groupsNode) && groupsNode is not null)
+        {
+            body.Remove("groups");
+            body["groupBy"] = groupsNode.DeepClone();
+        }
+
+        ApplyWindowDays(body);
+        if (!body.ContainsKey("catalogVersion"))
+            body["catalogVersion"] = 1;
+    }
+
+    private static void MapMetricIds(JsonObject body)
+    {
+        if (!body.TryGetPropertyValue("metrics", out JsonNode? metricsNode) || metricsNode is not JsonArray metrics)
+            return;
+
+        foreach (JsonNode? metric in metrics)
+        {
+            if (metric?.GetValueKind() != JsonValueKind.String)
+                return;
+        }
+
+        JsonArray mapped = [];
+        foreach (JsonNode? metric in metrics)
+            mapped.Add(new JsonObject { ["id"] = metric?.GetValue<string>() ?? string.Empty });
+
+        body["metrics"] = mapped;
     }
 
     private static void ApplyWindowDays(JsonObject body)
