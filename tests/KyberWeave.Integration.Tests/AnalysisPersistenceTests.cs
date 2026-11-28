@@ -31,7 +31,7 @@ public sealed class AnalysisPersistenceTests
         Directory.CreateDirectory(stateDirectory);
         File.WriteAllText(Path.Combine(stateDirectory, ".gitignore"), ignoreContents);
 
-        bool actual = DocsPorts.CacheSafety.IsSafe(repository.Path);
+        bool actual = DocsPorts.IsCacheSafe(repository.Path);
 
         Assert.Equal(expected, actual);
     }
@@ -47,7 +47,7 @@ public sealed class AnalysisPersistenceTests
         Directory.CreateDirectory(stateDirectory);
         File.WriteAllText(Path.Combine(stateDirectory, ".gitignore"), ignoreContents);
 
-        Assert.False(DocsPorts.CacheSafety.IsSafe(repository.Path));
+        Assert.False(DocsPorts.IsCacheSafe(repository.Path));
     }
 
     [Fact]
@@ -60,7 +60,7 @@ public sealed class AnalysisPersistenceTests
         RunGit(repository.Path, "init");
         RunGit(repository.Path, "add", "-f", ".kyber-weave/cache/docs-analysis.sqlite3");
 
-        Assert.False(DocsPorts.CacheSafety.IsSafe(repository.Path));
+        Assert.False(DocsPorts.IsCacheSafe(repository.Path));
     }
 
     [Theory]

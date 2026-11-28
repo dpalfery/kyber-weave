@@ -680,12 +680,6 @@
       "bound": "Builds only; nothing starts on this line. Started through the bounded process executor in RunSqlite with SqliteReadTimeout = 60 s."
     },
     {
-      "file": "src/KyberWeave.Data/Docs/FileSystem/KernelBoundedProcessExecutor.cs",
-      "text": "ProcessRunner.Run(startInfo, standardInput, timeout);",
-      "count": 1,
-      "bound": "The kernel's deadlock-safe runner with the caller's timeout, which kills the process tree on expiry. Callers: the plan lifecycle's git add, diff, status and commit (60 s, never push)."
-    },
-    {
       "file": "src/KyberWeave.Data/Docs/Analysis/Persistence/AnalysisCacheSafety.cs",
       "text": "ProcessStartInfo startInfo = new ProcessStartInfo(\"git\")",
       "count": 1,
@@ -704,28 +698,10 @@
       "bound": "Builds only; nothing starts on this line. The copy is started by Process.Start at ProcessRunner.cs:59."
     },
     {
-      "file": "src/KyberWeave.Data/Review/ProcessProgramRunner.cs",
-      "text": "ProcessStartInfo startInfo = new(program)",
-      "count": 1,
-      "bound": "Builds only; nothing starts on this line. Started by the ProcessRunner.Run call below it."
-    },
-    {
-      "file": "src/KyberWeave.Data/Review/ProcessProgramRunner.cs",
-      "text": "return ProcessRunner.Run(startInfo, string.Empty, timeout, maxOutputBytes, cancellationToken);",
-      "count": 1,
-      "bound": "ProcessRunner.Run with the caller's timeout: the process tree is killed on expiry or when the caller's token is cancelled, and maxOutputBytes caps what is buffered. Callers: git reads in GitChangeReader, SuppressionScanService (10 MB output cap) and FileRepositoryFileLister, each 60 s; every review gate through GateRunService with the gate's timeout-seconds (review.gates; ReviewConfigLoader defaults it to 900 s and rejects values <= 0), where the TimeoutException is reported as TimedOut and a concurrent gate's tree is also killed when a run given --stop-on-failure cancels it; git argv only, never a shell."
-    },
-    {
       "file": "src/KyberWeave.Data/Squad/Instances/SquadHarnessLauncher.cs",
       "text": "ProcessStartInfo startInfo = new()",
       "count": 1,
       "bound": "Builds only; nothing starts on this line. Started by RunInteractive (ProcessRunner.cs:177), unbounded by design (see that entry)."
-    },
-    {
-      "file": "src/KyberWeave.Cli/Commands/Squad/Infrastructure/IProcessExecutor.cs",
-      "text": "ProcessRunner.Run(startInfo, standardInput, _timeout);",
-      "count": 1,
-      "bound": "ProcessRunner.Run with the executor's timeout: 60 s for ProcessExecutor.Instance (DefaultTimeout), or the WithTimeout value (120 s for the KyberDash plugin verb). WithTimeout rejects non-positive values. The tree is killed on expiry."
     },
     {
       "file": "tests/KyberWeave.Integration.Tests/Squad/SquadPackResponsePreferencesTests.cs",
@@ -844,7 +820,7 @@
     {
       "file": "src/KyberWeave.Application/Doctor/PostCheckoutHookInstaller.cs",
       "text": "ProcessStartInfo startInfo = new(\"git\")",
-      "count": 2,
+      "count": 1,
       "bound": "Started through the injected process seam on the sync and async paths. The doctor command passes a timeout, 600 s by default, which kills the child tree on expiry; git argv only, in the repository root."
     },
     {
@@ -1058,18 +1034,6 @@
       "bound": "Builds only; nothing starts on this line. Started by the ProcessRunner.RunAsync call below with a 60 s timeout, which kills the child tree. argv only: the built docs assembly, the fixture repository root and --no-codegraph-refresh; stdin is the fixed request list in the test."
     },
     {
-      "file": "tests/KyberWeave.Kernel.Tests/Processes/ProcessRunnerRoleViewTests.cs",
-      "text": "ProcessStartInfo startInfo = new(\"probe\") { WorkingDirectory = \"work\" };",
-      "count": 1,
-      "bound": "Builds only; the scripted fake starts nothing. It proves the IProcessExecutor view translates the start info onto the seam."
-    },
-    {
-      "file": "tests/KyberWeave.Kernel.Tests/Processes/ProcessRunnerRoleViewTests.cs",
-      "text": "ProcessStartInfo startInfo = new(\"probe\");",
-      "count": 1,
-      "bound": "Builds only; the scripted fake starts nothing. It proves the IBoundedProcessExecutor view passes its timeout onto the seam."
-    },
-    {
       "file": "tests/KyberWeave.Kernel.Tests/Processes/ProcessRunnerAsyncTests.cs",
       "text": "ProcessStartInfo startInfo = new(\"dotnet\")",
       "count": 1,
@@ -1164,6 +1128,48 @@
       "text": "ProcessStartInfo startInfo = new(request.Program)",
       "count": 1,
       "bound": "The async face of ProbeExecutor: it builds the start info and hands it to the same RunStartProbe.Run as the sync view, so the single ProcessRunner.Run with its 60 s timeout kills the child tree. The children are the stub codegraph and git on the probe's isolated PATH, so nothing reaches the network or a real index."
+    },
+    {
+      "file": "tests/KyberWeave.Application.Tests/Squad/SquadReleaseClientTests.cs",
+      "text": "ProcessStartInfo startInfo = new(request.Program)",
+      "count": 1,
+      "bound": "Builds only; the recording fake returns a canned result and starts nothing."
+    },
+    {
+      "file": "src/KyberWeave.Application/Arbiter/Facts/GitFacts.cs",
+      "text": ": ProcessRunner.Run(startInfo, standardInput);",
+      "count": 1,
+      "bound": "Synchronous fact reader over the kernel runner, which drains both pipes, reaps the child and kills the tree on a fault; every git fact is a short, self-terminating command."
+    },
+    {
+      "file": "src/KyberWeave.Application/Review/GitChangeReader.cs",
+      "text": "ProcessStartInfo startInfo = new(\"git\")",
+      "count": 1,
+      "bound": "Builds only; nothing starts on this line. Started by the ProcessRunner.Run call below it."
+    },
+    {
+      "file": "src/KyberWeave.Application/Review/GitChangeReader.cs",
+      "text": ": ProcessRunner.Run(startInfo, string.Empty, GitTimeout);",
+      "count": 1,
+      "bound": "ProcessRunner.Run with GitTimeout = 60 s kills the child tree on expiry; git argv only, never a shell."
+    },
+    {
+      "file": "src/KyberWeave.Data/CodeGraph/CodeGraphIndexStaleness.cs",
+      "text": "ProcessStartInfo startInfo = new(\"git\")",
+      "count": 1,
+      "bound": "Builds only; nothing starts on this line. Started by the ProcessRunner.Run call below it."
+    },
+    {
+      "file": "src/KyberWeave.Data/CodeGraph/CodeGraphIndexStaleness.cs",
+      "text": "ProcessResult result = ProcessRunner.Run(startInfo, string.Empty, GitTimeout);",
+      "count": 1,
+      "bound": "ProcessRunner.Run with GitTimeout = 20 s kills the child tree on expiry; git argv only, never a shell."
+    },
+    {
+      "file": "src/KyberWeave.Data/CodeGraph/CodeGraphResolverAdapter.cs",
+      "text": "ProcessResult result = ProcessRunner.Run(startInfo, string.Empty, SqliteReadTimeout);",
+      "count": 1,
+      "bound": "ProcessRunner.Run with SqliteReadTimeout = 60 s kills the child tree on expiry; sqlite3 reads one batched index query."
     }
   ]
 }

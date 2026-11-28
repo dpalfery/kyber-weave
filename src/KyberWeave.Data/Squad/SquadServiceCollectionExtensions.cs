@@ -57,7 +57,7 @@ public static class SquadServiceCollectionExtensions
         services.TryAddSingleton<ISelfUpdateSystem>(sp => new SelfUpdateSystem(
             sp.GetRequiredService<IWritableFileSystem>(),
             sp.GetRequiredService<IPathResolver>(),
-            sp.GetRequiredService<IBoundedProcessExecutor>(),
+            sp.GetRequiredService<IProcessRunner>(),
             sp.GetRequiredService<IConsoleProcessLauncher>(),
             sp.GetRequiredService<IUpdateFileModes>()));
         services.TryAddSingleton<ISquadPackager>(sp => new FileSquadPackager(

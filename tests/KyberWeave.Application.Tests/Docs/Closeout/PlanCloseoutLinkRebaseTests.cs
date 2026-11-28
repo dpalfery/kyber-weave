@@ -20,7 +20,7 @@ public sealed class PlanCloseoutLinkRebaseTests
     private static DateOnly ArchiveDate => DateOnly.Parse(DocsCloseoutRepository.Date, CultureInfo.InvariantCulture);
 
     [Fact]
-    public void ArchivingRewritesThePlanLinkAndTheInventoryRowForTheArchiveFolder()
+    public async Task ArchivingRewritesThePlanLinkAndTheInventoryRowForTheArchiveFolder()
     {
         string sections = CloseoutCorpus.DecisionsSection("D1")
                           + CloseoutCorpus.CloseoutMappingSection(("D1, H1", "[Architecture](../admin-dashboard/architecture.md#install)"))
@@ -32,7 +32,7 @@ public sealed class PlanCloseoutLinkRebaseTests
             .Write(DocsCloseoutRepository.PlanIndex, DocsCloseoutRepository.PlanIndexWithRow)
             .Write(Inventory, DocsCloseoutRepository.InventoryWithOneRow);
 
-        PlanCloseoutOutcome outcome = new PlanCloseout(
+        PlanCloseoutOutcome outcome = await new PlanCloseout(
                 fixture.Root,
                 KyberWeaveConfigDefaults.Product,
                 () => fixture.Loader(KyberWeaveConfigDefaults.Product.Ontology),
@@ -41,7 +41,7 @@ public sealed class PlanCloseoutLinkRebaseTests
                 new InMemoryExclusiveFileWriter(fixture.Memory!),
                 fixture.Paths,
                 fixture.Environment)
-            .Run(Plan, ArchiveDate, archive: true);
+            .RunAsync(Plan, ArchiveDate, archive: true, CancellationToken.None);
 
         Assert.True(outcome.Archived);
         Assert.Contains(

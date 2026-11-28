@@ -43,7 +43,7 @@ public sealed class ArbiterSetupCommandTests : IDisposable
             services.AddSingleton<IArbiterKeyInput>(new FakeArbiterKeyInput(() => _keyStdinValue, () => _keyPromptValue));
             services.AddSingleton<IArbiterHttpHandlers>(new FakeArbiterHttpHandlers(() => new StubOllamaHandler(_ollamaResponder)));
             services.AddSingleton<IGitCommandRunner>(new FakeGitCommandRunner((directory, arguments) => _runGit(directory, arguments)));
-            services.AddSingleton<IProcessExecutor>(new DelegateProbeExecutor(() => _probeResult));
+            services.AddSingleton<IProcessRunner>(new DelegateProbeExecutor(() => _probeResult));
         });
     }
 
@@ -479,8 +479,20 @@ public sealed class ArbiterSetupCommandTests : IDisposable
             Task.FromResult(responder(request));
     }
 
-    private sealed class DelegateProbeExecutor(Func<ProcessResult> next) : IProcessExecutor
+    private sealed class DelegateProbeExecutor(Func<ProcessResult> next) : IProcessRunner
     {
-        public ProcessResult Run(ProcessStartInfo startInfo, string standardInput) => next();
+        public Task<ProcessRunResult> RunAsync(ProcessRunRequest request, CancellationToken cancellationToken = default)
+        {
+            ProcessResult result = next();
+            return Task.FromResult(new ProcessRunResult(result.ExitCode, result.StandardOutput, TimedOut: false)
+            {
+                StandardOutput = result.StandardOutput,
+                StandardError = result.StandardError
+            });
+        }
+
+        public bool IsAlive(int processId) => false;
+
+        public string? FindOnPath(string program) => null;
     }
 }

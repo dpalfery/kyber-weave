@@ -53,7 +53,6 @@ internal static class DocsMemoryPortsC
         InMemoryFileSystem memory = fixture.Memory ?? throw NotInMemory();
         ScriptedProcessRunner runner = new();
         _ = runner.Script("git", new ProcessRunResult(128, "fatal: not a git repository", TimedOut: false));
-        ScriptedProcessExecutor executor = new(_ => throw new UnscriptedProcessCallException("process"));
         ServiceCollection services = new();
         services.AddSingleton<IWritableFileSystem>(memory);
         services.AddSingleton<IFileSystem>(memory);
@@ -61,7 +60,6 @@ internal static class DocsMemoryPortsC
         services.AddSingleton(fixture.Paths);
         services.AddSingleton(fixture.Environment);
         services.AddSingleton<IProcessRunner>(runner);
-        services.AddSingleton<IBoundedProcessExecutor>(executor);
         return services.AddWeaveApplication().BuildServiceProvider();
     }
 

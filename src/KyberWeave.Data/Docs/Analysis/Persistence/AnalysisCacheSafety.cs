@@ -21,22 +21,7 @@ public sealed class AnalysisCacheSafety
     private readonly IFileSystem _files;
     private readonly IPathResolver _paths;
     private readonly IProcessEnvironment _environment;
-    private readonly IBoundedProcessExecutor _processes;
-    private readonly IProcessRunner? _processesAsync;
-
-    /// <summary>Checks whether local analysis state is protected from accidental commits.</summary>
-    /// <param name="files">Reads the repository's state ignore file.</param>
-    /// <param name="paths">Resolves the repository root to a full path.</param>
-    /// <param name="environment">Supplies the directory a relative root resolves against.</param>
-    /// <param name="processes">Runs <c>git ls-files</c> under a time limit.</param>
-    public AnalysisCacheSafety(
-        IFileSystem files,
-        IPathResolver paths,
-        IProcessEnvironment environment,
-        IBoundedProcessExecutor processes)
-        : this(files, paths, environment, processes, processes as IProcessRunner)
-    {
-    }
+    private readonly IProcessRunner _processes;
 
     /// <summary>Checks whether local analysis state is protected from accidental commits, reading git without blocking.</summary>
     /// <param name="files">Reads the repository's state ignore file.</param>
@@ -48,16 +33,6 @@ public sealed class AnalysisCacheSafety
         IPathResolver paths,
         IProcessEnvironment environment,
         IProcessRunner processes)
-        : this(files, paths, environment, processes, processes)
-    {
-    }
-
-    private AnalysisCacheSafety(
-        IFileSystem files,
-        IPathResolver paths,
-        IProcessEnvironment environment,
-        IBoundedProcessExecutor processes,
-        IProcessRunner? processesAsync)
     {
         ArgumentNullException.ThrowIfNull(files);
         ArgumentNullException.ThrowIfNull(paths);
@@ -67,32 +42,6 @@ public sealed class AnalysisCacheSafety
         _paths = paths;
         _environment = environment;
         _processes = processes;
-        _processesAsync = processesAsync;
-    }
-
-    /// <summary>
-    /// Returns true only when the repository-owned state ignore file contains the narrow
-    /// cache-directory entry used by Kyber-Weave.
-    /// </summary>
-    public bool IsSafe(string repositoryRoot)
-    {
-        ArgumentException.ThrowIfNullOrWhiteSpace(repositoryRoot);
-
-        string ignorePath = IgnorePathFor(repositoryRoot);
-        try
-        {
-            return _files.FileExists(ignorePath)
-                && HasEffectiveCacheIgnore(ignorePath)
-                && !HasTrackedCacheEntry(repositoryRoot);
-        }
-        catch (IOException)
-        {
-            return false;
-        }
-        catch (UnauthorizedAccessException)
-        {
-            return false;
-        }
     }
 
     /// <summary>
@@ -184,32 +133,13 @@ public sealed class AnalysisCacheSafety
 #pragma warning restore CA1847
     }
 
-    private bool HasTrackedCacheEntry(string repositoryRoot)
-    {
-        ProcessStartInfo startInfo = GitStartInfo(repositoryRoot);
-
-        try
-        {
-            ProcessResult result = _processes.Run(startInfo, string.Empty, GitTimeout);
-            return result.ExitCode == 0 && !string.IsNullOrWhiteSpace(result.StandardOutput);
-        }
-        catch (Exception ex) when (ex is Win32Exception or InvalidOperationException or IOException or TimeoutException)
-        {
-            // Without git, or without an answer from it, persistence cannot prove that the cache is outside the index.
-            return true;
-        }
-    }
-
     private async Task<bool> HasTrackedCacheEntryAsync(string repositoryRoot, CancellationToken cancellationToken)
     {
-        // Built over a bounded-only executor there is no async runner: answer as the sync twin does when git
-        // cannot answer (the cache cannot be proved untracked, so it is treated as unsafe), never throw.
-        if (_processesAsync is not { } processesAsync) return true;
         ProcessStartInfo startInfo = GitStartInfo(repositoryRoot);
 
         try
         {
-            ProcessResult result = await processesAsync.RunAsync(
+            ProcessResult result = await _processes.RunAsync(
                 startInfo,
                 string.Empty,
                 GitTimeout,

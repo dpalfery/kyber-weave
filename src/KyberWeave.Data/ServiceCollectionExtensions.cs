@@ -58,8 +58,6 @@ public static class ServiceCollectionExtensions
             sp.GetRequiredService<IPathResolver>(),
             sp.GetRequiredService<IProcessEnvironment>()));
         services.TryAddSingleton<IRepositoryFileStore>(_ => new PhysicalRepositoryFileStore());
-        // The runner is also the bounded view, so a consumer moving to its async twin finds an IProcessRunner.
-        services.TryAddSingleton<IBoundedProcessExecutor>(sp => sp.GetRequiredService<IProcessRunner>());
         services.TryAddSingleton<IExclusiveFileWriter>(_ => new ExclusiveFileWriter());
         services.TryAddSingleton<IDoctorFileSystem>(_ => new PhysicalDoctorFileSystem());
     }
@@ -70,7 +68,6 @@ public static class ServiceCollectionExtensions
     {
         services.TryAddSingleton(sp => new CodeGraphIndexStaleness(
             sp.GetRequiredService<IFileSystem>(),
-            // IProcessRunner: the staleness rule's async read needs it, and it is also the IProgramRunner view.
             sp.GetRequiredService<IProcessRunner>()));
         services.TryAddSingleton<ICodeGraphPortsFactory, CodeGraphPortsFactory>();
         services.TryAddSingleton<ICodeGraphIndexWorkspace, FileCodeGraphIndexWorkspace>();
@@ -78,7 +75,6 @@ public static class ServiceCollectionExtensions
             sp.GetRequiredService<IFileSystem>(),
             sp.GetRequiredService<IPathResolver>(),
             sp.GetRequiredService<IProcessEnvironment>(),
-            // IProcessRunner: the async safety check needs it, and it is also the IBoundedProcessExecutor view.
             sp.GetRequiredService<IProcessRunner>()));
         services.TryAddSingleton<IAnalysisPersistenceFactory, SqliteAnalysisPersistenceFactory>();
         services.TryAddSingleton<IEmbeddingTransport, LoopbackEmbeddingTransport>();
@@ -104,8 +100,6 @@ public static class ServiceCollectionExtensions
     /// <param name="services">The collection to populate.</param>
     private static void RegisterReviewAndSkillAdapters(IServiceCollection services)
     {
-        // As for the bounded view: the runner is also the program-runner view, so async consumers find an IProcessRunner.
-        services.TryAddSingleton<IProgramRunner>(sp => sp.GetRequiredService<IProcessRunner>());
         services.TryAddSingleton<ISeatFolder, FileSeatFolder>();
         services.TryAddSingleton<ISkillArchiveWriter, ZipSkillArchiveWriter>();
         services.TryAddSingleton<IReviewEvidenceStore>(sp => new FileReviewEvidenceStore(sp.GetRequiredService<IWritableFileSystem>()));

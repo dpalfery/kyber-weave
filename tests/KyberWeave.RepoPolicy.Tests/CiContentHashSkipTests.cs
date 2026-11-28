@@ -1030,7 +1030,7 @@ public sealed class CiContentHashSkipTests
             string line;
             try
             {
-                line = session.ReadLine();
+                line = session.ReadLineAsync().GetAwaiter().GetResult();
             }
             catch (EndOfStreamException)
             {

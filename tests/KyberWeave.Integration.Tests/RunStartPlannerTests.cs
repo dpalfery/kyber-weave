@@ -729,7 +729,6 @@ internal sealed class RunStartProbe : IDisposable
             {
                 _ = services.AddSingleton<IProcessEnvironment>(environment);
                 _ = services.AddSingleton<IGitCommandRunner>(git);
-                _ = services.AddSingleton<IProcessExecutor>(executor);
                 _ = services.AddSingleton<IProcessRunner>(executor);
             }).Run(argv), width: UnwrappedWidth);
 
@@ -927,7 +926,7 @@ internal sealed class RunStartProbe : IDisposable
     }
 
     /// <summary>Runs the CodeGraph index step's children against the probe's PATH, so the stub answers to its name.</summary>
-    private sealed class ProbeExecutor(RunStartProbe probe, string path) : IProcessExecutor, IProcessRunner
+    private sealed class ProbeExecutor(RunStartProbe probe, string path) : IProcessRunner
     {
         public Task<ProcessRunResult> RunAsync(ProcessRunRequest request, CancellationToken cancellationToken = default)
         {

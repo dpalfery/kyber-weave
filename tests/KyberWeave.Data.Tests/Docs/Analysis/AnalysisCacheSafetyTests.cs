@@ -21,12 +21,12 @@ public sealed class AnalysisCacheSafetyTests
     private string IgnoreFile => Path.Combine(Root, ".kyber-weave", ".gitignore");
 
     [Fact]
-    public void ACacheEntryInTheIgnoreFileWithNothingTrackedIsSafe()
+    public async Task ACacheEntryInTheIgnoreFileWithNothingTrackedIsSafe()
     {
         WriteIgnore("cache/");
         ScriptedProcessExecutor git = new(_ => Result(0, ""));
 
-        Assert.True(Safety(git).IsSafe(Root));
+        Assert.True(await Safety(git).IsSafeAsync(Root));
 
         ProcessStartInfo call = Assert.Single(git.Calls);
         Assert.Equal("git", call.FileName);
@@ -36,60 +36,60 @@ public sealed class AnalysisCacheSafetyTests
     }
 
     [Fact]
-    public void AMissingIgnoreFileIsUnsafeAndGitIsNeverAsked()
+    public async Task AMissingIgnoreFileIsUnsafeAndGitIsNeverAsked()
     {
         ScriptedProcessExecutor git = new(_ => Result(0, ""));
 
-        Assert.False(Safety(git).IsSafe(Root));
+        Assert.False(await Safety(git).IsSafeAsync(Root));
 
         Assert.Empty(git.Calls);
     }
 
     [Fact]
-    public void AnIgnoreFileWithoutTheCacheEntryIsUnsafe()
+    public async Task AnIgnoreFileWithoutTheCacheEntryIsUnsafe()
     {
         WriteIgnore("logs/");
         ScriptedProcessExecutor git = new(_ => Result(0, ""));
 
-        Assert.False(Safety(git).IsSafe(Root));
+        Assert.False(await Safety(git).IsSafeAsync(Root));
     }
 
     [Fact]
-    public void ALaterNegationOfTheDatabaseWithdrawsTheProtection()
+    public async Task ALaterNegationOfTheDatabaseWithdrawsTheProtection()
     {
         WriteIgnore("cache/\n!cache/docs-analysis.sqlite3");
         ScriptedProcessExecutor git = new(_ => Result(0, ""));
 
-        Assert.False(Safety(git).IsSafe(Root));
+        Assert.False(await Safety(git).IsSafeAsync(Root));
     }
 
     [Fact]
-    public void ATrackedFileUnderTheCacheMakesItUnsafe()
+    public async Task ATrackedFileUnderTheCacheMakesItUnsafe()
     {
         WriteIgnore("cache/");
         ScriptedProcessExecutor git = new(_ => Result(0, ".kyber-weave/cache/docs-analysis.sqlite3\n"));
 
-        Assert.False(Safety(git).IsSafe(Root));
+        Assert.False(await Safety(git).IsSafeAsync(Root));
     }
 
     [Theory]
     [InlineData(typeof(Win32Exception))]
     [InlineData(typeof(TimeoutException))]
-    public void AGitThatCannotAnswerLeavesTheCacheUnproven(Type failure)
+    public async Task AGitThatCannotAnswerLeavesTheCacheUnproven(Type failure)
     {
         WriteIgnore("cache/");
         ScriptedProcessExecutor git = new(_ => throw (Exception)Activator.CreateInstance(failure)!);
 
-        Assert.False(Safety(git).IsSafe(Root));
+        Assert.False(await Safety(git).IsSafeAsync(Root));
     }
 
     [Fact]
-    public void ARelativeRootIsResolvedAgainstTheWorkingDirectory()
+    public async Task ARelativeRootIsResolvedAgainstTheWorkingDirectory()
     {
         WriteIgnore("cache/");
         ScriptedProcessExecutor git = new(_ => Result(0, ""));
 
-        Assert.True(Safety(git).IsSafe("repo"));
+        Assert.True(await Safety(git).IsSafeAsync("repo"));
     }
 
     [Fact]

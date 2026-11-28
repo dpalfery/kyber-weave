@@ -67,26 +67,6 @@ public sealed partial class ReviewBlockWriter : IReviewGateCatalogue
     }
 
     /// <summary>
-    /// Renders the catalogue for <paramref name="declaredTechnologies"/>, detecting each
-    /// family's project roots under <paramref name="repoRoot"/> with that family's own root
-    /// rules. The test-runner choice (MTP versus VSTest) is read from the repository's
-    /// <c>global.json</c> by the render itself.
-    /// </summary>
-    public ReviewGatesPlan Plan(string repoRoot, IReadOnlyList<string> declaredTechnologies)
-    {
-        ArgumentException.ThrowIfNullOrWhiteSpace(repoRoot);
-        ArgumentNullException.ThrowIfNull(declaredTechnologies);
-
-        // One planner, shared with the commands that have a container: this answers over the ports the
-        // host injected rather than walking the disk itself.
-        return ReviewCataloguePlanner.Plan(
-            repoRoot,
-            declaredTechnologies,
-            _lister.List(repoRoot),
-            new GateCatalogueFacts(_files.FileExists, _files.ReadAllText));
-    }
-
-    /// <summary>
     /// Renders the catalogue for <paramref name="declaredTechnologies"/> without blocking a thread,
     /// detecting each family's project roots under <paramref name="repoRoot"/> with that family's
     /// own root rules.

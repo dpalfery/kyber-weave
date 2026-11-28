@@ -28,7 +28,7 @@ internal sealed class PostCheckoutGitFixture : IDisposable
     private static readonly TimeSpan ChildTimeout = TimeSpan.FromSeconds(60);
 
     private readonly TempDirectory _temp = new();
-    private readonly ProcessExecutor _runner = ProcessExecutor.WithTimeout(ChildTimeout);
+    private readonly KyberWeave.Data.Hooks.KernelProcessRunner _runner = new();
 
     public PostCheckoutGitFixture()
     {
@@ -63,7 +63,7 @@ internal sealed class PostCheckoutGitFixture : IDisposable
     /// The executor the code under test receives. Its git children run isolated, with PATH left as the test's own
     /// unless <paramref name="path"/> names one.
     /// </summary>
-    public IProcessExecutor Executor(string? path = null) => new IsolatedChildExecutor(_runner, Home, path);
+    public IProcessRunner Executor(string? path = null) => new IsolatedChildExecutor(_runner, Home, path);
 
     /// <summary>A PATH that finds <paramref name="first"/> before the system folders and nothing else.</summary>
     public static string PathStartingWith(string first) => first + ":/usr/bin:/bin";
@@ -186,7 +186,10 @@ internal sealed class PostCheckoutGitFixture : IDisposable
             startInfo.ArgumentList.Add(argument);
         }
 
-        return Executor(path).Run(startInfo, string.Empty);
+        ProcessRunResult run = Executor(path).RunAsync(
+            ProcessRunRequest.FromStartInfo(startInfo, string.Empty, ChildTimeout),
+            CancellationToken.None).GetAwaiter().GetResult();
+        return new ProcessResult(run.ExitCode, run.StandardOutput, run.StandardError);
     }
 
     private static void ExpectSuccess(ProcessResult result, string[] args)
@@ -202,27 +205,35 @@ internal sealed class PostCheckoutGitFixture : IDisposable
     /// Pins the child environment: HOME and the global config point into the temporary root, the system config is
     /// off, and the commit identity is fixed. The wrapped runner still applies its own timeout and tree kill.
     /// </summary>
-    private sealed class IsolatedChildExecutor(IProcessExecutor inner, string home, string? path) : IProcessExecutor
+    private sealed class IsolatedChildExecutor(IProcessRunner inner, string home, string? path) : IProcessRunner
     {
-        public ProcessResult Run(ProcessStartInfo startInfo, string standardInput)
+        public Task<ProcessRunResult> RunAsync(ProcessRunRequest request, CancellationToken cancellationToken = default)
         {
-            ArgumentNullException.ThrowIfNull(startInfo);
+            ArgumentNullException.ThrowIfNull(request);
 
-            startInfo.Environment["HOME"] = home;
-            startInfo.Environment["USERPROFILE"] = home;
-            startInfo.Environment["GIT_CONFIG_GLOBAL"] = Path.Combine(home, ".gitconfig");
-            startInfo.Environment["GIT_CONFIG_NOSYSTEM"] = "1";
-            startInfo.Environment["GIT_TERMINAL_PROMPT"] = "0";
-            startInfo.Environment["GIT_AUTHOR_NAME"] = "Kyber-Weave Tests";
-            startInfo.Environment["GIT_AUTHOR_EMAIL"] = "kyber-weave@example.com";
-            startInfo.Environment["GIT_COMMITTER_NAME"] = "Kyber-Weave Tests";
-            startInfo.Environment["GIT_COMMITTER_EMAIL"] = "kyber-weave@example.com";
+            Dictionary<string, string?> environment = new(StringComparer.Ordinal);
+            foreach (KeyValuePair<string, string?> pair in request.Environment ?? new Dictionary<string, string?>())
+                environment[pair.Key] = pair.Value;
+
+            environment["HOME"] = home;
+            environment["USERPROFILE"] = home;
+            environment["GIT_CONFIG_GLOBAL"] = Path.Combine(home, ".gitconfig");
+            environment["GIT_CONFIG_NOSYSTEM"] = "1";
+            environment["GIT_TERMINAL_PROMPT"] = "0";
+            environment["GIT_AUTHOR_NAME"] = "Kyber-Weave Tests";
+            environment["GIT_AUTHOR_EMAIL"] = "kyber-weave@example.com";
+            environment["GIT_COMMITTER_NAME"] = "Kyber-Weave Tests";
+            environment["GIT_COMMITTER_EMAIL"] = "kyber-weave@example.com";
             if (path is not null)
             {
-                startInfo.Environment["PATH"] = path;
+                environment["PATH"] = path;
             }
 
-            return inner.Run(startInfo, standardInput);
+            return inner.RunAsync(request with { Environment = environment }, cancellationToken);
         }
+
+        public bool IsAlive(int processId) => inner.IsAlive(processId);
+
+        public string? FindOnPath(string program) => inner.FindOnPath(program);
     }
 }

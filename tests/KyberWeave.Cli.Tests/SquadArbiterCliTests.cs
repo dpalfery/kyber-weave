@@ -155,26 +155,26 @@ public sealed class SquadArbiterCliTests
     }
 
     [Fact]
-    public void ArbiterProcessProbe_ParsesVersionOutput()
+    public async Task ArbiterProcessProbe_ParsesVersionOutput()
     {
         FakeProcessExecutor executor = new FakeProcessExecutor()
             .WithProbeOutput("kyber-weave-arbiter", "kyber-weave-arbiter 1.2.3\n");
         var probe = SquadCommandComposition.ResolveArbiterProbe(executor, new FakeProcessEnvironment());
 
-        var result = probe.Probe();
+        var result = await probe.ProbeAsync();
 
         Assert.True(result.IsAvailable);
         Assert.Equal("1.2.3", result.Version);
     }
 
     [Fact]
-    public void ArbiterProcessProbe_WhenBinaryMissing_ReportsUnavailable()
+    public async Task ArbiterProcessProbe_WhenBinaryMissing_ReportsUnavailable()
     {
         FakeProcessExecutor executor = new FakeProcessExecutor()
             .WithFailure("kyber-weave-arbiter", "missing");
         var probe = SquadCommandComposition.ResolveArbiterProbe(executor, new FakeProcessEnvironment());
 
-        var result = probe.Probe();
+        var result = await probe.ProbeAsync();
 
         Assert.False(result.IsAvailable);
         Assert.Null(result.Version);

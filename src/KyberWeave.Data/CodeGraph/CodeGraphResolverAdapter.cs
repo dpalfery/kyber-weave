@@ -53,8 +53,7 @@ public sealed class CodeGraphResolverAdapter : ICodeGraphResolver, ICodeGraphNei
     private readonly List<string> _filePaths = [];
     private readonly List<CodeGraphEdge> _edges = [];
     private readonly Dictionary<string, int> _edgeDegree = new(StringComparer.Ordinal);
-    private readonly IBoundedProcessExecutor _processes;
-    private readonly IProcessRunner? _processesAsync;
+    private readonly IProcessRunner _processes;
     private readonly IFileSystem _files;
     private readonly CodeGraphIndexStaleness _stalenessRule;
     private bool _stalenessRead;
@@ -85,7 +84,7 @@ public sealed class CodeGraphResolverAdapter : ICodeGraphResolver, ICodeGraphNei
         IFileSystem files,
         IPathResolver paths,
         IProcessEnvironment environment,
-        IBoundedProcessExecutor processes,
+        IProcessRunner processes,
         CodeGraphIndexStaleness staleness)
         : this(databasePath, files, paths, environment, processes, staleness, load: true)
     {
@@ -96,7 +95,7 @@ public sealed class CodeGraphResolverAdapter : ICodeGraphResolver, ICodeGraphNei
         IFileSystem files,
         IPathResolver paths,
         IProcessEnvironment environment,
-        IBoundedProcessExecutor processes,
+        IProcessRunner processes,
         CodeGraphIndexStaleness staleness,
         bool load)
     {
@@ -106,7 +105,6 @@ public sealed class CodeGraphResolverAdapter : ICodeGraphResolver, ICodeGraphNei
         ArgumentNullException.ThrowIfNull(environment);
         _files = files;
         _processes = processes ?? throw new ArgumentNullException(nameof(processes));
-        _processesAsync = processes as IProcessRunner;
         _stalenessRule = staleness ?? throw new ArgumentNullException(nameof(staleness));
         DatabasePath = paths.GetFullPath(databasePath, environment.CurrentDirectory);
 
@@ -398,17 +396,14 @@ public sealed class CodeGraphResolverAdapter : ICodeGraphResolver, ICodeGraphNei
         // The runner drains both pipes concurrently. This query returns the whole node table, so stdout is
         // large by design and stderr must not be left to fill behind it. A read that outlasts the bound is
         // killed and throws TimeoutException, which the constructor reports as the index being unavailable.
-        ProcessResult result = _processes.Run(startInfo, string.Empty, SqliteReadTimeout);
+        ProcessResult result = ProcessRunner.Run(startInfo, string.Empty, SqliteReadTimeout);
         return SqliteOutput(result);
     }
 
     private async Task<IEnumerable<string>> RunSqliteAsync(string sql, CancellationToken cancellationToken)
     {
-        // Built over a bounded-only executor there is no async runner: the read answers nothing, so the caller
-        // treats the facts as unknown rather than failing with an exception the sync twin never raised.
-        if (_processesAsync is not { } processesAsync) return [];
         ProcessStartInfo startInfo = SqliteStartInfo(sql);
-        ProcessResult result = await processesAsync.RunAsync(
+        ProcessResult result = await _processes.RunAsync(
             startInfo,
             string.Empty,
             SqliteReadTimeout,

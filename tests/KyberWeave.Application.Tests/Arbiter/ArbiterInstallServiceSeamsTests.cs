@@ -1261,7 +1261,8 @@ public sealed class ArbiterInstallServiceSeamsTests
     {
         public string CliVersion => "1.0.0";
 
-        public ToolProbeResult Probe() => new(true, "1.0.0", null);
+        public Task<ToolProbeResult> ProbeAsync(CancellationToken cancellationToken = default) =>
+            Task.FromResult(new ToolProbeResult(true, "1.0.0", null));
     }
 
     /// <summary>A preparation-only test never scaffolds; the branch that would is skipped by the dry run.</summary>

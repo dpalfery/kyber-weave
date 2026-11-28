@@ -762,7 +762,7 @@ public sealed class ArbiterInstallService(
             }
         }
 
-        ProbeBinary(events);
+        await ProbeBinaryAsync(events, cancellationToken).ConfigureAwait(false);
         return true;
     }
 
@@ -834,11 +834,11 @@ public sealed class ArbiterInstallService(
             "after install. Run with --arbiter-key, --key-stdin, or export " +
             $"{ArbiterKeyResolver.EnvVarName}.");
 
-    private void ProbeBinary(List<ArbiterInstallEvent> events)
+    private async Task ProbeBinaryAsync(List<ArbiterInstallEvent> events, CancellationToken cancellationToken)
     {
         try
         {
-            ToolProbeResult result = probe.Probe();
+            ToolProbeResult result = await probe.ProbeAsync(cancellationToken).ConfigureAwait(false);
             if (!result.IsAvailable)
             {
                 events.Add(new ArbiterInstallProbeWarning(

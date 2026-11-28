@@ -158,7 +158,7 @@ public sealed class PostCheckoutHookScriptTests : IDisposable
         _git.CommitAll(_git.Repository, "govern the repository");
         string ownMarker = Path.Combine(_git.Markers, "own-hook-ran");
         WriteHook($"#!/bin/sh -eu\necho own >> '{ownMarker}'\nexit 0\n");
-        DoctorTestServices.PostCheckout.Ensure(_git.Repository, _git.Executor());
+        DoctorTestServices.PostCheckout.EnsureAsync(_git.Repository, _git.Executor()).GetAwaiter().GetResult();
         WriteStub(string.Empty);
         string worktree = Path.Combine(_git.Root, "owned");
 
@@ -177,7 +177,7 @@ public sealed class PostCheckoutHookScriptTests : IDisposable
     {
         _git.CreateGovernedRepository();
         _git.CommitAll(_git.Repository, "govern the repository");
-        DoctorTestServices.PostCheckout.Ensure(_git.Repository, _git.Executor());
+        DoctorTestServices.PostCheckout.EnsureAsync(_git.Repository, _git.Executor()).GetAwaiter().GetResult();
     }
 
     /// <summary>

@@ -408,7 +408,7 @@ internal static class SquadTestCommands
     }
 
     public static SquadDoctorCommand Doctor(
-        IProcessExecutor? executor = null,
+        IProcessRunner? executor = null,
         ISquadUserPaths? userPaths = null,
         string? workingDirectory = null,
         ISquadGlobalRootResolver? globalRoots = null,
@@ -450,7 +450,7 @@ internal static class SquadTestCommands
     /// </summary>
     public static SquadDoctorCommand InMemoryDoctor(
         InMemorySquadState state,
-        IProcessExecutor? executor = null,
+        IProcessRunner? executor = null,
         string? workingDirectory = null,
         ISquadGlobalRootResolver? globalRoots = null,
         ISquadRenderer? renderer = null,

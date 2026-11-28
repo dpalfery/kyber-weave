@@ -8,7 +8,7 @@ using KyberWeave.Contracts.Repositories;
 namespace KyberWeave.Tests;
 
 /// <summary>
-/// Shared arrangement for the doctor tests. Every child is either a scripted <see cref="IProcessExecutor"/> answer
+/// Shared arrangement for the doctor tests. Every child is either a scripted <see cref="IProcessRunner"/> answer
 /// or a trivial shell stub written into a temp directory. No test spawns a real <c>codegraph</c> or the real
 /// <c>kyber-weave-mcp</c>.
 /// </summary>

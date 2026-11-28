@@ -10,13 +10,13 @@ namespace KyberWeave.Cli.Commands.Squad.Infrastructure;
 /// <summary>Checks the PATH-resolved Kyber-Weave MCP version.</summary>
 public sealed partial class McpProcessProbe
 {
-    private readonly IProcessExecutor _executor;
+    private readonly IProcessRunner _executor;
     private readonly IProcessEnvironment _environment;
 
     /// <summary>Creates an MCP probe over an injectable process boundary.</summary>
     /// <param name="executor">Runs the probe.</param>
     /// <param name="environment">Names the variables the probe's child needs to start.</param>
-    public McpProcessProbe(IProcessExecutor executor, IProcessEnvironment environment)
+    public McpProcessProbe(IProcessRunner executor, IProcessEnvironment environment)
     {
         ArgumentNullException.ThrowIfNull(executor);
         ArgumentNullException.ThrowIfNull(environment);
@@ -25,11 +25,12 @@ public sealed partial class McpProcessProbe
     }
 
     /// <summary>Runs only <c>kyber-weave-mcp --version</c> and parses its exact output envelope.</summary>
-    public ToolProbeResult Probe() => ProcessProbe.Probe(
+    public Task<ToolProbeResult> ProbeAsync(CancellationToken cancellationToken = default) => ProcessProbe.ProbeAsync(
         _executor,
         _environment,
         "kyber-weave-mcp",
-        McpVersionRegex());
+        McpVersionRegex(),
+        cancellationToken);
 
     [GeneratedRegex(
         "\\Akyber-weave-mcp (?<version>" + SemanticVersionPattern.Value + ")(?:\\r?\\n)?\\z",
@@ -44,7 +45,7 @@ public sealed partial class McpProcessProbe
 /// </remarks>
 public sealed partial class ArbiterProcessProbe : IArbiterBinaryProbe
 {
-    private readonly IProcessExecutor _executor;
+    private readonly IProcessRunner _executor;
     private readonly IProcessEnvironment _environment;
 
     /// <inheritdoc />
@@ -53,7 +54,7 @@ public sealed partial class ArbiterProcessProbe : IArbiterBinaryProbe
     /// <summary>Creates an Arbiter probe over an injectable process boundary.</summary>
     /// <param name="executor">Runs the probe.</param>
     /// <param name="environment">Names the variables the probe's child needs to start.</param>
-    public ArbiterProcessProbe(IProcessExecutor executor, IProcessEnvironment environment)
+    public ArbiterProcessProbe(IProcessRunner executor, IProcessEnvironment environment)
     {
         ArgumentNullException.ThrowIfNull(executor);
         ArgumentNullException.ThrowIfNull(environment);
@@ -62,11 +63,12 @@ public sealed partial class ArbiterProcessProbe : IArbiterBinaryProbe
     }
 
     /// <summary>Runs only <c>kyber-weave-arbiter --version</c> and parses its exact output envelope.</summary>
-    public ToolProbeResult Probe() => ProcessProbe.Probe(
+    public Task<ToolProbeResult> ProbeAsync(CancellationToken cancellationToken = default) => ProcessProbe.ProbeAsync(
         _executor,
         _environment,
         "kyber-weave-arbiter",
-        ArbiterVersionRegex());
+        ArbiterVersionRegex(),
+        cancellationToken);
 
     [GeneratedRegex(
         "\\Akyber-weave-arbiter (?<version>" + SemanticVersionPattern.Value + ")(?:\\r?\\n)?\\z",
@@ -87,17 +89,18 @@ internal static class SemanticVersionPattern
 
 internal static class ProcessProbe
 {
-    public static ToolProbeResult Probe(
-        IProcessExecutor executor,
+    public static async Task<ToolProbeResult> ProbeAsync(
+        IProcessRunner executor,
         IProcessEnvironment environment,
         string executable,
-        Regex outputPattern)
+        Regex outputPattern,
+        CancellationToken cancellationToken)
     {
         ProcessStartInfo startInfo = CreateStartInfo(executable, environment);
         ProcessResult result;
         try
         {
-            result = executor.Run(startInfo, string.Empty);
+            result = await executor.RunAsync(startInfo, string.Empty, timeout: null, cancellationToken).ConfigureAwait(false);
         }
         catch (TimeoutException)
         {

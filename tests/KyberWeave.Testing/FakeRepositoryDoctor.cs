@@ -10,7 +10,7 @@ internal sealed record DoctorRun(
     string Root,
     DoctorMode Mode,
     DoctorOptions Options,
-    IProcessExecutor Executor,
+    IProcessRunner Executor,
     Func<string, string?> Environment,
     string? LockDirectory);
 

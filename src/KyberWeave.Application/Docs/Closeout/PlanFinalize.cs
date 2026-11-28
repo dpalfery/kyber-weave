@@ -58,7 +58,7 @@ public sealed partial class PlanFinalize
     private readonly Func<IDocumentSource> _loaderFactory;
     private readonly ActivePlanFiles _files;
     private readonly IRepositoryFileStore _store;
-    private readonly IBoundedProcessExecutor _process;
+    private readonly IProcessRunner _process;
     private readonly IDocsSchemaGate _gate;
     private readonly IPlanTaskAgentPicker? _picker;
 
@@ -69,7 +69,7 @@ public sealed partial class PlanFinalize
     internal Action<string>? AfterActivePlanCheck { get; init; }
 
     /// <summary>Creates the finalize step over a repository, its effective configuration and the loader validation reads with.</summary>
-    public PlanFinalize(string repoRoot, KyberWeaveConfig config, Func<IDocumentSource> loaderFactory, IRepositoryFileStore files, IBoundedProcessExecutor process, IDocsSchemaGate gate, IPathResolver paths, IProcessEnvironment environment)
+    public PlanFinalize(string repoRoot, KyberWeaveConfig config, Func<IDocumentSource> loaderFactory, IRepositoryFileStore files, IProcessRunner process, IDocsSchemaGate gate, IPathResolver paths, IProcessEnvironment environment)
         : this(repoRoot, config, loaderFactory, files, process, gate, paths, environment, null)
     {
     }
@@ -89,7 +89,7 @@ public sealed partial class PlanFinalize
         KyberWeaveConfig config,
         Func<IDocumentSource> loaderFactory,
         IRepositoryFileStore files,
-        IBoundedProcessExecutor process,
+        IProcessRunner process,
         IDocsSchemaGate gate,
         IPathResolver paths,
         IProcessEnvironment environment,
@@ -111,54 +111,6 @@ public sealed partial class PlanFinalize
         _process = process;
         _files = new ActivePlanFiles(_repoRoot, config, files, process);
         _picker = picker;
-    }
-
-    /// <summary>Finalizes the approved Draft plan at <paramref name="planPath"/>, or refuses and changes nothing.</summary>
-    /// <param name="planPath">The plan, relative to the repository root.</param>
-    /// <param name="mode">Who approved it.</param>
-    /// <param name="approval">One line saying what approved it, recorded in the Decisions table.</param>
-    /// <param name="date">The approval date.</param>
-    public PlanFinalizeOutcome Run(string planPath, PlanApprovalMode mode, string? approval, DateOnly date)
-    {
-        ArgumentException.ThrowIfNullOrWhiteSpace(planPath);
-
-        DiagnosticReport report = new();
-        DraftPreparation prep = PrepareDraft(planPath, report);
-        if (prep.Outcome is { } early)
-            return early;
-        if (prep.AlreadyReady)
-            return AlreadyReady(prep.Plan, report, prep.TaskFile);
-
-        PlanFinalizeOutcome Refused() => new(report, false, false, prep.TaskFile);
-
-        if (HasOtherStaged(prep.Touched, prep.Plan, report))
-            return Refused();
-
-        if (PrepareApproval(mode, approval, date, prep.PlanText, prep.Plan, report) is not { } withApproval)
-            return Refused();
-
-        PlanTaskFileGenerator generator = new(_repoRoot, _config, _store, _picker);
-        PlanTaskFileOutcome preview = generator.Run(prep.Plan, PlanTaskFileMode.Preview);
-        if (!TryPrepareDraftWrite(preview, prep, withApproval, date, report, out DraftWritePlan write))
-            return Refused();
-
-        try
-        {
-            WriteDraftTargets(prep.Plan, write.NewPlan, prep.PlanIndex, write.NewIndex);
-            PlanTaskFileOutcome written = generator.Run(prep.Plan, PlanTaskFileMode.Write);
-            if (!CompleteDraftValidation(prep, write.TaskFileBefore, written, report))
-                return Refused();
-        }
-        catch (Exception exception) when (FileFailure.Is(exception))
-        {
-            HandleFinalizeFailure(exception, prep, write.TaskFileBefore, report);
-            return Refused();
-        }
-
-        RecordDraftSuccess(report, prep, mode, write.NewIndex);
-        _files.Stage(prep.Touched, report, prep.Plan, Step);
-        _files.CommitOnly(prep.Touched, CommitMessage(prep.Plan), report, prep.Plan, Step);
-        return new PlanFinalizeOutcome(report, true, false, prep.TaskFile, ReadyQueue(prep.TaskFile, prep.Plan, report));
     }
 
     /// <summary>Finalizes the approved Draft plan at <paramref name="planPath"/> without blocking a thread, or refuses and changes nothing.</summary>
@@ -430,17 +382,6 @@ public sealed partial class PlanFinalize
         return string.Equals(value?.Trim(), "supervised", StringComparison.OrdinalIgnoreCase);
     }
 
-    private PlanFinalizeOutcome AlreadyReady(string plan, DiagnosticReport report, string taskFile)
-    {
-        PlanTaskFileOutcome check = new PlanTaskFileGenerator(_repoRoot, _config, _store).Run(plan, PlanTaskFileMode.Check);
-        if (!TryPrepareAlreadyReady(plan, report, taskFile, check, out List<string> own))
-            return new PlanFinalizeOutcome(report, false, false, taskFile);
-
-        if (!HasOtherStaged(own, plan, report))
-            _files.CommitOnly(own, CommitMessage(plan), report, plan, Step);
-        return new PlanFinalizeOutcome(report, false, true, taskFile, ReadyQueue(taskFile, plan, report));
-    }
-
     private async Task<PlanFinalizeOutcome> AlreadyReadyAsync(
         string plan,
         DiagnosticReport report,
@@ -491,9 +432,6 @@ public sealed partial class PlanFinalize
 
         return true;
     }
-
-    private bool HasOtherStaged(IReadOnlyList<string> own, string plan, DiagnosticReport report) =>
-        ReportOtherStaged(_files.StagedOutside(own), plan, report);
 
     private async Task<bool> HasOtherStagedAsync(
         IReadOnlyList<string> own,

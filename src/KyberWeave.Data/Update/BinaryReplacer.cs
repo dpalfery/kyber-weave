@@ -14,7 +14,7 @@ namespace KyberWeave.Data.Update;
 internal sealed class BinaryReplacer(
     IWritableFileSystem files,
     IUpdateFileModes modes,
-    IBoundedProcessExecutor processes)
+    IProcessRunner processes)
 {
     /// <summary>The bound for clearing quarantine on one staged file. xattr returns at once, so a longer wait means it hung.</summary>
     private static readonly TimeSpan XattrTimeout = TimeSpan.FromSeconds(30);
@@ -29,8 +29,14 @@ internal sealed class BinaryReplacer(
     /// <param name="destinationPath">The installed binary to replace.</param>
     /// <param name="windows">Whether the platform is Windows.</param>
     /// <param name="macOs">Whether the platform is macOS, which clears the quarantine attribute first.</param>
+    /// <param name="cancellationToken">Cancels the quarantine-attribute child.</param>
     /// <exception cref="SelfUpdateException">The archive did not hold the binary, or the destination has no directory.</exception>
-    public void Replace(string extractedBinaryPath, string destinationPath, bool windows, bool macOs)
+    public async Task ReplaceAsync(
+        string extractedBinaryPath,
+        string destinationPath,
+        bool windows,
+        bool macOs,
+        CancellationToken cancellationToken)
     {
         if (!files.FileExists(extractedBinaryPath))
         {
@@ -54,7 +60,7 @@ internal sealed class BinaryReplacer(
             // result is the same — but staging is the last point at which the destination is
             // certainly not this process's own image. See ClearMacQuarantine.
             if (macOs)
-                ClearMacQuarantine(staging);
+                await ClearMacQuarantineAsync(staging, cancellationToken).ConfigureAwait(false);
 
             if (windows)
                 MoveOverOnWindows(staging, destinationPath);
@@ -111,7 +117,7 @@ internal sealed class BinaryReplacer(
 
     /// <summary>Copies a file whole: written beside the destination, then moved over it, so a stop leaves the old or the new content.</summary>
     /// <remarks>
-    /// The copy is staged under the name <see cref="Replace"/> stages under, so a copy that a stop left behind is the file
+    /// The copy is staged under the name <see cref="ReplaceAsync"/> stages under, so a copy that a stop left behind is the file
     /// the next update overwrites and moves, not a stray.
     /// </remarks>
     /// <param name="sourcePath">The file to copy.</param>
@@ -163,7 +169,7 @@ internal sealed class BinaryReplacer(
     /// 'System.Diagnostics.Process'" — aborting an update that had already written the new
     /// binary. Running before the move also warms the assembly for anything after it.
     /// </remarks>
-    private void ClearMacQuarantine(string path)
+    private async Task ClearMacQuarantineAsync(string path, CancellationToken cancellationToken)
     {
         try
         {
@@ -178,7 +184,7 @@ internal sealed class BinaryReplacer(
             startInfo.ArgumentList.Add("com.apple.quarantine");
             startInfo.ArgumentList.Add(path);
 
-            processes.Run(startInfo, string.Empty, XattrTimeout);
+            await processes.RunAsync(startInfo, string.Empty, XattrTimeout, cancellationToken).ConfigureAwait(false);
         }
         catch (Exception ex) when (ex is Win32Exception or IOException or InvalidOperationException
                                        or UnauthorizedAccessException or TimeoutException)

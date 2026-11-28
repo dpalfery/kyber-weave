@@ -8,7 +8,7 @@ using KyberWeave.Contracts.Repositories;
 namespace KyberWeave.Tests.Fakes;
 
 /// <summary>
-/// Deterministic fake for <see cref="IProcessExecutor"/> and <see cref="IProcessRunner"/> that captures command calls and returns canned outputs.
+/// Deterministic fake for <see cref="IProcessRunner"/> and <see cref="IProcessRunner"/> that captures command calls and returns canned outputs.
 /// </summary>
 public sealed class FakeProcessExecutor : IProcessRunner
 {
@@ -77,6 +77,15 @@ public sealed class FakeProcessExecutor : IProcessRunner
         };
         foreach (string argument in request.Arguments)
             startInfo.ArgumentList.Add(argument);
+        if (request.Environment is { } environment)
+        {
+            startInfo.Environment.Clear();
+            foreach (KeyValuePair<string, string?> pair in environment)
+            {
+                if (pair.Value is not null)
+                    startInfo.Environment[pair.Key] = pair.Value;
+            }
+        }
 
         ProcessResult result = Run(startInfo, request.StandardInput ?? string.Empty);
         return Task.FromResult(new ProcessRunResult(result.ExitCode, result.StandardOutput + result.StandardError, TimedOut: false)

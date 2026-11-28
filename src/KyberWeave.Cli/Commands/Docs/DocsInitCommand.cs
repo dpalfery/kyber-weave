@@ -790,12 +790,8 @@ public sealed class DocsInitCommand : AsyncCommand<DocsInitSettings>
     }
 
     private string FullPath(string path) => _paths.GetFullPath(path, _environment.CurrentDirectory);
-
     private sealed class BoundedExecutor(IProcessRunner process, TimeSpan timeout) : IProcessRunner
     {
-        public ProcessResult Run(ProcessStartInfo startInfo, string standardInput) =>
-            ((IBoundedProcessExecutor)process).Run(startInfo, standardInput, timeout);
-
         public Task<ProcessRunResult> RunAsync(ProcessRunRequest request, CancellationToken cancellationToken = default)
         {
             ArgumentNullException.ThrowIfNull(request);

@@ -23,7 +23,7 @@ internal sealed class LoopbackFinishingProcess
     private readonly Func<string, string?>? _readEnvironment;
     private readonly Func<string, IReadOnlyList<string>, int>? _runProcess;
     private readonly Func<string, bool>? _canWriteDirectory;
-    private readonly Func<string, IReadOnlyList<string>, ProcessResult>? _captureProcess;
+    private readonly Func<string, IReadOnlyList<string>, CancellationToken, Task<ProcessResult>>? _captureProcess;
     private readonly IArbiterHookRefresher? _arbiterHookRefresher;
     private readonly IArbiterRefreshTargets? _arbiterTargets;
 
@@ -57,7 +57,9 @@ internal sealed class LoopbackFinishingProcess
         _readEnvironment = readEnvironment;
         _runProcess = runProcess;
         _canWriteDirectory = canWriteDirectory;
-        _captureProcess = captureProcess;
+        _captureProcess = captureProcess is { } capture
+            ? (file, args, _) => Task.FromResult(capture(file, args))
+            : null;
         _arbiterHookRefresher = arbiterHookRefresher;
         _arbiterTargets = arbiterTargets;
     }

@@ -35,7 +35,7 @@ public sealed class ReviewCatalogueCommandTests : IDisposable
     public void StdoutEqualsTheRenderedCatalogueBlockForTheFixtureTechnologies()
     {
         string repo = NewFixtureRepo("go", ["go"]);
-        ReviewGatesPlan plan = DocsTestCommands.Catalogue.Plan(repo, ["go"]);
+        ReviewGatesPlan plan = DocsTestCommands.Catalogue.PlanAsync(repo, ["go"], CancellationToken.None).GetAwaiter().GetResult();
         Assert.True(
             plan.ShouldWrite,
             "The go fixture planned no review block, so the stdout comparison proves nothing.");

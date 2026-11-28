@@ -67,10 +67,10 @@ public sealed class PlanLifecycleRootOverPathSeamTests
             new FakeProcessEnvironment(currentDirectory: workingDirectory));
 
     [Fact]
-    public void FinalizeFindsThePlanUnderTheInjectedWorkingDirectory()
+    public async Task FinalizeFindsThePlanUnderTheInjectedWorkingDirectory()
     {
-        PlanFinalizeOutcome found = Finalizer(WorkingDirectory).Run(Plan, PlanApprovalMode.Supervised, "approved", Date);
-        PlanFinalizeOutcome missing = Finalizer(OtherDirectory).Run(Plan, PlanApprovalMode.Supervised, "approved", Date);
+        PlanFinalizeOutcome found = await Finalizer(WorkingDirectory).RunAsync(Plan, PlanApprovalMode.Supervised, "approved", Date, CancellationToken.None);
+        PlanFinalizeOutcome missing = await Finalizer(OtherDirectory).RunAsync(Plan, PlanApprovalMode.Supervised, "approved", Date, CancellationToken.None);
 
         // The plan exists but is not a Draft, so the run reaches the status check and refuses there.
         Assert.Contains(found.Report.Items, item => item.Code == PlanFinalize.NotDraft);
@@ -79,13 +79,13 @@ public sealed class PlanLifecycleRootOverPathSeamTests
     }
 
     [Fact]
-    public void CloseoutFindsThePlanUnderTheInjectedWorkingDirectory()
+    public async Task CloseoutFindsThePlanUnderTheInjectedWorkingDirectory()
     {
         _disk.CreateDirectory($"{WorkingDirectory}/{RelativeRoot}/6-Docs/archive/plans");
         _disk.WriteAllText($"{WorkingDirectory}/{RelativeRoot}/{Archived}", "# earlier archive entry\n");
 
-        PlanCloseoutOutcome found = Closer(WorkingDirectory).Run(Plan, Date, archive: false);
-        PlanCloseoutOutcome missing = Closer(OtherDirectory).Run(Plan, Date, archive: false);
+        PlanCloseoutOutcome found = await Closer(WorkingDirectory).RunAsync(Plan, Date, archive: false, CancellationToken.None);
+        PlanCloseoutOutcome missing = await Closer(OtherDirectory).RunAsync(Plan, Date, archive: false, CancellationToken.None);
 
         // The plan exists and its archive target is taken, so the run refuses on the target and not on the plan.
         Assert.Contains(found.Report.Items, item => item.Code == PlanCloseout.ArchiveTargetExists);

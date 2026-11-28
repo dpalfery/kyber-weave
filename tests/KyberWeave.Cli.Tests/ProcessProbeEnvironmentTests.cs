@@ -24,9 +24,9 @@ public sealed class ProcessProbeEnvironmentTests
     [Theory]
     [InlineData(OperatingSystemKind.Linux)]
     [InlineData(OperatingSystemKind.MacOS)]
-    public void Probe_OnUnix_PassesOnlyPathFromTheEnvironment(OperatingSystemKind kind)
+    public async Task Probe_OnUnix_PassesOnlyPathFromTheEnvironment(OperatingSystemKind kind)
     {
-        new McpProcessProbe(_executor, Environment(kind)).Probe();
+        await new McpProcessProbe(_executor, Environment(kind)).ProbeAsync();
 
         Assert.Equal(
             new Dictionary<string, string?> { ["PATH"] = "/fake/bin" },
@@ -34,9 +34,9 @@ public sealed class ProcessProbeEnvironmentTests
     }
 
     [Fact]
-    public void Probe_OnWindows_AlsoPassesTheVariablesAToolNeedsToStart()
+    public async Task Probe_OnWindows_AlsoPassesTheVariablesAToolNeedsToStart()
     {
-        new McpProcessProbe(_executor, Environment(OperatingSystemKind.Windows)).Probe();
+        await new McpProcessProbe(_executor, Environment(OperatingSystemKind.Windows)).ProbeAsync();
 
         Assert.Equal(
             ["PATH", "PATHEXT", "SystemRoot", "WINDIR"],
@@ -44,19 +44,19 @@ public sealed class ProcessProbeEnvironmentTests
     }
 
     [Fact]
-    public void Probe_WithNoPath_StartsTheChildWithAnEmptyEnvironment()
+    public async Task Probe_WithNoPath_StartsTheChildWithAnEmptyEnvironment()
     {
-        new McpProcessProbe(_executor, new FakeProcessEnvironment(operatingSystem: OperatingSystemKind.Linux)).Probe();
+        await new McpProcessProbe(_executor, new FakeProcessEnvironment(operatingSystem: OperatingSystemKind.Linux)).ProbeAsync();
 
         Assert.Empty(Assert.Single(_executor.Calls).Environment);
     }
 
     [Fact]
-    public void ArbiterProbe_ReadsPathFromTheEnvironmentToo()
+    public async Task ArbiterProbe_ReadsPathFromTheEnvironmentToo()
     {
         FakeProcessExecutor executor = new FakeProcessExecutor().WithMatchingArbiterProbe();
 
-        ToolProbeResult result = new ArbiterProcessProbe(executor, Environment(OperatingSystemKind.Linux)).Probe();
+        ToolProbeResult result = await new ArbiterProcessProbe(executor, Environment(OperatingSystemKind.Linux)).ProbeAsync();
 
         Assert.True(result.IsAvailable);
         Assert.Equal("/fake/bin", Assert.Single(executor.Calls).Environment["PATH"]);

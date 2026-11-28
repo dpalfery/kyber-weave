@@ -175,7 +175,7 @@ internal sealed class UpdateWorld : IDisposable
             log,
             runProcess,
             canWriteDirectory,
-            captureProcess,
+            captureProcess is { } capture ? (file, args, _) => Task.FromResult(capture(file, args)) : null,
             arbiterHookRefresher,
             finishingProcess,
             arbiterTargets);
@@ -297,7 +297,7 @@ internal sealed class UpdateWorld : IDisposable
         _ = services.AddSingleton<ISquadFileAccess>(new InMemorySquadFileAccess(Files));
         _ = services.AddSingleton<ISquadLinkFileSystem>(new FileSystemSquadLinkFileSystem(Files));
         _ = services.AddSingleton<IMcpConfigFiles>(new InMemoryMcpConfigFiles(Files));
-        _ = services.AddSingleton<IBoundedProcessExecutor>(processes);
+        _ = services.AddSingleton<IProcessRunner>(processes);
         _ = services.AddSingleton<IConsoleProcessLauncher>(new FakeConsoleProcessLauncher());
         _ = services.AddSingleton<IUpdateFileModes>(new FakeUpdateFileModes());
         _ = services.AddSingleton<ISquadReleaseHttpHandlers>(new UnreachableReleaseHandlers());
