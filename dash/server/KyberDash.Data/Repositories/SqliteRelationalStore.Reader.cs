@@ -15,10 +15,6 @@ using Microsoft.Data.Sqlite;
 namespace KyberDash.Data.Repositories;
 
 /// <summary>
-/// The read half of <see cref="SqliteRelationalStore"/>: schema reads, session projections, and
-/// content-free figures over a SQLite relational store.
-/// </summary>
-/// <summary>
 /// Low-level read helpers shared by the relational store's reader: row mapping, parsing, and the
 /// parameterized read seam.
 /// </summary>
@@ -1063,10 +1059,7 @@ public abstract class SqliteRelationalStoreReadBase : BaseSqliteRepository
 }
 
 /// <summary>
-/// Session and record reads over a SQLite relational store.
-/// </summary>
-/// <summary>
-/// Record, projection, and aggregate queries over a SQLite relational store.
+/// Session, record, projection, and aggregate queries over a SQLite relational store.
 /// </summary>
 public abstract class SqliteRelationalStoreReadQueryBase : SqliteRelationalStoreReadBase
 {
@@ -3510,10 +3503,6 @@ public abstract class SqliteRelationalStoreReadCore : SqliteRelationalStoreReadQ
 /// The read half of <see cref="SqliteRelationalStore"/>: schema reads, session projections, and
 /// content-free figures over a SQLite relational store.
 /// </summary>
-/// <summary>
-/// The read half of <see cref="SqliteRelationalStore"/>: schema reads, session projections, and
-/// content-free figures over a SQLite relational store.
-/// </summary>
 public abstract class SqliteRelationalStoreReaderBase : SqliteRelationalStoreReadFigureBase, IRelationalStoreReader
 {
 
@@ -4485,15 +4474,6 @@ public abstract class SqliteRelationalStoreReaderBase : SqliteRelationalStoreRea
         return BuildSessionListFigures(sessions, shapes, pricing);
     }
 
-    /// <summary>
-    /// Builds one sessions-list figure per session from the batched reads both figures passes
-    /// share: content-free record scalars, the stored turns a session without a projection falls
-    /// back to, and the stored ingest problems.
-    /// </summary>
-    /// <param name="sessions">Session rows to build figures for, with their workspace and usage.</param>
-    /// <param name="shapesBySession">What each projected session's figure takes from its projection, by session id.</param>
-    /// <param name="pricing">Optional pricing lookup overriding default bundled rate tables.</param>
-    /// <returns>One figure per session, in the order the sessions were read.</returns>
 }
 
 /// <summary>
@@ -4559,6 +4539,15 @@ public abstract class SqliteRelationalStoreReadFigureBase : SqliteRelationalStor
             reader.GetString(reader.GetOrdinal("span_id"))));
     }
 
+    /// <summary>
+    /// Builds one sessions-list figure per session from the batched reads both figures passes
+    /// share: content-free record scalars, the stored turns a session without a projection falls
+    /// back to, and the stored ingest problems.
+    /// </summary>
+    /// <param name="sessions">Session rows to build figures for, with their workspace and usage.</param>
+    /// <param name="shapesBySession">What each projected session's figure takes from its projection, by session id.</param>
+    /// <param name="pricing">Optional pricing lookup overriding default bundled rate tables.</param>
+    /// <returns>One figure per session, in the order the sessions were read.</returns>
     private protected IReadOnlyList<SessionListFigure> BuildSessionListFigures(
         IReadOnlyList<CollectedSession> sessions,
         IReadOnlyDictionary<string, SessionListProjectionShape> shapesBySession,

@@ -15,7 +15,10 @@ public static class HookFastPath
     /// <param name="stdin">The hook event as JSON.</param>
     /// <returns>
     /// True only when the harness is served, the event is a JSON object and its adapter says it passes through. In every
-    /// other case, including an adapter that throws, false: the hook command decides, and reports what went wrong.
+    /// other case false, including an event or adapter that fails with <see cref="JsonException"/>,
+    /// <see cref="InvalidOperationException"/>, <see cref="ArgumentException"/> or <see cref="NotSupportedException"/>,
+    /// the failures a malformed event produces: the hook command then decides, and reports what went wrong. Any other
+    /// exception is a defect and propagates to the caller's handler.
     /// </returns>
     public static bool IsPassThrough(string harness, string? caller, string stdin) =>
         TryPassThrough(harness, caller, stdin, out _);
@@ -50,10 +53,9 @@ public static class HookFastPath
             document = adapter.AllowDocument(parsed.RootElement);
             return true;
         }
-        catch (Exception ex) when (ex is not OutOfMemoryException && ex is not OperationCanceledException)
+        catch (Exception ex) when (ex is JsonException or InvalidOperationException or ArgumentException or NotSupportedException)
         {
-            // KW-STD-CS-006 boundary, a hook entry point: any adapter failure falls through to the
-            // hook command, which decides the call and reports what went wrong.
+            // A malformed event: the hook command re-reads it, decides the call and reports the failure.
             return false;
         }
     }
