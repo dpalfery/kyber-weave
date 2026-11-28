@@ -75,6 +75,12 @@ public sealed class CodeGraphIndexRetryClockTests
             return new Handle();
         }
 
+        public Task<CodeGraphIndexLockAttempt> TryAcquireLockAsync(
+            string path,
+            TimeSpan wait,
+            CancellationToken cancellationToken = default) =>
+            Task.FromResult(new CodeGraphIndexLockAttempt(new Handle(), null));
+
         public bool IsWritable(string directory) => true;
 
         public bool IsCodeGraphLockHeld(string indexDirectory) => false;

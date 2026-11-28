@@ -21,6 +21,26 @@ public sealed class SqliteAnalysisPersistenceFactory(
     public bool IsCacheSafe(string repositoryRoot) => safety.IsSafe(repositoryRoot);
 
     /// <inheritdoc />
+    public Task<bool> IsCacheSafeAsync(string repositoryRoot, CancellationToken cancellationToken = default) =>
+        safety.IsSafeAsync(repositoryRoot, cancellationToken);
+
+    /// <inheritdoc />
     public IAnalysisPersistence Open(string repositoryRoot) =>
         new SqliteAnalysisPersistence(repositoryRoot, files, paths, environment, processes, safety);
+
+    /// <inheritdoc />
+    public async Task<IAnalysisPersistence> OpenAsync(
+        string repositoryRoot,
+        CancellationToken cancellationToken = default)
+    {
+        bool cacheSafe = await safety.IsSafeAsync(repositoryRoot, cancellationToken).ConfigureAwait(false);
+        return new SqliteAnalysisPersistence(
+            repositoryRoot,
+            files,
+            paths,
+            environment,
+            processes,
+            safety,
+            cacheSafe);
+    }
 }

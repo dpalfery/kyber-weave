@@ -195,5 +195,9 @@ public sealed class ReviewPathSeamTests
     private sealed class UnusedGraphs : ICodeGraphPortsFactory
     {
         public CodeGraphPorts ForRepository(string repositoryRoot) => throw new InvalidOperationException("unexpected call");
+
+        public Task<CodeGraphPorts> ForRepositoryAsync(
+            string repositoryRoot,
+            CancellationToken cancellationToken = default) => throw new InvalidOperationException("unexpected call");
     }
 }

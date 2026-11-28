@@ -54,15 +54,18 @@ public sealed class CodeGraphResolverAdapter : ICodeGraphResolver, ICodeGraphNei
     private readonly List<CodeGraphEdge> _edges = [];
     private readonly Dictionary<string, int> _edgeDegree = new(StringComparer.Ordinal);
     private readonly IBoundedProcessExecutor _processes;
+    private readonly IProcessRunner? _processesAsync;
+    private readonly IFileSystem _files;
     private readonly CodeGraphIndexStaleness _stalenessRule;
     private bool _stalenessRead;
     private string? _staleness;
+    private bool _loadDeferred;
 
     /// <inheritdoc />
-    public bool IsAvailable { get; }
+    public bool IsAvailable { get; private set; }
 
     /// <inheritdoc />
-    public string? UnavailableReason { get; }
+    public string? UnavailableReason { get; private set; }
 
     /// <inheritdoc />
     public string DatabasePath { get; }
@@ -84,14 +87,34 @@ public sealed class CodeGraphResolverAdapter : ICodeGraphResolver, ICodeGraphNei
         IProcessEnvironment environment,
         IBoundedProcessExecutor processes,
         CodeGraphIndexStaleness staleness)
+        : this(databasePath, files, paths, environment, processes, staleness, load: true)
+    {
+    }
+
+    private CodeGraphResolverAdapter(
+        string databasePath,
+        IFileSystem files,
+        IPathResolver paths,
+        IProcessEnvironment environment,
+        IBoundedProcessExecutor processes,
+        CodeGraphIndexStaleness staleness,
+        bool load)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(databasePath);
         ArgumentNullException.ThrowIfNull(files);
         ArgumentNullException.ThrowIfNull(paths);
         ArgumentNullException.ThrowIfNull(environment);
+        _files = files;
         _processes = processes ?? throw new ArgumentNullException(nameof(processes));
+        _processesAsync = processes as IProcessRunner;
         _stalenessRule = staleness ?? throw new ArgumentNullException(nameof(staleness));
         DatabasePath = paths.GetFullPath(databasePath, environment.CurrentDirectory);
+
+        if (!load)
+        {
+            _loadDeferred = true;
+            return;
+        }
 
         if (!files.FileExists(DatabasePath))
         {
@@ -112,59 +135,128 @@ public sealed class CodeGraphResolverAdapter : ICodeGraphResolver, ICodeGraphNei
         }
     }
 
+    /// <summary>
+    /// Loads the given CodeGraph database path without blocking a thread. Missing or unreadable indexes leave
+    /// <see cref="IsAvailable"/> false with <see cref="UnavailableReason"/> set.
+    /// </summary>
+    /// <param name="databasePath">The CodeGraph database, as the caller spelled it.</param>
+    /// <param name="files">Tells whether the database exists.</param>
+    /// <param name="paths">Resolves the database path to a full path.</param>
+    /// <param name="environment">Supplies the directory a relative path resolves against.</param>
+    /// <param name="processes">Runs <c>sqlite3</c> under a time limit.</param>
+    /// <param name="staleness">Judges whether the index has fallen behind the checkout.</param>
+    /// <param name="cancellationToken">Cancels the index read.</param>
+    /// <returns>The loaded adapter, available only when the index could be read.</returns>
+    public static async Task<CodeGraphResolverAdapter> CreateAsync(
+        string databasePath,
+        IFileSystem files,
+        IPathResolver paths,
+        IProcessEnvironment environment,
+        IProcessRunner processes,
+        CodeGraphIndexStaleness staleness,
+        CancellationToken cancellationToken = default)
+    {
+        CodeGraphResolverAdapter adapter = new(databasePath, files, paths, environment, processes, staleness, load: false);
+        await adapter.LoadDeferredAsync(cancellationToken).ConfigureAwait(false);
+        return adapter;
+    }
+
+    private async Task LoadDeferredAsync(CancellationToken cancellationToken)
+    {
+        if (!_loadDeferred) return;
+        _loadDeferred = false;
+
+        if (!_files.FileExists(DatabasePath))
+        {
+            UnavailableReason = $"No CodeGraph index at {DatabasePath}.";
+            return;
+        }
+
+        try
+        {
+            await LoadAsync(cancellationToken).ConfigureAwait(false);
+            IsAvailable = true;
+        }
+        catch (Exception ex) when (ex is InvalidOperationException or IOException
+                                       or System.ComponentModel.Win32Exception
+                                       or TimeoutException)
+        {
+            UnavailableReason = ex.Message;
+        }
+    }
+
+    // Nodes and the bounded neighborhood surface are loaded in the same sqlite3
+    // process. Aside from avoiding per-node subprocess cost, this makes the adapter
+    // a stable snapshot even when CodeGraph replaces its index after construction.
+    // 'import' nodes and edges are excluded: module imports are too broad to be a
+    // useful documentation relationship.
+    private const string LoadSql = """
+        SELECT 'node', id, kind, name, qualified_name, file_path, language, start_line, end_line
+        FROM nodes
+        WHERE kind <> 'import'
+        UNION ALL
+        SELECT 'edge', source, target, kind, '', '', '', '', ''
+        FROM edges
+        WHERE kind IN ('contains', 'calls', 'references', 'instantiates', 'extends', 'implements')
+        """;
+
+    private const string StalenessSql = """
+        SELECT 'file', path, CAST(modified_at AS INTEGER), node_count FROM files
+        UNION ALL
+        SELECT 'meta', key, value, '' FROM project_metadata WHERE key = 'indexed_at_commit'
+        """;
+
     private void Load()
     {
-        // Nodes and the bounded neighborhood surface are loaded in the same sqlite3
-        // process. Aside from avoiding per-node subprocess cost, this makes the adapter
-        // a stable snapshot even when CodeGraph replaces its index after construction.
-        // 'import' nodes and edges are excluded: module imports are too broad to be a
-        // useful documentation relationship.
-        const string sql = """
-            SELECT 'node', id, kind, name, qualified_name, file_path, language, start_line, end_line
-            FROM nodes
-            WHERE kind <> 'import'
-            UNION ALL
-            SELECT 'edge', source, target, kind, '', '', '', '', ''
-            FROM edges
-            WHERE kind IN ('contains', 'calls', 'references', 'instantiates', 'extends', 'implements')
-            """;
-
-        foreach (string line in RunSqlite(sql))
+        foreach (string line in RunSqlite(LoadSql))
         {
-            string[] parts = line.Split(FieldSeparator);
-            if (parts.Length < 9) continue;
+            IndexLine(line);
+        }
+    }
 
-            if (parts[0] == "edge")
-            {
-                CodeGraphEdge edge = new CodeGraphEdge(parts[1], parts[2], parts[3]);
-                if (!NeighborhoodEdgeKinds.Contains(edge.Kind)) continue;
+    private async Task LoadAsync(CancellationToken cancellationToken)
+    {
+        foreach (string line in await RunSqliteAsync(LoadSql, cancellationToken).ConfigureAwait(false))
+        {
+            IndexLine(line);
+        }
+    }
 
-                _edges.Add(edge);
-                IncrementDegree(edge.SourceId);
-                if (!StringComparer.Ordinal.Equals(edge.SourceId, edge.TargetId))
-                    IncrementDegree(edge.TargetId);
-                continue;
-            }
+    private void IndexLine(string line)
+    {
+        string[] parts = line.Split(FieldSeparator);
+        if (parts.Length < 9) return;
 
-            if (parts[0] != "node") continue;
+        if (parts[0] == "edge")
+        {
+            CodeGraphEdge edge = new CodeGraphEdge(parts[1], parts[2], parts[3]);
+            if (!NeighborhoodEdgeKinds.Contains(edge.Kind)) return;
 
-            _ = int.TryParse(parts[7], NumberStyles.Integer, CultureInfo.InvariantCulture, out int startLine);
-            _ = int.TryParse(parts[8], NumberStyles.Integer, CultureInfo.InvariantCulture, out int endLine);
-            CodeGraphNode node = new CodeGraphNode(parts[1], parts[2], parts[3], parts[4], parts[5], parts[6], startLine, endLine);
+            _edges.Add(edge);
+            IncrementDegree(edge.SourceId);
+            if (!StringComparer.Ordinal.Equals(edge.SourceId, edge.TargetId))
+                IncrementDegree(edge.TargetId);
+            return;
+        }
 
-            Index(_byName, node.Name, node);
-            Index(_byQualifiedName, node.QualifiedName, node);
-            Index(_byKind, node.Kind, node);
+        if (parts[0] != "node") return;
 
-            if (node.Kind == "route")
-            {
-                _routes.TryAdd(node.Name, node);
-            }
+        _ = int.TryParse(parts[7], NumberStyles.Integer, CultureInfo.InvariantCulture, out int startLine);
+        _ = int.TryParse(parts[8], NumberStyles.Integer, CultureInfo.InvariantCulture, out int endLine);
+        CodeGraphNode node = new CodeGraphNode(parts[1], parts[2], parts[3], parts[4], parts[5], parts[6], startLine, endLine);
 
-            if (node.FilePath.Length > 0)
-            {
-                _filePaths.Add(node.FilePath);
-            }
+        Index(_byName, node.Name, node);
+        Index(_byQualifiedName, node.QualifiedName, node);
+        Index(_byKind, node.Kind, node);
+
+        if (node.Kind == "route")
+        {
+            _routes.TryAdd(node.Name, node);
+        }
+
+        if (node.FilePath.Length > 0)
+        {
+            _filePaths.Add(node.FilePath);
         }
     }
 
@@ -183,6 +275,23 @@ public sealed class CodeGraphResolverAdapter : ICodeGraphResolver, ICodeGraphNei
         return _staleness = _stalenessRule.Describe(root, indexedCommit, files);
     }
 
+    /// <inheritdoc />
+    public async Task<string?> DescribeStalenessAsync(CancellationToken cancellationToken = default)
+    {
+        if (!IsAvailable) return null;
+        if (_stalenessRead) return _staleness;
+
+        // The checkout is the folder that holds the index folder: <root>/.codegraph/codegraph.db.
+        string? root = Path.GetDirectoryName(Path.GetDirectoryName(DatabasePath));
+        _stalenessRead = true;
+        if (root is null) return _staleness = null;
+
+        (string? indexedCommit, IReadOnlyDictionary<string, (long ModifiedMilliseconds, int NodeCount)> files) =
+            await ReadStalenessFactsAsync(cancellationToken).ConfigureAwait(false);
+        _staleness = await _stalenessRule.DescribeAsync(root, indexedCommit, files, cancellationToken).ConfigureAwait(false);
+        return _staleness;
+    }
+
     /// <summary>Reads the recorded commit and per-file state the staleness rule needs.</summary>
     /// <returns>The commit the index recorded (null when it recorded none), and each indexed path with its recorded modification time (ms) and symbol count.</returns>
     /// <remarks>
@@ -191,11 +300,6 @@ public sealed class CodeGraphResolverAdapter : ICodeGraphResolver, ICodeGraphNei
     /// </remarks>
     public (string? IndexedCommit, IReadOnlyDictionary<string, (long ModifiedMilliseconds, int NodeCount)> Files) ReadStalenessFacts()
     {
-        const string sql = """
-            SELECT 'file', path, CAST(modified_at AS INTEGER), node_count FROM files
-            UNION ALL
-            SELECT 'meta', key, value, '' FROM project_metadata WHERE key = 'indexed_at_commit'
-            """;
         Dictionary<string, (long ModifiedMilliseconds, int NodeCount)> files = new(StringComparer.Ordinal);
         string? indexedCommit = null;
 
@@ -203,19 +307,9 @@ public sealed class CodeGraphResolverAdapter : ICodeGraphResolver, ICodeGraphNei
 
         try
         {
-            foreach (string line in RunSqlite(sql))
+            foreach (string line in RunSqlite(StalenessSql))
             {
-                string[] parts = line.Split(FieldSeparator);
-                if (parts.Length < 4) continue;
-                if (parts[0] == "meta")
-                {
-                    indexedCommit = parts[2].Trim();
-                    continue;
-                }
-
-                _ = long.TryParse(parts[2], NumberStyles.Integer, CultureInfo.InvariantCulture, out long modified);
-                _ = int.TryParse(parts[3], NumberStyles.Integer, CultureInfo.InvariantCulture, out int nodeCount);
-                files[parts[1]] = (modified, nodeCount);
+                CollectStalenessRow(line, files, ref indexedCommit);
             }
         }
         catch (Exception ex) when (ex is InvalidOperationException or IOException
@@ -226,6 +320,52 @@ public sealed class CodeGraphResolverAdapter : ICodeGraphResolver, ICodeGraphNei
         }
 
         return (indexedCommit, files);
+    }
+
+    /// <summary>Reads the recorded commit and per-file state the staleness rule needs, without blocking a thread.</summary>
+    /// <param name="cancellationToken">Cancels the index read.</param>
+    /// <returns>The commit the index recorded (null when it recorded none), and each indexed path with its recorded modification time (ms) and symbol count.</returns>
+    public async Task<(string? IndexedCommit, IReadOnlyDictionary<string, (long ModifiedMilliseconds, int NodeCount)> Files)>
+        ReadStalenessFactsAsync(CancellationToken cancellationToken = default)
+    {
+        Dictionary<string, (long ModifiedMilliseconds, int NodeCount)> files = new(StringComparer.Ordinal);
+        string? indexedCommit = null;
+
+        if (!IsAvailable) return (null, files);
+
+        try
+        {
+            foreach (string line in await RunSqliteAsync(StalenessSql, cancellationToken).ConfigureAwait(false))
+            {
+                CollectStalenessRow(line, files, ref indexedCommit);
+            }
+        }
+        catch (Exception ex) when (ex is InvalidOperationException or IOException
+                                       or System.ComponentModel.Win32Exception
+                                       or TimeoutException)
+        {
+            return (null, files);
+        }
+
+        return (indexedCommit, files);
+    }
+
+    private static void CollectStalenessRow(
+        string line,
+        IDictionary<string, (long ModifiedMilliseconds, int NodeCount)> files,
+        ref string? indexedCommit)
+    {
+        string[] parts = line.Split(FieldSeparator);
+        if (parts.Length < 4) return;
+        if (parts[0] == "meta")
+        {
+            indexedCommit = parts[2].Trim();
+            return;
+        }
+
+        _ = long.TryParse(parts[2], NumberStyles.Integer, CultureInfo.InvariantCulture, out long modified);
+        _ = int.TryParse(parts[3], NumberStyles.Integer, CultureInfo.InvariantCulture, out int nodeCount);
+        files[parts[1]] = (modified, nodeCount);
     }
 
     private void IncrementDegree(string nodeId)
@@ -247,6 +387,30 @@ public sealed class CodeGraphResolverAdapter : ICodeGraphResolver, ICodeGraphNei
     }
 
     private IEnumerable<string> RunSqlite(string sql)
+    {
+        ProcessStartInfo startInfo = SqliteStartInfo(sql);
+
+        // The runner drains both pipes concurrently. This query returns the whole node table, so stdout is
+        // large by design and stderr must not be left to fill behind it. A read that outlasts the bound is
+        // killed and throws TimeoutException, which the constructor reports as the index being unavailable.
+        ProcessResult result = _processes.Run(startInfo, string.Empty, SqliteReadTimeout);
+        return SqliteOutput(result);
+    }
+
+    private async Task<IEnumerable<string>> RunSqliteAsync(string sql, CancellationToken cancellationToken)
+    {
+        IProcessRunner processesAsync = _processesAsync
+            ?? throw new InvalidOperationException("The CodeGraph index read needs a process runner that can run sqlite3 without blocking.");
+        ProcessStartInfo startInfo = SqliteStartInfo(sql);
+        ProcessResult result = await processesAsync.RunAsync(
+            startInfo,
+            string.Empty,
+            SqliteReadTimeout,
+            cancellationToken).ConfigureAwait(false);
+        return SqliteOutput(result);
+    }
+
+    private ProcessStartInfo SqliteStartInfo(string sql)
     {
         ProcessStartInfo startInfo = new ProcessStartInfo("sqlite3")
         {
@@ -270,12 +434,11 @@ public sealed class CodeGraphResolverAdapter : ICodeGraphResolver, ICodeGraphNei
         startInfo.ArgumentList.Add(FieldSeparator.ToString(CultureInfo.InvariantCulture));
         startInfo.ArgumentList.Add(DatabasePath);
         startInfo.ArgumentList.Add(sql);
+        return startInfo;
+    }
 
-        // The runner drains both pipes concurrently. This query returns the whole node table, so stdout is
-        // large by design and stderr must not be left to fill behind it. A read that outlasts the bound is
-        // killed and throws TimeoutException, which the constructor reports as the index being unavailable.
-        ProcessResult result = _processes.Run(startInfo, string.Empty, SqliteReadTimeout);
-
+    private static IEnumerable<string> SqliteOutput(ProcessResult result)
+    {
         if (result.ExitCode != 0)
         {
             throw new InvalidOperationException(

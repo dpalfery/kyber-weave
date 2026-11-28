@@ -32,6 +32,12 @@ internal sealed class FakeCodeGraphPortsFactory(ICodeGraphResolver resolver) : I
             _resolver as ICodeGraphIndexFreshness ?? CurrentIndex.Instance);
     }
 
+    /// <inheritdoc />
+    public Task<CodeGraphPorts> ForRepositoryAsync(
+        string repositoryRoot,
+        CancellationToken cancellationToken = default) =>
+        Task.FromResult(ForRepository(repositoryRoot));
+
     private sealed class NoNeighborhood : ICodeGraphNeighborhoodProvider
     {
         public static NoNeighborhood Instance { get; } = new();
@@ -51,5 +57,8 @@ internal sealed class FakeCodeGraphPortsFactory(ICodeGraphResolver resolver) : I
         public static CurrentIndex Instance { get; } = new();
 
         public string? DescribeStaleness() => null;
+
+        public Task<string?> DescribeStalenessAsync(CancellationToken cancellationToken = default) =>
+            Task.FromResult<string?>(null);
     }
 }

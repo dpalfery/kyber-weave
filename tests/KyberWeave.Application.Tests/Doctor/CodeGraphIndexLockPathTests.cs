@@ -66,6 +66,15 @@ public sealed class CodeGraphIndexLockPathTests
             return null;
         }
 
+        public Task<CodeGraphIndexLockAttempt> TryAcquireLockAsync(
+            string path,
+            TimeSpan wait,
+            CancellationToken cancellationToken = default)
+        {
+            Paths.Add(path);
+            return Task.FromResult(new CodeGraphIndexLockAttempt(null, "refused for the test"));
+        }
+
         public bool IsWritable(string directory) => false;
 
         public bool IsCodeGraphLockHeld(string indexDirectory) => false;

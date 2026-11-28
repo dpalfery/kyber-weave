@@ -1,3 +1,4 @@
+using KyberWeave.Contracts.Repositories;
 using KyberWeave.Data.Doctor;
 using Microsoft.Extensions.Time.Testing;
 using Xunit;
@@ -41,7 +42,9 @@ public sealed class FileCodeGraphIndexWorkspaceTests
             }
         });
 
-        IDisposable? held = workspace.TryAcquireLock(lockPath, Wait, out string? failure);
+        CodeGraphIndexLockAttempt attempt = await workspace.TryAcquireLockAsync(lockPath, Wait, CancellationToken.None);
+        IDisposable? held = attempt.Lock;
+        string? failure = attempt.Failure;
         await stop.CancelAsync();
         await clockDriver;
 

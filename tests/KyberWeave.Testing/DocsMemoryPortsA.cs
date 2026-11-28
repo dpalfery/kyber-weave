@@ -184,7 +184,15 @@ internal sealed class UnreachedAnalysisPersistenceFactory : KyberWeave.Contracts
     public bool IsCacheSafe(string repositoryRoot) => throw Unreached();
 
     /// <inheritdoc />
+    public Task<bool> IsCacheSafeAsync(string repositoryRoot, CancellationToken cancellationToken = default) => throw Unreached();
+
+    /// <inheritdoc />
     public KyberWeave.Core.Docs.Analysis.IAnalysisPersistence Open(string repositoryRoot) => throw Unreached();
+
+    /// <inheritdoc />
+    public Task<KyberWeave.Core.Docs.Analysis.IAnalysisPersistence> OpenAsync(
+        string repositoryRoot,
+        CancellationToken cancellationToken = default) => throw Unreached();
 
     private static InvalidOperationException Unreached() => new("The case replaced the cache factory, so it must not be reached.");
 }

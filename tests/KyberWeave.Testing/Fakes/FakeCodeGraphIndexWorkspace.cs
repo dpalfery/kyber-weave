@@ -31,6 +31,18 @@ public sealed class FakeCodeGraphIndexWorkspace : ICodeGraphIndexWorkspace
     }
 
     /// <inheritdoc />
+    public Task<CodeGraphIndexLockAttempt> TryAcquireLockAsync(
+        string path,
+        TimeSpan wait,
+        CancellationToken cancellationToken = default)
+    {
+        _lockPaths.Add(path);
+        return RefuseLock
+            ? Task.FromResult(new CodeGraphIndexLockAttempt(null, LockFailure))
+            : Task.FromResult(new CodeGraphIndexLockAttempt(NoopHandle.Instance, null));
+    }
+
+    /// <inheritdoc />
     public bool IsWritable(string directory) => Writable;
 
     /// <inheritdoc />
@@ -38,6 +50,15 @@ public sealed class FakeCodeGraphIndexWorkspace : ICodeGraphIndexWorkspace
 
     private sealed class Handle : IDisposable
     {
+        public void Dispose()
+        {
+        }
+    }
+
+    private sealed class NoopHandle : IDisposable
+    {
+        public static NoopHandle Instance { get; } = new();
+
         public void Dispose()
         {
         }

@@ -56,6 +56,18 @@ public sealed partial class SqliteAnalysisPersistence : IAnalysisPersistence
         IProcessEnvironment environment,
         IBoundedProcessExecutor processes,
         AnalysisCacheSafety safety)
+        : this(repositoryRoot, files, paths, environment, processes, safety, cacheSafe: null)
+    {
+    }
+
+    internal SqliteAnalysisPersistence(
+        string repositoryRoot,
+        IWritableFileSystem files,
+        IPathResolver paths,
+        IProcessEnvironment environment,
+        IBoundedProcessExecutor processes,
+        AnalysisCacheSafety safety,
+        bool? cacheSafe)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(repositoryRoot);
         ArgumentNullException.ThrowIfNull(files);
@@ -74,7 +86,7 @@ public sealed partial class SqliteAnalysisPersistence : IAnalysisPersistence
             "docs-analysis.sqlite3");
 
         EnsureSafePersistencePath(fullRoot, DatabasePath);
-        if (!safety.IsSafe(fullRoot) || !CanStartSqlite()) return;
+        if (!(cacheSafe ?? safety.IsSafe(fullRoot)) || !CanStartSqlite()) return;
 
         string databaseDirectory = Path.GetDirectoryName(DatabasePath)
             ?? throw new InvalidOperationException("The analysis database path must have a directory.");

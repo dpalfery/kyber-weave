@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using KyberWeave.Core.Docs.Analysis;
 using KyberWeave.Core.Docs.Analysis.Persistence;
 using KyberWeave.Core.Processes;
 using KyberWeave.Tests.Fakes;
@@ -45,6 +46,25 @@ public sealed class SqliteAnalysisPersistenceSeamTests
         ScriptedProcessExecutor processes = Scripted(_ => Ok("0\n"));
 
         _ = Assert.Throws<InvalidOperationException>(() => Open(processes));
+    }
+
+    [Fact]
+    public async Task OpenAsyncLeavesAnUnsafeCheckoutClosedWithoutBlocking()
+    {
+        _files.CreateDirectory(Path.Combine(Root, ".kyber-weave"));
+        _files.WriteAllText(Path.Combine(Root, ".kyber-weave", ".gitignore"), "logs/");
+        ScriptedProcessRunner processes = new();
+        FakePathResolver paths = new(_files);
+        FakeProcessEnvironment environment = new(currentDirectory: WorkingDirectory);
+        AnalysisCacheSafety safety = new(_files, paths, environment, processes);
+        SqliteAnalysisPersistenceFactory factory = new(_files, paths, environment, processes, safety);
+
+        Assert.False(await factory.IsCacheSafeAsync(Root));
+        IAnalysisPersistence persistence = await factory.OpenAsync(Root);
+
+        Assert.False(persistence.IsAvailable);
+        Assert.False(_files.DirectoryExists(CacheDirectory));
+        Assert.Empty(processes.Calls);
     }
 
     private static ProcessResult Ok(string output) => new(0, output, string.Empty);
