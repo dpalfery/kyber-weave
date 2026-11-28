@@ -35,7 +35,7 @@ public sealed class DocsCommandOutputSeamTests : IDisposable
     }
 
     [Fact]
-    public void PacketResolvesTheWorkingDirectoryThroughThePathSeamAndReportsOnItsConsole()
+    public async Task PacketResolvesTheWorkingDirectoryThroughThePathSeamAndReportsOnItsConsole()
     {
         IServiceProvider provider = DocsTestCommands.Services(services =>
         {
@@ -50,7 +50,7 @@ public sealed class DocsCommandOutputSeamTests : IDisposable
             WorkingDirectory = "repo",
         };
 
-        int exit = new DocsPacketCommand(
+        int exit = await new DocsPacketCommand(
             provider.GetRequiredService<IPlanTaskService>(),
             provider.GetRequiredService<IPacketHostFacts>(),
             provider.GetRequiredService<IWritableFileSystem>(),
@@ -70,7 +70,7 @@ public sealed class DocsCommandOutputSeamTests : IDisposable
                 provider.GetRequiredService<IFileSystem>(),
                 provider.GetRequiredService<IPathResolver>(),
                 provider.GetRequiredService<IProcessEnvironment>()),
-            provider.GetRequiredService<IKwSkillCatalogFactory>()).Execute(null!, settings, CancellationToken.None);
+            provider.GetRequiredService<IKwSkillCatalogFactory>()).ExecuteAsync(null!, settings, CancellationToken.None);
 
         Assert.Equal(1, exit);
         Assert.Contains(Root, _configs.LoadedRoots, StringComparer.Ordinal);
@@ -89,11 +89,11 @@ public sealed class DocsCommandOutputSeamTests : IDisposable
         _console);
 
     [Fact]
-    public void TasksReportsAConflictingModePairOnItsConsole()
+    public async Task TasksReportsAConflictingModePairOnItsConsole()
     {
         DocsTasksSettings settings = new() { List = true, Write = true, Format = "json" };
 
-        int exit = new DocsTasksCommand(
+        int exit = await new DocsTasksCommand(
             tasks: null!,
             pickers: null!,
             arbiterKeys: null!,
@@ -101,7 +101,7 @@ public sealed class DocsCommandOutputSeamTests : IDisposable
             files: new InMemoryRepositoryFileStore(_files),
             configs: _configs,
             console: _console,
-            plans: Plans(new FakePathResolver(_files), new FakeProcessEnvironment(currentDirectory: WorkingDirectory))).Execute(null!, settings, CancellationToken.None);
+            plans: Plans(new FakePathResolver(_files), new FakeProcessEnvironment(currentDirectory: WorkingDirectory))).ExecuteAsync(null!, settings, CancellationToken.None);
 
         Assert.Equal(1, exit);
         Assert.Contains(DocsTasksCommand.ConflictingModes, _console.Output, StringComparison.Ordinal);

@@ -18,9 +18,12 @@ public sealed class DocsExportGraphCommand(
     IKyberWeaveConfigRepository configs,
     IWritableFileSystem files,
     IDocumentSourceFactory documents,
-    IAnsiConsole console) : Command<DocsExportGraphSettings>
+    IAnsiConsole console) : AsyncCommand<DocsExportGraphSettings>
 {
-    public override int Execute(CommandContext context, DocsExportGraphSettings settings, CancellationToken cancellationToken)
+    public override async Task<int> ExecuteAsync(
+        CommandContext context,
+        DocsExportGraphSettings settings,
+        CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(settings);
 
@@ -39,7 +42,9 @@ public sealed class DocsExportGraphCommand(
         }
 
         DocumentSet set = loader.Load();
-        ICodeGraphResolver resolver = DocsCommandComposition.CreateResolver(settings, codeGraph);
+        ICodeGraphResolver resolver = await DocsCommandComposition
+            .CreateResolverAsync(settings, codeGraph, cancellationToken)
+            .ConfigureAwait(false);
 
         if (!resolver.IsAvailable)
         {
@@ -76,6 +81,4 @@ public sealed class DocsExportGraphCommand(
             $"[green]{result.EdgeCount} edges[/] → {Markup.Escape(result.EdgesPath)}");
         return 0;
     }
-
-    public int Execute(CommandContext context, DocsExportGraphSettings settings) => Execute(context, settings, CancellationToken.None);
 }

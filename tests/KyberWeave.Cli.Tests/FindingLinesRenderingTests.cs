@@ -74,11 +74,11 @@ public sealed class FindingLinesRenderingTests : IDisposable
     }
 
     [Fact]
-    public void WithoutAFormatARedirectedCommandWritesLinesAndTheSummary()
+    public async Task WithoutAFormatARedirectedCommandWritesLinesAndTheSummary()
     {
         DocsCloseoutSettings settings = new() { Path = "no-such-plan" };
 
-        int exit = Closeout().Execute(null!, settings, CancellationToken.None);
+        int exit = await Closeout().ExecuteAsync(null!, settings, CancellationToken.None);
 
         string[] lines = _console.Output.Split('\n', StringSplitOptions.RemoveEmptyEntries);
         Assert.Equal(1, exit);
@@ -93,11 +93,11 @@ public sealed class FindingLinesRenderingTests : IDisposable
     /// the caller typed, so the refusal names a location outside the tree instead of hiding it.
     /// </summary>
     [Fact]
-    public void APathThatClimbsOutOfTheRepositoryIsRefusedByName()
+    public async Task APathThatClimbsOutOfTheRepositoryIsRefusedByName()
     {
         DocsCloseoutSettings settings = new() { Path = "../../etc/passwd" };
 
-        int exit = Closeout().Execute(null!, settings, CancellationToken.None);
+        int exit = await Closeout().ExecuteAsync(null!, settings, CancellationToken.None);
 
         Assert.Equal(1, exit);
         Assert.Contains("KW-DOC-CLOSEOUT-001", _console.Output, StringComparison.Ordinal);
@@ -106,11 +106,11 @@ public sealed class FindingLinesRenderingTests : IDisposable
     }
 
     [Fact]
-    public void AnExplicitTableFormatStillDrawsTheTable()
+    public async Task AnExplicitTableFormatStillDrawsTheTable()
     {
         DocsCloseoutSettings settings = new() { Path = "no-such-plan", Format = "table" };
 
-        int exit = Closeout().Execute(null!, settings, CancellationToken.None);
+        int exit = await Closeout().ExecuteAsync(null!, settings, CancellationToken.None);
 
         Assert.Equal(1, exit);
         Assert.Contains("│", _console.Output, StringComparison.Ordinal);

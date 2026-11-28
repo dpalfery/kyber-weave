@@ -25,7 +25,7 @@ namespace KyberWeave.Cli.Commands.Docs;
 /// would drift from it. A missing APM is reported with the manual command and does not
 /// fail the command — the corpus scaffolding is the part that must succeed.
 /// </remarks>
-public sealed class DocsInitCommand : Command<DocsInitSettings>
+public sealed class DocsInitCommand : AsyncCommand<DocsInitSettings>
 {
     private readonly IMcpWiringService _wiring;
     private readonly IDocsScaffoldingService _scaffolder;
@@ -35,7 +35,7 @@ public sealed class DocsInitCommand : Command<DocsInitSettings>
     private readonly IFileSystem _files;
     private readonly IPathResolver _paths;
     private readonly IProcessEnvironment _environment;
-    private readonly IBoundedProcessExecutor _processes;
+    private readonly IProcessRunner _processes;
 
     /// <summary>Creates the command over the services the container resolves.</summary>
     /// <param name="wiring">Inspects, repairs and renames the harness MCP configuration.</param>
@@ -56,7 +56,7 @@ public sealed class DocsInitCommand : Command<DocsInitSettings>
         IFileSystem files,
         IPathResolver paths,
         IProcessEnvironment environment,
-        IBoundedProcessExecutor processes)
+        IProcessRunner processes)
     {
         _wiring = wiring ?? throw new ArgumentNullException(nameof(wiring));
         _scaffolder = scaffolder ?? throw new ArgumentNullException(nameof(scaffolder));
@@ -109,17 +109,21 @@ public sealed class DocsInitCommand : Command<DocsInitSettings>
     /// </summary>
     private static readonly TimeSpan ProvisionIndexTimeout = TimeSpan.FromSeconds(600);
 
-    /// <summary>Runs the provisioning doctor's CodeGraph child. Null uses a process executor bounded by <see cref="ProvisionIndexTimeout"/>.</summary>
-    internal IProcessExecutor? Executor { get; init; }
+    /// <summary>Runs the provisioning doctor's CodeGraph child. Null uses a process runner bounded by <see cref="ProvisionIndexTimeout"/>.</summary>
+    internal IProcessRunner? Executor { get; init; }
 
     /// <summary>The MCP executable the provisioning doctor proves. Null uses the PATH name <c>kyber-weave-mcp</c>.</summary>
     internal string? McpExecutable { get; init; }
 
     /// <inheritdoc />
-    public override int Execute(CommandContext context, DocsInitSettings settings, CancellationToken cancellationToken)
+    public override async Task<int> ExecuteAsync(
+        CommandContext context,
+        DocsInitSettings settings,
+        CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(settings);
-        (int ExitCode, ScaffoldResult? Result, string? Error) attempt = TryScaffold(_scaffolder, settings);
+        (int ExitCode, ScaffoldResult? Result, string? Error) attempt =
+            await TryScaffoldAsync(_scaffolder, settings, cancellationToken).ConfigureAwait(false);
         if (attempt.ExitCode != 0)
         {
             string error = attempt.Error
@@ -155,7 +159,7 @@ public sealed class DocsInitCommand : Command<DocsInitSettings>
 
         if (!settings.NoSkill)
         {
-            DeploySkill(settings);
+            await DeploySkillAsync(settings, cancellationToken).ConfigureAwait(false);
         }
 
         ReportRetiredSkills(settings);
@@ -176,7 +180,7 @@ public sealed class DocsInitCommand : Command<DocsInitSettings>
         _console.MarkupLine("  3. Ask your agent to apply the [grey]kyber-docs-authoring[/] skill to the failing documents.");
         _console.MarkupLine($"  4. Declare your stacks in [grey]ontology.technologies[/] and re-run, to scaffold a coding standard per technology under [grey]{Markup.Escape(result.DocsRoot)}/standards/[/].");
 
-        return settings.Provision ? Provision(settings) : 0;
+        return settings.Provision ? await ProvisionAsync(settings, cancellationToken).ConfigureAwait(false) : 0;
     }
 
     /// <summary>
@@ -188,21 +192,22 @@ public sealed class DocsInitCommand : Command<DocsInitSettings>
     ///     the repository that holds the scaffold. Pure scaffolding stays the default, so CI's scaffold step is
     ///     unchanged unless it opts in.
     /// </remarks>
-    private int Provision(DocsInitSettings settings)
+    private async Task<int> ProvisionAsync(DocsInitSettings settings, CancellationToken cancellationToken)
     {
         DoctorOptions options = new(
             ProvisionIndexTimeout,
             TimeSpan.FromSeconds(20),
             "codegraph",
             McpExecutable ?? "kyber-weave-mcp");
-        IProcessExecutor executor = Executor ?? new BoundedExecutor(_processes, ProvisionIndexTimeout);
+        IProcessRunner executor = Executor ?? new BoundedExecutor(_processes, ProvisionIndexTimeout);
 
-        DoctorReport report = _doctor.Run(
+        DoctorReport report = await _doctor.RunAsync(
             FullPath(settings.Path),
             DoctorMode.Provision,
             options,
             executor,
-            _environment.GetVariable);
+            _environment.GetVariable,
+            cancellationToken: cancellationToken).ConfigureAwait(false);
 
         DoctorReportRenderer.Write(_console.Profile.Out.Writer, report, asJson: false);
         return report.ExitCode;
@@ -211,21 +216,25 @@ public sealed class DocsInitCommand : Command<DocsInitSettings>
     /// <summary>Runs the scaffold step and translates expected operator failures to exit 1.</summary>
     /// <param name="scaffolder">The scaffolding service to run.</param>
     /// <param name="settings">The operator's options.</param>
-    internal static (int ExitCode, ScaffoldResult? Result, string? Error) TryScaffold(
-        IDocsScaffoldingService scaffolder, DocsInitSettings settings)
+    /// <param name="cancellationToken">Cancels the repository file listing used to plan review gates.</param>
+    internal static async Task<(int ExitCode, ScaffoldResult? Result, string? Error)> TryScaffoldAsync(
+        IDocsScaffoldingService scaffolder,
+        DocsInitSettings settings,
+        CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(scaffolder);
 
         try
         {
-            ScaffoldResult result = scaffolder.Scaffold(
+            ScaffoldResult result = await scaffolder.ScaffoldAsync(
                 settings.Path,
                 settings.DocsRoot,
                 settings.Owner,
                 settings.Force,
                 settings.KyberStandards,
                 reviewGates: !settings.NoReviewGates,
-                standards: settings.ChosenStandards);
+                standards: settings.ChosenStandards,
+                cancellationToken: cancellationToken).ConfigureAwait(false);
             return (0, result, null);
         }
         catch (Exception ex) when (ex is
@@ -309,7 +318,7 @@ public sealed class DocsInitCommand : Command<DocsInitSettings>
         }
     }
 
-    private void DeploySkill(DocsInitSettings settings)
+    private async Task DeploySkillAsync(DocsInitSettings settings, CancellationToken cancellationToken)
     {
         ProcessStartInfo startInfo = new ProcessStartInfo("apm")
         {
@@ -333,7 +342,9 @@ public sealed class DocsInitCommand : Command<DocsInitSettings>
 
         try
         {
-            ProcessResult result = _processes.Run(startInfo, string.Empty, ApmInstallTimeout);
+            ProcessResult result = await _processes
+                .RunAsync(startInfo, string.Empty, ApmInstallTimeout, cancellationToken)
+                .ConfigureAwait(false);
 
             if (result.ExitCode == 0)
             {
@@ -780,9 +791,19 @@ public sealed class DocsInitCommand : Command<DocsInitSettings>
 
     private string FullPath(string path) => _paths.GetFullPath(path, _environment.CurrentDirectory);
 
-    private sealed class BoundedExecutor(IBoundedProcessExecutor process, TimeSpan timeout) : IProcessExecutor
+    private sealed class BoundedExecutor(IProcessRunner process, TimeSpan timeout) : IProcessRunner
     {
         public ProcessResult Run(ProcessStartInfo startInfo, string standardInput) =>
-            process.Run(startInfo, standardInput, timeout);
+            ((IBoundedProcessExecutor)process).Run(startInfo, standardInput, timeout);
+
+        public Task<ProcessRunResult> RunAsync(ProcessRunRequest request, CancellationToken cancellationToken = default)
+        {
+            ArgumentNullException.ThrowIfNull(request);
+            return process.RunAsync(request with { Timeout = request.Timeout ?? timeout }, cancellationToken);
+        }
+
+        public bool IsAlive(int processId) => process.IsAlive(processId);
+
+        public string? FindOnPath(string program) => process.FindOnPath(program);
     }
 }

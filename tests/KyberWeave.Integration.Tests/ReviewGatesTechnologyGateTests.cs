@@ -11,19 +11,25 @@ namespace KyberWeave.Integration.Tests;
 /// <c>review gates . --agent &lt;tier&gt; --task &lt;id&gt;</c> resolves a task's gates by the task's technology, the way
 /// <c>docs packet</c> does, so a host that declares only <c>review.technology-gates</c> still runs the task's change.
 /// </summary>
-public sealed class ReviewGatesTechnologyGateTests : IDisposable
+public sealed class ReviewGatesTechnologyGateTests : IAsyncLifetime
 {
     private const string NoGatesForAgent = "KW-REVIEW-027";
 
-    private readonly DocFixture _fixture = Ready();
+    private DocFixture _fixture = null!;
 
-    public void Dispose() => _fixture.Dispose();
+    public async ValueTask InitializeAsync() => _fixture = await ReadyAsync();
 
-    internal static DocFixture Ready(string? planMarkdown = null)
+    public ValueTask DisposeAsync()
+    {
+        _fixture.Dispose();
+        return ValueTask.CompletedTask;
+    }
+
+    internal static async Task<DocFixture> ReadyAsync(string? planMarkdown = null)
     {
         DocFixture fixture = PlanTaskFileProbe.Corpus(planMarkdown);
         Directory.CreateDirectory(Path.Combine(fixture.Root, ".git"));
-        DocsTestCommands.Tasks().Execute(
+        _ = await DocsTestCommands.Tasks().ExecuteAsync(
             null!,
             new DocsTasksSettings { Path = Path.Combine(fixture.Root, PlanTaskFileProbe.PlanPath), Format = "json", Write = true },
             CancellationToken.None);
@@ -58,13 +64,13 @@ public sealed class ReviewGatesTechnologyGateTests : IDisposable
     }
 
     /// <summary>The fixture plan with its first task naming no technology, as a documentation task does.</summary>
-    private static DocFixture WithoutTechnology()
+    private static Task<DocFixture> WithoutTechnologyAsync()
     {
         const string Technology = "- **Technology:** csharp";
         string plan = PlanTaskFileProbe.PlanMarkdown();
         int at = plan.IndexOf(Technology, StringComparison.Ordinal);
         Assert.True(at >= 0, "the fixture plan should name the first task's technology");
-        return Ready(plan[..at] + "- **Capabilities:** documentation and prose" + plan[(at + Technology.Length)..]);
+        return ReadyAsync(plan[..at] + "- **Capabilities:** documentation and prose" + plan[(at + Technology.Length)..]);
     }
 
     [Fact]
@@ -109,10 +115,10 @@ public sealed class ReviewGatesTechnologyGateTests : IDisposable
     }
 
     [Fact]
-    public void ATechnologyWithNoEntryAnywhereReportsTheWarningAndNamesTechnologyGates()
+    public async Task ATechnologyWithNoEntryAnywhereReportsTheWarningAndNamesTechnologyGates()
     {
         SkipOnWindows();
-        using DocFixture fixture = WithoutTechnology();
+        using DocFixture fixture = await WithoutTechnologyAsync();
         ConfigureWith(fixture, "  technology-gates:\n" + Entry("csharp", "tech-probe", "tech-ran.txt"));
 
         (int exit, string output) = Run(fixture, "dev-easy");
@@ -124,10 +130,10 @@ public sealed class ReviewGatesTechnologyGateTests : IDisposable
     }
 
     [Fact]
-    public void ATaskWithNoTechnologyLineResolvesItsAgentsOwnEntry()
+    public async Task ATaskWithNoTechnologyLineResolvesItsAgentsOwnEntry()
     {
         SkipOnWindows();
-        using DocFixture fixture = WithoutTechnology();
+        using DocFixture fixture = await WithoutTechnologyAsync();
         ConfigureWith(fixture, "  task-gates:\n" + Entry("dev-medium", "agent-probe", "agent-ran.txt"));
 
         (int exit, string output) = Run(fixture, "dev-medium");

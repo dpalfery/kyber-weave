@@ -56,13 +56,13 @@ public sealed class TaskPromptBudgetTests
     }
 
     /// <summary>A corpus whose rules are small and whose skills and standard sections are large.</summary>
-    private static DocFixture Ready()
+    private static async Task<DocFixture> ReadyAsync()
     {
         DocFixture fixture = PlanTaskFileProbe.CorpusInMemory(BudgetPlan());
         Standards(fixture);
         _ = fixture.EnsureDirectory(".git");
         using TestConsole console = new() { EmitAnsiSequences = false };
-        _ = DocsTestCommands.Tasks(DocsMemoryServicesD.Services(fixture), console).Execute(
+        _ = await DocsTestCommands.Tasks(DocsMemoryServicesD.Services(fixture), console).ExecuteAsync(
             null!,
             new DocsTasksSettings
             {
@@ -161,9 +161,9 @@ public sealed class TaskPromptBudgetTests
         DocumentIndex.Build(fixture.Loader(config.Ontology).Load(), FakeCodeGraphResolver.WithSymbols());
 
     [Fact]
-    public void EveryPartFitsTheDefaultBudget()
+    public async Task EveryPartFitsTheDefaultBudget()
     {
-        using DocFixture fixture = Ready();
+        using DocFixture fixture = await ReadyAsync();
         KyberWeaveConfig config = Config();
         TaskPromptResult full = Build(fixture, config);
 
@@ -174,9 +174,9 @@ public sealed class TaskPromptBudgetTests
     }
 
     [Fact]
-    public void OverTheBudgetTheKwSkillsListIsCutFirstAndNamedInLeftOut()
+    public async Task OverTheBudgetTheKwSkillsListIsCutFirstAndNamedInLeftOut()
     {
-        using DocFixture fixture = Ready();
+        using DocFixture fixture = await ReadyAsync();
         int full = Build(fixture, Config()).Prompt.Length;
         KyberWeaveConfig tight = Config(full - 100);
 
@@ -195,9 +195,9 @@ public sealed class TaskPromptBudgetTests
     }
 
     [Fact]
-    public void OverTheBudgetTheLeastRelevantStandardSectionGoesLastAndRulesStayWhole()
+    public async Task OverTheBudgetTheLeastRelevantStandardSectionGoesLastAndRulesStayWhole()
     {
-        using DocFixture fixture = Ready();
+        using DocFixture fixture = await ReadyAsync();
         int full = Build(fixture, Config()).Prompt.Length;
         // The KW list alone is about 1,400 characters, so a budget of full - 1,600 cuts it and then the least relevant section.
         KyberWeaveConfig tight = Config(full - 1600);
@@ -219,9 +219,9 @@ public sealed class TaskPromptBudgetTests
     /// cannot recover. The last part must say so rather than return silently.
     /// </summary>
     [Fact]
-    public void APromptStillOverTheBudgetAfterEveryCutSaysSoInTheLastPart()
+    public async Task APromptStillOverTheBudgetAfterEveryCutSaysSoInTheLastPart()
     {
-        using DocFixture fixture = Ready();
+        using DocFixture fixture = await ReadyAsync();
         KyberWeaveConfig tiny = Config(100);
 
         TaskPromptResult result = Build(fixture, tiny);
@@ -233,9 +233,9 @@ public sealed class TaskPromptBudgetTests
 
     /// <summary>A retry's failure report rides in the same dispatch, so the prompt leaves it room rather than overshooting.</summary>
     [Fact]
-    public void TheRetryTextIsBudgetedWithThePrompt()
+    public async Task TheRetryTextIsBudgetedWithThePrompt()
     {
-        using DocFixture fixture = Ready();
+        using DocFixture fixture = await ReadyAsync();
         KyberWeaveConfig budget = Config(Build(fixture, Config()).Prompt.Length + 50);
 
         TaskPromptResult plain = Build(fixture, budget);

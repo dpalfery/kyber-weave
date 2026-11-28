@@ -36,14 +36,15 @@ public sealed class DocsAnalysisCompositionTests
 
     /// <summary>The resolver a docs command gets is the one the injected ports factory answers.</summary>
     [Fact]
-    public void TheResolverComesFromTheInjectedPortsFactory()
+    public async Task TheResolverComesFromTheInjectedPortsFactory()
     {
         FakeCodeGraphResolver resolver = FakeCodeGraphResolver.WithNodes();
         FakeCodeGraphPortsFactory codeGraph = new(resolver);
 
-        ICodeGraphResolver actual = DocsCommandComposition.CreateResolver(
+        ICodeGraphResolver actual = await DocsCommandComposition.CreateResolverAsync(
             new DocsSettings { Path = "/some/repo" },
-            codeGraph);
+            codeGraph,
+            CancellationToken.None);
 
         Assert.Same(resolver, actual);
         Assert.Equal(["/some/repo"], codeGraph.Roots);
@@ -56,7 +57,7 @@ public sealed class DocsAnalysisCompositionTests
     [InlineData(DocsAnalysisEmbeddingMode.Off, true, true, 1, 0)]
     [InlineData(DocsAnalysisEmbeddingMode.Prefer, true, true, 1, 1)]
     [InlineData(DocsAnalysisEmbeddingMode.Required, true, true, 1, 1)]
-    public void CompositionEnforcesEmbeddingModeAndSafePersistenceBeforeConstruction(
+    public async Task CompositionEnforcesEmbeddingModeAndSafePersistenceBeforeConstruction(
         DocsAnalysisEmbeddingMode mode,
         bool cacheSafe,
         bool expectedSuccess,
@@ -69,13 +70,14 @@ public sealed class DocsAnalysisCompositionTests
         FactoryProbe factories = Factories(cacheSafe, persistence, embedding, new AvailableResolver());
         DiagnosticReport report = new DiagnosticReport();
 
-        bool success = DocsCommandComposition.TryCreateAnalysisRuntime(
+        DocsAnalysisRuntime? runtime = await DocsCommandComposition.TryCreateAnalysisRuntimeAsync(
             Configs,
             new DocsIntegrityCheckSettings { Path = _host.Repo },
             report,
             factories.Factories,
-            out DocsAnalysisRuntime? runtime);
+            CancellationToken.None);
 
+        bool success = runtime is not null;
         Assert.Equal(expectedSuccess, success);
         Assert.Equal(expectedPersistenceConstructions, factories.PersistenceConstructions);
         Assert.Equal(expectedEmbeddingConstructions, factories.EmbeddingConstructions);
@@ -106,7 +108,7 @@ public sealed class DocsAnalysisCompositionTests
     [Theory]
     [InlineData(DocsAnalysisEmbeddingMode.Prefer, true)]
     [InlineData(DocsAnalysisEmbeddingMode.Required, false)]
-    public void CompositionUnavailablePersistenceFallsBackOnlyForPreferAndDisposesPartialRuntime(
+    public async Task CompositionUnavailablePersistenceFallsBackOnlyForPreferAndDisposesPartialRuntime(
         DocsAnalysisEmbeddingMode mode,
         bool expectedSuccess)
     {
@@ -116,13 +118,14 @@ public sealed class DocsAnalysisCompositionTests
         FactoryProbe factories = Factories(cacheSafe: true, persistence, embedding, new AvailableResolver());
         DiagnosticReport report = new DiagnosticReport();
 
-        bool success = DocsCommandComposition.TryCreateAnalysisRuntime(
+        DocsAnalysisRuntime? runtime = await DocsCommandComposition.TryCreateAnalysisRuntimeAsync(
             Configs,
             new DocsIntegrityCheckSettings { Path = _host.Repo },
             report,
             factories.Factories,
-            out DocsAnalysisRuntime? runtime);
+            CancellationToken.None);
 
+        bool success = runtime is not null;
         Assert.Equal(expectedSuccess, success);
         Assert.Equal(1, factories.PersistenceConstructions);
         Assert.Equal(0, factories.EmbeddingConstructions);
@@ -142,22 +145,22 @@ public sealed class DocsAnalysisCompositionTests
     }
 
     [Fact]
-    public void CompositionSuccessfulRuntimeDisposesEveryConstructedDisposableExactlyOnce()
+    public async Task CompositionSuccessfulRuntimeDisposesEveryConstructedDisposableExactlyOnce()
     {
         WriteConfig(DocsAnalysisEmbeddingMode.Prefer);
         DisposablePersistence persistence = new DisposablePersistence(isAvailable: true);
         DisposableEmbeddingGenerator embedding = new DisposableEmbeddingGenerator();
         FactoryProbe factories = Factories(cacheSafe: true, persistence, embedding, new AvailableResolver());
 
-        bool success = DocsCommandComposition.TryCreateAnalysisRuntime(
+        DocsAnalysisRuntime? runtime = await DocsCommandComposition.TryCreateAnalysisRuntimeAsync(
             Configs,
             new DocsIntegrityCheckSettings { Path = _host.Repo },
             new DiagnosticReport(),
             factories.Factories,
-            out DocsAnalysisRuntime? runtime);
+            CancellationToken.None);
 
-        Assert.True(success);
-        runtime!.Dispose();
+        Assert.NotNull(runtime);
+        runtime.Dispose();
         runtime.Dispose();
 
         Assert.Equal(1, persistence.DisposeCount);
@@ -165,7 +168,7 @@ public sealed class DocsAnalysisCompositionTests
     }
 
     [Fact]
-    public void CompositionMissingCodeGraphWarnsExactlyOnceAndContinues()
+    public async Task CompositionMissingCodeGraphWarnsExactlyOnceAndContinues()
     {
         WriteConfig(DocsAnalysisEmbeddingMode.Off);
         DiagnosticReport report = new DiagnosticReport();
@@ -175,22 +178,22 @@ public sealed class DocsAnalysisCompositionTests
             new DisposableEmbeddingGenerator(),
             new UnavailableResolver());
 
-        bool success = DocsCommandComposition.TryCreateAnalysisRuntime(
+        DocsAnalysisRuntime? runtime = await DocsCommandComposition.TryCreateAnalysisRuntimeAsync(
             Configs,
             new DocsIntegrityCheckSettings { Path = _host.Repo },
             report,
             factories.Factories,
-            out DocsAnalysisRuntime? runtime);
+            CancellationToken.None);
 
-        Assert.True(success);
-        runtime!.Dispose();
+        Assert.NotNull(runtime);
+        runtime.Dispose();
         Diagnostic warning = Assert.Single(report.Items, item =>
             item.Code == DocumentationAnalyzer.CodeGraphUnavailableRuleCode);
         Assert.Equal(Severity.Warning, warning.Severity);
     }
 
     [Fact]
-    public void CompositionUnsafeOrdinaryAnalysisCreatesNoCacheOrTrackedFiles()
+    public async Task CompositionUnsafeOrdinaryAnalysisCreatesNoCacheOrTrackedFiles()
     {
         WriteConfig(DocsAnalysisEmbeddingMode.Off);
         string[] before = Files();
@@ -200,15 +203,15 @@ public sealed class DocsAnalysisCompositionTests
             new DisposableEmbeddingGenerator(),
             new AvailableResolver());
 
-        bool success = DocsCommandComposition.TryCreateAnalysisRuntime(
+        DocsAnalysisRuntime? runtime = await DocsCommandComposition.TryCreateAnalysisRuntimeAsync(
             Configs,
             new DocsIntegrityCheckSettings { Path = _host.Repo },
             new DiagnosticReport(),
             factories.Factories,
-            out DocsAnalysisRuntime? runtime);
+            CancellationToken.None);
 
-        Assert.True(success);
-        runtime!.Dispose();
+        Assert.NotNull(runtime);
+        runtime.Dispose();
 
         Assert.Equal(before, Files());
         Assert.False(_host.Files.DirectoryExists(Path.Combine(_host.Repo, ".kyber-weave", "cache")));
@@ -220,7 +223,7 @@ public sealed class DocsAnalysisCompositionTests
     [InlineData("export")]
     [InlineData("import")]
     [InlineData("glossary")]
-    public void RepositoryServiceRequiredEmbeddingFailureStopsEveryRequestedWrite(string operation)
+    public async Task RepositoryServiceRequiredEmbeddingFailureStopsEveryRequestedWrite(string operation)
     {
         WriteAnalysisFixture(DocsAnalysisEmbeddingMode.Required);
         DisposablePersistence persistence = new DisposablePersistence(isAvailable: true);
@@ -234,17 +237,20 @@ public sealed class DocsAnalysisCompositionTests
         string input = Path.Combine(_host.Repo, "verdicts.json");
         _host.Files.WriteAllText(input, "{}");
 
-        int exitCode = (operation switch
+        int exitCode = await (operation switch
         {
-            "export" => new DocsReviewExportCommand(service, _host.Files, _host.Console).Execute(
+            "export" => new DocsReviewExportCommand(service, _host.Files, _host.Console).ExecuteAsync(
                 null!,
-                new DocsReviewExportSettings { Path = _host.Repo, OutputPath = output, Format = "json" }),
-            "import" => new DocsReviewImportCommand(service, _host.Files, _host.Console).Execute(
+                new DocsReviewExportSettings { Path = _host.Repo, OutputPath = output, Format = "json" },
+                CancellationToken.None),
+            "import" => new DocsReviewImportCommand(service, _host.Files, _host.Console).ExecuteAsync(
                 null!,
-                new DocsReviewImportSettings { Path = _host.Repo, InputPath = input, Format = "json" }),
-            "glossary" => new DocsGlossaryCommand(service, _host.Console).Execute(
+                new DocsReviewImportSettings { Path = _host.Repo, InputPath = input, Format = "json" },
+                CancellationToken.None),
+            "glossary" => new DocsGlossaryCommand(service, _host.Console).ExecuteAsync(
                 null!,
-                new DocsGlossarySettings { Path = _host.Repo, Write = true, Format = "json" }),
+                new DocsGlossarySettings { Path = _host.Repo, Write = true, Format = "json" },
+                CancellationToken.None),
             _ => throw new InvalidOperationException("Unknown operation.")
         });
 
@@ -255,7 +261,7 @@ public sealed class DocsAnalysisCompositionTests
     }
 
     [Fact]
-    public void RepositoryServicePreferAndCodeGraphWarningsFlowOnceThroughEveryResult()
+    public async Task RepositoryServicePreferAndCodeGraphWarningsFlowOnceThroughEveryResult()
     {
         WriteAnalysisFixture(DocsAnalysisEmbeddingMode.Prefer);
         DisposablePersistence persistence = new DisposablePersistence(isAvailable: true);
@@ -266,9 +272,9 @@ public sealed class DocsAnalysisCompositionTests
             new UnavailableResolver());
         RepositoryDocsAnalysisCommandService service = AnalysisService(factories.Factories);
 
-        ReviewExportResult exported = service.ExportReview(new DocsReviewExportSettings { Path = _host.Repo });
-        ReviewImportResult imported = service.ImportReview(new DocsReviewImportSettings { Path = _host.Repo }, "{}");
-        GlossaryUpdateResult glossary = service.UpdateGlossary(new DocsGlossarySettings { Path = _host.Repo });
+        ReviewExportResult exported = await service.ExportReviewAsync(new DocsReviewExportSettings { Path = _host.Repo });
+        ReviewImportResult imported = await service.ImportReviewAsync(new DocsReviewImportSettings { Path = _host.Repo }, "{}");
+        GlossaryUpdateResult glossary = await service.UpdateGlossaryAsync(new DocsGlossarySettings { Path = _host.Repo });
 
         AssertWarningsOnce(exported.Diagnostics);
         AssertWarningsOnce(imported.Diagnostics);
@@ -285,18 +291,18 @@ public sealed class DocsAnalysisCompositionTests
         {
             Factories = new DocsAnalysisCompositionFactories(new FakeCodeGraphPortsFactory(resolver), new UnreachedAnalysisPersistenceFactory(), new UnreachedEmbeddingGeneratorFactory())
             {
-                IsCacheSafe = _ => cacheSafe,
-                CreatePersistence = _ =>
+                IsCacheSafeAsync = (_, _) => Task.FromResult(cacheSafe),
+                CreatePersistenceAsync = (_, _) =>
                 {
                     PersistenceConstructions++;
-                    return persistence;
+                    return Task.FromResult<IAnalysisPersistence>(persistence);
                 },
                 CreateEmbeddingGenerator = () =>
                 {
                     EmbeddingConstructions++;
                     return embedding;
                 },
-                CreateResolver = _ => resolver
+                CreateResolverAsync = (_, _) => Task.FromResult(resolver)
             };
         }
 

@@ -24,7 +24,11 @@ public sealed class DocsCloseoutRealFileSystemTests
 
     private static DocFixture Repository() => DocsCloseoutRepository.Create(inMemory: false);
 
-    private static (int Exit, string Output) Run(DocFixture fixture, bool archive, string path = Plan, string? date = Date)
+    private static async Task<(int Exit, string Output)> RunAsync(
+        DocFixture fixture,
+        bool archive,
+        string path = Plan,
+        string? date = Date)
     {
         DocsCloseoutSettings settings = new()
         {
@@ -34,8 +38,8 @@ public sealed class DocsCloseoutRealFileSystemTests
             Date = date
         };
 
-        CapturedConsoleExecution<int> run = ProcessConsoleCapture.Run(
-            () => DocsTestCommands.Closeout().Execute(null!, settings, CancellationToken.None));
+        CapturedConsoleExecution<int> run = await ProcessConsoleCapture.RunAsync(
+            () => DocsTestCommands.Closeout().ExecuteAsync(null!, settings, CancellationToken.None));
         return (run.Result, run.Output);
     }
 
@@ -53,12 +57,12 @@ public sealed class DocsCloseoutRealFileSystemTests
     [Theory]
     [InlineData(PlanIndex)]
     [InlineData(Inventory)]
-    public void ALinkAtAnIndexPathIsRefusedAndNothingMoves(string linkedPath)
+    public async Task ALinkAtAnIndexPathIsRefusedAndNothingMoves(string linkedPath)
     {
         using DocFixture fixture = Repository();
         string linked = Path.Combine(fixture.Root, linkedPath.Replace('/', Path.DirectorySeparatorChar));
         string target = Path.Combine(fixture.Root, "owner-copy.md");
-        string before = File.ReadAllText(linked);
+        string before = await File.ReadAllTextAsync(linked, CancellationToken.None);
         File.Move(linked, target);
         try
         {
@@ -69,12 +73,12 @@ public sealed class DocsCloseoutRealFileSystemTests
             Assert.Skip("Symbolic-link creation is not available here; the link refusal was not run.");
         }
 
-        (int exit, string output) = Run(fixture, archive: true);
+        (int exit, string output) = await RunAsync(fixture, archive: true);
 
         Assert.Equal(1, exit);
         Assert.Contains("KW-DOC-CLOSEOUT-003", output, StringComparison.Ordinal);
         Assert.Contains("is a symbolic link", output, StringComparison.Ordinal);
-        Assert.Equal(before, File.ReadAllText(target));
+        Assert.Equal(before, await File.ReadAllTextAsync(target, CancellationToken.None));
         Assert.True(Exists(fixture, Plan));
         Assert.False(Exists(fixture, Archived));
     }
@@ -191,7 +195,7 @@ public sealed class DocsCloseoutRealFileSystemTests
 
     [Fact]
     [UnsupportedOSPlatform("windows")]
-    public void AnUnreadablePlanIsNamedInTheReportNotThrown()
+    public async Task AnUnreadablePlanIsNamedInTheReportNotThrown()
     {
         Assert.SkipWhen(
             OperatingSystem.IsWindows() || Environment.IsPrivilegedProcess,
@@ -202,7 +206,7 @@ public sealed class DocsCloseoutRealFileSystemTests
         File.SetUnixFileMode(plan, UnixFileMode.None);
         try
         {
-            (int exit, string output) = Run(fixture, archive: true);
+            (int exit, string output) = await RunAsync(fixture, archive: true);
 
             Assert.Equal(1, exit);
             Assert.Contains(PlanCloseout.NotAnActivePlan, output, StringComparison.Ordinal);
@@ -216,7 +220,7 @@ public sealed class DocsCloseoutRealFileSystemTests
     }
 
     [Fact]
-    public void InAGitRepositoryTheMovedAndEditedFilesAreStaged()
+    public async Task InAGitRepositoryTheMovedAndEditedFilesAreStaged()
     {
         using DocFixture fixture = Repository();
         Directory.Delete(Path.Combine(fixture.Root, ".git"));
@@ -224,7 +228,7 @@ public sealed class DocsCloseoutRealFileSystemTests
         Git(fixture, "add", "-A");
         Git(fixture, "-c", "user.name=t", "-c", "user.email=t@example.invalid", "-c", "commit.gpgsign=false", "commit", "--quiet", "-m", "start");
 
-        (int exit, string output) = Run(fixture, archive: true);
+        (int exit, string output) = await RunAsync(fixture, archive: true);
 
         Assert.True(exit == 0, output);
         string status = Git(fixture, "status", "--porcelain");

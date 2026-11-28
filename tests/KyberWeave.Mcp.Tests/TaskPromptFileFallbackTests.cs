@@ -17,13 +17,19 @@ namespace KyberWeave.Mcp.Tests;
 /// The file is the whole delivery on a fallback harness, so it holds exactly the text the service built, one file
 /// per task, under the folder the repository already ignores.
 /// </remarks>
-public sealed class TaskPromptFileFallbackTests : IDisposable
+public sealed class TaskPromptFileFallbackTests : IAsyncLifetime
 {
     private static readonly ICorpusSource Corpus = CheckoutCorpusSource.Checkout;
 
-    private readonly DocFixture _fixture = DocsTaskPromptFixture.Ready();
+    private DocFixture _fixture = null!;
 
-    public void Dispose() => _fixture.Dispose();
+    public async ValueTask InitializeAsync() => _fixture = await DocsTaskPromptFixture.ReadyAsync();
+
+    public ValueTask DisposeAsync()
+    {
+        _fixture.Dispose();
+        return ValueTask.CompletedTask;
+    }
 
     private KyberWeaveConfig Config => DocsTaskPromptFixture.Config(_fixture);
 
