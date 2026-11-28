@@ -219,6 +219,17 @@ public class AdapterRegistry
 /// </summary>
 public static class CanonAdapters
 {
+    /// <summary>
+    /// Whether <paramref name="exception"/> is an adapter's rejection of one raw item: the item is counted as
+    /// rejected and recorded as a problem, and the rest of the batch goes on. Every path that calls
+    /// <see cref="IHarnessAdapter.Normalize"/> uses this one test. <see cref="ObjectDisposedException"/> is an
+    /// <see cref="InvalidOperationException"/>, so it is covered.
+    /// </summary>
+    /// <param name="exception">The exception <c>Normalize</c> threw.</param>
+    /// <returns>True when the item is rejected; false for a failure that must stop the batch.</returns>
+    public static bool IsNormalizeRejection(Exception exception) =>
+        exception is ArgumentException or JsonException or InvalidOperationException or NotSupportedException;
+
     /// <summary>Supported OpenCode plugin wire contract version.</summary>
     public const string OpencodeContractVersion = "3";
 
