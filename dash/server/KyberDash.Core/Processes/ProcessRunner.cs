@@ -58,7 +58,8 @@ public static class ProcessRunner
                 timeoutCts.CancelAfter(limit);
                 Task timer = Task.Delay(Timeout.Infinite, timeoutCts.Token);
                 Task completed = await Task.WhenAny(io, timer).ConfigureAwait(false);
-                if (completed != io)
+                // A child that finished as the timer fired has finished: only an unfinished run times out.
+                if (completed != io && !io.IsCompleted)
                 {
                     if (!cancellationToken.IsCancellationRequested)
                     {
@@ -79,7 +80,7 @@ public static class ProcessRunner
             {
                 Task timer = Task.Delay(Timeout.Infinite, cancellationToken);
                 Task completed = await Task.WhenAny(io, timer).ConfigureAwait(false);
-                if (completed != io)
+                if (completed != io && !io.IsCompleted)
                     throw new OperationCanceledException(cancellationToken);
 
                 await io.ConfigureAwait(false);
