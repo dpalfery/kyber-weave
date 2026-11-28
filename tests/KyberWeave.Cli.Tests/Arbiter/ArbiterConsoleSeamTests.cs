@@ -288,6 +288,12 @@ public sealed class ArbiterConsoleSeamTests
 
         public string ResolveArbiterDirectory(string path) => path + "/artifacts/arbiter";
 
+        public Task<string> ResolveRepositoryRootAsync(string path, CancellationToken cancellationToken = default) =>
+            Task.FromResult(path);
+
+        public Task<string> ResolveArbiterDirectoryAsync(string path, CancellationToken cancellationToken = default) =>
+            Task.FromResult(path + "/artifacts/arbiter");
+
         public string FindGitRoot(string start) => start;
     }
 

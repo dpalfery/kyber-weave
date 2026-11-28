@@ -139,4 +139,187 @@ public interface IGitRepositoryFacts
         string workingDirectory,
         GitSnapshot snapshot,
         string gitExecutable = "git");
+
+
+    /// <summary>Resolves the repository root for a working directory, without blocking a thread while git runs.</summary>
+    /// <param name="workingDirectory">The directory git is asked in.</param>
+    /// <param name="gitExecutable">The git program to start.</param>
+    /// <param name="cancellationToken">Cancels the run and kills the process tree.</param>
+    /// <returns>The root, or <c>null</c> when it cannot be determined.</returns>
+    Task<string?> GetRootAsync(
+        string workingDirectory,
+        string gitExecutable = "git",
+        CancellationToken cancellationToken = default);
+
+
+    /// <summary>The working trees of the repository, main first, without blocking a thread while git runs.</summary>
+    /// <param name="workingDirectory">The directory git is asked in.</param>
+    /// <param name="gitExecutable">The git program to start.</param>
+    /// <param name="cancellationToken">Cancels the run and kills the process tree.</param>
+    /// <returns>The worktrees; empty outside a repository or when git cannot run.</returns>
+    Task<IReadOnlyList<string>> ListWorktreesAsync(
+        string workingDirectory,
+        string gitExecutable = "git",
+        CancellationToken cancellationToken = default);
+
+
+    /// <summary>Reads the repository's common git directory, without blocking a thread while git runs.</summary>
+    /// <param name="workingDirectory">The directory git is asked in.</param>
+    /// <param name="gitExecutable">The git program to start.</param>
+    /// <param name="cancellationToken">Cancels the run and kills the process tree.</param>
+    /// <returns>The directory, or <c>null</c> outside a repository.</returns>
+    Task<string?> GetCommonDirectoryAsync(
+        string workingDirectory,
+        string gitExecutable = "git",
+        CancellationToken cancellationToken = default);
+
+
+    /// <summary>Reads the current branch name, without blocking a thread while git runs.</summary>
+    /// <param name="workingDirectory">The directory git is asked in.</param>
+    /// <param name="gitExecutable">The git program to start.</param>
+    /// <param name="cancellationToken">Cancels the run and kills the process tree.</param>
+    /// <returns>The branch, or <c>null</c> on a detached head or outside a repository.</returns>
+    Task<string?> GetCurrentBranchAsync(
+        string workingDirectory,
+        string gitExecutable = "git",
+        CancellationToken cancellationToken = default);
+
+
+    /// <summary>Whether <paramref name="revision"/> resolves in the checkout, without blocking a thread while git runs.</summary>
+    /// <param name="workingDirectory">The directory git is asked in.</param>
+    /// <param name="revision">The revision to resolve.</param>
+    /// <param name="gitExecutable">The git program to start.</param>
+    /// <param name="cancellationToken">Cancels the run and kills the process tree.</param>
+    /// <returns>False for a bogus ref or outside a repository; never throws.</returns>
+    Task<bool> RefExistsAsync(
+        string workingDirectory,
+        string revision,
+        string gitExecutable = "git",
+        CancellationToken cancellationToken = default);
+
+
+    /// <summary>Reads the current commit, without blocking a thread while git runs.</summary>
+    /// <param name="workingDirectory">The directory git is asked in.</param>
+    /// <param name="gitExecutable">The git program to start.</param>
+    /// <param name="cancellationToken">Cancels the run and kills the process tree.</param>
+    /// <returns>The full <c>HEAD</c> sha, or <c>null</c> when it cannot be determined.</returns>
+    Task<string?> GetHeadAsync(
+        string workingDirectory,
+        string gitExecutable = "git",
+        CancellationToken cancellationToken = default);
+
+
+    /// <summary>Reads the dirty set, without blocking a thread while git runs.</summary>
+    /// <param name="workingDirectory">The directory git is asked in.</param>
+    /// <param name="gitExecutable">The git program to start.</param>
+    /// <param name="cancellationToken">Cancels the run and kills the process tree.</param>
+    /// <returns>Porcelain status per repository-relative path; empty when absent.</returns>
+    Task<IReadOnlyDictionary<string, string>> GetDirtyStatusesAsync(
+        string workingDirectory,
+        string gitExecutable = "git",
+        CancellationToken cancellationToken = default);
+
+
+    /// <summary>Hashes working-tree files the way the index sees them, without blocking a thread while git runs.</summary>
+    /// <param name="workingDirectory">The directory git is asked in.</param>
+    /// <param name="paths">The repository-relative paths to hash.</param>
+    /// <param name="gitExecutable">The git program to start.</param>
+    /// <param name="cancellationToken">Cancels the run and kills the process tree.</param>
+    /// <returns>Blob id per path that could be hashed; empty when absent.</returns>
+    Task<IReadOnlyDictionary<string, string>> GetBlobIdsAsync(
+        string workingDirectory,
+        IEnumerable<string> paths,
+        string gitExecutable = "git",
+        CancellationToken cancellationToken = default);
+
+
+    /// <summary>Lists what changed since a base, without blocking a thread while git runs.</summary>
+    /// <param name="workingDirectory">The directory git is asked in.</param>
+    /// <param name="baseRef">The ref to compare with.</param>
+    /// <param name="gitExecutable">The git program to start.</param>
+    /// <param name="cancellationToken">Cancels the run and kills the process tree.</param>
+    /// <returns>Repository-relative paths; empty when absent.</returns>
+    Task<IReadOnlySet<string>> GetChangedPathsSinceBaseAsync(
+        string workingDirectory,
+        string baseRef,
+        string gitExecutable = "git",
+        CancellationToken cancellationToken = default);
+
+
+    /// <summary>Reads the new-side hunk ranges of the diff against a base, without blocking a thread while git runs.</summary>
+    /// <param name="workingDirectory">The directory git is asked in.</param>
+    /// <param name="baseRef">The ref to compare with.</param>
+    /// <param name="gitExecutable">The git program to start.</param>
+    /// <param name="cancellationToken">Cancels the run and kills the process tree.</param>
+    /// <returns>One range per hunk; empty when absent.</returns>
+    Task<IReadOnlyList<HunkRange>> GetHunkRangesAsync(
+        string workingDirectory,
+        string baseRef,
+        string gitExecutable = "git",
+        CancellationToken cancellationToken = default);
+
+
+    /// <summary>Reads the changed hunks of the change against a base, without blocking a thread while git runs.</summary>
+    /// <param name="workingDirectory">The directory git is asked in.</param>
+    /// <param name="baseRef">The ref to compare with.</param>
+    /// <param name="gitExecutable">The git program to start.</param>
+    /// <param name="cancellationToken">Cancels the run and kills the process tree.</param>
+    /// <returns>Every hunk ordered by path; <c>null</c> when the base is unreadable or nothing changed.</returns>
+    Task<IReadOnlyList<ChangedHunk>?> GetChangedHunksAsync(
+        string workingDirectory,
+        string baseRef,
+        string gitExecutable = "git",
+        CancellationToken cancellationToken = default);
+
+
+    /// <summary>Measures the change against a base once, without blocking a thread while git runs.</summary>
+    /// <param name="workingDirectory">The directory git is asked in.</param>
+    /// <param name="baseRef">The ref to compare with.</param>
+    /// <param name="gitExecutable">The git program to start.</param>
+    /// <param name="cancellationToken">Cancels the run and kills the process tree.</param>
+    /// <returns>The change set, or <c>null</c> when it cannot be measured or nothing changed.</returns>
+    Task<ChangeSet?> GetChangeSetAsync(
+        string workingDirectory,
+        string baseRef,
+        string gitExecutable = "git",
+        CancellationToken cancellationToken = default);
+
+
+    /// <summary>Summarises a change, without blocking a thread while git runs.</summary>
+    /// <param name="workingDirectory">The directory git is asked in.</param>
+    /// <param name="baseRef">The ref to compare with.</param>
+    /// <param name="changedPaths">The paths the summary lists.</param>
+    /// <param name="gitExecutable">The git program to start.</param>
+    /// <param name="cancellationToken">Cancels the run and kills the process tree.</param>
+    /// <returns>The summary, or null when nothing changed or the diff cannot be read.</returns>
+    Task<string?> GetDiffSummaryAsync(
+        string workingDirectory,
+        string baseRef,
+        IReadOnlyCollection<string> changedPaths,
+        string gitExecutable = "git",
+        CancellationToken cancellationToken = default);
+
+
+    /// <summary>Captures the snapshot the ledger stores at pre-dispatch, without blocking a thread while git runs.</summary>
+    /// <param name="workingDirectory">The directory git is asked in.</param>
+    /// <param name="gitExecutable">The git program to start.</param>
+    /// <param name="cancellationToken">Cancels the run and kills the process tree.</param>
+    /// <returns><c>HEAD</c> plus the blob id of every dirty or untracked path.</returns>
+    Task<GitSnapshot?> CaptureSnapshotAsync(
+        string workingDirectory,
+        string gitExecutable = "git",
+        CancellationToken cancellationToken = default);
+
+
+    /// <summary>Diffs the working tree against a snapshot taken earlier, without blocking a thread while git runs.</summary>
+    /// <param name="workingDirectory">The directory git is asked in.</param>
+    /// <param name="snapshot">The snapshot to compare with.</param>
+    /// <param name="gitExecutable">The git program to start.</param>
+    /// <param name="cancellationToken">Cancels the run and kills the process tree.</param>
+    /// <returns>Repository-relative paths; empty when absent.</returns>
+    Task<IReadOnlySet<string>> GetChangedPathsSinceSnapshotAsync(
+        string workingDirectory,
+        GitSnapshot snapshot,
+        string gitExecutable = "git",
+        CancellationToken cancellationToken = default);
 }

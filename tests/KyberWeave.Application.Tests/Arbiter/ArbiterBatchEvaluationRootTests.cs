@@ -158,6 +158,21 @@ public sealed class ArbiterBatchEvaluationRootTests
             Func<string, IReadOnlyList<string>>? listWorktrees = null) =>
             ResolveByName(hookRoot, planFile, listWorktrees);
 
+        public Task<string> ResolveAsync(
+            string hookRoot,
+            string prompt,
+            Func<string, CancellationToken, Task<IReadOnlyList<string>>>? listWorktrees = null,
+            CancellationToken cancellationToken = default) =>
+            Task.FromResult(ResolveByName(hookRoot, PlanIn(prompt), listWorktrees: null));
+
+        public Task<string> ResolvePlanRootAsync(
+            string hookRoot,
+            string? planFile,
+            string? text,
+            Func<string, CancellationToken, Task<IReadOnlyList<string>>>? listWorktrees = null,
+            CancellationToken cancellationToken = default) =>
+            Task.FromResult(ResolveByName(hookRoot, planFile, listWorktrees: null));
+
         private string ResolveByName(
             string hookRoot, string? planFile, Func<string, IReadOnlyList<string>>? listWorktrees) =>
             planFile is not null && byPlan.TryGetValue(planFile, out string? root) ? root : hookRoot;

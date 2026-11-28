@@ -197,6 +197,12 @@ public sealed class CliPathSeamTests : IDisposable
 
         public string ResolveArbiterDirectory(string path) => throw new NotSupportedException();
 
+        public Task<string> ResolveRepositoryRootAsync(string path, CancellationToken cancellationToken = default) =>
+            Task.FromResult(gitRoot);
+
+        public Task<string> ResolveArbiterDirectoryAsync(string path, CancellationToken cancellationToken = default) =>
+            throw new NotSupportedException();
+
         public string FindGitRoot(string start)
         {
             Start = start;
