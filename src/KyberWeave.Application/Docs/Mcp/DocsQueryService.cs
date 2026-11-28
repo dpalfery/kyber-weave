@@ -453,7 +453,12 @@ public sealed partial class DocsQueryService : IDocsQueryService
         // the documented second line of the response. Replacing that with the generic block would
         // throw away the findings. The gate's one-line note still rides above the verdict.
         DiagnosticReport report = new();
-        _gates.CheckDrift(_host.RepositoryRoot, _host.LoadDocumentSet, _host.CreateCodeGraphResolver, report);
+        await _gates.CheckDriftAsync(
+            _host.RepositoryRoot,
+            _host.LoadDocumentSet,
+            _host.CreateCodeGraphResolver,
+            report,
+            cancellationToken).ConfigureAwait(false);
 
         return FormatGateResponse(gate, provenance, report, charBudget);
     }

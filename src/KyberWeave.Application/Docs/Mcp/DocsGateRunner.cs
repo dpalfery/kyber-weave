@@ -56,11 +56,12 @@ public sealed class DocsGateRunner(
     }
 
     /// <inheritdoc />
-    public void CheckDrift(
+    public async Task CheckDriftAsync(
         string repositoryRoot,
         Func<DocumentSet> loadDocuments,
         Func<ICodeGraphResolver> codeGraph,
-        DiagnosticReport report)
+        DiagnosticReport report,
+        CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(loadDocuments);
         ArgumentNullException.ThrowIfNull(codeGraph);
@@ -72,8 +73,10 @@ public sealed class DocsGateRunner(
         try
         {
             DocumentSet set = loadDocuments();
-            report.AddRange(
-                new DocDriftLinter(codeGraph()).Validate(set).Items);
+            DiagnosticReport drift = await new DocDriftLinter(codeGraph())
+                .ValidateAsync(set, cancellationToken)
+                .ConfigureAwait(false);
+            report.AddRange(drift.Items);
         }
         catch (Exception exception) when (DocsToolSupport.IsExpectedReadFailure(exception))
         {
