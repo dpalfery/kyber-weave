@@ -163,6 +163,13 @@ public sealed partial class PlanFinalize
             HandleFinalizeFailure(exception, prep, write.TaskFileBefore, report);
             return Refused();
         }
+        catch (OperationCanceledException exception)
+        {
+            // The plan and index are already written as Ready: undo them before the cancel propagates, so a re-run
+            // starts from the Draft the caller had rather than a Ready plan with no task file.
+            HandleFinalizeFailure(exception, prep, write.TaskFileBefore, report);
+            throw;
+        }
 
         RecordDraftSuccess(report, prep, mode, write.NewIndex);
         await _files.StageAsync(prep.Touched, report, prep.Plan, Step, cancellationToken).ConfigureAwait(false);
