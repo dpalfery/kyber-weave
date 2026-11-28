@@ -1181,13 +1181,92 @@ public abstract class SqliteRelationalStoreReadQueryBase : SqliteRelationalStore
     private protected static string SessionKeyListFilter(IReadOnlyCollection<string> keys, Dictionary<string, object?> parameters) =>
         string.Join(", ", keys.Select(key => Bind(parameters, key)));
 
+    /// <summary>
+    /// The most session keys one statement binds. A statement may use its key list twice, so this keeps it
+    /// under 500 variables, the limit of the system SQLite macOS ships, however many sessions the store holds.
+    /// </summary>
+    private protected const int MaxKeysPerStatement = 240;
+
+    /// <summary>
+    /// Reads the session rows for <paramref name="keys"/> in storage order, as one statement would, binding at
+    /// most <see cref="MaxKeysPerStatement"/> keys per statement. Past one chunk the keys are first put in storage
+    /// order, so each chunk's rows (read in storage order) concatenate in the order a single read returns.
+    /// </summary>
+    /// <param name="keys">Distinct session keys.</param>
+    /// <returns>The sessions found, in storage order.</returns>
+    private protected IReadOnlyList<CollectedSession> QuerySessionsByKeys(IReadOnlyList<string> keys)
+    {
+        if (keys.Count <= MaxKeysPerStatement)
+        {
+            return QuerySessionChunk(keys);
+        }
+
+        List<(string Key, long RowId)> stored = [];
+        foreach (string[] chunk in keys.Chunk(MaxKeysPerStatement))
+        {
+            Dictionary<string, object?> parameters = new(StringComparer.Ordinal);
+            stored.AddRange(QueryRows<(string Key, long RowId)>(
+                $"SELECT session_id, rowid FROM session WHERE session_id IN ({SessionKeyListFilter(chunk, parameters)})",
+                parameters,
+                static reader => (reader.GetString(0), reader.GetInt64(1))));
+        }
+
+        List<CollectedSession> sessions = new(stored.Count);
+        foreach (string[] chunk in stored.OrderBy(static row => row.RowId).Select(static row => row.Key).Chunk(MaxKeysPerStatement))
+        {
+            sessions.AddRange(QuerySessionChunk(chunk));
+        }
+
+        return sessions;
+    }
+
+    private IReadOnlyList<CollectedSession> QuerySessionChunk(IReadOnlyCollection<string> keys)
+    {
+        Dictionary<string, object?> parameters = new(StringComparer.Ordinal);
+        string filter = SessionKeyListFilter(keys, parameters);
+        return QuerySessions($"s.session_id IN ({filter})", $"u.session_id IN ({filter})", parameters);
+    }
+
+    /// <summary>
+    /// Runs a per-session read over <paramref name="sessionKeys"/> in chunks of at most
+    /// <see cref="MaxKeysPerStatement"/> and merges the per-session results. Each session's rows come from
+    /// one chunk, so merging never splits a session.
+    /// </summary>
+    /// <typeparam name="TValue">What the read returns per session.</typeparam>
+    /// <param name="sessionKeys">Session keys to read.</param>
+    /// <param name="read">The read for one chunk of keys.</param>
+    /// <returns>The merged results, by session key.</returns>
+    private protected static Dictionary<string, TValue> MergeKeyChunks<TValue>(
+        IReadOnlyList<string> sessionKeys,
+        Func<IReadOnlyList<string>, Dictionary<string, TValue>> read)
+    {
+        if (sessionKeys.Count <= MaxKeysPerStatement)
+        {
+            return read(sessionKeys);
+        }
+
+        Dictionary<string, TValue> merged = new(StringComparer.Ordinal);
+        foreach (string[] chunk in sessionKeys.Distinct(StringComparer.Ordinal).Chunk(MaxKeysPerStatement))
+        {
+            foreach (KeyValuePair<string, TValue> entry in read(chunk))
+            {
+                merged[entry.Key] = entry.Value;
+            }
+        }
+
+        return merged;
+    }
+
     private protected List<Problem> QuerySessionIngestProblems(string sessionKey)
     {
         Dictionary<string, List<Problem>> grouped = QuerySessionIngestProblemsBySession([sessionKey]);
         return grouped.TryGetValue(sessionKey, out List<Problem>? problems) ? problems : [];
     }
 
-    private protected Dictionary<string, IReadOnlyList<StoredSessionTurn>> QuerySessionTurnsBySession(IReadOnlyList<string> sessionKeys)
+    private protected Dictionary<string, IReadOnlyList<StoredSessionTurn>> QuerySessionTurnsBySession(IReadOnlyList<string> sessionKeys) =>
+        MergeKeyChunks(sessionKeys, QuerySessionTurnsBySessionChunk);
+
+    private Dictionary<string, IReadOnlyList<StoredSessionTurn>> QuerySessionTurnsBySessionChunk(IReadOnlyList<string> sessionKeys)
     {
         Dictionary<string, IReadOnlyList<StoredSessionTurn>> turnsBySession = new(StringComparer.Ordinal);
         if (sessionKeys.Count == 0)
@@ -1220,7 +1299,10 @@ public abstract class SqliteRelationalStoreReadQueryBase : SqliteRelationalStore
         return turnsBySession;
     }
 
-    private protected Dictionary<string, List<Problem>> QuerySessionIngestProblemsBySession(IReadOnlyList<string> sessionKeys)
+    private protected Dictionary<string, List<Problem>> QuerySessionIngestProblemsBySession(IReadOnlyList<string> sessionKeys) =>
+        MergeKeyChunks(sessionKeys, QuerySessionIngestProblemsBySessionChunk);
+
+    private Dictionary<string, List<Problem>> QuerySessionIngestProblemsBySessionChunk(IReadOnlyList<string> sessionKeys)
     {
         Dictionary<string, List<Problem>> problemsBySession = new(StringComparer.Ordinal);
         if (sessionKeys.Count == 0)
@@ -1348,7 +1430,15 @@ public abstract class SqliteRelationalStoreReadQueryBase : SqliteRelationalStore
     private protected Dictionary<string, List<CollectedRecord>> QueryContentFreeRecordsBySession(
         IReadOnlyList<string> sessionKeys,
         bool includeToolMetadata = false,
-        string? scopedSpanId = null)
+        string? scopedSpanId = null) =>
+        scopedSpanId is not null
+            ? QueryContentFreeRecordsBySessionChunk(sessionKeys, includeToolMetadata, scopedSpanId)
+            : MergeKeyChunks(sessionKeys, chunk => QueryContentFreeRecordsBySessionChunk(chunk, includeToolMetadata, scopedSpanId: null));
+
+    private Dictionary<string, List<CollectedRecord>> QueryContentFreeRecordsBySessionChunk(
+        IReadOnlyList<string> sessionKeys,
+        bool includeToolMetadata,
+        string? scopedSpanId)
     {
         Dictionary<string, List<CollectedRecord>> recordsBySession = new(StringComparer.Ordinal);
         if (sessionKeys.Count == 0 && scopedSpanId is null)
@@ -1372,7 +1462,7 @@ public abstract class SqliteRelationalStoreReadQueryBase : SqliteRelationalStore
             : $"({spanMarker})";
 
         string recordSql = "SELECT " + RecordReadColumns + " " + RecordReadFrom + recordFilter + " ORDER BY r.rowid ASC";
-        List<RawRecordHeader> rawRecords = [.. Query(recordSql, parameters, ReadRawRecordHeader)];
+        List<RawRecordHeader> rawRecords = [.. QueryRows(recordSql, parameters, ReadRawRecordHeader)];
 
         Dictionary<string, List<CollectedTokenCount>> tokensBySpan = new(StringComparer.Ordinal);
         foreach ((string SpanId, TokenClass TokenClass, long Count) row in QueryRows<(string SpanId, TokenClass TokenClass, long Count)>(
@@ -1504,7 +1594,7 @@ public abstract class SqliteRelationalStoreReadQueryBase : SqliteRelationalStore
             : $" WHERE ai.span_id IN (SELECT r.span_id FROM record r WHERE {wherePredicate})";
 
         string recordSql = "SELECT " + RecordReadColumns + " " + RecordReadFrom + recordFilter + " ORDER BY r.rowid ASC";
-        List<RawRecordHeader> rawRecords = [.. Query(recordSql, parameters, ReadRawRecordHeader)];
+        List<RawRecordHeader> rawRecords = [.. QueryRows(recordSql, parameters, ReadRawRecordHeader)];
 
         Dictionary<string, List<CollectedTokenCount>> tokensBySpan = new(StringComparer.Ordinal);
         foreach ((string SpanId, TokenClass TokenClass, long Count) row in QueryRows<(string SpanId, TokenClass TokenClass, long Count)>(
@@ -4379,16 +4469,20 @@ public abstract class SqliteRelationalStoreReaderBase : SqliteRelationalStoreRea
         // The same batches as the harness-scoped read, each bound to the named keys by its own
         // statement: the session rows, the content-free record scalars, what the figures take
         // from the projections, the fallback turns of sessions without a projection, and the
-        // stored ingest problems. No statement lists the store's sessions or projections.
-        Dictionary<string, object?> parameters = new(StringComparer.Ordinal);
-        string filter = SessionKeyListFilter(keys, parameters);
-        IReadOnlyList<CollectedSession> sessions = QuerySessions($"s.session_id IN ({filter})", $"u.session_id IN ({filter})", parameters);
+        // stored ingest problems. No statement lists the store's sessions or projections, and
+        // each binds at most MaxKeysPerStatement keys.
+        IReadOnlyList<CollectedSession> sessions = QuerySessionsByKeys(keys);
         if (sessions.Count == 0)
         {
             return [];
         }
 
-        return BuildSessionListFigures(sessions, QuerySessionListProjectionShapes(filter, parameters), pricing);
+        Dictionary<string, SessionListProjectionShape> shapes = MergeKeyChunks(keys, chunk =>
+        {
+            Dictionary<string, object?> parameters = new(StringComparer.Ordinal);
+            return QuerySessionListProjectionShapes(SessionKeyListFilter(chunk, parameters), parameters);
+        });
+        return BuildSessionListFigures(sessions, shapes, pricing);
     }
 
     /// <summary>
@@ -4575,9 +4669,7 @@ public abstract class SqliteRelationalStoreReadFigureBase : SqliteRelationalStor
         // metadata included — the report prices offered and invoked tools), and their stored
         // turns. The report figures are projection-independent, so no projection, problem, or
         // skill read runs, and no statement lists the store's sessions or projections.
-        Dictionary<string, object?> parameters = new(StringComparer.Ordinal);
-        string filter = SessionKeyListFilter(keys, parameters);
-        IReadOnlyList<CollectedSession> sessions = QuerySessions($"s.session_id IN ({filter})", $"u.session_id IN ({filter})", parameters);
+        IReadOnlyList<CollectedSession> sessions = QuerySessionsByKeys(keys);
         if (sessions.Count == 0)
         {
             return [];
@@ -4714,7 +4806,9 @@ public abstract class SqliteRelationalStoreReadFigureBase : SqliteRelationalStor
         sql.Append("LEFT JOIN first_model fmm ON fmm.root = p.request_span_id ");
         sql.Append(CultureInfo.InvariantCulture, $"ORDER BY p.position {sqlOrder}");
 
-        IReadOnlyList<ReadTimeSessionRequestSummary> rows = QueryRows<ReadTimeSessionRequestSummary>(
+        // The page statement carries the total in every row, so the page and its total come from one
+        // evaluation of the request chain; only an empty page needs a second statement for the total.
+        IReadOnlyList<(ReadTimeSessionRequestSummary Row, int PageTotal)> paged = QueryRows<(ReadTimeSessionRequestSummary Row, int PageTotal)>(
             sql.ToString(),
             parameters,
             static reader =>
@@ -4729,18 +4823,21 @@ public abstract class SqliteRelationalStoreReadFigureBase : SqliteRelationalStor
                 string timestampUtc = requestStarted.HasValue
                     ? FormatTimestamp(requestStarted.Value)
                     : (firstTurnStarted.HasValue ? FormatTimestamp(firstTurnStarted.Value) : string.Empty);
-                return new ReadTimeSessionRequestSummary(
+                return (new ReadTimeSessionRequestSummary(
                     RequestSpanId: reader.GetString(reader.GetOrdinal("request_span_id")),
                     TimestampUtc: timestampUtc,
                     Turns: reader.GetInt32(reader.GetOrdinal("turn_total")),
                     Model: model,
-                    PromptPreview: null);
+                    PromptPreview: null), reader.GetInt32(reader.GetOrdinal("page_total")));
             });
 
-        int total = QueryRows<int>(
-            ctes + "SELECT (SELECT COUNT(*) FROM all_requests) AS page_total",
-            parameters,
-            static reader => reader.GetInt32(reader.GetOrdinal("page_total")))[0];
+        ReadTimeSessionRequestSummary[] rows = [.. paged.Select(static entry => entry.Row)];
+        int total = paged.Count > 0
+            ? paged[0].PageTotal
+            : QueryRows<int>(
+                ctes + "SELECT (SELECT COUNT(*) FROM all_requests) AS page_total",
+                parameters,
+                static reader => reader.GetInt32(reader.GetOrdinal("page_total")))[0];
 
         return new SessionRequestFigurePageResult(rows, total);
     }
@@ -4790,21 +4887,23 @@ public abstract class SqliteRelationalStoreReadFigureBase : SqliteRelationalStor
         sql.Append("sum_chat_output, output_match ");
         sql.Append(CultureInfo.InvariantCulture, $"FROM measurable ORDER BY position {sqlOrder} LIMIT {limitMarker} OFFSET {offsetMarker}");
 
-        IReadOnlyList<ReadTimeTurnReconciliation> rows = QueryRows<ReadTimeTurnReconciliation>(
+        IReadOnlyList<(ReadTimeTurnReconciliation Row, int PageTotal)> paged = QueryRows<(ReadTimeTurnReconciliation Row, int PageTotal)>(
             sql.ToString(),
             parameters,
-            static reader => new ReadTimeTurnReconciliation(
+            static reader => (new ReadTimeTurnReconciliation(
                 RequestSpanId: reader.GetString(reader.GetOrdinal("span_id")),
                 RootInput: ReadNullableInt64(reader, "reported_input"),
                 SumChatInput: reader.GetInt64(reader.GetOrdinal("sum_chat_input")),
                 InputMatch: reader.GetInt64(reader.GetOrdinal("input_match")) == 1L,
                 RootOutput: ReadNullableInt64(reader, "reported_output"),
                 SumChatOutput: reader.GetInt64(reader.GetOrdinal("sum_chat_output")),
-                OutputMatch: reader.GetInt64(reader.GetOrdinal("output_match")) == 1L));
+                OutputMatch: reader.GetInt64(reader.GetOrdinal("output_match")) == 1L), reader.GetInt32(reader.GetOrdinal("page_total"))));
 
-        int total = rows.Count == 0
+        // As for the request page: the total comes from the page statement's own rows.
+        ReadTimeTurnReconciliation[] rows = [.. paged.Select(static entry => entry.Row)];
+        int total = paged.Count == 0
             ? ReadSessionSectionTotal(ctes, "measurable", "session reconciliation page", parameters)
-            : QueryRows<int>(ctes + "SELECT COUNT(*) AS page_total FROM measurable", parameters, static reader => reader.GetInt32(reader.GetOrdinal("page_total")))[0];
+            : paged[0].PageTotal;
 
         return new SessionReconciliationFigurePageResult(rows, total);
     }

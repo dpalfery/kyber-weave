@@ -121,10 +121,10 @@ public sealed class SqliteRelationalStoreReadTests : IDisposable
         Assert.Equal("span-alpha-2", single!.RecordId);
         Assert.Equal("alpha", single.SessionKey);
         Assert.Equivalent(memory.RecordContentFree("span-alpha-2"), single, strict: true);
-        // The content-free read issues its token, tool-definition, and tool-call statements as
-        // three separate parameterized reads. Each is scoped to the span, bound as a parameter
+        // The content-free read issues its record, token, tool-definition, and tool-call statements
+        // as four separate parameterized reads. Each is scoped to the span, bound as a parameter
         // and rendered by the recording seam as a SQL literal.
-        Assert.Equal(3, sqlite.ExecutedSql.Count);
+        Assert.Equal(4, sqlite.ExecutedSql.Count);
         Assert.All(sqlite.ExecutedSql, sql =>
         {
             Assert.Contains(KeyLiteral("span-alpha-2"), sql, StringComparison.Ordinal);
@@ -203,10 +203,8 @@ public sealed class SqliteRelationalStoreReadTests : IDisposable
         IReadOnlyList<StoredContentPart> budgeted = sqlite.TurnContentParts("sess-budget", budget: 8);
 
         Assert.Equal(["aaaaa", "bbbb"], budgeted.Select(static part => part.Part.PlainText));
-        // The read materializes only the two parts the cut kept: the text of "cc" and "dddddd"
-        // never reaches managed memory, while the uncut read still answers all four.
-        Assert.DoesNotContain(budgeted, static part => part.Part.PlainText == "cc");
-        Assert.DoesNotContain(budgeted, static part => part.Part.PlainText == "dddddd");
+        // The read materializes only the two parts the cut kept; the captured script below proves the
+        // cut runs in SQL, so the text of "cc" and "dddddd" never reaches managed memory.
 
         (string Script, string Output) contentRead = Assert.Single(sqlite.CapturedScripts);
         Assert.Contains("bytes_before < 8", contentRead.Script, StringComparison.Ordinal);
