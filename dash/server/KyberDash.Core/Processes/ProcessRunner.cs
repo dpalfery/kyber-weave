@@ -94,6 +94,112 @@ public static class ProcessRunner
     }
 
     /// <summary>
+    /// Starts a child process, transfers its standard input, and captures its output without blocking the caller.
+    /// </summary>
+    public static async Task<ProcessResult> RunAsync(
+        ProcessStartInfo startInfo,
+        string standardInput,
+        TimeSpan? timeout = null,
+        long? maxOutputBytes = null,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(startInfo);
+        ArgumentNullException.ThrowIfNull(standardInput);
+
+        if (startInfo.UseShellExecute ||
+            !startInfo.RedirectStandardInput ||
+            !startInfo.RedirectStandardOutput ||
+            !startInfo.RedirectStandardError)
+        {
+            throw new ArgumentException(
+                "Standard input, standard output, and standard error must be redirected with shell execution disabled.",
+                nameof(startInfo));
+        }
+
+        if (!string.IsNullOrEmpty(startInfo.Arguments))
+            throw new ArgumentException("Pass arguments through ArgumentList, not Arguments.", nameof(startInfo));
+
+        using Process process = Process.Start(CreateSafeStartInfo(startInfo))
+                                ?? throw new InvalidOperationException("The child process could not be started.");
+
+        Task<string> standardOutput = ReadBoundedAsync(process.StandardOutput, maxOutputBytes);
+        Task<string> standardError = ReadBoundedAsync(process.StandardError, maxOutputBytes);
+        Task inputWrite = WriteAndCloseAsync(process.StandardInput, standardInput);
+
+        bool timedOut = false;
+        try
+        {
+            Task io = Task.WhenAll(inputWrite, standardOutput, standardError);
+            if (timeout is { } limit)
+            {
+                using CancellationTokenSource timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+                timeoutCts.CancelAfter(limit);
+                Task timer = Task.Delay(Timeout.Infinite, timeoutCts.Token);
+                Task completed = await Task.WhenAny(io, timer).ConfigureAwait(false);
+                if (completed != io)
+                {
+                    if (!cancellationToken.IsCancellationRequested)
+                    {
+                        timedOut = true;
+                        TryKillTree(process);
+                        await Task.WhenAny(io, Task.Delay(TimeSpan.FromSeconds(5), CancellationToken.None)).ConfigureAwait(false);
+                        throw new TimeoutException(
+                            $"The process did not exit within {limit.TotalSeconds.ToString("0", CultureInfo.InvariantCulture)} seconds.");
+                    }
+
+                    // The caller's token fired before the timeout; surface cancellation like the blocking wait does.
+                    throw new OperationCanceledException(cancellationToken);
+                }
+
+                await io.ConfigureAwait(false);
+            }
+            else if (cancellationToken.CanBeCanceled)
+            {
+                Task timer = Task.Delay(Timeout.Infinite, cancellationToken);
+                Task completed = await Task.WhenAny(io, timer).ConfigureAwait(false);
+                if (completed != io)
+                    throw new OperationCanceledException(cancellationToken);
+
+                await io.ConfigureAwait(false);
+            }
+            else
+            {
+                await io.ConfigureAwait(false);
+            }
+        }
+        catch (Exception ex) when (ex is not TimeoutException)
+        {
+            TryKillTree(process);
+            if (ex is AggregateException ae)
+                throw ae.Flatten().InnerExceptions[0];
+            throw;
+        }
+        finally
+        {
+            if (timedOut || !process.HasExited)
+            {
+                using CancellationTokenSource graceCts = new(TimeSpan.FromSeconds(5));
+                try
+                {
+                    await process.WaitForExitAsync(graceCts.Token).ConfigureAwait(false);
+                }
+                catch (OperationCanceledException)
+                {
+                }
+            }
+            else
+            {
+                await process.WaitForExitAsync(CancellationToken.None).ConfigureAwait(false);
+            }
+        }
+
+        return new ProcessResult(
+            process.ExitCode,
+            await standardOutput.ConfigureAwait(false),
+            await standardError.ConfigureAwait(false));
+    }
+
+    /// <summary>
     /// Runs an interactive or long-lived child process, streaming standard output and standard error
     /// as chunks arrive and killing the child process tree on cancellation.
     /// </summary>

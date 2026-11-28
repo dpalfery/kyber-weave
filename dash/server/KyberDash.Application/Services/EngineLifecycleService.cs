@@ -44,7 +44,12 @@ public class EngineLifecycleService : IEngineLifecycleService
 
     private readonly IServerStateRepository serverState;
     private readonly DashOptions options;
-    private readonly Func<string, string, bool> spawnEngine;
+    private readonly Func<string, string, Task<bool>> spawnEngine;
+
+    /// <summary>Initializes a new <see cref="EngineLifecycleService"/> using the detached engine launch.</summary>
+    public EngineLifecycleService(IServerStateRepository serverState, DashOptions options) : this(serverState, options, null)
+    {
+    }
 
     /// <summary>
     /// Initializes a new <see cref="EngineLifecycleService"/>.
@@ -55,7 +60,7 @@ public class EngineLifecycleService : IEngineLifecycleService
     /// Starts the replacement engine from its binary path and state directory and reports whether it started;
     /// the detached <c>/bin/sh</c> launch when <see langword="null"/>. The seam lets a test see which binary is launched.
     /// </param>
-    public EngineLifecycleService(IServerStateRepository serverState, DashOptions options, Func<string, string, bool>? spawnEngine = null)
+    public EngineLifecycleService(IServerStateRepository serverState, DashOptions options, Func<string, string, Task<bool>>? spawnEngine = null)
     {
         ArgumentNullException.ThrowIfNull(serverState);
         ArgumentNullException.ThrowIfNull(options);
@@ -120,7 +125,7 @@ public class EngineLifecycleService : IEngineLifecycleService
         }
 
         string exePath = ResolveApiBinary(apiBinaryPath);
-        if (!spawnEngine(exePath, resolvedStateDir))
+        if (!await spawnEngine(exePath, resolvedStateDir).ConfigureAwait(false))
         {
             return new EngineEnsureReport(false, $"engine: failed could not start {exePath} {NoOpenArgument}");
         }
@@ -331,7 +336,7 @@ public class EngineLifecycleService : IEngineLifecycleService
         return EngineExecutableName;
     }
 
-    private static bool TrySpawnDetachedEngine(string exePath, string stateDir)
+    private static async Task<bool> TrySpawnDetachedEngine(string exePath, string stateDir)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(exePath);
         ArgumentException.ThrowIfNullOrWhiteSpace(stateDir);
@@ -354,11 +359,11 @@ public class EngineLifecycleService : IEngineLifecycleService
 
         try
         {
-            _ = ProcessRunner.Run(
+            _ = await ProcessRunner.RunAsync(
                 startInfo,
                 standardInput: string.Empty,
                 timeout: TimeSpan.FromSeconds(10),
-                maxOutputBytes: 8192);
+                maxOutputBytes: 8192).ConfigureAwait(false);
             return true;
         }
         catch (Exception exception) when (exception is TimeoutException or InvalidOperationException or Win32Exception)
