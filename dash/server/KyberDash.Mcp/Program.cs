@@ -190,14 +190,14 @@ public class McpOptions
 
                 case "--server-url":
                     string rawUrl = ReadValue(args, ref index, arg);
-                    if (!McpStdioHost.TryValidateLoopbackServerUrl(rawUrl, out Uri? normalized))
+                    if (!McpStdioHost.TryValidateLoopbackServerUrl(rawUrl, out Uri? normalized) || normalized is null)
                     {
                         throw new DashValidationException(
                             "invalid_request",
                             "--server-url must be a literal loopback http://127.0.0.1:<port> or http://[::1]:<port> URL.");
                     }
 
-                    options.ServerUrl = normalized!;
+                    options.ServerUrl = normalized;
                     break;
 
                 case "--state-dir":

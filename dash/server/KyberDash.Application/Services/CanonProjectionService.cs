@@ -16,7 +16,7 @@ namespace KyberDash.Application;
 /// </remarks>
 public class CanonProjectionService : ICanonProjectionService
 {
-    private readonly IProjectionStore? projections;
+    private readonly IProjectionStore projections;
     private readonly CanonSessionProjectorEngine projector;
     private readonly CanonRollupsEngine rollups;
 
@@ -53,7 +53,7 @@ public class CanonProjectionService : ICanonProjectionService
         {
             return new ProjectionPassReport(
                 Built: 0,
-                Skipped: projections!.ListSessionProjections().Count,
+                Skipped: projections.ListSessionProjections().Count,
                 Pruned: 0,
                 Findings: 0,
                 RebuiltKeys: [],

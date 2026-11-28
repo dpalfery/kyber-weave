@@ -35,6 +35,6 @@ public sealed class LexicalRoutingStrategy : IRoutingStrategy
 
         RoutingCandidate? top = ranked.FirstOrDefault();
         bool fired = top is not null && top.Score >= FireThreshold;
-        return new RoutingResult(fired ? top!.SkillName : null, fired, ranked);
+        return new RoutingResult(fired ? top?.SkillName : null, fired, ranked);
     }
 }

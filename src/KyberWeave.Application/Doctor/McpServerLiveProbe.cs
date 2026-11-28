@@ -1,4 +1,5 @@
 using System.ComponentModel;
+using System.Diagnostics.CodeAnalysis;
 using System.Text.Json;
 using System.Text.RegularExpressions;
 using KyberWeave.Contracts.Paths;
@@ -157,11 +158,11 @@ public sealed partial class McpServerLiveProbe(
 
         if (!TryRead(session, out string? initializeReply, out string? handshakeFailure))
         {
-            checks.Add(Handshake(false, handshakeFailure!, session, options, root));
+            checks.Add(Handshake(false, handshakeFailure, session, options, root));
             return;
         }
 
-        if (!TryResult(initializeReply!, out _))
+        if (!TryResult(initializeReply, out _))
         {
             checks.Add(Handshake(false, "initialize did not return a result", session, options, root));
             return;
@@ -185,11 +186,11 @@ public sealed partial class McpServerLiveProbe(
 
         if (!TryRead(session, out string? callReply, out string? callFailure))
         {
-            checks.Add(new DoctorCheck("mcp.docs_explore", false, callFailure!, TimeoutFix(options)));
+            checks.Add(new DoctorCheck("mcp.docs_explore", false, callFailure, TimeoutFix(options)));
             return;
         }
 
-        if (!TryResult(callReply!, out JsonElement result) || !TryText(result, out string text))
+        if (!TryResult(callReply, out JsonElement result) || !TryText(result, out string text))
         {
             checks.Add(new DoctorCheck("mcp.docs_explore", false, "docs_answer_question_from_repo_documentation reply was not a tool result", "kyber-weave update"));
             return;
@@ -271,7 +272,10 @@ public sealed partial class McpServerLiveProbe(
     ///     Reads one reply line, turning a timeout, a closed stream, or a line past the session's cap into a reason
     ///     rather than an exception.
     /// </summary>
-    private static bool TryRead(IMcpStdioSession session, out string? line, out string? failure)
+    private static bool TryRead(
+        IMcpStdioSession session,
+        [NotNullWhen(true)] out string? line,
+        [NotNullWhen(false)] out string? failure)
     {
         try
         {

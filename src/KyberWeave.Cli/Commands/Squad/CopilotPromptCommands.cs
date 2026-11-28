@@ -111,7 +111,7 @@ public sealed class CopilotPromptInstallCommand : Command<CopilotPromptSettings>
     public override int Execute(CommandContext context, CopilotPromptSettings settings, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(settings);
-        CopilotPromptEnvironment environment = _environment ?? CopilotPromptCommandSupport.EnvironmentOf(_processEnvironment!, _paths!, _console);
+        CopilotPromptEnvironment environment = CopilotPromptCommandSupport.ResolveEnvironment(_environment, _processEnvironment, _paths, _console);
         if (!CopilotPromptCommandSupport.HasHome(environment, _console))
             return 2;
 
@@ -283,7 +283,7 @@ public sealed class CopilotPromptUninstallCommand : Command<CopilotPromptSetting
     public override int Execute(CommandContext context, CopilotPromptSettings settings, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(settings);
-        CopilotPromptEnvironment environment = _environment ?? CopilotPromptCommandSupport.EnvironmentOf(_processEnvironment!, _paths!, _console);
+        CopilotPromptEnvironment environment = CopilotPromptCommandSupport.ResolveEnvironment(_environment, _processEnvironment, _paths, _console);
         if (!CopilotPromptCommandSupport.HasHome(environment, _console))
             return 2;
 
@@ -447,7 +447,7 @@ public sealed class CopilotPromptStatusCommand : Command<CopilotPromptSettings>
     public override int Execute(CommandContext context, CopilotPromptSettings settings, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(settings);
-        CopilotPromptEnvironment environment = _environment ?? CopilotPromptCommandSupport.EnvironmentOf(_processEnvironment!, _paths!, _console);
+        CopilotPromptEnvironment environment = CopilotPromptCommandSupport.ResolveEnvironment(_environment, _processEnvironment, _paths, _console);
         if (!CopilotPromptCommandSupport.HasHome(environment, _console))
             return 2;
 
@@ -552,6 +552,24 @@ internal static class CopilotPromptCommandSupport
         }
 
         writer.WriteAllBytesAtomic(target, document);
+    }
+
+    /// <summary>
+    /// The environment the command was given, or the terminal's own when it was built from the host seams. Throws
+    /// when neither was provided, so a command never asks an absent seam for the environment.
+    /// </summary>
+    internal static CopilotPromptEnvironment ResolveEnvironment(
+        CopilotPromptEnvironment? injected,
+        IProcessEnvironment? environment,
+        IPathResolver? paths,
+        SquadConsole console)
+    {
+        if (injected is not null) return injected;
+
+        return EnvironmentOf(
+            environment ?? throw new InvalidOperationException("The command was not constructed with a process environment."),
+            paths ?? throw new InvalidOperationException("The command was not constructed with a path resolver."),
+            console);
     }
 
     /// <summary>The environment a person's terminal runs in: their home, their roaming app data, and whether they can answer a prompt.</summary>

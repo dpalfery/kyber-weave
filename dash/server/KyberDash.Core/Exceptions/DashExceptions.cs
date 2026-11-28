@@ -212,8 +212,8 @@ public class TrayInstallException : DashException
     }
 
     /// <summary>Initializes a new <see cref="TrayInstallException"/> with a failing step name, message, and inner cause.</summary>
-    public TrayInstallException(string step, string message, Exception? innerException)
-        : base(message, innerException!)
+    public TrayInstallException(string step, string message, Exception innerException)
+        : base(message, innerException)
     {
         Step = step;
     }

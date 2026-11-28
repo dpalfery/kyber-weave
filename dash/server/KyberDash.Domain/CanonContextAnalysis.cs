@@ -325,10 +325,11 @@ public static class CanonContextAnalysis
             long? measured = CanonPricing.MeasuredCount(part.Tokens);
             bool hasStructure = text.Length > 0 || measured.HasValue;
             TokenCount? counted = hasStructure && !measured.HasValue ? countTokens(text, part.Model) : null;
+            long? tokens = measured ?? counted?.Count;
             reduced.Add(new ContextPart(
                 Part: part.Part,
                 Text: string.Empty,
-                Tokens: hasStructure ? (measured ?? counted!.Count) : null,
+                Tokens: tokens,
                 Server: part.Server,
                 Derived: !measured.HasValue,
                 Resident: part.Resident == false ? false : null,

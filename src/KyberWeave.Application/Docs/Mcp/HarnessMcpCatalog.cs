@@ -219,7 +219,7 @@ public static class HarnessMcpCatalog
     [
         new HarnessMcpEntry
         {
-            Harness = HarnessRegistry.Factory.McpCatalogName!,
+            Harness = McpCatalogNameOf(HarnessRegistry.Factory),
             Shape = McpConfigurationShape.Json,
             Paths = [".factory/mcp.json"],
             ServerKeyPath = ["mcpServers"],
@@ -248,7 +248,7 @@ public static class HarnessMcpCatalog
         },
         new HarnessMcpEntry
         {
-            Harness = HarnessRegistry.Claude.McpCatalogName!,
+            Harness = McpCatalogNameOf(HarnessRegistry.Claude),
             Shape = McpConfigurationShape.Json,
             Paths = [".mcp.json"],
             ServerKeyPath = ["mcpServers"],
@@ -280,7 +280,7 @@ public static class HarnessMcpCatalog
         },
         new HarnessMcpEntry
         {
-            Harness = HarnessRegistry.Cursor.McpCatalogName!,
+            Harness = McpCatalogNameOf(HarnessRegistry.Cursor),
             Shape = McpConfigurationShape.Json,
             Paths = [".cursor/mcp.json"],
             ServerKeyPath = ["mcpServers"],
@@ -309,7 +309,7 @@ public static class HarnessMcpCatalog
         },
         new HarnessMcpEntry
         {
-            Harness = HarnessRegistry.CopilotVsCode.McpCatalogName!,
+            Harness = McpCatalogNameOf(HarnessRegistry.CopilotVsCode),
             Shape = McpConfigurationShape.Json,
             Paths = [".vscode/mcp.json"],
             // Not `mcpServers`: VS Code keys the map `servers`, and the wrong key fails silently.
@@ -358,7 +358,7 @@ public static class HarnessMcpCatalog
         },
         new HarnessMcpEntry
         {
-            Harness = HarnessRegistry.Codex.McpCatalogName!,
+            Harness = McpCatalogNameOf(HarnessRegistry.Codex),
             Shape = McpConfigurationShape.Toml,
             Paths = [".codex/config.toml"],
             ServerKeyPath = ["mcp_servers"],
@@ -372,7 +372,7 @@ public static class HarnessMcpCatalog
         },
         new HarnessMcpEntry
         {
-            Harness = HarnessRegistry.OpenCode.McpCatalogName!,
+            Harness = McpCatalogNameOf(HarnessRegistry.OpenCode),
             Shape = McpConfigurationShape.Json,
             Paths = ["opencode.json"],
             ServerKeyPath = ["mcp"],
@@ -410,7 +410,7 @@ public static class HarnessMcpCatalog
         },
         new HarnessMcpEntry
         {
-            Harness = HarnessRegistry.ZCode.McpCatalogName!,
+            Harness = McpCatalogNameOf(HarnessRegistry.ZCode),
             Shape = McpConfigurationShape.Json,
             // The project tiers, working directory to worktree root. The user tier under the
             // ZCode storage root is never read (R2.6): a server wired only there is not wired for
@@ -426,6 +426,10 @@ public static class HarnessMcpCatalog
             Fixability = McpWiringFixability.NotFixable
         }
     ];
+
+    private static string McpCatalogNameOf(HarnessDescriptor harness) =>
+        harness.McpCatalogName ?? throw new InvalidOperationException(
+            $"The harness '{harness.Token}' has no DocGraph MCP catalog name.");
 
     /// <summary>Finds a row by its harness slug, or null when the slug is not in the catalog.</summary>
     public static HarnessMcpEntry? Find(string harness)

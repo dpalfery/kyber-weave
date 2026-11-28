@@ -51,8 +51,17 @@ public sealed class SkillFileReader(IFileSystem files, IPathResolver paths, IPro
     /// <summary>Loads only the skills that parsed successfully.</summary>
     /// <param name="rootPath">A skill directory, a tree of skills, or a SKILL.md file.</param>
     /// <returns>The parsed skills.</returns>
-    public SkillSet LoadSet(string rootPath) =>
-        new(Load(rootPath).Where(r => r.Success).Select(r => r.Skill!));
+    public SkillSet LoadSet(string rootPath)
+    {
+        List<Skill> skills = [];
+        foreach (SkillLoadResult result in Load(rootPath))
+        {
+            if (result.Success && result.Skill is { } skill)
+                skills.Add(skill);
+        }
+
+        return new SkillSet(skills);
+    }
 
     /// <summary>Reads and parses one SKILL.md file.</summary>
     /// <param name="skillFilePath">The absolute path of the SKILL.md.</param>
@@ -65,7 +74,8 @@ public sealed class SkillFileReader(IFileSystem files, IPathResolver paths, IPro
             throw new SkillParseException($"SKILL.md not found at '{skillFilePath}'.");
 
         string content = files.ReadAllText(fullPath);
-        string directory = Path.GetDirectoryName(fullPath)!;
+        if (Path.GetDirectoryName(fullPath) is not { } directory)
+            throw new InvalidOperationException($"Cannot determine the directory of '{fullPath}'.");
         return Read(content, fullPath, directory);
     }
 

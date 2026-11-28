@@ -321,14 +321,15 @@ public class ClaudeTranscriptMapper : IHarnessMapper
 
     private static string WalkChainRoot(ClaudeTranscriptLine line, Dictionary<string, ClaudeTranscriptLine> byUuid)
     {
-        string runId = line.Uuid!;
+        string runId = line.Uuid ?? throw new InvalidOperationException("A chain walk must start from a line with a uuid.");
         ClaudeTranscriptLine current = line;
         int hops = 0;
         while (current.ParentUuid is { } parentUuid
             && byUuid.TryGetValue(parentUuid, out ClaudeTranscriptLine? parent)
             && hops++ < byUuid.Count)
         {
-            runId = parent.Uuid!;
+            // Every entry is keyed by its own uuid, so the key of a found parent is that parent's uuid.
+            runId = parentUuid;
             current = parent;
         }
 
@@ -781,22 +782,22 @@ public class ClaudeTranscriptMapper : IHarnessMapper
             ClaudeTranscriptLine lastLine = group[^1];
             UsageSnapshot? usageInfo = ExtractUsageSnapshot(lastLine, pathInfo);
 
-            if (merged.Count > 0)
+            if (merged.Count > 0 && usageInfo is { } currentUsage)
             {
                 MergedLineGroup prev = merged[^1];
                 UsageSnapshot? prevForMatch = prev.Usage is null
                     ? null
                     : prev.Usage with { MessageId = prev.MessageId ?? prev.Usage.MessageId };
-                if (IsMatchingClaudeUsage(prevForMatch, usageInfo))
+                if (IsMatchingClaudeUsage(prevForMatch, currentUsage))
                 {
                     prev.Lines.AddRange(group);
-                    string? mergedMessageId = prev.MessageId ?? usageInfo!.MessageId;
+                    string? mergedMessageId = prev.MessageId ?? currentUsage.MessageId;
                     UsageSnapshot mergedUsage = prev.Usage! with
                     {
                         MessageId = mergedMessageId,
-                        Model = !string.IsNullOrWhiteSpace(usageInfo!.Model) ? usageInfo.Model : prev.Usage.Model,
-                        Usage = usageInfo.Usage,
-                        Timestamp = prev.Usage.Timestamp ?? usageInfo.Timestamp,
+                        Model = !string.IsNullOrWhiteSpace(currentUsage.Model) ? currentUsage.Model : prev.Usage.Model,
+                        Usage = currentUsage.Usage,
+                        Timestamp = prev.Usage.Timestamp ?? currentUsage.Timestamp,
                     };
                     merged[^1] = prev with { MessageId = mergedMessageId, Usage = mergedUsage };
 

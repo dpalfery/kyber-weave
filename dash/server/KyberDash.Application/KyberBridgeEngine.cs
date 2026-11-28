@@ -109,6 +109,7 @@ public abstract class KyberBridgeEngineBase
     internal CanonSessionProjectorEngine projector;
     internal CanonRollupsEngine rollups;
     internal Func<DateTimeOffset> clock;
+    internal readonly TimeProvider time;
     internal string version;
     internal string instanceId;
     internal string storePath;
@@ -563,6 +564,7 @@ public abstract class KyberBridgeEngineBase
     /// <param name="options">Composition options carrying the configured collector port, when the host has one.</param>
     /// <param name="collector">Live collector, when this process hosts one. Absent means admission failures are unknown.</param>
     /// <param name="listener">Bind record for this process's collector socket. Absent means the listener was not observed.</param>
+    /// <param name="time">Wall-clock time provider for deterministic timestamps; defaults to <see cref="TimeProvider.System"/>.</param>
     protected KyberBridgeEngineBase(
         IRelationalStoreReader reader,
         IProjectionStore projections,
@@ -576,7 +578,8 @@ public abstract class KyberBridgeEngineBase
         string? storePath = null,
         DashOptions? options = null,
         IOtlpCollectorService? collector = null,
-        IOtlpListenerState? listener = null)
+        IOtlpListenerState? listener = null,
+        TimeProvider? time = null)
     {
         ArgumentNullException.ThrowIfNull(reader);
         ArgumentNullException.ThrowIfNull(projections);
@@ -596,7 +599,8 @@ public abstract class KyberBridgeEngineBase
         this.projector = projector;
         this.rollups = rollups;
         this.version = version ?? DashVersion.Current;
-        this.clock = clock ?? (() => DateTimeOffset.UtcNow);
+        this.time = time ?? TimeProvider.System;
+        this.clock = clock ?? (() => this.time.GetUtcNow());
         this.instanceId = string.IsNullOrWhiteSpace(instanceId)
             ? string.Create(CultureInfo.InvariantCulture, $"kyberdash-{Environment.ProcessId}")
             : instanceId;
@@ -860,7 +864,7 @@ public abstract class KyberBridgeEngineRowBuilders : KyberBridgeEngineBase
                     ? listed
                     : NotMeasurableBlock($"{harness} did not export the session's listed skills."),
                 ["invocations"] = skillCounts.GetValueOrDefault(skillName),
-                ["turns_listed"] = listed ? turns!.ToArray() : Array.Empty<int>(),
+                ["turns_listed"] = turns is { } listedTurns ? listedTurns.ToArray() : Array.Empty<int>(),
             });
         }
 
@@ -3579,8 +3583,9 @@ public abstract class KyberBridgeEngineSections : KyberBridgeEngineSessionSectio
         IModelPricingLookup lookup = pricing.LoadPricingTables();
         IReadOnlyList<StoredExecution> executions = projections.ListExecutionsForRun(runId);
         HashSet<string> runSessionIds = [.. executions
-            .Where(static e => !string.IsNullOrEmpty(e.SessionId))
-            .Select(static e => e.SessionId!)];
+            .Select(static e => e.SessionId)
+            .OfType<string>()
+            .Where(static id => id.Length > 0)];
         // A derived run groups sessions rather than being named on the finding rows, so a run's
         // findings are the ones naming the run or any of its sessions.
         List<StoredFinding> findings = [.. projections.ListFindings()
@@ -4015,7 +4020,7 @@ public abstract class KyberBridgeEngineSections : KyberBridgeEngineSessionSectio
     {
         List<PredictionRow> predictions = [.. projections.ListPredictions().Select(ToPredictionRow)];
         List<PredictionRow> scored = [.. predictions.Where(p => p.CalibrationScore.HasValue)];
-        double? meanScore = scored.Count > 0 ? Math.Round(scored.Average(p => p.CalibrationScore!.Value), 4) : null;
+        double? meanScore = scored.Count > 0 ? Math.Round(scored.Average(p => p.CalibrationScore.GetValueOrDefault()), 4) : null;
 
         return JsonSerializer.SerializeToElement(new
         {
@@ -4733,7 +4738,7 @@ internal sealed class AnalyticsBridge
         }
         catch (Exception ex) when (ex is IOException or TimeoutException or UnauthorizedAccessException or InvalidOperationException or ObjectDisposedException)
         {
-            timestamp = DateTimeOffset.UtcNow;
+            timestamp = owner.time.GetUtcNow();
         }
 
         object freshness = CreateAnalyticsFreshness(FormatTimestamp(timestamp), 0L);

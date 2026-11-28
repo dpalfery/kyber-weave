@@ -162,7 +162,9 @@ public sealed class DocumentIndexHost
 
             if (_index is null || corpusStale || codeGraphStamp != _codeGraphStamp)
             {
-                _index = DocumentIndex.Build(_corpus!, _resolverFactory());
+                DocumentCorpus corpus = _corpus
+                    ?? throw new InvalidOperationException("The corpus is built before the index.");
+                _index = DocumentIndex.Build(corpus, _resolverFactory());
                 _codeGraphStamp = codeGraphStamp;
                 JoinBuilds++;
             }

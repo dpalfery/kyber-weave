@@ -263,7 +263,8 @@ internal sealed class SquadCommandRoots
         if (registered.Count == 0) return message + " No projects are registered.";
 
         SquadProjectRegistryEntry nearest = registered.MinBy(entry =>
-            StringDistance.Levenshtein(full, entry.Path, true))!;
+            StringDistance.Levenshtein(full, entry.Path, true))
+            ?? throw new InvalidOperationException("A registered project is needed to suggest a nearest path.");
         return message + $" Did you mean '{nearest.Path}'?";
     }
 }

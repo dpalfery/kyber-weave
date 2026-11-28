@@ -22,7 +22,12 @@ public sealed class FileRunStateStore(
         ArgumentException.ThrowIfNullOrWhiteSpace(baseRef);
 
         string path = RunBaseStateFormat.StatePath(homeDirectory, branch);
-        files.CreateDirectory(Path.GetDirectoryName(path)!);
+        if (Path.GetDirectoryName(path) is not { } directory)
+        {
+            throw new InvalidOperationException($"Cannot determine the state directory for '{path}'.");
+        }
+
+        files.CreateDirectory(directory);
         files.WriteAllText(path, RunBaseStateFormat.Serialize(baseRef, branch, place));
     }
 
@@ -88,7 +93,8 @@ public sealed class FileRunStateStore(
             }
 
             if (RunBaseStateFormat.TryReadRecord(json, out RunRecord? record)
-                && string.Equals(RunBaseStateFormat.NormalizeDirectory(record!.Repository, paths, environment), wanted, RunBaseStateFormat.PathComparison(environment))
+                && record is not null
+                && string.Equals(RunBaseStateFormat.NormalizeDirectory(record.Repository, paths, environment), wanted, RunBaseStateFormat.PathComparison(environment))
                 && files.DirectoryExists(record.Worktree)
                 && string.Equals(branches.Read(record.Worktree), record.Branch, StringComparison.Ordinal))
             {
@@ -113,9 +119,9 @@ public sealed class FileRunStateStore(
 
             foreach (string file in files.EnumerateFiles(directory, "*" + RunBaseStateFormat.StateExtension, recursive: false))
             {
-                if (RunBaseStateFormat.TryReadRecord(files.ReadAllText(file), out RunRecord? record))
+                if (RunBaseStateFormat.TryReadRecord(files.ReadAllText(file), out RunRecord? record) && record is not null)
                 {
-                    records.Add(record!);
+                    records.Add(record);
                 }
             }
         }

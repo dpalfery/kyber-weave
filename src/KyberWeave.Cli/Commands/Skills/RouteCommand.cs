@@ -64,21 +64,22 @@ public sealed class RouteCommand(ISkillGovernanceService skills, IAnsiConsole an
             _ => new LexicalRoutingStrategy { FireThreshold = settings.Threshold }
         };
 
-        return settings.EvalFile is not null
-            ? RunEval(settings, set, strategy)
+        return settings.EvalFile is { } evalFile
+            ? RunEval(settings, evalFile, set, strategy)
             : RunSingle(settings, set, strategy);
     }
 
     /// <summary>Routes the one prompt given on the command line and prints the ranked skills.</summary>
     private int RunSingle(RouteSettings settings, SkillSet set, IRoutingStrategy strategy)
     {
-        if (string.IsNullOrWhiteSpace(settings.Prompt))
+        string? prompt = settings.Prompt;
+        if (string.IsNullOrWhiteSpace(prompt))
         {
             ansi.MarkupLine("[red]Provide a prompt, or use --eval <file>.[/]");
             return 2;
         }
 
-        RoutingResult result = strategy.Route(settings.Prompt!, set);
+        RoutingResult result = strategy.Route(prompt, set);
 
         if (settings.Json)
         {
@@ -99,10 +100,17 @@ public sealed class RouteCommand(ISkillGovernanceService skills, IAnsiConsole an
             return 0;
         }
 
-        ansi.MarkupLine($"Prompt: [italic]\"{Markup.Escape(settings.Prompt!)}\"[/]");
-        ansi.MarkupLine(result.Fired
-            ? $"Would fire: [green bold]{Markup.Escape(result.SelectedSkill!)}[/] (margin over runner-up: {result.Margin:F3})"
-            : $"[yellow]No skill clears the fire threshold ({strategy.Name} @ {settings.Threshold}).[/]");
+        ansi.MarkupLine($"Prompt: [italic]\"{Markup.Escape(prompt)}\"[/]");
+        if (result.Fired)
+        {
+            string selected = result.SelectedSkill
+                ?? throw new InvalidOperationException("A fired routing result names the skill it selected.");
+            ansi.MarkupLine($"Would fire: [green bold]{Markup.Escape(selected)}[/] (margin over runner-up: {result.Margin:F3})");
+        }
+        else
+        {
+            ansi.MarkupLine($"[yellow]No skill clears the fire threshold ({strategy.Name} @ {settings.Threshold}).[/]");
+        }
 
         Table table = new Table().Border(TableBorder.Rounded);
         table.AddColumn("Rank"); table.AddColumn("Skill"); table.AddColumn("Score");
@@ -117,12 +125,12 @@ public sealed class RouteCommand(ISkillGovernanceService skills, IAnsiConsole an
         return 0;
     }
 
-    private int RunEval(RouteSettings settings, SkillSet set, IRoutingStrategy strategy)
+    private int RunEval(RouteSettings settings, string evalFile, SkillSet set, IRoutingStrategy strategy)
     {
         RoutingEvalSummary? evaluated;
         try
         {
-            evaluated = skills.Evaluate(settings.EvalFile!, strategy, set);
+            evaluated = skills.Evaluate(evalFile, strategy, set);
         }
         catch (RoutingEvalParseException error)
         {
@@ -132,7 +140,7 @@ public sealed class RouteCommand(ISkillGovernanceService skills, IAnsiConsole an
 
         if (evaluated is null)
         {
-            ansi.MarkupLine($"[red]Eval file not found: {Markup.Escape(settings.EvalFile!)}[/]");
+            ansi.MarkupLine($"[red]Eval file not found: {Markup.Escape(evalFile)}[/]");
             return 2;
         }
 

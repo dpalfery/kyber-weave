@@ -82,7 +82,7 @@ public static class ReviewConfigParser
 
         foreach (ReviewGateYaml gate in gates)
         {
-            if (!ConfigSlug.IsValid(gate.Id))
+            if (gate.Id is not { } id || !ConfigSlug.IsValid(id))
             {
                 throw new YamlException(
                     $"review.gates id '{gate.Id}' is not a valid lookup name. Use lowercase " +
@@ -91,7 +91,7 @@ public static class ReviewConfigParser
 
             // A gate id is cited in findings, reports, and suppressions, so two gates
             // sharing one makes every downstream reference ambiguous.
-            if (!seen.Add(gate.Id!))
+            if (!seen.Add(id))
                 throw new YamlException($"review.gates declares '{gate.Id}' more than once.");
 
             if (gate.Run is null || gate.Run.Count == 0)
@@ -118,13 +118,13 @@ public static class ReviewConfigParser
                 gate.WorkingDirectory, gateWhere, repositoryRoot, facts, [gate.Run]);
 
             parsed.Add(new ReviewGate(
-                gate.Id!,
+                id,
                 [.. gate.Run],
                 gate.Blocking ?? true,
                 timeoutSeconds,
                 os,
                 workingDirectory,
-                ParseAppliesWhen(gate.Id!, gate.AppliesWhen))
+                ParseAppliesWhen(id, gate.AppliesWhen))
             {
                 Include = include,
                 FailOnOutput = gate.FailOnOutput ?? false,
@@ -952,12 +952,12 @@ public static class ReviewConfigParser
 
         foreach (ReviewSuppressionYaml suppression in suppressions)
         {
-            if (string.IsNullOrWhiteSpace(suppression.Id))
+            if (suppression.Id is not { } id || string.IsNullOrWhiteSpace(id))
                 throw new YamlException("review.policy.suppressions requires an id on every entry.");
 
             // A suppression without a stated reason is indistinguishable from a mistake by
             // the time anyone reads it, and nobody can judge whether it is still warranted.
-            if (string.IsNullOrWhiteSpace(suppression.Reason))
+            if (suppression.Reason is not { } reason || string.IsNullOrWhiteSpace(reason))
             {
                 throw new YamlException(
                     $"review.policy.suppressions '{suppression.Id}' has no reason. A suppression " +
@@ -976,7 +976,7 @@ public static class ReviewConfigParser
                     "yyyy-MM-dd. Suppressions do not last forever.");
             }
 
-            parsed.Add(new ReviewSuppression(suppression.Id!, suppression.Reason!, expires));
+            parsed.Add(new ReviewSuppression(id, reason, expires));
         }
 
         return parsed;

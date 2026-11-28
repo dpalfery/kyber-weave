@@ -21,7 +21,8 @@ public sealed partial class TomlAgentParser(IPathResolver paths, IProcessEnviron
     {
         ArgumentNullException.ThrowIfNull(content);
 
-        string dirName = Path.GetDirectoryName(paths.GetFullPath(filePath, environment.CurrentDirectory))!;
+        string dirName = Path.GetDirectoryName(paths.GetFullPath(filePath, environment.CurrentDirectory))
+            ?? throw new InvalidOperationException($"The path '{filePath}' has no directory.");
         string fileName = Path.GetFileNameWithoutExtension(filePath);
 
         string name = fileName;

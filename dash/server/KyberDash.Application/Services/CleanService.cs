@@ -69,6 +69,7 @@ public class CleanService : ICleanService
     private readonly IOperationalStore operationalStore;
     private readonly ICanonProjectionService projection;
     private readonly ITranscriptIngestionService ingestion;
+    private readonly TimeProvider timeProvider;
 
     /// <summary>
     /// Initializes a new <see cref="CleanService"/>.
@@ -79,13 +80,15 @@ public class CleanService : ICleanService
     /// <param name="operationalStore">Operational store owning the clean stamp and projection invalidation.</param>
     /// <param name="projection">Projection service rebuilding derived state after the wipe.</param>
     /// <param name="ingestion">Ingestion service used for an optional history backfill.</param>
+    /// <param name="timeProvider">Clock supplying the clean stamp; defaults to <see cref="TimeProvider.System"/>.</param>
     public CleanService(
         IRelationalStoreReader reader,
         IRelationalStoreWriter writer,
         IProjectionStore projections,
         IOperationalStore operationalStore,
         ICanonProjectionService projection,
-        ITranscriptIngestionService ingestion)
+        ITranscriptIngestionService ingestion,
+        TimeProvider? timeProvider = null)
     {
         ArgumentNullException.ThrowIfNull(reader);
         ArgumentNullException.ThrowIfNull(writer);
@@ -100,6 +103,7 @@ public class CleanService : ICleanService
         this.operationalStore = operationalStore;
         this.projection = projection;
         this.ingestion = ingestion;
+        this.timeProvider = timeProvider ?? TimeProvider.System;
     }
 
     /// <inheritdoc />
@@ -207,7 +211,7 @@ public class CleanService : ICleanService
 
     private StoreWipeReport Wipe(IReadOnlyList<string>? harnesses)
     {
-        string nowIso = DateTimeOffset.UtcNow.UtcDateTime.ToString(
+        string nowIso = timeProvider.GetUtcNow().UtcDateTime.ToString(
             "yyyy-MM-dd'T'HH:mm:ss.fff'Z'", CultureInfo.InvariantCulture);
 
         WipeScope scope = ReadScope(harnesses);

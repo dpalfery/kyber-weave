@@ -17,13 +17,14 @@ public sealed class DocsCatalogCommand(
     public override int Execute(CommandContext context, DocsSettings settings, CancellationToken cancellationToken)
     {
         DiagnosticReport report = new DiagnosticReport();
-        if (!DocsCommandComposition.TryCreateLoader(configs, settings, report, documents, out IDocumentSource? loader))
+        if (!DocsCommandComposition.TryCreateLoader(configs, settings, report, documents, out IDocumentSource? loader)
+            || loader is null)
         {
             CommandHelpers.Finish(console, report, settings, "docs catalog", "Document");
             return 1;
         }
 
-        DocumentSet set = loader!.Load();
+        DocumentSet set = loader.Load();
 
         Table table = new Table().Border(TableBorder.Rounded).Expand();
         table.AddColumn("Component");

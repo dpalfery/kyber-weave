@@ -171,9 +171,14 @@ public class EngineOwner : IEngineOwnerLease
         try
         {
             if (publisher is null)
+            {
                 AtomicFile.Write(recordFile, JsonSerializer.SerializeToUtf8Bytes(record, ServerStateRepository.EngineJsonOptions));
-            else
-                publisher.WriteEngineDescriptor(Path.GetDirectoryName(recordFile)!, record);
+                return;
+            }
+
+            string stateDirectory = Path.GetDirectoryName(recordFile)
+                ?? throw new InvalidOperationException("A full record path must carry a directory part for the engine descriptor.");
+            publisher.WriteEngineDescriptor(stateDirectory, record);
         }
         catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or ArgumentException)
         {

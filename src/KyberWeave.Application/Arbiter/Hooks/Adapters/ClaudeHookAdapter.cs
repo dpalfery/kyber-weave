@@ -296,7 +296,7 @@ public sealed class ClaudeHookAdapter : IHarnessHookAdapter
         return insertion.Kind switch
         {
             DispatchInsertionKind.Inserted => RenderPreAllowPrompt(toolInput, insertion.Text),
-            DispatchInsertionKind.Stopped => RenderPreDeny(insertion.Reason!),
+            DispatchInsertionKind.Stopped => RenderPreDeny(insertion.StopReason),
             _ => null,
         };
     }
@@ -343,7 +343,7 @@ public sealed class ClaudeHookAdapter : IHarnessHookAdapter
             // A prompt that cannot be built stops the dispatch: no worker starts with only a task id.
             if (insertion.Kind == DispatchInsertionKind.Stopped)
             {
-                return RenderPreDeny(insertion.Reason!);
+                return RenderPreDeny(insertion.StopReason);
             }
 
             bool inserted = insertion.Kind == DispatchInsertionKind.Inserted;
@@ -383,26 +383,17 @@ public sealed class ClaudeHookAdapter : IHarnessHookAdapter
             };
         }
 
-        if (IsShellTool(tool) && ArchitectShellGuard.IsShellGuarded(caller))
+        if (ShellGuardDenial(payload, tool, caller, config, context) is { } shellDenial)
         {
-            // A missing tool_input is not an exception here: the guard reads it as a call with no command and denies it.
-            JsonElement toolInput = payload.TryGetProperty("tool_input", out JsonElement shellInput) ? shellInput : default;
-            ShellGuardResult shell = ArchitectShellGuard.Check(
-                tool!, toolInput, RepoRootOf(payload, context.RepoRoot), ReadGuard.ProtectedDirectories(config));
-            context.Log.WriteLine(OneLine(
-                $"{ArchitectShellGuard.RuleId}: {tool} call by {caller} " +
-                (shell.Allowed ? "allowed" : $"denied: {shell.Reason}")));
-            return shell.Allowed
-                ? string.Empty
-                : RenderPreDeny(shell.Reason ?? $"Denied by the shell guard ({ArchitectShellGuard.RuleId}).");
+            return shellDenial;
         }
 
-        if (IsReadTool(tool))
+        if (IsReadTool(tool) && tool is not null)
         {
             JsonElement toolInput = RequireToolInput(payload);
             IReadOnlyList<string> dirs = ReadGuard.ProtectedDirectories(config);
             (string root, IReadOnlyList<string> roots) = GuardRoots(payload, context);
-            ReadGuardResult verdict = ReadGuard.Check(tool!, toolInput, root, dirs, roots);
+            ReadGuardResult verdict = ReadGuard.Check(tool, toolInput, root, dirs, roots);
             return verdict.Allowed
                 ? string.Empty
                 : RenderPreDeny(verdict.Reason ?? "Denied by the Read guard (Req 25.2, Req 25.4).");
@@ -715,6 +706,27 @@ public sealed class ClaudeHookAdapter : IHarnessHookAdapter
     /// worktrees, so a worker's read in the run worktree is judged there even when the payload cwd is the checkout the
     /// session started in.
     /// </summary>
+    /// <summary>The deny document a guarded shell call earns, or null when this is not a guarded shell call.</summary>
+    private static string? ShellGuardDenial(
+        JsonElement payload, string? tool, string caller, KyberWeaveConfig config, HookContext context)
+    {
+        if (tool is null || !IsShellTool(tool) || !ArchitectShellGuard.IsShellGuarded(caller))
+        {
+            return null;
+        }
+
+        // A missing tool_input is not an exception here: the guard reads it as a call with no command and denies it.
+        JsonElement toolInput = payload.TryGetProperty("tool_input", out JsonElement shellInput) ? shellInput : default;
+        ShellGuardResult shell = ArchitectShellGuard.Check(
+            tool, toolInput, RepoRootOf(payload, context.RepoRoot), ReadGuard.ProtectedDirectories(config));
+        context.Log.WriteLine(OneLine(
+            $"{ArchitectShellGuard.RuleId}: {tool} call by {caller} " +
+            (shell.Allowed ? "allowed" : $"denied: {shell.Reason}")));
+        return shell.Allowed
+            ? string.Empty
+            : RenderPreDeny(shell.Reason ?? $"Denied by the shell guard ({ArchitectShellGuard.RuleId}).");
+    }
+
     private static (string Root, IReadOnlyList<string> Roots) GuardRoots(JsonElement payload, HookContext context) =>
         context.RunContext is { } run
             ? (run.Worktree, run.Worktrees)

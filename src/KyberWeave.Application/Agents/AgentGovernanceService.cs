@@ -54,7 +54,12 @@ public sealed class AgentGovernanceService(IFileSystem files, IPathResolver path
 
         if (!AgentHarnessFilter.TryParse(harness, out HarnessKind? harnessFilter, out string? error))
         {
-            report.Add(new Diagnostic(FilterRefusedCode, Severity.Error, error!, "agent", path));
+            report.Add(new Diagnostic(
+                FilterRefusedCode,
+                Severity.Error,
+                error ?? $"Unknown harness '{harness}'.",
+                "agent",
+                path));
             return new AgentAnalysis(report, FilterRefused: true);
         }
 

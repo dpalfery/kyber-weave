@@ -77,9 +77,9 @@ public sealed class PlanArguments(
         ArgumentNullException.ThrowIfNull(report);
         string current = CurrentDirectory(workingDirectory);
         PlanPathResolution resolution = ResolverFor(root, config, planFiles).Resolve(argument, current);
-        if (resolution.Found)
+        if (resolution.Path is { } resolved)
         {
-            relative = resolution.Path!;
+            relative = resolved;
             return true;
         }
 

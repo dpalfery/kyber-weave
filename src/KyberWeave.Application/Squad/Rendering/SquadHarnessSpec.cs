@@ -198,7 +198,7 @@ public static class SquadHarnessLowering
         return (bareModel, level);
     }
 
-    private static string? OmitInherited(string value, SquadModelPolicy policy) =>
+    private static string? OmitInherited(string? value, SquadModelPolicy policy) =>
         string.Equals(value, Inherit, StringComparison.Ordinal) ||
         (policy == SquadModelPolicy.InheritOrBlankOmitted && string.IsNullOrWhiteSpace(value))
             ? null

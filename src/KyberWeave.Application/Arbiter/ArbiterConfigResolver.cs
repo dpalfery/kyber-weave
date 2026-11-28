@@ -40,7 +40,7 @@ public sealed class ArbiterConfigResolver(
         }
 
         KyberWeaveConfigLoadResult loaded = repository.TryLoad(path, configFile);
-        if (!loaded.Success)
+        if (!loaded.Success || loaded.Config is null)
         {
             if (TryLoadProjectConfigWithoutGlobal(path, configFile, out config, out configPath))
             {
@@ -60,7 +60,7 @@ public sealed class ArbiterConfigResolver(
             return false;
         }
 
-        config = loaded.Config!;
+        config = loaded.Config;
         configPath = loaded.ConfigPath;
 
         try

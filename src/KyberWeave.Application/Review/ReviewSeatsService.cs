@@ -124,9 +124,9 @@ public sealed class ReviewSeatsService(
         string tree = trees.Containing(root);
         string scratchpad = ReviewWorkTree.Scratchpad(tree);
         ReviewTaskChoice choice = selector.ChooseTask(tree, scratchpad, request.Task);
-        if (!choice.Chosen)
+        if (choice.Error is { } error)
         {
-            failure = ReviewCommandResultFactory.Refused(choice.Error!);
+            failure = ReviewCommandResultFactory.Refused(error);
             return null;
         }
 

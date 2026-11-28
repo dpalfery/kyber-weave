@@ -143,7 +143,7 @@ public sealed class HookCommand : IArbiterHookHost
             if (scope == HookScope.Global)
             {
                 KyberWeaveConfig? projectConfig = _hostConfig.LoadProject(repoRoot);
-                if (projectConfig?.Arbiter.ExplicitlyEnabled == false)
+                if (projectConfig is { Arbiter.ExplicitlyEnabled: false })
                 {
                     log.WriteLine("Arbiter global scope: deferred-to-project (project opts out: arbiter.enabled: false).");
                     // The Arbiter is off, but prompt insertion is not an Arbiter action: the dispatch still gets its
@@ -152,7 +152,7 @@ public sealed class HookCommand : IArbiterHookHost
                         adapter,
                         payload,
                         caller,
-                        NewContext(adapter, repoRoot, runContext, home, HookScope.Project, projectConfig!, log),
+                        NewContext(adapter, repoRoot, runContext, home, HookScope.Project, projectConfig, log),
                         stdout);
                 }
 

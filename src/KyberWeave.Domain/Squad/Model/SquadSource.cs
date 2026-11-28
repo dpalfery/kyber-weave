@@ -86,7 +86,7 @@ public sealed record SquadModelProfiles(
 
 /// <summary>A target-neutral default plus optional harness-specific model identifiers.</summary>
 public sealed record SquadModelProfile(
-    string Default,
+    string? Default,
     IReadOnlyDictionary<string, string> HarnessModels);
 
 /// <summary>The semantic capability vocabulary and named permission profiles.</summary>

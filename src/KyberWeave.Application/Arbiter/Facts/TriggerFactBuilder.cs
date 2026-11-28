@@ -198,9 +198,7 @@ public static class TriggerFactBuilder
         block.Headers.TryGetValue(DispatchHeaders.PlanFile, out string? planFile);
         block.Headers.TryGetValue(DispatchHeaders.Task, out string? task);
         block.Headers.TryGetValue(DispatchHeaders.Technology, out string? technology);
-        string? parentTechnology = repoRoot is not null && technology is not null
-            ? TaskGateResolver.ParentTechnologyOrNone(files!, repoRoot, config, technology)
-            : null;
+        string? parentTechnology = ParentTechnology(files, repoRoot, config, technology);
         block.Headers.TryGetValue(DispatchHeaders.Lens, out string? lens);
         block.Headers.TryGetValue(DispatchHeaders.Refute, out string? refute);
         // REFUTE names the finding as <lens>/<slug>. The finding block's id line carries either that full value
@@ -275,6 +273,13 @@ public static class TriggerFactBuilder
 
         return facts;
     }
+
+    /// <summary>The technology the dispatched technology builds on, when a root and the files to read both resolve.</summary>
+    private static string? ParentTechnology(
+        IFileSystem? files, string? repoRoot, KyberWeaveConfig config, string? technology) =>
+        repoRoot is not null && files is not null && technology is not null
+            ? TaskGateResolver.ParentTechnologyOrNone(files, repoRoot, config, technology)
+            : null;
 
     /// <summary>The planning paths a dispatch names, unless the hook inserted the prompt and so already routed it.</summary>
     private static IReadOnlyList<string> PlanningPaths(bool promptInserted, string stripped, IReadOnlyList<string> planningDirs) =>

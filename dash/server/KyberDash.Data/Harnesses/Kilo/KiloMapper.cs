@@ -689,7 +689,7 @@ public class KiloMapper : IHarnessMapper
 
         List<string> skillsInvoked = ownParts
             .Where(static p => string.Equals(p.Data.Tool, "skill", StringComparison.Ordinal) && !string.IsNullOrWhiteSpace(p.Data.SkillName))
-            .Select(static p => p.Data.SkillName!)
+            .Select(static p => p.Data.SkillName ?? throw new InvalidOperationException("A skill part must carry a non-blank skill name."))
             .Distinct(StringComparer.Ordinal)
             .ToList();
 
@@ -724,7 +724,8 @@ public class KiloMapper : IHarnessMapper
         {
             KiloPartData part = row.Data;
             if (!string.Equals(part.PartType, "tool", StringComparison.Ordinal)
-                || string.IsNullOrWhiteSpace(part.CallId))
+                || part.CallId is not { } callId
+                || string.IsNullOrWhiteSpace(callId))
             {
                 continue;
             }
@@ -740,9 +741,9 @@ public class KiloMapper : IHarnessMapper
                 seenRecordIds);
             records.Add(tool);
 
-            if (!string.IsNullOrWhiteSpace(part.SubagentType))
+            if (part.SubagentType is { } subagentType && !string.IsNullOrWhiteSpace(subagentType))
             {
-                records.Add(BuildAgentRecord(tool, part.CallId!, part.SubagentType!, harnessId, seenRecordIds));
+                records.Add(BuildAgentRecord(tool, callId, subagentType, harnessId, seenRecordIds));
             }
         }
 
@@ -760,7 +761,7 @@ public class KiloMapper : IHarnessMapper
         HashSet<string> seenRecordIds)
     {
         KiloPartData part = row.Data;
-        string callId = part.CallId!;
+        string callId = part.CallId ?? throw new InvalidOperationException("A tool part must carry a call id.");
         string recordId = EnsureUniqueRecordId(
             seenRecordIds,
             string.Create(CultureInfo.InvariantCulture, $"{CanonSynth.SynthSpanPrefix}{harnessId}:{parent.SessionKey}:{message.Id}:{callId}"));
@@ -1485,9 +1486,11 @@ public class KiloMapper : IHarnessMapper
 
         if (data.TryGetProperty("model", out JsonElement model))
         {
-            if (model.ValueKind == JsonValueKind.String && !string.IsNullOrWhiteSpace(model.GetString()))
+            if (model.ValueKind == JsonValueKind.String
+                && model.GetString() is { } modelText
+                && !string.IsNullOrWhiteSpace(modelText))
             {
-                return model.GetString()!.Trim();
+                return modelText.Trim();
             }
 
             if (model.ValueKind == JsonValueKind.Object)

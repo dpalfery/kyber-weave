@@ -215,7 +215,9 @@ internal sealed class KwSkillRulesValidator(string repoRoot, IFileSystem files, 
             return;
         }
 
-        string declared = skill.Frontmatter.Name!.Trim();
+        string declared = (skill.Frontmatter.Name
+            ?? throw new InvalidOperationException("A skill that passed the frontmatter check declares a name."))
+            .Trim();
         if (!string.Equals(declared, folderName, StringComparison.Ordinal))
         {
             report.Add(new Diagnostic(

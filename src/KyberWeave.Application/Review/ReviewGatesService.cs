@@ -67,8 +67,18 @@ public sealed class ReviewGatesService(
         ArgumentNullException.ThrowIfNull(indexExecutor);
         ArgumentNullException.ThrowIfNull(output);
 
-        return request.Agent is null
-            ? new RepositoryGateRun(
+        return request.Agent is { } agent
+            ? new AgentGateRun(
+                configs,
+                git,
+                gateRunner,
+                projectFiles,
+                files,
+                environment,
+                pathResolver,
+                taskGates,
+                targets).Run(request, agent, output)
+            : new RepositoryGateRun(
                 trees,
                 cycles,
                 git,
@@ -83,17 +93,7 @@ public sealed class ReviewGatesService(
                 pathResolver,
                 selector,
                 configs,
-                taskGates).Run(request, indexExecutor, output)
-            : new AgentGateRun(
-                configs,
-                git,
-                gateRunner,
-                projectFiles,
-                files,
-                environment,
-                pathResolver,
-                taskGates,
-                targets).Run(request, output);
+                taskGates).Run(request, indexExecutor, output);
     }
 
     /// <summary>
@@ -497,12 +497,14 @@ public sealed class ReviewGatesService(
 
             ReviewReportWriter.TryWrite(
                 files, pathResolver, environment, request.Out, ReviewJson.Write(written), ReviewDiagnosticCodes.ReportWriteFailed, report);
-            string? evidence = cycle is { WritesIdentity: true } && request.Out is not null
-                ? WriteEvidence(cycle, inputs.Root, request, written, inputs.Config, report)
-                : null;
-            IReadOnlyDictionary<string, string>? gateProven = evidence is not null
-                ? GateProvenSkips(cycle!, inputs.Root, inputs.Config, request, written, report)
-                : null;
+            string? evidence = null;
+            IReadOnlyDictionary<string, string>? gateProven = null;
+            if (cycle is { WritesIdentity: true, Folder: { } cycleFolder } && request.Out is { } outPath)
+            {
+                evidence = WriteEvidence(cycleFolder, outPath, cycle, inputs.Root, request, written, inputs.Config, report);
+                if (evidence is not null)
+                    gateProven = GateProvenSkips(cycleFolder, inputs.Root, inputs.Config, request, written, report);
+            }
 
             List<string> epilogue = [];
             if (cycle is not null && request.HumanOutput)
@@ -526,12 +528,12 @@ public sealed class ReviewGatesService(
         {
             if (evidence is not null)
                 epilogue.Add($"evidence: {evidence}");
-            if (gateProven is not null)
+            if (gateProven is not null && cycle.Folder is { } cycleFolder)
             {
                 foreach ((string lens, string reason) in gateProven.OrderBy(pair => pair.Key, StringComparer.Ordinal))
                     epilogue.Add($"not-seated: --not-seated \"{lens}={reason}\"");
                 // Only lenses review seats wrote a packet for: a verifier cycle seats fewer, and none is widened here.
-                string packets = Path.Combine(cycle.Folder!, "packets");
+                string packets = Path.Combine(cycleFolder, "packets");
                 string[] send = [.. CouncilSeating.AfterGates.Where(lens => !gateProven.ContainsKey(lens)
                     && (!files.DirectoryExists(packets) || files.FileExists(Path.Combine(packets, lens + ".md"))))];
                 epilogue.Add($"after-gates: send {(send.Length == 0 ? "none" : string.Join(", ", send))}");
@@ -660,6 +662,8 @@ public sealed class ReviewGatesService(
         /// </summary>
         /// <returns>The evidence file's path, or null when it could not be written.</returns>
         private string? WriteEvidence(
+            string folder,
+            string outPath,
             CouncilCycle cycle,
             string root,
             ReviewGatesRequest request,
@@ -670,11 +674,11 @@ public sealed class ReviewGatesService(
             try
             {
                 string path = evidenceWriter.Write(
-                    cycle.Folder!,
+                    folder,
                     root,
                     request.BaseRef ?? ReviewGateReporting.CouncilDefaultBase,
                     written,
-                    request.Out!,
+                    outPath,
                     cycle.Verifier ? cycle.Plan.Prior?.Head : null,
                     config.Review.Coverage);
                 report.AddMetric("evidence", path);
@@ -698,7 +702,7 @@ public sealed class ReviewGatesService(
         ///     leaves them something to say.
         /// </summary>
         private IReadOnlyDictionary<string, string> GateProvenSkips(
-            CouncilCycle cycle,
+            string folder,
             string root,
             KyberWeaveConfig config,
             ReviewGatesRequest request,
@@ -711,7 +715,7 @@ public sealed class ReviewGatesService(
                 files,
                 pathResolver,
                 environment,
-                Path.Combine(cycle.Folder!, "duplicates.json"),
+                Path.Combine(folder, "duplicates.json"),
                 ReviewJson.Write(duplicates),
                 ReviewDiagnosticCodes.ReportWriteFailed,
                 report);
@@ -719,7 +723,7 @@ public sealed class ReviewGatesService(
             IReadOnlyDictionary<string, string> skips = CouncilSeating.GateProvenSkips(written, duplicates, changed);
             try
             {
-                notSeatedStore.Replace(cycle.Folder!, CouncilSeating.GateProvenLenses, skips);
+                notSeatedStore.Replace(folder, CouncilSeating.GateProvenLenses, skips);
             }
             catch (Exception ex) when (FileFailure.Is(ex))
             {
@@ -859,6 +863,7 @@ public sealed class ReviewGatesService(
         /// <param name="OutPath">Where the report goes, or null for the task's own report path.</param>
         /// <param name="AgentGates">The agent's resolved task gates.</param>
         /// <param name="RepoRoot">The enclosing repository root.</param>
+        /// <param name="Agent">The developer agent whose task gates run.</param>
         private sealed record AgentSetup(
             string Root,
             KyberWeaveConfig Config,
@@ -869,7 +874,8 @@ public sealed class ReviewGatesService(
             IReadOnlyList<string> Paths,
             string? OutPath,
             IReadOnlyList<ReviewTaskGate> AgentGates,
-            string RepoRoot);
+            string RepoRoot,
+            string Agent);
 
         /// <summary>The planned gates and the observation state their run reports through.</summary>
         /// <param name="Plan">The selected gates, skips and refusals.</param>
@@ -886,10 +892,10 @@ public sealed class ReviewGatesService(
             Dictionary<string, string> Outputs,
             TaskGateObserver Observer);
 
-        public ReviewCommandResult Run(ReviewGatesRequest request, TextWriter output)
+        public ReviewCommandResult Run(ReviewGatesRequest request, string agent, TextWriter output)
         {
             DiagnosticReport report = new();
-            AgentSetup? setup = Prepare(request, report, out ReviewCommandResult? failure);
+            AgentSetup? setup = Prepare(request, agent, report, out ReviewCommandResult? failure);
             if (setup is null)
                 return failure ?? ReviewCommandResultFactory.Reported(1, report);
 
@@ -907,7 +913,7 @@ public sealed class ReviewGatesService(
         /// Checks every input and resolves the agent's gates before any process starts. Returns null with the refusal
         /// in <paramref name="failure"/> when the run cannot start.
         /// </summary>
-        private AgentSetup? Prepare(ReviewGatesRequest request, DiagnosticReport report, out ReviewCommandResult? failure)
+        private AgentSetup? Prepare(ReviewGatesRequest request, string agent, DiagnosticReport report, out ReviewCommandResult? failure)
         {
             failure = null;
             string root = GatePaths.FullPath(pathResolver, environment, request.Path);
@@ -980,18 +986,18 @@ public sealed class ReviewGatesService(
 
             TaskGateResolution resolved = TaskGateResolver.Resolve(
                 config.Review,
-                request.Agent!,
+                agent,
                 target?.Entry.Technology,
                 parentTechnology);
 
             IReadOnlyList<ReviewTaskGate> agentGates = resolved.Gates;
             if (agentGates.Count == 0)
             {
-                failure = NoGates(request, root, taskSlug, paths, outPath, resolved, report);
+                failure = NoGates(request, agent, root, taskSlug, paths, outPath, resolved, report);
                 return null;
             }
 
-            return new AgentSetup(root, config, baseRef, target, targetMissing, taskSlug, paths, outPath, agentGates, repoRoot);
+            return new AgentSetup(root, config, baseRef, target, targetMissing, taskSlug, paths, outPath, agentGates, repoRoot, agent);
         }
 
         /// <summary>
@@ -1000,6 +1006,7 @@ public sealed class ReviewGatesService(
         /// </summary>
         private ReviewCommandResult NoGates(
             ReviewGatesRequest request,
+            string agent,
             string root,
             string? taskSlug,
             IReadOnlyList<string> paths,
@@ -1014,7 +1021,7 @@ public sealed class ReviewGatesService(
                 ReviewGateReporting.NoGatesForAgent,
                 resolved.IsRefused ? Severity.Error : Severity.Warning,
                 resolved.Refusal
-                ?? $"No task gates resolve for agent '{request.Agent}': the task names no technology this host declares " +
+                ?? $"No task gates resolve for agent '{agent}': the task names no technology this host declares " +
                 "gates for, and review.task-gates has no entry for the agent, so its change has no executed evidence behind it.",
                 "review",
                 Hint: "Declare gates under review.technology-gates for the task's technology, or its parent, or under " +
@@ -1031,7 +1038,7 @@ public sealed class ReviewGatesService(
                 report.HasErrors ? 1 : 0,
                 report,
                 request.HumanOutput && !resolved.IsRefused
-                    ? TaskGateNextStep.NoneDeclared(request.Agent!, paths, outPath, PeekRunCount(root, taskSlug))
+                    ? TaskGateNextStep.NoneDeclared(agent, paths, outPath, PeekRunCount(root, taskSlug))
                     : []);
         }
 
@@ -1251,8 +1258,8 @@ public sealed class ReviewGatesService(
             epilogue.AddRange(digest);
             if (redOutcome is not null)
             {
-                epilogue.AddRange(ReviewGateReporting.RedLines(redOutcome, request.Agent!, finalReport, outPath, plan.RunCount));
-                epilogue.AddRange(TaskGateNextStep.AfterFailingRun(redOutcome.Passed, request.Agent!, changed, setup.TaskSlug, fromPlan: setup.Target is not null));
+                epilogue.AddRange(ReviewGateReporting.RedLines(redOutcome, setup.Agent, finalReport, outPath, plan.RunCount));
+                epilogue.AddRange(TaskGateNextStep.AfterFailingRun(redOutcome.Passed, setup.Agent, changed, setup.TaskSlug, fromPlan: setup.Target is not null));
             }
             else
             {
@@ -1261,7 +1268,7 @@ public sealed class ReviewGatesService(
                     .. setup.AgentGates.Select(gate => new ReviewTaskGateView(
                         gate.Id, !gate.Run.Any(arg => arg.Contains("{changed}", StringComparison.Ordinal) || arg.Contains("{tests}", StringComparison.Ordinal)))),
                 ];
-                epilogue.AddRange(TaskGateNextStep.AfterRun(finalReport, views, fixChangedFiles, request.Agent!, changed, outPath, plan.RunCount));
+                epilogue.AddRange(TaskGateNextStep.AfterRun(finalReport, views, fixChangedFiles, setup.Agent, changed, outPath, plan.RunCount));
             }
 
         }
@@ -1287,7 +1294,8 @@ public sealed class ReviewGatesService(
                     try
                     {
                         string full = Path.Combine(root, log);
-                        files.CreateDirectory(Path.GetDirectoryName(full)!);
+                        if (Path.GetDirectoryName(full) is { } directory)
+                            files.CreateDirectory(directory);
                         files.WriteAllText(full, output);
                     }
                     catch (Exception ex) when (FileFailure.Is(ex))
@@ -1349,7 +1357,8 @@ public sealed class ReviewGatesService(
             string path = RunCountPath(root, taskSlug);
             try
             {
-                files.CreateDirectory(Path.GetDirectoryName(path)!);
+                if (Path.GetDirectoryName(path) is { } directory)
+                    files.CreateDirectory(directory);
                 files.WriteAllText(path, count.ToString(CultureInfo.InvariantCulture));
             }
             catch (Exception ex) when (FileFailure.Is(ex))

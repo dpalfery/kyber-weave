@@ -1,4 +1,5 @@
 using System.ComponentModel;
+using System.Diagnostics.CodeAnalysis;
 using System.Text;
 using KyberWeave.Contracts.Paths;
 using KyberWeave.Contracts.Repositories;
@@ -89,7 +90,7 @@ public sealed class RunIntegrateService : IRunIntegrateService
 
         if (!TryTaskId(request.TaskId, out string taskId, out RunIntegrateOutcome? refused))
         {
-            return refused!;
+            return refused;
         }
 
         List<string> notes = [];
@@ -132,12 +133,12 @@ public sealed class RunIntegrateService : IRunIntegrateService
 
         if (!TryBranchName(taskWorktree, taskBranch, "task", out RunIntegrateOutcome? taskBranchFailed))
         {
-            return taskBranchFailed!;
+            return taskBranchFailed;
         }
 
         if (!TryRunWorktree(request, taskWorktree, taskBranch, taskFacts.CommonDirectory, out string runWorktree, out RunIntegrateOutcome? outcome))
         {
-            return outcome!;
+            return outcome;
         }
 
         WorktreeFacts? runFacts = ReadFacts(runWorktree);
@@ -188,7 +189,7 @@ public sealed class RunIntegrateService : IRunIntegrateService
 
         if (!TryBranchName(runWorktree, runBranch, "run", out RunIntegrateOutcome? runBranchFailed))
         {
-            return runBranchFailed!;
+            return runBranchFailed;
         }
 
         if (string.Equals(taskBranch, runBranch, StringComparison.Ordinal))
@@ -456,7 +457,7 @@ public sealed class RunIntegrateService : IRunIntegrateService
     }
 
     /// <summary>Checks the task id before it is used as a folder name.</summary>
-    private static bool TryTaskId(string? value, out string taskId, out RunIntegrateOutcome? refused)
+    private static bool TryTaskId(string? value, out string taskId, [NotNullWhen(false)] out RunIntegrateOutcome? refused)
     {
         taskId = value?.Trim() ?? string.Empty;
         refused = null;
@@ -485,7 +486,7 @@ public sealed class RunIntegrateService : IRunIntegrateService
         string taskBranch,
         string taskCommon,
         out string runWorktree,
-        out RunIntegrateOutcome? outcome)
+        [NotNullWhen(false)] out RunIntegrateOutcome? outcome)
     {
         runWorktree = string.Empty;
         outcome = null;
@@ -594,7 +595,7 @@ public sealed class RunIntegrateService : IRunIntegrateService
     /// <param name="branch">The branch name <c>symbolic-ref</c> reported.</param>
     /// <param name="role">Whether the branch belongs to the task or the run, for the message.</param>
     /// <param name="failed">The failure to report when the name is not a branch name.</param>
-    private bool TryBranchName(string worktree, string branch, string role, out RunIntegrateOutcome? failed)
+    private bool TryBranchName(string worktree, string branch, string role, [NotNullWhen(false)] out RunIntegrateOutcome? failed)
     {
         failed = null;
         if (_git.Run(worktree, ["-C", worktree, "check-ref-format", "--branch", branch]).Succeeded)

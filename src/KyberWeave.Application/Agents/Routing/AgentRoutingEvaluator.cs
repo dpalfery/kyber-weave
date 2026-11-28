@@ -35,6 +35,7 @@ public static class AgentRoutingEvaluator
 
         RoutingCandidate? top = ranked.FirstOrDefault();
         bool fired = top is not null && top.Score >= fireThreshold;
-        return new AgentRoutingResult(fired ? top!.SkillName : null, fired, ranked);
+        string? selectedRole = top is { } candidate && fired ? candidate.SkillName : null;
+        return new AgentRoutingResult(selectedRole, fired, ranked);
     }
 }

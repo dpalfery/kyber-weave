@@ -33,7 +33,8 @@ public sealed partial class DocumentMarkdown
     public static string ResolveDocId(DocumentFrontmatter frontmatter, string relativePath)
     {
         ArgumentNullException.ThrowIfNull(frontmatter);
-        return string.IsNullOrWhiteSpace(frontmatter.Id) ? relativePath : frontmatter.Id!;
+        string? id = frontmatter.Id;
+        return string.IsNullOrWhiteSpace(id) ? relativePath : id;
     }
 
     /// <summary>

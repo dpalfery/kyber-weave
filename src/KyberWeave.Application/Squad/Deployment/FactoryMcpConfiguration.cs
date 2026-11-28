@@ -170,6 +170,12 @@ public static class FactoryMcpConfiguration
                 ? args.EnumerateArray().Select(argument => argument.ToString())
                 : [];
 
-        return $"{server} ({string.Join(' ', arguments.Prepend(command.GetString()!))})";
+        string? commandText = command.GetString();
+        if (commandText is null)
+        {
+            return server;
+        }
+
+        return $"{server} ({string.Join(' ', arguments.Prepend(commandText))})";
     }
 }

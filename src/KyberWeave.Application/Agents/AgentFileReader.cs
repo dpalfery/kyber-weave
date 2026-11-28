@@ -31,7 +31,8 @@ public sealed class AgentFileReader(IFileSystem files, IPathResolver paths, IPro
         IReadOnlyList<AgentLoadResult> results = LoadResults(projectRoot, harnessFilter);
         List<AgentModel> validAgents = results
             .Where(r => r is { Success: true, Agent: not null })
-            .Select(r => r.Agent!)
+            .Select(r => r.Agent)
+            .OfType<AgentModel>()
             .ToList();
         return new AgentSet(validAgents);
     }

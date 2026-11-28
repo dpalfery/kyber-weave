@@ -73,7 +73,9 @@ internal static class SystemOneContracts
         int longestQuestionTokens = 0;
         foreach (ArbiterRule rule in askRules)
         {
-            RuleAsk ask = rule.Ask!;
+            if (rule.Ask is not { } ask)
+                throw new InvalidOperationException($"Rule '{rule.Id}' has no step-1 question to build.");
+
             Dictionary<string, object?> fields = new(StringComparer.Ordinal);
             foreach ((string field, string factName) in ask.State)
             {

@@ -98,9 +98,9 @@ public partial class CanonSessionProjectorEngine
         DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull,
     };
 
-    private readonly IRelationalStoreReader? reader;
-    private readonly IProjectionStore? projections;
-    private readonly IOperationalStore? operationalStore;
+    private readonly IRelationalStoreReader reader;
+    private readonly IProjectionStore projections;
+    private readonly IOperationalStore operationalStore;
     private readonly IPricingRepository pricing;
     private readonly ITextTokenizer tokenizer;
     private readonly int readPathSessionRecordBudget;
@@ -316,11 +316,11 @@ public partial class CanonSessionProjectorEngine
 
     private bool IsRelationalProjectionCurrent(bool forReads)
     {
-        long currentMarker = operationalStore!.GetWriteMarker();
+        long currentMarker = operationalStore.GetWriteMarker();
         ProjectionStateView? state = operationalStore.GetProjectionState();
         if (state is null)
         {
-            return currentMarker == 0 && reader!.CountRecords() == 0 && projections!.ListSessionProjections().Count == 0;
+            return currentMarker == 0 && reader.CountRecords() == 0 && projections.ListSessionProjections().Count == 0;
         }
 
         if (state.RecordsMarker != currentMarker
@@ -334,13 +334,13 @@ public partial class CanonSessionProjectorEngine
             return false;
         }
 
-        return reader!.CountRecords() == 0 || projections!.ListSessionProjections().Count > 0;
+        return reader.CountRecords() == 0 || projections.ListSessionProjections().Count > 0;
     }
 
     /// <summary>True when the stored dirty state still names sessions to rebuild (or is wildcard).</summary>
     private bool HasOutstandingDirtyKeys()
     {
-        DirtyProjectionState? dirty = operationalStore!.GetProjectionDirtyState();
+        DirtyProjectionState? dirty = operationalStore.GetProjectionDirtyState();
         return dirty is not null && (dirty.IsWildcard || dirty.Keys is null || dirty.Keys.Count > 0);
     }
 
@@ -423,7 +423,7 @@ public partial class CanonSessionProjectorEngine
     /// </summary>
     private bool HasCurrentProjectionEnvironment()
     {
-        ProjectionStateView? projectionState = operationalStore!.GetProjectionState();
+        ProjectionStateView? projectionState = operationalStore.GetProjectionState();
         StoreStateView? storeState = operationalStore.GetStoreState();
         return projectionState is not null
             && projectionState.ProjectionSchemaVersion == SqliteRelationalStore.SchemaVersion
@@ -447,7 +447,7 @@ public partial class CanonSessionProjectorEngine
     /// stamp stale and the next maintenance pass runs in full rather than skipping a session.
     /// </remarks>
     private void StampProjectionState(long recordsMarker, bool stampDetector) =>
-        StampProjectionState(operationalStore!, recordsMarker, stampDetector);
+        StampProjectionState(operationalStore, recordsMarker, stampDetector);
 
     /// <summary>
     /// Writes the projection watermark and, when <paramref name="stampDetector"/> is set, the
@@ -501,7 +501,7 @@ public partial class CanonSessionProjectorEngine
     {
         _ = pricing.LoadPricingTables();
 
-        long currentMarker = operationalStore!.GetWriteMarker();
+        long currentMarker = operationalStore.GetWriteMarker();
         ProjectionStateView? previousState = operationalStore.GetProjectionState();
         DirtyProjectionState? dirtyState = operationalStore.GetProjectionDirtyState();
         IncrementalPlan incremental = ResolveIncrementalPlan(forReads, previousState, dirtyState, currentMarker);
@@ -590,7 +590,7 @@ public partial class CanonSessionProjectorEngine
         // Attribution rows replace the whole-store record read: identities, skip decisions, and
         // the per-session and per-pass record budgets are planned from (session key, harness,
         // count) rows, and full records are read only for the keys this pass actually rebuilds.
-        IReadOnlyList<StoredSessionAttribution> attributions = reader!.SessionAttributions();
+        IReadOnlyList<StoredSessionAttribution> attributions = reader.SessionAttributions();
         Dictionary<string, List<string>> harnessesByKey = new(StringComparer.Ordinal);
         Dictionary<string, int> recordCountByKey = new(StringComparer.Ordinal);
         foreach (StoredSessionAttribution attribution in attributions)
@@ -624,7 +624,7 @@ public partial class CanonSessionProjectorEngine
         }
 
         HashSet<string> storedProjectionIds = new(
-            projections!.ListSessionProjections().Select(static projection => projection.SessionId),
+            projections.ListSessionProjections().Select(static projection => projection.SessionId),
             StringComparer.Ordinal);
 
         List<string> rebuildKeys = [];
@@ -699,7 +699,7 @@ public partial class CanonSessionProjectorEngine
             // Each session's records are read when its turn comes and released after it is built:
             // reading the whole store at once outgrew the sqlite3 output a string can hold on a
             // real store, and held every session's text in memory for the length of the pass.
-            List<CanonicalRecord> hydrated = [.. reader!.SessionRecordsForRebuild(key).Select(CanonRecordHydration.Hydrate)];
+            List<CanonicalRecord> hydrated = [.. reader.SessionRecordsForRebuild(key).Select(CanonRecordHydration.Hydrate)];
             hydrated.Sort(CompareRecordTimestamps);
             Dictionary<string, List<CanonicalRecord>> grouped = GroupByCanonicalHarness(hydrated);
             if (grouped.Count == 0)
@@ -739,7 +739,7 @@ public partial class CanonSessionProjectorEngine
                     merged,
                     counter.Count,
                     plan.SessionsByKey[sessionId].Title);
-                projections!.ReplaceSessionProjection(projection);
+                projections.ReplaceSessionProjection(projection);
                 builtCount++;
 
                 findingsCount += RebuildSessionFindingsRelational(sessionId, merged, plan.Identities);
@@ -754,7 +754,7 @@ public partial class CanonSessionProjectorEngine
     private int PruneMissingProjections(HashSet<string> liveSessionIds)
     {
         int prunedCount = 0;
-        foreach (StoredSessionProjection stored in projections!.ListSessionProjections())
+        foreach (StoredSessionProjection stored in projections.ListSessionProjections())
         {
             if (liveSessionIds.Contains(stored.SessionId))
             {
@@ -779,7 +779,7 @@ public partial class CanonSessionProjectorEngine
             // detector version. The dirty state is written before the watermark: a crash between
             // the two leaves a range that does not start at the stored watermark, which forces a
             // full pass, never a watermark that hides the deferred keys.
-            operationalStore!.SetProjectionDirtyState(new DirtyProjectionState(
+            operationalStore.SetProjectionDirtyState(new DirtyProjectionState(
                 FromSeq: finalMarker,
                 ToSeq: finalMarker,
                 Keys: [.. deferredKeys.Order(StringComparer.Ordinal)],
@@ -789,7 +789,7 @@ public partial class CanonSessionProjectorEngine
         {
             // Dirty state before the watermark, as above: a crash between them leaves the old
             // watermark with nothing dirty, which forces a full pass.
-            operationalStore!.ClearProjectionDirtyState();
+            operationalStore.ClearProjectionDirtyState();
         }
 
         StampProjectionState(finalMarker, stampDetector);
@@ -827,7 +827,7 @@ public partial class CanonSessionProjectorEngine
     /// <summary>Rewrites the dirty state <see cref="StampMidPassWrites"/> leaves behind it.</summary>
     private void WriteMidPassDirtyState(long currentMarker, long finalMarker, IReadOnlyCollection<string> deferredKeys)
     {
-        DirtyProjectionState? stored = operationalStore!.GetProjectionDirtyState();
+        DirtyProjectionState? stored = operationalStore.GetProjectionDirtyState();
         if (stored is null || stored.ToSeq != finalMarker)
         {
             operationalStore.ClearProjectionDirtyState();
@@ -875,12 +875,12 @@ public partial class CanonSessionProjectorEngine
     private void RebuildRunExecutionProjection()
     {
         Dictionary<string, CollectedSession> sessionsByKey = new(StringComparer.Ordinal);
-        foreach (CollectedSession session in reader!.Sessions())
+        foreach (CollectedSession session in reader.Sessions())
         {
             sessionsByKey.TryAdd(session.SessionKey, session);
         }
 
-        List<StoredSessionProjection> stored = [.. projections!.ListSessionProjections()];
+        List<StoredSessionProjection> stored = [.. projections.ListSessionProjections()];
         stored.Sort(static (left, right) => string.CompareOrdinal(left.SessionId, right.SessionId));
 
         Dictionary<string, List<RunMember>> membersByRun = new(StringComparer.Ordinal);
@@ -1100,7 +1100,7 @@ public partial class CanonSessionProjectorEngine
         IReadOnlyList<CanonicalRecord> sessionRecords,
         SessionIdentities identities)
     {
-        projections!.DeleteFindingsForSession(sessionId);
+        projections.DeleteFindingsForSession(sessionId);
         OutcomeBlock outcome = CanonFindings.DeriveOutcome(sessionRecords);
         IReadOnlyList<Finding> findings = CanonFindings.DetectFindings(new DetectFindingsInput(
             RunId: sessionId,
@@ -3151,14 +3151,16 @@ internal static class SessionProjectionHelpers
                 {
                     string itemText = item.GetRawText();
                     string name = string.Empty;
-                    if (item.TryGetProperty("name", out JsonElement n) && n.ValueKind == JsonValueKind.String && !string.IsNullOrWhiteSpace(n.GetString()))
+                    if (item.TryGetProperty("name", out JsonElement n) && n.ValueKind == JsonValueKind.String
+                        && n.GetString() is { } nameText && !string.IsNullOrWhiteSpace(nameText))
                     {
-                        name = n.GetString()!.Trim();
+                        name = nameText.Trim();
                     }
                     else if (item.TryGetProperty("function", out JsonElement fn) && fn.ValueKind == JsonValueKind.Object
-                             && fn.TryGetProperty("name", out JsonElement fnName) && fnName.ValueKind == JsonValueKind.String && !string.IsNullOrWhiteSpace(fnName.GetString()))
+                             && fn.TryGetProperty("name", out JsonElement fnName) && fnName.ValueKind == JsonValueKind.String
+                             && fnName.GetString() is { } functionNameText && !string.IsNullOrWhiteSpace(functionNameText))
                     {
-                        name = fnName.GetString()!.Trim();
+                        name = functionNameText.Trim();
                     }
 
                     result.Add((name, itemText));

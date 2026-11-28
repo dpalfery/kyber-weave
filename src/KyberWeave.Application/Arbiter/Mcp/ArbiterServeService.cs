@@ -175,9 +175,9 @@ public sealed class ArbiterServeService(
         // A refutation call is one evaluation per finding id, because a REFUTE header
         // names one finding. Ids are checked before any evaluation, on the lens+finding
         // path too, so a bad id records nothing (review 20.1-2, Major).
-        if (Present(facts.Finding))
+        if (facts.Finding is { } finding && Present(finding))
         {
-            findingBlocks = FindingBlocks(facts.Finding!);
+            findingBlocks = FindingBlocks(finding);
             if (findingBlocks.Count > MaxFanOutUnits)
             {
                 return $"A refutation carries at most {MaxFanOutUnits} findings; split the call.";

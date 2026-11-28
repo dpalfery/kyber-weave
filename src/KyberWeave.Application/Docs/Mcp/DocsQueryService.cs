@@ -179,7 +179,9 @@ public sealed partial class DocsQueryService : IDocsQueryService
             sb.AppendLine();
         }
 
-        string path = answer.SourceDocument!.RelativePath.Replace('\\', '/');
+        DocumentModel source = answer.SourceDocument
+            ?? throw new InvalidOperationException("An answer that is not a miss must name its source document.");
+        string path = source.RelativePath.Replace('\\', '/');
         if (string.IsNullOrEmpty(answer.SourceHeading))
         {
             sb.Append("source: ").AppendLine(path);

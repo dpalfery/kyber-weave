@@ -524,7 +524,7 @@ public static partial class RedClassifier
             return null;
         }
 
-        return [.. errors.Select(error => error.Symbol!).Distinct(StringComparer.Ordinal)];
+        return [.. errors.Select(error => error.Symbol).OfType<string>().Distinct(StringComparer.Ordinal)];
     }
 
     /// <summary>Whether a gate command runs tests, so it cannot run once the build it needs is known to be broken.</summary>
@@ -692,8 +692,8 @@ public static partial class RedClassifier
             return true;
         }
 
-        symbols.AddRange(errors.Select(error => error.Symbol!).Where(symbol => !symbols.Contains(symbol, StringComparer.Ordinal)).Distinct(StringComparer.Ordinal));
-        accepted[gate.Id] = "compile failed only on missing symbols: " + string.Join(", ", errors.Select(error => error.Symbol!).Distinct(StringComparer.Ordinal));
+        symbols.AddRange(errors.Select(error => error.Symbol).OfType<string>().Where(symbol => !symbols.Contains(symbol, StringComparer.Ordinal)).Distinct(StringComparer.Ordinal));
+        accepted[gate.Id] = "compile failed only on missing symbols: " + string.Join(", ", errors.Select(error => error.Symbol).OfType<string>().Distinct(StringComparer.Ordinal));
         filter ??= FilterOf(gate.Command);
         return true;
     }

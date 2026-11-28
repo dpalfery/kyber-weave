@@ -47,6 +47,7 @@ public class ServerStateRepository : IServerStateRepository, IEngineDescriptorPu
     };
 
     private readonly string defaultStateDirectory;
+    private readonly TimeProvider timeProvider;
 
     /// <summary>Initializes a repository whose default state directory is <c>~/.kyberdash</c> or the configured override.</summary>
     public ServerStateRepository()
@@ -56,9 +57,11 @@ public class ServerStateRepository : IServerStateRepository, IEngineDescriptorPu
 
     /// <summary>Initializes a repository with an explicit default state directory.</summary>
     /// <param name="stateDirectory">State directory to use when no other override applies.</param>
-    public ServerStateRepository(string? stateDirectory)
+    /// <param name="timeProvider">Clock supplying acquisition and lease timestamps; defaults to <see cref="TimeProvider.System"/>.</param>
+    public ServerStateRepository(string? stateDirectory, TimeProvider? timeProvider = null)
     {
         defaultStateDirectory = ResolveStateDirectory(stateDirectory);
+        this.timeProvider = timeProvider ?? TimeProvider.System;
     }
 
     /// <inheritdoc />
@@ -266,7 +269,7 @@ public class ServerStateRepository : IServerStateRepository, IEngineDescriptorPu
                 Pid: Environment.ProcessId,
                 Exe: exePath,
                 Version: version,
-                StartedAt: DateTimeOffset.UtcNow.UtcDateTime.ToString("yyyy-MM-dd'T'HH:mm:ss.fff'Z'", CultureInfo.InvariantCulture));
+                StartedAt: timeProvider.GetUtcNow().UtcDateTime.ToString("yyyy-MM-dd'T'HH:mm:ss.fff'Z'", CultureInfo.InvariantCulture));
             EngineOwner? owner = EngineOwner.TryBindInternal(socketPath, recordFile, record, onShutdownRequested, this);
             if (owner is not null)
                 return (owner, null);
@@ -330,7 +333,7 @@ public class ServerStateRepository : IServerStateRepository, IEngineDescriptorPu
         AtomicFile.RefuseSymlink(lockPath);
 
         int ownerPid = pid ?? Environment.ProcessId;
-        string acquiredAt = (now ?? DateTimeOffset.UtcNow).UtcDateTime.ToString("yyyy-MM-dd'T'HH:mm:ss.fff'Z'", CultureInfo.InvariantCulture);
+        string acquiredAt = (now ?? timeProvider.GetUtcNow()).UtcDateTime.ToString("yyyy-MM-dd'T'HH:mm:ss.fff'Z'", CultureInfo.InvariantCulture);
         byte[] payload = JsonSerializer.SerializeToUtf8Bytes(new { pid = ownerPid, acquiredAt });
 
         for (int attempt = 0; attempt < 2; attempt++)
@@ -382,14 +385,14 @@ public class ServerStateRepository : IServerStateRepository, IEngineDescriptorPu
     /// Deletes a <c>jobs.lock</c> that holds no readable owner, or reports <see langword="false"/>
     /// while it may still be a lock being written.
     /// </summary>
-    private static bool TryReclaimCorruptLock(string lockPath)
+    private bool TryReclaimCorruptLock(string lockPath)
     {
         try
         {
             if (!File.Exists(lockPath))
                 return true;
 
-            if (DateTime.UtcNow - File.GetLastWriteTimeUtc(lockPath) < CorruptLockGracePeriod)
+            if (timeProvider.GetUtcNow().UtcDateTime - File.GetLastWriteTimeUtc(lockPath) < CorruptLockGracePeriod)
                 return false;
 
             File.Delete(lockPath);

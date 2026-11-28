@@ -102,7 +102,7 @@ public sealed class DevinHookAdapter : IHarnessHookAdapter
         return insertion.Kind switch
         {
             DispatchInsertionKind.Inserted => RenderMergePrompt(insertion.Text),
-            DispatchInsertionKind.Stopped => RenderPreDeny(insertion.Reason!),
+            DispatchInsertionKind.Stopped => RenderPreDeny(insertion.StopReason),
             _ => null,
         };
     }
@@ -181,7 +181,7 @@ public sealed class DevinHookAdapter : IHarnessHookAdapter
         DispatchInsertion insertion = DispatchPromptInsertion.Expand(prompt, context, target);
         if (insertion.Kind == DispatchInsertionKind.Stopped)
         {
-            return RenderPreDeny(insertion.Reason!);
+            return RenderPreDeny(insertion.StopReason);
         }
 
         bool inserted = insertion.Kind == DispatchInsertionKind.Inserted;

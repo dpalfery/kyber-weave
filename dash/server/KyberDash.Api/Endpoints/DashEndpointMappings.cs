@@ -711,7 +711,7 @@ public static class DashEndpointMappings
 
         (bool ok, JsonElement body, IResult? failure) = await DashHttp.ReadJsonBodyAsync(request, cancellationToken).ConfigureAwait(false);
         if (!ok)
-            return failure!;
+            return JsonBodyFailure(failure);
 
         return await Task.Run<IResult>(
             () =>
@@ -719,10 +719,21 @@ public static class DashEndpointMappings
                 if (!query.TryRecordPrediction(body, out PredictionRow? created, out string? error))
                     return DashHttp.Error(StatusCodes.Status400BadRequest, error ?? "Invalid prediction");
 
-                return DashHttp.NoStoreJson(StatusCodes.Status201Created, created!);
+                // A successful record always carries a row; a query stub may return none, which the
+                // endpoint has always answered as a created response with a null body.
+                return created is { } row
+                    ? DashHttp.NoStoreJson(StatusCodes.Status201Created, row)
+                    : DashHttp.NoStoreJson(StatusCodes.Status201Created, JsonSerializer.SerializeToElement<object?>(null));
             },
             cancellationToken).ConfigureAwait(false);
     }
+
+    /// <summary>
+    /// Returns the response a failed body read carries. The read reports failure only with a
+    /// response, so a missing one is a programming error rather than a client error.
+    /// </summary>
+    private static IResult JsonBodyFailure(IResult? failure) =>
+        failure ?? throw new InvalidOperationException("A failed JSON body read must carry an error response.");
 
     private static async Task<IResult> CalibrationAsync(IDashboardQueryService query, CancellationToken cancellationToken)
     {
@@ -848,7 +859,7 @@ public static class DashEndpointMappings
 
         (bool ok, JsonElement body, IResult? failure) = await DashHttp.ReadJsonBodyAsync(request, cancellationToken).ConfigureAwait(false);
         if (!ok)
-            return failure!;
+            return JsonBodyFailure(failure);
 
         try
         {
@@ -884,7 +895,7 @@ public static class DashEndpointMappings
 
         (bool ok, JsonElement patch, IResult? failure) = await DashHttp.ReadJsonBodyAsync(request, cancellationToken).ConfigureAwait(false);
         if (!ok)
-            return failure!;
+            return JsonBodyFailure(failure);
 
         try
         {
@@ -970,7 +981,7 @@ public static class DashEndpointMappings
 
         (bool ok, JsonElement body, IResult? failure) = await DashHttp.ReadJsonBodyAsync(request, cancellationToken).ConfigureAwait(false);
         if (!ok)
-            return failure!;
+            return JsonBodyFailure(failure);
 
         if (body.ValueKind != JsonValueKind.Object
             || !body.TryGetProperty("confirm", out JsonElement confirm)
@@ -1052,7 +1063,7 @@ public static class DashEndpointMappings
         {
             (bool ok, JsonElement parsed, IResult? failure) = await DashHttp.ReadJsonBodyAsync(request, cancellationToken).ConfigureAwait(false);
             if (!ok)
-                return failure!;
+                return JsonBodyFailure(failure);
 
             body = parsed;
         }

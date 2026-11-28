@@ -162,7 +162,7 @@ public sealed partial class CopilotHookAdapter : IHarnessHookAdapter
             return insertion.Kind switch
             {
                 DispatchInsertionKind.Inserted => RenderLocalPreAllowPrompt(toolInput, insertion.Text),
-                DispatchInsertionKind.Stopped => RenderLocalPreDeny(insertion.Reason!),
+                DispatchInsertionKind.Stopped => RenderLocalPreDeny(insertion.StopReason),
                 _ => null,
             };
         }
@@ -202,7 +202,7 @@ public sealed partial class CopilotHookAdapter : IHarnessHookAdapter
         return cliInsertion.Kind switch
         {
             DispatchInsertionKind.Inserted => RenderCliAllowPrompt(args, cliInsertion.Text),
-            DispatchInsertionKind.Stopped => RenderCliDeny(cliInsertion.Reason!),
+            DispatchInsertionKind.Stopped => RenderCliDeny(cliInsertion.StopReason),
             _ => null,
         };
     }
@@ -296,8 +296,8 @@ public sealed partial class CopilotHookAdapter : IHarnessHookAdapter
     private static IReadOnlyList<string> AgentNamesOf(JsonElement payload) =>
         [.. AgentNameFields
             .Select(name => GetString(payload, name))
+            .OfType<string>()
             .Where(name => !string.IsNullOrWhiteSpace(name))
-            .Select(name => name!)
             .Distinct(StringComparer.OrdinalIgnoreCase)];
 
     /// <summary>
@@ -413,7 +413,7 @@ public sealed partial class CopilotHookAdapter : IHarnessHookAdapter
 
             if (insertion.Kind == DispatchInsertionKind.Stopped)
             {
-                return RenderLocalPreDeny(insertion.Reason!);
+                return RenderLocalPreDeny(insertion.StopReason);
             }
 
             bool inserted = insertion.Kind == DispatchInsertionKind.Inserted;
@@ -602,7 +602,7 @@ public sealed partial class CopilotHookAdapter : IHarnessHookAdapter
 
         if (insertion.Kind == DispatchInsertionKind.Stopped)
         {
-            return RenderCliDeny(insertion.Reason!);
+            return RenderCliDeny(insertion.StopReason);
         }
 
         bool inserted = insertion.Kind == DispatchInsertionKind.Inserted;

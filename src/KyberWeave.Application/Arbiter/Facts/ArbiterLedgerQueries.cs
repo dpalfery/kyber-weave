@@ -38,7 +38,7 @@ public static class ArbiterLedgerQueries
                 && (e.Recovered is null
                     || string.Equals(e.Recovered, ArbiterRecoveries.PromptStopped, StringComparison.Ordinal))
                 && e.Id != post.Id)
-            .Select(e => e.PreId!)
+            .Select(e => e.PreId ?? throw new InvalidOperationException("A post event filtered as paired carries no pre id."))
             .ToHashSet(StringComparer.Ordinal);
 
         if (post.CallId is not null)
@@ -98,7 +98,7 @@ public static class ArbiterLedgerQueries
 
         HashSet<string> paired = events
             .Where(e => e.Phase == ArbiterLedgerPhases.Post && e.PreId is not null)
-            .Select(e => e.PreId!)
+            .Select(e => e.PreId ?? throw new InvalidOperationException("A post event filtered as paired carries no pre id."))
             .ToHashSet(StringComparer.Ordinal);
         ArbiterLedgerEvent? gated = excludeEventId is null
             ? null
@@ -175,7 +175,7 @@ public static class ArbiterLedgerQueries
 
         Dictionary<string, ArbiterLedgerEvent> returnsById = events
             .Where(e => e.Phase == ArbiterLedgerPhases.Post && e.PreId is not null)
-            .GroupBy(e => e.PreId!, StringComparer.Ordinal)
+            .GroupBy(e => e.PreId ?? throw new InvalidOperationException("A post event filtered as paired carries no pre id."), StringComparer.Ordinal)
             .ToDictionary(group => group.Key, group => group.First(), StringComparer.Ordinal);
 
         List<ArbiterLedgerEvent> overlapping = [.. events
@@ -245,7 +245,7 @@ public static class ArbiterLedgerQueries
 
         HashSet<string> returned = events
             .Where(e => e.Phase == ArbiterLedgerPhases.Post && e.PreId is not null)
-            .Select(e => e.PreId!)
+            .Select(e => e.PreId ?? throw new InvalidOperationException("A post event filtered as paired carries no pre id."))
             .ToHashSet(StringComparer.Ordinal);
         List<ArbiterLedgerEvent> candidates = [.. events
             .Where(e => e.Phase == ArbiterLedgerPhases.Pre

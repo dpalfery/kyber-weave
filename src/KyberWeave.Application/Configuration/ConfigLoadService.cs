@@ -35,7 +35,9 @@ public sealed class ConfigLoadService(IKyberWeaveConfigRepository configs) : ICo
             return false;
         }
 
-        config = result.Config!;
+        // A successful load always carries its configuration, so a null here is a contract violation, not an answer.
+        config = result.Config ?? throw new InvalidOperationException(
+            "A successful configuration load returned no configuration.");
 
         // Unknown keys load but do nothing, so each one is surfaced rather than left to be noticed later.
         foreach (string warning in config.Review.Warnings)

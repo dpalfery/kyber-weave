@@ -36,7 +36,8 @@ internal static class KwSkillFiles
                 && stream.Documents[0].RootNode is YamlSequenceNode sequence
                 && sequence.Children.All(child => child is YamlScalarNode { Value: { } value } && value.Trim().Length > 0))
             {
-                names = [.. sequence.Children.Cast<YamlScalarNode>().Select(node => node.Value!.Trim())];
+                names = [.. sequence.Children.Cast<YamlScalarNode>().Select(node => (node.Value
+                    ?? throw new InvalidOperationException("A sound YAML list scalar always has a value.")).Trim())];
                 return true;
             }
         }

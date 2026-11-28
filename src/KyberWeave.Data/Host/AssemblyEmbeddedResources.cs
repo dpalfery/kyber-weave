@@ -26,7 +26,9 @@ public sealed class AssemblyEmbeddedResources : IEmbeddedResources
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(name);
         return _assembly.GetManifestResourceStream(name)
-            ?? throw new MissingEmbeddedResourceException(name, _assembly.GetName().Name ?? _assembly.FullName!);
+            ?? throw new MissingEmbeddedResourceException(
+                name,
+                _assembly.GetName().Name ?? _assembly.FullName ?? string.Empty);
     }
 
     /// <inheritdoc />

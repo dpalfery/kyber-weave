@@ -129,7 +129,7 @@ public sealed partial class RoutingLinter
         // Exact name collisions
         IEnumerable<IGrouping<string, Skill>> byName = skills
             .Where(s => !string.IsNullOrWhiteSpace(s.Frontmatter.Name))
-            .GroupBy(s => s.Frontmatter.Name!, StringComparer.Ordinal)
+            .GroupBy(s => s.Frontmatter.Name is { } name ? name : string.Empty, StringComparer.Ordinal)
             .Where(g => g.Count() > 1);
 
         foreach (IGrouping<string, Skill> group in byName)
@@ -142,7 +142,7 @@ public sealed partial class RoutingLinter
         // Description overlap (near-duplicate routing targets)
         List<(Skill Skill, Dictionary<string, double> Vec)> vectors = skills
             .Where(s => !string.IsNullOrWhiteSpace(s.Frontmatter.Description))
-            .Select(s => (Skill: s, Vec: TextVectorizer.Vectorize(s.Frontmatter.Description!)))
+            .Select(s => (Skill: s, Vec: TextVectorizer.Vectorize(s.Frontmatter.Description is { } description ? description : string.Empty)))
             .ToList();
 
         for (int i = 0; i < vectors.Count; i++)

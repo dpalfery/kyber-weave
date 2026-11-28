@@ -119,7 +119,7 @@ public sealed partial class CodexHookAdapter : IHarnessHookAdapter
         return insertion.Kind switch
         {
             DispatchInsertionKind.Inserted => RenderPreAllowPrompt(toolInput, insertion.Text),
-            DispatchInsertionKind.Stopped => RenderPreDeny(insertion.Reason!),
+            DispatchInsertionKind.Stopped => RenderPreDeny(insertion.StopReason),
             _ => null,
         };
     }
@@ -155,7 +155,7 @@ public sealed partial class CodexHookAdapter : IHarnessHookAdapter
 
         if (insertion.Kind == DispatchInsertionKind.Stopped)
         {
-            return RenderPreDeny(insertion.Reason!);
+            return RenderPreDeny(insertion.StopReason);
         }
 
         bool inserted = insertion.Kind == DispatchInsertionKind.Inserted;

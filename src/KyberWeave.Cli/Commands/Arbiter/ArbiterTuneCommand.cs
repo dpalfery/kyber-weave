@@ -1,3 +1,4 @@
+using System.Diagnostics.CodeAnalysis;
 using System.Globalization;
 using System.Text.Json;
 using System.Text.Json.Serialization;
@@ -39,7 +40,7 @@ public sealed class ArbiterTuneCommand(IArbiterTuneService tune, IAnsiConsole co
             report.Add(new Diagnostic(
                 RuleValidator.MalformedSection,
                 Severity.Error,
-                problem!,
+                problem,
                 "--thresholds",
                 Hint: "Pass values between 0 and 1, for example 0.5,0.6,0.7."));
             CommandHelpers.Finish(console, report, settings, CommandName, "Event");
@@ -76,7 +77,10 @@ public sealed class ArbiterTuneCommand(IArbiterTuneService tune, IAnsiConsole co
         Execute(context, settings, CancellationToken.None);
 
     /// <summary>Parses <c>--thresholds</c>: a comma-separated list of values in [0, 1]; the defaults when absent.</summary>
-    public static bool TryParseThresholds(string? text, out double[] thresholds, out string? problem)
+    public static bool TryParseThresholds(
+        string? text,
+        out double[] thresholds,
+        [NotNullWhen(false)] out string? problem)
     {
         problem = null;
         if (string.IsNullOrWhiteSpace(text))

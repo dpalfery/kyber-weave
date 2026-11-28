@@ -547,7 +547,9 @@ public sealed class ArbiterDoctorService(
     [
         .. HarnessRegistry.Rows
             .Where(row => row.PostDispatchAdvisoryChannel is not null)
-            .Select(row => (row.DisplayName, row.Token, row.PostDispatchAdvisoryChannel!)),
+            .Select(row => (row.DisplayName, row.Token,
+                row.PostDispatchAdvisoryChannel ?? throw new InvalidOperationException(
+                    "A harness row filtered as advisory carries no channel."))),
     ];
 
     private bool IndexExists(string root, string path)

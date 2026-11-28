@@ -1,3 +1,4 @@
+using System.Diagnostics.CodeAnalysis;
 using KyberWeave.Contracts.Repositories;
 using KyberWeave.Contracts.Services;
 using KyberWeave.Core.Arbiter;
@@ -51,7 +52,7 @@ public sealed class ArbiterSetupCommand(
 
         if (!TryParseProvider(settings.Provider, out ArbiterProviderKind kind, out Diagnostic? providerError))
         {
-            report.Add(providerError!);
+            report.Add(providerError);
             CommandHelpers.Finish(console, report, settings, "arbiter setup", "Rule");
             return 1;
         }
@@ -198,7 +199,10 @@ public sealed class ArbiterSetupCommand(
         return true;
     }
 
-    private static bool TryParseProvider(string? raw, out ArbiterProviderKind kind, out Diagnostic? error)
+    private static bool TryParseProvider(
+        string? raw,
+        out ArbiterProviderKind kind,
+        [NotNullWhen(false)] out Diagnostic? error)
     {
         kind = ArbiterProviderKind.None;
         error = null;

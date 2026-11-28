@@ -388,7 +388,10 @@ public sealed partial class DocumentationAnalyzer(
             .ToList();
         foreach (IGrouping<string, AnalysisCandidate> group in materialized
                      .Where(candidate => candidate.Kind == AnalysisRuleKind.Terminology)
-                     .GroupBy(candidate => candidate.Term!, StringComparer.Ordinal))
+                     .GroupBy(
+                         candidate => candidate.Term
+                             ?? throw new InvalidOperationException("A terminology candidate must carry a term."),
+                         StringComparer.Ordinal))
         {
             Claim[] claims = group.SelectMany(candidate => candidate.Claims)
                 .Distinct()
@@ -422,7 +425,7 @@ public sealed partial class DocumentationAnalyzer(
         double[] scores = candidates
             .Select(candidate => candidate.Score.Semantic)
             .Where(score => score.HasValue)
-            .Select(score => score!.Value)
+            .Select(score => score.GetValueOrDefault())
             .ToArray();
         return scores.Length == 0 ? null : scores.Max();
     }

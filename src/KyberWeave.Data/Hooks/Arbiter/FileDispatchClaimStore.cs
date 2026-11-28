@@ -36,7 +36,8 @@ public sealed class FileDispatchClaimStore(IWritableFileSystem files, TimeProvid
     {
         ArgumentNullException.ThrowIfNull(key);
         string path = ClaimPath(projectRoot, key);
-        string directory = Path.GetDirectoryName(path)!;
+        string directory = Path.GetDirectoryName(path)
+            ?? throw new InvalidOperationException("The dispatch claim path must have a directory.");
         files.CreateDirectory(directory);
         PruneStale(directory);
         string temp = Path.Combine(directory, $".{ids.NewGuid():N}.tmp");

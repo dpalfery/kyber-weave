@@ -370,9 +370,7 @@ public static class HarnessRegistry
 
     private static readonly Dictionary<string, HarnessDescriptor> ByMcpClientNameIndex = BuildMcpClientNameIndex();
 
-    private static readonly Dictionary<string, HarnessDescriptor> ByMcpCatalogNameIndex = Rows
-        .Where(row => row.McpCatalogName is not null)
-        .ToDictionary(row => row.McpCatalogName!, StringComparer.Ordinal);
+    private static readonly Dictionary<string, HarnessDescriptor> ByMcpCatalogNameIndex = BuildMcpCatalogNameIndex();
 
     /// <summary>The harness tokens whose hook replaces the dispatch text.</summary>
     public static IReadOnlySet<string> RewriteTokens { get; } =
@@ -383,32 +381,16 @@ public static class HarnessRegistry
         Rows.Where(row => row.Trusted).Select(row => row.Token).ToHashSet(StringComparer.OrdinalIgnoreCase);
 
     /// <summary>Every Squad target this registry knows, in the registry's order.</summary>
-    public static IReadOnlyList<SquadTarget> SquadTargets { get; } =
-        Rows.Where(row => row.SquadTarget is not null)
-            .Select(row => row.SquadTarget!.Value)
-            .Distinct()
-            .ToArray();
+    public static IReadOnlyList<SquadTarget> SquadTargets { get; } = BuildSquadTargets();
 
     /// <summary>The hooked Squad targets, in their stable emission order.</summary>
-    public static IReadOnlyList<SquadTarget> HookedSquadTargets { get; } =
-        Rows.Where(row => row.HookOrder is not null)
-            .OrderBy(row => row.HookOrder)
-            .Select(row => row.SquadTarget!.Value)
-            .Distinct()
-            .ToArray();
+    public static IReadOnlyList<SquadTarget> HookedSquadTargets { get; } = BuildHookedSquadTargets();
 
     /// <summary>The fallback-only Squad targets, in their stable emission order.</summary>
-    public static IReadOnlyList<SquadTarget> FallbackSquadTargets { get; } =
-        Rows.Where(row => row.FallbackOrder is not null)
-            .OrderBy(row => row.FallbackOrder)
-            .Select(row => row.SquadTarget!.Value)
-            .ToArray();
+    public static IReadOnlyList<SquadTarget> FallbackSquadTargets { get; } = BuildFallbackSquadTargets();
 
     /// <summary>The project-scope prefixes a Global receipt written before rc.11 recorded, by squad token.</summary>
-    public static IReadOnlyDictionary<string, string> LegacyGlobalPrefixes { get; } = Rows
-        .Where(row => row.SquadToken is not null && row.LegacyGlobalPrefix is not null)
-        .DistinctBy(row => row.SquadToken)
-        .ToDictionary(row => row.SquadToken!, row => row.LegacyGlobalPrefix!, StringComparer.Ordinal);
+    public static IReadOnlyDictionary<string, string> LegacyGlobalPrefixes { get; } = BuildLegacyGlobalPrefixes();
 
     /// <summary>Finds a row by its hook token, or null when the token is not in the registry.</summary>
     public static HarnessDescriptor? ByToken(string? token) =>
@@ -473,5 +455,85 @@ public static class HarnessRegistry
         }
 
         return index;
+    }
+
+    private static Dictionary<string, HarnessDescriptor> BuildMcpCatalogNameIndex()
+    {
+        Dictionary<string, HarnessDescriptor> index = new(StringComparer.Ordinal);
+        foreach (HarnessDescriptor row in Rows)
+        {
+            if (row.McpCatalogName is { } name)
+            {
+                // Add, not assign: a duplicate catalog name is a table defect and fails at startup.
+                index.Add(name, row);
+            }
+        }
+
+        return index;
+    }
+
+    private static SquadTarget[] BuildSquadTargets()
+    {
+        List<SquadTarget> targets = [];
+        foreach (HarnessDescriptor row in Rows)
+        {
+            if (row.SquadTarget is { } target && !targets.Contains(target))
+            {
+                targets.Add(target);
+            }
+        }
+
+        return targets.ToArray();
+    }
+
+    private static SquadTarget[] BuildHookedSquadTargets()
+    {
+        List<SquadTarget> targets = [];
+        IEnumerable<HarnessDescriptor> hookedRows = Rows
+            .Where(row => row.HookOrder is not null)
+            .OrderBy(row => row.HookOrder);
+        foreach (HarnessDescriptor row in hookedRows)
+        {
+            SquadTarget target = row.SquadTarget ?? throw new InvalidOperationException(
+                $"Harness '{row.Token}' has a hook order but no Squad target.");
+            if (!targets.Contains(target))
+            {
+                targets.Add(target);
+            }
+        }
+
+        return targets.ToArray();
+    }
+
+    private static SquadTarget[] BuildFallbackSquadTargets()
+    {
+        List<SquadTarget> targets = [];
+        IEnumerable<HarnessDescriptor> fallbackRows = Rows
+            .Where(row => row.FallbackOrder is not null)
+            .OrderBy(row => row.FallbackOrder);
+        foreach (HarnessDescriptor row in fallbackRows)
+        {
+            targets.Add(row.SquadTarget ?? throw new InvalidOperationException(
+                $"Harness '{row.Token}' has a fallback order but no Squad target."));
+        }
+
+        return targets.ToArray();
+    }
+
+    private static Dictionary<string, string> BuildLegacyGlobalPrefixes()
+    {
+        Dictionary<string, string> prefixes = new(StringComparer.Ordinal);
+        IEnumerable<HarnessDescriptor> eligibleRows = Rows
+            .Where(row => row.SquadToken is not null && row.LegacyGlobalPrefix is not null)
+            .DistinctBy(row => row.SquadToken);
+        foreach (HarnessDescriptor row in eligibleRows)
+        {
+            if (row.SquadToken is { } token && row.LegacyGlobalPrefix is { } prefix)
+            {
+                prefixes[token] = prefix;
+            }
+        }
+
+        return prefixes;
     }
 }

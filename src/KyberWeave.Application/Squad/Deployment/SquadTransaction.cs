@@ -142,7 +142,7 @@ public sealed class SquadTransaction : ISquadTransaction
         string stateAuthorityRoot = Physical(_stateStore.ResolveStateAuthorityRoot(root, plan.Scope));
         string lockPath = PhysicalLeaf(_stateStore.ResolveLockPath(root, plan.Scope));
         string receiptPath = PhysicalLeaf(_stateStore.ResolveReceiptPath(root, plan.Scope));
-        string stateDirectory = Path.GetDirectoryName(lockPath)!;
+        string stateDirectory = RequireDirectoryName(lockPath);
         plan.AnchorReceipt(plan.Scope == SquadDeploymentScope.Global
             ? _stateStore.ResolveHomeRoot()
             : root);
@@ -416,7 +416,7 @@ public sealed class SquadTransaction : ISquadTransaction
             // A kill between removing the journal folder and the tool folder above it leaves that folder empty and
             // unexplained. It is the tool's own folder, so an empty one goes. Nothing above it is touched: those
             // folders may predate the transaction and the journal that recorded which ones it made is gone.
-            string toolFolder = Path.GetDirectoryName(journalDirectory)!;
+            string toolFolder = RequireDirectoryName(journalDirectory);
             if (string.Equals(Path.GetFileName(toolFolder), UserStatePaths.DirectoryName, StringComparison.Ordinal))
                 DeleteEmptyDirectory(toolFolder);
             return RecoveryOutcome.None;
@@ -452,7 +452,7 @@ public sealed class SquadTransaction : ISquadTransaction
 
                 // Only the tool's own folder directly above is removed, and only when empty: the folders above it may
                 // predate the transaction, and the journal that recorded which ones it made never existed.
-                string toolFolder = Path.GetDirectoryName(journalDirectory)!;
+                string toolFolder = RequireDirectoryName(journalDirectory);
                 if (string.Equals(Path.GetFileName(toolFolder), UserStatePaths.DirectoryName, StringComparison.Ordinal))
                     DeleteEmptyDirectory(toolFolder);
                 recoveryCompleted = true;
@@ -534,7 +534,7 @@ public sealed class SquadTransaction : ISquadTransaction
         string intentPath,
         bool sameTransactionDirectory)
     {
-        string toolFolder = Path.GetDirectoryName(journalDirectory)!;
+        string toolFolder = RequireDirectoryName(journalDirectory);
         if (!_files.DirectoryExists(journalDirectory) &&
             !_files.DirectoryExists(toolFolder) &&
             (sameTransactionDirectory || !_files.DirectoryExists(workDirectory)))
@@ -605,7 +605,7 @@ public sealed class SquadTransaction : ISquadTransaction
                     physicalRoot,
                     TransactionSupport.GetEntryKind(_files, fullPath),
                     CaptureMissingDirectories(
-                            Path.GetDirectoryName(fullPath)!,
+                            RequireDirectoryName(fullPath),
                             physicalRoot)
                         .Select(path => Path.GetRelativePath(physicalRoot, path)
                             .Replace(Path.DirectorySeparatorChar, '/'))
@@ -914,7 +914,7 @@ public sealed class SquadTransaction : ISquadTransaction
                     lease,
                     ref intent);
                 string targetPath = SquadPathPolicy.ResolveFile(boundRoot, mutation.RelativePath, _semantics);
-                _files.CreateDirectory(Path.GetDirectoryName(targetPath)!);
+                _files.CreateDirectory(RequireDirectoryName(targetPath));
                 PublishStageNoOverwrite(
                     intent,
                     ArtifactArea.Work,
@@ -1129,7 +1129,7 @@ public sealed class SquadTransaction : ISquadTransaction
             ArtifactArea.Journal,
             ArtifactRole.StateStage,
             stageRelativePath,
-            Path.GetDirectoryName(targetPath)!,
+            RequireDirectoryName(targetPath),
             Path.GetFileName(targetPath),
             stagingPath,
             targetPath);
@@ -1160,17 +1160,17 @@ public sealed class SquadTransaction : ISquadTransaction
         ref IntentDocument intent)
     {
         ClaimExistingNoOverwrite(
-            Path.GetDirectoryName(targetPath)!,
+            RequireDirectoryName(targetPath),
             Path.GetFileName(targetPath),
             Path.GetFileName(targetPath),
             _semantics.AreSame(
                 workDirectory,
-                Path.GetDirectoryName(intentPath)!)
+                RequireDirectoryName(intentPath))
                 ? workDirectory
-                : Path.GetDirectoryName(intentPath)!,
+                : RequireDirectoryName(intentPath),
             _semantics.AreSame(
                 workDirectory,
-                Path.GetDirectoryName(intentPath)!)
+                RequireDirectoryName(intentPath))
                 ? ArtifactArea.Work
                 : ArtifactArea.Journal,
             originalKind,
@@ -1243,7 +1243,7 @@ public sealed class SquadTransaction : ISquadTransaction
             _files.CreateDirectoryLink(
                 claimPath,
                 Path.GetRelativePath(
-                    Path.GetDirectoryName(claimPath)!,
+                    RequireDirectoryName(claimPath),
                     resolvedDirectoryLinkTarget));
             artifact = CaptureNodeArtifact(
                 intent.TransactionId,
@@ -1521,7 +1521,7 @@ public sealed class SquadTransaction : ISquadTransaction
 
             if (targetKind == OriginalEntryKind.Missing)
             {
-                _files.CreateDirectory(Path.GetDirectoryName(targetPath)!);
+                _files.CreateDirectory(RequireDirectoryName(targetPath));
                 VerifyAndMoveArtifactNoOverwrite(
                     artifact,
                     claimPath,
@@ -1741,7 +1741,7 @@ public sealed class SquadTransaction : ISquadTransaction
         CapturedRestorePayload payload,
         string displayPath)
     {
-        _files.CreateDirectory(Path.GetDirectoryName(targetPath)!);
+        _files.CreateDirectory(RequireDirectoryName(targetPath));
         if (!VerifyRestoreAfterImage(targetPath, afterKind, afterSha256, payload) ||
             GetEntryKind(targetPath) != afterKind)
             throw new InvalidDataException(
@@ -2118,7 +2118,7 @@ public sealed class SquadTransaction : ISquadTransaction
         string destinationPath,
         OriginalEntryKind kind)
     {
-        _files.CreateDirectory(Path.GetDirectoryName(destinationPath)!);
+        _files.CreateDirectory(RequireDirectoryName(destinationPath));
         switch (kind)
         {
             case OriginalEntryKind.File:
@@ -2220,6 +2220,12 @@ public sealed class SquadTransaction : ISquadTransaction
         return _semantics.Canonicalize(path);
     }
 
+    private static string RequireDirectoryName(string path)
+    {
+        return Path.GetDirectoryName(path)
+               ?? throw new InvalidOperationException($"Path '{path}' has no parent directory.");
+    }
+
     /// <summary>
     ///     Canonicalizes the directory a state file lives in but not the file itself. A state file may be a
     ///     symbolic link, and canonicalizing the leaf would claim the link's target instead of the link, so
@@ -2227,7 +2233,7 @@ public sealed class SquadTransaction : ISquadTransaction
     /// </summary>
     private string PhysicalLeaf(string path)
     {
-        return Path.Combine(Physical(Path.GetDirectoryName(path)!), Path.GetFileName(path));
+        return Path.Combine(Physical(RequireDirectoryName(path)), Path.GetFileName(path));
     }
 
     private string RelativeAuthorityPath(string authorityRoot, string path)
@@ -2598,7 +2604,7 @@ public sealed class SquadTransaction : ISquadTransaction
         ReadOnlySpan<byte> content,
         bool overwrite)
     {
-        _files.CreateDirectory(Path.GetDirectoryName(destinationPath)!);
+        _files.CreateDirectory(RequireDirectoryName(destinationPath));
         string temporaryPath = destinationPath + $".{_ids.NewGuid():N}.tmp";
         try
         {
@@ -2609,7 +2615,7 @@ public sealed class SquadTransaction : ISquadTransaction
             // The rename lives in the folder, not in the file: without this a power loss after the call returns can
             // lose the journal's name although its bytes reached the device.
             if (SyncToDisk)
-                _files.FlushDirectory(Path.GetDirectoryName(destinationPath)!);
+                _files.FlushDirectory(RequireDirectoryName(destinationPath));
         }
         finally
         {

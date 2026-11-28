@@ -21,14 +21,15 @@ public class TranscriptIngestionService : ITranscriptIngestionService
     /// <summary>Diagnostic code emitted when a local source unit cannot be read or parsed.</summary>
     public const string SourceUnreadableCode = "SOURCE_UNREADABLE";
 
-    private readonly IRelationalStoreWriter? writer;
-    private readonly IOperationalStore? operationalStore;
-    private readonly HarnessSourceRegistry? sourceRegistry;
+    private readonly IRelationalStoreWriter writer;
+    private readonly IOperationalStore operationalStore;
+    private readonly HarnessSourceRegistry sourceRegistry;
     private readonly IReadOnlyDictionary<string, IHarnessMapper> mappersByHarness;
     private readonly IHarnessFileSystem fileSystem;
     private readonly string homeDirectory;
     private readonly string stateDirectory;
     private readonly Func<DateTimeOffset> clock;
+    private readonly TimeProvider time;
 
 
     /// <summary>
@@ -44,6 +45,7 @@ public class TranscriptIngestionService : ITranscriptIngestionService
     /// <param name="options">Application options supplying state directory overrides.</param>
     /// <param name="homeDirectory">Optional home directory override for deterministic discovery.</param>
     /// <param name="clock">Optional UTC clock override for deterministic refresh timestamps.</param>
+    /// <param name="time">Optional time provider backing the default clock; defaults to system time when omitted.</param>
     public TranscriptIngestionService(
         IRelationalStoreWriter writer,
         IOperationalStore operationalStore,
@@ -52,7 +54,8 @@ public class TranscriptIngestionService : ITranscriptIngestionService
         IHarnessFileSystem? fileSystem = null,
         DashOptions? options = null,
         string? homeDirectory = null,
-        Func<DateTimeOffset>? clock = null)
+        Func<DateTimeOffset>? clock = null,
+        TimeProvider? time = null)
     {
         ArgumentNullException.ThrowIfNull(writer);
         ArgumentNullException.ThrowIfNull(operationalStore);
@@ -64,10 +67,9 @@ public class TranscriptIngestionService : ITranscriptIngestionService
         mappersByHarness = HarnessMapperLookup.Build(mappers);
         this.fileSystem = fileSystem ?? PhysicalHarnessFileSystem.Instance;
 
-        bool explicitHome = !string.IsNullOrWhiteSpace(homeDirectory);
-        this.homeDirectory = explicitHome
-            ? Path.GetFullPath(homeDirectory!)
-            : Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
+        string? explicitHomeDirectory = string.IsNullOrWhiteSpace(homeDirectory) ? null : Path.GetFullPath(homeDirectory);
+        bool explicitHome = explicitHomeDirectory is not null;
+        this.homeDirectory = explicitHomeDirectory ?? Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
 
         this.stateDirectory = !string.IsNullOrWhiteSpace(options?.StateDirectory)
             ? Path.GetFullPath(options.StateDirectory)
@@ -75,7 +77,8 @@ public class TranscriptIngestionService : ITranscriptIngestionService
                 ? Path.Combine(this.homeDirectory, CanonDbPath.DefaultDirectoryName)
                 : ServerStateRepository.ResolveStateDirectory();
 
-        this.clock = clock ?? (static () => DateTimeOffset.UtcNow);
+        this.time = time ?? TimeProvider.System;
+        this.clock = clock ?? (() => this.time.GetUtcNow());
     }
 
     /// <inheritdoc />
@@ -87,7 +90,7 @@ public class TranscriptIngestionService : ITranscriptIngestionService
             return new IngestOutcome(0, 0, 0);
         }
 
-        return CanonIngestPipeline.IngestBatch(spans, writer!, operationalStore!);
+        return CanonIngestPipeline.IngestBatch(spans, writer, operationalStore);
     }
 
     /// <inheritdoc />
@@ -108,7 +111,7 @@ public class TranscriptIngestionService : ITranscriptIngestionService
             return UnloggedRefreshReport([], commandStarted);
         }
 
-        IHarnessSourceReader? reader = sourceRegistry!.GetReader(harnessId);
+        IHarnessSourceReader? reader = sourceRegistry.GetReader(harnessId);
         if (reader is null || HarnessMapperLookup.Resolve(mappersByHarness, harnessId) is null)
         {
             return UnloggedRefreshReport([], commandStarted);
@@ -125,7 +128,7 @@ public class TranscriptIngestionService : ITranscriptIngestionService
         SourceDiscoveryResult discovery = reader.Discover(context);
         foreach (CollectedProblem discoveryProblem in discovery.Problems)
         {
-            writer!.WriteProblem(discoveryProblem);
+            writer.WriteProblem(discoveryProblem);
         }
 
         HashSet<string> wantedStems = new(sessionKeys, StringComparer.Ordinal);
@@ -188,7 +191,7 @@ public class TranscriptIngestionService : ITranscriptIngestionService
             // A harness with no reader or mapper discovers nothing, so none of its checkpointed
             // units is rediscovered and the clear below still removes their stored estimates.
             HashSet<string> discoveredKeys = new(StringComparer.Ordinal);
-            IHarnessSourceReader? reader = sourceRegistry!.GetReader(harnessId);
+            IHarnessSourceReader? reader = sourceRegistry.GetReader(harnessId);
             if (reader is null || HarnessMapperLookup.Resolve(mappersByHarness, harnessId) is null)
             {
                 clearedAny |= ClearEstimatesOfVanishedUnits(harnessId, discoveredKeys, rows);
@@ -198,7 +201,7 @@ public class TranscriptIngestionService : ITranscriptIngestionService
             SourceDiscoveryResult discovery = reader.Discover(context);
             foreach (CollectedProblem discoveryProblem in discovery.Problems)
             {
-                writer!.WriteProblem(discoveryProblem);
+                writer.WriteProblem(discoveryProblem);
             }
 
             foreach (SourceUnit unit in discovery.Sources)
@@ -212,7 +215,7 @@ public class TranscriptIngestionService : ITranscriptIngestionService
 
                 // Only a unit the store already knows is replaced; a never-imported file stays for
                 // the next folder import to pick up, so this pass cannot widen what was collected.
-                if (operationalStore!.GetSourceCheckpoint(unit.HarnessId, unit.SourceKey) is null)
+                if (operationalStore.GetSourceCheckpoint(unit.HarnessId, unit.SourceKey) is null)
                 {
                     continue;
                 }
@@ -236,7 +239,7 @@ public class TranscriptIngestionService : ITranscriptIngestionService
         // clean path does.
         if (clearedAny)
         {
-            operationalStore!.SetWriteMarker(operationalStore.GetWriteMarker() + 1);
+            operationalStore.SetWriteMarker(operationalStore.GetWriteMarker() + 1);
             operationalStore.ClearProjectionDirtyState();
         }
 
@@ -278,7 +281,7 @@ public class TranscriptIngestionService : ITranscriptIngestionService
         List<RefreshSourceStatusRow> rows)
     {
         bool clearedAny = false;
-        foreach (SourceCheckpoint checkpoint in operationalStore!.ListSourceCheckpoints(harnessId))
+        foreach (SourceCheckpoint checkpoint in operationalStore.ListSourceCheckpoints(harnessId))
         {
             if (discoveredKeys.Contains(checkpoint.SourceKey))
             {
@@ -296,7 +299,7 @@ public class TranscriptIngestionService : ITranscriptIngestionService
 
             try
             {
-                writer!.ClearEstimatedRecordTokens(harnessId, checkpoint.SourceKey, estimated);
+                writer.ClearEstimatedRecordTokens(harnessId, checkpoint.SourceKey, estimated);
                 rows.Add(new RefreshSourceStatusRow(harnessId, checkpoint.SourceKey, "cleared", 0));
                 clearedAny = true;
             }
@@ -340,7 +343,7 @@ public class TranscriptIngestionService : ITranscriptIngestionService
     {
         DateTimeOffset instant = now ?? clock();
         string cutoffUtc = FormatUtc(CanonRefreshEngine.ContentRetentionFloor(instant));
-        operationalStore!.SetContentRetentionDays(CanonRefreshEngine.ContentRetentionDays);
+        operationalStore.SetContentRetentionDays(CanonRefreshEngine.ContentRetentionDays);
         operationalStore.SetContentPurgeMarkUtc(cutoffUtc);
         return new PurgeExpiredContentResult(0, cutoffUtc);
     }
@@ -350,11 +353,6 @@ public class TranscriptIngestionService : ITranscriptIngestionService
     /// <returns>The instant before which record content is cleared.</returns>
     public static DateTimeOffset RetentionFloor(DateTimeOffset now) =>
         CanonRefreshEngine.ContentRetentionFloor(now);
-
-    /// <summary>The retention floor for the current instant, formatted as the purge cutoff.</summary>
-    /// <returns>ISO-8601 UTC cutoff.</returns>
-    public static string RetentionFloorIso() =>
-        FormatUtc(CanonRefreshEngine.ContentRetentionFloor(DateTimeOffset.UtcNow));
 
     private RefreshReport RefreshRelationalSources(int historyWeeks)
     {
@@ -366,7 +364,7 @@ public class TranscriptIngestionService : ITranscriptIngestionService
         string importedAtUtc = coveredThroughUtc;
 
         string runId = Guid.NewGuid().ToString("D", CultureInfo.InvariantCulture);
-        operationalStore!.UpsertRefreshRun(new RefreshRunRow(
+        operationalStore.UpsertRefreshRun(new RefreshRunRow(
             Id: runId,
             StartedAt: importedAtUtc,
             CompletedAt: null,
@@ -384,10 +382,10 @@ public class TranscriptIngestionService : ITranscriptIngestionService
                 StateDirectory: stateDirectory,
                 FileSystem: fileSystem,
                 SinceUtc: windowStart);
-            SourceDiscoveryResult discovery = sourceRegistry!.DiscoverAll(context);
+            SourceDiscoveryResult discovery = sourceRegistry.DiscoverAll(context);
             foreach (CollectedProblem discoveryProblem in discovery.Problems)
             {
-                writer!.WriteProblem(discoveryProblem);
+                writer.WriteProblem(discoveryProblem);
             }
 
             List<RefreshSourceStatusRow> rows = new(discovery.Sources.Count);
@@ -472,7 +470,7 @@ public class TranscriptIngestionService : ITranscriptIngestionService
         string importedAtUtc,
         HashSet<string> sessionKeys)
     {
-        SourceCheckpoint? existing = operationalStore!.GetSourceCheckpoint(unit.HarnessId, unit.SourceKey);
+        SourceCheckpoint? existing = operationalStore.GetSourceCheckpoint(unit.HarnessId, unit.SourceKey);
         CoverageInterval requested = new(coveredFromUtc, coveredThroughUtc);
         CoverageRequest request = new(unit.RevisionToken, unit.ParserContractVersion);
 
@@ -482,7 +480,7 @@ public class TranscriptIngestionService : ITranscriptIngestionService
             return new RefreshSourceStatusRow(unit.HarnessId, unit.SourceKey, "skipped", 0);
         }
 
-        IHarnessSourceReader? reader = sourceRegistry!.GetReader(unit.HarnessId);
+        IHarnessSourceReader? reader = sourceRegistry.GetReader(unit.HarnessId);
         IHarnessMapper? mapper = HarnessMapperLookup.Resolve(mappersByHarness, unit.HarnessId);
         if (reader is null || mapper is null)
         {
@@ -503,7 +501,7 @@ public class TranscriptIngestionService : ITranscriptIngestionService
 
             // Clear the unit's earlier failure before writing: if anything below fails, the catch records it
             // again, so no committed write is ever paired with a stale failure, nor a failure with no problem.
-            writer!.DeleteProblem(CanonRefreshEngine.SourceUnreadableProblemKey(unit.HarnessId, unit.SourceKey));
+            writer.DeleteProblem(CanonRefreshEngine.SourceUnreadableProblemKey(unit.HarnessId, unit.SourceKey));
             if (existing?.LastSuccessUtc is not null)
             {
                 // One transaction: a refused write keeps the stored rows, including spans shared with another source.
@@ -561,7 +559,7 @@ public class TranscriptIngestionService : ITranscriptIngestionService
                 TimestampUtc: importedAtUtc,
                 Stack: SafeOptionalText(ex.StackTrace));
 
-            writer!.WriteProblem(problem);
+            writer.WriteProblem(problem);
 
             SourceCheckpoint failedCheckpoint = new(
                 HarnessId: unit.HarnessId,

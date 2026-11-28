@@ -243,7 +243,7 @@ public sealed class AntigravityHookAdapter : IHarnessHookAdapter
                 DispatchInsertion insertion = DispatchPromptInsertion.Expand(prompt, context, subagentType);
                 if (insertion.Kind == DispatchInsertionKind.Stopped)
                 {
-                    return RenderDeny(insertion.Reason!);
+                    return RenderDeny(insertion.StopReason);
                 }
 
                 if (insertion.Kind == DispatchInsertionKind.Inserted)
@@ -270,7 +270,7 @@ public sealed class AntigravityHookAdapter : IHarnessHookAdapter
             DispatchInsertion flat = DispatchPromptInsertion.Expand(flatPrompt, context, flatType);
             if (flat.Kind == DispatchInsertionKind.Stopped)
             {
-                return RenderDeny(flat.Reason!);
+                return RenderDeny(flat.StopReason);
             }
 
             if (flat.Kind == DispatchInsertionKind.Inserted)
@@ -296,7 +296,7 @@ public sealed class AntigravityHookAdapter : IHarnessHookAdapter
         DispatchInsertion insertion = DispatchPromptInsertion.Expand(prompt, context, type);
         return insertion.Kind switch
         {
-            DispatchInsertionKind.Stopped => RenderDeny(insertion.Reason!),
+            DispatchInsertionKind.Stopped => RenderDeny(insertion.StopReason),
             DispatchInsertionKind.Inserted => new JsonObject
             {
                 ["decision"] = "ask",
