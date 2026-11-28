@@ -73,10 +73,9 @@ public class OtlpCollectorServiceTests
         Harness harness = new(maxBodyBytes: 16);
         byte[] payload = Encoding.UTF8.GetBytes(CopilotTracePayload);
 
-        IngestAdmissionResult result = await harness.Collector.AdmitTracesAsync(
+        IngestAdmissionResult result = harness.Collector.AdmitTraces(
             payload,
-            "application/json",
-            TestContext.Current.CancellationToken);
+            "application/json");
 
         Assert.False(result.Accepted);
         Assert.Equal(413, result.HttpStatusCode);
@@ -89,10 +88,9 @@ public class OtlpCollectorServiceTests
     {
         Harness harness = new();
 
-        await Assert.ThrowsAsync<OtlpDecodeException>(() => harness.Collector.AdmitTracesAsync(
+        Assert.Throws<OtlpDecodeException>(() => harness.Collector.AdmitTraces(
             Encoding.UTF8.GetBytes("{\"resourceSpans\": 5}"),
-            "application/json",
-            TestContext.Current.CancellationToken));
+            "application/json"));
 
         Assert.Equal(1, harness.Collector.CountFailuresSince(DateTimeOffset.UtcNow.AddMinutes(-5)));
         Assert.Equal("OTLP_MALFORMED_PAYLOAD", harness.Collector.LastErrorCode);
@@ -115,10 +113,9 @@ public class OtlpCollectorServiceTests
 
         for (int i = 0; i < 1100; i++)
         {
-            await Assert.ThrowsAsync<OtlpDecodeException>(() => harness.Collector.AdmitTracesAsync(
-                payload,
-                "application/json",
-                TestContext.Current.CancellationToken));
+            Assert.Throws<OtlpDecodeException>(() => harness.Collector.AdmitTraces(
+            payload,
+                "application/json"));
         }
 
         int counted = harness.Collector.CountFailuresSince(DateTimeOffset.UtcNow.AddMinutes(-5));
@@ -130,10 +127,9 @@ public class OtlpCollectorServiceTests
     {
         Harness harness = new();
 
-        await Assert.ThrowsAsync<NotSupportedException>(() => harness.Collector.AdmitLogsAsync(
+        Assert.Throws<NotSupportedException>(() => harness.Collector.AdmitLogs(
             Encoding.UTF8.GetBytes("{}"),
-            "text/plain",
-            TestContext.Current.CancellationToken));
+            "text/plain"));
     }
 
     [Fact]
@@ -141,10 +137,9 @@ public class OtlpCollectorServiceTests
     {
         Harness harness = new();
 
-        IngestAdmissionResult result = await harness.Collector.AdmitTracesAsync(
+        IngestAdmissionResult result = harness.Collector.AdmitTraces(
             Encoding.UTF8.GetBytes(CopilotTracePayload),
-            "application/json; charset=utf-8",
-            TestContext.Current.CancellationToken);
+            "application/json; charset=utf-8");
 
         // Admission queues; the flush is what writes. Before a flush is owed, nothing has landed.
         Assert.True(result.Accepted);
@@ -153,7 +148,7 @@ public class OtlpCollectorServiceTests
         Assert.True(harness.Collector.PendingBytes > 0);
         Assert.Equal(0, harness.Store.CountRecords());
 
-        int flushed = await harness.Collector.FlushPendingAsync(TestContext.Current.CancellationToken);
+        int flushed = harness.Collector.FlushPending();
 
         Assert.Equal(1, flushed);
         Assert.Equal(0, harness.Collector.PendingCount);
@@ -181,10 +176,9 @@ public class OtlpCollectorServiceTests
 
         try
         {
-            IngestAdmissionResult result = await harness.Collector.AdmitTracesAsync(
+            IngestAdmissionResult result = harness.Collector.AdmitTraces(
                 Encoding.UTF8.GetBytes(CopilotTracePayload),
-                "application/json",
-                TestContext.Current.CancellationToken);
+                "application/json");
             Assert.True(result.Accepted);
 
             // The floor is the loop's own interval plus generous scheduling room; the wake on
@@ -217,11 +211,10 @@ public class OtlpCollectorServiceTests
         int raised = 0;
         harness.Collector.StoreUpdated += (_, _) => raised++;
 
-        await harness.Collector.AdmitTracesAsync(
+        harness.Collector.AdmitTraces(
             Encoding.UTF8.GetBytes(CopilotTracePayload),
-            "application/json",
-            TestContext.Current.CancellationToken);
-        _ = await harness.Collector.FlushPendingAsync(TestContext.Current.CancellationToken);
+            "application/json");
+        _ = harness.Collector.FlushPending();
 
         Assert.Equal(1, raised);
     }
@@ -234,11 +227,10 @@ public class OtlpCollectorServiceTests
         int raised = 0;
         harness.Collector.StoreUpdated += (_, _) => raised++;
 
-        await harness.Collector.AdmitTracesAsync(
+        harness.Collector.AdmitTraces(
             Encoding.UTF8.GetBytes(UnknownTracePayload),
-            "application/json",
-            TestContext.Current.CancellationToken);
-        _ = await harness.Collector.FlushPendingAsync(TestContext.Current.CancellationToken);
+            "application/json");
+        _ = harness.Collector.FlushPending();
 
         Assert.Equal(1, raised);
         Assert.Equal(0, harness.Collector.PendingCount);
@@ -253,7 +245,7 @@ public class OtlpCollectorServiceTests
         int raised = 0;
         harness.Collector.StoreUpdated += (_, _) => raised++;
 
-        int flushed = await harness.Collector.FlushPendingAsync(TestContext.Current.CancellationToken);
+        int flushed = harness.Collector.FlushPending();
 
         Assert.Equal(0, flushed);
         Assert.Equal(0, raised);
@@ -265,10 +257,9 @@ public class OtlpCollectorServiceTests
     {
         Harness harness = new();
 
-        await harness.Collector.AdmitTracesAsync(
+        harness.Collector.AdmitTraces(
             Encoding.UTF8.GetBytes(CopilotTracePayload),
-            "application/json",
-            TestContext.Current.CancellationToken);
+            "application/json");
 
         harness.Collector.PauseIngestion();
 
@@ -276,10 +267,9 @@ public class OtlpCollectorServiceTests
         Assert.Equal(0, harness.Collector.PendingCount);
         Assert.Equal(1, harness.Store.CountRecords());
 
-        IngestAdmissionResult paused = await harness.Collector.AdmitTracesAsync(
+        IngestAdmissionResult paused = harness.Collector.AdmitTraces(
             Encoding.UTF8.GetBytes(CopilotTracePayload),
-            "application/json",
-            TestContext.Current.CancellationToken);
+            "application/json");
         Assert.False(paused.Accepted);
         Assert.Equal(503, paused.HttpStatusCode);
         Assert.Equal(OtlpCollectorService.PauseRetryAfterSeconds, paused.RetryAfterSeconds);
@@ -287,10 +277,9 @@ public class OtlpCollectorServiceTests
         harness.Collector.ResumeIngestion();
         Assert.False(harness.Collector.IsPaused);
 
-        IngestAdmissionResult resumed = await harness.Collector.AdmitTracesAsync(
+        IngestAdmissionResult resumed = harness.Collector.AdmitTraces(
             Encoding.UTF8.GetBytes(CopilotTracePayload),
-            "application/json",
-            TestContext.Current.CancellationToken);
+            "application/json");
         Assert.True(resumed.Accepted);
     }
 
@@ -301,10 +290,9 @@ public class OtlpCollectorServiceTests
         byte[] payload = Encoding.UTF8.GetBytes(CopilotTracePayload);
         Assert.True(payload.Length > 64);
 
-        IngestAdmissionResult result = await harness.Collector.AdmitTracesAsync(
+        IngestAdmissionResult result = harness.Collector.AdmitTraces(
             payload,
-            "application/json",
-            TestContext.Current.CancellationToken);
+            "application/json");
 
         Assert.False(result.Accepted);
         Assert.Equal(503, result.HttpStatusCode);
@@ -380,15 +368,14 @@ public class OtlpCollectorServiceTests
         await using ServiceProvider provider = services.BuildServiceProvider();
         IOtlpCollectorService collector = provider.GetRequiredService<IOtlpCollectorService>();
 
-        IngestAdmissionResult logResult = await collector.AdmitLogsAsync(
+        IngestAdmissionResult logResult = collector.AdmitLogs(
             Encoding.UTF8.GetBytes("""
                 {"resourceLogs":[{"scopeLogs":[{"logRecords":[{"timeUnixNano":"1760000000000000000","body":{"stringValue":"unmapped"}}]}]}]}
                 """),
-            "application/json",
-            TestContext.Current.CancellationToken);
+            "application/json");
         Assert.True(logResult.Accepted);
 
-        int flushed = await collector.FlushPendingAsync(TestContext.Current.CancellationToken);
+        int flushed = collector.FlushPending();
         Assert.Equal(1, flushed);
         Assert.Equal(1, store.CountIngestProblems());
     }

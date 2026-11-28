@@ -36,8 +36,8 @@ public static class OtlpEndpointMappings
                 pendingCount = collector.PendingCount,
             }));
 
-        endpoints.MapPost("/v1/admin/pause", HandlePauseAsync);
-        endpoints.MapPost("/v1/admin/resume", HandleResumeAsync);
+        endpoints.MapPost("/v1/admin/pause", HandlePause);
+        endpoints.MapPost("/v1/admin/resume", HandleResume);
 
         endpoints.MapPost(OtlpCollector.TracesPath, (HttpContext context, IOtlpCollectorService collector, DashRuntimeSettings runtime, CancellationToken cancellationToken) =>
             AdmitAsync(context, collector, runtime, OtlpSignalKind.Traces, cancellationToken));
@@ -49,25 +49,25 @@ public static class OtlpEndpointMappings
             AdmitAsync(context, collector, runtime, OtlpSignalKind.Metrics, cancellationToken));
     }
 
-    private static async Task<IResult> HandlePauseAsync(HttpRequest request, IOtlpCollectorService collector)
+    private static IResult HandlePause(HttpRequest request, IOtlpCollectorService collector)
     {
         ArgumentNullException.ThrowIfNull(request);
         ArgumentNullException.ThrowIfNull(collector);
         if (!DashHttp.IsAllowedMutation(request))
             return DashHttp.Error(StatusCodes.Status403Forbidden, "admin routes accept loopback requests without browser Origin headers only");
 
-        await Task.Run(collector.PauseIngestion).ConfigureAwait(false);
+        collector.PauseIngestion();
         return Results.Json(new { paused = collector.IsPaused });
     }
 
-    private static async Task<IResult> HandleResumeAsync(HttpRequest request, IOtlpCollectorService collector)
+    private static IResult HandleResume(HttpRequest request, IOtlpCollectorService collector)
     {
         ArgumentNullException.ThrowIfNull(request);
         ArgumentNullException.ThrowIfNull(collector);
         if (!DashHttp.IsAllowedMutation(request))
             return DashHttp.Error(StatusCodes.Status403Forbidden, "admin routes accept loopback requests without browser Origin headers only");
 
-        await Task.Run(collector.ResumeIngestion).ConfigureAwait(false);
+        collector.ResumeIngestion();
         return Results.Json(new { paused = collector.IsPaused });
     }
 
@@ -123,9 +123,9 @@ public static class OtlpEndpointMappings
         {
             IngestAdmissionResult admission = signal switch
             {
-                OtlpSignalKind.Traces => await collector.AdmitTracesAsync(body, contentType, cancellationToken).ConfigureAwait(false),
-                OtlpSignalKind.Logs => await collector.AdmitLogsAsync(body, contentType, cancellationToken).ConfigureAwait(false),
-                _ => await collector.AdmitMetricsAsync(body, contentType, cancellationToken).ConfigureAwait(false),
+                OtlpSignalKind.Traces => collector.AdmitTraces(body, contentType),
+                OtlpSignalKind.Logs => collector.AdmitLogs(body, contentType),
+                _ => collector.AdmitMetrics(body, contentType),
             };
             return DashHttp.OtlpAdmission(admission);
         }

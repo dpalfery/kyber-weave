@@ -14,7 +14,7 @@ namespace KyberDash.Application.Tests.Ingest;
 
 /// <summary>
 /// Verifies the scheduler's plugin-captured counter pass and the folder-import switch over fakes:
-/// <see cref="JobSchedulerService.TriggerRefreshAsync"/> and
+/// <see cref="JobSchedulerService.TriggerRefresh"/> and
 /// <see cref="JobSchedulerService.RunMaintenancePass"/> each run the counter pass once before
 /// <see cref="ICanonProjectionService.ProjectAll"/>, the maintenance pass imports folder sources
 /// only when <c>FolderImportScheduled</c> is set, and a paused host skips both file reads while
@@ -32,7 +32,7 @@ public class PluginSessionFileSchedulerTests
         harness.SeedPluginCapture("sess-plug");
         harness.ClearStoreReadLog();
 
-        JobOutcome outcome = await harness.Jobs.TriggerRefreshAsync(TestContext.Current.CancellationToken);
+        JobOutcome outcome = harness.Jobs.TriggerRefresh();
 
         Assert.Equal("succeeded", outcome.Outcome);
         harness.CounterPassVerify(Times.Once(), ["sess-plug"]);
@@ -103,7 +103,7 @@ public class PluginSessionFileSchedulerTests
         harness.SeedPluginCapture("sess-plug");
         harness.Settings.WriteBooleanSetting(SettingsService.JobsPausedKey, true);
 
-        JobOutcome outcome = await harness.Jobs.TriggerRefreshAsync(TestContext.Current.CancellationToken);
+        JobOutcome outcome = harness.Jobs.TriggerRefresh();
 
         Assert.Equal("declined", outcome.Outcome);
         harness.Ingestion.Verify(
@@ -135,7 +135,7 @@ public class PluginSessionFileSchedulerTests
         harness.SeedPluginCapture("sess-plug");
         harness.PluginRows = [new RefreshSourceStatusRow("droid", "sess-plug.jsonl", "failed", 0, "unreadable")];
 
-        JobOutcome outcome = await harness.Jobs.TriggerRefreshAsync(TestContext.Current.CancellationToken);
+        JobOutcome outcome = harness.Jobs.TriggerRefresh();
 
         Assert.Equal("partial", outcome.Outcome);
         Assert.Equal(1, outcome.FailedUnits);

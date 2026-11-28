@@ -186,20 +186,10 @@ public class JobSchedulerService : IJobSchedulerService
     }
 
     /// <inheritdoc />
-    public Task<JobOutcome> TriggerRefreshAsync(CancellationToken cancellationToken = default)
-    {
-        _ = cancellationToken;
-        JobOutcome outcome = RunJob(work: null);
-        return Task.FromResult(outcome);
-    }
+    public JobOutcome TriggerRefresh() => RunJob(work: null);
 
     /// <inheritdoc />
-    public Task<JobOutcome> TriggerImportHistoryAsync(CancellationToken cancellationToken = default)
-    {
-        _ = cancellationToken;
-        JobOutcome outcome = RunJob(work: ImportHistory);
-        return Task.FromResult(outcome);
-    }
+    public JobOutcome TriggerImportHistory() => RunJob(work: ImportHistory);
 
     /// <inheritdoc />
     public void Start()

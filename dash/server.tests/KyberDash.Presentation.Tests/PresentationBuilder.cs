@@ -133,8 +133,8 @@ public class PresentationBuilder
         Settings.Setup(s => s.UpdateSettings(It.IsAny<JsonElement>())).Returns(PresentationTestData.Settings);
 
         Jobs.Setup(j => j.GetStatus()).Returns(PresentationTestData.JobStatus);
-        Jobs.Setup(j => j.TriggerRefreshAsync(It.IsAny<CancellationToken>())).ReturnsAsync(new JobOutcome("succeeded"));
-        Jobs.Setup(j => j.TriggerImportHistoryAsync(It.IsAny<CancellationToken>())).ReturnsAsync(new JobOutcome("succeeded"));
+        Jobs.Setup(j => j.TriggerRefresh()).Returns(new JobOutcome("succeeded"));
+        Jobs.Setup(j => j.TriggerImportHistory()).Returns(new JobOutcome("succeeded"));
 
         Capture
             .Setup(c => c.InstallPlugin(It.IsAny<string>(), It.IsAny<bool>(), It.IsAny<string?>(), It.IsAny<string?>()))

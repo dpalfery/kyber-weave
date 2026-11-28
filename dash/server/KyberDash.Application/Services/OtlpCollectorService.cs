@@ -17,7 +17,7 @@ namespace KyberDash.Application;
 /// so the transport layer stays free of policy. Pausing does not drop data: it flushes what is queued
 /// and refuses new admissions until <see cref="ResumeIngestion"/>.
 /// <para>
-/// Admission only queues; <see cref="FlushPendingAsync"/> is the only writer. Nothing else drives it
+/// Admission only queues; <see cref="FlushPending"/> is the only writer. Nothing else drives it
 /// between a request and shutdown, so a flush runs on <see cref="FlushInterval"/>, and an admission
 /// wakes it at once when it is idle. Without that timer accepted telemetry sat in the queue until
 /// the process exited, invisible to every reader of the store.
@@ -173,38 +173,16 @@ public class OtlpCollectorService : IOtlpCollectorService, IDisposable
     public long MaxBodyBytes => maxBodyBytes;
 
     /// <inheritdoc />
-    public Task<IngestAdmissionResult> AdmitTracesAsync(
-        ReadOnlyMemory<byte> payload,
-        string contentType,
-        CancellationToken cancellationToken = default)
-    {
-        const string Signal = "traces";
-        return Task.Run(() => Admit(payload, contentType, Signal), cancellationToken);
-    }
+    public IngestAdmissionResult AdmitTraces(ReadOnlyMemory<byte> payload, string contentType) =>
+        Admit(payload, contentType, "traces");
 
     /// <inheritdoc />
-    public Task<IngestAdmissionResult> AdmitLogsAsync(
-        ReadOnlyMemory<byte> payload,
-        string contentType,
-        CancellationToken cancellationToken = default)
-    {
-        const string Signal = "logs";
-        return Task.Run(() => Admit(payload, contentType, Signal), cancellationToken);
-    }
+    public IngestAdmissionResult AdmitLogs(ReadOnlyMemory<byte> payload, string contentType) =>
+        Admit(payload, contentType, "logs");
 
     /// <inheritdoc />
-    public Task<IngestAdmissionResult> AdmitMetricsAsync(
-        ReadOnlyMemory<byte> payload,
-        string contentType,
-        CancellationToken cancellationToken = default)
-    {
-        const string Signal = "metrics";
-        return Task.Run(() => Admit(payload, contentType, Signal), cancellationToken);
-    }
-
-    /// <inheritdoc />
-    public Task<int> FlushPendingAsync(CancellationToken cancellationToken = default) =>
-        Task.Run(FlushPending, cancellationToken);
+    public IngestAdmissionResult AdmitMetrics(ReadOnlyMemory<byte> payload, string contentType) =>
+        Admit(payload, contentType, "metrics");
 
     /// <inheritdoc />
     public void PauseIngestion()
@@ -248,7 +226,7 @@ public class OtlpCollectorService : IOtlpCollectorService, IDisposable
     /// <summary>Starts the background flush loop that turns admitted telemetry into store rows.</summary>
     /// <remarks>
     /// Safe to call more than once: the second call is a no-op. A collector used only through
-    /// <see cref="FlushPendingAsync"/> (as the collector's own tests do) works the same with or
+    /// <see cref="FlushPending"/> (as the collector's own tests do) works the same with or
     /// without the loop, because both run the same <see cref="FlushPending"/>.
     /// </remarks>
     public void Start()
@@ -283,7 +261,7 @@ public class OtlpCollectorService : IOtlpCollectorService, IDisposable
         }
 
         // The loop has stopped, so this is the only writer now and the last flush cannot race it.
-        await FlushPendingAsync(CancellationToken.None).ConfigureAwait(false);
+        FlushPending();
         flushWake.Dispose();
         flushShutdown.Dispose();
     }
@@ -341,7 +319,7 @@ public class OtlpCollectorService : IOtlpCollectorService, IDisposable
 
             try
             {
-                await FlushPendingAsync(stopping).ConfigureAwait(false);
+                FlushPending();
             }
             catch (Exception exception) when (exception is not OperationCanceledException)
             {
@@ -459,9 +437,9 @@ public class OtlpCollectorService : IOtlpCollectorService, IDisposable
         }
     }
 
-    /// <summary>Drains the queue into the relational store and raises <see cref="StoreUpdated"/> when anything landed.</summary>
-    /// <returns>Number of telemetry items the flush processed.</returns>
-    private int FlushPending()
+    /// <inheritdoc />
+    /// <remarks>Drains the queue into the relational store and raises <see cref="StoreUpdated"/> when anything landed.</remarks>
+    public int FlushPending()
     {
         int pendingBefore = writer.PendingItems;
         if (pendingBefore == 0)

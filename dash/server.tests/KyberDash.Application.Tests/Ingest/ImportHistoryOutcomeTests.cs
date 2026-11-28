@@ -25,7 +25,7 @@ public class ImportHistoryOutcomeTests
             new RefreshSourceStatusRow("droid", "sess-a", "committed", 3),
             new RefreshSourceStatusRow("droid", "sess-b", "failed", 0, "unreadable"));
 
-        JobOutcome outcome = await harness.Jobs.TriggerImportHistoryAsync(TestContext.Current.CancellationToken);
+        JobOutcome outcome = harness.Jobs.TriggerImportHistory();
 
         Assert.Equal("partial", outcome.Outcome);
         Assert.Equal(1, outcome.FailedUnits);
@@ -40,7 +40,7 @@ public class ImportHistoryOutcomeTests
             new RefreshSourceStatusRow("droid", "sess-a", "committed", 3),
             new RefreshSourceStatusRow("cursor", "sess-c", "skipped", 0));
 
-        JobOutcome outcome = await harness.Jobs.TriggerImportHistoryAsync(TestContext.Current.CancellationToken);
+        JobOutcome outcome = harness.Jobs.TriggerImportHistory();
 
         Assert.Equal("succeeded", outcome.Outcome);
         Assert.Equal(0, outcome.FailedUnits);

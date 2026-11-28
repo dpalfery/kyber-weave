@@ -279,18 +279,18 @@ public class ApplicationParityTests
 
         using JobSchedulerService jobs = new(store, store, projection, ingestion, settings, serverState, options, clock: () => new DateTimeOffset(2026, 11, 15, 0, 0, 0, TimeSpan.Zero));
 
-        JobOutcome idle = await jobs.TriggerRefreshAsync(TestContext.Current.CancellationToken);
+        JobOutcome idle = jobs.TriggerRefresh();
         Assert.Equal("succeeded", idle.Outcome);
         Assert.Equal("idle", jobs.GetStatus().State);
         Assert.NotNull(jobs.GetStatus().LastSuccessAt);
         Assert.Equal("2026-11-15T00:05:00.000Z", jobs.GetStatus().NextDueAt);
 
         settings.WriteBooleanSetting(SettingsService.JobsPausedKey, true);
-        JobOutcome paused = await jobs.TriggerRefreshAsync(TestContext.Current.CancellationToken);
+        JobOutcome paused = jobs.TriggerRefresh();
         Assert.Equal("declined", paused.Outcome);
         Assert.True(jobs.GetStatus().Paused);
 
-        JobOutcome imported = await jobs.TriggerImportHistoryAsync(TestContext.Current.CancellationToken);
+        JobOutcome imported = jobs.TriggerImportHistory();
         Assert.Equal("succeeded", imported.Outcome);
     }
 
@@ -306,7 +306,7 @@ public class ApplicationParityTests
 
         using JobSchedulerService jobs = new(store, store, projection, ingestion, settings, serverState, new DashOptions { StateDirectory = serverState.DefaultStateDirectory });
 
-        JobOutcome outcome = await jobs.TriggerRefreshAsync(TestContext.Current.CancellationToken);
+        JobOutcome outcome = jobs.TriggerRefresh();
 
         Assert.Equal("hosted-elsewhere", outcome.Outcome);
         Assert.True(jobs.GetStatus().HostedElsewhere);
@@ -324,7 +324,7 @@ public class ApplicationParityTests
 
         using JobSchedulerService jobs = new(store, store, projection, ingestion, settings, serverState, new DashOptions { StateDirectory = serverState.DefaultStateDirectory });
 
-        JobOutcome outcome = await jobs.TriggerRefreshAsync(TestContext.Current.CancellationToken);
+        JobOutcome outcome = jobs.TriggerRefresh();
 
         Assert.Equal("failed", outcome.Outcome);
         Assert.Equal("projection exploded", outcome.Reason);
