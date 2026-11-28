@@ -1224,5 +1224,16 @@ public sealed class ArbiterInstallServiceSeamsTests
             bool reviewGates = true,
             IReadOnlyList<string>? standards = null) =>
             throw new InvalidOperationException("A preparation must not scaffold.");
+
+        public Task<ScaffoldResult> ScaffoldAsync(
+            string repoRoot,
+            string? docsRoot = null,
+            string owner = "unassigned",
+            bool force = false,
+            bool kyberStandards = false,
+            bool reviewGates = true,
+            IReadOnlyList<string>? standards = null,
+            CancellationToken cancellationToken = default) =>
+            throw new InvalidOperationException("A preparation must not scaffold.");
     }
 }

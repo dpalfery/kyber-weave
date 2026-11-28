@@ -37,4 +37,20 @@ public sealed class FakeDocsScaffoldingService : IDocsScaffoldingService
         string root = docsRoot ?? Path.Combine(repoRoot, "docs");
         return new ScaffoldResult(root, DocsRootSource.Convention, []);
     }
+
+    /// <inheritdoc />
+    public Task<ScaffoldResult> ScaffoldAsync(
+        string repoRoot,
+        string? docsRoot = null,
+        string owner = "unassigned",
+        bool force = false,
+        bool kyberStandards = false,
+        bool reviewGates = true,
+        IReadOnlyList<string>? standards = null,
+        CancellationToken cancellationToken = default)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        return Task.FromResult(Scaffold(
+            repoRoot, docsRoot, owner, force, kyberStandards, reviewGates, standards));
+    }
 }
