@@ -28,6 +28,31 @@ public sealed class ArbiterTuneService(IArbiterRepositoryLocator locator, IArbit
         ArgumentNullException.ThrowIfNull(report);
 
         string arbiterDirectory = locator.ResolveArbiterDirectory(repositoryPath);
+        return Analyze(arbiterDirectory, thresholds, onlyRule, report);
+    }
+
+    /// <inheritdoc />
+    public async Task<ArbiterTuneReport?> ScoreAsync(
+        string repositoryPath,
+        IReadOnlyList<double> thresholds,
+        string? onlyRule,
+        DiagnosticReport report,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(thresholds);
+        ArgumentNullException.ThrowIfNull(report);
+
+        string arbiterDirectory = await locator.ResolveArbiterDirectoryAsync(repositoryPath, cancellationToken).ConfigureAwait(false);
+        return Analyze(arbiterDirectory, thresholds, onlyRule, report);
+    }
+
+    /// <summary>The tally the two entries share: reads the log under <paramref name="arbiterDirectory"/> and scores the step-1 answers.</summary>
+    private ArbiterTuneReport? Analyze(
+        string arbiterDirectory,
+        IReadOnlyList<double> thresholds,
+        string? onlyRule,
+        DiagnosticReport report)
+    {
         IReadOnlyList<ArbiterDecisionRecord> records;
         IReadOnlyList<ArbiterLedgerEvent> events;
         string? truncationNote;
