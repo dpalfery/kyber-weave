@@ -19,7 +19,7 @@ namespace KyberWeave.Integration.Tests;
 public sealed class ArbiterServeStartupFailureTests
 {
     [Fact]
-    public void Serve_AStartupFailure_ExitsOneWithAMessageOnStderrAndNothingOnStdout()
+    public async Task Serve_AStartupFailure_ExitsOneWithAMessageOnStderrAndNothingOnStdout()
     {
         using TempDirectory repository = new();
 
@@ -37,7 +37,7 @@ public sealed class ArbiterServeStartupFailureTests
         startInfo.ArgumentList.Add(repository.Path);
         startInfo.ArgumentList.Add("-=x");
 
-        ProcessResult result = ProcessRunner.Run(startInfo, string.Empty, TimeSpan.FromSeconds(60));
+        ProcessResult result = await ProcessRunner.RunAsync(startInfo, string.Empty, TimeSpan.FromSeconds(60));
 
         Assert.Equal(1, result.ExitCode);
         Assert.Equal(string.Empty, result.StandardOutput);
@@ -47,7 +47,7 @@ public sealed class ArbiterServeStartupFailureTests
     }
 
     [Fact]
-    public void Serve_ARootThatIsNotADirectory_ExitsOneWithAMessageAndNothingOnStdout()
+    public async Task Serve_ARootThatIsNotADirectory_ExitsOneWithAMessageAndNothingOnStdout()
     {
         using TempDirectory repository = new();
         string missing = Path.Combine(repository.Path, "not-a-directory");
@@ -65,7 +65,7 @@ public sealed class ArbiterServeStartupFailureTests
         startInfo.ArgumentList.Add("--repo-root");
         startInfo.ArgumentList.Add(missing);
 
-        ProcessResult result = ProcessRunner.Run(startInfo, string.Empty, TimeSpan.FromSeconds(60));
+        ProcessResult result = await ProcessRunner.RunAsync(startInfo, string.Empty, TimeSpan.FromSeconds(60));
 
         Assert.Equal(1, result.ExitCode);
         Assert.Equal(string.Empty, result.StandardOutput);

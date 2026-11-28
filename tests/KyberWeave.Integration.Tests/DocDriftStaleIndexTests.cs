@@ -24,9 +24,9 @@ public sealed class DocDriftStaleIndexTests : IDisposable
     public void Dispose() => _temp.Dispose();
 
     [Fact]
-    public void AnIndexMatchingTheCheckoutListsAnUnresolvedReferenceAsDrift()
+    public async Task AnIndexMatchingTheCheckoutListsAnUnresolvedReferenceAsDrift()
     {
-        string root = CreateRepositoryWithIndexedClass("Known");
+        string root = await CreateRepositoryWithIndexedClass("Known");
 
         DiagnosticReport report = Drift(root, "Missing");
 
@@ -35,12 +35,12 @@ public sealed class DocDriftStaleIndexTests : IDisposable
     }
 
     [Fact]
-    public void AnIndexOlderThanASourceFileReportsOneStaleIndexFindingNamingTheFix()
+    public async Task AnIndexOlderThanASourceFileReportsOneStaleIndexFindingNamingTheFix()
     {
-        string root = CreateRepositoryWithIndexedClass("Known");
-        File.WriteAllText(Path.Combine(root, "Added.cs"), "public class Added {}\n");
-        Git(root, "add", "-A");
-        Git(root, "commit", "-q", "-m", "add a class");
+        string root = await CreateRepositoryWithIndexedClass("Known");
+        await File.WriteAllTextAsync(Path.Combine(root, "Added.cs"), "public class Added {}\n");
+        await Git(root, "add", "-A");
+        await Git(root, "commit", "-q", "-m", "add a class");
 
         DiagnosticReport report = Drift(root, "Added", "AlsoAdded");
 
@@ -53,12 +53,12 @@ public sealed class DocDriftStaleIndexTests : IDisposable
     }
 
     [Fact]
-    public void ADocumentationOnlyChangeDoesNotMakeTheIndexStale()
+    public async Task ADocumentationOnlyChangeDoesNotMakeTheIndexStale()
     {
-        string root = CreateRepositoryWithIndexedClass("Known");
-        File.WriteAllText(Path.Combine(root, "NOTES.md"), "notes\n");
-        Git(root, "add", "-A");
-        Git(root, "commit", "-q", "-m", "docs only");
+        string root = await CreateRepositoryWithIndexedClass("Known");
+        await File.WriteAllTextAsync(Path.Combine(root, "NOTES.md"), "notes\n");
+        await Git(root, "add", "-A");
+        await Git(root, "commit", "-q", "-m", "docs only");
 
         DiagnosticReport report = Drift(root, "Missing");
 
@@ -66,11 +66,11 @@ public sealed class DocDriftStaleIndexTests : IDisposable
     }
 
     [Fact]
-    public void AnEditedIndexedFileMakesTheIndexStaleEvenWithoutACommit()
+    public async Task AnEditedIndexedFileMakesTheIndexStaleEvenWithoutACommit()
     {
-        string root = CreateRepositoryWithIndexedClass("Known");
+        string root = await CreateRepositoryWithIndexedClass("Known");
         string source = Path.Combine(root, "Known.cs");
-        File.WriteAllText(source, "public class Renamed {}\n");
+        await File.WriteAllTextAsync(source, "public class Renamed {}\n");
         File.SetLastWriteTimeUtc(source, DateTime.UtcNow.AddMinutes(5));
 
         DiagnosticReport report = Drift(root, "Renamed");
@@ -79,13 +79,13 @@ public sealed class DocDriftStaleIndexTests : IDisposable
     }
 
     [Fact]
-    public void ANewCodeFileInAFolderTheIndexNeverCoveredIsNotStale()
+    public async Task ANewCodeFileInAFolderTheIndexNeverCoveredIsNotStale()
     {
-        string root = CreateRepositoryWithIndexedClass("Known");
+        string root = await CreateRepositoryWithIndexedClass("Known");
         Directory.CreateDirectory(Path.Combine(root, "vendor", "lib"));
-        File.WriteAllText(Path.Combine(root, "vendor", "lib", "Skipped.cs"), "public class Skipped {}\n");
-        Git(root, "add", "-A");
-        Git(root, "commit", "-q", "-m", "vendored code");
+        await File.WriteAllTextAsync(Path.Combine(root, "vendor", "lib", "Skipped.cs"), "public class Skipped {}\n");
+        await Git(root, "add", "-A");
+        await Git(root, "commit", "-q", "-m", "vendored code");
 
         DiagnosticReport report = Drift(root, "Missing");
 
@@ -93,12 +93,12 @@ public sealed class DocDriftStaleIndexTests : IDisposable
     }
 
     [Fact]
-    public void AnIndexWithNothingUnresolvedStaysQuietEvenWhenItLags()
+    public async Task AnIndexWithNothingUnresolvedStaysQuietEvenWhenItLags()
     {
-        string root = CreateRepositoryWithIndexedClass("Known");
-        File.WriteAllText(Path.Combine(root, "Added.cs"), "public class Added {}\n");
-        Git(root, "add", "-A");
-        Git(root, "commit", "-q", "-m", "add a class");
+        string root = await CreateRepositoryWithIndexedClass("Known");
+        await File.WriteAllTextAsync(Path.Combine(root, "Added.cs"), "public class Added {}\n");
+        await Git(root, "add", "-A");
+        await Git(root, "commit", "-q", "-m", "add a class");
 
         DiagnosticReport report = Drift(root, "Known");
 
@@ -137,16 +137,16 @@ public sealed class DocDriftStaleIndexTests : IDisposable
         return new DocDriftLinter(resolver).Validate(set);
     }
 
-    private string CreateRepositoryWithIndexedClass(string name)
+    private async Task<string> CreateRepositoryWithIndexedClass(string name)
     {
         string root = Path.Combine(_temp.Path, "repo");
         Directory.CreateDirectory(root);
-        Git(root, "init", "-q", "-b", "main");
+        await Git(root, "init", "-q", "-b", "main");
         string source = Path.Combine(root, name + ".cs");
-        File.WriteAllText(source, $"public class {name} {{}}\n");
-        Git(root, "add", "-A");
-        Git(root, "commit", "-q", "-m", "init");
-        string commit = Git(root, "rev-parse", "HEAD").Trim();
+        await File.WriteAllTextAsync(source, $"public class {name} {{}}\n");
+        await Git(root, "add", "-A");
+        await Git(root, "commit", "-q", "-m", "init");
+        string commit = (await Git(root, "rev-parse", "HEAD")).Trim();
         long modified = new DateTimeOffset(File.GetLastWriteTimeUtc(source)).ToUnixTimeMilliseconds();
 
         Directory.CreateDirectory(Path.Combine(root, ".codegraph"));
@@ -160,17 +160,17 @@ public sealed class DocDriftStaleIndexTests : IDisposable
             INSERT INTO files VALUES ('{name}.cs', 'h', 'csharp', 10, {modified}.4766, {modified}, 1);
             INSERT INTO project_metadata VALUES ('indexed_at_commit', '{commit}', {modified});
             """;
-        Run("sqlite3", root, [database, sql]);
+        await Run("sqlite3", root, [database, sql]);
         return root;
     }
 
-    private static string Git(string directory, params string[] arguments)
+    private static async Task<string> Git(string directory, params string[] arguments)
     {
         string[] full = ["-c", "user.name=t", "-c", "user.email=t@example.com", .. arguments];
-        return Run("git", directory, full);
+        return await Run("git", directory, full);
     }
 
-    private static string Run(string program, string directory, string[] arguments)
+    private static async Task<string> Run(string program, string directory, string[] arguments)
     {
         ProcessStartInfo startInfo = new(program)
         {
@@ -185,7 +185,7 @@ public sealed class DocDriftStaleIndexTests : IDisposable
         startInfo.Environment["GIT_CONFIG_GLOBAL"] = Path.Combine(directory, ".no-global-gitconfig");
         foreach (string argument in arguments) startInfo.ArgumentList.Add(argument);
 
-        ProcessResult result = ProcessRunner.Run(startInfo, string.Empty, TimeSpan.FromSeconds(60));
+        ProcessResult result = await ProcessRunner.RunAsync(startInfo, string.Empty, TimeSpan.FromSeconds(60));
         Assert.True(result.ExitCode == 0, $"{program} {string.Join(' ', arguments)} failed: {result.StandardError}");
         return result.StandardOutput;
     }

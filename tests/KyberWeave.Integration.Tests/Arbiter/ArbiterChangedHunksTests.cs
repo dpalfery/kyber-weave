@@ -21,7 +21,7 @@ namespace KyberWeave.Integration.Tests.Arbiter;
 /// is asserted as absence, never as an empty list: an empty list reads as "measured, nothing
 /// changed", which is a claim the harness cannot make when the base is unreadable.
 /// </remarks>
-public sealed class ArbiterChangedHunksTests : IDisposable
+public sealed class ArbiterChangedHunksTests : IAsyncLifetime
 {
     private const string ChangedHunks = "review.changed-hunks";
     private const string RenameOnly = "review.rename-only-paths";
@@ -34,17 +34,23 @@ public sealed class ArbiterChangedHunksTests : IDisposable
     private static readonly string[] ExpectedNoCodeChange = new[] { "docs/guide.md", "src/New.cs", "src/Notes.cs" };
     private static readonly int[] ExpectedFindingChangedLines = new[] { 3, 7, 8 };
 
-    private readonly RunStartProbe _probe = RunStartProbe.Create();
+    private RunStartProbe _probe = null!;
     private readonly TempDirectory _home = new();
     private readonly TempDirectory _arbiter = new();
     private readonly TempDirectory _outside = new();
 
-    public void Dispose()
+    public async ValueTask InitializeAsync()
+    {
+        _probe = await RunStartProbe.CreateAsync();
+    }
+
+    public ValueTask DisposeAsync()
     {
         _probe.Dispose();
         _home.Dispose();
         _arbiter.Dispose();
         _outside.Dispose();
+        return ValueTask.CompletedTask;
     }
 
     /// <summary>
@@ -52,13 +58,13 @@ public sealed class ArbiterChangedHunksTests : IDisposable
     /// so a lens can cite the line a change occupies on either side of it.
     /// </summary>
     [Fact]
-    public void ChangedHunksListEveryHunkWithItsOldAndNewRanges()
+    public async Task ChangedHunksListEveryHunkWithItsOldAndNewRanges()
     {
-        CommitFile("src/Service.cs", NumberedLines(10));
+        await CommitFile("src/Service.cs", NumberedLines(10));
         string baseRef = Head();
         Write("src/Service.cs", Edit(NumberedLines(10), (3, "changed 3"), (7, "changed 7"), (8, "changed 8")));
 
-        IReadOnlyList<ChangedHunk>? hunks = RealGitFacts.Create().GetChangedHunks(_probe.Root, baseRef);
+        IReadOnlyList<ChangedHunk>? hunks = await RealGitFacts.Create().GetChangedHunksAsync(_probe.Root, baseRef);
 
         Assert.NotNull(hunks);
         Assert.Equal(
@@ -75,15 +81,15 @@ public sealed class ArbiterChangedHunksTests : IDisposable
     /// which is how git marks the side that has no lines. Hunks are ordered by path.
     /// </summary>
     [Fact]
-    public void PureDeletionAndPureInsertionCarryZeroCountsAndHunksAreOrderedByPath()
+    public async Task PureDeletionAndPureInsertionCarryZeroCountsAndHunksAreOrderedByPath()
     {
-        CommitFile("src/Delete.cs", NumberedLines(10));
-        CommitFile("src/Append.cs", NumberedLines(10));
+        await CommitFile("src/Delete.cs", NumberedLines(10));
+        await CommitFile("src/Append.cs", NumberedLines(10));
         string baseRef = Head();
         Write("src/Delete.cs", NumberedLines(10).Replace("line 5\n", string.Empty, StringComparison.Ordinal));
         Write("src/Append.cs", NumberedLines(10) + "line 11\n");
 
-        IReadOnlyList<ChangedHunk>? hunks = RealGitFacts.Create().GetChangedHunks(_probe.Root, baseRef);
+        IReadOnlyList<ChangedHunk>? hunks = await RealGitFacts.Create().GetChangedHunksAsync(_probe.Root, baseRef);
 
         Assert.NotNull(hunks);
         Assert.Equal(
@@ -101,15 +107,15 @@ public sealed class ArbiterChangedHunksTests : IDisposable
     /// not yet committed would be invisible to it.
     /// </summary>
     [Fact]
-    public void CommittedAndUncommittedChangesAreBothMeasuredAgainstTheWorkingTree()
+    public async Task CommittedAndUncommittedChangesAreBothMeasuredAgainstTheWorkingTree()
     {
-        CommitFile("src/a.cs", NumberedLines(5));
-        CommitFile("src/b.cs", NumberedLines(5));
+        await CommitFile("src/a.cs", NumberedLines(5));
+        await CommitFile("src/b.cs", NumberedLines(5));
         string baseRef = Head();
-        CommitFile("src/a.cs", NumberedLines(5).Replace("line 2\n", "committed 2\n", StringComparison.Ordinal));
+        await CommitFile("src/a.cs", NumberedLines(5).Replace("line 2\n", "committed 2\n", StringComparison.Ordinal));
         Write("src/b.cs", NumberedLines(5).Replace("line 1\n", "dirty 1\n", StringComparison.Ordinal));
 
-        IReadOnlyList<ChangedHunk>? hunks = RealGitFacts.Create().GetChangedHunks(_probe.Root, baseRef);
+        IReadOnlyList<ChangedHunk>? hunks = await RealGitFacts.Create().GetChangedHunksAsync(_probe.Root, baseRef);
 
         Assert.NotNull(hunks);
         Assert.Equal(
@@ -126,13 +132,13 @@ public sealed class ArbiterChangedHunksTests : IDisposable
     /// reported as one hunk covering the whole file, with a zero old side.
     /// </summary>
     [Fact]
-    public void AnUntrackedFileIsOneWholeFileHunk()
+    public async Task AnUntrackedFileIsOneWholeFileHunk()
     {
-        CommitFile("src/Tracked.cs", "class Tracked { }\n");
+        await CommitFile("src/Tracked.cs", "class Tracked { }\n");
         string baseRef = Head();
         Write("docs/New.md", "first\nsecond\nthird\n");
 
-        IReadOnlyList<ChangedHunk>? hunks = RealGitFacts.Create().GetChangedHunks(_probe.Root, baseRef);
+        IReadOnlyList<ChangedHunk>? hunks = await RealGitFacts.Create().GetChangedHunksAsync(_probe.Root, baseRef);
 
         Assert.NotNull(hunks);
         Assert.Equal(new[] { new ChangedHunk("docs/New.md", 0, 0, 1, 3) }, hunks);
@@ -143,15 +149,15 @@ public sealed class ArbiterChangedHunksTests : IDisposable
     /// cut short, because a lens that sees the first hunks and not the rest judges a partial change.
     /// </summary>
     [Fact]
-    public void EveryHunkIsReportedWithoutTruncation()
+    public async Task EveryHunkIsReportedWithoutTruncation()
     {
-        CommitFile("src/Many.cs", NumberedLines(80));
+        await CommitFile("src/Many.cs", NumberedLines(80));
         string baseRef = Head();
         Write(
             "src/Many.cs",
             string.Concat(Enumerable.Range(1, 80).Select(i => i % 2 == 1 ? $"edited {i}\n" : $"line {i}\n")));
 
-        IReadOnlyList<ChangedHunk>? hunks = RealGitFacts.Create().GetChangedHunks(_probe.Root, baseRef);
+        IReadOnlyList<ChangedHunk>? hunks = await RealGitFacts.Create().GetChangedHunksAsync(_probe.Root, baseRef);
 
         Assert.NotNull(hunks);
         Assert.Equal(40, hunks.Count);
@@ -163,12 +169,12 @@ public sealed class ArbiterChangedHunksTests : IDisposable
     /// real change. Reporting it empty would tell a lens the change touched nothing.
     /// </summary>
     [Fact]
-    public void AnUnreadableBaseLeavesTheFactAbsentNotEmpty()
+    public async Task AnUnreadableBaseLeavesTheFactAbsentNotEmpty()
     {
-        CommitFile("src/Service.cs", NumberedLines(3));
+        await CommitFile("src/Service.cs", NumberedLines(3));
         Write("src/Service.cs", NumberedLines(3) + "line 4\n");
 
-        IReadOnlyList<ChangedHunk>? hunks = RealGitFacts.Create().GetChangedHunks(_probe.Root, "refs/heads/no-such-base");
+        IReadOnlyList<ChangedHunk>? hunks = await RealGitFacts.Create().GetChangedHunksAsync(_probe.Root, "refs/heads/no-such-base");
 
         Assert.Null(hunks);
     }
@@ -178,11 +184,11 @@ public sealed class ArbiterChangedHunksTests : IDisposable
     /// rather than becoming an empty list that a rule would read as a measured empty change.
     /// </summary>
     [Fact]
-    public void ACleanCheckoutLeavesTheFactAbsentNotEmpty()
+    public async Task ACleanCheckoutLeavesTheFactAbsentNotEmpty()
     {
-        CommitFile("src/Service.cs", NumberedLines(3));
+        await CommitFile("src/Service.cs", NumberedLines(3));
 
-        IReadOnlyList<ChangedHunk>? hunks = RealGitFacts.Create().GetChangedHunks(_probe.Root, Head());
+        IReadOnlyList<ChangedHunk>? hunks = await RealGitFacts.Create().GetChangedHunksAsync(_probe.Root, Head());
 
         Assert.Null(hunks);
     }
@@ -209,10 +215,10 @@ public sealed class ArbiterChangedHunksTests : IDisposable
     /// list the git helper reports.
     /// </summary>
     [Fact]
-    public void TheHookMeasuresChangedHunksFromTheReviewBase()
+    public async Task TheHookMeasuresChangedHunksFromTheReviewBase()
     {
-        CommitFile("src/Service.cs", NumberedLines(10));
-        SetOriginHead(Head());
+        await CommitFile("src/Service.cs", NumberedLines(10));
+        await SetOriginHead(Head());
         Write("src/Service.cs", Edit(NumberedLines(10), (3, "changed 3")));
 
         ArbiterFactSet facts = Enrich(Declare(ChangedHunks));
@@ -227,11 +233,11 @@ public sealed class ArbiterChangedHunksTests : IDisposable
     /// is listed as rename-only.
     /// </summary>
     [Fact]
-    public void APureRenameIsListedAsRenameOnly()
+    public async Task APureRenameIsListedAsRenameOnly()
     {
-        CommitFile("src/Old.cs", NumberedLines(12));
-        SetOriginHead(Head());
-        _probe.Git("mv", "src/Old.cs", "src/New.cs");
+        await CommitFile("src/Old.cs", NumberedLines(12));
+        await SetOriginHead(Head());
+        await _probe.GitAsync("mv", "src/Old.cs", "src/New.cs");
 
         ArbiterFactSet facts = Enrich(Declare(RenameOnly));
 
@@ -243,11 +249,11 @@ public sealed class ArbiterChangedHunksTests : IDisposable
     /// one would let an edit slip past the no-code-change path.
     /// </summary>
     [Fact]
-    public void ARenameWithAnEditIsNotRenameOnly()
+    public async Task ARenameWithAnEditIsNotRenameOnly()
     {
-        CommitFile("src/Old.cs", NumberedLines(12));
-        SetOriginHead(Head());
-        _probe.Git("mv", "src/Old.cs", "src/New.cs");
+        await CommitFile("src/Old.cs", NumberedLines(12));
+        await SetOriginHead(Head());
+        await _probe.GitAsync("mv", "src/Old.cs", "src/New.cs");
         Write("src/New.cs", NumberedLines(12).Replace("line 6\n", "changed 6\n", StringComparison.Ordinal));
 
         ArbiterFactSet facts = Enrich(Declare(RenameOnly));
@@ -260,11 +266,11 @@ public sealed class ArbiterChangedHunksTests : IDisposable
     /// changed is not, even when the code change sits on a line that also looks like a comment.
     /// </summary>
     [Fact]
-    public void ACommentOnlyChangeIsListedAndACodeChangeIsNot()
+    public async Task ACommentOnlyChangeIsListedAndACodeChangeIsNot()
     {
-        CommitFile("src/Notes.cs", "class Notes { }\n");
-        CommitFile("src/Code.cs", "class Code { int x = 1; }\n");
-        SetOriginHead(Head());
+        await CommitFile("src/Notes.cs", "class Notes { }\n");
+        await CommitFile("src/Code.cs", "class Code { int x = 1; }\n");
+        await SetOriginHead(Head());
         Write("src/Notes.cs", "// added note\nclass Notes { }\n");
         Write("src/Code.cs", "class Code { int x = 2; }\n");
 
@@ -278,15 +284,15 @@ public sealed class ArbiterChangedHunksTests : IDisposable
     /// code change in the same run stays out of it, so a lens never skips a file that changed code.
     /// </summary>
     [Fact]
-    public void NoCodeChangeCombinesCommentOnlyRenameOnlyAndMarkdownPaths()
+    public async Task NoCodeChangeCombinesCommentOnlyRenameOnlyAndMarkdownPaths()
     {
-        CommitFile("src/Notes.cs", "class Notes { }\n");
-        CommitFile("src/Old.cs", NumberedLines(12));
-        CommitFile("src/Code.cs", "class Code { int x = 1; }\n");
-        CommitFile("docs/guide.md", "# Guide\n\nFirst.\n");
-        SetOriginHead(Head());
+        await CommitFile("src/Notes.cs", "class Notes { }\n");
+        await CommitFile("src/Old.cs", NumberedLines(12));
+        await CommitFile("src/Code.cs", "class Code { int x = 1; }\n");
+        await CommitFile("docs/guide.md", "# Guide\n\nFirst.\n");
+        await SetOriginHead(Head());
         Write("src/Notes.cs", "// added note\nclass Notes { }\n");
-        _probe.Git("mv", "src/Old.cs", "src/New.cs");
+        await _probe.GitAsync("mv", "src/Old.cs", "src/New.cs");
         Write("src/Code.cs", "class Code { int x = 2; }\n");
         Write("docs/guide.md", "# Guide\n\nSecond.\n");
 
@@ -302,10 +308,10 @@ public sealed class ArbiterChangedHunksTests : IDisposable
     /// the lines a finding can claim the change touched.
     /// </summary>
     [Fact]
-    public void FindingChangedLinesAreTheNewSideLinesInsideTheHunks()
+    public async Task FindingChangedLinesAreTheNewSideLinesInsideTheHunks()
     {
-        CommitFile("src/Service.cs", NumberedLines(10));
-        SetOriginHead(Head());
+        await CommitFile("src/Service.cs", NumberedLines(10));
+        await SetOriginHead(Head());
         Write("src/Service.cs", Edit(NumberedLines(10), (3, "changed 3"), (7, "changed 7"), (8, "changed 8")));
 
         ArbiterFactSet facts = Enrich(Declare(ChangedHunks, FindingChangedLines).With(
@@ -321,10 +327,10 @@ public sealed class ArbiterChangedHunksTests : IDisposable
     /// the hunks are present.
     /// </summary>
     [Fact]
-    public void FindingChangedLinesStayAbsentWithoutAFindingFile()
+    public async Task FindingChangedLinesStayAbsentWithoutAFindingFile()
     {
-        CommitFile("src/Service.cs", NumberedLines(10));
-        SetOriginHead(Head());
+        await CommitFile("src/Service.cs", NumberedLines(10));
+        await SetOriginHead(Head());
         Write("src/Service.cs", Edit(NumberedLines(10), (3, "changed 3")));
 
         ArbiterFactSet facts = Enrich(Declare(ChangedHunks, FindingChangedLines));
@@ -337,10 +343,10 @@ public sealed class ArbiterChangedHunksTests : IDisposable
     /// finding names a file.
     /// </summary>
     [Fact]
-    public void FindingChangedLinesStayAbsentWithoutHunks()
+    public async Task FindingChangedLinesStayAbsentWithoutHunks()
     {
-        CommitFile("src/Service.cs", NumberedLines(10));
-        SetOriginHead(Head());
+        await CommitFile("src/Service.cs", NumberedLines(10));
+        await SetOriginHead(Head());
 
         ArbiterFactSet facts = Enrich(Declare(ChangedHunks, FindingChangedLines).With(
             "finding.file",
@@ -356,11 +362,11 @@ public sealed class ArbiterChangedHunksTests : IDisposable
     /// and KW-ARB-LENS-002 would then skip every lens for it.
     /// </summary>
     [Fact]
-    public void AShebangOnlyChangeIsNeitherCommentOnlyNorNoCodeChange()
+    public async Task AShebangOnlyChangeIsNeitherCommentOnlyNorNoCodeChange()
     {
-        CommitFile("scripts/build.sh", "#!/bin/sh\necho build\n");
-        CommitFile("docs/guide.md", "# Guide\n\nFirst.\n");
-        SetOriginHead(Head());
+        await CommitFile("scripts/build.sh", "#!/bin/sh\necho build\n");
+        await CommitFile("docs/guide.md", "# Guide\n\nFirst.\n");
+        await SetOriginHead(Head());
         Write("scripts/build.sh", "#!/bin/bash\necho build\n");
         Write("docs/guide.md", "# Guide\n\nSecond.\n");
 
@@ -376,9 +382,9 @@ public sealed class ArbiterChangedHunksTests : IDisposable
     /// change, so the whole fact is absent and no path is classed comment-only or no-code.
     /// </summary>
     [Fact]
-    public void AnUntrackedFileOverOneMebibyteLeavesTheHunksAbsent()
+    public async Task AnUntrackedFileOverOneMebibyteLeavesTheHunksAbsent()
     {
-        CommitFile("src/Service.cs", NumberedLines(3));
+        await CommitFile("src/Service.cs", NumberedLines(3));
         string baseRef = Head();
         Write("src/Service.cs", Edit(NumberedLines(3), (2, "changed 2")));
         Write("data/large.txt", string.Concat(Enumerable.Range(1, 100_000).Select(i => $"line {i}\n")));
@@ -386,7 +392,7 @@ public sealed class ArbiterChangedHunksTests : IDisposable
             new FileInfo(Path.Combine(_probe.Root, "data", "large.txt")).Length > 1024 * 1024,
             "the fixture must exceed the one-mebibyte untracked-file cap.");
 
-        IReadOnlyList<ChangedHunk>? hunks = RealGitFacts.Create().GetChangedHunks(_probe.Root, baseRef);
+        IReadOnlyList<ChangedHunk>? hunks = await RealGitFacts.Create().GetChangedHunksAsync(_probe.Root, baseRef);
 
         Assert.Null(hunks);
     }
@@ -396,14 +402,14 @@ public sealed class ArbiterChangedHunksTests : IDisposable
     /// text would invent hunks that no reviewer can judge, so the whole fact is absent instead.
     /// </summary>
     [Fact]
-    public void ABinaryUntrackedFileLeavesTheHunksAbsent()
+    public async Task ABinaryUntrackedFileLeavesTheHunksAbsent()
     {
-        CommitFile("src/Service.cs", NumberedLines(3));
+        await CommitFile("src/Service.cs", NumberedLines(3));
         string baseRef = Head();
         Write("src/Service.cs", Edit(NumberedLines(3), (2, "changed 2")));
         WriteBytes("assets/logo.dat", [0x89, 0x50, 0x00, 0x47, 0x0D, 0x0A, 0x1A, 0x0A]);
 
-        IReadOnlyList<ChangedHunk>? hunks = RealGitFacts.Create().GetChangedHunks(_probe.Root, baseRef);
+        IReadOnlyList<ChangedHunk>? hunks = await RealGitFacts.Create().GetChangedHunksAsync(_probe.Root, baseRef);
 
         Assert.Null(hunks);
     }
@@ -414,16 +420,16 @@ public sealed class ArbiterChangedHunksTests : IDisposable
     /// the failure to absence, and the test keeps it that way.
     /// </summary>
     [Fact]
-    public void AnUnreadableUntrackedFileLeavesTheHunksAbsent()
+    public async Task AnUnreadableUntrackedFileLeavesTheHunksAbsent()
     {
-        CommitFile("src/Service.cs", NumberedLines(3));
+        await CommitFile("src/Service.cs", NumberedLines(3));
         string baseRef = Head();
         Write("src/Service.cs", Edit(NumberedLines(3), (2, "changed 2")));
         File.CreateSymbolicLink(
             Path.Combine(_probe.Root, "src", "Dangling.cs"),
             Path.Combine(_probe.Root, "src", "missing-target.cs"));
 
-        IReadOnlyList<ChangedHunk>? hunks = RealGitFacts.Create().GetChangedHunks(_probe.Root, baseRef);
+        IReadOnlyList<ChangedHunk>? hunks = await RealGitFacts.Create().GetChangedHunksAsync(_probe.Root, baseRef);
 
         Assert.Null(hunks);
     }
@@ -486,14 +492,14 @@ public sealed class ArbiterChangedHunksTests : IDisposable
     private string Head() =>
         RealGitFacts.Create().GetHead(_probe.Root) ?? throw new InvalidOperationException("the probe repository has no HEAD.");
 
-    private void SetOriginHead(string sha) =>
-        _probe.Git("update-ref", "refs/remotes/origin/HEAD", sha);
+    private async Task SetOriginHead(string sha) =>
+        await _probe.GitAsync("update-ref", "refs/remotes/origin/HEAD", sha);
 
-    private void CommitFile(string relative, string text)
+    private async Task CommitFile(string relative, string text)
     {
         Write(relative, text);
-        _probe.Git("add", "-A");
-        _probe.Git("commit", "-m", $"test: {relative}");
+        await _probe.GitAsync("add", "-A");
+        await _probe.GitAsync("commit", "-m", $"test: {relative}");
     }
 
     private void Write(string relative, string text)

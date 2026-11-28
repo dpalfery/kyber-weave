@@ -51,7 +51,7 @@ public sealed class ReviewGatesRealRustToolchainTests : IDisposable
         ]));
 
         Assert.DoesNotContain(NoGatesForAgent, execution.Output, StringComparison.Ordinal);
-        if (CargoAvailable())
+        if (await CargoAvailable())
         {
             Assert.True(
                 File.Exists(reportPath),
@@ -69,7 +69,7 @@ public sealed class ReviewGatesRealRustToolchainTests : IDisposable
         }
     }
 
-    private static bool CargoAvailable()
+    private static async Task<bool> CargoAvailable()
     {
         try
         {
@@ -83,7 +83,7 @@ public sealed class ReviewGatesRealRustToolchainTests : IDisposable
             startInfo.ArgumentList.Add("--version");
 
             // Bounded: a rustup proxy can stall on a toolchain download, and that stall must not hang the suite.
-            return ProcessRunner.Run(startInfo, string.Empty, TimeSpan.FromSeconds(30)).ExitCode == 0;
+            return (await ProcessRunner.RunAsync(startInfo, string.Empty, TimeSpan.FromSeconds(30))).ExitCode == 0;
         }
         catch (Exception ex) when (ex is Win32Exception or IOException or UnauthorizedAccessException)
         {

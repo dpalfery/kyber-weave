@@ -27,7 +27,7 @@ namespace KyberWeave.Integration.Tests;
 /// silently.
 /// </para>
 /// </remarks>
-public sealed class RunStartResumeTests : IDisposable
+public sealed class RunStartResumeTests : IAsyncLifetime
 {
     private const string Branch = "claude/feat/resume-reader";
 
@@ -43,26 +43,32 @@ public sealed class RunStartResumeTests : IDisposable
     private const string FirstResult = "alpha-result: the reader lists completed tasks.";
     private const string SecondResult = "beta-result: the reader prints each prior report.";
 
-    private readonly RunStartProbe _probe = BranchWithFinishedTasks();
+    private RunStartProbe _probe = null!;
 
-    public void Dispose()
+    public async ValueTask InitializeAsync()
+    {
+        _probe = await BranchWithFinishedTasks();
+    }
+
+    public ValueTask DisposeAsync()
     {
         _probe.Dispose();
+        return ValueTask.CompletedTask;
     }
 
     /// <summary>
     /// A branch carrying two finished tasks, one commit that only mentions a task in a
     /// sentence, and one that quotes a task inside a report. Nothing is uncommitted.
     /// </summary>
-    private static RunStartProbe BranchWithFinishedTasks()
+    private static async Task<RunStartProbe> BranchWithFinishedTasks()
     {
-        RunStartProbe probe = RunStartProbe.Create();
-        probe.Git("switch", "-c", Branch, "origin/main");
+        RunStartProbe probe = await RunStartProbe.CreateAsync();
+        await probe.GitAsync("switch", "-c", Branch, "origin/main");
 
-        Commit(probe, "first.txt", TaskCommit(FirstResult, FirstTask));
-        Commit(probe, "second.txt", TaskCommit(SecondResult, SecondTask));
+        await Commit(probe, "first.txt", TaskCommit(FirstResult, FirstTask));
+        await Commit(probe, "second.txt", TaskCommit(SecondResult, SecondTask));
 
-        Commit(
+        await Commit(
             probe,
             "third.txt",
             $"""
@@ -71,7 +77,7 @@ public sealed class RunStartResumeTests : IDisposable
              This superseded the earlier Task: {MentionedInASentence} note about the reader.
              """);
 
-        Commit(
+        await Commit(
             probe,
             "fourth.txt",
             $"""
@@ -84,16 +90,16 @@ public sealed class RunStartResumeTests : IDisposable
              No task of its own is recorded here.
              """);
 
-        Assert.Equal(string.Empty, probe.GitOutput("status", "--porcelain").Trim());
+        Assert.Equal(string.Empty, (await probe.GitOutputAsync("status", "--porcelain")).Trim());
         return probe;
     }
 
     /// <summary>Writes a file and commits it with <paramref name="message"/>.</summary>
-    private static void Commit(RunStartProbe probe, string fileName, string message)
+    private static async Task Commit(RunStartProbe probe, string fileName, string message)
     {
-        File.WriteAllText(Path.Combine(probe.Root, fileName), message + "\n", Encoding.UTF8);
-        probe.Git("add", "-A");
-        probe.Git("commit", "-m", message);
+        await File.WriteAllTextAsync(Path.Combine(probe.Root, fileName), message + "\n", Encoding.UTF8);
+        await probe.GitAsync("add", "-A");
+        await probe.GitAsync("commit", "-m", message);
     }
 
     /// <summary>A commit message in the shape the execution contract prescribes.</summary>
@@ -111,7 +117,7 @@ public sealed class RunStartResumeTests : IDisposable
     /// that only looks like a task record.
     /// </summary>
     [Fact]
-    public void ResumeListsCompletedTasksAndTheirReportsFromTaskCommitLines()
+    public async Task ResumeListsCompletedTasksAndTheirReportsFromTaskCommitLines()
     {
         ProbeResult result = _probe.RunStart(
             "--harness", "claude", "--type", "feat", "--slug", "resume-reader", "--resume", Branch);
@@ -146,7 +152,7 @@ public sealed class RunStartResumeTests : IDisposable
     /// separate decision recorded in the open todo, so a refusal here is the correct surface.
     /// </summary>
     [Fact]
-    public void APullRequestNumberIsNotAcceptedAsAResumeTarget()
+    public async Task APullRequestNumberIsNotAcceptedAsAResumeTarget()
     {
         ProbeResult result = _probe.RunStart(
             "--harness", "claude", "--type", "feat", "--slug", "resume-reader", "--resume", "412");
@@ -156,7 +162,7 @@ public sealed class RunStartResumeTests : IDisposable
             $"a pull-request number is refused input and must exit 2, not {result.ExitCode}. {result.Output}");
         Assert.Contains("412", result.Output, StringComparison.Ordinal);
         Assert.False(
-            _probe.BranchExists("412"),
+            await _probe.BranchExistsAsync("412"),
             "a refused resume target must create no branch.");
     }
 

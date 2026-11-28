@@ -81,7 +81,7 @@ public sealed class ReleaseTests
     [InlineData("Darwin", "amd64", "osx-x64")]
     [InlineData("Darwin", "arm64", "osx-arm64")]
     [InlineData("Darwin", "aarch64", "osx-arm64")]
-    public void ResolveRidMapsPlatformIdentifierToSupportedRid(
+    public async Task ResolveRidMapsPlatformIdentifierToSupportedRid(
         string unameOs,
         string unameArch,
         string expectedRid)
@@ -92,7 +92,7 @@ public sealed class ReleaseTests
             ". \"" + InstallShPath + "\"; " +
             "kyber_weave_resolve_rid '" + unameOs + "' '" + unameArch + "'");
 
-        ProcessResult result = ProcessRunner.Run(startInfo, string.Empty, TimeSpan.FromSeconds(60));
+        ProcessResult result = await ProcessRunner.RunAsync(startInfo, string.Empty, TimeSpan.FromSeconds(60));
 
         Assert.Equal(0, result.ExitCode);
         Assert.Equal(expectedRid, result.StandardOutput.Trim());
@@ -107,7 +107,7 @@ public sealed class ReleaseTests
     // An RID that has no KyberDash counterpart demonstrates the helper
     // returns it verbatim rather than fabricating a publishable name.
     [InlineData("unknown-rid", "unknown-rid")]
-    public void KyberDashRidReMapsOsxOnlyNodeSeaRid(
+    public async Task KyberDashRidReMapsOsxOnlyNodeSeaRid(
         string kyberWeaveRid,
         string expectedKyberDashRid)
     {
@@ -117,7 +117,7 @@ public sealed class ReleaseTests
             ". \"" + InstallShPath + "\"; " +
             "kyber_weave_kyberdash_rid '" + kyberWeaveRid + "'");
 
-        ProcessResult result = ProcessRunner.Run(startInfo, string.Empty, TimeSpan.FromSeconds(60));
+        ProcessResult result = await ProcessRunner.RunAsync(startInfo, string.Empty, TimeSpan.FromSeconds(60));
 
         Assert.Equal(0, result.ExitCode);
         Assert.Equal(expectedKyberDashRid, result.StandardOutput.Trim());
@@ -151,7 +151,7 @@ public sealed class ReleaseTests
     [InlineData("1.0.0-beta.2", "1.0.0-beta.11", "-1")]
     // A missing field reads as zero.
     [InlineData("1.2", "1.2.0", "0")]
-    public void SemverCompareFollowsSemVerPrecedence(string left, string right, string expected)
+    public async Task SemverCompareFollowsSemVerPrecedence(string left, string right, string expected)
     {
         SkipOnWindows();
 
@@ -159,7 +159,7 @@ public sealed class ReleaseTests
             ". \"" + InstallShPath + "\"; " +
             "kyber_weave_semver_compare '" + left + "' '" + right + "'");
 
-        ProcessResult result = ProcessRunner.Run(startInfo, string.Empty, TimeSpan.FromSeconds(60));
+        ProcessResult result = await ProcessRunner.RunAsync(startInfo, string.Empty, TimeSpan.FromSeconds(60));
 
         Assert.Equal(0, result.ExitCode);
         Assert.Equal(expected, result.StandardOutput.Trim());
@@ -175,14 +175,14 @@ public sealed class ReleaseTests
     [InlineData("0.1.7-rc.2\n0.1.8-rc.1\n", "0.1.8-rc.1")]
     [InlineData("0.1.7-rc.1\n", "0.1.7-rc.1")]
     [InlineData("9.0.0/preview\n0.1.7-rc.13\nlatest\n", "0.1.7-rc.13")]
-    public void HighestVersionPicksSemVerMaximumNotFirstListed(string listed, string expected)
+    public async Task HighestVersionPicksSemVerMaximumNotFirstListed(string listed, string expected)
     {
         SkipOnWindows();
 
         ProcessStartInfo startInfo = CreateShellStartInfo(
             ". \"" + InstallShPath + "\"; kyber_weave_highest_version");
 
-        ProcessResult result = ProcessRunner.Run(startInfo, listed, TimeSpan.FromSeconds(60));
+        ProcessResult result = await ProcessRunner.RunAsync(startInfo, listed, TimeSpan.FromSeconds(60));
 
         Assert.Equal(0, result.ExitCode);
         Assert.Equal(expected, result.StandardOutput.Trim());
@@ -193,7 +193,7 @@ public sealed class ReleaseTests
     /// drafts, stable releases and tags that are not versions must not, wherever they sit.
     /// </summary>
     [Fact]
-    public void NewestPrereleaseReadsEveryPageAndSkipsDraftsAndStableReleases()
+    public async Task NewestPrereleaseReadsEveryPageAndSkipsDraftsAndStableReleases()
     {
         SkipOnWindows();
 
@@ -222,7 +222,7 @@ public sealed class ReleaseTests
             ". \"" + InstallShPath + "\"\n" + stub +
             "\nkyber_weave_newest_prerelease https://api.invalid/releases stub");
 
-        ProcessResult result = ProcessRunner.Run(startInfo, string.Empty, TimeSpan.FromSeconds(60));
+        ProcessResult result = await ProcessRunner.RunAsync(startInfo, string.Empty, TimeSpan.FromSeconds(60));
 
         Assert.Equal(0, result.ExitCode);
         Assert.Equal("0.2.0-rc.1", result.StandardOutput.Trim());
@@ -233,7 +233,7 @@ public sealed class ReleaseTests
     /// answer that would install a lower version than the one the missing page holds.
     /// </summary>
     [Fact]
-    public void NewestPrereleaseFailsWhenALaterPageCannotBeFetched()
+    public async Task NewestPrereleaseFailsWhenALaterPageCannotBeFetched()
     {
         SkipOnWindows();
 
@@ -257,7 +257,7 @@ public sealed class ReleaseTests
             ". \"" + InstallShPath + "\"\n" + stub +
             "\nkyber_weave_newest_prerelease https://api.invalid/releases stub");
 
-        ProcessResult result = ProcessRunner.Run(startInfo, string.Empty, TimeSpan.FromSeconds(60));
+        ProcessResult result = await ProcessRunner.RunAsync(startInfo, string.Empty, TimeSpan.FromSeconds(60));
 
         Assert.NotEqual(0, result.ExitCode);
         Assert.Equal(string.Empty, result.StandardOutput.Trim());
@@ -265,14 +265,14 @@ public sealed class ReleaseTests
 
     /// <summary>Nothing to choose from is a failure, not an empty version.</summary>
     [Fact]
-    public void HighestVersionFailsOnEmptyInput()
+    public async Task HighestVersionFailsOnEmptyInput()
     {
         SkipOnWindows();
 
         ProcessStartInfo startInfo = CreateShellStartInfo(
             ". \"" + InstallShPath + "\"; kyber_weave_highest_version");
 
-        ProcessResult result = ProcessRunner.Run(startInfo, string.Empty, TimeSpan.FromSeconds(60));
+        ProcessResult result = await ProcessRunner.RunAsync(startInfo, string.Empty, TimeSpan.FromSeconds(60));
 
         Assert.NotEqual(0, result.ExitCode);
         Assert.Equal(string.Empty, result.StandardOutput.Trim());
@@ -290,7 +290,7 @@ public sealed class ReleaseTests
     [InlineData("0.1.7", true)]
     [InlineData("0.2.0", true)]
     [InlineData("1.0.0", true)]
-    public void ReleaseHasKyberDashGatesOnThePublishedFloor(string version, bool expected)
+    public async Task ReleaseHasKyberDashGatesOnThePublishedFloor(string version, bool expected)
     {
         SkipOnWindows();
 
@@ -298,13 +298,13 @@ public sealed class ReleaseTests
             ". \"" + InstallShPath + "\"; " +
             "kyber_weave_release_has_kyberdash '" + version + "'");
 
-        ProcessResult result = ProcessRunner.Run(startInfo, string.Empty, TimeSpan.FromSeconds(60));
+        ProcessResult result = await ProcessRunner.RunAsync(startInfo, string.Empty, TimeSpan.FromSeconds(60));
 
         Assert.Equal(expected ? 0 : 1, result.ExitCode);
     }
 
     [Fact]
-    public void KyberDashMinVersionIsTheTagThatFirstPublishedTheAsset()
+    public async Task KyberDashMinVersionIsTheTagThatFirstPublishedTheAsset()
     {
         SkipOnWindows();
 
@@ -314,7 +314,7 @@ public sealed class ReleaseTests
             ". \"" + InstallShPath + "\"; " +
             "printf '%s' \"$KYBERDASH_MIN_VERSION\"");
 
-        ProcessResult result = ProcessRunner.Run(startInfo, string.Empty, TimeSpan.FromSeconds(60));
+        ProcessResult result = await ProcessRunner.RunAsync(startInfo, string.Empty, TimeSpan.FromSeconds(60));
 
         Assert.Equal(0, result.ExitCode);
         Assert.Equal("0.1.7-rc.9", result.StandardOutput.Trim());
@@ -324,7 +324,7 @@ public sealed class ReleaseTests
     [InlineData("openbsd")]
     [InlineData("Plan9")]
     [InlineData("Solaris")]
-    public void ResolveRidRejectsUnsupportedOs(string unsupportedOs)
+    public async Task ResolveRidRejectsUnsupportedOs(string unsupportedOs)
     {
         SkipOnWindows();
 
@@ -332,7 +332,7 @@ public sealed class ReleaseTests
             ". \"" + InstallShPath + "\"; " +
             "kyber_weave_resolve_rid '" + unsupportedOs + "' x86_64");
 
-        ProcessResult result = ProcessRunner.Run(startInfo, string.Empty, TimeSpan.FromSeconds(60));
+        ProcessResult result = await ProcessRunner.RunAsync(startInfo, string.Empty, TimeSpan.FromSeconds(60));
 
         Assert.Equal(2, result.ExitCode);
         Assert.True(string.IsNullOrEmpty(result.StandardOutput.Trim()),
@@ -343,7 +343,7 @@ public sealed class ReleaseTests
     [InlineData("powerpc")]
     [InlineData("sparc")]
     [InlineData("riscv64")]
-    public void ResolveRidRejectsUnsupportedArchitecture(string unsupportedArch)
+    public async Task ResolveRidRejectsUnsupportedArchitecture(string unsupportedArch)
     {
         SkipOnWindows();
 
@@ -351,7 +351,7 @@ public sealed class ReleaseTests
             ". \"" + InstallShPath + "\"; " +
             "kyber_weave_resolve_rid 'Linux' '" + unsupportedArch + "'");
 
-        ProcessResult result = ProcessRunner.Run(startInfo, string.Empty, TimeSpan.FromSeconds(60));
+        ProcessResult result = await ProcessRunner.RunAsync(startInfo, string.Empty, TimeSpan.FromSeconds(60));
 
         Assert.Equal(2, result.ExitCode);
         Assert.True(string.IsNullOrEmpty(result.StandardOutput.Trim()),
@@ -366,7 +366,7 @@ public sealed class ReleaseTests
     // on the network.
 
     [Fact]
-    public void VerifyChecksumAcceptsMatchingHash()
+    public async Task VerifyChecksumAcceptsMatchingHash()
     {
         SkipOnWindows();
 
@@ -380,13 +380,13 @@ public sealed class ReleaseTests
             ". \"" + InstallShPath + "\"; " +
             "kyber_weave_verify_checksum '" + sandbox.SumsPath + "' '" + archive + "'");
 
-        ProcessResult result = ProcessRunner.Run(startInfo, string.Empty, TimeSpan.FromSeconds(60));
+        ProcessResult result = await ProcessRunner.RunAsync(startInfo, string.Empty, TimeSpan.FromSeconds(60));
 
         Assert.Equal(0, result.ExitCode);
     }
 
     [Fact]
-    public void VerifyChecksumRejectsTamperedArchive()
+    public async Task VerifyChecksumRejectsTamperedArchive()
     {
         SkipOnWindows();
 
@@ -397,13 +397,13 @@ public sealed class ReleaseTests
         sandbox.AppendSumsLine(archive, "kyberdash-linux-x64.tar.gz");
         // Tamper after the sums line is written; the helper should detect the
         // divergence and return non-zero.
-        File.AppendAllText(archive, "tampered");
+        await File.AppendAllTextAsync(archive, "tampered");
 
         ProcessStartInfo startInfo = CreateShellStartInfo(
             ". \"" + InstallShPath + "\"; " +
             "kyber_weave_verify_checksum '" + sandbox.SumsPath + "' '" + archive + "'");
 
-        ProcessResult result = ProcessRunner.Run(startInfo, string.Empty, TimeSpan.FromSeconds(60));
+        ProcessResult result = await ProcessRunner.RunAsync(startInfo, string.Empty, TimeSpan.FromSeconds(60));
 
         Assert.Equal(1, result.ExitCode);
         // The helper writes the diff to stderr so a user running the
@@ -412,7 +412,7 @@ public sealed class ReleaseTests
     }
 
     [Fact]
-    public void VerifyChecksumRejectsMissingEntry()
+    public async Task VerifyChecksumRejectsMissingEntry()
     {
         SkipOnWindows();
 
@@ -428,13 +428,13 @@ public sealed class ReleaseTests
             ". \"" + InstallShPath + "\"; " +
             "kyber_weave_verify_checksum '" + sandbox.SumsPath + "' '" + archive + "'");
 
-        ProcessResult result = ProcessRunner.Run(startInfo, string.Empty, TimeSpan.FromSeconds(60));
+        ProcessResult result = await ProcessRunner.RunAsync(startInfo, string.Empty, TimeSpan.FromSeconds(60));
 
         Assert.Equal(2, result.ExitCode);
     }
 
     [Fact]
-    public void VerifyChecksumRejectsMalformedHashLine()
+    public async Task VerifyChecksumRejectsMalformedHashLine()
     {
         SkipOnWindows();
 
@@ -445,20 +445,20 @@ public sealed class ReleaseTests
         // Manifest has a row that names the asset but with a non-hex hash —
         // the awk filter inside the helper must reject it as a structural
         // invariant, not a value mismatch.
-        File.WriteAllText(sandbox.SumsPath, "garbagehash  kyberdash-linux-x64.tar.gz\n");
+        await File.WriteAllTextAsync(sandbox.SumsPath, "garbagehash  kyberdash-linux-x64.tar.gz\n");
 
         ProcessStartInfo startInfo = CreateShellStartInfo(
             ". \"" + InstallShPath + "\"; " +
             "kyber_weave_verify_checksum '" + sandbox.SumsPath + "' '" + archive + "'");
 
-        ProcessResult result = ProcessRunner.Run(startInfo, string.Empty, TimeSpan.FromSeconds(60));
+        ProcessResult result = await ProcessRunner.RunAsync(startInfo, string.Empty, TimeSpan.FromSeconds(60));
 
         Assert.Equal(2, result.ExitCode);
     }
 
     /// <summary>Checksum verification reads only this asset's line, ignoring other assets' hashes in the sums file.</summary>
     [Fact]
-    public void VerifyChecksumIgnoresOtherAssetsHashesWhenBaselineMatches()
+    public async Task VerifyChecksumIgnoresOtherAssetsHashesWhenBaselineMatches()
     {
         SkipOnWindows();
 
@@ -474,7 +474,7 @@ public sealed class ReleaseTests
         // one.
         string correctHash = Sha256(archive);
         string wrongHash = Sha256(otherArchive);
-        File.WriteAllText(sandbox.SumsPath,
+        await File.WriteAllTextAsync(sandbox.SumsPath,
             wrongHash + "  kyberdash-linux-arm64.tar.gz\n" +
             correctHash + "  kyberdash-linux-x64.tar.gz\n");
 
@@ -482,7 +482,7 @@ public sealed class ReleaseTests
             ". \"" + InstallShPath + "\"; " +
             "kyber_weave_verify_checksum '" + sandbox.SumsPath + "' '" + archive + "'");
 
-        ProcessResult result = ProcessRunner.Run(startInfo, string.Empty, TimeSpan.FromSeconds(60));
+        ProcessResult result = await ProcessRunner.RunAsync(startInfo, string.Empty, TimeSpan.FromSeconds(60));
 
         Assert.Equal(0, result.ExitCode);
     }
@@ -1176,7 +1176,7 @@ public sealed class ReleaseTests
     /// SBOMs, and the aggregate SBOM.
     /// </summary>
     [Fact]
-    public void VerifyReleaseChecksumsListModeOutputsAssetNames()
+    public async Task VerifyReleaseChecksumsListModeOutputsAssetNames()
     {
         SkipOnWindows();
 
@@ -1196,7 +1196,7 @@ public sealed class ReleaseTests
         startInfo.ArgumentList.Add(sandbox.Root);
         startInfo.ArgumentList.Add(version);
 
-        ProcessResult result = ProcessRunner.Run(startInfo, string.Empty, TimeSpan.FromSeconds(60));
+        ProcessResult result = await ProcessRunner.RunAsync(startInfo, string.Empty, TimeSpan.FromSeconds(60));
 
         Assert.Equal(0, result.ExitCode);
 
@@ -1228,7 +1228,7 @@ public sealed class ReleaseTests
     /// SBOM keeps its versioned name.
     /// </summary>
     [Fact]
-    public void VerifyReleaseChecksumsListModeEmitsEveryPerArtifactSbomName()
+    public async Task VerifyReleaseChecksumsListModeEmitsEveryPerArtifactSbomName()
     {
         SkipOnWindows();
 
@@ -1248,7 +1248,7 @@ public sealed class ReleaseTests
         startInfo.ArgumentList.Add(sandbox.Root);
         startInfo.ArgumentList.Add(version);
 
-        ProcessResult result = ProcessRunner.Run(startInfo, string.Empty, TimeSpan.FromSeconds(60));
+        ProcessResult result = await ProcessRunner.RunAsync(startInfo, string.Empty, TimeSpan.FromSeconds(60));
 
         Assert.Equal(0, result.ExitCode);
 
@@ -1296,7 +1296,7 @@ public sealed class ReleaseTests
     /// missing SBOM, and write no manifest.
     /// </remarks>
     [Fact]
-    public void VerifyReleaseChecksumsRejectsMissingPerArtifactSbom()
+    public async Task VerifyReleaseChecksumsRejectsMissingPerArtifactSbom()
     {
         SkipOnWindows();
 
@@ -1327,7 +1327,7 @@ public sealed class ReleaseTests
         startInfo.ArgumentList.Add(sandbox.Root);
         startInfo.ArgumentList.Add(version);
 
-        ProcessResult result = ProcessRunner.Run(startInfo, string.Empty, TimeSpan.FromSeconds(60));
+        ProcessResult result = await ProcessRunner.RunAsync(startInfo, string.Empty, TimeSpan.FromSeconds(60));
 
         Assert.NotEqual(0, result.ExitCode);
         Assert.Contains("missing release asset", result.StandardError, StringComparison.Ordinal);
@@ -1448,7 +1448,7 @@ public sealed class ReleaseTests
     /// and no-argument calls with the usage error, not an unbound variable error.
     /// </summary>
     [Fact]
-    public void VerifyReleaseChecksumsRejectsShortArgumentCalls()
+    public async Task VerifyReleaseChecksumsRejectsShortArgumentCalls()
     {
         SkipOnWindows();
 
@@ -1467,7 +1467,7 @@ public sealed class ReleaseTests
         startInfo.ArgumentList.Add("--list");
         startInfo.ArgumentList.Add(sandbox.Root);
 
-        ProcessResult result = ProcessRunner.Run(startInfo, string.Empty, TimeSpan.FromSeconds(60));
+        ProcessResult result = await ProcessRunner.RunAsync(startInfo, string.Empty, TimeSpan.FromSeconds(60));
 
         Assert.NotEqual(0, result.ExitCode);
         Assert.Contains("usage:", result.StandardError, StringComparison.Ordinal);
@@ -1484,7 +1484,7 @@ public sealed class ReleaseTests
         startInfo2.ArgumentList.Add(
             Path.Combine(Corpus.Root, "scripts", "verify-release-checksums.sh"));
 
-        ProcessResult result2 = ProcessRunner.Run(startInfo2, string.Empty, TimeSpan.FromSeconds(60));
+        ProcessResult result2 = await ProcessRunner.RunAsync(startInfo2, string.Empty, TimeSpan.FromSeconds(60));
 
         Assert.NotEqual(0, result2.ExitCode);
         Assert.Contains("usage:", result2.StandardError, StringComparison.Ordinal);
@@ -1558,7 +1558,7 @@ public sealed class ReleaseTests
     /// The script must exit 0 and create a valid SHA256SUMS.txt.
     /// </summary>
     [Fact]
-    public void VerifyReleaseChecksumsAcceptsCompleteFixture()
+    public async Task VerifyReleaseChecksumsAcceptsCompleteFixture()
     {
         SkipOnWindows();
 
@@ -1584,13 +1584,13 @@ public sealed class ReleaseTests
         startInfo.ArgumentList.Add(sandbox.Root);
         startInfo.ArgumentList.Add(version);
 
-        ProcessResult result = ProcessRunner.Run(startInfo, string.Empty, TimeSpan.FromSeconds(60));
+        ProcessResult result = await ProcessRunner.RunAsync(startInfo, string.Empty, TimeSpan.FromSeconds(60));
 
         Assert.Equal(0, result.ExitCode);
         Assert.True(File.Exists(Path.Combine(sandbox.Root, "SHA256SUMS.txt")));
 
         // The manifest must have 51 lines (one per asset).
-        string manifest = File.ReadAllText(Path.Combine(sandbox.Root, "SHA256SUMS.txt"));
+        string manifest = await File.ReadAllTextAsync(Path.Combine(sandbox.Root, "SHA256SUMS.txt"));
         string[] manifestLines = manifest.Split('\n', StringSplitOptions.RemoveEmptyEntries);
         Assert.Equal(51, manifestLines.Length);
 
@@ -1607,7 +1607,7 @@ public sealed class ReleaseTests
     /// error diagnostic naming the missing file.
     /// </summary>
     [Fact]
-    public void VerifyReleaseChecksumsRejectsMissingAsset()
+    public async Task VerifyReleaseChecksumsRejectsMissingAsset()
     {
         SkipOnWindows();
 
@@ -1635,7 +1635,7 @@ public sealed class ReleaseTests
         startInfo.ArgumentList.Add(sandbox.Root);
         startInfo.ArgumentList.Add(version);
 
-        ProcessResult result = ProcessRunner.Run(startInfo, string.Empty, TimeSpan.FromSeconds(60));
+        ProcessResult result = await ProcessRunner.RunAsync(startInfo, string.Empty, TimeSpan.FromSeconds(60));
 
         Assert.NotEqual(0, result.ExitCode);
         Assert.Contains("missing release asset", result.StandardError, StringComparison.Ordinal);
@@ -1654,7 +1654,7 @@ public sealed class ReleaseTests
     /// above removes whichever asset happens to be last in the list.
     /// </remarks>
     [Fact]
-    public void VerifyReleaseChecksumsRejectsAMissingSbom()
+    public async Task VerifyReleaseChecksumsRejectsAMissingSbom()
     {
         SkipOnWindows();
 
@@ -1685,7 +1685,7 @@ public sealed class ReleaseTests
         startInfo.ArgumentList.Add(sandbox.Root);
         startInfo.ArgumentList.Add(version);
 
-        ProcessResult result = ProcessRunner.Run(startInfo, string.Empty, TimeSpan.FromSeconds(60));
+        ProcessResult result = await ProcessRunner.RunAsync(startInfo, string.Empty, TimeSpan.FromSeconds(60));
 
         Assert.NotEqual(0, result.ExitCode);
         Assert.Contains("missing release asset", result.StandardError, StringComparison.Ordinal);
@@ -1698,7 +1698,7 @@ public sealed class ReleaseTests
     /// error diagnostic naming the extra file.
     /// </summary>
     [Fact]
-    public void VerifyReleaseChecksumsRejectsExtraAsset()
+    public async Task VerifyReleaseChecksumsRejectsExtraAsset()
     {
         SkipOnWindows();
 
@@ -1727,7 +1727,7 @@ public sealed class ReleaseTests
         startInfo.ArgumentList.Add(sandbox.Root);
         startInfo.ArgumentList.Add(version);
 
-        ProcessResult result = ProcessRunner.Run(startInfo, string.Empty, TimeSpan.FromSeconds(60));
+        ProcessResult result = await ProcessRunner.RunAsync(startInfo, string.Empty, TimeSpan.FromSeconds(60));
 
         Assert.NotEqual(0, result.ExitCode);
         Assert.Contains("unexpected release asset", result.StandardError, StringComparison.Ordinal);
@@ -1741,7 +1741,7 @@ public sealed class ReleaseTests
     /// must not contain a line for itself, and the warning must be in stderr.
     /// </summary>
     [Fact]
-    public void VerifyReleaseChecksumsDeletesStaleManifestWithWarning()
+    public async Task VerifyReleaseChecksumsDeletesStaleManifestWithWarning()
     {
         SkipOnWindows();
 
@@ -1756,7 +1756,7 @@ public sealed class ReleaseTests
         }
 
         // Write a stale SHA256SUMS.txt.
-        File.WriteAllText(
+        await File.WriteAllTextAsync(
             Path.Combine(sandbox.Root, "SHA256SUMS.txt"),
             "0000000000000000000000000000000000000000000000000000000000000000  kyber-weave-linux-x64.tar.gz\n");
 
@@ -1772,7 +1772,7 @@ public sealed class ReleaseTests
         startInfo.ArgumentList.Add(sandbox.Root);
         startInfo.ArgumentList.Add(version);
 
-        ProcessResult result = ProcessRunner.Run(startInfo, string.Empty, TimeSpan.FromSeconds(60));
+        ProcessResult result = await ProcessRunner.RunAsync(startInfo, string.Empty, TimeSpan.FromSeconds(60));
 
         Assert.Equal(0, result.ExitCode);
 
@@ -1780,7 +1780,7 @@ public sealed class ReleaseTests
         Assert.Contains("::warning::discarding stale inbound SHA256SUMS.txt", result.StandardError, StringComparison.Ordinal);
 
         // The manifest must have been recomputed.
-        string manifest = File.ReadAllText(Path.Combine(sandbox.Root, "SHA256SUMS.txt"));
+        string manifest = await File.ReadAllTextAsync(Path.Combine(sandbox.Root, "SHA256SUMS.txt"));
 
         // Must not contain the stale hash.
         Assert.DoesNotContain("0000000000000000000000000000000000000000000000000000000000000000", manifest, StringComparison.Ordinal);
@@ -1794,7 +1794,7 @@ public sealed class ReleaseTests
     /// it as an unexpected asset.
     /// </summary>
     [Fact]
-    public void VerifyReleaseChecksumsRejectsHiddenFiles()
+    public async Task VerifyReleaseChecksumsRejectsHiddenFiles()
     {
         SkipOnWindows();
 
@@ -1823,7 +1823,7 @@ public sealed class ReleaseTests
         startInfo.ArgumentList.Add(sandbox.Root);
         startInfo.ArgumentList.Add(version);
 
-        ProcessResult result = ProcessRunner.Run(startInfo, string.Empty, TimeSpan.FromSeconds(60));
+        ProcessResult result = await ProcessRunner.RunAsync(startInfo, string.Empty, TimeSpan.FromSeconds(60));
 
         Assert.NotEqual(0, result.ExitCode);
         Assert.Contains(".hidden-file", result.StandardError, StringComparison.Ordinal);
@@ -1838,7 +1838,7 @@ public sealed class ReleaseTests
     /// /bin/bash 3.2). Newer bash passes regardless.
     /// </summary>
     [Fact]
-    public void VerifyReleaseChecksumsReportsEveryAssetForEmptyDirectory()
+    public async Task VerifyReleaseChecksumsReportsEveryAssetForEmptyDirectory()
     {
         SkipOnWindows();
 
@@ -1857,7 +1857,7 @@ public sealed class ReleaseTests
         startInfo.ArgumentList.Add(sandbox.Root);
         startInfo.ArgumentList.Add(version);
 
-        ProcessResult result = ProcessRunner.Run(startInfo, string.Empty, TimeSpan.FromSeconds(60));
+        ProcessResult result = await ProcessRunner.RunAsync(startInfo, string.Empty, TimeSpan.FromSeconds(60));
 
         // Script must exit non-zero when all assets are missing.
         Assert.NotEqual(0, result.ExitCode);
@@ -1887,7 +1887,7 @@ public sealed class ReleaseTests
     /// relative path, mirroring the release.yml invocation form.
     /// </summary>
     [Fact]
-    public void VerifyReleaseChecksumsWorksWithRelativeAssetDirectoryPath()
+    public async Task VerifyReleaseChecksumsWorksWithRelativeAssetDirectoryPath()
     {
         SkipOnWindows();
 
@@ -1920,7 +1920,7 @@ public sealed class ReleaseTests
         startInfo.ArgumentList.Add("release-assets");  // Relative path, as release.yml does.
         startInfo.ArgumentList.Add(version);
 
-        ProcessResult result = ProcessRunner.Run(startInfo, string.Empty, TimeSpan.FromSeconds(60));
+        ProcessResult result = await ProcessRunner.RunAsync(startInfo, string.Empty, TimeSpan.FromSeconds(60));
 
         Assert.Equal(0, result.ExitCode);
         Assert.True(File.Exists(Path.Combine(releaseDirPath, "SHA256SUMS.txt")));
@@ -1935,7 +1935,7 @@ public sealed class ReleaseTests
     /// Asserts that the chmod 644 step in the script runs and produces the correct permissions.
     /// </summary>
     [Fact]
-    public void VerifyReleaseChecksumsCreatesManifestWithCorrectPermissions()
+    public async Task VerifyReleaseChecksumsCreatesManifestWithCorrectPermissions()
     {
         SkipOnWindows();
 
@@ -1961,7 +1961,7 @@ public sealed class ReleaseTests
         startInfo.ArgumentList.Add(sandbox.Root);
         startInfo.ArgumentList.Add(version);
 
-        ProcessResult result = ProcessRunner.Run(startInfo, string.Empty, TimeSpan.FromSeconds(60));
+        ProcessResult result = await ProcessRunner.RunAsync(startInfo, string.Empty, TimeSpan.FromSeconds(60));
 
         Assert.Equal(0, result.ExitCode);
 
@@ -1985,7 +1985,7 @@ public sealed class ReleaseTests
     /// fails during hashing to verify the trap runs on all exit paths.
     /// </summary>
     [Fact]
-    public void VerifyReleaseChecksumsTrapCleansUpTempFileOnFailureAfterMktemp()
+    public async Task VerifyReleaseChecksumsTrapCleansUpTempFileOnFailureAfterMktemp()
     {
         SkipOnWindows();
 
@@ -2005,7 +2005,7 @@ public sealed class ReleaseTests
         try
         {
             string sha256sumShim = Path.Combine(shimDir, "sha256sum");
-            File.WriteAllText(sha256sumShim, "#!/bin/sh\nexit 3\n");
+            await File.WriteAllTextAsync(sha256sumShim, "#!/bin/sh\nexit 3\n");
             if (!OperatingSystem.IsWindows())
             {
                 File.SetUnixFileMode(sha256sumShim, UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute);
@@ -2026,7 +2026,7 @@ public sealed class ReleaseTests
             startInfo.ArgumentList.Add(sandbox.Root);
             startInfo.ArgumentList.Add(version);
 
-            ProcessResult result = ProcessRunner.Run(startInfo, string.Empty, TimeSpan.FromSeconds(60));
+            ProcessResult result = await ProcessRunner.RunAsync(startInfo, string.Empty, TimeSpan.FromSeconds(60));
 
             // Script must exit non-zero when the hash command fails.
             Assert.NotEqual(0, result.ExitCode);
@@ -2067,7 +2067,7 @@ public sealed class ReleaseTests
     /// or required tools are unavailable.
     /// </summary>
     [Fact]
-    public void VerifyReleaseChecksumsUsesShaSumFallbackWhenSha256sumUnavailable()
+    public async Task VerifyReleaseChecksumsUsesShaSumFallbackWhenSha256sumUnavailable()
     {
         SkipOnWindows();
 
@@ -2087,7 +2087,7 @@ public sealed class ReleaseTests
             };
             resolveInfo.ArgumentList.Add("-c");
             resolveInfo.ArgumentList.Add("command -v " + tool);
-            ProcessResult resolveResult = ProcessRunner.Run(resolveInfo, string.Empty, TimeSpan.FromSeconds(60));
+            ProcessResult resolveResult = await ProcessRunner.RunAsync(resolveInfo, string.Empty, TimeSpan.FromSeconds(60));
 
             if (resolveResult.ExitCode != 0)
             {
@@ -2119,11 +2119,11 @@ public sealed class ReleaseTests
             Path.Combine(Corpus.Root, "scripts", "verify-release-checksums.sh"));
         normalInfo.ArgumentList.Add(sandbox.Root);
         normalInfo.ArgumentList.Add(version);
-        ProcessResult normalResult = ProcessRunner.Run(normalInfo, string.Empty, TimeSpan.FromSeconds(60));
+        ProcessResult normalResult = await ProcessRunner.RunAsync(normalInfo, string.Empty, TimeSpan.FromSeconds(60));
         Assert.Equal(0, normalResult.ExitCode);
 
         string manifestPath = Path.Combine(sandbox.Root, "SHA256SUMS.txt");
-        string baselineManifest = File.ReadAllText(manifestPath);
+        string baselineManifest = await File.ReadAllTextAsync(manifestPath);
 
         // Create a hermetic bin directory with symlinks only to required tools (no sha256sum).
         string hermBinDir = Directory.CreateTempSubdirectory("kyber-weave-fallback-test-bin-").FullName;
@@ -2167,7 +2167,7 @@ public sealed class ReleaseTests
                 Path.Combine(Corpus.Root, "scripts", "verify-release-checksums.sh"));
             fallbackInfo.ArgumentList.Add(sandbox.Root);
             fallbackInfo.ArgumentList.Add(version);
-            ProcessResult fallbackResult = ProcessRunner.Run(fallbackInfo, string.Empty, TimeSpan.FromSeconds(60));
+            ProcessResult fallbackResult = await ProcessRunner.RunAsync(fallbackInfo, string.Empty, TimeSpan.FromSeconds(60));
 
             // Verify sha256sum is not available in the hermetic PATH.
             ProcessStartInfo verifySha256sumAbsent = new("/bin/bash")
@@ -2180,7 +2180,7 @@ public sealed class ReleaseTests
             verifySha256sumAbsent.EnvironmentVariables["PATH"] = hermBinDir;
             verifySha256sumAbsent.ArgumentList.Add("-c");
             verifySha256sumAbsent.ArgumentList.Add("command -v sha256sum >/dev/null 2>&1");
-            ProcessResult verifySha256Result = ProcessRunner.Run(verifySha256sumAbsent, string.Empty, TimeSpan.FromSeconds(60));
+            ProcessResult verifySha256Result = await ProcessRunner.RunAsync(verifySha256sumAbsent, string.Empty, TimeSpan.FromSeconds(60));
             Assert.NotEqual(0, verifySha256Result.ExitCode);
 
             // Verify shasum IS available in the hermetic PATH.
@@ -2194,12 +2194,12 @@ public sealed class ReleaseTests
             verifyShasumPresent.EnvironmentVariables["PATH"] = hermBinDir;
             verifyShasumPresent.ArgumentList.Add("-c");
             verifyShasumPresent.ArgumentList.Add("command -v shasum >/dev/null 2>&1");
-            ProcessResult verifyShasumResult = ProcessRunner.Run(verifyShasumPresent, string.Empty, TimeSpan.FromSeconds(60));
+            ProcessResult verifyShasumResult = await ProcessRunner.RunAsync(verifyShasumPresent, string.Empty, TimeSpan.FromSeconds(60));
             Assert.Equal(0, verifyShasumResult.ExitCode);
 
             Assert.Equal(0, fallbackResult.ExitCode);
 
-            string fallbackManifest = File.ReadAllText(manifestPath);
+            string fallbackManifest = await File.ReadAllTextAsync(manifestPath);
 
             // Manifest bytes must be identical (both paths produce the same hash output in the same format).
             Assert.Equal(baselineManifest, fallbackManifest);
@@ -2233,7 +2233,7 @@ public sealed class ReleaseTests
     /// ships — the flag installed nothing.
     /// </summary>
     [Fact]
-    public void WithMenubarInvokesTheKyberdashBinaryWithForce()
+    public async Task WithMenubarInvokesTheKyberdashBinaryWithForce()
     {
         SkipOnWindows();
 
@@ -2247,10 +2247,10 @@ public sealed class ReleaseTests
             ". \"" + InstallShPath + "\"; " +
             "kyber_weave_run_menubar '" + Path.GetDirectoryName(recorder) + "'");
 
-        ProcessResult result = ProcessRunner.Run(startInfo, string.Empty, TimeSpan.FromSeconds(60));
+        ProcessResult result = await ProcessRunner.RunAsync(startInfo, string.Empty, TimeSpan.FromSeconds(60));
 
         Assert.Equal(0, result.ExitCode);
-        string[] argv = File.ReadAllLines(
+        string[] argv = await File.ReadAllLinesAsync(
             Path.Combine(Path.GetDirectoryName(recorder)!, "argv.txt"));
         Assert.Equal(ExpectedMenubarArgv, argv);
     }
@@ -2260,7 +2260,7 @@ public sealed class ReleaseTests
     /// path, not two arguments.
     /// </summary>
     [Fact]
-    public void WithMenubarQuotesAnInstallDirectoryContainingASpace()
+    public async Task WithMenubarQuotesAnInstallDirectoryContainingASpace()
     {
         SkipOnWindows();
 
@@ -2273,12 +2273,12 @@ public sealed class ReleaseTests
             ". \"" + InstallShPath + "\"; " +
             "kyber_weave_run_menubar \"" + Path.GetDirectoryName(recorder) + "\"");
 
-        ProcessResult result = ProcessRunner.Run(startInfo, string.Empty, TimeSpan.FromSeconds(60));
+        ProcessResult result = await ProcessRunner.RunAsync(startInfo, string.Empty, TimeSpan.FromSeconds(60));
 
         Assert.Equal(0, result.ExitCode);
         Assert.Equal(
             ExpectedMenubarArgv,
-            File.ReadAllLines(Path.Combine(Path.GetDirectoryName(recorder)!, "argv.txt")));
+            await File.ReadAllLinesAsync(Path.Combine(Path.GetDirectoryName(recorder)!, "argv.txt")));
     }
 
     /// <summary>
@@ -2291,7 +2291,7 @@ public sealed class ReleaseTests
     [InlineData("1", "", 0)]
     [InlineData("", "1", 0)]
     [InlineData("", "", 0)]
-    public void WithMenubarConflictsWithNoKyberdash(
+    public async Task WithMenubarConflictsWithNoKyberdash(
         string withMenubar,
         string noKyberdash,
         int expectedExitCode)
@@ -2302,7 +2302,7 @@ public sealed class ReleaseTests
             ". \"" + InstallShPath + "\"; " +
             "kyber_weave_menubar_conflict '" + withMenubar + "' '" + noKyberdash + "'");
 
-        ProcessResult result = ProcessRunner.Run(startInfo, string.Empty, TimeSpan.FromSeconds(60));
+        ProcessResult result = await ProcessRunner.RunAsync(startInfo, string.Empty, TimeSpan.FromSeconds(60));
 
         Assert.Equal(expectedExitCode, result.ExitCode);
         if (expectedExitCode != 0)
@@ -2368,14 +2368,14 @@ public sealed class ReleaseTests
     /// <c>fetch</c> would have written; a refusal leaves it absent.
     /// </summary>
     [Fact]
-    public void ReleaseOriginUnsetRefusesPlainHttpAndWritesNoFile()
+    public async Task ReleaseOriginUnsetRefusesPlainHttpAndWritesNoFile()
     {
         SkipOnWindows();
 
         using Sandbox sandbox = new();
         string destination = Path.Combine(sandbox.Root, "download");
         string log = Path.Combine(sandbox.Root, "curl-args");
-        ProcessResult result = InvokeFetch(
+        ProcessResult result = await InvokeFetchAsync(
             null,
             "http://127.0.0.1/dpalfery/kyber-weave/releases/download/v0.1.0/SHA256SUMS.txt",
             destination,
@@ -2410,7 +2410,7 @@ public sealed class ReleaseTests
     [InlineData("https://localhost:9", "=https")]
     [InlineData("https://[::1]", "=https")]
     [InlineData("https://[::1]:443", "=https")]
-    public void ReleaseOriginAcceptsLoopbackHttpOrHttps(string origin, string proto)
+    public async Task ReleaseOriginAcceptsLoopbackHttpOrHttps(string origin, string proto)
     {
         SkipOnWindows();
 
@@ -2418,7 +2418,7 @@ public sealed class ReleaseTests
         string destination = Path.Combine(sandbox.Root, "download");
         string log = Path.Combine(sandbox.Root, "curl-args");
         string url = SumsUrl(origin);
-        ProcessResult result = InvokeFetch(
+        ProcessResult result = await InvokeFetchAsync(
             origin,
             url,
             destination,
@@ -2472,7 +2472,7 @@ public sealed class ReleaseTests
     [InlineData("http://127.0.0.1:", "")]
     [InlineData("http://127.0.0.1:9", "http://example.com/outside")]
     [InlineData("https://example.com", "http://127.0.0.1/dpalfery/kyber-weave/releases/download/v0.1.0/SHA256SUMS.txt")]
-    public void ReleaseOriginRefusesNonLoopbackUserinfoAndForeignHosts(string origin, string explicitTarget)
+    public async Task ReleaseOriginRefusesNonLoopbackUserinfoAndForeignHosts(string origin, string explicitTarget)
     {
         SkipOnWindows();
 
@@ -2480,7 +2480,7 @@ public sealed class ReleaseTests
         string destination = Path.Combine(sandbox.Root, "download");
         string log = Path.Combine(sandbox.Root, "curl-args");
         string url = explicitTarget.Length == 0 ? SumsUrl(origin) : explicitTarget;
-        ProcessResult result = InvokeFetch(
+        ProcessResult result = await InvokeFetchAsync(
             origin,
             url,
             destination,
@@ -2499,7 +2499,7 @@ public sealed class ReleaseTests
     /// installer would otherwise select wget and then must stop before it runs.
     /// </summary>
     [Fact]
-    public void ReleaseOriginHttpRefusesWget()
+    public async Task ReleaseOriginHttpRefusesWget()
     {
         SkipOnWindows();
 
@@ -2507,11 +2507,11 @@ public sealed class ReleaseTests
         string destination = Path.Combine(sandbox.Root, "download");
         string log = Path.Combine(sandbox.Root, "wget-args");
         const string origin = "http://127.0.0.1:9";
-        ProcessResult result = InvokeFetch(
+        ProcessResult result = await InvokeFetchAsync(
             origin,
             SumsUrl(origin),
             destination,
-            IsolatedWgetDirectory(sandbox, log),
+            await IsolatedWgetDirectoryAsync(sandbox, log),
             true,
             false);
 
@@ -2526,7 +2526,7 @@ public sealed class ReleaseTests
     /// An <c>https</c> loopback origin keeps today's wget flags (<c>--https-only</c>).
     /// </summary>
     [Fact]
-    public void ReleaseOriginHttpsKeepsWgetHttpsOnly()
+    public async Task ReleaseOriginHttpsKeepsWgetHttpsOnly()
     {
         SkipOnWindows();
 
@@ -2535,11 +2535,11 @@ public sealed class ReleaseTests
         string log = Path.Combine(sandbox.Root, "wget-args");
         const string origin = "https://127.0.0.1:9";
         string url = SumsUrl(origin);
-        ProcessResult result = InvokeFetch(
+        ProcessResult result = await InvokeFetchAsync(
             origin,
             url,
             destination,
-            IsolatedWgetDirectory(sandbox, log),
+            await IsolatedWgetDirectoryAsync(sandbox, log),
             true,
             false);
 
@@ -2556,13 +2556,13 @@ public sealed class ReleaseTests
     /// <c>KYBER_WEAVE_INSTALL_LIB</c> is not set on that invocation.
     /// </summary>
     [Fact]
-    public void ReleaseOriginInstallsPinnedVersionFromTheLocalReleaseServer()
+    public async Task ReleaseOriginInstallsPinnedVersionFromTheLocalReleaseServer()
     {
         SkipOnWindows();
 
-        using PublishedRelease release = PublishedRelease.Create(false);
+        using PublishedRelease release = await PublishedRelease.Create(false);
         string fetchDest = Path.Combine(release.Sandbox.Root, "fetched-sums.txt");
-        ProcessResult fetch = InvokeFetch(
+        ProcessResult fetch = await InvokeFetchAsync(
             release.Origin,
             SumsUrl(release.Origin),
             fetchDest,
@@ -2574,12 +2574,12 @@ public sealed class ReleaseTests
         // runs. Until it is defined, this fails closed and the body — which
         // would otherwise ignore the origin and contact GitHub — does not start.
         Assert.True(fetch.ExitCode == 0, Describe(fetch));
-        Assert.Contains(release.AssetName, File.ReadAllText(fetchDest), StringComparison.Ordinal);
+        Assert.Contains(release.AssetName, await File.ReadAllTextAsync(fetchDest), StringComparison.Ordinal);
 
-        ProcessResult install = RunFullInstall(release.InstallDirectory, release.Origin);
+        ProcessResult install = await RunFullInstallAsync(release.InstallDirectory, release.Origin);
         Assert.True(install.ExitCode == 0, Describe(install));
         string installed = Path.Combine(release.InstallDirectory, "kyber-weave");
-        Assert.Equal(InstallPayload, File.ReadAllText(installed));
+        Assert.Equal(InstallPayload, await File.ReadAllTextAsync(installed));
         Assert.False(File.Exists(Path.Combine(release.InstallDirectory, "kyber-weave-mcp")));
     }
 
@@ -2588,7 +2588,7 @@ public sealed class ReleaseTests
     /// escapes the temporary directory is refused before tar writes anything.
     /// </summary>
     [Fact]
-    public void InstallerRejectsAnArchiveMemberThatEscapesTheTempDirectory()
+    public async Task InstallerRejectsAnArchiveMemberThatEscapesTheTempDirectory()
     {
         SkipOnWindows();
 
@@ -2599,7 +2599,7 @@ public sealed class ReleaseTests
         using (TarWriter writer = new(gzip, TarEntryFormat.Pax, leaveOpen: true))
         {
             byte[] payload = Encoding.UTF8.GetBytes("owned");
-            writer.WriteEntry(new PaxTarEntry(TarEntryType.RegularFile, "../evil.txt")
+            await writer.WriteEntryAsync(new PaxTarEntry(TarEntryType.RegularFile, "../evil.txt")
             {
                 DataStream = new MemoryStream(payload),
             });
@@ -2607,7 +2607,7 @@ public sealed class ReleaseTests
 
         ProcessStartInfo startInfo = CreateShellStartInfo(
             ". \"" + InstallShPath + "\"; verify_archive_members \"" + archive + "\"");
-        ProcessResult result = ProcessRunner.Run(startInfo, string.Empty, TimeSpan.FromSeconds(60));
+        ProcessResult result = await ProcessRunner.RunAsync(startInfo, string.Empty, TimeSpan.FromSeconds(60));
 
         Assert.NotEqual(0, result.ExitCode);
         Assert.Contains("unsafe archive member", result.StandardError, StringComparison.Ordinal);
@@ -2618,7 +2618,7 @@ public sealed class ReleaseTests
     /// backslash parent segments, not only POSIX <c>../</c>.
     /// </summary>
     [Fact]
-    public void NpmArchiveEntryValidationRejectsDriveAbsoluteAndParentSegments()
+    public async Task NpmArchiveEntryValidationRejectsDriveAbsoluteAndParentSegments()
     {
         const string Script = """
             const d = require('./npm/lib/download.js');
@@ -2638,7 +2638,7 @@ public sealed class ReleaseTests
         startInfo.ArgumentList.Add("-e");
         startInfo.ArgumentList.Add(Script);
 
-        ProcessResult result = ProcessRunner.Run(startInfo, string.Empty, TimeSpan.FromSeconds(60));
+        ProcessResult result = await ProcessRunner.RunAsync(startInfo, string.Empty, TimeSpan.FromSeconds(60));
 
         Assert.True(result.ExitCode == 0, Describe(result));
     }
@@ -2651,13 +2651,13 @@ public sealed class ReleaseTests
     /// <c>verify_and_extract</c>.
     /// </summary>
     [Fact]
-    public void ReleaseOriginRejectsByteFlippedAfterTheChecksumIsWritten()
+    public async Task ReleaseOriginRejectsByteFlippedAfterTheChecksumIsWritten()
     {
         SkipOnWindows();
 
-        using PublishedRelease release = PublishedRelease.Create(true);
+        using PublishedRelease release = await PublishedRelease.Create(true);
         string fetchDest = Path.Combine(release.Sandbox.Root, "fetched-sums.txt");
-        ProcessResult fetch = InvokeFetch(
+        ProcessResult fetch = await InvokeFetchAsync(
             release.Origin,
             SumsUrl(release.Origin),
             fetchDest,
@@ -2666,7 +2666,7 @@ public sealed class ReleaseTests
             false);
         Assert.True(fetch.ExitCode == 0, Describe(fetch));
 
-        ProcessResult install = RunFullInstall(release.InstallDirectory, release.Origin);
+        ProcessResult install = await RunFullInstallAsync(release.InstallDirectory, release.Origin);
         Assert.Contains("SHA256 mismatch", install.StandardError, StringComparison.Ordinal);
         Assert.NotEqual(0, install.ExitCode);
         Assert.False(
@@ -2680,17 +2680,17 @@ public sealed class ReleaseTests
     /// outcome. The logging curl records the URL the installer actually requested.
     /// </summary>
     [Fact]
-    public void ReleaseOriginHttpRedirectAwayFromLoopbackIsNotInstalled()
+    public async Task ReleaseOriginHttpRedirectAwayFromLoopbackIsNotInstalled()
     {
         SkipOnWindows();
 
         using Sandbox sandbox = new();
         string script = Path.Combine(sandbox.Root, "redirect.py");
-        File.WriteAllText(script, RedirectServerScript);
-        using ListeningServer server = ListeningServer.Start(script);
+        await File.WriteAllTextAsync(script, RedirectServerScript);
+        using ListeningServer server = await ListeningServer.Start(script);
         string origin = "http://127.0.0.1:" + server.Port.ToString(CultureInfo.InvariantCulture);
         string fetchDest = Path.Combine(sandbox.Root, "fetched");
-        ProcessResult fetch = InvokeFetch(
+        ProcessResult fetch = await InvokeFetchAsync(
             origin,
             SumsUrl(origin),
             fetchDest,
@@ -2706,14 +2706,14 @@ public sealed class ReleaseTests
         string log = Path.Combine(sandbox.Root, "curl-args");
         string installDir = Path.Combine(sandbox.Root, "install");
         Directory.CreateDirectory(installDir);
-        ProcessResult install = RunFullInstall(
+        ProcessResult install = await RunFullInstallAsync(
             installDir,
             origin,
-            PrependRecordingCurl(sandbox, log));
+            await PrependRecordingCurlAsync(sandbox, log));
 
         Assert.NotEqual(0, install.ExitCode);
         Assert.False(File.Exists(Path.Combine(installDir, "kyber-weave")), Describe(install));
-        string recorded = File.Exists(log) ? File.ReadAllText(log) : string.Empty;
+        string recorded = File.Exists(log) ? await File.ReadAllTextAsync(log) : string.Empty;
         Assert.Contains(origin, recorded, StringComparison.Ordinal);
         Assert.DoesNotContain("github.com", recorded, StringComparison.Ordinal);
         Assert.DoesNotContain(
@@ -2771,7 +2771,7 @@ public sealed class ReleaseTests
     /// Sources <c>install.sh</c> in library mode and calls <c>fetch</c>.
     /// <paramref name="origin"/> null removes <c>KYBER_WEAVE_RELEASE_ORIGIN</c>.
     /// </summary>
-    private static ProcessResult InvokeFetch(
+    private static async Task<ProcessResult> InvokeFetchAsync(
         string? origin,
         string url,
         string destination,
@@ -2805,14 +2805,14 @@ public sealed class ReleaseTests
         }
 
         ClearProxies(startInfo);
-        return ProcessRunner.Run(startInfo, string.Empty, TimeSpan.FromSeconds(30));
+        return await ProcessRunner.RunAsync(startInfo, string.Empty, TimeSpan.FromSeconds(30));
     }
 
     /// <summary>
     /// Runs the installer the way a user would. Does not set
     /// <c>KYBER_WEAVE_INSTALL_LIB</c>: that gate returns before any download.
     /// </summary>
-    private static ProcessResult RunFullInstall(string installDir, string origin, string? prependPath = null)
+    private static async Task<ProcessResult> RunFullInstallAsync(string installDir, string origin, string? prependPath = null)
     {
         ProcessStartInfo startInfo = new("/bin/sh")
         {
@@ -2841,7 +2841,7 @@ public sealed class ReleaseTests
                 "Full-install facts must not set KYBER_WEAVE_INSTALL_LIB; library mode returns before download.");
         }
 
-        return ProcessRunner.Run(startInfo, string.Empty, TimeSpan.FromSeconds(60));
+        return await ProcessRunner.RunAsync(startInfo, string.Empty, TimeSpan.FromSeconds(60));
     }
 
     private static void ClearProxies(ProcessStartInfo startInfo)
@@ -2852,11 +2852,11 @@ public sealed class ReleaseTests
         }
     }
 
-    private static string CurrentInstallRid()
+    private static async Task<string> CurrentInstallRidAsync()
     {
         ProcessStartInfo startInfo = CreateShellStartInfo(
             ". \"" + InstallShPath + "\"; kyber_weave_resolve_rid \"$(uname -s)\" \"$(uname -m)\"");
-        ProcessResult result = ProcessRunner.Run(startInfo, string.Empty, TimeSpan.FromSeconds(30));
+        ProcessResult result = await ProcessRunner.RunAsync(startInfo, string.Empty, TimeSpan.FromSeconds(30));
         Assert.Equal(0, result.ExitCode);
         return result.StandardOutput.Trim();
     }
@@ -2869,11 +2869,11 @@ public sealed class ReleaseTests
         return directory;
     }
 
-    private static string PrependRecordingCurl(Sandbox sandbox, string logPath)
+    private static async Task<string> PrependRecordingCurlAsync(Sandbox sandbox, string logPath)
     {
         string directory = Path.Combine(sandbox.Root, "curl-bin");
         Directory.CreateDirectory(directory);
-        WriteDownloader(Path.Combine(directory, "curl"), logPath, ResolveExecutable("curl"));
+        WriteDownloader(Path.Combine(directory, "curl"), logPath, await ResolveExecutableAsync("curl"));
         return directory;
     }
 
@@ -2883,15 +2883,15 @@ public sealed class ReleaseTests
     /// <c>sha256sum</c> or <c>shasum</c>. macOS ships the latter, and this directory
     /// replaces PATH, so the host tool is invisible unless it is linked here.
     /// </summary>
-    private static string IsolatedWgetDirectory(Sandbox sandbox, string logPath)
+    private static async Task<string> IsolatedWgetDirectoryAsync(Sandbox sandbox, string logPath)
     {
         string directory = Path.Combine(sandbox.Root, "wget-only");
         Directory.CreateDirectory(directory);
         WriteDownloader(Path.Combine(directory, "wget"), logPath, null);
         if (!OperatingSystem.IsWindows())
         {
-            File.CreateSymbolicLink(Path.Combine(directory, "tar"), ResolveExecutable("tar"));
-            string? checksum = TryResolveExecutable("sha256sum") ?? TryResolveExecutable("shasum");
+            File.CreateSymbolicLink(Path.Combine(directory, "tar"), await ResolveExecutableAsync("tar"));
+            string? checksum = await TryResolveExecutableAsync("sha256sum") ?? await TryResolveExecutableAsync("shasum");
             if (checksum is null)
             {
                 throw SkipException.ForSkip(
@@ -2955,9 +2955,9 @@ public sealed class ReleaseTests
         return invocations;
     }
 
-    private static string ResolveExecutable(string name)
+    private static async Task<string> ResolveExecutableAsync(string name)
     {
-        string? path = TryResolveExecutable(name);
+        string? path = await TryResolveExecutableAsync(name);
         Assert.True(path is not null, "command -v " + name + " failed");
         return path;
     }
@@ -2967,7 +2967,7 @@ public sealed class ReleaseTests
     /// Does not add interpreters such as perl; <c>shasum</c> on macOS uses a fixed
     /// <c>/usr/bin/perl</c> shebang.
     /// </summary>
-    private static string? TryResolveExecutable(string name)
+    private static async Task<string?> TryResolveExecutableAsync(string name)
     {
         ProcessStartInfo startInfo = new("/bin/sh")
         {
@@ -2978,7 +2978,7 @@ public sealed class ReleaseTests
         };
         startInfo.ArgumentList.Add("-c");
         startInfo.ArgumentList.Add("command -v " + name);
-        ProcessResult result = ProcessRunner.Run(startInfo, string.Empty, TimeSpan.FromSeconds(10));
+        ProcessResult result = await ProcessRunner.RunAsync(startInfo, string.Empty, TimeSpan.FromSeconds(10));
         if (result.ExitCode != 0)
         {
             return null;
@@ -3069,7 +3069,7 @@ public sealed class ReleaseTests
     /// Req 22.1: the checksum verifier's list grows from 20 to 25 assets.
     /// </summary>
     [Fact]
-    public void VerifyReleaseChecksumsListsTwentyFiveAssetsIncludingArbiter()
+    public async Task VerifyReleaseChecksumsListsTwentyFiveAssetsIncludingArbiter()
     {
         SkipOnWindows();
 
@@ -3089,7 +3089,7 @@ public sealed class ReleaseTests
         startInfo.ArgumentList.Add(sandbox.Root);
         startInfo.ArgumentList.Add(version);
 
-        ProcessResult result = ProcessRunner.Run(startInfo, string.Empty);
+        ProcessResult result = await ProcessRunner.RunAsync(startInfo, string.Empty);
 
         Assert.Equal(0, result.ExitCode);
         string[] lines = result.StandardOutput.Split('\n', StringSplitOptions.RemoveEmptyEntries);
@@ -3135,7 +3135,7 @@ public sealed class ReleaseTests
     /// printed at implementation time.
     /// </summary>
     [Fact]
-    public void ArbiterMinVersionIsTheTagThatFirstPublishedTheAsset()
+    public async Task ArbiterMinVersionIsTheTagThatFirstPublishedTheAsset()
     {
         SkipOnWindows();
 
@@ -3143,7 +3143,7 @@ public sealed class ReleaseTests
             ". \"" + InstallShPath + "\"; " +
             "printf '%s' \"$ARBITER_MIN_VERSION\"");
 
-        ProcessResult result = ProcessRunner.Run(startInfo, string.Empty);
+        ProcessResult result = await ProcessRunner.RunAsync(startInfo, string.Empty);
 
         Assert.Equal(0, result.ExitCode);
         Assert.Equal("0.1.7-rc.17", result.StandardOutput.Trim());
@@ -3159,7 +3159,7 @@ public sealed class ReleaseTests
     [InlineData("0.1.7", true)]
     [InlineData("0.2.0", true)]
     [InlineData("1.0.0", true)]
-    public void ReleaseHasArbiterGatesOnThePublishedFloor(string version, bool expected)
+    public async Task ReleaseHasArbiterGatesOnThePublishedFloor(string version, bool expected)
     {
         SkipOnWindows();
 
@@ -3167,7 +3167,7 @@ public sealed class ReleaseTests
             ". \"" + InstallShPath + "\"; " +
             "kyber_weave_release_has_arbiter '" + version + "'");
 
-        ProcessResult result = ProcessRunner.Run(startInfo, string.Empty);
+        ProcessResult result = await ProcessRunner.RunAsync(startInfo, string.Empty);
 
         Assert.Equal(expected ? 0 : 1, result.ExitCode);
     }
@@ -3359,22 +3359,22 @@ public sealed class ReleaseTests
 
         public string AssetName { get; }
 
-        public static PublishedRelease Create(bool corruptArchive)
+        public static async Task<PublishedRelease> Create(bool corruptArchive)
         {
             Sandbox sandbox = new();
             ListeningServer? server = null;
             try
             {
-                string rid = CurrentInstallRid();
+                string rid = await CurrentInstallRidAsync();
                 string assetName = "kyber-weave-" + rid + ".tar.gz";
                 string tagDir = Path.Combine(sandbox.Root, "v" + PinnedVersion);
                 Directory.CreateDirectory(tagDir);
                 string stage = Path.Combine(sandbox.Root, "stage");
                 Directory.CreateDirectory(stage);
-                File.WriteAllText(Path.Combine(stage, "kyber-weave"), InstallPayload);
+                await File.WriteAllTextAsync(Path.Combine(stage, "kyber-weave"), InstallPayload);
                 string archive = Path.Combine(tagDir, assetName);
 
-                ProcessStartInfo tar = new(ResolveExecutable("tar"))
+                ProcessStartInfo tar = new(await ResolveExecutableAsync("tar"))
                 {
                     RedirectStandardInput = true,
                     RedirectStandardOutput = true,
@@ -3386,19 +3386,19 @@ public sealed class ReleaseTests
                 tar.ArgumentList.Add("-C");
                 tar.ArgumentList.Add(stage);
                 tar.ArgumentList.Add("kyber-weave");
-                ProcessResult tarResult = ProcessRunner.Run(tar, string.Empty, TimeSpan.FromSeconds(30));
+                ProcessResult tarResult = await ProcessRunner.RunAsync(tar, string.Empty, TimeSpan.FromSeconds(30));
                 Assert.True(tarResult.ExitCode == 0, tarResult.StandardError);
 
                 string hash = Sha256(archive);
-                File.WriteAllText(Path.Combine(tagDir, "SHA256SUMS.txt"), hash + "  " + assetName + "\n");
+                await File.WriteAllTextAsync(Path.Combine(tagDir, "SHA256SUMS.txt"), hash + "  " + assetName + "\n");
                 if (corruptArchive)
                 {
-                    byte[] bytes = File.ReadAllBytes(archive);
+                    byte[] bytes = await File.ReadAllBytesAsync(archive);
                     bytes[0] ^= 0xFF;
-                    File.WriteAllBytes(archive, bytes);
+                    await File.WriteAllBytesAsync(archive, bytes);
                 }
 
-                server = ListeningServer.Start(
+                server = await ListeningServer.Start(
                     Path.Combine(Corpus.Root, "scripts", "local-release-server.py"),
                     "--root",
                     sandbox.Root,
@@ -3436,9 +3436,9 @@ public sealed class ReleaseTests
 
         public int Port { get; }
 
-        public static ListeningServer Start(string scriptPath, params string[] arguments)
+        public static async Task<ListeningServer> Start(string scriptPath, params string[] arguments)
         {
-            ProcessStartInfo startInfo = new(ResolveExecutable("python3"))
+            ProcessStartInfo startInfo = new(await ResolveExecutableAsync("python3"))
             {
                 RedirectStandardInput = true,
                 RedirectStandardOutput = true,
@@ -3456,13 +3456,17 @@ public sealed class ReleaseTests
             process.StandardInput.Close();
             Task<string> stderr = process.StandardError.ReadToEndAsync();
             Task<string?> readLine = process.StandardOutput.ReadLineAsync();
-            if (!readLine.Wait(TimeSpan.FromSeconds(10)))
+            try
+            {
+                await readLine.WaitAsync(TimeSpan.FromSeconds(10));
+            }
+            catch (TimeoutException)
             {
                 string err = KillAndRead(process, stderr);
                 throw new InvalidOperationException("server did not print a port. " + err);
             }
 
-            string? line = readLine.Result;
+            string? line = await readLine;
             if (line is null
                 || !int.TryParse(line.Trim(), NumberStyles.None, CultureInfo.InvariantCulture, out int port))
             {

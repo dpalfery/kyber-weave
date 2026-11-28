@@ -159,7 +159,7 @@ public sealed class SbomTests
         }
     }
 
-    private static (int ExitCode, string StandardOutput, string StandardError) RunValidator(
+    private static async Task<(int ExitCode, string StandardOutput, string StandardError)> RunValidatorAsync(
         string sbomPath,
         params string[] extraArguments)
     {
@@ -177,7 +177,7 @@ public sealed class SbomTests
             startInfo.ArgumentList.Add(argument);
         }
 
-        ProcessResult result = ProcessRunner.Run(startInfo, string.Empty, TimeSpan.FromSeconds(60));
+        ProcessResult result = await ProcessRunner.RunAsync(startInfo, string.Empty, TimeSpan.FromSeconds(60));
         return (result.ExitCode, result.StandardOutput, result.StandardError);
     }
 
@@ -255,14 +255,14 @@ public sealed class SbomTests
     }
 
     [Fact]
-    public void AValidCycloneDxSbomPassesSchemaValidation()
+    public async Task AValidCycloneDxSbomPassesSchemaValidation()
     {
         SkipOnWindows();
 
         string path = WriteTempSbom(ValidSbom);
         try
         {
-            (int exitCode, string standardOutput, string standardError) = RunValidator(path);
+            (int exitCode, string standardOutput, string standardError) = await RunValidatorAsync(path);
 
             Assert.True(
                 exitCode == 0,
@@ -276,7 +276,7 @@ public sealed class SbomTests
     }
 
     [Fact]
-    public void AValidSignedSbomPassesSchemaValidation()
+    public async Task AValidSignedSbomPassesSchemaValidation()
     {
         SkipOnWindows();
 
@@ -291,7 +291,7 @@ public sealed class SbomTests
         string path = WriteTempSbom(signed);
         try
         {
-            (int exitCode, _, string standardError) = RunValidator(path);
+            (int exitCode, _, string standardError) = await RunValidatorAsync(path);
 
             Assert.True(
                 exitCode == 0,
@@ -320,7 +320,7 @@ public sealed class SbomTests
         "a dependsOn that is not an array",
         "\"dependsOn\": [ \"pkg:nuget/anchor@1.0.0\" ]",
         "\"dependsOn\": \"pkg:nuget/anchor@1.0.0\"")]
-    public void AMalformedSbomFailsCleanlyWithoutATraceback(string what, string find, string replaceWith)
+    public async Task AMalformedSbomFailsCleanlyWithoutATraceback(string what, string find, string replaceWith)
     {
         SkipOnWindows();
 
@@ -330,7 +330,7 @@ public sealed class SbomTests
         string path = WriteTempSbom(malformed);
         try
         {
-            (int exitCode, _, string standardError) = RunValidator(path);
+            (int exitCode, _, string standardError) = await RunValidatorAsync(path);
 
             Assert.True(exitCode != 0, $"{what} must be rejected");
 
@@ -349,7 +349,7 @@ public sealed class SbomTests
     }
 
     [Fact]
-    public void ASbomWithDuplicateDependencyEntriesFailsSchemaValidation()
+    public async Task ASbomWithDuplicateDependencyEntriesFailsSchemaValidation()
     {
         SkipOnWindows();
 
@@ -369,7 +369,7 @@ public sealed class SbomTests
         string path = WriteTempSbom(withDuplicate);
         try
         {
-            (int exitCode, _, string standardError) = RunValidator(path);
+            (int exitCode, _, string standardError) = await RunValidatorAsync(path);
 
             Assert.NotEqual(0, exitCode);
             Assert.Contains("duplicate", standardError, StringComparison.OrdinalIgnoreCase);
@@ -381,7 +381,7 @@ public sealed class SbomTests
     }
 
     [Fact]
-    public void ASbomWithNoComponentsFailsValidation()
+    public async Task ASbomWithNoComponentsFailsValidation()
     {
         SkipOnWindows();
 
@@ -395,7 +395,7 @@ public sealed class SbomTests
                                     """);
         try
         {
-            (int exitCode, _, string standardError) = RunValidator(path);
+            (int exitCode, _, string standardError) = await RunValidatorAsync(path);
 
             Assert.NotEqual(0, exitCode);
             Assert.Contains("no components", standardError, StringComparison.OrdinalIgnoreCase);
@@ -407,7 +407,7 @@ public sealed class SbomTests
     }
 
     [Fact]
-    public void AnSbomMissingAnExpectedEcosystemFailsValidation()
+    public async Task AnSbomMissingAnExpectedEcosystemFailsValidation()
     {
         SkipOnWindows();
 
@@ -420,7 +420,7 @@ public sealed class SbomTests
 
         try
         {
-            (int exitCode, _, string standardError) = RunValidator(
+            (int exitCode, _, string standardError) = await RunValidatorAsync(
                 path,
                 "--require-ecosystems",
                 "npm,cargo,nuget");
@@ -435,7 +435,7 @@ public sealed class SbomTests
     }
 
     [Fact]
-    public void AnSbomMissingAnOptionalEcosystemIsAWarningRatherThanAnError()
+    public async Task AnSbomMissingAnOptionalEcosystemIsAWarningRatherThanAnError()
     {
         SkipOnWindows();
 
@@ -470,7 +470,7 @@ public sealed class SbomTests
 
         try
         {
-            (int exitCode, _, string standardError) = RunValidator(
+            (int exitCode, _, string standardError) = await RunValidatorAsync(
                 path,
                 "--require-ecosystems",
                 "npm,cargo,nuget",
@@ -611,7 +611,7 @@ public sealed class SbomTests
     /// here rather than at publish time.
     /// </summary>
     [Fact]
-    public void GenerateArtifactSbomsEmitsOneSbomPerArchive()
+    public async Task GenerateArtifactSbomsEmitsOneSbomPerArchive()
     {
         SkipOnWindows();
 
@@ -623,9 +623,9 @@ public sealed class SbomTests
         string dir = Directory.CreateTempSubdirectory("kyber-weave-artifact-sboms-test-").FullName;
         try
         {
-            PackPayload(dir, "payload-one.txt", "kyber-weave-test-x64.tar.gz");
-            PackPayload(dir, "payload-two.txt", "kyberdash-test-x64.tar.gz");
-            PackZipPayload(dir, "payload-three.txt", "kyber-squad-test-0.1.0.zip");
+            await PackPayload(dir, "payload-one.txt", "kyber-weave-test-x64.tar.gz");
+            await PackPayload(dir, "payload-two.txt", "kyberdash-test-x64.tar.gz");
+            await PackZipPayload(dir, "payload-three.txt", "kyber-squad-test-0.1.0.zip");
             StageExePayload(dir, "per-artifact fixture payload-four", "kyberdash-tray-test-win-x64-setup.exe");
 
             ProcessStartInfo startInfo = new("/bin/bash")
@@ -639,7 +639,7 @@ public sealed class SbomTests
             startInfo.ArgumentList.Add(dir);
             startInfo.ArgumentList.Add("0.1.0");
 
-            ProcessResult result = ProcessRunner.Run(startInfo, string.Empty, TimeSpan.FromSeconds(300));
+            ProcessResult result = await ProcessRunner.RunAsync(startInfo, string.Empty, TimeSpan.FromSeconds(300));
             Assert.True(
                 result.ExitCode == 0,
                 "generate-artifact-sboms.sh failed: " + result.StandardError);
@@ -654,7 +654,7 @@ public sealed class SbomTests
             foreach (string sbom in expected)
             {
                 Assert.True(File.Exists(sbom), "the generator emitted no SBOM at " + sbom);
-                string content = File.ReadAllText(sbom);
+                string content = await File.ReadAllTextAsync(sbom);
                 Assert.False(string.IsNullOrWhiteSpace(content), "the SBOM at " + sbom + " is empty.");
                 Assert.Contains("bomFormat", content, StringComparison.Ordinal);
             }
@@ -672,7 +672,7 @@ public sealed class SbomTests
                 + (kyberdashMarker ?? "<none>") + ".");
 
             string squadSbomPath = Path.Combine(dir, "kyber-squad-test-0.1.0.cdx.json");
-            string squadContent = File.ReadAllText(squadSbomPath);
+            string squadContent = await File.ReadAllTextAsync(squadSbomPath);
             using JsonDocument squadDocument = JsonDocument.Parse(squadContent);
             Assert.True(
                 squadDocument.RootElement.TryGetProperty("metadata", out JsonElement squadMetadata),
@@ -711,13 +711,13 @@ public sealed class SbomTests
             {
                 // Best-effort cleanup; the directory lives under %TEMP% with a
                 // unique name, so a leak is bounded.
-                Console.Error.WriteLine("warning: could not delete temp artifact-sbom dir " + dir + ": " + ex.Message);
+                await Console.Error.WriteLineAsync("warning: could not delete temp artifact-sbom dir " + dir + ": " + ex.Message);
             }
             catch (UnauthorizedAccessException ex)
             {
                 // Best-effort cleanup; the directory lives under %TEMP% with a
                 // unique name, so a leak is bounded.
-                Console.Error.WriteLine("warning: could not delete temp artifact-sbom dir " + dir + ": " + ex.Message);
+                await Console.Error.WriteLineAsync("warning: could not delete temp artifact-sbom dir " + dir + ": " + ex.Message);
             }
         }
     }
@@ -727,9 +727,9 @@ public sealed class SbomTests
     /// leaving only the archive behind so the generator scans exactly the
     /// published-archive shape.
     /// </summary>
-    private static void PackPayload(string dir, string payloadName, string archiveName)
+    private static async Task PackPayload(string dir, string payloadName, string archiveName)
     {
-        File.WriteAllText(Path.Combine(dir, payloadName), "per-artifact fixture " + payloadName);
+        await File.WriteAllTextAsync(Path.Combine(dir, payloadName), "per-artifact fixture " + payloadName);
 
         ProcessStartInfo tar = new("tar")
         {
@@ -744,7 +744,7 @@ public sealed class SbomTests
         tar.ArgumentList.Add(dir);
         tar.ArgumentList.Add(payloadName);
 
-        ProcessResult tarResult = ProcessRunner.Run(tar, string.Empty, TimeSpan.FromSeconds(60));
+        ProcessResult tarResult = await ProcessRunner.RunAsync(tar, string.Empty, TimeSpan.FromSeconds(60));
         Assert.True(tarResult.ExitCode == 0, tarResult.StandardError);
         File.Delete(Path.Combine(dir, payloadName));
     }
@@ -754,9 +754,9 @@ public sealed class SbomTests
     /// leaving only the archive behind so the generator exercises its
     /// <c>unzip</c> branch on exactly the published-archive shape.
     /// </summary>
-    private static void PackZipPayload(string dir, string payloadName, string archiveName)
+    private static async Task PackZipPayload(string dir, string payloadName, string archiveName)
     {
-        File.WriteAllText(Path.Combine(dir, payloadName), "per-artifact fixture " + payloadName);
+        await File.WriteAllTextAsync(Path.Combine(dir, payloadName), "per-artifact fixture " + payloadName);
 
         ProcessStartInfo zip = new("zip")
         {
@@ -769,7 +769,7 @@ public sealed class SbomTests
         zip.ArgumentList.Add(Path.Combine(dir, archiveName));
         zip.ArgumentList.Add(Path.Combine(dir, payloadName));
 
-        ProcessResult zipResult = ProcessRunner.Run(zip, string.Empty, TimeSpan.FromSeconds(60));
+        ProcessResult zipResult = await ProcessRunner.RunAsync(zip, string.Empty, TimeSpan.FromSeconds(60));
         Assert.True(zipResult.ExitCode == 0, zipResult.StandardError);
         File.Delete(Path.Combine(dir, payloadName));
     }
@@ -846,7 +846,7 @@ public sealed class SbomTests
     }
 
     [Fact]
-    public void AMissingEcosystemThatIsNotOptionalStillFailsValidation()
+    public async Task AMissingEcosystemThatIsNotOptionalStillFailsValidation()
     {
         SkipOnWindows();
 
@@ -861,7 +861,7 @@ public sealed class SbomTests
 
         try
         {
-            (int exitCode, _, string standardError) = RunValidator(
+            (int exitCode, _, string standardError) = await RunValidatorAsync(
                 path,
                 "--require-ecosystems",
                 "npm,cargo,nuget",
@@ -878,7 +878,7 @@ public sealed class SbomTests
     }
 
     [Fact]
-    public void TheExpectedReleaseAssetListCarriesTheSbom()
+    public async Task TheExpectedReleaseAssetListCarriesTheSbom()
     {
         SkipOnWindows();
 
@@ -895,7 +895,7 @@ public sealed class SbomTests
         startInfo.ArgumentList.Add(Path.GetTempPath());
         startInfo.ArgumentList.Add("9.9.9");
 
-        ProcessResult result = ProcessRunner.Run(startInfo, string.Empty, TimeSpan.FromSeconds(60));
+        ProcessResult result = await ProcessRunner.RunAsync(startInfo, string.Empty, TimeSpan.FromSeconds(60));
 
         Assert.Equal(0, result.ExitCode);
         Assert.Contains(

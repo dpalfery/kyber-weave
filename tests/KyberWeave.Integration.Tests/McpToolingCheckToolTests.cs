@@ -15,21 +15,22 @@ namespace KyberWeave.Integration.Tests;
 /// The docs server's tooling-check tool, which runs the same doctor as <c>kyber-weave doctor --ensure</c> for a caller
 /// with no shell. Every child is scripted or a shell stub: no test starts a real CodeGraph or the real docs server.
 /// </summary>
-public sealed class McpToolingCheckToolTests : IDisposable
+public sealed class McpToolingCheckToolTests : IAsyncLifetime
 {
     private readonly DocFixture _fixture = new();
     private readonly TempDirectory _stubs = new();
 
-    public McpToolingCheckToolTests()
+    public async ValueTask InitializeAsync()
     {
-        Git(_fixture.Root, "init", "-q", "-b", "main");
+        await GitAsync(_fixture.Root, "init", "-q", "-b", "main");
         Directory.CreateDirectory(Path.Combine(_fixture.Root, ".codegraph"));
     }
 
-    public void Dispose()
+    public ValueTask DisposeAsync()
     {
         _stubs.Dispose();
         _fixture.Dispose();
+        return ValueTask.CompletedTask;
     }
 
     private string Root => _fixture.Root;
@@ -148,7 +149,7 @@ public sealed class McpToolingCheckToolTests : IDisposable
         Assert.DoesNotContain("EXIT:", response, StringComparison.Ordinal);
     }
 
-    private static void Git(string directory, params string[] arguments)
+    private static async Task GitAsync(string directory, params string[] arguments)
     {
         ProcessStartInfo startInfo = new("git")
         {
@@ -163,7 +164,7 @@ public sealed class McpToolingCheckToolTests : IDisposable
         startInfo.Environment["GIT_CONFIG_GLOBAL"] = Path.Combine(directory, ".no-global-gitconfig");
         foreach (string argument in arguments) startInfo.ArgumentList.Add(argument);
 
-        ProcessResult result = ProcessRunner.Run(startInfo, string.Empty, TimeSpan.FromSeconds(60));
+        ProcessResult result = await ProcessRunner.RunAsync(startInfo, string.Empty, TimeSpan.FromSeconds(60));
         Assert.True(result.ExitCode == 0, $"git {string.Join(' ', arguments)} failed: {result.StandardError}");
     }
 }

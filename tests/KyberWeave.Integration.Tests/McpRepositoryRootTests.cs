@@ -131,7 +131,7 @@ public sealed class McpRepositoryRootTests : IDisposable
     {
         (string first, string second) = await CreateTwoInitializedRepositoriesAsync();
 
-        ProcessResult result = RunMcp(
+        ProcessResult result = await RunMcp(
             first, expectRootFlag: second, expectedRootEnvironment: null, input: string.Empty);
 
         Assert.Equal(1, result.ExitCode);
@@ -144,7 +144,7 @@ public sealed class McpRepositoryRootTests : IDisposable
     {
         (string first, _) = await CreateTwoInitializedRepositoriesAsync();
 
-        ProcessResult result = RunMcp(
+        ProcessResult result = await RunMcp(
             first, expectRootFlag: first, expectedRootEnvironment: null, input: InitializeRequests);
 
         Assert.Equal(0, result.ExitCode);
@@ -156,7 +156,7 @@ public sealed class McpRepositoryRootTests : IDisposable
     {
         (string first, string second) = await CreateTwoInitializedRepositoriesAsync();
 
-        ProcessResult result = RunMcp(
+        ProcessResult result = await RunMcp(
             first, expectRootFlag: null, expectedRootEnvironment: second, input: string.Empty);
 
         Assert.Equal(1, result.ExitCode);
@@ -168,7 +168,7 @@ public sealed class McpRepositoryRootTests : IDisposable
     {
         (string first, string second) = await CreateTwoInitializedRepositoriesAsync();
 
-        ProcessResult result = RunMcp(
+        ProcessResult result = await RunMcp(
             first, expectRootFlag: first, expectedRootEnvironment: second, input: InitializeRequests);
 
         Assert.Equal(0, result.ExitCode);
@@ -218,7 +218,7 @@ public sealed class McpRepositoryRootTests : IDisposable
     /// avoid writing into a closed pipe. Starting cases send a minimal initialize so the
     /// server completes its normal lifecycle and exits zero.
     /// </remarks>
-    private static ProcessResult RunMcp(
+    private static async Task<ProcessResult> RunMcp(
         string repository,
         string? expectRootFlag,
         string? expectedRootEnvironment,
@@ -245,6 +245,6 @@ public sealed class McpRepositoryRootTests : IDisposable
             startInfo.Environment[ExpectRootEnvironmentVariable] = expectedRootEnvironment;
         }
 
-        return ProcessRunner.Run(startInfo, input, TimeSpan.FromSeconds(30));
+        return await ProcessRunner.RunAsync(startInfo, input, TimeSpan.FromSeconds(30));
     }
 }

@@ -46,9 +46,10 @@ public sealed class ProcessRunnerInputTests
             $"{Emit(BytesPerStream, 'o', toStandardError: false)}; " +
             "count=$(wc -c | tr -d '[:space:]'); printf '\\nstdin:%s\\n' \"$count\"; exit 11");
 
-        ProcessResult result = await Task
-            .Run(() => ProcessRunner.Run(startInfo, input, TimeSpan.FromSeconds(TimeoutSeconds)))
-            .WaitAsync(TimeSpan.FromSeconds(TimeoutSeconds));
+        ProcessResult result = await ProcessRunner.RunAsync(
+            startInfo,
+            input,
+            TimeSpan.FromSeconds(TimeoutSeconds)).WaitAsync(TimeSpan.FromSeconds(TimeoutSeconds));
 
         Assert.Equal(new string('o', BytesPerStream) + $"\nstdin:{BytesPerStream}\n", result.StandardOutput);
         Assert.Equal(new string('e', BytesPerStream), result.StandardError);
@@ -56,7 +57,7 @@ public sealed class ProcessRunnerInputTests
     }
 
     [Fact]
-    public void RunPreservesCallerEnvironmentOverrides()
+    public async Task RunPreservesCallerEnvironmentOverrides()
     {
         if (OperatingSystem.IsWindows())
         {
@@ -66,7 +67,7 @@ public sealed class ProcessRunnerInputTests
         ProcessStartInfo startInfo = CreateShellStartInfo("printf '%s' \"$KYBER_WEAVE_PROCESS_MARKER\"");
         startInfo.Environment["KYBER_WEAVE_PROCESS_MARKER"] = "from-caller";
 
-        ProcessResult result = ProcessRunner.Run(startInfo, string.Empty, TimeSpan.FromSeconds(TimeoutSeconds));
+        ProcessResult result = await ProcessRunner.RunAsync(startInfo, string.Empty, TimeSpan.FromSeconds(TimeoutSeconds));
 
         Assert.Equal("from-caller", result.StandardOutput);
         Assert.Equal(0, result.ExitCode);
@@ -76,7 +77,7 @@ public sealed class ProcessRunnerInputTests
     [InlineData("stdin")]
     [InlineData("stdout")]
     [InlineData("stderr")]
-    public void RunWhenARequiredStreamIsNotRedirectedRejectsTheStartInfo(string stream)
+    public async Task RunWhenARequiredStreamIsNotRedirectedRejectsTheStartInfo(string stream)
     {
         ProcessStartInfo startInfo = CreateShellStartInfo("exit 0");
         switch (stream)
@@ -92,11 +93,11 @@ public sealed class ProcessRunnerInputTests
                 break;
         }
 
-        Assert.Throws<ArgumentException>(() => ProcessRunner.Run(startInfo, string.Empty));
+        await Assert.ThrowsAsync<ArgumentException>(() => ProcessRunner.RunAsync(startInfo, string.Empty));
     }
 
     [Fact]
-    public void RunWhenArgumentsIsAConcatenatedStringRejectsTheStartInfo()
+    public async Task RunWhenArgumentsIsAConcatenatedStringRejectsTheStartInfo()
     {
         ProcessStartInfo startInfo = new ProcessStartInfo("sqlite3")
         {
@@ -107,12 +108,12 @@ public sealed class ProcessRunnerInputTests
             Arguments = "--version"
         };
 
-        ArgumentException exception = Assert.Throws<ArgumentException>(() => ProcessRunner.Run(startInfo, string.Empty));
+        ArgumentException exception = await Assert.ThrowsAsync<ArgumentException>(() => ProcessRunner.RunAsync(startInfo, string.Empty));
         Assert.Equal("startInfo", exception.ParamName);
     }
 
     [Fact]
-    public void RunWhenProcessCannotStartPropagatesTheStartupFailure()
+    public async Task RunWhenProcessCannotStartPropagatesTheStartupFailure()
     {
         string missingExecutable = Path.Combine(
             Path.GetTempPath(),
@@ -125,7 +126,7 @@ public sealed class ProcessRunnerInputTests
             UseShellExecute = false
         };
 
-        Assert.Throws<Win32Exception>(() => ProcessRunner.Run(startInfo, string.Empty));
+        await Assert.ThrowsAsync<Win32Exception>(() => ProcessRunner.RunAsync(startInfo, string.Empty));
     }
 
     [Fact]
@@ -139,14 +140,12 @@ public sealed class ProcessRunnerInputTests
         ProcessStartInfo startInfo = CreateShellStartInfo("exec 0<&-; exit 0");
         string input = new string('i', BytesPerStream * 4);
 
-        await Assert.ThrowsAnyAsync<IOException>(async () =>
-            await Task
-                .Run(() => ProcessRunner.Run(startInfo, input))
-                .WaitAsync(TimeSpan.FromSeconds(TimeoutSeconds)));
+        await Assert.ThrowsAnyAsync<IOException>(() =>
+            ProcessRunner.RunAsync(startInfo, input).WaitAsync(TimeSpan.FromSeconds(TimeoutSeconds)));
     }
 
     [Fact]
-    public void RunWhenTheChildExceedsTheTimeoutThrowsTimeoutException()
+    public async Task RunWhenTheChildExceedsTheTimeoutThrowsTimeoutException()
     {
         if (OperatingSystem.IsWindows())
         {
@@ -155,12 +154,12 @@ public sealed class ProcessRunnerInputTests
 
         ProcessStartInfo startInfo = CreateShellStartInfo("sleep 2");
 
-        Assert.Throws<TimeoutException>(() =>
-            ProcessRunner.Run(startInfo, string.Empty, TimeSpan.FromMilliseconds(200)));
+        await Assert.ThrowsAsync<TimeoutException>(() =>
+            ProcessRunner.RunAsync(startInfo, string.Empty, TimeSpan.FromMilliseconds(200)));
     }
 
     [Fact]
-    public void RunWhenOutputExceedsLimitThrowsInvalidOperationExceptionAndKillsChild()
+    public async Task RunWhenOutputExceedsLimitThrowsInvalidOperationExceptionAndKillsChild()
     {
         if (OperatingSystem.IsWindows())
         {
@@ -169,8 +168,8 @@ public sealed class ProcessRunnerInputTests
 
         ProcessStartInfo startInfo = CreateShellStartInfo("head -c 2000 /dev/zero | tr '\\0' 'a'");
 
-        OutputLimitExceededException ex = Assert.Throws<OutputLimitExceededException>(() =>
-            ProcessRunner.Run(startInfo, string.Empty, TimeSpan.FromSeconds(TimeoutSeconds), maxOutputBytes: 1000));
+        OutputLimitExceededException ex = await Assert.ThrowsAsync<OutputLimitExceededException>(() =>
+            ProcessRunner.RunAsync(startInfo, string.Empty, TimeSpan.FromSeconds(TimeoutSeconds), maxOutputBytes: 1000));
 
         Assert.Contains("exceeded the limit", ex.Message, StringComparison.OrdinalIgnoreCase);
     }

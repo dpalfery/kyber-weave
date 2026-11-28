@@ -16,17 +16,23 @@ namespace KyberWeave.Integration.Tests;
 ///     The in-memory tests script what <c>git rev-parse --git-path info/exclude</c> answers. This class asks real
 ///     git, so a difference between the answer git gives and the answer the code expects shows up here.
 /// </remarks>
-public sealed class RunStartWorktreeExcludeGitTests : IDisposable
+public sealed class RunStartWorktreeExcludeGitTests : IAsyncLifetime
 {
     private const string Folder = ".agent_worktrees";
     private const string LinkedBranch = "claude/fix/linked-exclude";
-    private readonly RunStartProbe _probe = RunStartProbe.Create();
+    private RunStartProbe _probe = null!;
     private readonly ProcessGitCommandRunner _git = new(ProcessGitCommandRunner.DefaultTimeout);
 
     /// <inheritdoc />
-    public void Dispose()
+    public async ValueTask InitializeAsync()
+    {
+        _probe = await RunStartProbe.CreateAsync();
+    }
+
+    public ValueTask DisposeAsync()
     {
         _probe.Dispose();
+        return ValueTask.CompletedTask;
     }
 
     /// <summary>
@@ -34,7 +40,7 @@ public sealed class RunStartWorktreeExcludeGitTests : IDisposable
     ///     does not list that folder.
     /// </summary>
     [Fact]
-    public void TheRealRunStartFlowKeepsTheWorktreeFolderOutOfTheMainCheckoutStatus()
+    public async Task TheRealRunStartFlowKeepsTheWorktreeFolderOutOfTheMainCheckoutStatus()
     {
         _probe.AppendLine("README.md", "uncommitted work");
 
@@ -42,7 +48,7 @@ public sealed class RunStartWorktreeExcludeGitTests : IDisposable
 
         Assert.True(result.ExitCode == 0, $"run start must exit 0 on a dirty checkout. {result.Output}");
         Assert.Single(Directory.GetDirectories(Path.Combine(_probe.Root, Folder)));
-        GitOutcome status = _git.Run(_probe.Root, ["status", "--porcelain"]);
+        GitOutcome status = await _git.RunAsync(_probe.Root, ["status", "--porcelain"]);
         Assert.True(status.Succeeded, status.FirstErrorLine);
         Assert.DoesNotContain(Folder, status.StandardOutput, StringComparison.Ordinal);
     }
@@ -55,8 +61,8 @@ public sealed class RunStartWorktreeExcludeGitTests : IDisposable
     [Fact]
     public async Task AWorktreeFolderUnderALinkedWorktreeStaysOutOfItsStatus()
     {
-        _probe.AddLinkedWorktree(LinkedBranch);
-        string linked = LinkedWorktreePath();
+        await _probe.AddLinkedWorktreeAsync(LinkedBranch);
+        string linked = await LinkedWorktreePath();
         RunStartRunner runner = new(
             _git,
             new PhysicalFileSystem(),
@@ -83,9 +89,9 @@ public sealed class RunStartWorktreeExcludeGitTests : IDisposable
     }
 
     /// <summary>The path git reports for the worktree on the linked branch, found in the porcelain listing.</summary>
-    private string LinkedWorktreePath()
+    private async Task<string> LinkedWorktreePath()
     {
-        foreach (string block in _probe.GitOutput("worktree", "list", "--porcelain").Split("\n\n"))
+        foreach (string block in (await _probe.GitOutputAsync("worktree", "list", "--porcelain")).Split("\n\n"))
         {
             string[] lines = block.Split('\n');
             if (lines.Contains("branch refs/heads/" + LinkedBranch))

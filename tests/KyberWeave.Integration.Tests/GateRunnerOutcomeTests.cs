@@ -88,7 +88,7 @@ public sealed class GateRunnerOutcomeTests : IDisposable
     [Fact]
     public async Task AFailOnOutputGatePassesWhenACommandExitsZeroAndPrintsNothing()
     {
-        RunGit(_root.Path, "init", "-q");
+        await RunGit(_root.Path, "init", "-q");
         PlannedTaskGate gate = new("silent", true, 30, [], ["git", "status", "--porcelain"]) { FailOnOutput = true };
 
         TaskGateRun run = await ReviewTestServices.Gates.RunTaskGatesAsync([gate], _root.Path, fix: false);
@@ -100,7 +100,7 @@ public sealed class GateRunnerOutcomeTests : IDisposable
     [Fact]
     public async Task AFailOnOutputGatePassesWhenTheOnlyOutputIsWhitespace()
     {
-        RunGit(_root.Path, "init", "-q");
+        await RunGit(_root.Path, "init", "-q");
         PlannedTaskGate gate = new("blank", true, 30, [], ["git", "rev-parse", "--show-prefix"]) { FailOnOutput = true };
 
         TaskGateRun run = await ReviewTestServices.Gates.RunTaskGatesAsync([gate], _root.Path, fix: false);
@@ -158,8 +158,8 @@ public sealed class GateRunnerOutcomeTests : IDisposable
         string web = Path.Combine(_root.Path, "web");
         Directory.CreateDirectory(web);
         await File.WriteAllTextAsync(Path.Combine(web, "marker.txt"), "marker");
-        RunGit(_root.Path, "init", "-q");
-        RunGit(_root.Path, "add", "web/marker.txt");
+        await RunGit(_root.Path, "init", "-q");
+        await RunGit(_root.Path, "add", "web/marker.txt");
 
         string[] probe = ["git", "ls-files", "--error-unmatch", "marker.txt"];
         PlannedTaskGate inWeb = new("probe-in-web", true, 30, [], probe, WorkingDirectory: "web");
@@ -171,7 +171,7 @@ public sealed class GateRunnerOutcomeTests : IDisposable
         Assert.False(run.Report.Gates[1].Passed, "The same probe at the repository root must not find web/marker.txt.");
     }
 
-    private static void RunGit(string workingDirectory, params string[] arguments)
+    private static async Task RunGit(string workingDirectory, params string[] arguments)
     {
         ProcessStartInfo startInfo = new("git")
         {
@@ -185,7 +185,7 @@ public sealed class GateRunnerOutcomeTests : IDisposable
         foreach (string argument in arguments)
             startInfo.ArgumentList.Add(argument);
 
-        ProcessResult result = ProcessRunner.Run(startInfo, string.Empty, TimeSpan.FromSeconds(60));
+        ProcessResult result = await ProcessRunner.RunAsync(startInfo, string.Empty, TimeSpan.FromSeconds(60));
         Assert.Equal(0, result.ExitCode);
     }
 }

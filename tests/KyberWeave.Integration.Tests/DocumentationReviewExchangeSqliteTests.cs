@@ -16,9 +16,9 @@ namespace KyberWeave.Integration.Tests;
 public sealed class DocumentationReviewExchangeSqliteTests
 {
     [Fact]
-    public void ImportRealSqliteAfterCurrentExportPersistsClaimsFingerprintsAndVerdictAtomically()
+    public async Task ImportRealSqliteAfterCurrentExportPersistsClaimsFingerprintsAndVerdictAtomically()
     {
-        RequireSqlite();
+        await RequireSqliteAsync();
         using TempDirectory repository = SafeRepository();
         IAnalysisPersistence persistence = DocsPorts.Sqlite(repository.Path);
         AnalysisCandidate candidate = Candidate("sqlite-round-trip", AnalysisRuleKind.Conflict);
@@ -31,7 +31,7 @@ public sealed class DocumentationReviewExchangeSqliteTests
         ReviewImportResult imported = exchange.Import(Serialize(bundle), [candidate]);
 
         Assert.True(imported.Success, Join(imported.Diagnostics));
-        Assert.Equal(2, persistence.LoadClaims(CurrentClaimIds(persistence)).Count);
+        Assert.Equal(2, persistence.LoadClaims(await CurrentClaimIds(persistence)).Count);
         Assert.Equal(
             candidate.Id,
             Assert.Single(persistence.LoadCandidateFingerprints([candidate.Id])).Value.CandidateId);
@@ -42,15 +42,15 @@ public sealed class DocumentationReviewExchangeSqliteTests
 
 
     [Fact]
-    public void ImportRealSqliteWhenVerdictWriteFailsRollsBackClaimsFingerprintsAndVerdicts()
+    public async Task ImportRealSqliteWhenVerdictWriteFailsRollsBackClaimsFingerprintsAndVerdicts()
     {
-        RequireSqlite();
+        await RequireSqliteAsync();
         using TempDirectory repository = SafeRepository();
         SqliteAnalysisPersistence persistence = DocsPorts.Sqlite(repository.Path);
         AnalysisCandidate candidate = Candidate("sqlite-rollback", AnalysisRuleKind.Conflict);
         DocumentationReviewExchange exchange = new DocumentationReviewExchange(persistence);
         ReviewCandidateBundle exported = exchange.Export([candidate]).Bundle;
-        RunSqlite(
+        await RunSqliteAsync(
             persistence.DatabasePath,
             "CREATE TRIGGER reject_review BEFORE INSERT ON analysis_verdicts " +
             "BEGIN SELECT RAISE(ABORT, 'forced review failure'); END;");
@@ -62,27 +62,27 @@ public sealed class DocumentationReviewExchangeSqliteTests
             [candidate]);
 
         Assert.False(imported.Success);
-        Assert.Equal("0", QuerySqlite(persistence.DatabasePath, "SELECT COUNT(*) FROM analysis_claims;").Trim());
+        Assert.Equal("0", (await QuerySqliteAsync(persistence.DatabasePath, "SELECT COUNT(*) FROM analysis_claims;")).Trim());
         Assert.Empty(persistence.LoadCandidateFingerprints([candidate.Id]));
         Assert.Empty(persistence.LoadVerdicts([candidate.Id]));
     }
 
-    private static IReadOnlyCollection<string> CurrentClaimIds(IAnalysisPersistence persistence)
+    private static async Task<IReadOnlyCollection<string>> CurrentClaimIds(IAnalysisPersistence persistence)
     {
         if (persistence is not SqliteAnalysisPersistence sqlite)
             throw new InvalidOperationException("A SQLite persistence adapter is required.");
-        return QuerySqlite(sqlite.DatabasePath, "SELECT CAST(id AS TEXT) FROM analysis_claims;")
+        return (await QuerySqliteAsync(sqlite.DatabasePath, "SELECT CAST(id AS TEXT) FROM analysis_claims;"))
             .Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
     }
 
     private static TempDirectory SafeRepository() => SqliteTestFixture.SafeRepository();
 
-    private static void RequireSqlite() =>
-        SqliteTestFixture.RequireSqlite("sqlite3 is unavailable; SQLite review import parity was not run.");
+    private static Task RequireSqliteAsync() =>
+        SqliteTestFixture.RequireSqliteAsync("sqlite3 is unavailable; SQLite review import parity was not run.");
 
-    private static string QuerySqlite(string databasePath, string sql) =>
-        SqliteTestFixture.QuerySqlite(databasePath, sql);
+    private static Task<string> QuerySqliteAsync(string databasePath, string sql) =>
+        SqliteTestFixture.QuerySqliteAsync(databasePath, sql);
 
-    private static void RunSqlite(string databasePath, string sql) =>
-        SqliteTestFixture.RunSqlite(databasePath, sql);
+    private static Task RunSqliteAsync(string databasePath, string sql) =>
+        SqliteTestFixture.RunSqliteAsync(databasePath, sql);
 }

@@ -165,17 +165,17 @@ public sealed class ReviewGatesTechnologyGateTests : IAsyncLifetime
     /// its own; <c>docs packet</c> finds the task there, so the gate resolves the task's technology the same way.
     /// </summary>
     [Fact]
-    public void APlanInAnotherWorktreeStillResolvesTheTasksTechnologyGates()
+    public async Task APlanInAnotherWorktreeStillResolvesTheTasksTechnologyGates()
     {
         SkipOnWindows();
         using TempDirectory other = new();
         DocFixture host = _fixture;
         ConfigureWith(host, "  technology-gates:\n" + Entry("csharp", "tech-probe", "tech-ran.txt"));
 
-        Git(host.Root, "init", "-q");
-        Git(host.Root, "add", "-A");
-        Git(host.Root, "-c", "user.email=probe@example.com", "-c", "user.name=Probe", "commit", "-qm", "fixture");
-        Git(host.Root, "worktree", "add", "-q", Path.Combine(other.Path, "run"), "-b", "probe/run");
+        await Git(host.Root, "init", "-q");
+        await Git(host.Root, "add", "-A");
+        await Git(host.Root, "-c", "user.email=probe@example.com", "-c", "user.name=Probe", "commit", "-qm", "fixture");
+        await Git(host.Root, "worktree", "add", "-q", Path.Combine(other.Path, "run"), "-b", "probe/run");
 
         // The run's worktree keeps the plan and its task file; the worker's checkout does not have them, which is
         // the case `docs packet` already handles by reading the plan from the other worktree.
@@ -189,7 +189,7 @@ public sealed class ReviewGatesTechnologyGateTests : IAsyncLifetime
         Assert.True(Ran(host, "tech-ran.txt"), output);
     }
 
-    private static void Git(string workingDirectory, params string[] arguments)
+    private static async Task Git(string workingDirectory, params string[] arguments)
     {
         ProcessStartInfo start = new("git")
         {
@@ -202,7 +202,7 @@ public sealed class ReviewGatesTechnologyGateTests : IAsyncLifetime
         foreach (string argument in arguments)
             start.ArgumentList.Add(argument);
 
-        ProcessResult result = ProcessRunner.Run(start, string.Empty, TimeSpan.FromSeconds(60));
+        ProcessResult result = await ProcessRunner.RunAsync(start, string.Empty, TimeSpan.FromSeconds(60));
         Assert.True(result.ExitCode == 0, $"git {string.Join(' ', arguments)} failed: {result.StandardError}{result.StandardOutput}");
     }
 }

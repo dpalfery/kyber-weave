@@ -15,8 +15,8 @@ public sealed class DocsGraphCliCommandTests : IDisposable
     public async Task ExecuteManagedGlossaryExportsApprovedKnowledgeOnlyAndPreservesDocuments()
     {
         WriteRepository();
-        using CodeGraphFixtureDb codeGraph = new CodeGraphFixtureDb();
-        codeGraph.IndexSymbol("Game.Run", "src/Game.cs", 10);
+        using CodeGraphFixtureDb codeGraph = await CodeGraphFixtureDb.CreateAsync();
+        await codeGraph.IndexSymbol("Game.Run", "src/Game.cs", 10);
         string codeGraphDirectory = Path.Combine(_repository.Path, ".codegraph");
         Directory.CreateDirectory(codeGraphDirectory);
         File.Copy(codeGraph.DatabasePath, Path.Combine(codeGraphDirectory, "codegraph.db"));
@@ -69,8 +69,8 @@ public sealed class DocsGraphCliCommandTests : IDisposable
             |---|---|---|---|---|
             | loop-gameplay | CURRENT | The gameplay update cycle. | component:Gameplay | gameplay loop |
             """);
-        using CodeGraphFixtureDb codeGraph = new CodeGraphFixtureDb();
-        codeGraph.IndexSymbol("Game.Run", "src/Game.cs", 10);
+        using CodeGraphFixtureDb codeGraph = await CodeGraphFixtureDb.CreateAsync();
+        await codeGraph.IndexSymbol("Game.Run", "src/Game.cs", 10);
         string codeGraphDirectory = Path.Combine(_repository.Path, ".codegraph");
         Directory.CreateDirectory(codeGraphDirectory);
         File.Copy(codeGraph.DatabasePath, Path.Combine(codeGraphDirectory, "codegraph.db"));

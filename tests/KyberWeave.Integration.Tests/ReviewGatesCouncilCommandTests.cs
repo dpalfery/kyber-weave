@@ -226,7 +226,7 @@ public sealed class ReviewGatesCouncilCommandTests : IDisposable
     [InlineData("--paths=../outside.cs")]
     [InlineData("--paths=-rf")]
     [InlineData("--base=--output=x")]
-    public void AnUnsafeInputIsRefusedBeforeAnyCouncilGateStarts(string unsafeOption)
+    public async Task AnUnsafeInputIsRefusedBeforeAnyCouncilGateStarts(string unsafeOption)
     {
         // Refused input reports KW-REVIEW-028 and exits 1, the same as with --agent; no gate may start.
         WriteConfiguration(MustNotRunConfiguration);
@@ -235,7 +235,7 @@ public sealed class ReviewGatesCouncilCommandTests : IDisposable
 
         AssertExitCode(1, run);
         AssertRendered(run, InvalidInput);
-        Assert.NotEqual(0, Git("config", "--local", "--get", StartedMarkerKey).ExitCode);
+        Assert.NotEqual(0, (await Git("config", "--local", "--get", StartedMarkerKey)).ExitCode);
     }
 
     // -----------------------------------------------------------------------------------------
@@ -289,7 +289,7 @@ public sealed class ReviewGatesCouncilCommandTests : IDisposable
     /// terminal the operator may run anything, so the test is skipped there rather than asserting a refusal that cannot happen.
     /// </remarks>
     [Fact]
-    public void ARefusedFullSuiteGateIsReportedAsNotStartedNotAsFailedAndTheOtherGatesStillRun()
+    public async Task ARefusedFullSuiteGateIsReportedAsNotStartedNotAsFailedAndTheOtherGatesStillRun()
     {
         if (!Console.IsInputRedirected)
             throw SkipException.ForSkip("stdin is an interactive terminal, so a full-suite gate is not refused here.");
@@ -310,7 +310,7 @@ public sealed class ReviewGatesCouncilCommandTests : IDisposable
         AssertRendered(run, "test: refused");
         AssertDiagnostic(run.Output, GateNotStarted, "ERROR");
         Assert.DoesNotContain(GateFailed, run.Output, StringComparison.Ordinal);
-        Assert.NotEqual(0, Git("config", "--local", "--get", StartedMarkerKey).ExitCode);
+        Assert.NotEqual(0, (await Git("config", "--local", "--get", StartedMarkerKey)).ExitCode);
         using JsonDocument report = ReadReport();
         Assert.True(GatePassed(report, "repository-wide"));
     }
@@ -343,7 +343,7 @@ public sealed class ReviewGatesCouncilCommandTests : IDisposable
     }
 
     [Fact]
-    public void ReviewGates_WithAllFlag_RunsAllGatesEvenWhenDiffMatchesSubset()
+    public async Task ReviewGates_WithAllFlag_RunsAllGatesEvenWhenDiffMatchesSubset()
     {
         WriteConfiguration("""
                            review:
@@ -356,8 +356,8 @@ public sealed class ReviewGatesCouncilCommandTests : IDisposable
                                  run: [git, --version]
                            """);
         WriteRepositoryFile("dash/index.ts", "// ts\n");
-        MustGit("add", "dash/index.ts");
-        Commit("add dash");
+        await MustGit("add", "dash/index.ts");
+        await Commit("add dash");
         ChangeTracked("dash/index.ts");
 
         CliRun run = Cli(GatesCommand("--all", "--format", "json"));
@@ -398,7 +398,7 @@ public sealed class ReviewGatesCouncilCommandTests : IDisposable
     /// configuration, so "did not start" is a fact the test reads back rather than an absent log line.
     /// </remarks>
     [Fact]
-    public void ReviewGates_WithAllAndARefusedFullSuiteGate_StopsBeforeAnyGateStarts()
+    public async Task ReviewGates_WithAllAndARefusedFullSuiteGate_StopsBeforeAnyGateStarts()
     {
         if (!Console.IsInputRedirected)
             throw SkipException.ForSkip("stdin is an interactive terminal, so a full-suite gate is not refused here.");
@@ -419,10 +419,10 @@ public sealed class ReviewGatesCouncilCommandTests : IDisposable
         AssertRendered(run, "test: refused");
         AssertDiagnostic(run.Output, GateNotStarted, "ERROR");
         Assert.DoesNotContain(GateFailed, run.Output, StringComparison.Ordinal);
-        Assert.NotEqual(0, Git("config", "--local", "--get", StartedMarkerKey).ExitCode);
+        Assert.NotEqual(0, (await Git("config", "--local", "--get", StartedMarkerKey)).ExitCode);
         Assert.NotEqual(
             0,
-            Git("config", "--local", "--get", OtherStartedMarkerKey).ExitCode);
+            (await Git("config", "--local", "--get", OtherStartedMarkerKey)).ExitCode);
     }
 
     /// <summary>
@@ -435,7 +435,7 @@ public sealed class ReviewGatesCouncilCommandTests : IDisposable
     /// Scoping by <c>--paths</c> is the shape a task gate and the self-review use.
     /// </remarks>
     [Fact]
-    public void ReviewGates_ScopedWithoutCouncil_StillRunsTheOtherGatesAfterARefusal()
+    public async Task ReviewGates_ScopedWithoutCouncil_StillRunsTheOtherGatesAfterARefusal()
     {
         if (!Console.IsInputRedirected)
             throw SkipException.ForSkip("stdin is an interactive terminal, so a full-suite gate is not refused here.");
@@ -457,7 +457,7 @@ public sealed class ReviewGatesCouncilCommandTests : IDisposable
         AssertExitCode(1, run);
         AssertRendered(run, "test: refused");
         AssertDiagnostic(run.Output, GateNotStarted, "ERROR");
-        Assert.NotEqual(0, Git("config", "--local", "--get", StartedMarkerKey).ExitCode);
+        Assert.NotEqual(0, (await Git("config", "--local", "--get", StartedMarkerKey)).ExitCode);
         using JsonDocument report = ReadReport();
         Assert.True(
             GatePassed(report, "csharp-lint"),
@@ -477,7 +477,7 @@ public sealed class ReviewGatesCouncilCommandTests : IDisposable
     /// list is caught by the marker rather than only by the report.
     /// </remarks>
     [Fact]
-    public void ReviewGates_WithGateOption_RunsOnlyTheNamedGate()
+    public async Task ReviewGates_WithGateOption_RunsOnlyTheNamedGate()
     {
         WriteConfiguration($"""
                             review:
@@ -493,14 +493,14 @@ public sealed class ReviewGatesCouncilCommandTests : IDisposable
         AssertExitCode(0, run);
         using JsonDocument report = ReadReport();
         Assert.Equal(["first-gate"], GateIds(report));
-        Assert.NotEqual(0, Git("config", "--local", "--get", StartedMarkerKey).ExitCode);
+        Assert.NotEqual(0, (await Git("config", "--local", "--get", StartedMarkerKey)).ExitCode);
     }
 
     /// <summary>
     /// <c>--gate</c> is repeatable: each named gate runs, in declaration order, and the gate nobody named does not.
     /// </summary>
     [Fact]
-    public void ReviewGates_WithRepeatedGateOption_RunsEachNamedGateAndNoOther()
+    public async Task ReviewGates_WithRepeatedGateOption_RunsEachNamedGateAndNoOther()
     {
         WriteConfiguration($"""
                             review:
@@ -518,7 +518,7 @@ public sealed class ReviewGatesCouncilCommandTests : IDisposable
         AssertExitCode(0, run);
         using JsonDocument report = ReadReport();
         Assert.Equal(["first-gate", "last-gate"], GateIds(report));
-        Assert.NotEqual(0, Git("config", "--local", "--get", StartedMarkerKey).ExitCode);
+        Assert.NotEqual(0, (await Git("config", "--local", "--get", StartedMarkerKey)).ExitCode);
     }
 
     /// <summary>
@@ -526,7 +526,7 @@ public sealed class ReviewGatesCouncilCommandTests : IDisposable
     /// else: the gate never starts, the refusal is <c>KW-REVIEW-033</c> at Error, and the run exits 1.
     /// </summary>
     [Fact]
-    public void ReviewGates_WithGateNamingAFullSuiteGateWithoutCouncil_IsRefusedTheSameWay()
+    public async Task ReviewGates_WithGateNamingAFullSuiteGateWithoutCouncil_IsRefusedTheSameWay()
     {
         if (!Console.IsInputRedirected)
             throw SkipException.ForSkip("stdin is an interactive terminal, so a full-suite gate is not refused here.");
@@ -545,7 +545,7 @@ public sealed class ReviewGatesCouncilCommandTests : IDisposable
         AssertRendered(run, "test: refused");
         AssertDiagnostic(run.Output, GateNotStarted, "ERROR");
         Assert.DoesNotContain(GateFailed, run.Output, StringComparison.Ordinal);
-        Assert.NotEqual(0, Git("config", "--local", "--get", StartedMarkerKey).ExitCode);
+        Assert.NotEqual(0, (await Git("config", "--local", "--get", StartedMarkerKey)).ExitCode);
     }
 
     /// <summary>
@@ -676,22 +676,22 @@ public sealed class ReviewGatesCouncilCommandTests : IDisposable
         WriteRepositoryFile(relativePath, "// changed\n");
     }
 
-    private void Commit(string message)
+    private async Task Commit(string message)
     {
-        MustGit(
+        await MustGit(
             "-c", "user.name=task3",
             "-c", "user.email=task3@example.invalid",
             "-c", "commit.gpgsign=false",
             "commit", "--quiet", "--allow-empty", "-m", message);
     }
 
-    private void MustGit(params string[] arguments)
+    private async Task MustGit(params string[] arguments)
     {
-        (int exitCode, string output) = Git(arguments);
+        (int exitCode, string output) = await Git(arguments);
         Assert.True(exitCode == 0, $"git {string.Join(' ', arguments)} failed: {output}");
     }
 
-    private (int ExitCode, string Output) Git(params string[] arguments)
+    private async Task<(int ExitCode, string Output)> Git(params string[] arguments)
     {
         ProcessStartInfo startInfo = new("git")
         {
@@ -705,7 +705,7 @@ public sealed class ReviewGatesCouncilCommandTests : IDisposable
         foreach (string argument in arguments)
             startInfo.ArgumentList.Add(argument);
 
-        ProcessResult result = ProcessRunner.Run(startInfo, string.Empty, TimeSpan.FromSeconds(60));
+        ProcessResult result = await ProcessRunner.RunAsync(startInfo, string.Empty, TimeSpan.FromSeconds(60));
         return (result.ExitCode, result.StandardOutput);
     }
 

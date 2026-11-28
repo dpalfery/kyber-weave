@@ -239,7 +239,7 @@ public sealed class DistributionManifestTests : IDisposable
     [InlineData("arbiter", "win-x64", "kyber-weave-arbiter-win-x64.zip")]
     [InlineData("mcp", "osx-arm64", "kyber-weave-mcp-osx-arm64.tar.gz")]
     [InlineData("cli", "linux-x64", "kyber-weave-linux-x64.tar.gz")]
-    public void NpmPlatformModuleResolvesEveryKnownTool(
+    public async Task NpmPlatformModuleResolvesEveryKnownTool(
         string tool,
         string rid,
         string expectedArchive)
@@ -254,7 +254,7 @@ public sealed class DistributionManifestTests : IDisposable
         startInfo.ArgumentList.Add(tool);
         startInfo.ArgumentList.Add(rid);
 
-        ProcessResult result = ProcessRunner.Run(startInfo, string.Empty);
+        ProcessResult result = await ProcessRunner.RunAsync(startInfo, string.Empty);
 
         Assert.True(
             result.ExitCode == 0,
@@ -267,7 +267,7 @@ public sealed class DistributionManifestTests : IDisposable
     [InlineData("CLI")]
     [InlineData("kilo")]
     [InlineData("")]
-    public void NpmPlatformModuleThrowsOnAnUnknownToolRatherThanResolvingTheCli(string tool)
+    public async Task NpmPlatformModuleThrowsOnAnUnknownToolRatherThanResolvingTheCli(string tool)
     {
         // The fallback resolved every typo to the CLI binary, so a caller naming a tool
         // that does not exist quietly downloaded and launched kyber-weave instead.
@@ -281,7 +281,7 @@ public sealed class DistributionManifestTests : IDisposable
         startInfo.ArgumentList.Add(NpmPlatformModulePath);
         startInfo.ArgumentList.Add(tool);
 
-        ProcessResult result = ProcessRunner.Run(startInfo, string.Empty);
+        ProcessResult result = await ProcessRunner.RunAsync(startInfo, string.Empty);
 
         Assert.True(
             result.ExitCode == 0,
@@ -295,7 +295,7 @@ public sealed class DistributionManifestTests : IDisposable
     [InlineData("osx-x64", "kyber-weave-arbiter", "kyber-weave-arbiter-osx-x64.tar.gz")]
     [InlineData("osx-arm64", "kyber-weave-arbiter", "kyber-weave-arbiter-osx-arm64.tar.gz")]
     [InlineData("win-x64", "kyber-weave-arbiter.exe", "kyber-weave-arbiter-win-x64.zip")]
-    public void NpmPlatformModuleMapsTheArbiterToolToTheRidSuffixedAssetNames(
+    public async Task NpmPlatformModuleMapsTheArbiterToolToTheRidSuffixedAssetNames(
         string rid,
         string expectedBinary,
         string expectedArchive)
@@ -311,7 +311,7 @@ public sealed class DistributionManifestTests : IDisposable
         startInfo.ArgumentList.Add(NpmPlatformModulePath);
         startInfo.ArgumentList.Add(rid);
 
-        ProcessResult result = ProcessRunner.Run(startInfo, string.Empty);
+        ProcessResult result = await ProcessRunner.RunAsync(startInfo, string.Empty);
 
         Assert.True(
             result.ExitCode == 0,
@@ -345,7 +345,7 @@ public sealed class DistributionManifestTests : IDisposable
     }
 
     [Fact]
-    public void NpmDownloadModuleEnsuresTheArbiterBinaryAlongsideTheCliAndMcp()
+    public async Task NpmDownloadModuleEnsuresTheArbiterBinaryAlongsideTheCliAndMcp()
     {
         string node = RequireRuntime("node");
 
@@ -360,7 +360,7 @@ public sealed class DistributionManifestTests : IDisposable
         startInfo.ArgumentList.Add(NpmDownloadModulePath);
         startInfo.Environment["KYBER_WEAVE_BINARY_DIR"] = _temp.Path;
 
-        ProcessResult result = ProcessRunner.Run(startInfo, string.Empty);
+        ProcessResult result = await ProcessRunner.RunAsync(startInfo, string.Empty);
 
         Assert.True(
             result.ExitCode == 0,
@@ -393,7 +393,7 @@ public sealed class DistributionManifestTests : IDisposable
     // ---- npm bin/kyber-weave-arbiter.js ----
 
     [Fact]
-    public void NpmArbiterWrapperLaunchesTheArbiterBinaryFromTheOverrideDirectory()
+    public async Task NpmArbiterWrapperLaunchesTheArbiterBinaryFromTheOverrideDirectory()
     {
         if (OperatingSystem.IsWindows())
         {
@@ -405,7 +405,7 @@ public sealed class DistributionManifestTests : IDisposable
         string node = RequireRuntime("node");
 
         string fakeBinary = Path.Combine(_temp.Path, "kyber-weave-arbiter");
-        File.WriteAllText(fakeBinary, "#!/bin/sh\necho \"fake-arbiter $@\"\n");
+        await File.WriteAllTextAsync(fakeBinary, "#!/bin/sh\necho \"fake-arbiter $@\"\n");
         MakeExecutable(fakeBinary);
 
         ProcessStartInfo startInfo = new(node)
@@ -419,7 +419,7 @@ public sealed class DistributionManifestTests : IDisposable
         startInfo.ArgumentList.Add("--version");
         startInfo.Environment["KYBER_WEAVE_BINARY_DIR"] = _temp.Path;
 
-        ProcessResult result = ProcessRunner.Run(startInfo, string.Empty);
+        ProcessResult result = await ProcessRunner.RunAsync(startInfo, string.Empty);
 
         Assert.True(
             result.ExitCode == 0,

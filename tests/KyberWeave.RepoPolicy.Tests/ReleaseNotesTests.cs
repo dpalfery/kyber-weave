@@ -54,9 +54,9 @@ public sealed class ReleaseNotesTests
     /// Without this the first RC of a new line would compare with an older line's candidates.
     /// </summary>
     [Fact]
-    public void NotesBaseForFirstRcAfterStableComparesWithThatStable()
+    public async Task NotesBaseForFirstRcAfterStableComparesWithThatStable()
     {
-        AssertNotesBase(
+        await AssertNotesBase(
             tags: ["v0.1.6"],
             arguments: [NotesBaseFlag, ForFlag, "v0.1.7-rc.1"],
             expectedPreviousTag: "v0.1.6",
@@ -68,9 +68,9 @@ public sealed class ReleaseNotesTests
     /// the stable release that opened the line.
     /// </summary>
     [Fact]
-    public void NotesBaseForLaterRcComparesWithPreviousRc()
+    public async Task NotesBaseForLaterRcComparesWithPreviousRc()
     {
-        AssertNotesBase(
+        await AssertNotesBase(
             tags: ["v0.1.6", "v0.1.7-rc.1", "v0.1.7-rc.2"],
             arguments: [NotesBaseFlag, ForFlag, "v0.1.7-rc.3"],
             expectedPreviousTag: "v0.1.7-rc.2",
@@ -83,9 +83,9 @@ public sealed class ReleaseNotesTests
     /// (0.1.7-rc.*) is never the base for the stable 0.1.7.
     /// </summary>
     [Fact]
-    public void NotesBaseForFirstStableAfterRcsSpansThemToPreviousStable()
+    public async Task NotesBaseForFirstStableAfterRcsSpansThemToPreviousStable()
     {
-        AssertNotesBase(
+        await AssertNotesBase(
             tags: ["v0.1.6", "v0.1.7-rc.1", "v0.1.7-rc.2", "v0.1.7-rc.3"],
             arguments: [NotesBaseFlag, ForFlag, "v0.1.7"],
             expectedPreviousTag: "v0.1.6",
@@ -97,9 +97,9 @@ public sealed class ReleaseNotesTests
     /// empty value and exits 0, so the workflow can compare with the start of history.
     /// </summary>
     [Fact]
-    public void NotesBaseForStableWithNoPriorStableIsEmpty()
+    public async Task NotesBaseForStableWithNoPriorStableIsEmpty()
     {
-        AssertNotesBase(
+        await AssertNotesBase(
             tags: ["v0.1.0-rc.1"],
             arguments: [NotesBaseFlag, ForFlag, "v0.1.0"],
             expectedPreviousTag: string.Empty,
@@ -111,9 +111,9 @@ public sealed class ReleaseNotesTests
     /// for the first RC of 0.1.7, even though it sorts above v0.1.6.
     /// </summary>
     [Fact]
-    public void NotesBaseIgnoresDevTags()
+    public async Task NotesBaseIgnoresDevTags()
     {
-        AssertNotesBase(
+        await AssertNotesBase(
             tags: ["v0.1.6", "v0.1.7-dev.3"],
             arguments: [NotesBaseFlag, ForFlag, "v0.1.7-rc.1"],
             expectedPreviousTag: "v0.1.6",
@@ -126,9 +126,9 @@ public sealed class ReleaseNotesTests
     /// v1.0.0 line here, so this mode widens it.
     /// </summary>
     [Fact]
-    public void NotesBaseWidensMajorFilterSoNewMajorRcComparesWithItsOwnLine()
+    public async Task NotesBaseWidensMajorFilterSoNewMajorRcComparesWithItsOwnLine()
     {
-        AssertNotesBase(
+        await AssertNotesBase(
             tags: ["v0.9.5", "v1.0.0-rc.1"],
             arguments: [NotesBaseFlag, ForFlag, "v1.0.0-rc.2"],
             expectedPreviousTag: "v1.0.0-rc.1",
@@ -142,9 +142,9 @@ public sealed class ReleaseNotesTests
     /// against a version that is not in the release line.
     /// </summary>
     [Fact]
-    public void NotesBaseForReleasedTagIgnoresTagsAboveItWhenMajorIsMistyped()
+    public async Task NotesBaseForReleasedTagIgnoresTagsAboveItWhenMajorIsMistyped()
     {
-        AssertNotesBase(
+        await AssertNotesBase(
             tags: ["v0.1.6", "v0.1.7-rc.9", "v1.0.6-rc.6"],
             arguments: [NotesBaseFlag, ForFlag, "v0.1.7-rc.10"],
             expectedPreviousTag: "v0.1.7-rc.9",
@@ -156,12 +156,12 @@ public sealed class ReleaseNotesTests
     /// default output for this same tag set is v0.1.7-rc.10, so the two modes cannot drift.
     /// </summary>
     [Fact]
-    public void DefaultTagForMistypedMajorSetIsTheReleasedTagTheBaseIsComputedFor()
+    public async Task DefaultTagForMistypedMajorSetIsTheReleasedTagTheBaseIsComputedFor()
     {
         using TempDirectory temp = new();
-        CreateRepoWithTags(temp.Path, ["v0.1.6", "v0.1.7-rc.9", "v1.0.6-rc.6"]);
+        await CreateRepoWithTags(temp.Path, ["v0.1.6", "v0.1.7-rc.9", "v1.0.6-rc.6"]);
 
-        ProcessResult result = RunNextReleaseVersion(temp.Path);
+        ProcessResult result = await RunNextReleaseVersion(temp.Path);
 
         Assert.True(result.ExitCode == 0, $"default mode exited {result.ExitCode}: {result.StandardError.Trim()}");
         Assert.Equal("v0.1.7-rc.10", ReadOutputValue(result.StandardOutput, "TAG"));
@@ -172,12 +172,12 @@ public sealed class ReleaseNotesTests
     /// line must not move the next RC number, so widening stays confined to <c>--notes-base</c>.
     /// </summary>
     [Fact]
-    public void DefaultRcOutputKeepsMajorGuardForTagsAboveStableMajor()
+    public async Task DefaultRcOutputKeepsMajorGuardForTagsAboveStableMajor()
     {
         using TempDirectory temp = new();
-        CreateRepoWithTags(temp.Path, ["v0.9.5", "v1.0.0-rc.1"]);
+        await CreateRepoWithTags(temp.Path, ["v0.9.5", "v1.0.0-rc.1"]);
 
-        ProcessResult result = RunNextReleaseVersion(temp.Path);
+        ProcessResult result = await RunNextReleaseVersion(temp.Path);
 
         Assert.True(result.ExitCode == 0, $"default mode exited {result.ExitCode}: {result.StandardError.Trim()}");
         Assert.Equal("0.9.6-rc.1", ReadOutputValue(result.StandardOutput, "VERSION"));
@@ -189,12 +189,12 @@ public sealed class ReleaseNotesTests
     /// publishes. The 0.1.7-rc.10 answer is what the release workflow relies on today.
     /// </summary>
     [Fact]
-    public void DefaultRcOutputIsUnchangedByNotesBaseMode()
+    public async Task DefaultRcOutputIsUnchangedByNotesBaseMode()
     {
         using TempDirectory temp = new();
-        CreateRepoWithTags(temp.Path, ["v0.1.6", "v0.1.7-rc.9"]);
+        await CreateRepoWithTags(temp.Path, ["v0.1.6", "v0.1.7-rc.9"]);
 
-        ProcessResult result = RunNextReleaseVersion(temp.Path);
+        ProcessResult result = await RunNextReleaseVersion(temp.Path);
 
         Assert.True(result.ExitCode == 0, $"default mode exited {result.ExitCode}: {result.StandardError.Trim()}");
         Assert.Equal("0.1.7-rc.10", ReadOutputValue(result.StandardOutput, "VERSION"));
@@ -205,12 +205,12 @@ public sealed class ReleaseNotesTests
     /// Pins the <c>--prod</c> output so promoting a candidate to stable still yields 0.1.7.
     /// </summary>
     [Fact]
-    public void ProdOutputIsUnchangedByNotesBaseMode()
+    public async Task ProdOutputIsUnchangedByNotesBaseMode()
     {
         using TempDirectory temp = new();
-        CreateRepoWithTags(temp.Path, ["v0.1.6", "v0.1.7-rc.9"]);
+        await CreateRepoWithTags(temp.Path, ["v0.1.6", "v0.1.7-rc.9"]);
 
-        ProcessResult result = RunNextReleaseVersion(temp.Path, "--prod");
+        ProcessResult result = await RunNextReleaseVersion(temp.Path, "--prod");
 
         Assert.True(result.ExitCode == 0, $"--prod mode exited {result.ExitCode}: {result.StandardError.Trim()}");
         Assert.Equal("0.1.7", ReadOutputValue(result.StandardOutput, "VERSION"));
@@ -366,7 +366,7 @@ public sealed class ReleaseNotesTests
     // helpers
     // ---------------------------------------------------------------------------------------
 
-    private static void AssertNotesBase(
+    private static async Task AssertNotesBase(
         string[] tags,
         string[] arguments,
         string expectedPreviousTag,
@@ -375,9 +375,9 @@ public sealed class ReleaseNotesTests
         SkipOnWindows();
 
         using TempDirectory temp = new();
-        CreateRepoWithTags(temp.Path, tags);
+        await CreateRepoWithTags(temp.Path, tags);
 
-        ProcessResult result = RunNextReleaseVersion(temp.Path, arguments);
+        ProcessResult result = await RunNextReleaseVersion(temp.Path, arguments);
 
         Assert.True(
             result.ExitCode == 0,
@@ -385,17 +385,17 @@ public sealed class ReleaseNotesTests
         Assert.Equal(expectedPreviousTag, ReadOutputValue(result.StandardOutput, PreviousTagKey));
     }
 
-    private static void CreateRepoWithTags(string path, string[] tags)
+    private static async Task CreateRepoWithTags(string path, string[] tags)
     {
-        RunGit(path, "init", "-q");
-        RunGit(path, "commit", "--allow-empty", "-q", "-m", "fixture");
+        await RunGit(path, "init", "-q");
+        await RunGit(path, "commit", "--allow-empty", "-q", "-m", "fixture");
         foreach (string tag in tags)
         {
-            RunGit(path, "tag", tag);
+            await RunGit(path, "tag", tag);
         }
     }
 
-    private static void RunGit(string path, params string[] arguments)
+    private static async Task RunGit(string path, params string[] arguments)
     {
         ProcessStartInfo startInfo = new("git")
         {
@@ -417,14 +417,14 @@ public sealed class ReleaseNotesTests
             startInfo.ArgumentList.Add(argument);
         }
 
-        ProcessResult result = ProcessRunner.Run(startInfo, string.Empty, TimeSpan.FromSeconds(60));
+        ProcessResult result = await ProcessRunner.RunAsync(startInfo, string.Empty, TimeSpan.FromSeconds(60));
 
         Assert.True(
             result.ExitCode == 0,
             $"git {string.Join(' ', arguments)} failed ({result.ExitCode}): {result.StandardError.Trim()}");
     }
 
-    private static ProcessResult RunNextReleaseVersion(string repositoryPath, params string[] arguments)
+    private static async Task<ProcessResult> RunNextReleaseVersion(string repositoryPath, params string[] arguments)
     {
         SkipOnWindows();
 
@@ -442,7 +442,7 @@ public sealed class ReleaseNotesTests
             startInfo.ArgumentList.Add(argument);
         }
 
-        return ProcessRunner.Run(startInfo, string.Empty, TimeSpan.FromSeconds(60));
+        return await ProcessRunner.RunAsync(startInfo, string.Empty, TimeSpan.FromSeconds(60));
     }
 
     /// <summary>

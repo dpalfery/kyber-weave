@@ -16,23 +16,25 @@ namespace KyberWeave.Integration.Tests.Arbiter;
 /// A Copilot CLI <c>task</c> payload with no routing headers, replayed against a real git checkout: the planner
 /// writes its plan after dispatch, and only real git reports that change since the dispatch snapshot.
 /// </summary>
-public sealed class ArbiterHeaderlessPlannerRealGitTests : IDisposable
+public sealed class ArbiterHeaderlessPlannerRealGitTests : IAsyncLifetime
 {
-    private readonly RunStartProbe _probe = RunStartProbe.Create();
+    private RunStartProbe _probe = null!;
     private readonly TempDirectory _home = new();
 
-    public ArbiterHeaderlessPlannerRealGitTests()
+    public async ValueTask InitializeAsync()
     {
+        _probe = await RunStartProbe.CreateAsync();
         Directory.CreateDirectory(Path.Combine(_probe.Root, ".kyber-weave"));
-        File.WriteAllText(
+        await File.WriteAllTextAsync(
             Path.Combine(_probe.Root, ".kyber-weave", "kyber-weave.yml"),
             "ontology:\n  docs-root: docs\narbiter:\n  enabled: true\n  provider:\n    kind: none\n");
     }
 
-    public void Dispose()
+    public ValueTask DisposeAsync()
     {
         _probe.Dispose();
         _home.Dispose();
+        return ValueTask.CompletedTask;
     }
 
     [Fact]

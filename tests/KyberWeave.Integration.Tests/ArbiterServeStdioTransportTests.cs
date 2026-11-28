@@ -29,11 +29,11 @@ public sealed class ArbiterServeStdioTransportTests
         """;
 
     [Fact]
-    public void TheExecutableAnswersRequestsPipedInBeforeStdinCloses()
+    public async Task TheExecutableAnswersRequestsPipedInBeforeStdinCloses()
     {
         using TempDirectory repository = new TempDirectory();
         Directory.CreateDirectory(Path.Combine(repository.Path, ".kyber-weave"));
-        File.WriteAllText(
+        await File.WriteAllTextAsync(
             Path.Combine(repository.Path, ".kyber-weave", "kyber-weave.yml"),
             "arbiter:\n  enabled: true\n  provider:\n    kind: none\n");
 
@@ -50,7 +50,7 @@ public sealed class ArbiterServeStdioTransportTests
         startInfo.ArgumentList.Add("--repo-root");
         startInfo.ArgumentList.Add(repository.Path);
 
-        ProcessResult result = ProcessRunner.Run(startInfo, Requests, TimeSpan.FromSeconds(30));
+        ProcessResult result = await ProcessRunner.RunAsync(startInfo, Requests, TimeSpan.FromSeconds(30));
 
         List<long> answered = AnsweredIds(result.StandardOutput);
         Assert.True(

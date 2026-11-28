@@ -26,7 +26,7 @@ namespace KyberWeave.Integration.Tests;
 /// everything as it was, and the one create-or-update it makes. Git runs for real in a scratch repository whose push
 /// goes to a local bare repository; every gh call is answered by a script, so nothing reaches GitHub.
 /// </summary>
-public sealed class RunDeliveryTests : IClassFixture<RunDeliveryRepositoryTemplate>, IDisposable
+public sealed class RunDeliveryTests : IClassFixture<RunDeliveryRepositoryTemplate>, IAsyncLifetime
 {
     private static readonly ICorpusSource Corpus = CheckoutCorpusSource.Checkout;
 
@@ -82,7 +82,9 @@ public sealed class RunDeliveryTests : IClassFixture<RunDeliveryRepositoryTempla
         Directory.CreateDirectory(_home);
     }
 
-    public void Dispose()
+    public ValueTask InitializeAsync() => ValueTask.CompletedTask;
+
+    public ValueTask DisposeAsync()
     {
         try
         {
@@ -96,6 +98,8 @@ public sealed class RunDeliveryTests : IClassFixture<RunDeliveryRepositoryTempla
         catch (UnauthorizedAccessException)
         {
         }
+
+        return ValueTask.CompletedTask;
     }
 
     // ---------------------------------------------------------------- the description
@@ -244,7 +248,7 @@ public sealed class RunDeliveryTests : IClassFixture<RunDeliveryRepositoryTempla
     [Fact]
     public async Task CreatesADraftPullRequestCommittingThePendingArchiveAndWritingNoFile()
     {
-        GitRunRepository(archivePending: true);
+        await GitRunRepository(archivePending: true);
         HashSet<string> before = Snapshot();
         ScriptedGh gh = new();
 
@@ -272,16 +276,16 @@ public sealed class RunDeliveryTests : IClassFixture<RunDeliveryRepositoryTempla
         Assert.Contains("## Pending human review\n\n- Minor: The file name does not say it writes CSV (src/Export.cs:1).", body, StringComparison.Ordinal);
         Assert.Contains("## Decisions made for you to check", body, StringComparison.Ordinal);
 
-        Assert.Equal(string.Empty, Git(_work, "status", "--porcelain").Trim());
-        Assert.Contains("docs(plan): archive widget-export plan", Git(_work, "log", "-1", "--format=%s"), StringComparison.Ordinal);
-        Assert.Equal(Git(_work, "rev-parse", "HEAD").Trim(), Git(_remote, "rev-parse", $"refs/heads/{Branch}").Trim());
+        Assert.Equal(string.Empty, (await Git(_work, "status", "--porcelain")).Trim());
+        Assert.Contains("docs(plan): archive widget-export plan", await Git(_work, "log", "-1", "--format=%s"), StringComparison.Ordinal);
+        Assert.Equal((await Git(_work, "rev-parse", "HEAD")).Trim(), (await Git(_remote, "rev-parse", $"refs/heads/{Branch}")).Trim());
         Assert.Subset(before.Union([ArchivedPlan]).ToHashSet(StringComparer.Ordinal), Snapshot());
     }
 
     [Fact]
     public async Task UpdatesTheOpenPullRequestInsteadOfCreatingASecond()
     {
-        GitRunRepository(archivePending: false);
+        await GitRunRepository(archivePending: false);
         ScriptedGh gh = new() { OpenPullRequest = """[{"number":42,"url":"https://github.com/acme/widgets/pull/42","baseRefName":"main"}]""" };
 
         DeliveryOutcome outcome = await Deliver(gh, new DeliveryRequest("Lists can be exported."));
@@ -295,7 +299,7 @@ public sealed class RunDeliveryTests : IClassFixture<RunDeliveryRepositoryTempla
     [Fact]
     public async Task AnOpenPullRequestIntoAnotherBaseIsLeftAloneForAPerson()
     {
-        GitRunRepository(archivePending: false);
+        await GitRunRepository(archivePending: false);
         ScriptedGh gh = new() { OpenPullRequest = """[{"number":42,"url":"u","baseRefName":"release"}]""" };
 
         DeliveryOutcome outcome = await Deliver(gh, new DeliveryRequest("S."));
@@ -318,7 +322,7 @@ public sealed class RunDeliveryTests : IClassFixture<RunDeliveryRepositoryTempla
     [InlineData("""[{"number":1.5,"baseRefName":"main"}]""")]
     public async Task AMalformedPullRequestListIsARefusalThatNamesThePushedBranch(string list)
     {
-        GitRunRepository(archivePending: false);
+        await GitRunRepository(archivePending: false);
         ScriptedGh gh = new() { OpenPullRequest = list };
 
         DeliveryOutcome outcome = await Deliver(gh, new DeliveryRequest("S."));
@@ -347,7 +351,7 @@ public sealed class RunDeliveryTests : IClassFixture<RunDeliveryRepositoryTempla
     [InlineData("[]")]
     public async Task AMalformedPullRequestViewIsARefusalThatNamesThePushedBranch(string view)
     {
-        GitRunRepository(archivePending: false);
+        await GitRunRepository(archivePending: false);
         ScriptedGh gh = new() { ViewResponse = view };
 
         DeliveryOutcome outcome = await Deliver(gh, new DeliveryRequest("S."));
@@ -360,7 +364,7 @@ public sealed class RunDeliveryTests : IClassFixture<RunDeliveryRepositoryTempla
     [Fact]
     public async Task AnOpenPullRequestWithNoUsableBaseSaysSoInsteadOfNamingAnEmptyBase()
     {
-        GitRunRepository(archivePending: false);
+        await GitRunRepository(archivePending: false);
         ScriptedGh gh = new() { OpenPullRequest = """[{"number":42,"baseRefName":""}]""" };
 
         DeliveryOutcome outcome = await Deliver(gh, new DeliveryRequest("S."));
@@ -373,20 +377,20 @@ public sealed class RunDeliveryTests : IClassFixture<RunDeliveryRepositoryTempla
     [Fact]
     public async Task RefusesWithoutASummary()
     {
-        GitRunRepository(archivePending: false);
+        await GitRunRepository(archivePending: false);
         ScriptedGh gh = new();
 
-        AssertRefusedBeforeAnythingLeaves(await Deliver(gh, new DeliveryRequest("  ")), gh, RunDelivery.InvalidRequest);
+        await AssertRefusedBeforeAnythingLeaves(await Deliver(gh, new DeliveryRequest("  ")), gh, RunDelivery.InvalidRequest);
     }
 
     [Fact]
     public async Task RefusesOnTheBaseBranch()
     {
-        GitRunRepository(archivePending: false);
-        Git(_work, "checkout", "-q", "main");
+        await GitRunRepository(archivePending: false);
+        await Git(_work, "checkout", "-q", "main");
         ScriptedGh gh = new();
 
-        AssertRefusedBeforeAnythingLeaves(await Deliver(gh, new DeliveryRequest("S.")), gh, RunDelivery.NotARunBranch);
+        await AssertRefusedBeforeAnythingLeaves(await Deliver(gh, new DeliveryRequest("S.")), gh, RunDelivery.NotARunBranch);
     }
 
     /// <summary>
@@ -396,7 +400,7 @@ public sealed class RunDeliveryTests : IClassFixture<RunDeliveryRepositoryTempla
     [Fact]
     public async Task CommitsTheFiledTodosAndListsThemUnderFollowUpWorkFiled()
     {
-        GitRunRepository(archivePending: false);
+        await GitRunRepository(archivePending: false);
         Write("docs/todo/README.md", "# Todos\n\n- [Move the shared DTOs](move-shared-dtos.md)\n");
         Write("docs/todo/move-shared-dtos.md",
             "---\nid: todo/move-shared-dtos\ntitle: Move the shared DTOs out of the Domain project\ndoc-type: todo\n---\n\n# Move the shared DTOs\n");
@@ -405,8 +409,8 @@ public sealed class RunDeliveryTests : IClassFixture<RunDeliveryRepositoryTempla
         DeliveryOutcome outcome = await Deliver(gh, new DeliveryRequest("S."));
 
         Assert.True(outcome.Delivered, Findings(outcome));
-        Assert.Equal(string.Empty, Git(_work, "status", "--porcelain").Trim());
-        Assert.Contains("docs(todo): file the follow-up work this run found", Git(_work, "log", "-1", "--format=%s"), StringComparison.Ordinal);
+        Assert.Equal(string.Empty, (await Git(_work, "status", "--porcelain")).Trim());
+        Assert.Contains("docs(todo): file the follow-up work this run found", await Git(_work, "log", "-1", "--format=%s"), StringComparison.Ordinal);
         Assert.Contains(
             "## Follow-up work filed\n\n- Move the shared DTOs out of the Domain project (`docs/todo/move-shared-dtos.md`)",
             gh.Bodies.Single(),
@@ -426,36 +430,36 @@ public sealed class RunDeliveryTests : IClassFixture<RunDeliveryRepositoryTempla
     [Fact]
     public async Task RefusesChangesItDoesNotOwn()
     {
-        GitRunRepository(archivePending: true);
+        await GitRunRepository(archivePending: true);
         await File.WriteAllTextAsync(Path.Combine(_work, "src.cs"), "// a worker's uncommitted edit");
         ScriptedGh gh = new();
 
         DeliveryOutcome outcome = await Deliver(gh, new DeliveryRequest("S."));
 
-        AssertRefusedBeforeAnythingLeaves(outcome, gh, RunDelivery.UncommittedChanges);
+        await AssertRefusedBeforeAnythingLeaves(outcome, gh, RunDelivery.UncommittedChanges);
         Assert.Contains("src.cs", Findings(outcome), StringComparison.Ordinal);
-        Assert.NotEqual(string.Empty, Git(_work, "diff", "--cached", "--name-only").Trim());
+        Assert.NotEqual(string.Empty, (await Git(_work, "diff", "--cached", "--name-only")).Trim());
     }
 
     [Fact]
     public async Task RefusesAPlanThatIsNotArchived()
     {
-        GitRunRepository(archivePending: false, archived: false);
+        await GitRunRepository(archivePending: false, archived: false);
         ScriptedGh gh = new();
 
-        AssertRefusedBeforeAnythingLeaves(await Deliver(gh, new DeliveryRequest("S.")), gh, RunDelivery.PlanNotDeliverable);
+        await AssertRefusedBeforeAnythingLeaves(await Deliver(gh, new DeliveryRequest("S.")), gh, RunDelivery.PlanNotDeliverable);
     }
 
     /// <summary>The archived plan is found by git and read a moment later; if it is gone by then the run refuses and says so.</summary>
     [Fact]
     public async Task RefusesAPlanThatVanishesBetweenBeingFoundAndBeingRead()
     {
-        GitRunRepository(archivePending: false);
+        await GitRunRepository(archivePending: false);
         ScriptedGh gh = new();
 
         DeliveryOutcome outcome = await Deliver(gh, new DeliveryRequest("S."), afterPlanFound: File.Delete);
 
-        AssertRefusedBeforeAnythingLeaves(outcome, gh, RunDelivery.PlanNotDeliverable);
+        await AssertRefusedBeforeAnythingLeaves(outcome, gh, RunDelivery.PlanNotDeliverable);
         Assert.Contains("is no longer there", Findings(outcome), StringComparison.Ordinal);
     }
 
@@ -463,7 +467,7 @@ public sealed class RunDeliveryTests : IClassFixture<RunDeliveryRepositoryTempla
     [Fact]
     public async Task RefusesAPlanThatCannotBeReadAndSaysWhy()
     {
-        GitRunRepository(archivePending: false);
+        await GitRunRepository(archivePending: false);
         ScriptedGh gh = new();
 
         DeliveryOutcome outcome = await Deliver(gh, new DeliveryRequest("S."), afterPlanFound: path =>
@@ -472,7 +476,7 @@ public sealed class RunDeliveryTests : IClassFixture<RunDeliveryRepositoryTempla
             Directory.CreateDirectory(path);
         });
 
-        AssertRefusedBeforeAnythingLeaves(outcome, gh, RunDelivery.PlanNotDeliverable);
+        await AssertRefusedBeforeAnythingLeaves(outcome, gh, RunDelivery.PlanNotDeliverable);
         Assert.Contains("could not be read", Findings(outcome), StringComparison.Ordinal);
     }
 
@@ -480,7 +484,7 @@ public sealed class RunDeliveryTests : IClassFixture<RunDeliveryRepositoryTempla
     [Fact]
     public async Task ATodoThatCannotBeReadIsListedByFileNameAndDoesNotFailTheDelivery()
     {
-        GitRunRepository(archivePending: false);
+        await GitRunRepository(archivePending: false);
         const string Unreadable = "docs/todo/unreadable-follow-up.md";
         Write("docs/todo/README.md", "# Todos\n");
         Write(Unreadable, "---\nid: todo/unreadable-follow-up\ntitle: Cannot read this\ndoc-type: todo\n---\n\n# X\n");
@@ -545,10 +549,10 @@ public sealed class RunDeliveryTests : IClassFixture<RunDeliveryRepositoryTempla
     [Fact]
     public async Task AnUnreadableHostTemplateGivesTheDeliveryAWarningThatNamesIt()
     {
-        GitRunRepository(archivePending: false);
+        await GitRunRepository(archivePending: false);
         Write(".github/pull_request_template.md", "## Summary\n");
-        Git(_work, "add", "-A");
-        Git(_work, "commit", "-q", "-m", "docs: template");
+        await Git(_work, "add", "-A");
+        await Git(_work, "commit", "-q", "-m", "docs: template");
         ScriptedGh gh = new();
 
         DeliveryOutcome outcome = await Deliver(gh, new DeliveryRequest("S."), readTemplateFile: _ => throw new IOException("denied"));
@@ -655,7 +659,7 @@ public sealed class RunDeliveryTests : IClassFixture<RunDeliveryRepositoryTempla
     [Fact]
     public async Task ACorruptTaskGateReportIsWarnedAboutAndTheDescriptionSaysNoneWasRecorded()
     {
-        GitRunRepository(archivePending: false);
+        await GitRunRepository(archivePending: false);
         Write(".agent_scratchpad/T3/task-gate.json", "{ this is not json");
         ScriptedGh gh = new();
 
@@ -671,7 +675,7 @@ public sealed class RunDeliveryTests : IClassFixture<RunDeliveryRepositoryTempla
     [Fact]
     public async Task ATaskGateReportLargerThanTheCapIsWarnedAboutNotLoaded()
     {
-        GitRunRepository(archivePending: false);
+        await GitRunRepository(archivePending: false);
         Write(".agent_scratchpad/T3/task-gate.json", new string(' ', (int)BoundedFile.MaxBytes + 1));
         ScriptedGh gh = new();
 
@@ -686,7 +690,7 @@ public sealed class RunDeliveryTests : IClassFixture<RunDeliveryRepositoryTempla
     [Fact]
     public async Task ACorruptReviewFindingsFileIsWarnedAboutAndTheDescriptionSaysNoReviewWasRecorded()
     {
-        GitRunRepository(archivePending: false);
+        await GitRunRepository(archivePending: false);
         Write(".agent_scratchpad/review/review/cycle-1/findings.json", "{ this is not json");
         ScriptedGh gh = new();
 
@@ -729,7 +733,7 @@ public sealed class RunDeliveryTests : IClassFixture<RunDeliveryRepositoryTempla
     [Fact]
     public async Task ATodoThatVanishesWhileTheFollowUpsAreListedIsLeftOutAndTheRestAreListed()
     {
-        GitRunRepository(archivePending: false);
+        await GitRunRepository(archivePending: false);
         const string Kept = "docs/todo/kept-follow-up.md";
         const string Vanishing = "docs/todo/vanishing-follow-up.md";
         Write("docs/todo/README.md", "# Todos\n");
@@ -758,13 +762,13 @@ public sealed class RunDeliveryTests : IClassFixture<RunDeliveryRepositoryTempla
     [Fact]
     public async Task AnAzureDevOpsRemoteSendsTheConductorToTheDeliveryAgent()
     {
-        GitRunRepository(archivePending: false);
-        Git(_work, "remote", "set-url", "origin", "https://dev.azure.com/acme/widgets/_git/widgets");
+        await GitRunRepository(archivePending: false);
+        await Git(_work, "remote", "set-url", "origin", "https://dev.azure.com/acme/widgets/_git/widgets");
         ScriptedGh gh = new();
 
         DeliveryOutcome outcome = await Deliver(gh, new DeliveryRequest("S."));
 
-        AssertRefusedBeforeAnythingLeaves(outcome, gh, RunDelivery.ProviderUnavailable);
+        await AssertRefusedBeforeAnythingLeaves(outcome, gh, RunDelivery.ProviderUnavailable);
         Assert.True(outcome.NeedsDeliveryAgent);
         Assert.Contains("Azure DevOps", Findings(outcome), StringComparison.Ordinal);
     }
@@ -772,33 +776,33 @@ public sealed class RunDeliveryTests : IClassFixture<RunDeliveryRepositoryTempla
     [Fact]
     public async Task ASignedOutGitHubCliSendsTheConductorToTheDeliveryAgent()
     {
-        GitRunRepository(archivePending: true);
+        await GitRunRepository(archivePending: true);
         ScriptedGh gh = new() { SignedIn = false };
 
         DeliveryOutcome outcome = await Deliver(gh, new DeliveryRequest("S."));
 
-        AssertRefusedBeforeAnythingLeaves(outcome, gh, RunDelivery.ProviderUnavailable);
+        await AssertRefusedBeforeAnythingLeaves(outcome, gh, RunDelivery.ProviderUnavailable);
         Assert.True(outcome.NeedsDeliveryAgent);
-        Assert.NotEqual(string.Empty, Git(_work, "status", "--porcelain").Trim());
+        Assert.NotEqual(string.Empty, (await Git(_work, "status", "--porcelain")).Trim());
     }
 
     [Fact]
     public async Task AMissingGitHubCliSendsTheConductorToTheDeliveryAgent()
     {
-        GitRunRepository(archivePending: false);
+        await GitRunRepository(archivePending: false);
         ScriptedGh gh = new() { Installed = false };
 
         DeliveryOutcome outcome = await Deliver(gh, new DeliveryRequest("S."));
 
         Assert.False(outcome.Delivered);
         Assert.True(outcome.NeedsDeliveryAgent);
-        Assert.Equal(string.Empty, Git(_remote, "branch", "--list", Branch).Trim());
+        Assert.Equal(string.Empty, (await Git(_remote, "branch", "--list", Branch)).Trim());
     }
 
     [Fact]
     public async Task AFailingTestFirstRunIsNotReadAsAFailedCheck()
     {
-        GitRunRepository(archivePending: false);
+        await GitRunRepository(archivePending: false);
         Write(".agent_scratchpad/T3-red/task-gate.json", ReviewJson.Write(new GateReport(GateReport.CurrentSchema,
             [new GateResult("test", true, 1, "failed")])));
         Write(".agent_scratchpad/T3/task-gate-red.json", ReviewJson.Write(new GateReport(GateReport.CurrentSchema,
@@ -830,10 +834,10 @@ public sealed class RunDeliveryTests : IClassFixture<RunDeliveryRepositoryTempla
     [Fact]
     public async Task TheDeliverToolReturnsTheLinkDraftStateAndChecks()
     {
-        GitRunRepository(archivePending: false);
+        await GitRunRepository(archivePending: false);
         await File.WriteAllTextAsync(Path.Combine(_work, ".kyber-weave", "kyber-weave.yml"), Config);
-        Git(_work, "add", "-A");
-        Git(_work, "commit", "-q", "-m", "chore: config");
+        await Git(_work, "add", "-A");
+        await Git(_work, "commit", "-q", "-m", "chore: config");
         ScriptedGh gh = new();
         DocsTools tools = DocsRootRegistry.CreateTools(_work, codeGraphRefreshEnabled: false,
             DocsTestCommands.Registry(_work, path => DocsRootRegistry.CreateTools(path, codeGraphRefreshEnabled: false, registry: null)),
@@ -855,12 +859,12 @@ public sealed class RunDeliveryTests : IClassFixture<RunDeliveryRepositoryTempla
     private async Task<DeliveryOutcome> Deliver(ScriptedGh gh, DeliveryRequest request, Action<string>? afterPlanFound = null, Func<string, string>? readTemplateFile = null) =>
         await new RunDelivery(_work, KyberWeaveConfigAssembler.FromYaml(Config), gh, _home, DocsTestCommands.DeliveryPorts) { AfterPlanFound = afterPlanFound, ReadTemplateFile = readTemplateFile }.RunAsync(request);
 
-    private void AssertRefusedBeforeAnythingLeaves(DeliveryOutcome outcome, ScriptedGh gh, string code)
+    private async Task AssertRefusedBeforeAnythingLeaves(DeliveryOutcome outcome, ScriptedGh gh, string code)
     {
         Assert.False(outcome.Delivered);
         Assert.Contains(outcome.Report.Items, item => item.Code == code);
         Assert.DoesNotContain(gh.Calls, call => call.Contains("pr"));
-        Assert.Equal(string.Empty, Git(_remote, "branch", "--list", Branch).Trim());
+        Assert.Equal(string.Empty, (await Git(_remote, "branch", "--list", Branch)).Trim());
     }
 
     /// <summary>
@@ -872,7 +876,7 @@ public sealed class RunDeliveryTests : IClassFixture<RunDeliveryRepositoryTempla
     /// history and its own bare remote without building either. Only the run record is written per test, because it
     /// names this test's home and checkout.
     /// </remarks>
-    private void GitRunRepository(bool archivePending, bool archived = true)
+    private async Task GitRunRepository(bool archivePending, bool archived = true)
     {
         _templates.Copy(
             !archived ? RunDeliveryRepositoryTemplate.PlanState.Active
@@ -881,7 +885,7 @@ public sealed class RunDeliveryTests : IClassFixture<RunDeliveryRepositoryTempla
             _work,
             _remote);
 
-        string common = Path.GetFullPath(Path.Combine(_work, Git(_work, "rev-parse", "--git-common-dir").Trim()));
+        string common = Path.GetFullPath(Path.Combine(_work, (await Git(_work, "rev-parse", "--git-common-dir")).Trim()));
         RunStartTestServices.RunStateStore().Write(_home, Branch, "origin/main", new RunStartPlace(common, _work, DateTimeOffset.UtcNow.AddMinutes(-5)));
     }
 
@@ -910,14 +914,14 @@ public sealed class RunDeliveryTests : IClassFixture<RunDeliveryRepositoryTempla
     private static string Findings(DeliveryOutcome outcome) =>
         string.Join(" | ", outcome.Report.Items.Select(item => $"{item.Code}: {item.Message}"));
 
-    private static string Git(string directory, params string[] arguments)
+    private static async Task<string> Git(string directory, params string[] arguments)
     {
-        ProcessResult result = RealGit(directory, arguments, string.Empty);
+        ProcessResult result = await RealGit(directory, arguments, string.Empty);
         Assert.True(result.ExitCode == 0, $"git {string.Join(' ', arguments)} failed: {result.StandardError}");
         return result.StandardOutput;
     }
 
-    private static ProcessResult RealGit(string directory, IEnumerable<string> arguments, string standardInput)
+    private static async Task<ProcessResult> RealGit(string directory, IEnumerable<string> arguments, string standardInput)
     {
         ProcessStartInfo startInfo = new("git")
         {
@@ -932,7 +936,7 @@ public sealed class RunDeliveryTests : IClassFixture<RunDeliveryRepositoryTempla
         startInfo.Environment["GIT_CONFIG_GLOBAL"] = Path.Combine(directory, ".no-global-gitconfig");
         foreach (string argument in arguments)
             startInfo.ArgumentList.Add(argument);
-        return ProcessRunner.Run(startInfo, standardInput, TimeSpan.FromSeconds(60));
+        return await ProcessRunner.RunAsync(startInfo, standardInput, TimeSpan.FromSeconds(60));
     }
 
     /// <summary>Runs git for real in the scratch repository, and answers every gh call from a script, recording each.</summary>
@@ -956,20 +960,20 @@ public sealed class RunDeliveryTests : IClassFixture<RunDeliveryRepositoryTempla
         public string[] Call(string first, string second) =>
             Calls.Single(call => call.Length > 1 && call[0] == first && call[1] == second);
 
-        public Task<ProcessRunResult> RunAsync(ProcessRunRequest request, CancellationToken cancellationToken = default)
+        public async Task<ProcessRunResult> RunAsync(ProcessRunRequest request, CancellationToken cancellationToken = default)
         {
             ArgumentNullException.ThrowIfNull(request);
 
-            ProcessResult result = Execute(
+            ProcessResult result = await ExecuteAsync(
                 request.Program,
                 request.WorkingDirectory ?? string.Empty,
                 [.. request.Arguments],
                 request.StandardInput ?? string.Empty);
-            return Task.FromResult(new ProcessRunResult(result.ExitCode, result.StandardOutput, TimedOut: false)
+            return new ProcessRunResult(result.ExitCode, result.StandardOutput, TimedOut: false)
             {
                 StandardOutput = result.StandardOutput,
                 StandardError = result.StandardError
-            });
+            };
         }
 
         public bool IsAlive(int processId) => false;
@@ -979,14 +983,14 @@ public sealed class RunDeliveryTests : IClassFixture<RunDeliveryRepositoryTempla
         public ProcessResult Run(ProcessStartInfo startInfo, string standardInput)
         {
             ArgumentNullException.ThrowIfNull(startInfo);
-            return Execute(startInfo.FileName, startInfo.WorkingDirectory, [.. startInfo.ArgumentList], standardInput);
+            return ExecuteAsync(startInfo.FileName, startInfo.WorkingDirectory, [.. startInfo.ArgumentList], standardInput).GetAwaiter().GetResult();
         }
 
-        private ProcessResult Execute(string program, string workingDirectory, string[] arguments, string standardInput)
+        private async Task<ProcessResult> ExecuteAsync(string program, string workingDirectory, string[] arguments, string standardInput)
         {
             if (program == "git")
             {
-                ProcessResult result = RealGit(workingDirectory, arguments, standardInput);
+                ProcessResult result = await RealGit(workingDirectory, arguments, standardInput);
                 AfterGit?.Invoke(arguments);
                 return result;
             }

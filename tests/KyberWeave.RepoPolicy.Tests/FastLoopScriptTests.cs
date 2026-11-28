@@ -33,15 +33,15 @@ public sealed class FastLoopScriptTests
     /// and documentation validation.
     /// </summary>
     [Fact]
-    public void ChangedMarkdownUnderSrcTauri_RunsBothRustChecksAndDocsValidate()
+    public async Task ChangedMarkdownUnderSrcTauri_RunsBothRustChecksAndDocsValidate()
     {
         SkipIfBashUnavailable();
-        using FastLoopFixture fixture = new();
+        using FastLoopFixture fixture = await FastLoopFixture.CreateAsync();
 
         string readmePath = Path.Combine(fixture.Root, "dash", "tray", "src-tauri", "README.md");
-        File.AppendAllText(readmePath, "\n## Rust Crate Documentation Changes\n");
+        await File.AppendAllTextAsync(readmePath, "\n## Rust Crate Documentation Changes\n");
 
-        _ = fixture.RunFastLoop();
+        _ = await fixture.RunFastLoopAsync();
         string log = fixture.GetCallLog();
 
         Assert.Contains("cargo fmt --check", log, StringComparison.Ordinal);
@@ -54,16 +54,16 @@ public sealed class FastLoopScriptTests
     /// unit classes, says that CI runs the touched integration classes, and does not start them.
     /// </summary>
     [Fact]
-    public void TouchedNeverRunsIntegrationClassesAndSaysCiRunsThem()
+    public async Task TouchedNeverRunsIntegrationClassesAndSaysCiRunsThem()
     {
         SkipIfBashUnavailable();
-        using FastLoopFixture fixture = new();
+        using FastLoopFixture fixture = await FastLoopFixture.CreateAsync();
 
         fixture.WriteProductSource();
         fixture.WriteUnitTestClass("TouchedUnitTests");
         fixture.WriteIntegrationTestClasses(21);
 
-        ProcessResult result = fixture.RunFastLoop("--touched");
+        ProcessResult result = await fixture.RunFastLoopAsync("--touched");
         string log = fixture.GetCallLog();
 
         Assert.DoesNotContain("running the fast tier instead", result.StandardOutput + result.StandardError, StringComparison.Ordinal);
@@ -79,10 +79,10 @@ public sealed class FastLoopScriptTests
     /// read as clean.
     /// </summary>
     [Fact]
-    public void FilterThatMatchesNoTestInEitherProject_FailsTheLoop()
+    public async Task FilterThatMatchesNoTestInEitherProject_FailsTheLoop()
     {
         SkipIfBashUnavailable();
-        using FastLoopFixture fixture = new();
+        using FastLoopFixture fixture = await FastLoopFixture.CreateAsync();
         fixture.ReplaceDotnetStub(
             """
             #!/bin/sh
@@ -98,7 +98,7 @@ public sealed class FastLoopScriptTests
             exit 0
             """);
 
-        ProcessResult result = fixture.RunFastLoop("--class", "KyberWeave.Application.Tests.DoesNotExistTests");
+        ProcessResult result = await fixture.RunFastLoopAsync("--class", "KyberWeave.Application.Tests.DoesNotExistTests");
 
         Assert.Equal(1, result.ExitCode);
         Assert.Contains("no unit or repository-policy tests ran; the filter matched nothing", result.StandardError, StringComparison.Ordinal);
@@ -111,10 +111,10 @@ public sealed class FastLoopScriptTests
     /// policy run's total is what proves the filter matched.
     /// </summary>
     [Fact]
-    public void FilterThatSelectsOnlyPolicyTests_Passes()
+    public async Task FilterThatSelectsOnlyPolicyTests_Passes()
     {
         SkipIfBashUnavailable();
-        using FastLoopFixture fixture = new();
+        using FastLoopFixture fixture = await FastLoopFixture.CreateAsync();
         fixture.ReplaceDotnetStub(
             """
             #!/bin/sh
@@ -130,7 +130,7 @@ public sealed class FastLoopScriptTests
             exit 0
             """);
 
-        ProcessResult result = fixture.RunFastLoop("--class", "KyberWeave.Tests.ProcessSpawnSitesTests");
+        ProcessResult result = await fixture.RunFastLoopAsync("--class", "KyberWeave.Tests.ProcessSpawnSitesTests");
 
         Assert.Equal(0, result.ExitCode);
         Assert.Contains("KyberWeave.RepoPolicy.Tests.dll -class KyberWeave.Tests.ProcessSpawnSitesTests", fixture.GetCallLog(), StringComparison.Ordinal);
@@ -142,10 +142,10 @@ public sealed class FastLoopScriptTests
     /// one the runner can match rather than the fallback namespace.
     /// </summary>
     [Fact]
-    public void TouchedReadsAnIndentedNamespaceAndNamesTheTestClass()
+    public async Task TouchedReadsAnIndentedNamespaceAndNamesTheTestClass()
     {
         SkipIfBashUnavailable();
-        using FastLoopFixture fixture = new();
+        using FastLoopFixture fixture = await FastLoopFixture.CreateAsync();
 
         fixture.WriteProductSource("ReviewCycleService");
         fixture.WriteChangedTestFile(
@@ -160,7 +160,7 @@ public sealed class FastLoopScriptTests
             }
             """);
 
-        ProcessResult result = fixture.RunFastLoop("--touched");
+        ProcessResult result = await fixture.RunFastLoopAsync("--touched");
         string log = fixture.GetCallLog();
 
         Assert.Equal(0, result.ExitCode);
@@ -172,19 +172,19 @@ public sealed class FastLoopScriptTests
     /// Editing markdown inside <c>dash/tray/ui/</c> must trigger documentation validation.
     /// </summary>
     [Fact]
-    public void ChangedMarkdownUnderTrayUi_RunsDocsValidate()
+    public async Task ChangedMarkdownUnderTrayUi_RunsDocsValidate()
     {
         SkipIfBashUnavailable();
-        using FastLoopFixture fixture = new();
+        using FastLoopFixture fixture = await FastLoopFixture.CreateAsync();
 
         string nodeModulesDir = Path.Combine(fixture.Root, "dash", "tray", "ui", "node_modules");
         Directory.CreateDirectory(nodeModulesDir);
-        File.WriteAllText(Path.Combine(nodeModulesDir, ".keep"), string.Empty);
+        await File.WriteAllTextAsync(Path.Combine(nodeModulesDir, ".keep"), string.Empty);
 
         string readmePath = Path.Combine(fixture.Root, "dash", "tray", "ui", "README.md");
-        File.AppendAllText(readmePath, "\n## Tray UI Documentation Changes\n");
+        await File.AppendAllTextAsync(readmePath, "\n## Tray UI Documentation Changes\n");
 
-        _ = fixture.RunFastLoop();
+        _ = await fixture.RunFastLoopAsync();
         string log = fixture.GetCallLog();
 
         Assert.Contains("docs validate .", log, StringComparison.Ordinal);
@@ -195,10 +195,10 @@ public sealed class FastLoopScriptTests
     /// provide the remediation command <c>npm --prefix dash/tray/ui ci</c>, and not print <c>Fast tier clean.</c>.
     /// </summary>
     [Fact]
-    public void ChangedTrayUiWithoutNodeModules_ExitsOneWithCiHintAndDoesNotPrintClean()
+    public async Task ChangedTrayUiWithoutNodeModules_ExitsOneWithCiHintAndDoesNotPrintClean()
     {
         SkipIfBashUnavailable();
-        using FastLoopFixture fixture = new();
+        using FastLoopFixture fixture = await FastLoopFixture.CreateAsync();
 
         string nodeModulesDir = Path.Combine(fixture.Root, "dash", "tray", "ui", "node_modules");
         if (Directory.Exists(nodeModulesDir))
@@ -207,9 +207,9 @@ public sealed class FastLoopScriptTests
         }
 
         string appPath = Path.Combine(fixture.Root, "dash", "tray", "ui", "src", "App.tsx");
-        File.AppendAllText(appPath, "\nexport const AppExtension = 42;\n");
+        await File.AppendAllTextAsync(appPath, "\nexport const AppExtension = 42;\n");
 
-        ProcessResult result = fixture.RunFastLoop();
+        ProcessResult result = await fixture.RunFastLoopAsync();
         string combinedOutput = result.StandardOutput + Environment.NewLine + result.StandardError;
 
         Assert.Equal(1, result.ExitCode);
@@ -222,14 +222,14 @@ public sealed class FastLoopScriptTests
     /// as the unit projects.
     /// </summary>
     [Fact]
-    public void ChangedScript_RunsTheRepositoryPolicyTests()
+    public async Task ChangedScript_RunsTheRepositoryPolicyTests()
     {
         SkipIfBashUnavailable();
-        using FastLoopFixture fixture = new();
+        using FastLoopFixture fixture = await FastLoopFixture.CreateAsync();
 
-        File.WriteAllText(Path.Combine(fixture.Root, "scripts", "new-tool.sh"), "#!/bin/sh\nexit 0\n");
+        await File.WriteAllTextAsync(Path.Combine(fixture.Root, "scripts", "new-tool.sh"), "#!/bin/sh\nexit 0\n");
 
-        ProcessResult result = fixture.RunFastLoop();
+        ProcessResult result = await fixture.RunFastLoopAsync();
         string log = fixture.GetCallLog();
 
         Assert.Equal(0, result.ExitCode);
@@ -242,14 +242,14 @@ public sealed class FastLoopScriptTests
     /// the ones that read source text: the spawn-site audit, the upstream-name scan and the domain-purity scan.
     /// </summary>
     [Fact]
-    public void ChangedProductCSharpOnly_RunsOnlyThePolicySourceScans()
+    public async Task ChangedProductCSharpOnly_RunsOnlyThePolicySourceScans()
     {
         SkipIfBashUnavailable();
-        using FastLoopFixture fixture = new();
+        using FastLoopFixture fixture = await FastLoopFixture.CreateAsync();
 
         fixture.WriteProductSource();
 
-        ProcessResult result = fixture.RunFastLoop();
+        ProcessResult result = await fixture.RunFastLoopAsync();
         string log = fixture.GetCallLog();
 
         Assert.Equal(0, result.ExitCode);
@@ -267,10 +267,10 @@ public sealed class FastLoopScriptTests
     /// though the unit projects ran: a renamed scan class cannot pass as clean.
     /// </summary>
     [Fact]
-    public void PolicySourceScansThatRunNoTests_FailTheLoop()
+    public async Task PolicySourceScansThatRunNoTests_FailTheLoop()
     {
         SkipIfBashUnavailable();
-        using FastLoopFixture fixture = new();
+        using FastLoopFixture fixture = await FastLoopFixture.CreateAsync();
         fixture.ReplaceDotnetStub(
             """
             #!/bin/sh
@@ -285,7 +285,7 @@ public sealed class FastLoopScriptTests
 
         fixture.WriteProductSource();
 
-        ProcessResult result = fixture.RunFastLoop();
+        ProcessResult result = await fixture.RunFastLoopAsync();
 
         Assert.Equal(1, result.ExitCode);
         Assert.Contains("the policy source scans ran no tests", result.StandardError, StringComparison.Ordinal);
@@ -297,10 +297,10 @@ public sealed class FastLoopScriptTests
     /// reported, and the loop still fails.
     /// </summary>
     [Fact]
-    public void UnitProjectFailure_StillRunsThePolicyTestsAndFailsTheLoop()
+    public async Task UnitProjectFailure_StillRunsThePolicyTestsAndFailsTheLoop()
     {
         SkipIfBashUnavailable();
-        using FastLoopFixture fixture = new();
+        using FastLoopFixture fixture = await FastLoopFixture.CreateAsync();
         fixture.ReplaceDotnetStub(
             """
             #!/bin/sh
@@ -317,9 +317,9 @@ public sealed class FastLoopScriptTests
             exit 0
             """);
 
-        File.WriteAllText(Path.Combine(fixture.Root, "scripts", "new-tool.sh"), "#!/bin/sh\nexit 0\n");
+        await File.WriteAllTextAsync(Path.Combine(fixture.Root, "scripts", "new-tool.sh"), "#!/bin/sh\nexit 0\n");
 
-        ProcessResult result = fixture.RunFastLoop();
+        ProcessResult result = await fixture.RunFastLoopAsync();
         string log = fixture.GetCallLog();
 
         Assert.Equal(1, result.ExitCode);
@@ -336,14 +336,14 @@ public sealed class FastLoopScriptTests
     /// and both statuses are reported.
     /// </summary>
     [Fact]
-    public void UnitProjectFailureOnACSharpOnlyChange_StillRunsTheSourceScans()
+    public async Task UnitProjectFailureOnACSharpOnlyChange_StillRunsTheSourceScans()
     {
         SkipIfBashUnavailable();
-        using FastLoopFixture fixture = new();
+        using FastLoopFixture fixture = await FastLoopFixture.CreateAsync();
         fixture.ReplaceDotnetStub(FailingUnitStub(policyReportsTests: true));
         fixture.WriteProductSource();
 
-        ProcessResult result = fixture.RunFastLoop();
+        ProcessResult result = await fixture.RunFastLoopAsync();
         string log = fixture.GetCallLog();
 
         Assert.Equal(1, result.ExitCode);
@@ -359,14 +359,14 @@ public sealed class FastLoopScriptTests
     /// the loop exits.
     /// </summary>
     [Fact]
-    public void EmptySourceScanRunWithAUnitFailure_ReportsBoth()
+    public async Task EmptySourceScanRunWithAUnitFailure_ReportsBoth()
     {
         SkipIfBashUnavailable();
-        using FastLoopFixture fixture = new();
+        using FastLoopFixture fixture = await FastLoopFixture.CreateAsync();
         fixture.ReplaceDotnetStub(FailingUnitStub(policyReportsTests: false));
         fixture.WriteProductSource();
 
-        ProcessResult result = fixture.RunFastLoop();
+        ProcessResult result = await fixture.RunFastLoopAsync();
 
         Assert.Equal(1, result.ExitCode);
         Assert.Contains("the policy source scans ran no tests", result.StandardError, StringComparison.Ordinal);
@@ -430,7 +430,15 @@ public sealed class FastLoopScriptTests
 
         public string CallLogPath { get; }
 
-        public FastLoopFixture()
+        /// <summary>Creates the fixture and waits for its temporary git repository to be committed.</summary>
+        public static async Task<FastLoopFixture> CreateAsync()
+        {
+            FastLoopFixture fixture = new();
+            await fixture.InitializeAsync();
+            return fixture;
+        }
+
+        private FastLoopFixture()
         {
             Root = Path.Combine(_temp.Path, "repo");
             BinDir = Path.Combine(_temp.Path, "fake-bin");
@@ -440,12 +448,12 @@ public sealed class FastLoopScriptTests
             Directory.CreateDirectory(BinDir);
 
             CreateStubs();
-            InitializeRepo();
         }
 
-        public ProcessResult RunFastLoop() => RunFastLoop([]);
+        /// <summary>Initializes the fixture's temporary git repository and commits its initial tree.</summary>
+        public Task InitializeAsync() => InitializeRepoAsync();
 
-        public ProcessResult RunFastLoop(params string[] arguments)
+        public async Task<ProcessResult> RunFastLoopAsync(params string[] arguments)
         {
             ProcessStartInfo startInfo = new("/bin/bash")
             {
@@ -473,7 +481,7 @@ public sealed class FastLoopScriptTests
             startInfo.Environment["PATH"] = $"{BinDir}:{originalPath}";
             startInfo.Environment["CALL_LOG"] = CallLogPath;
 
-            return ProcessRunner.Run(startInfo, string.Empty, TimeSpan.FromSeconds(30));
+            return await ProcessRunner.RunAsync(startInfo, string.Empty, TimeSpan.FromSeconds(30));
         }
 
         /// <summary>Writes one product C# file, so the change is C#-only.</summary>
@@ -564,50 +572,50 @@ public sealed class FastLoopScriptTests
                 """);
         }
 
-        private void InitializeRepo()
+        private async Task InitializeRepoAsync()
         {
-            RunGit(Root, "init", "--quiet");
-            RunGit(Root, "config", "user.name", "TestUser");
-            RunGit(Root, "config", "user.email", "test@example.com");
-            RunGit(Root, "config", "commit.gpgsign", "false");
+            await RunGitAsync(Root, "init", "--quiet");
+            await RunGitAsync(Root, "config", "user.name", "TestUser");
+            await RunGitAsync(Root, "config", "user.email", "test@example.com");
+            await RunGitAsync(Root, "config", "commit.gpgsign", "false");
 
             string fastLoopDest = Path.Combine(Root, "scripts", "fast-loop.sh");
             Directory.CreateDirectory(Path.GetDirectoryName(fastLoopDest)!);
-            File.WriteAllText(fastLoopDest, Corpus.ReadText("scripts/fast-loop.sh").ReplaceLineEndings("\n"));
+            await File.WriteAllTextAsync(fastLoopDest, Corpus.ReadText("scripts/fast-loop.sh").ReplaceLineEndings("\n"));
             MakeExecutable(fastLoopDest);
 
             string cliBinDir = Path.Combine(Root, "src", "KyberWeave.Cli", "bin", "Release", "net10.0");
             Directory.CreateDirectory(cliBinDir);
-            File.WriteAllText(Path.Combine(cliBinDir, "kyber-weave.dll"), "stub");
-            File.WriteAllText(Path.Combine(cliBinDir, "KyberWeave.Cli.dll"), "stub");
+            await File.WriteAllTextAsync(Path.Combine(cliBinDir, "kyber-weave.dll"), "stub");
+            await File.WriteAllTextAsync(Path.Combine(cliBinDir, "KyberWeave.Cli.dll"), "stub");
 
             foreach (string project in new[] { "Application", "Hooks", "Kernel", "Mcp", "Arbiter", "Cli", "Data", "Architecture", "Content", "RepoPolicy" })
             {
                 string testBinDir = Path.Combine(Root, "tests", $"KyberWeave.{project}.Tests", "bin", "Release", "net10.0");
                 Directory.CreateDirectory(testBinDir);
-                File.WriteAllText(Path.Combine(testBinDir, $"KyberWeave.{project}.Tests.dll"), "stub");
+                await File.WriteAllTextAsync(Path.Combine(testBinDir, $"KyberWeave.{project}.Tests.dll"), "stub");
             }
 
-            File.WriteAllText(Path.Combine(Root, "KyberWeave.sln"), "# stub sln\n");
+            await File.WriteAllTextAsync(Path.Combine(Root, "KyberWeave.sln"), "# stub sln\n");
 
-            WriteTrackedFile("dash/tray/src-tauri/README.md", "# Tray Rust\n");
-            WriteTrackedFile("dash/tray/ui/README.md", "# Tray UI\n");
-            WriteTrackedFile("dash/tray/ui/src/App.tsx", "// App\n");
-            WriteTrackedFile("dash/package.json", "{}\n");
+            await WriteTrackedFileAsync("dash/tray/src-tauri/README.md", "# Tray Rust\n");
+            await WriteTrackedFileAsync("dash/tray/ui/README.md", "# Tray UI\n");
+            await WriteTrackedFileAsync("dash/tray/ui/src/App.tsx", "// App\n");
+            await WriteTrackedFileAsync("dash/package.json", "{}\n");
 
             string dashNodeModules = Path.Combine(Root, "dash", "node_modules");
             Directory.CreateDirectory(dashNodeModules);
-            File.WriteAllText(Path.Combine(dashNodeModules, ".keep"), string.Empty);
+            await File.WriteAllTextAsync(Path.Combine(dashNodeModules, ".keep"), string.Empty);
 
-            RunGit(Root, "add", "-A");
-            RunGit(Root, "commit", "--quiet", "--allow-empty", "-m", "initial tree");
+            await RunGitAsync(Root, "add", "-A");
+            await RunGitAsync(Root, "commit", "--quiet", "--allow-empty", "-m", "initial tree");
         }
 
-        private void WriteTrackedFile(string relativePath, string content)
+        private async Task WriteTrackedFileAsync(string relativePath, string content)
         {
             string fullPath = Path.Combine(Root, relativePath);
             Directory.CreateDirectory(Path.GetDirectoryName(fullPath)!);
-            File.WriteAllText(fullPath, content);
+            await File.WriteAllTextAsync(fullPath, content);
         }
 
         private static void WriteExecutableStub(string path, string script)
@@ -628,7 +636,7 @@ public sealed class FastLoopScriptTests
             }
         }
 
-        private static void RunGit(string repoDir, params string[] arguments)
+        private static async Task RunGitAsync(string repoDir, params string[] arguments)
         {
             ProcessStartInfo startInfo = new("git")
             {
@@ -644,7 +652,7 @@ public sealed class FastLoopScriptTests
                 startInfo.ArgumentList.Add(argument);
             }
 
-            ProcessResult result = ProcessRunner.Run(startInfo, string.Empty, TimeSpan.FromSeconds(30));
+            ProcessResult result = await ProcessRunner.RunAsync(startInfo, string.Empty, TimeSpan.FromSeconds(30));
             Assert.True(
                 result.ExitCode == 0,
                 $"git {string.Join(' ', arguments)} failed (exit {result.ExitCode}): {result.StandardError}");

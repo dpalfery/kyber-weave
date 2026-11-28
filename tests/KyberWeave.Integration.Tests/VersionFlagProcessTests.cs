@@ -15,13 +15,13 @@ public class VersionFlagProcessTests
     [Theory]
     [InlineData("--version")]
     [InlineData("-v")]
-    public void CliVersionFlagOutputsApplicationVersionAndExitsZero(string flag)
+    public async Task CliVersionFlagOutputsApplicationVersionAndExitsZero(string flag)
     {
         // Arrange
         Assembly assembly = typeof(AgentCatalogCommand).Assembly;
 
         // Act
-        ProcessResult result = RunAssembly(assembly, flag);
+        ProcessResult result = await RunAssembly(assembly, flag);
 
         // Assert
         Assert.Equal(0, result.ExitCode);
@@ -44,7 +44,7 @@ public class VersionFlagProcessTests
     [Theory]
     [InlineData("--version")]
     [InlineData("-v")]
-    public void CliVersionFlagPrintsExactlyNameAndVersionWithoutBuildMetadata(string flag)
+    public async Task CliVersionFlagPrintsExactlyNameAndVersionWithoutBuildMetadata(string flag)
     {
         // Arrange
         Assembly assembly = typeof(AgentCatalogCommand).Assembly;
@@ -57,7 +57,7 @@ public class VersionFlagProcessTests
         string expectedVersion = plusIndex >= 0 ? informationalVersion[..plusIndex] : informationalVersion;
 
         // Act
-        ProcessResult result = RunAssembly(assembly, flag);
+        ProcessResult result = await RunAssembly(assembly, flag);
 
         // Assert
         Assert.Equal(0, result.ExitCode);
@@ -68,13 +68,13 @@ public class VersionFlagProcessTests
     [Theory]
     [InlineData("--version")]
     [InlineData("-v")]
-    public void McpVersionFlagOutputsApplicationVersionAndExitsZero(string flag)
+    public async Task McpVersionFlagOutputsApplicationVersionAndExitsZero(string flag)
     {
         // Arrange
         Assembly assembly = typeof(DocsTools).Assembly;
 
         // Act
-        ProcessResult result = RunAssembly(assembly, flag);
+        ProcessResult result = await RunAssembly(assembly, flag);
 
         // Assert
         Assert.Equal(0, result.ExitCode);
@@ -82,7 +82,7 @@ public class VersionFlagProcessTests
         Assert.Contains("0.1.0", result.StandardOutput, StringComparison.Ordinal);
     }
 
-    private static ProcessResult RunAssembly(Assembly assembly, params string[] args)
+    private static async Task<ProcessResult> RunAssembly(Assembly assembly, params string[] args)
     {
         ProcessStartInfo startInfo = new("dotnet")
         {
@@ -98,6 +98,6 @@ public class VersionFlagProcessTests
         }
 
         // Bounded: the product CLI answers --version and exits; the timeout kills it if it does not.
-        return ProcessRunner.Run(startInfo, string.Empty, TimeSpan.FromSeconds(30));
+        return await ProcessRunner.RunAsync(startInfo, string.Empty, TimeSpan.FromSeconds(30));
     }
 }

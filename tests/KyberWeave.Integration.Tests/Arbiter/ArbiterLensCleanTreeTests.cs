@@ -31,35 +31,41 @@ namespace KyberWeave.Integration.Tests.Arbiter;
 /// against, which that fixture supplies as <c>main</c> and <c>origin/main</c>.
 /// </para>
 /// </remarks>
-public sealed class ArbiterLensCleanTreeTests : IDisposable
+public sealed class ArbiterLensCleanTreeTests : IAsyncLifetime
 {
     private const string ChangedFile = "src/Payment.cs";
 
-    private readonly RunStartProbe _probe = CommittedChangeOnAFeatureBranch();
+    private RunStartProbe _probe = null!;
 
-    public void Dispose()
+    public async ValueTask InitializeAsync()
+    {
+        _probe = await CommittedChangeOnAFeatureBranch();
+    }
+
+    public ValueTask DisposeAsync()
     {
         _probe.Dispose();
+        return ValueTask.CompletedTask;
     }
 
     /// <summary>
     /// A feature branch one commit ahead of <c>main</c>, with nothing uncommitted: the tree a
     /// per-task commit leaves behind.
     /// </summary>
-    private static RunStartProbe CommittedChangeOnAFeatureBranch()
+    private static async Task<RunStartProbe> CommittedChangeOnAFeatureBranch()
     {
-        RunStartProbe probe = RunStartProbe.Create();
-        probe.Git("switch", "-c", "claude/feat/lens-applicability", "origin/main");
+        RunStartProbe probe = await RunStartProbe.CreateAsync();
+        await probe.GitAsync("switch", "-c", "claude/feat/lens-applicability", "origin/main");
 
         string changed = Path.Combine(probe.Root, ChangedFile.Replace('/', Path.DirectorySeparatorChar));
         Directory.CreateDirectory(Path.GetDirectoryName(changed)!);
-        File.WriteAllText(
+        await File.WriteAllTextAsync(
             changed,
             "namespace Payments;\n\ninternal static class Payment\n{\n    public static int Total(int a, int b) => a + b;\n}\n",
             Encoding.UTF8);
 
-        probe.Git("add", "-A");
-        probe.Git("commit", "-m", "feat: one committed change");
+        await probe.GitAsync("add", "-A");
+        await probe.GitAsync("commit", "-m", "feat: one committed change");
         return probe;
     }
 

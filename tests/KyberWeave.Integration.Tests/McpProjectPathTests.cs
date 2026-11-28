@@ -32,7 +32,7 @@ public sealed class McpProjectPathTests : IDisposable
     public async Task ProjectPathAnswersFromTheWorktreeWhileTheServerRootKeepsItsOwnDocuments()
     {
         string repo = await CreateRepositoryAsync();
-        string worktree = AddWorktree(repo, "wt");
+        string worktree = await AddWorktree(repo, "wt");
         await File.AppendAllTextAsync(Path.Combine(worktree, OntologyPage), $"\n\n{MarkerSentence}\n");
         DocsTools tools = ServerTools(repo);
 
@@ -49,7 +49,7 @@ public sealed class McpProjectPathTests : IDisposable
     public async Task ProjectPathNamingASubdirectoryOrTheServerRootIsAccepted()
     {
         string repo = await CreateRepositoryAsync();
-        string worktree = AddWorktree(repo, "wt");
+        string worktree = await AddWorktree(repo, "wt");
         await File.AppendAllTextAsync(Path.Combine(worktree, OntologyPage), $"\n\n{MarkerSentence}\n");
         DocsTools tools = ServerTools(repo);
 
@@ -66,7 +66,7 @@ public sealed class McpProjectPathTests : IDisposable
         string repo = await CreateRepositoryAsync();
         string foreign = Path.Combine(_temp.Path, "foreign");
         Directory.CreateDirectory(foreign);
-        Git(foreign, "init", "-q");
+        await Git(foreign, "init", "-q");
         DocsTools tools = ServerTools(repo);
 
         string response = await tools.ExploreAsync("ontology", projectPath: foreign);
@@ -97,7 +97,10 @@ public sealed class McpProjectPathTests : IDisposable
         string repo = await CreateRepositoryAsync();
         DocsRootRegistry registry = Registry(repo);
         DocsTools tools = ServerTools(repo, registry);
-        string[] worktrees = [.. Enumerable.Range(1, 5).Select(i => AddWorktree(repo, "wt" + i))];
+        List<string> worktreeList = [];
+        for (int i = 1; i <= 5; i++)
+            worktreeList.Add(await AddWorktree(repo, "wt" + i));
+        string[] worktrees = [.. worktreeList];
 
         foreach (string worktree in worktrees) await tools.DocsStatusAsync(worktree);
         Assert.Equal(DocsRootRegistry.Capacity, registry.Count);
@@ -119,21 +122,21 @@ public sealed class McpProjectPathTests : IDisposable
     {
         string repo = Path.Combine(_temp.Path, "repo");
         Directory.CreateDirectory(repo);
-        Git(repo, "init", "-q", "-b", "main");
+        await Git(repo, "init", "-q", "-b", "main");
         await DocsTestCommands.Scaffolding.ScaffoldAsync(repo);
-        Git(repo, "add", "-A");
-        Git(repo, "-c", "user.name=t", "-c", "user.email=t@example.com", "commit", "-q", "-m", "init");
+        await Git(repo, "add", "-A");
+        await Git(repo, "-c", "user.name=t", "-c", "user.email=t@example.com", "commit", "-q", "-m", "init");
         return repo;
     }
 
-    private string AddWorktree(string repo, string name)
+    private async Task<string> AddWorktree(string repo, string name)
     {
         string path = Path.Combine(_temp.Path, name);
-        Git(repo, "worktree", "add", "-q", "-b", name, path);
+        await Git(repo, "worktree", "add", "-q", "-b", name, path);
         return path;
     }
 
-    private static void Git(string directory, params string[] arguments)
+    private static async Task Git(string directory, params string[] arguments)
     {
         ProcessStartInfo startInfo = new("git")
         {
@@ -148,7 +151,7 @@ public sealed class McpProjectPathTests : IDisposable
         startInfo.Environment["GIT_CONFIG_GLOBAL"] = Path.Combine(directory, ".no-global-gitconfig");
         foreach (string argument in arguments) startInfo.ArgumentList.Add(argument);
 
-        ProcessResult result = ProcessRunner.Run(startInfo, string.Empty, TimeSpan.FromSeconds(60));
+        ProcessResult result = await ProcessRunner.RunAsync(startInfo, string.Empty, TimeSpan.FromSeconds(60));
         Assert.True(result.ExitCode == 0, $"git {string.Join(' ', arguments)} failed: {result.StandardError}");
     }
 }

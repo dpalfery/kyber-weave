@@ -130,9 +130,9 @@ public sealed class UtilitiesCliCommandTests : IDisposable
     // -----------------------------------------------------------------------------------------
 
     [Fact]
-    public void TheStatusLineBranchRegistersDeployStatusDoctorAndRemove()
+    public async Task TheStatusLineBranchRegistersDeployStatusDoctorAndRemove()
     {
-        CliResult run = Run("utilities", "statusline", "--help");
+        CliResult run = await Run("utilities", "statusline", "--help");
 
         AssertExitCode(0, run);
         foreach (string verb in Verbs)
@@ -144,9 +144,9 @@ public sealed class UtilitiesCliCommandTests : IDisposable
     /// adapters stage the artifacts exactly as the in-process cases that fake the environment do.
     /// </summary>
     [Fact]
-    public void TheRealHostDeploysTheArtifactsFromTheCheckout()
+    public async Task TheRealHostDeploysTheArtifactsFromTheCheckout()
     {
-        CliResult run = RunInChildProcess(_checkout, _stubBin, "utilities", "statusline", "deploy", "--target", "claude");
+        CliResult run = await RunInChildProcess(_checkout, _stubBin, "utilities", "statusline", "deploy", "--target", "claude");
 
         AssertExitCode(0, run);
         AssertFileBytes(DeployedPath("claude"), ArtifactContent("claude"));
@@ -159,9 +159,9 @@ public sealed class UtilitiesCliCommandTests : IDisposable
     [Theory]
     [InlineData("--target")]
     [InlineData("-t")]
-    public void DeployRefusesTheDroppedOpenCodeTargetWithExitTwoAndADeferralHint(string targetOption)
+    public async Task DeployRefusesTheDroppedOpenCodeTargetWithExitTwoAndADeferralHint(string targetOption)
     {
-        CliResult run = Run("utilities", "statusline", "deploy", targetOption, "opencode");
+        CliResult run = await Run("utilities", "statusline", "deploy", targetOption, "opencode");
 
         string output = Compact(run.Output);
         AssertExitCode(2, run);
@@ -176,9 +176,9 @@ public sealed class UtilitiesCliCommandTests : IDisposable
     [Theory]
     [InlineData("windows")]
     [InlineData("gemini")]
-    public void DeployRefusesAnUnknownTargetWithExitTwoAndNamesTheSupportedOnes(string target)
+    public async Task DeployRefusesAnUnknownTargetWithExitTwoAndNamesTheSupportedOnes(string target)
     {
-        CliResult run = Run("utilities", "statusline", "deploy", "--target", target);
+        CliResult run = await Run("utilities", "statusline", "deploy", "--target", target);
 
         string output = Compact(run.Output);
         AssertExitCode(2, run);
@@ -189,9 +189,9 @@ public sealed class UtilitiesCliCommandTests : IDisposable
     }
 
     [Fact]
-    public void DeployWithNoTargetStagesAllFourHarnesses()
+    public async Task DeployWithNoTargetStagesAllFourHarnesses()
     {
-        CliResult run = Run("utilities", "statusline", "deploy");
+        CliResult run = await Run("utilities", "statusline", "deploy");
 
         AssertExitCode(0, run);
         string output = Compact(run.Output);
@@ -211,9 +211,9 @@ public sealed class UtilitiesCliCommandTests : IDisposable
     [InlineData("-t", "pi")]
     [InlineData("--target", "commandcode")]
     [InlineData("-t", "commandcode")]
-    public void DeployWithATargetStagesExactlyThatHarness(string targetOption, string token)
+    public async Task DeployWithATargetStagesExactlyThatHarness(string targetOption, string token)
     {
-        CliResult run = Run("utilities", "statusline", "deploy", targetOption, token);
+        CliResult run = await Run("utilities", "statusline", "deploy", targetOption, token);
 
         AssertExitCode(0, run);
         AssertFileBytes(DeployedPath(token), ArtifactContent(token));
@@ -229,9 +229,9 @@ public sealed class UtilitiesCliCommandTests : IDisposable
     // -----------------------------------------------------------------------------------------
 
     [Fact]
-    public void DeployPrintsAbsoluteActivationSnippetsAndSaysTheOperatorAppliesTheEdit()
+    public async Task DeployPrintsAbsoluteActivationSnippetsAndSaysTheOperatorAppliesTheEdit()
     {
-        CliResult run = Run("utilities", "statusline", "deploy");
+        CliResult run = await Run("utilities", "statusline", "deploy");
 
         AssertExitCode(0, run);
         string output = Compact(run.Output);
@@ -249,12 +249,12 @@ public sealed class UtilitiesCliCommandTests : IDisposable
     }
 
     [Fact]
-    public void DeployMarksTheCommandVariantsExecutableForTheirHarness()
+    public async Task DeployMarksTheCommandVariantsExecutableForTheirHarness()
     {
         if (OperatingSystem.IsWindows())
             Assert.Skip("Kyber Utilities status-line artifacts are macOS and Linux only (D4).");
 
-        AssertExitCode(0, Run("utilities", "statusline", "deploy"));
+        AssertExitCode(0, await Run("utilities", "statusline", "deploy"));
 
         foreach (string token in CommandVariantTokens)
         {
@@ -274,27 +274,27 @@ public sealed class UtilitiesCliCommandTests : IDisposable
     [InlineData("status")]
     [InlineData("doctor")]
     [InlineData("remove")]
-    public void EveryVerbNamesNoSettingsPathAndLeavesEveryConfirmedSettingsFileByteIdentical(string verb)
+    public async Task EveryVerbNamesNoSettingsPathAndLeavesEveryConfirmedSettingsFileByteIdentical(string verb)
     {
         Dictionary<string, byte[]> sentinels = SeedConfirmedSettingsSentinels();
 
-        CliResult deploy = Run("utilities", "statusline", "deploy");
+        CliResult deploy = await Run("utilities", "statusline", "deploy");
         AssertExitCode(0, deploy);
         AssertNoSettingsPathAppears(deploy.Output);
         AssertSettingsSentinelsUnchanged(sentinels);
 
-        CliResult run = Run("utilities", "statusline", verb);
+        CliResult run = await Run("utilities", "statusline", verb);
 
         AssertNoSettingsPathAppears(run.Output);
         AssertSettingsSentinelsUnchanged(sentinels);
     }
 
     [Fact]
-    public void NoVerbCreatesAConfirmedSettingsFileThatWasNotAlreadyThere()
+    public async Task NoVerbCreatesAConfirmedSettingsFileThatWasNotAlreadyThere()
     {
         foreach (string verb in Verbs)
         {
-            CliResult run = Run("utilities", "statusline", verb);
+            CliResult run = await Run("utilities", "statusline", verb);
             Assert.True(
                 run.ExitCode is 0 or 1,
                 $"'utilities statusline {verb}' exited {run.ExitCode}, which is neither a healthy " +
@@ -309,11 +309,11 @@ public sealed class UtilitiesCliCommandTests : IDisposable
     // -----------------------------------------------------------------------------------------
 
     [Fact]
-    public void DeployDryRunWritesNothingAndStillPrintsTheAbsoluteActivationPath()
+    public async Task DeployDryRunWritesNothingAndStillPrintsTheAbsoluteActivationPath()
     {
         Dictionary<string, byte[]> before = SnapshotHome();
 
-        CliResult run = Run("utilities", "statusline", "deploy", "--dry-run");
+        CliResult run = await Run("utilities", "statusline", "deploy", "--dry-run");
 
         AssertExitCode(0, run);
         AssertHomeUnchanged(before);
@@ -326,12 +326,12 @@ public sealed class UtilitiesCliCommandTests : IDisposable
     }
 
     [Fact]
-    public void DeployOutsideACheckoutExitsOneWithAHintRatherThanCrashing()
+    public async Task DeployOutsideACheckoutExitsOneWithAHintRatherThanCrashing()
     {
         string notACheckout = Path.Combine(_temp.Path, "not-a-checkout");
         Directory.CreateDirectory(notACheckout);
 
-        CliResult run = RunIn(notACheckout, _stubBin, "utilities", "statusline", "deploy");
+        CliResult run = await RunIn(notACheckout, _stubBin, "utilities", "statusline", "deploy");
 
         string output = Compact(run.Output);
         AssertExitCode(1, run);
@@ -344,19 +344,19 @@ public sealed class UtilitiesCliCommandTests : IDisposable
     // -----------------------------------------------------------------------------------------
 
     [Fact]
-    public void StatusExitsOneWhenNothingIsDeployed()
+    public async Task StatusExitsOneWhenNothingIsDeployed()
     {
-        CliResult run = Run("utilities", "statusline", "status");
+        CliResult run = await Run("utilities", "statusline", "status");
 
         AssertExitCode(1, run);
     }
 
     [Fact]
-    public void StatusReportsEveryOwnedFileAsOkAndExitsZero()
+    public async Task StatusReportsEveryOwnedFileAsOkAndExitsZero()
     {
-        AssertExitCode(0, Run("utilities", "statusline", "deploy"));
+        AssertExitCode(0, await Run("utilities", "statusline", "deploy"));
 
-        CliResult run = Run("utilities", "statusline", "status");
+        CliResult run = await Run("utilities", "statusline", "status");
 
         AssertExitCode(0, run);
         string output = Compact(run.Output);
@@ -373,16 +373,16 @@ public sealed class UtilitiesCliCommandTests : IDisposable
     [Theory]
     [InlineData("missing")]
     [InlineData("drift")]
-    public void StatusExitsOneAndNamesTheStateOfAnOwnedFileThatIsGoneOrEdited(string state)
+    public async Task StatusExitsOneAndNamesTheStateOfAnOwnedFileThatIsGoneOrEdited(string state)
     {
-        AssertExitCode(0, Run("utilities", "statusline", "deploy"));
+        AssertExitCode(0, await Run("utilities", "statusline", "deploy"));
         string owned = DeployedPath("pi");
         if (string.Equals(state, "missing", StringComparison.Ordinal))
             File.Delete(owned);
         else
-            File.WriteAllText(owned, EditedFileContent);
+            await File.WriteAllTextAsync(owned, EditedFileContent);
 
-        CliResult run = Run("utilities", "statusline", "status");
+        CliResult run = await Run("utilities", "statusline", "status");
 
         AssertExitCode(1, run);
         Assert.Contains(state, Compact(run.Output), StringComparison.Ordinal);
@@ -393,11 +393,11 @@ public sealed class UtilitiesCliCommandTests : IDisposable
     // -----------------------------------------------------------------------------------------
 
     [Fact]
-    public void DoctorExitsZeroForAHealthyDeploymentAndWarnsOnlyAboutTheOptionalRecorder()
+    public async Task DoctorExitsZeroForAHealthyDeploymentAndWarnsOnlyAboutTheOptionalRecorder()
     {
-        AssertExitCode(0, Run("utilities", "statusline", "deploy"));
+        AssertExitCode(0, await Run("utilities", "statusline", "deploy"));
 
-        CliResult run = Run("utilities", "statusline", "doctor");
+        CliResult run = await Run("utilities", "statusline", "doctor");
 
         AssertExitCode(0, run);
         string output = Compact(run.Output);
@@ -411,11 +411,11 @@ public sealed class UtilitiesCliCommandTests : IDisposable
     }
 
     [Fact]
-    public void DoctorExitsOneAndNamesAPrerequisiteThatIsMissing()
+    public async Task DoctorExitsOneAndNamesAPrerequisiteThatIsMissing()
     {
-        AssertExitCode(0, Run("utilities", "statusline", "deploy"));
+        AssertExitCode(0, await Run("utilities", "statusline", "deploy"));
 
-        CliResult run = RunIn(_checkout, StubBinWithout("jq"), "utilities", "statusline", "doctor");
+        CliResult run = await RunIn(_checkout, StubBinWithout("jq"), "utilities", "statusline", "doctor");
 
         AssertExitCode(1, run);
         string output = Compact(run.Output);
@@ -424,26 +424,26 @@ public sealed class UtilitiesCliCommandTests : IDisposable
     }
 
     [Fact]
-    public void DoctorExitsOneWhenAnOwnedCommandScriptLostItsExecutableBit()
+    public async Task DoctorExitsOneWhenAnOwnedCommandScriptLostItsExecutableBit()
     {
         if (OperatingSystem.IsWindows())
             Assert.Skip("Kyber Utilities status-line artifacts are macOS and Linux only (D4).");
 
-        AssertExitCode(0, Run("utilities", "statusline", "deploy"));
+        AssertExitCode(0, await Run("utilities", "statusline", "deploy"));
         ClearExecutableBit(DeployedPath("claude"));
 
-        CliResult run = Run("utilities", "statusline", "doctor");
+        CliResult run = await Run("utilities", "statusline", "doctor");
 
         AssertExitCode(1, run);
         Assert.Contains("notexecutable", Compact(run.Output), StringComparison.OrdinalIgnoreCase);
     }
 
     [Fact]
-    public void DoctorSkipsAHarnessThatIsNotInstalledInsteadOfFailingIt()
+    public async Task DoctorSkipsAHarnessThatIsNotInstalledInsteadOfFailingIt()
     {
-        AssertExitCode(0, Run("utilities", "statusline", "deploy"));
+        AssertExitCode(0, await Run("utilities", "statusline", "deploy"));
 
-        CliResult run = RunIn(
+        CliResult run = await RunIn(
             _checkout,
             StubBinWithout("agy", "pi", "cmd", "python3", "node"),
             "utilities",
@@ -461,37 +461,37 @@ public sealed class UtilitiesCliCommandTests : IDisposable
     // -----------------------------------------------------------------------------------------
 
     [Fact]
-    public void RemoveDeletesEveryOwnedFileAndExitsZero()
+    public async Task RemoveDeletesEveryOwnedFileAndExitsZero()
     {
-        AssertExitCode(0, Run("utilities", "statusline", "deploy"));
+        AssertExitCode(0, await Run("utilities", "statusline", "deploy"));
 
-        CliResult run = Run("utilities", "statusline", "remove");
+        CliResult run = await Run("utilities", "statusline", "remove");
 
         AssertExitCode(0, run);
         foreach (string token in HarnessTokens)
             Assert.False(File.Exists(DeployedPath(token)),
                 $"Remove left the owned file '{DeployedPath(token)}' behind.");
-        AssertExitCode(1, Run("utilities", "statusline", "status"));
+        AssertExitCode(1, await Run("utilities", "statusline", "status"));
     }
 
     [Fact]
-    public void RemoveWithNothingDeployedExitsZeroAndWritesNothing()
+    public async Task RemoveWithNothingDeployedExitsZeroAndWritesNothing()
     {
         Dictionary<string, byte[]> before = SnapshotHome();
 
-        CliResult run = Run("utilities", "statusline", "remove");
+        CliResult run = await Run("utilities", "statusline", "remove");
 
         AssertExitCode(0, run);
         AssertHomeUnchanged(before);
     }
 
     [Fact]
-    public void RemoveExitsOneWhenAnOwnedFileCannotBeDeleted()
+    public async Task RemoveExitsOneWhenAnOwnedFileCannotBeDeleted()
     {
-        AssertExitCode(0, Run("utilities", "statusline", "deploy"));
+        AssertExitCode(0, await Run("utilities", "statusline", "deploy"));
         string stagingRoot = StagingRoot("pi");
         string probe = Path.Combine(stagingRoot, "deletion-probe.txt");
-        File.WriteAllText(probe, "probe\n");
+        await File.WriteAllTextAsync(probe, "probe\n");
 
         if (!TryRemoveDeletePermission(stagingRoot, out UnixFileMode originalMode))
             Assert.Skip("Kyber Utilities status-line artifacts are macOS and Linux only (D4).");
@@ -501,7 +501,7 @@ public sealed class UtilitiesCliCommandTests : IDisposable
             if (CanDeleteIn(stagingRoot, probe))
                 Assert.Skip("A privileged process ignores the directory mode, so this case cannot be arranged.");
 
-            CliResult run = Run("utilities", "statusline", "remove");
+            CliResult run = await Run("utilities", "statusline", "remove");
 
             AssertExitCode(1, run);
             Assert.True(
@@ -574,16 +574,16 @@ public sealed class UtilitiesCliCommandTests : IDisposable
     }
 
     /// <summary>Runs the CLI from the synthetic checkout, where the artifacts are found.</summary>
-    private CliResult Run(params string[] args)
+    private async Task<CliResult> Run(params string[] args)
     {
-        return RunIn(_checkout, _stubBin, args);
+        return await RunIn(_checkout, _stubBin, args);
     }
 
     /// <summary>
     /// Runs the CLI in this process over the isolated home, with the given working directory and
     /// <c>PATH</c>, and captures its exit code and both output streams.
     /// </summary>
-    private CliResult RunIn(string workingDirectory, string pathVariable, params string[] args)
+    private async Task<CliResult> RunIn(string workingDirectory, string pathVariable, params string[] args)
     {
         Dictionary<string, string> variables = new(StringComparer.Ordinal)
         {
@@ -599,12 +599,12 @@ public sealed class UtilitiesCliCommandTests : IDisposable
             homeDirectory: _home,
             tempDirectory: Path.GetTempPath(),
             readVariable: name => variables.TryGetValue(name, out string? value) ? value : Environment.GetEnvironmentVariable(name));
-        Func<ProcessStartInfo, string, CancellationToken, Task<ProcessResult>> versionProbe = (startInfo, _, _) =>
+        Func<ProcessStartInfo, string, CancellationToken, Task<ProcessResult>> versionProbe = async (startInfo, _, _) =>
         {
             // A child resolves its program against this process's PATH, so the stub on the case's PATH is named in full.
             startInfo.FileName = ResolveOnPath(startInfo.FileName, pathVariable) ?? startInfo.FileName;
             startInfo.Environment["PATH"] = pathVariable;
-            return Task.FromResult(Execute(startInfo));
+            return await Execute(startInfo);
         };
 
         CapturedConsoleExecution<int> run = ProcessConsoleCapture.Run(() =>
@@ -621,7 +621,7 @@ public sealed class UtilitiesCliCommandTests : IDisposable
     /// Runs the CLI as the real host process, for the one case that proves the composition root wires the
     /// branch end to end.
     /// </summary>
-    private CliResult RunInChildProcess(string workingDirectory, string pathVariable, params string[] args)
+    private async Task<CliResult> RunInChildProcess(string workingDirectory, string pathVariable, params string[] args)
     {
         ProcessStartInfo startInfo = new(CliHostPath())
         {
@@ -642,14 +642,14 @@ public sealed class UtilitiesCliCommandTests : IDisposable
         startInfo.Environment[PiCodingAgentDirectoryVariable] = Path.Combine(_home, ".pi", "agent");
         startInfo.Environment["PATH"] = pathVariable;
 
-        ProcessResult result = Execute(startInfo);
+        ProcessResult result = await Execute(startInfo);
         return new CliResult(result.ExitCode, result.StandardOutput + "\n" + result.StandardError);
     }
 
     /// <summary>The one place this suite starts a process: bounded by <see cref="CliTimeout"/>, which kills the tree.</summary>
-    private static ProcessResult Execute(ProcessStartInfo startInfo)
+    private static async Task<ProcessResult> Execute(ProcessStartInfo startInfo)
     {
-        return ProcessRunner.Run(startInfo, string.Empty, CliTimeout);
+        return await ProcessRunner.RunAsync(startInfo, string.Empty, CliTimeout);
     }
 
     private static string? ResolveOnPath(string name, string path)
