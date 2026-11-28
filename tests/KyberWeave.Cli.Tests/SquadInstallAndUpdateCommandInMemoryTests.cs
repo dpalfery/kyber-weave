@@ -34,13 +34,13 @@ public sealed class SquadInstallAndUpdateCommandInMemoryTests : IDisposable
     public void Dispose() => _ansi.Dispose();
 
     [Fact]
-    public void Install_WhenToolchainUnreleased_FailsClosedWithExitOne()
+    public async Task Install_WhenToolchainUnreleased_FailsClosedWithExitOne()
     {
         string targetDir = CreateRoot("install-unreleased");
         FakeSquadReleaseSource release = FakeSquadReleaseSource.Failing(
             new InvalidOperationException("No validated release is available for this toolchain."));
 
-        int exitCode = SquadTestCommands.InMemoryInstall(_state, release, _renderer, _console).Execute(
+        int exitCode = await SquadTestCommands.InMemoryInstall(_state, release, _renderer, _console).ExecuteAsync(
             null!,
             new SquadInstallSettings
             {
@@ -49,7 +49,8 @@ public sealed class SquadInstallAndUpdateCommandInMemoryTests : IDisposable
                 Global = false,
                 DryRun = false,
                 Adopt = false
-            });
+            },
+            CancellationToken.None);
 
         string output = Output();
         Assert.Equal(1, exitCode);
@@ -58,12 +59,12 @@ public sealed class SquadInstallAndUpdateCommandInMemoryTests : IDisposable
     }
 
     [Fact]
-    public void Install_WhenCollaboratorsInjected_SucceedsWithExitZero()
+    public async Task Install_WhenCollaboratorsInjected_SucceedsWithExitZero()
     {
         string targetDir = CreateRoot("install-success");
         FakeSquadReleaseSource release = new() { Files = _state.Files };
 
-        int exitCode = SquadTestCommands.InMemoryInstall(_state, release, _renderer, _console).Execute(
+        int exitCode = await SquadTestCommands.InMemoryInstall(_state, release, _renderer, _console).ExecuteAsync(
             null!,
             new SquadInstallSettings
             {
@@ -72,7 +73,8 @@ public sealed class SquadInstallAndUpdateCommandInMemoryTests : IDisposable
                 Global = false,
                 DryRun = false,
                 Adopt = false
-            });
+            },
+            CancellationToken.None);
 
         string homeState = _state.Layout.HomeProjectDirectory(targetDir);
         Assert.Equal(0, exitCode);
@@ -83,12 +85,12 @@ public sealed class SquadInstallAndUpdateCommandInMemoryTests : IDisposable
     }
 
     [Fact]
-    public void Install_DryRun_ReportsPlannedFilesWithoutModifyingFilesystem()
+    public async Task Install_DryRun_ReportsPlannedFilesWithoutModifyingFilesystem()
     {
         string targetDir = CreateRoot("install-dry-run");
         FakeSquadReleaseSource release = new() { Files = _state.Files };
 
-        int exitCode = SquadTestCommands.InMemoryInstall(_state, release, _renderer, _console).Execute(
+        int exitCode = await SquadTestCommands.InMemoryInstall(_state, release, _renderer, _console).ExecuteAsync(
             null!,
             new SquadInstallSettings
             {
@@ -97,7 +99,8 @@ public sealed class SquadInstallAndUpdateCommandInMemoryTests : IDisposable
                 Global = false,
                 DryRun = true,
                 Adopt = false
-            });
+            },
+            CancellationToken.None);
 
         Assert.Equal(0, exitCode);
         Assert.Contains("Dry-run", Output(), StringComparison.OrdinalIgnoreCase);
@@ -107,18 +110,19 @@ public sealed class SquadInstallAndUpdateCommandInMemoryTests : IDisposable
     [Theory]
     [InlineData("invalid-target")]
     [InlineData("codex,unknown-target")]
-    public void Install_InvalidTargetToken_ExitsTwo(string target)
+    public async Task Install_InvalidTargetToken_ExitsTwo(string target)
     {
         string targetDir = CreateRoot("install-invalid-target");
         FakeSquadReleaseSource release = new() { Files = _state.Files };
 
-        int exitCode = SquadTestCommands.InMemoryInstall(_state, release, _renderer, _console).Execute(
+        int exitCode = await SquadTestCommands.InMemoryInstall(_state, release, _renderer, _console).ExecuteAsync(
             null!,
             new SquadInstallSettings
             {
                 Path = targetDir,
                 Targets = [target]
-            });
+            },
+            CancellationToken.None);
 
         Assert.Equal(2, exitCode);
         Assert.Contains("Unknown Squad target", Output(), StringComparison.OrdinalIgnoreCase);
@@ -127,51 +131,53 @@ public sealed class SquadInstallAndUpdateCommandInMemoryTests : IDisposable
     [Theory]
     [InlineData("invalid-exclude")]
     [InlineData("cursor,bad-exclude")]
-    public void Install_InvalidExcludeToken_ExitsTwo(string exclusion)
+    public async Task Install_InvalidExcludeToken_ExitsTwo(string exclusion)
     {
         string targetDir = CreateRoot("install-invalid-exclude");
         FakeSquadReleaseSource release = new() { Files = _state.Files };
 
-        int exitCode = SquadTestCommands.InMemoryInstall(_state, release, _renderer, _console).Execute(
+        int exitCode = await SquadTestCommands.InMemoryInstall(_state, release, _renderer, _console).ExecuteAsync(
             null!,
             new SquadInstallSettings
             {
                 Path = targetDir,
                 Targets = ["all"],
                 Exclusions = [exclusion]
-            });
+            },
+            CancellationToken.None);
 
         Assert.Equal(2, exitCode);
         Assert.Contains("Unknown Squad target", Output(), StringComparison.OrdinalIgnoreCase);
     }
 
     [Fact]
-    public void Install_NoTargetInNonInteractiveTerminal_ExitsTwoWithRecoveryCommand()
+    public async Task Install_NoTargetInNonInteractiveTerminal_ExitsTwoWithRecoveryCommand()
     {
         string targetDir = CreateRoot("install-no-target");
         FakeSquadReleaseSource release = new() { Files = _state.Files };
 
-        int exitCode = SquadTestCommands.InMemoryInstall(_state, release, _renderer, _console).Execute(
+        int exitCode = await SquadTestCommands.InMemoryInstall(_state, release, _renderer, _console).ExecuteAsync(
             null!,
             new SquadInstallSettings
             {
                 Path = targetDir,
                 Targets = []
-            });
+            },
+            CancellationToken.None);
 
         Assert.Equal(2, exitCode);
         Assert.Contains("kyber-weave squad install --target <target>", Output(), StringComparison.Ordinal);
     }
 
     [Fact]
-    public void Update_WhenToolchainUnreleased_FailsClosedWithExitOne()
+    public async Task Update_WhenToolchainUnreleased_FailsClosedWithExitOne()
     {
         string targetDir = CreateRoot("update-target");
         SeedProjectDeployment(targetDir, ("agents/architect.md", "You are architect.\nPlan first.\n"));
         FakeSquadReleaseSource release = FakeSquadReleaseSource.Failing(
             new InvalidOperationException("No validated release is available for this toolchain."));
 
-        int exitCode = SquadTestCommands.InMemoryUpdate(_state, release, _renderer, _console).Execute(
+        int exitCode = await SquadTestCommands.InMemoryUpdate(_state, release, _renderer, _console).ExecuteAsync(
             null!,
             new SquadUpdateSettings
             {
@@ -179,20 +185,21 @@ public sealed class SquadInstallAndUpdateCommandInMemoryTests : IDisposable
                 Global = false,
                 DryRun = false,
                 ReplaceManaged = false
-            });
+            },
+            CancellationToken.None);
 
         Assert.Equal(1, exitCode);
         Assert.Contains("error", Output(), StringComparison.OrdinalIgnoreCase);
     }
 
     [Fact]
-    public void Update_WhenCollaboratorsInjected_SucceedsWithExitZero()
+    public async Task Update_WhenCollaboratorsInjected_SucceedsWithExitZero()
     {
         string targetDir = CreateRoot("update-success-target");
         SeedProjectDeployment(targetDir, (".codex/agents/architect.toml", "name = \"architect\"\n"));
         FakeSquadReleaseSource release = new() { Files = _state.Files };
 
-        int exitCode = SquadTestCommands.InMemoryUpdate(_state, release, _renderer, _console).Execute(
+        int exitCode = await SquadTestCommands.InMemoryUpdate(_state, release, _renderer, _console).ExecuteAsync(
             null!,
             new SquadUpdateSettings
             {
@@ -201,7 +208,8 @@ public sealed class SquadInstallAndUpdateCommandInMemoryTests : IDisposable
                 Global = false,
                 DryRun = false,
                 ReplaceManaged = true
-            });
+            },
+            CancellationToken.None);
 
         Assert.Equal(0, exitCode);
         Assert.Contains("Successfully updated", Output(), StringComparison.OrdinalIgnoreCase);
@@ -213,7 +221,7 @@ public sealed class SquadInstallAndUpdateCommandInMemoryTests : IDisposable
     /// charge reports success while claude never reaches the lock or the receipt.
     /// </summary>
     [Fact]
-    public void UpdateExplicitTargetsReconcileRenderedReceiptAndLockTargets()
+    public async Task UpdateExplicitTargetsReconcileRenderedReceiptAndLockTargets()
     {
         string targetDir = CreateRoot("update-explicit-targets");
         SeedProjectDeployment(targetDir, (".codex/agents/architect.toml", "name = \"architect\"\n"));
@@ -222,12 +230,12 @@ public sealed class SquadInstallAndUpdateCommandInMemoryTests : IDisposable
 
         // Confirmation is a separate gate from target selection. Pin it closed so a
         // pty cannot turn this regression into a hung prompt.
-        int exitCode = SquadTestCommands.InMemoryUpdate(
+        int exitCode = await SquadTestCommands.InMemoryUpdate(
             _state,
             release,
             renderer,
             _console,
-            isInteractive: false).Execute(
+            isInteractive: false).ExecuteAsync(
             null!,
             new SquadUpdateSettings
             {
@@ -236,7 +244,8 @@ public sealed class SquadInstallAndUpdateCommandInMemoryTests : IDisposable
                 Global = false,
                 DryRun = false,
                 ReplaceManaged = true
-            });
+            },
+            CancellationToken.None);
 
         Assert.Equal(0, exitCode);
         SquadRenderRequest renderRequest = Assert.Single(renderer.RenderRequests);
@@ -260,7 +269,7 @@ public sealed class SquadInstallAndUpdateCommandInMemoryTests : IDisposable
     /// byte-identical, because the operator has not accepted a write.
     /// </summary>
     [Fact]
-    public void UpdateExplicitTargetsDryRunReportsDesiredSetWithoutWritingState()
+    public async Task UpdateExplicitTargetsDryRunReportsDesiredSetWithoutWritingState()
     {
         string targetDir = CreateRoot("update-explicit-targets-dry-run");
         SeedProjectDeployment(targetDir, (".codex/agents/architect.toml", "name = \"architect\"\n"));
@@ -271,14 +280,14 @@ public sealed class SquadInstallAndUpdateCommandInMemoryTests : IDisposable
         string receiptPath = _state.Store.ResolveReceiptPath(targetDir, SquadDeploymentScope.Project);
         byte[] lockBefore = _state.Files.ReadAllBytes(lockPath);
         byte[] receiptBefore = _state.Files.ReadAllBytes(receiptPath);
-        int desiredFileCount = RenderedDeploymentFileCount(SquadTarget.Codex, SquadTarget.Claude);
+        int desiredFileCount = await RenderedDeploymentFileCountAsync(SquadTarget.Codex, SquadTarget.Claude);
 
-        int exitCode = SquadTestCommands.InMemoryUpdate(
+        int exitCode = await SquadTestCommands.InMemoryUpdate(
             _state,
             release,
             renderer,
             _console,
-            isInteractive: false).Execute(
+            isInteractive: false).ExecuteAsync(
             null!,
             new SquadUpdateSettings
             {
@@ -287,7 +296,8 @@ public sealed class SquadInstallAndUpdateCommandInMemoryTests : IDisposable
                 Global = false,
                 DryRun = true,
                 ReplaceManaged = true
-            });
+            },
+            CancellationToken.None);
 
         Assert.Equal(0, exitCode);
         string output = Output();
@@ -300,25 +310,26 @@ public sealed class SquadInstallAndUpdateCommandInMemoryTests : IDisposable
     [Theory]
     [InlineData("invalid-target")]
     [InlineData("claude,unknown-target")]
-    public void Update_InvalidTargetToken_ExitsTwo(string target)
+    public async Task Update_InvalidTargetToken_ExitsTwo(string target)
     {
         string targetDir = CreateRoot("update-invalid-target");
         FakeSquadReleaseSource release = new() { Files = _state.Files };
 
-        int exitCode = SquadTestCommands.InMemoryUpdate(_state, release, _renderer, _console).Execute(
+        int exitCode = await SquadTestCommands.InMemoryUpdate(_state, release, _renderer, _console).ExecuteAsync(
             null!,
             new SquadUpdateSettings
             {
                 Path = targetDir,
                 Targets = [target]
-            });
+            },
+            CancellationToken.None);
 
         Assert.Equal(2, exitCode);
         Assert.Contains("Unknown Squad target", Output(), StringComparison.OrdinalIgnoreCase);
     }
 
     [Fact]
-    public void Update_EmptyReceiptTargetsInNonInteractiveTerminal_ExitsTwoWithRecoveryCommand()
+    public async Task Update_EmptyReceiptTargetsInNonInteractiveTerminal_ExitsTwoWithRecoveryCommand()
     {
         string targetDir = CreateRoot("update-empty-receipt");
         FakeSquadReleaseSource release = new() { Files = _state.Files };
@@ -333,30 +344,32 @@ public sealed class SquadInstallAndUpdateCommandInMemoryTests : IDisposable
                 Degradations: [],
                 Files: [])));
 
-        int exitCode = SquadTestCommands.InMemoryUpdate(_state, release, _renderer, _console).Execute(
+        int exitCode = await SquadTestCommands.InMemoryUpdate(_state, release, _renderer, _console).ExecuteAsync(
             null!,
             new SquadUpdateSettings
             {
                 Path = targetDir
-            });
+            },
+            CancellationToken.None);
 
         Assert.Equal(2, exitCode);
         Assert.Contains("kyber-weave squad update --target <target>", Output(), StringComparison.Ordinal);
     }
 
     [Fact]
-    public void Update_MissingReceipt_ExitsOneAndDirectsToInstall()
+    public async Task Update_MissingReceipt_ExitsOneAndDirectsToInstall()
     {
         string targetDir = CreateRoot("update-no-receipt");
         FakeSquadReleaseSource release = new() { Files = _state.Files };
 
-        int exitCode = SquadTestCommands.InMemoryUpdate(_state, release, _renderer, _console).Execute(
+        int exitCode = await SquadTestCommands.InMemoryUpdate(_state, release, _renderer, _console).ExecuteAsync(
             null!,
             new SquadUpdateSettings
             {
                 Path = targetDir,
                 Global = false
-            });
+            },
+            CancellationToken.None);
 
         Assert.Equal(1, exitCode);
         Assert.Contains("squad install", Output(), StringComparison.Ordinal);
@@ -366,14 +379,14 @@ public sealed class SquadInstallAndUpdateCommandInMemoryTests : IDisposable
     /// The dry-run oracle is the file count a renderer emits for the desired pair. A
     /// one-target plan cannot report that count.
     /// </summary>
-    private int RenderedDeploymentFileCount(params SquadTarget[] targets)
+    private async Task<int> RenderedDeploymentFileCountAsync(params SquadTarget[] targets)
     {
         FakeSquadRenderer renderer = new();
-        SquadRenderResult result = renderer.RenderAsync(
+        SquadRenderResult result = await renderer.RenderAsync(
             new SquadRenderRequest(
                 SourceDirectory: ".",
                 Targets: targets,
-                Scope: SquadDeploymentScope.Project).Prepared(_state.Files)).GetAwaiter().GetResult();
+                Scope: SquadDeploymentScope.Project).Prepared(_state.Files));
         return result.Files.Count;
     }
 

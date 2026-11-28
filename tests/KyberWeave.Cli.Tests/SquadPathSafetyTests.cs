@@ -146,7 +146,7 @@ public sealed class SquadPathSafetyTests
     }
 
     [Fact]
-    public void Install_WhenPositionalAndPathOptionConflict_ExitsTwoNamingBothForms()
+    public async Task Install_WhenPositionalAndPathOptionConflict_ExitsTwoNamingBothForms()
     {
         // The command wiring surfaces the conflict as the convention's exit-2 abort
         // before any resolution or filesystem work, with the hint naming both forms.
@@ -156,14 +156,15 @@ public sealed class SquadPathSafetyTests
         using FakeSquadReleaseSource releaseSource = new() { Files = _state.Files };
         SquadInstallCommand command = SquadTestCommands.InMemoryInstall(_state, releaseSource, _renderer);
 
-        (int ExitCode, string Output) execution = Capture(() => command.Execute(
+        (int ExitCode, string Output) execution = await CaptureAsync(() => command.ExecuteAsync(
             null!,
             new SquadInstallSettings
             {
                 Path = Path.Combine(Work, "conflicting-positional-root"),
                 PathOption = Path.Combine(Work, "conflicting-option-root"),
                 Targets = ["codex"]
-            }));
+            },
+            CancellationToken.None));
 
         Assert.Equal(2, execution.ExitCode);
         string normalized = Normalize(execution.Output);
@@ -180,7 +181,7 @@ public sealed class SquadPathSafetyTests
     [InlineData("install")]
     [InlineData("update")]
     [InlineData("uninstall")]
-    public void MutatingVerb_WhenInteractiveConfirmationDeclined_ExitsTwoWithoutWritingAnything(string verb)
+    public async Task MutatingVerb_WhenInteractiveConfirmationDeclined_ExitsTwoWithoutWritingAnything(string verb)
     {
         // N3 wiring, pinned per mutating command because the gate is wired separately in
         // each: a decline is aborted-before-side-effects client input — exit 2 with the
@@ -202,14 +203,14 @@ public sealed class SquadPathSafetyTests
 
         string[] filesBefore = Files(targetDir);
 
-        (int ExitCode, string Output) execution = Capture(() => verb switch
+        (int ExitCode, string Output) execution = await CaptureAsync(() => verb switch
         {
             "install" => SquadTestCommands.InMemoryInstall(
                 _state,
                 releaseSource,
                 renderer,
                 isInteractive: true,
-                readAnswer: _ => false).Execute(
+                readAnswer: _ => false).ExecuteAsync(
                 null!,
                 new SquadInstallSettings
                 {
@@ -218,13 +219,14 @@ public sealed class SquadPathSafetyTests
                     Global = false,
                     DryRun = false,
                     Adopt = false
-                }),
+                },
+                CancellationToken.None),
             "update" => SquadTestCommands.InMemoryUpdate(
                 _state,
                 releaseSource,
                 renderer,
                 isInteractive: true,
-                readAnswer: _ => false).Execute(
+                readAnswer: _ => false).ExecuteAsync(
                 null!,
                 new SquadUpdateSettings
                 {
@@ -232,20 +234,22 @@ public sealed class SquadPathSafetyTests
                     Targets = ["codex"],
                     Global = false,
                     DryRun = false
-                }),
+                },
+                CancellationToken.None),
             _ => SquadTestCommands.InMemoryUninstall(
                 _state,
                 releaseSource,
                 renderer,
                 isInteractive: true,
-                readAnswer: _ => false).Execute(
+                readAnswer: _ => false).ExecuteAsync(
                 null!,
                 new SquadUninstallSettings
                 {
                     PathOption = targetDir,
                     Global = false,
                     DryRun = false
-                })
+                },
+                CancellationToken.None)
         });
 
         Assert.Equal(2, execution.ExitCode);
@@ -269,7 +273,7 @@ public sealed class SquadPathSafetyTests
     [InlineData("install")]
     [InlineData("update")]
     [InlineData("uninstall")]
-    public void MutatingVerb_WhenNonInteractive_ProceedsWithoutPromptingAndEchoesTheAbsoluteRoot(string verb)
+    public async Task MutatingVerb_WhenNonInteractive_ProceedsWithoutPromptingAndEchoesTheAbsoluteRoot(string verb)
     {
         // N1 wiring, pinned per mutating command because the gate is wired separately in
         // each: a non-interactive mutating run echoes the resolved absolute root and
@@ -293,7 +297,7 @@ public sealed class SquadPathSafetyTests
 
         int promptCount = 0;
 
-        (int ExitCode, string Output) execution = Capture(() => verb switch
+        (int ExitCode, string Output) execution = await CaptureAsync(() => verb switch
         {
             "install" => SquadTestCommands.InMemoryInstall(
                 _state,
@@ -304,7 +308,7 @@ public sealed class SquadPathSafetyTests
                 {
                     promptCount++;
                     return true;
-                }).Execute(
+                }).ExecuteAsync(
                 null!,
                 new SquadInstallSettings
                 {
@@ -313,7 +317,8 @@ public sealed class SquadPathSafetyTests
                     Global = false,
                     DryRun = false,
                     Adopt = false
-                }),
+                },
+                CancellationToken.None),
             "update" => SquadTestCommands.InMemoryUpdate(
                 _state,
                 releaseSource,
@@ -323,7 +328,7 @@ public sealed class SquadPathSafetyTests
                 {
                     promptCount++;
                     return true;
-                }).Execute(
+                }).ExecuteAsync(
                 null!,
                 new SquadUpdateSettings
                 {
@@ -332,7 +337,8 @@ public sealed class SquadPathSafetyTests
                     Global = false,
                     DryRun = false,
                     ReplaceManaged = true
-                }),
+                },
+                CancellationToken.None),
             _ => SquadTestCommands.InMemoryUninstall(
                 _state,
                 releaseSource,
@@ -342,14 +348,15 @@ public sealed class SquadPathSafetyTests
                 {
                     promptCount++;
                     return true;
-                }).Execute(
+                }).ExecuteAsync(
                 null!,
                 new SquadUninstallSettings
                 {
                     PathOption = targetDir,
                     Global = false,
                     DryRun = false
-                })
+                },
+                CancellationToken.None)
         });
 
         string successfulMutation = verb switch
@@ -384,7 +391,7 @@ public sealed class SquadPathSafetyTests
     [InlineData("install")]
     [InlineData("update")]
     [InlineData("uninstall")]
-    public void MutatingVerb_WhenGlobalScope_EchoNamesEachSelectedTargetPhysicalGlobalRoot(string verb)
+    public async Task MutatingVerb_WhenGlobalScope_EchoNamesEachSelectedTargetPhysicalGlobalRoot(string verb)
     {
         // Review finding (Greptile P1): with --global the confirmation echoed only
         // targetRoot — the global state anchor — while the lifecycle writes every deployed
@@ -433,7 +440,7 @@ public sealed class SquadPathSafetyTests
             name => globalRootOverrides.GetValueOrDefault(name),
             _state.UserPaths.HomeDirectory);
 
-        (int ExitCode, string Output) execution = Capture(() => verb switch
+        (int ExitCode, string Output) execution = await CaptureAsync(() => verb switch
         {
             "install" => SquadTestCommands.InMemoryInstall(
                 _state,
@@ -445,7 +452,7 @@ public sealed class SquadPathSafetyTests
                 {
                     promptCount++;
                     return true;
-                }).Execute(
+                }).ExecuteAsync(
                 null!,
                 new SquadInstallSettings
                 {
@@ -454,7 +461,8 @@ public sealed class SquadPathSafetyTests
                     Global = true,
                     DryRun = false,
                     Adopt = false
-                }),
+                },
+                CancellationToken.None),
             "update" => SquadTestCommands.InMemoryUpdate(
                 _state,
                 releaseSource,
@@ -465,7 +473,7 @@ public sealed class SquadPathSafetyTests
                 {
                     promptCount++;
                     return true;
-                }).Execute(
+                }).ExecuteAsync(
                 null!,
                 new SquadUpdateSettings
                 {
@@ -474,7 +482,8 @@ public sealed class SquadPathSafetyTests
                     Global = true,
                     DryRun = false,
                     ReplaceManaged = true
-                }),
+                },
+                CancellationToken.None),
             _ => SquadTestCommands.InMemoryUninstall(
                 _state,
                 releaseSource,
@@ -485,14 +494,15 @@ public sealed class SquadPathSafetyTests
                 {
                     promptCount++;
                     return true;
-                }).Execute(
+                }).ExecuteAsync(
                 null!,
                 new SquadUninstallSettings
                 {
                     PathOption = anchorRoot,
                     Global = true,
                     DryRun = false
-                })
+                },
+                CancellationToken.None)
         });
 
         string normalized = Normalize(execution.Output);
@@ -508,7 +518,7 @@ public sealed class SquadPathSafetyTests
     #region Doctor path consumption (review remediation): --path and the positional select the diagnosed root
 
     [Fact]
-    public void Doctor_WhenPathOptionSupplied_DiagnosesTheNamedRootNotTheDefaultRoot()
+    public async Task Doctor_WhenPathOptionSupplied_DiagnosesTheNamedRootNotTheDefaultRoot()
     {
         // Review finding (Greptile P1): squad doctor accepted --path and then ignored it —
         // Execute diagnosed the injected default (the working directory, the process's
@@ -526,12 +536,13 @@ public sealed class SquadPathSafetyTests
             .WithProbeOutput("kyber-weave-mcp", "kyber-weave-mcp 1.2.3\n");
         SquadDoctorCommand command = SquadTestCommands.InMemoryDoctor(_state, executor, workingDirectory: defaultRoot);
 
-        (int ExitCode, string Output) execution = Capture(() => command.Execute(
+        (int ExitCode, string Output) execution = await CaptureAsync(() => command.ExecuteAsync(
             null!,
             new SquadDoctorSettings
             {
                 PathOption = requestedRoot
-            }));
+            },
+            CancellationToken.None));
 
         Assert.Equal(1, execution.ExitCode);
         Assert.Contains(
@@ -541,7 +552,7 @@ public sealed class SquadPathSafetyTests
     }
 
     [Fact]
-    public void Doctor_WhenPositionalPathSupplied_DiagnosesTheNamedRootNotTheDefaultRoot()
+    public async Task Doctor_WhenPositionalPathSupplied_DiagnosesTheNamedRootNotTheDefaultRoot()
     {
         // The positional form carries the same contract: doctor reads
         // CoalesceTargetPath(settings.Path, settings.PathOption) like every other squad
@@ -556,12 +567,13 @@ public sealed class SquadPathSafetyTests
             .WithProbeOutput("kyber-weave-mcp", "kyber-weave-mcp 1.2.3\n");
         SquadDoctorCommand command = SquadTestCommands.InMemoryDoctor(_state, executor, workingDirectory: defaultRoot);
 
-        (int ExitCode, string Output) execution = Capture(() => command.Execute(
+        (int ExitCode, string Output) execution = await CaptureAsync(() => command.ExecuteAsync(
             null!,
             new SquadDoctorSettings
             {
                 Path = requestedRoot
-            }));
+            },
+            CancellationToken.None));
 
         Assert.Equal(1, execution.ExitCode);
         Assert.Contains(
@@ -571,7 +583,7 @@ public sealed class SquadPathSafetyTests
     }
 
     [Fact]
-    public void Doctor_WhenNamedRootHasNoCanonicalSource_DoesNotReportTheDefaultRootsSource()
+    public async Task Doctor_WhenNamedRootHasNoCanonicalSource_DoesNotReportTheDefaultRootsSource()
     {
         // The inverse direction of the same contract, and the exact shape of the reported
         // defect: the default root here carries an unparsable canonical source — diagnosing
@@ -588,19 +600,20 @@ public sealed class SquadPathSafetyTests
             .WithProbeOutput("kyber-weave-mcp", "kyber-weave-mcp 1.2.3\n");
         SquadDoctorCommand command = SquadTestCommands.InMemoryDoctor(_state, executor, workingDirectory: defaultRoot);
 
-        (int ExitCode, string Output) execution = Capture(() => command.Execute(
+        (int ExitCode, string Output) execution = await CaptureAsync(() => command.ExecuteAsync(
             null!,
             new SquadDoctorSettings
             {
                 PathOption = requestedRoot
-            }));
+            },
+            CancellationToken.None));
 
         Assert.Equal(0, execution.ExitCode);
         Assert.DoesNotContain("Canonical source", Normalize(execution.Output), StringComparison.Ordinal);
     }
 
     [Fact]
-    public void Doctor_WhenPositionalAndPathOptionConflict_ExitsTwoNamingBothForms()
+    public async Task Doctor_WhenPositionalAndPathOptionConflict_ExitsTwoNamingBothForms()
     {
         // The same N6 rule the other squad commands pin: a non-default positional and
         // --path are two names for one deployment root, and doctor must reject the
@@ -616,13 +629,14 @@ public sealed class SquadPathSafetyTests
             .WithProbeOutput("kyber-weave-mcp", "kyber-weave-mcp 1.2.3\n");
         SquadDoctorCommand command = SquadTestCommands.InMemoryDoctor(_state, executor, workingDirectory: defaultRoot);
 
-        (int ExitCode, string Output) execution = Capture(() => command.Execute(
+        (int ExitCode, string Output) execution = await CaptureAsync(() => command.ExecuteAsync(
             null!,
             new SquadDoctorSettings
             {
                 Path = positionalRoot,
                 PathOption = optionRoot
-            }));
+            },
+            CancellationToken.None));
 
         Assert.Equal(2, execution.ExitCode);
         string normalized = Normalize(execution.Output);
@@ -684,6 +698,12 @@ public sealed class SquadPathSafetyTests
     private static (T Result, string Output) Capture<T>(Func<T> execute)
     {
         CapturedConsoleExecution<T> execution = ProcessConsoleCapture.Run(execute);
+        return (execution.Result, execution.Output);
+    }
+
+    private static async Task<(T Result, string Output)> CaptureAsync<T>(Func<Task<T>> execute)
+    {
+        CapturedConsoleExecution<T> execution = await ProcessConsoleCapture.RunAsync(execute);
         return (execution.Result, execution.Output);
     }
 

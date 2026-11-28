@@ -325,7 +325,7 @@ public sealed class SquadKyberWeaveSkillsTests : IClassFixture<SquadKyberWeavePa
     /// them with the Squad skills. The release source is the APM archive from pack, extracted as a release would be.
     /// </summary>
     [Fact]
-    public void GlobalInstallDeploysKyberWeaveSkillsBesideSquadSkillsAndUninstallRemovesThem()
+    public async Task GlobalInstallDeploysKyberWeaveSkillsBesideSquadSkillsAndUninstallRemovesThem()
     {
         AssertExit(_pack.ApmPack.ExitCode, _pack.ApmPack.Output, 0);
         string archive = ArchivePath(_pack.ApmPack, $"kyber-squad-{PackedVersion}.zip");
@@ -338,14 +338,14 @@ public sealed class SquadKyberWeaveSkillsTests : IClassFixture<SquadKyberWeavePa
         string claudeToken = SquadTargetCatalog.GetToken(SquadTarget.Claude);
         string[] kyberWeaveSkills = AllKyberWeaveSkillNames();
 
-        CapturedConsoleExecution<int> install = ProcessConsoleCapture.Run(() => SquadTestCommands.Install(
+        CapturedConsoleExecution<int> install = await ProcessConsoleCapture.RunAsync(() => SquadTestCommands.Install(
                 harness.UserPaths,
                 harness.Store,
                 releaseSource,
                 renderer,
                 false,
                 globalRoots: harness.GlobalRoots)
-            .Execute(null!, new SquadInstallSettings
+            .ExecuteAsync(null!, new SquadInstallSettings
             {
                 Path = anchor,
                 Global = true,
@@ -353,7 +353,7 @@ public sealed class SquadKyberWeaveSkillsTests : IClassFixture<SquadKyberWeavePa
                 Version = PackedVersion,
                 Yes = true,
                 NoCapturePlugin = true
-            }));
+            }, CancellationToken.None));
         AssertExit(install.Result, install.Output, 0);
 
         Assert.True(
@@ -366,7 +366,7 @@ public sealed class SquadKyberWeaveSkillsTests : IClassFixture<SquadKyberWeavePa
         }
 
         Assert.True(File.Exists(receiptPath), $"The global receipt is missing at '{receiptPath}'.");
-        SquadReceipt installed = harness.Store.DeserializeReceipt(File.ReadAllText(receiptPath, Encoding.UTF8));
+        SquadReceipt installed = harness.Store.DeserializeReceipt(await File.ReadAllTextAsync(receiptPath, Encoding.UTF8, CancellationToken.None));
         string[] owned = installed.Files
             .Where(file => file.Target == claudeToken)
             .Select(file => NormalizePath(file.RelativePath))
@@ -377,7 +377,7 @@ public sealed class SquadKyberWeaveSkillsTests : IClassFixture<SquadKyberWeavePa
         }
 
         string[] beforeUpdate = OwnedFingerprint(installed);
-        CapturedConsoleExecution<int> update = ProcessConsoleCapture.Run(() => SquadTestCommands.Update(
+        CapturedConsoleExecution<int> update = await ProcessConsoleCapture.RunAsync(() => SquadTestCommands.Update(
                 harness.UserPaths,
                 harness.Store,
                 releaseSource,
@@ -385,25 +385,25 @@ public sealed class SquadKyberWeaveSkillsTests : IClassFixture<SquadKyberWeavePa
                 false,
                 static _ => true,
                 harness.GlobalRoots)
-            .Execute(null!, new SquadUpdateSettings
+            .ExecuteAsync(null!, new SquadUpdateSettings
             {
                 Path = anchor,
                 Global = true,
                 Version = PackedVersion,
                 Yes = true,
                 NoCapturePlugin = true
-            }));
+            }, CancellationToken.None));
         AssertExit(update.Result, update.Output, 0);
-        SquadReceipt updated = harness.Store.DeserializeReceipt(File.ReadAllText(receiptPath, Encoding.UTF8));
+        SquadReceipt updated = harness.Store.DeserializeReceipt(await File.ReadAllTextAsync(receiptPath, Encoding.UTF8, CancellationToken.None));
         Assert.Equal(beforeUpdate, OwnedFingerprint(updated));
 
-        CapturedConsoleExecution<int> uninstall = ProcessConsoleCapture.Run(() => SquadTestCommands.Uninstall(
+        CapturedConsoleExecution<int> uninstall = await ProcessConsoleCapture.RunAsync(() => SquadTestCommands.Uninstall(
                 harness.UserPaths,
                 harness.Store,
                 harness.Lifecycle(renderer),
                 false,
                 globalRoots: harness.GlobalRoots)
-            .Execute(null!, new SquadUninstallSettings { PathOption = anchor, Global = true, Yes = true }));
+            .ExecuteAsync(null!, new SquadUninstallSettings { PathOption = anchor, Global = true, Yes = true }, CancellationToken.None));
         AssertExit(uninstall.Result, uninstall.Output, 0);
 
         string[] removedNames = [.. kyberWeaveSkills, "task-gate"];
@@ -451,7 +451,7 @@ public sealed class SquadKyberWeaveSkillsTests : IClassFixture<SquadKyberWeavePa
     /// skills only (D16).
     /// </summary>
     [Fact]
-    public void GlobalInstallDeploysNoKwSkill()
+    public async Task GlobalInstallDeploysNoKwSkill()
     {
         AssertExit(_pack.ApmPack.ExitCode, _pack.ApmPack.Output, 0);
         string archive = ArchivePath(_pack.ApmPack, $"kyber-squad-{PackedVersion}.zip");
@@ -461,14 +461,14 @@ public sealed class SquadKyberWeaveSkillsTests : IClassFixture<SquadKyberWeavePa
         string anchor = harness.MakeDirectory("anchor");
         string claudeRoot = harness.GlobalRoot(SquadTarget.Claude);
 
-        CapturedConsoleExecution<int> install = ProcessConsoleCapture.Run(() => SquadTestCommands.Install(
+        CapturedConsoleExecution<int> install = await ProcessConsoleCapture.RunAsync(() => SquadTestCommands.Install(
                 harness.UserPaths,
                 harness.Store,
                 releaseSource,
                 renderer,
                 false,
                 globalRoots: harness.GlobalRoots)
-            .Execute(null!, new SquadInstallSettings
+            .ExecuteAsync(null!, new SquadInstallSettings
             {
                 Path = anchor,
                 Global = true,
@@ -476,7 +476,7 @@ public sealed class SquadKyberWeaveSkillsTests : IClassFixture<SquadKyberWeavePa
                 Version = PackedVersion,
                 Yes = true,
                 NoCapturePlugin = true
-            }));
+            }, CancellationToken.None));
         AssertExit(install.Result, install.Output, 0);
 
         Assert.True(File.Exists(Path.Combine(claudeRoot, "skills", "task-gate", "SKILL.md")));

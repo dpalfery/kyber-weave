@@ -23,11 +23,12 @@ public sealed class SquadUninstallCommandTests : IDisposable
     }
 
     [Fact]
-    public void Execute_GlobalAndProjectTogether_IsRefusedWithoutTouchingAnything()
+    public async Task Execute_GlobalAndProjectTogether_IsRefusedWithoutTouchingAnything()
     {
         FakeSquadLifecycleService lifecycle = new(_state);
 
-        int exit = Command(lifecycle).Execute(null!, new SquadUninstallSettings { Global = true, Project = true });
+        int exit = await Command(lifecycle).ExecuteAsync(null!, new SquadUninstallSettings { Global = true, Project = true },
+            CancellationToken.None);
 
         Assert.Equal(2, exit);
         Assert.Equal(
@@ -38,11 +39,12 @@ public sealed class SquadUninstallCommandTests : IDisposable
     }
 
     [Fact]
-    public void Execute_RelativePath_ResolvesAgainstTheWorkingDirectoryTheEnvironmentNames()
+    public async Task Execute_RelativePath_ResolvesAgainstTheWorkingDirectoryTheEnvironmentNames()
     {
         FakeSquadLifecycleService lifecycle = new(_state) { Result = new SquadLifecycleResult(true) };
 
-        int exit = Command(lifecycle).Execute(null!, new SquadUninstallSettings { PathOption = "app" });
+        int exit = await Command(lifecycle).ExecuteAsync(null!, new SquadUninstallSettings { PathOption = "app" },
+            CancellationToken.None);
 
         Assert.Equal(0, exit);
         Assert.Equal([WorkingDirectory], _migration.InvokingDirectories);
@@ -56,16 +58,16 @@ public sealed class SquadUninstallCommandTests : IDisposable
     }
 
     [Fact]
-    public void Execute_InteractiveAndDeclined_StopsBeforeTheLifecycle()
+    public async Task Execute_InteractiveAndDeclined_StopsBeforeTheLifecycle()
     {
         FakeSquadLifecycleService lifecycle = new(_state);
         List<string> questions = [];
 
-        int exit = Command(lifecycle, interactive: true, readAnswer: question =>
+        int exit = await Command(lifecycle, interactive: true, readAnswer: question =>
         {
             questions.Add(question);
             return false;
-        }).Execute(null!, new SquadUninstallSettings());
+        }).ExecuteAsync(null!, new SquadUninstallSettings(), CancellationToken.None);
 
         Assert.Equal(2, exit);
         Assert.Empty(lifecycle.Uninstalls);
@@ -74,13 +76,14 @@ public sealed class SquadUninstallCommandTests : IDisposable
     }
 
     [Fact]
-    public void Execute_Interactive_AsksOnTheConsoleWhenNoAnswerSeamIsGiven()
+    public async Task Execute_Interactive_AsksOnTheConsoleWhenNoAnswerSeamIsGiven()
     {
         FakeSquadLifecycleService lifecycle = new(_state);
         _streams.IsInputRedirected = false;
         _streams.ScriptInput("n\n");
 
-        int exit = Command(lifecycle, interactive: true).Execute(null!, new SquadUninstallSettings());
+        int exit = await Command(lifecycle, interactive: true).ExecuteAsync(null!, new SquadUninstallSettings(),
+            CancellationToken.None);
 
         Assert.Equal(2, exit);
         Assert.Empty(lifecycle.Uninstalls);
@@ -88,14 +91,14 @@ public sealed class SquadUninstallCommandTests : IDisposable
     }
 
     [Fact]
-    public void Execute_AnInterruptedTransactionWasRecovered_PrintsTheRecoveryNotice()
+    public async Task Execute_AnInterruptedTransactionWasRecovered_PrintsTheRecoveryNotice()
     {
         FakeSquadLifecycleService lifecycle = new(_state)
         {
             Result = new SquadLifecycleResult(true, Warnings: ["Recovered an unfinished Squad transaction at '/kw/work/.kyber-weave/.squad-transaction': it had not committed, so its changes were rolled back."])
         };
 
-        int exit = Command(lifecycle).Execute(null!, new SquadUninstallSettings());
+        int exit = await Command(lifecycle).ExecuteAsync(null!, new SquadUninstallSettings(), CancellationToken.None);
 
         Assert.Equal(0, exit);
         Assert.Contains(
@@ -106,23 +109,23 @@ public sealed class SquadUninstallCommandTests : IDisposable
     }
 
     [Fact]
-    public void Execute_YesFlag_SkipsTheQuestionAndRemoves()
+    public async Task Execute_YesFlag_SkipsTheQuestionAndRemoves()
     {
         FakeSquadLifecycleService lifecycle = new(_state);
 
-        int exit = Command(lifecycle, interactive: true, readAnswer: _ => throw new InvalidOperationException("asked"))
-            .Execute(null!, new SquadUninstallSettings { Yes = true });
+        int exit = await Command(lifecycle, interactive: true, readAnswer: _ => throw new InvalidOperationException("asked"))
+            .ExecuteAsync(null!, new SquadUninstallSettings { Yes = true }, CancellationToken.None);
 
         Assert.Equal(0, exit);
         Assert.Single(lifecycle.Uninstalls);
     }
 
     [Fact]
-    public void Execute_LifecycleFails_PrintsEachErrorAndExitsOne()
+    public async Task Execute_LifecycleFails_PrintsEachErrorAndExitsOne()
     {
         FakeSquadLifecycleService lifecycle = new(_state) { Result = new SquadLifecycleResult(false, Errors: ["first [x]", "second"]) };
 
-        int exit = Command(lifecycle).Execute(null!, new SquadUninstallSettings());
+        int exit = await Command(lifecycle).ExecuteAsync(null!, new SquadUninstallSettings(), CancellationToken.None);
 
         Assert.Equal(1, exit);
         Assert.EndsWith(
@@ -132,12 +135,13 @@ public sealed class SquadUninstallCommandTests : IDisposable
     }
 
     [Fact]
-    public void Execute_MigrationReportsLegacyItemsOnADryRun_PrintsThemAndStops()
+    public async Task Execute_MigrationReportsLegacyItemsOnADryRun_PrintsThemAndStops()
     {
         FakeSquadLifecycleService lifecycle = new(_state);
         _migration.Report = new SquadMigrationReport(["moved the receipt"], [], [], []);
 
-        int exit = Command(lifecycle).Execute(null!, new SquadUninstallSettings { DryRun = true });
+        int exit = await Command(lifecycle).ExecuteAsync(null!, new SquadUninstallSettings { DryRun = true },
+            CancellationToken.None);
 
         Assert.Equal(0, exit);
         Assert.Equal("info moved the receipt\n", Output());
@@ -145,7 +149,7 @@ public sealed class SquadUninstallCommandTests : IDisposable
     }
 
     [Fact]
-    public void Execute_DryRunAfterARecovery_PrintsThePendingJournalNotice()
+    public async Task Execute_DryRunAfterARecovery_PrintsThePendingJournalNotice()
     {
         SquadDeploymentPlan plan = UninstallPlan();
         FakeSquadLifecycleService lifecycle = new(_state)
@@ -160,7 +164,8 @@ public sealed class SquadUninstallCommandTests : IDisposable
                 Warnings: [PendingJournalNotice])
         };
 
-        int exit = Command(lifecycle).Execute(null!, new SquadUninstallSettings { DryRun = true });
+        int exit = await Command(lifecycle).ExecuteAsync(null!, new SquadUninstallSettings { DryRun = true },
+            CancellationToken.None);
 
         Assert.Equal(0, exit);
         Assert.Contains("warning: " + PendingJournalNotice + "\n", Output(), StringComparison.Ordinal);

@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using KyberWeave.Cli.Commands.Utilities;
 using KyberWeave.Contracts.Repositories;
 using KyberWeave.Core.Processes;
@@ -37,8 +38,8 @@ public sealed class UtilitiesStatusLineCommandSeamTests : IDisposable
     private readonly IFileSystemPathSemantics _semantics =
         new SquadFileSystemPathSemantics(FakePathResolver.OverEmptyFileSystem());
 
-    private static UtilitiesStatusLineProcessRunner UnreachableProbe => (_, _) =>
-        throw new InvalidOperationException("This case must not probe a harness.");
+    private static Func<ProcessStartInfo, string, CancellationToken, Task<ProcessResult>> UnreachableProbe =>
+        (_, _, _) => throw new InvalidOperationException("This case must not probe a harness.");
 
     public void Dispose()
     {
@@ -137,15 +138,15 @@ public sealed class UtilitiesStatusLineCommandSeamTests : IDisposable
     [Theory]
     [InlineData("status")]
     [InlineData("doctor")]
-    public void AnUnusableHomeIsClientInputWithExitTwo(string verb)
+    public async Task AnUnusableHomeIsClientInputWithExitTwo(string verb)
     {
         FakeProcessEnvironment environment = new(currentDirectory: Work, homeDirectory: "relative-home");
 
         int result = verb == "status"
             ? new UtilitiesStatusLineStatusCommand(environment, _plans, _host, _semantics, _console)
                 .Execute(null!, new UtilitiesStatusLineSettings())
-            : new UtilitiesStatusLineDoctorCommand(environment, _plans, _host, UnreachableProbe, _semantics, _console)
-                .Execute(null!, new UtilitiesStatusLineSettings());
+            : await new UtilitiesStatusLineDoctorCommand(environment, _plans, _host, UnreachableProbe, _semantics, _console)
+                .ExecuteAsync(null!, new UtilitiesStatusLineSettings(), CancellationToken.None);
 
         Assert.Equal(2, result);
         Assert.Contains("kyber-weave utilities statusline: error:", _console.Output, StringComparison.Ordinal);
@@ -355,9 +356,9 @@ public sealed class UtilitiesStatusLineCommandSeamTests : IDisposable
 
     /// <summary>A harness that is not installed is skipped, and no version probe runs for it.</summary>
     [Fact]
-    public void DoctorSkipsHarnessesThatAreNotOnPath()
+    public async Task DoctorSkipsHarnessesThatAreNotOnPath()
     {
-        int result = Doctor(UnreachableProbe).Execute(null!, new UtilitiesStatusLineSettings());
+        int result = await Doctor(UnreachableProbe).ExecuteAsync(null!, new UtilitiesStatusLineSettings(), CancellationToken.None);
 
         Assert.Equal(0, result);
         Assert.Contains("skip", _console.Output, StringComparison.Ordinal);
@@ -367,13 +368,13 @@ public sealed class UtilitiesStatusLineCommandSeamTests : IDisposable
 
     /// <summary>An installed harness reports its version, its prerequisites and the activation snippet.</summary>
     [Fact]
-    public void DoctorReportsAnInstalledHarnessAndItsVersion()
+    public async Task DoctorReportsAnInstalledHarnessAndItsVersion()
     {
         InstallClaude();
         _plans.WithReceipt(StatusLineTarget.Claude, Owned("statusline/statusline.sh"));
 
-        int result = Doctor((_, _) => new ProcessResult(0, "1.2.3\n", string.Empty))
-            .Execute(null!, new UtilitiesStatusLineSettings());
+        int result = await Doctor((_, _, _) => Task.FromResult(new ProcessResult(0, "1.2.3\n", string.Empty)))
+            .ExecuteAsync(null!, new UtilitiesStatusLineSettings(), CancellationToken.None);
 
         Assert.Equal(0, result);
         Assert.Contains("(1.2.3)", _console.Output, StringComparison.Ordinal);
@@ -386,12 +387,12 @@ public sealed class UtilitiesStatusLineCommandSeamTests : IDisposable
     /// would create, so printing it with "not deployed" in the same run would point the operator at an absent path.
     /// </summary>
     [Fact]
-    public void DoctorWithNoDeploymentPrintsNoActivationSnippet()
+    public async Task DoctorWithNoDeploymentPrintsNoActivationSnippet()
     {
         InstallClaude();
 
-        int result = Doctor((_, _) => new ProcessResult(0, "1.2.3\n", string.Empty))
-            .Execute(null!, new UtilitiesStatusLineSettings());
+        int result = await Doctor((_, _, _) => Task.FromResult(new ProcessResult(0, "1.2.3\n", string.Empty)))
+            .ExecuteAsync(null!, new UtilitiesStatusLineSettings(), CancellationToken.None);
 
         Assert.Equal(0, result);
         Assert.Contains("not deployed", _console.Output, StringComparison.Ordinal);
@@ -401,12 +402,12 @@ public sealed class UtilitiesStatusLineCommandSeamTests : IDisposable
 
     /// <summary>A missing prerequisite fails the run with a remedy, while the other checks still report.</summary>
     [Fact]
-    public void DoctorFailsOnAMissingPrerequisite()
+    public async Task DoctorFailsOnAMissingPrerequisite()
     {
         InstallClaude(without: "jq");
 
-        int result = Doctor((_, _) => new ProcessResult(0, "1.2.3\n", string.Empty))
-            .Execute(null!, new UtilitiesStatusLineSettings());
+        int result = await Doctor((_, _, _) => Task.FromResult(new ProcessResult(0, "1.2.3\n", string.Empty)))
+            .ExecuteAsync(null!, new UtilitiesStatusLineSettings(), CancellationToken.None);
 
         Assert.Equal(1, result);
         Assert.Contains("fail", _console.Output, StringComparison.Ordinal);
@@ -415,14 +416,14 @@ public sealed class UtilitiesStatusLineCommandSeamTests : IDisposable
 
     /// <summary>A command variant without its executable bit fails the run.</summary>
     [Fact]
-    public void DoctorFailsOnAnOwnedFileWithoutTheExecutableBit()
+    public async Task DoctorFailsOnAnOwnedFileWithoutTheExecutableBit()
     {
         InstallClaude();
         _plans.WithReceipt(StatusLineTarget.Claude, Owned("statusline/statusline.sh"));
         _host.FilesWithoutExecutableBit.Add("statusline.sh");
 
-        int result = Doctor((_, _) => new ProcessResult(0, "1.2.3\n", string.Empty))
-            .Execute(null!, new UtilitiesStatusLineSettings());
+        int result = await Doctor((_, _, _) => Task.FromResult(new ProcessResult(0, "1.2.3\n", string.Empty)))
+            .ExecuteAsync(null!, new UtilitiesStatusLineSettings(), CancellationToken.None);
 
         Assert.Equal(1, result);
         Assert.Contains("is not executable", _console.Output, StringComparison.Ordinal);
@@ -432,13 +433,13 @@ public sealed class UtilitiesStatusLineCommandSeamTests : IDisposable
     [Theory]
     [InlineData("io")]
     [InlineData("denied")]
-    public void DoctorReportsAnUnreadableReceiptAsAFailure(string failureKind)
+    public async Task DoctorReportsAnUnreadableReceiptAsAFailure(string failureKind)
     {
         InstallClaude();
         _plans.WithReadFailure(StatusLineTarget.Claude, ReadFailure(failureKind));
 
-        int result = Doctor((_, _) => new ProcessResult(0, "1.2.3\n", string.Empty))
-            .Execute(null!, new UtilitiesStatusLineSettings());
+        int result = await Doctor((_, _, _) => Task.FromResult(new ProcessResult(0, "1.2.3\n", string.Empty)))
+            .ExecuteAsync(null!, new UtilitiesStatusLineSettings(), CancellationToken.None);
 
         Assert.Equal(1, result);
         Assert.Contains("fail", _console.Output, StringComparison.Ordinal);
@@ -495,15 +496,15 @@ public sealed class UtilitiesStatusLineCommandSeamTests : IDisposable
     /// failure for that harness, not thrown out of doctor.
     /// </summary>
     [Fact]
-    public void DoctorReportsAnActivationPathThePolicyRefuses()
+    public async Task DoctorReportsAnActivationPathThePolicyRefuses()
     {
         InstallClaude();
         _plans.WithReceipt(StatusLineTarget.Claude, Owned("statusline/statusline.sh"));
 
-        int result = DoctorOver(
-                (_, _) => new ProcessResult(0, "1.2.3\n", string.Empty),
+        int result = await DoctorOver(
+                (_, _, _) => Task.FromResult(new ProcessResult(0, "1.2.3\n", string.Empty)),
                 new RefusingPathSemantics())
-            .Execute(null!, new UtilitiesStatusLineSettings());
+            .ExecuteAsync(null!, new UtilitiesStatusLineSettings(), CancellationToken.None);
 
         Assert.Equal(1, result);
         Assert.Contains("fail", _console.Output, StringComparison.Ordinal);
@@ -519,11 +520,12 @@ public sealed class UtilitiesStatusLineCommandSeamTests : IDisposable
     private UtilitiesStatusLineDeployCommand Deploy() =>
         new(new FakeProcessEnvironment(currentDirectory: Work, homeDirectory: Home), _host, _plans, _semantics, _console);
 
-    private UtilitiesStatusLineDoctorCommand Doctor(UtilitiesStatusLineProcessRunner probe) =>
+    private UtilitiesStatusLineDoctorCommand Doctor(
+        Func<ProcessStartInfo, string, CancellationToken, Task<ProcessResult>> probe) =>
         new(new FakeProcessEnvironment(currentDirectory: Work, homeDirectory: Home), _plans, _host, probe, _semantics, _console);
 
     private UtilitiesStatusLineDoctorCommand DoctorOver(
-        UtilitiesStatusLineProcessRunner probe,
+        Func<ProcessStartInfo, string, CancellationToken, Task<ProcessResult>> probe,
         IFileSystemPathSemantics semantics) =>
         new(new FakeProcessEnvironment(currentDirectory: Work, homeDirectory: Home), _plans, _host, probe, semantics, _console);
 

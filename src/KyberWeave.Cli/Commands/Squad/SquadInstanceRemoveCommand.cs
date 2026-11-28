@@ -12,7 +12,7 @@ namespace KyberWeave.Cli.Commands.Squad;
 /// <summary>
 ///     Removes a harness instance deployment and its recorded state without modifying main harness files.
 /// </summary>
-internal sealed partial class SquadInstanceRemoveCommand : Command<SquadInstanceRemoveSettings>
+internal sealed partial class SquadInstanceRemoveCommand : AsyncCommand<SquadInstanceRemoveSettings>
 {
     [GeneratedRegex("^[a-z0-9][a-z0-9-]{0,63}$")]
     private static partial Regex PresetNameRegex();
@@ -58,7 +58,7 @@ internal sealed partial class SquadInstanceRemoveCommand : Command<SquadInstance
     }
 
     /// <inheritdoc />
-    public override int Execute(CommandContext context, SquadInstanceRemoveSettings settings,
+    public override async Task<int> ExecuteAsync(CommandContext context, SquadInstanceRemoveSettings settings,
         CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(settings);
@@ -131,17 +131,11 @@ internal sealed partial class SquadInstanceRemoveCommand : Command<SquadInstance
             }
         }
 
-        _instances.RemoveAsync(target, settings.Preset, cancellationToken).GetAwaiter().GetResult();
+        await _instances.RemoveAsync(target, settings.Preset, cancellationToken).ConfigureAwait(false);
 
         _output.WriteLine($"[green]Removed instance '{targetToken}/{settings.Preset}'.[/]");
         return 0;
     }
 
     private string FullPath(string path) => _paths.GetFullPath(path, _environment.CurrentDirectory);
-
-    /// <summary>Executes the command with default cancellation.</summary>
-    public int Execute(CommandContext context, SquadInstanceRemoveSettings settings)
-    {
-        return Execute(context, settings, CancellationToken.None);
-    }
 }

@@ -61,14 +61,15 @@ public sealed class SquadLegacySingleRootCliTests
     /// root and the global receipt, and must leave the launch directory as it was.
     /// </summary>
     [Fact]
-    public void UninstallFromAnotherDirectoryRemovesTheLegacyFileBeneathItsBindingRoot()
+    public async Task UninstallFromAnotherDirectoryRemovesTheLegacyFileBeneathItsBindingRoot()
     {
         Fixture f = Arrange();
         string elsewhere = f.MakeDirectory("elsewhere");
         IReadOnlyDictionary<string, SquadTreeEntry> elsewhereBefore = f.Capture(elsewhere);
 
-        CommandExecution execution = Capture(() =>
-            f.Uninstall().Execute(null!, new SquadUninstallSettings { PathOption = elsewhere, Global = true, Yes = true }));
+        CommandExecution execution = await CaptureAsync(() =>
+            f.Uninstall().ExecuteAsync(null!, new SquadUninstallSettings { PathOption = elsewhere, Global = true, Yes = true },
+                CancellationToken.None));
 
         AssertExit(execution, 0);
         Assert.False(f.State.Files.FileExists(OwnedPath(f.Binding)), "The legacy file beneath its binding root must be removed.");
@@ -81,20 +82,21 @@ public sealed class SquadLegacySingleRootCliTests
     /// bound file and the launch directory exactly as they were, so a refused run cannot become a partial one.
     /// </summary>
     [Fact]
-    public void UpdateFromAnotherDirectoryRefusesTheLegacyReceiptAndWritesNothing()
+    public async Task UpdateFromAnotherDirectoryRefusesTheLegacyReceiptAndWritesNothing()
     {
         Fixture f = Arrange();
         string elsewhere = f.MakeDirectory("elsewhere");
         IReadOnlyDictionary<string, SquadTreeEntry> elsewhereBefore = f.Capture(elsewhere);
 
-        CommandExecution execution = Capture(() =>
-            f.Update().Execute(null!, new SquadUpdateSettings
+        CommandExecution execution = await CaptureAsync(() =>
+            f.Update().ExecuteAsync(null!, new SquadUpdateSettings
             {
                 Path = elsewhere,
                 Global = true,
                 Version = UpdatedVersion,
                 Yes = true
-            }));
+            },
+            CancellationToken.None));
 
         AssertExit(execution, 1);
         Assert.Contains("legacy single-root layout", execution.Output, StringComparison.Ordinal);
@@ -168,6 +170,12 @@ public sealed class SquadLegacySingleRootCliTests
         Assert.True(
             execution.ExitCode == expected,
             $"Expected exit {expected} but got {execution.ExitCode}:{Environment.NewLine}{execution.Output}");
+
+    private static async Task<CommandExecution> CaptureAsync(Func<Task<int>> execute)
+    {
+        CapturedConsoleExecution<int> execution = await ProcessConsoleCapture.RunAsync(execute);
+        return new CommandExecution(execution.Result, execution.Output);
+    }
 
     private static CommandExecution Capture(Func<int> execute)
     {

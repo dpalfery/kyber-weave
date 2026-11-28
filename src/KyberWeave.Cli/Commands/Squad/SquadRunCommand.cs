@@ -18,7 +18,7 @@ namespace KyberWeave.Cli.Commands.Squad;
 ///     and linked, redirects configuration to the isolated instance root, and passes through
 ///     execution control and exit codes to the underlying harness process.
 /// </remarks>
-internal sealed class SquadRunCommand : Command<SquadRunSettings>
+internal sealed class SquadRunCommand : AsyncCommand<SquadRunSettings>
 {
     private readonly ISquadInstanceService _instances;
     private readonly ISquadModelPresetSelectionStore _selectionStore;
@@ -69,8 +69,8 @@ internal sealed class SquadRunCommand : Command<SquadRunSettings>
     }
 
     /// <inheritdoc />
-    public override int Execute(CommandContext context, SquadRunSettings settings,
-        CancellationToken cancellationToken = default)
+    public override async Task<int> ExecuteAsync(CommandContext context, SquadRunSettings settings,
+        CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(settings);
 
@@ -142,8 +142,8 @@ internal sealed class SquadRunCommand : Command<SquadRunSettings>
                 return 1;
             }
 
-            ensureResult = _instances.EnsureAsync(target, presetName, cancellationToken).GetAwaiter()
-                .GetResult();
+            ensureResult = await _instances.EnsureAsync(target, presetName, cancellationToken)
+                .ConfigureAwait(false);
         }
         catch (SquadLinkException ex)
         {

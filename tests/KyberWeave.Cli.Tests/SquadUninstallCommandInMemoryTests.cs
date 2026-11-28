@@ -38,11 +38,11 @@ public sealed class SquadUninstallCommandInMemoryTests : IDisposable
     }
 
     [Fact]
-    public void Uninstall_MissingReceipt_ExitsZeroAsNoOp()
+    public async Task Uninstall_MissingReceipt_ExitsZeroAsNoOp()
     {
         string targetDir = CreateRoot("no-receipt-uninstall");
 
-        int exitCode = Execute(new SquadUninstallSettings
+        int exitCode = await Execute(new SquadUninstallSettings
         {
             PathOption = targetDir,
             Global = false,
@@ -53,7 +53,7 @@ public sealed class SquadUninstallCommandInMemoryTests : IDisposable
     }
 
     [Fact]
-    public void Uninstall_ExistingReceipt_ExecutesTransactionAndRemovesFilesAndState()
+    public async Task Uninstall_ExistingReceipt_ExecutesTransactionAndRemovesFilesAndState()
     {
         string targetDir = CreateRoot("uninstall-target");
         SeedProjectDeployment(targetDir,
@@ -70,7 +70,7 @@ public sealed class SquadUninstallCommandInMemoryTests : IDisposable
         Assert.True(_state.Files.FileExists(receiptPath));
         Assert.True(_state.Files.FileExists(lockPath));
 
-        int exitCode = Execute(new SquadUninstallSettings
+        int exitCode = await Execute(new SquadUninstallSettings
         {
             PathOption = targetDir,
             Global = false,
@@ -85,7 +85,7 @@ public sealed class SquadUninstallCommandInMemoryTests : IDisposable
     }
 
     [Fact]
-    public void Uninstall_DryRun_PreservesFilesAndState()
+    public async Task Uninstall_DryRun_PreservesFilesAndState()
     {
         string targetDir = CreateRoot("uninstall-dryrun-target");
         SeedProjectDeployment(targetDir,
@@ -95,7 +95,7 @@ public sealed class SquadUninstallCommandInMemoryTests : IDisposable
         string deployedFile1 = Path.Combine(targetDir, "agents", "architect.md");
         string receiptPath = _state.Store.ResolveReceiptPath(targetDir, SquadDeploymentScope.Project);
 
-        int exitCode = Execute(new SquadUninstallSettings
+        int exitCode = await Execute(new SquadUninstallSettings
         {
             PathOption = targetDir,
             Global = false,
@@ -108,7 +108,7 @@ public sealed class SquadUninstallCommandInMemoryTests : IDisposable
     }
 
     [Fact]
-    public void Uninstall_WhenCorruptReceipt_ExitsOne()
+    public async Task Uninstall_WhenCorruptReceipt_ExitsOne()
     {
         string targetDir = CreateRoot("corrupt-receipt-uninstall");
 
@@ -116,7 +116,7 @@ public sealed class SquadUninstallCommandInMemoryTests : IDisposable
             _state.Store.ResolveReceiptPath(targetDir, SquadDeploymentScope.Project),
             "invalid json {[[");
 
-        int exitCode = Execute(new SquadUninstallSettings
+        int exitCode = await Execute(new SquadUninstallSettings
         {
             PathOption = targetDir,
             Global = false,
@@ -128,12 +128,12 @@ public sealed class SquadUninstallCommandInMemoryTests : IDisposable
     }
 
     [Fact]
-    public void Uninstall_NamedHarness_RemovesOnlyThatHarnessUntilTheLastOneGoes()
+    public async Task Uninstall_NamedHarness_RemovesOnlyThatHarnessUntilTheLastOneGoes()
     {
         (string targetDir, string codexFile, string cursorFile, string receiptPath) =
             SeedCodexAndCursorProject("uninstall-one-harness");
 
-        int firstExitCode = Execute(new SquadUninstallSettings { Harness = "cursor", Project = true, PathOption = targetDir });
+        int firstExitCode = await Execute(new SquadUninstallSettings { Harness = "cursor", Project = true, PathOption = targetDir });
 
         Assert.Equal(0, firstExitCode);
         Assert.False(_state.Files.FileExists(cursorFile));
@@ -142,7 +142,7 @@ public sealed class SquadUninstallCommandInMemoryTests : IDisposable
         SquadReceipt? remaining = _state.Store.ReadReceipt(targetDir, SquadDeploymentScope.Project);
         Assert.Equal(["codex"], remaining!.Files.Select(file => file.Target).Distinct());
 
-        int lastExitCode = Execute(new SquadUninstallSettings { Harness = "codex", Project = true, PathOption = targetDir });
+        int lastExitCode = await Execute(new SquadUninstallSettings { Harness = "codex", Project = true, PathOption = targetDir });
 
         Assert.Equal(0, lastExitCode);
         Assert.False(_state.Files.FileExists(codexFile));
@@ -150,12 +150,12 @@ public sealed class SquadUninstallCommandInMemoryTests : IDisposable
     }
 
     [Fact]
-    public void Uninstall_NamedHarnessDryRun_PreservesFilesAndReceipt()
+    public async Task Uninstall_NamedHarnessDryRun_PreservesFilesAndReceipt()
     {
         (string targetDir, string codexFile, string cursorFile, string receiptPath) =
             SeedCodexAndCursorProject("uninstall-one-harness-dry-run");
 
-        int exitCode = Execute(new SquadUninstallSettings { Harness = "cursor", Project = true, PathOption = targetDir, DryRun = true });
+        int exitCode = await Execute(new SquadUninstallSettings { Harness = "cursor", Project = true, PathOption = targetDir, DryRun = true });
 
         Assert.Equal(0, exitCode);
         Assert.True(_state.Files.FileExists(codexFile));
@@ -164,7 +164,7 @@ public sealed class SquadUninstallCommandInMemoryTests : IDisposable
     }
 
     [Fact]
-    public void Uninstall_InvalidHarnessInput_ExitsTwoWithoutChanges()
+    public async Task Uninstall_InvalidHarnessInput_ExitsTwoWithoutChanges()
     {
         (string targetDir, string codexFile, string cursorFile, string receiptPath) =
             SeedCodexAndCursorProject("uninstall-invalid-harness-input");
@@ -181,7 +181,7 @@ public sealed class SquadUninstallCommandInMemoryTests : IDisposable
 
         foreach ((SquadUninstallSettings settings, string expectedMessage) in invalid)
         {
-            int exitCode = Execute(settings);
+            int exitCode = await Execute(settings);
             Assert.Equal(2, exitCode);
             Assert.Contains(expectedMessage, Output(), StringComparison.OrdinalIgnoreCase);
         }
@@ -192,7 +192,7 @@ public sealed class SquadUninstallCommandInMemoryTests : IDisposable
     }
 
     [Fact]
-    public void Uninstall_NamedHarnessWithoutProject_UsesTheGlobalScopeAndKeepsTheOtherHarness()
+    public async Task Uninstall_NamedHarnessWithoutProject_UsesTheGlobalScopeAndKeepsTheOtherHarness()
     {
         string home = _state.UserPaths.HomeDirectory;
         _state.Files.CreateDirectory(home);
@@ -207,7 +207,7 @@ public sealed class SquadUninstallCommandInMemoryTests : IDisposable
         Assert.True(_state.Files.FileExists(codexFile));
         Assert.True(_state.Files.FileExists(cursorFile));
 
-        int firstExitCode = Execute(new SquadUninstallSettings { Harness = "cursor", Yes = true });
+        int firstExitCode = await Execute(new SquadUninstallSettings { Harness = "cursor", Yes = true });
 
         Assert.Equal(0, firstExitCode);
         Assert.False(_state.Files.FileExists(cursorFile));
@@ -215,7 +215,7 @@ public sealed class SquadUninstallCommandInMemoryTests : IDisposable
         SquadReceipt remaining = Assert.IsType<SquadReceipt>(_state.Store.ReadReceipt(home, SquadDeploymentScope.Global));
         Assert.Equal(["codex"], remaining.Files.Select(file => file.Target).Distinct());
 
-        int lastExitCode = Execute(new SquadUninstallSettings { Harness = "codex", Yes = true });
+        int lastExitCode = await Execute(new SquadUninstallSettings { Harness = "codex", Yes = true });
 
         Assert.Equal(0, lastExitCode);
         Assert.False(_state.Files.FileExists(codexFile));
@@ -225,12 +225,12 @@ public sealed class SquadUninstallCommandInMemoryTests : IDisposable
     [Theory]
     [InlineData(".")]
     [InlineData("./deploy")]
-    public void Uninstall_DirectoryGivenAsTheHarness_ExitsTwoNamingProjectAndPath(string directory)
+    public async Task Uninstall_DirectoryGivenAsTheHarness_ExitsTwoNamingProjectAndPath(string directory)
     {
         (string targetDir, string codexFile, string cursorFile, string receiptPath) =
             SeedCodexAndCursorProject("uninstall-directory-as-harness");
 
-        int exitCode = Execute(new SquadUninstallSettings { Harness = directory, PathOption = targetDir });
+        int exitCode = await Execute(new SquadUninstallSettings { Harness = directory, PathOption = targetDir });
 
         Assert.Equal(2, exitCode);
         Assert.Contains("--project", Output(), StringComparison.Ordinal);
@@ -243,7 +243,7 @@ public sealed class SquadUninstallCommandInMemoryTests : IDisposable
     [Theory]
     [InlineData("")]
     [InlineData("   ")]
-    public void Uninstall_BlankPathOption_ExitsTwoWithoutChanges(string blank)
+    public async Task Uninstall_BlankPathOption_ExitsTwoWithoutChanges(string blank)
     {
         (string targetDir, string codexFile, string cursorFile, string receiptPath) =
             SeedCodexAndCursorProject("uninstall-blank-path");
@@ -254,7 +254,7 @@ public sealed class SquadUninstallCommandInMemoryTests : IDisposable
                      new SquadUninstallSettings { Harness = "cursor", Project = true, PathOption = blank }
                  })
         {
-            int exitCode = Execute(settings);
+            int exitCode = await Execute(settings);
 
             Assert.Equal(2, exitCode);
             Assert.Contains("must not be blank", Output(), StringComparison.Ordinal);
@@ -266,22 +266,22 @@ public sealed class SquadUninstallCommandInMemoryTests : IDisposable
     }
 
     [Fact]
-    public void Uninstall_GlobalAndProjectWithoutAHarness_ExitsTwo()
+    public async Task Uninstall_GlobalAndProjectWithoutAHarness_ExitsTwo()
     {
-        int exitCode = Execute(new SquadUninstallSettings { Global = true, Project = true });
+        int exitCode = await Execute(new SquadUninstallSettings { Global = true, Project = true });
 
         Assert.Equal(2, exitCode);
         Assert.Contains("mutually exclusive", Output(), StringComparison.Ordinal);
     }
 
     [Fact]
-    public void Uninstall_NamedHarnessWithCorruptReceipt_ReportsTheReadErrorAndChangesNothing()
+    public async Task Uninstall_NamedHarnessWithCorruptReceipt_ReportsTheReadErrorAndChangesNothing()
     {
         (string targetDir, string codexFile, string cursorFile, string receiptPath) =
             SeedCodexAndCursorProject("uninstall-corrupt-receipt");
         _state.Files.WriteAllText(receiptPath, "{ not json");
 
-        int exitCode = Execute(new SquadUninstallSettings { Harness = "cursor", Project = true, PathOption = targetDir });
+        int exitCode = await Execute(new SquadUninstallSettings { Harness = "cursor", Project = true, PathOption = targetDir });
 
         string output = Output();
         Assert.Equal(1, exitCode);
@@ -293,13 +293,13 @@ public sealed class SquadUninstallCommandInMemoryTests : IDisposable
     }
 
     [Fact]
-    public void UninstallReceiptLayout_LegacyGlobalReceipt_ConfirmationNamesRecordedRoot()
+    public async Task UninstallReceiptLayout_LegacyGlobalReceipt_ConfirmationNamesRecordedRoot()
     {
         string targetRoot = CreateRoot("legacy-global-uninstall");
         SeedLegacyGlobalDeployment(targetRoot,
             (".codex/agents/conductor.toml", "conductor content"));
 
-        int exitCode = Execute(new SquadUninstallSettings
+        int exitCode = await Execute(new SquadUninstallSettings
         {
             PathOption = targetRoot,
             Global = true,
@@ -309,13 +309,13 @@ public sealed class SquadUninstallCommandInMemoryTests : IDisposable
         Assert.Contains($"codex writes beneath {targetRoot}.", Output(), StringComparison.Ordinal);
     }
 
-    private int Execute(SquadUninstallSettings settings) =>
-        SquadTestCommands.InMemoryUninstall(
+    private async Task<int> Execute(SquadUninstallSettings settings) =>
+        await SquadTestCommands.InMemoryUninstall(
             _state,
             _release,
             _renderer,
             new FakeSquadGlobalRootResolver(_state.UserPaths.HomeDirectory),
-            _console).Execute(null!, settings);
+            _console).ExecuteAsync(null!, settings, CancellationToken.None);
 
     private string Output() => _ansi.Output.Replace("\r\n", "\n", StringComparison.Ordinal);
 

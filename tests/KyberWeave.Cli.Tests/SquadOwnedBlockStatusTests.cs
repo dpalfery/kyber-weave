@@ -129,7 +129,7 @@ public sealed class SquadOwnedBlockStatusTests
     }
 
     [Fact]
-    public void Doctor_ReportsHandEditedOwnedEntryAsDriftByFileAndContainer()
+    public async Task Doctor_ReportsHandEditedOwnedEntryAsDriftByFileAndContainer()
     {
         string root = ProjectRoot();
         SquadStateStore store = _state.Store;
@@ -150,13 +150,14 @@ public sealed class SquadOwnedBlockStatusTests
             .WithProbeOutput("kyber-weave-mcp", "kyber-weave-mcp 1.2.3\n");
         SquadDoctorCommand command = SquadTestCommands.InMemoryDoctor(_state, executor, workingDirectory: root);
 
-        CapturedConsoleExecution<int> execution = ProcessConsoleCapture.Run(() => command.Execute(
+        CapturedConsoleExecution<int> execution = await ProcessConsoleCapture.RunAsync(() => command.ExecuteAsync(
             null!,
             new SquadDoctorSettings
             {
                 Path = root,
                 Global = false,
-            }));
+            },
+            CancellationToken.None));
 
         Assert.Equal(1, execution.Result);
         Assert.Contains("drift", execution.Output, StringComparison.OrdinalIgnoreCase);
@@ -165,7 +166,7 @@ public sealed class SquadOwnedBlockStatusTests
     }
 
     [Fact]
-    public void Doctor_ReportsMissingBlockFileAsDriftByFileAndContainer()
+    public async Task Doctor_ReportsMissingBlockFileAsDriftByFileAndContainer()
     {
         string root = ProjectRoot();
         SquadStateStore store = _state.Store;
@@ -186,13 +187,14 @@ public sealed class SquadOwnedBlockStatusTests
             .WithProbeOutput("kyber-weave-mcp", "kyber-weave-mcp 1.2.3\n");
         SquadDoctorCommand command = SquadTestCommands.InMemoryDoctor(_state, executor, workingDirectory: root);
 
-        CapturedConsoleExecution<int> execution = ProcessConsoleCapture.Run(() => command.Execute(
+        CapturedConsoleExecution<int> execution = await ProcessConsoleCapture.RunAsync(() => command.ExecuteAsync(
             null!,
             new SquadDoctorSettings
             {
                 Path = root,
                 Global = false,
-            }));
+            },
+            CancellationToken.None));
 
         Assert.Equal(1, execution.Result);
         Assert.Contains("drift", execution.Output, StringComparison.OrdinalIgnoreCase);
@@ -242,7 +244,7 @@ public sealed class SquadOwnedBlockStatusTests
     /// both were inspected, not that the first one hid the second.
     /// </summary>
     [Fact]
-    public void Doctor_GlobalFindsEveryBlockHealthy()
+    public async Task Doctor_GlobalFindsEveryBlockHealthy()
     {
         GlobalBlockDeployment installed = InstallGlobalBlocks();
 
@@ -254,13 +256,14 @@ public sealed class SquadOwnedBlockStatusTests
             installed.Home,
             installed.GlobalRoots);
 
-        CapturedConsoleExecution<int> execution = ProcessConsoleCapture.Run(() => command.Execute(
+        CapturedConsoleExecution<int> execution = await ProcessConsoleCapture.RunAsync(() => command.ExecuteAsync(
             null!,
             new SquadDoctorSettings
             {
                 Path = installed.Home,
                 Global = true,
-            }));
+            },
+            CancellationToken.None));
 
         Assert.True(
             execution.Result == 0,

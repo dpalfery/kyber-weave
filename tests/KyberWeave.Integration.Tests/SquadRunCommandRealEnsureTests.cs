@@ -37,10 +37,10 @@ public sealed class SquadRunCommandRealEnsureTests : IDisposable
     }
 
     [Fact]
-    public void SuccessfulRunLeavesProjectSourceTreeCompletelyUnmodified()
+    public async Task SuccessfulRunLeavesProjectSourceTreeCompletelyUnmodified()
     {
         string sourceFile = Path.Combine(_projectDir, "Program.cs");
-        File.WriteAllText(sourceFile, "// Original content", Encoding.UTF8);
+        await File.WriteAllTextAsync(sourceFile, "// Original content", Encoding.UTF8, CancellationToken.None);
         string[] entriesBefore = Directory.GetFileSystemEntries(_projectDir, "*", SearchOption.AllDirectories);
 
         WritePreset("fast");
@@ -55,12 +55,13 @@ public sealed class SquadRunCommandRealEnsureTests : IDisposable
             Args = ["run"]
         };
 
-        CapturedConsoleExecution<int> execution = ProcessConsoleCapture.Run(() => command.Execute(null!, settings));
+        CapturedConsoleExecution<int> execution = await ProcessConsoleCapture.RunAsync(
+            () => command.ExecuteAsync(null!, settings, CancellationToken.None));
 
         Assert.Equal(0, execution.Result);
         string[] entriesAfter = Directory.GetFileSystemEntries(_projectDir, "*", SearchOption.AllDirectories);
         Assert.Equal(entriesBefore, entriesAfter);
-        Assert.Equal("// Original content", File.ReadAllText(sourceFile, Encoding.UTF8));
+        Assert.Equal("// Original content", await File.ReadAllTextAsync(sourceFile, Encoding.UTF8, CancellationToken.None));
     }
 
     private void WritePreset(string name, string? yaml = null)

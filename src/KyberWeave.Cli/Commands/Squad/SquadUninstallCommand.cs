@@ -10,7 +10,7 @@ namespace KyberWeave.Cli.Commands.Squad;
 /// <summary>
 /// Uninstalls Kyber-Squad from a project or global deployment directory using its ownership receipt.
 /// </summary>
-internal sealed class SquadUninstallCommand : Command<SquadUninstallSettings>
+internal sealed class SquadUninstallCommand : AsyncCommand<SquadUninstallSettings>
 {
     private readonly ISquadLifecycleService _lifecycle;
     private readonly ISquadStateStore _stateStore;
@@ -64,7 +64,7 @@ internal sealed class SquadUninstallCommand : Command<SquadUninstallSettings>
     }
 
     /// <inheritdoc />
-    public override int Execute(CommandContext context, SquadUninstallSettings settings,
+    public override async Task<int> ExecuteAsync(CommandContext context, SquadUninstallSettings settings,
         CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(settings);
@@ -149,8 +149,8 @@ internal sealed class SquadUninstallCommand : Command<SquadUninstallSettings>
 
         try
         {
-            SquadLifecycleResult result = lifecycleService.UninstallAsync(uninstallRequest, cancellationToken)
-                .GetAwaiter().GetResult();
+            SquadLifecycleResult result = await lifecycleService.UninstallAsync(uninstallRequest, cancellationToken)
+                .ConfigureAwait(false);
             return WriteUninstallResult(result, settings, targetRoot);
         }
         catch (Exception ex) when (ex is not OutOfMemoryException && ex is not OperationCanceledException)
@@ -159,11 +159,6 @@ internal sealed class SquadUninstallCommand : Command<SquadUninstallSettings>
             _output.WriteFailure(ex);
             return 1;
         }
-    }
-
-    public int Execute(CommandContext context, SquadUninstallSettings settings)
-    {
-        return Execute(context, settings, CancellationToken.None);
     }
 
     private bool TryResolveTarget(SquadUninstallSettings settings, out SquadTarget? target)

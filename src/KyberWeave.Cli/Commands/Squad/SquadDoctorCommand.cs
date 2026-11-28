@@ -23,7 +23,7 @@ namespace KyberWeave.Cli.Commands.Squad;
 /// <summary>
 ///     Diagnoses prerequisites, toolchain availability, and deployment health for Kyber-Squad.
 /// </summary>
-internal sealed class SquadDoctorCommand : Command<SquadDoctorSettings>
+internal sealed class SquadDoctorCommand : AsyncCommand<SquadDoctorSettings>
 {
     private const string ArbiterServer = McpServerNames.Arbiter;
 
@@ -145,7 +145,7 @@ internal sealed class SquadDoctorCommand : Command<SquadDoctorSettings>
     }
 
     /// <inheritdoc />
-    public override int Execute(CommandContext context, SquadDoctorSettings settings,
+    public override async Task<int> ExecuteAsync(CommandContext context, SquadDoctorSettings settings,
         CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(settings);
@@ -274,7 +274,8 @@ internal sealed class SquadDoctorCommand : Command<SquadDoctorSettings>
         }
 
         if (settings.Global &&
-            _diagnostics.ReportGlobalCollisions(workingDirectory, canonicalSourcePath, canonicalSourceValid))
+            await _diagnostics.ReportGlobalCollisionsAsync(workingDirectory, canonicalSourcePath, canonicalSourceValid, cancellationToken)
+                .ConfigureAwait(false))
             hasIssues = true;
 
         _console.Ansi.WriteLine();
@@ -286,11 +287,6 @@ internal sealed class SquadDoctorCommand : Command<SquadDoctorSettings>
 
         _console.Ansi.MarkupLine("[green]All checked prerequisites and components are healthy.[/]");
         return 0;
-    }
-
-    public int Execute(CommandContext context, SquadDoctorSettings settings)
-    {
-        return Execute(context, settings, CancellationToken.None);
     }
 
     /// <summary>Reports which declared targets have a renderer that can install today.</summary>
@@ -630,10 +626,11 @@ internal sealed class SquadDoctorDiagnostics
     ///     <see langword="true" /> when the scan itself failed and doctor should exit non-zero.
     ///     Warnings and skipped scans return <see langword="false" />.
     /// </returns>
-    public bool ReportGlobalCollisions(
+    public async Task<bool> ReportGlobalCollisionsAsync(
         string workingDirectory,
         string? canonicalSourcePath,
-        bool canonicalSourceValid)
+        bool canonicalSourceValid,
+        CancellationToken cancellationToken)
     {
         if (canonicalSourcePath is null)
         {
@@ -703,7 +700,13 @@ internal sealed class SquadDoctorDiagnostics
                     continue;
                 }
 
-                SquadRenderResult render = RenderAndInject(target, canonicalSourcePath, sharedSource, docsServerCommand, loadedPresets);
+                SquadRenderResult render = await RenderAndInjectAsync(
+                    target,
+                    canonicalSourcePath,
+                    sharedSource,
+                    docsServerCommand,
+                    loadedPresets,
+                    cancellationToken).ConfigureAwait(false);
 
                 collisions.AddRange(_planner.CollectUnmanagedCollisions(
                     workingDirectory,
@@ -765,14 +768,15 @@ internal sealed class SquadDoctorDiagnostics
     /// mirroring install and update so the collision scan compares against what a deployment would write. A failed
     /// render throws <see cref="SquadRenderValidationException"/> rather than reading as an empty corpus.
     /// </summary>
-    private SquadRenderResult RenderAndInject(
+    private async Task<SquadRenderResult> RenderAndInjectAsync(
         SquadTarget target,
         string canonicalSourcePath,
         SquadSource sharedSource,
         string? docsServerCommand,
-        Dictionary<SquadTarget, SquadModelPreset>? loadedPresets)
+        Dictionary<SquadTarget, SquadModelPreset>? loadedPresets,
+        CancellationToken cancellationToken)
     {
-        SquadRenderResult render = _renderer.RenderAsync(
+        SquadRenderResult render = await _renderer.RenderAsync(
                 new SquadRenderRequest(
                     canonicalSourcePath,
                     [target],
@@ -781,9 +785,8 @@ internal sealed class SquadDoctorDiagnostics
                     ModelPresets: loadedPresets,
                     PreloadedSource: sharedSource,
                     EnvironmentReader: _environment.GetVariable,
-                    DocsServerCommand: docsServerCommand))
-            .GetAwaiter()
-            .GetResult();
+                    DocsServerCommand: docsServerCommand),
+                cancellationToken).ConfigureAwait(false);
 
         if (!render.Success || render.Errors.Count > 0)
         {

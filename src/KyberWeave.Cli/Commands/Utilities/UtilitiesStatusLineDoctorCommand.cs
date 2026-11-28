@@ -1,5 +1,7 @@
+using System.Diagnostics;
 using KyberWeave.Contracts.Repositories;
 using KyberWeave.Contracts.Services;
+using KyberWeave.Core.Processes;
 using KyberWeave.Core.Squad.Deployment;
 using KyberWeave.Domain.StatusLine;
 using Spectre.Console;
@@ -19,12 +21,12 @@ namespace KyberWeave.Cli.Commands.Utilities;
 ///     recorder is present. A harness that is not installed is skipped rather than failed, because
 ///     requiring one harness of someone who runs another would make doctor useless to them.
 /// </remarks>
-public sealed class UtilitiesStatusLineDoctorCommand : Command<UtilitiesStatusLineSettings>
+public sealed class UtilitiesStatusLineDoctorCommand : AsyncCommand<UtilitiesStatusLineSettings>
 {
     private readonly IProcessEnvironment _environment;
     private readonly IStatusLineDeploymentService _plans;
     private readonly IStatusLineHostService _host;
-    private readonly UtilitiesStatusLineProcessRunner _processRunner;
+    private readonly Func<ProcessStartInfo, string, CancellationToken, Task<ProcessResult>> _processRunner;
     private readonly IFileSystemPathSemantics _semantics;
     private readonly IAnsiConsole _console;
 
@@ -39,7 +41,7 @@ public sealed class UtilitiesStatusLineDoctorCommand : Command<UtilitiesStatusLi
         IProcessEnvironment environment,
         IStatusLineDeploymentService plans,
         IStatusLineHostService host,
-        UtilitiesStatusLineProcessRunner processRunner,
+        Func<ProcessStartInfo, string, CancellationToken, Task<ProcessResult>> processRunner,
         IFileSystemPathSemantics semantics,
         IAnsiConsole console)
     {
@@ -59,7 +61,7 @@ public sealed class UtilitiesStatusLineDoctorCommand : Command<UtilitiesStatusLi
     }
 
     /// <inheritdoc />
-    public override int Execute(
+    public override async Task<int> ExecuteAsync(
         CommandContext context,
         UtilitiesStatusLineSettings settings,
         CancellationToken cancellationToken)
@@ -86,7 +88,7 @@ public sealed class UtilitiesStatusLineDoctorCommand : Command<UtilitiesStatusLi
 
         bool hasIssues = false;
         foreach (StatusLineTarget target in UtilitiesStatusLineTargetCatalog.All)
-            if (!Diagnose(target, roots))
+            if (!await DiagnoseAsync(target, roots, cancellationToken).ConfigureAwait(false))
                 hasIssues = true;
 
         _console.WriteLine();
@@ -101,15 +103,11 @@ public sealed class UtilitiesStatusLineDoctorCommand : Command<UtilitiesStatusLi
         return 0;
     }
 
-    public int Execute(CommandContext context, UtilitiesStatusLineSettings settings)
-    {
-        return Execute(context, settings, CancellationToken.None);
-    }
-
     /// <summary>Diagnoses one harness. Returns <see langword="false" /> when it has an actionable issue.</summary>
-    private bool Diagnose(
+    private async Task<bool> DiagnoseAsync(
         StatusLineTarget target,
-        StatusLineTargetRoots roots)
+        StatusLineTargetRoots roots,
+        CancellationToken cancellationToken)
     {
         string token = UtilitiesStatusLineTargetCatalog.GetToken(target);
         string harnessExecutable = UtilitiesStatusLinePrerequisites.HarnessExecutable(target);
@@ -122,7 +120,9 @@ public sealed class UtilitiesStatusLineDoctorCommand : Command<UtilitiesStatusLi
         }
 
         bool healthy = true;
-        string? version = UtilitiesStatusLineHarnessProbe.TryVersion(_processRunner, harnessExecutable);
+        string? version = await UtilitiesStatusLineHarnessProbe
+            .TryVersionAsync(_processRunner, harnessExecutable, cancellationToken)
+            .ConfigureAwait(false);
         _console.MarkupLine(
             $"  [green]ok[/] {Markup.Escape(token)}: harness '{Markup.Escape(harnessExecutable)}' " +
             $"({Markup.Escape(version ?? "version unknown")})");

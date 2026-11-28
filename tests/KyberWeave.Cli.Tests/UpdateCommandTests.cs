@@ -158,10 +158,11 @@ public sealed class UpdateCommandTests : IDisposable
             executor,
             () => Path.Combine(_world.Install, "kyberdash"),
             new SquadConsole(squadConsole, new FakeConsole(isInputRedirected: true)));
-        CapturePluginStepOutcome stepOutcome = step.Run(
+        CapturePluginStepOutcome stepOutcome = await step.RunAsync(
             TargetOf(harness),
             harness == "opencode" ? Path.Combine(_world.Files.Root, "opencode") : null,
-            false);
+            false,
+            CancellationToken.None);
 
         Assert.Equal(CapturePluginStepOutcome.Completed, stepOutcome);
 

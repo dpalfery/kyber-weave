@@ -247,7 +247,7 @@ public sealed class SquadPresetStatusDoctorTests : IDisposable
     }
 
     [Fact]
-    public void DoctorPassesRecordedModelPresetsToComparisonRender()
+    public async Task DoctorPassesRecordedModelPresetsToComparisonRender()
     {
         // Doctor must supply the deployment lock's ModelPresets to the comparison render request.
         string home = _state.UserPaths.HomeDirectory;
@@ -272,13 +272,14 @@ public sealed class SquadPresetStatusDoctorTests : IDisposable
 
         SquadDoctorCommand command = DoctorCommand(executor, repository, globalRoots, renderer);
 
-        _ = command.Execute(
+        _ = await command.ExecuteAsync(
             null!,
             new SquadDoctorSettings
             {
                 Path = repository,
                 Global = true
-            });
+            },
+            CancellationToken.None);
 
         Assert.NotEmpty(renderer.RenderRequests);
         SquadRenderRequest? claudeRequest =
@@ -290,7 +291,7 @@ public sealed class SquadPresetStatusDoctorTests : IDisposable
     }
 
     [Fact]
-    public void DoctorReportsZeroFindingsWhenComparisonRenderMatchesActivePreset()
+    public async Task DoctorReportsZeroFindingsWhenComparisonRenderMatchesActivePreset()
     {
         // On a clean deployment where files on disk were rendered with an active preset,
         // doctor must pass the active preset into comparison render so it confirms zero findings and exits 0.
@@ -322,13 +323,14 @@ public sealed class SquadPresetStatusDoctorTests : IDisposable
 
         SquadDoctorCommand command = DoctorCommand(executor, repository, globalRoots, renderer);
 
-        int exit = command.Execute(
+        int exit = await command.ExecuteAsync(
             null!,
             new SquadDoctorSettings
             {
                 Path = repository,
                 Global = true
-            });
+            },
+            CancellationToken.None);
 
         Assert.Equal(0, exit);
         Assert.Contains("Global unmanaged collisions: none", Output, StringComparison.OrdinalIgnoreCase);

@@ -1,4 +1,3 @@
-using KyberWeave.Contracts.Repositories;
 using System.Diagnostics;
 using KyberWeave.Core.Processes;
 
@@ -11,8 +10,9 @@ public static class StatusLineVersionProbeRunner
     private static readonly TimeSpan VersionProbeTimeout = TimeSpan.FromSeconds(5);
 
     /// <summary>The runner the container hands out when a host or test has not registered its own.</summary>
-    public static UtilitiesStatusLineProcessRunner Create()
+    public static Func<ProcessStartInfo, string, CancellationToken, Task<ProcessResult>> Create()
     {
-        return static (startInfo, standardInput) => ProcessRunner.Run(startInfo, standardInput, VersionProbeTimeout);
+        return static (startInfo, standardInput, cancellationToken) =>
+            ProcessRunner.RunAsync(startInfo, standardInput, VersionProbeTimeout, cancellationToken: cancellationToken);
     }
 }
